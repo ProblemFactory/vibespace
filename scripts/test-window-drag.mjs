@@ -684,7 +684,7 @@ console.log('§5 the door census — every pointer drag in the client is on the 
     ['browser-live-window.js', /^pointerup$/, "lane J's keyboard-yield witness (capture, passive): a press witness, not a drag"],
   ];
   // THE FEED DOORS per file (a new door registers here — or it is red)
-  const DOORS = { 'window.js': 2, 'tab-group.js': 3, 'resizer.js': 1, 'theme-editor.js': 2, 'chat-minimap.js': 1, 'desktop-manager.js': 2, 'file-explorer.js': 1, 'file-viewer.js': 2, 'customize-mode.js': 1, 'chat-input.js': 1 };
+  const DOORS = { 'window.js': 2, 'tab-group.js': 3, 'resizer.js': 1, 'theme-editor.js': 2, 'chat-minimap.js': 1, 'desktop-manager.js': 2, 'file-explorer.js': 1, 'file-viewer.js': 2, 'customize-mode.js': 1, 'chat-input.js': 1, 'corner-float.js': 1 }; // + corner-float.js: lane stream-stats-popup — the stream details' pinned panel and the full-screen pill
   const judge = (rows) => {
     const bad = [];
     for (const r of rows) {
@@ -698,7 +698,7 @@ console.log('§5 the door census — every pointer drag in the client is on the 
   const rows = census(texts);
   const bad = judge(rows);
   const nDoors = Object.values(DOORS).reduce((a, b) => a + b, 0), nListeners = rows.filter((r) => r.kind === 'listener').length, nDnd = rows.filter((r) => r.kind === 'native-dnd').reduce((a, r) => a + r.count, 0);
-  ok(bad.length === 0, `THE CENSUS: ${nDoors} feed doors in ${Object.keys(DOORS).length} files (window.js title + handle; tab-group.js icon + tab + divider; the sidebar / editor Resizer; the theme editor's move + size; the minimap scrub; the top-bar scale + taskbar height handles; the explorer column; the viewer's pan + pptx sidebar; customize-mode's move; the queue reorder) — ${nListeners} document/window move-or-end listeners, every one named with its reason — ${nDnd} native HTML5 dragstart doors (their own dragend)${bad.length ? ' — ' + bad.join(' ; ') : ''}`);
+  ok(bad.length === 0, `THE CENSUS: ${nDoors} feed doors in ${Object.keys(DOORS).length} files (window.js title + handle; tab-group.js icon + tab + divider; the sidebar / editor Resizer; the theme editor's move + size; the minimap scrub; the top-bar scale + taskbar height handles; the explorer column; the viewer's pan + pptx sidebar; customize-mode's move; the queue reorder; a stream's pinned details + full-screen pill) — ${nListeners} document/window move-or-end listeners, every one named with its reason — ${nDnd} native HTML5 dragstart doors (their own dragend)${bad.length ? ' — ' + bad.join(' ; ') : ''}`);
   const dead = ALLOWED.filter(([f, re]) => !rows.some((r) => r.kind === 'listener' && r.file === f && re.test(r.event)));
   ok(dead.length === 0, `every allowlisted reason names a listener that exists${dead.length ? ' — dead: ' + dead.map(([f, re]) => f + ' ' + re).join(', ') : ''}`);
   // the two bridges that forward a pointer they CAPTURED (their own end semantics: the remote page / X owns the gesture)

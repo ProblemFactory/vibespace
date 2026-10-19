@@ -240,17 +240,22 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
   const chip = el('span', 'flex:0 0 auto;white-space:nowrap;font-variant-numeric:tabular-nums'); chip.className = 'machine-window-chip';
   const stopBtn = btn('file-tool-btn machine-window-stop', t('Stop streaming'), () => stopStream()); stopBtn.style.cssText = 'width:auto;padding:0 10px;flex:0 0 auto;white-space:nowrap';
   strip.append(stripText, chip, stopBtn);
-  // THE STATS ROW (src/lib/stream-stats.js — the same as the whole screen's): the firewall notice (the hub relay), the numbers
-  const stats = createStreamStats({ machine });
+  // THE STATS ROW (src/lib/stream-stats.js — the same as the whole screen's): the firewall notice (the hub relay); lane
+  // stream-stats-popup: the numbers left it — the chip is the ONE summary (its title carries the sentence), its click opens the
+  // details (a table + three charts), pinned in a corner of the picture's pane
+  const host = el('div', 'position:relative;flex:1 1 auto;min-height:0'); host.className = 'machine-window-pane';
+  const stats = createStreamStats({ machine, hostId: m.hostId, summary: chip, frame: host });
+  chip.setAttribute('role', 'button'); chip.tabIndex = 0;
+  chip.onclick = () => { if (view) stats.toggle(chip); };
+  chip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chip.onclick(); } };
   const statsRow = el('div', NOTE + ';display:none;align-items:center;gap:8px;overflow-x:auto;white-space:nowrap'); statsRow.className = 'machine-window-stats';
-  statsRow.append(stats.firewall, stats.numbers);
+  statsRow.append(stats.firewall);
   // THE HELD DOOR: the minimized row — its sentence + 「还原它」 — shown by `display` (never the `hidden` attribute: viewers.css's
   // `.file-tool-btn { display: flex }` out-ranks it — the button that sat top-right at all times)
   const heldRow = el('div', NOTE + ';display:none;align-items:center;gap:8px;color:var(--text)'); heldRow.className = 'machine-window-held';
   const heldText = el('span', 'flex:1 1 auto;min-width:0');
   const restoreBtn = btn('file-tool-btn machine-window-restore', t('Restore it'), () => restore()); restoreBtn.style.cssText = 'width:auto;padding:0 10px;flex:0 0 auto';
   heldRow.append(heldText, restoreBtn);
-  const host = el('div', 'position:relative;flex:1 1 auto;min-height:0'); host.className = 'machine-window-pane';
   const say = el('div', 'position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px;text-align:center;background:var(--bg-window);color:var(--text)');
   say.className = 'machine-app-say';
   const sayText = el('div', 'max-width:420px;font-size:13px'), sayActs = el('div'); sayActs.className = 'desktop-install-actions';
@@ -268,11 +273,11 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
     stopBtn.style.display = ended ? 'none' : '';
   };
   const drawStats = () => {
-    const { playing, page: p, agent: a } = stats.draw(view);
-    statsRow.style.display = playing ? 'flex' : 'none';
+    const { playing, page: p, agent: a, words } = stats.draw(view);
+    statsRow.style.display = playing && !stats.firewall.hidden ? 'flex' : 'none'; // lane stream-stats-popup: the row is the firewall notice alone now
     chip.textContent = ended ? '' : playing ? t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · connecting…');
     const sc = a && a.screen;
-    chip.title = p ? [t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }),
+    chip.title = p ? [...(words ? [words] : []), t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }),
       ...(sc && sc.floor != null && sc.kbps != null ? [t('The machine encodes it at {kbps} kbps — never under {floor} kbps for a window this size', { kbps: sc.kbps, floor: sc.floor })] : [])].join('\n') : '';
   };
   /** THE SIZE RULE: the picture at the window's own size on its machine (physical ÷ dpi/96), inside the workspace, aspect kept. */
@@ -311,7 +316,7 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
   function stopStream() {
     if (!view || ended) return;
     const v = view; view = null; ended = true; held = null;
-    v.dispose('stopped');
+    v.dispose('stopped'); stats.ended();
     drawStrip(); drawStats();
     showSay(t('Streaming of “{title}” stopped', { title }), { again: true });
   }
@@ -326,7 +331,7 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
       // ended by the machine, the hub, the picker's 停止 or another window — a Mac's minimized window ENDS (SCK sends no
       // picture — lane stream-p3m-build; Windows holds it): its own words
       onFallback: (code, why) => {
-        view = null; ended = true; held = null; drawStrip(); drawStats(); host.append(say);
+        view = null; ended = true; held = null; stats.ended(); drawStrip(); drawStats(); host.append(say);
         showSay(code === 'window_minimized' ? t('the window is minimized — restore it to stream') : windowStreamText(code, { title, machine, why }), { again: code !== 'window_gone' });
       },
     });
@@ -336,7 +341,7 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
     drawStrip(); drawStats();
     view.connect();
   }
-  winInfo.onClose = () => { closed = true; if (view) view.dispose('closed'); view = null; };
+  winInfo.onClose = () => { closed = true; stats.dispose(); if (view) view.dispose('closed'); view = null; };
   connect();
   return winInfo;
 }

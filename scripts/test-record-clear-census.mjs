@@ -760,6 +760,8 @@ const STORAGE = {
   'src/lib/sidebar-state.js|localStorage|\'sessionCustomNames\'': ['owner', 'the names the owner typed for sessions (never a store record)'],
   'src/lib/desktop-picker.js|localStorage|RECENT_KEY': ['pref', 'lane desktop-v2-entry: this browser\'s last Desktop choice — a host id + a display key (the picker\'s first row); no words of any record'],
   'src/lib/desktop-picker.js|localStorage|DISPLAYS_KEY': ['pref', 'lane desktop-v2-entry: per machine, the displays its window mapped last (key, number, the OS display name) — the picker\'s chips; no words of any record'],
+  'src/lib/stream-stats.js|localStorage|PIN_KEY': ['pref', 'lane stream-stats-popup: per machine, the corner this browser pins a stream\'s details in (tl / tr / bl / br — src/stream-series.js rememberCorner, ≤ 32 machines); no words of any record'],
+  'src/lib/stream-pill.js|localStorage|PILL_KEY': ['pref', 'lane stream-stats-popup: per machine, the corner of the full-screen pill (tl / tr / bl / br — src/stream-series.js rememberCorner, ≤ 32 machines); no words of any record'],
   'src/lib/machine-desktop.js|localStorage|RUNS_KEY': ['owner', 'design 014 D1: the owner\'s own last 3 "Run on its desktop…" lines per machine (typed by the owner, re-judged by desktopRunPlan before they are offered; never an agent\'s, never a record)'],
   'src/lib/sidebar-state.js|localStorage|\'sessionModes\'': ['ids', 'terminal | chat per session id'],
   'src/lib/sidebar-state.js|localStorage|\'sessionConfigs\'': ['pref', 'per-session model / effort / permission overrides'],

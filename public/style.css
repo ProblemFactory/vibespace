@@ -7377,8 +7377,6 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 /* lane stream-cursor: the viewer's own pointer IS the pointer — no source draws the machine's into the frames, so the page's
    arrow stays over the picture (its own rule: an inherited `cursor: none` never hides it) */
 .stream-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; display: block; touch-action: none; outline: none; cursor: default; }
-.desktop-strip-stream { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.desktop-strip-stream[data-path="relay"] { color: var(--text); }
 .desktop-strip-note { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text); border: 1px solid var(--warning, #d9822b); white-space: nowrap; }
 .desktop-strip-firewall { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 1px 2px 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text); border: 1px solid var(--warning, #d9822b); white-space: nowrap; } /* lane stream-relay-udp */
 .desktop-strip-firewall[hidden], .desktop-strip-fw-copy[hidden] { display: none; }
@@ -7394,6 +7392,52 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .machine-desktop-handover-why { color: var(--red, #e55); font-size: 12px; margin: 6px 0; }
 .desktop-strip .file-tool-btn.desktop-strip-tcc-open { width: auto; height: auto; min-height: 20px; padding: 0 8px; border-radius: 8px; white-space: nowrap; }
 .desktop-machine-content:fullscreen { background: var(--bg-window, #1e1e1e); }
+/* lane stream-stats-popup: a stream's ONE summary (the strip's chip; a window stream's chip) says it opens the details — a chart
+   glyph after its words (a mask: the words' own colour; the chip's text stays its words) */
+.desktop-strip-status[data-chart]::after, .machine-window-chip[data-chart]::after { content: ''; display: inline-block; width: 12px; height: 12px; margin-left: 5px; vertical-align: -2px; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 11.5l3.5-4 3 2.5 6-7'/%3E%3Cpath d='M1.5 14.5h13'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 11.5l3.5-4 3 2.5 6-7'/%3E%3Cpath d='M1.5 14.5h13'/%3E%3C/svg%3E") center / contain no-repeat; }
+.machine-window-chip[role="button"] { cursor: pointer; }
+/* the details (src/lib/stream-stats.js): the popup (createPopover — popover chrome, §17) and the panel pinned in a corner of the
+   picture's pane; a two-column table and three canvas charts (src/lib/stream-charts.js draws them in the theme's tokens) */
+.stream-stats-pop { width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; box-sizing: border-box; padding: 8px 10px 10px; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.35); color: var(--text); font-size: 12px; }
+.stream-stats-panel { position: absolute; z-index: 6; width: 236px; box-sizing: border-box; padding: 6px 8px 8px; background: color-mix(in srgb, var(--bg-dialog) 92%, transparent); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.35); color: var(--text); font-size: 11px; }
+.stream-stats-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.stream-stats-panel .stream-stats-head { cursor: grab; user-select: none; touch-action: none; }
+.stream-stats-panel.is-dragging .stream-stats-head { cursor: grabbing; }
+.stream-stats-title { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stream-stats-panel .stream-stats-title { font-weight: 400; color: var(--text-secondary); }
+.stream-stats-btn { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-secondary); font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.stream-stats-btn:hover { border-color: var(--accent); color: var(--accent); }
+.stream-stats-btn svg { width: 12px; height: 12px; flex: 0 0 auto; }
+.stream-stats-btn.stream-stats-x { padding: 0 4px; }
+.stream-stats-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+.stream-stats-table th { padding: 2px 10px 2px 0; text-align: left; font-weight: 400; color: var(--text-secondary); white-space: nowrap; vertical-align: top; }
+.stream-stats-table td { padding: 2px 0; text-align: right; overflow-wrap: anywhere; }
+.stream-chart + .stream-chart { margin-top: 6px; }
+.stream-chart-head { display: flex; align-items: baseline; gap: 6px; font-size: 11px; }
+.stream-chart-name { flex: 0 0 auto; color: var(--text-secondary); }
+.stream-chart-now { flex: 1 1 auto; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stream-chart-plot { position: relative; margin-top: 2px; }
+.stream-chart-canvas { display: block; width: 100%; height: 48px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--bg-input) 70%, transparent); touch-action: none; cursor: crosshair; }
+.stream-stats-panel .stream-chart-canvas { height: 34px; }
+.stream-chart-max { position: absolute; left: 4px; top: 2px; font-size: 9px; color: var(--text-dim, var(--text-secondary)); pointer-events: none; font-variant-numeric: tabular-nums; }
+/* TRUE FULL SCREEN (src/lib/stream-pill.js): the picture takes the whole screen; the strip floats over it as a movable pill — its
+   summary, 「退出全屏」, ⋯ and the notices that must not be missed (each on its own row under them); 3 s still ⇒ it fades */
+.desktop-machine-content:fullscreen > .desktop-strip-compare { display: none; }
+.desktop-strip.is-pill { position: absolute; z-index: 7; flex-wrap: wrap; column-gap: 6px; row-gap: 0; max-width: calc(100% - 20px); box-sizing: border-box; padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius); background: color-mix(in srgb, var(--bg-dialog) 92%, transparent); box-shadow: 0 8px 24px rgba(0,0,0,0.35); overflow: visible; touch-action: none; cursor: grab; transition: opacity var(--transition); }
+.desktop-strip.is-pill.is-dragging { cursor: grabbing; transition: none; }
+.desktop-strip.is-pill.is-away { opacity: 0; pointer-events: none; }
+.desktop-strip.is-pill > :not(.desktop-strip-grip, .desktop-strip-status, .desktop-strip-full, .desktop-strip-pill-more, .desktop-strip-tcc, .desktop-strip-firewall, .desktop-strip-note, .desktop-strip-handover) { display: none !important; }
+.desktop-strip-grip[hidden], .desktop-strip-pill-more[hidden] { display: none; }
+.desktop-strip.is-pill > .desktop-strip-grip { order: 1; display: inline-flex; align-items: center; padding: 0 2px; color: var(--text-secondary); }
+.desktop-strip.is-pill > .desktop-strip-status { order: 2; margin-left: 0; padding-left: 0; color: var(--text); cursor: pointer; }
+.desktop-strip.is-pill > .desktop-strip-full { order: 3; }
+.desktop-strip.is-pill > .desktop-strip-pill-more { order: 4; min-width: 28px; }
+.desktop-strip.is-pill::after { content: ''; order: 5; flex: 1 0 100%; height: 0; }
+.desktop-strip.is-pill > .desktop-strip-tcc, .desktop-strip.is-pill > .desktop-strip-firewall, .desktop-strip.is-pill > .desktop-strip-note, .desktop-strip.is-pill > .desktop-strip-handover { order: 6; margin-top: 4px; max-width: 100%; box-sizing: border-box; white-space: normal; }
+.stream-pill-menu { display: flex; flex-direction: column; min-width: 180px; padding: 4px; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+.stream-pill-menu-item { display: block; width: 100%; padding: 5px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text); font: inherit; font-size: 12px; text-align: left; white-space: nowrap; cursor: pointer; }
+.stream-pill-menu-item:hover { background: var(--hover-overlay, color-mix(in srgb, var(--accent) 12%, transparent)); }
+.stream-pill-menu-sep { height: 1px; margin: 4px 2px; background: var(--border); }
 .desktop-open-link { border-style: dashed; }
 /* lane agent-feedback: ⚙ System ▸ Agent feedback… — the row's open count, and the sheet (src/lib/feedback-sheet.js) */
 .gs-menu-item .gs-count { margin-left: auto; min-width: 16px; padding: 0 5px; border-radius: var(--radius-sm); background: var(--accent); color: var(--accent-fg); font-size: 10px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }

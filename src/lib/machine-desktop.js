@@ -24,6 +24,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
 import { createStreamView } from './stream-view.js'; // lane stream-p1a-transport: the WebRTC rung's <video>, in this same shell
 import { createStreamStats } from './stream-stats.js'; // lane stream-window-fixes: THE stats row — shared with one window's stream
+import { createStreamPill } from './stream-pill.js'; // lane stream-stats-popup: TRUE full screen — the strip floats over the picture as a pill
 import { pageIsSecure } from './picture-shell.js';
 import { keyboardLockGate, NAGLE_REFERENCE, SLOW_KBPS, STILL_MS } from '../desktop-quality.js'; // lane desktop-v2-latency
 import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from '../machine-desktop-model.js';
@@ -139,7 +140,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
     else if (!g.lock && locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone with the page */ } }
     drawKeys();
   };
-  const onFull = () => { lockKeys(); if (document.fullscreenElement === c) (stream || view)?.focus(); };
+  const onFull = () => { lockKeys(); pill.sync(); stats.close(); if (document.fullscreenElement === c) (stream || view)?.focus(); }; // lane stream-stats-popup: the pill; a popup of the page behind would not show in full screen
   document.addEventListener('fullscreenchange', onFull);
   drawKeys();
   const chip = el('span'); chip.className = 'desktop-strip-status';
@@ -154,7 +155,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
   hdrEl.title = t('Windows HDR is captured by TightVNC as it is, with no tone mapping; while you work remotely, turn off "Use HDR" in Windows Settings › Display (or press Win+Alt+B)');
   chip.setAttribute('role', 'button'); chip.tabIndex = 0;
   const cmp = el('div'); cmp.className = 'desktop-strip-compare'; cmp.hidden = true;
-  chip.onclick = () => { cmp.hidden = !cmp.hidden; drawChip(); };
+  chip.onclick = () => { if (stream) { stats.toggle(chip); return; } cmp.hidden = !cmp.hidden; drawChip(); }; // lane stream-stats-popup: a stream's summary opens its details
   chip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chip.onclick(); } };
   strip.append(hostBtn, seg, fullBtn, keysBtn, chip, rungEl, slowEl, hdrEl);
   c.append(strip, cmp);
@@ -268,8 +269,10 @@ export function openMachineDesktop(app, m, { display } = {}) {
   // while the hub relay carries the picture, with the owner's admin line to copy. The notice sits right after the status chip,
   // AHEAD of the numbers (lane stream-relay-udp-ci): the numbers run long on the relay (the path, NVENC · encode) and the strip
   // scrolls sideways, so after them the copy button sat past a desk-sized window's edge (DejaVu: the .296 mirror)
-  const stats = createStreamStats({ machine });
-  const streamEl = stats.numbers, fwEl = stats.firewall;
+  // lane stream-stats-popup: the numbers sentence LEFT the strip — the chip is the summary (its title carries the sentence), its
+  // click opens the details (a table + three charts), pinned in a corner of the picture's pane
+  const stats = createStreamStats({ machine, hostId: m.hostId, summary: chip, frame: pane });
+  const fwEl = stats.firewall;
   const noteEl = el('span'); noteEl.className = 'desktop-strip-note'; noteEl.hidden = true;
   // lane stream-p3m-build: A MAC'S PERMISSION — macOS keeps the screen (Screen Recording) or the input (Accessibility) from the
   // agent's screen helper until its owner turns it on; a background agent cannot even ask (tccd: "does not allow prompting"),
@@ -297,7 +300,15 @@ export function openMachineDesktop(app, m, { display } = {}) {
         : t('The Mac shows no picture until Screen Recording is on for vibespace-screen');
     tccEl.title = tccLink; tccEl.hidden = false;
   };
-  strip.append(fwEl, tccEl, streamEl, noteEl);
+  strip.append(fwEl, tccEl, noteEl);
+  // lane stream-stats-popup: TRUE FULL SCREEN — 「全屏」 shows the picture alone and this strip floats over it as a movable pill
+  // (src/lib/stream-pill.js): the summary, 「退出全屏」 and ⋯ = the details · the displays · 「捕获快捷键」
+  const pill = createStreamPill({ host: c, bar: strip, fullBtn, hostId: m.hostId, menu: () => {
+    const segs = [...seg.querySelectorAll('.desktop-strip-seg')];
+    return [...(stream ? [{ label: t('Stream details'), action: () => stats.open(chip) }, { separator: true }] : []),
+      ...segs.map((b) => ({ label: b.title || b.textContent, checked: b.getAttribute('aria-pressed') === 'true', action: () => b.click() })), ...(segs.length ? [{ separator: true }] : []),
+      { label: t('Capture shortcuts'), checked: keysBtn.getAttribute('aria-pressed') === 'true', action: () => keysBtn.click() }];
+  } });
   let noteTimer = null, refusedWhy = '';
   const note = (text, title, ms = 0) => { clearTimeout(noteTimer); noteEl.textContent = text; noteEl.title = title || text; noteEl.hidden = !text; if (ms) noteTimer = setTimeout(() => { noteEl.hidden = true; }, ms); };
   const STREAM_WHY = {
@@ -319,11 +330,11 @@ export function openMachineDesktop(app, m, { display } = {}) {
   const streamWords = (code) => (STREAM_WHY[code] ? STREAM_WHY[code]() : t('the machine ended it ({code})', { code: code || '?' }));
   const ms = (v) => (v == null ? '—' : v);
   const drawStream = () => {
-    const { playing, page: p, agent: a } = stats.draw(stream); // the numbers + the firewall notice (src/lib/stream-stats.js)
+    const { playing, page: p, agent: a, words } = stats.draw(stream); // the firewall notice + the details' series (src/lib/stream-stats.js)
     chip.textContent = playing ? t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · connecting…');
     if (!p) return;
     const sc = a && a.screen; // lane stream-p1b-screen: the machine's own screen — its encoder and what encoding costs there
-    chip.title = [scope, t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }),
+    chip.title = [scope, ...(words ? [words] : []), t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }), // lane stream-stats-popup: the numbers sentence, here now
       ...(sc && sc.floor != null && sc.kbps != null ? [t('The machine encodes it at {kbps} kbps — never under {floor} kbps for a screen this size', { kbps: sc.kbps, floor: sc.floor })] : []), // lane stream-mac-rate: THE RATE's decision, beside what the page receives
       ...(sc && sc.white ? [t('HDR mapped on the machine (SDR white {nits} nits)', { nits: Math.round(sc.white * 0.08) })] : []), ...(sc && sc.note === 'no_hw_encoder' ? [t('software encoding (no hardware encoder found)')] : []),
       t('Pointer: yours — the machine draws none into the picture')].join('\n'); // lane stream-cursor: no source paints the machine's
@@ -353,7 +364,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
       onStats: () => drawChip(),
       onInput: inputWords,
       onFallback: (code, why, taken) => {
-        stream = null; streamEl.hidden = true; clearInterval(tick); tick = null; handover.playing(false); handover.facts(null);
+        stream = null; stats.ended(); clearInterval(tick); tick = null; handover.playing(false); handover.facts(null);
         streamDisplays = null; drawStreamSeg(); // the VNC picture draws its own switcher (remap)
         refusedWhy = STREAM_WHY[code] ? streamWords(code) : why || streamWords(code); // the page words a known code in its own language; else the machine's sentence
         if (code === 'screen_permission' || code === 'helper_changed_regrant') showTcc(code); // lane stream-p3m-build: which switch on the Mac
@@ -366,7 +377,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
     stream.connect();
   };
   winInfo._pickDisplay = (key) => pick(key);
-  winInfo.onClose = () => { handover.dispose(); clearInterval(tick); clearTimeout(noteTimer); document.removeEventListener('fullscreenchange', onFull); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); if (view) view.dispose(); };
+  winInfo.onClose = () => { handover.dispose(); pill.dispose(); stats.dispose(); clearInterval(tick); clearTimeout(noteTimer); document.removeEventListener('fullscreenchange', onFull); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); if (view) view.dispose(); };
   if (typeof RTCPeerConnection === 'function') startStream(); else startVnc();
   return winInfo;
 }

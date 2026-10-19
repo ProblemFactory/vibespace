@@ -9229,4 +9229,38 @@ export default {
   "Add these words to your Dropline dictionary": "これらの語を Dropline の辞書に追加", // lane foryou-plugin-notices
   "That plugin is not on this instance any more": "このプラグインはもうこのインスタンスにありません", // lane foryou-plugin-notices
   "That suggestion was already added or ignored. Nothing waits for it.": "この候補は追加済みか無視済みです。待っているものはありません。", // lane foryou-plugin-notices
+  "Direct path": "直接接続", // lane stream-stats-popup
+  "Round trip": "往復", // lane stream-stats-popup
+  "Jitter": "ジッタ", // lane stream-stats-popup
+  "Frame rate": "フレームレート", // lane stream-stats-popup
+  "sent {n}": "送信 {n}", // lane stream-stats-popup
+  "Decode": "デコード", // lane stream-stats-popup
+  "Received": "受信", // lane stream-stats-popup
+  "Codec": "コーデック", // lane stream-stats-popup
+  "Encoder": "エンコーダ", // lane stream-stats-popup
+  "Screen": "画面", // lane stream-stats-popup
+  "Picture": "画像サイズ", // lane stream-stats-popup
+  "encoded {w}×{h}": "エンコード {w}×{h}", // lane stream-stats-popup
+  "The machine’s rate": "マシンのレート", // lane stream-stats-popup
+  "floor {n} kbps": "下限 {n} kbps", // lane stream-stats-popup
+  "estimate {n} kbps": "推定 {n} kbps", // lane stream-stats-popup
+  "Lost": "損失", // lane stream-stats-popup
+  "{lost} packets · {dropped} frames dropped": "パケット損失 {lost} · フレーム破棄 {dropped}", // lane stream-stats-popup
+  "Latency": "レイテンシ", // lane stream-stats-popup
+  "{rtt} ms ± {jitter}": "{rtt} ms ± {jitter}", // lane stream-stats-popup
+  "Round trip (the line) and its jitter (the band)": "往復時間（線）とジッタ（帯）", // lane stream-stats-popup
+  "Packet loss": "パケット損失", // lane stream-stats-popup
+  "{n} frames dropped": "フレーム破棄 {n}", // lane stream-stats-popup
+  "Packets lost each second (the bars); a frame the browser dropped is a mark along the top": "毎秒のパケット損失（棒）。ブラウザが破棄したフレームは上端に印", // lane stream-stats-popup
+  "Bandwidth": "帯域", // lane stream-stats-popup
+  "rate {n}": "レート {n}", // lane stream-stats-popup
+  "Received kbps (the line), the machine’s decided rate (dashed) and its floor (dotted)": "受信 kbps（実線）、マシンが決めたレート（破線）とその下限（点線）", // lane stream-stats-popup
+  "Stream details": "ストリームの詳細", // lane stream-stats-popup
+  "Pin it": "ピン留め", // lane stream-stats-popup
+  "Keep it in a corner of the window, updating": "ウィンドウの隅に留めて更新し続ける", // lane stream-stats-popup
+  "{s} s ago": "{s} 秒前", // lane stream-stats-popup
+  "no reading": "計測なし", // lane stream-stats-popup
+  "{ms} ms · {fps} fps · {kbps} kbps": "{ms} ms · {fps} fps · {kbps} kbps", // lane stream-stats-popup
+  "Drag to another corner": "別の隅へドラッグ", // lane stream-stats-popup
+  "Exit full screen": "全画面を終了", // lane stream-stats-popup
 };

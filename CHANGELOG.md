@@ -14,6 +14,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Changed
 - A plugin's reminders, like Dropline's dictionary suggestions, now stay at the top of For you, right under urgent items.
 - Clicking a plugin's reminder takes you straight to where it's handled: a Dropline suggestion opens with its words chosen, and ✓ adds them.
+- A stream window's bar now shows one short summary; click it for the details with latency, packet loss and bandwidth charts, and pin them to a corner.
+- Full screen is truly full screen: no fixed bar on top, just a small bar you can drag to any corner; it hides while the pointer rests.
 
 ## 2.369.312 — 2026-10-19
 

@@ -22,7 +22,8 @@
  *   INPUT_KINDS / inputEventOf(raw)  the data channel's event table, validated (what the daemon accepts; anything else is
  *                                    refused by name, never guessed) · wheelUnitsOf(deltaY, deltaMode)
  *   statsOf(prev, reports, now)      the stats strip's numbers from RTCPeerConnection.getStats(): RTT, jitter, fps, decode ms,
- *                                    kbps, lost, the path (direct | relay)
+ *                                    kbps, lost, the path (direct | relay); + received, dropped (frames), codec — the details'
+ *                                    charts and table (lane stream-stats-popup, src/stream-series.js)
  *   streamNumbersOf(page, agent, via)   THE STATS ROW's facts (lane stream-window-fixes — ONE row for the whole screen's window
  *                                    and a window's stream, src/lib/stream-stats.js): the page's numbers + the relay path + the
  *                                    machine's encoder (its encode ms) and, for a window, its rate (kbps over its floor)
@@ -242,6 +243,7 @@ function statsOf(prev, reports, now) {
   const transport = list.find((r) => r.type === 'transport' && r.selectedCandidatePairId);
   const pair = (transport && byId.get(transport.selectedCandidatePairId)) || list.find((r) => r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') || null;
   const remote = pair ? byId.get(pair.remoteCandidateId) : null;
+  const codec = v && v.codecId ? byId.get(v.codecId) : null;
   const frames = v && Number.isFinite(v.framesDecoded) ? v.framesDecoded : null;
   const bytes = v && Number.isFinite(v.bytesReceived) ? v.bytesReceived : null;
   const decodeS = v && Number.isFinite(v.totalDecodeTime) ? v.totalDecodeTime : null;
@@ -255,6 +257,11 @@ function statsOf(prev, reports, now) {
     rttMs: pair && Number.isFinite(pair.currentRoundTripTime) ? Math.round(pair.currentRoundTripTime * 1000) : null,
     jitterMs: v && Number.isFinite(v.jitter) ? Math.round(v.jitter * 1000) : null,
     lost: v && Number.isFinite(v.packetsLost) ? v.packetsLost : null,
+    // lane stream-stats-popup: the details' packet-loss chart (Δlost ÷ (Δlost + Δreceived) a second — src/stream-series.js), the
+    // frames the browser dropped, and the codec the video is decoded with (its codec report's mime type without `video/`)
+    received: v && Number.isFinite(v.packetsReceived) ? v.packetsReceived : null,
+    dropped: v && Number.isFinite(v.framesDropped) ? v.framesDropped : null,
+    codec: codec && typeof codec.mimeType === 'string' ? codec.mimeType.replace(/^video\//i, '').slice(0, 24) : null,
     width: v && Number.isFinite(v.frameWidth) ? v.frameWidth : null,
     height: v && Number.isFinite(v.frameHeight) ? v.frameHeight : null,
     path: remote ? (remote.candidateType === 'relay' ? 'relay' : 'direct') : null,

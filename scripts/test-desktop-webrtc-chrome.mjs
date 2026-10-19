@@ -51,6 +51,17 @@
 //      (POST settings-open — the toast says so), the link copied only when the agent predates it      mac-switcher.png, mac-tcc-door.png
 //   ⑩ also (lane stream-mac-rate): the chip's title says what the machine DECIDED — 机器以 N kbps 编码——这个大小的屏幕不会低于 F
 //      kbps — N and F the agent's own numbers (THE RATE: the screen's floor, 1280×720 @ 30 ⇒ 2500)
+//   lane stream-stats-popup: the numbers sentence LEFT the strip — every leg above reads it off the chip's title (the summary's
+//      tooltip); ⑦'s RED CONTROL puts a sentence of its length back AHEAD of the notice (/fwlast); ⑨ taps the summary instead
+//   ⑭ THE DETAILS · THE PIN · TRUE FULL SCREEN: the strip is ONE summary + its chart glyph (before: /prelane — the pre-lane
+//      strip, the sentence back in it); its click = the details popup (data-popover): the table + three inked charts, a hover
+//      reads a second; 「钉住」 ⇒ a panel in the picture's top-right that outlives the popup, dragged to bottom-left and
+//      remembered; 「全屏」 ⇒ the picture is 100 % of the screen, the strip a pill (grip · summary · 退出全屏 · ⋯ — the ⋯ and the
+//      details inside the full-screen element), hidden 3 s after the pointer rests, back on a move, dragged to bottom-right
+//      and remembered on reopen; 「退出全屏」 / the browser's exit put the bar back — RED CONTROL: the pre-lane full screen keeps
+//      the bar over the picture (< 100 %)                        strip-before.png, strip-after.png, details.png, pinned.png, fullscreen.png, …
+//   ⑮ a phone (touch): a tap on the summary = the details inside the 375 px screen; in full screen the pill hides, a tap in the
+//      middle is the machine's (the pill stays away), a tap in the pill's corner wakes it and never reaches the machine
 //   ⑬ THE ESTIMATE (lane stream-mac-rate — werift 0.25's send-side estimate counts ~one packet a picture: the owner's 300 kbps):
 //      THE fixture padded to ~3 Mbps (a filler NAL a picture — 11 packets each) through the real agent bundle to this Chrome:
 //      the agent's estimate (its own transport-cc reading) stays within 0.7–2.5 × what it sent — werift's would read ~1/11
@@ -208,10 +219,17 @@ const MOVE = '  const moved = modifierKeyOf({ key: e && e.key, code: e && e.code
 const noTable = { name: 'no-table', setup(b) { b.onLoad({ filter: /stream-input\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(MOVE)) throw new Error('the door\'s table line moved'); return { contents: src.replace(MOVE, '  const moved = null;\n'), loader: 'js' }; }); } };
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page.js'), loader: { '.css': 'empty' }, logLevel: 'error' });
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-notable.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [noTable] });
-// ⑦'s RED control (lane stream-relay-udp-ci): the strip's OLD order — the firewall notice after the numbers
-const FW_ORDER = '  strip.append(fwEl, tccEl, streamEl, noteEl);\n'; // + lane stream-p3m-build's Mac permission notice (tccEl, hidden off a Mac — int304)
-const fwLast = { name: 'fw-last', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(FW_ORDER)) throw new Error('the strip\'s order line moved'); return { contents: src.replace(FW_ORDER, '  strip.append(tccEl, streamEl, fwEl, noteEl);\n'), loader: 'js' }; }); } };
+// ⑦'s RED control (lane stream-relay-udp-ci; lane stream-stats-popup): a numbers sentence of its length put back AHEAD of the
+// firewall notice (the strip before the relay-udp-ci fix — the numbers left the strip in lane stream-stats-popup)
+const FW_ORDER = '  strip.append(fwEl, tccEl, noteEl);\n'; // + lane stream-p3m-build's Mac permission notice (tccEl, hidden off a Mac — int304)
+const NUM_LOOK = 'flex:0 0 auto;padding:1px 7px;border-radius:9px;background:var(--bg-input);color:var(--text-secondary);font-variant-numeric:tabular-nums;white-space:nowrap'; // the pre-lane .desktop-strip-stream rule
+const fwLast = { name: 'fw-last', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(FW_ORDER)) throw new Error('the strip\'s order line moved'); return { contents: src.replace(FW_ORDER, `  const longNum = document.createElement('span'); longNum.className = 'desktop-strip-stream'; longNum.style.cssText = '${NUM_LOOK}'; longNum.textContent = '往返 12 ms · 抖动 3 ms · 30 fps · 解码 1.5 ms · 5400 kbps · 经 hub 中转 · UDP';\n  strip.append(longNum, fwEl, tccEl, noteEl);\n`), loader: 'js' }; }); } };
+// ⑭'s BEFORE (lane stream-stats-popup): the pre-lane strip — the live numbers sentence back after the notices, in its old look —
+// and the pre-lane full screen (no pill: the strip stays a bar over the picture)
+const PRE_DRAW = "    const { playing, page: p, agent: a, words } = stats.draw(stream); // the firewall notice + the details' series (src/lib/stream-stats.js)\n", PRE_FULL = 'pill.sync(); ';
+const preLane = { name: 'pre-lane', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); for (const x of [FW_ORDER, PRE_DRAW, PRE_FULL]) if (!src.includes(x)) throw new Error('the pre-lane anchor moved: ' + x.trim()); return { contents: src.replace(FW_ORDER, `  const preNum = document.createElement('span'); preNum.className = 'desktop-strip-stream'; preNum.hidden = true; preNum.style.cssText = '${NUM_LOOK}';\n  strip.append(fwEl, tccEl, preNum, noteEl);\n`).replace(PRE_DRAW, PRE_DRAW + '    preNum.textContent = words; preNum.hidden = !playing;\n').replace(PRE_FULL, ''), loader: 'js' }; }); } };
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-fwlast.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [fwLast] });
+await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-prelane.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [preLane] });
 const app = express(); app.use(express.json());
 app.use(R.router);
 const CSS = ['style', 'viewers', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
@@ -219,11 +237,13 @@ for (const n of CSS) app.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.r
 app.get('/page.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page.js'))));
 app.get('/page-notable.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-notable.js'))));
 app.get('/page-fwlast.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-fwlast.js'))));
+app.get('/page-prelane.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-prelane.js'))));
 app.get('/novnc.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(NOVNC)));
 const HTML = `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-root);height:100vh;overflow:hidden}</style></head><body><script src="/page.js"></script></body></html>`;
 app.get('/', (q, s) => s.type('text/html').send(HTML));
 app.get('/notable', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-notable.js')));
 app.get('/fwlast', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-fwlast.js')));
+app.get('/prelane', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-prelane.js')));
 const PORT = await freePort();
 srv = http.createServer(app);
 srv.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head, bridge.upgradeId(new URL(req.url, 'http://x').pathname)));
@@ -273,7 +293,10 @@ const M = { hostId: 'win-a', label: 'WIN-DESK1', setup: 'win32', code: 'desktop_
 const DESK = 'position:fixed;left:30px;top:30px;width:1100px;height:700px;display:flex;flex-direction:column;background:var(--bg-window);border:1px solid var(--border);box-shadow:0 6px 24px rgba(0,0,0,.25);border-radius:8px;overflow:hidden;z-index:5';
 const PHONE = 'position:fixed;left:0;top:0;width:375px;height:667px;display:flex;flex-direction:column;background:var(--bg-window);overflow:hidden;z-index:5';
 const playing = (p) => p.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); return !!v && v.videoWidth === 1280 && v.currentTime > 0.2 && window.__band() !== null; })()`, 20000);
-const stripText = (p) => p.ev(`(() => { const q = (s) => { const e = document.querySelector('${WIN} ' + s); return e && !e.hidden ? e.textContent : null; }; return { chip: q('.desktop-strip-status'), stream: q('.desktop-strip-stream'), note: q('.desktop-strip-note'), fw: q('.desktop-strip-firewall'), fwCopy: q('.desktop-strip-fw-copy'), fwTitle: (document.querySelector('${WIN} .desktop-strip-firewall') || {}).title || '', title: (document.querySelector('${WIN} .desktop-strip-status') || {}).title || '' }; })()`);
+// lane stream-stats-popup: the numbers sentence left the strip — it rides the summary's (the chip's) title
+const NUMS = (sel) => `((((document.querySelector('${sel}') || {}).title || '').split('\\n').find((l) => /^往返 /.test(l))) || '')`;
+const NUM = NUMS(`${WIN} .desktop-strip-status`);
+const stripText = (p) => p.ev(`(() => { const q = (s) => { const e = document.querySelector('${WIN} ' + s); return e && !e.hidden ? e.textContent : null; }; return { chip: q('.desktop-strip-status'), stream: ${NUM} || null, note: q('.desktop-strip-note'), fw: q('.desktop-strip-firewall'), fwCopy: q('.desktop-strip-fw-copy'), fwTitle: (document.querySelector('${WIN} .desktop-strip-firewall') || {}).title || '', title: (document.querySelector('${WIN} .desktop-strip-status') || {}).title || '' }; })()`);
 const centre = (p) => p.ev(`(() => { const b = document.querySelector('${WIN} .stream-video').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
 const sessions = async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/stream/facts?host=win-a`)).json()).sessions || [];
 const linesSince = (n) => psLines().slice(n);
@@ -284,7 +307,7 @@ async function fwCopyAt(p) {
   const up = await p.until(`(() => { const e = document.querySelector('${WIN} .desktop-strip-firewall'); return !!e && !e.hidden; })()`, 8000);
   const sf = await stripText(p);
   await p.ev(`Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } }, configurable: true })`);
-  const reach = await p.ev(`(() => { const r = (s) => document.querySelector('${WIN} ' + s).getBoundingClientRect(); const s = r('.desktop-strip'), b = r('.desktop-strip-fw-copy'), n = r('.desktop-strip-firewall'), st = r('.desktop-strip-stream'); const x = Math.round(b.left + b.width / 2), y = Math.round(b.top + b.height / 2), hit = document.elementFromPoint(x, y); return { x, y, before: n.right <= st.left, inView: b.left >= s.left && b.right <= s.right, hit: !!(hit && hit.closest('.desktop-strip-fw-copy')), strip: [s.left, s.right].map(Math.round), button: [b.left, b.right].map(Math.round), numbers: [st.left, st.right].map(Math.round) }; })()`);
+  const reach = await p.ev(`(() => { const r = (s) => document.querySelector('${WIN} ' + s).getBoundingClientRect(); const s = r('.desktop-strip'), b = r('.desktop-strip-fw-copy'); const ahead = document.querySelector('${WIN} .desktop-strip > .desktop-strip-stream'); const x = Math.round(b.left + b.width / 2), y = Math.round(b.top + b.height / 2), hit = document.elementFromPoint(x, y); return { x, y, ahead: ahead ? Math.round(ahead.getBoundingClientRect().width) : 0, inView: b.left >= s.left && b.right <= s.right, hit: !!(hit && hit.closest('.desktop-strip-fw-copy')), strip: [s.left, s.right].map(Math.round), button: [b.left, b.right].map(Math.round) }; })()`);
   await p.click(reach.x, reach.y);
   const copied = await p.until('window.__copied !== undefined', 3000) ? await p.ev('window.__copied') : null;
   const toast = await p.ev(`(document.getElementById('global-toasts') || {}).textContent || ''`);
@@ -297,9 +320,9 @@ console.log('① – ⑥ desk 1280 px');
   await p.ev(`window.__open(${JSON.stringify(M)})`);
   const up = await playing(p);
   const canvas = await p.ev(`!!document.querySelector('${WIN} canvas')`);
-  await p.until(`/解码 [\\d.]+ ms · \\d+ kbps$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 8000); // decode ms and kbps need a second getStats read
+  await p.until(`/解码 [\\d.]+ ms · \\d+ kbps$/.test(${NUM})`, 8000); // decode ms and kbps need a second getStats read
   const s1 = await stripText(p);
-  ok(up && !canvas && /^串流 · \d+ ms · \d+ fps$/.test(s1.chip || '') && /^往返 \d+ ms · 抖动 \d+ ms · \d+ fps · 解码 [\d.]+ ms · \d+ kbps$/.test(s1.stream || '') && !s1.note && vnc.seen.sessions === 0, '① the window opens STREAMING: a <video> where the canvas was (no VNC session), the strip [串流 · N ms · N fps] [往返 · 抖动 · fps · 解码 · kbps]', s1);
+  ok(up && !canvas && /^串流 · \d+ ms · \d+ fps$/.test(s1.chip || '') && /^往返 \d+ ms · 抖动 \d+ ms · \d+ fps · 解码 [\d.]+ ms · \d+ kbps$/.test(s1.stream || '') && !s1.note && vnc.seen.sessions === 0, '① the window opens STREAMING: a <video> where the canvas was (no VNC session), the strip [串流 · N ms · N fps], its title 往返 · 抖动 · fps · 解码 · kbps', s1);
   // lane stream-cursor: the page's own arrow over the playing picture — and the RED CONTROL: a <video> without the class (no
   // rule) in the same pane inherits the pane's none
   const look = await p.ev(`(() => { const v = document.querySelector('${WIN} .stream-video'), b = v.getBoundingClientRect(), top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2), pane = v.parentElement;
@@ -320,7 +343,7 @@ console.log('① – ⑥ desk 1280 px');
   await sleep(1200);
   const s2 = await stripText(p);
   const fps = Number((/· (\d+) fps ·/.exec(s2.stream || '') || [])[1]);
-  ok(fps >= 15 && /解码 [\d.]+ ms/.test(s2.stream) && /\d+ kbps$/.test(s2.stream) && /发出 \d+ fps、\d+ kbps/.test(s2.title) && /指针是你的/.test(s2.title), `③ the stats strip: ${fps} fps, decode ms, kbps; the agent's own numbers (sent fps, kbps) and 指针是你的 in the chip's title`, s2);
+  ok(fps >= 15 && /解码 [\d.]+ ms/.test(s2.stream) && /\d+ kbps$/.test(s2.stream) && /发出 \d+ fps、\d+ kbps/.test(s2.title) && /指针是你的/.test(s2.title), `③ the numbers (the summary's title): ${fps} fps, decode ms, kbps; the agent's own numbers (sent fps, kbps) and 指针是你的 beside them`, s2);
   const [cx, cy] = await centre(p);
   const n0 = psLines().length;
   await p.click(cx, cy);
@@ -373,16 +396,17 @@ console.log('⑦ relay-only ⑧ no source');
   const p = await page(1280, 800, DESK);
   await p.ev(`window.__open(${JSON.stringify(M)})`);
   const up = await playing(p);
-  const via = await p.until(`/经 hub 中转 · UDP$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 10000);
+  const via = await p.until(`/经 hub 中转 · UDP$/.test(${NUM})`, 10000);
   const f = relayOnly.facts('win-a')[0] || {};
-  ok(up && via && f.path === 'relay' && f.relay && f.relay.via === 'udp' && f.relay.leg.down > 0, '⑦ relay-only: the daemon\'s own UDP leg carries it — the strip says 经 hub 中转 · UDP, the record says path relay, via udp', { up, via, path: f.path, relay: f.relay });
+  ok(up && via && f.path === 'relay' && f.relay && f.relay.via === 'udp' && f.relay.leg.down > 0, '⑦ relay-only: the daemon\'s own UDP leg carries it — the numbers say 经 hub 中转 · UDP, the record says path relay, via udp', { up, via, path: f.path, relay: f.relay });
   const fw = await fwCopyAt(p);
-  ok(fw.up && /^机器防火墙挡住直连，经 hub 中转/.test(fw.sf.fw || '') && fw.sf.fwCopy === '复制管理员命令' && fw.sf.fwTitle === FW_RULE && fw.reach.before && fw.reach.inView && fw.reach.hit && fw.copied === FW_RULE && /已复制，请粘贴到 WIN-DESK1 上以管理员身份打开的 PowerShell/.test(fw.toast), '⑦ the machine\'s firewall blocks the direct path: the strip says 机器防火墙挡住直连，经 hub 中转 AHEAD of the numbers, its 复制管理员命令 in view (no sideways scroll), and it copies the netsh rule for its node.exe (the toast says where to paste it — VibeSpace never runs it)', fw);
+  ok(fw.up && /^机器防火墙挡住直连，经 hub 中转/.test(fw.sf.fw || '') && fw.sf.fwCopy === '复制管理员命令' && fw.sf.fwTitle === FW_RULE && fw.reach.ahead === 0 && fw.reach.inView && fw.reach.hit && fw.copied === FW_RULE && /已复制，请粘贴到 WIN-DESK1 上以管理员身份打开的 PowerShell/.test(fw.toast), '⑦ the machine\'s firewall blocks the direct path: the strip says 机器防火墙挡住直连，经 hub 中转 (nothing long ahead of it — the numbers left the strip), its 复制管理员命令 in view (no sideways scroll), and it copies the netsh rule for its node.exe (the toast says where to paste it — VibeSpace never runs it)', fw);
   await p.shot('relay.png', WIN);
   await p.close();
-  // RED CONTROL — the strip's OLD order (the notice after the numbers) in a 900 px window: the copy button is past the strip's
-  // edge and a click at its centre copies nothing; THE order in the same window copies (in DejaVu — the hosted runner's sans —
-  // the old order missed even in the desk's 1100 px window: the .296 mirror red)
+  // RED CONTROL — a numbers sentence back AHEAD of the notice (the strip before lane stream-relay-udp-ci) in a 900 px window: the
+  // copy button is past the strip's edge and a click at its centre copies nothing; the shipped strip (the summary alone — lane
+  // stream-stats-popup) in the same window copies (in DejaVu — the hosted runner's sans — the old order missed even in the
+  // desk's 1100 px window: the .296 mirror red)
   const narrow = DESK.replace('width:1100px', 'width:900px'), pair = {};
   for (const [name, at] of [['order', '/'], ['old', '/fwlast']]) {
     const pc = await page(1280, 800, narrow, { at });
@@ -391,16 +415,16 @@ console.log('⑦ relay-only ⑧ no source');
     pair[name] = await fwCopyAt(pc);
     await pc.close();
   }
-  ok(narrow !== DESK && pair.order.reach.inView && pair.order.copied === FW_RULE && pair.old.up && !pair.old.reach.before && !pair.old.reach.inView && !pair.old.reach.hit && pair.old.copied === null, '⑦ RED CONTROL: the old order (the notice after the numbers) in a 900 px window — the copy button past the strip\'s edge, a click at its centre copies nothing; THE order in the same window copies', { order: pair.order.reach, old: pair.old.reach, oldCopied: pair.old.copied });
+  ok(narrow !== DESK && pair.order.reach.inView && pair.order.copied === FW_RULE && pair.old.up && pair.old.reach.ahead > 200 && !pair.old.reach.inView && !pair.old.reach.hit && pair.old.copied === null, '⑦ RED CONTROL: a numbers sentence (' + pair.old.reach.ahead + ' px) back ahead of the notice in a 900 px window — the copy button past the strip\'s edge, a click at its centre copies nothing; the shipped strip in the same window copies', { order: pair.order.reach, old: pair.old.reach, oldCopied: pair.old.copied });
   relayOnly.shutdown();
   const linkOnly = DW.create({ access, direct: false, udpLeg: false, log: quiet });
   R.setup({ ...BASE, webrtc: linkOnly });
   const pl = await page(1280, 800, DESK);
   await pl.ev(`window.__open(${JSON.stringify(M)})`);
   const upL = await playing(pl);
-  const viaL = await pl.until(`/经设备链路$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 10000);
+  const viaL = await pl.until(`/经设备链路$/.test(${NUM})`, 10000);
   const fl = linkOnly.facts('win-a')[0] || {};
-  ok(upL && viaL && fl.path === 'relay' && fl.relay && fl.relay.via === 'link' && fl.relay.leg === null, '⑦ a hub that offers no leg: the relay over the device link — the strip says 经设备链路, the record via link', { upL, viaL, relay: fl.relay });
+  ok(upL && viaL && fl.path === 'relay' && fl.relay && fl.relay.via === 'link' && fl.relay.leg === null, '⑦ a hub that offers no leg: the relay over the device link — the numbers say 经设备链路, the record via link', { upL, viaL, relay: fl.relay });
   await pl.shot('relay-link.png', WIN);
   await pl.close();
   linkOnly.shutdown();
@@ -425,7 +449,7 @@ console.log('⑨ phone 375×667');
   const p = await page(375, 667, PHONE, { touch: true });
   await p.ev(`window.__open(${JSON.stringify(M)})`);
   const up = await playing(p);
-  await p.until(`/^往返 \\d+ ms/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 8000);
+  await p.until(`/^往返 \\d+ ms/.test(${NUM})`, 8000);
   const row = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'); const kids = [...s.children].filter((e) => !e.hidden).map((e) => e.getBoundingClientRect()); const v = document.querySelector('${WIN} .stream-video').getBoundingClientRect(); return { h: Math.round(s.getBoundingClientRect().height), oneRow: Math.max(...kids.map((r) => r.top)) < Math.min(...kids.map((r) => r.bottom)), vw: Math.round(v.width) }; })()`);
   ok(up && row.oneRow && row.h <= 34 && row.vw === 375, '⑨ the phone plays it in the same shell, full width; the strip is ONE row (it scrolls sideways)', row);
   const [cx, cy] = await centre(p);
@@ -436,8 +460,8 @@ console.log('⑨ phone 375×667');
   const [, mx, my] = pt.split(' ').map(Number);
   ok(Math.abs(mx - 640) <= 4 && Math.abs(my - 360) <= 4 && got.includes('D 0') && got.includes('U 0'), '⑨ a TAP at the picture\'s centre is a click at the machine\'s 640 360 (touch → pointer events → the data channel)', got);
   await p.shot('phone.png');
-  const scrolled = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'); s.scrollLeft = s.scrollWidth; const st = document.querySelector('${WIN} .desktop-strip-stream').getBoundingClientRect(); return s.scrollLeft > 0 && st.right <= 375 + 1 && st.left >= 0; })()`);
-  ok(scrolled, '⑨ the strip scrolls sideways to its stream numbers (往返 · 抖动 · fps · 解码 · kbps in view)');
+  const scrolled = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'); s.scrollLeft = s.scrollWidth; const st = document.querySelector('${WIN} .desktop-strip-status').getBoundingClientRect(); return s.scrollLeft >= 0 && st.right <= 375 + 1 && st.left >= 0; })()`);
+  ok(scrolled, '⑨ the strip scrolls sideways to its summary (串流 · N ms · N fps in view — its tap opens the numbers: ⑮)');
   await p.shot('phone-stats.png');
   await p.close();
 }
@@ -495,13 +519,13 @@ console.log('⑩ the machine\'s own screen: the HDR road, NVENC on the strip —
   const p = await page(1280, 800, DESK);
   await p.ev(`window.__open(${JSON.stringify(M)})`);
   const up = await playing(p);
-  const nv = await p.until(`/ · NVENC · 编码 \\d+ ms$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 10000);
+  const nv = await p.until(`/ · NVENC · 编码 \\d+ ms$/.test(${NUM})`, 10000);
   const rated = await p.until(`/机器以 \\d+ kbps 编码——这个大小的屏幕不会低于 \\d+ kbps/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).title || '')`, 8000);
   const s = await stripText(p);
   const f = screenHub.facts('win-a')[0] || {};
   const sc = (f.stats && f.stats.screen) || {}, said = /机器以 (\d+) kbps 编码——这个大小的屏幕不会低于 (\d+) kbps/.exec(s.title || '') || [];
   ok(rated && Number(said[1]) === sc.kbps && Number(said[2]) === sc.floor && sc.floor === 2500 && sc.kbps >= sc.floor, `⑩ the chip's title says what the machine decided: ${said[0]} — the agent's own kbps ${sc.kbps} and floor ${sc.floor} (1280×720 @ 30 ⇒ 2500: THE RATE)`, { said: said[0], sc: { kbps: sc.kbps, floor: sc.floor, rate: sc.rate } });
-  ok(up && nv && /HDR 已在机器上映射（SDR 白点 200 nits）/.test(s.title) && f.source && f.source.kind === 'screen' && f.source.encoder === 'NVENC' && f.source.mode === 'mapped', '⑩ the machine\'s own screen (no fake source on the hub): the HDR road plays, the strip reads … · NVENC · 编码 N ms, the chip\'s title says HDR 已在机器上映射（SDR 白点 200 nits）', { s, src: f.source });
+  ok(up && nv && /HDR 已在机器上映射（SDR 白点 200 nits）/.test(s.title) && f.source && f.source.kind === 'screen' && f.source.encoder === 'NVENC' && f.source.mode === 'mapped', '⑩ the machine\'s own screen (no fake source on the hub): the HDR road plays, the numbers read … · NVENC · 编码 N ms, the chip\'s title says HDR 已在机器上映射（SDR 白点 200 nits）', { s, src: f.source });
   await p.shot('screen.png', WIN);
   fs.writeFileSync(DIE, '1');
   const fell = await p.until(`!document.querySelector('${WIN} .stream-video') && /串流停了（机器的屏幕采集停了）/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 12000);
@@ -535,9 +559,17 @@ console.log('⑪ ONE WINDOW as the stream: the stats row, 「还原它」 only w
   const sayText = () => p.ev(`(() => { const s = document.querySelector('${WWIN} .machine-app-say'); return s && getComputedStyle(s).display !== 'none' ? { text: s.firstChild.textContent, acts: [...s.querySelectorAll('button')].map((b) => b.textContent) } : null; })()`);
   await p.ev(`window.__openWin(${JSON.stringify(M)}, ${JSON.stringify(ROW)})`);
   const up = await plays();
-  await p.until(`/ · NVENC · 编码 \\d+ ms$/.test((document.querySelector('${WWIN} .machine-window-stats .desktop-strip-stream') || {}).textContent || '')`, 10000);
-  const s1 = await p.ev(`(() => { ${vis} const q = (sel) => document.querySelector('${WWIN} ' + sel); return { title: q('.vs-win-title').textContent, chip: q('.machine-window-chip').textContent, stats: q('.machine-window-stats .desktop-strip-stream').textContent, statsShown: vis(q('.machine-window-stats')), held: vis(q('.machine-window-held')), restore: vis(q('.machine-window-restore')), stop: vis(q('.machine-window-stop')) ? q('.machine-window-stop').textContent : null }; })()`);
-  ok(up && s1.title === `WIN-DESK1上的${CJK}` && /^串流 · \d+ ms · \d+ fps$/.test(s1.chip) && /^往返 \d+ ms · 抖动 \d+ ms · \d+ fps · 解码 [\d.]+ ms · \d+ kbps · NVENC · 编码 \d+ ms$/.test(s1.stats) && s1.statsShown, '⑪ the window stream plays, its title intact (CJK + emoji), with THE stats row of the whole screen\'s window: 往返 · 抖动 · fps · 解码 · kbps · NVENC · 编码', s1);
+  const WNUM = NUMS(`${WWIN} .machine-window-chip`);
+  await p.until(`/ · NVENC · 编码 \\d+ ms$/.test(${WNUM})`, 10000);
+  const s1 = await p.ev(`(() => { ${vis} const q = (sel) => document.querySelector('${WWIN} ' + sel); return { title: q('.vs-win-title').textContent, chip: q('.machine-window-chip').textContent, stats: ${WNUM}, statsShown: vis(q('.machine-window-stats')), glyph: q('.machine-window-chip').hasAttribute('data-chart'), held: vis(q('.machine-window-held')), restore: vis(q('.machine-window-restore')), stop: vis(q('.machine-window-stop')) ? q('.machine-window-stop').textContent : null }; })()`);
+  ok(up && s1.title === `WIN-DESK1上的${CJK}` && /^串流 · \d+ ms · \d+ fps$/.test(s1.chip) && /^往返 \d+ ms · 抖动 \d+ ms · \d+ fps · 解码 [\d.]+ ms · \d+ kbps · NVENC · 编码 \d+ ms$/.test(s1.stats) && !s1.statsShown && s1.glyph, '⑪ the window stream plays, its title intact (CJK + emoji), with THE stats row of the whole screen\'s window: its chip the summary (+ the chart glyph), 往返 · 抖动 · fps · 解码 · kbps · NVENC · 编码 in its title; the row under it is the firewall notice alone (none on the direct path)', s1);
+  // lane stream-stats-popup: the window stream's summary opens THE same details (one component)
+  const wc = await centreOf(`${WWIN} .machine-window-chip`);
+  await p.click(wc[0], wc[1]);
+  const wpop = await p.until(`(() => { const d = document.querySelector('.stream-stats-pop'); return !!d && d.querySelectorAll('canvas.stream-chart-canvas').length === 3 && [...d.querySelectorAll('.stream-stats-table tr')].some((tr) => tr.dataset.k === 'encoder' && /NVENC · 编码 \\d+ ms/.test(tr.cells[1].textContent)); })()`, 4000);
+  ok(wpop, '⑪ its summary\'s click opens THE details (the same component): three charts, the encoder row NVENC · 编码 N ms');
+  await p.click(wc[0], wc[1]);
+  ok(await p.until(`!document.querySelector('.stream-stats-pop')`, 2000), '⑪ a second click on the summary closes them');
   ok(!s1.held && !s1.restore && s1.stop === '停止串流', '⑪ live: no 「还原它」 (the held row is not shown); 「停止串流」 is', s1);
   const cause = await p.ev(`(() => { const b = document.createElement('button'); b.className = 'file-tool-btn'; b.hidden = true; document.body.append(b); const d = getComputedStyle(b).display; b.remove(); return d; })()`);
   ok(cause === 'flex', '⑪ the cause, measured in this page: a hidden .file-tool-btn computes display:flex (viewers.css out-ranks [hidden]) — the old bare 「还原它」 showed at all times', cause);
@@ -694,6 +726,190 @@ console.log('⑭ THE HAND-OVER (lane desktop-handover): the strip gives the stre
   ok(ho.stateOf('win-a') === null && JSON.stringify(ends) === JSON.stringify(['revoked', 'window_closed']), '⑭ the window\'s × ends it (window_closed) — the audit\'s lease ends: revoked, window_closed', ends);
   ho.shutdown(); hoHub.shutdown();
   R.setup({ ...BASE });
+}
+console.log('⑮ THE DETAILS · THE PIN · TRUE FULL SCREEN (lane stream-stats-popup)');
+let SHOWN = null;
+{
+  const STRIP = `${WIN} .desktop-strip`, CONTENT = `${WIN} .desktop-machine-content`;
+  SHOWN = `(() => { const d = document.querySelector('.stream-stats-pop'); return !!d && !!d.querySelector('canvas') && getComputedStyle(d).visibility === 'visible'; })()`; // createPopover lays it out at its first frame
+  const at = (p, sel) => p.ev(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
+  const press = async (p, sel) => { const [x, y] = await at(p, sel); await p.click(x, y); };
+  const mouse = (p, type, x, y, buttons = 0) => p.cdp('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 });
+  const drag = async (p, [x0, y0], [x1, y1]) => { await mouse(p, 'mouseMoved', x0, y0); await mouse(p, 'mousePressed', x0, y0, 1); for (let k = 1; k <= 10; k++) { await mouse(p, 'mouseMoved', Math.round(x0 + ((x1 - x0) * k) / 10), Math.round(y0 + ((y1 - y0) * k) / 10), 1); await sleep(25); } await mouse(p, 'mouseReleased', x1, y1, 0); await sleep(150); };
+  const stripFacts = (p) => p.ev(`(() => { const s = document.querySelector('${STRIP}'), c = s.querySelector('.desktop-strip-status'), r = s.getBoundingClientRect(); const kids = [...s.children].filter((e) => !e.hidden && getComputedStyle(e).display !== 'none'); const used = Math.round(kids.reduce((n, e) => n + e.getBoundingClientRect().width, 0) + 6 * Math.max(0, kids.length - 1)); return { h: Math.round(r.height), content: used, room: s.clientWidth, scrolls: s.scrollWidth > s.clientWidth + 1, numbers: !!s.querySelector('.desktop-strip-stream:not([hidden])'), chip: c.textContent, glyph: c.hasAttribute('data-chart'), glyphPx: Math.round(parseFloat(getComputedStyle(c, '::after').width) || 0) }; })()`);
+  const fullFacts = (p) => p.ev(`(() => { const c = document.querySelector('${CONTENT}'), s = c.querySelector('.desktop-strip'), v = c.querySelector('.stream-video'); const vr = v.getBoundingClientRect(), sr = s.getBoundingClientRect(); const tag = (e) => e.classList.contains('desktop-strip-grip') ? 'grip' : e.classList.contains('desktop-strip-status') ? 'summary' : e.classList.contains('desktop-strip-full') ? 'exit' : e.classList.contains('desktop-strip-pill-more') ? 'more' : e.className; const shown = [...s.children].filter((e) => getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0).sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left).map(tag);
+    return { full: document.fullscreenElement === c, vw: innerWidth, vh: innerHeight, video: [vr.left, vr.top, vr.width, vr.height].map(Math.round), pill: s.classList.contains('is-pill'), away: s.classList.contains('is-away'), opacity: getComputedStyle(s).opacity, pos: getComputedStyle(s).position, corner: s.dataset.corner || null, rect: [sr.left, sr.top, sr.right, sr.bottom].map(Math.round), shown, exit: c.querySelector('.desktop-strip-full').textContent }; })()`);
+  const goFull = async (p) => { await press(p, `${WIN} .desktop-strip-full`); return p.until(`document.fullscreenElement === document.querySelector('${CONTENT}')`, 4000); };
+  // BEFORE: the pre-lane strip (the numbers sentence in it) and its full screen (the strip stays a bar) — the RED CONTROL
+  const pre = await page(1280, 800, DESK, { at: '/prelane' });
+  await pre.ev(`window.__open(${JSON.stringify(M)})`);
+  await playing(pre);
+  await pre.until(`!!document.querySelector('${STRIP} .desktop-strip-stream:not([hidden])') && /kbps/.test(document.querySelector('${STRIP} .desktop-strip-stream').textContent)`, 8000);
+  const before = await stripFacts(pre);
+  await pre.shot('strip-before.png', STRIP);
+  const preFull = await goFull(pre);
+  await sleep(400);
+  const fsPre = await fullFacts(pre);
+  await pre.shot('fullscreen-before.png');
+  await pre.ev('document.exitFullscreen().catch(() => {})');
+  await pre.close();
+  ok(preFull && fsPre.full && !fsPre.pill && fsPre.pos === 'static' && fsPre.video[3] < fsPre.vh && fsPre.video[1] >= before.h, `⑭ RED CONTROL: the pre-lane full screen keeps the strip as a bar over the picture — the picture ${fsPre.video[2]}×${fsPre.video[3]} of ${fsPre.vw}×${fsPre.vh} (${Math.round((100 * fsPre.video[3]) / fsPre.vh)} % of the height), starting ${fsPre.video[1]} px down`, fsPre);
+  // AFTER
+  const p = await page(1280, 800, DESK);
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  const up = await playing(p);
+  await p.until(`/kbps/.test(${NUM})`, 8000);
+  await sleep(2500); // a few seconds in the series
+  const after = await stripFacts(p);
+  ok(up && before.numbers && !after.numbers && after.h === before.h && after.content < before.content && !after.scrolls && after.glyph && after.glyphPx === 12 && /^串流 · \d+ ms · \d+ fps$/.test(after.chip), `⑭ the strip shows ONE summary: 「${after.chip}」 + a 12 px chart glyph — the numbers sentence left it (the strip's content ${before.content} → ${after.content} px in ${after.room} px, height ${before.h} → ${after.h} px)`, { before, after });
+  await p.shot('strip-after.png', STRIP);
+  await press(p, `${WIN} .desktop-strip-status`);
+  await p.until(SHOWN, 3000);
+  await sleep(300);
+  const POP = `(() => { const d = document.querySelector('.stream-stats-pop'); if (!d) return null; const r = d.getBoundingClientRect(); const cv = [...d.querySelectorAll('canvas.stream-chart-canvas')];
+    const ink = (c) => { const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < px.length; i += 4) if (px[i] > 0) n++; return n; };
+    return { popover: d.dataset.popover === '1', rows: [...d.querySelectorAll('.stream-stats-table tr')].map((tr) => [tr.dataset.k, tr.cells[0].textContent, tr.cells[1].textContent]), kinds: [...d.querySelectorAll('.stream-chart')].map((c) => c.dataset.kind), names: [...d.querySelectorAll('.stream-chart-name')].map((e) => e.textContent), now: [...d.querySelectorAll('.stream-chart-now')].map((e) => e.textContent), max: [...d.querySelectorAll('.stream-chart-max')].map((e) => e.textContent), ink: cv.map(ink), size: cv.map((c) => [c.clientWidth, c.clientHeight]), box: [r.left, r.top, r.width, r.height].map(Math.round), inView: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight }; })()`;
+  const pop = await p.ev(POP);
+  ok(pop && pop.popover && pop.kinds.join() === 'latency,loss,rate' && pop.names.join() === '延迟,丢包,带宽' && pop.ink.every((n) => n > 0) && pop.inView && /^\d+ ms/.test(pop.now[0]) && /^[\d.]+ %/.test(pop.now[1]) && /^\d+ kbps/.test(pop.now[2]) && pop.max[0].endsWith(' ms') && pop.max[2].endsWith(' kbps'), `⑭ the summary's click opens THE DETAILS (a createPopover — data-popover, so Esc and an outside press close it): three inked canvas charts 延迟 · 丢包 · 带宽 (${pop && pop.now.join(' | ')}; tops ${pop && pop.max.join(' / ')})`, pop);
+  const row = (k) => ((pop && pop.rows.find((r) => r[0] === k)) || [])[2] || '';
+  ok(pop.rows.slice(0, 5).map((r) => r[1]).join() === '往返,抖动,帧率,解码,接收' && /^\d+ ms$/.test(row('rtt')) && /^\d+ fps · 发出 \d+$/.test(row('fps')) && /^\d+ kbps · 发出 \d+$/.test(row('kbps')) && row('path') === '直连' && /H264/i.test(row('codec')) && row('size') === '1280×720' && /^丢包 \d+ · 丢帧 \d+$/.test(row('loss')), '⑭ the table: 往返 · 抖动 · 帧率 (发出) · 解码 · 接收 (发出) · 路径 直连 · 编解码器 H264 · 画面大小 1280×720 · 丢失 — the page\'s own numbers beside the agent\'s', pop.rows);
+  await p.shot('details.png', '.stream-stats-pop');
+  const lat = await p.ev(`(() => { const b = document.querySelector('.stream-stats-pop .stream-chart[data-kind="latency"] canvas').getBoundingClientRect(); return { x: b.right - 1, y: Math.round(b.top + b.height / 2), step: b.width / 119 }; })()`);
+  await mouse(p, 'mouseMoved', lat.x, lat.y);
+  await sleep(150);
+  const readout = await p.ev(`document.querySelector('.stream-stats-pop .stream-chart[data-kind="latency"] .stream-chart-now').textContent`);
+  await mouse(p, 'mouseMoved', lat.x - 2 * lat.step, lat.y);
+  await sleep(150);
+  const readout2 = await p.ev(`document.querySelector('.stream-stats-pop .stream-chart[data-kind="latency"] .stream-chart-now').textContent`);
+  ok(/^现在 · \d+ ms ± \d+$/.test(readout) && /^2 秒前 · (\d+ ms ± \d+|无读数)$/.test(readout2), `⑭ a hover on a chart reads that second: 「${readout}」, two seconds left 「${readout2}」`, { readout, readout2 });
+  // 钉住 ⇒ the panel in the picture's top-right corner; it outlives the popup
+  await press(p, '.stream-stats-pop .stream-stats-pin');
+  const PANEL = `(() => { const q = document.querySelector('${WIN} .stream-stats-panel'); if (!q) return null; const f = q.parentElement.getBoundingClientRect(), r = q.getBoundingClientRect(); return { corner: q.dataset.corner, gaps: { l: Math.round(r.left - f.left), t: Math.round(r.top - f.top), r: Math.round(f.right - r.right), b: Math.round(f.bottom - r.bottom) }, inPane: !!q.parentElement.querySelector('.stream-video'), popover: q.hasAttribute('data-popover'), charts: q.querySelectorAll('canvas.stream-chart-canvas').length, table: !!q.querySelector('table'), title: q.querySelector('.stream-stats-title').textContent, size: [Math.round(r.width), Math.round(r.height)], hash: [...q.querySelectorAll('canvas')].map((c) => { const px = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let h = 0; for (let i = 3; i < px.length; i += 4) h = (h * 31 + px[i] * (i % 997)) % 1000000007; return h; }).join(':') }; })()`;
+  const pinned = await p.until(`!document.querySelector('.stream-stats-pop') && !!document.querySelector('${WIN} .stream-stats-panel')`, 3000);
+  const pf = await p.ev(PANEL);
+  ok(pinned && pf.corner === 'tr' && pf.gaps.t === 10 && pf.gaps.r === 10 && pf.inPane && !pf.popover && pf.charts === 3 && !pf.table && /^\d+ ms · \d+ fps · \d+ kbps$/.test(pf.title), `⑭ 钉住: the details become a ${pf.size.join('×')} panel in the picture's top-right corner (10 px in) — three live charts under one line (${pf.title}), no data-popover (the Esc sweep leaves it)`, pf);
+  await press(p, `${WIN} .desktop-strip-status`);
+  const again = await p.until(SHOWN, 2000);
+  await press(p, `${WIN} .vs-win-title`); // an outside press
+  const closed = await p.until(`!document.querySelector('.stream-stats-pop')`, 2000);
+  await sleep(2200);
+  const pf2 = await p.ev(PANEL);
+  ok(again && closed && pf2 && pf2.hash !== pf.hash, '⑭ the panel outlives the popup: the summary opens the popup again beside it, an outside press closes the popup, the panel stays — and its charts moved on (updated each second)', { again, closed, before: pf.hash, after: pf2 && pf2.hash });
+  await p.shot('pinned.png', WIN);
+  const head = await p.ev(`(() => { const b = document.querySelector('${WIN} .stream-stats-panel .stream-stats-head').getBoundingClientRect(), f = document.querySelector('${WIN} .stream-stats-panel').parentElement.getBoundingClientRect(); return { from: [Math.round(b.left + 30), Math.round(b.top + b.height / 2)], to: [Math.round(f.left + 160), Math.round(f.bottom - 60)] }; })()`);
+  await drag(p, head.from, head.to);
+  const pf3 = await p.ev(PANEL);
+  const pinMem = await p.ev(`localStorage.getItem('vibespace.streamStatsPin')`);
+  ok(pf3.corner === 'bl' && pf3.gaps.l === 10 && pf3.gaps.b === 10 && pinMem === '{"win-a":"bl"}', '⑭ dragged by its head toward the bottom-left, it drops IN that corner (10 px in) — remembered for this machine (vibespace.streamStatsPin)', { pf3, pinMem });
+  // TRUE FULL SCREEN
+  const fsOn = await goFull(p);
+  await sleep(400);
+  const fs1 = await fullFacts(p);
+  ok(fsOn && fs1.pill && fs1.pos === 'absolute' && fs1.video.join() === `0,0,${fs1.vw},${fs1.vh}`, `⑭ TRUE full screen: the picture takes the whole screen — ${fs1.video[2]}×${fs1.video[3]} of ${fs1.vw}×${fs1.vh} = 100 % (no fixed strip)`, fs1);
+  ok(fs1.shown.join() === 'grip,summary,exit,more' && fs1.exit === '退出全屏' && fs1.corner === 'tl' && fs1.rect[0] === 10 && fs1.rect[1] === 10 && !fs1.away, '⑭ the strip floats over it as a pill in the top-left: grip · 串流 · N ms · N fps · 退出全屏 · ⋯ (nothing else of the bar)', fs1);
+  const pfFull = await p.ev(PANEL);
+  ok(pfFull && pfFull.corner === 'bl' && pfFull.gaps.l === 10 && pfFull.gaps.b === 10, '⑭ the pinned panel rides along: the screen\'s bottom-left corner now', pfFull);
+  await p.shot('fullscreen.png');
+  await press(p, `${WIN} .desktop-strip-pill-more`);
+  const menu = await p.ev(`(() => { const m = document.querySelector('.stream-pill-menu'); return m ? { inFull: document.fullscreenElement.contains(m), items: [...m.querySelectorAll('.stream-pill-menu-item')].map((b) => b.textContent), held: document.querySelector('${STRIP}').dataset.why } : null; })()`);
+  ok(menu && menu.inFull && menu.items[0] === '串流详情' && menu.items.some((x) => /捕获快捷键$/.test(x)) && menu.held === 'menu', '⑭ ⋯ opens inside the full-screen element (a popup of the page behind would not show there): 串流详情 · (the displays) · 捕获快捷键 — and holds the pill up', menu);
+  await p.until(`getComputedStyle(document.querySelector('.stream-pill-menu')).visibility === 'visible'`, 2000);
+  await press(p, '.stream-pill-menu .stream-pill-menu-item');
+  await p.until(SHOWN, 3000);
+  const fpop = await p.ev(`(() => { const d = document.querySelector('.stream-stats-pop'); if (!d) return null; const r = d.getBoundingClientRect(), hit = document.elementFromPoint(r.left + r.width / 2, r.top + 30); return { inFull: document.fullscreenElement.contains(d), hit: !!(hit && d.contains(hit)), inView: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight }; })()`);
+  ok(fpop && fpop.inFull && fpop.hit && fpop.inView, '⑭ 串流详情 shows the details over the picture (inside the full-screen element, the topmost element where it is)', fpop);
+  await p.shot('fullscreen-details.png');
+  await press(p, '.stream-stats-pop .stream-stats-x');
+  await mouse(p, 'mouseMoved', 640, 520);
+  const t0 = Date.now();
+  const away = await p.until(`document.querySelector('${STRIP}').classList.contains('is-away')`, 6000);
+  const restMs = Date.now() - t0;
+  await sleep(350); // past its 0.15 s fade
+  const fsAway = await fullFacts(p);
+  ok(away && restMs >= 2500 && restMs <= 4500 && fsAway.opacity === '0', `⑭ the pointer rests: the pill fades ${restMs} ms later (3 s) — the picture alone`, { restMs, fsAway });
+  await p.shot('fullscreen-away.png');
+  await mouse(p, 'mouseMoved', 600, 500);
+  const back = await p.until(`!document.querySelector('${STRIP}').classList.contains('is-away')`, 1000);
+  ok(back, '⑭ a move brings it back');
+  const gr = await at(p, `${STRIP} .desktop-strip-grip`);
+  await drag(p, gr, [fs1.vw - 80, fs1.vh - 40]);
+  const fs2 = await fullFacts(p);
+  const pillMem = await p.ev(`localStorage.getItem('vibespace.streamPill')`);
+  ok(fs2.corner === 'br' && fs2.rect[2] === fs2.vw - 10 && fs2.rect[3] === fs2.vh - 10 && pillMem === '{"win-a":"br"}', '⑭ dragged by its grip, the pill drops in the bottom-right corner (10 px in) — remembered for this machine (vibespace.streamPill)', { fs2, pillMem });
+  await p.shot('fullscreen-br.png');
+  await press(p, `${WIN} .desktop-strip-full`);
+  const exited = await p.until(`!document.fullscreenElement`, 3000);
+  await sleep(300);
+  const ex = await p.ev(`(() => { const s = document.querySelector('${STRIP}'), v = document.querySelector('${WIN} .stream-video').getBoundingClientRect(); return { pill: s.classList.contains('is-pill'), pos: getComputedStyle(s).position, full: s.querySelector('.desktop-strip-full').textContent, grip: getComputedStyle(s.querySelector('.desktop-strip-grip')).display, more: getComputedStyle(s.querySelector('.desktop-strip-pill-more')).display, below: Math.round(v.top - s.getBoundingClientRect().bottom) }; })()`);
+  ok(exited && !ex.pill && ex.pos === 'static' && ex.full === '⤢ 全屏' && ex.grip === 'none' && ex.more === 'none' && ex.below >= 0, '⑭ 「退出全屏」 leaves it: the strip is the window\'s bar again (⤢ 全屏; no grip, no ⋯), the picture under it', ex);
+  // Esc: the browser's own (it exits full screen and fires fullscreenchange — the same door); measured: CDP's Esc never leaves
+  // a headless Chrome's full screen, so the browser's exit is taken through the API when it did not
+  await goFull(p);
+  await p.key('Escape', 'Escape', 27);
+  const escLeft = await p.until(`!document.fullscreenElement`, 1500);
+  if (!escLeft) await p.ev('document.exitFullscreen().catch(() => {})');
+  const exEsc = await p.until(`!document.fullscreenElement && !document.querySelector('${STRIP}').classList.contains('is-pill')`, 3000);
+  ok(exEsc, `⑭ the browser's exit (Esc ${escLeft ? 'itself' : '— taken through the API: CDP\'s Esc never leaves headless full screen'}) puts the bar back the same way`, { escLeft });
+  await press(p, `${WIN} .stream-stats-panel .stream-stats-x`);
+  ok(await p.until(`!document.querySelector('${WIN} .stream-stats-panel')`, 2000), '⑭ the panel\'s × closes it');
+  await p.close();
+  // reopened: the pill's corner and the pin's corner come back
+  const p2 = await page(1280, 800, DESK);
+  await p2.ev(`window.__open(${JSON.stringify(M)})`);
+  await playing(p2);
+  await goFull(p2);
+  await sleep(300);
+  const fs3 = await fullFacts(p2);
+  await press(p2, `${WIN} .desktop-strip-status`);
+  await p2.until(SHOWN, 3000);
+  await press(p2, '.stream-stats-pop .stream-stats-pin');
+  await sleep(200);
+  const pf4 = await p2.ev(PANEL);
+  ok(fs3.full && fs3.corner === 'br' && fs3.rect[2] === fs3.vw - 10 && pf4 && pf4.corner === 'bl', '⑭ the window reopened: its full-screen pill comes back bottom-right, a new pin bottom-left — remembered per machine', { fs3, pf4 });
+  await p2.ev(`document.exitFullscreen().catch(() => {}); localStorage.removeItem('vibespace.streamPill'); localStorage.removeItem('vibespace.streamStatsPin'); true`); // this profile's memory reset for the legs after
+  await p2.close();
+}
+
+console.log('⑮ a phone: the summary\'s tap, the pill under a finger');
+{
+  const p = await page(375, 667, PHONE, { touch: true });
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  await playing(p);
+  await p.until(`/kbps/.test(${NUM})`, 8000);
+  await sleep(1500);
+  await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'); s.scrollLeft = s.scrollWidth; return true; })()`);
+  const [sx, sy] = await p.ev(`(() => { const b = document.querySelector('${WIN} .desktop-strip-status').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
+  await p.tap(sx, sy);
+  const pop = await p.until(SHOWN, 3000) && await p.ev(`(() => { const d = document.querySelector('.stream-stats-pop'), r = d.getBoundingClientRect(); return { box: [r.left, r.top, r.right, r.bottom].map(Math.round), charts: d.querySelectorAll('canvas').length, rows: d.querySelectorAll('tr').length }; })()`);
+  ok(pop && pop.box[0] >= 0 && pop.box[2] <= 375 && pop.box[1] >= 0 && pop.box[3] <= 667 && pop.charts === 3 && pop.rows >= 7, `⑮ a TAP on the summary opens the details inside the 375 × 667 screen (${pop && pop.box.join(',')}) — the table and three charts`, pop);
+  const [lx, ly] = await p.ev(`(() => { const b = document.querySelector('.stream-stats-pop .stream-chart[data-kind="rate"] canvas').getBoundingClientRect(); return [Math.floor(b.right - 1), Math.round(b.top + b.height / 2)]; })()`); // the newest second (a few rows only yet)
+  await p.tap(lx, ly);
+  await sleep(150);
+  const tapRead = await p.ev(`document.querySelector('.stream-stats-pop .stream-chart[data-kind="rate"] .stream-chart-now').textContent`);
+  ok(/^现在 · \d+ kbps/.test(tapRead), `⑮ a tap on a chart holds that second's readout: 「${tapRead}」`, tapRead);
+  await p.shot('phone-details.png');
+  await p.ev(`document.querySelector('.stream-stats-pop .stream-stats-x').click()`);
+  await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'); s.scrollLeft = 0; return true; })()`);
+  const [fx, fy] = await p.ev(`(() => { const b = document.querySelector('${WIN} .desktop-strip-full').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
+  await p.tap(fx, fy);
+  const full = await p.until(`!!document.fullscreenElement && document.querySelector('${WIN} .desktop-strip').classList.contains('is-pill')`, 4000);
+  const away = await p.until(`document.querySelector('${WIN} .desktop-strip').classList.contains('is-away')`, 6000);
+  const n0 = psLines().length;
+  await p.tap(187, 420); // the middle of the picture: the machine's
+  const mid = await (async () => { for (let i = 0; i < 30; i++) { const l = linesSince(n0); if (l.includes('U 0')) return l; await sleep(100); } return linesSince(n0); })();
+  const stillAway = await p.ev(`document.querySelector('${WIN} .desktop-strip').classList.contains('is-away')`);
+  ok(full && away && mid.includes('D 0') && mid.includes('U 0') && stillAway, '⑮ in full screen the pill fades (no finger moved); a tap in the middle is a click on the machine (D 0 · U 0) and leaves the pill away', { full, away, mid, stillAway });
+  const n1 = psLines().length;
+  await p.tap(30, 40); // the pill's corner (top-left third)
+  const woke = await p.until(`!document.querySelector('${WIN} .desktop-strip').classList.contains('is-away')`, 1000);
+  await sleep(600);
+  const corner = linesSince(n1).filter((l) => /^[DU] /.test(l));
+  ok(woke && corner.length === 0, '⑮ a tap in the pill\'s corner wakes it — and never reaches the machine (no press, no release sent)', { woke, corner });
+  await p.shot('phone-fullscreen.png');
+  const reAway = await p.until(`document.querySelector('${WIN} .desktop-strip').classList.contains('is-away')`, 5000);
+  ok(reAway, '⑮ …for 3 s, then it fades again');
+  await p.ev('document.exitFullscreen().catch(() => {})');
+  await p.close();
 }
 ok((await sessions()).length === 0, 'every window closed ⇒ no stream session left on the hub');
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

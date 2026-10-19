@@ -9230,4 +9230,38 @@ export default {
   "Add these words to your Dropline dictionary": "把这些词加入 Dropline 词库", // lane foryou-plugin-notices
   "That plugin is not on this instance any more": "这个插件已经不在本实例上了", // lane foryou-plugin-notices
   "That suggestion was already added or ignored. Nothing waits for it.": "这批建议已经加入或忽略过了，没有要处理的。", // lane foryou-plugin-notices
+  "Direct path": "直连", // lane stream-stats-popup
+  "Round trip": "往返", // lane stream-stats-popup
+  "Jitter": "抖动", // lane stream-stats-popup
+  "Frame rate": "帧率", // lane stream-stats-popup
+  "sent {n}": "发出 {n}", // lane stream-stats-popup
+  "Decode": "解码", // lane stream-stats-popup
+  "Received": "接收", // lane stream-stats-popup
+  "Codec": "编解码器", // lane stream-stats-popup
+  "Encoder": "编码器", // lane stream-stats-popup
+  "Screen": "显示器", // lane stream-stats-popup
+  "Picture": "画面大小", // lane stream-stats-popup
+  "encoded {w}×{h}": "编码 {w}×{h}", // lane stream-stats-popup
+  "The machine’s rate": "机器码率", // lane stream-stats-popup
+  "floor {n} kbps": "下限 {n} kbps", // lane stream-stats-popup
+  "estimate {n} kbps": "估计 {n} kbps", // lane stream-stats-popup
+  "Lost": "丢失", // lane stream-stats-popup
+  "{lost} packets · {dropped} frames dropped": "丢包 {lost} · 丢帧 {dropped}", // lane stream-stats-popup
+  "Latency": "延迟", // lane stream-stats-popup
+  "{rtt} ms ± {jitter}": "{rtt} ms ± {jitter}", // lane stream-stats-popup
+  "Round trip (the line) and its jitter (the band)": "往返时间（线）与抖动（带）", // lane stream-stats-popup
+  "Packet loss": "丢包", // lane stream-stats-popup
+  "{n} frames dropped": "丢帧 {n}", // lane stream-stats-popup
+  "Packets lost each second (the bars); a frame the browser dropped is a mark along the top": "每秒丢包（柱）；浏览器丢掉的帧在顶部标出", // lane stream-stats-popup
+  "Bandwidth": "带宽", // lane stream-stats-popup
+  "rate {n}": "码率 {n}", // lane stream-stats-popup
+  "Received kbps (the line), the machine’s decided rate (dashed) and its floor (dotted)": "接收 kbps（实线）、机器决定的码率（虚线）与下限（点线）", // lane stream-stats-popup
+  "Stream details": "串流详情", // lane stream-stats-popup
+  "Pin it": "钉住", // lane stream-stats-popup
+  "Keep it in a corner of the window, updating": "钉在窗口一角，持续更新", // lane stream-stats-popup
+  "{s} s ago": "{s} 秒前", // lane stream-stats-popup
+  "no reading": "无读数", // lane stream-stats-popup
+  "{ms} ms · {fps} fps · {kbps} kbps": "{ms} ms · {fps} fps · {kbps} kbps", // lane stream-stats-popup
+  "Drag to another corner": "拖到另一个角", // lane stream-stats-popup
+  "Exit full screen": "退出全屏", // lane stream-stats-popup
 };
