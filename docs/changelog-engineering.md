@@ -4,6 +4,14 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.310 — 2026-10-18
+
+### hotfix (主开发) — a Windows device's own children flashed a terminal window on the owner's desktop (owner 2026-10-19 00:4xZ 「现在还是一直在弹 而且路径里有.vibespace」; the console-flood census 00:2xZ)
+- THE SHAPE: since lane device-upgrade-stuck the self-upgrade re-execs the daemon `detached + stdio ignore + windowsHide` ⇒ the daemon has NO console; every child it spawns without `windowsHide: true` allocates a NEW console, which Windows 11 delegates to Windows Terminal ⇒ a visible window per child (closed on exit 0, left open on a non-zero exit — `type` of a missing file, a 30 s kill). The owner's desktop held 143 of them (most from his Codex app's own spawns; ours flashed on every hub sweep: the discovery-snapshot child and the usage-scan child, plus every `vibespace-exit run`).
+- THE FIX: `windowsHide: true` on the SEVEN device spawn sites in src/agentd/agentd.js — the console code-page probe, the stdio-bridge daemon spawn, the two discovery-snapshot children, the usage-scan child, the pipe-session spawn, run-cmd (the re-exec already had it; node-pty's ConPTY needs none; stream-screen / stream-window-source already had it). No behaviour change elsewhere: the flag only drops the console window on win32.
+- WHAT FOLLOWS: lane win-run-hide-console delivers the grep-derived census over every child_process call in src/agentd (a dropped flag ⇒ RED), the code-page probe that is asked until known (the 5 s single attempt had cached `null` under the first run's 28 s stall ⇒ every cmd.exe message decoded as UTF-8 mojibake) and the card line that names a fallback decoding.
+- A device must be UPDATED to stop flashing: the hub ships the bundle, the Windows daemon self-upgrades a minute after the hub restarts on .310.
+
 ## 2.369.309 — 2026-10-18
 
 ### lane stream-mac-stall — a Mac's stream: ONE picture then none, one display, the copied Settings link (owner 2026-10-18 22:3xZ 「现在能看到画面了，但是似乎传了一帧就卡住了」「而且只有一个屏幕了」「这个按钮点了之后能不能不要让我复制东西，而是直接在电脑上打开对应的窗口」); base 66125ffa

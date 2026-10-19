@@ -388,7 +388,7 @@ function consoleCodePage() {
       if (i >= XS.CODEPAGE_PROBES.length) return resolve(null);
       const p = XS.shellPlan('win32', XS.CODEPAGE_PROBES[i]);
       try {
-        execFile(p.file, p.args, { timeout: 5000, maxBuffer: 64 * 1024, encoding: 'buffer', env: spawnEnv(), windowsVerbatimArguments: true }, (err, out) => {
+        execFile(p.file, p.args, { windowsHide: true, timeout: 5000, maxBuffer: 64 * 1024, encoding: 'buffer', env: spawnEnv(), windowsVerbatimArguments: true }, (err, out) => {
           const cp = err ? null : XS.parseCodePage(out);
           if (cp) resolve(cp); else ask(i + 1);
         });
@@ -513,7 +513,7 @@ if (process.argv.includes('--stdio')) {
         // daemon not up — spawn it detached from the CURRENT (M2 stdio-bridge)
         // file, then retry connecting to the socket it will create
         const child = cpB.spawn(process.execPath, [__filename], {
-          detached: true, stdio: 'ignore', env: daemonEnv(process.env), // a daemon is born sanitized at every site (src/agent-env.js)
+          detached: true, stdio: 'ignore', windowsHide: true, env: daemonEnv(process.env), // a daemon is born sanitized at every site (src/agent-env.js)
         });
         child.unref();
       }
@@ -969,7 +969,7 @@ const pipeSessions = {
     let useCwd = process.env.HOME;
     try { if (cwd && fs.statSync(cwd).isDirectory()) useCwd = cwd; } catch { }
     const child = require('child_process').spawn(cmd, args || [], {
-      detached: true, stdio: [inFd, outFd, errFd],
+      detached: true, stdio: [inFd, outFd, errFd], windowsHide: true,
       cwd: useCwd, env: spawnEnv(env),
     });
     child.unref();
@@ -1660,7 +1660,7 @@ function serveConnection(sock) {
               snap = await new Promise((resolve) => {
                 try {
                   const { execFile } = require('child_process');
-                  execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
+                  execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
                     if (err) return resolve(null);
                     try { const r = JSON.parse(stdout); resolve(r && r.jsonls ? r : null); } catch { resolve(null); }
                   });
@@ -1688,7 +1688,7 @@ function serveConnection(sock) {
               snap = await new Promise((resolve) => {
                 try {
                   const { execFile } = require('child_process');
-                  execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
+                  execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
                     if (err) return resolve(null);
                     try { const r = JSON.parse(stdout); resolve(r && r.jsonls ? r : null); } catch { resolve(null); }
                   });
@@ -1827,7 +1827,7 @@ function serveConnection(sock) {
               if (st.running) { st.again = true; return; }
               st.running = true;
               require('child_process').execFile(process.execPath, [__filename, '--usage-scan-child', cursorFile],
-                { timeout: 120000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
+                { windowsHide: true, timeout: 120000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
                   st.running = false;
                   try {
                     if (err) log('usage-events walk failed: ' + err.message);
@@ -2310,7 +2310,7 @@ function serveConnection(sock) {
           const plan = typeof msg.shell === 'string' ? XS.shellPlan(process.platform, msg.shell) : { ok: true, file: String(msg.cmd), args: (msg.args || []).map(String), windowsVerbatimArguments: false, interpreter: null };
           if (!plan.ok) { mux.control({ op: 'cmd-result', id: msg.id, code: XS.spawnExitCode(plan), spawnError: { code: plan.code, message: plan.message }, interpreter: plan.interpreter, stdout: '', stderr: '', timedOut: false, signal: null, truncated: false }); return; }
           const child = execFile(plan.file, plan.args, {
-            timeout: Math.min(Number(msg.timeoutMs) || 10000, 30000), maxBuffer: 2 * 1024 * 1024,
+            windowsHide: true, timeout: Math.min(Number(msg.timeoutMs) || 10000, 30000), maxBuffer: 2 * 1024 * 1024,
             env: spawnEnv(msg.env), ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}), ...(win ? { encoding: 'buffer' } : {}),
           }, (err, stdout, stderr) => {
             // lane-pairing ⑥: a command the 30 s cap killed says so (`timedOut` + the signal) — it read as a bare `code 1`.

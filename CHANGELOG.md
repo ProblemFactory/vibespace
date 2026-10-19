@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.310 — 2026-10-18
+
+### Fixed
+- On a Windows machine, VibeSpace's own background work no longer flashes a terminal window on your desktop.
+
 ## 2.369.309 — 2026-10-18
 
 ### Fixed
