@@ -163,7 +163,7 @@ class MachineMounts {
     if (h.transport === 'dial' || this.hosts.dataPlaneOn?.()) {
       try {
         const dm = await this.hosts.deviceBounded(hostId, 10000);
-        const r = await dm.runCmd(cmd, args, { stdin: input, timeoutMs: 60000 });
+        const r = await dm.runCmd(cmd, args, { stdin: input, timeoutMs: 60000, by: 'system:machine-mounts' }); // lane device-act-audit
         return { code: r.code, stdout: r.stdout, stderr: r.stderr };
       } catch (e) {
         if (h.transport === 'dial') return { code: 1, stdout: '', stderr: 'device unreachable: ' + e.message }; // no ssh to fall to
@@ -224,7 +224,7 @@ class MachineMounts {
       try {
         const dm = await this.hosts.deviceBounded(hostId, 10000);
         const chunks = [];
-        const r = await dm.runStream('sh', ['-c', script], { onData: (b) => chunks.push(b) });
+        const r = await dm.runStream('sh', ['-c', script], { onData: (b) => chunks.push(b), by: 'system:machine-mounts' });
         out = Buffer.concat(chunks).toString('utf8');
         if (r.code !== 0 && !out.includes('OK')) throw new Error('exit ' + r.code + ': ' + out.slice(-200));
       } catch (e) {
@@ -447,7 +447,7 @@ class MachineMounts {
     let rp = String(remotePath || '');
     if (rp === '~' || rp.startsWith('~/')) {
       const dm = await this.hosts.deviceBounded(hostId, 8000);
-      const home = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 8000 })).stdout || '').trim();
+      const home = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 8000, by: 'system:machine-mounts' })).stdout || '').trim();
       if (!home.startsWith('/')) throw new Error('could not resolve ~ on the machine — use an absolute path');
       rp = home + rp.slice(1);
       remotePath = rp;
@@ -633,7 +633,7 @@ class MachineMounts {
         // `mount` prints "… on <mountpoint> (type…" (mac) / "… on <mountpoint> type …"
         // (linux) — a fixed-string match on ' on <mp> ' covers both
         const mp = String(rec.mountpoint).replace(/'/g, `'\\''`);
-        const r = await dm.runCmd('sh', ['-c', `mount | grep -qF ' on ${mp} '`], { timeoutMs: 8000 });
+        const r = await dm.runCmd('sh', ['-c', `mount | grep -qF ' on ${mp} '`], { timeoutMs: 8000, by: 'system:machine-mounts' });
         mounted = r.code === 0;
       } catch { mounted = null; }
       if (mounted === null) continue; // probe itself failed — no verdict
@@ -652,7 +652,7 @@ class MachineMounts {
         if (this._pushTunnelOwned.has(rec.id)) {
           try {
             // no curl on the machine ⇒ exit 0 (no verdict) — never churn re-owns
-            const r = await dm.runCmd('sh', ['-c', `command -v curl >/dev/null 2>&1 || exit 0; curl -s -o /dev/null --max-time 5 http://127.0.0.1:${Number(rec.tunnelPort)}/`], { timeoutMs: 10000 });
+            const r = await dm.runCmd('sh', ['-c', `command -v curl >/dev/null 2>&1 || exit 0; curl -s -o /dev/null --max-time 5 http://127.0.0.1:${Number(rec.tunnelPort)}/`], { timeoutMs: 10000, by: 'system:machine-mounts' });
             if (r.code !== 0) { this._pushTunnelOwned.delete(rec.id); this.log(`push tunnel :${rec.tunnelPort} dead on ${rec.hostId} — will re-own`); }
           } catch { }
         }

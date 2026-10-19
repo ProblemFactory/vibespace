@@ -137,7 +137,7 @@ async function sweepWriters(hosts, hostId, rid, { shq, timeoutMs = 20000, connec
   const script = sweep(rid, shq, { protectSids });
   try {
     const dm = await hosts.deviceBounded(hostId, connectMs);
-    const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });
+    const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by: 'system:writer-sweep' }); // lane device-act-audit: the resume's double-writer sweep
     return { swept: parseSwept(r?.stdout), ...sayRefused(r?.stdout, hostId), via: 'device' };
   } catch (e) {
     // ssh hosts keep the legacy per-op channel as the fallback the data plane

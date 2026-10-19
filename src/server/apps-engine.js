@@ -285,7 +285,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     // design 009: an installer by address / file is FETCHED (as the user, judged, sniffed, hashed) before anything is planned
     let fetched = null, request1 = request;
     if (v0.ok && (K.kindRow(v0.request.kind) || {}).fetches) {
-      fetched = await access.call(host, 'app-fetch', v0.request.url ? { url: v0.request.url } : { file: v0.request.file });
+      fetched = await access.call(host, 'app-fetch', v0.request.url ? { url: v0.request.url } : { file: v0.request.file }, { by: require('../device-acts.js').byOfWho(by, 'system:apps') });
       const recipe = R.recipeFor(fetched.hosts);
       const name = v0.request.url ? decodeURIComponent(String(v0.request.url).split(/[?#]/)[0].split('/').pop() || '').slice(0, 120) : path.basename(v0.request.file);
       request1 = { kind: fetched.kind, staged: fetched.staged, sha256: fetched.sha256, size: fetched.size, name, from: { ...(fetched.url ? { url: fetched.url, hosts: fetched.hosts } : { file: fetched.file }), ...(recipe ? { recipe: recipe.id } : {}) } };
@@ -368,7 +368,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
         homeRec = rq.kind === 'registered' ? await access.call(host, 'app-install', { kind: 'registered', entry: rq.entry, by: who, why: p ? p.why : null, session: p ? p.by.sessionId : null }) // lane app-register-model: the owner's click on a declaration
           : (K.kindRow(rq.kind) || {}).entry === 'home'
           ? await access.call(host, 'app-install', { kind: 'appimage', staged: rq.staged, sha256: rq.sha256, entryId: hp.entryId, by: who, why: p ? p.why : null, label: p ? p.label : hp.label, from: (rq.from && (rq.from.url || rq.from.file)) || null, icon: (hp.app && hp.app.icon) || null })
-          : await access.call(host, 'app-remove', { entryId: hp.entryId, home: true });
+          : await access.call(host, 'app-remove', { entryId: hp.entryId, home: true }, { by: require('../device-acts.js').byOfWho(who, 'system:apps') });
         onData(Buffer.from('done\n'));
         r = { plan: hp, reattached: false };
       } else r = await access.installPackage(host, { what: whatOf(rq, null), planOpts: rq, expectDigest, onData, onReattach });

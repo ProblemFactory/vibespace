@@ -149,6 +149,29 @@ console.log('— lane win-upgrade-pipe: a device that never dials back after its
   ok(E.open().length === 0, 'CONTROL (e): the pre-fix door (no `begun`) — a device that never came back files nothing: the incident\'s silence (GONE-3 red)');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: 'mutant-copy (device-upgrade-watch gone): ' })) ok(r.pass, r.name, r.detail);
 }
+// lane device-bundle-signing (design q-042 D2): a device REFUSED the bundle (its release signature did not check) — the same
+// door, ONE URGENT item per (device, version, code) over the REAL UserTodoManager; this hub's own unsigned build = the row only
+console.log('— a REFUSED upgrade: one urgent item per (device, version, code); an unsigned hub build: the row only —');
+{
+  const R = world();
+  const f = { hostKey: 'host-dial-M', machine: 'MacBook', from: '2.369.312', to: '2.369.313', code: 'bad-signature', keyId: '0123456789abcdef', by: 'system:device-upgrade' };
+  const a = R.w.onAgentUpgrade('refused', f), b = R.w.onAgentUpgrade('refused', f);
+  const o = R.open();
+  ok(a.filed && !b.filed && o.length === 1 && o[0].urgency === 'urgent' && o[0].origin === 'machines' && /MacBook REFUSED an agent update \(2\.369\.312 → 2\.369\.313\)/.test(o[0].text) && o[0].detail.includes('bad-signature (key 0123456789abcdef)'), 'REF-1: a refusal files ONE urgent item (machines), named machine / from → to / code / key; the same refusal again files nothing', o.map((t) => [t.urgency, t.text]));
+  R.w.onAgentUpgrade('refused', { ...f, code: 'unknown-key' });
+  ok(R.open().length === 2 && R.w.rowOf('host-dial-M').refused === 'unknown-key' && R.open().some((t) => /\(unknown-key\)$/.test(t.text)), 'REF-2: another code for the same device is another fact (a second item, its title names the code; the older one stays open)', R.open().map((t) => t.text));
+  R.w.onAgentUpgrade('matched', { hostKey: 'host-dial-M', version: '2.369.313' });
+  ok(R.w.rowOf('host-dial-M') === null && R.open().length === 2, 'REF-3: a later match drops the row, never the refusal items (a fact, not a state)');
+  const u = R.w.onAgentUpgrade('refused', { hostKey: 'host-dial-U', machine: 'Box', from: '1.0.0', to: '1.0.1', code: 'unsigned-local-build' });
+  ok(!u.filed && R.open().length === 2 && R.w.rowOf('host-dial-U').unsigned === true, 'REF-4: this hub\'s own unsigned build — the machine row says so, no item');
+  const src = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
+  const mR = src.replace("event === 'refused' ? refused(facts) : ", '');
+  ok(mR !== src, '(r) the patch applies');
+  const MR = mutantCopies('dus-ref', REPO);
+  const X = world(MR.load('src/server/device-upgrade-watch.js', mR, 'norefused'));
+  X.w.onAgentUpgrade('refused', f);
+  ok(X.open().length === 0, 'CONTROL (r): a door without `refused` files nothing for a bad signature — REF-1 red');
+}
 fs.rmSync(SCR, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

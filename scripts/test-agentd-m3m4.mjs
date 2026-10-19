@@ -58,13 +58,13 @@ await dm.connect();
 console.log('— M3.1 fs ops —');
 {
   const p = path.join(tmp, 'fs', 'hello.txt');
-  await dm.fsMkdir(path.dirname(p));
-  await dm.fsWrite(p, 'hello 设备文件系统 ✓');
+  await dm.fsMkdir(path.dirname(p), { by: 'system:test' });
+  await dm.fsWrite(p, 'hello 设备文件系统 ✓', { by: 'system:test' });
   const st = await dm.fsStat(p);
   check('write + stat (size includes multibyte)', st.stat.size === Buffer.byteLength('hello 设备文件系统 ✓'), JSON.stringify(st.stat));
   const ls = await dm.fsList(path.dirname(p));
   check('list shows the file', ls.entries.length === 1 && ls.entries[0].name === 'hello.txt', JSON.stringify(ls.entries));
-  await dm.fsRm(p);
+  await dm.fsRm(p, undefined, { by: 'system:test' });
   const ls2 = await dm.fsList(path.dirname(p));
   check('rm removes it', ls2.entries.length === 0, '');
 }
@@ -74,7 +74,7 @@ console.log('— M3.2 transcript slab: byte-exact range reads across a multibyte
   const p = path.join(tmp, 'fs', 'transcript.jsonl');
   const line = JSON.stringify({ type: 'user', text: '多字节🎯行' }) + '\n';
   const content = line.repeat(500); // ~25KB
-  await dm.fsWrite(p, content);
+  await dm.fsWrite(p, content, { by: 'system:test' });
   const whole = Buffer.byteLength(content);
   // split point INSIDE the 🎯 4-byte sequence of some line
   const cut = content.indexOf('🎯') + 2; // bytes: 🎯 starts at a known char index… compute byte offset
@@ -121,9 +121,9 @@ console.log('— M3.3 discovery: raw-facts snapshot + dirty push —');
 
 console.log('— M4.1 run-cmd (the clipboard shape: argv + stdin, bounded) —');
 {
-  const r = await dm.runCmd('wc', ['-c'], { stdin: 'clip-payload-1234' });
+  const r = await dm.runCmd('wc', ['-c'], { by: 'system:test', stdin: 'clip-payload-1234' });
   check('argv exec with stdin round-trips', r.code === 0 && r.stdout.trim() === '17', JSON.stringify(r));
-  const bad = await dm.runCmd('false', []);
+  const bad = await dm.runCmd('false', [], { by: 'system:test' });
   check('non-zero exit surfaces', bad.code !== 0, JSON.stringify(bad.code));
 }
 
@@ -150,8 +150,8 @@ console.log('— M4.2 tcp-forward (the VNC-bridge shape): bidirectional loopback
 console.log('— M4.3 Ctrl+G shape: write → device-side edit → read-back —');
 {
   const p = path.join(tmp, 'fs', 'edit.txt');
-  await dm.fsWrite(p, 'line-original\n');
-  await dm.runCmd('sed', ['-i', 's/original/edited-on-device/', p]);
+  await dm.fsWrite(p, 'line-original\n', { by: 'system:test' });
+  await dm.runCmd('sed', ['-i', 's/original/edited-on-device/', p], { by: 'system:test' });
   const rr = await dm.fsReadRange(p, 0, 1024);
   check('device-side edit visible in the read-back', rr.data.toString().includes('edited-on-device'), rr.data.toString());
 }
@@ -163,11 +163,11 @@ console.log('— M5 shape: device-owned long-lived mount-class process lifecycle
   const h = await dm.openPipeSession({ sid: 'mount-1', cmd: process.execPath, args: ['-e', 'setInterval(()=>{},1e3);console.log("MOUNTED")'] });
   const r = await h.ready;
   await sleep(400);
-  const probe = await dm.runCmd('kill', ['-0', String(r.pid)]);
+  const probe = await dm.runCmd('kill', ['-0', String(r.pid)], { by: 'system:test' });
   check('mount-class process spawned + health-probe alive', probe.code === 0, JSON.stringify(probe.code));
   h.kill();
   await sleep(3200); // kill = SIGTERM → 2.5s → SIGKILL
-  const probe2 = await dm.runCmd('kill', ['-0', String(r.pid)]);
+  const probe2 = await dm.runCmd('kill', ['-0', String(r.pid)], { by: 'system:test' });
   check('teardown kills the device process', probe2.code !== 0, JSON.stringify(probe2.code));
 }
 

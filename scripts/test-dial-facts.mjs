@@ -198,7 +198,7 @@ console.log('naive-user N-sheet: a paired device\'s sheet checks the device\'s O
   const pkSrc = fs.readFileSync(path.join(REPO, 'src/lib/dial-address-picker.js'), 'utf8');
   ok(/if \(vb && vb\.ok\) d\.mintedBase = vb\.base\.slice\(0, 200\); else delete d\.mintedBase;/.test(hostsSrc), 'wiring: noteDial(minted) stamps mintedBase (judged by dialBaseVerdict) and drops a stale one');
   ok(/hosts\.noteDial\(deviceId, 'minted', \{ host, base \}\)/.test(dpSrc), 'wiring: the ONE minter hands the base to noteDial');
-  ok(/agentdMintDialPair\(deviceId, \{ host: DF\.hostOf\(dialUrl\), base, keepLink: pushV\.push \}\)/.test(wSrc) && /agentdMintDialPair\(gradDevice, \{ host: require\('\.\.\/dial-facts\.js'\)\.hostOf\(dialUrl\), base \}\)/.test(wSrc), 'wiring: both mint sites (the dial-pair route, graduate-dial) pass the base');
+  ok(/agentdMintDialPair\(deviceId, \{ host: DF\.hostOf\(dialUrl\), base, keepLink: pushV\.push, by: actBy, from: [^}]*\}\)/.test(wSrc) && /agentdMintDialPair\(gradDevice, \{ host: require\('\.\.\/dial-facts\.js'\)\.hostOf\(dialUrl\), base, by, from \}\)/.test(wSrc), 'wiring: both mint sites (the dial-pair route, graduate-dial) pass the base');
   ok(/dial: existing \? \(h\.dial \|\| \{\}\) : null/.test(smSrc) && /dial: h\.dial \|\| null/.test(smSrc), 'wiring: the pairing sheet and the graduate dialog hand the device\'s dial facts to the picker (verify-r5 C3: a paired device with none yet hands `{}` — a paired device, never read as a new one)');
   ok(/const first = dialDefaultChoice\(\{ candidates, dial, relayPublishable \}\);/.test(pkSrc), 'wiring: the picker checks PURE dialDefaultChoice({candidates, dial, relayPublishable})');
   // verify-r4 F1: the DEVICE states the address it dials on every attempt; the gate keeps it apart from the Host header
@@ -457,7 +457,7 @@ console.log('② inPlacePushVerdict (verify-r1 B8: the rotated token reaches the
   ok(/e && e\.code === 'link_gone' \? tr\(/.test(dlg) && /e && e\.code === 'link_changed' \? tr\(/.test(dlg) && /if \(e && e\.code === 'link_gone' && keepLbl\) \{ keepBox\.checked = false; keepLbl\.style\.display = 'none';/.test(dlg), 'P1 WIRING: the sheet words link_gone / link_changed and, the device being gone, drops the keep-its-link choice (the next press is the plain rotation it just described)');
   // verify-r2 B8-r2: the mint ENDS the holder's link unless the push keeps it, and a push that did not land ends it too
   const dp = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
-  ok(/agentdMintDialPair\(deviceId, \{ host: DF\.hostOf\(dialUrl\), base, keepLink: pushV\.push \}\)/.test(route) && /if \(!updatedInPlace\) lockedOut = lockOutDialHolder\(deviceId\) \|\| lockedOut;/.test(route), 'WIRING (B8-r2): the route mints with keepLink = the push verdict, and a push that did not land locks the holder out');
+  ok(/agentdMintDialPair\(deviceId, \{ host: DF\.hostOf\(dialUrl\), base, keepLink: pushV\.push, by: actBy, from: [^}]*\}\)/.test(route) && /if \(!updatedInPlace\) lockedOut = lockOutDialHolder\(deviceId\) \|\| lockedOut;/.test(route), 'WIRING (B8-r2): the route mints with keepLink = the push verdict, and a push that did not land locks the holder out');
   ok(/const lockedOut = keepLink === true \? false : lockOutDialHolder\(deviceId\);/.test(dp) && /function lockOutDialHolder\(deviceId\) \{/.test(dp), 'WIRING (B8-r2): the minter itself ends the holder\'s link unless keepLink');
   ok(/the device that was connected has been disconnected; it holds the previous command, which no longer works/.test(dlg) && !/is refused at its next dial/.test(dlg), 'WORDS (B8-r2): the sheet says the holder was disconnected now — never "refused at its next dial"');
 }
@@ -595,6 +595,9 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
     { file: 'src/agentd/agentd.js', re: /const hash = msg\.sha256 \? require\('crypto'\)\.createHash\('sha256'\) : null;/, why: 'a pull window\'s content hash (read-range `sha256: true`) — the bytes of a file, not a token' },
     { file: 'src/agentd/agentd.js', re: /received: 0, hash: require\('crypto'\)\.createHash\('sha256'\), buf: \[\]/, why: 'a push\'s content hash (write-stream) — the bytes of a file, not a token' },
     { file: 'src/agentd/client.js', re: /const contentHash = crypto\.createHash\('sha256'\);/, why: 'a push\'s content hash on the hub side (fsWriteStream) — the bytes of a file, not a token' },
+    // lane device-bundle-signing (design q-042 D2): the agent bundle's digest + the hub's single-use local proof — never a pairing token
+    { file: 'src/agentd/client.js', re: /const sha256 = crypto\.createHash\('sha256'\)\.update\(bytes \|\| fs\.readFileSync\(this\._bundlePath\)\)\.digest\('hex'\);/, why: 'the agent BUNDLE\'s digest (the signed release\'s identity) — the bytes of a file, not a token' },
+    { file: 'src/agentd/agentd.js', re: /const h = \(x\) => crypto\.createHash\('sha256'\)\.update\(String\(x\)\)\.digest\(\);/, why: 'the local proof of an upgrade of the hub\'s OWN daemon (a single-use nonce, compared digest-to-digest in constant time) — not a pairing token' },
   ];
   const exempt = (file, line) => EXEMPT.some((x) => x.file === file && x.re.test(line));
   function doorCensus(files) {
@@ -640,7 +643,7 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
   ok(PT.tokenMatches(d, PT.tokenHash(d)) && !PT.tokenMatches(d + 'x', PT.tokenHash(d)) && !PT.tokenMatches('', PT.tokenHash('')) && !PT.tokenMatches(d, 'nothex') && !PT.tokenMatches(null, PT.tokenHash(d)) && !PT.tokenMatches(d, PT.tokenHash(d).toUpperCase()), 'tokenMatches: the right token only; an empty / missing / malformed side is false');
   ok(/crypto\.timingSafeEqual\(Buffer\.from\(tokenHash\(token\), 'hex'\), Buffer\.from\(hash, 'hex'\)\)/.test(FILES[DOOR]), 'the compare is crypto.timingSafeEqual over the two 32-byte digests');
   // the wiring: every token path names the door
-  const uses = { 'src/server/dial-pairing.js': [/PT\.mintToken\('dial'\)/, /PT\.tokenHash\(tok\)/, /PT\.tokenMatches\(tok, want\)/], 'server.js': [/pairing-token\.js'\)\.mintToken\('host'\)/], 'src/agentd/agentd.js': [/pairing-token\.js'\)\.tokenHash\(raw\)/, /pairing-token\.js'\)\.tokenMatches\(msg\.hostToken, want\)/], 'src/agentd/client.js': [/PT\.mintToken\('host'\)/, /PT\.tokenHash\(raw\)/], 'src/dial-session-bridge.js': [/PT\.tokenMatches\(msg\.hostToken, PT\.tokenHash\(want\)\)/], 'src/server/mounts-plugins-wiring.js': [/await dm\.placeSecret\(root \+ '\/state\/dial\.json', body\)/] };
+  const uses = { 'src/server/dial-pairing.js': [/PT\.mintToken\('dial'\)/, /PT\.tokenHash\(tok\)/, /PT\.tokenMatches\(tok, want\)/], 'server.js': [/pairing-token\.js'\)\.mintToken\('host'\)/], 'src/agentd/agentd.js': [/pairing-token\.js'\)\.tokenHash\(raw\)/, /pairing-token\.js'\)\.tokenMatches\(msg\.hostToken, want\)/], 'src/agentd/client.js': [/PT\.mintToken\('host'\)/, /PT\.tokenHash\(raw\)/], 'src/dial-session-bridge.js': [/PT\.tokenMatches\(msg\.hostToken, PT\.tokenHash\(want\)\)/], 'src/server/mounts-plugins-wiring.js': [/await dm\.placeSecret\(root \+ '\/state\/dial\.json', body, \{ by: actBy \}\)/] };
   const miss = Object.entries(uses).flatMap(([f, res]) => res.filter((re) => !re.test(FILES[f])).map((re) => `${f}: ${re}`));
   ok(miss.length === 0, 'WIRING: the gate + minter, the host-token store, the device\'s hello, device #0\'s key, the session bridge and the in-place push all name the door', miss);
   // CONTROLS: a planted site per rule is caught
@@ -651,7 +654,7 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
     ['R2', 'server.js', "require('./src/pairing-token.js').mintToken('host');", "'vsht_' + require('crypto').randomBytes(24).toString('hex');"],
     ['R3', 'src/dial-session-bridge.js', "!PT.tokenMatches(msg.hostToken, PT.tokenHash(want))", 'msg.hostToken !== want'],
     ['R4', 'src/server/dial-pairing.js', "  const generation = (() =>", "  console.log(`[device] minted ${tok} for ${deviceId}`);\n  const generation = (() =>"],
-    ['R5', 'src/server/mounts-plugins-wiring.js', "          try { await dm.placeSecret(root + '/state/dial.json', body); }", "          try { await dm.fsWrite(root + '/state/dial.json', body); }"],
+    ['R5', 'src/server/mounts-plugins-wiring.js', "          try { await dm.placeSecret(root + '/state/dial.json', body, { by: actBy }); }", "          try { await dm.fsWrite(root + '/state/dial.json', body, { by: actBy }); }"], // lane device-act-audit: + by
     // (the call is spelled in two pieces: the tier rule's binary detector reads a literal ssh launch as this suite running ssh)
     ['R6', 'src/server/mounts-plugins-wiring.js', `      const child = ${SSH_CALL}, [...hosts.sshArgs(h, { multiplex: true }), '--', inv.remote],`, `      const child = ${SSH_CALL}, [...hosts.sshArgs(h, { multiplex: true }), '--', \`bash -s -- --dial-token \${pair.dialToken}\`],`],
   ];

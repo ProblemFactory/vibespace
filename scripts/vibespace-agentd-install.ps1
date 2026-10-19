@@ -129,6 +129,10 @@ if (-not $NoCheck) {
 
 Set-Content -NoNewline -Path (Join-Path $root 'state\token') -Value $HostToken
 Write-Host "-> host token at $root\state\token"
+# THE RELEASE-KEY PIN RESETS (design q-042 D2): a (re-)pair = a new trust-on-first-use; the new bundle pins ITS keys at its first start
+Remove-Item (Join-Path $root 'state\trusted-keys.json') -Force -ErrorAction SilentlyContinue
+# ...and the version floor with it (fix r2: the newest version this install ran — a re-pair may land an older hub's agent)
+Remove-Item (Join-Path $root 'state\release-floor.json') -Force -ErrorAction SilentlyContinue
 
 # Persist the dial config like the bash installer does: a 2.170+ daemon re-reads
 # it on every dial attempt, so it can be started ARGLESS (the scheduled task

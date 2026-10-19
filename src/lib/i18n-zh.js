@@ -5932,6 +5932,20 @@ export default {
   "{machine} stopped answering after its upgrade to {to} began — rerun its install command (Remote → {machine} → Pairing command)": "{machine}升级到{to}开始后就不再应答——请重新运行它的安装命令（远程 → {machine} → 配对命令）",
   "VibeSpace started updating the device agent on {machine} to {to}; the device has not connected since. This item resolves itself when it connects again.": "VibeSpace 已开始把{machine}上的设备代理升级到{to}；此后该设备一直没有连接。它重新连接后，此项会自动解决。",
   "{machine}: its agent could not update ({from} → {to})": "{machine}：代理无法升级（{from} → {to}）",
+  // lane device-bundle-signing-fix-r2: a downgrade refused / a first trust in a release key
+  "Agent {from} — REFUSED {to}: an older version than one it already ran; see For you": "代理 {from} — 拒绝了 {to}：比它已运行过的版本更旧；见「For you」",
+  "{machine}: someone pushed an OLDER agent version ({to}) — refused": "有人向 {machine} 推送了旧版本 {to}——已拒绝",
+  "The device agent on {machine} runs {from} and has already run {floor}; it refused {to}, an older release. An older agent lands only as a rollback the release key signed. Nothing was installed; it keeps running {from}.": "{machine} 上的设备代理正在运行 {from}，并且已经运行过 {floor}；它拒绝了更旧的 {to}。更旧的代理只能以发布钥签名的回滚落地。什么都没有安装；它继续运行 {from}。",
+  "The update was pushed by {by}. Replaying an old signed release is how a compromised VibeSpace would bring back a hole a newer release closed — check this VibeSpace's build and its log. A rollback on purpose is signed (sign-agentd --allow-downgrade-to). It will not send that update again.": "这次升级由 {by} 推送。重放一个旧的签名发布版，正是被攻破的 VibeSpace 让新版本已修补的漏洞重新出现的手法——请检查这个 VibeSpace 的构建和日志。有意的回滚需要签名（sign-agentd --allow-downgrade-to）。它不会再发送这次升级。",
+  "{machine} trusted a release key for the first time: {keys}": "{machine} 首次信任发布钥 {keys}",
+  "The device agent on {machine} trusted no release key (it was installed from a VibeSpace build that carried none), so it trusted the key that signed this update ({from} → {to}): {keys}. From now on it lands only updates signed by that key or its signed successors.": "{machine} 上的设备代理此前不信任任何发布钥（它装自一个没有携带发布钥的 VibeSpace 构建），因此它信任了签署这次升级（{from} → {to}）的钥：{keys}。从此它只接受由该钥或其签名继任者签署的升级。",
+  "Pushed by {by}. If {keys} is not your release key (src/agentd/release-keys.js lists it), this machine now runs someone else's code: re-pair it (its install command resets the trust).": "由 {by} 推送。如果 {keys} 不是你的发布钥（src/agentd/release-keys.js 里列着），这台机器现在运行的是别人的代码：请重新配对它（它的安装命令会重置信任）。",
+  // lane device-bundle-signing (design q-042 D2): a refused / unsigned agent update
+  "Agent {from} — REFUSED the update to {to}: its release signature did not check ({code}); see For you": "代理 {from} — 拒绝了升级到 {to}：发布签名验证不通过（{code}）；见「For you」",
+  "Agent {from} — not updated to {to}: this VibeSpace's agent build is not the signed release (sign it before a release)": "代理 {from} — 未升级到 {to}：这个 VibeSpace 的代理构建不是签名的发布版（发布前先签名）",
+  "{machine} REFUSED an agent update ({from} → {to}): its release signature did not check ({code})": "{machine} 拒绝了一次代理升级（{from} → {to}）：发布签名验证不通过（{code}）",
+  "The device agent on {machine} checked the update this VibeSpace sent ({from} → {to}) against the release keys it trusts and refused it: {code}{key}. Nothing was installed; it keeps running {from}.": "{machine} 上的设备代理用它信任的发布公钥检查了这个 VibeSpace 发来的升级（{from} → {to}），并拒绝了它：{code}{key}。什么都没有安装；它继续运行 {from}。",
+  "The update was pushed by {by}. A VibeSpace that sends an update without the release signature is misbuilt or compromised — check this VibeSpace's build (release/agentd/manifest.json, its log) before anything else. It will not send that update again.": "这次升级由 {by} 推送。发送没有发布签名的升级的 VibeSpace 不是构建有误就是已被攻破——先检查这个 VibeSpace 的构建（release/agentd/manifest.json、它的日志）。它不会再发送这次升级。",
   "VibeSpace tried 3 times to update the device agent on {machine} from {from} to {to}; it stayed at {from}.": "VibeSpace 已 3 次尝试把 {machine} 上的设备代理从 {from} 升级到 {to}；它仍停在 {from}。",
   "What does not work there until it is updated: running commands (vibespace-exit run) — this agent cannot run them on Windows.": "升级之前那里无法使用的功能：运行命令（vibespace-exit run）— 这个代理无法在 Windows 上运行命令。",
   "The one step: rerun the device's install command (Remote → {machine} → Pairing command). This item resolves itself when the device reports {to}.": "唯一的一步：重新运行该设备的安装命令（远程 → {machine} → 配对命令）。设备报告 {to} 后，这一项会自动解决。",
@@ -9324,4 +9338,36 @@ export default {
   "The vault is locked — unlock it first": "保险库已锁定——先解锁", // lane vault-e2e-password
   "Lock the vault": "锁定保险库", // lane vault-e2e-password
   "Check whether the vault is locked": "查看保险库是否锁定", // lane vault-e2e-password
+  "Activity…": "活动…", // lane device-act-audit
+  "Activity on {machine}": "{machine} 上的活动", // lane device-act-audit
+  "The last 50 things this VibeSpace did on {machine}, newest first, each with who asked; a row opens its output head.": "这个 VibeSpace 在 {machine} 上做的最近 50 件事，最新的在前，每件都写明是谁要的；点开一行可看它的输出开头。", // lane device-act-audit
+  "Who asked": "谁要的", // lane device-act-audit
+  "Everyone": "全部", // lane device-act-audit
+  "People": "人", // lane device-act-audit
+  "Jobs": "后台任务", // lane device-act-audit
+  "VibeSpace itself": "VibeSpace 自己", // lane device-act-audit
+  "nobody named": "未写明是谁", // lane device-act-audit
+  "a person": "某人", // lane device-act-audit
+  "a job": "某个后台任务", // lane device-act-audit
+  "VibeSpace": "VibeSpace", // lane device-act-audit
+  "refused: nobody was named for it — never sent": "已拒绝：没写明是谁要的——从未发出", // lane device-act-audit
+  "failed ({code})": "失败（{code}）", // lane device-act-audit
+  "new agent code": "新的设备代理代码", // lane device-act-audit
+  "an act": "一个动作", // lane device-act-audit
+  "output head": "输出开头", // lane device-act-audit
+  "no output kept": "没有保留输出", // lane device-act-audit
+  "Nothing has been done on this machine yet": "还没有在这台机器上做过任何事", // lane device-act-audit
+  "Could not load the activity": "无法加载活动记录", // lane device-act-audit
+  "New pairing command for {machine} — made by {by} from {from}": "{machine} 的新配对命令——由 {by} 从 {from} 生成", // lane device-act-audit
+  "A pairing command for {machine} was made (pairing {generation}) by {by}, from the browser address {from}. Whoever runs it connects that machine to this VibeSpace.": "{by} 从浏览器地址 {from} 为 {machine} 生成了一条配对命令（第 {generation} 次配对）。谁运行它，谁就能把那台机器接入这个 VibeSpace。", // lane device-act-audit
+  "If you did not make it: Remote → {machine} → Pairing command → Generate a new command (it retires this one), then read the machine card's Activity….": "如果不是你生成的：远程 → {machine} → 配对命令 → 生成新命令（旧命令随之作废），然后查看机器卡片的「活动…」。", // lane device-act-audit
+  "{machine} connected from a new address: {address}": "{machine} 从新地址接入：{address}", // lane device-act-audit
+  "{machine} connected to this VibeSpace from {address} — an address it has not connected from before.": "{machine} 从 {address} 接入了这个 VibeSpace——它以前从没从这个地址接入过。", // lane device-act-audit
+  "If that is not where the machine is: Remote → {machine} → Pairing command → Generate a new command, then read the machine card's Activity….": "如果那台机器不在那里：远程 → {machine} → 配对命令 → 生成新命令，然后查看机器卡片的「活动…」。", // lane device-act-audit
+  "Agent update pushed to {machine}: {from} → {to}": "已向 {machine} 推送设备代理更新：{from} → {to}", // lane device-act-audit
+  "This VibeSpace sent {machine} a new device agent ({from} → {to}), asked by {by}; the machine runs it as soon as it lands.": "这个 VibeSpace 向 {machine} 发送了新的设备代理（{from} → {to}），由 {by} 要求；机器收到后立即运行。", // lane device-act-audit
+  "Expected after this VibeSpace was updated. An update you did not expect means someone else may control this hub — read the machine card's Activity….": "这个 VibeSpace 刚更新过就属正常。如果你没预料到这次更新，可能有别人控制了这个 hub——查看机器卡片的「活动…」。", // lane device-act-audit
+  "{machine} refused an agent update with a bad signature ({from} → {to})": "{machine} 拒绝了一个签名不对的代理更新（{from} → {to}）", // lane device-act-audit
+  "This VibeSpace sent {machine} a device agent ({from} → {to}, asked by {by}) that is not signed by the release key; the machine refused it and keeps running {from}.": "这个 VibeSpace 向 {machine} 发送了一个没有发布钥签名的设备代理（{from} → {to}，由 {by} 要求）；机器拒绝了它，继续运行 {from}。", // lane device-act-audit
+  "Someone may control this hub: read the machine card's Activity…, and rotate this hub's secrets before anything else.": "可能有人控制了这个 hub：查看机器卡片的「活动…」，并先轮换这个 hub 的所有密钥。", // lane device-act-audit
 };

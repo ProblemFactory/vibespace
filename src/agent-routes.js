@@ -1746,7 +1746,7 @@ app.post('/api/agent/msg/send', async (req, res) => {
   const fromName = agentText(s.name || 'unnamed session', { kind: 'line', max: 200 });
   const safeText = agentText(text, { kind: 'block' });
   const framed = `Message from session "${fromName}" (via vibespace-msg; reply: vibespace-msg send "${fromName}" "..."):\n${safeText}`;
-  const r = deliver ? await deliver.deliverToConversation(target.cid, framed, { fromName, cardText: text, spendReason: 'peer-message' }) : { ok: false, reason: 'delivery not wired' };
+  const r = deliver ? await deliver.deliverToConversation(target.cid, framed, { fromName, cardText: text, spendReason: 'peer-message', by: require('./device-acts.js').byAgent(myCid || id) || undefined }) : { ok: false, reason: 'delivery not wired' };
   if (r.ok) return res.json({ delivered: true, chars: cliText.chars(text), lane: r.lane, peerName: msgName(r.peerName || target.t.name || '') || null, machine: r.hostId || null });   // verify r2 F5: the target's name through the belt (the CLI prints it)
   let st = null;
   try { st = deliver?.stashFor(target.cid, { source: 'agent', kind: 'peer', fromName, text: safeText }) || null; } // kind = the PATH (S3 verify F3): a session NAMED like VibeSpace still drains as a peer

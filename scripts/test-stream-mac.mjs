@@ -599,7 +599,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
   const off2 = await dm.streamOffer({ sourceKind: 'screen', sourceId: '2' }, { onPush: () => { } });
   ok(off2.ok && off2.source.display === '2' && off2.source.displays.length === 2, 'a display picked on the switcher = THAT display\'s offer (source {kind: display, id} → the plan\'s --display)', off2.source || off2);
   if (off2.ok) await dm.streamStop(off2.sid);
-  const sb = await dm.settingsOpen('bogus');
+  const sb = await dm.settingsOpen('bogus', { by: 'system:test' });
   ok(conn.info.capabilities.includes('settings-open') && sb.ok === false && sb.code === 'bad_pane', 'lane stream-mac-stall: `settings-open` in the hello-ack; the op reaches the Mac\'s source through the real daemon and answers by name (bad_pane — no `open` runs on this box)', sb);
 
   const hO = home('smac-old');
@@ -621,7 +621,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
   const cq = await dmq.connect();
   let qAsked = 0;
   const realReq = dmq._request.bind(dmq); dmq._request = (m, ...rest) => { if (m && m.op === 'settings-open') qAsked++; return realReq(m, ...rest); };
-  const eq = await dmq.settingsOpen('screen').then(() => null, (e) => e);
+  const eq = await dmq.settingsOpen('screen', { by: 'system:test' }).then(() => null, (e) => e);
   ok(!cq.info.capabilities.includes('settings-open') && cq.info.capabilities.includes('stream-windows') && eq && eq.code === 'host_needs_daemon' && qAsked === 0, 'THE CAPABILITY GATE: an agent without settings-open is NEVER asked (host_needs_daemon — the hub answers agent_too_old, the page copies the link)', { code: eq && eq.code, qAsked });
   dmq.stop(); endDaemonsOf(rootOf(hQ));
 

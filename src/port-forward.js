@@ -146,7 +146,7 @@ class PortForwardManager {
    *  the device link — the same tcpForward primitive the forwards pipe over. */
   async _remoteSocket(hostId, port, targetHost) {
     const dm = await this.hosts.deviceBounded(hostId);
-    const h = await dm.tcpForward(port, targetHost || undefined);
+    const h = await dm.tcpForward(port, targetHost || undefined, { by: 'system:port-forward' });
     const { Duplex } = require('stream');
     const d = new Duplex({
       read() {},
@@ -289,9 +289,9 @@ class PortForwardManager {
       // Linux: `ss -tlnH`; macOS/BSD: `lsof`. Try ss first, fall back to lsof.
       // -H (no header) is GNU-ss only, so parse defensively either way.
       let out = '';
-      try { out = String((await dm.runCmd('sh', ['-c', PORT_SCAN], { timeoutMs: 8000 })).stdout || ''); } catch (e) { throw new Error('port scan failed: ' + e.message); }
+      try { out = String((await dm.runCmd('sh', ['-c', PORT_SCAN], { timeoutMs: 8000, by: 'system:port-forward' })).stdout || ''); } catch (e) { throw new Error('port scan failed: ' + e.message); }
       ports = this._parsePorts(out).map((p) => this._classify(p));
-      await this._enrichDocker(ports, async (cmd) => String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 6000 })).stdout || ''));
+      await this._enrichDocker(ports, async (cmd) => String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 6000, by: 'system:port-forward' })).stdout || ''));
     }
     if (probe) {
       // cache serves every row; the probe budget goes to UNCACHED ports only,
@@ -527,7 +527,7 @@ class PortForwardManager {
       // resolve the device PER CONNECTION, never capture it: a dial re-dial
       // stop()s the old DeviceManager (review finding, high). Steady-state
       // hosts.device() returns the cached live dm, so this costs nothing.
-      openUpstream = async () => { const dm = await this.hosts.deviceBounded(rec.hostId, 8000); return dm.tcpForward(rec.remotePort, rec.targetHost || undefined); };
+      openUpstream = async () => { const dm = await this.hosts.deviceBounded(rec.hostId, 8000); return dm.tcpForward(rec.remotePort, rec.targetHost || undefined, { by: 'system:port-forward' }); };
     }
     const sockets = new Set();
     const server = net.createServer({ allowHalfOpen: true }, async (sock) => {

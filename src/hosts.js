@@ -59,10 +59,40 @@ const slotMovedError = (msg) => Object.assign(new Error(msg), { code: SLOT_MOVED
  *  that explains a refusal must not be able to disagree about it. */
 const stampedSizeOf = (meta) => (meta && Number.isFinite(Number(meta.size)) ? Number(meta.size) : NaN);
 
+// lane device-bundle-signing-fix-r2 (verify-r1 RED-3): the ssh road's remote step — ONE sh script, the tar on stdin
+// (agentd.js + token [+ agentd.manifest.json]); see HostManager#installAgentd for the rungs. The token always lands
+// (the hub's bridge needs it); `current` moves only through a rung that says so — an existing install's own agent
+// (`--land-upgrade`, the landBundle verdict) for any build that replaces it.
+function installAgentdScript(ver, signed) {
+  const V = String(ver).replace(/[^\w.-]/g, '');
+  return REMOTE_PRELUDE + 'umask 077; D="$HOME/.vibespace/agentd"; V="' + V + '"; SIGNED=' + (signed ? 1 : 0) + '; S="$D/state/incoming.$$"; '
+    + 'mkdir -p "$D/state" "$S" && tar -x -C "$S" && mv -f "$S/token" "$D/state/token" && chmod 600 "$D/state/token" || { rm -rf "$S"; echo "VS-AGENTD-FAILED staging: the tar did not land"; exit 0; }; '
+    + 'F=$(basename "$(readlink "$D/current" 2>/dev/null)" 2>/dev/null); '
+    + 'if [ -f "$D/current/agentd.js" ] && cmp -s "$S/agentd.js" "$D/current/agentd.js"; then echo "VS-AGENTD-INSTALLED current"; '
+    + 'elif [ ! -e "$D/current" ]; then mkdir -p "$D/$V" && mv -f "$S/agentd.js" "$D/$V/agentd.js" && ln -sfn "$D/$V" "$D/current" && echo "VS-AGENTD-INSTALLED fresh"; '
+    + 'elif [ "$SIGNED" != 1 ]; then echo "VS-AGENTD-REFUSED unsigned-local-build from=$F: this VibeSpace\'s agent build is not the signed release"; '
+    + 'elif grep -qF -e --land-upgrade "$D/current/agentd.js" 2>/dev/null; then node "$D/current/agentd.js" --land-upgrade "$S/agentd.js" --version "$V" --manifest "$S/agentd.manifest.json"; '
+    + 'else mkdir -p "$D/$V" && mv -f "$S/agentd.js" "$D/$V/agentd.js" && ln -sfn "$D/$V" "$D/current" && echo "VS-AGENTD-INSTALLED legacy"; fi; '
+    + 'rm -rf "$S"';
+}
+/** The remote step's one line → { landed } | { landed: 'verified', from, tofu } | { refused, from, floor, keyId, why } |
+ *  { failed } | null (anything else — the caller's "unexpected response"). */
+function installAgentdAnswer(out) {
+  const t = String(out || ''); let m;
+  if ((m = /VS-AGENTD-INSTALLED (current|fresh|legacy)/.exec(t))) return { landed: m[1] };
+  if ((m = /VS-AGENTD-LANDED (\S+) from=(\S*)(?: tofu=([0-9a-f,]+))?/.exec(t))) return { landed: 'verified', from: m[2] || null, tofu: m[3] ? m[3].split(',').filter((k) => /^[0-9a-f]{16}$/.test(k)).slice(0, 16) : null };
+  if ((m = /VS-AGENTD-REFUSED ([a-z-]{1,40}) from=(\S*?)(?: floor=(\S+?))?(?: key=([0-9a-f]{16}))?: ?([^\n]*)/.exec(t))) return { refused: m[1], from: m[2] || null, floor: m[3] || null, keyId: m[4] || null, why: m[5].slice(0, 200) };
+  if ((m = /VS-AGENTD-FAILED ([^\n]*)/.exec(t))) return { failed: m[1].slice(0, 200) };
+  return null;
+}
+
 class HostManager {
   constructor({ dataDir }) {
     this.convIndex = new (require('./conversation-index.js').ConversationIndex)({ dataDir });
     this.dataDir = dataDir;
+    // lane device-act-audit: THE hub's record of every act / code op it sends a device (src/device-audit.js —
+    // data/device-audit.jsonl); every DeviceManager construction hands its lines here through `noteAct`
+    this.deviceAudit = require('./device-audit.js').create({ dataDir, log: (m) => console.warn(m) });
     this._file = path.join(dataDir, 'hosts.json');
     this._sshDir = path.join(dataDir, 'ssh');
     // ControlPath sockets must stay under the ~104-char unix-socket limit —
@@ -295,6 +325,13 @@ class HostManager {
    * matter). → `{changed}` = the row's state (PURE dialRowState) moved, so the caller broadcasts; null when no
    * record answers to the device id (an unpaired name — nothing to note).
    */
+  /** lane device-act-audit: one audit line of a device client (src/agentd/client.js `onAct`) → data/device-audit.jsonl,
+   *  bound to the machine it was sent to (its CURRENT name; `local` = this machine's own daemon). Never throws. */
+  noteAct(hostId, line) {
+    let machine = hostId === 'local' ? 'this machine' : hostId;
+    try { const h = hostId === 'local' ? null : this.get(hostId); if (h) machine = h.name || h.id; } catch { /* a removed row: its id */ }
+    try { return this.deviceAudit.append({ ...line, hostId: String(hostId), machine }); } catch { return null; }
+  }
   noteDial(deviceId, event, facts = {}) {
     const h = this.findByDeviceId(deviceId);
     if (!h) return null;
@@ -324,6 +361,21 @@ class HostManager {
       d.lastRefusal = { code: String(facts.code || 'token-mismatch').slice(0, 40), at, since: run, ...hint(false) }; // verify-r5 C2: no token ⇒ no statement kept
       urgent = prev !== d.lastRefusal.code;
     } else if (event === 'accepted') {
+      // lane device-act-audit (design q-042 D10): the addresses this device has dialed in FROM (keyed: IPv4 / an IPv6 /64 —
+      // src/device-acts.js addressKeyOf); a first dial from one not in the set is an URGENT For-you item (the hub's
+      // onDeviceAlert door — src/server/device-alerts.js). The set is seeded with the address of the last accepted dial
+      // before this lane, so an existing device is not news at the first restart; a relay / ingress (loopback) is never news.
+      const DAx = require('./device-acts.js');
+      const from = String(facts.from || '');
+      const key = DAx.isLoopbackAddr(from) ? null : DAx.addressKeyOf(from);
+      if (!Array.isArray(d.knownFrom)) {
+        const seed = d.lastAccept && d.lastAccept.from && !DAx.isLoopbackAddr(d.lastAccept.from) ? DAx.addressKeyOf(d.lastAccept.from) : null;
+        d.knownFrom = seed ? [seed] : [];
+      }
+      if (key && !d.knownFrom.includes(key)) {
+        d.knownFrom = [...d.knownFrom, key].slice(-16);
+        try { this.onDeviceAlert?.('new-address', { hostKey: h.id, machine: h.name || h.id, deviceId, address: from.slice(0, 64), addressKey: key, at, first: !d.firstConnectAt }); } catch (e) { console.warn('[hosts] new-address alert not filed:', e.message); }
+      }
       d.lastAccept = { at, ...hint() };
       d.lastConnectAt = at; if (!d.firstConnectAt) d.firstConnectAt = at;
       urgent = true;
@@ -556,14 +608,16 @@ class HostManager {
    *  devices via the device daemon's run-cmd (2.188.0: the Manage-Agents
    *  status probes were ssh-only, so a selected dial device showed everything
    *  as not-installed/unreachable while the same probes worked over ssh). */
-  async _hostShell(h, script, { timeoutMs = 15000 } = {}) {
+  /** `by` (lane device-act-audit): who asked — a caller that knows (a person's route, an agent) names it; the hub's own
+   *  probes are `system:hosts`. */
+  async _hostShell(h, script, { timeoutMs = 15000, by = 'system:hosts' } = {}) {
     try {
       if (h.transport === 'dial') {
         // 15s, not the 6s default (review catch): accountsStatus rides this
         // inside session CREATE (linked/host-held rescue) — a tight bound
         // failed creates a slow-but-healthy link would have served.
         const dm = await this.deviceBounded(h.id, 15000);
-        const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });
+        const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by });
         return String(r.stdout || '');
       }
       return String(await this._ssh(h, script, { timeoutMs }));
@@ -708,7 +762,7 @@ class HostManager {
         // 15s (review catch): this default feeds the session-create cwd — a
         // deadline records the POD's local home as the device cwd (B-0d70).
         const dm = await this.deviceBounded(h.id, 15000);
-        out = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout || '').trim().split('\n').pop().trim();
+        out = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:hosts' })).stdout || '').trim().split('\n').pop().trim();
       } else {
         out = String(await this._ssh(h, 'echo "$HOME"')).trim().split('\n').pop().trim();
       }
@@ -727,7 +781,7 @@ class HostManager {
   }
 
   /** Connectivity + remote tool inventory in ONE round trip. */
-  async test(id) {
+  async test(id, { by = 'system:hosts' } = {}) {
     const h = this.get(id);
     // dial machine: no ssh — a real round trip over the dialed-in link (runCmd
     // exercises the whole mux path) + the daemon's self-reported identity.
@@ -738,7 +792,7 @@ class HostManager {
       const st = dm.status();
       let tools;
       try {
-        const r = await dm.runCmd('sh', ['-c', 'for c in dtach node claude codex; do command -v $c >/dev/null 2>&1 && printf "%s=yes " $c || printf "%s=no " $c; done'], { timeoutMs: 8000 });
+        const r = await dm.runCmd('sh', ['-c', 'for c in dtach node claude codex; do command -v $c >/dev/null 2>&1 && printf "%s=yes " $c || printf "%s=no " $c; done'], { timeoutMs: 8000, by });
         tools = {};
         for (const m of String(r.stdout || '').matchAll(/(\w+)=(yes|no)/g)) tools[m[1]] = m[2] === 'yes';
       } catch { tools = null; } // Windows daemon: no sh — identity still proves the link
@@ -778,14 +832,14 @@ class HostManager {
    *  FOUR outcomes since r5 — VS_OK / VS_GONE are the only ones that return,
    *  VS_NOTAGENT and VS_UNKNOWN both THROW, because "nothing was signalled" is
    *  never a success (see killPidShell for the busybox `ps -p` incident). */
-  async killRemotePid(id, pid) {
+  async killRemotePid(id, pid, { by = 'system:hosts' } = {}) {
     const h = this.get(id);
     const p = parseInt(pid, 10);
     if (!Number.isFinite(p) || p <= 1) throw new Error('bad pid');
     const cmd = killPidShell(p);
     let out = '';
     if (h.transport === 'dial' || this.dataPlaneOn?.()) {
-      try { const dm = await this.deviceBounded(id); out = String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 10000 })).stdout || ''); }
+      try { const dm = await this.deviceBounded(id); out = String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 10000, by })).stdout || ''); }
       catch (e) { if (h.transport === 'dial') throw new Error('device unreachable: ' + e.message); }
     }
     if (!out) out = String(await this._ssh(h, cmd));
@@ -805,7 +859,7 @@ class HostManager {
   /** Remote directory autocomplete — parent-dir listing, prefix-filter.
    *  Device link first (the ONLY path for dial machines — real report: the
    *  pull dialog completed LOCAL folders; ssh fallback below unchanged). */
-  async dirComplete(id, input) {
+  async dirComplete(id, input, { by = 'system:hosts' } = {}) {
     const h = this.get(id);
     const raw = String(input || '');
     const slash = raw.lastIndexOf('/');
@@ -815,8 +869,8 @@ class HostManager {
       try {
         const dm = await this.deviceBounded(id, 4000);
         let base = parent;
-        if (base === '' || base === '~') base = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 5000 })).stdout || '').trim() || '/';
-        else if (base.startsWith('~/')) base = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 5000 })).stdout || '').trim() + base.slice(1);
+        if (base === '' || base === '~') base = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 5000, by })).stdout || '').trim() || '/';
+        else if (base.startsWith('~/')) base = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 5000, by })).stdout || '').trim() + base.slice(1);
         const r = await dm.fsList(base);
         const shown = (parent === '' || parent === '~') ? '~' : parent;
         return r.entries
@@ -903,7 +957,7 @@ class HostManager {
    *  src/browser-stuck.js); `vibespace-browser-passkey.js` its passkey words (lane browser-passkey, copied at boot from
    *  src/browser-passkey.js); `agent-cli-text.js` the ONE-text rule vibespace-msg / -channels / -ask / -task
    *  share (lane cli-one-text-arg, copied at boot from src/agent-cli-text.js). test-architecture §52 fails a static tool left out. */
-  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-design', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'vibespace-browser-passkey.js', 'agent-cli-text.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-feedback', 'vibespace-vault', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
+  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-remote', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-design', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'vibespace-browser-passkey.js', 'agent-cli-text.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-feedback', 'vibespace-vault', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
   /** Plugin agent-tool shims (Plugin Ph4, 2.369.30): the loader installs a
    *  provider returning the `vibespace-tool-<plugin>-<name>` files it
    *  generates right now, so they ship to ssh hosts and dial devices with the
@@ -1143,6 +1197,9 @@ class HostManager {
       onVersionMatch: (v) => this.onAgentUpgrade?.('matched', { hostKey: id, version: v }),
       onUpgradeBegin: (from, to) => this.onAgentUpgrade?.('begun', { hostKey: id, machine: h.name || id, from, to }), // lane win-upgrade-pipe
       onAnswer: (v) => this.onAgentUpgrade?.('answered', { hostKey: id, version: v }),
+      onAct: (line) => this.noteAct(id, line), // lane device-act-audit: every act sent over this link = one line of data/device-audit.jsonl
+      onUpgradeRefused: (from, to, info) => this.onAgentUpgrade?.('refused', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }), // lane device-bundle-signing
+      onUpgradeTrusted: (from, to, info) => this.onAgentUpgrade?.('trusted', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }), // fix r2: a first trust (TOFU)
     });
     await dm.connect();
     this._devices.set(id, dm);
@@ -1158,31 +1215,43 @@ class HostManager {
   /** M2 remote install: land the agentd bundle into ~/.vibespace/agentd/<ver>/
    *  + symlink `current`, and provision the host vsht_ token (0600) so the
    *  standing remote daemon authenticates the server's ssh-bridge connection.
-   *  Bundle + token ride ONE tar over ssh stdin (never argv). Idempotent. */
+   *  Bundle + token (+ the release record) ride ONE tar over ssh stdin (never argv). Idempotent.
+   *  THE SSH ROAD VERIFIES TOO (lane device-bundle-signing-fix-r2, verify-r1 RED-3): it ships exactly what the dial road
+   *  would push (DeviceManager.releaseOf — the bundle, and its manifest when these bytes ARE the signed release) and the
+   *  host lands it through the agent ALREADY installed there (`agentd.js --land-upgrade` = the same landBundle as a dial
+   *  link: signature, floor, pin — installAgentdScript). The rungs: these bytes already run there ⇒ nothing; nothing
+   *  installed yet ⇒ lands as is (the owner's add-host act — the installer's trust-on-first-use; the new agent pins its
+   *  baked keys at its first start); an install exists and this build is unsigned ⇒ `unsigned-local-build` (the row
+   *  only); a pre-signing agent there (no --land-upgrade) ⇒ the SIGNED release lands unverified once, like every
+   *  pre-signing dial device. A refusal / a first trust reach the same door; the host keeps its running agent.
+   *  Not a fence against a hub that holds this host's ssh key (that is a shell already — design q-042 D6). */
   installAgentd(id, bundlePath, version, hostToken) {
     const h = this.get(id);
     const { execFileSync } = require('child_process');
     if (!fs.existsSync(bundlePath)) throw new Error('device daemon bundle missing: ' + bundlePath);
-    // stage a tar with two entries: agentd.js + token
+    const rel = require('./agentd/client.js').DeviceManager.releaseOf(bundlePath, String(version));
+    const ver = String(rel.version || version).replace(/[^\w.-]/g, '');
+    // stage a tar: agentd.js + token (+ agentd.manifest.json — the release record — when signed)
     const os2 = require('os');
     const stage = fs.mkdtempSync(path.join(os2.tmpdir(), 'vs-agentd-stage-'));
     try {
       fs.copyFileSync(bundlePath, path.join(stage, 'agentd.js'));
       fs.writeFileSync(path.join(stage, 'token'), String(hostToken), { mode: 0o600 });
-      const tar = execFileSync('tar', ['-c', '-C', stage, 'agentd.js', 'token'], { timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
-      const ver = JSON.stringify(String(version));
-      const remote = 'umask 077; D="$HOME/.vibespace/agentd"; mkdir -p "$D/'+String(version).replace(/[^\w.-]/g,'')+'" "$D/state"; '
-        + 'tar -x -C "$D/state"; ' // extracts agentd.js + token into state/ temporarily
-        + 'mv -f "$D/state/agentd.js" "$D/'+String(version).replace(/[^\w.-]/g,'')+'/agentd.js"; '
-        + 'chmod 600 "$D/state/token"; ln -sfn "$D/'+String(version).replace(/[^\w.-]/g,'')+'" "$D/current"; '
-        + 'echo VS-AGENTD-INSTALLED';
+      if (rel.signed) fs.writeFileSync(path.join(stage, 'agentd.manifest.json'), JSON.stringify(rel.manifest));
+      const tar = execFileSync('tar', ['-c', '-C', stage, 'agentd.js', 'token', ...(rel.signed ? ['agentd.manifest.json'] : [])], { timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
+      const remote = installAgentdScript(ver, rel.signed);
       return new Promise((resolve, reject) => {
         const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--', remote],
           { timeout: 30000 }, (err, stdout, stderr) => {
             try { fs.rmSync(stage, { recursive: true, force: true }); } catch {}
             if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
-            if (!String(stdout).includes('VS-AGENTD-INSTALLED')) return reject(new Error('unexpected response: ' + String(stdout).slice(0, 120)));
-            resolve({ agentdPath: '$HOME/.vibespace/agentd/current/agentd.js' });
+            const r = installAgentdAnswer(stdout);
+            if (!r) return reject(new Error('unexpected response: ' + String(stdout).slice(0, 120)));
+            if (r.failed) return reject(new Error('the host could not land the agent: ' + r.failed));
+            const machine = h.name || id;
+            if (r.refused) { try { this.onAgentUpgrade?.('refused', { hostKey: id, machine, from: r.from, to: ver, code: r.refused, keyId: r.keyId, floor: r.floor, by: 'system:device-upgrade' }); } catch { } } // int315: lane device-act-audit's `by` for the version-drift push (ensureAgentdOnHost)
+            if (r.tofu) { try { this.onAgentUpgrade?.('trusted', { hostKey: id, machine, from: r.from, to: ver, keyIds: r.tofu, by: 'system:device-upgrade' }); } catch { } }
+            resolve({ agentdPath: '$HOME/.vibespace/agentd/current/agentd.js', ...r });
           });
         child.stdin.end(tar);
       });
@@ -1812,7 +1881,7 @@ class HostManager {
         // `sort` makes the pick DETERMINISTIC and prefers the plain twin
         // (".jsonl" sorts before ".jsonl.zst"), so a codex thread whose
         // rollout exists in both forms doesn't flap between them per poll
-        const find = await dm.runCmd('sh', ['-c', `find ${root} ${findExpr} 2>/dev/null | sort | head -1`]);
+        const find = await dm.runCmd('sh', ['-c', `find ${root} ${findExpr} 2>/dev/null | sort | head -1`], { by: 'system:transcript-fetch' });
         const remotePath = find.stdout.trim();
         if (!remotePath) return fs.existsSync(cachePath) ? cachePath : null;
         const st = await dm.fsStat(remotePath);
@@ -2129,19 +2198,19 @@ class HostManager {
           const r = await dm.usageScan();
           if (r.cursors && r.cursorFile) {
             try {
-              await dm.fsWrite(r.cursorFile + '.tmp', JSON.stringify(r.cursors));
-              await dm.fsRename(r.cursorFile + '.tmp', r.cursorFile);
+              await dm.fsWrite(r.cursorFile + '.tmp', JSON.stringify(r.cursors), { by: 'system:usage-harvest' });
+              await dm.fsRename(r.cursorFile + '.tmp', r.cursorFile, { by: 'system:usage-harvest' });
             } catch (e4) { console.warn('[usage] cursor commit failed (next harvest re-emits):', e4.message); }
           }
           return r.ndjson;
         } catch (e3) {
           if (!/lacks usage-scan/.test(e3.message || '')) console.warn('[usage] usage-scan op failed, falling back to script ship:', e3.message);
         }
-        const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout.trim();
+        const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:usage-harvest' })).stdout.trim();
         const scanPath = home + '/.vibespace/bin/vibespace-usage-scan';
-        await dm.fsWrite(scanPath, script); // fsWrite mkdirs the parent
+        await dm.fsWrite(scanPath, script, { by: 'system:usage-harvest' }); // fsWrite mkdirs the parent
         const chunks = [];
-        const { code, error } = await dm.runStream('node', [scanPath], { onData: (b) => chunks.push(b) });
+        const { code, error } = await dm.runStream('node', [scanPath], { onData: (b) => chunks.push(b), by: 'system:usage-harvest' });
         if (error) throw new Error(error);
         if (code !== 0) throw new Error('scanner exit ' + code);
         return Buffer.concat(chunks).toString('utf-8');
@@ -2708,4 +2777,4 @@ HostManager.prototype.bootstrap = function (id, onEvent) {
   });
 };
 
-module.exports = { HostManager, codexOpenRolloutsShell, killPidShell };
+module.exports = { HostManager, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer };

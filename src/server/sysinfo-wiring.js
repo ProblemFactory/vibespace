@@ -135,7 +135,7 @@ async function remoteProcs(hostId) {
 // The ONE user-facing kill path for every machine — `hostId` is a parameter.
 // The shell text it sends is built by signalVerdictScript (module level, so
 // the suite can drive the shipped bytes).
-async function signalProc(hostId, pidRaw, sigRaw) {
+async function signalProc(hostId, pidRaw, sigRaw, { by = 'system:sysinfo' } = {}) {
   const sig = String(sigRaw || 'TERM').toUpperCase().replace(/^SIG/, '');
   const pid = parseInt(pidRaw, 10);
   if (!PROC_SIGS.has(sig)) throw new Error('unsupported signal');
@@ -164,9 +164,9 @@ async function signalProc(hostId, pidRaw, sigRaw) {
   let dm = null;
   try { dm = await hosts.deviceBounded(hostId, 6000); } catch { }
   if (dm) {
-    try { out = String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 8000 })).stdout || ''); }
+    try { out = String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 8000, by })).stdout || ''); }
     catch (e) { throw new Error('device link failed mid-signal (it may or may not have landed) — check the table and retry: ' + e.message); }
-  } else out = String(await hosts._hostShell(h, script, { timeoutMs: 10000 }));
+  } else out = String(await hosts._hostShell(h, script, { timeoutMs: 10000, by }));
   if (out.includes('EPERM')) throw new Error("permission denied (another user's process)");
   if (out.includes('ESRCH')) throw new Error('no such process (already gone)');
   if (out.includes('OK-GONE')) return { ok: true, gone: true };

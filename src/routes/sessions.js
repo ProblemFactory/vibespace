@@ -547,7 +547,7 @@ function setup(ctx) {
         // and kill THERE. The local-only path failed silently forever, and a
         // colliding LOCAL pid could even pass the claude check and kill the
         // wrong process (real report: terminate一直不成功).
-        await hosts.killRemotePid(String(host), pid);
+        await hosts.killRemotePid(String(host), pid, { by: require('../device-audit.js').byOfReq(req) });
         return res.json({ success: true });
       }
       // THE SAME QUESTION AS THE REMOTE BRANCH ABOVE, SO THE SAME RULE (B-3185

@@ -421,7 +421,7 @@ class ExitProxyManager {
       throw this._refused(session, sessionId, { code: 'remote_session', grant: 'use', h, has: j.has, where, same: session.host === h.id });
     }
     if (h.transport === 'dial' && !h.online) throw this._refused(session, sessionId, { code: 'offline', grant: 'use', h });
-    const r = await this._forward(h);
+    const r = await this._forward(h, { by: require('./device-acts.js').byAgent(this.keyOf(session, sessionId)) });
     const live = this._live.get(h.id);
     if (live && sessionId) live.users.add(sessionId);
     // THE FORWARD IS A LOOPBACK PORT EVERY LOCAL PROCESS CAN REACH (verify-r1 A3): the list gated only who may OPEN
@@ -482,11 +482,11 @@ class ExitProxyManager {
   /** Is the conversation an ask / a run was started for still the LIVE one (verify-r2 ask-a)? The same object under
    *  the same id — a killed conversation leaves the map, and its id is never reused. */
   _stillLive(session, sessionId) { const s = this.sessionsMap().get(sessionId); return !!s && (!session || s === session); }
-  async _forward(h) {
+  async _forward(h, { by } = {}) {
     const existing = this._live.get(h.id);
     if (existing && existing.server.listening) return { machine: h.name || h.id, hostId: h.id, localPort: existing.localPort, url: `socks5h://127.0.0.1:${existing.localPort}` };
     const dm = await this.hosts.deviceBounded(h.id, 8000); // throws if offline
-    const { port: socksPort } = await dm.serveSocks();
+    const { port: socksPort } = await dm.serveSocks({ by }); // lane device-act-audit: the conversation whose `use` opened it
     const sockets = new Set();
     const server = net.createServer({ allowHalfOpen: true }, async (sock) => {
       sockets.add(sock);
@@ -578,12 +578,12 @@ class ExitProxyManager {
       const caps = Array.isArray(info.capabilities) ? info.capabilities : [];
       platform = typeof info.platform === 'string' ? info.platform.replace(/[^a-z0-9]/gi, '').slice(0, 16) || null : null; // verify r1 F5a: a daemon's word, bounded to a platform name's shape
       const useShell = caps.includes(XS.RUN_SHELL_CAP);
-      const opts = { timeoutMs: E.EXIT_RUN_TIMEOUT_MS, waitMs: E.EXIT_RUN_TIMEOUT_MS + 10000 };
+      const opts = { timeoutMs: E.EXIT_RUN_TIMEOUT_MS, waitMs: E.EXIT_RUN_TIMEOUT_MS + 10000, by: require('./device-acts.js').byAgent(this.keyOf(session, sessionId)) };
       // lane device-upgrade-stuck: a Windows agent WITHOUT run-shell can run no line (no `sh` there) — the hub KNOWS it from
       // the hello and refuses by name below; pre-fix it sent `sh -lc` anyway and the card read "exit 1 · 0.0 s · no output"
       if (!XS.canRunLine(platform, caps)) outdated = { agentVersion: E.agentVersionOf(info.daemonVersion) };
       else {
-        r = useShell ? await dm.runShell(cmd, opts) : await dm.runCmd(XS.POSIX_SHELL, ['-lc', cmd], opts);
+        r = useShell ? await dm.runShell(cmd, { ...opts, by: opts.by }) : await dm.runCmd(XS.POSIX_SHELL, ['-lc', cmd], { ...opts, by: opts.by });
         // verify r1 F5a: the reply's `interpreter` is read through the CLOSED set — a daemon's raw string (`<system-reminder`,
         // an RLO) reached the agent's sentence, the card, the audit and the history as itself; off the set ⇒ what the hub asked for
         interpreter = XS.knownInterpreter(r && r.interpreter) || (useShell ? XS.interpreterOf(platform) : XS.POSIX_SHELL);
@@ -849,7 +849,7 @@ class ExitProxyManager {
       }
     } else {
       try {
-        const r = await dm.fsWriteStream(remote, { source: o.source, size: tv.size, overwrite: o.overwrite, check: stillOn, windowBytes: E.TRANSFER_WINDOW_BYTES });
+        const r = await dm.fsWriteStream(remote, { source: o.source, size: tv.size, overwrite: o.overwrite, check: stillOn, windowBytes: E.TRANSFER_WINDOW_BYTES, by: require('./device-acts.js').byAgent(by.key) });
         bytes = Number(r.size) || 0; sha256 = typeof r.sha256 === 'string' ? r.sha256 : null;
       } catch (e) {
         const nm = named(e); if (nm) throw nm;

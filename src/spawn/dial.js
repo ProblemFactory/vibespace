@@ -38,12 +38,15 @@ function dialLadder(c) {
             // nothing to place at all.
             if (!integrationOn && !spawnAccount?.secret && !needsClaudeLoginHelper) return { envPairs: [], tokenAssign: '' };
             const dm = await hosts.device(h.id); // dial → deviceForDial
-            const home = String((await dm.runCmd('sh', ['-c', 'printf %s "$HOME"'], { timeoutMs: 8000 }))?.stdout || '').trim() || '/root';
+            // lane device-act-audit: the session's setup acts name WHO created it (the browser sign-in of the socket that asked —
+            // ws-handler stamps it), else the spawn ladder itself
+            const by = (ws && ws._actBy) || 'system:spawn';
+            const home = String((await dm.runCmd('sh', ['-c', 'printf %s "$HOME"'], { timeoutMs: 8000, by }))?.stdout || '').trim() || '/root';
             const bin = `${home}/.vibespace/bin`;
             const tokName = `.tok-${sid}`;
             let rf = null;
             if (integrationOn || needsClaudeLoginHelper) {
-              await dm.fsMkdir(bin);
+              await dm.fsMkdir(bin, { by });
               const toolDir = AGENT_BIN_DIR;
               const names = integrationOn
                 ? require('../hosts').HostManager.agentTools() // static tools + plugin shims (Ph4)
@@ -51,7 +54,7 @@ function dialLadder(c) {
               for (const n of names) {
                 try {
                   const buf = fs.readFileSync(path.join(toolDir, n));
-                  await dm.fsWrite(`${bin}/${n}`, buf);
+                  await dm.fsWrite(`${bin}/${n}`, buf, { by });
                 } catch (e) {
                   if (needsClaudeLoginHelper && n === 'vibespace-claude-subscription-login.mjs') throw e;
                 }
@@ -61,10 +64,10 @@ function dialLadder(c) {
               // fake `code` editor helper (remote Ctrl+G, B-2de8) — OUTSIDE the
               // PATH dir so it can't shadow a real vscode `code` on the device
               try {
-                await dm.fsWrite(`${home}/.vibespace/editor/code`, fs.readFileSync(EDITOR_CMD));
+                await dm.fsWrite(`${home}/.vibespace/editor/code`, fs.readFileSync(EDITOR_CMD), { by });
               } catch { }
-              try { await dm.placeSecret(`${bin}/${tokName}`, Buffer.from(session.agentToken)); }
-              catch { await dm.fsWrite(`${bin}/${tokName}`, Buffer.from(session.agentToken)); }
+              try { await dm.placeSecret(`${bin}/${tokName}`, Buffer.from(session.agentToken), { by }); }
+              catch { await dm.fsWrite(`${bin}/${tokName}`, Buffer.from(session.agentToken), { by }); }
               // chmod: tools executable, token 0600, then register the hook in
               // the device's OWN claude/codex configs (its local CLI fires it)
               await dm.runCmd('sh', ['-c',
@@ -77,7 +80,7 @@ function dialLadder(c) {
                 // VIBESPACE_CLI_CONFIG rides the daemon's run-cmd env merge (no new
                 // op, no capability bit — run-cmd predates this): the device's own
                 // claude/codex configs get the managed keys too (design §6).
-                { env: { VIBESPACE_CLI_CONFIG: cliConfigPlanB64() }, timeoutMs: 12000 }).catch(() => {});
+                { env: { VIBESPACE_CLI_CONFIG: cliConfigPlanB64() }, timeoutMs: 12000, by }).catch(() => {});
               // VIBESPACE_API back-tunnel: a loopback port ON THE DEVICE whose
               // accepts ride the dial link back into our own server port.
               const net = require('net');
@@ -96,15 +99,15 @@ function dialLadder(c) {
             // it out of every argv.
             let acctAssign = '';
             if (spawnAccount && spawnAccount.secret && !spawnAccount._hostSubReady) {
-              await dm.fsMkdir(`${home}/.vibespace`); // integration-OFF path skipped the bin mkdir
+              await dm.fsMkdir(`${home}/.vibespace`, { by }); // integration-OFF path skipped the bin mkdir
               const kf = `${home}/.vibespace/${spawnAccount.id}.key`;
               // place-secret op (2.298.0): atomic 0600 at open — the old
               // fsWrite-then-chmod pair left a mode-race window with the key
               // world-readable. Old daemons keep the legacy pair.
-              try { await dm.placeSecret(kf, Buffer.from(spawnAccount.secret.value)); }
+              try { await dm.placeSecret(kf, Buffer.from(spawnAccount.secret.value), { by }); }
               catch {
-                await dm.fsWrite(kf, Buffer.from(spawnAccount.secret.value));
-                await dm.runCmd('sh', ['-c', `chmod 600 "${kf}"`], { timeoutMs: 6000 }).catch(() => {});
+                await dm.fsWrite(kf, Buffer.from(spawnAccount.secret.value), { by });
+                await dm.runCmd('sh', ['-c', `chmod 600 "${kf}"`], { timeoutMs: 6000, by }).catch(() => {});
               }
               acctAssign = `${spawnAccount.secret.var}="$(cat "${kf}")" `;
             }

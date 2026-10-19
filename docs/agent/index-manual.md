@@ -17,6 +17,7 @@ server. `vibespace-docs <topic>` prints it.
 | `pages` | `vibespace-page` | host a self-contained HTML page on this VibeSpace behind a share link (a design the user asked for: vibespace-design) | `vibespace-docs pages` |
 | `design` | `vibespace-design` | designs, mockups, screens: HTML artboards the user watches live in the Design window; its manual carries the craft rules | `vibespace-docs design` |
 | `exit` | `vibespace-exit` | borrow a paired machine's network for one command, or run a command ON it: only machines the user opened to you | `vibespace-docs exit` |
+| `remote` | `vibespace-remote` | what this VibeSpace did on its paired machines because YOU asked: each act, its verdict, who asked | `vibespace-docs remote` |
 | `window` | `vibespace-window` | a NATIVE app window the user shared with you (or you opened) as a target: accessibility tree + @refs, or pixels | `vibespace-docs window` |
 | `browser` | `vibespace-browser` | THE browser tool: open / snapshot / click @ref / fill in THIS conversation's own browser, shown live to the user | `vibespace-docs browser` |
 | `apps` | `vibespace-app` | apps that survive the machine's rebuild: search, then PROPOSE an install or a removal (the user installs) | `vibespace-docs apps` |

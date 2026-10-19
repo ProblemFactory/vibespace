@@ -94,7 +94,7 @@ async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR) {
   if (!need || !/^[A-Za-z0-9._-]{1,40}$/.test(String(need.version || '')) || !/^\/[^\0]{1,400}$/.test(String(need.dir || ''))) return { ok: false, code: 'no_helper', error: 'the agent did not say where its helper goes' };
   if (have !== need.version) return { ok: false, code: 'no_helper', error: `this hub's prebuilt Mac screen helper is ${have}; the Mac's agent needs ${need.version}` };
   if (!dm || typeof dm.fsWriteStream !== 'function') return { ok: false, code: 'no_helper', error: 'the Mac\'s agent cannot take a pushed file' };
-  try { await dm.fsWriteStream(`${need.dir}/vibespace-screen-${need.version}`, { source: fs.createReadStream(bin), size: st.size, overwrite: true }); } catch (e) { return { ok: false, code: 'no_helper', error: `the prebuilt helper did not reach the Mac (${(e && e.message) || e})` }; }
+  try { await dm.fsWriteStream(`${need.dir}/vibespace-screen-${need.version}`, { source: fs.createReadStream(bin), size: st.size, overwrite: true, by: 'system:desktop-webrtc' }); } catch (e) { return { ok: false, code: 'no_helper', error: `the prebuilt helper did not reach the Mac (${(e && e.message) || e})` }; }
   return { ok: true, size: st.size };
 }
 

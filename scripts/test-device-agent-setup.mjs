@@ -46,16 +46,16 @@ const srvPort = await new Promise((r) => srv.listen(0, '127.0.0.1', () => r(srv.
 
 try {
   // 1. runCmd: device $HOME
-  const home = String((await dm.runCmd('sh', ['-c', 'printf %s "$HOME"'], { timeoutMs: 8000 }))?.stdout || '').trim();
+  const home = String((await dm.runCmd('sh', ['-c', 'printf %s "$HOME"'], { by: 'system:test', timeoutMs: 8000 }))?.stdout || '').trim();
   check('runCmd returns the device $HOME', home.startsWith('/'), JSON.stringify(home));
   const bin = `${home}/.vibespace/bin`;
 
   // 2. fsMkdir + fsWrite a tool + a 0600 token, chmod via runCmd, read back
-  await dm.fsMkdir(bin);
+  await dm.fsMkdir(bin, { by: 'system:test' });
   const toolBody = '#!/usr/bin/env node\nconsole.log("tool");\n';
-  await dm.fsWrite(`${bin}/vibespace-status`, Buffer.from(toolBody));
-  await dm.fsWrite(`${bin}/.tok-xyz`, Buffer.from('vsst_smoketoken'));
-  await dm.runCmd('sh', ['-c', `chmod +x "${bin}"/vibespace-* 2>/dev/null; chmod 600 "${bin}/.tok-xyz"`], { timeoutMs: 8000 });
+  await dm.fsWrite(`${bin}/vibespace-status`, Buffer.from(toolBody), { by: 'system:test' });
+  await dm.fsWrite(`${bin}/.tok-xyz`, Buffer.from('vsst_smoketoken'), { by: 'system:test' });
+  await dm.runCmd('sh', ['-c', `chmod +x "${bin}"/vibespace-* 2>/dev/null; chmod 600 "${bin}/.tok-xyz"`], { by: 'system:test', timeoutMs: 8000 });
   const st = (await dm.fsStat(`${bin}/vibespace-status`)).stat;
   check('fsWrite landed the tool (size matches)', st.size === Buffer.byteLength(toolBody), JSON.stringify(st));
   check('tool is executable (mode bit)', (st.mode & 0o100) !== 0, (st.mode & 0o777).toString(8));
@@ -71,7 +71,7 @@ try {
   const rf = await dm.reverseForward({ port: 0, connectLocal: () => net.connect(srvPort, '127.0.0.1') });
   check('reverseForward bound a device port', rf.port > 0, JSON.stringify(rf));
   let out = '';
-  const rc = await dm.runStream('sh', ['-c', `command -v curl >/dev/null && curl -s http://127.0.0.1:${rf.port}/ping || (command -v wget >/dev/null && wget -qO- http://127.0.0.1:${rf.port}/ping) || echo NO-HTTP-CLIENT`], { onData: (b) => { out += b.toString(); } });
+  const rc = await dm.runStream('sh', ['-c', `command -v curl >/dev/null && curl -s http://127.0.0.1:${rf.port}/ping || (command -v wget >/dev/null && wget -qO- http://127.0.0.1:${rf.port}/ping) || echo NO-HTTP-CLIENT`], { by: 'system:test', onData: (b) => { out += b.toString(); } });
   check('VIBESPACE_API back-tunnel reaches our server from the device',
     out.includes('VIBESPACE-API-OK /ping') || out.includes('NO-HTTP-CLIENT'),
     JSON.stringify(out.slice(0, 120)));

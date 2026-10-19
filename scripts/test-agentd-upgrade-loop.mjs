@@ -72,6 +72,9 @@ console.log('— the ledger across rebuilt instances (a fake never-converging da
   const bundle = path.join(t2, 'agentd.js');
   // the marker PAST 400 000 bytes — where the real bundle has it (byte 1 076 247 of 1.6 MB); the reader must find it
   fs.writeFileSync(bundle, '/*' + 'x'.repeat(450000) + '*/\nmodule.exports = { VERSION: "9.9.9" };\n');
+  // lane device-bundle-signing (design q-042 D2): a hub pushes only the SIGNED release to another machine — the fake bundle
+  // carries its release manifest (a throwaway key: the hub checks the manifest names these bytes; the device verifies)
+  { const SIG = require('../src/agentd-signature.js'); const crypto = require('node:crypto'); const k = SIG.generateKeyPair({ crypto }); fs.writeFileSync(path.join(t2, 'agentd.manifest.json'), JSON.stringify(SIG.sign(k.privateKeyPem, fs.readFileSync(bundle), '9.9.9', { crypto }))); }
   let upgrades = 0; const upgradeVersions = []; let helloVersion = '0.0.1';
   const srv = net.createServer((sock) => {
     let expect = 0, got = 0;
@@ -151,8 +154,8 @@ console.log('— the ledger across rebuilt instances (a fake never-converging da
     // ends on the TIMEOUT with no reason: DUS-H3 goes red
     {
       const c0 = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/agentd/client.js'), 'utf8');
-      const cm = c0.replace("        else if (msg.op === 'upgrade-failed') {", "        else if (false) {").replace("reject(new Error('upgrade timeout')), 30000);", "reject(new Error('upgrade timeout')), 300);");
-      ok(cm !== c0 && cm.includes('else if (false) {') && cm.includes("'upgrade timeout')), 300);"), '(control) both patches apply');
+      const cm = c0.replace("        else if (msg.op === 'upgrade-failed') {", "        else if (false) {").replace("reject(new Error('upgrade timeout')); }, 30000);", "reject(new Error('upgrade timeout')); }, 300);"); // lane device-act-audit: the timeout also writes the code line
+      ok(cm !== c0 && cm.includes('else if (false) {') && cm.includes("'upgrade timeout')); }, 300);"), '(control) both patches apply');
       const DMf = mutantCopies('upgloopf', path.join(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/agentd/client.js', cm, 'nofailop').DeviceManager;
       const fm2 = { onControl: () => {}, data: () => {}, control: (m) => { if (m.op === 'upgrade') setTimeout(() => fm2.onControl({ op: 'upgrade-failed', version: m.version, error: 'EPERM: x' }), 5); } };
       const u2 = await new DMf({ dataDir: t2, bundlePath: bundle, version: '1.1.1', log: () => {} })._upgrade(fm2).then(() => 'done', (e) => e.message);

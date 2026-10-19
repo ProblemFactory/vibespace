@@ -426,7 +426,7 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
   const dm5 = deviceOn(home3);
   await dm5.connect();
   const tb = Date.now();
-  const belt = await dm5.runStream('sh', ['-c', 'exec sleep 3'], { timeoutMs: 700 });
+  const belt = await dm5.runStream('sh', ['-c', 'exec sleep 3'], { by: 'system:test', timeoutMs: 700 });
   const beltMs = Date.now() - tb;
   ok(belt && belt.timedOut === true && belt.code == null && beltMs < 2000, `run-stream honours the caller's timeoutMs over the real daemon (settled timedOut after ${beltMs} ms for 700 ms — the 120 s constant is only the default)`, belt);
   const acc5 = ACC.create({ hosts: hostsFor({ 'dev-m': dm5 }), install: false, log: { log() { }, warn() { } }, installMs: 1000, holdMs: 15000 });
@@ -485,7 +485,7 @@ console.log('§8 the link dies MID-OP, and a long run past its deadline (C2 veri
     const plantNow = () => { if (!plant) return; const pid = Number(fs.readFileSync(pidfX, 'utf8')); fs.mkdirSync(logDir, { recursive: true, mode: 0o700 }); plant(logOf(pid), logDir, pid); };
     let got = 0, tCut = 0;
     const cut = () => { if (tCut) return; plantNow(); tCut = Date.now(); dmX._conn.mux.destroy(); }; // the hub's side only — the daemon is untouched
-    const st = dmX.runStream('sh', ['-c', script], { onData: (b) => { got += b.length; if (stall && !tCut) { const t = Date.now(); while (Date.now() - t < 400) { /* the hub's loop is busy: no credit leaves */ } cut(); } }, timeoutMs: 60000 });
+    const st = dmX.runStream('sh', ['-c', script], { by: 'system:test', onData: (b) => { got += b.length; if (stall && !tCut) { const t = Date.now(); while (Date.now() - t < 400) { /* the hub's loop is busy: no credit leaves */ } cut(); } }, timeoutMs: 60000 });
     if (!stall) { await until(() => fs.existsSync(pidfX), 3000, 20); await sleep(200); cut(); }
     const settled = await st;
     const gotAtCut = got;

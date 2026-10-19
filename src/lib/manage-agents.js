@@ -44,6 +44,7 @@ import { dialRowState } from '../dial-facts.js'; // lane-pairing ③: THE one di
 import { dialStateText, dialHistoryLine } from './dial-address-picker.js';
 import { openExitAccessDialog, exitSummaryText, exitCodeWords, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
+import { openDeviceActsDialog } from './device-acts-dialog.js'; // lane device-act-audit: what the hub did on the machine, who asked
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it)
 import { enterSubmits } from './chat-enter-keys.js';
 import { mintShowVerdict } from '../oat-mint-model.js'; // PURE (lane heavy3-flake-races): a late answer never repaints over a newer push
@@ -2364,6 +2365,12 @@ export function installManageAgents(App, ctx = {}) {
             runs.type = 'button'; runs.className = 'btn-cancel agents-mach-runs'; runs.textContent = t('Commands…');
             runs.onclick = (e) => { e.preventDefault(); openExitRunsDialog(this, { hostId: h.id, name: h.name }); };
             tools.appendChild(runs);
+            // lane device-act-audit (design q-042 D4): every act the hub took there — a person's, a conversation's, a job's,
+            // VibeSpace's own — with who asked (human-triggered, a fresh GET)
+            const acts = document.createElement('button');
+            acts.type = 'button'; acts.className = 'btn-cancel agents-mach-acts'; acts.textContent = t('Activity…');
+            acts.onclick = (e) => { e.preventDefault(); openDeviceActsDialog(this, { hostId: h.id, name: h.name }); };
+            tools.appendChild(acts);
             if (h.deviceId) {
               const hist = document.createElement('button');
               hist.type = 'button'; hist.className = 'btn-cancel agents-mach-hist'; hist.textContent = t('Dial history…');

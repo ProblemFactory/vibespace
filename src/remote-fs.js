@@ -85,7 +85,11 @@ const shqp = (s) => {
 };
 
 class RemoteFs {
-  constructor(hostManager) { this.hosts = hostManager; }
+  constructor(hostManager) { this.hosts = hostManager; this._homes = new Map(); this._shSeen = new WeakMap(); this._by = null; }
+  /** lane device-act-audit: THIS request's view — every act it sends a device (a write, a rename, a shell line) names
+   *  `by` (the Files routes bind the person's sign-in; src/device-audit.js byOfReq). The caches stay the instance's. */
+  as(by) { const v = Object.create(this); v._by = by || null; return v; }
+  get _actBy() { return this._by || 'system:remote-fs'; }
 
   // ── CS data-plane (2.146.0): device-agent fast path. Returns null when the
   // flag is off / device unreachable — callers fall back to their ssh body.
@@ -100,7 +104,7 @@ class RemoteFs {
   async _devHome(id, dm) {
     if (!this._homes) this._homes = new Map();
     if (this._homes.has(id)) return this._homes.get(id);
-    const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout.trim();
+    const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { by: this._actBy })).stdout.trim();
     if (home) this._homes.set(id, home);
     return home;
   }
@@ -148,7 +152,7 @@ class RemoteFs {
   _winHasSh(dm, info) {
     if (Array.isArray(info.posixShells)) return info.posixShells.includes('sh');
     if (!this._shSeen) this._shSeen = new WeakMap();
-    if (!this._shSeen.has(info)) this._shSeen.set(info, dm.runCmd('sh', ['-c', 'exit 0'], { timeoutMs: 5000 }).then((r) => !!r && r.code === 0 && !r.timedOut, (e) => !(e && e.code === 'windows_no_shell')));
+    if (!this._shSeen.has(info)) this._shSeen.set(info, dm.runCmd('sh', ['-c', 'exit 0'], { timeoutMs: 5000, by: this._actBy }).then((r) => !!r && r.code === 0 && !r.timedOut, (e) => !(e && e.code === 'windows_no_shell')));
     return this._shSeen.get(info);
   }
   /** A Windows agent's file → an HTTP response over read-range (no `cat` there). Same contract as _devStreamTo. */
@@ -197,7 +201,7 @@ class RemoteFs {
     if (h?.transport === 'dial') {
       const dm = await this._dev(id);
       if (!dm) throw new Error(`device "${h.name}" is offline`);
-      const r = await dm.runCmd('sh', ['-c', cmd], { timeoutMs: Math.min(timeoutMs, 30000) });
+      const r = await dm.runCmd('sh', ['-c', cmd], { timeoutMs: Math.min(timeoutMs, 30000), by: this._actBy });
       if (r.code !== 0) throw new Error((r.stderr || `command failed (${r.code})`).trim().slice(0, 400));
       return Buffer.from(r.stdout || '', 'utf-8');
     }
@@ -360,12 +364,12 @@ class RemoteFs {
   }
 
   async write(id, filePath, contentBuffer) {
-    const w = await this._win(id); if (w) { await w.fsWrite(filePath, contentBuffer); return { success: true }; }
+    const w = await this._win(id); if (w) { await w.fsWrite(filePath, contentBuffer, { by: this._actBy }); return { success: true }; }
     const dm = await this._dev(id);
     if (dm) {
       try {
         const abs = await this._devAbs(id, dm, filePath);
-        await dm.fsWrite(abs, contentBuffer);
+        await dm.fsWrite(abs, contentBuffer, { by: this._actBy });
         return;
       } catch { /* legacy */ }
     }
@@ -381,18 +385,18 @@ class RemoteFs {
   }
 
   async mkdir(id, dirPath) {
-    const w = await this._win(id); if (w) { await w.fsMkdir(dirPath); return { success: true }; }
+    const w = await this._win(id); if (w) { await w.fsMkdir(dirPath, { by: this._actBy }); return { success: true }; }
     const dm = await this._dev(id);
-    if (dm) { try { await dm.fsMkdir(await this._devAbs(id, dm, dirPath)); return { success: true }; } catch { } }
+    if (dm) { try { await dm.fsMkdir(await this._devAbs(id, dm, dirPath), { by: this._actBy }); return { success: true }; } catch { } }
     await this._run(id, `mkdir -p ${shqp(dirPath)}`); return { success: true };
   }
 
-  async rename(id, from, to) { const w = await this._win(id); if (w) { await w.fsMove(from, to); return { success: true }; } await this._run(id, `mv -n ${shqp(from)} ${shqp(to)}`); return { success: true }; }
+  async rename(id, from, to) { const w = await this._win(id); if (w) { await w.fsMove(from, to, { by: this._actBy }); return { success: true }; } await this._run(id, `mv -n ${shqp(from)} ${shqp(to)}`); return { success: true }; }
 
   async remove(id, target) {
-    const w = await this._win(id); if (w) { await w.fsRm(target, true); return { success: true }; }
+    const w = await this._win(id); if (w) { await w.fsRm(target, true, { by: this._actBy }); return { success: true }; }
     const dm = await this._dev(id);
-    if (dm) { try { await dm.fsRm(await this._devAbs(id, dm, target), true); return { success: true }; } catch { } }
+    if (dm) { try { await dm.fsRm(await this._devAbs(id, dm, target), true, { by: this._actBy }); return { success: true }; } catch { } }
     await this._run(id, `rm -rf ${shq(target)}`); return { success: true };
   }
 
@@ -416,7 +420,7 @@ class RemoteFs {
         let du;
         if (withDu && st.stat.isDir) {
           // portable recursive size: `du -sk` (POSIX) → KiB; -b is GNU-only
-          try { const r = await dm.runCmd('sh', ['-c', `du -sk ${shq(abs)} 2>/dev/null | cut -f1`], { timeoutMs: 30000 }); du = (parseInt(String(r.stdout).trim()) || 0) * 1024 || null; } catch { du = null; }
+          try { const r = await dm.runCmd('sh', ['-c', `du -sk ${shq(abs)} 2>/dev/null | cut -f1`], { timeoutMs: 30000, by: this._actBy }); du = (parseInt(String(r.stdout).trim()) || 0) * 1024 || null; } catch { du = null; }
         }
         return { path: target, size: st.stat.size || 0, modified: st.stat.mtimeMs || 0, mode: st.stat.mode, uid: undefined, gid: undefined, kind: st.stat.isDir ? 'directory' : 'regular file', du: withDu ? (du ?? null) : undefined };
       } catch (e) { if (this._host(id)?.transport === 'dial') throw e; /* ssh: legacy below */ }
@@ -430,8 +434,8 @@ class RemoteFs {
   }
 
   // copy/move WITHIN the same host (cross-host relay handled in files.js)
-  async copy(id, from, to) { const w = await this._win(id); if (w) { await w.fsCopy(from, to); return { success: true }; } await this._run(id, `cp -rn ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
-  async move(id, from, to) { const w = await this._win(id); if (w) { await w.fsMove(from, to); return { success: true }; } await this._run(id, `mv -n ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
+  async copy(id, from, to) { const w = await this._win(id); if (w) { await w.fsCopy(from, to, { by: this._actBy }); return { success: true }; } await this._run(id, `cp -rn ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
+  async move(id, from, to) { const w = await this._win(id); if (w) { await w.fsMove(from, to, { by: this._actBy }); return { success: true }; } await this._run(id, `mv -n ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
 
   // Stream a remote file to an HTTP response (download / raw viewer). ALWAYS
   // NAMED (lane raw-filename): `attachment` for /api/download (that header is
@@ -517,7 +521,7 @@ class RemoteFs {
       const dm = await this._dev(id);
       if (!dm) throw new Error('device offline');
       let wrote = false;
-      const r = await dm.runStream(cmd, args, { onData: (b) => { if (!wrote) name(); wrote = true; try { res.write(b); } catch {} } });
+      const r = await dm.runStream(cmd, args, { onData: (b) => { if (!wrote) name(); wrote = true; try { res.write(b); } catch {} }, by: this._actBy });
       if (r.code !== 0 && !wrote && notFoundOnFail && !res.headersSent) { unname(); return res.status(404).end(); }
       if (!wrote) name();
       res.end();
@@ -555,7 +559,7 @@ class RemoteFs {
       const dm = await this._dev(id);
       if (!dm) { try { ws.destroy(); } catch { } throw new Error(`device "${h.name}" is offline`); }
       let over = false;
-      const r = await dm.runStream('sh', ['-c', cmd], { onData: (b) => { written += b.length; if (written > cap) { over = true; return; } try { ws.write(b); } catch { } } });
+      const r = await dm.runStream('sh', ['-c', cmd], { onData: (b) => { written += b.length; if (written > cap) { over = true; return; } try { ws.write(b); } catch { } }, by: this._actBy });
       await new Promise((done) => ws.end(done));
       if (over) throw Object.assign(new Error(`${what} too large (>${Math.round(cap / 1048576)}MB)`), { status: 413 });
       if (r.code !== 0 && written === 0) throw new Error(`${what} read failed (exit ${r.code})`);
@@ -607,7 +611,7 @@ class RemoteFs {
   }
 
   // Directory autocomplete (delegated — HostManager already has it)
-  dirComplete(id, input) { return this.hosts.dirComplete(id, input); }
+  dirComplete(id, input) { return this.hosts.dirComplete(id, input, { by: this._actBy }); }
 }
 
 module.exports = { RemoteFs, parseArchiveListing, FS_PORTABLE_CAP, WIN_REFUSED, filesOutdatedText, fsErrorBody };

@@ -304,6 +304,11 @@ elif [ ! -f "$ROOT/state/token" ]; then
 fi
 chmod 600 "$ROOT/state/token"
 echo "→ host token at $ROOT/state/token"
+# THE RELEASE-KEY PIN RESETS (design q-042 D2): a (re-)pair is the owner's own act — a new trust-on-first-use. The bundle
+# just landed pins ITS release keys at its first start (src/agentd/agentd.js) — when it carries none (a build before the
+# first signed release), the first validly signed update it is offered; a lost release key is recovered this way. The
+# version floor resets with it (fix r2: the newest version this install ran — a re-pair may land an older hub's agent).
+rm -f "$ROOT/state/trusted-keys.json" "$ROOT/state/release-floor.json"
 
 # Persist the dial config so the daemon can start ARGLESS forever after (it
 # re-dials from state/dial.json; no tokens in any unit file or argv).

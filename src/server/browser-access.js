@@ -81,13 +81,13 @@ function create({ hosts = null, env = () => ({}), homeDir = undefined, local = n
   /** Run ONE browser-serve op on the machine named by hostId. Throws a
    *  coded error on every failure (no silent failures law); the op's own
    *  `{ok:false, code, error}` is thrown too, so callers see ONE shape. */
-  async function call(hostId, action, params = {}) {
+  async function call(hostId, action, params = {}, { by = 'system:browser-access' } = {}) { // lane device-act-audit: `by` = who asked
     if (!S.BROWSER_SERVE_OPS.includes(action)) throw named('bad-request', `unknown browser-serve op '${action}'`);
     let r;
     if (isLocal(hostId)) r = await S.runBrowserServeOp(localOf(), action, params);
     else {
       const dm = await deviceOf(hostId);
-      try { r = await dm.browserServe(action, params); }
+      try { r = await dm.browserServe(action, params, { by }); }
       catch (e) { throw named(e && (e.code === 'host_needs_daemon' || e.code === 'builds_unsupported' || e.code === 'remove_unsupported') ? e.code : 'host_unavailable', `${hostId}: ${e && e.message}`); } // lane browser-admin 2a: an agent too old to list builds says so by name
     }
     // lane remote-profile-start: a machine's refusal keeps its ONE step (`{code, command, shell}`) for whoever says it

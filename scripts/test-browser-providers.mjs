@@ -231,20 +231,20 @@ console.log('— ③ a real agentd answers browser-serve; an old daemon is never
   dmReal = new DeviceManager({ dataDir, bundlePath: path.join(REPO, 'data/bin/vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
   const conn = await dmReal.connect();
   ok(conn.info?.capabilities?.includes?.('browser-serve'), 'the daemon advertises the browser-serve capability in its hello-ack');
-  const v = await dmReal.browserServe('version');
+  const v = await dmReal.browserServe('version', undefined, { by: 'system:test' });
   ok(v.ok && v.version === '0.38.0', `the op answers over the mux (version ${v.version}) — reply routed by its own op`);
   const id = 'bp-0b0b0b0b';
-  const s1 = await dmReal.browserServe('start', { profileId: id });
+  const s1 = await dmReal.browserServe('start', { profileId: id }, { by: 'system:test' });
   ok(s1.ok && s1.active && Number.isInteger(s1.pid) && s1.cdpPort === DEAD_CDP && s1.dir === path.join(HOME, '.agent-browser', 'vs-' + id), `start through the daemon: pid ${s1.pid}, the daemon composed the dir under ITS home`);
-  const st = await dmReal.browserServe('status', { profileId: id });
+  const st = await dmReal.browserServe('status', { profileId: id }, { by: 'system:test' });
   ok(st.ok && st.active && st.pid === s1.pid, 'status through the daemon agrees');
-  const cu = await dmReal.browserServe('cdp-url', { profileId: id });
+  const cu = await dmReal.browserServe('cdp-url', { profileId: id }, { by: 'system:test' });
   ok(cu.ok && cu.port === DEAD_CDP, 'cdp-url through the daemon');
-  const sp = await dmReal.browserServe('stop', { profileId: id });
+  const sp = await dmReal.browserServe('stop', { profileId: id }, { by: 'system:test' });
   ok(sp.ok && sp.closed === 1, 'stop through the daemon');
   // the op never throws across the wire (the daemon relays the runner's own
   // {ok:false, code, error}); the ACCESS layer is where it becomes a coded throw (④)
-  const bad = await dmReal.browserServe('start', { profileId: 'nope' });
+  const bad = await dmReal.browserServe('start', { profileId: 'nope' }, { by: 'system:test' });
   ok(bad && bad.ok === false && bad.code === 'bad-request' && /profile id/.test(bad.error), 'a machine-side refusal arrives as the machine\'s own {ok:false, code, error} object — never a throw across the wire');
   // THE GATE: an OLD daemon (no capability) is never sent a frame
   const c2 = await dmReal.connect();
@@ -252,10 +252,10 @@ console.log('— ③ a real agentd answers browser-serve; an old daemon is never
   c2.info.capabilities = saved.filter((x) => x !== 'browser-serve');
   let sent = 0; const origControl = c2.mux.control.bind(c2.mux);
   c2.mux.control = (m) => { if (m && m.op === 'browser-serve') sent++; return origControl(m); };
-  const g = await threw(() => dmReal.browserServe('version'));
+  const g = await threw(() => dmReal.browserServe('version', undefined, { by: 'system:test' }));
   ok(g && /lacks browser-serve \(capabilities gate\)/.test(g.message) && g.code === 'host_needs_daemon' && sent === 0, 'an old daemon is refused by the capability gate BEFORE any frame is sent (unknown ops hang)');
   c2.info.capabilities = saved; c2.mux.control = origControl;
-  ok((await dmReal.browserServe('version')).version === '0.38.0', 'with the capability back, the op answers again');
+  ok((await dmReal.browserServe('version', undefined, { by: 'system:test' })).version === '0.38.0', 'with the capability back, the op answers again');
   // drift guards over the three touches
   const cli = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
   const daemon = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');

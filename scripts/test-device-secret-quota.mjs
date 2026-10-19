@@ -39,19 +39,19 @@ check('hello-ack advertises place-secret + quota-refresh', conn.info.capabilitie
 try {
   // ── place-secret ──
   const dest = path.join(fakeHome, '.vibespace', 'acct-1.key');
-  const p = await dm.placeSecret(dest, Buffer.from('sk-ant-api-FAKE-VALUE'));
+  const p = await dm.placeSecret(dest, Buffer.from('sk-ant-api-FAKE-VALUE'), { by: 'system:test' });
   check('place-secret lands the file', fs.readFileSync(dest, 'utf-8') === 'sk-ant-api-FAKE-VALUE', p);
   const mode = fs.statSync(dest).mode & 0o777;
   check(`file is 0600 AT CREATION — no chmod window (${mode.toString(8)})`, mode === 0o600);
   const dmode = fs.statSync(path.dirname(dest)).mode & 0o777;
   check(`parent dir created 0700 (${dmode.toString(8)})`, dmode === 0o700);
   // overwrite is atomic + keeps mode
-  await dm.placeSecret(dest, Buffer.from('ROTATED'));
+  await dm.placeSecret(dest, Buffer.from('ROTATED'), { by: 'system:test' });
   check('overwrite is atomic and keeps 0600', fs.readFileSync(dest, 'utf-8') === 'ROTATED' && (fs.statSync(dest).mode & 0o777) === 0o600);
   // confinement: outside $HOME refused
-  let esc = null; try { await dm.placeSecret('/tmp/vs-escape.key', Buffer.from('x')); } catch (e) { esc = e.message; }
+  let esc = null; try { await dm.placeSecret('/tmp/vs-escape.key', Buffer.from('x'), { by: 'system:test' }); } catch (e) { esc = e.message; }
   check('a path outside $HOME is refused', /inside \$HOME/.test(esc || ''), esc);
-  let trav = null; try { await dm.placeSecret(path.join(fakeHome, '..', 'escape.key'), Buffer.from('x')); } catch (e) { trav = e.message; }
+  let trav = null; try { await dm.placeSecret(path.join(fakeHome, '..', 'escape.key'), Buffer.from('x'), { by: 'system:test' }); } catch (e) { trav = e.message; }
   check('traversal out of $HOME is refused', /inside \$HOME/.test(trav || ''), trav);
 
   // ── quota-refresh gates (never reaches the vendor in ANY of these) ──

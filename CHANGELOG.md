@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.315 — 2026-10-19
+
+### Security
+- Every action the hub takes on a paired machine now records who asked; read them in the machine card's Activity… or with vibespace-remote audit.
+- A new pairing command, a machine dialing in from a new address and an agent update pushed to a machine are now urgent items in For you.
+- Paired machines accept only signed agent updates and never an older one, so a compromised VibeSpace can no longer push code to them.
+- Machines added over ssh also check an agent update's signature before installing it.
+
 ## 2.369.314 — 2026-10-19
 
 ### Security

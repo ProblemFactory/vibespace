@@ -65,8 +65,8 @@ ok(r1.cursorFile === opCursor, 'manifest names the cursor file');
 ok(!fs.existsSync(opCursor), 'daemon did NOT persist the cursor (two-phase: commit is the server’s move)');
 
 // server-style commit over the device link, then incremental
-await dm.fsWrite(opCursor + '.tmp', JSON.stringify(r1.cursors));
-await dm.fsRename(opCursor + '.tmp', opCursor);
+await dm.fsWrite(opCursor + '.tmp', JSON.stringify(r1.cursors), { by: 'system:test' });
+await dm.fsRename(opCursor + '.tmp', opCursor, { by: 'system:test' });
 ok(fs.existsSync(opCursor), 'commit landed via fsWrite+fsRename');
 const r2 = await dm.usageScan({ cursorFile: opCursor });
 ok(r2.ndjson === '', 'committed cursor makes the next op incremental (nothing re-emitted)');
@@ -77,8 +77,8 @@ const r3 = await dm.usageScan({ cursorFile: opCursor });
 ok(r3.ndjson.split('\n').filter(Boolean).length === 1, 'append picked up past the committed cursor');
 // commit r3's cursor too — an UNCOMMITTED cursor re-emits by design (that IS
 // the two-phase guarantee), and the next section asserts exact deltas
-await dm.fsWrite(opCursor + '.tmp', JSON.stringify(r3.cursors));
-await dm.fsRename(opCursor + '.tmp', opCursor);
+await dm.fsWrite(opCursor + '.tmp', JSON.stringify(r3.cursors), { by: 'system:test' });
+await dm.fsRename(opCursor + '.tmp', opCursor, { by: 'system:test' });
 
 // ── dirty push (R4): the daemon fs.watches transcript dirs and pushes one
 // debounced discovery-dirty per change burst — the server's harvest kick +
@@ -153,9 +153,9 @@ ok(snapChild.jsonls[0].tailIds?.includes(SID), 'tail-id enrichment survives the 
 {
   const scannerSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-usage-scan'), 'utf8');
   const scanPath = path.join(home, '.vibespace', 'bin', 'vibespace-usage-scan');
-  await dm.fsWrite(scanPath, scannerSrc);
+  await dm.fsWrite(scanPath, scannerSrc, { by: 'system:test' });
   const chunks2 = [];
-  const r5 = await dm.runStream(process.execPath, [scanPath], { onData: (b) => chunks2.push(b) });
+  const r5 = await dm.runStream(process.execPath, [scanPath], { by: 'system:test', onData: (b) => chunks2.push(b) });
   ok(r5.code === 0 && !r5.error, 'ship-lane fallback: scanner runs via fsWrite+runStream');
   const shipEvs = Buffer.concat(chunks2).toString('utf8').split('\n').filter(Boolean);
   ok(shipEvs.length >= 5 && shipEvs.some((l) => JSON.parse(l).be === 'codex'), `ship-lane emits the full fixture incl. codex (${shipEvs.length} events, own default cursor)`);

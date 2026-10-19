@@ -45,7 +45,7 @@ check('hello-ack advertises pool-orders', conn.info.capabilities.includes('pool-
 const orders = { poolId: 'pool-x', linkPath: link, currentId: 'sub-a',
   ranked: [{ id: 'sub-a', dir: path.join(subs, 'sub-a'), creds: path.join(subs, 'sub-a', '.credentials.json') },
            { id: 'sub-b', dir: path.join(subs, 'sub-b'), creds: path.join(subs, 'sub-b', '.credentials.json') }] };
-await dm1.poolOrders(orders);
+await dm1.poolOrders(orders, undefined, { by: 'system:test' });
 check('orders accepted + persisted', fs.existsSync(path.join(ROOT, 'state', 'pool-orders.json')));
 
 // a fake LIVE pipe session the tailer will scan
@@ -87,7 +87,7 @@ const dm2 = mk();
 const reported = [];
 await dm2.connect();
 // the server re-pushes orders at boot/eval — the report rides that reply
-await dm2.poolOrders(orders, (evs) => { reported.push(...evs); dm2.ackPoolOrdersLog(); });
+await dm2.poolOrders(orders, (evs) => { reported.push(...evs); dm2.ackPoolOrdersLog(); }, { by: 'system:test' });
 check('the next orders push delivers the executed report', reported.length === 1 && reported[0].to === 'sub-b' && reported[0].poolId === 'pool-x');
 for (let i = 0; i < 20 && fs.existsSync(path.join(ROOT, 'state', 'pool-orders-log.ndjson')); i++) await sleep(300);
 check('ack clears the execution log (no duplicate reports)', !fs.existsSync(path.join(ROOT, 'state', 'pool-orders-log.ndjson')));
@@ -98,12 +98,12 @@ check('ack clears the execution log (no duplicate reports)', !fs.existsSync(path
   const link2 = path.join(subs, 'pool-y');
   fs.symlinkSync(path.join(subs, 'sub-a'), link2);
   const orders2 = { poolId: 'pool-y', linkPath: link2, currentId: 'sub-a', ranked: orders.ranked };
-  await dm2.poolOrders(orders);      // re-arm pool-x
-  await dm2.poolOrders(orders2);     // arm pool-y — must NOT evict pool-x
+  await dm2.poolOrders(orders, undefined, { by: 'system:test' });      // re-arm pool-x
+  await dm2.poolOrders(orders2, undefined, { by: 'system:test' });     // arm pool-y — must NOT evict pool-x
   const stored = JSON.parse(fs.readFileSync(path.join(ROOT, 'state', 'pool-orders.json'), 'utf8'));
   check('both pools are stored (single-slot bug fixed)', !!(stored['pool-x'] && stored['pool-y']), Object.keys(stored).join(','));
   // clear one → the other survives
-  await dm2.poolOrders({ clearPool: 'pool-y' });
+  await dm2.poolOrders({ clearPool: 'pool-y' }, undefined, { by: 'system:test' });
   const stored2 = JSON.parse(fs.readFileSync(path.join(ROOT, 'state', 'pool-orders.json'), 'utf8'));
   check('clearPool disarms ONLY that pool', !!stored2['pool-x'] && !stored2['pool-y'], Object.keys(stored2).join(','));
 }

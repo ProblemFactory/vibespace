@@ -51,6 +51,10 @@ export function lastRunText(lr) {
 export function agentUpgradeText(h) {
   const u = h && h.agentUpgrade;
   if (!u || !u.from || !u.to) return '';
+  // lane device-bundle-signing (design q-042 D2): the device refused the bundle's signature / this hub's build is unsigned
+  if (u.refused === 'downgrade') return t('Agent {from} — REFUSED {to}: an older version than one it already ran; see For you', { from: u.from, to: u.to }); // fix r2
+  if (u.refused) return t('Agent {from} — REFUSED the update to {to}: its release signature did not check ({code}); see For you', { from: u.from, to: u.to, code: u.refused });
+  if (u.unsigned) return t("Agent {from} — not updated to {to}: this VibeSpace's agent build is not the signed release (sign it before a release)", { from: u.from, to: u.to });
   return u.lost === 'commands' ? t('Agent {from} — its update to {to} failed, so commands cannot run here; rerun the install command (Pairing command)', { from: u.from, to: u.to }) : t('Agent {from} — its update to {to} failed; rerun the install command (Pairing command)', { from: u.from, to: u.to });
 }
 /** The cookie routes' codes in the device's words (§11.5). */

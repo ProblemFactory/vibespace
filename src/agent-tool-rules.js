@@ -102,6 +102,7 @@ const AGENT_TOOL_RULES = Object.freeze([
   Object.freeze({ tool: 'vibespace-task', verbs: null, why: 'reports progress / backlog on this session\'s own task' }),
   Object.freeze({ tool: 'vibespace-ask', verbs: null, why: 'files an item in the user\'s For you inbox' }),
   Object.freeze({ tool: 'vibespace-docs', verbs: null, why: 'reads a VibeSpace manual' }),
+  Object.freeze({ tool: 'vibespace-remote', verbs: null, why: 'reads what this VibeSpace did on its machines for THIS conversation — read-only; another subject\'s acts are the user\'s (human_only)' }), // lane device-act-audit
   Object.freeze({ tool: 'vibespace-feedback', verbs: null, why: 'tells the maintainers what felt wrong — one text row on this instance (the user reads it in ⚙), nothing runs' }), // lane agent-feedback
   Object.freeze({ tool: 'vibespace-vault', verbs: null, why: 'reads the vault\'s state or LOCKS it — unlocking is the user\'s door only (an agent token is refused human_only)' }), // lane vault-e2e-password
   Object.freeze({ tool: 'vibespace-msg', verbs: null, why: 'messages other agents — a wake is a billed turn under the spend ceiling' }),

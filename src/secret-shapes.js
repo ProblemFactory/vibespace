@@ -1,6 +1,6 @@
 'use strict';
 /**
- * PURE (imports only browser-trace's CREDENTIAL_WORDS; CJS so the hub, the bundle and a suite share one copy) —
+ * PURE (imports only src/credential-words.js — browser-trace's CREDENTIAL_WORDS; CJS so the hub, the bundle and a suite share one copy) —
  * SECRET SHAPES IN MACHINE OUTPUT (lane-exit-run-output verify r1 F1, 2026-10-01).
  *
  * A command's output heads are PERSISTED (data/exit-audit.jsonl), BROADCAST (every client socket), CARDED (the
@@ -50,7 +50,7 @@
  * the value's tail past 4096 characters — a 6 KB bearer, an RSA-4096 `client-key-data`); no pass throws (a text that
  * cannot be judged is returned unchanged — never a stall, never a crash, and the caller's belt still runs).
  */
-const { CREDENTIAL_WORDS } = require('./browser-trace.js');
+const { CREDENTIAL_WORDS } = require('./credential-words.js'); // browser-trace's list, its own module (lane device-act-audit: the device bundle carries this file)
 
 const REDACTED = '«redacted»';
 const INPUT_MAX = 64 * 1024;          // characters judged; the rest is dropped (the caller cut to 8 KiB before this)

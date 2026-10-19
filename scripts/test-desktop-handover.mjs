@@ -178,14 +178,14 @@ console.log('⑤ the op census — THREE-TOUCH');
   const routing = (/if \(m\.op === 'fs-result'[^\n]*/.exec(client) || [''])[0];
   ok(routing.includes("m.op === 'desktop-grab-result'") && routing.includes("m.op === 'desktop-input-result'"), 'touch 3: the client\'s id-keyed routing set holds both result ops');
   const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
-  for (const [m, args] of [['desktopGrab', ['s1']], ['desktopInput', ['s1', [{ t: 'kd', c: 'KeyA' }]]]]) {
+  for (const [m, args] of [['desktopGrab', ['s1', { by: 'system:test' }]], ['desktopInput', ['s1', [{ t: 'kd', c: 'KeyA' }], { by: 'system:test' }]]]) {
     const asked = [];
     const old = { connect: async () => ({ info: { capabilities: ['stream-offer', 'input-events'], daemonVersion: '2.369.300' } }), _request: async (x) => { asked.push(x); return { result: { ok: true } }; } };
     const e = await codeOfAsync(() => DeviceManager.prototype[m].apply(old, args));
     ok(e === 'host_needs_daemon' && asked.length === 0, `${m}: an agent without the capability is NEVER asked (host_needs_daemon, 0 requests)`, { e, asked });
     const nu = { ...old, connect: async () => ({ info: { capabilities: ['desktop-grab', 'desktop-input'] } }) };
     const r = await DeviceManager.prototype[m].apply(nu, args);
-    ok(r.ok && asked.length === 1 && asked[0].op === (m === 'desktopGrab' ? 'desktop-grab' : 'desktop-input') && asked[0].sid === 's1', `${m}: with the capability it asks its op once, naming the session`, asked);
+    ok(r.ok && asked.length === 1 && asked[0].op === (m === 'desktopGrab' ? 'desktop-grab' : 'desktop-input') && asked[0].sid === 's1' && asked[0].by === 'system:test', `${m}: with the capability it asks its op once, naming the session and who asked (\`by\`, int315: an act at lane device-act-audit's ONE send point)`, asked);
   }
 }
 
@@ -199,11 +199,12 @@ const sessions = new Map([
 const factsOf = (tok) => { for (const [id, s] of sessions) if (s.agentToken === tok) return { sessionId: id, session: s, name: s.name }; return null; };
 const STILL = SH.fakeStill();
 const calls = [];
+const bys = []; // int315: the `by` each device op carried (lane device-act-audit's ONE send point refuses an act without one)
 let capsNow = ['desktop-grab', 'desktop-input'];
 let inputHook = null;
 const dm = { connect: async () => ({ info: { capabilities: capsNow } }),
-  desktopGrab: async (sid) => { calls.push(['grab', sid]); return { ok: true, png64: STILL.png.toString('base64'), w: STILL.w, h: STILL.h, display: 'D1', origin: { x: 1920, y: 0 }, road: 'direct' }; },
-  desktopInput: async (sid, evs) => { calls.push(['input', sid, evs]); if (inputHook) await inputHook(); return { ok: true, n: evs.length, refused: [] }; } };
+  desktopGrab: async (sid, o) => { calls.push(['grab', sid]); bys.push(o && o.by); return { ok: true, png64: STILL.png.toString('base64'), w: STILL.w, h: STILL.h, display: 'D1', origin: { x: 1920, y: 0 }, road: 'direct' }; },
+  desktopInput: async (sid, evs, o) => { calls.push(['input', sid, evs]); bys.push(o && o.by); if (inputHook) await inputHook(); return { ok: true, n: evs.length, refused: [] }; } };
 const streams = new Map();
 const nudges = [];
 const wr = { device: (k) => streams.get(k) || null, nudge: (k) => nudges.push(k) };
@@ -239,6 +240,7 @@ console.log('⑥ the engine');
   const r1 = await eng.act('md-pc1', A, { verb: 'click', at: '100,50', button: 3 });
   const sent = calls[calls.length - 1];
   ok(r1.ok && sent[0] === 'input' && sent[1] === 'sid-A' && J(sent[2]) === J(DH.clickRecords('100,50', 3, { x: 1920, y: 0 })), 'click --at 100,50 --button 3 = the records + the display\'s origin, into the window\'s session', sent);
+  ok(bys.length >= 2 && bys.slice(-2).every((b) => b === 'agent:claude:cid-1'), 'int315: the still and the click each name the agent the desktop was handed to (`by` agent:claude:cid-1 — the act at the ONE send point)', bys.slice(-2));
   const f1 = eng.hooks.factsOf('stA');
   ok(f1 && f1.state === 'agent' && f1.holder.name === 'Alpha' && f1.dot && f1.dot.x === 100 && f1.dot.y === 50 && nudges.includes('stA'), 'the strip\'s facts: Alpha drives, its pointer at the still\'s 100,50 (the page\'s poll nudged)', f1);
   addStream('stP', 'sid-P'); // verify r1 (B): a SECOND window of the same machine (the phone) hears the lease by host — not its own (no pointer there), its owner input pauses; another machine's stream hears nothing

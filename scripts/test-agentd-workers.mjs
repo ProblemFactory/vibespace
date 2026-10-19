@@ -36,7 +36,7 @@ await new Promise((r) => srv.listen(0, '127.0.0.1', r));
 await dm.tcpForward(srv.address().port);
 try { await dm.tcpForward(1); } catch { }
 const p1 = path.join(tmp, 'skew.txt');
-await dm.fsWrite(p1, 'post-skew');
+await dm.fsWrite(p1, 'post-skew', { by: 'system:test' });
 const rr1 = await dm.fsReadRange(p1, 0, 64);
 ok(rr1.data.toString() === 'post-skew', 'fs ops answer correctly AFTER unrelated ops skewed the id spaces (the id-leak regression)');
 
@@ -49,12 +49,12 @@ const hungOp = dm.fsReadRange(fifo, 0, 10).catch((e) => { hangErr = e; });
 
 // while the op is stuck, the daemon must keep answering EVERYTHING else
 await new Promise((r) => setTimeout(r, 1500));
-const mid = await dm.runCmd('echo', ['alive']);
+const mid = await dm.runCmd('echo', ['alive'], { by: 'system:test' });
 ok(mid.stdout.trim() === 'alive', 'daemon answers run-cmd WHILE an fs op is wedged on the FIFO');
 const midProbe = await dm.probeCli();
 ok(!!midProbe?.facts, 'daemon answers probe ops mid-hang (session-pipe loop never starved)');
 const p2 = path.join(tmp, 'during.txt');
-await dm.fsWrite(p2, 'during-hang');
+await dm.fsWrite(p2, 'during-hang', { by: 'system:test' });
 ok(fs.readFileSync(p2, 'utf8') === 'during-hang', 'OTHER fs ops complete mid-hang (second worker serves them)');
 
 await hungOp;
@@ -65,7 +65,7 @@ ok(took < 25000, `deadline fired in bounded time (${(took / 1000).toFixed(1)}s),
 // ── self-heal: the terminated worker respawns; fs ops keep working ──
 await new Promise((r) => setTimeout(r, 800));
 const p3 = path.join(tmp, 'after.txt');
-await dm.fsWrite(p3, 'healed');
+await dm.fsWrite(p3, 'healed', { by: 'system:test' });
 const rr3 = await dm.fsReadRange(p3, 0, 64);
 ok(rr3.data.toString() === 'healed', 'pool self-heals after terminating the wedged worker');
 

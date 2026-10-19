@@ -24,8 +24,14 @@ function safePath(p) { return path.resolve(expandTilde(p)); }
 function rfs(req) {
   const host = req.query.host || req.body?.host;
   if (!host) return null;
-  const inst = req.app.locals.getRemoteFs?.();
+  const inst = remoteFsFor(req);
   return inst ? { fs: inst, host } : null;
+}
+/** lane device-act-audit: the RemoteFs bound to THIS request's subject — every act it sends a device names the person's
+ *  sign-in (src/device-audit.js byOfReq). */
+function remoteFsFor(req) {
+  const inst = req.app.locals.getRemoteFs?.();
+  return inst && typeof inst.as === 'function' ? inst.as(require('../device-audit.js').byOfReq(req)) : inst || null;
 }
 // remote paths are used verbatim (no local path.resolve — they live on the
 // remote); '~' expands remotely inside RemoteFs
@@ -521,7 +527,7 @@ router.post('/api/paste-image', async (req, res) => {
     // the session object is authoritative (client openSpec can lag).
     const sess = sessionId && req.app.locals.activeSessions?.get?.(String(sessionId));
     if (sess?.host) {
-      const rfsInst = req.app.locals.getRemoteFs?.();
+      const rfsInst = remoteFsFor(req);
       if (!rfsInst) return res.status(500).json({ error: 'remote fs unavailable' });
       const remotePath = `~/.vibespace/paste/paste-${Date.now()}.${ext}`;
       await rfsInst.mkdir(sess.host, '~/.vibespace/paste');
@@ -1009,7 +1015,7 @@ function startTransferOp(req, res, body) {
 async function crossHostTransfer(req, res, { move }) {
   const { src, dest, srcHost, destHost, overwrite } = req.body || {};
   if (!src || !dest) return res.status(400).json({ error: 'src and dest required' });
-  const inst = req.app.locals.getRemoteFs?.();
+  const inst = remoteFsFor(req);
   const op = req._transferOp || null;
   if (op) (srcHost ? remoteDuBytes(inst, srcHost, src) : localDuBytes(safePath(src))).then((b) => { if (b) op.total = b; });
   const count = (stream) => { if (op && stream) stream.on('data', (d) => { op.done += d.length; }); };
@@ -1143,7 +1149,7 @@ async function doCopy(req, res) {
   const op = req._transferOp || null;
   // cross-host (or host↔local) → relay stream through the server
   if ((srcHost || destHost) && srcHost !== destHost) return crossHostTransfer(req, res, { move: false });
-  const R = rfs(req) || (srcHost ? { fs: req.app.locals.getRemoteFs(), host: srcHost } : null);
+  const R = rfs(req) || (srcHost ? { fs: remoteFsFor(req), host: srcHost } : null);
   if (R) {
     let stop = null;
     if (op) {
@@ -1177,7 +1183,7 @@ async function doMove(req, res) {
   const { srcHost, destHost } = req.body || {};
   const op = req._transferOp || null;
   if ((srcHost || destHost) && srcHost !== destHost) return crossHostTransfer(req, res, { move: true });
-  const R = srcHost ? { fs: req.app.locals.getRemoteFs(), host: srcHost } : null;
+  const R = srcHost ? { fs: remoteFsFor(req), host: srcHost } : null;
   if (R) { try { return res.json(await R.fs.move(R.host, remotePath(req.body.src), remotePath(req.body.dest))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
   const { src, dest, overwrite } = req.body || {};
   if (!src || !dest) return res.status(400).json({ error: 'src and dest required' });

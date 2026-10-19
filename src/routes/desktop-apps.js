@@ -208,6 +208,14 @@ function launchedByOfReq(req) {
   try { f = ctx && ctx.windowEngine && typeof ctx.windowEngine.factsForToken === 'function' ? ctx.windowEngine.factsForToken(token) : null; } catch { f = null; }
   return f ? { kind: 'agent', sessionId: f.sessionId, name: f.name || null } : { kind: 'agent' };
 }
+/** lane device-act-audit: WHO an act on a device comes from — an agent's session token its session, a job token a job,
+ *  anything else the person's sign-in (src/device-audit.js byOfReq). */
+function actByOfReq(req) {
+  if (!isAgentBearer(req)) return require('../device-audit.js').byOfReq(req);
+  if (/^Bearer\s+jbt_/i.test(String(req.headers.authorization || ''))) return 'job:token';
+  const lb = launchedByOfReq(req);
+  return require('../device-acts.js').byAgent(lb && lb.sessionId) || 'agent:unknown';
+}
 function fail(res, e) {
   const code = e?.code || null;
   const status = code === 'not-found' || code === 'file-missing' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' || code === 'bad-url' || code === 'not-a-browser' || code === 'automation-flag' || code === 'profile-not-owned' || code === 'profile-is-users' || code === 'unsupported-host'
@@ -389,7 +397,7 @@ const DONE = { display: () => xpraDone, catalog: (host, what) => officeDone(host
 const shownDigest = (req) => (req.body && typeof req.body.planDigest === 'string' && req.body.planDigest ? req.body.planDigest.slice(0, 64) : null);
 router.post('/api/desktop/install-xpra', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
-  return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, { ...o, expectDigest: shownDigest(req) }), xpraDone);
+  return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, { ...o, expectDigest: shownDigest(req), by: actByOfReq(req) }), xpraDone);
 });
 /** §7.9: after a LibreOffice install the MACHINE's catalog is asked again (its LibreOffice facts re-read at once —
  *  `facts {fresh}`) and the install counts as done only when it now serves the row; otherwise `still-absent` by name
@@ -409,7 +417,7 @@ router.post('/api/desktop/install', async (req, res) => {
   const row = installRow(what);
   if (row && row.humanOnly && humanOnly(req, res)) return; // design 014 D1: the Windows one-time setup is people's
   if (!row) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
-  return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req) }), DONE[row.done](host, what));
+  return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req), by: actByOfReq(req) }), DONE[row.done](host, what));
 });
 // ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's WHOLE DESKTOP — people only ──
 /** An agent's token (a Bearer header, a token in the body or the url) is refused by name on every whole-desktop door:
@@ -433,7 +441,7 @@ router.post('/api/desktop/machine-desktop/run', async (req, res) => {
   if (humanOnly(req, res)) return;
   const host = hostParam(req, res); if (!host) return;
   if (!ctx.access) return noAccess(res);
-  try { res.json(await ctx.access.runOnDesktop(host, req.body ? req.body.cmd : undefined, { report: !!(req.body && req.body.window === true) })); } catch (e) { fail(res, e); }
+  try { res.json(await ctx.access.runOnDesktop(host, req.body ? req.body.cmd : undefined, { report: !!(req.body && req.body.window === true), by: actByOfReq(req) })); } catch (e) { fail(res, e); }
 });
 // lane remoteapp-r1a (design q-024 §1.2): ONE app of a paired WINDOWS machine as a real window through RemoteApp — people only
 // (§1.6 fence 4: an agent never starts one). The machine's setup is asked first, so the launcher hears what is missing
@@ -506,7 +514,7 @@ router.get('/api/desktop/machine-app/watch', async (req, res) => {
 router.post('/api/desktop/machine-app/on-top', async (req, res) => {
   if (humanOnly(req, res)) return;
   const ma = appsOf(res); if (!ma) return;
-  try { res.json(await ma.pin(String((req.body && req.body.key) || ''), !!(req.body && req.body.on))); } catch (e) { appFail(res, e); }
+  try { res.json(await ma.pin(String((req.body && req.body.key) || ''), !!(req.body && req.body.on), { by: actByOfReq(req) })); } catch (e) { appFail(res, e); }
 });
 router.post('/api/desktop/machine-app/untrack', (req, res) => {
   if (humanOnly(req, res)) return;
@@ -565,7 +573,7 @@ router.post('/api/desktop/machine-desktop/settings-open', async (req, res) => {
   if (!ctx.access || typeof ctx.access.settingsOpen !== 'function') return noAccess(res);
   const pane = String((req.body && req.body.pane) || '');
   if (pane !== 'screen' && pane !== 'accessibility') { res.status(400).json({ error: 'pane is screen or accessibility', code: 'bad-request' }); return; }
-  try { res.json(await ctx.access.settingsOpen(host, pane)); } catch (e) { fail(res, e); }
+  try { res.json(await ctx.access.settingsOpen(host, pane, { by: actByOfReq(req) })); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/machine-desktop/stream/answer', async (req, res) => {
   if (humanOnly(req, res)) return;

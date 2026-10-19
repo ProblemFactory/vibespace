@@ -48,12 +48,12 @@ const viaLocal = await hosts.device('local');
 const viaBounded = await hosts.deviceBounded(null, 5000);
 ok(viaNull === dm && viaLocal === dm && viaBounded === dm, "device(null) / device('local') / deviceBounded(null) all resolve device #0");
 
-const r = await viaBounded.runCmd('sh', ['-c', 'echo dev0-$((6*7))'], { timeoutMs: 8000 });
+const r = await viaBounded.runCmd('sh', ['-c', 'echo dev0-$((6*7))'], { by: 'system:test', timeoutMs: 8000 });
 ok(String(r?.stdout || '').includes('dev0-42'), 'runCmd over the local unix socket executes for real');
 
 // fs ops — the same op surface every remote consumer uses
 const p = path.join(root, 'probe.txt');
-await viaBounded.fsWrite(p, Buffer.from('one surface'));
+await viaBounded.fsWrite(p, Buffer.from('one surface'), { by: 'system:test' });
 const rd = await viaBounded.fsReadRange(p, 0, 1024);
 ok(rd?.data?.toString() === 'one surface', 'fsWrite + fsReadRange round-trip on device #0');
 

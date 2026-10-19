@@ -830,18 +830,18 @@ await section('§6 a REAL daemon from this tree\'s bundle: the capability, {shel
   try {
     ok(conn.info && Array.isArray(conn.info.capabilities) && conn.info.capabilities.includes('run-shell'), 'the hello-ack advertises run-shell (the THREE-TOUCH rule: capability first)', conn.info && conn.info.capabilities);
     ok(conn.info.platform === process.platform, `the hello-ack states the daemon's platform (${conn.info.platform})`);
-    const r = await dm.runShell('printf out; printf err 1>&2; exit 3', { timeoutMs: 30000, waitMs: 40000 });
+    const r = await dm.runShell('printf out; printf err 1>&2; exit 3', { by: 'system:test', timeoutMs: 30000, waitMs: 40000 });
     ok(r && r.code === 3 && r.stdout === 'out' && r.stderr === 'err' && r.interpreter === 'sh' && r.timedOut === false && !r.spawnError, '{shell: <line>} runs through sh -lc on this box: code 3, both streams, interpreter sh, no spawnError (the win32 branch — cmd.exe — is unit-level in §1: no Windows box runs this lane)', r);
-    const ml = await dm.runShell('echo one\necho two', { timeoutMs: 30000 });
+    const ml = await dm.runShell('echo one\necho two', { by: 'system:test', timeoutMs: 30000 });
     ok(ml && ml.code === 0 && ml.stdout === 'one\ntwo\n', 'a multi-line shell line runs whole under sh', ml);
-    const sf = await dm.runCmd(`/nonexistent/vs-exo-${process.pid}-bin`, ['x'], { timeoutMs: 30000 });
+    const sf = await dm.runCmd(`/nonexistent/vs-exo-${process.pid}-bin`, ['x'], { by: 'system:test', timeoutMs: 30000 });
     ok(sf && sf.spawnError && sf.spawnError.code === 'ENOENT' && sf.code === 127 && sf.stdout === '' && sf.stderr === '' && sf.timedOut === false, 'a child that never started answers spawnError ENOENT + code 127 (pre-fix: code 1, nothing else — the production shape)', sf);
     const exe = path.join(SCR, 'not-executable-2'); fs.writeFileSync(exe, '#!/bin/sh\necho hi\n', { mode: 0o644 });
-    const sfa = await dm.runCmd(exe, [], { timeoutMs: 30000 });
+    const sfa = await dm.runCmd(exe, [], { by: 'system:test', timeoutMs: 30000 });
     ok(sfa && sfa.spawnError && sfa.spawnError.code === 'EACCES' && sfa.code === 126, '…a file without the execute bit: EACCES + 126', sfa);
-    const ex3 = await dm.runCmd('sh', ['-c', 'exit 3'], { timeoutMs: 30000 });
+    const ex3 = await dm.runCmd('sh', ['-c', 'exit 3'], { by: 'system:test', timeoutMs: 30000 });
     ok(ex3 && ex3.code === 3 && !ex3.spawnError, '…a non-zero exit is never a spawn failure (the argv form unchanged)', ex3);
-    const bad = await settle(dm.runShell('', { timeoutMs: 30000 }));
+    const bad = await settle(dm.runShell('', { by: 'system:test', timeoutMs: 30000 }));
     ok(bad.v && bad.v.spawnError && bad.v.spawnError.code === 'ESHELLLINE', 'an empty shell line is refused by name before a spawn', bad.v || bad.e);
     // the gate: a daemon without the capability is never asked — the client method refuses by name
     const old = { ...dm, _conn: { ...dm._conn, info: { ...conn.info, capabilities: conn.info.capabilities.filter((c) => c !== 'run-shell') } }, connect: async function () { return this._conn; } };
@@ -885,7 +885,7 @@ await section('§7 controls (patched copies)', async () => {
   const bundle = bundleFrom(adCopy, 'ctl');
   const { dm, conn } = await realDaemon(bundle, 'ctl');
   try {
-    const sf = await dm.runCmd(`/nonexistent/vs-exo-${process.pid}-bin`, [], { timeoutMs: 30000 });
+    const sf = await dm.runCmd(`/nonexistent/vs-exo-${process.pid}-bin`, [], { by: 'system:test', timeoutMs: 30000 });
     ok(sf && !sf.spawnError && sf.code === 1 && sf.stdout === '' && sf.stderr === '' && conn.info.capabilities.includes('run-shell'), 'CONTROL (d): the daemon that never consults the judge answers the production shape — code 1, empty streams, nothing named — the §6 leg goes red', sf);
   } finally { try { dm.stop(); } catch { } }
   // (e) verify r1 F1: a secret-shape rule that redacts nothing — the §2b table and the §3 printenv leg go red
@@ -1469,7 +1469,7 @@ require(${JSON.stringify(agentdFile)});
     const out = { seq: [] };
     try {
       fs.writeFileSync(fw.flag, '1');
-      for (const l of lines) out.seq.push(out[l] = await dm.runShell(l, { timeoutMs: 30000, waitMs: 40000 }));
+      for (const l of lines) out.seq.push(out[l] = await dm.runShell(l, { by: 'system:test', timeoutMs: 30000, waitMs: 40000 }));
     } finally { try { fs.unlinkSync(fw.flag); } catch { } try { dm.stop(); } catch { } }
     const lines0 = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').map((x) => JSON.parse(x)) : []);
     out.cmdLog = lines0(fw.log);
@@ -1488,7 +1488,7 @@ require(${JSON.stringify(agentdFile)});
   // POSIX unchanged: the real daemon of §6's bundle, bytes through String() as before and no \`encoding\` key
   const { dm: dmP } = await realDaemon(bundleFrom('src/agentd/agentd.js', 'posix9'), 'posix9');
   try {
-    const r = await dmP.runShell("printf '\\344\\270\\255\\317\\265\\315\\263\\325\\322'", { timeoutMs: 30000, waitMs: 40000 });
+    const r = await dmP.runShell("printf '\\344\\270\\255\\317\\265\\315\\263\\325\\322'", { by: 'system:test', timeoutMs: 30000, waitMs: 40000 });
     ok(r && r.stdout === Buffer.from([0xe4, 0xb8, 0xad, 0xcf, 0xb5, 0xcd, 0xb3, 0xd5, 0xd2]).toString() && !('encoding' in r), 'POSIX: the bytes ride String() byte for byte, no `encoding` key (a byte-identical leg)', r);
   } finally { try { dmP.stop(); } catch { } }
 

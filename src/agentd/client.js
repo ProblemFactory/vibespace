@@ -16,6 +16,9 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { Mux, PROTO_VERSION } = require('./mux.js');
 const { daemonEnv } = require('../agent-env.js');
+const DA = require('../device-acts.js'); // lane device-act-audit: the op layers + `by` + THE audit line (PURE)
+const BY_UPGRADE = 'system:device-upgrade'; // the hub's version-drift rule pushes a new agent (no person, no agent asked)
+const SIG = require('../agentd-signature.js'); // design q-042 D2: the release record a pushed bundle must carry
 
 // lane windows-device-fs — THE DOOR: a POSIX shell is never asked of a WINDOWS agent THAT HAS NONE. The hub ran `sh -c …`
 // over the device link for the Files view, the home, path completion, the sweeps; a Windows machine without `sh` answered
@@ -55,7 +58,7 @@ class DeviceManager {
    *  version      release version (= daemonVersion expected)
    *  log          logger fn
    */
-  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null } = {}) {
+  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null, onAct = null, onUpgradeRefused = null, onUpgradeTrusted = null } = {}) {
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
@@ -74,6 +77,18 @@ class DeviceManager {
     // that never dials back after its re-exec reaches the user (src/server/device-upgrade-watch.js begun / answered)
     this._onUpgradeBegin = typeof onUpgradeBegin === 'function' ? onUpgradeBegin : null;
     this._onAnswer = typeof onAnswer === 'function' ? onAnswer : null;
+    // lane device-act-audit: THE hub's audit door — every act / code op sent through THIS client is ONE line (src/device-acts.js
+    // lineOf), handed to the construction site's writer (src/device-audit.js through hosts.deviceAudit; every `new DeviceManager`
+    // passes one — scripts/test-device-acts.mjs census)
+    this._onAct = typeof onAct === 'function' ? onAct : null;
+    // lane device-bundle-signing (design q-042 D2): an upgrade this hub WILL NOT push (its build is not the signed release)
+    // or one the DEVICE refused (its signature did not check) — the same door (device-upgrade-watch `refused`)
+    this._onUpgradeRefused = typeof onUpgradeRefused === 'function' ? onUpgradeRefused : null;
+    // fix r2 (verify-r1 RED-2): a device that trusted NO release key took the first validly signed one (TOFU) — said
+    // through the same door (device-upgrade-watch `trusted`: an URGENT item naming the fingerprint)
+    this._onUpgradeTrusted = typeof onUpgradeTrusted === 'function' ? onUpgradeTrusted : null;
+    this._releaseCache = null;
+    this._unsignedSaid = new Set();
     // The version a freshly-upgraded daemon will REPORT is the one baked into
     // the bundle we ship — not this server's package version. They diverge
     // whenever the repo is rebuilt without restarting the server (or vice
@@ -158,6 +173,71 @@ class DeviceManager {
       this._bundleVerCache = { key, v };
       return v;
     } catch { return this._version; }
+  }
+
+  /** THE RELEASE STATE of the bundle this hub would push (design q-042 D2): `{signed: true, manifest}` when the
+   *  manifest beside it (data/bin/vibespace-agentd.manifest.json — written by the build only when the bytes ARE the signed
+   *  release, scripts/agentd-release.mjs) names these exact bytes and this version; else `{signed: false, code:
+   *  'unsigned-local-build', why}`. Cached by the bundle's and the manifest's mtime+size (the digest reads 5 MB). */
+  _releaseState(bytes = null) {
+    const mf = this._bundlePath ? this._bundlePath.replace(/\.js$/, '') + '.manifest.json' : null;
+    try {
+      const st = fs.statSync(this._bundlePath);
+      let mk = 'none'; try { const m = fs.statSync(mf); mk = m.mtimeMs + ':' + m.size; } catch { }
+      const key = st.mtimeMs + ':' + st.size + ':' + mk;
+      if (!bytes && this._releaseCache?.key === key) return this._releaseCache.v;
+      const sha256 = crypto.createHash('sha256').update(bytes || fs.readFileSync(this._bundlePath)).digest('hex');
+      let manifest = null; try { manifest = JSON.parse(fs.readFileSync(mf, 'utf-8')); } catch { }
+      const v = { ...SIG.manifestMatches(manifest, { sha256, version: this._expectedVersion() }), sha256 };
+      this._releaseCache = { key, v };
+      return v;
+    } catch (e) { return { signed: false, code: 'unsigned-local-build', why: 'the agent bundle is unreadable (' + (e && e.code || 'error') + ')' }; }
+  }
+  /** The release state of a bundle on disk without a connection (fix r2): the ssh road (src/hosts.js installAgentd)
+   *  ships exactly what the dial road would push — `{signed, manifest, sha256, version}` (version = the bundle's own). */
+  static releaseOf(bundlePath, version) {
+    const dm = Object.create(DeviceManager.prototype);
+    Object.assign(dm, { _bundlePath: bundlePath, _version: version, _releaseCache: null, _bundleVerCache: null });
+    return { ...dm._releaseState(), version: dm._expectedVersion() };
+  }
+  /** A device reported its FIRST trust in a release key (fix r2): it trusted none, and the bundle that just landed was
+   *  validly signed by a self-consistent key set — the hub's door files the urgent item (the owner checks the fingerprint). */
+  _trusted(done, from, to) {
+    const ids = done && Array.isArray(done.tofu) ? done.tofu.filter((k) => typeof k === 'string' && /^[0-9a-f]{16}$/.test(k)).slice(0, 16) : [];
+    if (!ids.length) return;
+    this._log(`[agentd] daemon ${from} → ${to}: it trusted no release key and pinned ${ids.join(', ')} on first use`);
+    try { this._onUpgradeTrusted?.(from, to, { keyIds: ids, by: BY_UPGRADE }); } catch { }
+  }
+  /** May this hub push its bundle to the daemon on the other end? A signed release: yes, to any. An unsigned local
+   *  build: only to THIS machine's own daemon (the local proof); any other is told ONCE per version and keeps its agent. */
+  _mayPush(from, to) {
+    const rel = this._releaseState();
+    if (rel.signed || this._transport.kind === 'local') return true;
+    if (!this._unsignedSaid.has(to)) {
+      this._unsignedSaid.add(to);
+      this._log(`[agentd] daemon ${from} ≠ ${to} — NOT upgrading it: this hub's agent build is not the signed release (${rel.why}). The device keeps ${from} (capability-gated); sign the agent before a release (scripts/sign-agentd.mjs).`);
+      try { this._onUpgradeRefused?.(from, to, { code: 'unsigned-local-build', why: rel.why, sha256: rel.sha256 || null, by: BY_UPGRADE }); } catch { }
+    }
+    return false;
+  }
+  /** The DEVICE refused the bundle (design q-042 D2 — its signature did not check): never pushed again for this version
+   *  (the ledger gives up at once), and the hub's door files the urgent For-you item. Other failures keep the 3 tries. */
+  _refused(e, from, to, led) {
+    if (!e || !SIG.REFUSALS.includes(e.code)) return;
+    led.tries = Math.max(3, led.tries); led.gaveUp = true; this._ledgerWrite(to, led);
+    this._log(`[agentd] daemon ${from} REFUSED the upgrade to ${to} — ${e.code}${e.keyId ? ' (key ' + e.keyId + ')' : ''}: never pushing this bundle again`);
+    try { this._onUpgradeRefused?.(from, to, { code: e.code, keyId: e.keyId || null, floor: e.floor || null, sha256: this._releaseState().sha256 || null, by: BY_UPGRADE }); } catch { }
+  }
+  /** The local proof (design q-042 D2): 32 random bytes written into the daemon's OWN state dir right before every upgrade
+   *  of THIS machine's daemon — whoever writes that dir is this machine's user already; the daemon deletes it on any read. */
+  _writeLocalProof() {
+    const proof = crypto.randomBytes(32).toString('hex');
+    const file = path.join(this._state, 'upgrade-proof'), tmp = file + '.' + process.pid + '.tmp';
+    fs.mkdirSync(this._state, { recursive: true, mode: 0o700 });
+    try { fs.unlinkSync(tmp); } catch { }
+    fs.writeFileSync(tmp, proof, { mode: 0o600 });
+    fs.renameSync(tmp, file);
+    return proof;
   }
 
   /** The loop breaker's count for THIS bundle version: the ledger's when one is wired (survives a rebuilt instance),
@@ -302,16 +382,17 @@ class DeviceManager {
                 try { global.__vsEvent?.('agentd-upgrade-stuck', { detail: `${msg.daemonVersion}→${expected}` }); } catch { }
                 try { this._onUpgradeStuck?.(msg.daemonVersion, expected, { platform: msg.platform, capabilities: msg.capabilities }); } catch { }
               }
-            } else if (msg.daemonVersion !== expected && fs.existsSync(this._bundlePath)) {
+            } else if (msg.daemonVersion !== expected && fs.existsSync(this._bundlePath) && this._mayPush(msg.daemonVersion, expected)) {
               led.tries += 1; this._ledgerWrite(expected, led);
               // version drift → stream the new bundle (self-upgrade), then reconnect
               this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — upgrading (attempt ${led.tries}/3)`);
               try { this._onUpgradeBegin?.(msg.daemonVersion, expected, { platform: msg.platform }); } catch { }
-              this._upgrade(mux).then(() => {
+              this._upgrade(mux, { from: msg.daemonVersion }).then((done) => {
+                this._trusted(done, msg.daemonVersion, expected);
                 settled = true;
                 try { sock.destroy(); } catch { }
                 setTimeout(() => resolve(this._connectLoop()), 700); // re-exec window
-              }).catch(fail);
+              }).catch((e) => { this._refused(e, msg.daemonVersion, expected, led); fail(e); });
               return;
             }
             if (msg.daemonVersion === expected) { this._ledgerWrite(expected, { tries: 0, gaveUp: false }); try { this._onVersionMatch?.(expected); } catch { } }
@@ -423,22 +504,33 @@ class DeviceManager {
     });
   }
 
-  async _upgrade(mux) {
+  async _upgrade(mux, { from = null } = {}) {
     const bundle = fs.readFileSync(this._bundlePath);
+    // lane device-act-audit: the `code` layer's ONE send — it carries its `by` (the version-drift rule) and is ONE audit line
+    // (from → to, the size) whatever its end; the device records it in its own state/acts.log
+    const req = { op: 'upgrade', version: this._expectedVersion(), size: bundle.length, from: from || undefined, by: BY_UPGRADE };
+    const t0 = Date.now();
+    const said = (ok, code) => this._act(req, { ok, code, ms: Date.now() - t0 });
+    // THE HUB SHIPS NO UNSIGNED CODE (design q-042 D2): the release record rides the control line (`sig`) and the device
+    // verifies it before anything points at the bytes; an unsigned local build reaches only THIS machine's own daemon,
+    // with the single-use local proof (src/agentd/agentd.js landingVerdict)
+    const rel = this._releaseState(bundle);
+    if (!rel.signed && this._transport.kind !== 'local') { const e = new Error(`not upgrading: this hub's agent build is not the signed release — ${rel.why}`); e.code = 'unsigned-local-build'; throw e; }
+    const proof = this._transport.kind === 'local' ? this._writeLocalProof() : null; // the hub's OWN daemon: always (it never depends on a pin)
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('upgrade timeout')), 30000);
+      const timer = setTimeout(() => { said(false, 'timeout'); reject(new Error('upgrade timeout')); }, 30000);
       const origOnControl = mux.onControl;
       mux.onControl = (msg) => {
-        if (msg.op === 'upgrade-done') { clearTimeout(timer); mux.onControl = origOnControl; resolve(); }
+        if (msg.op === 'upgrade-done') { clearTimeout(timer); mux.onControl = origOnControl; said(true, null); resolve(msg); }
         // lane device-upgrade-stuck: a daemon that could not LAND the bundle says so (≥ 2.369.203) — the attempt ends
         // now with the device's own reason, never a silent 30 s timeout
-        else if (msg.op === 'upgrade-failed') { clearTimeout(timer); mux.onControl = origOnControl; reject(new Error('the device could not land the upgrade — ' + String(msg.error || '?').replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200))); }
+        else if (msg.op === 'upgrade-failed') { clearTimeout(timer); mux.onControl = origOnControl; said(false, msg.code || 'upgrade_failed'); const e = new Error('the device could not land the upgrade — ' + String(msg.error || '?').replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200)); if (typeof msg.code === 'string') e.code = msg.code.slice(0, 40); if (typeof msg.keyId === 'string') e.keyId = msg.keyId.replace(/[^0-9a-f]/g, '').slice(0, 16); if (typeof msg.floor === 'string' && SIG.VERSION_RE.test(msg.floor)) e.floor = msg.floor; reject(e); }
         else origOnControl(msg);
       };
       // the version the daemon lands under and REPORTS after its re-exec (VIBESPACE_AGENTD_VERSION) is the
       // BUNDLE's own — the one `_expectedVersion()` compares against. Naming the package version here made a
       // rebuilt-without-restart server upgrade the same device on every natural restart (verify-r1 C1).
-      mux.control({ op: 'upgrade', version: this._expectedVersion(), size: bundle.length });
+      mux.control({ ...req, ...(rel.signed ? { sig: rel.manifest } : {}), ...(proof ? { localProof: proof } : {}) });
       // stream on chan 1 in credit-sized slices (the mux queues past the window)
       for (let off = 0; off < bundle.length; off += 65536) {
         mux.data(1, bundle.subarray(off, Math.min(off + 65536, bundle.length)));
@@ -514,14 +606,37 @@ class DeviceManager {
     return handle;
   }
 
-  async _request(payload) {
+  /** lane device-act-audit: THE ONE SEND POINT. An act / code op (src/device-acts.js layers) carries WHO asked — `by`
+   *  (`human:` / `agent:` / `job:` / `system:`) — or it is refused HERE, in-process, `act_without_by`, logged and NEVER sent;
+   *  every act that IS sent is ONE audit line (op, by, summary, ok / code, the redacted output head, ms). `audit: false` =
+   *  the caller writes the line itself (a stream's line is written at its end — `_streamOp`). */
+  async _request(payload, { audit = true } = {}) {
+    const act = DA.needsBy(payload);
+    if (act && !DA.validBy(payload.by)) return this._refuseAct(payload);
     const conn = await this.connect();
     const id = conn.nextId++;
+    const line = audit && act && DA.auditable(payload);
+    const t0 = Date.now();
     return new Promise((resolve, reject) => {
-      conn.pending.set(id, (m) => (m.error ? reject(Object.assign(new Error(m.error), m.linkLost ? { code: 'link_lost' } : {})) : resolve(m)));
+      conn.pending.set(id, (m) => {
+        if (line) this._act(payload, { ...DA.answerOf(m), outHead: DA.outHeadOf(m), ms: Date.now() - t0 });
+        return m.error ? reject(Object.assign(new Error(m.error), m.linkLost ? { code: 'link_lost' } : {})) : resolve(m);
+      });
       conn.mux.control({ ...payload, id });
-      setTimeout(() => { if (conn.pending.delete(id)) reject(new Error(payload.op + ' timeout')); }, payload.waitMs || payload.timeoutMs || 30000);
+      setTimeout(() => { if (conn.pending.delete(id)) { if (line) this._act(payload, { ok: false, code: 'timeout', ms: Date.now() - t0 }); reject(new Error(payload.op + ' timeout')); } }, payload.waitMs || payload.timeoutMs || 30000);
     });
+  }
+  /** One audit line of an act sent through this client (never throws). */
+  _act(payload, facts = {}) {
+    if (!this._onAct) return;
+    try { this._onAct(DA.lineOf({ at: Date.now(), payload, by: payload.by, ...facts })); } catch { /* the act's answer is the caller's; a writer's failure is the writer's */ }
+  }
+  /** An act without a `by`: refused in-process, said in the journal and the audit, never sent. */
+  _refuseAct(payload) {
+    const l = DA.lineOf({ at: Date.now(), payload, by: null, ok: false, code: 'act_without_by' });
+    try { this._log(`[device-acts] REFUSED ${l.op} with no "by" (who asked) — never sent: ${l.summary}`); } catch { }
+    if (this._onAct) { try { this._onAct(l); } catch { } }
+    return Promise.reject(Object.assign(new Error(`act_without_by: ${l.op} was not sent — the hub names who asked for every act on a device`), { code: 'act_without_by' }));
   }
 
   /** Kill a daemon pipe session by sid without attaching (the dial-chat
@@ -534,10 +649,11 @@ class DeviceManager {
   // ── M3 ──
   fsStat(p) { return this._request({ op: 'fs-op', action: 'stat', path: p }); }
   fsList(p) { return this._request({ op: 'fs-op', action: 'list', path: p }); }
-  fsWrite(p, buf) { return this._request({ op: 'fs-op', action: 'write', path: p, data64: Buffer.from(buf).toString('base64') }); }
-  fsRename(p, to) { return this._request({ op: 'fs-op', action: 'rename', path: p, to }); }
-  fsMkdir(p) { return this._request({ op: 'fs-op', action: 'mkdir', path: p }); }
-  fsRm(p, recursive = false) { return this._request({ op: 'fs-op', action: 'rm', path: p, recursive }); }
+  // lane device-act-audit: every write / rename / mkdir / rm names who asked (`{by}` — the ONE send point refuses it without)
+  fsWrite(p, buf, { by } = {}) { return this._request({ op: 'fs-op', action: 'write', path: p, data64: Buffer.from(buf).toString('base64'), by }); }
+  fsRename(p, to, { by } = {}) { return this._request({ op: 'fs-op', action: 'rename', path: p, to, by }); }
+  fsMkdir(p, { by } = {}) { return this._request({ op: 'fs-op', action: 'mkdir', path: p, by }); }
+  fsRm(p, recursive = false, { by } = {}) { return this._request({ op: 'fs-op', action: 'rm', path: p, recursive, by }); }
   /** lane windows-device-fs: the Files view's ops WITHOUT a shell (`fs-portable`; `~` expanded by the device) — what a
    *  Windows agent does with its own fs. Capability-gated: an older agent is never asked an op it lacks (it would hang). */
   async _fsPortable(payload, waitMs) {
@@ -546,8 +662,8 @@ class DeviceManager {
     return this._request({ op: 'fs-op', ...payload, ...(waitMs ? { waitMs } : {}) });
   }
   fsHome() { return this._fsPortable({ action: 'home', path: '~' }); }
-  fsCopy(p, to) { return this._fsPortable({ action: 'copy', path: p, to }, 130000); }
-  fsMove(p, to) { return this._fsPortable({ action: 'move', path: p, to }, 130000); }
+  fsCopy(p, to, { by } = {}) { return this._fsPortable({ action: 'copy', path: p, to, by }, 130000); }
+  fsMove(p, to, { by } = {}) { return this._fsPortable({ action: 'move', path: p, to, by }, 130000); }
   fsDu(p) { return this._fsPortable({ action: 'du', path: p }, 70000); }
   /** read [start, start+len) — resolves a Buffer (the transcript-slab primitive).
    *  COUNT-GATED: fs-done rides the credit-EXEMPT control channel, so it can
@@ -610,18 +726,19 @@ class DeviceManager {
    *  is full); `end` with the count and the sha256 THIS side computed ⇒ the device compares both, renames, answers.
    *  `size` is announced up front: more or fewer bytes is a failure, never a short file. `check()` is asked every
    *  window (8 MiB) — a throw (the grant revoked, the caller gone) aborts. Any failure removes the part. → `{size, sha256}`. */
-  async fsWriteStream(p, { source, size, overwrite = false, check = null, windowBytes = 8 * 1024 * 1024 } = {}) {
+  async fsWriteStream(p, { source, size, overwrite = false, check = null, windowBytes = 8 * 1024 * 1024, by } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('fs-write-stream')) { const e = new Error('daemon lacks fs-write-stream (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    if (!DA.validBy(by)) return this._refuseAct({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, size }); // lane device-act-audit: before the channel opens (after the capability gate — §74)
     const chan = conn.nextChan++;
     const crypto = require('crypto');
     const contentHash = crypto.createHash('sha256'); // the bytes of a file (the device compares it at `end`)
     let sent = 0, nextCheck = windowBytes, waitW = null;
     conn.sessions.set(chan, { onWritable: () => { const f = waitW; waitW = null; f?.(); } });
     const linkGone = () => this._stopped || this._conn !== conn;
-    const abort = async () => { if (linkGone()) return; try { await this._request({ op: 'fs-op', action: 'write-stream', step: 'abort', path: p, chan, waitMs: 15000 }); } catch { } }; // a dropped link: the agent removes the part itself
+    const abort = async () => { if (linkGone()) return; try { await this._request({ op: 'fs-op', action: 'write-stream', step: 'abort', path: p, chan, waitMs: 15000, by }); } catch { } }; // a dropped link: the agent removes the part itself
     try {
-      await this._request({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, chan, size, overwrite: !!overwrite, waitMs: 20000 });
+      await this._request({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, chan, size, overwrite: !!overwrite, waitMs: 20000, by });
       // never destroyOnReturn: a refusal mid-body must still answer the HTTP request the body arrived on
       const it = typeof source.iterator === 'function' ? source.iterator({ destroyOnReturn: false }) : source;
       for await (const piece of it) {
@@ -647,7 +764,7 @@ class DeviceManager {
       }
       if (sent !== size) throw Object.assign(new Error(`${sent} bytes arrived of the ${size} announced`), { code: 'size_changed' });
       if (check) await check(sent);
-      const r = await this._request({ op: 'fs-op', action: 'write-stream', step: 'end', path: p, chan, sent, sha256: contentHash.digest('hex'), waitMs: 120000 });
+      const r = await this._request({ op: 'fs-op', action: 'write-stream', step: 'end', path: p, chan, sent, sha256: contentHash.digest('hex'), waitMs: 120000, by });
       return { size: r.size, sha256: r.sha256 };
     } catch (e) { await abort(); throw e; }
     finally { conn.sessions.delete(chan); }
@@ -679,11 +796,11 @@ class DeviceManager {
    *  null clears. onExecuted(events) receives fallback switches the device
    *  performed while no orchestrator was reachable — call ackPoolOrdersLog()
    *  after recording them. */
-  async poolOrders(orders, onExecuted) {
+  async poolOrders(orders, onExecuted, { by } = {}) {
     if (onExecuted) this._onPoolOrdersExecuted = onExecuted;
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('pool-orders')) throw new Error('daemon lacks pool-orders (capabilities gate)');
-    const r = await this._request({ op: 'pool-orders', orders, timeoutMs: 15000 });
+    const r = await this._request({ op: 'pool-orders', orders, timeoutMs: 15000, by });
     if (r?.error) throw new Error(r.error);
     if (r?.events?.length && this._onPoolOrdersExecuted) this._onPoolOrdersExecuted(r.events);
     return r?.events || [];
@@ -735,10 +852,11 @@ class DeviceManager {
   }
   /** `waitMs` (lane-pairing ⑥): how long THIS side waits for the reply — the daemon kills the child at `timeoutMs`
    *  (capped at 30 s there) and still has to send the result, so a caller that uses the cap itself waits past it. */
-  async runCmd(cmd, args = [], { stdin, env, timeoutMs, waitMs } = {}) {
+  async runCmd(cmd, args = [], { stdin, env, timeoutMs, waitMs, by } = {}) {
+    if (!DA.validBy(by)) return this._refuseAct({ op: 'run-cmd', cmd, args }); // lane device-act-audit: refused before the link is even asked
     const { info } = await this.connect();
     const noShell = posixShellRefusal(info, cmd); if (noShell) throw noShell; // lane windows-device-fs: THE DOOR (the device's fact)
-    const r = await this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, ...(waitMs ? { waitMs } : {}), stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
+    const r = await this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, ...(waitMs ? { waitMs } : {}), stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined, by });
     const failed = posixShellFailed(info, cmd, r); if (failed) throw failed; // verify-r1 F1: asked, and it was not there ⇒ named
     return r;
   }
@@ -746,10 +864,11 @@ class DeviceManager {
    *  PURE src/exit-shell.js decides THERE); the reply carries `interpreter`, and `spawnError` when the child never
    *  started. Capability-gated (`run-shell` in the hello-ack): an older daemon only knows the argv form — the caller
    *  falls back to `sh -lc` itself and says which it ran; a daemon is never asked an op it lacks (it would hang). */
-  async runShell(line, { env, timeoutMs, waitMs } = {}) {
+  async runShell(line, { env, timeoutMs, waitMs, by } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('run-shell')) { const e = new Error('daemon lacks run-shell (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
-    return this._request({ op: 'run-cmd', shell: String(line), env, timeoutMs, ...(waitMs ? { waitMs } : {}) });
+    if (!DA.validBy(by)) return this._refuseAct({ op: 'run-cmd', shell: String(line) }); // lane device-act-audit: after the capability gate (an old agent's refusal stays its own)
+    return this._request({ op: 'run-cmd', shell: String(line), env, timeoutMs, ...(waitMs ? { waitMs } : {}), by });
   }
   /** streaming argv exec: stdout arrives via onData (byte channel); resolves
    *  {code} at exit. For outputs too large for runCmd (usage-scan NDJSON).
@@ -758,16 +877,22 @@ class DeviceManager {
    *  credit-gated tail can't be overtaken and silently dropped (truncated
    *  usage harvests / streamed downloads). Old daemons omit it → resolve at
    *  exit as before. A 15s post-exit stall resolves {truncated:true}. */
-  async runStream(cmd, args = [], { env, cwd, stdin, onData, timeoutMs } = {}) {
+  async runStream(cmd, args = [], { env, cwd, stdin, onData, timeoutMs, by } = {}) {
+    if (!DA.validBy(by)) return this._refuseAct({ op: 'run-stream', cmd, args, cwd });
     const { info } = await this.connect();
     const noShell = posixShellRefusal(info, cmd); if (noShell) throw noShell; // lane windows-device-fs: THE DOOR (the device's fact)
-    const r = await this._streamOp({ op: 'run-stream', cmd, args, env, cwd, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined }, { onData, timeoutMs });
+    const r = await this._streamOp({ op: 'run-stream', cmd, args, env, cwd, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined, by }, { onData, timeoutMs });
     const failed = posixShellFailed(info, cmd, r); if (failed) throw failed; // verify-r1 F1: asked, and it was not there ⇒ named
     return r;
   }
   /** ONE streaming-op consumer (run-stream + usage-scan): count-gated settle
    *  (stream-exit's `sent` vs received), link-death settles, deadline belt. */
   async _streamOp(req, { onData, timeoutMs = 120000 } = {}) {
+    // lane device-act-audit: an act stream (run-stream) names who asked BEFORE its channel opens, and is ONE audit line at
+    // its END (the exit code, the first bytes of its output — redacted —, the whole duration)
+    if (DA.needsBy(req) && !DA.validBy(req.by)) return this._refuseAct(req);
+    const line = DA.auditable(req), t0 = Date.now();
+    let head = [], headLen = 0;
     const conn = await this.connect();
     const chan = conn.nextChan++;
     let exitR;
@@ -776,7 +901,10 @@ class DeviceManager {
     const settle = (extra) => {
       if (settled) return; settled = true;
       clearTimeout(stall); conn.sessions.delete(chan);
-      exitR({ code: exitMsg?.code, error: exitMsg?.error, ...(extra || {}) });
+      const res = { code: exitMsg?.code, error: exitMsg?.error, ...(extra || {}) };
+      if (line) this._act(req, { ...DA.answerOf(res), outHead: DA.outHeadOf({ stdout: Buffer.concat(head).toString('utf8') }), ms: Date.now() - t0 });
+      head = [];
+      exitR(res);
     };
     const check = () => {
       if (!exitMsg) return;
@@ -784,7 +912,7 @@ class DeviceManager {
       clearTimeout(stall); stall = setTimeout(() => settle({ truncated: true }), 15000);
     };
     conn.sessions.set(chan, {
-      onData: (b) => { received += b.length; onData?.(b); check(); },
+      onData: (b) => { received += b.length; if (line && headLen < 2048) { head.push(b.subarray(0, 2048 - headLen)); headLen += Math.min(b.length, 2048 - headLen); } onData?.(b); check(); },
       onExitMsg: (m) => { exitMsg = m; check(); },
       // Link death mid-stream (2.271.0 T1-5): mux.onDead fires onClose/onExit —
       // WITHOUT these the `done` promise NEVER settled, so a single device flap
@@ -801,8 +929,10 @@ class DeviceManager {
     const deadline = setTimeout(() => settle({ error: 'run-stream timed out', timedOut: true }), timeoutMs);
     if (deadline.unref) deadline.unref();
     done.finally?.(() => clearTimeout(deadline));
-    const ack = await this._request({ ...req, chan });
-    if (ack.error) { conn.sessions.delete(chan); clearTimeout(stall); throw new Error(ack.error); }
+    let ack;
+    try { ack = await this._request({ ...req, chan }, { audit: false }); }
+    catch (e) { settled = true; clearTimeout(deadline); conn.sessions.delete(chan); if (line) this._act(req, { ok: false, code: (e && e.code) || 'error', ms: Date.now() - t0 }); throw e; }
+    if (ack.error) { settled = true; clearTimeout(deadline); conn.sessions.delete(chan); clearTimeout(stall); if (line) this._act(req, { ok: false, code: ack.code || 'error', ms: Date.now() - t0 }); throw new Error(ack.error); }
     return done;
   }
   /** R4 `usage.scan`: run the daemon's BUNDLED ledger walker (no per-harvest
@@ -813,10 +943,11 @@ class DeviceManager {
    *  on the hello's daemonVersion and throw fast → caller falls back. */
   /** Place a secret file (0600, atomic) on the device — THE sanctioned secret
    *  channel; capability-gated so old daemons fall back to fsWrite+chmod. */
-  async placeSecret(remotePath, buf) {
+  async placeSecret(remotePath, buf, { by } = {}) {
+    if (!DA.validBy(by)) return this._refuseAct({ op: 'place-secret', path: remotePath });
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('place-secret')) throw new Error('daemon lacks place-secret (capabilities gate)');
-    const r = await this._request({ op: 'place-secret', path: remotePath, data: Buffer.from(buf).toString('base64'), timeoutMs: 15000 });
+    const r = await this._request({ op: 'place-secret', path: remotePath, data: Buffer.from(buf).toString('base64'), timeoutMs: 15000, by });
     if (r.error) throw new Error(r.error);
     return r.path;
   }
@@ -844,10 +975,10 @@ class DeviceManager {
 
   /** The Design window's folder op (dc-twins M1): THE shared module src/design-fs.js run on this machine — one read /
    *  meta / tokens / write-user per call, the result in its wire shape (design-fs fromWire). Capability-gated. */
-  async designFs(action, params = {}) {
+  async designFs(action, params = {}, { by } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('design-fs')) throw new Error('daemon lacks design-fs (capabilities gate)');
-    const r = await this._request({ op: 'design-fs', action, params, timeoutMs: 30000 });
+    const r = await this._request({ op: 'design-fs', action, params, timeoutMs: 30000, by });
     if (r.error) throw new Error(r.error);
     return r.result;
   }
@@ -891,7 +1022,7 @@ class DeviceManager {
    *  src/browser-serve.js — the daemon runs the same runBrowserServeOp()
    *  against its own facts. Capability-gated: an old daemon that does not
    *  know the op would HANG (the 2.300.0 rule), so it is never asked. */
-  async browserServe(action, params = {}, { timeoutMs = 90000 } = {}) {
+  async browserServe(action, params = {}, { timeoutMs = 90000, by } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('browser-serve')) { const e = new Error('daemon lacks browser-serve (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
     // lane browser-admin 2a: the Chrome build list is its own capability — an older agent is never asked (it would refuse
@@ -901,7 +1032,7 @@ class DeviceManager {
     // lane daemon-orphan-end: ending a daemon that has no browser is its own capability — an older agent is never asked (reported in the row)
     if (action === 'end-daemon' && !conn.info.capabilities.includes('browser-end-daemon')) { const e = new Error('this machine\'s agent cannot end a browser daemon (it predates it) -- upgrade the agent on this machine'); e.code = 'end_daemon_unsupported'; throw e; }
     if (action === 'remove' && !conn.info.capabilities.includes('browser-remove')) { const e = new Error('this machine\'s agent cannot remove a profile\'s folder (it predates it) -- upgrade the agent on this machine'); e.code = 'remove_unsupported'; throw e; }
-    const r = await this._request({ op: 'browser-serve', action, params, timeoutMs });
+    const r = await this._request({ op: 'browser-serve', action, params, timeoutMs, by });
     if (r.error) throw new Error(r.error);
     return r.result || {};
   }
@@ -911,13 +1042,13 @@ class DeviceManager {
    *  op names and shapes are the SHARED table src/desktop-serve.js — the daemon runs the same runDesktopServeOp()
    *  against its own machine keeper. Capability-gated: an old daemon that does not know the op would HANG (the
    *  2.300.0 rule), so it is never asked — refused by name `host_needs_daemon`. */
-  async desktopServe(action, params = {}, { timeoutMs = 60000 } = {}) {
+  async desktopServe(action, params = {}, { timeoutMs = 60000, by } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('desktop-serve')) { const e = new Error('daemon lacks desktop-serve (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
     // Layer 0 apps (docs/design-app-persistence.zh.md §3.1): the app-* actions are asked only of a daemon whose hello-ack
     // names `app-install` — an agent that predates them would refuse them by name, but the GATE is the capability
     if (/^app-/.test(String(action)) && !conn.info?.capabilities?.includes?.('app-install')) { const e = new Error('daemon lacks app-install (capabilities gate) -- upgrade the agent on this machine to install apps there'); e.code = 'host_needs_daemon'; throw e; }
-    const r = await this._request({ op: 'desktop-serve', action, params, timeoutMs });
+    const r = await this._request({ op: 'desktop-serve', action, params, timeoutMs, by });
     if (r.error) throw new Error(r.error);
     return r.result || {};
   }
@@ -935,7 +1066,7 @@ class DeviceManager {
     if (!this._windowWatches) this._windowWatches = new Map();
     const wid = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     const w = { pinned: false, target: null, push: (a) => { if (a && a.state === 'found') w.target = a.hwnd ?? a.windowId ?? w.target; if (a && a.state !== 'found') this._windowWatches.delete(wid); try { onPush(a); } catch { } },
-      rearm: () => { if (!w.target) return; this._request({ op: 'window-track', target: w.target, watch: true, wid, timeoutMs }).then((r) => { if (r.result) w.push(r.result); if (w.pinned && r.result && r.result.state === 'found') this._request({ op: 'window-pin', wid, on: true, timeoutMs: 15000 }).catch(() => { }); }, () => { }); } };
+      rearm: () => { if (!w.target) return; this._request({ op: 'window-track', target: w.target, watch: true, wid, timeoutMs }).then((r) => { if (r.result) w.push(r.result); if (w.pinned && r.result && r.result.state === 'found') this._request({ op: 'window-pin', wid, on: true, timeoutMs: 15000, by: w.pinBy || 'system:window-track' }).catch(() => { }); }, () => { }); } };
     this._windowWatches.set(wid, w);
     let r;
     try { r = await this._request({ op: 'window-track', ...ask, watch: true, wid, timeoutMs }); } catch (e) { this._windowWatches.delete(wid); throw e; }
@@ -1025,10 +1156,10 @@ class DeviceManager {
   }
   /** Pointer / key / clipboard events into THE machine's injector (the `input-events` op — the data channel's twin for a
    *  caller with no stream). Capability-gated. → { ok, n, kind, refused: [{ i, code }] } */
-  async inputEvents(events) {
+  async inputEvents(events, { by } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('input-events')) { const e = new Error('daemon lacks input-events (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
-    const r = await this._request({ op: 'input-events', events: Array.isArray(events) ? events : [], timeoutMs: 15000 });
+    const r = await this._request({ op: 'input-events', events: Array.isArray(events) ? events : [], timeoutMs: 15000, by });
     if (r.error) throw new Error(r.error);
     return r.result || { ok: false, n: 0, refused: [] };
   }
@@ -1059,29 +1190,29 @@ class DeviceManager {
   /** lane stream-mac-stall: 「打开系统设置」 — the Mac shows that Settings pane itself (`screen` | `accessibility`; its agent runs
    *  `open` on the pane's deep link). Capability-gated (`settings-open`): an agent that predates it is never asked —
    *  `host_needs_daemon` + its version (the page then copies the link, as before). → { ok, pane } | { ok: false, code, error } */
-  async settingsOpen(pane, { timeoutMs = 15000 } = {}) {
+  async settingsOpen(pane, { timeoutMs = 15000, by } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('settings-open')) { const e = new Error('daemon lacks settings-open (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
-    const r = await this._request({ op: 'settings-open', pane: String(pane || ''), timeoutMs });
+    const r = await this._request({ op: 'settings-open', pane: String(pane || ''), timeoutMs, by });
     if (r.error) throw new Error(r.error);
     return r.result || { ok: false, code: 'open_failed', error: 'no answer' };
   }
   /** lane desktop-handover: ONE still of a stream session's display (the `desktop-grab` op — the picture an agent the owner handed
    *  this machine's desktop to reads; the hub decides who may ask). Capability-gated: an agent that predates the op is never
    *  asked — `host_needs_daemon` + its version. → { ok, png64, w, h, display, origin, road } | { ok: false, code, error } */
-  async desktopGrab(sid, { timeoutMs = 30000 } = {}) {
+  async desktopGrab(sid, { timeoutMs = 30000, by } = {}) { // int315: an act — `by` = the agent the desktop was handed to
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('desktop-grab')) { const e = new Error('daemon lacks desktop-grab (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
-    const r = await this._request({ op: 'desktop-grab', sid: String(sid || ''), timeoutMs });
+    const r = await this._request({ op: 'desktop-grab', sid: String(sid || ''), timeoutMs, by });
     if (r.error) throw new Error(r.error);
     return r.result || { ok: false, code: 'still_failed', error: 'no answer' };
   }
   /** lane desktop-handover: the agent's input records (the data channel's own shapes) into a stream session's sink (the
    *  `desktop-input` op). Capability-gated like desktopGrab. → { ok, n, refused: [{ i, code }], display } | { ok: false, code, error } */
-  async desktopInput(sid, events, { timeoutMs = 30000 } = {}) {
+  async desktopInput(sid, events, { timeoutMs = 30000, by } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('desktop-input')) { const e = new Error('daemon lacks desktop-input (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
-    const r = await this._request({ op: 'desktop-input', sid: String(sid || ''), events: Array.isArray(events) ? events : [], timeoutMs });
+    const r = await this._request({ op: 'desktop-input', sid: String(sid || ''), events: Array.isArray(events) ? events : [], timeoutMs, by });
     if (r.error) throw new Error(r.error);
     return r.result || { ok: false, code: 'input_failed', error: 'no answer' };
   }
@@ -1096,13 +1227,13 @@ class DeviceManager {
   }
   /** lane machine-app-crop: keep a followed window on top (`on`) or not — Windows' topmost; a Mac activates the app instead.
    *  Capability-gated like windowTrack. → { ok, pinned, state?, note? } */
-  async windowPin(wid, on) {
+  async windowPin(wid, on, { by } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('window-pin')) { const e = new Error('daemon lacks window-pin (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
-    const r = await this._request({ op: 'window-pin', wid, on: !!on, timeoutMs: 15000 });
+    const r = await this._request({ op: 'window-pin', wid, on: !!on, timeoutMs: 15000, by });
     if (r.error) throw new Error(r.error);
     const w = this._windowWatches?.get(wid);
-    if (w && r.result && r.result.ok) w.pinned = !!on;
+    if (w && r.result && r.result.ok) { w.pinned = !!on; w.pinBy = by; } // lane device-act-audit: a re-arm after a reconnect re-pins it in the name of who pinned it
     return r.result || { ok: false, code: 'pin_failed', error: 'no answer' };
   }
 
@@ -1118,10 +1249,10 @@ class DeviceManager {
 
   /** Post one message into a conversation whose CLI runs on THIS device
    *  (2.362.0 cross-machine delivery rung). */
-  async peerPost({ cid, text }) {
+  async peerPost({ cid, text, by }) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('peer-post')) throw new Error('daemon lacks peer-post (capabilities gate)');
-    const r = await this._request({ op: 'peer-post', cid, text, timeoutMs: 15000 });
+    const r = await this._request({ op: 'peer-post', cid, text, timeoutMs: 15000, by });
     if (r.error) throw new Error(r.error);
     const { id, op, ...rest } = r;
     return rest;
@@ -1159,7 +1290,7 @@ class DeviceManager {
    *  greeting, an SSH banner) answers in the same read as the agent's tcp-open — before the caller's `await` resumes
    *  and sets onData. The handle keeps what arrives before its consumer is attached (bytes, then the close) and hands
    *  it over, in order, when onData / onClose are set (lane mirror-green-212 — kb-bugfix-invariants). */
-  async tcpForward(port, host) {
+  async tcpForward(port, host, { by } = {}) {
     const conn = await this.connect();
     const chan = conn.nextChan++;
     const early = []; let dataFn = null, closeFn = null, closed = false;
@@ -1168,7 +1299,7 @@ class DeviceManager {
     conn.sessions.set(chan, { onData: (b) => { if (dataFn && !early.length) dataFn(b); else early.push(b); }, onClose: () => { closed = true; drain(); } });
     // host defaults to loopback on the device; an explicit host reaches the
     // device's LAN (a user-driven forward to another internal machine)
-    await this._request({ op: 'tcp-connect', port, chan, ...(host && host !== '127.0.0.1' ? { host } : {}) });
+    await this._request({ op: 'tcp-connect', port, chan, ...(host && host !== '127.0.0.1' ? { host } : {}), by }); // lane device-act-audit: another LAN host = an act (`by`); the loopback = a read
     handle.write = (b) => conn.mux.data(chan, Buffer.isBuffer(b) ? b : Buffer.from(b));
     handle.close = () => { conn.sessions.delete(chan); conn.mux.closeChan(chan); };
     return handle;
@@ -1192,12 +1323,12 @@ class DeviceManager {
   // ── device-folder-mount: serve a device folder over HTTP (the daemon binds
   // 127.0.0.1:<port>), returns {port}. The server tcp-forwards that port and
   // rclone-http-mounts it. unserveFolder tears the server down. ──
-  serveFolder(path) { return this._request({ op: 'serve-folder', path }); }
+  serveFolder(path, { by } = {}) { return this._request({ op: 'serve-folder', path, by }); }
   unserveFolder(port) { return this._request({ op: 'unserve-folder', port }); }
 
   // on-demand egress: the device serves a SOCKS5 proxy on its loopback, the
   // server reaches it via tcpForward (the exit-proxy shape). CONNECT only.
-  serveSocks() { return this._request({ op: 'serve-socks' }); }
+  serveSocks({ by } = {}) { return this._request({ op: 'serve-socks', by }); }
   unserveSocks(port) { return this._request({ op: 'unserve-socks', port }); }
   _onTcpAccept(m) {
     const conn = this._conn;

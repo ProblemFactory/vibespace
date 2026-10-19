@@ -1240,7 +1240,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           // the stash rung honestly instead (the background connect still heals).
           const dm = await (hosts.deviceBounded ? hosts.deviceBounded(hid, 6000) : hosts.device(hid));
           undo2 = armTurn();
-          const r = await dm.peerPost({ cid, text });
+          // lane device-act-audit: the sender when the caller names it (vibespace-msg: agent:<cid>), else the delivery's own reason
+          const r = await dm.peerPost({ cid, text, by: require('../device-acts.js').validBy(opts.by) ? opts.by : require('../device-acts.js').bySystem(spendReason) });
           if (r && r.ok) { spent(); cardOk(); return { ok: true, lane: 'remote-message', kind, peerName: r.peerName || null, hostId: hid }; }
           undo2();
           return { ok: false, lane: 'remote-message', hostId: hid, reason: (r && r.reason) || 'remote daemon could not reach the inbox' };

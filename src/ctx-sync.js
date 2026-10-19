@@ -57,10 +57,11 @@ async function syncGroupCtxOverDevice({ hosts, hostId, group, remoteDir, onSkip 
   if (blockedMp) throw DOOR.refusal(blockedMp);
   const dm = await hosts.deviceBounded(hostId, connectMs);
   if (!dm) throw new Error('device offline');
+  const BY = 'system:ctx-sync'; // lane device-act-audit: the Task Group context folder's two-way sync
   const inv = await dm.runCmd('sh', ['-c',
     `mkdir -p ${shq(remoteDir)}; cd ${shq(remoteDir)} && find . -type f ! -path './.vibespace/*' 2>/dev/null | while IFS= read -r f; do ` +
     `printf '%s\\t%s\\t%s\\n' "$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)" ` +
-    `"$( (sha256sum "$f" 2>/dev/null || shasum -a 256 "$f" 2>/dev/null) | cut -d' ' -f1)" "$f"; done`], { timeoutMs: 25000 });
+    `"$( (sha256sum "$f" 2>/dev/null || shasum -a 256 "$f" 2>/dev/null) | cut -d' ' -f1)" "$f"; done`], { timeoutMs: 25000, by: BY });
   const remote = new Map(); // rel → {mt, sha}
   for (const line of String(inv?.stdout || '').split('\n')) {
     const parts = line.split('\t');
@@ -98,8 +99,8 @@ async function syncGroupCtxOverDevice({ hosts, hostId, group, remoteDir, onSkip 
     if (rm && rm.sha === f.sha) continue;      // identical — nothing to move either way
     if (rm && rm.mt > f.mt + 1) continue;      // remote strictly newer — the pull pass owns it
     const dir = path.posix.dirname(`${remoteDir}/${f.r}`);
-    if (dir !== remoteDir && !mkdirs.has(dir)) { try { await dm.fsMkdir(dir); } catch { } mkdirs.add(dir); }
-    try { await dm.fsWrite(`${remoteDir}/${f.r}`, fs.readFileSync(f.p)); pushed++; } catch { }
+    if (dir !== remoteDir && !mkdirs.has(dir)) { try { await dm.fsMkdir(dir, { by: BY }); } catch { } mkdirs.add(dir); }
+    try { await dm.fsWrite(`${remoteDir}/${f.r}`, fs.readFileSync(f.p), { by: BY }); pushed++; } catch { }
   }
   for (const [rel, rm] of remote) {
     const lf = localByRel.get(rel);

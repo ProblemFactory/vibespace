@@ -719,7 +719,7 @@ app.get('/api/sysinfo/procs', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/sysinfo/signal', async (req, res) => {
-  try { res.json(await signalProc(String(req.body?.host || ''), req.body?.pid, req.body?.sig)); }
+  try { res.json(await signalProc(String(req.body?.host || ''), req.body?.pid, req.body?.sig, { by: require('./src/device-audit.js').byOfReq(req) })); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Resource HISTORY for the System rail charts (2.223.0): self-sampled CPU/
@@ -1276,7 +1276,7 @@ hosts.onUsageEvents = (hostId, text) => {
       gradTried.set(hostId, Date.now());
       setTimeout(async () => {
         try {
-          const out = await graduateHostToDial(hosts.get(hostId), {});
+          const out = await graduateHostToDial(hosts.get(hostId), { by: 'system:graduate' });
           serverNotice('grad-' + hostId, `"${h.name}" now talks to VibeSpace over its own ws link${out.dialedIn ? '' : ' (dialing in shortly)'} — ssh stays as the rescue channel.`);
         } catch (e) {
           // Never silent: the operator asked for ws and did not get it.
@@ -1415,7 +1415,7 @@ app.post('/api/ports/kill-orphan', (req, res) => {
 // Who may, per machine: two lists (lane-pairing ⑥, PURE src/exit-reach.js) — the routes are src/server/exit-routes.js.
 const { ExitProxyManager } = require('./src/exit-proxy');
 // lane device-upgrade-stuck: an agent upgrade the hub gave up on reaches the user — ONE For-you item per (machine, version) + the row's line, gone at that version (every transport's door); lane host-stale-dialer (B-6136): a second agent with an old token — its row's line, ONE For-you item per episode, a 10-min journal line (src/server/dial-health-watch.js)
-const deviceUpgradeWatch = require('./src/server/device-upgrade-watch.js').create({ userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a), bcast: () => { try { bcastAll({ type: 'hosts-updated' }); } catch { } } });
+const deviceAlerts = require('./src/server/device-alerts.js').create({ userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a) }); hosts.onDeviceAlert = (kind, facts) => deviceAlerts.file(kind, facts); /* lane device-act-audit: a pairing minted, a first dial from a new address, a pushed update = URGENT For you */ const deviceUpgradeWatch = require('./src/server/device-upgrade-watch.js').create({ userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a), bcast: () => { try { bcastAll({ type: 'hosts-updated' }); } catch { } }, alerts: deviceAlerts });
 hosts.onAgentUpgrade = (event, facts) => deviceUpgradeWatch.onAgentUpgrade(event, facts); hosts.agentUpgradeOf = (id) => deviceUpgradeWatch.rowOf(id); const dialHealthWatch = require('./src/server/dial-health-watch.js').create({ userTodos, hosts, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a), bcast: () => { try { bcastAll({ type: 'hosts-updated' }); } catch { } } });
 const exitProxy = new ExitProxyManager({ hosts, log: (m) => console.log('[exit]', m), dataDir: path.join(__dirname, 'data'), userTodos, settingOf: (k) => serverSetting(k), sessionsMap: () => activeSessions, bcastAll: (...a) => bcastAll(...a),
   emitCard: (s, card) => feedPeerCard(s, { ...card, belongsTo: require('./src/exit-call.js').cardMatcher(card) }), groupsOf: (s, id) => tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id) });
@@ -1775,7 +1775,7 @@ probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(
         version: require('./package.json').version,
         nodeModules: path.join(__dirname, 'node_modules'),
         log: console.log,
-        onUpgradeStuck: (from, to, info) => hosts.onAgentUpgrade?.('stuck', { ...(info || {}), hostKey: 'local', machine: os.hostname(), from, to }), onVersionMatch: (v) => hosts.onAgentUpgrade?.('matched', { hostKey: 'local', version: v }), // lane device-upgrade-stuck: this machine's own daemon, the same door (no row)
+        onUpgradeStuck: (from, to, info) => hosts.onAgentUpgrade?.('stuck', { ...(info || {}), hostKey: 'local', machine: os.hostname(), from, to }), onVersionMatch: (v) => hosts.onAgentUpgrade?.('matched', { hostKey: 'local', version: v }), onUpgradeRefused: (from, to, info) => hosts.onAgentUpgrade?.('refused', { ...(info || {}), hostKey: 'local', machine: os.hostname(), from, to }), onAct: (line) => hosts.noteAct('local', line), // lane device-upgrade-stuck (+ lane device-bundle-signing: `refused`): this machine's own daemon, the same door (no row); lane device-act-audit: its acts audited as `local`
       });
       // device #0 becomes reachable through hosts.device(null) — that is what
       // lets a consumer be written ONCE and run on ANY machine including this

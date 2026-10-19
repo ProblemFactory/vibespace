@@ -55,7 +55,9 @@ app.post('/api/editor/open', (req, res) => {
 // Editor: signal completion (called by client when user saves/closes editor)
 app.post('/api/editor/signal', async (req, res) => {
   const { signalPath, filePath, content, host } = req.body;
-  const remoteFs = getRemoteFs(); // server.js defines it after these routes register
+  const remoteFs0 = getRemoteFs(); // server.js defines it after these routes register
+  // lane device-act-audit: the person saved / closed the editor in their browser — the remote writes name their sign-in
+  const remoteFs = remoteFs0 && typeof remoteFs0.as === 'function' ? remoteFs0.as(require('../device-audit.js').byOfReq(req)) : remoteFs0;
   try {
     if (host && remoteFs) {
       // remote Ctrl+G: the CLI polls the signal file ON ITS machine

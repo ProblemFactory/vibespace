@@ -368,7 +368,7 @@ async function clearSealedOrders(poolId) {
   try {
     _sealedOrdersSent.delete(poolId);
     const dm = await hosts.device(null);
-    await dm.poolOrders({ clearPool: poolId });
+    await dm.poolOrders({ clearPool: poolId }, null, { by: 'system:usage-pool' });
   } catch { }
 }
 const _sealedOrdersSent = new Map(); // poolId → last pushed JSON (skip no-ops)
@@ -414,7 +414,7 @@ async function pushSealedOrders(poolId) {
       try { accounts.noteDeviceRepoint({ link: ev.link, poolId: ev.poolId, from: ev.from, to: ev.to, at: ev.ts, why: 'sealed-orders' }); } catch { }
     }
     try { dm.ackPoolOrdersLog(); } catch { }
-  });
+  }, { by: 'system:usage-pool' }); // lane device-act-audit: the pool engine's sealed orders
   _sealedOrdersSent.set(poolId, j);
 }
 

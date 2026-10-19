@@ -41,12 +41,15 @@ const DUP_PROBE_MS = 1500;          // verify-r1 B9: how long the current stream
 // command as a duplicate while the holder answered (reproduced with two real daemons: 4 refusals in 9 s, the row
 // naming the owner's device the intruder). The only exception is `keepLink` — the route's in-place push, which
 // needs the link to hand the new dial.json over; a push that does not land cuts it too (lockOutDialHolder).
-function agentdMintDialPair(deviceId, { host = '', base = '', keepLink = false } = {}) {
+// lane device-act-audit (design q-042 D10): every mint is an URGENT For-you item — WHO minted it (`by`) and from which browser
+// address (`from`) — through the hub's onDeviceAlert door (src/server/device-alerts.js; once per mint)
+function agentdMintDialPair(deviceId, { host = '', base = '', keepLink = false, by = 'system:dial-pairing', from = '' } = {}) {
   ensureDir(AGENTD_DIR);
   const tok = PT.mintToken('dial');
   hosts.setDialToken(deviceId, PT.tokenHash(tok));
   try { hosts.noteDial(deviceId, 'minted', { host, base }); } catch (e) { console.warn('[device] dial facts not stamped at mint:', e.message); }
   const generation = (() => { try { return Number(hosts.findByDeviceId(deviceId)?.dial?.generation) || 1; } catch { return 1; } })();
+  try { const h = hosts.findByDeviceId(deviceId); hosts.onDeviceAlert?.('pairing-minted', { hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, deviceId, by, from: String(from || '').slice(0, 120), generation, host: String(host || '').slice(0, 120) }); } catch (e) { console.warn('[device] pairing alert not filed:', e.message); }
   const lockedOut = keepLink === true ? false : lockOutDialHolder(deviceId);
   // the device token (vsht_) for in-mux auth ships in the install payload
   return { deviceId, dialToken: tok, hostToken: agentdHostToken('dial-' + deviceId), generation, lockedOut };
@@ -285,6 +288,12 @@ async function deviceForDial(deviceId, _retried = false) {
       // lane win-upgrade-pipe: an upgrade started / the device answered — a device that never dials back reaches the user
       onUpgradeBegin: (from, to) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('begun', { hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, from, to }); },
       onAnswer: (v) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('answered', { hostKey: h ? h.id : 'host-dial-' + deviceId, version: v }); },
+      // lane device-act-audit: every act sent over this dial link = one line of data/device-audit.jsonl (the row's id)
+      onAct: (line) => { const h = hosts.findByDeviceId(deviceId); hosts.noteAct(h ? h.id : 'host-dial-' + deviceId, line); },
+      // lane device-bundle-signing (design q-042 D2): this hub will not push an unsigned build / the device refused the signature
+      onUpgradeRefused: (from, to, info) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('refused', { ...(info || {}), hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, from, to }); },
+      // fix r2 (verify-r1 RED-2): a device that trusted no release key pinned the first validly signed one (TOFU)
+      onUpgradeTrusted: (from, to, info) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('trusted', { ...(info || {}), hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, from, to }); },
     });
     agentdDialDevices.set(deviceId, dm);
   }

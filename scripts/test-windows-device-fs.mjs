@@ -49,39 +49,39 @@ console.log('§1 the census: every hub→device shell site in src/');
 const SITE_RE = /\.(?:runCmd|runStream)\(|\bcmd:\s*'sh'|\['-lc'/;
 const DOOR = 'refused by name at THE DOOR where the device says it has no `sh` (client.js posixShellRefusal over the hello\'s posixShells: windows_no_shell) — nothing is sent; a Windows machine WITH `sh` is asked as before';
 const TABLE = [
-  { file: 'src/remote-fs.js', has: "(await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'])).stdout.trim();", verdict: 'win32', how: 'never reached: home() asks the agent (fsHome), _devAbs hands `~` to a Windows agent unexpanded (it expands it)' },
-  { file: 'src/remote-fs.js', has: "const r = await dm.runCmd('sh', ['-c', cmd], { timeoutMs: Math.min(timeoutMs, 30000) });", verdict: 'win32', how: '_run: every Files op takes _win first (list/info/read/write/mkdir/rename/rm/stat/copy/move ⇒ fs ops; the archive ops refused by name); anything else hits the door' },
+  { file: 'src/remote-fs.js', has: "(await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { by: this._actBy })).stdout.trim();", verdict: 'win32', how: 'never reached: home() asks the agent (fsHome), _devAbs hands `~` to a Windows agent unexpanded (it expands it)' },
+  { file: 'src/remote-fs.js', has: "const r = await dm.runCmd('sh', ['-c', cmd], { timeoutMs: Math.min(timeoutMs, 30000), by: this._actBy });", verdict: 'win32', how: '_run: every Files op takes _win first (list/info/read/write/mkdir/rename/rm/stat/copy/move ⇒ fs ops; the archive ops refused by name); anything else hits the door' },
   { file: 'src/remote-fs.js', has: "this._shSeen.set(info, dm.runCmd('sh', ['-c', 'exit 0']", verdict: 'win32', how: 'verify-r1 F1: the one probe a Windows agent too old to say whether it has `sh` is asked (once per link); none there ⇒ ENOENT, named (the outdated sentence / WIN_REFUSED), never a bare 127' },
   { file: 'src/remote-fs.js', has: "await dm.runCmd('sh', ['-c', `du -sk", verdict: 'win32', how: 'stat(withDu): the agent\'s own walk (fsDu)' },
   { file: 'src/remote-fs.js', has: 'const r = await dm.runStream(cmd, args, { onData:', verdict: 'win32', how: 'downloads: _winStreamTo over read-range (no `cat`); folder .zip refused by name before it (WIN_REFUSED.zip)' },
   { file: 'src/remote-fs.js', has: "const r = await dm.runStream('sh', ['-c', cmd], { onData:", verdict: 'win32', how: 'fetchToLocal: _winFetchToLocal over read-range; an archive entry refused by name (WIN_REFUSED[archive-entry])' },
-  { file: 'src/exit-proxy.js', has: "await dm.runCmd(XS.POSIX_SHELL, ['-lc', cmd], opts);", verdict: 'win32', how: 'run-shell: the agent picks cmd.exe; a Windows agent without run-shell is refused by name (canRunLine ⇒ device_agent_outdated) before this rung' },
+  { file: 'src/exit-proxy.js', has: "await dm.runCmd(XS.POSIX_SHELL, ['-lc', cmd], { ...opts, by: opts.by });", verdict: 'win32', how: 'run-shell: the agent picks cmd.exe; a Windows agent without run-shell is refused by name (canRunLine ⇒ device_agent_outdated) before this rung' },
   { file: 'src/ctx-sync.js', has: "const inv = await dm.runCmd('sh', ['-c',", verdict: 'refused', how: DOOR },
-  { file: 'src/hosts.js', has: "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });", verdict: 'refused', how: DOOR },
-  { file: 'src/hosts.js', has: "out = String((await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'])).stdout", verdict: 'refused', how: DOOR },
+  { file: 'src/hosts.js', has: "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by });", verdict: 'refused', how: DOOR },
+  { file: 'src/hosts.js', has: "out = String((await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { by: 'system:hosts' })).stdout", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "for c in dtach node claude codex", verdict: 'refused', how: DOOR },
-  { file: 'src/hosts.js', has: "out = String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 10000 })).stdout", verdict: 'refused', how: DOOR },
+  { file: 'src/hosts.js', has: "out = String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 10000, by })).stdout", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "if (base === '' || base === '~') base = String((await dm.runCmd('sh'", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "else if (base.startsWith('~/')) base = String((await dm.runCmd('sh'", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "const find = await dm.runCmd('sh', ['-c', `find ${root}", verdict: 'refused', how: DOOR },
-  { file: 'src/hosts.js', has: "const home = (await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'])).stdout.trim();", verdict: 'refused', how: DOOR },
+  { file: 'src/hosts.js', has: "const home = (await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { by: 'system:usage-harvest' })).stdout.trim();", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "await dm.runStream('node', [scanPath]", verdict: 'refused', how: 'reached only past the `echo $HOME` line above it, which the door refuses on Windows', argv: true },
-  { file: 'src/machine-mounts.js', has: 'const r = await dm.runCmd(cmd, args, { stdin: input, timeoutMs: 60000 });', verdict: 'refused', how: 'argv carrier: its `sh` argvs hit the door; detectOS\'s `uname` answers nothing on Windows ⇒ \'windows\' (the mount refuses the OS)', argv: true },
+  { file: 'src/machine-mounts.js', has: 'const r = await dm.runCmd(cmd, args, { stdin: input, timeoutMs: 60000, by: \'system:machine-mounts\' });', verdict: 'refused', how: 'argv carrier: its `sh` argvs hit the door; detectOS\'s `uname` answers nothing on Windows ⇒ \'windows\' (the mount refuses the OS)', argv: true },
   { file: 'src/machine-mounts.js', has: "const r = await dm.runStream('sh', ['-c', script]", verdict: 'refused', how: DOOR },
-  { file: 'src/machine-mounts.js', has: "const home = String((await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { timeoutMs: 8000 })).stdout", verdict: 'refused', how: DOOR },
+  { file: 'src/machine-mounts.js', has: "const home = String((await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { timeoutMs: 8000, by: 'system:machine-mounts' })).stdout", verdict: 'refused', how: DOOR },
   { file: 'src/machine-mounts.js', has: "await dm.runCmd('sh', ['-c', `mount | grep -qF", verdict: 'refused', how: DOOR },
   { file: 'src/machine-mounts.js', has: "await dm.runCmd('sh', ['-c', `command -v curl", verdict: 'refused', how: DOOR },
   { file: 'src/port-forward.js', has: "await dm.runCmd('sh', ['-c', PORT_SCAN]", verdict: 'refused', how: DOOR },
-  { file: 'src/port-forward.js', has: "await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 6000 })", verdict: 'refused', how: DOOR },
+  { file: 'src/port-forward.js', has: "await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 6000, by: 'system:port-forward' })", verdict: 'refused', how: DOOR },
   { file: 'src/server/desktop-access.js', has: 'const stream = dm.runStream(launch[0], launch.slice(1)', verdict: 'refused', how: 'launch = desktop-apps installLauncherArgv = [\'sh\', \'-c\', …] ⇒ the door', argv: true },
   // the 2.369.204 integration: desktop-vnc-native (design 014 D1) — a Windows machine's desktop is asked through PowerShell, never `sh`
-  { file: 'src/server/desktop-access.js', has: 'try { r = await dm.runCmd(plan.argv[0], plan.argv.slice(1), { timeoutMs: 20000, waitMs: 25000 }); }', verdict: 'win32', how: 'Run on its desktop…: desktop-apps desktopRunPlan = PowerShell -EncodedCommand on win32 (no `sh`), /bin/sh on darwin (macOS ships it), refused elsewhere', argv: true },
-  { file: 'src/server/desktop-access.js', has: 'const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData, timeoutMs: installMs });', verdict: 'win32', how: 'the TightVNC install (runUacInstall): tightvncInstallPlan = PowerShell -EncodedCommand (elevated by UAC on that machine), win32 only', argv: true },
+  { file: 'src/server/desktop-access.js', has: 'try { r = await dm.runCmd(plan.argv[0], plan.argv.slice(1), { timeoutMs: 20000, waitMs: 25000, by }); }', verdict: 'win32', how: 'Run on its desktop…: desktop-apps desktopRunPlan = PowerShell -EncodedCommand on win32 (no `sh`), /bin/sh on darwin (macOS ships it), refused elsewhere', argv: true },
+  { file: 'src/server/desktop-access.js', has: 'const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData, timeoutMs: installMs, by });', verdict: 'win32', how: 'the TightVNC install (runUacInstall): tightvncInstallPlan = PowerShell -EncodedCommand (elevated by UAC on that machine), win32 only', argv: true },
   { file: 'src/server/mounts-plugins-wiring.js', has: "await dm.runCmd('sh', ['-c', 'printf %s \"${VIBESPACE_DEVICE_ROOT", verdict: 'refused', how: DOOR },
   { file: 'src/server/mounts-plugins-wiring.js', has: "await dm.runCmd('chmod', ['600', root + '/state/dial.json']", verdict: 'n/a', how: 'reached only past the root read above it (refused at the door on Windows)', argv: true },
-  { file: 'src/server/sysinfo-wiring.js', has: "out = String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 8000 })).stdout", verdict: 'refused', how: DOOR },
-  { file: 'src/writer-sweep.js', has: "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });", verdict: 'refused', how: DOOR },
-  { file: 'src/spawn/dial.js', has: "await dm.runCmd('sh', ['-c', 'printf %s \"$HOME\"'], { timeoutMs: 8000 })", verdict: 'refused', how: DOOR },
+  { file: 'src/server/sysinfo-wiring.js', has: "out = String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 8000, by })).stdout", verdict: 'refused', how: DOOR },
+  { file: 'src/writer-sweep.js', has: "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by: 'system:writer-sweep' });", verdict: 'refused', how: DOOR },
+  { file: 'src/spawn/dial.js', has: "await dm.runCmd('sh', ['-c', 'printf %s \"$HOME\"'], { timeoutMs: 8000, by })", verdict: 'refused', how: DOOR },
   { file: 'src/spawn/dial.js', has: "await dm.runCmd('sh', ['-c',", exact: true, verdict: 'refused', how: DOOR },
   { file: 'src/spawn/dial.js', has: "await dm.runCmd('sh', ['-c', `chmod 600", verdict: 'refused', how: DOOR },
   { file: 'src/spawn/dial.js', has: "pty: { cmd: 'sh', args: ['-lc', shellCmd], cwd,", verdict: 'refused', how: 'a session spawn spec ⇒ openSession / openPipeSession ⇒ the door' },
@@ -269,11 +269,11 @@ ok(Array.isArray(win.conn.info.posixShells) && win.conn.info.posixShells.length 
     ok(e && e.code === 'windows_unsupported' && e.message === RFS.WIN_REFUSED[what], `${what} ⇒ refused by name: "${RFS.WIN_REFUSED[what]}"`, e && e.message);
   }
   ok(asked.length > 20 && !asked.some((a) => a.op === 'run-cmd' || a.op === 'run-stream'), `nothing was asked of a shell: ${asked.length} asks, every one an fs-op (${[...new Set(asked.map((a) => a.action))].join(', ')})`, asked.filter((a) => a.op !== 'fs-op'));
-  const dr = await rejects(dm.runCmd('sh', ['-c', 'echo "$HOME"']));
+  const dr = await rejects(dm.runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:test' }));
   ok(dr && dr.code === 'windows_no_shell' && !asked.some((a) => a.op === 'run-cmd'), 'THE DOOR on a real link: `sh` asked of this agent is refused by name, nothing sent', dr && dr.message);
-  const ds = await rejects(dm.runStream('sh', ['-c', 'zip -r - x'], { onData: () => {} }));
+  const ds = await rejects(dm.runStream('sh', ['-c', 'zip -r - x'], { by: 'system:test', onData: () => {} }));
   ok(ds && ds.code === 'windows_no_shell', '…runStream too');
-  ok(String((await dm.runCmd(process.execPath, ['-e', 'process.stdout.write("argv ok")'])).stdout) === 'argv ok', '…a non-shell argv still runs');
+  ok(String((await dm.runCmd(process.execPath, ['-e', 'process.stdout.write("argv ok")'], { by: 'system:test' })).stdout) === 'argv ok', '…a non-shell argv still runs');
   // the pre-fix hub (base remote-fs + base client) over the SAME agent = the owner's report
   if (!BaseCL) skip('PRE-FIX (the base hub over this agent): list("~") ⇒ "command failed (127)"'); else {
   const bdm = secondManager(win, BaseCL);
@@ -304,7 +304,7 @@ if (old) {
   ok(asked.length === 1 && asked[0].op === 'run-cmd' && asked[0].cmd === 'sh', 'F1: the old agent cannot say whether it has `sh` — asked ONCE per link (`sh -c "exit 0"`, the line it ran anyway), no fs-op it might not know', asked);
   const g = await rejects(dm.fsHome());
   ok(g && g.code === 'host_needs_daemon' && asked.length === 1, 'the client\'s capability gate: fsHome on an agent without fs-portable is refused at once, never asked', g && g.message);
-  const ns = await rejects(dm.runCmd('sh', ['-c', 'echo "$HOME"']));
+  const ns = await rejects(dm.runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:test' }));
   ok(ns && ns.code === 'windows_no_shell' && WORDS_NOSH.test(ns.message) && asked.length === 2, 'F1: `sh` asked of the old agent (too old to say) IS sent, and its failed spawn comes back named — not "command failed (127)"', ns && ns.message);
 }
 
@@ -316,9 +316,9 @@ seed(wsh.home);
 {
   const dm = wsh.dm, asked = record(dm);
   ok(wsh.conn.info.platform === 'win32' && wsh.conn.info.posixShells.includes('sh'), 'F1: the agent says win32 AND that `sh` starts there (measured)', wsh.conn.info.posixShells);
-  const r = await dm.runCmd('sh', ['-c', 'printf %s "$HOME"']);
+  const r = await dm.runCmd('sh', ['-c', 'printf %s "$HOME"'], { by: 'system:test' });
   ok(r.code === 0 && r.stdout === wsh.home, 'F1: runCmd(`sh -c …`) — the ctx-sync / sweeps / sysinfo / port-forward carrier — answers as before', r);
-  const st = await dm.runStream('sh', ['-c', 'echo streamed'], { onData: () => { } });
+  const st = await dm.runStream('sh', ['-c', 'echo streamed'], { by: 'system:test', onData: () => { } });
   ok(st.code === 0, 'F1: runStream(`sh`) — the mounts / install carrier — runs', st);
   const ps = await rejects(dm.openPipeSession({ sid: 'wdfs-f1', cmd: 'sh', args: ['-lc', 'echo hi'], cwd: wsh.home }));
   ok(ps === null, 'F1: openPipeSession(`sh -lc`) — a ws-create session — opens', ps && ps.message);
@@ -334,7 +334,7 @@ else seed(oldSh.home);
 if (oldSh) {
   const dm = oldSh.dm, asked = record(dm);
   ok(oldSh.conn.info.platform === 'win32' && oldSh.conn.info.posixShells === undefined && !oldSh.conn.info.capabilities.includes('fs-portable'), 'F1: an old Windows agent: says neither its shells nor fs-portable');
-  const r = await dm.runCmd('sh', ['-c', 'printf %s "$HOME"']);
+  const r = await dm.runCmd('sh', ['-c', 'printf %s "$HOME"'], { by: 'system:test' });
   ok(r.code === 0 && r.stdout === oldSh.home, 'F1: too old to say ⇒ asked (today\'s behaviour) — its `sh` answers', r);
   const l = await new RFS.RemoteFs(hostsOf(dm)).list('h', '~');
   const b = await new BaseRFS.RemoteFs(hostsOf(dm)).list('h', '~');
@@ -376,17 +376,17 @@ console.log('§6 controls — each rule removed');
   ok(src.split(DOORLINE).length === 3 && src.split(FAILLINE).length === 3, '(c1) the door line + the named-failure line sit in runCmd + runStream');
   const NoDoor = require(writeCopy('client-nodoor.cjs', rel(src.split(DOORLINE).join(''))));
   const ndm = secondManager(win, NoDoor); const nasked = record(ndm);
-  const ne = await rejects(ndm.runCmd('sh', ['-c', 'echo "$HOME"']));
+  const ne = await rejects(ndm.runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:test' }));
   ok(nasked.some((a) => a.op === 'run-cmd' && a.cmd === 'sh') && ne && ne.code === 'windows_no_shell', 'CONTROL c1 — no door: `sh` IS sent to the Windows agent that said it has none (only named after it failed)', { nasked, e: ne && ne.message });
   const NoName = require(writeCopy('client-noname.cjs', rel(src.split(DOORLINE).join('').split(FAILLINE).join(''))));
-  const r = await secondManager(win, NoName).runCmd('sh', ['-c', 'echo "$HOME"']);
+  const r = await secondManager(win, NoName).runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:test' });
   ok(r.code === 127, 'CONTROL c1b — no door, no naming: `sh` comes back 127 (the number nobody can act on)', r);
   const FACT = "if (!base || !Array.isArray(info.posixShells) || info.posixShells.includes(base)) return null;";
   ok(src.includes(FACT), '(c6) the door keys on the device\'s fact');
   const ByPlatform = require(writeCopy('client-byplatform.cjs', rel(src.replace(FACT, 'if (!base) return null;'))));
-  const pe = await rejects(secondManager(wsh, ByPlatform).runCmd('sh', ['-c', 'echo "$HOME"']));
+  const pe = await rejects(secondManager(wsh, ByPlatform).runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:test' }));
   ok(pe && pe.code === 'windows_no_shell', 'CONTROL c6 — the door keyed on the PLATFORM (the lane head e90dfd88): the Windows machine WITH `sh` is refused what it ran (F1)', pe && pe.message);
-  if (!oldSh) skip('CONTROL c6 — …and the old agent with `sh` too'); else { const pe2 = await rejects(secondManager(oldSh, ByPlatform).runCmd('sh', ['-c', 'echo "$HOME"']));
+  if (!oldSh) skip('CONTROL c6 — …and the old agent with `sh` too'); else { const pe2 = await rejects(secondManager(oldSh, ByPlatform).runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:test' }));
   ok(pe2 && pe2.code === 'windows_no_shell', 'CONTROL c6 — …and the old agent with `sh` too', pe2 && pe2.message); }
   const GATE = "if (!conn.info?.capabilities?.includes?.('fs-portable')) { const e = new Error('daemon lacks fs-portable (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }";
   ok(src.includes(GATE), '(c2) the gate line is there');
@@ -446,7 +446,7 @@ let r2;
   m2.stop();
   fakeShells('r2probe', { sh: 'exec /bin/sh "$@"' }); // Git for Windows installed after the agent started
   const m3 = secondManager(r2, CL), conn3 = await m3.connect();
-  const rr = await m3.runCmd('sh', ['-c', 'echo installed-later']);
+  const rr = await m3.runCmd('sh', ['-c', 'echo installed-later'], { by: 'system:test' });
   ok(conn3.info.posixShells.includes('sh') && rr.code === 0 && rr.stdout.trim() === 'installed-later', 'r2: a `sh` installed after the agent started is seen at the NEXT link (and runs)', { sh: conn3.info.posixShells, rr });
   m3.stop();
 }
@@ -470,7 +470,7 @@ const wordIn = (dict) => new Function('t', fnSrc + '\nreturn fsErrorText;')(tOf(
 const oldDuck = { status: () => ({ info: { platform: 'win32', capabilities: [], daemonVersion: '2.369.0' } }), runCmd: async () => ({ code: 127, stdout: '', stderr: '' }) };
 const outdated = await rejects(new RFS.RemoteFs(hostsOf(old ? old.dm : oldDuck)).list('h', '~'));
 const zipE = await rejects(new RFS.RemoteFs(hostsOf(win.dm)).archiveList('h', path.join(win.home, 'x.zip')));
-const noSh = await rejects(win.dm.runCmd('sh', ['-c', 'exit 0']));
+const noSh = await rejects(win.dm.runCmd('sh', ['-c', 'exit 0'], { by: 'system:test' }));
 const bodies = [outdated, zipE, noSh].map((e) => RFS.fsErrorBody(e));
 ok(bodies.map((b) => b.code).join() === 'device_agent_outdated,windows_unsupported,windows_no_shell' && bodies.every((b) => b.error && b.params), 'r2: the three refusals travel as a CODE + params beside the English error', bodies);
 const CJK = /[\u3040-\u30ff\u4e00-\u9fff]/;
@@ -493,7 +493,7 @@ const xdevMove = async (dm, tag) => {
   const a = path.join(SCR, tag + '-a'), b = path.join(SCR, tag + '-b');
   fs.mkdirSync(path.join(a, 'sub'), { recursive: true }); fs.writeFileSync(path.join(a, 'ok.txt'), 'ok'); fs.writeFileSync(path.join(a, 'sub', 'locked.txt'), 'x'); fs.chmodSync(path.join(a, 'sub', 'locked.txt'), 0o000);
   fs.mkdirSync(path.join(b, 'sub'), { recursive: true }); fs.writeFileSync(path.join(b, 'sub', 'stays.txt'), 'y'); fs.chmodSync(path.join(b, 'sub'), 0o555);
-  const ea = await rejects(dm.fsMove(a, path.join(xdev, tag + '-a'))), eb = await rejects(dm.fsMove(b, path.join(xdev, tag + '-b')));
+  const ea = await rejects(dm.fsMove(a, path.join(xdev, tag + '-a'), { by: 'system:test' })), eb = await rejects(dm.fsMove(b, path.join(xdev, tag + '-b'), { by: 'system:test' }));
   fs.chmodSync(path.join(b, 'sub'), 0o755); fs.chmodSync(path.join(a, 'sub', 'locked.txt'), 0o644);
   return { ea, eb, aLeft: fs.existsSync(path.join(xdev, tag + '-a')), aKept: fs.existsSync(path.join(a, 'ok.txt')), bCopied: fs.existsSync(path.join(xdev, tag + '-b', 'sub', 'stays.txt')), bKept: fs.existsSync(path.join(b, 'sub', 'stays.txt')) };
 };

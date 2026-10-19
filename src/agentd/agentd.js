@@ -442,6 +442,21 @@ let loopLagMax = 0;
 }
 
 const STATE = path.join(ROOT, 'state');
+// lane device-act-audit (design q-042 §3 D4): THIS machine's own record of what its hub did here. Every act / code op the
+// hub sends (src/device-acts.js layers: a command, a file written, a secret placed, keys typed, a LAN socket, an upgrade)
+// is ONE line {at, op, layer, by, summary} in state/acts.log — `by` as the hub said it (null = it named nobody), the
+// summary bounded and secret-free (sizes, never bytes). A ring of two files (→ acts.log.1 at ACTS_LOG_MAX), appended in
+// order off the loop; nothing is printed.
+const DA = require('../device-acts.js');
+const ACTS_LOG = path.join(STATE, 'acts.log');
+const ACTS_LOG_MAX = 2 * 1024 * 1024;
+let actsQ = Promise.resolve();
+function noteAct(msg) {
+  if (!msg || typeof msg !== 'object' || !DA.auditable(msg)) return;
+  let text; try { text = JSON.stringify(DA.lineOf({ at: Date.now(), payload: msg, by: msg.by })) + '\n'; } catch { return; }
+  actsQ = actsQ.then(() => fs.promises.stat(ACTS_LOG).then((st) => (st.size + Buffer.byteLength(text) > ACTS_LOG_MAX ? fs.promises.rename(ACTS_LOG, ACTS_LOG + '.1') : null), () => null))
+    .then(() => fs.promises.appendFile(ACTS_LOG, text, { mode: 0o600 })).catch(() => { /* the act runs; a full disk loses the line, never the op */ });
+}
 // Windows has no unix sockets for node's net.listen — use a named pipe keyed
 // by the root path so several per-instance daemons coexist (EXPERIMENTAL).
 // Everywhere else THE socket-path ladder (src/sock-path.js, lane-pairing ④): the
@@ -579,6 +594,87 @@ function pidCmdline(pid) {
 // executing the daemon.
 const { reExecArgv, repointCurrent, handOver, listenWithRetry } = require('./reexec');
 
+// THE RELEASE SIGNATURE (lane device-bundle-signing, design q-042 D2): an upgrade lands only when it is signed by a
+// release key THIS device trusts (src/agentd-signature.js) — or, on this machine's OWN socket (never the dial link),
+// when the hub proved it writes this daemon's state directory (the hub's own machine running an unsigned local build).
+// The pin: <state>/trusted-keys.json, written at the first start of an install from the keys IN this bundle
+// (src/agentd/release-keys.js); a successor reached through the key chain JOINS it (fix r2: siblings stay, a signed
+// retirement drops one); a device that trusts no key at all pins the first validly signed release's own key set (TOFU,
+// fix r2); a (re-)pair resets it. The floor: <state>/release-floor.json — the newest version this install ever ran
+// (raised at every start); an older signed release lands only as a signed rollback, honoured once (fix r2).
+const SIG = require('../agentd-signature.js');
+const RK = require('./release-keys.js');
+const TRUST_FILE = path.join(STATE, 'trusted-keys.json');
+const PROOF_FILE = path.join(STATE, 'upgrade-proof');
+const FLOOR_FILE = path.join(STATE, 'release-floor.json');
+const trustedKeys = () => { try { const k = SIG.parseTrust(fs.readFileSync(TRUST_FILE, 'utf-8')); if (k) return k; } catch { } return RK.RELEASE_KEYS; };
+// TOFU only for a device that trusts NOTHING: no pin file at all and no key baked into this bundle (a pin file that exists
+// — even one that does not parse — is never a reason to trust a stranger)
+const trustsNoKey = () => !fs.existsSync(TRUST_FILE) && !RK.RELEASE_KEYS.length;
+function pinTrust(keys, from) { // atomic at 0600 (tmp + rename), like dial.json
+  const tmp = TRUST_FILE + '.' + process.pid + '.tmp';
+  try { fs.unlinkSync(tmp); } catch { }
+  fs.writeFileSync(tmp, SIG.trustText(keys, { from, at: new Date().toISOString() }), { mode: 0o600 });
+  fs.renameSync(tmp, TRUST_FILE);
+}
+/** The floor this install judges with: the newest version it ever ran — never below the version running now. */
+function floorNow() {
+  let f = null; try { f = SIG.parseFloor(fs.readFileSync(FLOOR_FILE, 'utf-8')); } catch { }
+  const own = SIG.VERSION_RE.test(VERSION) ? VERSION : null;
+  const floor = f && f.floor && (!own || SIG.compareVersions(f.floor, own) > 0) ? f.floor : own;
+  return { floor, honoured: f ? f.honoured : [] };
+}
+function writeFloor(f) { // atomic at 0600, like the pin
+  const tmp = FLOOR_FILE + '.' + process.pid + '.tmp';
+  try { fs.unlinkSync(tmp); } catch { }
+  fs.writeFileSync(tmp, SIG.floorText({ ...f, at: new Date().toISOString() }), { mode: 0o600 });
+  fs.renameSync(tmp, FLOOR_FILE);
+}
+/** THE LANDING VERDICT over the bytes ON DISK. On this machine's own socket (never a dial link) the hub's single-use
+ *  local proof (<state>/upgrade-proof, deleted on any read) is enough — whoever writes that dir is this machine's user
+ *  already, and the hub's OWN daemon must never depend on a pin (one that ran an unsigned build pinned nothing).
+ *  Everywhere else: a release signature by a key this device trusts. */
+function landingVerdict(bytes, { version, sig = null, localProof = null }, { dialed = false } = {}) {
+  const crypto = require('crypto');
+  if (!dialed && typeof localProof === 'string') {
+    let want = ''; try { want = fs.readFileSync(PROOF_FILE, 'utf-8').trim(); } catch { }
+    try { fs.unlinkSync(PROOF_FILE); } catch { }
+    const h = (x) => crypto.createHash('sha256').update(String(x)).digest();
+    if (/^[0-9a-f]{64}$/.test(want) && crypto.timingSafeEqual(h(want), h(localProof))) return { ok: true, local: true };
+    if (sig == null) return { ok: false, code: 'unsigned', why: 'no release signature, and the local proof does not match this machine\'s' };
+  }
+  const fl = floorNow();
+  // a signed rollback is spent ONCE — but re-landing the very bytes `current` already holds moves nothing (the ssh road's
+  // standing agent catching up after --land-upgrade landed them, a re-exec that did not happen): not a second downgrade
+  let honoured = fl.honoured;
+  if (honoured.length) { try { if (fs.readFileSync(path.join(ROOT, 'current', path.basename(process.argv[1] || 'agentd.js'))).equals(bytes)) honoured = []; } catch { } }
+  return SIG.verify(trustedKeys(), bytes, version, sig, { crypto, tofu: trustsNoKey(), floor: fl.floor, honoured });
+}
+/** THE ONE WRITER of this install's `current` (test-architecture §92): the bytes ON DISK at `tmp` are judged first; only
+ *  on a yes are they renamed to this install's file name, `current` repointed, and what the verdict changed recorded (the
+ *  pin, a signed rollback honoured). The hub's stream (beginUpgrade) and the ssh road (`--land-upgrade`, fix r2) both
+ *  land through here. A refusal deletes the bytes (and the empty dir) and says so. → the verdict; an fs error throws. */
+function landBundle(tmp, dir, version, { sig = null, localProof = null } = {}, { dialed = false } = {}) {
+  const verdict = landingVerdict(fs.readFileSync(tmp), { version, sig, localProof }, { dialed });
+  if (!verdict.ok) {
+    try { fs.unlinkSync(tmp); } catch { }
+    try { fs.rmdirSync(dir); } catch { } // only an empty dir goes (a version this daemon runs from keeps its files)
+    log(`upgrade to ${version} REFUSED — ${verdict.code}: ${verdict.why} — the bundle was deleted; still running ${VERSION}`);
+    return verdict;
+  }
+  log(verdict.local ? `upgrade to ${version}: accepted on this machine's own socket (the local proof)` : `upgrade to ${version}: release signature ok (key ${verdict.keyId}${verdict.viaChain ? ', reached through the key chain' : ''}${verdict.tofu ? ', TRUSTED ON FIRST USE — this install trusted no release key' : ''}${verdict.rollback ? `, a SIGNED ROLLBACK below the floor ${verdict.floor}` : ''})`);
+  // keep whatever filename THIS install runs under (fresh installs are
+  // vibespace-device.js, legacy ones agentd.js) — a hardcoded name here
+  // would silently rename the daemon back on its first self-upgrade
+  const selfName = path.basename(process.argv[1] || 'agentd.js');
+  fs.renameSync(tmp, path.join(dir, selfName));
+  // the current repoint — per platform (src/agentd/reexec.js: a junction on Windows, a symlink swap elsewhere)
+  repointCurrent(fs, { root: ROOT, dir });
+  if (verdict.trustAfter) { try { pinTrust(verdict.trustAfter, verdict.tofu ? 'tofu' : 'chain'); log(`release keys pinned: ${verdict.trustAfter.map((k) => k.keyId).join(', ')} (${verdict.tofu ? 'trusted on first use — the first validly signed release' : 'the key chain'})`); } catch (e) { log(`release keys NOT pinned: ${e.message}`); } }
+  if (verdict.rollback) { try { const f = floorNow(); writeFloor({ floor: f.floor, honoured: f.honoured.includes(verdict.sha256) ? f.honoured : [...f.honoured, verdict.sha256] }); log(`signed rollback to ${version} honoured (once) — the floor stays ${f.floor}`); } catch (e) { log(`signed rollback NOT recorded: ${e.message}`); } }
+  return verdict;
+}
+
 // Exec-PROOF process identity: the start time survives execve while cmdline
 // does NOT — a pipe child spawned as `sh -lc '… exec env … claude …'` rewrites
 // its cmdline twice, so matching cmdline against the recorded argv0 misjudges
@@ -634,7 +730,41 @@ function acquireSingleton() {
   return false;
 }
 
-if (!process.argv.includes('--stdio') && !process.argv.includes('--dial-check')) {
+// ── LAND A STAGED BUNDLE — the ssh road (lane device-bundle-signing-fix-r2, verify-r1 RED-3) ──
+// `agentd.js --land-upgrade <staged file> --version <v> [--manifest <record.json>]`: the hub's ssh install step
+// (src/hosts.js installAgentd) runs it with the code ALREADY installed here — this agent judges the newcomer exactly
+// as it judges a stream over a dial link (landBundle: the signature, the floor, the pin; never a local proof). No lock,
+// no socket. ONE line on stdout — VS-AGENTD-LANDED <v> from=<this version> [tofu=<ids>] (exit 0) /
+// VS-AGENTD-REFUSED <code> from=<this version>: <why> (exit 3) / VS-AGENTD-FAILED <why> (exit 4).
+if (process.argv.includes('--land-upgrade')) {
+  const argOf = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : undefined; };
+  const staged = String(argOf('--land-upgrade') || ''), version = String(argOf('--version') || ''), mf = argOf('--manifest');
+  const clean = (x) => String(x).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200);
+  let line, exit = 0;
+  try {
+    let sig = null;
+    if (mf && fs.existsSync(mf)) { try { sig = JSON.parse(fs.readFileSync(mf, 'utf-8')); } catch { sig = { v: 0 }; } }
+    if (!SIG.VERSION_RE.test(version)) {
+      log(`upgrade REFUSED — malformed: ${JSON.stringify(version.slice(0, 40))} is not a version — still running ${VERSION}`);
+      line = `VS-AGENTD-REFUSED malformed from=${VERSION}: the upgrade names no version`; exit = 3;
+    } else {
+      const dir = path.join(ROOT, version);
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const tmp = path.join(dir, 'agentd.js.tmp');
+      try { fs.renameSync(staged, tmp); } catch (e) { if (e.code !== 'EXDEV') throw e; fs.copyFileSync(staged, tmp); fs.unlinkSync(staged); }
+      log(`upgrade to ${version} (${fs.statSync(tmp).size} bytes) begins — staged over ssh`);
+      const v = landBundle(tmp, dir, version, { sig }, { dialed: true });
+      if (v.ok) line = `VS-AGENTD-LANDED ${version} from=${VERSION}${v.tofu ? ` tofu=${v.trustAfter.map((k) => k.keyId).join(',')}` : ''}`;
+      else { line = `VS-AGENTD-REFUSED ${v.code} from=${VERSION}${v.floor ? ` floor=${v.floor}` : ''}${sig && typeof sig.keyId === 'string' ? ` key=${sig.keyId.replace(/[^0-9a-f]/g, '').slice(0, 16)}` : ''}: ${clean(v.why)}`; exit = 3; }
+    }
+  } catch (e) {
+    line = `VS-AGENTD-FAILED ${(e && e.code) || 'error'}: ${clean((e && e.message) || e)}`; exit = 4;
+    log(`upgrade to ${version} FAILED (ssh road) — ${line}`);
+  }
+  process.stdout.write(line + '\n', () => process.exit(exit));
+}
+
+if (!process.argv.includes('--stdio') && !process.argv.includes('--dial-check') && !process.argv.includes('--land-upgrade')) {
 if (!acquireSingleton()) {
   process.stderr.write(`vibespace-device: already running (pid ${blockingPid || '?'}, root ${ROOT})` +
     ' — a running daemon adopts a re-pair by itself within ~30s; to force-replace it: kill the pid and the installer/launchd restarts it\n');
@@ -669,6 +799,11 @@ const tokenSha = () => {
 
 log(`vibespace-device ${VERSION} starting (proto ${PROTO_VERSION}, pid ${process.pid})`);
 fs.writeFileSync(path.join(STATE, 'agentd.pid'), String(process.pid));
+// TOFU (design q-042 D2): the first start of an install pins the release keys shipped IN this bundle
+if (!fs.existsSync(TRUST_FILE) && RK.RELEASE_KEYS.length) { try { pinTrust(RK.RELEASE_KEYS, 'bundle'); log(`release keys pinned: ${RK.RELEASE_KEYS.map((k) => k.keyId).join(', ')} (the first start of this install)`); } catch (e) { log(`release keys NOT pinned: ${e.message}`); } }
+// THE FLOOR (fix r2, verify-r1 RED-1): the newest version this install ever ran — a release older than it lands only as
+// a signed rollback (landBundle). Raised here, at every start; a signed rollback below it leaves it where it was.
+try { let f = null; try { f = SIG.parseFloor(fs.readFileSync(FLOOR_FILE, 'utf-8')); } catch { } if (SIG.VERSION_RE.test(VERSION) && (!f || !f.floor || SIG.compareVersions(VERSION, f.floor) > 0)) { writeFloor({ floor: VERSION, honoured: f ? f.honoured : [] }); log(`release floor: ${VERSION} (the newest version this install ran)`); } } catch (e) { log(`release floor NOT written: ${e.message}`); }
 
 // ── upgrade: receive a new bundle on chan 1, land it versioned, re-exec ──
 // verify-r1 C3: the re-exec ENDS this process's link on purpose. The dial loop reads this flag when its socket
@@ -676,39 +811,49 @@ fs.writeFileSync(path.join(STATE, 'agentd.pid'), String(process.pid));
 // `closed-before-hello` (streak 1 into dial-status.json, so the NEW daemon's first dial-in told the server
 // "1 attempt failed" after every healthy self-upgrade).
 let upgradeLanded = false;
-function beginUpgrade(mux, { version, size }) {
+function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { dialed = false } = {}) {
+  // the version names a DIRECTORY under the root: a version-shaped string or nothing (never a path out of it)
+  if (typeof version !== 'string' || !SIG.VERSION_RE.test(version)) {
+    log(`upgrade REFUSED — malformed: ${JSON.stringify(String(version).slice(0, 40))} is not a version — still running ${VERSION}`);
+    try { mux.control({ op: 'upgrade-failed', version: String(version).slice(0, 40), code: 'malformed', error: 'malformed: the upgrade names no version' }); } catch { }
+    return { data(buf) { mux.credit(1, buf.length); } };
+  }
   const dir = path.join(ROOT, version);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const tmp = path.join(dir, 'agentd.js.tmp');
   const fd = fs.openSync(tmp, 'w', 0o700);
-  let got = 0;
+  let got = 0, done = false;
   log(`upgrade to ${version} (${size} bytes) begins`);
   return {
     data(buf) {
+      if (done) { mux.credit(1, buf.length); return; }
       fs.writeSync(fd, buf);
       got += buf.length;
       mux.credit(1, buf.length);
       if (got >= size) {
+        done = true;
         // lane device-upgrade-stuck: a landing step that THROWS is SAID (the device's log + `upgrade-failed` to the hub).
         // Pre-fix the throw died inside ws-min's swallowing emit — no line here, no answer there: the hub waited out its
         // 30 s, three times, and gave up while this daemon kept running the old version (every Windows machine)
+        let tofuIds = null;
         try {
           fs.fsyncSync(fd);
           fs.closeSync(fd);
-          // keep whatever filename THIS install runs under (fresh installs are
-          // vibespace-device.js, legacy ones agentd.js) — a hardcoded name here
-          // would silently rename the daemon back on its first self-upgrade
-          const selfName = path.basename(process.argv[1] || 'agentd.js');
-          fs.renameSync(tmp, path.join(dir, selfName));
-          // the current repoint — per platform (src/agentd/reexec.js: a junction on Windows, a symlink swap elsewhere)
-          repointCurrent(fs, { root: ROOT, dir });
+          // THE SIGNATURE GATE (design q-042 D2): landBundle judges the bytes ON DISK before anything points at them. A
+          // refusal deletes them, says so (the log + `upgrade-failed {code}`) and keeps running this version.
+          const verdict = landBundle(tmp, dir, version, { sig, localProof }, { dialed });
+          if (!verdict.ok) {
+            try { mux.control({ op: 'upgrade-failed', version, code: verdict.code, error: `${verdict.code}: ${verdict.why}`, ...(sig && typeof sig.keyId === 'string' ? { keyId: sig.keyId.slice(0, 16) } : {}), ...(verdict.floor ? { floor: verdict.floor } : {}) }); } catch { }
+            return;
+          }
+          if (verdict.tofu) tofuIds = verdict.trustAfter.map((k) => k.keyId); // the hub files the first trust (fix r2)
         } catch (e) {
           const why = `${(e && e.code) || 'error'}: ${String((e && e.message) || e).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200)}`;
           log(`upgrade to ${version} FAILED — ${why} — still running ${VERSION}`);
           try { mux.control({ op: 'upgrade-failed', version, error: why }); } catch { }
           return;
         }
-        mux.control({ op: 'upgrade-done', version });
+        mux.control({ op: 'upgrade-done', version, ...(tofuIds ? { tofu: tofuIds } : {}) });
         upgradeLanded = true;
         log(`upgrade to ${version} landed — re-exec`);
         // re-exec from the new dir; the singleton lock is released on exit and
@@ -1425,7 +1570,7 @@ function orphanRunStream(rec, reason) {
   log(`run-stream pid ${child.pid}: the hub's link was lost — its output continues into ${file}`);
 }
 
-function serveConnection(sock) {
+function serveConnection(sock, { dialed = false } = {}) {
   let authed = false;
   let upgrade = null;
   const sessions = new Map(); // chan → { proc, credit accounting is per-mux }
@@ -1549,8 +1694,9 @@ function serveConnection(sock) {
         return;
       }
       if (!authed) { sock.end(); return; }
+      noteAct(msg); // lane device-act-audit: an act / code op from the hub = one line of state/acts.log (who asked, what)
       if (msg.op === 'ok') return; // server accepted us as-is
-      if (msg.op === 'upgrade') { upgrade = beginUpgrade(mux, msg); return; }
+      if (msg.op === 'upgrade') { upgrade = beginUpgrade(mux, msg, { dialed }); return; }
       if (msg.op === 'ping-info') { mux.control({ op: 'info', version: VERSION, pid: process.pid, uptime: process.uptime() }); return; }
       // ── M1 session primitive: spawn a pty, relay its bytes on a byte channel
       // (invariant #2: mechanical only — no normalization/discovery here). The
@@ -2622,7 +2768,7 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
       status = DF.nextDialStatus(status, { at: upAt, outcome: 'connected', host });
       writeDialStatus(status);
       log(DF.dialLogLine({ outcome: 'connected', url: cfg.url, failedBefore }));
-      serveConnection(ws);
+      serveConnection(ws, { dialed: true }); // design q-042 D2: a dial link is never this machine's own socket
     });
     ws.on('close', () => {
       // C3: a self-upgrade's re-exec ends the link on purpose — no failure recorded, no retry (this process exits;

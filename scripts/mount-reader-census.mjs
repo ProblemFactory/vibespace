@@ -43,6 +43,7 @@ export const ROWS = [
   ['src/design-fs.js', 'user-path', 7, 'DOOR\\.blocked\\(', 'the design folder read: storage_blocked by name'],
   ['src/desktop-display.js', 'own-tree', 27, null, PROC], // +2 lane remoteapp-r1b: the first connection's OWN fresh config dir (readdir + the one stored certificate, read for its sha256); +3 lane app-display-portal: portal binaries stat'd in /usr/libexec, the app dir's bus socket, /proc/self/mountinfo; +1 lane app-display-notify-sink: the sink file; +1 lane remoteapp-r1a: the RDP client binary stat'd (its build facts' memo key) beside the module; +1 lane app-launch-singleton: the holder of a browser's default profile (/proc/<pid>/stat — its SingletonLock is a readlink in the browser's own tree under ~)
   ['src/desktop-serve.js', 'own-tree', 15, null, DATA], // +2 lane remoteapp-r1b: a RemoteApp session's own app.log re-read at its teardown (stat + read) for the password-shape scrub; +2 lane app-display-notify-sink: the app's notification journal (stat + read) in its own 0700 portal dir; +1 lane remoteapp-r1a: the tail of a RemoteApp session's own app.log (why it ended)
+  ['src/device-audit.js', 'own-tree', 3, null, `${DATA} — lane device-act-audit: the hub's device-act audit ring (data/device-audit.jsonl: the size before an append, the backwards tail read)`],
   ['src/device-mount.js', 'exempt', 5, null, 'the device pull mount: /proc scans + its own mount point (its owner’s liveness)'],
   ['src/discovery-facts.js', 'own-tree', 5, null, PROC],
   ['src/exit-proxy.js', 'user-path', 10, 'DOOR\\.blocked\\(', 'an exit-run transfer’s local side: refused by name (transfer_failed)'],
@@ -117,6 +118,7 @@ export const ROWS = [
   ['src/server/desktop-app-keeper.js', 'own-tree', 1, null, DATA],
   ['src/server/desktop-webrtc.js', 'own-tree', 3, null, 'lane stream-p3m-build: the prebuilt Mac screen helper the hub pushes to a Mac with no compiler — data/bin/helpers/vibespace-screen (+ .version) in the checkout: its version, its size, its bytes'],
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],
+  ['src/server/device-alerts.js', 'own-tree', 1, null, DATA], // lane device-act-audit: the three urgent items' dedup ledger (data/device-alerts.json)
   ['src/server/dial-health-watch.js', 'own-tree', 1, null, DATA], // lane host-stale-dialer: data/dial-health.json (the For-you ledger)
   ['src/server/dial-pairing.js', 'own-tree', 1, null, DATA],
   ['src/server/exit-hook.js', 'own-tree', 2, null, PROC], // lane usage-fold-worker-exit-hook: /proc/self/task (a worker's thread named at spawn, listed at the join)

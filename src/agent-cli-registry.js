@@ -114,6 +114,10 @@ const ROWS = Object.freeze([
     summary: 'borrow a paired machine\'s network for one command, or run a command ON it: only machines the user opened to you',
   },
   {
+    name: 'vibespace-remote', topic: 'remote', manual: 'remote-manual.md', gate: 'always', teach: null,
+    summary: 'what this VibeSpace did on its paired machines because YOU asked: each act, its verdict, who asked',
+  },
+  {
     name: 'vibespace-window', topic: 'window', manual: 'window-manual.md', gate: 'always', teach: null,
     summary: 'a NATIVE app window the user shared with you (or you opened) as a target: accessibility tree + @refs, or pixels',
   },

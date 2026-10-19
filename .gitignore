@@ -66,6 +66,9 @@ data/tasks.json
 data/uploads-sync.json
 .claude/worktrees/
 data/bin/vibespace-agentd.js
+# lane device-bundle-signing: the release manifest beside the bundle — copied by scripts/agentd-release.mjs at build ONLY
+# when this build IS the signed release (release/agentd/manifest.json is the tracked original)
+data/bin/vibespace-agentd.manifest.json
 data/bin/vibespace-agentd-attach.js
 src/lib/build-version.js
 # (No test suite writes a patched copy into src/ — scripts/mutant-copy.mjs puts

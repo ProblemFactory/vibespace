@@ -60,7 +60,7 @@ try {
   // 3) runStream: `cat` writes 3MB and exits immediately — the exact
   //    stream-exit-overtakes-queued-stdout scenario
   const chunks = [];
-  const r = await dm.runStream('cat', [big], { onData: (b) => chunks.push(b) });
+  const r = await dm.runStream('cat', [big], { by: 'system:test', onData: (b) => chunks.push(b) });
   const streamed = Buffer.concat(chunks);
   check('runStream exits 0 without truncation flag', r.code === 0 && !r.truncated, JSON.stringify(r));
   check('runStream delivers ALL stdout of a fast-exiting producer',

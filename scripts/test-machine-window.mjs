@@ -270,7 +270,7 @@ console.log('§7 the capability gate: an old agent is never asked');
   const old = make(C, ['desktop-serve']);
   let err = null; try { await old.dm.windowTrack({ pid: 1 }); } catch (e) { err = e; }
   ok(err && err.code === 'host_needs_daemon' && old.sent.length === 0, 'an agent without window-track: host_needs_daemon, and NO request (an unknown op would hang it)', { code: err && err.code, sent: old.sent });
-  let perr = null; try { await old.dm.windowPin('w1', true); } catch (e) { perr = e; }
+  let perr = null; try { await old.dm.windowPin('w1', true, { by: 'system:test' }); } catch (e) { perr = e; }
   ok(perr && perr.code === 'host_needs_daemon' && old.sent.length === 0, 'the same for window-pin');
   const neu = make(C, ['window-track', 'window-pin']);
   const r = await neu.dm.windowTrack({ pid: 1 });

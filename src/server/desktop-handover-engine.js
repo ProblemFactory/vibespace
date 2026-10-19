@@ -26,6 +26,7 @@
 const fs = require('fs');
 const path = require('path');
 const DH = require('../desktop-handover.js');
+const DA = require('../device-acts.js'); // int315: the act's `by` = the agent holding the lease (lane device-act-audit)
 const SM = require('../stream-model.js'); // STREAM_LIMITS.handoverEventsMax — the daemon's cap on one desktop-input op (fix r2)
 const R = require('../window-reach.js');
 const { addressableId } = require('../claude-lock-capture.js');
@@ -178,7 +179,7 @@ function create({ dataDir, activeSessions, log = console, now = Date.now, tickMs
   async function screenshot(handle, f) {
     const { lease, dev } = held(handle, f);
     let r;
-    try { r = await dev.dm.desktopGrab(dev.sid); } catch (e) { audit({ handle, verb: 'screenshot', sessionKey: lease.holder.key, by: 'pixels', ok: false, code: errOfDevice(e).code }); throw errOfDevice(e); }
+    try { r = await dev.dm.desktopGrab(dev.sid, { by: DA.byAgent(lease.holder.key) }); } catch (e) { audit({ handle, verb: 'screenshot', sessionKey: lease.holder.key, by: 'pixels', ok: false, code: errOfDevice(e).code }); throw errOfDevice(e); }
     if (r && r.code === 'not_found') { daemonGone(lease); audit({ handle, verb: 'screenshot', sessionKey: lease.holder.key, by: 'pixels', ok: false, code: 'not_found' }); throw named('not_found', NOT_FOUND_WHY, { handle, origin: ORIGIN }); }
     const cur = stillHeld(handle, f, lease);
     if (!r || !r.ok) { audit({ handle, verb: 'screenshot', sessionKey: lease.holder.key, by: 'pixels', ok: false, code: (r && r.code) || 'still_failed' }); throw named((r && r.code) || 'still_failed', (r && r.error) || 'the machine took no picture', { handle, origin: ORIGIN }); }
@@ -241,7 +242,7 @@ function create({ dataDir, activeSessions, log = console, now = Date.now, tickMs
     let r = null, n = 0, sent = 0, cut = null;
     for (let ci = 0; ci < chunks.length; ci++) {
       if (ci) { try { stillHeld(handle, f, lease); } catch (e) { cut = e; break; } }
-      try { r = await dev.dm.desktopInput(dev.sid, chunks[ci]); } catch (e) { const er = errOfDevice(e); if (!sent) refuse(er.code, er.message); cut = er; break; }
+      try { r = await dev.dm.desktopInput(dev.sid, chunks[ci], { by: DA.byAgent(lease.holder.key) }); } catch (e) { const er = errOfDevice(e); if (!sent) refuse(er.code, er.message); cut = er; break; }
       if (r && r.code === 'not_found') { daemonGone(lease); refuse('not_found', `${NOT_FOUND_WHY}${sent ? ` (${sent} of ${records.length} records had gone in)` : ''}`); }
       n += (r && r.n) || 0;
       sent += r && r.cancelled ? Math.max(0, Number(r.sent) || 0) : chunks[ci].length;

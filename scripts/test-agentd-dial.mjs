@@ -269,11 +269,11 @@ console.log('— lane-pairing ③: a real daemon vs the REAL dial gate — wrong
   check('the dial-status op answers the device\'s file over the live link', ds && ds.last && ds.last.outcome === 'connected' && Array.isArray(ds.history) && ds.history.length >= 3, JSON.stringify(ds && ds.last));
   // verify-r1 A5: the real daemon's run-cmd — the exit's call shape: a cut output is NAMED, the code is a number
   {
-    const r1 = await dm.runCmd('sh', ['-lc', 'head -c 1500000 /dev/zero | tr "\\0" a; echo; echo TAIL'], { timeoutMs: 30000, waitMs: 40000 });
+    const r1 = await dm.runCmd('sh', ['-lc', 'head -c 1500000 /dev/zero | tr "\\0" a; echo; echo TAIL'], { by: 'system:test', timeoutMs: 30000, waitMs: 40000 });
     check('a 1.5 MB stdout comes back cut to 1 MiB WITH `truncated: true` (the tail is missing and the reply says so)', r1.code === 0 && r1.truncated === true && String(r1.stdout).length === 1048576 && !String(r1.stdout).includes('TAIL'), JSON.stringify({ code: r1.code, truncated: r1.truncated, len: String(r1.stdout).length }));
-    const r2 = await dm.runCmd('sh', ['-lc', 'head -c 3000000 /dev/zero | tr "\\0" b'], { timeoutMs: 30000, waitMs: 40000 });
+    const r2 = await dm.runCmd('sh', ['-lc', 'head -c 3000000 /dev/zero | tr "\\0" b'], { by: 'system:test', timeoutMs: 30000, waitMs: 40000 });
     check('a 3 MB stdout (over the daemon\'s 2 MiB maxBuffer) answers a NUMERIC code (was the string ERR_CHILD_PROCESS_STDIO_MAXBUFFER) + truncated, not timedOut', Number.isInteger(r2.code) && r2.truncated === true && r2.timedOut === false, JSON.stringify({ code: r2.code, truncated: r2.truncated, timedOut: r2.timedOut }));
-    const r3 = await dm.runCmd('sh', ['-lc', 'echo small'], { timeoutMs: 30000 });
+    const r3 = await dm.runCmd('sh', ['-lc', 'echo small'], { by: 'system:test', timeoutMs: 30000 });
     check('a small output: code 0, truncated false', r3.code === 0 && r3.truncated === false && r3.stdout === 'small\n', JSON.stringify(r3));
   }
   // attack 18: the device holds ANOTHER command's host token (state/token) — dialed in, every op refused ⇒ `auth-fail`
@@ -334,6 +334,7 @@ console.log('— lane-pairing ③: a real daemon vs the REAL dial gate — wrong
 // path's rebuilt DeviceManagers (measured before the per-device ledger: 180 upgrades in 45 s, 4 pushes a second). ──
 console.log('— verify-r1 C1: a never-converging device under the handshake-on-every-dial-in path is BOUNDED —');
 // One run = a real pinned daemon + a real gate; `bundleSrc` is what the server SHIPS and what the daemon runs.
+const RELEASE_C = require('../src/agentd-signature.js').generateKeyPair({ crypto }); // lane device-bundle-signing: the C1/C3 release key
 async function neverConverging({ tag, bundleSrc, ms }) {
   const { HostManager } = require('../src/hosts.js');
   const dataC = path.join(tmp, `server-${tag}`, 'data'); fs.mkdirSync(path.join(dataC, 'bin'), { recursive: true });
@@ -341,6 +342,10 @@ async function neverConverging({ tag, bundleSrc, ms }) {
   const pinned = bundleSrc.replace('VERSION = process.env.VIBESPACE_AGENTD_VERSION || require_version().VERSION;', 'VERSION = "2.300.0";');
   check(`(${tag}: the shipped copy is pinned to report 2.300.0 whatever lands)`, pinned !== bundleSrc);
   fs.writeFileSync(stuckBundle, pinned);
+  // lane device-bundle-signing (design q-042 D2): a hub pushes only the SIGNED release and the device lands only what a key
+  // it pinned signed — the shipped copy gets its release manifest (a throwaway key) and the device below pins that key
+  const SIGC = require('../src/agentd-signature.js');
+  fs.writeFileSync(path.join(dataC, 'bin', 'vibespace-agentd.manifest.json'), JSON.stringify(SIGC.sign(RELEASE_C.privateKeyPem, Buffer.from(pinned), version, { crypto })));
   const HC = new HostManager({ dataDir: dataC });
   const HOST_C = 'vsht_c' + crypto.randomBytes(6).toString('hex');
   const DPC = require('../src/server/dial-pairing.js').create({ rootDir: path.join(tmp, `server-${tag}`), AGENTD_DIR: path.join(dataC, 'agentd'), agentdHostToken: () => HOST_C,
@@ -372,6 +377,7 @@ async function neverConverging({ tag, bundleSrc, ms }) {
   const rootC = path.join(tmp, `agentd-${tag}`); const stC = path.join(rootC, 'state');
   fs.mkdirSync(stC, { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(stC, 'token'), HOST_C, { mode: 0o600 });
+  fs.writeFileSync(path.join(stC, 'trusted-keys.json'), SIGC.trustText([{ keyId: RELEASE_C.keyId, publicKey: RELEASE_C.publicKey }], { from: 'test', at: 'x' }), { mode: 0o600 });
   fs.writeFileSync(path.join(stC, 'dial.json'), JSON.stringify({ url: `ws://127.0.0.1:${PC}/api/device-dial?device=devC`, token: pairC.dialToken }), { mode: 0o600 });
   const instC = path.join(rootC, '2.300.0'); fs.mkdirSync(instC, { recursive: true });
   fs.writeFileSync(path.join(instC, 'vibespace-device.js'), pinned);
@@ -618,6 +624,8 @@ console.log('— lane win-upgrade-pipe: a REAL re-exec hands over (close, then s
   const { HostManager } = require('../src/hosts.js');
   const dataE = path.join(tmp, 'server-e', 'data'); fs.mkdirSync(path.join(dataE, 'bin'), { recursive: true });
   fs.copyFileSync(bundle, path.join(dataE, 'bin', 'vibespace-agentd.js')); // what deviceForDial SHIPS: reports `version`
+  // lane device-bundle-signing: the SIGNED release (a throwaway key the device below pins) — an unsigned one is never pushed
+  fs.writeFileSync(path.join(dataE, 'bin', 'vibespace-agentd.manifest.json'), JSON.stringify(require('../src/agentd-signature.js').sign(RELEASE_C.privateKeyPem, fs.readFileSync(bundle), version, { crypto })));
   const HE = new HostManager({ dataDir: dataE });
   const events = []; HE.onAgentUpgrade = (e, f) => { events.push(e + ':' + ((f && (f.version || f.to)) || '')); };
   const HOST_E = 'vsht_e' + crypto.randomBytes(6).toString('hex');
@@ -649,6 +657,7 @@ console.log('— lane win-upgrade-pipe: a REAL re-exec hands over (close, then s
   const rootE = path.join(tmp, 'agentd-e'); const stE = path.join(rootE, 'state');
   fs.mkdirSync(stE, { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(stE, 'token'), HOST_E, { mode: 0o600 });
+  fs.writeFileSync(path.join(stE, 'trusted-keys.json'), require('../src/agentd-signature.js').trustText([{ keyId: RELEASE_C.keyId, publicKey: RELEASE_C.publicKey }], { from: 'test', at: 'x' }), { mode: 0o600 });
   fs.writeFileSync(path.join(stE, 'dial.json'), JSON.stringify({ url: `ws://127.0.0.1:${PE}/api/device-dial?device=devE`, token: pairE.dialToken }), { mode: 0o600 });
   const instE = path.join(rootE, '2.369.1'); fs.mkdirSync(instE, { recursive: true });
   fs.copyFileSync(bundle, path.join(instE, 'vibespace-device.js'));

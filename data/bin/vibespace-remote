@@ -1,0 +1,60 @@
+#!/usr/bin/env node
+// vibespace-remote — what this VibeSpace DID on its paired machines, and who asked (lane device-act-audit, design q-042 D4).
+// Every act the hub takes on a machine — a command, a file written, a secret placed, keys typed, a socket to another LAN
+// host, a new agent pushed — is ONE audit line naming WHO asked (`by`: human:<a sign-in> / agent:<conversation> /
+// job:<id> / system:<module>). `audit` lists THIS conversation's own acts (the server answers nothing of another's — the
+// user reads every line on the machine card's Activity…). Self-contained: this file ships alone to every host.
+'use strict';
+const api = process.env.VIBESPACE_API;
+const token = process.env.VIBESPACE_SESSION_TOKEN;
+if (!api || !token) { console.error('vibespace-remote: not running inside a VibeSpace session (missing env)'); process.exit(2); }
+
+const USAGE = [
+  'usage — what this VibeSpace did on its paired machines for YOU (this conversation), newest first:',
+  '  vibespace-remote audit [--since <dur>] [--machine <m>] [--by <subject>] [--limit N]',
+  '                                          one line per act the hub took on a machine because this conversation asked:',
+  '                                            when · machine · op · what (argv head, path, size — never a secret) · the',
+  '                                            verdict (exit N / ok / refused) · the duration · who asked',
+  '    --since 90s | 15m | 2h | 3d           only the recent ones',
+  '    --machine <id|name>                   one machine',
+  '    --by <subject>                        your own subject only (agent:<your conversation>); another subject\'s acts are',
+  '                                            the user\'s to read (the machine card\'s Activity… in Manage Agents → Machines)',
+  '    --limit N                             at most N lines (default 50, at most 500)',
+].join('\n');
+
+function fail(data, status) {
+  console.error('vibespace-remote:', (data && data.error) || status);
+  process.exit(data && data.code === 'human_only' ? 3 : 1);
+}
+async function get(path) {
+  const res = await fetch(api + path, { headers: { Authorization: 'Bearer ' + token } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) fail(data, res.status);
+  return data;
+}
+// what a line prints: bounded, one line, no control characters (the server judged it already; this is the belt)
+const one = (s, n) => { const t = String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+
+async function main() {
+  const args = process.argv.slice(2);
+  const cmd = args[0];
+  if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help') { console.log(USAGE); process.exit(cmd ? 0 : 2); }
+  if (cmd !== 'audit') { console.error(`vibespace-remote: unknown verb "${one(cmd, 40)}"\n` + USAGE); process.exit(2); }
+  const flags = { since: null, machine: null, by: null, limit: null };
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i], k = a.replace(/^--/, '');
+    if (!a.startsWith('--') || !(k in flags) || args[i + 1] == null) { console.error(`vibespace-remote audit: unexpected "${one(a, 40)}"\n` + USAGE); process.exit(2); }
+    flags[k] = args[++i];
+  }
+  const q = new URLSearchParams(Object.entries(flags).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)]));
+  const { acts = [], you = null } = await get('/api/agent/remote/audit?' + q.toString());
+  if (!acts.length) { console.log(`  nothing this VibeSpace did on a machine${flags.machine ? ` ("${one(flags.machine, 60)}")` : ''} was asked by you${you ? ` (${you})` : ''}${flags.since ? ` in the last ${one(flags.since, 12)}` : ''}`); return; }
+  for (const r of acts) {
+    const when = new Date(r.at).toISOString().replace('T', ' ').slice(0, 19);
+    const verdict = r.code === 'act_without_by' ? 'refused (no "by" — never sent)' : r.ok === false ? (typeof r.code === 'number' ? `exit ${r.code}` : `failed (${one(r.code || '?', 30)})`) : (typeof r.code === 'number' ? `exit ${r.code}` : 'ok');
+    const secs = r.ms == null ? '' : ` · ${(Math.max(0, Number(r.ms) || 0) / 1000).toFixed(1)} s`;
+    console.log(`  ${when}  ${one(r.machine || r.hostId || '?', 40)}  ${one(r.op, 30)}  ${one(r.summary, 140)}  ${verdict}${secs}  (by ${one(r.by || 'nobody', 80)})`);
+    if (r.outHead) console.log(`      out: ${one(r.outHead, 200)}`);
+  }
+}
+main().catch((e) => { console.error('vibespace-remote:', e.message); process.exit(1); });

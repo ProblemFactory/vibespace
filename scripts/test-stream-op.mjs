@@ -133,7 +133,7 @@ console.log('§2 input through the data channel and the op');
   ok(JSON.stringify(cmds().slice(0, 8)) === JSON.stringify(['K 30 0 0', 'K 30 0 1', 'M 640 360', 'D 0', 'M 640 360', 'U 0', 'C aADpAA==', 'M 1 2']), 'the data channel\'s key, press and clipboard reached THE injector in order (the Linux stub\'s record: scan codes, absolute moves, base64 UTF-16LE text)', cmds());
   const st = await dm.streamStats(off.sid);
   ok(st.ok && st.stats.input.n >= 6 && st.stats.input.refused && st.stats.input.refused.code === 'unmapped_key', 'the session counts the events and names the last refusal (unmapped_key — the garbage before it was not_json)', st.stats.input);
-  const op = await dm.inputEvents([{ t: 'kd', c: 'KeyB' }, { t: 'zz' }, { t: 'mv', x: 99999, y: 0 }]);
+  const op = await dm.inputEvents([{ t: 'kd', c: 'KeyB' }, { t: 'zz' }, { t: 'mv', x: 99999, y: 0 }], { by: 'system:test' });
   ok(op.kind === 'stub' && op.n === 1 && JSON.stringify(op.refused.map((r) => [r.i, r.code])) === '[[1,"unknown_kind"],[2,"bad_x"]]' && cmds().includes('K 48 0 0'), 'the input-events op feeds the SAME injector (KeyB 0x30 recorded) and refuses the rest by index + name', op);
 }
 
@@ -143,15 +143,15 @@ console.log('§2b the hand-over\'s ops: desktop-input into the SAME sink, deskto
   ok(conn.info.capabilities.includes('desktop-grab') && conn.info.capabilities.includes('desktop-input'), 'the hello-ack names desktop-grab and desktop-input');
   const before = cmds().length;
   const recs = [{ t: 'kd', c: 'KeyA' }, { t: 'ku', c: 'KeyA' }, { t: 'md', x: 640, y: 360, b: 0 }, { t: 'mu', x: 640, y: 360, b: 0 }, { t: 'clip', text: 'hé' }, { t: 'wh', x: 1, y: 2, dx: 0, dy: -120 }];
-  const r = await dm.desktopInput(off.sid, recs);
+  const r = await dm.desktopInput(off.sid, recs, { by: 'system:test' });
   await until(() => cmds().length >= before + 8, 5000);
   ok(r.ok && r.n === 6 && JSON.stringify(cmds().slice(before, before + 8)) === JSON.stringify(cmds().slice(0, 8)), 'desktop-input with the records §2\'s data channel sent ⇒ THE injector recorded the SAME 8 command lines (one sink: the session\'s onInput)', { r, op: cmds().slice(before, before + 8) });
-  const bad = await dm.desktopInput(off.sid, [{ t: 'ack', f: 1 }, { t: 'kd', c: 'Pause' }, { t: 'kd', c: 'KeyC' }]);
+  const bad = await dm.desktopInput(off.sid, [{ t: 'ack', f: 1 }, { t: 'kd', c: 'Pause' }, { t: 'kd', c: 'KeyC' }], { by: 'system:test' });
   ok(!bad.ok && JSON.stringify(bad.refused) === JSON.stringify([{ i: 0, code: 'not_an_act' }, { i: 1, code: 'unmapped_key' }]) && bad.n === 1, 'refused records by index + name (an ack is the page\'s; a key the table lacks), the rest lands', bad);
-  const g = await dm.desktopGrab(off.sid);
+  const g = await dm.desktopGrab(off.sid, { by: 'system:test' });
   const png = Buffer.from(g.png64 || '', 'base64');
   ok(g.ok && g.w === 1280 && g.h === 720 && png.slice(1, 4).toString() === 'PNG' && png.readUInt32BE(16) === 1280 && png.readUInt32BE(20) === 720 && g.road === 'fake', 'desktop-grab ⇒ the session\'s still: a 1280×720 PNG (its IHDR) over the device link', { ok: g.ok, w: g.w, h: g.h, bytes: png.length });
-  ok((await dm.desktopGrab('snope')).code === 'not_found' && (await dm.desktopInput('snope', [])).code === 'not_found', 'an unknown session ⇒ not_found');
+  ok((await dm.desktopGrab('snope', { by: 'system:test' })).code === 'not_found' && (await dm.desktopInput('snope', [], { by: 'system:test' })).code === 'not_found', 'an unknown session ⇒ not_found');
 }
 
 console.log('§3 the numbers');
@@ -254,9 +254,9 @@ console.log('§7 the capability gate');
   const send0 = dmo._request.bind(dmo);
   dmo._request = (msg) => { sent.push(msg && msg.op); return send0(msg); };
   const e1 = await dmo.streamOffer({ sourceKind: 'fake', sourceId: FIXTURE }).then(() => null, (x) => x);
-  const e2 = await dmo.inputEvents([{ t: 'kd', c: 'KeyA' }]).then(() => null, (x) => x);
-  const e3 = await dmo.desktopGrab('s1').then(() => null, (x) => x);
-  const e4 = await dmo.desktopInput('s1', [{ t: 'kd', c: 'KeyA' }]).then(() => null, (x) => x);
+  const e2 = await dmo.inputEvents([{ t: 'kd', c: 'KeyA' }], { by: 'system:test' }).then(() => null, (x) => x);
+  const e3 = await dmo.desktopGrab('s1', { by: 'system:test' }).then(() => null, (x) => x);
+  const e4 = await dmo.desktopInput('s1', [{ t: 'kd', c: 'KeyA' }], { by: 'system:test' }).then(() => null, (x) => x);
   ok(e1 && e1.code === 'host_needs_daemon' && e1.daemonVersion === co.info.daemonVersion && e2 && e2.code === 'host_needs_daemon' && e3 && e3.code === 'host_needs_daemon' && e4 && e4.code === 'host_needs_daemon' && sent.length === 0, 'an older agent is refused by the capability (host_needs_daemon + its version) — stream-offer, input-events, desktop-grab, desktop-input — and NO request went to it');
   const raw = await send0({ op: 'stream-offer', sid: 'sraw', sourceKind: 'fake', sourceId: FIXTURE, timeoutMs: 1500 }).then((r) => ({ answered: r }), (x) => ({ error: String(x && x.message) }));
   ok(!raw.answered && /time(?:d)? ?out/i.test(raw.error || ''), 'CONTROL: asked past the gate, the old agent answers NOTHING — the request ends on its own timeout (the 2.300.0 rule)', raw);

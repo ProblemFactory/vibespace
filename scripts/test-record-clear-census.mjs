@@ -1946,6 +1946,7 @@ const I_RECV = {
   // ── lane device-upgrade-stuck ──
   'src/server/device-upgrade-watch.js|w': ['host', 'the stuck-upgrade item\'s words — a machine name and two agent versions (itemOf), the machine\'s own record'],
   // ── lane host-stale-dialer (B-6136) ──
+  'src/server/device-alerts.js|w': ['host', 'the three urgent device items\' words (itemOf, lane device-act-audit) — a machine name, an address, a sign-in handle, two agent versions: the machine\'s own record and the hub\'s own facts, never a record\'s text'],
   'src/server/dial-health-watch.js|w': ['host', 'the second-dialer item\'s words — a machine name, an address, a time (itemOf), the machine\'s own record'],
   'src/server/dial-health-watch.js|v': ['host', 'the verdict\'s refusing address (secondDialerVerdict) in the journal line — the machine\'s own dial record'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──

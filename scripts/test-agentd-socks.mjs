@@ -44,7 +44,7 @@ try {
   ORIGIN_PORT = await new Promise((r) => origin.listen(0, '127.0.0.1', function () { r(this.address().port); }));
 
   // 1) device serves a SOCKS5 proxy on ITS loopback
-  const { port: devSocksPort } = await dm.serveSocks();
+  const { port: devSocksPort } = await dm.serveSocks({ by: 'system:test' });
   check('daemon serve-socks returns a device port', devSocksPort > 0, String(devSocksPort));
 
   // 2) bring it to the "server" loopback the port-forward way: a local server
@@ -123,7 +123,7 @@ try {
   if (LAN_PORT == null) { console.log('  · cannot bind 127.0.0.2 — skipping the target-host check'); }
   else {
     const roundtrip = async (host) => {
-      let h; try { h = await dm.tcpForward(LAN_PORT, host); } catch { return ''; } // refused (loopback, 127.0.0.2-only echo) = did not reach
+      let h; try { h = await dm.tcpForward(LAN_PORT, host, { by: 'system:test' }); } catch { return ''; } // refused (loopback, 127.0.0.2-only echo) = did not reach
       return await new Promise((resolve) => {
         let got = ''; h.onData = (b) => { got += b.toString(); if (got.includes('LANDEV:hi')) resolve(got); };
         h.onClose = () => resolve(got);

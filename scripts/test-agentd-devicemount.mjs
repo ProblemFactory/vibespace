@@ -73,7 +73,7 @@ async function httpThroughTunnel(devicePort, reqPath, headers = {}, method = 'GE
 }
 
 console.log('— serve-folder binds a device-side HTTP server —');
-const sf = await dm.serveFolder(share);
+const sf = await dm.serveFolder(share, { by: 'system:test' });
 check('serve-folder returned a port', sf.port > 0, JSON.stringify(sf));
 
 console.log('— PROPFIND listings through the tunnel (rclone webdav backend shape) —');

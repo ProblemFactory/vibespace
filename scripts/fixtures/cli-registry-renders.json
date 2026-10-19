@@ -90,10 +90,10 @@
     "sha256": "0ff706ba83f729d77e3b25ca38f8b0f502be3b1a71f7e90d27eb0e643e4e4323"
    },
    "now": {
-    "bytes": 954,
-    "sha256": "cd65d4c51af158d2d6758506e1745699d15e88f67375c8fb9a4daba6addcdccc"
+    "bytes": 961,
+    "sha256": "da6b30584b64a036e5c09e9cf014a2340661dd936933bd08124ec6237d6f905f"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B)"
   },
   "reminder · one group / none · read": {
    "base": {
@@ -101,10 +101,10 @@
     "sha256": "92bfd3f34db652460290b1a1b0fb1755acc2f3862af9f9f57dfbc837d2675507"
    },
    "now": {
-    "bytes": 1077,
-    "sha256": "e14da98dcc099acfa8b5a099b210a7180179db32505a4fbde25ed8499763b11a"
+    "bytes": 1084,
+    "sha256": "f3f0788f32254e0a82c0f906c3bb282cacbddfe026373ccdb3b1356032f11a3e"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B)"
   },
   "reminder · one group / none · request": {
    "base": {
@@ -112,10 +112,10 @@
     "sha256": "e677cf377fb3fbcdf41764c715c4514132be35d0a4df86ab7e2e5d8d12a049da"
    },
    "now": {
-    "bytes": 1077,
-    "sha256": "79e766d9ad783a588bed9bb48211030f8f888a71aa67e330d43b351d91eb633e"
+    "bytes": 1084,
+    "sha256": "d06ff40cab08fd156867c0abce1793fa031749c7067abc42fb83af098bb4953a"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B)"
   },
   "reminder · several groups": {
    "base": {
@@ -123,10 +123,10 @@
     "sha256": "078423795f344cefd0af209b4b56439a9cfbfdc8f9ee6b0d0d0c50fc7c0b5e7f"
    },
    "now": {
-    "bytes": 967,
-    "sha256": "30a86c54d30438ba1c6df717b99db1ec44ea94422c86a2c61781c8d12553378e"
+    "bytes": 974,
+    "sha256": "eb81eb9c80ed392c05421325165ef3d4925146b115e75cbe57a3a7ecb77f710d"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B)"
   },
   "reminder · several groups · read": {
    "base": {
@@ -134,10 +134,10 @@
     "sha256": "6670eb40ca5a4fac4b66c8efafa34d887eb3677fc6e3189740ebf80d4e06ce76"
    },
    "now": {
-    "bytes": 1090,
-    "sha256": "b861d307304f807b40e4eb9d91ca962e817c47679dc78d630fae5b8e22c85f88"
+    "bytes": 1097,
+    "sha256": "2c5b2c9ae0901c49c45fbf8d67d9691fba51bd3fb4682812e7461509743b9a52"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B)"
   },
   "reminder · several groups · request": {
    "base": {
@@ -145,10 +145,10 @@
     "sha256": "cdb15dd9a30ae4a435255ee0d91200922845d8265c457ab051c23aebd742fe17"
    },
    "now": {
-    "bytes": 1090,
-    "sha256": "684f9913745d081720d9e3afe7e7cabaa0c130227780e402b312041a3e6280c6"
+    "bytes": 1097,
+    "sha256": "005315291981899396c121f7069943a6d0131b4c4f019b9094f16a12a454d416"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B)"
   },
   "reminder · manager · several groups · read": {
    "base": {
@@ -156,10 +156,10 @@
     "sha256": "f82a9423735c2723d6d0a4014b29eb750c68db390ae33d1f8aa44ec33b64056e"
    },
    "now": {
-    "bytes": 1225,
-    "sha256": "1b418bd916c95b7d3abcc2244b335c0f38c7209eb461ec7d833bf5ee3e5c56a3"
+    "bytes": 1232,
+    "sha256": "dde4f6fcf782e19236edb41aef36eba8a413062fff786c176aefdc9c725fa8e4"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B)"
   },
   "reminder · status only": {
    "base": {
@@ -167,10 +167,10 @@
     "sha256": "e5c0f6df7dafe8009d46880e4dbf1701fec8c8e786802f57716f1fc4bb380abd"
    },
    "now": {
-    "bytes": 365,
-    "sha256": "6e59afe489ab7e334eab5c7444e8c6173e6e2291a4469cf4d6eecd9565fb50d6"
+    "bytes": 372,
+    "sha256": "24a428e0575ea72cc5c19480e93c594299bc8eca7a593c48b02438f2622a6807"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, − ask|task|jobs (a closed toggle's manual is no longer pointed at — 2.211.0) (+10 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, − ask|task|jobs (a closed toggle's manual is no longer pointed at — 2.211.0) (+10 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B)"
   },
   "reminder · every toggle off": {
    "base": {
@@ -178,10 +178,10 @@
     "sha256": "dd48164665ff89d500b71946d6ded11459f62994415f41052882936048bc7497"
    },
    "now": {
-    "bytes": 297,
-    "sha256": "eef19ed53f5246cda19532c923a17687923d82d3708d249b36b7e9f5f4f331d4"
+    "bytes": 304,
+    "sha256": "f78e2abe48f4677079be4752d11fee23e82dc5e18320894bc8ace5797b04c019"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, − status|ask|task|jobs (a closed toggle's manual is no longer pointed at — 2.211.0) (+3 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, − status|ask|task|jobs (a closed toggle's manual is no longer pointed at — 2.211.0) (+3 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B)"
   },
   "no-group intro": {
    "base": {

@@ -94,21 +94,21 @@ console.log('— S3 transcript slab: incremental delta sync —');
   // create a synthetic "transcript" on the host inside ~/.claude/projects
   const sid = 'ffffffff-0000-4000-8000-' + String(Date.now()).slice(-12);
   const remoteDir = `.claude/projects/-tmp-vs-slabtest`;
-  const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout.trim();
+  const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:test' })).stdout.trim();
   const remotePath = `${home}/${remoteDir}/${sid}.jsonl`;
-  await dm.fsWrite(remotePath, '{"type":"user","cwd":"/tmp/slab"}\n'.repeat(100));
+  await dm.fsWrite(remotePath, '{"type":"user","cwd":"/tmp/slab"}\n'.repeat(100), { by: 'system:test' });
   const p1 = await hosts.fetchSessionJsonl(hostId, sid);
   const size1 = fs.statSync(p1).size;
   check('first slab fetch lands the full file', size1 === Buffer.byteLength('{"type":"user","cwd":"/tmp/slab"}\n') * 100, String(size1));
   const meta1 = JSON.parse(fs.readFileSync(p1 + '.meta', 'utf8'));
   check('meta marks the slab path', meta1.slab === true, JSON.stringify(meta1));
   // APPEND remotely, refetch — must pull only the delta and byte-match
-  await dm.runCmd('sh', ['-c', `printf '{"type":"assistant","delta":true}\\n' >> ${JSON.stringify(remotePath)}`]);
+  await dm.runCmd('sh', ['-c', `printf '{"type":"assistant","delta":true}\\n' >> ${JSON.stringify(remotePath)}`], { by: 'system:test' });
   const p2 = await hosts.fetchSessionJsonl(hostId, sid);
   const local = fs.readFileSync(p2, 'utf8');
   const remote = (await dm.fsReadRange(remotePath, 0, 10 * 1024 * 1024)).data.toString('utf8');
   check('post-append refetch is byte-identical to the remote', local === remote && local.includes('"delta":true'), `lens ${local.length} vs ${remote.length}`);
-  await dm.fsRm(`${home}/${remoteDir}`, true);
+  await dm.fsRm(`${home}/${remoteDir}`, true, { by: 'system:test' });
   fs.rmSync(p2, { force: true }); fs.rmSync(p2 + '.meta', { force: true });
 }
 
@@ -118,12 +118,12 @@ console.log('— S4 usage harvest through the daemon (streaming) —');
   // 2.127.0 law: harvests are consuming)
   const scanner = path.join(repo, 'data/bin/vibespace-usage-scan');
   // run via the same runStream path harvestUsage uses, but against a temp cursor
-  const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout.trim();
+  const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:test' })).stdout.trim();
   const script = fs.readFileSync(scanner, 'utf-8');
   const scanPath = home + '/.vibespace/bin/.usage-scan-swtest';
-  await dm.fsWrite(scanPath, script);
+  await dm.fsWrite(scanPath, script, { by: 'system:test' });
   const chunks = [];
-  const { code } = await dm.runStream('node', [scanPath], {
+  const { code } = await dm.runStream('node', [scanPath], { by: 'system:test',
     env: { VIBESPACE_USAGE_CURSOR: `/tmp/vs-sw-cursor-${Date.now()}.json` },
     onData: (b) => chunks.push(b),
   });
@@ -132,7 +132,7 @@ console.log('— S4 usage harvest through the daemon (streaming) —');
   let parsed = 0; for (const l of lines.slice(0, 50)) { try { JSON.parse(l); parsed++; } catch { } }
   check('scanner streamed NDJSON through the daemon (exit 0)', code === 0, String(code));
   check('NDJSON lines parse (or host has no transcripts)', lines.length === 0 || parsed > 0, `${lines.length} lines, ${parsed} parsed`);
-  await dm.fsRm(scanPath);
+  await dm.fsRm(scanPath, undefined, { by: 'system:test' });
 }
 
 dm.stop();

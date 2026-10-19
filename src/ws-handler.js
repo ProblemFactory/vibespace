@@ -330,7 +330,10 @@ function registerWsHandler(wss, ctx) {
   // socket (the second attach, two kills). src/server/ws-heartbeat.js.
   if (!wss._heartbeatTimer) createWsHeartbeat(wss).start();
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    // lane device-act-audit: WHO this socket is (a browser sign-in's handle, never the cookie) — an act it starts on a
+    // device (a session's setup, its teardown) names it (src/device-audit.js byOfReq)
+    try { ws._actBy = req ? require('./device-audit.js').byOfReq(req) : null; } catch { ws._actBy = null; }
     ws._isAlive = true;
     ws.on('pong', () => { ws._isAlive = true; });
     const attachedSessions = new Set();
@@ -1441,7 +1444,7 @@ function registerWsHandler(wss, ctx) {
                     hosts.deviceBounded(session.host, 8000).then(async (dm) => {
                       let killed = false;
                       try { await dm.killPipeSession(sidSafe); killed = true; } catch (e) { console.warn('[dial] kill-pipe-session failed:', e.message); }
-                      try { await dm.runCmd('sh', ['-c', `rm -f "$HOME/.vibespace/bin/.tok-${sidSafe}"`], { timeoutMs: 10000 }); } catch {}
+                      try { await dm.runCmd('sh', ['-c', `rm -f "$HOME/.vibespace/bin/.tok-${sidSafe}"`], { timeoutMs: 10000, by: ws._actBy || 'system:session-end' }); } catch {}
                       try { hosts.invalidateDiscovery(session.host); } catch {}
                       if (!killed) notifyKillUnconfirmed(h.name);
                     }).catch((e) => { console.warn('[dial] terminate teardown unreachable:', e.message); notifyKillUnconfirmed(h.name); });

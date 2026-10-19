@@ -167,6 +167,10 @@ class Auth {
 
   // ── HTTP integration ──
 
+  /** lane device-act-audit: WHO a cookie request is, for an audit line — 12 hex of the sign-in cookie's sha256 (never the
+   *  cookie itself; one sign-in = one handle), or null without one. The ONE cookie reader stays this file (test-auth). */
+  static signInHandle(req) { const t = Auth.cookieToken(req); return t ? crypto.createHash('sha256').update(String(t)).digest('hex').slice(0, 12) : null; }
+
   static cookieToken(req) {
     const h = req.headers.cookie || '';
     const m = h.match(new RegExp('(?:^|;\\s*)' + TOKEN_COOKIE + '=([a-f0-9]+)'));

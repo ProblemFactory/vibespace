@@ -10,6 +10,7 @@ const { sameToken } = require('../pairing-token.js'); // B-8dda
 const { spawn } = require('child_process');
 
 const { mk } = require('./lazy.js');
+const DAU = require('../device-audit.js'); // lane device-act-audit: a cookie request's subject + the audit store's reader
 
 function create({ app, rootDir, AGENT_BIN_DIR, activeSessions, auth, wss, WS_OPEN,
   bcastAll, integrationEnabled, unpairDialDevice, hosts,
@@ -145,6 +146,51 @@ app.get('/api/hosts/:id/exit-runs', (req, res) => {
   const platform = h.dial && h.dial.lastAccept && typeof h.dial.lastAccept.platform === 'string' ? h.dial.lastAccept.platform : null;
   res.json({ machine: { id: h.id, name: h.name || h.id, platform, interpreter: platform ? E.interpreterOf(platform) : null }, runs: exitProxy.runsOf(h.id, { limit: Number(req.query.limit) || undefined }) });
 });
+// lane device-act-audit (design q-042 D4): WHAT THE HUB DID ON A MACHINE — every act / code op it sent there, with who asked
+// (src/device-audit.js — data/device-audit.jsonl). The OWNER's list of one machine (the Machines card's 「活动…」): cookie
+// only, every subject's lines; an agent token is refused by name (an agent reads its OWN acts — vibespace-remote audit).
+const DA = require('../device-acts.js');
+const sinceOf = (q) => { if (q == null || q === '') return { at: null }; const ms = DAU.durationMs(q); return ms == null || ms <= 0 ? { bad: true } : { at: Date.now() - ms }; };
+if (hosts.deviceAudit) hosts.deviceAudit.onLine = (rec) => { try { const row = DA.rowOf(rec); if (row) bcastAll({ type: 'device-audit', line: row }); } catch { } }; // the card patches its keyed rows in place
+app.get('/api/hosts/:id/device-acts', (req, res) => {
+  if (!hosts.deviceAudit) return res.status(503).json({ error: 'the device-act audit is not wired on this server', code: 'no_audit' });
+  if (isAnyBearer(req)) return res.status(403).json({ error: 'what the hub did on a machine is the user\'s to read — an agent reads its own acts (vibespace-remote audit)', code: 'human_only' });
+  let h = null;
+  if (req.params.id === 'local') h = { id: 'local', name: 'this machine' }; else { try { h = hosts.get(req.params.id); } catch { } }
+  if (!h) return res.status(404).json({ error: 'no such machine', code: 'not-found' });
+  const q = req.query || {};
+  const since = sinceOf(q.since);
+  if (since.bad) return res.status(400).json({ error: 'since is a duration: 90s, 15m, 2h, 3d', code: 'bad_since' });
+  const kind = DA.BY_KINDS.includes(q.kind) ? q.kind : null;
+  const layer = q.layer === 'act' || q.layer === 'code' ? q.layer : null;
+  res.json({ machine: { id: h.id, name: h.name || h.id }, acts: hosts.deviceAudit.tail({ hostId: h.id, kind, layer, since: since.at, limit: Number(q.limit) || undefined }) });
+});
+// THE AGENT's read (vibespace-remote audit): ONLY the acts `by` this conversation (its keys through window-reach's caller
+// keys, like every exit verb); naming another subject is `human_only` — the owner reads every line on the card
+app.get('/api/agent/remote/audit', (req, res) => {
+  const e = agentOr401(req, res); if (!e) return;
+  if (!hosts.deviceAudit) return res.status(503).json({ error: 'the device-act audit is not wired on this server', code: 'no_audit' });
+  const R = require('../window-reach.js');
+  const own = R.callerKeys(e[1], e[0]).map((k) => DA.byAgent(k)).filter(Boolean);
+  const q = req.query || {};
+  if (q.by && !own.includes(String(q.by))) return res.status(403).json({ error: `only the user reads the acts of another subject (${String(q.by).slice(0, 80)}) — the machine card's Activity… shows every line; you read your own`, code: 'human_only', you: own[0] || null });
+  const since = sinceOf(q.since);
+  if (since.bad) return res.status(400).json({ error: 'since is a duration: 90s, 15m, 2h, 3d', code: 'bad_since' });
+  let hostId = null;
+  if (q.machine) {
+    const m = String(q.machine).toLowerCase();
+    const list = (() => { try { return hosts.list(); } catch { return []; } })();
+    const hit = list.find((h) => h.id === q.machine) || list.find((h) => String(h.name || '').toLowerCase() === m) || null;
+    if (!hit) return res.status(404).json({ error: `no machine "${String(q.machine).slice(0, 80)}" here`, code: 'no_machine' });
+    hostId = hit.id;
+  }
+  // every machine-written byte (an argv head, a path, a machine name, an output head) through the peer-text belt on its way
+  // to an agent — the rows are already judged (rowOf: bounded, re-redacted, folded); this is the agent door's own rule
+  const PT = require('../peer-text.js');
+  const acts = hosts.deviceAudit.tail({ hostId, bys: q.by ? [String(q.by)] : own, since: since.at, limit: Number(q.limit) || undefined })
+    .map((r) => ({ ...r, machine: r.machine == null ? null : PT.toAgentText(r.machine, { kind: 'line', max: 80 }), summary: PT.toAgentText(r.summary || '', { kind: 'line', max: 400 }), outHead: r.outHead ? PT.toAgentText(r.outHead, { kind: 'block', max: 600 }) : '' }));
+  res.json({ you: own[0] || null, acts });
+});
 app.get('/api/exits/audit', (req, res) => {
   if (isAnyBearer(req)) return res.status(403).json({ error: 'the exit audit is the user\'s', code: 'human_only' });
   res.json({ lines: exitProxy.auditTail({ hostId: req.query.host ? String(req.query.host) : null, limit: Number(req.query.limit) || 50 }) });
@@ -195,7 +241,7 @@ app.post('/api/hosts/key', async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/hosts/:id/test', async (req, res) => {
-  try { res.json({ success: true, ...(await hosts.test(req.params.id)) }); }
+  try { res.json({ success: true, ...(await hosts.test(req.params.id, { by: DAU.byOfReq(req) })) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/hosts/:id/sessions', async (req, res) => {
@@ -242,7 +288,7 @@ app.get('/api/hosts/bootstrap-steps', (req, res) => res.json({ steps: hosts.boot
 // Remote directory autocomplete (New Session dialog when a host is chosen) —
 // mirrors /api/dir-complete but runs ls over ssh on the target.
 app.get('/api/hosts/:id/dir-complete', async (req, res) => {
-  try { res.json({ suggestions: await hosts.dirComplete(req.params.id, req.query.path || '') }); }
+  try { res.json({ suggestions: await hosts.dirComplete(req.params.id, req.query.path || '', { by: DAU.byOfReq(req) }) }); }
   catch { res.json({ suggestions: [] }); }
 });
 // Recent working dirs seen on the host (from its Claude project dirs) — the

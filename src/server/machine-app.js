@@ -81,10 +81,10 @@ function create({ access, log = console, now = Date.now, idleMs = IDLE_MS, sweep
     });
   }
   /** KEEP IT ON TOP (or not). One per machine: the window pinned before is unpinned first. → the device's answer */
-  async function pin(key, on) {
+  async function pin(key, on, { by = 'system:machine-app' } = {}) {
     const w = watchOf(key);
-    if (on) for (const o of watches.values()) if (o !== w && o.hostId === w.hostId && o.pinned) { try { await o.dm.windowPin(o.wid, false); } catch { /* its watch ends on its own */ } o.pinned = false; }
-    const r = await w.dm.windowPin(w.wid, !!on);
+    if (on) for (const o of watches.values()) if (o !== w && o.hostId === w.hostId && o.pinned) { try { await o.dm.windowPin(o.wid, false, { by }); } catch { /* its watch ends on its own */ } o.pinned = false; }
+    const r = await w.dm.windowPin(w.wid, !!on, { by });
     if (r && r.ok) w.pinned = !!r.pinned;
     wakeHost(w.hostId);
     return { ...r, pin: pinOf(w.hostId) };

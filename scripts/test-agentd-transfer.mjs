@@ -133,17 +133,17 @@ await section('③ ④ the device refuses a lying end; an abort and a dropped li
   const conn = await dm.connect();
   const chan = conn.nextChan++;
   conn.sessions.set(chan, {});
-  const open = await dm._request({ op: 'fs-op', action: 'write-stream', step: 'open', path: dst, chan, size: 4, waitMs: 10000 });
+  const open = await dm._request({ op: 'fs-op', action: 'write-stream', step: 'open', path: dst, chan, size: 4, waitMs: 10000, by: 'system:test' });
   ok(open.ready === true && fs.existsSync(dst + '.vs-part'), 'open ⇒ ready, the part made', open);
   conn.mux.data(chan, Buffer.from('abcd'));
-  const lie = await settle(dm._request({ op: 'fs-op', action: 'write-stream', step: 'end', path: dst, chan, sent: 4, sha256: '0'.repeat(64), waitMs: 20000 }));
+  const lie = await settle(dm._request({ op: 'fs-op', action: 'write-stream', step: 'end', path: dst, chan, sent: 4, sha256: '0'.repeat(64), waitMs: 20000, by: 'system:test' }));
   conn.sessions.delete(chan);
   await sleep(300);
   ok(lie.e && /hash_mismatch/.test(lie.e.message) && !fs.existsSync(dst) && !fs.existsSync(dst + '.vs-part'), 'a sha256 that is not the bytes\' ⇒ hash_mismatch; the part removed; nothing at the path', lie.e ? lie.e.message : lie.v);
   // a source that dies after 3 MiB
   const dst2 = path.join(REM, 'dies.bin');
   async function* dying() { yield crypto.randomBytes(3 * MiB); throw new Error('the local disk failed'); }
-  const d = await settle(dm.fsWriteStream(dst2, { source: dying(), size: 10 * MiB }));
+  const d = await settle(dm.fsWriteStream(dst2, { by: 'system:test', source: dying(), size: 10 * MiB }));
   await sleep(300);
   ok(d.e && /local disk failed/.test(d.e.message) && !fs.existsSync(dst2) && !fs.existsSync(dst2 + '.vs-part'), 'a source dying mid-push ⇒ abort ⇒ the part removed, nothing at the path', d.e && d.e.message);
   // the link dropped mid-push: a SECOND connection to the same agent, stopped while its push waits for more bytes
@@ -151,7 +151,7 @@ await section('③ ④ the device refuses a lying end; an abort and a dropped li
   const dst3 = path.join(REM, 'dropped.bin');
   let release; const gate = new Promise((r) => { release = r; });
   async function* slow() { yield crypto.randomBytes(2 * MiB); await gate; yield crypto.randomBytes(MiB); }
-  const p3 = settle(dm2.fsWriteStream(dst3, { source: slow(), size: 3 * MiB }));
+  const p3 = settle(dm2.fsWriteStream(dst3, { by: 'system:test', source: slow(), size: 3 * MiB }));
   for (let i = 0; i < 50 && !fs.existsSync(dst3 + '.vs-part'); i++) await sleep(20);
   const had = fs.existsSync(dst3 + '.vs-part');
   await sleep(300);
@@ -195,7 +195,7 @@ await section('⑤ /dev/zero, a growing file, 0 bytes, an existing destination',
 await section('⑥ never a shell: the agent spawned nothing during any transfer', async () => {
   const n = spawns() - s0;
   ok(n === 0, `0 child_process calls on the agent across ①–⑤ beside its hello's shell probe (a Windows machine has no sh; a transfer needs none)${n ? ': ' + spawnLines().slice(-n).join(' | ') : ''}`, n);
-  const r = await dm.runShell('true', { timeoutMs: 30000 });
+  const r = await dm.runShell('true', { by: 'system:test', timeoutMs: 30000 });
   ok(r && r.code === 0 && spawns() - s0 >= 1, 'CONTROL: a `run` on the same agent IS logged by the census (it sees a spawn when one happens)', spawns() - s0);
 });
 

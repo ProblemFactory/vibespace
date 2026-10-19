@@ -135,7 +135,7 @@ try {
  *  Installs the daemon as a persistent service on the machine and has it DIAL
  *  BACK over ws. Throws with a user-readable reason; ssh always remains as the
  *  bootstrap + rescue channel. */
-async function graduateHostToDial(h, { serverUrl, viaRelay } = {}) {
+async function graduateHostToDial(h, { serverUrl, viaRelay, by = 'system:graduate', from = '' } = {}) {
   const sshRun = (script, timeout = 30000) => new Promise((resolve) => {
     const { execFile } = require('child_process');
     execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
@@ -163,7 +163,7 @@ async function graduateHostToDial(h, { serverUrl, viaRelay } = {}) {
     hosts.graduateDial(h.id, { dialRoot: root });
     const gradDevice = hosts.get(h.id).deviceId;
     const dialUrl = `${base.replace(/^http/, 'ws')}/api/device-dial?device=${gradDevice}`;
-    const pair = agentdMintDialPair(gradDevice, { host: require('../dial-facts.js').hostOf(dialUrl), base });
+    const pair = agentdMintDialPair(gradDevice, { host: require('../dial-facts.js').hostOf(dialUrl), base, by, from });
     // ship + run the installer over ssh STDIN — the installer AND its arguments (verify-r3 B-grad): the tokens used to
     // ride `ssh … -- 'bash -s -- … --dial-token vsdt_… --host-token vsht_…'`, i.e. the argv of the LOCAL ssh (readable
     // by every user of this machine through /proc/<pid>/cmdline for the whole install, ≤ 300 s) and the remote shell's
@@ -216,7 +216,7 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
     // lane-pairing ①: the chosen address (the pairing dialog's list) — judged by the ONE verdict before anything runs
     let serverUrl = req.body?.base ?? req.body?.serverUrl;
     if (serverUrl && !req.body?.viaRelay) { const v = require('../dial-facts.js').dialBaseVerdict(serverUrl); if (!v.ok) return res.status(400).json({ error: `not an address the machine can dial (${v.code})`, code: 'bad_base', why: v.code }); serverUrl = v.base; }
-    const out = await graduateHostToDial(h, { serverUrl, viaRelay: req.body?.viaRelay });
+    const out = await graduateHostToDial(h, { serverUrl, viaRelay: req.body?.viaRelay, by: require('../device-audit.js').byOfReq(req), from: (req.socket && req.socket.remoteAddress) || '' });
     res.json(out);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -290,7 +290,8 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
     const pushV = DF.inPlacePushVerdict({ existed, live: holderConnected, requested: req.body?.updateInPlace === true, shownSince: req.body?.keepLinkSince === undefined ? undefined : req.body.keepLinkSince, liveSince: liveRec && liveRec.dial ? liveRec.dial.lastConnectAt : null });
     if (pushV.refuse) return res.status(409).json({ code: pushV.refuse, deviceId, error: pushV.refuse === 'link_gone' ? `"${deviceId}" is no longer connected — nothing was changed; its new command cannot be sent over its link` : `"${deviceId}" reconnected after the sheet was opened (or another device dialed in under its name) — nothing was changed; reopen the sheet` });
     let pair;
-    try { pair = agentdMintDialPair(deviceId, { host: DF.hostOf(dialUrl), base, keepLink: pushV.push }); }
+    const actBy = require('../device-audit.js').byOfReq(req); // lane device-act-audit: the owner's sign-in minted it (an URGENT For-you item names it)
+    try { pair = agentdMintDialPair(deviceId, { host: DF.hostOf(dialUrl), base, keepLink: pushV.push, by: actBy, from: (req.socket && req.socket.remoteAddress) || '' }); }
     catch (e) { return res.status(400).json({ error: e.message, code: /collides/.test(e.message) ? 'collision' : 'mint_failed' }); }
     bcastAll({ type: 'hosts-updated' });
     let updatedInPlace = false;
@@ -298,7 +299,7 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
     if (pushV.push) {
       try {
         const dm = await deviceForDial(deviceId);
-        const root = String((await dm.runCmd('sh', ['-c', 'printf %s "${VIBESPACE_DEVICE_ROOT:-$VIBESPACE_AGENTD_ROOT}"'], { timeoutMs: 8000 })).stdout || '').trim();
+        const root = String((await dm.runCmd('sh', ['-c', 'printf %s "${VIBESPACE_DEVICE_ROOT:-$VIBESPACE_AGENTD_ROOT}"'], { timeoutMs: 8000, by: actBy })).stdout || '').trim();
         if (root && path.isAbsolute(root)) {
           // verify-r3 (the dial-token door census): a token written onto a device goes through the device's ONE secret
           // door, `place-secret` — 0600 at open, tmp + rename (the fsWrite-then-chmod pair it replaced left a window at
@@ -306,11 +307,11 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
           // $HOME (the op's own fence), keeps the old pair (the device's state dir is 0700 — the window is its owner's).
           const body = Buffer.from(JSON.stringify({ url: dialUrl, token: pair.dialToken }));
           let via = 'place-secret';
-          try { await dm.placeSecret(root + '/state/dial.json', body); }
+          try { await dm.placeSecret(root + '/state/dial.json', body, { by: actBy }); }
           catch {
             via = 'fs-write';
-            await dm.fsWrite(root + '/state/dial.json', body);
-            await dm.runCmd('chmod', ['600', root + '/state/dial.json'], { timeoutMs: 5000 }).catch(() => {});
+            await dm.fsWrite(root + '/state/dial.json', body, { by: actBy });
+            await dm.runCmd('chmod', ['600', root + '/state/dial.json'], { timeoutMs: 5000, by: actBy }).catch(() => {});
           }
           updatedInPlace = true;
           console.log(`[device] '${deviceId}': the rotated dial config pushed in place (${via})`);

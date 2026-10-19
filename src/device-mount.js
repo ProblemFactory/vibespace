@@ -204,7 +204,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   let refresher = null, tornDown = false; // heldRefresher, once the mount is up
   const sawGet = (d) => { if (refresher && d.indexOf('GET ') !== -1) refresher.sawRead(); };
   // 1) ask the device to serve the folder over WebDAV on its own loopback
-  const sf = await device.serveFolder(remotePath);
+  const sf = await device.serveFolder(remotePath, { by: 'system:device-mount' }); // lane device-act-audit: a pull mount's folder server
   if (!sf || !sf.port) throw new Error('device serve-folder failed: ' + (sf && sf.error || 'no port'));
   const devicePort = sf.port;
 

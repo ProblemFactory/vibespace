@@ -45,6 +45,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const S = require('../desktop-serve.js');
+const DA = require('../device-acts.js'); // lane device-act-audit: `by` on every act this layer sends a device
 const M = require('../desktop-apps.js');
 const SLOT = require('../install-slot.js'); // the machine's ONE package slot (its launcher, its files, its argv)
 const I = require('../installs.js'); // THE INSTALLABLES: one row each — this layer asks the row, never a name
@@ -120,13 +121,15 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
 
   /** Run ONE desktop-serve op on the machine named by hostId. Throws a coded error on every failure (no silent
    *  failures law); the op's own `{ok:false, code, error}` is thrown too, so callers see ONE shape. */
-  async function call(hostId, action, params = {}) {
+  /** `by` (lane device-act-audit): who asked — the caller's, else the app record's own `by` (an install names its
+   *  conversation / the person), else this module. */
+  async function call(hostId, action, params = {}, { by = null } = {}) {
     if (!S.DESKTOP_SERVE_OPS.includes(action)) throw named('bad-request', `unknown desktop-serve op '${action}'`);
     let r;
     if (isLocal(hostId)) r = await S.runDesktopServeOp(localOf(), action, params);
     else {
       const dm = await deviceOf(hostId);
-      try { r = await dm.desktopServe(action, params); }
+      try { r = await dm.desktopServe(action, params, { by: DA.validBy(by) ? by : DA.byOfWho(params && params.by, 'system:desktop-access') }); }
       catch (e) { throw named(e && e.code === 'host_needs_daemon' ? 'host_needs_daemon' : 'host_unavailable', `${hostId}: ${e && e.message}`); }
     }
     if (!r || r.ok === false) throw named((r && r.code) || 'op_failed', (r && r.error) || `desktop-serve ${action} failed on ${hostId || 'this machine'}`);
@@ -334,7 +337,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *    install_timeout   — past installMs: this call stops following; the install runs on (VibeSpace never kills apt).
    *    install_link_lost — the device's link dropped: the install runs on there, unobserved until the link is back.
    *  The machine's slot outlives both (installXpra holds it until the machine's facts say the install is gone). */
-  async function runArgv(hostId, argv, { onData = () => { }, stateDir = '', mode = 'start' } = {}) {
+  async function runArgv(hostId, argv, { onData = () => { }, stateDir = '', mode = 'start', by = 'system:desktop-access' } = {}) {
     const launch = SLOT.installLauncherArgv(argv, { stateDir, mode });
     let timer = null, abandoned = false;
     const relay = (d) => { if (!abandoned) onData(d); }; // the dialog's stream is closed once we answered
@@ -355,7 +358,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
       if (typeof dm.runStream !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot stream a command`);
       // the launcher folds its own stderr into stdout (run-stream relays stdout only); the stream's belt outlives the
       // install deadline (the 120 s default abandoned a long apt as "exit 1")
-      const stream = dm.runStream(launch[0], launch.slice(1), { env: { LC_ALL: 'C' }, onData: relay, timeoutMs: installMs + holdMs });
+      const stream = dm.runStream(launch[0], launch.slice(1), { env: { LC_ALL: 'C' }, onData: relay, timeoutMs: installMs + holdMs, by });
       const r = await Promise.race([stream, deadline]);
       if (r && r.code != null) return { code: r.code };
       if (r && r.timedOut) throw named('install_timeout', `the install on ${hostId} did not report an exit within ${spell(installMs + holdMs)} — it may still be running there`);
@@ -411,7 +414,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  install. The machine has ONE slot for every package (dpkg runs one install at a time anyway): an install of
    *  another package already running there is FOLLOWED like any live install (the dialog is told `reattached`), and
    *  the caller re-checks what it wanted afterwards (the route: `still-absent` by name). */
-  async function installPackage(hostId, { what = I.DEFAULT_INSTALL, onData = () => { }, onReattach = () => { }, expectDigest = null, planOpts = null } = {}) {
+  async function installPackage(hostId, { what = I.DEFAULT_INSTALL, onData = () => { }, onReattach = () => { }, expectDigest = null, planOpts = null, by = 'system:desktop-access' } = {}) {
     const key = machineKey(hostId);
     const cur = installs.get(key);
     if (cur) throw named('busy', `an install is already running on ${machineName(hostId)} (started ${new Date(cur.since).toISOString()}) — wait for it to finish, then check again`);
@@ -420,7 +423,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     let held = null;
     try {
       const { plan, facts } = await installPlan(hostId, what, planOpts);
-      if (plan && plan.uac) return await runUacInstall(hostId, plan, { onData, expectDigest }); // design 014 D1: Windows asks on its own screen
+      if (plan && plan.uac) return await runUacInstall(hostId, plan, { onData, expectDigest, by }); // design 014 D1: Windows asks on its own screen
       const running = facts && facts.installing && facts.installing.pid ? facts.installing : null;
       if (!running) {
         if (!plan.ok) { const e = named(plan.code, plan.error); e.plan = plan; throw e; }
@@ -439,7 +442,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
       let r;
       // an app plan carries its own argv (the machine's paths + the run's nonce — src/app-manifest.js appArgv); every
       // other plan's argv is its script under sudo -n — the SAME slot either way: one install per machine, re-attached
-      try { r = await runArgv(hostId, plan.ok ? (Array.isArray(plan.argv) ? plan.argv : SLOT.installArgv(plan)) : ['false'], { onData, stateDir: (facts && facts.stateDir) || '', mode: running ? 'follow' : 'start' }); }
+      try { r = await runArgv(hostId, plan.ok ? (Array.isArray(plan.argv) ? plan.argv : SLOT.installArgv(plan)) : ['false'], { onData, stateDir: (facts && facts.stateDir) || '', mode: running ? 'follow' : 'start', by }); }
       catch (e) { if (e && (e.code === 'install_timeout' || e.code === 'install_link_lost')) held = e.code; if (e && !e.plan) e.plan = plan; throw e; }
       if (r.code === SLOT.INSTALL_UNRECORDED_EXIT) { const e = named('install_unrecorded', `the install on ${hostId || 'this machine'} ended without recording its exit (it was stopped, or the machine restarted) — check again`); e.plan = plan; throw e; }
       if (r.code !== 0) { const e = named('install_failed', `the install exited ${r.code} on ${hostId || 'this machine'} — the log above says why`); e.plan = plan; throw e; }
@@ -539,7 +542,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     let machine = hostId; try { const h = hosts && hosts.get ? hosts.get(hostId) : null; machine = String((h && (h.name || h.id)) || hostId); } catch { /* the id */ }
     try { audit({ hostId, machine, sessionId: null, sessionKey: null, name: 'you — Run on its desktop', by: 'user', grant: 'run', verb: 'run', via: 'desktop', cmd: line, ...extra }); } catch (e) { log.warn?.(`[desktop] the run on ${hostId} was not audited: ${e && e.message}`); }
   };
-  async function runOnDesktop(hostId, line, { report = false } = {}) {
+  async function runOnDesktop(hostId, line, { report = false, by = 'system:desktop-access' } = {}) {
     if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine runs apps through the Apps launcher');
     const dm = await deviceOf(hostId);
     const platform = platformOfHandle(dm);
@@ -547,7 +550,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (!plan.ok) { auditRun(hostId, line, { ok: false, refusal: plan.code, ...(platform ? { platform } : {}) }); throw named(plan.code, plan.error); }
     let r;
     const t0 = Date.now();
-    try { r = await dm.runCmd(plan.argv[0], plan.argv.slice(1), { timeoutMs: 20000, waitMs: 25000 }); }
+    try { r = await dm.runCmd(plan.argv[0], plan.argv.slice(1), { timeoutMs: 20000, waitMs: 25000, by }); }
     catch (e) { auditRun(hostId, line, { ok: false, refusal: 'host_unavailable', platform, ms: Date.now() - t0 }); throw named('host_unavailable', `${hostId}: ${e && e.message}`); }
     auditRun(hostId, line, { ok: !!r && r.code === 0, code: r && Number.isInteger(r.code) ? r.code : null, ms: Date.now() - t0, platform, ...(!r || r.code !== 0 ? { refusal: 'run_failed' } : {}) });
     if (!r || r.code !== 0) throw named('run_failed', `the command did not start on ${hostId} (exit ${r ? r.code : '?'}${r && r.stderr ? `: ${String(r.stderr).trim().split('\n')[0].slice(0, 200)}` : ''})`);
@@ -611,13 +614,13 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  argv asks Windows for elevation ON THAT MACHINE'S SCREEN and waits: someone there clicks Yes and types the VNC
    *  password into the administrator window — VibeSpace never carries it. Declined / nobody there ⇒ `no_admin` by name
    *  with the plan (its commands = the same script for an administrator PowerShell). Done = the 5900 probe, after. */
-  async function runUacInstall(hostId, plan, { onData = () => { }, expectDigest = null } = {}) {
+  async function runUacInstall(hostId, plan, { onData = () => { }, expectDigest = null, by = 'system:desktop-access' } = {}) {
     if (!plan.ok) { const e = named(plan.code, plan.error); e.plan = plan; throw e; }
     if (expectDigest != null && planDigest(plan) !== String(expectDigest)) { const e = named('plan_changed', `what would run on ${hostId} changed after it was shown — nothing ran; read the new commands, then press Install again`); e.plan = plan; e.digest = planDigest(plan); throw e; }
     const dm = await deviceOf(hostId);
     if (typeof dm.runStream !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot stream a command`);
     log.log?.(`[desktop] installing ${plan.label} on ${hostId}: Windows asks for administrator rights on that machine's screen`);
-    const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData, timeoutMs: installMs });
+    const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData, timeoutMs: installMs, by });
     const fail = (code, msg) => { const e = named(code, msg); e.plan = plan; return e; };
     if (r && r.code === M.TIGHTVNC_NO_ADMIN_EXIT) throw fail('no_admin', `Windows on ${hostId} granted no administrator rights (Yes was not clicked there) — nothing was installed; click Install again with someone at that machine, or run the commands above in an administrator PowerShell there`);
     if (!r || r.code == null) throw fail(r && r.timedOut ? 'install_timeout' : 'install_link_lost', `the install on ${hostId} reported no exit (${(r && r.error) || (r && r.timedOut ? 'past its deadline' : 'the link dropped')}) — check again`);
@@ -759,14 +762,14 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   /** lane stream-mac-stall: the strip's 「打开系统设置」 — the Mac shows the Settings pane itself (`screen` | `accessibility`)
    *  through its agent (the `settings-open` op). No Mac: not_mac; an agent that predates the op is never asked: `agent_too_old`
    *  naming the version it has (the page then copies the link, as before). → the agent's answer */
-  async function settingsOpen(hostId, pane) {
+  async function settingsOpen(hostId, pane, { by = 'system:desktop-access' } = {}) {
     if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine\'s own Settings are its own');
     const dm = await deviceOf(hostId);
     const platform = platformOfHandle(dm);
     if (platform !== 'darwin') return { ok: false, code: 'not_mac', platform, error: `${hostName(hostId)} is not a Mac` };
     const tooOld = (have) => ({ ok: false, code: 'agent_too_old', platform, have: have || null, need: AGENT_VERSION, error: `${hostName(hostId)}'s agent ${have ? `(${have}) ` : ''}cannot open its Settings — it needs version ${AGENT_VERSION} or later` });
     if (typeof dm.settingsOpen !== 'function') return tooOld(null);
-    try { return await dm.settingsOpen(pane); }
+    try { return await dm.settingsOpen(pane, { by }); }
     catch (e) { if (e && e.code === 'host_needs_daemon') return tooOld(e.daemonVersion); throw named('host_unavailable', `${hostId}: ${e && e.message}`); }
   }
   // ── design q-024 r1 §1.3–§1.4 (lane remoteapp-r1b): THE REMOTEAPP SETTINGS CARD'S DOORS — the owner's (the routes refuse an agent token) ──

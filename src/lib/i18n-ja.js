@@ -5931,6 +5931,20 @@ export default {
   "{machine} stopped answering after its upgrade to {to} began — rerun its install command (Remote → {machine} → Pairing command)": "{machine}は{to}へのアップグレード開始後に応答しなくなりました — インストールコマンドを再実行してください（リモート → {machine} → ペアリングコマンド）",
   "VibeSpace started updating the device agent on {machine} to {to}; the device has not connected since. This item resolves itself when it connects again.": "VibeSpace は{machine}のデバイスエージェントを{to}に更新し始めましたが、それ以降デバイスが接続していません。再接続するとこの項目は自動的に解決します。",
   "{machine}: its agent could not update ({from} → {to})": "{machine}：エージェントを更新できませんでした（{from} → {to}）",
+  // lane device-bundle-signing-fix-r2: a downgrade refused / a first trust in a release key
+  "Agent {from} — REFUSED {to}: an older version than one it already ran; see For you": "エージェント {from} — {to} を拒否しました：すでに実行したバージョンより古いものです。For you を参照",
+  "{machine}: someone pushed an OLDER agent version ({to}) — refused": "{machine} に古いバージョン {to} が送られました — 拒否しました",
+  "The device agent on {machine} runs {from} and has already run {floor}; it refused {to}, an older release. An older agent lands only as a rollback the release key signed. Nothing was installed; it keeps running {from}.": "{machine} のデバイスエージェントは {from} を実行中で、すでに {floor} を実行したことがあります。より古いリリース {to} を拒否しました。古いエージェントは、リリース鍵が署名したロールバックとしてのみ入ります。何もインストールされず、{from} のまま動作しています。",
+  "The update was pushed by {by}. Replaying an old signed release is how a compromised VibeSpace would bring back a hole a newer release closed — check this VibeSpace's build and its log. A rollback on purpose is signed (sign-agentd --allow-downgrade-to). It will not send that update again.": "この更新は {by} が送りました。古い署名済みリリースの再送は、侵害された VibeSpace が新しいリリースで塞いだ穴を戻す手口です — この VibeSpace のビルドとログを確認してください。意図したロールバックには署名が必要です（sign-agentd --allow-downgrade-to）。この更新は二度と送られません。",
+  "{machine} trusted a release key for the first time: {keys}": "{machine} が初めてリリース鍵を信頼しました：{keys}",
+  "The device agent on {machine} trusted no release key (it was installed from a VibeSpace build that carried none), so it trusted the key that signed this update ({from} → {to}): {keys}. From now on it lands only updates signed by that key or its signed successors.": "{machine} のデバイスエージェントはリリース鍵を一つも信頼していなかったため（リリース鍵を持たない VibeSpace ビルドからインストールされました）、この更新（{from} → {to}）に署名した鍵を信頼しました：{keys}。今後はその鍵か、その署名済みの後継鍵で署名された更新だけを受け入れます。",
+  "Pushed by {by}. If {keys} is not your release key (src/agentd/release-keys.js lists it), this machine now runs someone else's code: re-pair it (its install command resets the trust).": "{by} が送りました。{keys} があなたのリリース鍵（src/agentd/release-keys.js に記載）でなければ、このマシンは今、他人のコードを実行しています：ペアリングし直してください（インストールコマンドが信頼をリセットします）。",
+  // lane device-bundle-signing (design q-042 D2): a refused / unsigned agent update
+  "Agent {from} — REFUSED the update to {to}: its release signature did not check ({code}); see For you": "エージェント {from} — {to} への更新を拒否しました：リリース署名を検証できません（{code}）。For you を参照",
+  "Agent {from} — not updated to {to}: this VibeSpace's agent build is not the signed release (sign it before a release)": "エージェント {from} — {to} に更新されていません：この VibeSpace のエージェントビルドは署名済みリリースではありません（リリース前に署名してください）",
+  "{machine} REFUSED an agent update ({from} → {to}): its release signature did not check ({code})": "{machine} がエージェントの更新を拒否しました（{from} → {to}）：リリース署名を検証できません（{code}）",
+  "The device agent on {machine} checked the update this VibeSpace sent ({from} → {to}) against the release keys it trusts and refused it: {code}{key}. Nothing was installed; it keeps running {from}.": "{machine} のデバイスエージェントは、この VibeSpace が送った更新（{from} → {to}）を信頼するリリース鍵で検証し、拒否しました：{code}{key}。何もインストールされず、{from} のまま動作しています。",
+  "The update was pushed by {by}. A VibeSpace that sends an update without the release signature is misbuilt or compromised — check this VibeSpace's build (release/agentd/manifest.json, its log) before anything else. It will not send that update again.": "この更新は {by} が送りました。リリース署名のない更新を送る VibeSpace は、ビルドの誤りか侵害されています — まずこの VibeSpace のビルド（release/agentd/manifest.json、ログ）を確認してください。この更新は二度と送られません。",
   "VibeSpace tried 3 times to update the device agent on {machine} from {from} to {to}; it stayed at {from}.": "VibeSpace は {machine} のデバイスエージェントを {from} から {to} へ 3 回更新しようとしましたが、{from} のままです。",
   "What does not work there until it is updated: running commands (vibespace-exit run) — this agent cannot run them on Windows.": "更新されるまでそこで使えないもの：コマンドの実行（vibespace-exit run）— このエージェントは Windows でコマンドを実行できません。",
   "The one step: rerun the device's install command (Remote → {machine} → Pairing command). This item resolves itself when the device reports {to}.": "やることは一つ：デバイスのインストールコマンドを再実行してください（リモート → {machine} → ペアリングコマンド）。デバイスが {to} を報告すると、この項目は自動的に解決します。",
@@ -9323,4 +9337,36 @@ export default {
   "The vault is locked — unlock it first": "保管庫はロック中です — 先にロックを解除してください", // lane vault-e2e-password
   "Lock the vault": "保管庫をロック", // lane vault-e2e-password
   "Check whether the vault is locked": "保管庫がロック中か確認", // lane vault-e2e-password
+  "Activity…": "アクティビティ…", // lane device-act-audit
+  "Activity on {machine}": "{machine} でのアクティビティ", // lane device-act-audit
+  "The last 50 things this VibeSpace did on {machine}, newest first, each with who asked; a row opens its output head.": "この VibeSpace が {machine} で行った直近 50 件（新しい順、それぞれ誰の依頼か付き）。行を開くと出力の先頭が見られます。", // lane device-act-audit
+  "Who asked": "依頼元", // lane device-act-audit
+  "Everyone": "すべて", // lane device-act-audit
+  "People": "人", // lane device-act-audit
+  "Jobs": "ジョブ", // lane device-act-audit
+  "VibeSpace itself": "VibeSpace 自身", // lane device-act-audit
+  "nobody named": "依頼元なし", // lane device-act-audit
+  "a person": "人", // lane device-act-audit
+  "a job": "ジョブ", // lane device-act-audit
+  "VibeSpace": "VibeSpace", // lane device-act-audit
+  "refused: nobody was named for it — never sent": "拒否：依頼元がないため送信していません", // lane device-act-audit
+  "failed ({code})": "失敗（{code}）", // lane device-act-audit
+  "new agent code": "新しいエージェントのコード", // lane device-act-audit
+  "an act": "操作", // lane device-act-audit
+  "output head": "出力の先頭", // lane device-act-audit
+  "no output kept": "出力は保存されていません", // lane device-act-audit
+  "Nothing has been done on this machine yet": "このマシンではまだ何も行っていません", // lane device-act-audit
+  "Could not load the activity": "アクティビティを読み込めませんでした", // lane device-act-audit
+  "New pairing command for {machine} — made by {by} from {from}": "{machine} の新しいペアリングコマンド — {by} が {from} から作成", // lane device-act-audit
+  "A pairing command for {machine} was made (pairing {generation}) by {by}, from the browser address {from}. Whoever runs it connects that machine to this VibeSpace.": "{by} がブラウザのアドレス {from} から {machine} のペアリングコマンドを作成しました（ペアリング {generation}）。これを実行した人がそのマシンをこの VibeSpace につなげます。", // lane device-act-audit
+  "If you did not make it: Remote → {machine} → Pairing command → Generate a new command (it retires this one), then read the machine card's Activity….": "作成した覚えがなければ：リモート → {machine} → ペアリングコマンド → 新しいコマンドを生成（このコマンドは無効になります）し、マシンカードの「アクティビティ…」を確認してください。", // lane device-act-audit
+  "{machine} connected from a new address: {address}": "{machine} が新しいアドレスから接続しました：{address}", // lane device-act-audit
+  "{machine} connected to this VibeSpace from {address} — an address it has not connected from before.": "{machine} が {address} からこの VibeSpace に接続しました — これまで使ったことのないアドレスです。", // lane device-act-audit
+  "If that is not where the machine is: Remote → {machine} → Pairing command → Generate a new command, then read the machine card's Activity….": "マシンがそこにないなら：リモート → {machine} → ペアリングコマンド → 新しいコマンドを生成し、マシンカードの「アクティビティ…」を確認してください。", // lane device-act-audit
+  "Agent update pushed to {machine}: {from} → {to}": "{machine} にエージェントの更新を送信：{from} → {to}", // lane device-act-audit
+  "This VibeSpace sent {machine} a new device agent ({from} → {to}), asked by {by}; the machine runs it as soon as it lands.": "この VibeSpace が {machine} に新しいデバイスエージェントを送りました（{from} → {to}、依頼元 {by}）。届き次第マシンで実行されます。", // lane device-act-audit
+  "Expected after this VibeSpace was updated. An update you did not expect means someone else may control this hub — read the machine card's Activity….": "この VibeSpace を更新した直後なら想定どおりです。心当たりのない更新なら、別の誰かがこの hub を操作している可能性があります — マシンカードの「アクティビティ…」を確認してください。", // lane device-act-audit
+  "{machine} refused an agent update with a bad signature ({from} → {to})": "{machine} が署名の正しくないエージェント更新を拒否しました（{from} → {to}）", // lane device-act-audit
+  "This VibeSpace sent {machine} a device agent ({from} → {to}, asked by {by}) that is not signed by the release key; the machine refused it and keeps running {from}.": "この VibeSpace が {machine} にリリース鍵の署名がないデバイスエージェント（{from} → {to}、依頼元 {by}）を送りました。マシンは拒否し、{from} のまま動いています。", // lane device-act-audit
+  "Someone may control this hub: read the machine card's Activity…, and rotate this hub's secrets before anything else.": "誰かがこの hub を操作している可能性があります：マシンカードの「アクティビティ…」を確認し、まずこの hub のシークレットをすべて入れ替えてください。", // lane device-act-audit
 };

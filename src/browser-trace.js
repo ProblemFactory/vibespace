@@ -149,7 +149,7 @@ function withoutUserinfo(v) { return typeof v === 'string' ? v.replace(/\b([A-Za
  *  its scheme, host and path (what the page WAS) and loses the whole query (fragment) as `?«cut»` (`#«cut»`), for EVERY
  *  navigation (an agent's too): an allowlist-free rule by the key's WORDS (split at _ - . and camelCase), so `postcode`,
  *  `keyword` or `passthrough` are not keys of that shape; a query without one stays whole. Then the userinfo cut. */
-const CREDENTIAL_WORDS = new Set(['token', 'code', 'secret', 'password', 'passwd', 'pwd', 'pass', 'passcode', 'apikey', 'key', 'auth', 'authorization', 'session', 'sessionid', 'sid', 'sig', 'signature', 'credential', 'credentials', 'otp', 'ticket', 'jwt', 'assertion', 'samlresponse', 'samlrequest']);
+const { CREDENTIAL_WORDS } = require('./credential-words.js'); // the ONE word list (lane device-act-audit moved it out: secret-shapes, and so the device agent's bundle, need the words, never this module)
 function credentialKey(k) {
   let key = String(k || '');
   try { key = decodeURIComponent(key.replace(/\+/g, ' ')); } catch { /* keep the raw name */ }

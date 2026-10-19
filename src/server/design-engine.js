@@ -285,12 +285,12 @@ function create({
    *  machine (device #0) runs it in-process; a machine whose daemon serves `design-fs` runs the SAME module there in ONE
    *  op (a Windows `fs-portable` agent included — no shell); null ⇒ a daemon-less ssh host (or an older daemon): the
    *  caller's ONE-command sh script, the fallback rung. The host is a parameter here, never a branch above. */
-  async function onMachine(h, action, params) {
+  async function onMachine(h, action, params, by = 'system:design-engine') {
     if (!h) return DFS.run(action, params);
     const rfs = getRemoteFs();
     const dm = rfs && typeof rfs.deviceWith === 'function' ? await rfs.deviceWith(h, DFS.CAP).catch(() => null) : null;
     if (!dm) return null;
-    try { return DFS.fromWire(await dm.designFs(action, params)); }
+    try { return DFS.fromWire(await dm.designFs(action, params, { by })); }
     catch (e) { return fail('host_unreachable', `the machine did not answer (${String(e && e.message || e).slice(0, 200)})`); }
   }
   /** The sh rung (a daemon-less ssh host): ONE command through RemoteFs. */
