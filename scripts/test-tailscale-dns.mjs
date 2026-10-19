@@ -274,7 +274,24 @@ console.log('⑥ MUTANTS: copies of src/plugins/tailscale.js outside the tree');
   const rc = await driveBoot(c);
   ok('CONTROL (c) no boot replay of its own ⇒ a rewritten resolv.conf stays (no set, no line) ⇒ ③ RED', rc.added.length === 0 && rc.heal.length === 0, rc.added);
   await stopAll(rc.pm);
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: 'mutant-copy (tailscale-dns): ' })) ok(r.name, r.pass, r.detail);
+  // (d) THE .319 MIRROR'S RACE (the Actions runner answered {done:true} for a login whose auth URL was still in the pipe): a
+  // fake `up` that prints the URL from a BACKGROUNDED subshell after the process itself has exited — the REAL plugin settles
+  // on 'close' (stdio drained) and captures it; a copy that settles on 'exit' answers {done:true}
+  const tsBin = path.join(TSDIR, 'bin', 'tailscale'), tsSrc = fs.readFileSync(tsBin, 'utf8');
+  const upLine = '    up) echo "To authenticate, visit:"; echo; echo "\thttps://login.tailscale.com/a/0abc123"; exit 0;;';
+  ok('CONTROL (d): the fake up branch found once', tsSrc.split(upLine).length === 2);
+  fs.writeFileSync(tsBin, tsSrc.replace(upLine, '    up) ( sleep 0.3; echo "To authenticate, visit:"; echo; echo "\thttps://login.tailscale.com/a/0abc123" ) & exit 0;;'));
+  const { pm: pmD } = await driveStart(REAL); // a login needs the daemon up (the fake tailscaled)
+  const rd = await driveSetup(pmD);
+  ok('(d) an auth URL that reaches the pipe AFTER the process exited is still captured (the login settles on close, not exit)', rd.r?.authUrl === 'https://login.tailscale.com/a/0abc123', rd.r);
+  ok('CONTROL (d): the close handler is the one edit', src.split("proc.on('close', (code) => {").length === 2);
+  const dmut = M.load(REL, src.replace("proc.on('close', (code) => {", "proc.on('exit', (code) => {"), 'exit-not-close');
+  const pmE = manager(dmut, { settings: { mode: 'userspace' }, resolv: plant('k8s.conf', K8S) });
+  const re = await driveSetup(pmE);
+  ok('CONTROL (d) a copy that settles on exit answers {done:true} for the same fake ⇒ RED', re.r?.done === true && !re.r?.authUrl, re.r);
+  fs.writeFileSync(tsBin, tsSrc);
+  await stopAll(pmD);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: 'mutant-copy (tailscale-dns): ' })) ok(r.name, r.pass, r.detail);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

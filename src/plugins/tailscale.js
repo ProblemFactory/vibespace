@@ -329,7 +329,9 @@ module.exports = {
           };
           proc.stdout.on('data', scan);
           proc.stderr.on('data', scan);
-          proc.on('exit', (code) => {
+          // 'close', not 'exit': close fires after the child's stdio has been drained, exit can run BEFORE the last stdout chunk
+          // is delivered — the .319 Actions mirror answered {done:true} for a login whose auth URL was still in the pipe
+          proc.on('close', (code) => {
             h.notify();
             if (!entry.authUrl) {
               if (code === 0) resolve({ done: true }); // already authorized (key in statedir)

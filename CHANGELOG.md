@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.320 — 2026-10-19
+
+### Fixed
+- Signing in to Tailscale from its plugin no longer misses the sign-in link when the tailscale command returns before its output is read.
+
 ## 2.369.319 — 2026-10-19
 
 ### Added

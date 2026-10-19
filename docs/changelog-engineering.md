@@ -4,6 +4,11 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.320 — 2026-10-19
+
+### 主开发 — the .319 Actions mirror (fast): test-tailscale-dns 「Log in: the auth URL captured — {done:true}」 = a PRODUCT race
+- src/plugins/tailscale.js loginStart resolved {done:true} on the child's `exit` with code 0; on the 2-vCPU runner `exit` fired BEFORE the stdout chunk carrying the auth URL was delivered (the suite's fake prints the URL and exits at once; a real `tailscale up` blocks until the login, so only an already-authorized exit-0 could show it in the field). The handler is now `close` (stdio drained). RED CONTROL in test-tailscale-dns ⑥(d): a fake `up` that prints the URL from a backgrounded subshell after exiting — the real plugin captures it, a copy settling on `exit` answers {done:true}. 60/60 ×3.
+
 ## 2.369.319 — 2026-10-19
 
 ### 主开发 — the .319 integration seam: the phone page reads the owner's band policy like the tray
