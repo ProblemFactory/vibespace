@@ -91,7 +91,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const BUNDLE = path.join(REPO, 'data/bin/vibespace-agentd.js');
 const NOVNC = path.join(REPO, 'public/novnc.js');
 const FIXTURE = path.join(REPO, 'scripts/fixtures/stream/fake-desk-720p.h264');
-const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : null; })();
+const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : process.env.VS_UI_SHOTS_DIR ? path.join(process.env.VS_UI_SHOTS_DIR, 'webrtc-chrome') : null; })(); // VS_UI_SHOTS_DIR: the Actions mirror's kept PNGs (ci.yml)
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -240,6 +240,11 @@ const PRE_DRAW = "    const { playing, page: p, agent: a, words } = stats.draw(s
 const preLane = { name: 'pre-lane', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); for (const x of [FW_ORDER, PRE_DRAW, PRE_FULL]) if (!src.includes(x)) throw new Error('the pre-lane anchor moved: ' + x.trim()); return { contents: src.replace(FW_ORDER, `  const preNum = document.createElement('span'); preNum.className = 'desktop-strip-stream'; preNum.hidden = true; preNum.style.cssText = '${NUM_LOOK}';\n  strip.append(fwEl, tccEl, preNum, noteEl);\n`).replace(PRE_DRAW, PRE_DRAW + '    preNum.textContent = words; preNum.hidden = !playing;\n').replace(PRE_FULL, ''), loader: 'js' }; }); } };
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-fwlast.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [fwLast] });
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-prelane.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [preLane] });
+// ⑭'s reopened-pin RED CONTROL (lane mirror-315-webrtc-pin): the details' pre-fix placement — moved above a bottom anchor one
+// frame AFTER they first showed (two rAFs), once (no resize watch): the frame the .315 mirror's 钉住 press aimed at
+const PIN_PLACE = "    requestAnimationFrame(above);\n    if (typeof ResizeObserver === 'function') { const ro = new ResizeObserver(() => { if (me.isConnected) above(); else ro.disconnect(); }); ro.observe(me); } // after createPopover's own (its viewport clamp first)\n";
+const prePin = { name: 'pre-pin', setup(b) { b.onLoad({ filter: /stream-stats\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(PIN_PLACE)) throw new Error('the details\' placement lines moved'); return { contents: src.replace(PIN_PLACE, '    requestAnimationFrame(() => requestAnimationFrame(above));\n'), loader: 'js' }; }); } };
+await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-prepin.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [prePin] });
 const app = express(); app.use(express.json());
 app.use(R.router);
 const CSS = ['style', 'viewers', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
@@ -248,12 +253,14 @@ app.get('/page.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(pat
 app.get('/page-notable.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-notable.js'))));
 app.get('/page-fwlast.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-fwlast.js'))));
 app.get('/page-prelane.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-prelane.js'))));
+app.get('/page-prepin.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-prepin.js'))));
 app.get('/novnc.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(NOVNC)));
 const HTML = `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-root);height:100vh;overflow:hidden}</style></head><body><script src="/page.js"></script></body></html>`;
 app.get('/', (q, s) => s.type('text/html').send(HTML));
 app.get('/notable', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-notable.js')));
 app.get('/fwlast', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-fwlast.js')));
 app.get('/prelane', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-prelane.js')));
+app.get('/prepin', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-prepin.js')));
 const PORT = await freePort();
 srv = http.createServer(app);
 srv.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head, bridge.upgradeId(new URL(req.url, 'http://x').pathname)));
@@ -299,7 +306,8 @@ async function page(w, h, winCss, { at = '/', mac = false, touch = false, hdr = 
   const shot = async (file, sel) => {
     if (!SHOTS) return;
     fs.mkdirSync(SHOTS, { recursive: true });
-    const r = sel ? await ev(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; })()`) : [0, 0, w, h];
+    const r = sel ? await ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; })()`) : [0, 0, w, h];
+    if (!r) return; // the element a red leg did not get: the leg's ✗ says so, the shot never throws it into a crash
     const pic = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, r[0] - 6), y: Math.max(0, r[1] - 6), width: Math.min(r[2] + 12, w), height: Math.min(r[3] + 12, h), scale: 1 } });
     fs.writeFileSync(path.join(SHOTS, file), Buffer.from(pic.result.data, 'base64'));
     console.log(`    (PNG ${path.join(SHOTS, file)})`);
@@ -968,21 +976,53 @@ let SHOWN = null;
   await press(p, `${WIN} .stream-stats-panel .stream-stats-x`);
   ok(await p.until(`!document.querySelector('${WIN} .stream-stats-panel')`, 2000), '⑭ the panel\'s × closes it');
   await p.close();
-  // reopened: the pill's corner and the pin's corner come back
+  // reopened: the pill's corner and the pin's corner come back. Lane mirror-315-webrtc-pin (the .315 mirror, both tries: pf4
+  // null): 钉住 was pressed where the details had been painted ONE FRAME before they moved above the pill (or before the
+  // table's first numbers grew them) ⇒ the press landed in the details, no panel. Every wait names the effect the next step
+  // needs; the details' painted places are traced (a ResizeObserver made AFTER the details' own ⇒ it reads each frame's
+  // final place, after their corrections) and the press's landing is printed
+  const PIN_TRACE = `(() => { const tr = window.__pinTrace = { frames: [], press: null }, anchor = document.querySelector('${WIN} .desktop-strip-status');
+    const look = (d) => { if (getComputedStyle(d).visibility !== 'visible') return; const r = d.getBoundingClientRect(), f = { top: Math.round(r.top), bottom: Math.round(r.bottom), anchorTop: Math.round(anchor.getBoundingClientRect().top) }, l = tr.frames[tr.frames.length - 1]; if (!l || l.top !== f.top || l.bottom !== f.bottom) tr.frames.push(f); };
+    const mo = new MutationObserver(() => { const d = document.querySelector('.stream-stats-pop'); if (!d) return; mo.disconnect(); new ResizeObserver(() => look(d)).observe(d); });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+    document.addEventListener('pointerdown', (e) => { const pin = document.querySelector('.stream-stats-pop .stream-stats-pin'); if (tr.press || !pin) return; const q = pin.getBoundingClientRect(); tr.press = { at: [e.clientX, e.clientY], onPin: !!e.target.closest('.stream-stats-pin'), pin: [q.left, q.top, q.right, q.bottom].map(Math.round), hit: String(e.target.className || e.target.tagName).slice(0, 40) }; }, { capture: true });
+    return true; })()`;
+  const PIN_STILL = `new Promise((r) => { const q = () => { const b = document.querySelector('.stream-stats-pop .stream-stats-pin'); if (!b) return null; const x = b.getBoundingClientRect(); return x.left + ',' + x.top; }; const a = q(); requestAnimationFrame(() => requestAnimationFrame(() => r(a !== null && q() === a))); })`;
+  // the stream's numbers ALL in = the rows ⑭'s first table showed: a fast reopen's table fills in two reads (0 → 5 → 9 rows —
+  // measured: painted 386–762, then 298–762), each growing the details upward; a count (≥ 5) pressed 钉住 across the second
+  const PIN_ROWS = ['rtt', 'jitter', 'fps', 'decode', 'kbps', 'path', 'codec', 'size', 'loss'];
+  const reopenPin = async (q) => { // the pill up in its remembered corner → the summary pressed → the details shown, their numbers in, their place held
+    await q.ev(`window.__open(${JSON.stringify(M)})`);
+    await playing(q);
+    await goFull(q);
+    await q.until(`document.querySelector('${STRIP}').classList.contains('is-pill')`, 3000); // the fullscreenchange's own effect (pill.sync)
+    const fs = await fullFacts(q);
+    await q.ev(PIN_TRACE);
+    await press(q, `${WIN} .desktop-strip-status`);
+    const shown = await q.until(SHOWN, 3000);
+    const filled = shown && await q.until(`(() => { const k = new Set([...document.querySelectorAll('.stream-stats-pop .stream-stats-table tr')].map((tr) => tr.dataset.k)); return ${JSON.stringify(PIN_ROWS)}.every((x) => k.has(x)); })()`, 8000);
+    const held = filled && await q.until(PIN_STILL, 3000);
+    return { fs, shown, filled, held, frames: await q.ev('window.__pinTrace.frames') };
+  };
+  const aboveAll = (r) => r.frames.length > 0 && r.frames.every((f) => Math.abs(f.bottom - (f.anchorTop - 2)) <= 1);
+  const placesOf = (r) => r.frames.map((f) => `${f.top}–${f.bottom}`).join(' → ');
   const p2 = await page(1280, 800, DESK);
-  await p2.ev(`window.__open(${JSON.stringify(M)})`);
-  await playing(p2);
-  await goFull(p2);
-  await sleep(300);
-  const fs3 = await fullFacts(p2);
-  await press(p2, `${WIN} .desktop-strip-status`);
-  await p2.until(SHOWN, 3000);
+  const r3 = await reopenPin(p2), fs3 = r3.fs;
+  ok(r3.shown && r3.filled && r3.held && aboveAll(r3), `⑭ the window reopened in full screen: the summary's details open ABOVE the bottom-right pill from the first frame they show, and grow upward when the table's numbers come — painted at ${placesOf(r3)}, each bottom 2 px over the summary (${r3.frames[0] && r3.frames[0].anchorTop})`, r3);
   await press(p2, '.stream-stats-pop .stream-stats-pin');
-  await sleep(200);
+  const pinned4 = await p2.until(`!!document.querySelector('${WIN} .stream-stats-panel')`, 3000);
   const pf4 = await p2.ev(PANEL);
-  ok(fs3.full && fs3.corner === 'br' && fs3.rect[2] === fs3.vw - 10 && pf4 && pf4.corner === 'bl', '⑭ the window reopened: its full-screen pill comes back bottom-right, a new pin bottom-left — remembered per machine', { fs3, pf4 });
-  await p2.ev(`document.exitFullscreen().catch(() => {}); localStorage.removeItem('vibespace.streamPill'); localStorage.removeItem('vibespace.streamStatsPin'); true`); // this profile's memory reset for the legs after
+  const land = await p2.ev('window.__pinTrace.press');
+  ok(fs3.full && fs3.corner === 'br' && fs3.rect[2] === fs3.vw - 10 && pinned4 && pf4 && pf4.corner === 'bl', '⑭ the window reopened: its full-screen pill comes back bottom-right, a new pin bottom-left — remembered per machine', { fs3, shown: r3.shown, filled: r3.filled, held: r3.held, land, pf4, pop: pf4 ? null : await p2.ev(`(() => { const d = document.querySelector('.stream-stats-pop'); if (!d) return null; const r = d.getBoundingClientRect(); return { visibility: getComputedStyle(d).visibility, box: [r.left, r.top, r.right, r.bottom].map(Math.round), away: document.querySelector('${STRIP}').classList.contains('is-away') }; })()`) });
+  await p2.ev(`document.exitFullscreen().catch(() => {}); true`);
   await p2.close();
+  // its RED CONTROL: the details' pre-fix placement (above the anchor one frame after they showed, once) — the place the
+  // mirror's press aimed at is painted first, and the table's numbers clamp them down over the pill
+  const p3 = await page(1280, 800, DESK, { at: '/prepin' });
+  const r3c = await reopenPin(p3);
+  ok(r3c.shown && r3c.filled && r3c.frames.length > 0 && !aboveAll(r3c), `⑭ RED CONTROL: the pre-fix placement paints the details at ${placesOf(r3c)} — a frame of them over the pill (its summary at ${r3c.frames[0] && r3c.frames[0].anchorTop}) before or after they move`, r3c);
+  await p3.ev(`document.exitFullscreen().catch(() => {}); localStorage.removeItem('vibespace.streamPill'); localStorage.removeItem('vibespace.streamStatsPin'); true`); // this profile's memory reset for the legs after
+  await p3.close();
 }
 
 console.log('⑮ a phone: the summary\'s tap, the pill under a finger');

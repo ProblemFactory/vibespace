@@ -11,6 +11,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - A playing stream no longer switches to the VNC picture by itself: it reconnects first, then lets you choose Try again or Show the VNC picture.
 - On a Mac, closing one display's window no longer stops another display's stream; a brief capture hiccup recovers in place.
+- In full screen, the details you open from the small bar in a bottom corner now appear above it at once: no jump, and they no longer cover the bar.
 
 ### Security
 - Machine pairing and sign-in tokens, the frp token and the voice sign-in are in the vault too; a sign-in lasts 30 days from its last use; a lock signs all out.

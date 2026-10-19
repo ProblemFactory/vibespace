@@ -116,16 +116,23 @@ jobs:
       - run: node scripts/ci.mjs --heavy --dirty-ok --host=hosted --shard ${{ matrix.shard }}/6
         env:
           VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
+          VS_UI_SHOTS_DIR: ${{ runner.temp }}/vs-shots
       # A chrome suite that goes red HERE and green locally (2.369.125's
-      # test-gear-menu Esc legs) leaves its screenshots in /tmp/vs-*-shots-*
-      # on a runner nobody can log into; ship them as an artifact so the
-      # failure can be read instead of guessed at.
-      - name: Upload chrome-suite screenshots (failure only)
+      # test-gear-menu Esc legs) leaves its screenshots on a runner nobody can
+      # log into; ship them as an artifact so the failure can be read instead
+      # of guessed at. Lane mirror-315-webrtc-pin: since B-60d2 a suite's
+      # scratch dir (the old /tmp/vs-*-shots-* glob) is removed at its exit —
+      # the .315 red uploaded nothing — so the PNGs go to VS_UI_SHOTS_DIR, and
+      # with them every failed try's WHOLE output (ci.mjs's fail-logs; the log
+      # above keeps a tail).
+      - name: Upload the failed suites' whole logs + chrome-suite screenshots (failure only)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: chrome-suite-shots-${{ github.sha }}-${{ matrix.shard }}
-          path: /tmp/vs-*-shots-*/
+          path: |
+            data/ci-heavy/fail-logs/*.log
+            ${{ runner.temp }}/vs-shots/
           if-no-files-found: ignore
           retention-days: 7
   # THE ONE HEAVY STATUS: green only when every shard is green. always(), so a

@@ -152,12 +152,18 @@ export function createStreamStats({ machine = '', hostId = '', summary = null, f
     popView = detailsView({ compact: false, onPin: () => pin(), onClose: () => close() });
     pop.append(popView.el);
     popView.update();
-    const me = pop; // an anchor in the screen's lower half (the pill in a bottom corner): the details open above it
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    // an anchor in the screen's lower half (the pill in a bottom corner): the details open ABOVE it — placed in the frame they
+    // first show in (createPopover's clamp asked for that frame first, so it runs first) and again whenever they grow (the
+    // table's first numbers): never shown where they move off a frame later, never clamped down over their anchor (lane
+    // mirror-315-webrtc-pin: the second frame's move put the 钉住 a press had aimed at 34 px away — the mirror's null pin)
+    const me = pop;
+    const above = () => {
       if (!me.isConnected || !anchor.isConnected) return;
       const a = anchor.getBoundingClientRect(), r = me.getBoundingClientRect();
       if (a.top > innerHeight / 2 && a.top - r.height - 2 >= 4) me.style.top = ((a.top - r.height - 2) / (uiScale() || 1)) + 'px';
-    }));
+    };
+    requestAnimationFrame(above);
+    if (typeof ResizeObserver === 'function') { const ro = new ResizeObserver(() => { if (me.isConnected) above(); else ro.disconnect(); }); ro.observe(me); } // after createPopover's own (its viewport clamp first)
     return pop;
   }
   function close() { if (pop) { pop._closeCtl?.abort?.(); pop.remove(); } pop = null; popView = null; }
