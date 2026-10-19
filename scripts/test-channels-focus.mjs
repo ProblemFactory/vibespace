@@ -44,6 +44,12 @@
 //     legacy hit, an older server), the REAL engine (setAccess + setWatchers,
 //     a digest hit pending ⇒ untagged; 61 min later ⇒ held), two patched
 //     copies as controls (the pre-seam total; statusTag without the watchers)
+//   ⑮ THE FIRST SCREEN SPLITS (lane attention-predicate-shared, design q-044 decision 7): every candidate row's BAND FACTS
+//     (`attentionRowOf` — the rule → fact → band table, each wait fact read on its own, a switch off claims nothing),
+//     placed by src/attention-model.js's own rule; 「需要我」 (≤ cap, folds by band) + 「相关」 (the 15 standing agent
+//     groups + assigned / read / replied / held); the REAL engine's Channels badge `needsMe` (15 unread + 2 awaiting +
+//     1 direct ⇒ 1, kept: a partial broadcast patches it, a 24 h edge expires it, a band switch moves it) + the
+//     stale-patch CONTROL
 //
 // Zero vendor calls; per-pid scratch dirs (scripts/scratch.mjs).
 // Run: node scripts/test-channels-focus.mjs
@@ -754,6 +760,126 @@ console.log('⑭ the at-you rule (lane attention-rule-at-you): an unread @ of me
   ok(fsrc.split(CLAUSE).length === 2, 'at-you CONTROL setup: the clause is spelled once');
   const Fb = require(MUT.write('src/channel-focus.js', fsrc.replace(CLAUSE, ''), 'no-at-you'));
   ok(Fb.statusTag(conv(at1), NOW) === null && !Fb.firstScreen([conv(at1)], { now: NOW }).shown.length, 'RED CONTROL: a copy that ignores mentions never lists the @ row — the legs above would be red');
+}
+
+console.log('⑮ the first screen splits (lane attention-predicate-shared): the band facts, 「需要我」 + 「相关」, the Channels badge = needsMe');
+{
+  const A = require(path.join(REPO, 'src/attention-model.js'));
+  const conv = (r) => ({ kind: 'conv', conv: r });
+  const lastAt = NOW - 10 * 60e3;
+  const judged = (id, clauses) => row(id, { lastAt, judged: { p: 0.9, clauses, threshold: 0.7, lastAt } });
+  // THE TABLE: rule / fact → the row's fact → its band (placed by attention-model's bandOfRow, never a second rule)
+  const T = [
+    [row('t-direct', { kind: 'dm', unread: 2, lastAt: NOW - H }), 2, { waitedBy: 'person' }],
+    [row('t-at', { atYouAts: [NOW - H], readAt: 0 }), 2, { waitedBy: 'person' }],
+    [judged('t-j-wait', ['waiting']), 2, { waitedBy: 'person' }],
+    [judged('t-j-money', ['deadline_money']), 3, { deadlineMoney: true }],
+    [row('t-await', { outbox: { awaiting: 2, unknown: 0 } }), 4, { action: 'approve' }],
+    [row('t-unknown', { outbox: { awaiting: 0, unknown: 1 } }), 4, { action: 'check' }],
+    [judged('t-j-plain', ['asks_me']), 5, {}],
+    [row('t-assigned', { assignment: principal('Alpha') }), null],
+    [row('t-read', { touch: { read: { id: 'cid-g', name: 'Gamma', at: NOW - H, upTo: NOW } } }), null],
+    [row('t-new', { lastAt: NOW - 60e3, touch: { read: { id: 'cid-g', name: 'Gamma', at: NOW - H, upTo: NOW - 2 * H } } }), null],
+    [row('t-held', { touch: { pending: 3 } }), null],
+    [row('t-replied', { touch: { selfAt: NOW - 3 * H } }), null],
+    [row('t-untagged', { unread: 9 }), null],
+  ];
+  const band = (a) => (a ? A.bandOfRow(a, NOW) : null);
+  const bad = T.filter(([r, b, f]) => { const a = Fo.attentionRowOf(conv(r), NOW); return band(a) !== b || (a && Object.entries(f || {}).some(([k, v]) => a[k] !== v)); }).map(([r]) => r.id);
+  ok(!bad.length, 'THE TABLE: direct / at-you / judged-waiting ⇒ a person waiting (2) · judged deadline_money ⇒ 3 · awaiting / unknown ⇒ a decision (4: approve / check) · judged otherwise ⇒ 5 · assigned / read / new-since-read / held / replied ⇒ 「相关」 (null) · untagged ⇒ neither', bad.join(' '));
+  ok(Fo.ATTENTION_FACTS.length === 7 && Fo.ATTENTION_FACTS.every((x) => [2, 3, 4, 5].includes(x.band)) && JSON.stringify(Fo.RELATED_RULES) === '["assigned","read","held","replied"]', 'the exported table (rule → fact → band) and the context rules are the ones above');
+  // EVERY CANDIDATE ROW gains the band facts (the whole ① fixture): a row the rules list is either a band row with the
+  // attention row's shape, or 「相关」; a row no rule lists is neither; no channel fact is band 1
+  const shapeKeys = ['id', 'key', 'source', 'at', 'due', 'urgency', 'waitedBy', 'deadlineMoney', 'blocked', 'options', 'action', 'card', 'plugin'];
+  const fx = FIXTURE.map(([r]) => [r, Fo.statusTag(r, NOW), Fo.attentionRowOf(conv(r), NOW)]);
+  const shapeBad = fx.filter(([r, tag, a]) => (a && (!tag || shapeKeys.some((k) => !(k in a)) || a.source !== 'channels' || a.key !== r.key || typeof a.at !== 'number' || band(a) < 2)) || (!tag && a)).map(([r]) => r.id);
+  ok(fx.length > 30 && !shapeBad.length, `every candidate of the ${fx.length}-row fixture carries the band facts (source 'channels', key, at, the facts) or is 「相关」; a row no rule lists is neither; never band 1`, shapeBad.join(' '));
+  // each wait fact ON ITS OWN, never only the ONE tag: an assigned direct chat a person wrote in is still a person waiting
+  const both = row('t-both', { kind: 'dm', unread: 1, lastAt: NOW - H, assignment: principal('Alpha') });
+  ok(Fo.statusTag(conv(both), NOW).code === 'assigned' && band(Fo.attentionRowOf(conv(both), NOW)) === 2, 'an assigned direct chat wears "→ Alpha" yet sits in band 2 (the facts place it, the tag only says its top rule)');
+  // a switch off claims nothing (the 8 rules still decide candidacy)
+  const offDirect = Fo.attentionPolicy((k) => (k === 'channels.attention.rule.direct' ? false : undefined));
+  const offAwait = Fo.attentionPolicy((k) => (k === 'channels.attention.rule.awaiting' ? false : undefined));
+  ok(Fo.attentionRowOf(conv(T[0][0]), NOW, offDirect) === null && band(Fo.attentionRowOf(conv(both), NOW, offDirect)) === null && Fo.attentionRowOf(conv(T[4][0]), NOW, offAwait) === null,
+    'a rule switched off claims nothing: direct off ⇒ the direct chat leaves (and the assigned one is 「相关」); awaiting off ⇒ the draft row leaves');
+  ok(Fo.attentionRowOf(conv(T[0][0]), NOW).until === NOW - H + D && Fo.attentionRowOf(conv(T[4][0]), NOW).until === null, 'the clock edge: a direct chat waits until its newest message is 24 h old (`until`); a draft has no edge');
+  // the agent groups: 「相关」 unless an @ of the owner puts one in band 2; archived never
+  const g = (id, o = {}) => ({ kind: 'group', key: `groups/${id}`, id, group: { id }, title: id, lastAt: NOW - H, unread: 3, archived: false, internal: true, atYou: 0, ...o });
+  ok(Fo.attentionRowOf(g('g1'), NOW) === null && band(Fo.attentionRowOf(g('g2', { atYou: 1 }), NOW)) === 2 && Fo.attentionRowOf(g('g3', { atYou: 1, archived: true }), NOW) === null,
+    'an agent group is 「相关」 (unread or not); an @ of the owner puts it in band 2; an archived one is in neither');
+  // THE SPLIT on the brief's shape: 15 standing agent groups + tag rows ⇒ ≤ cap rows on screen + folds by band + 「相关」
+  const groups = Array.from({ length: 15 }, (_, k) => ({ id: `ag${k}`, name: `Agents ${k}`, lastAt: NOW - (k + 1) * 60e3, unread: 1 + (k % 3), members: [] }));
+  const convs = [
+    ...Array.from({ length: 8 }, (_, k) => row(`dm${k}`, { kind: 'dm', unread: 1, lastAt: NOW - (k + 1) * 5 * 60e3 })),
+    row('aw1', { outbox: { awaiting: 1, unknown: 0 } }), row('aw2', { outbox: { awaiting: 1, unknown: 0 }, lastAt: NOW - 7 * 60e3 }), row('un1', { outbox: { awaiting: 0, unknown: 1 } }),
+    judged('jm', ['deadline_money']), judged('jp', ['asks_me']),
+    row('rd1', { touch: { read: { name: 'R', at: NOW - H, upTo: NOW } } }), row('rd2', { touch: { read: { name: 'R', at: NOW - H, upTo: NOW } } }), row('rd3', { touch: { read: { name: 'R', at: NOW - H, upTo: NOW } } }),
+    row('rp1', { touch: { selfAt: NOW - H } }), row('rp2', { touch: { selfAt: NOW - 2 * H } }), row('as1', { assignment: principal('A') }), row('as2', { assignment: principal('B') }), row('hd1', { touch: { pending: 1 } }),
+    ...Array.from({ length: 20 }, (_, k) => row(`quiet${k}`, { unread: k })),
+  ];
+  const { rows } = V.groupListRows({ groups, conversations: convs, adapters: ADAPTERS });
+  const fsx = Fo.firstScreen(rows, { now: NOW });
+  const sp = Fo.firstScreenSplit(fsx.shown, NOW, { needsMe: A.needsMe });
+  const nm = sp.needs;
+  ok(fsx.focus === 15 + 21 && nm.screen.length === 6 && nm.list.length === 13 && sp.related.length === 23, `the brief's shape: 36 on the attention list (15 groups + 21 tagged) ⇒ 「需要我」 13 rows, ${nm.screen.length} on screen (≤ cap 6) · 「相关」 ${sp.related.length} folded`, JSON.stringify({ focus: fsx.focus, needs: nm.list.length, rel: sp.related.length }));
+  ok(JSON.stringify(nm.folds.map((f) => [f.code, f.n])) === JSON.stringify([['waiting', 2], ['dated', 1], ['decide', 3], ['ask', 1]]), 'folded BY BAND: waiting 2 more, dated 1, decide 3, ask 1 (the screen = the 6 longest-waiting direct chats)', JSON.stringify(nm.folds.map((f) => [f.code, f.n])));
+  ok(nm.screen.every((r) => r.waitedBy === 'person') && sp.related.filter((r) => r.kind === 'group').length === 15 && sp.related.every((r) => !nm.list.some((x) => x.key === r.key)) && nm.list.every((x) => sp.byKey.get(x.key)),
+    'the 15 standing groups are all 「相关」; the two sections are disjoint and every 「需要我」 row maps back to its drawn row');
+  ok(nm.counts.needsMe === 12 && Fo.channelsBadge(nm.counts.needsMe, groups, NOW, { needsMe: A.needsMe }) === 12, 'the badge = bands 1–4 (8 direct + 1 dated + 3 decisions = 12) — the groups add none, their unread counts nowhere');
+  const cap8 = Fo.firstScreenSplit(fsx.shown, NOW, { needsMe: A.needsMe, bands: A.settingsPolicy((k) => (k === 'attention.cap' ? 8 : undefined)) });
+  ok(cap8.needs.screen.length === 8, 'attention.cap 8 ⇒ 8 rows on the Channels first screen too (the same policy)');
+  // THE PANEL draws exactly this (wiring pins)
+  const PS = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
+  ok(/const split = fs\.view === 'focus' && !q\.trim\(\) && fs\.shown\.length \? firstScreenSplit\(fs\.shown, now, \{ policy: attnPolicy\(\), bands: bandPolicy\(\), needsMe \}\) : null;/.test(PS)
+    && /if \(split\) drawNeeds\(split, list, now\);/.test(PS) && /internalBlock\(split \? \(relOpen \? split\.related : \[\]\) : fs\.shown,/.test(PS)
+    && /for \(const id of b\.shown\) \{ const r = split\.byKey\.get\(id\); if \(r\) list\.appendChild\(groupRow\(r, now\)\); \}/.test(PS) && V.FOLDED_BY_DEFAULT.includes('related'),
+  'PIN: the panel draws firstScreenSplit — 「需要我」 band by band through the same groupRow, then 「相关」 (folded by default, user state `channelsPanelFolds.related`) through the internal block');
+
+  // THE REAL ENGINE: the Channels badge = needsMe (kept — a first read, a partial broadcast, a clock edge, a switch)
+  const SET = {};
+  const Wn = makeWorld(20);
+  const mk = async (name, engineMod = ENG) => {
+    const registry = CH.createChannelRegistry();
+    registry.register(worldModule('im', Wn));
+    const dataDir = path.join(ROOT, name);
+    seed(dataDir, 'im', 'im');
+    const e = engineMod.create({ dataDir, registry, env: {}, now, broadcast: () => {}, serverSetting: (k) => SET[k], liveSessions: () => [], log: quiet });
+    await e.pass('im', { force: true });
+    await e.store.index.update(() => {
+      const en0 = e.store.index.entry('im', 'c00', { create: false }); en0.kind = 'dm'; en0.unread = 1;   // THE direct chat
+      for (let k = 1; k <= 15; k++) e.store.index.entry('im', `c${String(k).padStart(2, '0')}`, { create: false }).unread = 1;   // 15 unread in group chats
+    });
+    await e.store.outbox.update((ob) => { ob.proposals = ob.proposals || {}; for (const id of ['p1', 'p2']) ob.proposals[id] = { id, key: 'im/c00', adapterId: 'im', convId: 'c00', state: 'awaiting-approval', text: 'draft', draftedBy: { kind: 'agent', id: 'cid-x' }, at: clock }; });
+    return e;
+  };
+  const e = await mk('needs-badge');
+  const d0 = e.digest();
+  const before = d0.unreadTotal + d0.awaitingTotal;
+  ok(before === 18 && d0.needsMe === 1 && e.digest({ scope: 'totals' }).needsMe === 1, `15 unread + 2 awaiting + 1 direct: the old badge (unread + awaiting) ${before} ⇒ needsMe ${d0.needsMe} — the direct chat whose two drafts await you is ONE row in band 2`, JSON.stringify({ unread: d0.unreadTotal, awaiting: d0.awaitingTotal, needsMe: d0.needsMe }));
+  // the two drafts move to their own conversations: a PARTIAL broadcast's keys patch the kept rows (never a walk)
+  await e.store.outbox.update((ob) => { ob.proposals.p1.key = 'im/c16'; ob.proposals.p1.convId = 'c16'; ob.proposals.p2.key = 'im/c17'; ob.proposals.p2.convId = 'c17'; });
+  const dp = e.digest({ keys: ['im/c00', 'im/c16', 'im/c17'] });
+  ok(dp.partial === true && dp.scope === 'partial', 'the digest is a PARTIAL one (a broadcast\'s shape: the three keys only)');
+  ok(dp.needsMe === 3 && e.digest({ scope: 'totals' }).needsMe === 3, `drafts on their own rows ⇒ 3 (the direct chat in band 2 + two decisions in band 4) — the partial broadcast patched the kept count (${dp.needsMe})`);
+  // the clock edge: 25 h later the direct chat has left its window; the drafts stay
+  clock += 25 * H;
+  ok(e.digest({ scope: 'totals' }).needsMe === 2, 'a day later the direct chat left by its own clock edge (`until`) — the two drafts still wait (2)');
+  // a band switch (decision 4): decide off ⇒ the drafts sit in band 5 ⇒ out of the badge
+  SET['attention.band.decide'] = false;
+  ok(e.digest({ scope: 'totals' }).needsMe === 0, 'attention.band.decide off ⇒ the drafts fall to band 5 — the badge counts 0 (the switch read server side)');
+  delete SET['attention.band.decide'];
+  ok(e.digest({ scope: 'totals' }).needsMe === 2, '…switched back on ⇒ 2');
+  e.stop();
+  clock -= 25 * H;
+  // CONTROL: an engine whose partial broadcast does NOT patch the kept rows keeps the stale 1 after the drafts moved
+  const PATCH = '    if (keys) attnPatch(keys, conversations, liveIx, byId, t);';
+  ok(ENGINE_SRC.split(PATCH).length === 2, 'CONTROL setup: the partial broadcast\'s patch is spelled once');
+  const stale = MUT.load('src/server/channels-engine.js', ENGINE_SRC.replace(PATCH, ''), 'no-attn-patch');
+  const e2 = await mk('needs-badge-stale', stale);
+  e2.digest();
+  await e2.store.outbox.update((ob) => { ob.proposals.p1.key = 'im/c16'; ob.proposals.p1.convId = 'c16'; ob.proposals.p2.key = 'im/c17'; ob.proposals.p2.convId = 'c17'; });
+  ok(e2.digest({ keys: ['im/c00', 'im/c16', 'im/c17'] }).needsMe === 1, 'CONTROL RED: without the patch the badge stays 1 after the drafts moved — the "3" leg above would be red');
+  e2.stop();
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

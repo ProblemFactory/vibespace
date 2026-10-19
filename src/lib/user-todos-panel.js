@@ -23,7 +23,7 @@
 // click; the badge counts bands 1–4; an arrival toasts only in bands 1–2. The LLM plugin's three sections and the
 // per-conversation flood fold are retired (the judge only breaks a band-5 tie).
 import { t, tc } from './i18n.js';
-import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words
+import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
@@ -55,6 +55,10 @@ export function installUserTodos(app) {
   // paint listed (folded rows included) — what that band's 「全部标为已看」 resolves
   let bands = null;
   const bandOpen = new Map();
+  // lane attention-predicate-shared (decision 4): THE OWNER'S POLICY — the band switches + the first screen's size, read per
+  // paint through the ONE reader (settingsPolicy); `bandOff` = the switched-off bands the last fresh layout moved rows from
+  const attnPolicy = () => settingsPolicy((k) => app.settings?.get?.(k));
+  let bandOff = [];
   let noticesOpen = false; // the notices are a grey count until one click opens them (per open, like the folds)
   // NOTICES BY ORIGIN (B-328d): the filter is per DEVICE (like the language) and
   // survives a close; the group ORDER is append-only while the popup is open
@@ -124,7 +128,7 @@ export function installUserTodos(app) {
     // NOTICES (2.369.118, owner: spend notices are DISTRACTING beside real asks):
     // only ACTION items colour the badge; notices are a grey count of their own.
     // lane foryou-folds: the badge counts the attention list's bands 1–4 (a band-5 ask or a row in 搁置 moves only the list)
-    const { action, notices } = badgeOf(todos.open, Date.now());
+    const { action, notices } = badgeOf(todos.open, Date.now(), attnPolicy());
     const n = action.length;
     const worst = action.reduce((w, i) => Math.max(w, URG_RANK[i.urgency || 'normal'] || 1), 0);
     btn.classList.toggle('ut-has-items', n > 0);
@@ -178,8 +182,8 @@ export function installUserTodos(app) {
     const d = popup.querySelector(':scope > .ut-tabs');
     if (!d) return;
     const now = Date.now();
-    const c = tabCounts(todos.open, getToastHistory(), histSeen(), now); // lane foryou-folds: the Inbox tab = the badge's own number (bands 1–4)
-    const { action } = badgeOf(todos.open, now);
+    const c = tabCounts(todos.open, getToastHistory(), histSeen(), now, attnPolicy()); // lane foryou-folds: the Inbox tab = the badge's own number (bands 1–4)
+    const { action } = badgeOf(todos.open, now, attnPolicy());
     for (const b of d.querySelectorAll(':scope > .ut-tab')) {
       const on = b.dataset.tab === tab;
       if (b.classList.contains('on') !== on) b.classList.toggle('on', on);
@@ -337,16 +341,31 @@ export function installUserTodos(app) {
       bandOpen.set(String(b.band), b.openIds);
       const sa = bar.querySelector(':scope > .ut-seen-all');
       if (sa) { const show = b.openIds.length >= 2 ? '' : 'none'; if (sa.style.display !== show) sa.style.display = show; }
-      reconcileRows(g, b.entries.map((e) => ({ ...e, band: b.band })), bar);
-      // THE FOLD (decision 1): the band's folded open rows behind ONE head — after the shown rows, or in the bar when none show
-      let fe = g.querySelector('.ut-fold');
-      if (b.hidden) {
-        if (!fe) { fe = mk('button', 'ut-fold'); fe.type = 'button'; }
+      // lane attention-predicate-shared (decision 4): A BAND SWITCHED OFF IS SAID, ONCE — on band 5's head, where its rows now sit
+      let note = g.querySelector(':scope > .ut-band-off');
+      const offWords = b.band === 5 ? bandOff.map((o) => (o.to ? t('{band} is switched off — {n} of its rows sit with Other questions', { band: t(o.name), n: o.n }) : t('Other questions is switched off — {n} rows wait behind the fold', { n: o.n }))).join(' · ') : '';
+      if (offWords) {
+        if (!note) { note = mk('div', 'ut-band-off'); bar.after(note); }
+        if (note.textContent !== offWords) note.textContent = offWords;
+      } else if (note) note.remove();
+      reconcileRows(g, b.entries.map((e) => ({ ...e, band: b.band })), note || bar);
+      // THE FOLD (decision 1) IS A TOGGLE IN ITS OWN SLOT (lane attention-predicate-shared — the owner 2026-10-19, 「很容易误触」):
+      // the bar's right end holds it for the whole open — 「还有 N 条 — 展开」 ⇄ 「收起」, one fixed width; 「全部标为已看」 keeps its own
+      // slot left of it. Nothing held back any more (the folded rows resolved elsewhere) ⇒ the toggle hides but KEEPS its slot,
+      // so no destructive control ever slides into a spot a fold button just vacated.
+      let fe = bar.querySelector(':scope > .ut-fold');
+      if (b.foldable) {
+        if (!fe) { fe = mk('button', 'ut-fold'); fe.type = 'button'; bar.append(fe); }
         fe.dataset.band = String(b.band);
-        const words = t(FOLD_HEAD, { n: b.hidden });
-        if (fe.textContent !== words) fe.textContent = words;
-        const host = b.entries.length ? g : bar;
-        if (fe.parentNode !== host || host.lastElementChild !== fe) host.append(fe);
+        const live = b.expanded || b.hidden > 0;
+        fe.dataset.state = b.expanded ? 'open' : 'folded';
+        const words = b.expanded ? t('Show less') : t(FOLD_HEAD, { n: b.hidden });
+        if (live && fe.textContent !== words) fe.textContent = words;
+        fe.setAttribute('aria-expanded', String(b.expanded));
+        fe.disabled = !live;
+        const vis = live ? '' : 'hidden';
+        if (fe.style.visibility !== vis) fe.style.visibility = vis;
+        if (bar.lastElementChild !== fe) bar.append(fe);
       } else if (fe) fe.remove();
     }
     for (const g of existing.values()) { bandOpen.delete(g.dataset.band); g.remove(); }
@@ -442,13 +461,14 @@ export function installUserTodos(app) {
     layout = layout ? nextLayout(layout, todos) : openLayout(gs);
     // THE ATTENTION LIST (lane foryou-folds): the bands' slots — the first 6 rows shown, the rest folded by band,
     // append-only while open (PURE bandLayout / bandEntries over src/attention-model.js needsMe)
-    bands = bandLayout(todos, { now, prev: bands });
+    bands = bandLayout(todos, { now, prev: bands, policy: attnPolicy() });
+    bandOff = bands.off || [];
     const drawn = bandEntries(bands, todos);
     const inPlace = new Set([...layout.groups.flatMap((g) => g.ids), ...bands.bands.flatMap((b) => b.ids)]);
     const allRows = entriesFor(layout, todos).map((g) => [g.key, g.entries, g.openCount]);
     // NOTICES (2.369.118): for-your-information rows leave the list for a section of their own under the bands
     const { notices } = splitNotices(allRows);
-    const openActions = badgeOf(todos.open, now).open.length;
+    const openActions = badgeOf(todos.open, now, attnPolicy()).open.length;
     root.querySelector(':scope > .ut-title > .ut-head-sub').textContent = openActions ? t('{n} open', { n: openActions }) : t('all clear');
     drawBands(root.querySelector(':scope > .ut-bands'), drawn);
     root.querySelector(':scope > .ut-empty').style.display = drawn.length ? 'none' : '';
@@ -558,7 +578,7 @@ export function installUserTodos(app) {
     const now = Date.now();
     for (const winId of [...app.wm.windows.keys()]) {
       const keys = keysForWin(winId);
-      const b = keys ? inboxBadgeFor(todos.open, keys, now) : { count: 0, urgency: '' }; // lane foryou-folds: that conversation's rows in bands 1–4
+      const b = keys ? inboxBadgeFor(todos.open, keys, now, attnPolicy()) : { count: 0, urgency: '' }; // lane foryou-folds: that conversation's rows in bands 1–4
       app.wm.setInboxBadge(winId, b.count ? b : null);
     }
   };
@@ -737,10 +757,12 @@ export function installUserTodos(app) {
       renderPanel();
       return;
     }
-    // THE FOLD (lane foryou-folds): 「还有 N 条 — 展开」 opens its band IN PLACE (the held slots gain the band's rows)
+    // THE FOLD (lane foryou-folds): 「还有 N 条 — 展开」 opens its band IN PLACE (the held slots gain the band's rows); lane
+    // attention-predicate-shared: the same button, now 「收起」, folds exactly those rows back (it never left its slot)
     const fb = e.target.closest('.ut-fold');
     if (fb) {
-      if (bands) bands = bandLayout(todos, { now: Date.now(), prev: bands, expand: Number(fb.dataset.band) });
+      const band = Number(fb.dataset.band);
+      if (bands) bands = bandLayout(todos, { now: Date.now(), prev: bands, ...(fb.dataset.state === 'open' ? { collapse: band } : { expand: band }), policy: attnPolicy() });
       renderPanel();
       return;
     }
@@ -891,7 +913,7 @@ export function installUserTodos(app) {
         if (prevKnown.has(i.id)) continue;
         // lane foryou-folds (design q-044 §2): only an arrival in band 1 or 2 (urgent, someone waiting) raises a toast and
         // blinks the button — every other one moves a number (39 toasts a day ⇒ about 3)
-        if (!toastWorthy(attentionRow(i, now))) continue; // (the panel's own `rowOf` is a DOM helper — the attention row is imported under its own name)
+        if (!toastWorthy(attentionRow(i, now), attnPolicy())) continue; // (the panel's own `rowOf` is a DOM helper — the attention row is imported under its own name; a band switched off never toasts)
         // lane S3: the toast says WHERE the tray is ("Added to For you (bottom
         // right)") — measured off this device's own button, once per item
         const where = trayWhere(trayRect(), window.innerWidth, window.innerHeight);
@@ -929,6 +951,12 @@ export function installUserTodos(app) {
   // the row, in band 2)
   model.on('todos', (next) => apply(next));
   model.on('live', () => { patchLive(); scheduleBadges(); });
+  // lane attention-predicate-shared (decision 4): A SWITCH OR THE CAP CHANGED (here or on another client — the settings
+  // broadcast) ⇒ the badge, the title-bar badges and an open popup re-render at once; the open popup's slots are rebuilt
+  // (a switch moves rows between bands — the slot law holds only while the policy does)
+  const onPolicy = () => { bands = null; renderBtn(); scheduleBadges(); if (!popup.classList.contains('hidden')) renderPanel(); };
+  for (const b of BANDS) app.settings?.on?.(bandKey(b.code), onPolicy);
+  app.settings?.on?.(CAP_KEY, onPolicy);
   if (model.loaded) apply(model.todos); // a model built before this surface (the window opened first) already holds a snapshot
   // A toast fired while the history page is open → live-refresh it
   // (and on the inbox page the Notifications tab's unread count ticks up in place)

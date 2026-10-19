@@ -209,10 +209,10 @@ export function wakeCount(r) {
 /** The panel's secondary sections, persisted in user state
  *  (`channelsPanelFolds`, PATCH merge-only): `true` = folded. Only the known
  *  parts, only booleans — user state never grows from this map. */
-export const PANEL_PARTS = Object.freeze(['accounts', 'watcher', 'internal']);   // lane channels-badges: `internal` = VibeSpace's own talk folded
+export const PANEL_PARTS = Object.freeze(['accounts', 'watcher', 'internal', 'related']);   // lane channels-badges: `internal` = VibeSpace's own talk folded; lane attention-predicate-shared: `related` = the first screen's 「相关」
 /** lane channels-fold (the owner, 2026-10-03): the parts FOLDED until the user unfolds them — absent = folded, only a
  *  literal `false` (the user's own unfold, synced like any fold) opens one. */
-export const FOLDED_BY_DEFAULT = Object.freeze(['internal']);
+export const FOLDED_BY_DEFAULT = Object.freeze(['internal', 'related']);   // lane attention-predicate-shared (decision 7): 「相关」 folds under 「需要我」
 export function foldsFrom(state) {
   const f = state && state.channelsPanelFolds && typeof state.channelsPanelFolds === 'object' ? state.channelsPanelFolds : {};
   const out = {};

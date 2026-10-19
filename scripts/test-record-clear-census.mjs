@@ -1122,6 +1122,7 @@ const CACHES = {
   'src/lib/channel-window.js|rowH': 'lane reaction-strip-anchor (B-59ff): a list row element → its last measured height (a number; a WeakMap — gone with the row, never words)',
   'src/lib/channels-panel.js|COLLAPSED': 'folded section keys',
   'src/lib/channels-panel.js|EXPANDED': 'expanded section keys',
+  'src/lib/channels-panel.js|NEEDS_OPEN': 'lane attention-predicate-shared: the 「需要我」 band numbers the person opened (numbers — no words)',
   'src/lib/channels-panel.js|ends': 'list name → its end element (a sentinel / skeleton row — no words of a row)',
   'src/lib/channels-panel.js|aroundCache': 'design 010: the search dialog\'s around sheets — the vendor\'s records per found message, a local of ONE dialog (gone with it; never stored)',
   'src/lib/channels-panel.js|curSystems': 'lane webhook-l2-ui: the account ids whose capability row declares an inbound door (pushTransport http-inbound) of the last build — ids, no words',

@@ -59,13 +59,13 @@
  * 「还有 N 条 — 展开」 (expanded in place), notices out of the list:
  *   rowsOf(open, now)              — the open ACTION items as attention rows (rowOf)
  *   badgeOf(open, now)             — {action: the items in bands 1–4 (the badges count these), notices, open: every action item}
- *   bandLayout(todos, {now, prev, expand}) — the bands' slots while the popup is open (the slot law: a row keeps its band and
+ *   bandLayout(todos, {now, prev, expand, collapse}) — the bands' slots while the popup is open (the slot law: a row keeps its band and
  *                                    place, resolved in place; an arrival appends at its band's end and joins a fold that
  *                                    exists; `expand` shows a band's folded rows in place)
  *   bandEntries(layout, todos)     — [{band, code, name, entries, hidden, openIds, openCount}] — what the panel draws
  */
 import { replyVerdict, REPLY_HIDDEN_CODES } from '../inbox-reply.js';
-import { rowOf, needsMe, placeOf, badgeRows, bandInfo } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds, design q-044) — the tray's bands, cap and folds
+import { rowOf, needsMe, placeOf, badgeRows, bandInfo, policyOf } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds, design q-044) — the tray's bands, cap and folds; `policy` = the owner's (src/attention-model.js settingsPolicy, lane attention-predicate-shared)
 import { INBOX_ORIGINS, ORIGIN_LABELS } from '../inbox-origin.js';
 
 /**
@@ -212,10 +212,10 @@ export function badgeCounts(open) {
 export function rowsOf(open, now = 0) { return (open || []).filter((i) => i && !isNotice(i)).map((i) => rowOf(i, now)).filter(Boolean); }
 /** THE BADGE (design §2: the For-you badge = bands 1–4, colours unchanged, + the grey notice count): `action` = the open
  *  items in bands 1–4 (never 搁置, never band 5), `notices` = the grey count, `open` = every open action item. */
-export function badgeOf(open, now = 0) {
+export function badgeOf(open, now = 0, policy = null) {
   const list = (open || []).filter(Boolean);
   const all = list.filter((i) => !isNotice(i));
-  const ids = new Set(badgeRows(rowsOf(all, now), now).map((r) => r.id));
+  const ids = new Set(badgeRows(rowsOf(all, now), now, policy).map((r) => r.id));   // decision 4: a band switched off counts nowhere
   return { action: all.filter((i) => ids.has(i.id)), notices: list.length - all.length, open: all };
 }
 /** THE BANDS' SLOTS while the popup is open — the slot law (inc-mtw02kbq-kj96) on the attention list. `prev` null = a
@@ -224,12 +224,18 @@ export function badgeOf(open, now = 0) {
  *  arrival appends at the END of the band its facts place it in, shown when that band folds nothing (band 1 always),
  *  else it joins the fold; `expand` (a band number) shows that band's folded rows IN PLACE. → {bands: [{band, ids}],
  *  shown: Set<id>} — the panel holds it until the popup closes. */
-export function bandLayout(todos, { now = 0, prev = null, expand = null, policy = null } = {}) {
+// lane attention-predicate-shared (the owner 2026-10-19 on the .318 tray: 「很容易误触」 — after 展开 the fold left the bar and
+// 「全部标为已看」 slid into its spot, so the next tap at the same place marked the whole band seen): THE FOLD IS A TOGGLE that
+// keeps its slot for the whole open — `foldable` = the bands that folded rows during this open (their toggle's slot stays
+// even when nothing is held back any more), `revealed` = band → the ids its 展开 showed (`collapse` hides exactly those again;
+// an arrival shown meanwhile stays shown).
+export function bandLayout(todos, { now = 0, prev = null, expand = null, collapse = null, policy = null } = {}) {
   const open = ((todos && todos.open) || []).filter((i) => i && i.id && !isNotice(i));
   if (!prev || !Array.isArray(prev.bands)) {
     const r = needsMe(rowsOf(open, now), now, policy);
-    return { bands: r.bands.map((b) => ({ band: b.band, ids: b.rows.map((x) => x.id) })), shown: new Set(r.bands.flatMap((b) => b.shown)) };
+    return { bands: r.bands.map((b) => ({ band: b.band, ids: b.rows.map((x) => x.id) })), shown: new Set(r.bands.flatMap((b) => b.shown)), off: r.off, foldable: new Set(r.bands.filter((b) => b.hidden.length).map((b) => b.band)), revealed: new Map() };
   }
+  const p = policyOf(policy);
   const known = new Set([...open.map((i) => i.id), ...((todos && todos.resolved) || []).map((i) => i && i.id)]);
   const bands = prev.bands.map((b) => ({ band: b.band, ids: b.ids.filter((id) => known.has(id)) }));
   const shown = new Set([...(prev.shown || [])].filter((id) => known.has(id)));
@@ -241,10 +247,17 @@ export function bandLayout(todos, { now = 0, prev = null, expand = null, policy 
     if (!b) { b = { band, ids: [] }; const k = bands.findIndex((x) => x.band > band); if (k < 0) bands.push(b); else bands.splice(k, 0, b); }
     const folding = b.ids.some((id) => !shown.has(id));
     b.ids.push(i.id); seen.add(i.id);
-    if (band === 1 || !folding) shown.add(i.id); // band 1 never folds; an arrival joins a fold that exists, never opens one
+    if (band === 1 || (!folding && !(band === 5 && p.off.has(5)))) shown.add(i.id); // band 1 never folds; an arrival joins a fold that exists, never opens one (band 5 switched off: always behind its fold)
   }
-  if (expand !== null && expand !== undefined) { const b = bands.find((x) => x.band === Number(expand)); if (b) for (const id of b.ids) shown.add(id); }
-  return { bands: bands.filter((b) => b.ids.length), shown };
+  const foldable = new Set(prev.foldable || []);
+  const revealed = new Map(prev.revealed || []);
+  for (const b of bands) if (b.ids.some((id) => !shown.has(id))) foldable.add(b.band);
+  if (expand !== null && expand !== undefined) {
+    const b = bands.find((x) => x.band === Number(expand));
+    if (b) { const added = b.ids.filter((id) => !shown.has(id)); for (const id of added) shown.add(id); revealed.set(b.band, [...(revealed.get(b.band) || []), ...added]); }
+  }
+  if (collapse !== null && collapse !== undefined) { for (const id of revealed.get(Number(collapse)) || []) shown.delete(id); revealed.delete(Number(collapse)); }
+  return { bands: bands.filter((b) => b.ids.length), shown, off: prev.off || [], foldable, revealed };
 }
 /** What the panel draws, band by band in order: `entries` = the shown rows ({item, resolved}, layout order), `hidden` =
  *  how many OPEN rows the band's fold holds back (the head's N), `openIds` = every open row of the band, folded ones
@@ -257,7 +270,9 @@ export function bandEntries(layout, todos) {
     const info = bandInfo(b.band) || { code: 'ask', name: '' };
     const all = b.ids.map((id) => (open.has(id) ? { item: open.get(id), resolved: false } : resolved.has(id) ? { item: resolved.get(id), resolved: true } : null)).filter(Boolean);
     const openIds = all.filter((e) => !e.resolved).map((e) => e.item.id);
-    return { band: b.band, code: info.code, name: info.name, entries: all.filter((e) => shown.has(e.item.id)), hidden: all.filter((e) => !e.resolved && !shown.has(e.item.id)).length, openIds, openCount: openIds.length };
+    // lane attention-predicate-shared: `foldable` (the toggle keeps its slot) and `expanded` (the toggle reads 「收起」)
+    return { band: b.band, code: info.code, name: info.name, entries: all.filter((e) => shown.has(e.item.id)), hidden: all.filter((e) => !e.resolved && !shown.has(e.item.id)).length, openIds, openCount: openIds.length,
+      foldable: !!(layout.foldable && layout.foldable.has(b.band)), expanded: !!(layout.revealed && layout.revealed.has(b.band)) };
   });
 }
 
@@ -318,11 +333,11 @@ const URGENCY_ORDER = ['low', 'normal', 'high', 'urgent'];
  *  sessionKey is one of `keys` (a window answers for its `<backend>:<id>` key
  *  AND the `webui:<id>` key an early item was filed under), and the worst
  *  urgency among them. `{count: 0, urgency: ''}` = no badge. */
-export function inboxBadgeFor(open, keys, now = null) {
+export function inboxBadgeFor(open, keys, now = null, policy = null) {
   const ks = new Set(keys || []);
   // lane foryou-folds: given `now`, the badge counts that session's rows in bands 1–4 (the attention list's badge rule)
   const mine = (open || []).filter((i) => i && !isNotice(i) && ks.has(i.sessionKey));
-  const counted = now === null ? null : new Set(badgeOf(mine, now).action.map((i) => i.id));
+  const counted = now === null ? null : new Set(badgeOf(mine, now, policy).action.map((i) => i.id));
   let count = 0, worst = -1;
   for (const i of mine) {
     if (counted && !counted.has(i.id)) continue;
@@ -448,10 +463,10 @@ export function noticeChips(notices, { prev = null } = {}) {
  *  `lastSeenTs` that were not `seen` at show time (B-3f5d ①: the user's own feedback) — the last time the Notifications tab was shown on this device
  *  (null/garbage = never: everything counts; the panel stamps the key at
  *  install so an upgrade does not open on a hundred). */
-export function tabCounts(open, toastHistory, lastSeenTs, now = null) {
+export function tabCounts(open, toastHistory, lastSeenTs, now = null, policy = null) {
   // lane foryou-folds: given `now` (the popup), `inbox.action` = the badge's own number — the rows in bands 1–4; the
   // For-you window (no `now`) still counts every open action item in its scope
-  const { action, notices } = now === null ? badgeCounts(open) : badgeOf(open, now);
+  const { action, notices } = now === null ? badgeCounts(open) : badgeOf(open, now, policy);
   let worst = -1;
   for (const i of action) worst = Math.max(worst, URGENCY_ORDER.indexOf(i.urgency || 'normal'));
   const seen = Number(lastSeenTs);

@@ -9488,4 +9488,20 @@ export default {
   "That stored value is never shown — VibeSpace uses it itself": "这条存储的值从不显示——由 VibeSpace 自己使用", // int317 (the Vault window's Hub secrets)
   "Screen Sharing: name + password": "屏幕共享：用户名 + 密码", // int317 (the Vault window's Hub secrets)
   "VNC password": "VNC 密码", // int317 (the Vault window's Hub secrets)
+  "What needs me · the bands": "需要我 · 分带", // lane attention-predicate-shared
+  "A login about to end, a device alert, an action card. Off: these rows sit with Other questions and never raise a toast. For you and the Channels first screen both read this switch.": "登录即将过期、设备警报、动作卡。关闭后：这些项排在「其余的问」里，不再弹出提示。「待你处理」与频道首屏都读这个开关。", // lane attention-predicate-shared
+  "A person wrote to you or @-mentioned you, an agent is blocked on you, a permission ask nobody answered for a minute, a plugin reminder. Off: these rows sit with Other questions and never raise a toast.": "有人私信或 @ 了你、agent 卡在等你、一分钟没人答的权限请求、插件提醒。关闭后：这些项排在「其余的问」里，不再弹出提示。", // lane attention-predicate-shared
+  "A date within 48 hours, or the judging model read a deadline or an amount of money. Off: these rows sit with Other questions.": "48 小时内的日期，或判断模型读到了期限或金额。关闭后：这些项排在「其余的问」里。", // lane attention-predicate-shared
+  "Option chips, a button to press, a draft waiting for your approval to send. Off: these rows sit with Other questions.": "选项、要你按的按钮、等你批准才发出的草稿。关闭后：这些项排在「其余的问」里。", // lane attention-predicate-shared
+  "Every other ask. Off: they never take a first-screen row and wait behind their fold.": "其余所有的问。关闭后：它们不再占首屏，折在下面。", // lane attention-predicate-shared
+  "An ask nobody answered for 7 days (a plugin reminder: 3 days) folds into On hold; nothing is deleted. Off: nothing is put on hold — those rows sit with Other questions.": "7 天没人答的问（插件提醒：3 天）折进「搁置」，不删除。关闭后：不再搁置——这些项排在「其余的问」里。", // lane attention-predicate-shared
+  "First screen: rows before the folds": "首屏：折叠前显示几行", // lane attention-predicate-shared
+  "How many rows For you and the Channels first screen show before the rest fold by band behind \"N more — expand\" (4–8). Urgent rows never fold.": "「待你处理」与频道首屏先显示这么多行，其余按带折在「还有 N 条 — 展开」后面（4–8）。紧急项从不折叠。", // lane attention-predicate-shared
+  "Needs me": "需要我", // lane attention-predicate-shared
+  "Related": "相关", // lane attention-predicate-shared
+  "Nothing waits for you right now": "现在没有在等你的", // lane attention-predicate-shared
+  "{band} is switched off — {n} of its rows sit with Other questions": "「{band}」已关闭——其中 {n} 条排在「其余的问」里", // lane attention-predicate-shared
+  "Other questions is switched off — {n} rows wait behind the fold": "「其余的问」已关闭——{n} 条折在下面", // lane attention-predicate-shared
+  "Handed to an agent, read by one, replied, a held wake, the agent groups — context, not a wait": "交给了 agent、被 agent 读过、你回复过、被挡住的唤醒、agent 群——是上下文，不是在等你", // lane attention-predicate-shared
+  "A person or an agent is waiting for you here": "这里有人或 agent 在等你", // lane attention-predicate-shared
 };

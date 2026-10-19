@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.319 — 2026-10-19
+
+### Added
+- Each For you group can be switched off on its own, and how many rows the first screen shows (4–8) is a setting: Settings → What needs me.
+
+### Changed
+- The Channels badge counts what needs you — a person waiting for you, a draft to approve — not unread messages.
+- Channels opens on Needs me, in the same groups as For you; chats handed to an agent, read by one or replied to fold under Related.
+- The sidebar puts urgent and blocked conversations first, then the ones asking you something.
+
 ## 2.369.318 — 2026-10-19
 
 ### Changed

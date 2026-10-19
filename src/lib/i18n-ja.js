@@ -9487,4 +9487,20 @@ export default {
   "That stored value is never shown — VibeSpace uses it itself": "この保存値は表示しません — VibeSpace 自身が使います", // int317 (the Vault window's Hub secrets)
   "Screen Sharing: name + password": "画面共有：名前 + パスワード", // int317 (the Vault window's Hub secrets)
   "VNC password": "VNC パスワード", // int317 (the Vault window's Hub secrets)
+  "What needs me · the bands": "自分が必要なもの · 帯", // lane attention-predicate-shared
+  "A login about to end, a device alert, an action card. Off: these rows sit with Other questions and never raise a toast. For you and the Channels first screen both read this switch.": "ログインの期限切れ間近、デバイスの警告、アクションカード。オフ：これらは「その他の質問」に並び、通知は出ません。「あなた宛て」とチャンネルの最初の画面の両方がこのスイッチを読みます。", // lane attention-predicate-shared
+  "A person wrote to you or @-mentioned you, an agent is blocked on you, a permission ask nobody answered for a minute, a plugin reminder. Off: these rows sit with Other questions and never raise a toast.": "誰かがあなたに直接書いた・@メンションした、エージェントがあなた待ちで止まっている、1 分間誰も答えなかった権限の確認、プラグインのリマインダー。オフ：これらは「その他の質問」に並び、通知は出ません。", // lane attention-predicate-shared
+  "A date within 48 hours, or the judging model read a deadline or an amount of money. Off: these rows sit with Other questions.": "48 時間以内の日付、または判定モデルが期限や金額を読み取ったもの。オフ：これらは「その他の質問」に並びます。", // lane attention-predicate-shared
+  "Option chips, a button to press, a draft waiting for your approval to send. Off: these rows sit with Other questions.": "選択肢、押すボタン、送信の承認を待つ下書き。オフ：これらは「その他の質問」に並びます。", // lane attention-predicate-shared
+  "Every other ask. Off: they never take a first-screen row and wait behind their fold.": "その他すべての質問。オフ：最初の画面には出ず、折りたたまれて待ちます。", // lane attention-predicate-shared
+  "An ask nobody answered for 7 days (a plugin reminder: 3 days) folds into On hold; nothing is deleted. Off: nothing is put on hold — those rows sit with Other questions.": "7 日間誰も答えなかった質問（プラグインのリマインダーは 3 日）は「保留」に折りたたまれ、削除はされません。オフ：保留にせず、それらは「その他の質問」に並びます。", // lane attention-predicate-shared
+  "First screen: rows before the folds": "最初の画面：折りたたむ前の行数", // lane attention-predicate-shared
+  "How many rows For you and the Channels first screen show before the rest fold by band behind \"N more — expand\" (4–8). Urgent rows never fold.": "「あなた宛て」とチャンネルの最初の画面がこの行数を表示し、残りは帯ごとに「あと N 件 — 展開」の後ろに折りたたまれます（4〜8）。緊急の項目は折りたたまれません。", // lane attention-predicate-shared
+  "Needs me": "自分が必要", // lane attention-predicate-shared
+  "Related": "関連", // lane attention-predicate-shared
+  "Nothing waits for you right now": "今あなたを待っているものはありません", // lane attention-predicate-shared
+  "{band} is switched off — {n} of its rows sit with Other questions": "「{band}」はオフ — その {n} 件は「その他の質問」に並んでいます", // lane attention-predicate-shared
+  "Other questions is switched off — {n} rows wait behind the fold": "「その他の質問」はオフ — {n} 件は折りたたまれています", // lane attention-predicate-shared
+  "Handed to an agent, read by one, replied, a held wake, the agent groups — context, not a wait": "エージェントに渡した・エージェントが読んだ・返信した・保留された起動・エージェントのグループ — 文脈であって、あなた待ちではありません", // lane attention-predicate-shared
+  "A person or an agent is waiting for you here": "ここで人かエージェントがあなたを待っています", // lane attention-predicate-shared
 };

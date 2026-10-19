@@ -1384,12 +1384,14 @@ button.ut-notice-head:hover { color: var(--accent); }
 .ut-band { border-top: 1px solid var(--border); padding: 2px 0 3px; }
 .ut-band-bar { display: flex; align-items: center; gap: 6px; min-height: 20px; color: var(--text); font-size: 11px; font-weight: 600; }
 .ut-band-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ut-band-n { color: var(--text-dim); font-weight: 400; }
-.ut-band-bar > .ut-seen-all { margin-left: auto; }
-.ut-band-bar > .ut-fold { width: auto; margin-left: auto; padding: 1px 6px; font-weight: 400; }
-.ut-band-bar > .ut-seen-all + .ut-fold { margin-left: 0; }
+.ut-band-n { color: var(--text-dim); font-weight: 400; margin-right: auto; }
+/* lane attention-predicate-shared (the owner 2026-10-19, 「很容易误触」): FIXED SLOTS on the bar's right — 「全部标为已看」, then the
+   fold TOGGLE at the very end in one fixed width (「还有 N 条 — 展开」 ⇄ 「收起」); a hidden toggle keeps its slot (visibility) */
+.ut-band-bar > .ut-fold { flex: 0 0 auto; width: 10.5em; margin-left: 0; padding: 1px 6px; font-weight: 400; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ut-band[data-band="1"] > .ut-band-bar > .ut-band-name { color: var(--red, #e55); }
 .ut-band-parked > .ut-band-bar { color: var(--text-dim); }
+/* lane attention-predicate-shared (decision 4): a band the owner switched off is SAID once, under band 5's bar */
+.ut-band-off { font-size: 10px; color: var(--text-dim); padding: 0 2px 2px; }
 /* lane foryou-folds, measured (tools/tray-measure.mjs: production-length asks ran ~120 px a row — 4 fit the 1280×800 popup):
    a band row's words are a TWO-LINE preview, so the first screen holds its 6 rows + the fold heads; the row's 「▸ 详情」
    (or a reply box being typed) shows the whole words in place — the For-you window (⤢) always does */
@@ -5380,6 +5382,23 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-ihead-at { flex-shrink: 0; font-size: 10px; font-weight: 700; color: var(--accent); }
 .chan-ihead .chan-ihead-unread { flex-shrink: 0; }
 @media (max-width: 600px) { .chan-ihead { min-height: 36px; } }
+/* lane attention-predicate-shared (design q-044 decision 7): THE FIRST SCREEN'S TWO SECTIONS — 「需要我」 (the attention list's
+   bands: a band's name + count, its rows, its fold 「还有 N 条 — 展开」) above 「相关」 (a fold, the internal head's grammar,
+   folded by default); a band the owner switched off is said once under band 5's name */
+.chan-attn-head { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 24px; margin: 4px 0 0; padding: 2px 8px; border: 0; background: none; border-radius: var(--radius-sm); text-align: left; font: inherit; font-size: 11px; font-weight: 600; color: var(--text); }
+button.chan-attn-head { cursor: pointer; user-select: none; }
+button.chan-attn-head:hover { background: var(--bg-hover); }
+.chan-attn-head .chan-part-chev { transition: transform var(--transition); }
+.chan-attn-head.chan-attn-folded .chan-part-chev { transform: rotate(-90deg); }
+.chan-attn-count { color: var(--text-dim); font-weight: 400; font-variant-numeric: tabular-nums; }
+.chan-attn-band { display: flex; align-items: center; gap: 6px; padding: 2px 8px 0 12px; font-size: 10px; color: var(--text-dim); }
+.chan-attn-band-n { font-variant-numeric: tabular-nums; }
+.chan-attn-band[data-band="1"] .chan-attn-band-name { color: var(--red, #e55); }
+.chan-attn-fold { flex: 0 0 auto; width: 10.5em; margin: 0 0 0 auto; padding: 1px 6px; border: 0; background: none; border-radius: var(--radius-sm); font: inherit; font-size: 11px; color: var(--accent); cursor: pointer; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chan-attn-fold:hover { background: var(--bg-hover); }
+.chan-attn-off { padding: 0 8px 2px 12px; font-size: 10px; color: var(--text-dim); }
+.chan-attn-none { padding: 2px 8px 4px 12px; }
+@media (max-width: 600px) { .chan-attn-head, .chan-attn-fold { min-height: 36px; } }
 /* lane internal-rows-look (the owner, 2026-10-09: "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开"): VibeSpace's OWN
    talk looks internal at a glance — the block (the head + its rows; folded, the head alone) sits on an inset BAND with a
    muted 2 px left rule, every internal row wears the product's mark AS its avatar on a muted disc (no hue, no corner

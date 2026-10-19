@@ -81,7 +81,7 @@ console.log('⑤ NOTICES (2.369.118, owner: spend notices are DISTRACTING beside
   const store = fs.readFileSync(path.join(ROOT, 'src/user-todos.js'), 'utf8');
   ok(/const KINDS = \['action', 'notice'\]/.test(store) && /kind must be one of/.test(store) && /kind: kind \|\| 'action'/.test(store), 'the store validates kind and defaults it to action');
   const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
-  ok(/import \{[^}]*splitNotices, badgeOf[^}]*\} from '\.\/user-todos-layout\.js'/.test(panel) && /const \{ action, notices \} = badgeOf\(todos\.open, Date\.now\(\)\);/.test(panel) && /splitNotices\(allRows\)/.test(panel) && /ut-seg-notice/.test(panel) && /ut-notice-head/.test(panel), 'the panel counts the badge with badgeOf (lane foryou-folds: the attention list\'s bands 1–4 + the grey notices) and renders the notice section from splitNotices');
+  ok(/import \{[^}]*splitNotices, badgeOf[^}]*\} from '\.\/user-todos-layout\.js'/.test(panel) && /const \{ action, notices \} = badgeOf\(todos\.open, Date\.now\(\), attnPolicy\(\)\);/.test(panel) && /splitNotices\(allRows\)/.test(panel) && /ut-seg-notice/.test(panel) && /ut-notice-head/.test(panel), 'the panel counts the badge with badgeOf (lane foryou-folds: the attention list\'s bands 1–4 + the grey notices) and renders the notice section from splitNotices');
   const guard = fs.readFileSync(path.join(ROOT, 'src/server/spend-guard.js'), 'utf8');
   ok(/sessionName: 'Spending', kind: 'notice'/.test(guard), "spend-guard's inbox item is declared a notice at the producer");
   const ask = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-ask'), 'utf8');
@@ -180,7 +180,7 @@ console.log('⑧ THE MINI INBOX (design-user-inbox-reply §3, chunk 3) — one s
   const win = fs.readFileSync(path.join(ROOT, 'src/lib/window.js'), 'utf8');
   const tg = fs.readFileSync(path.join(ROOT, 'src/lib/tab-group.js'), 'utf8');
   const appSrc = fs.readFileSync(path.join(ROOT, 'src/lib/app.js'), 'utf8');
-  ok(/inboxBadgeFor\(todos\.open, keys, now\)/.test(panel) && /app\.wm\.setInboxBadge\(/.test(panel), 'wiring: the panel counts through inboxBadgeFor (lane foryou-folds: with `now` — that conversation\'s rows in bands 1–4) and hands the result to wm.setInboxBadge');
+  ok(/inboxBadgeFor\(todos\.open, keys, now, attnPolicy\(\)\)/.test(panel) && /app\.wm\.setInboxBadge\(/.test(panel), 'wiring: the panel counts through inboxBadgeFor (lane foryou-folds: with `now` — that conversation\'s rows in bands 1–4) and hands the result to wm.setInboxBadge');
   ok(/miniInboxEntries\(mini\.layout, todos, mini\.keys\)/.test(panel) && /reconcileRows\(mini\.rows, entries, null, miniCtx\)/.test(panel), 'wiring: the popover lays out through miniInboxEntries and reconciles through THE row renderer');
   ok(/createPopover\(anchor, 'ut-mini-popover'\)/.test(panel), 'wiring: the popover is a createPopover (data-popover ⇒ the layered Escape)');
   ok(/if \(mini\) return; \/\/ the mini inbox lives in this session's own window/.test(panel), 'wiring: a row click in the popover never jumps');
@@ -248,14 +248,16 @@ console.log('⑨ THE BAND FOLD (lane foryou-folds, design q-044 decisions 1 + 6)
   eq(L.inboxBadgeFor([opt, notice, ...asks], ['claude:s1'], NOW), { count: 1, urgency: 'normal' }, 'inboxBadgeFor with `now`: that conversation\'s rows in bands 1–4 (its decision), not its 3 band-5 asks');
   eq(L.inboxBadgeFor([opt, notice, ...asks], ['claude:s1']), { count: 4, urgency: 'normal' }, '…and without `now` (an older caller) every open action row, as before');
   const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
-  ok(/import \{[^}]*\bbandLayout, bandEntries\b[^}]*\} from '\.\/user-todos-layout\.js'/.test(panel) && /bands = bandLayout\(todos, \{ now, prev: bands \}\);/.test(panel) && /const drawn = bandEntries\(bands, todos\);/.test(panel), 'wiring: the panel holds the bands\' slots through bandLayout (prev while open) and draws bandEntries');
-  ok(/'ut-fold'/.test(panel) && /const words = t\(FOLD_HEAD, \{ n: b\.hidden \}\);/.test(panel) && /bands = bandLayout\(todos, \{ now: Date\.now\(\), prev: bands, expand: Number\(fb\.dataset\.band\) \}\);/.test(panel), "wiring: the fold is .ut-fold worded FOLD_HEAD ('{n} more — expand') with the band's folded count; a click expands THAT band in place");
-  ok(/reconcileRows\(g, b\.entries\.map\(\(e\) => \(\{ \.\.\.e, band: b\.band \}\)\), bar\);/.test(panel), 'wiring: only the shown rows are reconciled into the band (keyed, patched in place), each marked a band row');
+  ok(/import \{[^}]*\bbandLayout, bandEntries\b[^}]*\} from '\.\/user-todos-layout\.js'/.test(panel) && /bands = bandLayout\(todos, \{ now, prev: bands, policy: attnPolicy\(\) \}\);/.test(panel) && /const drawn = bandEntries\(bands, todos\);/.test(panel), 'wiring: the panel holds the bands\' slots through bandLayout (prev while open) and draws bandEntries');
+  ok(/'ut-fold'/.test(panel) && /const words = b\.expanded \? t\('Show less'\) : t\(FOLD_HEAD, \{ n: b\.hidden \}\);/.test(panel) && /bands = bandLayout\(todos, \{ now: Date\.now\(\), prev: bands, \.\.\.\(fb\.dataset\.state === 'open' \? \{ collapse: band \} : \{ expand: band \}\), policy: attnPolicy\(\) \}\);/.test(panel)
+    && /let fe = bar\.querySelector\(':scope > \.ut-fold'\);/.test(panel) && /if \(fe\.style\.visibility !== vis\) fe\.style\.visibility = vis;/.test(panel),
+  "wiring: the fold is .ut-fold worded FOLD_HEAD ('{n} more — expand') with the band's folded count; a click expands THAT band in place — lane attention-predicate-shared: a TOGGLE in the bar's last slot (「收起」 folds back; hidden, it keeps its slot)");
+  ok(/reconcileRows\(g, b\.entries\.map\(\(e\) => \(\{ \.\.\.e, band: b\.band \}\)\), note \|\| bar\);/.test(panel), 'wiring: only the shown rows are reconciled into the band (keyed, patched in place), each marked a band row');
   ok((panel.match(/bands = null/g) || []).length >= 2, 'wiring: the bands\' slots live only while the popup is open (dropped on close and on every open)');
   // the toast rule reads the ATTENTION row — the panel's own `rowOf` is a DOM helper (`el.closest('.ut-item')`), and an
   // import under that name was shadowed inside installUserTodos: every arrival read as no row ⇒ no toast at all (the
   // chrome suite caught it); the import carries its own name
-  ok(/import \{ rowOf as attentionRow, toastWorthy[^}]*\} from '\.\.\/attention-model\.js'/.test(panel) && /if \(!toastWorthy\(attentionRow\(i, now\)\)\) continue;/.test(panel) && /const rowOf = \(el\) => el && el\.closest/.test(panel),
+  ok(/import \{ rowOf as attentionRow, toastWorthy[^}]*\} from '\.\.\/attention-model\.js'/.test(panel) && /if \(!toastWorthy\(attentionRow\(i, now\), attnPolicy\(\)\)\) continue;/.test(panel) && /const rowOf = \(el\) => el && el\.closest/.test(panel),
     'wiring: an arrival toasts only in bands 1–2 — toastWorthy(attentionRow(item)), the attention row imported under its own name (the panel\'s rowOf is a DOM helper)');
 }
 
@@ -646,7 +648,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   ok(/patchChips\(nBox\.querySelector\(':scope > \.ut-chips'\), noticeChips\(entries, \{ prev: noticeOrder \}\), noticeFilter\);/.test(panel) && (panel.match(/noticeFilterFor\(/g) || []).length === 1, '…the strip marks the HELD filter (the one call of noticeFilterFor is the hold — no second derivation that could disagree)');
   ok(/noticeFilter = readFilter\(\); \/\/ …read afresh from the device on every open/.test(panel), '…read afresh from the device on every open (then held)');
   ok(/if \(tb\) \{ if \(tb\.dataset\.tab !== tab\) \{ tab = tb\.dataset\.tab; renderPanel\(\); \} return; \}/.test(panel) && !/popup\.replaceChildren\(tabsEl\(\)/.test(panel), 'a tab click switches the PAGE; the tabs are never rebuilt (no replaceChildren(tabsEl(), …))');
-  ok(/const c = tabCounts\(todos\.open, getToastHistory\(\), histSeen\(\), now\);/.test(panel) && /ut-tab-n\[data-n="\$\{k\}"\]/.test(panel), 'the tab counts come from tabCounts (lane foryou-folds: with `now` — the Inbox tab = the badge\'s bands 1–4) and patch keyed `.ut-tab-n[data-n]` spans');
+  ok(/const c = tabCounts\(todos\.open, getToastHistory\(\), histSeen\(\), now, attnPolicy\(\)\);/.test(panel) && /ut-tab-n\[data-n="\$\{k\}"\]/.test(panel), 'the tab counts come from tabCounts (lane foryou-folds: with `now` — the Inbox tab = the badge\'s bands 1–4) and patch keyed `.ut-tab-n[data-n]` spans');
   ok(/window\.addEventListener\('vs-toast', \(\) => \{ if \(popup\.classList\.contains\('hidden'\)\) return; if \(tab === 'history'\) renderPanel\(\); else patchTabs\(\); \}\);/.test(panel), 'a toast patches the Notifications count in place (or refreshes the page being read)');
   ok(/markHistorySeen\(\); \/\/ the page is being LOOKED AT/.test(panel) && /if \(histSeen\(\) == null\) markHistorySeen\(\);/.test(panel), 'showing the Notifications page stamps the last look; a device that never looked is stamped at install');
   ok(/btn\.title = actionWords\(action\)/.test(panel) && /const words = actionWords\(action\); \/\/ the taskbar badge's own sentence/.test(panel), 'the Inbox tab\'s count and the taskbar badge share ONE sentence (actionWords)');
@@ -997,6 +999,52 @@ console.log('⑬ THE PIN (lane foryou-plugin-notices, owner 2026-10-19: 「这�
     const doorAt = act.indexOf("if (item?.open?.kind === 'plugin-settings') { close(); app.openPluginDoor?.(item.open); return; }");
     ok(jumpAt > 0 && doorAt > jumpAt && doorAt < act.indexOf('const s = sessionFor(key);', jumpAt), 'THE CLICK: jump() opens an item\'s declared door BEFORE the session lookup (a plugin key is no session — it ended in "Session not found")');
   }
+}
+
+console.log('⑮ THE FOLD IS A TOGGLE (lane attention-predicate-shared — the owner 2026-10-19: 「很容易误触」) — 展开 ⇄ 收起, the slot kept');
+{
+  const L = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
+  const NOW = Date.UTC(2026, 9, 19, 12), H = 3600e3;
+  const asks = Array.from({ length: 10 }, (_, k) => it('t' + k, 'claude:s' + (k % 3), { createdAt: NOW - (k + 1) * H }));
+  const td = { open: asks, resolved: [] };
+  const v = (lay, t2 = td) => L.bandEntries(lay, t2).map((b) => [b.band, b.entries.length, b.hidden, b.foldable, b.expanded]);
+  let lay = L.bandLayout(td, { now: NOW });
+  eq(v(lay), [[5, 6, 4, true, false]], 'a fresh open: 6 shown, 4 folded — the band is FOLDABLE (its toggle has a slot), not expanded');
+  lay = L.bandLayout(td, { now: NOW, prev: lay, expand: 5 });
+  eq(v(lay), [[5, 10, 0, true, true]], '展开: every row shows; the band stays foldable and reads EXPANDED (the toggle says 「收起」 in the same slot)');
+  const arrival = it('t-new', 'claude:s1', { createdAt: NOW });
+  const td2 = { open: [arrival, ...asks], resolved: [] };
+  lay = L.bandLayout(td2, { now: NOW, prev: lay });
+  lay = L.bandLayout(td2, { now: NOW, prev: lay, collapse: 5 });
+  eq(v(lay, td2), [[5, 7, 4, true, false]], '收起: exactly the rows 展开 showed fold back (4); an arrival shown while it was open stays shown (7)');
+  const td3 = { open: asks.slice(0, 6), resolved: asks.slice(6).map((i) => ({ ...i, status: 'done' })) };
+  lay = L.bandLayout(td3, { now: NOW, prev: lay });
+  eq(v(lay, td3).map(([b, , h, f, x]) => [b, h, f, x]), [[5, 0, true, false]], 'the folded rows resolved elsewhere: nothing held back — still FOLDABLE (the toggle hides, its slot stays: 「全部标为已看」 never moves)');
+  ok(L.bandEntries(L.bandLayout({ open: asks.slice(0, 3), resolved: [] }, { now: NOW }), { open: asks.slice(0, 3), resolved: [] })[0].foldable === false, 'a band that never folded has no toggle slot at all');
+}
+
+console.log('⑭ THE OWNER\'S SWITCHES IN THE TRAY (lane attention-predicate-shared, decision 4) — the badge, the title-bar badge, the tabs and the bands read the policy');
+{
+  const L = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
+  const A = (await import(path.join(ROOT, 'src/attention-model.js'))).default;
+  const NOW = Date.UTC(2026, 9, 19, 12), H = 3600e3;
+  const pol = (o) => A.settingsPolicy((k) => o[k]);
+  const td = { open: [it('w', 'claude:s1', { action: { type: 'helper-ask' }, createdAt: NOW - H }), it('d', 'claude:s1', { options: ['A'], createdAt: NOW - 2 * H }), it('a', 'claude:s2', { createdAt: NOW - 3 * H })], resolved: [] };
+  const offW = pol({ 'attention.band.waiting': false });
+  ok(L.badgeOf(td.open, NOW).action.length === 2 && L.badgeOf(td.open, NOW, offW).action.length === 1, 'badgeOf: waiting OFF drops the held permission ask from the badge (2 ⇒ 1)');
+  ok(L.inboxBadgeFor(td.open, ['claude:s1'], NOW).count === 2 && L.inboxBadgeFor(td.open, ['claude:s1'], NOW, offW).count === 1, 'inboxBadgeFor: a chat window\'s title-bar badge follows the same switch (2 ⇒ 1)');
+  ok(L.tabCounts(td.open, [], 0, NOW, offW).inbox.action === 1, 'tabCounts: the Inbox tab = the badge\'s own number under the policy');
+  const lay = L.bandLayout(td, { now: NOW, policy: offW });
+  eq(lay.bands.map((b) => [b.band, b.ids]), [[4, ['d']], [5, ['w', 'a']]], 'bandLayout: waiting OFF ⇒ the held ask sits in band 5 in band 5\'s order');
+  eq(lay.off, [{ band: 2, code: 'waiting', name: 'Someone is waiting', n: 1, to: 5 }], '…and the layout carries what to SAY once (the panel words it on band 5\'s head)');
+  const offAsk = pol({ 'attention.band.ask': false });
+  let l2 = L.bandLayout(td, { now: NOW, policy: offAsk });
+  ok(L.bandEntries(l2, td).find((b) => b.band === 5).entries.length === 0, 'ask OFF ⇒ band 5 shows no row on a fresh open (behind its fold)');
+  const td2 = { open: [it('n', 'claude:s3', { createdAt: NOW }), ...td.open], resolved: [] };
+  l2 = L.bandLayout(td2, { now: NOW, prev: l2, policy: offAsk });
+  ok(!l2.shown.has('n') && l2.off.length === 1, 'ask OFF ⇒ an arrival in band 5 joins the fold, never the screen');
+  const cap4 = L.bandLayout({ open: Array.from({ length: 9 }, (_, k) => it('c' + k, 'claude:s1', { createdAt: NOW - k * H })), resolved: [] }, { now: NOW, policy: pol({ 'attention.cap': 4 }) });
+  ok(cap4.shown.size === 4, 'attention.cap 4 ⇒ the tray\'s first screen holds 4 rows');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -70,7 +70,10 @@ import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag, fil
 import { accountFold, accountFoldDefault, accountFoldKey, accountMatches, foldsToWrite, needsYou } from './channel-groups-view.js';   // lane channels-fold-default
 // design 008 (B-3cf8): the rows this panel HOLDS — the first read + every page read, keyed (PURE)
 import { createRowStore, applyFirst, applyPage, applyBroadcast, listRows, focusRowsOf, ensureList, pageQueryOf, accountList } from './channel-rows.js';
-import { afterCursor, PAGE_MAX, listRowModel, attentionPolicy, ATTENTION_RULES } from '../channel-focus.js';
+import { afterCursor, PAGE_MAX, listRowModel, attentionPolicy, ATTENTION_RULES, firstScreenSplit } from '../channel-focus.js';
+// lane attention-predicate-shared (design q-044 decision 7): the first screen's 「需要我」 is the attention list's (PURE: the
+// bands, the cap, the folds by band, the owner's switches — the For-you tray's own functions)
+import { needsMe, settingsPolicy, bandKey, BANDS, CAP_KEY, FOLD_HEAD } from '../attention-model.js';
 import { chipMode, titleMinText } from './title-chips.js'; // int214: a row's freshness pill folds (lane G), never cuts
 import { clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a group row's cleared last line
 import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } from './channel-group-dialogs.js';
@@ -1045,6 +1048,8 @@ export function registerChannelsGearRow() {
 const COLLAPSED = new Set();
 /** Sections a user EXPLICITLY OPENED (overrides a default fold). */
 const EXPANDED = new Set();
+/** lane attention-predicate-shared: the 「需要我」 bands the person opened (「还有 N 条 — 展开」) — per page session, like the folds. */
+const NEEDS_OPEN = new Set();
 /** lane channels-fold-default: each ACCOUNT section's default fold, decided at its first draw on this page and HELD
  *  (a row that comes to need the person later never opens a list under their hand — the folded head's count and dot
  *  rise instead). The person's own open / close is user state (`channelsPanelFolds['acct:<id>']`) and wins. */
@@ -1193,6 +1198,11 @@ export function renderChannelsPanel(app, c) {
   const attnPolicy = () => (app.settings ? attentionPolicy((k) => app.settings.get(k)) : null);
   const onPolicy = () => { if (c.isConnected && groups !== null) draw(); };
   for (const code of ATTENTION_RULES) app.settings?.on?.(`channels.attention.rule.${code}`, onPolicy);
+  // lane attention-predicate-shared (decision 4): the owner's band switches + the cap (their ONE reader, settingsPolicy) —
+  // a change redraws 「需要我」 at once, like a rule's switch
+  const bandPolicy = () => settingsPolicy((k) => app.settings?.get?.(k), { expanded: NEEDS_OPEN });
+  for (const b of BANDS) app.settings?.on?.(bandKey(b.code), onPolicy);
+  app.settings?.on?.(CAP_KEY, onPolicy);
   // R3 (§23): THE HEADER IS THE VIEW SWITCH — "{n} need attention" | "All {n}"
   // (a `chan-seg`, the Outbox window's Awaiting | All grammar) in the summary's
   // place; a click redraws from the digest already in hand (no fetch)
@@ -1461,6 +1471,11 @@ export function renderChannelsPanel(app, c) {
       const sl = store.lists.get('search');
       fs.moreInAll = sl && sl.loaded && sl.q === q.trim() ? Math.max(0, (Number(sl.total) || 0) - fs.shown.filter((r) => r.kind === 'conv').length) : 0;
     }
+    // lane attention-predicate-shared (decision 7): THE FIRST SCREEN SPLITS — 「需要我」 = the rows a person or an agent waits
+    //  on, placed by the attention list's bands (≤ the cap on screen, the rest folded BY BAND, 搁置 at the tail), above
+    //  「相关」 (context: handed over, read, replied, held, the agent groups) folded under it. The attention view without a
+    //  query only — a query searches everything and nothing folds under it (the internal block's rule)
+    const split = fs.view === 'focus' && !q.trim() && fs.shown.length ? firstScreenSplit(fs.shown, now, { policy: attnPolicy(), bands: bandPolicy(), needsMe }) : null;
     const words = viewSwitchText({ focus: focusN, all: allN });
     segFocus.textContent = words.focus; segFocus.title = t('What needs you or an agent: handed to an agent, read by one in the last 24 h, awaiting your approval, a held wake, or a reply of yours in the last 24 h');
     segAll.textContent = words.all; segAll.title = t('Every conversation of every connected account, newest first');
@@ -1505,7 +1520,10 @@ export function renderChannelsPanel(app, c) {
     // lane channels-badges: VibeSpace's own talk is ONE block under its head (PURE internalBlock); folded the head alone
     //  stands for it — a row that needs the owner keeps its own row on top. A query searches everything: nothing folds
     //  under it. lane channels-fold: FOLDED BY DEFAULT (foldsFrom) — the user's unfold is user state, synced
-    const ib = internalBlock(fs.shown, { folded: (FOLDS || foldsFrom(null)).internal && !q.trim(), now });
+    if (split) drawNeeds(split, list, now);
+    const relOpen = !split || !(FOLDS || foldsFrom(null)).related;
+    if (split && (split.related.length || split.needs.list.length)) list.appendChild(relatedHead(split.related, relOpen));
+    const ib = internalBlock(split ? (relOpen ? split.related : []) : fs.shown, { folded: (FOLDS || foldsFrom(null)).internal && !q.trim(), now });
     // lane internal-rows-look (the owner, 2026-10-09: "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开"): THE BLOCK IS
     //  A BAND — the head and the internal rows right under it sit inside ONE kept container (the keep() precedent: its
     //  rows reconciled, never replaced); folded, the head alone. A row that needs the owner (on top while folded) stays
@@ -1621,6 +1639,68 @@ export function renderChannelsPanel(app, c) {
       : t('Fold VibeSpace internal talk into this one row — anything that @-mentions you or awaits you keeps its own row');
     const toggle = () => { setFold('internal', !b.folded); draw(); };
     h.onclick = toggle;
+    return h;
+  }
+
+  // ── lane attention-predicate-shared (design q-044 decision 7): 「需要我」 and 「相关」 ──
+  /** A first-screen SECTION HEAD: 「需要我 · N」 (a plain head) or 「相关 · N」 (a fold, the internal head's grammar). */
+  function attnHead(key, label, n, fold = null) {
+    const h = keep('attn-head:' + key, () => {
+      const el = fold ? document.createElement('button') : document.createElement('div');
+      if (fold) el.type = 'button';
+      el.className = 'chan-attn-head';
+      el.dataset.attnSection = key;
+      if (fold) el.appendChild(icon('chevronDown', 10, 'chan-part-chev'));
+      el.append(chanEl('span', 'chan-attn-name'), chanEl('span', 'chan-attn-count'));
+      return el;
+    });
+    h.querySelector('.chan-attn-name').textContent = label;
+    h.querySelector('.chan-attn-count').textContent = `(${n})`;
+    if (fold) {
+      h.classList.toggle('chan-attn-folded', !fold.open);
+      h.setAttribute('aria-expanded', String(fold.open));
+      h.onclick = fold.toggle;
+    }
+    return h;
+  }
+  /** 「需要我」: its head, then each band in the list's order — the band's name and count, its shown rows (the same row
+   *  renderer as every first-screen row), and its fold 「还有 N 条 — 展开」 (opens the band in place, per page session); a
+   *  band the owner switched off is said ONCE on band 5's head (decision 4 — never silently empty). */
+  function drawNeeds(split, list, now) {
+    const nm = split.needs;
+    const head = attnHead('needs', t('Needs me'), nm.list.length);
+    head.title = t('A person or an agent is waiting for you here');
+    list.appendChild(head);
+    if (!nm.list.length) list.appendChild(keep('attn-none', () => chanLine('empty-hint chan-attn-none', t('Nothing waits for you right now'))));
+    for (const b of nm.bands) {
+      const bh = keep('attn-band:' + b.band, () => { const el = chanEl('div', 'chan-attn-band'); el.dataset.band = String(b.band); el.append(chanEl('span', 'chan-attn-band-name'), chanEl('span', 'chan-attn-band-n')); return el; });
+      bh.firstChild.textContent = t(b.name);
+      bh.lastChild.textContent = String(b.rows.length);
+      list.appendChild(bh);
+      if (b.band === 5) for (const o of nm.off) {
+        const note = keep('attn-off:' + o.band, () => { const el = chanEl('div', 'chan-attn-off'); el.dataset.bandOff = o.code; return el; });
+        note.textContent = o.to ? t('{band} is switched off — {n} of its rows sit with Other questions', { band: t(o.name), n: o.n }) : t('Other questions is switched off — {n} rows wait behind the fold', { n: o.n });
+        list.appendChild(note);
+      }
+      for (const id of b.shown) { const r = split.byKey.get(id); if (r) list.appendChild(groupRow(r, now)); }
+      // the band's fold is a TOGGLE on its head line, in a fixed slot (the tray's grammar — the owner 2026-10-19: a control
+      // never slides into the spot another just vacated): 「还有 N 条 — 展开」 ⇄ 「收起」
+      const open = NEEDS_OPEN.has(b.band);
+      let f = bh.querySelector(':scope > .chan-attn-fold');
+      if (b.hidden.length || open) {
+        if (!f) { f = document.createElement('button'); f.type = 'button'; f.className = 'chan-attn-fold'; bh.appendChild(f); }
+        f.dataset.band = String(b.band);
+        f.dataset.state = open ? 'open' : 'folded';
+        f.setAttribute('aria-expanded', String(open));
+        f.textContent = open ? t('Show less') : t(FOLD_HEAD, { n: b.hidden.length });
+        f.onclick = () => { if (open) NEEDS_OPEN.delete(b.band); else NEEDS_OPEN.add(b.band); draw(); };
+      } else if (f) f.remove();
+    }
+  }
+  /** 「相关」's head — a fold, FOLDED by default (user state `channelsPanelFolds.related`, synced like every fold). */
+  function relatedHead(rows, open) {
+    const h = attnHead('related', t('Related'), rows.length, { open, toggle: () => { setFold('related', open); draw(); } });
+    h.title = t('Handed to an agent, read by one, replied, a held wake, the agent groups — context, not a wait');
     return h;
   }
 

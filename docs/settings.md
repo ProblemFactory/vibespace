@@ -87,6 +87,13 @@ Every setting is listed below, the advanced ones and the ones that only apply in
 | `taskbar.showDesktopPreviews` | boolean | `true` | **Show desktop previews** — Show the virtual-desktop miniature previews in the taskbar |
 | `taskbar.showUsage` | boolean | `true` | **Show usage meters** — Show the 5h/7d rate-limit donuts in the taskbar |
 | `taskbar.showUserTodos` | boolean | `true` | **Show the "For you" inbox** — Show the inbox of items agents filed for you (decisions/input needed) in the taskbar |
+| `attention.band.urgent` | boolean | `true` | **Urgent** — A login about to end, a device alert, an action card. Off: these rows sit with Other questions and never raise a toast. For you and the Channels first screen both read this switch. |
+| `attention.band.waiting` | boolean | `true` | **Someone is waiting** — A person wrote to you or @-mentioned you, an agent is blocked on you, a permission ask nobody answered for a minute, a plugin reminder. Off: these rows sit with Other questions and never raise a toast. |
+| `attention.band.dated` | boolean | `true` | **A deadline or money** — A date within 48 hours, or the judging model read a deadline or an amount of money. Off: these rows sit with Other questions. |
+| `attention.band.decide` | boolean | `true` | **Needs your decision** — Option chips, a button to press, a draft waiting for your approval to send. Off: these rows sit with Other questions. |
+| `attention.band.ask` | boolean | `true` | **Other questions** — Every other ask. Off: they never take a first-screen row and wait behind their fold. |
+| `attention.band.parked` | boolean | `true` | **On hold** — An ask nobody answered for 7 days (a plugin reminder: 3 days) folds into On hold; nothing is deleted. Off: nothing is put on hold — those rows sit with Other questions. |
+| `attention.cap` | number | `6` | **First screen: rows before the folds** — How many rows For you and the Channels first screen show before the rest fold by band behind "N more — expand" (4–8). Urgent rows never fold. |
 | `taskbar.showWindowCount` | boolean | `true` | **Show window count** — Show the "N windows" counter/list button in the taskbar |
 | `toolbar.showCommandMode` | boolean | `true` | **Enable command mode** — Enable Ctrl+\ command mode for keyboard-driven window management |
 | `layout.enableDragSnap` | boolean | `true` | **Snap on drag** — Snap windows to grid cells or screen edges when dragging |

@@ -17,10 +17,16 @@
 //   ⑨ the judge's candidates (band-5 ties only) · the badge rows (bands 1–4) · the toast rule (bands 1–2)
 //   ⑩ DECISION 8: a signed forward agent upgrade is a NOTICE (out of the list), a bad signature / a downgrade urgent
 //   ⑪ the policy seam lanes ② and ③ read (cap, expanded bands)
+//   ⑫ THE OWNER'S SWITCHES (lane attention-predicate-shared, decision 4): a band off ⇒ its rows in band 5's order, out of
+//      the badge, never a toast, said ONCE (`off`); band 5 off ⇒ never on the first screen; 搁置 off ⇒ nothing parks;
+//      attention.cap 4 / 8 (outside 4–8 ⇒ 6) — all through `settingsPolicy`
+//   ⑬ THE ONE READER: `attention.band.*` / `attention.cap` are read only by settingsPolicy (a census over src/) + the
+//      MUTANT (a surface reading attention.cap itself) ⇒ RED; every surface asks settingsPolicy (wiring pins)
+//   ⑭ A SESSION AS A ROW (the sidebar's rank): urgent ⇒ 1, a running agent blocked ⇒ 2, asking ⇒ 5, else not in the list
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -225,6 +231,95 @@ console.log('⑪ the policy seam (lanes ② and ③)');
   ok(pol.cap === 6 && pol.parkDays === 7 && pol.expanded.has(2), 'policyOf: garbage falls back to the defaults; a Set of expanded bands is read');
   const ch = { id: 'ch1', key: 'slack:c1', source: 'channels', at: NOW - MIN, waitedBy: 'person', urgency: 'normal' };
   ok(A.needsMe([ch, ...rows(SHAPE)], NOW).screen[0].id === 'ch1', 'a lane-② Channels row with no `band` is placed by the same rule (a person waiting ⇒ band 2, ahead of the decisions)');
+}
+
+console.log('⑫ THE OWNER\'S SWITCHES (decision 4) — a band off falls to band 5\'s order, never toasts, is said once; the cap is a number');
+{
+  const get = (o) => (k) => o[k];
+  const W = [item({ id: 'w1', action: { type: 'helper-ask' }, createdAt: NOW - 3 * H }), item({ id: 'w2', origin: 'plugin', plugin: 'p', createdAt: NOW - 2 * H })];
+  const P5 = [item({ id: 'a1', createdAt: NOW - H }), item({ id: 'a2', createdAt: NOW - 4 * H })];
+  const D4 = [item({ id: 'd1', options: ['A'], createdAt: NOW - 30 * MIN })];
+  const U1 = [item({ id: 'u1', urgency: 'urgent', createdAt: NOW - 5 * H })];
+  const all = rows([...W, ...P5, ...D4, ...U1]);
+  const on = A.needsMe(all, NOW, A.settingsPolicy(get({})));
+  eq([on.counts[1], on.counts[2], on.counts[4], on.counts[5], on.counts.needsMe, on.off.length], [1, 2, 1, 2, 4, 0], 'every switch on (unset) = lane ①\'s list, byte for byte: urgent 1 · waiting 2 · decide 1 · ask 2 — nothing said');
+  const p2 = A.settingsPolicy(get({ 'attention.band.waiting': false }));
+  const r2 = A.needsMe(all, NOW, p2);
+  eq(ids(r2.bands.find((b) => b.band === 5).rows), ['a1', 'w2', 'w1', 'a2'], 'waiting OFF ⇒ its rows sit in band 5 in band 5\'s order (newest first: a1 1 h · w2 2 h · w1 3 h · a2 4 h — the plugin pin and longest-waiting order gone)');
+  ok(r2.counts[2] === 0 && r2.counts.needsMe === 2 && A.badgeRows(all, NOW, p2).length === 2, 'waiting OFF ⇒ out of the badge (bands 1–4 now: the urgent row + the decision)', r2.counts);
+  eq(r2.off, [{ band: 2, code: 'waiting', name: 'Someone is waiting', n: 2, to: 5 }], 'waiting OFF is SAID once — {band, n: 2, to: band 5} (never silently empty)');
+  ok(!A.toastWorthy(A.rowOf(W[0], NOW), p2) && A.toastWorthy(A.rowOf(W[0], NOW)) && A.toastWorthy(A.rowOf(U1[0], NOW), p2), 'waiting OFF ⇒ its arrival never toasts (on: it does); an urgent arrival still does');
+  const p1 = A.settingsPolicy(get({ 'attention.band.urgent': false }));
+  ok(!A.toastWorthy(A.rowOf(U1[0], NOW), p1) && A.placeOf(A.rowOf(U1[0], NOW), NOW, p1) === 5, 'urgent OFF ⇒ an urgent row sits in band 5 and never toasts');
+  const p5 = A.settingsPolicy(get({ 'attention.band.ask': false }));
+  const r5 = A.needsMe(all, NOW, p5);
+  const b5 = r5.bands.find((b) => b.band === 5);
+  ok(!r5.screen.some((x) => x.band === 5) && b5.shown.length === 0 && b5.hidden.length === 2 && r5.folds.some((f) => f.band === 5 && f.n === 2), 'ask OFF ⇒ band 5 never takes a first-screen row — both wait behind its fold', { screen: ids(r5.screen), b5 });
+  eq(r5.off, [{ band: 5, code: 'ask', name: 'Other questions', n: 2, to: null }], 'ask OFF is said once ({to: null}: behind the fold)');
+  const old = rows([item({ id: 'o1', createdAt: NOW - 9 * D }), item({ id: 'o2', options: ['A'], createdAt: NOW - 10 * D })]);
+  const pp = A.settingsPolicy(get({ 'attention.band.parked': false }));
+  const rp = A.needsMe(old, NOW, pp), rp0 = A.needsMe(old, NOW);
+  ok(rp0.counts.parked === 2 && rp.counts.parked === 0 && rp.counts[5] === 2 && rp.off.length === 1 && rp.off[0].code === 'parked', 'On hold OFF ⇒ nothing parks: the 9- and 10-day asks sit in band 5\'s order (on: both in 搁置)', { on: rp0.counts, off: rp.counts });
+  const many = rows(Array.from({ length: 12 }, (_, k) => item({ createdAt: NOW - (k + 1) * MIN * 3 })));
+  const caps = [4, 8, 3, 9, '7', 6.5, 'x', undefined].map((c) => [c, A.needsMe(many, NOW, A.settingsPolicy(get({ 'attention.cap': c }))).screen.length]);
+  eq(caps, [[4, 4], [8, 8], [3, 6], [9, 6], ['7', 7], [6.5, 6], ['x', 6], [undefined, 6]], 'attention.cap: 4 ⇒ 4 rows, 8 ⇒ 8; outside 4–8, not a whole number or unset ⇒ CAP (6)');
+  ok(A.CAP_MIN === 4 && A.CAP_MAX === 8 && A.CAP_KEY === 'attention.cap' && A.bandKey('dated') === 'attention.band.dated', 'the keys and the range: attention.cap 4–8, attention.band.<code>');
+  const odd = A.settingsPolicy(get({ 'attention.band.waiting': 'false', 'attention.band.dated': 0, 'attention.band.decide': null }));
+  ok(odd.off.size === 0, 'only a literal false switches a band off (a "false" string, 0, null — a damaged value — leaves it on)');
+  const ex = A.settingsPolicy(get({ 'attention.cap': 5 }), { expanded: new Set([5]) });
+  ok(ex.cap === 5 && ex.expanded.has(5) && A.policyOf(ex) === ex, 'settingsPolicy carries the surface\'s own state ({expanded}); a made policy is never re-made (policyOf(p) === p)');
+  ok(A.settingsPolicy(() => { throw new Error('x'); }).cap === 6, 'a settings reader that throws ⇒ the defaults');
+  const ch = { id: 'k', key: 'slack:c', source: 'channels', at: NOW - MIN, waitedBy: 'person', urgency: 'normal' };
+  ok(A.placeOf({ ...ch, band: A.bandOfRow(ch, NOW) }, NOW, p2) === 5, 'a Channels row obeys the same switch (a person waiting, waiting OFF ⇒ band 5)');
+}
+
+console.log('⑬ THE ONE READER — attention.band.* / attention.cap are read only through settingsPolicy');
+{
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+  const KEY = /attention\.(?:cap\b|band\.)/;
+  const ALLOWED = new Set(['src/attention-model.js', 'src/lib/settings-schema.js']);
+  const census = (files) => files.filter(([f, t]) => !ALLOWED.has(f) && KEY.test(strip(t))).map(([f]) => f);
+  const walk = (d) => fs.readdirSync(path.join(ROOT, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.(m?js|cjs)$/.test(e.name) ? [path.join(d, e.name)] : []));
+  const files = walk('src').map((f) => [f, fs.readFileSync(path.join(ROOT, f), 'utf8')]);
+  ok(files.length > 300, `the census scope is the whole src/ tree (${files.length} files)`);
+  eq(census(files), [], 'no file but attention-model.js (settingsPolicy) and the schema names attention.band.* / attention.cap');
+  const PANEL = files.find(([f]) => f === 'src/lib/user-todos-panel.js')[1];
+  const needle = '  const attnPolicy = () => settingsPolicy((k) => app.settings?.get?.(k));';
+  ok(PANEL.split(needle).length === 2, 'ANCHOR: the tray reads its policy through settingsPolicy');
+  const mut = PANEL.replace(needle, needle + "\n  const capOwn = Number(app.settings?.get?.('attention.cap')) || 6;");
+  eq(census([['src/lib/user-todos-panel.js', mut]]), ['src/lib/user-todos-panel.js'], 'MUTANT RED: the tray reading attention.cap itself (outside settingsPolicy / policyOf) is caught by the census');
+  const src = (f) => files.find(([x]) => x === f)[1];
+  // THE ROWS mirror the model: one boolean switch per band code (on), attention.cap = CAP in CAP_MIN–CAP_MAX, ONE block
+  const { SETTINGS_SCHEMA: SS } = await import(pathToFileURL(path.join(ROOT, 'src/lib/settings-schema.js')).href);
+  const rowsB = Object.entries(SS).filter(([k]) => /^attention\./.test(k));
+  ok(rowsB.length === 7 && A.BANDS.every((b) => SS[A.bandKey(b.code)] && SS[A.bandKey(b.code)].type === 'boolean' && SS[A.bandKey(b.code)].default === true && SS[A.bandKey(b.code)].label === b.name)
+    && SS[A.CAP_KEY].type === 'number' && SS[A.CAP_KEY].default === A.CAP && SS[A.CAP_KEY].min === A.CAP_MIN && SS[A.CAP_KEY].max === A.CAP_MAX && rowsB.every(([, r]) => r.block === 'bands' && r.liveApply === true),
+  'THE SETTINGS ROWS mirror the model: attention.band.<code> per band (boolean, on, labelled with the band\'s own words) + attention.cap (6, 4–8) — ONE block, live');
+  ok(/const bandPolicy = \(\) => settingsPolicy\(\(k\) => app\.settings\?\.get\?\.\(k\), \{ expanded: NEEDS_OPEN \}\);/.test(src('src/lib/channels-panel.js'))
+    && /const bands = A\.settingsPolicy\(\(k\) => serverSetting\(k\)\);/.test(src('src/server/channels-engine.js'))
+    && /bands: settingsPolicy\(get\), needsMe/.test(src('src/lib/sidebar-rail.js'))
+    && /const policy = settingsPolicy\(\(k\) => this\.app\?\.settings\?\.get\?\.\(k\)\);/.test(src('src/lib/sidebar-state.js')),
+  'PIN: the Channels first screen, the server\'s Channels badge, the rail\'s groups half and the sidebar\'s rank all ask settingsPolicy');
+  ok(/toastWorthy\(attentionRow\(i, now\), attnPolicy\(\)\)/.test(PANEL) && /badgeOf\(todos\.open, Date\.now\(\), attnPolicy\(\)\)/.test(PANEL) && /inboxBadgeFor\(todos\.open, keys, now, attnPolicy\(\)\)/.test(PANEL)
+    && /bandLayout\(todos, \{ now, prev: bands, policy: attnPolicy\(\) \}\)/.test(PANEL) && /for \(const b of BANDS\) app\.settings\?\.on\?\.\(bandKey\(b\.code\), onPolicy\);/.test(PANEL),
+  'PIN: the tray\'s toasts, badge, title-bar badges and bands read the policy; a switch / the cap re-renders it live (settings broadcast)');
+}
+
+console.log('⑭ A SESSION AS A ROW — the sidebar\'s rank reads the band');
+{
+  const T = [
+    [{ state: 'working', urgency: 'urgent' }, { live: true }, 1], [{ state: 'blocked' }, { live: true }, 2], [{ state: 'needs-input' }, { live: true }, 5],
+    [{ state: 'working' }, { live: true, waiting: true }, 5], [{ state: 'needs-input', urgency: 'high' }, { live: true }, 5],
+    [{ state: 'blocked' }, { live: false }, null], [{ state: 'needs-input' }, { live: false }, null], [{ state: 'done', urgency: 'urgent' }, { live: true }, null],
+    [{ state: 'working', urgency: 'high' }, { live: true }, null], [{ state: 'review' }, { live: true }, null], [null, { live: true }, null],
+  ];
+  const got = T.map(([st, o]) => { const r = A.sessionRowOf(st ? { ...st, at: NOW - H } : st, { key: 'claude:x', now: NOW, ...o }); return r ? r.band : null; });
+  eq(got, T.map((x) => x[2]), 'urgent ⇒ 1 · a running agent blocked ⇒ 2 · asking (needs-input, or idling on a prompt) ⇒ 5 · a stopped session\'s stale ask, done, working, review ⇒ not in the list');
+  const r = A.sessionRowOf({ state: 'needs-input', at: NOW - 8 * D }, { key: 'k', live: true, now: NOW });
+  ok(A.placeOf(r, NOW) === A.PARKED && r.source === 'session', 'an ask nobody answered for 8 days parks (搁置) like any other');
+  ok(A.placeOf(A.sessionRowOf({ state: 'blocked', at: NOW }, { live: true, now: NOW }), NOW, A.settingsPolicy((k) => (k === 'attention.band.waiting' ? false : undefined))) === 5, 'waiting OFF ⇒ a blocked session ranks with the asks (band 5)');
+  const SS = fs.readFileSync(path.join(ROOT, 'src/lib/sidebar-state.js'), 'utf8');
+  ok(/const row = sessionRowOf\(st, \{ key, live: isLive, waiting: waiting\.has\(key\), now \}\);/.test(SS) && /if \(ab !== bb\) return ab - bb;/.test(SS) && SS.indexOf('if (ab !== bb)') < SS.indexOf('if (ar !== br) return br - ar;'), 'PIN: _sortSessions orders by the band first (sessionRowOf + placeOf), the old rank only inside a band');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

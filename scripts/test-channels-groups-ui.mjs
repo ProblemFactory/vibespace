@@ -193,9 +193,9 @@ console.log('§1 channel-groups-view (PURE)');
     ok(/const badges = accountBadges\(adapters\);/.test(PS) && PS.split('siblings, ordinal, badges.get(a.id)));').length === 3 && /const tile = accountBadge\(badge, 'chan-sec-kind', name\);/.test(PS) && /h\.appendChild\(accountBadge\(badge, 'chan-sec-kind', /.test(PS) && !/kindGlyph\(/.test(PS)
       && /s\.appendChild\(accountBadge\(badge\)\);/.test(CS) && /if \(badge\.internal\) b\.dataset\.vs = '1';/.test(CS) && /if \(user\) return accountTitle\(a\);/.test(DS),
       'channels-badges PIN: both account card heads draw the SAME badge element their rows wear (accountBadge over ONE accountBadges map — no kind tile left); the card\'s name and the badge\'s title are one spelling');
-    ok(/const ib = internalBlock\(fs\.shown, \{ folded: \(FOLDS \|\| foldsFrom\(null\)\)\.internal && !q\.trim\(\), now \}\);/.test(PS) && /r\.kind === 'internal-head' \? internalHead\(r\.block\) : groupRow\(r, now\)/.test(PS)
+    ok(/const ib = internalBlock\(split \? \(relOpen \? split\.related : \[\]\) : fs\.shown, \{ folded: \(FOLDS \|\| foldsFrom\(null\)\)\.internal && !q\.trim\(\), now \}\);/.test(PS) && /r\.kind === 'internal-head' \? internalHead\(r\.block\) : groupRow\(r, now\)/.test(PS)
       && /const toggle = \(\) => \{ setFold\('internal', !b\.folded\); draw\(\); \};/.test(PS) && V.PANEL_PARTS.includes('internal'),
-      'channels-badges PIN: the first screen draws through internalBlock; its head folds through setFold (user state `channelsPanelFolds.internal`, broadcast to every client); lane channels-fold: before the folds load it is the default (folded)');
+      'channels-badges PIN: the first screen draws through internalBlock (lane attention-predicate-shared: over 「相关」 once the first screen splits — every row when a query searches); its head folds through setFold (user state `channelsPanelFolds.internal`, broadcast to every client); lane channels-fold: before the folds load it is the default (folded)');
   }
   // lane internal-rows-look (the owner, 2026-10-09: "这个 VibeSpace 内部的聊天群视觉上很难和其他的外部的区分开" — seven agent rows
   // and a Lark row read as ONE list, told apart by an 8 px corner mark): THE REAL convAvatar over a minimal DOM — an
@@ -278,11 +278,11 @@ console.log('§1 channel-groups-view (PURE)');
   }
   // wake echo + folds
   ok(JSON.stringify(V.wakeCount({ woke: [1, 2], refused: [3], later: [] })) === '{"woke":2,"refused":1,"later":0}' && JSON.stringify(V.wakeCount(null)) === '{"woke":0,"refused":0,"later":0}', 'wakeCount: the answer\'s woke / refused / later counts, zero when absent');
-  ok(JSON.stringify(V.foldsFrom({ channelsPanelFolds: { accounts: true, watcher: 'yes', junk: true } })) === '{"accounts":true,"watcher":false,"internal":true}' && JSON.stringify(V.foldsFrom(null)) === '{"accounts":null,"watcher":false,"internal":true}', 'foldsFrom: only the KNOWN parts, only a literal true folds Accounts / the watcher (user state never grows from this map); Accounts with no choice is `null` — the panel derives it (lane channels-fold-default)');
+  ok(JSON.stringify(V.foldsFrom({ channelsPanelFolds: { accounts: true, watcher: 'yes', junk: true } })) === '{"accounts":true,"watcher":false,"internal":true,"related":true}' && JSON.stringify(V.foldsFrom(null)) === '{"accounts":null,"watcher":false,"internal":true,"related":true}', 'foldsFrom: only the KNOWN parts (lane attention-predicate-shared: + 「相关」, folded by default), only a literal true folds Accounts / the watcher (user state never grows from this map); Accounts with no choice is `null` — the panel derives it (lane channels-fold-default)');
   // lane channels-fold (the owner, 2026-10-03: VibeSpace internal is FOLDED by default; an explicit choice still wins)
   ok(V.foldsFrom({}).internal === true && V.foldsFrom({ channelsPanelFolds: { internal: 'no' } }).internal === true && V.foldsFrom({ channelsPanelFolds: { internal: 0 } }).internal === true
-    && V.foldsFrom({ channelsPanelFolds: { internal: false } }).internal === false && V.foldsFrom({ channelsPanelFolds: { internal: true } }).internal === true && JSON.stringify(V.FOLDED_BY_DEFAULT) === '["internal"]',
-    'channels-fold: VibeSpace internal is FOLDED unless the user unfolded it — absent / junk = folded, only a literal false (the user\'s unfold) opens it; the watcher keeps its open default');
+    && V.foldsFrom({ channelsPanelFolds: { internal: false } }).internal === false && V.foldsFrom({ channelsPanelFolds: { internal: true } }).internal === true && JSON.stringify(V.FOLDED_BY_DEFAULT) === '["internal","related"]' && V.foldsFrom({}).related === true && V.foldsFrom({ channelsPanelFolds: { related: false } }).related === false,
+    'channels-fold: VibeSpace internal is FOLDED unless the user unfolded it — absent / junk = folded, only a literal false (the user\'s unfold) opens it; the watcher keeps its open default; 「相关」 the same (lane attention-predicate-shared)');
 
   // THE PARITY: wakePreview ≡ the engine's wakeVerdict over notify × mention
   const names = { a: 'alpha', b: 'beta', c: 'gamma lane' };
@@ -530,7 +530,7 @@ console.log('§4 wiring pins');
   ok(/const own = !!\(input && input\.direct === true\) && \(!ctx \|\| ctx\.kind === 'user'\);/.test(E) && /lastText: en\.lastText \|\| ''/.test(E), 'PIN: the engine\'s own-message rule is the USER\'s only, and the digest carries lastText');
   ok(/return \{ appended: fresh\.length, duplicates, lastAt, lastText,/.test(S), 'PIN: the store\'s append answers the newest record\'s text');
   const RL = read('src/lib/sidebar-rail.js');
-  ok(/msg\.type === 'channel-groups-updated' && Array\.isArray\(msg\.groups\)\) this\._railChanBadge\('grp'/.test(RL) && /this\._railChanBadge\('ch', \(msg\.digest\.unreadTotal/.test(RL) && !/_railSetBadge\('channels'/.test(RL.replace(/_railChanBadge\(part, n\) \{[\s\S]*?\n    \},/, '')), 'PIN: the rail\'s Channels badge sums BOTH halves (the digest and the groups\' owner unread) through _railChanBadge — no other writer of that badge');
+  ok(/msg\.type === 'channel-groups-updated' && Array\.isArray\(msg\.groups\)\) this\._railChanBadge\('grp'/.test(RL) && /this\._railChanBadge\('ch', Number\(msg\.digest\.needsMe\) \|\| 0\)/.test(RL) && /this\._railChanBadge\('grp', this\._railGroupsNeed\(msg\.groups\)\)/.test(RL) && !/unreadTotal|awaitingTotal/.test(RL) && !/_railSetBadge\('channels'/.test(RL.replace(/_railChanBadge\(part, n\) \{[\s\S]*?\n    \},/, '')), 'PIN: the rail\'s Channels badge sums BOTH halves through _railChanBadge — lane attention-predicate-shared: the digest\'s `needsMe` (conversations in bands 1–4) + the groups the attention list puts there (never unread + awaiting) — no other writer of that badge');
   ok(/if \(from === G\.OWNER\) ownerSaw\(gr, g\);/.test(GEsrc) && /list = \(\) => Object\.values\(all\(\)\)\.map\(\(g\) => \(\{ \.\.\.view\(g\), unread: ownerUnread\(g\) \}\)\)/.test(GEsrc), 'PIN: the owner\'s post moves the owner mark inside the door, and the owner list carries the derived unread');
   // lane group-pending (2026-10-01): the line under every message — the ONE rule, keyed, patched in place, from the broadcast
   const grp = W.slice(W.indexOf('function openGroupWindow'));
@@ -636,10 +636,10 @@ console.log('\nchannels-fold-default: the account sections\' fold');
   ok(fo.accounts === null && fo['acct:lark:a'] === false && fo['acct:gone'] === true && !('acct:' in fo) && !('junk' in fo) && !('acct:n' in fo) && V.accountFoldKey('lark:a') === 'acct:lark:a',
     'fold-default: the person\'s per-account choices ride the SAME map (`acct:<id>`, literal booleans only); Accounts with no choice stays `null`', JSON.stringify(fo));
   const w = V.foldsToWrite({ ...fo, 'acct:slack:a': true }, new Set(['lark:a', 'slack:a']));
-  ok(JSON.stringify(w) === '{"watcher":false,"internal":true,"acct:lark:a":false,"acct:slack:a":true}',
+  ok(JSON.stringify(w) === '{"watcher":false,"internal":true,"related":true,"acct:lark:a":false,"acct:slack:a":true}',
     'fold-default: the map WRITTEN keeps only booleans and the accounts that still exist (`acct:gone` pruned, Accounts\' `null` dropped) — user state never outlives an account', JSON.stringify(w));
   const many = {}; for (let i = 0; i < 100; i++) many['acct:a' + i] = true;
-  ok(Object.keys(V.foldsToWrite(many)).length === V.ACCOUNT_FOLDS_MAX && Object.keys(V.foldsFrom({ channelsPanelFolds: many })).length === 3 + V.ACCOUNT_FOLDS_MAX && V.ACCOUNT_FOLDS_MAX === 64,
+  ok(Object.keys(V.foldsToWrite(many)).length === V.ACCOUNT_FOLDS_MAX && Object.keys(V.foldsFrom({ channelsPanelFolds: many })).length === 4 + V.ACCOUNT_FOLDS_MAX && V.ACCOUNT_FOLDS_MAX === 64,
     'fold-default: at most ACCOUNT_FOLDS_MAX (64) account folds read or written');
   // the panel's wiring (source pins): the default HELD per page, the choice in user state, the derived Accounts fold
   const PS = read('src/lib/channels-panel.js');

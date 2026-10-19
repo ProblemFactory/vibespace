@@ -370,6 +370,92 @@ function judgeCandidate(v, now = Date.now(), policy = null) {
   return !statusTag({ ...c, judged: null }, now, policy);
 }
 
+// lane attention-predicate-shared (design q-044 decision 7 — the owner accepted it 2026-10-19): THE FIRST SCREEN SPLITS IN TWO —
+// 「需要我」 (a person or an agent waits for the owner) above, 「相关」 (context, not a wait: handed over, read, replied, held,
+// the agent groups) folded under it. The 8 rules and their switches are untouched: they still decide CANDIDACY (`statusTag`
+// — a row no rule lists is in neither section, it stays under All). PLACEMENT is the row's FACTS, placed by
+// src/attention-model.js `bandOfRow` / `needsMe` — the For-you tray's own rule, never a second one (injected below: this
+// module imports nothing). `attentionRowOf` reads each wait fact ON ITS OWN, never only the ONE tag (an assigned direct
+// chat a person wrote in is still a person waiting); a fact whose rule is switched off claims nothing.
+/** rule / fact → the attention row's fact → its band (the suite and the report read this table). */
+const ATTENTION_FACTS = Object.freeze([
+  Object.freeze({ rule: 'direct', fact: 'waitedBy', band: 2, why: 'a person wrote to me directly, unread, inside 24 h' }),
+  Object.freeze({ rule: 'at-you', fact: 'waitedBy', band: 2, why: 'a person @-mentioned me, unread, inside 24 h (an agent group\'s @ of me too)' }),
+  Object.freeze({ rule: 'judged', clause: 'waiting', fact: 'waitedBy', band: 2, why: 'the attention judge: someone is waiting on me' }),
+  Object.freeze({ rule: 'judged', clause: 'deadline_money', fact: 'deadlineMoney', band: 3, why: 'the attention judge: a deadline or money' }),
+  Object.freeze({ rule: 'awaiting', fact: 'action', action: 'approve', band: 4, why: 'a draft waits for my approval to send' }),
+  Object.freeze({ rule: 'unknown', fact: 'action', action: 'check', band: 4, why: 'a send whose delivery nobody confirmed waits for my check' }),
+  Object.freeze({ rule: 'judged', fact: null, band: 5, why: 'the judge listed it with no waiting / deadline clause' }),
+]);
+/** The rules whose rows are CONTEXT, never a wait (「相关」), and the agent groups with no @ of the owner. */
+const RELATED_RULES = Object.freeze(['assigned', 'read', 'held', 'replied']);
+/**
+ * A FIRST-SCREEN ROW AS AN ATTENTION ROW (src/attention-model.js's row shape, `band` left for its `bandOfRow`), or null —
+ * the row is 「相关」 (or no rule lists it at all). `row` = a `groupListRows` row (a conversation's `{kind:'conv', conv}` or
+ * an agent group's `{kind:'group', group, atYou}`) or a digest row itself; `policy` = `attentionPolicy` (the 8 rules'
+ * switches). No channel fact is urgent, blocked or dated (`urgency: 'normal'`, `blocked: false`, `due: null` — those are
+ * the tray's). `at` = the newest message (band 2 reads it longest-waiting first, bands 4 / 5 newest first); `until` = the
+ * first instant a fact it read leaves its 24 h window (null: no clock edge) — the engine's kept count re-asks the row then.
+ */
+function attentionRowOf(row, now = Date.now(), policy = null) {
+  if (!row) return null;
+  const group = row.kind === 'group' && !!row.group;
+  if (group && row.archived) return null;
+  const c = group ? row : row.conv || row;
+  if (!group && !statusTag(row, now, policy)) return null;   // candidacy: the 8 rules (an agent group: the owner's act, D1)
+  const on = (code) => ruleOn(policy, code);
+  const ob = (!group && c.outbox) || {};
+  const awaiting = on('awaiting') && num(ob.awaiting) > 0;
+  const unknown = on('unknown') && num(ob.unknown) > 0;
+  const atYou = on('at-you') && atYouOf(c, now) > 0;
+  const direct = !group && on('direct') && c.kind === 'dm' && !c.app && num(c.unread) > 0 && within(c.lastAt, now, FOCUS_WINDOW_MS);
+  const jt = !group && on('judged') ? judgedTag(c.judged, c.lastAt) : null;
+  const clauses = jt ? jt.clauses : [];
+  const waited = direct || atYou || clauses.includes('waiting');
+  const money = clauses.includes('deadline_money');
+  if (!waited && !money && !awaiting && !unknown && !jt) return null;
+  // the clock edge: a direct chat's newest message, the oldest counted @ of me (an agent group's count has none)
+  const edges = [];
+  if (direct) edges.push(num(c.lastAt) + FOCUS_WINDOW_MS);
+  if (atYou && !(num(c.atYou) > 0)) { const line = num(c.readAt); for (const at of Array.isArray(c.atYouAts) ? c.atYouAts : []) if (num(at) > line && within(at, now, FOCUS_WINDOW_MS)) edges.push(num(at) + FOCUS_WINDOW_MS); }
+  const key = String(row.key || c.key || '');
+  return {
+    id: key, key, source: 'channels', band: null, at: num(c.lastAt), due: null, urgency: 'normal', origin: null, kind: 'action',
+    options: 0, action: awaiting ? 'approve' : unknown ? 'check' : null, card: false, plugin: null, judged: null, reasks: 0,
+    blocked: false, waitedBy: waited ? 'person' : null, deadlineMoney: money, answered: false, notice: false,
+    until: edges.length ? Math.min(...edges) : null,
+  };
+}
+/**
+ * THE FIRST SCREEN'S TWO SECTIONS: `rows` = the attention list as drawn (`firstScreen`'s `shown`: every candidate + the
+ * agent groups), `needsMe` = src/attention-model.js `needsMe` (injected — this module imports nothing), `policy` = the 8
+ * rules' switches, `bands` = the owner's band policy (`settingsPolicy`: switches, cap, expanded bands). → `{needs:
+ * needsMe's answer over the rows that wait (screen ≤ cap, folds by band, counts), byKey: Map<key, the drawn row>, related:
+ * the rest, in the input order}` — the panel draws both, the server's Channels badge is `needs.counts.needsMe`.
+ */
+function firstScreenSplit(rows, now = Date.now(), { policy = null, bands = null, needsMe = null } = {}) {
+  const wait = [], related = [], byKey = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const a = r && r.kind !== 'internal-head' ? attentionRowOf(r, now, policy) : null;
+    if (a) { wait.push(a); byKey.set(a.key, r); } else if (r) related.push(r);
+  }
+  return { needs: typeof needsMe === 'function' ? needsMe(wait, now, bands) : null, rows: wait, byKey, related };
+}
+
+/** THE CHANNELS RAIL BADGE (decision 7): `convs` = the server's count of conversations in bands 1–4 (`digest.needsMe`, kept
+ *  — the client never holds every row) + the non-archived agent groups the attention list puts in bands 1–4 (an @ of the
+ *  owner) — `groups` = `/api/channel-groups`' list, `needsMe` injected. Never unread, never the outbox's arithmetic. */
+function channelsBadge(convs, groups, now = Date.now(), { policy = null, bands = null, needsMe = null } = {}) {
+  const rows = [];
+  for (const g of Array.isArray(groups) ? groups : []) {
+    if (!g || !g.id || g.archivedAt) continue;
+    const a = attentionRowOf({ kind: 'group', group: g, key: `groups/${g.id}`, atYou: num(g.atYou), lastAt: num(g.lastAt || g.createdAt), archived: false }, now, policy);
+    if (a) rows.push(a);
+  }
+  const n = rows.length && typeof needsMe === 'function' ? needsMe(rows, now, bands).counts.needsMe : 0;
+  return Math.max(0, Math.floor(num(convs))) + n;
+}
+
 /** THE ORDER every page and every list keeps: newest first (`lastAt` desc), then `key` — total, so a cursor is exact. */
 function pageOrder(a, b) {
   const d = num(b && b.lastAt) - num(a && a.lastAt);
@@ -503,4 +589,5 @@ module.exports = {
   isInternal, needsOwner, internalBlock,
   selfRead, readAdvance, systemRead,   // + systemRead: B-ef03
   AT_YOU_MAX, mentionsSelf, keepAtYou, atYouOf,   // lane attention-rule-at-you
+  ATTENTION_FACTS, RELATED_RULES, attentionRowOf, firstScreenSplit, channelsBadge,   // lane attention-predicate-shared (decision 7)
 };

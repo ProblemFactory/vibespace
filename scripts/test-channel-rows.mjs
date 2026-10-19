@@ -117,6 +117,13 @@ const wrong = rows.filter(([a, id, f, want]) => !f.unlistedAt && !!P.tags[id] !=
 ok(wrong.length === 0, `FIXTURE: ${rows.length} rows — every tag kind at every window edge wears its tag exactly inside the window (the D4 scope rows only once a wake acted)`, wrong);
 const kinds = new Set(Object.values(P.tags).filter(Boolean));
 ok(['awaiting', 'unknown', 'assigned', 'read', 'held', 'direct', 'replied'].every((k) => kinds.has(k)), `FIXTURE: the generated index holds every tag kind (${[...kinds].join(', ')})`);
+// lane attention-predicate-shared (decision 7): the first screen's 「需要我」 rows are a SUBSET of the tagged rows — so the same
+// pre-filter never misses one (the server's Channels badge counts what candidateOf lets through), at every window edge
+{
+  const waits = rows.filter(([a, id]) => FO.attentionRowOf(byKey.get(`${a}/${id}`), clock));
+  const lost = waits.filter(([a, id]) => !P.tags[id] || !FO.candidateOf(liveIx[`${a}/${id}`], obOf(`${a}/${id}`), clock)).map(([, id]) => id);
+  ok(waits.length >= 3 && lost.length === 0, `THE PROPERTY HOLDS FOR 「需要我」: every row the attention list places in a band (${waits.length}) wears a tag AND passes candidateOf — attentionRowOf ⊆ statusTag ⊆ candidateOf`, lost);
+}
 ok(P.misses.length === 0, `THE PROPERTY: candidateOf names every row statusTag tags (${Object.values(P.tags).filter(Boolean).length} tagged, ${rows.filter(([a, id]) => FO.candidateOf(liveIx[`${a}/${id}`], obOf(`${a}/${id}`), clock)).length} candidates of ${rows.length})`, P.misses);
 {
   const MUT = mutantCopies('chan-rows', REPO);
@@ -145,7 +152,7 @@ console.log('② the first read: the attention list, the heads, the counts');
   eng.digest();
   const viewed = eng.digestStats().rowViews - stats0;
   ok(viewed <= FO.ATTENTION_MAX + FO.HEAD_ROWS * 3 && viewed < whole.conversations.length, `a first read builds ${viewed} rowViews (candidates + heads) for ${whole.conversations.length} rows`);
-  ok(JSON.stringify(Object.keys(eng.digest({ scope: 'totals' })).sort()) === JSON.stringify(['at', 'awaitingTotal', 'scope', 'unreadTotal']) && !('conversations' in eng.digest({ scope: 'accounts' })), 'the slivers: ?scope=totals is the two numbers, ?scope=accounts carries no row');
+  ok(JSON.stringify(Object.keys(eng.digest({ scope: 'totals' })).sort()) === JSON.stringify(['at', 'awaitingTotal', 'needsMe', 'scope', 'unreadTotal']) && !('conversations' in eng.digest({ scope: 'accounts' })), 'the slivers: ?scope=totals is the numbers (+ needsMe, the rail badge since lane attention-predicate-shared), ?scope=accounts carries no row');
   // the focus view of rows(): the attention rows past a cut, paged in the same order
   const fp = eng.rows({ view: 'focus', limit: 5 });
   ok(fp.ok && fp.total === focus.length && fp.rows.every((r) => FO.statusTag(r, clock)) && JSON.stringify(fp.rows.map((r) => r.key)) === JSON.stringify(first.conversations.filter((c) => !c.unlisted && FO.statusTag(c, clock)).sort(FO.pageOrder).slice(0, 5).map((c) => c.key)), `rows({view:'focus'}) pages the attention list in the first read's order (${fp.total})`);

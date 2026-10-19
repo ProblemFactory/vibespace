@@ -217,6 +217,8 @@ async function newPage() {
   return { id: t.id, cdp, evaljs, load, reload: () => load(), close: () => { try { ws.close(); } catch {} } };
 }
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
+// lane attention-predicate-shared: 「相关」 open (`related: false`) — these legs read the hand-over / read / agent-group rows, which fold under it by default
+await api('PATCH', '/api/user-state', { channelsPanelFolds: { related: false } });
 const p1 = await newPage();
 ok(await p1.load(), 'page 1 loaded the app (zh)');
 

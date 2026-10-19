@@ -189,6 +189,8 @@ async function newPage() {
   };
   return { cdp, evaljs, load };
 }
+// lane attention-predicate-shared: 「相关」 open (`related: false`) — these legs read the hand-over / read / agent-group rows, which fold under it by default
+await api('PATCH', '/api/user-state', { channelsPanelFolds: { related: false } });
 const p1 = await newPage();
 ok(await p1.load(), 'page 1 loaded the app');
 const until = async (expr, ms = 20000) => { const end = Date.now() + ms; let v = null; while (Date.now() < end) { try { v = await p1.evaljs(expr); } catch {} if (v) return v; await sleep(250); } return v; };
@@ -476,8 +478,13 @@ const railBefore = await p1.evaljs(RAIL);
 await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-grow[data-group="${gid}"]').click(); return 1; })()`);
 const read = await until(`(() => !document.querySelector('.rail-panel-channels .chan-grow[data-group="${gid}"] .chan-grow-unread') ? 'read' : null)()`);
 ok(read === 'read', 'opening the group\'s window (the owner\'s act) marks it read — the unread badge goes');
-const railAfter = await until(`(() => { const n = ${RAIL}; return n === ${railBefore} - 1 ? n + 1e-9 : null; })()`, 8000);
-ok(railBefore >= 1 && railAfter !== null, `the RAIL's Channels badge counts the group's unread too (${railBefore} → ${railBefore - 1} as the group is read)`, JSON.stringify({ railBefore, railAfter }));
+// lane attention-predicate-shared (design q-044 decision 7): the RAIL's Channels badge counts what NEEDS the owner — the
+//  server's `needsMe` (the conversations in bands 1–4: here the single chats a person wrote in) + an agent group that
+//  @-mentions the owner; a group's unread counts nowhere, so reading the group moves nothing
+await sleep(600);
+const railAfter = await p1.evaljs(RAIL);
+const totals = (await api('GET', '/api/channels?scope=totals')).body || {};
+ok(railBefore >= 1 && railAfter === railBefore && railBefore === Number(totals.needsMe), `the RAIL's Channels badge = needsMe (${totals.needsMe}): the group's unread was never in it, reading the group moves nothing (${railBefore} → ${railAfter}); unread ${totals.unreadTotal} + awaiting ${totals.awaitingTotal} are not the badge`, JSON.stringify({ railBefore, railAfter, totals }));
 
 // ── ⑧ the Accounts fold is persisted ──
 // lane channels-fold-default: Accounts starts folded when every account section in it does — open it first, then fold it
@@ -501,7 +508,9 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
 //    9 join the groups, each with ONE tag, repainted from the broadcasts; "All" is the whole list; the filter
 //    works in both views ("{n} more in All"); at 375 px the tag sits UNDER the title in one column. ──
 {
-  const FOCUS = `(() => { const rows = [...document.querySelectorAll('.rail-panel-channels .chan-groups .chan-grow')]; const segs = [...document.querySelectorAll('.rail-panel-channels .chan-view-btn')].map((b) => ({ view: b.dataset.view, text: b.textContent, on: b.classList.contains('chan-seg-on') })); return { view: (document.querySelector('.rail-panel-channels .chan-groups') || {}).dataset?.view, segs, rows: rows.map((r) => ({ key: r.dataset.grow, group: !!r.dataset.group, tag: r.querySelector('.chan-grow-tag') ? r.querySelector('.chan-grow-tag').dataset.tag : null, tagText: r.querySelector('.chan-grow-tag') ? r.querySelector('.chan-grow-tag').textContent : null, who: r.querySelector('.chan-tag-who') ? r.querySelector('.chan-tag-who').textContent : null })) }; })()`;
+  // lane attention-predicate-shared: 「需要我」 holds 6 rows on its first screen and folds the rest BY BAND — these legs read the
+  //  WHOLE attention list, so the probe opens every band's fold first (its toggle; the open state lasts the page session)
+  const FOCUS = `(() => { for (const f of document.querySelectorAll('.rail-panel-channels .chan-attn-fold[data-state="folded"]')) f.click(); const rows = [...document.querySelectorAll('.rail-panel-channels .chan-groups .chan-grow')]; const segs = [...document.querySelectorAll('.rail-panel-channels .chan-view-btn')].map((b) => ({ view: b.dataset.view, text: b.textContent, on: b.classList.contains('chan-seg-on') })); return { view: (document.querySelector('.rail-panel-channels .chan-groups') || {}).dataset?.view, segs, rows: rows.map((r) => ({ key: r.dataset.grow, group: !!r.dataset.group, tag: r.querySelector('.chan-grow-tag') ? r.querySelector('.chan-grow-tag').dataset.tag : null, tagText: r.querySelector('.chan-grow-tag') ? r.querySelector('.chan-grow-tag').textContent : null, who: r.querySelector('.chan-tag-who') ? r.querySelector('.chan-tag-who').textContent : null })) }; })()`;
   const d0 = await api('GET', '/api/channels');
   const convs = (d0.body.conversations || []).filter((c) => !c.unlisted && !(d0.body.adapters || []).find((a) => a.id === c.adapterId && a.builtin));
   const groupsNow = (await api('GET', '/api/channel-groups')).body.groups.filter((g) => !g.archivedAt);
@@ -571,6 +580,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   ok(await p1.load(), 'page reloaded at 375 × 667 (a phone)');
   const phone = await until(`(async () => {
     if (!document.querySelector('.chan-window .chan-groups')) { window.app.openChannels(); await new Promise((r) => setTimeout(r, 300)); }
+    for (const f of document.querySelectorAll('.chan-window .chan-attn-fold[data-state="folded"]')) f.click();   // lane attention-predicate-shared: the whole list (every band open)
     const rows = [...document.querySelectorAll('.chan-window .chan-groups .chan-grow')].filter((r) => r.querySelector('.chan-grow-tag'));
     if (rows.length < ${N1}) return null;
     const list = document.querySelector('.chan-window .chan-groups').getBoundingClientRect();

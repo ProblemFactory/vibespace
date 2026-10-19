@@ -23,6 +23,8 @@ import { PLUGIN_SETTINGS, checkPluginRows, manifestRows, rowPath as pluginRowPat
 
 // lane attention-policy: the 「需关注 · 怎么判断」 block's shared fields (its rows, its head, the Settings search's words)
 const ATTENTION_BLOCK = Object.freeze({ block: 'attention', blockTitle: t('Needs attention · how it is decided'), category: t('Channels'), liveApply: true });
+// lane attention-predicate-shared (design q-044 decision 4): the attention list's bands, one switch each, + the first screen's size
+const BANDS_BLOCK = Object.freeze({ block: 'bands', blockTitle: t('What needs me · the bands'), category: t('Toolbar & Layout'), liveApply: true });
 
 const SETTINGS_SCHEMA = {
   // ── Toolbar & Layout ──
@@ -118,6 +120,46 @@ const SETTINGS_SCHEMA = {
     type: 'boolean', default: true, label: t('Show the "For you" inbox'),
     description: t('Show the inbox of items agents filed for you (decisions/input needed) in the taskbar'),
     category: t('Toolbar & Layout'), liveApply: true,
+  },
+  // lane attention-predicate-shared (design q-044 decision 4 — the owner accepted it 2026-10-19): EACH BAND OF THE ATTENTION
+  // LIST IS A SWITCH (on by default — the channels.attention.rule.* pattern) and the first screen's size a number. ONE block
+  // (`block: 'bands'`), read ONLY by src/attention-model.js `settingsPolicy` (the tray, its badges and toasts, a chat
+  // window's title-bar badge, the Channels first screen and its rail badge, the sidebar's rank). A band off ⇒ its rows sit
+  // in band 5's order and never toast; no per-origin filter (design §5).
+  'attention.band.urgent': {
+    type: 'boolean', default: true, ...BANDS_BLOCK,
+    label: t('Urgent'),
+    description: t('A login about to end, a device alert, an action card. Off: these rows sit with Other questions and never raise a toast. For you and the Channels first screen both read this switch.'),
+  },
+  'attention.band.waiting': {
+    type: 'boolean', default: true, ...BANDS_BLOCK,
+    label: t('Someone is waiting'),
+    description: t('A person wrote to you or @-mentioned you, an agent is blocked on you, a permission ask nobody answered for a minute, a plugin reminder. Off: these rows sit with Other questions and never raise a toast.'),
+  },
+  'attention.band.dated': {
+    type: 'boolean', default: true, ...BANDS_BLOCK,
+    label: t('A deadline or money'),
+    description: t('A date within 48 hours, or the judging model read a deadline or an amount of money. Off: these rows sit with Other questions.'),
+  },
+  'attention.band.decide': {
+    type: 'boolean', default: true, ...BANDS_BLOCK,
+    label: t('Needs your decision'),
+    description: t('Option chips, a button to press, a draft waiting for your approval to send. Off: these rows sit with Other questions.'),
+  },
+  'attention.band.ask': {
+    type: 'boolean', default: true, ...BANDS_BLOCK,
+    label: t('Other questions'),
+    description: t('Every other ask. Off: they never take a first-screen row and wait behind their fold.'),
+  },
+  'attention.band.parked': {
+    type: 'boolean', default: true, ...BANDS_BLOCK,
+    label: t('On hold'),
+    description: t('An ask nobody answered for 7 days (a plugin reminder: 3 days) folds into On hold; nothing is deleted. Off: nothing is put on hold — those rows sit with Other questions.'),
+  },
+  'attention.cap': {
+    type: 'number', default: 6, min: 4, max: 8, step: 1, ...BANDS_BLOCK,
+    label: t('First screen: rows before the folds'),
+    description: t('How many rows For you and the Channels first screen show before the rest fold by band behind "N more — expand" (4–8). Urgent rows never fold.'),
   },
   'taskbar.showWindowCount': {
     type: 'boolean', default: true, label: t('Show window count'),

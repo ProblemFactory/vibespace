@@ -121,6 +121,7 @@ const settings = {
   isModified: (k) => k in vals && vals[k] !== def(k), reset: (k) => settings.set(k, def(k)),
   on: (k, f) => { (ls[k] = ls[k] || new Set()).add(f); }, off: (k, f) => { if (ls[k]) ls[k].delete(f); },
 };
+window.__settings = settings;   // lane attention-predicate-shared ⑨: a band switch flipped from the page
 const app = { settings, isMobile: innerWidth < 600, ws: { onGlobal: (h) => { hs.add(h); return () => hs.delete(h); }, offGlobal: (h) => hs.delete(h), onStateChange() {}, offStateChange() {} }, wm: { windows: new Map(), createWindow() { throw new Error('no wm'); } }, openChannel: () => {} };
 app._settingsUI = new SettingsUI(app);
 window.__fire = (m) => { for (const h of [...hs]) h(m); };
@@ -161,7 +162,8 @@ app.get('/api/plugins/llm/status', (req, res) => res.json({ installed: true, run
 app.post('/api/plugins/llm/config', (req, res) => { PLUG_WRITES.push(req.body); plug = { ...plug, config: { ...plug.config, ...req.body } }; res.json({ ok: true }); });
 app.post('/api/settings', (req, res) => { SET_KEYS.push(...Object.keys(req.body || {})); Object.assign(SV, req.body || {}); res.json({ ok: true }); });
 app.get('/api/channel-groups', (req, res) => res.json({ groups: [] }));
-app.all('/api/user-state', (req, res) => res.json(req.method === 'GET' ? { channelsPanelFolds: { internal: false, 'acct:im': false } } : { ok: true }));
+// lane attention-predicate-shared: 「相关」 open (`related: false`) — these legs read the hand-overs' rows, which fold under it by default
+app.all('/api/user-state', (req, res) => res.json(req.method === 'GET' ? { channelsPanelFolds: { internal: false, related: false, 'acct:im': false } } : { ok: true }));
 app.get('/style.css', (req, res) => res.type('css').send(fs.readFileSync(path.join(repo, 'public/style.css'))));
 app.get('/:b.js', (req, res) => res.type('js').send(fs.readFileSync(path.join(dir, req.params.b + '.js'))));
 // lane chan-attn-door-icon: ?lang= (zh by default) and ?zoom= (the app's uiScale — utils applyUiPrefs: body zoom + --ui-scale)
@@ -364,6 +366,33 @@ await sleep(300);
 const wf = doorFaults(await wp.ev(BAR), 'zh');
 ok(wf.some((x) => /^words drawn/.test(x)) && wf.some((x) => /^content spills/.test(x)), 'CONTROL: a door that draws its words beside the cog again fails the same check (words drawn, content spills) ⇒ the legs above are the fix\'s doing', wf);
 wp.close();
+
+console.log('⑨ lane attention-predicate-shared (decision 4): 「需要我」 by band; a band switched off falls to band 5 and is SAID once; the 分带 block in the Settings window');
+{
+  const NEEDS = `(() => { const L = document.querySelector('.chan-groups'); if (!L) return null; return { bands: [...L.querySelectorAll('.chan-attn-band')].map((b) => b.dataset.band + ':' + b.querySelector('.chan-attn-band-n').textContent), off: [...L.querySelectorAll('.chan-attn-off')].map((x) => x.dataset.bandOff + '|' + x.textContent), rel: (L.querySelector('.chan-attn-head[data-attn-section="related"]') || { getAttribute: () => null }).getAttribute('aria-expanded') }; })()`;
+  const bp = await page(1100, 900, 'w=100%25');
+  await bp.go();
+  await until(bp, (rs) => has(rs, 'im/c6', 'direct') && judgedKeys(rs) === 'im/c0,im/c4', 12000);
+  const b0 = await waitFor(bp, NEEDS, (v) => v && v.bands.length);
+  ok(b0 && b0.bands[0] === '2:2' && !b0.off.length, `「需要我」 draws by band: the direct chat and the @ of me in 有人在等 (2:2) first — nothing switched off (${JSON.stringify(b0)})`);
+  await bp.ev(`(window.__settings.set('attention.band.waiting', false), true)`);
+  const b1 = await waitFor(bp, NEEDS, (v) => v && v.off.length);
+  const rs1 = await bp.ev(ROWS);
+  ok(b1 && !b1.bands.some((x) => x.startsWith('2:')) && b1.bands.some((x) => x.startsWith('5:')) && b1.off.length === 1 && b1.off[0] === 'waiting|「有人在等」已关闭——其中 2 条排在「其余的问」里' && has(rs1, 'im/c6') && has(rs1, 'im/c3'),
+    `attention.band.waiting OFF ⇒ live: 有人在等 is gone, its two rows sit in 其余的问, and the band says so ONCE under 其余的问 (${JSON.stringify(b1)})`);
+  await bp.ev(`(window.__settings.set('attention.band.waiting', true), true)`);
+  const b2 = await waitFor(bp, NEEDS, (v) => v && !v.off.length && v.bands[0] === '2:2');
+  ok(b2 && b2.bands[0] === '2:2' && !b2.off.length, '…back ON: 有人在等 returns, the sentence goes');
+  bp.close();
+  const sb = await page(900, 1000, 'w=100%25&b=panel&settings=' + encodeURIComponent('attention.'));
+  await sb.go();
+  const BANDS_BLOCK = `(() => { const b = document.querySelector('[data-settings-block="bands"]'); if (!b) return null; return { head: (b.querySelector('.settings-block-head, h3, h4') || {}).textContent || b.firstElementChild.textContent, rows: [...b.querySelectorAll('.settings-row')].map((x) => ({ label: x.querySelector('.settings-row-label')?.textContent || '', on: x.querySelector('.settings-toggle input') ? x.querySelector('.settings-toggle input').checked : null, num: x.querySelector('input[type=number]') ? x.querySelector('input[type=number]').value : null })) }; })()`;
+  const sbx = await waitFor(sb, BANDS_BLOCK, (v) => v && v.rows.length);
+  ok(sbx && sbx.rows.length === 7 && JSON.stringify(sbx.rows.slice(0, 6).map((r) => r.label)) === JSON.stringify(['紧急', '有人在等', '有期限或钱', '要你决定', '其余的问', '搁置']) && sbx.rows.slice(0, 6).every((r) => r.on === true) && sbx.rows[6].num === '6' && /需要我 · 分带/.test(sbx.head),
+    'the Settings window draws the 「需要我 · 分带」 block: six band switches in the bands\' own words, all on, and the first screen\'s size (6)', JSON.stringify(sbx));
+  await sb.shot('bands-block.png');
+  sb.close();
+}
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
 process.exit(fail ? 1 : 0);

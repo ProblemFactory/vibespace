@@ -10,6 +10,11 @@
 // ③ a group broadcast redraws IN PLACE: the band, the head and an unchanged row are the SAME nodes; ④ a click on the head
 // folds the block to the head alone on the same band (and back); ⑤ at 390 px the same, nothing wider than the screen;
 // CONTROL: the bundle rebuilt with the band made fresh at every draw (keep() bypassed) ⇒ ③ is red.
+// lane attention-predicate-shared (design q-044 decision 7): the legs above keep 「相关」 open (`related: false` — the
+// internal band stands inside it now); §5 MEASURES THE SPLIT on the brief's shape — 15 standing agent groups + tag rows on a
+// FRESH user state: 「需要我」 ≤ 6 rows + one fold per band, 「相关」 folded, the whole first screen inside the window without a
+// scroll; the band's fold is a toggle in a fixed slot (rect before / after); CONTROL: a bundle without the split lists
+// every row again.
 // IRL_TREE=<dir> bundles another tree (a base checkout: the suite is red there); IRL_SHOTS=<dir> [IRL_PREFIX=after]
 // writes <prefix>.png (desk 1100 px), <prefix>-phone.png (390 px), <prefix>-folded.png.
 import { spawn } from 'node:child_process';
@@ -46,6 +51,9 @@ renderChannelsPanel(app, document.getElementById('host'));`;
 }
 await bundle('after.js');
 await bundle('control.js', { from: "keep('internal-band', () => {", to: "((k, make) => make())('internal-band', () => {" }).catch((e) => ok(false, 'CONTROL bundle', e.message));
+await bundle('nosplit.js', { from: "const split = fs.view === 'focus' && !q.trim() && fs.shown.length ? firstScreenSplit(", to: "const split = false && fs.view === 'focus' && !q.trim() && fs.shown.length ? firstScreenSplit(" }).catch((e) => ok(false, 'CONTROL bundle (no split)', e.message));
+// lane attention-predicate-shared: what the stub serves (§5 swaps in its own shape) and the person's folds
+let DIGEST = null, GROUPS = null, USER_FOLDS = { internal: false, related: false };
 
 // ── the stub server: the owner's shape (synthesized — never the owner's data)
 const NOW = Date.now(), H = 3600e3;
@@ -71,9 +79,10 @@ const srv = http.createServer((req, res) => {
   if (/^\/[a-z]+\.js$/.test(u.pathname) && fs.existsSync(path.join(dir, u.pathname.slice(1)))) { res.writeHead(200, { 'Content-Type': 'text/javascript' }); res.end(fs.readFileSync(path.join(dir, u.pathname.slice(1)))); return; }
   if (files[u.pathname]) { res.writeHead(200, { 'Content-Type': files[u.pathname][1] }); res.end(fs.readFileSync(files[u.pathname][0])); return; }
   if (u.pathname.startsWith('/brand/')) { const f = path.join(tree, 'public', path.normalize(u.pathname)); if (f.startsWith(path.join(tree, 'public/brand/')) && fs.existsSync(f)) { res.writeHead(200, { 'Content-Type': 'image/svg+xml' }); res.end(fs.readFileSync(f)); return; } }
-  if (u.pathname === '/api/channels') return json(digest);
-  if (u.pathname === '/api/channel-groups') return json({ groups: groupsOf() });
-  if (u.pathname === '/api/user-state') return json(req.method === 'GET' ? { channelsPanelFolds: { internal: false } } : { ok: true });
+  if (u.pathname === '/api/channels') return json(DIGEST || digest);
+  if (u.pathname === '/api/channel-groups') return json({ groups: GROUPS || groupsOf() });
+  // lane attention-predicate-shared: 「相关」 open too (`related: false`) — the internal band now stands inside it
+  if (u.pathname === '/api/user-state') return json(req.method === 'GET' ? { channelsPanelFolds: USER_FOLDS } : { ok: true });
   if (u.pathname === '/api/channels/avatar') { res.writeHead(200, { 'Content-Type': 'image/svg+xml' }); res.end(FACE); return; }
   res.writeHead(404, { 'Content-Type': 'application/json' }); res.end('{"error":"not in this harness"}');
 });
@@ -87,7 +96,7 @@ process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 const WebSocket = require(path.join(repo, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
-async function page(w, h, query) {
+async function page(w, h, query, ready = null) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
@@ -99,7 +108,7 @@ async function page(w, h, query) {
   await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 2, mobile: w < 600 });
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?${query}` });
-  for (let i = 0; i < 80; i++) { await sleep(150); if (await ev(`document.querySelectorAll('.chan-groups .chan-grow').length >= 10 && [...document.querySelectorAll('img.chan-av-img')].some((i) => i.complete && i.naturalWidth > 0)`).catch(() => false)) break; }
+  for (let i = 0; i < 80; i++) { await sleep(150); if (await ev(ready || `document.querySelectorAll('.chan-groups .chan-grow').length >= 10 && [...document.querySelectorAll('img.chan-av-img')].some((i) => i.complete && i.naturalWidth > 0)`).catch(() => false)) break; }
   await sleep(300);
   const shot = async (file) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); const [ww, hh] = await ev(`(() => { const b = document.getElementById('win').getBoundingClientRect(); return [Math.ceil(b.width), Math.ceil(b.height)]; })()`); const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: Math.min(ww, w), height: Math.min(hh, 1400), scale: 1 }, captureBeyondViewport: true }); fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r.result.data, 'base64')); };
   return { ev, shot, close: () => { try { ws.close(); } catch {} } };
@@ -167,6 +176,58 @@ if (fs.existsSync(path.join(dir, 'control.js'))) {
   const K0 = await cp.ev(KEEP());
   ok(K0 && !K0.band && K0.head, 'CONTROL: with keep() bypassed for the band, the same broadcast REPLACES the band (the head itself is still kept) — leg ③ would be red', JSON.stringify(K0));
   cp.close();
+}
+console.log('§5 THE FIRST SCREEN SPLITS (lane attention-predicate-shared): 15 standing groups + tag rows on a fresh user state');
+{
+  const m = (k) => NOW - k * 60e3;
+  const conv = (id, o) => ({ key: `lark:a/${id}`, adapterId: 'lark:a', id, title: `Room ${id}`, kind: 'group', lastAt: m(30), lastText: 'an invented line', unread: 0, outbox: { awaiting: 0, unknown: 0 }, assignment: null, touch: null, ...o });
+  const convs = [
+    ...Array.from({ length: 8 }, (_, k) => conv(`dm${k}`, { title: `Person ${k}`, kind: 'p2p', unread: 1, lastAt: m(5 * (k + 1)) })),
+    conv('aw1', { outbox: { awaiting: 1, unknown: 0 }, lastAt: m(3) }), conv('aw2', { outbox: { awaiting: 1, unknown: 0 }, lastAt: m(7) }), conv('un1', { outbox: { awaiting: 0, unknown: 1 }, lastAt: m(9) }),
+    ...Array.from({ length: 3 }, (_, k) => conv(`rd${k}`, { touch: { read: { name: 'Reader', at: m(20), upTo: m(10) } }, lastAt: m(40 + k) })),
+    ...Array.from({ length: 2 }, (_, k) => conv(`rp${k}`, { touch: { selfAt: m(60 + k) }, lastAt: m(60 + k) })),
+    ...Array.from({ length: 2 }, (_, k) => conv(`as${k}`, { assignment: agent, lastAt: m(90 + k) })),
+    ...Array.from({ length: 10 }, (_, k) => conv(`q${k}`, { unread: k, lastAt: m(200 + k) })),
+  ];
+  // the direct chats: the panel's own row kind for a one-to-one chat is the record's `kind: 'dm'`
+  for (const c of convs) if (c.kind === 'p2p') c.kind = 'dm';
+  DIGEST = { adapters: [{ id: 'lark:a', kind: 'lark', label: 'Lark' }], kinds: [], counts: { all: convs.length, byAdapter: { 'lark:a': convs.length } }, heads: { 'lark:a': convs.map((c) => c.key) }, attention: { total: 16, cut: 0 }, conversations: convs };
+  GROUPS = Array.from({ length: 15 }, (_, k) => ({ id: `g-std${k}`, name: `Agents ${k}`, members: ['a', 'b'], lastAt: m(15 + k), lastText: 'an invented report', unread: 1 + (k % 3), createdAt: m(900) }));
+  USER_FOLDS = { internal: false };   // a FRESH choice for 「相关」 — its default (folded) decides
+  const READY = `!!document.querySelector('.chan-attn-head[data-attn-section="related"]') && document.querySelectorAll('.chan-groups .chan-grow').length >= 6`;
+  const S = `(() => {
+    const L = document.querySelector('.chan-groups'); const kids = [...L.children];
+    const rel = L.querySelector('.chan-attn-head[data-attn-section="related"]'); const ri = kids.indexOf(rel);
+    const needsRows = kids.slice(0, ri).filter((e) => e.classList.contains('chan-grow'));
+    const bands = [...L.querySelectorAll('.chan-attn-band')].map((b) => [Number(b.dataset.band), b.querySelector('.chan-attn-band-n').textContent, (b.querySelector('.chan-attn-fold') || {}).textContent || null]);
+    const win = document.getElementById('win').getBoundingClientRect(); const rr = rel.getBoundingClientRect();
+    return { needs: needsRows.length, keys: needsRows.map((r) => r.dataset.grow || ''), bands, relFolded: rel.classList.contains('chan-attn-folded') && rel.getAttribute('aria-expanded') === 'false', relCount: rel.querySelector('.chan-attn-count').textContent,
+      after: kids.slice(ri + 1).filter((e) => e.classList.contains('chan-grow') || e.classList.contains('chan-iband')).length, groupsShown: L.querySelectorAll('.chan-iband').length,
+      fits: rr.bottom <= Math.min(win.bottom, innerHeight), relBottom: Math.round(rr.bottom), winH: Math.round(Math.min(win.bottom, innerHeight)), needsHead: (L.querySelector('.chan-attn-head[data-attn-section="needs"]') || {}).textContent || null };
+  })()`;
+  const p5 = await page(1100, 900, 'b=after.js', READY);
+  const A1 = await p5.ev(S);
+  ok(A1.needs === 6 && A1.bands.length === 2 && A1.bands[0][0] === 2 && A1.bands[0][1] === '8' && A1.bands[1][0] === 4 && A1.bands[1][1] === '3' && A1.keys.every((k) => /\/dm\d$/.test(k)), `「需要我」 holds ${A1.needs} rows on the first screen (≤ cap 6) — the 6 longest-waiting of the 8 direct chats (band 2), the three decisions (band 4) behind their fold`, JSON.stringify(A1));
+  ok(JSON.stringify(A1.bands.map(([b, , f]) => [b, f && (f.match(/\d+/) || [null])[0]])) === JSON.stringify([[2, '2'], [4, '3']]), `…the rest folded BY BAND, ONE toggle on each band's head: 2 more people waiting, 3 more decisions (${JSON.stringify(A1.bands)})`);
+  ok(A1.relFolded && A1.relCount === '(22)' && A1.after === 0 && A1.groupsShown === 0, `「相关」 is FOLDED on a fresh user state — its head counts the 15 standing groups + 7 context rows (3 read, 2 replied, 2 handed over) (${A1.relCount}), no row of it drawn`, JSON.stringify(A1));
+  ok(A1.fits, `the whole first screen — 「需要我」, its folds and the 「相关」 head — fits the 900 px window without a scroll (the 相关 head ends at ${A1.relBottom} px of ${A1.winH})`, JSON.stringify(A1));
+  await p5.shot(`${PREFIX}-split.png`);
+  // the band's toggle keeps its slot (the tray's rule): 展开 ⇄ 收起 in the same rect
+  const T = await p5.ev(`(async () => { const sel = '.chan-attn-band[data-band="2"] .chan-attn-fold'; const r = () => { const q = document.querySelector(sel).getBoundingClientRect(); return [Math.round(q.left), Math.round(q.top), Math.round(q.width), Math.round(q.height)]; };
+    const before = r(); const t0 = document.querySelector(sel).textContent; document.querySelector(sel).click(); await new Promise((x) => setTimeout(x, 150));
+    const after = r(); const t1 = document.querySelector(sel).textContent; const rows = [...document.querySelectorAll('.chan-groups > .chan-grow')].filter((e) => /\\/dm\\d$/.test(e.dataset.grow || '')).length;
+    document.querySelector(sel).click(); await new Promise((x) => setTimeout(x, 150));
+    return { before, after, again: r(), t0, t1, t2: document.querySelector(sel).textContent, rows, rows2: [...document.querySelectorAll('.chan-groups > .chan-grow')].filter((e) => /\\/dm\\d$/.test(e.dataset.grow || '')).length }; })()`);
+  ok(T && JSON.stringify(T.before) === JSON.stringify(T.after) && JSON.stringify(T.after) === JSON.stringify(T.again) && T.t1 === '收起' && T.t2 === T.t0 && T.rows === 8 && T.rows2 === 6, `the band's fold is a TOGGLE in a fixed slot: 「${T && T.t0}」 ⇄ 「收起」, the same rect before / after / again; 8 rows open, 6 folded back`, JSON.stringify(T));
+  // 「相关」 opens on a press (the person's choice, written to user state)
+  const O = await p5.ev(`(async () => { document.querySelector('.chan-attn-head[data-attn-section="related"]').click(); await new Promise((x) => setTimeout(x, 150)); const L = document.querySelector('.chan-groups');
+    return { open: L.querySelector('.chan-attn-head[data-attn-section="related"]').getAttribute('aria-expanded'), groups: L.querySelectorAll('.chan-iband .chan-grow').length, rows: L.querySelectorAll('.chan-grow').length }; })()`);
+  ok(O && O.open === 'true' && O.groups === 15 && O.rows === 6 + 22, `opened, 「相关」 draws its 22 rows — the 15 standing groups inside the VibeSpace band (${JSON.stringify(O)})`);
+  p5.close();
+  const c5 = await page(1100, 900, 'b=nosplit.js', `document.querySelectorAll('.chan-groups .chan-grow').length >= 10`);
+  const C5 = await c5.ev(`(() => ({ rows: document.querySelectorAll('.chan-groups .chan-grow').length, heads: document.querySelectorAll('.chan-attn-head').length }))()`);
+  ok(C5.heads === 0 && C5.rows >= 16, `CONTROL: the same shape through a panel without the split lists every tagged row (${C5.rows}) and no section — the ≤ 6 above is the split's doing`, JSON.stringify(C5));
+  c5.close();
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
 process.exit(fail ? 1 : 0);

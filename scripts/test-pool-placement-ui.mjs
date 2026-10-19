@@ -171,7 +171,9 @@ console.log('§r1 the pin\'s resume carrier (the real setSessionConfig)');
   const domFree = (s) => s
     .replace("import { getSessionKey, backendFeatureCaps } from './agent-meta.js';", 'const getSessionKey = (s) => (s && s.sessionKey) || null, backendFeatureCaps = () => ({});')
     .replace("import { showToast, showInputDialog } from './utils.js';", 'const showToast = () => {}, showInputDialog = async () => null;')
-    .replace("import { t as tr } from './i18n.js';", 'const tr = (s) => s;');
+    .replace("import { t as tr } from './i18n.js';", 'const tr = (s) => s;')
+    // lane attention-predicate-shared: the rank's PURE attention functions (never used by setSessionConfig) — stubbed like the rest
+    .replace(/^import \{ sessionRowOf, placeOf, settingsPolicy \} from '\.\.\/attention-model\.js';.*$/m, 'const sessionRowOf = () => null, placeOf = () => 0, settingsPolicy = () => null;');
   const src = fs.readFileSync(path.resolve('src/lib/sidebar-state.js'), 'utf8');
   ok(!/^import /m.test(domFree(src)), 'the scratch copy is DOM-free (every import of sidebar-state.js is stubbed)');
   const load = async (text, tag) => {

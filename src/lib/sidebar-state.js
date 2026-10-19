@@ -8,6 +8,7 @@
 import { getSessionKey, backendFeatureCaps } from './agent-meta.js';
 import { showToast, showInputDialog } from './utils.js';
 import { t as tr } from './i18n.js';
+import { sessionRowOf, placeOf, settingsPolicy } from '../attention-model.js'; // PURE: THE attention list (lane attention-predicate-shared) — the rank reads a session's band
 
 export function installSidebarState(SidebarClass) {
   const proto = SidebarClass.prototype;
@@ -279,11 +280,29 @@ export function installSidebarState(SidebarClass) {
     return r;
   };
 
+  // lane attention-predicate-shared (design q-044 §2 「侧栏会话序」 — the owner accepted it 2026-10-19): THE RANK READS THE
+  // ATTENTION LIST'S BAND FIRST — the session's status as a row (src/attention-model.js sessionRowOf: urgent ⇒ 1, a running
+  // agent blocked ⇒ 2, a running agent asking ⇒ 5, 7 days ⇒ 搁置) placed by the same placeOf as the tray and the Channels
+  // first screen, under the owner's band switches; a session not in the list after every one that is; then the old rank
+  // (urgency / attention) as the tie order inside a band.
+  proto._sessionBand = function(s, waiting, now = Date.now(), policy = null) {
+    const st = this.getSessionStatus?.(s);
+    const isLive = s.status === 'live' || s.status === 'tmux';
+    const key = `${s.backend || 'claude'}:${s.backendSessionId || s.claudeSessionId || ''}`;
+    const row = sessionRowOf(st, { key, live: isLive, waiting: waiting.has(key), now });
+    const p = row ? placeOf(row, now, policy) : 0;
+    return p > 0 ? p : 7; // 1–5, 6 = 搁置; 7 = not in the list
+  };
+
   proto._sortSessions = function(arr) {
     const waiting = this._waitingSet();
-    const rankOf = new Map();
-    for (const s of arr) rankOf.set(s, this._sessionSortRank(s, waiting));
+    const now = Date.now();
+    const policy = settingsPolicy((k) => this.app?.settings?.get?.(k));
+    const rankOf = new Map(), bandOf = new Map();
+    for (const s of arr) { rankOf.set(s, this._sessionSortRank(s, waiting)); bandOf.set(s, this._sessionBand(s, waiting, now, policy)); }
     arr.sort((a, b) => {
+      const ab = bandOf.get(a), bb = bandOf.get(b);
+      if (ab !== bb) return ab - bb; // the attention list's band first (lane attention-predicate-shared)
       const ar = rankOf.get(a), br = rankOf.get(b);
       if (ar !== br) return br - ar; // urgency/attention first (user: 决定排列优先级)
       const as = this._stateSetHas(this._starredIds, a) ? 1 : 0;

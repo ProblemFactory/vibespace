@@ -160,7 +160,8 @@ const routes = require(path.join(repo, 'src/routes/channels.js'));
 routes.setup({ getEngine: () => eng });
 app.use(routes.router);
 app.get('/api/channel-groups', (req, res) => res.json({ groups: [] }));
-app.all('/api/user-state', (req, res) => res.json(req.method === 'GET' ? { channelsPanelFolds: { internal: false, 'acct:im': false } } : { ok: true }));
+// lane attention-predicate-shared: 「相关」 open (`related: false`) — these legs read the hand-overs' rows, which fold under it by default
+app.all('/api/user-state', (req, res) => res.json(req.method === 'GET' ? { channelsPanelFolds: { internal: false, related: false, 'acct:im': false } } : { ok: true }));
 app.get('/style.css', (req, res) => res.type('css').send(fs.readFileSync(path.join(repo, 'public/style.css'))));
 app.get('/:b.js', (req, res) => res.type('js').send(fs.readFileSync(path.join(dir, req.params.b + '.js'))));
 app.get('/', (req, res) => res.type('html').send(`<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/style.css"><style>body{margin:0;background:var(--bg-root)} #win{background:var(--bg-window);width:${req.query.w || '520px'};min-height:100vh;box-sizing:border-box;padding:10px 8px}</style><script>try{localStorage.setItem('vibespace.lang','zh')}catch{}</script></head><body><div id="win"><div id="host" class="rail-panel rail-panel-channels chan-window"></div></div><script src="/${req.query.b || 'panel'}.js"></script></body></html>`));

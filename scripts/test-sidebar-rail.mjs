@@ -16,12 +16,35 @@ const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for 
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+let failed = 0;
+// lane attention-predicate-shared (design q-044 decision 7 — the owner accepted it 2026-10-19): THE CHANNELS BADGE COUNTS WHAT
+// NEEDS THE OWNER — the server's `needsMe` (conversations in bands 1–4) + the agent groups the attention list puts there.
+// PURE, before the browser (it runs without chrome too): the brief's fixture — 15 unread (the 15 standing agent groups) +
+// 2 drafts awaiting approval + 1 direct chat (the drafts answer it) — was 18 on the rail, is 1.
+{
+  const FO = require(path.join(repo, 'src/channel-focus.js'));
+  const A = require(path.join(repo, 'src/attention-model.js'));
+  const NOW = Date.UTC(2026, 9, 19, 12);
+  const groups = Array.from({ length: 15 }, (_, k) => ({ id: 'g' + k, name: 'Agents ' + k, unread: 1, lastAt: NOW - k * 60e3 }));
+  const digest = { unreadTotal: 1, awaitingTotal: 2, needsMe: 1 };   // the direct chat's 1 unread; its 2 drafts; ONE row in band 2 (test-channels-focus ⑮ — the real engine)
+  const before = digest.unreadTotal + digest.awaitingTotal + groups.reduce((a, g) => a + g.unread, 0);
+  const after = FO.channelsBadge(digest.needsMe, groups, NOW, { needsMe: A.needsMe });
+  if (before === 18 && after === 1) console.log(`  ✓ the Channels badge: 15 unread + 2 awaiting + 1 direct was ${before} (unread + awaiting + the groups' unread) — now ${after} (needsMe)`);
+  else { failed++; console.error(`  ✗ the Channels badge: before ${before} (want 18), after ${after} (want 1)`); }
+  const at = FO.channelsBadge(digest.needsMe, [...groups, { id: 'gx', unread: 4, atYou: 1, lastAt: NOW }, { id: 'gy', atYou: 2, archivedAt: NOW, lastAt: NOW }], NOW, { needsMe: A.needsMe });
+  const off = FO.channelsBadge(digest.needsMe, [{ id: 'gx', atYou: 1, lastAt: NOW }], NOW, { needsMe: A.needsMe, policy: FO.attentionPolicy((k) => (k === 'channels.attention.rule.at-you' ? false : undefined)), bands: null });
+  if (at === 2 && off === 1) console.log('  ✓ …an agent group that @-mentions the owner adds one (band 2; an archived one never); the at-you rule off ⇒ it adds none');
+  else { failed++; console.error(`  ✗ the groups' half: @ group ${at} (want 2), rule off ${off} (want 1)`); }
+  const RL = fs.readFileSync(path.join(repo, 'src/lib/sidebar-rail.js'), 'utf8');
+  if (!/unreadTotal|awaitingTotal/.test(RL) && (RL.match(/Number\((msg\.digest|r\?|r|ch)\.needsMe\) \|\| 0/g) || []).length === 4) console.log('  ✓ PIN: every writer of the rail\'s conversation half reads `needsMe` (the broadcast, the first probe, the refresh, a settings change) — no unread + awaiting arithmetic left');
+  else { failed++; console.error('  ✗ PIN: the rail still reads unread / awaiting, or a `needsMe` writer is missing'); }
+}
+
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs) — a pid-modulo port was a 1-in-20 collision
 const wt = `/tmp/vs-rail-smoke-${process.pid}`;
-let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

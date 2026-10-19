@@ -606,12 +606,28 @@ try {
     check(`the first screen draws ${x15.all} rows (≤ 6); band 5 shows its NEWEST ${x15.n} and ONE head "${x15.fold}" for the rest`, x15.all <= 6 && x15.n >= 1 && x15.fold === `${open15 - x15.n} more — expand` && x15.foldLast && JSON.stringify(x15.ids) === JSON.stringify(FLOOD_IDS.slice(0, x15.n)), x15);
     check(`…while the band's bar counts all its open rows (${open15})`, x15.count === String(open15), x15);
     await evalJs(`window.__f5 = ${rowsOf}; window.__f5top = window.__f5.map((r) => r.offsetTop); true`);
+    // lane attention-predicate-shared (the owner 2026-10-19 on the .318 tray, 「很容易误触」): the fold is a TOGGLE in the bar's last
+    // slot and 「全部标为已看」 keeps its own — read both rects before the press, again after it
+    const rectsOf = `(() => { const r = (sel) => { const e = document.querySelector(sel); if (!e) return null; const q = e.getBoundingClientRect(); return [Math.round(q.left), Math.round(q.top), Math.round(q.width), Math.round(q.height)]; }; return { seen: r(${JSON.stringify(bSel + ' > .ut-band-bar > .ut-seen-all')}), fold: r(${JSON.stringify(bSel + ' > .ut-band-bar > .ut-fold')}) }; })()`;
     const fb = await evalJs(`(() => { const f = document.querySelector(${JSON.stringify(bSel + ' .ut-fold')}); f.scrollIntoView({ block: 'nearest' }); const q = f.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 }; })()`);
+    const rBefore = await evalJs(rectsOf);
     await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
     await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
     check(`a real click on the head opens the band IN PLACE: all ${open15} rows (the panel stays open)`, await waitFor(`${rowsOf}.length === ${open15} && !document.getElementById('user-todos-popup').classList.contains('hidden')`, 3000), await evalJs(`${rowsOf}.length`));
     const x15b = await evalJs(`(() => { const rows = ${rowsOf}; return { same: window.__f5.every((r, i) => rows[i] === r), tops: window.__f5.map((r) => r.offsetTop), before: window.__f5top, fold: !!document.querySelector(${JSON.stringify(bSel + ' .ut-fold')}), order: JSON.stringify(rows.map((r) => r.dataset.id).filter((id) => id.startsWith('ut-f100d'))) === ${JSON.stringify(JSON.stringify(FLOOD_IDS))} }; })()`);
-    check("…the shown rows are the SAME nodes at the SAME offsetTop, the rest below them in the list's order, the head gone", x15b.same && JSON.stringify(x15b.tops) === JSON.stringify(x15b.before) && !x15b.fold && x15b.order, x15b);
+    check("…the shown rows are the SAME nodes at the SAME offsetTop, the rest below them in the list's order; the toggle stays (「收起」)", x15b.same && JSON.stringify(x15b.tops) === JSON.stringify(x15b.before) && x15b.fold && x15b.order && (await evalJs(`document.querySelector(${JSON.stringify(bSel + ' .ut-fold')}).textContent`)) === 'Show less', x15b);
+    const rAfter = await evalJs(rectsOf);
+    check('THE SLOTS HOLD: 「全部标为已看」 and the toggle have the SAME rect after 展开 as before it (nothing destructive slid into the spot just pressed)', JSON.stringify(rAfter) === JSON.stringify(rBefore) && !!rBefore.seen && !!rBefore.fold, { rBefore, rAfter });
+    const hit = await evalJs(`(() => { const e = document.elementFromPoint(${fb.x}, ${fb.y}); return e ? (e.closest('.ut-fold') ? 'fold' : e.closest('.ut-seen-all') ? 'seen-all' : e.className) : null; })()`);
+    check('the spot just pressed is the toggle again — never 「全部标为已看」', hit === 'fold', hit);
+    const open15a = (await storeNow()).open.filter((i) => i.sessionKey === floodKey).length;
+    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
+    check(`a SECOND press at the same spot collapses the band back to ${x15.n} rows and marks nothing (${open15a} open in the store)`, await waitFor(`${rowsOf}.length === ${x15.n} && !document.getElementById('user-todos-popup').classList.contains('hidden')`, 3000) && (await storeNow()).open.filter((i) => i.sessionKey === floodKey).length === open15a && open15a === open15, await evalJs(`${rowsOf}.length`));
+    check('…the toggle reads 「还有 N 条 — 展开」 again in the same rect; 「全部标为已看」 never moved', JSON.stringify(await evalJs(rectsOf)) === JSON.stringify(rBefore) && (await evalJs(`document.querySelector(${JSON.stringify(bSel + ' .ut-fold')}).textContent`)) === `${open15 - x15.n} more — expand`, await evalJs(rectsOf));
+    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: fb.x, y: fb.y, button: 'left', clickCount: 1 });
+    check(`…and a third opens it again (all ${open15} rows — the legs below act on the open band)`, await waitFor(`${rowsOf}.length === ${open15}`, 3000), await evalJs(`${rowsOf}.length`));
     const saSel = bSel + ' > .ut-band-bar > .ut-seen-all';
     check('the band bar carries "Mark all seen" (≥ 2 open rows) — and 紧急 has none', await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(saSel)}); return !!b && b.textContent === 'Mark all seen' && getComputedStyle(b).display !== 'none' && !document.querySelector('#user-todos-popup .ut-band[data-band="1"] .ut-seen-all'); })()`));
     await evalJs(`window.__f30 = ${rowsOf}; true`);

@@ -128,6 +128,7 @@ const Av = require('../channel-avatars.js');   // lane channel-avatars (B-5fe1):
 // design 008 (B-3cf8, userW's first Channels open: 77.5 MB, 1.49 s): THE FIRST SCREEN'S PREDICATE + the page rules,
 // shared with the panel (PURE) — the first read views only the rows `candidateOf` names and `statusTag` decides.
 const FO = require('../channel-focus.js');
+const A = require('../attention-model.js');   // lane attention-predicate-shared (design q-044 decision 7): the Channels badge = the attention list's bands 1–4
 const DM = require('../decision-model.js');   // lane decision-attention-facts (PURE): the duplicate-inbox key + count of a scan's facts
 // verify r1 (S): the characters a name door drops (peerName / the ladder's oneLine) — the search's raw side drops them too
 const { HIDDEN_RE } = require('../hidden-chars.js');
@@ -2785,7 +2786,7 @@ function create(deps = {}) {
    *              {total, cut}`) + each account's newest FO.HEAD_ROWS listed rows (`heads: {[adapterId]: [keys]}`,
    *              each row once) — built by `firstRead`: one pass, a rowView only for a candidate or a head;
    *   'accounts' everything but the rows (the window's Re-authorize reads);
-   *   'totals'   `{unreadTotal, awaitingTotal, at}` (the rail badge).
+   *   'totals'   `{unreadTotal, awaitingTotal, needsMe, at}` (the rail badge reads `needsMe` — lane attention-predicate-shared).
    * `keys` = the partial broadcast's changed rows, unchanged. Every other row is read by key from `rows()`
    * (GET /api/channels/rows).
    */
@@ -2806,6 +2807,7 @@ function create(deps = {}) {
       conversations = keys.map((k) => liveIx[k]).filter(Boolean).map((en) => { const rec = byId.get(en.adapterId); return rec ? rowView(rec, en, ctx) : null; }).filter(Boolean);
       conversations.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
     } else if (scope !== 'accounts') { first = firstRead(byId, liveIx, ctx); conversations = first.conversations; }
+    if (keys) attnPatch(keys, conversations, liveIx, byId, t);   // lane attention-predicate-shared: the kept attention rows the broadcast names
     if (conversations) attention.note(conversations);   // lane decision-attention: the judge never holds a read up — it queues
     // THE TOTALS are over EVERY conversation, partial or not (the rail badge
     // reads them off each broadcast) — KEPT, not re-summed (B-f32b): a partial
@@ -2825,6 +2827,8 @@ function create(deps = {}) {
       scope: keys ? 'partial' : scope === 'accounts' ? 'accounts' : 'first',
       partial: !!keys,
       unreadTotal, awaitingTotal,
+      // lane attention-predicate-shared (decision 7): THE CHANNELS BADGE — the conversations in bands 1–4 (kept, never a walk)
+      needsMe: attnCount(t),
       // design 008: the header's numbers from the KEPT facts (F7) — every listed row of an account that exists
       // (`all` leaves the built-in watcher out, as the first screen does), on every broadcast, never a walk
       counts: countsOf(recs.adapters),
@@ -2875,7 +2879,68 @@ function create(deps = {}) {
     const byId = new Map(recs.adapters.map((r) => [r.id, r]));
     let awaitingTotal = 0;
     for (const p of Object.values(store.outbox.live().proposals || {})) if (p && p.key && p.state === 'awaiting-approval') awaitingTotal++;
-    return { unreadTotal: unreadTotalOf(store.index.live(), byId, false), awaitingTotal, at: t };
+    return { unreadTotal: unreadTotalOf(store.index.live(), byId, false), awaitingTotal, needsMe: attnCount(t), at: t };
+  }
+  // lane attention-predicate-shared (design q-044 decision 7 — the owner accepted it 2026-10-19): THE CHANNELS BADGE COUNTS WHAT
+  // NEEDS THE OWNER — the conversations the attention list puts in bands 1–4 (src/attention-model.js `needsMe` over
+  // src/channel-focus.js `attentionRowOf`: the panel's 「需要我」, the same functions; the owner's rule switches, band
+  // switches and cap read here through their ONE readers), never unread + awaiting. KEPT like the row facts (B-f32b: never a
+  // walk per broadcast): every first read re-derives the tagged rows it walks anyway, a partial broadcast the keys it names;
+  // a count re-asks only a kept row past its clock edge (`until` — a direct chat's 24 h) and every kept row when a switch
+  // or the cap changed. A count before any first read walks the candidates once.
+  const attnKept = { rows: null, sig: '' };   // rows: Map<key, attention row | null (a tagged row that is 「相关」)>
+  function attnPolicies() {
+    const rules = FO.attentionPolicy((k) => serverSetting(k));
+    const bands = A.settingsPolicy((k) => serverSetting(k));
+    return { rules, bands, sig: JSON.stringify([rules.rules, rules.judge, bands.cap, [...bands.off]]) };
+  }
+  /** A first read's tagged views ⇒ the kept rows, whole (a row it did not tag left the list). */
+  function attnFromFirst(views, t) {
+    const pol = attnPolicies();
+    attnKept.rows = new Map(views.map((v) => [v.key, FO.attentionRowOf(v, t, pol.rules)]));
+    attnKept.sig = pol.sig;
+  }
+  /** Re-derive `keys` from the live index (a key gone, unlisted or no longer tagged leaves). `views` = rowViews in hand. */
+  function attnRederive(keys, t, { views = null, liveIx = store.index.live(), byId = null } = {}) {
+    const pol = attnPolicies();
+    const ids = byId || new Map(adapterRecords().adapters.map((r) => [r.id, r]));
+    const have = new Map((views || []).map((v) => [v.key, v]));
+    let ctx = null;
+    for (const k of keys) {
+      const en = liveIx[k], rec = en && ids.get(en.adapterId);
+      if (!rec || en.unlistedAt || !listedAccount(rec)) { attnKept.rows.delete(k); continue; }
+      let v = have.get(k);
+      if (!v) { if (!ctx) ctx = viewCtx(t); v = rowView(rec, en, ctx); }
+      if (v && FO.statusTag(v, t)) attnKept.rows.set(k, FO.attentionRowOf(v, t, pol.rules)); else attnKept.rows.delete(k);
+    }
+    return pol;
+  }
+  /** A partial broadcast's keys (its rowViews in hand). */
+  function attnPatch(keys, views, liveIx, byId, t) {
+    if (!attnKept.rows || attnPolicies().sig !== attnKept.sig) return;   // never read / a switch moved: the next count re-derives
+    attnRederive(keys, t, { views, liveIx, byId });
+  }
+  /** THE BADGE'S NUMBER (`needsMe`): the kept conversations in bands 1–4 under the owner's switches. */
+  function attnCount(t = now()) {
+    try {
+      if (!attnKept.rows) {
+        const recs = adapterRecords(), byId = new Map(recs.adapters.map((r) => [r.id, r])), liveIx = store.index.live(), ctx = viewCtx(t);
+        const views = [];
+        for (const k in liveIx) {
+          const en = liveIx[k], rec = en && byId.get(en.adapterId);
+          if (!rec || en.unlistedAt || !listedAccount(rec) || !FO.candidateOf(en, ctx.outbox.get(en.key), t, attention.judgedFor(en, rec))) continue;
+          const v = rowView(rec, en, ctx);
+          if (FO.statusTag(v, t)) views.push(v);
+        }
+        attnFromFirst(views, t);
+      }
+      const sig = attnPolicies().sig;
+      const due = [];
+      for (const [k, r] of attnKept.rows) if (sig !== attnKept.sig || (r && r.until !== null && r.until <= t)) due.push(k);
+      const pol = due.length || sig !== attnKept.sig ? attnRederive(due, t) : attnPolicies();
+      attnKept.sig = pol.sig;
+      return A.needsMe([...attnKept.rows.values()].filter(Boolean), t, pol.bands).counts.needsMe;
+    } catch (err) { log.warn(`[channels] the attention count failed: ${(err && err.message) || err}`); return 0; }
   }
   /** The rowViews the reads built (the scale suite's bound on a first read: ≤ ATTENTION_MAX + HEAD_ROWS per account). */
   const viewStats = { rowViews: 0, firstReads: 0, pages: 0 };
@@ -2905,6 +2970,7 @@ function create(deps = {}) {
     const viewOf = (en) => { let v = views.get(en.key); if (!v) { v = rowView(byId.get(en.adapterId), en, ctx); views.set(en.key, v); } return v; };
     const tagged = [];
     for (const en of cands) { const v = viewOf(en); const tag = FO.statusTag(v, t); if (tag) tagged.push({ v, rank: FO.TAG_ORDER.indexOf(tag.code), p: tag.p || 0 }); }
+    attnFromFirst(tagged.map((x) => x.v), t);   // lane attention-predicate-shared: the Channels badge's kept rows, re-derived by the walk it does anyway
     // verify r1 (C): 300 newer "replied" rows used to push an old draft awaiting approval off the first screen — the cut
     // keeps statusTag's own order of urgency first, then the newest
     tagged.sort((a, b) => (a.rank - b.rank) || (b.p - a.p) || FO.pageOrder(a.v, b.v));   // lane decision-attention: judged rows by p
