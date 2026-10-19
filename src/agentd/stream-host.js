@@ -22,7 +22,9 @@
  *   desktop-input {sid, events}                                   → { ok, n, refused: [{i, code}], display } — lane desktop-handover:
  *                 an agent the owner handed the machine's desktop to — ITS records (the data channel's own shapes, the
  *                 picture's pixels + the source's origin) into THIS session's sink: the same onInput as the `input`
- *                 channel (the window's live place, the Mac's target, one ordered chain with the owner's own events)
+ *                 channel (the window's live place, the Mac's target), in the AGENT's lane — the owner's lane goes first,
+ *                 an owner record drops the agent's unsent ones (`{ partial, cancelled: 'owner_input', sent, of }`); at most
+ *                 handoverEventsMax records an op (`too_many_events`) — fix r2
  *   desktop-grab  {sid}                                           → { ok, png64, w, h, display, origin, road } — ONE still of the
  *                 session's display (the source's still(): the screen source's one-frame capture; a Mac's is pending)
  *   pushes        stream-ice {sid, candidate} · stream-stats {sid, stats, state, ended?} once a second and at every change
@@ -247,7 +249,7 @@ const SOURCES = Object.freeze({
   window: (msg, o, f) => (f.window ? f.window(msg, o) : f.screen ? f.screen(msg, o) : named('no_window_source', 'this agent cannot stream one window')),
 });
 
-function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift'), screen = null, window = null, legHosts = () => [], program = process.platform === 'win32' ? process.execPath : null } = {}) {
+function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift'), screen = null, window = null, legHosts = () => [], program = process.platform === 'win32' ? process.execPath : null, pasteBackMs = L.pasteBackMs } = {}) {
   const sessions = new Map();
   let probeMemo = null; // the self-probe's answer, kept probeMemoMs (a second session within it asks nothing)
   let W = null;
@@ -278,6 +280,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     if (!s) return false;
     sessions.delete(sid);
     clearInterval(s.statsTimer); clearTimeout(s.orphanTimer); clearTimeout(s.failTimer);
+    if (s.agentQ.length || s.agentHeld.size || s.inFlight === 'agent') { dropAgent(s, 'stream_ended'); pump(s); } // the agent's rest is not typed into a desktop nobody watches
     try { s.source && s.source.stop(why); } catch { /* gone */ }
     if (s.leg) s.leg.close();
     if (s.relay) s.relay.close();
@@ -287,43 +290,114 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     return true;
   }
 
-  // ── the input channel: in order, one injector, moves coalesced while the injector is behind ──
-  // lane desktop-handover: every path answers the event's own outcome ({ refused } | { dropped } | { ack } | { done: a promise of
-  // the injector's answer }) — the `input` channel ignores it, the `desktop-input` op sums it for the agent that sent the records
-  function onInput(s, raw) {
+  // ── the input channel: TWO LANES into one injector (verify r1 (A) → lane desktop-handover-fix-r2) — the owner's (the data
+  // channel) and the agent's (`desktop-input`); ONE record in flight at a time, the owner's first whenever both wait. An owner
+  // record DROPS the agent's unsent ones (their op answers partial, cancelled owner_input) and what the agent's sent records hold
+  // down (keys, a button) comes up before the owner's record lands — no stuck modifier. The owner's moves are coalesced while
+  // the owner's lane is behind. Every path answers the event's own outcome ({ refused } | { dropped } | { ack } | { done: a
+  // promise of the injector's answer, or { cancelled } }) — the `input` channel ignores it, the `desktop-input` op sums it
+  function onInput(s, raw, lane = 'owner') {
     let ev = SM.inputEventOf(typeof raw === 'string' ? raw : Buffer.isBuffer(raw) ? raw.toString('utf8') : raw);
     if (ev.refused) { s.inputRefused = { code: ev.refused, at: now() }; return { refused: ev.refused }; }
     if (s.source && s.source.relative && typeof s.source.bounds === 'function') ev = SW.windowInputOf(ev, s.source.bounds()); // window pixels → the desktop (the window's live place)
     if (ev.t === 'ack') { const sent = s.sentAt.get(ev.f); if (sent) { s.acks.push(now() - sent); if (s.acks.length > 30) s.acks.shift(); s.ackMs = [...s.acks].sort((a, b) => a - b)[s.acks.length >> 1]; } return { ack: true }; }
     if (!injector) { s.inputRefused = { code: 'input_unsupported', at: now() }; return { refused: 'input_unsupported' }; }
-    if (ev.t === 'mv' && s.inputPending > 8) { s.inputDropped++; return { dropped: true }; }
-    s.inputPending++;
+    if (lane === 'owner') {
+      if (ev.t === 'mv' && s.ownerQ.length + (s.inFlight === 'owner' ? 1 : 0) > 8) { s.inputDropped++; return { dropped: true }; }
+      if (s.agentQ.length || s.agentHeld.size || s.inFlight === 'agent') dropAgent(s, 'owner_input');
+      if (ev.t === 'clip') clipKeep(); // the owner's own clipboard: no put-back over it
+    }
     const target = s.source && typeof s.source.inputTarget === 'function' ? s.source.inputTarget() : undefined; // a Mac's picture → its global points
-    const done = s.inputChain.then(() => (target === undefined ? injector.inject([ev]) : injector.inject([ev], target)));
-    s.inputChain = done.then((r) => {
-      s.inputPending--;
-      if (r && r.n) s.inputN += r.n;
-      if (r && r.refused && r.refused.length) { const was = s.inputRefused && s.inputRefused.code; s.inputRefused = { code: r.refused[0].code, at: now() }; if (was !== s.inputRefused.code) pushStats(s); }
-    }, () => { s.inputPending--; });
+    const done = new Promise((resolve) => { (lane === 'owner' ? s.ownerQ : s.agentQ).push({ lane, ev, target, resolve }); });
+    pump(s);
     return { done };
   }
-  /** THE AGENT'S RECORDS (lane desktop-handover — `desktop-input`): each through onInput above, in order, behind whatever the
-   *  owner's channel queued; an `ack` is the page's own (refused). → { ok, n, refused: [{ i, code }], display } */
+  /** The agent's unsent records answer { cancelled: why }; its held keys / button come up at the pump's next turn. */
+  function dropAgent(s, why) {
+    for (const it of s.agentQ.splice(0)) it.resolve({ cancelled: why });
+    s.releaseDue = true;
+  }
+  const injectOne = (x) => (x.target === undefined ? injector.inject([x.ev]) : injector.inject([x.ev], x.target));
+  /** What the agent's injected records hold down: a key up / button up per press, in press order (released in reverse). */
+  function holdStep(held, it) {
+    const e = it.ev;
+    if (e.t === 'kd') held.set('k' + e.c, { ev: { t: 'ku', c: e.c }, target: it.target });
+    else if (e.t === 'ku') held.delete('k' + e.c);
+    else if (e.t === 'md') held.set('b' + e.b, { ev: { t: 'mu', x: e.x, y: e.y, b: e.b }, target: it.target });
+    else if (e.t === 'mu') held.delete('b' + e.b);
+  }
+  async function pump(s) {
+    if (s.pumping) return;
+    s.pumping = true;
+    try {
+      for (;;) {
+        if (s.releaseDue) {
+          s.releaseDue = false;
+          const up = [...s.agentHeld.values()].reverse();
+          s.agentHeld.clear();
+          for (const x of up) { const r = await injectOne(x).catch(() => null); if (r && r.n) s.inputN += r.n; }
+          continue;
+        }
+        const it = s.ownerQ.length ? s.ownerQ.shift() : s.agentQ.shift();
+        if (!it) break;
+        s.inFlight = it.lane;
+        let r;
+        try { r = await injectOne(it); } catch (e) { r = { ok: false, n: 0, refused: [{ code: 'inject_failed', error: String((e && e.message) || e) }] }; }
+        s.inFlight = null;
+        if (r && r.n) { s.inputN += r.n; if (it.lane === 'agent') holdStep(s.agentHeld, it); }
+        if (r && r.refused && r.refused.length) { const was = s.inputRefused && s.inputRefused.code; s.inputRefused = { code: r.refused[0].code, at: now() }; if (was !== s.inputRefused.code) pushStats(s); }
+        it.resolve(r);
+      }
+    } finally { s.pumping = false; }
+  }
+  // THE AGENT'S PASTE puts the machine's clipboard back (lane desktop-handover-fix-r2): the injector saves what it holds (on the
+  // machine — it never crosses the link) before the agent's first `clip`, and puts it back pasteBackMs after the paste while the
+  // clipboard still holds the agent's text (a copy made meanwhile wins); the owner's own clip cancels it. An injector without a
+  // clipboard read (the Mac's helper, the Linux stub) has no `clip` — the agent's text stays there (the manual says so).
+  let clipBack = null; // { timer, text } — host-wide: the injector (and the machine's clipboard) is one
+  async function clipSave() {
+    if (!injector || typeof injector.clip !== 'function') return false;
+    if (clipBack) { clearTimeout(clipBack.timer); clipBack.timer = null; return true; } // an earlier paste's put-back waits: what it saved is still the owner's
+    const a = await Promise.resolve(injector.clip('save')).catch(() => null);
+    if (a !== 'ok') return false;
+    clipBack = { timer: null, text: null };
+    return true;
+  }
+  function clipLater(text) {
+    if (!clipBack) return null;
+    clipBack.text = text;
+    clipBack.timer = setTimeout(() => { const b = clipBack; clipBack = null; if (b) Promise.resolve(injector.clip('restore', b.text)).catch(() => null); }, pasteBackMs);
+    clipBack.timer.unref?.();
+    return 'restoring';
+  }
+  function clipKeep() { if (clipBack) { clearTimeout(clipBack.timer); clipBack = null; } }
+  /** THE AGENT'S RECORDS (lane desktop-handover — `desktop-input`): each through onInput above in the AGENT's lane — at most
+   *  handoverEventsMax an op (the hub chunks a longer act); an `ack` is the page's own (refused). An owner record meanwhile
+   *  drops the rest. → { ok, n, refused: [{ i, code }], display, clipboard? } (+ { partial, cancelled, sent, of } when cut) */
   async function input(msg) {
     const s = sessions.get(String(msg.sid || ''));
     if (!s) return named('not_found', 'that stream session ended');
-    const list = Array.isArray(msg.events) ? msg.events.slice(0, L.handoverEventsMax) : [];
+    const list = Array.isArray(msg.events) ? msg.events : [];
+    if (list.length > L.handoverEventsMax) return named('too_many_events', `at most ${L.handoverEventsMax} records an op (this one has ${list.length}) — the hub sends a longer act in chunks`);
+    const paste = list.find((e) => e && typeof e === 'object' && e.t === 'clip' && typeof e.text === 'string');
+    const saved = paste ? await clipSave() : false;
     const refused = [], waits = [];
     list.forEach((e, i) => {
       if (e && typeof e === 'object' && e.t === 'ack') { refused.push({ i, code: 'not_an_act' }); return; }
-      const r = onInput(s, e);
+      const r = onInput(s, e, 'agent');
       if (r.refused) refused.push({ i, code: r.refused });
-      else if (r.done) waits.push(r.done.then((a) => ({ i, a }), (err) => ({ i, a: { refused: [{ code: 'inject_failed', error: String((err && err.message) || err) }] } })));
+      else if (r.done) waits.push(r.done.then((a) => ({ i, a })));
     });
-    let n = 0;
-    for (const { i, a } of await Promise.all(waits)) { if (a && a.n) n += a.n; if (a && a.refused && a.refused.length) refused.push({ i, code: a.refused[0].code }); }
+    let n = 0, cancelled = 0, why = null;
+    for (const { i, a } of await Promise.all(waits)) {
+      if (a && a.cancelled) { cancelled++; why = a.cancelled; continue; }
+      if (a && a.n) n += a.n;
+      if (a && a.refused && a.refused.length) refused.push({ i, code: a.refused[0].code });
+    }
+    const clipboard = saved ? clipLater(paste.text) : null;
     refused.sort((a, b) => a.i - b.i);
-    return { ok: !refused.length, n, refused, display: srcDisplay(s) };
+    const out = { ok: !refused.length && !cancelled, n, refused, display: srcDisplay(s), ...(clipboard ? { clipboard } : {}) };
+    return cancelled ? { ...out, partial: true, cancelled: why, sent: list.length - cancelled, of: list.length } : out;
   }
   /** ONE STILL of the session's display (lane desktop-handover — `desktop-grab`): the source's still(). */
   async function still(msg) {
@@ -428,7 +502,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       iceLite: true, iceServers: [], bundlePolicy: 'max-bundle', iceUseIpv6: false,
     });
     const s = { sid, owner, pc, source, maxKbps, track: null, dc: null, relay: null, leg: null, directInbound: null, frames: 0, bytes: 0, dropped: 0, keyRequests: 0, bweKbps: null, congested: false, estimate: null,
-      inputN: 0, inputRefused: null, inputDropped: 0, inputPending: 0, inputChain: Promise.resolve(), acks: [], ackMs: null, sentAt: new Map(),
+      inputN: 0, inputRefused: null, inputDropped: 0, ownerQ: [], agentQ: [], agentHeld: new Map(), inFlight: null, pumping: false, releaseDue: false, acks: [], ackMs: null, sentAt: new Map(),
       mark: { at: now(), frames: 0, bytes: 0 }, sending: false, statsTimer: null, orphanTimer: null, failTimer: null, seq: Math.floor(Math.random() * 65536), early: [], replied: false, startedAt: now() };
     sessions.set(sid, s);
     try {

@@ -88,6 +88,7 @@ const STATUS = {
   desktop_not_handed: 403, chord_refused: 403, desktop_switching: 409, screenshot_first: 409, outside_display: 400, type_too_long: 400, not_ascii: 400,
   host_needs_update: 409, mac_still_pending: 409, no_still: 409, still_too_big: 413, still_timeout: 504, still_failed: 502, device_unreachable: 502,
   uipi_blocked: 409, accessibility_permission: 409, unmapped_key: 400, input_unsupported: 409,
+  not_found: 404, // fix r2: the machine's stream session is gone (its agent restarted) — the lease ended daemon_gone
 };
 function fail(res, e) {
   const code = e?.code || null;

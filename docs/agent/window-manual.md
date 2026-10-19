@@ -449,10 +449,15 @@ pass it on — a verb on a desktop nobody handed you answers `desktop_not_handed
   `click md-<host> --at x,y [--button 1|2|3]` (a pixel of THAT image), `type md-<host> "text"` (through the machine's
   clipboard, like the owner's own paste — any language, any keyboard layout; `--keys` types ASCII as physical keys, for a
   field that refuses a paste), `key md-<host> <chord>`, `scroll md-<host> up|down|left|right [--by N] [--at x,y]`.
+* The paste REPLACES the machine's clipboard with your text. On Windows its own text comes back about 2 s later (text only:
+  a picture or files that were on it stay replaced, and Windows' clipboard history keeps your text); on a Mac your text
+  STAYS on the clipboard — mind what you paste, and tell the owner when it matters.
   `snapshot` has no tree here (`mode_pixels`). `detach md-<host>` hands it back.
 * The owner watches in that window and sees your pointer, labelled with your name. Any key, click or scroll of theirs there
   PAUSES you: every verb answers `window_paused` until they press «Let it continue» (继续交给它) — wait, never retry in a
-  loop. «Take back» (收回), closing the window, the stream ending or your conversation ending end it.
+  loop. Their input also STOPS a verb in flight: the rest of it is not sent and the answer says how much went in
+  (`did.sent` of `did.of` records, `charsTyped` for `--keys`) — look again before you go on. «Take back» (收回), closing the
+  window, the stream ending, the machine's agent restarting (`not_found`) or your conversation ending end it.
 * Refused by name: a chord that locks, logs off or powers the machine (`chord_refused` — Win+L, Ctrl+Alt+Del / End, ⌃⌘Q,
   ⇧⌘Q); `--at` outside the screenshot (`outside_display`); more than 1500 characters a `type`. A Mac's screenshot is not
   there yet (`mac_still_pending` — its keys, clicks and typing work). Every act is an audit line the owner can read.

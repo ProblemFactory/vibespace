@@ -31,6 +31,13 @@
 //      MUTANT: the routes' md- test widened to dw- ⇒ the dw act reaches the hand-over (RED)
 //   ⑨ THE CLI end to end (data/bin/vibespace-window → the real routes → the real engine → a fake device): list's md- row,
 //      screenshot's size line, click / type / key wording, desktop_not_handed / window_paused / chord_refused hints, exit codes
+//   ⑩ FIX r2 (verify r1 (A) + the lows): the owner's input PREEMPTS the agent's — MEASURED through the REAL stream host (a 1 ms
+//      injector, the hub's chunks): the owner's click sent 10 ms into a 1500-char type lands ≤ 50 ms after its send, no stuck
+//      modifier (CONTROL: a one-chain copy waits behind the chunk in flight); the exact order with a gated injector (held keys up,
+//      the owner's record, then the agent's next op); 200 a op (too_many_events); the stream's stop drops the rest; the agent's
+//      paste puts the machine's clipboard back (Windows S / R, saved once, guarded, the owner's clip cancels it); the engine's
+//      chunks re-ask the lease, the machine's cut pauses it (by: machine), the daemon's not_found ⇒ 404 + daemon_gone; owner input
+//      mid-switch ⇒ the next stream comes back paused + said 「切换中」; the hub's shutdown audits every lease's end
 // Run: node scripts/test-desktop-handover.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -403,6 +410,178 @@ console.log('⑨ the CLI end to end');
   ok(dt.code === 0 && /handed md-pc1 back to its owner/.test(dt.out) && eng.stateOf('pc1') === null, 'detach hands it back');
   const help = await cli(['help']);
   ok(/A MACHINE'S DESKTOP \(md-<host> rows\)/.test(help.out) && /no verb can ask for one/.test(help.out), 'the usage names the md- rows and the owner\'s door');
+}
+console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 (A)); the chunks; the lows');
+{
+  const SM = require(path.join(REPO, 'src/stream-model.js'));
+  const I = require(path.join(REPO, 'src/input-inject.js'));
+  const CAP = SM.STREAM_LIMITS.handoverEventsMax;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const caught = async (fn) => { try { return { ok: await fn() }; } catch (e) { return { code: e.code, did: e.did, message: String(e.message), takenAt: e.takenAt }; } };
+  // ── PURE: one op's worth at a time, cut where nothing is held ──
+  const long = DH.typeRecords('Ab'.repeat(750), 'win32', { keys: true }).records; // 1500 characters, half shifted
+  const chunks = DH.chunkRecords(long, CAP);
+  const heldAfter = (c) => { const h = new Set(); for (const x of c) { if (x.t === 'kd') h.add(x.c); else if (x.t === 'ku') h.delete(x.c); } return h.size; };
+  ok(CAP === 200 && chunks.length > 1 && chunks.every((c) => c.length <= CAP && heldAfter(c) === 0) && J(chunks.flat()) === J(long), `a 1500-char --keys type (${long.length} records) = ${chunks.length} chunks of ≤ ${CAP} (the sibling input-events' cap), each cut where nothing is held, nothing lost or reordered`, chunks.map((c) => c.length));
+  const mini = [{ t: 'kd', c: 'ShiftLeft' }, { t: 'kd', c: 'KeyA' }, { t: 'ku', c: 'KeyA' }, { t: 'ku', c: 'ShiftLeft' }, { t: 'kd', c: 'KeyB' }, { t: 'ku', c: 'KeyB' }];
+  ok(J(DH.chunkRecords(mini, 5).map((c) => c.length)) === J([4, 2]) && DH.charsTyped(long, 8) === 2 && DH.charsTyped(long, 0) === 0, 'a chunk never ends with Shift held (the cut moves back to the last let-go); charsTyped counts the characters in the first N records');
+
+  // ── THE MEASUREMENT through the REAL stream host (werift in-process) — verify r1 §C's leg, with the hub's chunks ──
+  const w = require(path.join(REPO, 'node_modules/werift'));
+  const dcs = [];
+  const loadWerift = () => ({ ...w, RTCPeerConnection: class extends w.RTCPeerConnection { createDataChannel(l, o) { const d = super.createDataChannel(l, o); dcs.push(d); return d; } } });
+  const srcOf = () => ({ ok: true, kind: 'screen', origin: { x: 0, y: 0 }, fps: 30, display: 'D1', start() { }, stop() { }, requestKeyframe() { }, setTargetKbps() { }, still: () => Promise.resolve(SH.fakeStill()) });
+  /** A 1 ms injector (the Windows resident script's cost a line, verify r1); the agent's 1500-char `type --keys` through the ENGINE
+   *  (chunks over desktop-input into the host); 10 ms in, the page does what it does on the owner's click: the three records down
+   *  the data channel AND the hub's pause. → { ownerMs (the click's md: injected − sent), act, log, input (the lease after) } */
+  async function measure(SHmod, tag) {
+    const t0 = Date.now(), log = [];
+    const injector = { kind: 'fake', inject(evs) { return new Promise((res) => setTimeout(() => { log.push({ at: Date.now() - t0, t: evs[0].t, c: evs[0].c }); res({ ok: true, n: 1, refused: [] }); }, 1)); } };
+    const host = SHmod.createStreamHost({ injector, loadWerift, screen: () => srcOf() });
+    await host.offer({ sid: 'm-' + tag, sourceKind: 'screen', sourceId: 'x' }, { control() { } });
+    const dc = dcs[dcs.length - 1];
+    const dmM = { connect: async () => ({ info: { capabilities: ['desktop-grab', 'desktop-input'] } }), desktopGrab: async () => ({ ok: false, code: 'no_still', error: 'none' }), desktopInput: async (sid, events) => host.input({ sid, events }) };
+    streams.set('stM', { key: 'stM', hostId: 'pcM', sid: 'm-' + tag, dm: dmM, platform: 'win32', source: { kind: 'screen', origin: { x: 0, y: 0 } }, stats: null, state: 'connected' });
+    await eng.give({ hostId: 'pcM', streamKey: 'stM', principal: 'agent:cid-1' });
+    const act = caught(() => eng.act('md-pcM', A, { verb: 'type', text: 'A'.repeat(1500), keys: true }));
+    await sleep(10);
+    const sentAt = Date.now() - t0;
+    for (const x of DH.clickRecords('5,5', 1)) dc.onMessage.execute(J(x)); // the owner's own click, down the data channel …
+    eng.pause('pcM', 'owner_input'); // … and the page's /pause to the hub
+    const a = await act;
+    await sleep(40);
+    const input = eng.stateOf('pcM') && eng.stateOf('pcM').input;
+    host.stopAll('done'); streams.delete('stM'); try { eng.revoke('pcM'); } catch { /* it ended */ }
+    const md = log.findIndex((l) => l.t === 'md');
+    return { ownerMs: md >= 0 ? log[md].at - sentAt : null, act: a, log, md, input, ms: Date.now() - t0 };
+  }
+  const m = await measure(SH, 'fix');
+  const before = m.log.slice(0, m.md);
+  const held = new Set(); for (const l of before) { if (l.t === 'kd') held.add(l.c); else if (l.t === 'ku') held.delete(l.c); }
+  ok(m.ownerMs != null && m.ownerMs <= 50, `MEASURED: the owner's click sent 10 ms into a 1500-char type landed ${m.ownerMs} ms after its send (≤ 50; verify r1 measured 6395 ms behind 6000 records) — ${m.md} agent records went before it`, { ownerMs: m.ownerMs, md: m.md });
+  ok(held.size === 0 && J(m.log.slice(-3).map((l) => l.t)) === J(['mv', 'md', 'mu']), 'no stuck modifier: every key the agent pressed was up before the owner\'s click, and nothing of the agent\'s came after it', { held: [...held], tail: m.log.slice(-4) });
+  ok(m.act.code === 'window_paused' && m.act.did && m.act.did.partial === true && m.act.did.of === 6000 && m.act.did.sent < 6000 && m.act.did.charsTyped >= 0 && m.act.did.charsTyped < 1500 && /records went in \(\d+ of 1500 characters typed\)/.test(m.act.message) && m.input === 'user', `the act answers window_paused, partial: ${m.act.did && m.act.did.sent} of 6000 records, ${m.act.did && m.act.did.charsTyped} of 1500 characters said; the lease paused`, m.act);
+  // CONTROL: the same leg over a copy of the stream host with ONE ordered chain (the owner's records queue behind the agent's, no drop)
+  const shSrc = fs.readFileSync(path.join(REPO, 'src/agentd/stream-host.js'), 'utf8');
+  const chainSrc = shSrc.replace('(lane === \'owner\' ? s.ownerQ : s.agentQ).push(', 's.agentQ.push(').replace('if (s.agentQ.length || s.agentHeld.size || s.inFlight === \'agent\') dropAgent(s, \'owner_input\');', '');
+  ok(chainSrc !== shSrc && !chainSrc.includes('dropAgent(s, \'owner_input\')'), 'CONTROL copy: one chain, no drop (the anchors exist)');
+  const ctl = await measure(mutantCopies('dho-chain', REPO).load('src/agentd/stream-host.js', chainSrc, 'one-chain'), 'ctl');
+  ok(ctl.ownerMs != null && ctl.ownerMs > 50, `CONTROL (one chain, today's chunks): the owner's click waits behind the chunk in flight — ${ctl.ownerMs} ms ⇒ the leg tells`, { ownerMs: ctl.ownerMs, md: ctl.md });
+
+  // ── DETERMINISTIC ORDER: a gated injector (the record named in `hold` waits for open()) ──
+  const got = []; let hold = null, open = null;
+  const injector = { kind: 'fake', inject(evs) { const k = evs[0].t + ':' + (evs[0].c || evs[0].b); got.push(k); if (k === hold) { hold = null; return new Promise((res) => { open = () => res({ ok: true, n: 1, refused: [] }); }); } return Promise.resolve({ ok: true, n: 1, refused: [] }); } };
+  const host = SH.createStreamHost({ injector, loadWerift, screen: () => srcOf() });
+  await host.offer({ sid: 'g', sourceKind: 'screen', sourceId: 'x' }, { control() { } });
+  const dc = dcs[dcs.length - 1];
+  hold = 'kd:KeyA';
+  const op1 = host.input({ sid: 'g', events: DH.typeRecords('Ab', 'win32', { keys: true }).records }); // kd Shift, kd A (held in flight), …
+  await sleep(5);
+  dc.onMessage.execute(J({ t: 'kd', c: 'KeyX' })); // the owner's key while the agent's A is in flight with Shift down
+  const op2 = host.input({ sid: 'g', events: [{ t: 'kd', c: 'KeyD' }, { t: 'ku', c: 'KeyD' }] }); // the agent's next op, while the owner's waits
+  open();
+  const [a1, a2] = await Promise.all([op1, op2]);
+  ok(J(got) === J(['kd:ShiftLeft', 'kd:KeyA', 'ku:KeyA', 'ku:ShiftLeft', 'kd:KeyX', 'kd:KeyD', 'ku:KeyD']), 'the order: the agent\'s held A and Shift come up (reverse order), the owner\'s key, THEN the agent\'s next op — its dropped rest never sent', got);
+  ok(a1.ok === false && a1.partial === true && a1.cancelled === 'owner_input' && a1.sent === 2 && a1.of === 6 && a1.n === 2 && a2.ok === true && a2.n === 2, 'the cut op answers { partial, cancelled: owner_input, sent: 2, of: 6 }; the next op lands whole', { a1, a2 });
+  got.length = 0;
+  const big = await host.input({ sid: 'g', events: Array.from({ length: CAP + 1 }, () => ({ t: 'kd', c: 'KeyA' })) });
+  ok(big.code === 'too_many_events' && got.length === 0, `one op over ${CAP} records ⇒ too_many_events by name, nothing injected (an older hub's one-op type is refused, never cut silently)`, big);
+  hold = 'kd:KeyE';
+  const op3 = host.input({ sid: 'g', events: [{ t: 'kd', c: 'ShiftLeft' }, { t: 'kd', c: 'KeyE' }, { t: 'ku', c: 'KeyE' }, { t: 'kd', c: 'KeyF' }, { t: 'ku', c: 'KeyF' }, { t: 'ku', c: 'ShiftLeft' }] });
+  await sleep(5);
+  host.stop('g', 'closed');
+  open();
+  const a3 = await op3;
+  await sleep(5);
+  ok(a3.cancelled === 'stream_ended' && a3.sent === 2 && J(got) === J(['kd:ShiftLeft', 'kd:KeyE', 'ku:KeyE', 'ku:ShiftLeft']), 'the stream stops mid-op: the rest is dropped (stream_ended), what it held comes up — nothing typed into a desktop nobody watches', { a3, got });
+
+  // ── THE AGENT'S PASTE puts the machine's clipboard back (Windows: the resident script's S / R) ──
+  const clips = [];
+  const injC = { kind: 'fake', inject: async (evs) => { clips.push(evs[0].t); return { ok: true, n: 1, refused: [] }; }, clip: async (op, text) => { clips.push(op === 'save' ? 'SAVE' : 'RESTORE:' + text); return 'ok'; } };
+  const hostC = SH.createStreamHost({ injector: injC, loadWerift, screen: () => srcOf(), pasteBackMs: 40 });
+  await hostC.offer({ sid: 'c', sourceKind: 'screen', sourceId: 'x' }, { control() { } });
+  const dcC = dcs[dcs.length - 1];
+  const p1 = await hostC.input({ sid: 'c', events: DH.typeRecords('first', 'win32').records });
+  const p2 = await hostC.input({ sid: 'c', events: DH.typeRecords('second', 'win32').records });
+  await sleep(90);
+  ok(p1.clipboard === 'restoring' && p2.clipboard === 'restoring' && J(clips) === J(['SAVE', 'clip', 'kd', 'kd', 'ku', 'ku', 'clip', 'kd', 'kd', 'ku', 'ku', 'RESTORE:second']), 'the agent\'s paste: the clipboard saved ONCE before the first, put back ONCE after the last (guarded by the agent\'s last text)', clips);
+  clips.length = 0;
+  await hostC.input({ sid: 'c', events: DH.typeRecords('third', 'win32').records });
+  dcC.onMessage.execute(J({ t: 'clip', text: 'mine' })); // the owner's own paste meanwhile
+  await sleep(90);
+  ok(clips[0] === 'SAVE' && !clips.some((x) => x.startsWith('RESTORE')), 'the owner\'s own clip cancels the put-back (their new clipboard wins)', clips);
+  hostC.stopAll('done');
+  const pz = await (async () => { const h2 = SH.createStreamHost({ injector: { kind: 'fake', inject: async () => ({ ok: true, n: 1, refused: [] }) }, loadWerift, screen: () => srcOf() }); await h2.offer({ sid: 'n', sourceKind: 'screen', sourceId: 'x' }, { control() { } }); const r = await h2.input({ sid: 'n', events: DH.typeRecords('x', 'darwin').records }); h2.stopAll('done'); return r; })();
+  ok(pz.ok && !('clipboard' in pz), 'an injector without a clipboard read (the Mac\'s helper, the Linux stub) ⇒ no put-back, said by its absence', pz);
+  const { EventEmitter } = await import('node:events');
+  const psLines = [];
+  const psSpawn = () => { const c = new EventEmitter(); c.stdout = new EventEmitter(); c.stdout.setEncoding = () => { }; c.stdin = new EventEmitter(); c.stdin.write = (l) => { psLines.push(l.trim()); setImmediate(() => c.stdout.emit('data', (l.startsWith('R') ? 'kept' : 'ok') + '\n')); return true; }; c.kill = () => { }; setImmediate(() => c.stdout.emit('data', 'ready\n')); return c; };
+  const win = I.createInjector({ platform: 'win32', spawn: psSpawn });
+  const s1 = await win.clip('save'), r1 = await win.clip('restore', 'hé');
+  win.close();
+  ok(s1 === 'ok' && r1 === 'kept' && psLines[0] === 'S' && /^R /.test(psLines[1]) && Buffer.from(psLines[1].slice(2), 'base64').toString('utf16le') === 'hé' && I.createInjector({ platform: 'linux' }).clip === null && I.createInjector({ platform: 'darwin' }).clip === null, 'Windows: clip = the resident script\'s `S` / `R <base64 utf-16le>` lines; the stub and the Mac have none', psLines);
+  ok(/'S' \{ \$vsHad = \[VsInput\]::ClipKind\(\); \$vsSaved = if \(\$vsHad -eq 'text'\) \{ Get-Clipboard -Raw \}/.test(I.INPUT_PS) && /'R' \{ .*\$r = 'kept'; if \(\$vsHad -and \(Get-Clipboard -Raw\) -ceq \$want\)/.test(I.INPUT_PS) && /IsClipboardFormatAvailable\(13\) \? "text" : CountClipboardFormats\(\) == 0 \? "empty" : "other"/.test(I.INPUT_PS), 'the resident script: S keeps text / empty / other INSIDE the script; R puts it back only while the clipboard still holds the agent\'s text (a picture or files: kept, said)');
+
+  // ── THE ENGINE: chunks with the lease re-asked; the machine's cut; the daemon's not_found ──
+  const xcalls = []; let xanswer = null, xgrab = null;
+  const dmX = { connect: async () => ({ info: { capabilities: ['desktop-grab', 'desktop-input'] } }),
+    desktopGrab: async (sid) => (xgrab ? xgrab(sid) : { ok: true, png64: STILL.png.toString('base64'), w: STILL.w, h: STILL.h, display: 'D1', origin: { x: 0, y: 0 } }),
+    desktopInput: async (sid, evs) => { xcalls.push(evs.length); return xanswer ? xanswer(sid, evs, xcalls.length) : { ok: true, n: evs.length, refused: [] }; } };
+  streams.set('stX', { key: 'stX', hostId: 'pcX', sid: 'sid-X', dm: dmX, platform: 'win32', source: { kind: 'screen', origin: { x: 0, y: 0 } }, stats: null, state: 'connected' });
+  await eng.give({ hostId: 'pcX', streamKey: 'stX', principal: 'agent:cid-1' });
+  const recs400 = DH.typeRecords('Ab'.repeat(200), 'win32', { keys: true }).records;
+  const ch400 = DH.chunkRecords(recs400, CAP);
+  xanswer = (sid, evs, k) => { if (k === 2) eng.pause('pcX', 'owner_input'); return { ok: true, n: evs.length, refused: [] }; };
+  const c1 = await caught(() => eng.act('md-pcX', A, { verb: 'type', text: 'Ab'.repeat(200), keys: true }));
+  const sent2 = ch400[0].length + ch400[1].length;
+  ok(ch400.length >= 3 && xcalls.length === 2 && c1.code === 'window_paused' && c1.did.partial && c1.did.sent === sent2 && c1.did.of === recs400.length && c1.did.charsTyped === DH.charsTyped(recs400, sent2) && /records went in/.test(c1.message), `a pause landing during chunk 2 ⇒ chunk 3 is never sent (the lease re-asked between chunks); window_paused says ${c1.did && c1.did.sent} of ${recs400.length} records / ${c1.did && c1.did.charsTyped} characters`, { calls: xcalls, c1 });
+  ok(auditLines().some((l) => l.verb === 'type' && l.handle === 'md-pcX' && l.ok === false && l.code === 'window_paused' && l.sent === sent2 && l.events === recs400.length), 'its audit line: ok false, window_paused, sent of events');
+  eng.resume('pcX');
+  xcalls.length = 0;
+  xanswer = (sid, evs) => ({ ok: false, n: 3, refused: [], display: 'D1', partial: true, cancelled: 'owner_input', sent: 3, of: evs.length });
+  const c2 = await caught(() => eng.act('md-pcX', A, { verb: 'type', text: 'hello', keys: true }));
+  ok(c2.code === 'window_paused' && c2.did.cancelled === 'owner_input' && c2.did.sent === 3 && c2.did.of === 10 && c2.did.released && c2.did.released.ok === true && eng.stateOf('pcX').input === 'user' && auditLines().some((l) => l.verb === 'lease-pause' && l.handle === 'md-pcX' && l.by === 'machine' && l.cause === 'owner_input'), 'the machine\'s `cancelled: owner_input` ⇒ the lease pauses here too (audited by: machine — the page\'s /pause may still be on its way), window_paused with sent / of / released', c2);
+  eng.resume('pcX');
+  xanswer = null;
+  ok((await caught(() => eng.act('md-pcX', A, { verb: 'type', text: 'hi' }))).ok.did.clipboard === undefined, 'no put-back from the machine ⇒ no clipboard word in did');
+  xanswer = (sid, evs) => ({ ok: true, n: evs.length, refused: [], clipboard: 'restoring' });
+  ok((await caught(() => eng.act('md-pcX', A, { verb: 'type', text: 'hi' }))).ok.did.clipboard === 'restoring', 'the machine\'s put-back ⇒ did.clipboard restoring (the CLI says the clipboard comes back)');
+  xanswer = () => ({ ok: false, code: 'not_found', error: 'that stream session ended' });
+  const nf = await req('POST', '/api/agent/window/act', { handle: 'md-pcX', verb: 'key', chord: 'a' }, asA);
+  ok(nf.status === 404 && nf.body.code === 'not_found' && eng.stateOf('pcX') === null && auditLines().some((l) => l.verb === 'lease-end' && l.handle === 'md-pcX' && l.cause === 'daemon_gone' && l.by === 'machine'), 'the daemon\'s not_found (its session gone — it restarted) ⇒ HTTP 404 by name, and the lease ENDS daemon_gone (audited)', nf);
+  xanswer = null;
+  await eng.give({ hostId: 'pcX', streamKey: 'stX', principal: 'agent:cid-1' });
+  xgrab = () => ({ ok: false, code: 'not_found', error: 'that stream session ended' });
+  const ng = await req('GET', '/api/agent/window/screenshot?handle=md-pcX', undefined, asA);
+  ok(ng.status === 404 && ng.body.code === 'not_found' && eng.stateOf('pcX') === null, 'the screenshot\'s not_found the same: 404, the lease ended', ng.status);
+  streams.delete('stX');
+
+  // ── A DISPLAY SWITCH: the owner's input mid-switch is theirs (the next stream comes back paused) and said 「切换中」 ──
+  const sw = { handle: 'md-q', hostId: 'q', holder: { key: 'k', name: 'n' }, input: 'rebinding', resumeTo: 'agent', streamKey: 'a', since: 0, pausedAt: null, rebindSince: 0 };
+  const sw1 = DH.leaseStep(sw, { type: 'owner-input' }, 5);
+  const sw2 = DH.leaseStep(sw1.lease, { type: 'rebind', streamKey: 'b', sid: 's' }, 6);
+  ok(sw1.changed && sw1.lease.input === 'rebinding' && sw1.lease.resumeTo === 'user' && sw2.lease.input === 'user' && sw2.lease.pausedAt === 5 && !DH.leaseStep(sw1.lease, { type: 'owner-input' }, 7).changed, 'owner input while rebinding ⇒ the next stream comes back PAUSED (once; the agent does not drive on after the switch)');
+  ok(DH.leaseStep({ ...sw, input: 'agent' }, { type: 'daemon-gone', streamKey: 'a' }, 1).end === 'daemon_gone' && !DH.leaseStep({ ...sw, input: 'agent' }, { type: 'daemon-gone', streamKey: 'other' }, 1).changed && typeof DH.END_WHY.daemon_gone === 'string', 'daemon-gone ends the lease of THAT stream only, by name');
+  const sv = fs.readFileSync(path.join(REPO, 'src/lib/stream-view.js'), 'utf8'), mdk = fs.readFileSync(path.join(REPO, 'src/lib/machine-desktop.js'), 'utf8'), hov = fs.readFileSync(path.join(REPO, 'src/lib/machine-desktop-handover.js'), 'utf8');
+  ok(/if \(msg && !open && msg\.t !== 'ack' && msg\.t !== 'mv' && opts\.after && st\.state !== 'playing'/.test(sv) && /code === 'switching' \? t\('Switching display — that input did not reach the machine'\)/.test(mdk) && /st\.state === 'rebinding' && !switchPaused && !pausing/.test(hov) && /cause === 'stream_ended' \|\| cause === 'daemon_gone'/.test(hov), 'the view SAYS a press / key / wheel / paste mid-switch reached nothing (「切换中」, never queued: a click would land on the other display), and the strip pauses once mid-switch');
+
+  // ── THE HUB'S SHUTDOWN audits every live hand-over's end (the streams first, then the timers — before the exit) ──
+  const DW = require(path.join(REPO, 'src/server/desktop-webrtc.js'));
+  const dataS = scratch('dho-shut'); fs.mkdirSync(dataS, { recursive: true });
+  const engS = ENG.create({ dataDir: dataS, activeSessions: sessions, tickMs: 0, holderGraceMs: 0, log: { log() { }, warn() { } } });
+  const stops = [];
+  const dmS = { connect: async () => ({ info: { capabilities: ['desktop-grab', 'desktop-input'] } }), streamOffer: async () => ({ ok: true, sid: 'sid-S', offer: { type: 'offer', sdp: 'v=0\r\n' }, source: { kind: 'screen', origin: { x: 0, y: 0 }, display: 'D1' } }), streamStop: async (sid, o) => { stops.push([sid, o && o.why]); return { stopped: true }; } };
+  const wrS = DW.create({ access: { streamRung: async () => ({ take: true, dm: dmS, platform: 'win32', source: 'screen' }) }, log: { log() { }, warn() { } }, relay: false, ips: () => [], sweepMs: 60000, handover: engS.hooks });
+  engS.setWebrtc(wrS);
+  const stS = await wrS.start('pcS');
+  await engS.give({ hostId: 'pcS', streamKey: stS.key, principal: 'agent:cid-1' });
+  DA.setup({ handover: engS, webrtc: wrS });
+  DA.shutdownStreams();
+  const shutLines = fs.readFileSync(path.join(dataS, 'window-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  ok(stS.take && engS.stateOf('pcS') === null && shutLines.some((l) => l.verb === 'lease-end' && l.handle === 'md-pcS' && l.by === 'hub' && l.cause === 'stream_ended'), 'desktop-apps shutdownStreams() ⇒ the stream module\'s shutdown ⇒ a lease-end line (by: hub) written before it returns', shutLines.map((l) => [l.verb, l.by, l.cause]));
+  const wiring = fs.readFileSync(path.join(REPO, 'src/server/window-live-wiring.js'), 'utf8'), serverJs = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  ok(/shutdown: \(\) => \{ try \{ require\('\.\.\/routes\/desktop-apps'\)\.shutdownStreams\(\); \} catch \{[^}]*\} try \{ engine\.shutdown\(\); \}.*try \{ handover\.shutdown\(\); \}/.test(wiring) && /\nfunction shutdown\(\) \{[\s\S]*?shutdownWindowLeases\(\);[\s\S]*?process\.exit\(0\);/.test(serverJs), 'wired: server.js\'s shutdown → shutdownWindowLeases → the streams FIRST (their lease-end lines), then the window engine and the hand-over\'s tick — all before process.exit');
+  engS.shutdown();
 }
 srv.close();
 eng.shutdown();

@@ -9213,6 +9213,7 @@ export default {
   "Take back": "取り戻す", // lane desktop-handover
   "Paused — you are using it": "一時停止中 — あなたが操作中", // lane desktop-handover
   "Switching display…": "ディスプレイを切り替え中…", // lane desktop-handover
+  "Switching display — that input did not reach the machine": "切り替え中 — この入力はマシンに届いていません", // fix r2
   "{name} is driving": "{name} が操作中", // lane desktop-handover
   "{name} waits until you let it continue": "{name} は「続けて任せる」まで待ちます", // lane desktop-handover
   "{name} drives this desktop — any key, click or scroll of yours pauses it": "{name} がこのデスクトップを操作中 — あなたのキー・クリック・スクロールで一時停止します", // lane desktop-handover

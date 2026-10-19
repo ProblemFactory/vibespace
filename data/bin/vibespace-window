@@ -388,7 +388,7 @@ function printNode(n) {
     if (text === undefined) usageOf('vibespace-window type <handle> "text" [@e7] [--replace]');
     const r = await call('POST', '/api/agent/window/act', { handle: h, verb: 'type', ref, text, replace: has('--replace'), ...(has('--keys') ? { keys: true } : {}) });
     if (json) { console.log(JSON.stringify(r, null, 2)); return; }
-    if (r.did.by === 'paste' || r.did.by === 'keys') { console.log(r.did.by === 'paste' ? `typed ${r.did.chars} character(s) through the machine's clipboard (it now holds them) into whatever has the focus — screenshot again to verify` : `typed ${r.did.chars} character(s) as keys into whatever has the focus — screenshot again to verify`); return; } // lane desktop-handover
+    if (r.did.by === 'paste' || r.did.by === 'keys') { console.log(r.did.by === 'paste' ? `typed ${r.did.chars} character(s) through the machine's clipboard (${r.did.clipboard === 'restoring' ? 'its own clipboard comes back in 2 s — text only' : 'it now holds them'}) into whatever has the focus — screenshot again to verify` : `typed ${r.did.chars} character(s) as keys into whatever has the focus — screenshot again to verify`); return; } // lane desktop-handover
     console.log(r.did.by === 'inject' ? `typed ${r.did.chars} character(s) as keys${r.did.ref ? ` into ${r.did.ref} (focused through the tree)` : ' into whatever holds focus'} — ${r.did.ref ? 'snapshot' : 'screenshot'} again to verify` : `${r.did.replaced ? 'set' : 'inserted'} ${r.did.chars} character(s) into ${r.did.ref} — snapshot again to verify`);
     return;
   }

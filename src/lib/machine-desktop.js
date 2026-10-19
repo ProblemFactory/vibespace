@@ -333,6 +333,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
     if (!code) return;
     if (code === 'accessibility_permission') { showTcc(code); return; } // lane stream-p3m-build: the Mac's Accessibility switch
     note(code === 'uipi_blocked' ? t('Windows keeps input away from an administrator window — click another window on the machine first')
+      : code === 'switching' ? t('Switching display — that input did not reach the machine') // fix r2: the view's own word (stream-view send)
       : code === 'input_unsupported' ? t('This machine cannot take input over the stream yet')
         : t('The machine did not take that input ({code})', { code }), null, 8000);
   };

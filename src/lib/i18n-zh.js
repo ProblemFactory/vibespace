@@ -9214,6 +9214,7 @@ export default {
   "Take back": "收回", // lane desktop-handover
   "Paused — you are using it": "已暂停——你在操作", // lane desktop-handover
   "Switching display…": "正在切换显示器…", // lane desktop-handover
+  "Switching display — that input did not reach the machine": "切换中——这次输入没有送到机器", // fix r2
   "{name} is driving": "{name} 正在操作", // lane desktop-handover
   "{name} waits until you let it continue": "{name} 会等你点「继续交给它」", // lane desktop-handover
   "{name} drives this desktop — any key, click or scroll of yours pauses it": "{name} 正在操作这个桌面——你按任何键、点击或滚动都会让它暂停", // lane desktop-handover

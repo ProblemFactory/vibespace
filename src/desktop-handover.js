@@ -12,7 +12,8 @@
  *   handleOf(hostId) / hostOfHandle(handle)   `md-<hostId>` (isMachineHandle)
  *   leaseStep(lease, ev, now)   THE STATE TABLE → { lease (null = no lease), end (the cause, when it ended), changed }:
  *       give            (none | another holder's) → input 'agent' — only the owner's route sends it
- *       owner-input     agent → user (`window_paused` for every verb) — the owner's key / pointer / wheel in the window
+ *       owner-input     agent → user (`window_paused` for every verb) — the owner's key / pointer / wheel in the window;
+ *                       while rebinding, the next stream comes back PAUSED (fix r2: a key pressed mid-switch is the owner's)
  *       resume          user → agent — the owner's 「继续交给它」
  *       revoke          → gone `revoked` — the owner's 「收回」
  *       stream-ended    why 'switched' (the strip's display switch) → `rebinding` (the window's next stream of the same
@@ -20,6 +21,7 @@
  *                       owner must be able to watch); any other end → gone `stream_ended`
  *       rebind          rebinding → the input it had (the new stream's key / sid / display; the last still forgotten)
  *       rebind-timeout  rebinding → gone `stream_ended`
+ *       daemon-gone     → gone `daemon_gone` (the machine's agent answered not_found for the stream session — it restarted)
  *       holder-gone     → gone `conversation_ended`
  *       agent-done      → gone `agent_done` (the holder's own `detach` — handing it BACK, never on to anyone)
  *   agentVerdict(lease, callerKeys)   null = may act now | { code, error }: desktop_not_handed (no lease of THIS
@@ -29,6 +31,9 @@
  *   clickRecords / scrollRecords / chordRecords / typeRecords   the agent's verbs → the data channel's records (picture
  *       pixels + the source's origin — what pointerMessage / wheelMessage / keyMessage send for the same act)
  *   chordVerdict — CHORD_REFUSED: the chords that lock, log off or power the machine are refused BY NAME
+ *   chunkRecords(records, max)  one device op's worth at a time, cut only where nothing is held down (fix r2: the lease is
+ *       re-asked between chunks — a chunk never sent strands no key); charsTyped(records, sent) — a `--keys` type's characters
+ *       in the first `sent` records
  */
 
 const MM = require('./lib/modifier-map.js'); // THE primary-modifier table (the .287 rule) — the paste's modifier is the machine's primary
@@ -57,6 +62,7 @@ const END_WHY = Object.freeze({
   conversation_ended: 'the conversation it was handed to ended',
   agent_done: 'the agent handed it back',
   replaced: 'the owner handed it to another conversation',
+  daemon_gone: 'the machine\'s agent lost the stream (it restarted)',
 });
 
 /** THE STATE TABLE (the module's header). `lease` = null | { handle, hostId, holder: {key, webuiId, name}, input: 'agent' |
@@ -74,7 +80,9 @@ function leaseStep(lease, ev, now = 0) {
   }
   if (!lease) return same;
   switch (e.type) {
-    case 'owner-input': return lease.input === 'agent' ? { lease: { ...lease, input: 'user', pausedAt: now }, end: null, changed: true } : same;
+    case 'owner-input':
+      if (lease.input === 'agent') return { lease: { ...lease, input: 'user', pausedAt: now }, end: null, changed: true };
+      return lease.input === 'rebinding' && lease.resumeTo !== 'user' ? { lease: { ...lease, resumeTo: 'user', pausedAt: now }, end: null, changed: true } : same;
     case 'resume': return lease.input === 'user' ? { lease: { ...lease, input: 'agent', pausedAt: null }, end: null, changed: true } : same;
     case 'revoke': return gone('revoked');
     case 'holder-gone': return gone('conversation_ended');
@@ -87,6 +95,7 @@ function leaseStep(lease, ev, now = 0) {
       if (lease.input !== 'rebinding' || !e.streamKey) return same;
       return { lease: { ...lease, input: lease.resumeTo || 'agent', resumeTo: null, rebindSince: null, streamKey: String(e.streamKey), sid: e.sid != null ? String(e.sid) : null, display: e.display != null ? String(e.display) : lease.display, shot: null }, end: null, changed: true };
     case 'rebind-timeout': return lease.input === 'rebinding' && now - (lease.rebindSince || 0) >= LIMITS.rebindMs ? gone('stream_ended') : same;
+    case 'daemon-gone': return String(e.streamKey || '') === lease.streamKey ? gone('daemon_gone') : same;
     default: return same;
   }
 }
@@ -237,6 +246,31 @@ function typeRecords(text, platform = null, { keys = false } = {}) {
   return { road: 'keys', chars: text.length, records: recs };
 }
 
+/** ONE DEVICE OP AT A TIME (fix r2): `records` in chunks of ≤ max, each cut where no key and no button is held down — a run
+ *  that never lets go within max (none of the verbs makes one) is cut at max. → [[…], …] */
+function chunkRecords(records, max) {
+  const list = Array.isArray(records) ? records : [];
+  const cap = Math.max(1, Math.floor(Number(max) || 1));
+  const out = [];
+  for (let start = 0; start < list.length;) {
+    if (list.length - start <= cap) { out.push(list.slice(start)); break; }
+    const held = new Set();
+    let cut = -1;
+    for (let i = start; i < start + cap; i++) {
+      const x = list[i] || {};
+      if (x.t === 'kd') held.add('k' + x.c); else if (x.t === 'ku') held.delete('k' + x.c);
+      else if (x.t === 'md') held.add('b' + x.b); else if (x.t === 'mu') held.delete('b' + x.b);
+      if (!held.size) cut = i + 1;
+    }
+    const end = cut > start ? cut : start + cap;
+    out.push(list.slice(start, end));
+    start = end;
+  }
+  return out;
+}
+/** A `--keys` type's characters in its first `sent` records (one key-up of a non-Shift key per character). */
+const charsTyped = (records, sent) => (Array.isArray(records) ? records.slice(0, Math.max(0, sent | 0)) : []).filter((x) => x && x.t === 'ku' && x.c !== 'ShiftLeft').length;
+
 /** The strip's / the CLI's facts of a lease (no stream key: it names a session the agent has no route to). */
 function leaseView(lease, now = 0) {
   if (!lease) return null;
@@ -244,4 +278,4 @@ function leaseView(lease, now = 0) {
   return { handle: lease.handle, hostId: lease.hostId, holder: { key: lease.holder.key, name: lease.holder.name }, input: lease.input, since: lease.since, pausedAt: lease.pausedAt, display: lease.display, shot: lease.shot ? { w: lease.shot.w, h: lease.shot.h } : null, dot };
 }
 
-module.exports = { HANDLE_PREFIX, LIMITS, END_WHY, CHORD_REFUSED, handleOf, hostOfHandle, isMachineHandle, leaseStep, agentVerdict, parseAt, pointVerdict, clickRecords, scrollRecords, chordRecords, chordVerdict, codeOfKey, typeRecords, primaryOf, leaseView };
+module.exports = { HANDLE_PREFIX, LIMITS, END_WHY, CHORD_REFUSED, handleOf, hostOfHandle, isMachineHandle, leaseStep, agentVerdict, parseAt, pointVerdict, clickRecords, scrollRecords, chordRecords, chordVerdict, codeOfKey, typeRecords, primaryOf, chunkRecords, charsTyped, leaseView };

@@ -67,9 +67,11 @@ const STREAM_LIMITS = Object.freeze({
   legKeepaliveMs: 15000, legLiveMs: 2000, legEchoMs: 2000, legProbeMs: 500, legReprobeMs: 5000, legStaleMs: 35000, legTargets: 6,
   probeWaitMs: 300, probeMemoMs: 60000,
   inputMaxBytes: 70000, clipMaxChars: 65536, fakeMaxBytes: 8 * 1024 * 1024,
-  // lane desktop-handover: one `desktop-input` op's records (a 1500-character `type --keys` is ≤ 6000) and one `desktop-grab`'s
-  // PNG over the device link (base64 rides one control frame — the link's frame bound is 64 MB)
-  handoverEventsMax: 6400, stillMaxBytes: 32 * 1024 * 1024,
+  // lane desktop-handover: one `desktop-input` op's records — the sibling input-events' 200 (fix r2: the hub chunks a longer act,
+  // a 1500-character `type --keys` ≤ 6000 records, re-asking the lease between chunks) — and one `desktop-grab`'s PNG over the
+  // device link (base64 rides one control frame — the link's frame bound is 64 MB); pasteBackMs = after the agent's paste, the
+  // machine's own clipboard comes back (Windows — the app has read the paste by then)
+  handoverEventsMax: 200, stillMaxBytes: 32 * 1024 * 1024, pasteBackMs: 2000,
 });
 const RUNG_ID = 'webrtc';
 

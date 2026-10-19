@@ -12,7 +12,9 @@
  *     stream_ended; the strip's display switch = rebinding, carried to the window's next stream by `hooks.started(after)`); the
  *     holder conversation not live for holderGraceMs = conversation_ended (the tick); the holder's own `detach` = agent_done
  *   · THE AGENT'S VERBS: list (rows handed to the caller), screenshot (desktop-grab), click --at / key / type / scroll
- *     (desktop-input; the records are src/desktop-handover.js's — the data channel's own shapes), detach (hand it back),
+ *     (desktop-input; the records are src/desktop-handover.js's — the data channel's own shapes — at most handoverEventsMax an
+ *     op: a longer act goes in chunks, the lease re-asked between them; the machine's `cancelled: owner_input` = the owner's own
+ *     input cut it ⇒ the lease pauses, window_paused with what went in — fix r2), detach (hand it back),
  *     attach (says it is held — nothing to take: the owner gave it), snapshot (mode_pixels: a desktop has no tree here), watch
  *     (the owner's window IS the live view). Every verb re-asks the lease AFTER its await (a pause / revoke that landed while it
  *     waited stops it — window_paused / desktop_not_handed — never after it ran)
@@ -24,6 +26,7 @@
 const fs = require('fs');
 const path = require('path');
 const DH = require('../desktop-handover.js');
+const SM = require('../stream-model.js'); // STREAM_LIMITS.handoverEventsMax — the daemon's cap on one desktop-input op (fix r2)
 const R = require('../window-reach.js');
 const { addressableId } = require('../claude-lock-capture.js');
 const { capsOf } = require('../backend-caps.js');
@@ -71,7 +74,7 @@ function create({ dataDir, activeSessions, log = console, now = Date.now, tickMs
     ended(key, why, hostId) {
       const h = hostId != null ? String(hostId) : [...leases.values()].find((l) => l.streamKey === String(key))?.hostId;
       if (h == null || !leases.has(h)) return;
-      step(h, { type: 'stream-ended', streamKey: String(key), why: String(why || '') });
+      step(h, { type: 'stream-ended', streamKey: String(key), why: String(why || ''), ...(why === 'shutdown' ? { by: 'hub' } : {}) }); // fix r2: the hub's own shutdown is audited by: hub
     },
     started(key, hostId, after) {
       const l = leases.get(String(hostId));
@@ -176,6 +179,7 @@ function create({ dataDir, activeSessions, log = console, now = Date.now, tickMs
     const { lease, dev } = held(handle, f);
     let r;
     try { r = await dev.dm.desktopGrab(dev.sid); } catch (e) { audit({ handle, verb: 'screenshot', sessionKey: lease.holder.key, by: 'pixels', ok: false, code: errOfDevice(e).code }); throw errOfDevice(e); }
+    if (r && r.code === 'not_found') { daemonGone(lease); audit({ handle, verb: 'screenshot', sessionKey: lease.holder.key, by: 'pixels', ok: false, code: 'not_found' }); throw named('not_found', NOT_FOUND_WHY, { handle, origin: ORIGIN }); }
     const cur = stillHeld(handle, f, lease);
     if (!r || !r.ok) { audit({ handle, verb: 'screenshot', sessionKey: lease.holder.key, by: 'pixels', ok: false, code: (r && r.code) || 'still_failed' }); throw named((r && r.code) || 'still_failed', (r && r.error) || 'the machine took no picture', { handle, origin: ORIGIN }); }
     const png = Buffer.from(String(r.png64 || ''), 'base64');
@@ -185,6 +189,17 @@ function create({ dataDir, activeSessions, log = console, now = Date.now, tickMs
     return { handle, png, w: shot.w, h: shot.h, originX: shot.origin.x, originY: shot.origin.y, display: shot.display, coords: 'display', machine: cur.hostId };
   }
   const INPUT_STATUS_CODES = new Set(['uipi_blocked', 'accessibility_permission', 'unmapped_key', 'input_unsupported']);
+  const NOT_FOUND_WHY = 'the machine\'s stream session is gone — its agent restarted; the hand-over ended (the owner hands it over again)';
+  /** fix r2: the daemon answered not_found for the stream session (it restarted) ⇒ the lease ends `daemon_gone`, audited. */
+  function daemonGone(lease) { step(lease.hostId, { type: 'daemon-gone', streamKey: lease.streamKey, by: 'machine' }); }
+  /** fix r2: the machine says the owner's own input cut the agent's records — the lease pauses here too (the page's pause may
+   *  still be on its way) → the window_paused refusal */
+  function ownerTook(lease) {
+    const r = step(lease.hostId, { type: 'owner-input' });
+    if (r.changed) audit({ handle: lease.handle, verb: 'lease-pause', sessionKey: lease.holder.key, by: 'machine', cause: 'owner_input' });
+    const l = leases.get(lease.hostId);
+    return named('window_paused', 'the owner\'s own key, pointer or wheel took the desktop mid-act — the rest was not sent; wait until they press 「继续交给它」 / "Hand back to the agent"; do not retry in a loop', { cancelled: 'owner_input', takenAt: l && l.pausedAt != null ? l.pausedAt : now() });
+  }
   async function act(handle, f, body = {}) {
     const { lease, dev } = held(handle, f);
     const verb = String(body.verb || '');
@@ -220,17 +235,30 @@ function create({ dataDir, activeSessions, log = console, now = Date.now, tickMs
       if (!records) refuse('bad-request', `scroll is up | down | left | right, --by 1..${DH.LIMITS.scrollMaxNotches}`);
       did = { direction: String(body.direction).toLowerCase(), by: body.by == null ? DH.LIMITS.scrollDefault : Number(body.by) };
     } else refuse('bad-request', 'the verbs of a machine\'s desktop: screenshot, click --at, key, type, scroll');
-    let r;
-    try { r = await dev.dm.desktopInput(dev.sid, records); } catch (e) { const er = errOfDevice(e); refuse(er.code, er.message); }
+    // ONE op carries at most handoverEventsMax records (fix r2): a longer act — a `type --keys` — goes in chunks cut where nothing
+    // is held down, the lease re-asked between them (a pause / revoke / switch that landed stops the rest; what went in is said)
+    const chunks = DH.chunkRecords(records, SM.STREAM_LIMITS.handoverEventsMax);
+    let r = null, n = 0, sent = 0, cut = null;
+    for (let ci = 0; ci < chunks.length; ci++) {
+      if (ci) { try { stillHeld(handle, f, lease); } catch (e) { cut = e; break; } }
+      try { r = await dev.dm.desktopInput(dev.sid, chunks[ci]); } catch (e) { const er = errOfDevice(e); if (!sent) refuse(er.code, er.message); cut = er; break; }
+      if (r && r.code === 'not_found') { daemonGone(lease); refuse('not_found', `${NOT_FOUND_WHY}${sent ? ` (${sent} of ${records.length} records had gone in)` : ''}`); }
+      n += (r && r.n) || 0;
+      sent += r && r.cancelled ? Math.max(0, Number(r.sent) || 0) : chunks[ci].length;
+      if (r && r.cancelled) { cut = r.cancelled === 'owner_input' ? ownerTook(lease) : named('desktop_not_handed', `this machine's desktop is not handed to you any more — ${DH.END_WHY.stream_ended}`); break; }
+      if (!r || r.ok !== true) break; // a refusal (uipi …) or a failure — said below; the rest is not sent
+    }
+    const part = sent < records.length ? { sent, of: records.length, ...(did.by === 'keys' ? { charsTyped: DH.charsTyped(records, sent) } : {}) } : null;
     const cur = leases.get(lease.hostId);
-    const point = records.find((x) => x.t === 'md' || x.t === 'wh');
+    const point = records.slice(0, sent).find((x) => x.t === 'md' || x.t === 'wh');
     if (cur && point) leases.set(cur.hostId, { ...cur, dot: { x: point.x - origin.x, y: point.y - origin.y, at: now(), verb } });
     if (cur) nudge(cur.streamKey);
-    const refusedCode = r && Array.isArray(r.refused) && r.refused.length ? r.refused[0].code : null;
-    audit({ handle, verb, sessionKey: lease.holder.key, by: 'pixels', ok: !!(r && r.ok), ...(refusedCode ? { code: refusedCode } : {}), ...(did.at ? { x: did.at.x, y: did.at.y, button: did.button } : {}), ...(did.chord ? { chord: did.chord } : {}), ...(did.chars != null ? { chars: did.chars, road: did.by } : {}), ...(did.direction ? { direction: did.direction, notches: did.by } : {}), display: lease.shot ? lease.shot.display : lease.display, events: records.length });
+    const refusedCode = !cut && r && Array.isArray(r.refused) && r.refused.length ? r.refused[0].code : null;
+    audit({ handle, verb, sessionKey: lease.holder.key, by: 'pixels', ok: !cut && !!(r && r.ok), ...(cut ? { code: cut.code } : refusedCode ? { code: refusedCode } : {}), ...(part ? { sent } : {}), ...(did.at ? { x: did.at.x, y: did.at.y, button: did.button } : {}), ...(did.chord ? { chord: did.chord } : {}), ...(did.chars != null ? { chars: did.chars, road: did.by } : {}), ...(did.direction ? { direction: did.direction, notches: did.by } : {}), display: lease.shot ? lease.shot.display : lease.display, events: records.length });
+    if (cut) throw named(cut.code, `${cut.message} — ${sent} of ${records.length} records went in${part && part.charsTyped != null ? ` (${part.charsTyped} of ${did.chars} characters typed)` : ''}`, { handle, origin: ORIGIN, ...(cut.takenAt != null ? { takenAt: cut.takenAt } : {}), did: { partial: true, verb, ...(cut.cancelled ? { cancelled: cut.cancelled, released: { ok: true } } : {}), ...part } }); // the machine released what the agent held (stream-host dropAgent)
     if (r && r.ok === false && !Array.isArray(r.refused)) throw named(r.code || 'input_failed', r.error || 'the machine did not take that input', { handle, origin: ORIGIN });
-    if (refusedCode) throw named(INPUT_STATUS_CODES.has(refusedCode) ? refusedCode : 'inject_failed', refusedCode === 'uipi_blocked' ? 'Windows keeps input away from an administrator window that has the focus — nothing reached it' : refusedCode === 'accessibility_permission' ? 'the Mac takes no keys or clicks until Accessibility is on for vibespace-screen (the owner\'s switch)' : `the machine did not take part of it (${refusedCode})`, { handle, origin: ORIGIN, did: { partial: true, verb } });
-    return { ok: true, handle, did: { ...did, backend: 'stream', n: r ? r.n : 0, display: lease.shot ? lease.shot.display : lease.display } };
+    if (refusedCode) throw named(INPUT_STATUS_CODES.has(refusedCode) ? refusedCode : 'inject_failed', refusedCode === 'uipi_blocked' ? 'Windows keeps input away from an administrator window that has the focus — nothing reached it' : refusedCode === 'accessibility_permission' ? 'the Mac takes no keys or clicks until Accessibility is on for vibespace-screen (the owner\'s switch)' : `the machine did not take part of it (${refusedCode})`, { handle, origin: ORIGIN, did: { partial: true, verb, ...part } });
+    return { ok: true, handle, did: { ...did, backend: 'stream', n, display: lease.shot ? lease.shot.display : lease.display, ...(r && r.clipboard ? { clipboard: r.clipboard } : {}) } };
   }
   function attach(handle, f) {
     const { lease } = held(handle, f);

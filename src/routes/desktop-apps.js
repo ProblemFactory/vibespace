@@ -517,6 +517,9 @@ const webrtcOf = (res) => {
   if (!webrtc) { webrtc = require('../server/desktop-webrtc.js').create({ access: ctx.access, log: console, handover: ctx.handover ? ctx.handover.hooks : null }); ctx.handover?.setWebrtc(webrtc); } // lane desktop-handover: the lease rides the stream
   return webrtc;
 };
+/** fix r2: the hub's shutdown ends every stream here — and with it every hand-over, its `lease-end` audit line written (sync) before
+ *  the process exits (src/server/window-live-wiring.js shutdown → server.js's shutdownWindowLeases) */
+function shutdownStreams() { const wr = (ctx && ctx.webrtc) || webrtc; if (wr && typeof wr.shutdown === 'function') wr.shutdown(); }
 const STREAM_STATUS = Object.freeze({ not_found: 404, 'bad-request': 400, answer_failed: 409, restart_failed: 409 });
 const streamFail = (res, e) => (e && STREAM_STATUS[e.code] ? res.status(STREAM_STATUS[e.code]).json({ error: String(e.message), code: e.code }) : fail(res, e));
 const streamKey = (req) => String((req.method === 'GET' ? req.query.key : req.body && req.body.key) || '');
@@ -919,4 +922,4 @@ router.post('/api/vnc/start', async (req, res) => {
   try { res.json(await ctx.vnc.ensureRunning()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-module.exports = { router, setup, setApps };
+module.exports = { router, setup, setApps, shutdownStreams };

@@ -45,11 +45,15 @@ export function createStreamView(host, opts = {}) {
   let source = null; // the offer's source facts (a window's: {kind: 'window', window: {id, title, app, w, h, dpi, display}})
   let hubRelay = null; // lane stream-relay-udp: the hub relay's facts (the long poll's `relay` — which way it forwards: udp | link)
   let map = keyMapFor(viewerPlatform(), opts.hostPlatform || null);
-  let refusedSeen = null;
+  let refusedSeen = null, switchSaid = 0;
 
   const send = (msg) => {
-    if (msg && dc && dc.readyState === 'open') { try { dc.send(JSON.stringify(msg)); } catch { /* closing */ } }
+    const open = !!(msg && dc && dc.readyState === 'open');
+    if (open) { try { dc.send(JSON.stringify(msg)); } catch { /* closing */ } }
     if (msg && msg.t !== 'ack') { try { opts.onOwnerInput?.(msg); } catch { /* the shell's */ } } // lane desktop-handover: the person's own input pauses an agent
+    // fix r2: a display switch's next stream is not up yet — a press, key, wheel or paste reaches nothing: SAID (「切换中」), never
+    // queued (a click would land on the other display's pixels); a move alone says nothing
+    if (msg && !open && msg.t !== 'ack' && msg.t !== 'mv' && opts.after && st.state !== 'playing' && Date.now() - switchSaid > 3000) { switchSaid = Date.now(); try { opts.onInput?.({ code: 'switching', at: switchSaid }); } catch { /* the shell's */ } }
   };
   function step(type, code = null) {
     if (disposed && type !== 'close') return;

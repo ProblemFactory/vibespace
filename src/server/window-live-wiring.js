@@ -88,7 +88,7 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   return {
     desktopStream: stream, windowEngine: engine, windowRequest, handover, announced,
     boot: () => { try { const r = engine.boot(); if (r.leases || r.dropped) log.log?.(`[window] boot: ${r.leases} lease(s) kept, ${r.dropped} dropped`); return r; } catch (e) { log.warn?.(`[window] boot reconcile failed — ${e && e.message}`); return null; } },
-    shutdown: () => { try { engine.shutdown(); } catch { /* timers only */ } try { handover.shutdown(); } catch { /* its tick only */ } },
+    shutdown: () => { try { require('../routes/desktop-apps').shutdownStreams(); } catch { /* no stream ever started */ } try { engine.shutdown(); } catch { /* timers only */ } try { handover.shutdown(); } catch { /* its tick only */ } }, // fix r2: the streams FIRST — each live hand-over's lease-end line is audited (sync) before the exit
   };
 }
 

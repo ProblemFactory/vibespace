@@ -27,7 +27,7 @@ export function giveRefusalText(r, machine) {
 /** Why a hand-over ended, for the toast (null = no toast: the owner did it, or the window is gone). */
 export function endedText(cause, name, machine) {
   if (cause === 'conversation_ended') return t('{name} no longer drives {machine}’s desktop — its conversation ended', { name, machine });
-  if (cause === 'stream_ended') return t('{name} no longer drives {machine}’s desktop — the stream ended', { name, machine });
+  if (cause === 'stream_ended' || cause === 'daemon_gone') return t('{name} no longer drives {machine}’s desktop — the stream ended', { name, machine }); // daemon_gone (fix r2): the machine's agent restarted
   if (cause === 'agent_done') return t('{name} handed {machine}’s desktop back', { name, machine });
   return null;
 }
@@ -43,7 +43,7 @@ export function pictureToElement(p, box, video) {
  * in it); `streamOf()` = the window's live stream view (its key, its <video>). → { facts(f), ownerInput(), playing(on), dispose() }
  */
 export function createHandover({ app, hostId, machine, strip, before = null, pane, streamOf }) {
-  let st = null, isPlaying = false, pausing = false, lastEnd = null, disposed = false;
+  let st = null, isPlaying = false, pausing = false, lastEnd = null, disposed = false, switchPaused = false;
   const give = button('desktop-strip-btn desktop-strip-handover-give', t('Hand to an agent'), () => pick());
   give.hidden = true;
   const box = mk('span', 'desktop-strip-handover'); box.hidden = true;
@@ -76,6 +76,7 @@ export function createHandover({ app, hostId, machine, strip, before = null, pan
       if (words) showToast(words);
     }
     st = live;
+    if (!live || live.state !== 'rebinding') switchPaused = false;
     const name = (live && live.holder && live.holder.name) || t('The agent');
     box.hidden = !live;
     give.hidden = !!live || !isPlaying;
@@ -115,6 +116,8 @@ export function createHandover({ app, hostId, machine, strip, before = null, pan
     facts: (f) => draw(f || null),
     /** The owner's own key / pointer / wheel went down the stream: the agent pauses (once — the hub says when it did). */
     ownerInput() {
+      // fix r2: mid-switch (rebinding) the owner's input pauses too — ONCE a switch; the next stream comes back paused
+      if (st && st.state === 'rebinding' && !switchPaused && !pausing) { switchPaused = true; pausing = true; post(`${BASE}/pause`, { host: hostId, cause: 'owner_input' }).then(() => { pausing = false; }, () => { pausing = false; switchPaused = false; }); return; }
       if (!st || st.state !== 'agent' || pausing) return;
       pausing = true;
       st = { ...st, state: 'user' }; draw(st);

@@ -29,7 +29,7 @@
  *   MAC_KEYCODES / macCommandsOf(ev, target)   the Mac's: `M x y` in global points · `D b` · `U b` · `W dx dy` · `K vk up` ·
  *                         `C <base64 utf-8>` — PURE
  *   INPUT_PS              the resident script (its C# compiles once)
- *   createInjector(opts)  → { kind, inject(events, target?) → { ok, n, refused: [{ i, t, code }] }, close() }
+ *   createInjector(opts)  → { kind, inject(events, target?) → { ok, n, refused: [{ i, t, code }] }, clip(op, text?) | null, close() }
  */
 const MD = require('./machine-desktop-model.js');
 const SP = require('./stream-plan.js');
@@ -108,7 +108,9 @@ function macCommandsOf(ev, target = null) {
 }
 
 // THE RESIDENT SCRIPT. One command per stdin line, one answer per line: `ok` | `uipi` | `err <what> <win32 error>`. The C#
-// compiles once (~1 s); `ready` is the first line out.
+// compiles once (~1 s); `ready` is the first line out. `S` / `R` (lane desktop-handover-fix-r2 — the agent's paste): `S` keeps
+// what the clipboard holds (its text, or that it was empty) INSIDE the script; `R <base64 utf-16le>` puts it back only while
+// the clipboard still holds that text (the agent's) → `ok` | `kept` (something else is there now, or it held a picture / files).
 const INPUT_PS = [
   "$ErrorActionPreference = 'Stop'",
   "Add-Type -TypeDefinition @'",
@@ -127,6 +129,11 @@ const INPUT_PS = [
   '  [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr p, uint access, out IntPtr t);',
   '  [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr t, int cls, out int v, int len, out int ret);',
   '  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);',
+  '  [DllImport("user32.dll")] static extern int CountClipboardFormats();',
+  '  [DllImport("user32.dll")] static extern bool IsClipboardFormatAvailable(uint f);',
+  '  [DllImport("user32.dll", SetLastError = true)] static extern bool OpenClipboard(IntPtr h);',
+  '  [DllImport("user32.dll")] static extern bool EmptyClipboard();',
+  '  [DllImport("user32.dll")] static extern bool CloseClipboard();',
   '  static string Send(INPUT[] a) { uint n = SendInput((uint)a.Length, a, Marshal.SizeOf(typeof(INPUT))); return n == a.Length ? "ok" : "err sendinput " + Marshal.GetLastWin32Error(); }',
   '  static INPUT Mouse(int dx, int dy, uint data, uint flags) { INPUT i = new INPUT(); i.type = 0; i.u.mi.dx = dx; i.u.mi.dy = dy; i.u.mi.mouseData = data; i.u.mi.dwFlags = flags; return i; }',
   '  public static string Move(int x, int y) {',
@@ -137,6 +144,8 @@ const INPUT_PS = [
   '  public static string Button(int b, bool up) { uint f = b == 2 ? (up ? 0x0010u : 0x0008u) : b == 1 ? (up ? 0x0040u : 0x0020u) : (up ? 0x0004u : 0x0002u); return Send(new INPUT[] { Mouse(0, 0, 0, f) }); }',
   '  public static string Wheel(int dx, int dy) { if (dy != 0) { string r = Send(new INPUT[] { Mouse(0, 0, unchecked((uint)dy), 0x0800) }); if (r != "ok") return r; } return dx != 0 ? Send(new INPUT[] { Mouse(0, 0, unchecked((uint)dx), 0x1000) }) : "ok"; }',
   '  public static string Key(int scan, int ext, int up) { INPUT i = new INPUT(); i.type = 1; i.u.ki.wScan = (ushort)scan; i.u.ki.dwFlags = 0x0008u | (ext == 1 ? 0x0001u : 0u) | (up == 1 ? 0x0002u : 0u); return Send(new INPUT[] { i }); }',
+  '  public static string ClipKind() { return IsClipboardFormatAvailable(13) ? "text" : CountClipboardFormats() == 0 ? "empty" : "other"; }',
+  '  public static string ClipClear() { if (!OpenClipboard(IntPtr.Zero)) return "err openclipboard " + Marshal.GetLastWin32Error(); EmptyClipboard(); CloseClipboard(); return "ok"; }',
   '  public static bool FrontElevated() {',
   '    uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); if (pid == 0) return false;',
   '    IntPtr p = OpenProcess(0x1000, false, pid); if (p == IntPtr.Zero) return Marshal.GetLastWin32Error() == 5;',
@@ -159,6 +168,8 @@ const INPUT_PS = [
   "      'W' { $r = [VsInput]::Wheel([int]$a[1], [int]$a[2]) }",
   "      'K' { $r = if ($a[3] -eq '0' -and [VsInput]::FrontElevated()) { 'uipi' } else { [VsInput]::Key([int]$a[1], [int]$a[2], [int]$a[3]) } }",
   "      'C' { Set-Clipboard -Value ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($a[1]))); $r = 'ok' }",
+  "      'S' { $vsHad = [VsInput]::ClipKind(); $vsSaved = if ($vsHad -eq 'text') { Get-Clipboard -Raw } else { $null }; $r = 'ok' }",
+  "      'R' { $want = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($a[1])); $r = 'kept'; if ($vsHad -and (Get-Clipboard -Raw) -ceq $want) { if ($vsHad -eq 'text') { Set-Clipboard -Value $vsSaved; $r = 'ok' } elseif ($vsHad -eq 'empty') { $r = [VsInput]::ClipClear() } }; $vsHad = $null; $vsSaved = $null }",
   "      default { $r = 'err unknown 0' }",
   '    }',
   "  } catch { $r = 'err ps ' + (($_.Exception.Message -replace '\\s+', ' ').Substring(0, [Math]::Min(120, ($_.Exception.Message -replace '\\s+', ' ').Length))) }",
@@ -259,7 +270,10 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
     return { ok: refused.length === 0, n, refused };
   }
   function close() { closed = true; settleAll('err closed 0'); kill(); }
-  return { kind, inject, close };
+  /** THE MACHINE'S CLIPBOARD around an agent's paste (Windows only — the resident script reads it; the Mac's helper cannot yet):
+   *  clip('save') before it, clip('restore', theAgentsText) after it → the script's answer (ok | kept | err …) */
+  const clip = kind === 'sendinput' ? (op, text = '') => sendLine(op === 'save' ? 'S' : `R ${Buffer.from(String(text), 'utf16le').toString('base64')}`) : null;
+  return { kind, inject, clip, close };
 }
 
 module.exports = { SCAN_CODES, commandsOf, MAC_KEYCODES, macCommandsOf, INPUT_PS, createInjector };
