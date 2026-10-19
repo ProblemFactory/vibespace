@@ -123,7 +123,9 @@ function xOf(i, len, width, n = SERIES_SECONDS) {
 /** The row under x → its index, or null (left of the oldest row, or nothing read yet). */
 function indexAt(x, len, width, n = SERIES_SECONDS) {
   if (!(len > 0) || !(width > 0) || num(x) == null) return null;
-  const i = len - 1 - Math.round((width - x) / (width / (n - 1)));
+  // the second whose PIXEL SPAN holds the pointer: bucket k spans [width - (k+1)·step, width - k·step) — so the newest second is
+  // reachable from the rightmost pixel of a narrow chart too (under 2 px a second, rounding to the nearest centre skipped it)
+  const i = len - 1 - Math.floor((width - x) / (width / (n - 1)) + 1e-9);
   return i >= 0 && i < len ? Math.min(i, len - 1) : null;
 }
 /** A hovered second's values for the chart's readout: { ago (seconds), gap } + the kind's values. */

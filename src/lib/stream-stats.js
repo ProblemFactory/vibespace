@@ -97,19 +97,22 @@ export function createStreamStats({ machine = '', hostId = '', summary = null, f
       const plot = mk('div', 'stream-chart-plot'), canvas = mk('canvas', 'stream-chart-canvas'), max = mk('span', 'stream-chart-max');
       plot.append(canvas, max);
       box.append(top, plot);
-      const c = { kind, box, now, canvas, max, hover: null };
-      const at = (e) => { c.hover = chartIndexAt(canvas, e.clientX, series.rows().length); paint(c); };
+      // the hovered second is kept as its AGE (seconds before the newest row), never as a row index: a new row arrives every
+      // second, and an index would read one second older at the next paint (int313: the right edge read 「1 秒前」 on a tick)
+      const c = { kind, box, now, canvas, max, hoverAgo: null };
+      const at = (e) => { const n = series.rows().length, i = chartIndexAt(canvas, e.clientX, n); c.hoverAgo = i == null ? null : n - 1 - i; paint(c); };
       canvas.addEventListener('pointermove', at);
       canvas.addEventListener('pointerdown', at); // a tap holds that second's readout until the next one
-      canvas.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch') { c.hover = null; paint(c); } });
+      canvas.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch') { c.hoverAgo = null; paint(c); } });
       return c;
     });
     el.append(head, ...(table ? [table] : []), ...charts.map((c) => c.box));
     function paint(c) {
       const rows = series.rows();
-      const m = drawChart(c.canvas, rows, c.kind, { hover: c.hover });
+      const hover = c.hoverAgo != null && rows.length - 1 - c.hoverAgo >= 0 ? rows.length - 1 - c.hoverAgo : null;
+      const m = drawChart(c.canvas, rows, c.kind, { hover });
       c.max.textContent = m ? `${m.max} ${m.unit}` : '';
-      const r = c.hover != null ? readoutAt(rows, c.hover, c.kind) : null;
+      const r = hover != null ? readoutAt(rows, hover, c.kind) : null;
       if (r) { c.now.textContent = (r.ago ? t('{s} s ago', { s: r.ago }) : t('now')) + ' · ' + (r.gap ? t('no reading') : CHART_WORDS[c.kind].of(r)); return; }
       const last = [...rows].reverse().find(Boolean);
       c.now.textContent = last ? CHART_WORDS[c.kind].of(last) : '—';
