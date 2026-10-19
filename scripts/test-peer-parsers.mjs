@@ -253,7 +253,11 @@ function rowInChild(i) {
     const c = spawn(process.execPath, [new URL(import.meta.url).pathname, '--row', String(i)], { stdio: ['ignore', 'pipe', 'pipe'] });
     const got = [];
     let buf = '', err = '', cut = setTimeout(() => c.kill('SIGKILL'), START_MS);
-    const arm = () => { clearTimeout(cut); cut = setTimeout(() => c.kill('SIGKILL'), deadline + BUILD_SLACK_MS); };
+    // the kill timer is a HANG guard, not the bound: the bound is each shape's own in-child `ms < deadline` (judged below); the wall clock
+  // between two lines also holds the input build + the box's scheduling (the .317 release gate killed this child at 4 s under load 5 with
+  // one shape done in 0.8 ms), so the guard is 10× the deadline + build slack, never less than START_MS — a quadratic shape at 64 KB
+  // still runs seconds-to-hours and is killed; a slow box is not
+  const arm = () => { clearTimeout(cut); cut = setTimeout(() => c.kill('SIGKILL'), Math.max(START_MS, 10 * (deadline + BUILD_SLACK_MS))); };
     c.stdout.on('data', (d) => { buf += d; for (let k; (k = buf.indexOf('\n')) >= 0; buf = buf.slice(k + 1)) { const [l, ms] = buf.slice(0, k).split('\t'); if (l !== 'ready') got.push({ label: JSON.parse(l), ms: Number(ms) }); arm(); } });
     c.stderr.on('data', (d) => { err += d; });
     c.on('exit', (code, sig) => { clearTimeout(cut); res({ deadline, got, code, killed: !!sig, pending: labels.slice(got.length), err: err.slice(-300) }); });
