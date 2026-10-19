@@ -234,6 +234,9 @@ console.log('⑥ the engine');
   ok(r1.ok && sent[0] === 'input' && sent[1] === 'sid-A' && J(sent[2]) === J(DH.clickRecords('100,50', 3, { x: 1920, y: 0 })), 'click --at 100,50 --button 3 = the records + the display\'s origin, into the window\'s session', sent);
   const f1 = eng.hooks.factsOf('stA');
   ok(f1 && f1.state === 'agent' && f1.holder.name === 'Alpha' && f1.dot && f1.dot.x === 100 && f1.dot.y === 50 && nudges.includes('stA'), 'the strip\'s facts: Alpha drives, its pointer at the still\'s 100,50 (the page\'s poll nudged)', f1);
+  addStream('stP', 'sid-P'); // verify r1 (B): a SECOND window of the same machine (the phone) hears the lease by host — not its own (no pointer there), its owner input pauses; another machine's stream hears nothing
+  ok(f1.own === true && eng.hooks.factsOf('stP', 'pc1').state === 'agent' && eng.hooks.factsOf('stP', 'pc1').own === false && eng.hooks.factsOf('stP', 'pc2') === null && eng.hooks.factsOf('stP') === null, 'the facts by host: every stream of the machine hears its lease, `own` only on the one that carries it', eng.hooks.factsOf('stP', 'pc1'));
+  streams.delete('stP');
   const c2 = calls.length;
   const kr = await codeOfAsync(() => eng.act('md-pc1', A, { verb: 'key', chord: 'win+l' }));
   ok(kr === 'chord_refused' && calls.length === c2, 'key win+l ⇒ chord_refused, nothing sent');

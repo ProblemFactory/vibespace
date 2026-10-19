@@ -61,7 +61,7 @@ export function createHandover({ app, hostId, machine, strip, before = null, pan
 
   function drawCursor() {
     const s = streamOf(), v = s && s.video;
-    const p = st && st.state === 'agent' && st.dot ? pictureToElement(st.dot, v ? v.getBoundingClientRect() : null, v && v.videoWidth ? { w: v.videoWidth, h: v.videoHeight } : null) : null;
+    const p = st && st.state === 'agent' && st.own !== false && st.dot ? pictureToElement(st.dot, v ? v.getBoundingClientRect() : null, v && v.videoWidth ? { w: v.videoWidth, h: v.videoHeight } : null) : null;
     cursor.style.display = p ? '' : 'none';
     if (!p) return;
     cursor.style.left = p.left + 'px'; cursor.style.top = p.top + 'px';

@@ -285,7 +285,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
       s.lastPoll = now();
     }
     const from = Math.max(0, Math.min(s.cands.length, Number(n) || 0));
-    const ho = handover && typeof handover.factsOf === 'function' ? handover.factsOf(s.key) : null; // lane desktop-handover: the strip's lease words + the agent's pointer
+    const ho = handover && typeof handover.factsOf === 'function' ? handover.factsOf(s.key, s.hostId) : null; // lane desktop-handover: the strip's lease words + the agent's pointer
     return { key, seq: s.seq, n: s.cands.length, cands: s.cands.slice(from), state: s.state, stats: s.stats, ended: s.ended, relay: relayFacts(s), ...(ho ? { handover: ho } : {}) };
   }
   /** The page's own read of its path (getStats — direct | relay) is told here so the record says it. */

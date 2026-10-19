@@ -80,10 +80,10 @@ function create({ dataDir, activeSessions, log = console, now = Date.now, tickMs
       const r = step(l.hostId, { type: 'rebind', streamKey: String(key), sid: dev ? dev.sid : null, display: dev && dev.source && dev.source.display != null ? dev.source.display : null });
       if (r.lease) audit({ handle: r.lease.handle, verb: 'lease-rebind', sessionKey: r.lease.holder.key, by: 'user', display: r.lease.display });
     },
-    factsOf(key) {
+    factsOf(key, hostId = null) { // verify r1 (B): EVERY stream of the machine hears its lease (the phone's window too) — `own` = this stream carries it
       const k = String(key || '');
-      const l = [...leases.values()].find((x) => x.streamKey === k);
-      if (l) return { ...DH.leaseView(l, now()), state: l.input };
+      const l = [...leases.values()].find((x) => x.streamKey === k) || (hostId != null ? leases.get(String(hostId)) || null : null);
+      if (l) return { ...DH.leaseView(l, now()), state: l.input, own: l.streamKey === k };
       const n = notices.get(k);
       return n && now() - n.at < NOTICE_MS ? { state: 'none', ended: n.end, at: n.at, name: n.name } : null;
     },
