@@ -1,0 +1,94 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>stream-audio-probe</title>
+<!-- VibeSpace lane stream-audio-probe (probe only): the viewer side of the audio leg. One RTCPeerConnection answering the
+     agent's (werift's) offer: the machine's video + its SPEAKER audio (one MediaStream — the product's <video> could carry
+     both), the DATA-CHANNEL fallback road (Opus frames → WebCodecs AudioDecoder → an AudioWorklet player), and the viewer's
+     MICROPHONE back to the machine on the same audio m-line (sendrecv). Every onset is stamped on the page's clock
+     (performance.timeOrigin + now = the hub's wall clock: same machine). -->
+<video id="v" autoplay playsinline muted></video>
+<audio id="a" autoplay></audio>
+<script>
+const W = () => performance.timeOrigin + performance.now();
+window.__onsets = { rtc: [], dc: [], mic: [] }; window.__log = []; window.__dc = { in: 0, decoded: 0, under: 0 };
+let ctx = null;
+async function ensureCtx() {
+  if (!ctx) { ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' }); await ctx.audioWorklet.addModule('/worklet.js'); }
+  if (ctx.state !== 'running') await ctx.resume();
+  return ctx;
+}
+// a context time → the wall time that sample is due at the output (getOutputTimestamp maps the two clocks)
+function outWallOf(t) { const ts = ctx.getOutputTimestamp(); return performance.timeOrigin + ts.performanceTime + (t - ts.contextTime) * 1000; }
+function onsetNode(kind) {
+  const n = new AudioWorkletNode(ctx, 'onset', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+  n.port.onmessage = (e) => { window.__onsets[kind].push({ seenWall: W(), outWall: outWallOf(e.data.t), t: e.data.t, amp: e.data.amp }); };
+  n.connect(ctx.destination); // silent output: keeps the node pulled by the graph
+  return n;
+}
+function setupDcAudio(ch, targetFrames) {
+  ch.binaryType = 'arraybuffer';
+  const player = new AudioWorkletNode(ctx, 'player', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { targetFrames } });
+  player.port.onmessage = (e) => {
+    if (e.data.under != null) { window.__dc.under = e.data.under; return; }
+    window.__onsets.dc.push({ seenWall: W(), outWall: outWallOf(e.data.t), t: e.data.t, amp: e.data.amp });
+  };
+  player.connect(ctx.destination);
+  const dec = new AudioDecoder({
+    output: (ad) => {
+      const n = ad.numberOfFrames, L = new Float32Array(n), R = new Float32Array(n);
+      ad.copyTo(L, { planeIndex: 0, format: 'f32-planar' }); ad.copyTo(R, { planeIndex: ad.numberOfChannels > 1 ? 1 : 0, format: 'f32-planar' });
+      ad.close(); window.__dc.decoded++;
+      player.port.postMessage({ L, R }, [L.buffer, R.buffer]);
+    },
+    error: (e) => window.__log.push({ decoderError: String(e) }),
+  });
+  dec.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2 });
+  ch.onmessage = (e) => {
+    const dv = new DataView(e.data), ts = dv.getUint32(0);
+    window.__dc.in++;
+    dec.decode(new EncodedAudioChunk({ type: 'key', timestamp: Math.round(ts * 1e6 / 48000), data: new Uint8Array(e.data, 4) }));
+  };
+}
+window.run = async ({ offer, mic, dcTargetFrames, unmute }) => {
+  await ensureCtx();
+  const pc = window.pc = new RTCPeerConnection({ iceServers: [] });
+  let micTrack = null;
+  if (mic) {
+    const ms = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    micTrack = ms.getAudioTracks()[0];
+    ctx.createMediaStreamSource(ms).connect(onsetNode('mic'));
+    window.__log.push({ micSettings: micTrack.getSettings() });
+  }
+  pc.ontrack = (e) => {
+    window.__log.push({ track: e.track.kind, streams: e.streams.map((s) => s.id) });
+    (window.__streams = window.__streams || {})[e.track.kind] = e.streams[0] || null;
+    const v = document.getElementById('v');
+    if (e.track.kind === 'video') { v.srcObject = e.streams[0] || new MediaStream([e.track]); v.play().catch(() => { }); return; }
+    // the speaker: the SAME MediaStream as the video when the agent names one stream for both (msid) — the product's
+    // <video muted> would then carry the sound, unmuted by the strip's 「声音」 click (a user gesture: autoplay allows it)
+    const a = document.getElementById('a'); a.srcObject = new MediaStream([e.track]); a.muted = !unmute; a.play().catch(() => { });
+    ctx.createMediaStreamSource(new MediaStream([e.track])).connect(onsetNode('rtc'));
+  };
+  pc.ondatachannel = (e) => { if (e.channel.label === 'audio') setupDcAudio(e.channel, dcTargetFrames || 960); };
+  await pc.setRemoteDescription(offer);
+  if (micTrack) {
+    const tr = pc.getTransceivers().find((t) => t.receiver.track && t.receiver.track.kind === 'audio');
+    tr.direction = 'sendrecv'; await tr.sender.replaceTrack(micTrack);
+  }
+  // the answer goes back AT ONCE (the product's order: stream-view posts it, its candidates trickle after) — waiting for the
+  // gathering first let Chrome's checks + ClientHello reach werift before werift had the answer, and DTLS never completed
+  await pc.setLocalDescription(await pc.createAnswer());
+  return pc.localDescription.sdp;
+};
+window.collect = async () => {
+  const st = await window.pc.getStats(); const out = { inbound: null, outbound: null, video: null };
+  st.forEach((r) => {
+    if (r.type === 'inbound-rtp' && r.kind === 'audio') out.inbound = r;
+    if (r.type === 'outbound-rtp' && r.kind === 'audio') out.outbound = r;
+    if (r.type === 'inbound-rtp' && r.kind === 'video') out.video = { framesDecoded: r.framesDecoded, framesReceived: r.framesReceived };
+  });
+  const pairs = []; st.forEach((r) => { if (r.type === 'candidate-pair') pairs.push({ state: r.state, nominated: r.nominated, sent: r.requestsSent, recv: r.responsesReceived, local: st.get(r.localCandidateId)?.address, remote: st.get(r.remoteCandidateId)?.address }); });
+  out.ice = { conn: window.pc.connectionState, ice: window.pc.iceConnectionState, pairs: pairs.slice(0, 8) };
+  return { onsets: window.__onsets, log: window.__log, dc: window.__dc, sameStream: !!(window.__streams && window.__streams.audio && window.__streams.audio === window.__streams.video && window.__streams.audio.getTracks().length === 2), ctx: { baseLatency: ctx.baseLatency, outputLatency: ctx.outputLatency, sampleRate: ctx.sampleRate, state: ctx.state }, stats: out };
+};
+</script>

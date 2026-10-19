@@ -58,6 +58,45 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.312 — 2026-10-19
 
+### lane stream-audio-probe — the machine stream's SOUND: speaker passthrough and the microphone road, measured (owner 2026-10-19 「开始研究下透传麦克风和扬声器」; independence rule: no third-party host/driver); base 07036579 (.312)
+- PROBE ONLY, nothing built: scripts/probes/stream-audio/ (win/ WASAPI helper + on-box Node legs, mac/ SCK-audio scratch helper + the AudioServerPlugIn and its no-install load test, hub/ werift ⇄ headless Chrome). Tones = 1 kHz, −20 dBFS, 200 ms. On Windows most legs ran on an idle virtual endpoint, so they were inaudible. Captured audio was never written to disk.
+- WINDOWS SPEAKER (WASAPI loopback, in-box COM, csc):
+  - 10 ms packets; event-driven capture works. AUTOCONVERTPCM gives 48 kHz float stereo from a 5.1 mix.
+  - An app's sample reaches our capture 20 ms (virtual endpoint) / 31 ms (the owner's USB device) after the app writes it. Loopback stamps it with its PLAY time, so capture runs 20–35 ms AHEAD of the speaker. 0.5–2 % CPU.
+  - A render endpoint that nothing plays to delivers NOTHING: 0 packets and no events in 3 s. The fix is a silent render stream of our own (zeros, 100 packets/s, the first after 10.6 ms).
+- WINDOWS ENCODE (the agent's ffmpeg; libopus is present):
+  - Raw `-f s16le` over a pipe (or UDP) comes out in ~90 ms clumps: the PCM demuxer reads ~4096 frames per packet, and no option changes that. A sample takes 62–100 ms to reach its RTP packet.
+  - A streaming WAV header + `-f wav -max_size 1920 -ignore_length 1` gives a packet every 20 ms, 1–10 ms after the sample passes. App write → Opus RTP packet in the agent's hands: 21–30 ms.
+  - ffmpeg ≈ 5 % of a core and ~0.9 s to its first packet. 10 ms frames add +29 kbps of headers.
+- MAC SPEAKER (SCStreamConfiguration.capturesAudio, a scratch helper under the probe's granted launcher):
+  - It rides the Screen Recording grant. tccd shows ScreenCapture (allowed) and only a coreaudiod Microphone PREFLIGHT (preflight_unknown: no prompt, no row). No System-Audio service was asked.
+  - 48 kHz float32 stereo planar, 960-frame buffers, delivery p50 35 / p95 47 ms. Our tone is stamped +22 ms after its scheduled host time and is in hand at +58–73 ms. The level is exact.
+  - Starting an output engine at capture start held SCK audio for ~1 s once.
+- MAC OPUS IS IN-BOX: AudioToolbox (AVAudioConverter) encodes Opus in 0.28 ms per 20 ms packet; the packet exists ~1 ms after the buffer. It also decodes it (0.03 ms per packet, level intact). A Mac needs no ffmpeg for audio.
+- THE WEBRTC ROAD (werift 0.25.0 → Chrome 154, hub):
+  - Opus needs no packetizer: one Opus packet = one RTP payload, written with writeRtp on an audio track (werift rewrites SSRC / PT / seq).
+  - One msid puts audio + video in ONE MediaStream, so the product's `<video>` can carry the sound.
+  - Clean loopback: send → Chrome's audio graph 36–67 ms, → its output clock 73–103 ms (outputLatency 30–37 ms). NetEq 31–41 ms, 0 lost.
+  - With 0–30 ms of jitter: NetEq 46–63 ms, output 88–122 ms, no gaps.
+- THE DATA-CHANNEL FALLBACK (Opus on an unordered DC → WebCodecs AudioDecoder → an AudioWorklet): 22–39 ms to the graph, but 4–6 underruns per run with a 20 ms cushion. With a 60 ms cushion it costs the same as NetEq and still has no concealment. Not needed: V1 = the RTP track.
+- THE MIC BACK (getUserMedia → the same audio m-line, sendrecv → werift receives Opus RTP): it arrives within ±13 ms of Chrome's own WebAudio stamp of the captured sample. ~7 kbps on the tone fixture (Chrome's encoder, DTX off).
+- INTERCOM (no virtual mic; the viewer's voice plays on the machine's speakers): on Windows, PCM → our render stream reaches the mix in 31–36 ms; Ogg Opus → ffmpeg decode (< 1 ms) → render takes 57–60 ms. Both were measured on the virtual endpoint; the owner's device plays ~23 ms later than the virtual one.
+- WINDOWS VIRTUAL MIC: there is no user-mode way to publish a capture endpoint.
+  - Every virtual audio device on the owner's box (Steam Streaming Mic/Speakers, Voicemeeter VAIO, NVIDIA Broadcast, Dubbing) is a kernel .sys signed by "Microsoft Windows Hardware Compatibility Publisher" (attestation/WHQL).
+  - Our own would be a SYSVAD/ACX-class driver + an EV certificate + a Partner Center account + an admin pnputil install. That is the same class as the parked virtual display (B-f6b3). Not built.
+- MAC VIRTUAL MIC: our own AudioServerPlugIn (user space, no kernel) was BUILT on the owner's Mac (clang; 69 KB arm64 / 84 KB universal; ad-hoc signed).
+  - It was load-tested WITHOUT installing: vsmic-host loads the CFPlugIn factory from the Info.plist, gets the driver interface, walks the HAL's 24 properties, then runs StartIO / zero time stamps at 48 kHz / WriteMix → ReadInput. 25/25 passed.
+  - The tone written on the output side is read on the input side with 0 frames of added delay. A stopped feed reads as silence.
+  - NOT measured: loading inside coreaudiod. That needs /Library/Audio/Plug-Ins/HAL + admin + a coreaudiod restart; distribution needs Developer ID + notarization.
+- SIDE FINDING (not audio): werift 0.25's ICE-lite keeps sending DTLS to the FIRST pair the browser nominated.
+  - On the multi-homed hub, Chrome 154 nominated a tailnet pair and then moved to a LAN pair. werift answered the ClientHello on the tailnet pair, and the handshake never completed: both sides stayed "connecting" while Chrome retransmitted.
+  - The probe pins werift to one address (iceInterfaceAddresses). A viewer that reaches a machine over BOTH a LAN and a tailnet may hit the same problem.
+- NOT MEASURED:
+  - a real viewer's output device (only headless Chrome's output clock);
+  - the AudioServerPlugIn inside coreaudiod;
+  - Windows' Steam Streaming Microphone as a loop (it would open a microphone endpoint on the owner's box — ask first);
+  - bitrate on real program audio (the target is 64 kbps).
+
 ### lane win-run-hide-console — the census behind .310's windowsHide, the code page asked until known, the fallback said (owner 2026-10-19: 143 Windows Terminal windows on the owner's desktop + mojibake on every cmd.exe message); base 3b99063a (.310)
 - THE CENSUS (scripts/test-agentd-spawn-hide.mjs, fast, 2 s) that keeps .310's seven agentd flags: acorn TOKENS (a quote / paren inside a string or a regex literal never moves a bracket; the options object read whole across lines) over the device daemon = src/agentd/*.js + the entry's require closure, DERIVED (136 files). 61 call sites: hidden 27 · a POSIX tool by literal name 16 (ps / pgrep / lsof / fuser / mkfifo / stty / df / sysctl / vm_stat — ENOENT on Windows) · named exceptions 2 (node-pty's ConPTY; session-store's execFileP = tmux / ps) · whole files 16 sites in 6 files (client.js hub side, attach-cli.js terminal side, stream-mac.js darwin, desktop-display / app-serve / app-secrets Linux displays). Callee spellings: bare, `require('child_process').x(`, a cp receiver, `{ spawn: sp }`, `spawnImpl = spawn`; a function of the file's own (`const exec = (…) =>`) is a wrapper (its body is the site); a regex's `.exec(` / a client's `.fork(` are not sites. A dead exception row is RED.
 - THE SITES .310 DID NOT HAVE (the census found them): agentd's streaming exec (`{ spawn: sp }`, run-stream + usage-scan streams), and in the closure `claude --version` / `codex --version` (machine-probes, every probe op), the OpenCode serve (DETACHED — a window that stays) + its `git init`, codex app-server, agent-browser's `--version` probe and every browser verb (browser-facts `execFileImpl`, added before `maxBuffer` — two suites pin `maxBuffer: 4 * 1024 * 1024, cwd: dc.dir }`). All now windowsHide (a no-op on POSIX).
