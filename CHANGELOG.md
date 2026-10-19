@@ -9,6 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - On a Mac, keys and clicks over the stream work as soon as Accessibility is turned on for vibespace-screen — no restart needed.
+- The list of machines to run on shows at once; each machine’s state refreshes in the background.
 
 ### Changed
 - A plugin's reminders, like Dropline's dictionary suggestions, now stay at the top of For you, right under urgent items.

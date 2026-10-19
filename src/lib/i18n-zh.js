@@ -8816,6 +8816,10 @@ export default {
   "This host’s own screen is a Wayland session — it cannot be shown yet; the virtual desktop can": "这台主机的屏幕是 Wayland 会话，暂不能显示；虚拟桌面可以",
   "Checking machines…": "正在查看机器…",
   "No paired Windows or Mac machine yet": "还没有配对的 Windows 或 Mac 机器",
+  // lane desktop-picker-instant: a machine row's 技术细节 (its title)
+  "Checked {n} s ago": "上次检查 {n} 秒前",
+  "Checked {n} min ago": "上次检查 {n} 分钟前",
+  "probe {ms} ms": "探测 {ms} ms",
   "Display {n}": "显示器 {n}",
   "Switch machine": "切换机器",
   "Full screen": "全屏",

@@ -241,6 +241,9 @@ const PURE = new Set(['src/agent-cli-registry.js' /* lane cli-registry: THE agen
   'src/keeper-limits.js', 'src/desktop-apps.js', 'src/install-slot.js' /* lane dc-apps-rows: the machine's ONE package slot — imports nothing */, 'src/installs.js' /* lane dc-apps-rows: THE INSTALLABLES — one row each, imports only PURE owners */, ...fs.readdirSync(path.join(REPO, 'src/app-kinds')).map((f) => `src/app-kinds/${f}`) /* lane dc-app-kinds: an app KIND is its own file + one index line — each imports nothing but its siblings */,
   // rv-desktop-apps F-S1 (lane dc-seams-desktop): its families, each its own PURE file
   'src/desktop-backends.js', 'src/desktop-fit.js', 'src/desktop-browser-app.js', 'src/machine-desktop-model.js',
+  // lane desktop-picker-instant: the machine rows' LAST KNOWN STATE — fresh / stale / none, the refresh floor, the broadcast payload,
+  // the probe's log lines, data/desktop-machines.json's shape (imports only the model above); the access layer + the picker share it
+  'src/desktop-machines-cache.js',
   // lane machine-app-crop: ONE app of a Windows / macOS machine as its own window — the look's scripts + parse, which window is
   // the app's, the crop + pointer math; the daemon runs it with its own spawn handed in (imports only the model above)
   'src/machine-window.js',

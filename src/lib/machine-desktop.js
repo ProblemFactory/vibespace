@@ -509,8 +509,12 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   const listApps = async (fresh) => {
     const mine = ++asked;
     apps.set({ ...apps.get(), loading: true });
-    const r = await fetchJson(`/api/desktop/machine-desktop/apps?host=${encodeURIComponent(m.hostId)}${fresh ? '&fresh=1' : ''}`);
+    const url = `/api/desktop/machine-desktop/apps?host=${encodeURIComponent(m.hostId)}`;
+    let r = await fetchJson(`${url}${fresh ? '&fresh=1' : ''}`);
     if (mine !== asked || !body.isConnected) return;
+    // lane desktop-picker-instant: the list the machine gave last is drawn AT ONCE (`listing` — it is listing again: 391–446 apps
+    // took 5–20 s on the owner's Windows box); the follow-up waits for the new list
+    if (r && r.listing && Array.isArray(r.rows)) { apps.set({ ...r, loading: true }); r = await fetchJson(`${url}&wait=1`); if (mine !== asked || !body.isConnected) return; }
     apps.set(r && Array.isArray(r.rows) ? r : { rows: apps.get().rows || [], code: (r && r.code) || 'list_failed', error: (r && r.error) || t('server unreachable') }); // a list answer may carry a code (an old agent, offline) — its rows are still the list
   };
   const check = async () => {
@@ -568,6 +572,12 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   input.onkeydown = (e) => { if (enterSubmits(e)) { e.preventDefault(); run({ window: asWindow() }); } };
   render();
   listApps(false);
+  // lane desktop-picker-instant: a listing that landed elsewhere (the machine's hello, another window's Check again) is announced —
+  // a newer list is read again (from the hub's store: nothing is asked of the machine)
+  const offListed = app.ws && typeof app.ws.onGlobal === 'function' ? app.ws.onGlobal((msg) => {
+    if (!body.isConnected) { try { offListed?.(); } catch { /* gone */ } return; }
+    if (msg && msg.type === 'desktop-installed-updated' && msg.hostId === m.hostId && (msg.listedAt || 0) > (apps.get().listedAt || 0) && !apps.get().loading) listApps(false);
+  }) : null;
 }
 
 // ── WINDOW-TYPE REGISTRATION ── not persisted: a reload never re-opens a machine's whole screen (it asks the sign-in)

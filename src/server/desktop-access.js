@@ -40,6 +40,7 @@
  * unconditional teardowns.
  */
 const net = require('net');
+const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
@@ -53,6 +54,7 @@ const D = require('../desktop-display.js'); // design 014 D1: the PURE RFB greet
 const AGENT_VERSION = (() => { try { return require('../../package.json').version; } catch { return ''; } })(); // lane remoteapp-r1b: the agent version that answers `remoteapp-facts` = this hub's (its agents upgrade to it)
 const RA = require('../remoteapp.js'); // lane remoteapp-r1a (design q-024 §1.2): the RemoteApp setup words, the platform verdict, the RDP port
 const SMOD = require('../stream-model.js'); // lane stream-p1a-transport: the webrtc rung's PURE verdict (the agent's capability, a source)
+const MC = require('../desktop-machines-cache.js'); // lane desktop-picker-instant: the machine rows' last known state (PURE)
 const IA = require('../installed-apps.js'); // lane machine-desktop-apps: a Windows / macOS machine's installed apps (SHARED: the device lists, the hub judges again)
 
 let installed = null;
@@ -89,7 +91,7 @@ const INSTALL_LOG_NAME = `~/.vibespace/${SLOT.INSTALL_FILES.log}`; // how a mess
  * @param hosts   HostManager (deviceBounded / get / isLocal) or null (local only)
  * @param local   () => THIS machine's desktop-serve handle (the hub keeper's `machine`)
  */
-function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000, vncPort = D.VNC_NATIVE.port, probeMs = 3000, audit = null, installedStore = null, helloListMs = 3000, rdpSetup = null, integrations = null } = {}) {
+function create({ hosts = null, local = null, env = () => process.env, log = console, install = true, connectMs = 8000, installMs = 15 * 60 * 1000, holdMs = 60 * 60 * 1000, pollMs = 15000, vncPort = D.VNC_NATIVE.port, probeMs = 3000, audit = null, installedStore = null, helloListMs = 3000, rdpSetup = null, integrations = null, dataDir = null, broadcast = null } = {}) {
   const forwards = new Map(); // `${hostId}:${remotePort}` → { server, sockets, localPort, hostId, remotePort, refs }
   const opening = new Map();  // key → the in-flight listen (a concurrent second caller joins it)
   const installs = new Map(); // machine key → { since, running } — THIS hub's follower; the machine's own slot is its pidfile (installState)
@@ -199,24 +201,81 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (!dialLive || !hosts || typeof hosts.deviceBounded !== 'function') return null;
     try { const dm = await hosts.deviceBounded(h.id, Math.min(connectMs, 3000)); return dm && dm.status && dm.status().connected ? dm : null; } catch { return null; }
   }
+  // ── lane desktop-picker-instant (owner 2026-10-19 「这个界面的加载时间怎么越来越长了」): THE ROWS ANSWER AT ONCE from what this
+  // hub last knew — in memory and in data/desktop-machines.json (a restart paints too). Every answer kicks a background
+  // refresh when due (ONE probe in flight per machine — a second asker joins it); the landed row is BROADCAST
+  // (`desktop-machines-updated` — the cache-invalidation-must-NOTIFY law) and the open dialogs patch that row in place.
+  // The rules (fresh / stale / none, the floor, the payload, the log lines, the file) are PURE: src/desktop-machines-cache.js
+  const known = new Map();      // hostId → { row, at, ms } — each machine's last probe
+  const refreshing = new Map(); // hostId → the probe in flight
+  const knownFile = dataDir ? path.join(dataDir, MC.FILE_NAME) : null;
+  if (knownFile) { try { for (const [id, e] of MC.fromFile(JSON.parse(fs.readFileSync(knownFile, 'utf8')))) known.set(id, e); } catch { /* none yet (or unreadable): each row says 「检查中…」 until its probe lands */ } }
+  const hostList = () => { try { return hosts && typeof hosts.list === 'function' ? hosts.list() : []; } catch { return []; } };
+  const linkOf = (h) => { try { return typeof hosts.linkState === 'function' ? hosts.linkState(h.id) : (h.online ? 'online' : 'unknown'); } catch { return 'unknown'; } };
+  /** What the hub knows of a machine WITHOUT asking it (synchronous): its record, its link, a connected handle's platform. */
+  const recOf = (h) => {
+    let info = null;
+    try { const dm = hosts && typeof hosts.connectedDevice === 'function' ? hosts.connectedDevice(h.id) : null; info = dm && dm.status ? dm.status().info || null : null; } catch { info = null; }
+    return { hostId: h.id, label: String(h.name || h.id), transport: h.transport === 'dial' ? 'dial' : 'ssh', link: info ? 'online' : linkOf(h), connected: !!info, platform: info ? info.platform || null : null };
+  };
+  /** THE ROWS NOW — this machine first, then every paired machine's last known row (no history: 「检查中…」). */
+  const rowsNow = () => [{ hostId: 'local', label: null, transport: 'local', link: 'online', connected: true, platform: process.platform, ...M.machinePickRow({ hostId: 'local' }) }].concat(MC.answerRows(hostList().map(recOf), known, Date.now()));
+  /** ONE machine's row asked LIVE (what machines() awaited per machine before this lane), timed by step: the handle without a
+   *  connect ladder (`dial`), then — a connected Windows / macOS machine — its own VNC server (`forward` + `greeting`). Logs
+   *  ONE line; a probe over 2 s logs a second naming its slowest step. The label is a DISPLAY string (the host record's
+   *  name): it goes to the dialog and the window title, never into a spawn. → { row, ms } */
+  async function probeRow(h, why) {
+    const t0 = Date.now(), steps = {};
+    const link = linkOf(h);
+    const dm = await handleIfConnected(h);
+    steps.dial = Date.now() - t0;
+    const info = dm && dm.status ? (dm.status().info || null) : null;
+    const row = { hostId: h.id, label: String(h.name || h.id), transport: h.transport === 'dial' ? 'dial' : 'ssh', link: info ? 'online' : link, connected: !!info, capabilities: info && Array.isArray(info.capabilities) ? info.capabilities : null, platform: info ? info.platform || null : null };
+    // design 014 D1: a connected Windows / macOS machine's own VNC server, probed as the launcher opens (Linux rows untouched)
+    if (row.connected && M.DESKTOP_PLATFORMS.includes(row.platform)) { const p = await probeTimed(h.id, dm).catch((e) => ({ vnc: { ok: false, code: 'no_listener', why: String((e && e.message) || e) }, steps: {} })); row.vnc = p.vnc; Object.assign(steps, p.steps); }
+    const out = { ...row, ...M.machinePickRow(row) };
+    const ms = Date.now() - t0;
+    log.log?.(MC.probeLine(h.id, ms, out.code, why));
+    const slow = MC.slowLine(h.id, ms, steps);
+    if (slow) log.warn?.(slow);
+    return { row: out, ms };
+  }
+  function saveKnown() {
+    if (!knownFile) return;
+    try { require('../channel-store.js').writeJsonAtomic(knownFile, MC.toFile(known, new Set(hostList().map((h) => h.id)))); } catch (e) { log.warn?.(`[desktop] could not keep the machine rows in ${MC.FILE_NAME}: ${(e && e.message) || e}`); }
+  }
+  /** Refresh ONE machine's row when due (MC.refreshDue — `force`: Check again, the daemon's hello); a probe in flight is
+   *  JOINED. The landed row is kept, written and broadcast. → the probe's promise | null (nothing due) */
+  function refreshHost(h, why, { force = false } = {}) {
+    const inFlight = refreshing.get(h.id) || null;
+    if (!MC.refreshDue(known.get(h.id), { now: Date.now(), inFlight: !!inFlight, force, linkNow: linkOf(h) })) return inFlight;
+    const p = probeRow(h, why).then(({ row, ms }) => {
+      known.set(h.id, { row, at: Date.now(), ms });
+      saveKnown();
+      if (typeof broadcast === 'function') { try { broadcast(MC.machinesPayload(rowsNow(), h.id)); } catch { /* a broadcast never fails a probe */ } }
+    }).catch((e) => { log.warn?.(`[desktop] ${h.id} probe failed: ${(e && e.message) || e}`); }).finally(() => { refreshing.delete(h.id); });
+    refreshing.set(h.id, p);
+    return p;
+  }
   /** Every machine the launch dialog may offer (this machine first), each with the PURE picker verdict
-   *  (src/desktop-apps.js machinePickRow) — greyed rows carry their code, nothing is hidden. The label is a DISPLAY
-   *  string (the host record's name): it goes to the dialog and the window title, never into a spawn. */
-  async function machines() {
-    const out = [{ hostId: 'local', label: null, transport: 'local', link: 'online', connected: true, platform: process.platform, ...M.machinePickRow({ hostId: 'local' }) }];
-    let list = [];
-    try { list = hosts && typeof hosts.list === 'function' ? hosts.list() : []; } catch { list = []; }
-    const rows = await Promise.all(list.map(async (h) => {
-      let link = 'unknown';
-      try { link = typeof hosts.linkState === 'function' ? hosts.linkState(h.id) : (h.online ? 'online' : 'unknown'); } catch { link = 'unknown'; }
-      const dm = await handleIfConnected(h);
-      const info = dm && dm.status ? (dm.status().info || null) : null;
-      const row = { hostId: h.id, label: String(h.name || h.id), transport: h.transport === 'dial' ? 'dial' : 'ssh', link: info ? 'online' : link, connected: !!info, capabilities: info && Array.isArray(info.capabilities) ? info.capabilities : null, platform: info ? info.platform || null : null };
-      // design 014 D1: a connected Windows / macOS machine's own VNC server, probed as the launcher opens (Linux rows untouched)
-      if (row.connected && M.DESKTOP_PLATFORMS.includes(row.platform)) row.vnc = await probeDesktop(h.id, dm).catch((e) => ({ ok: false, code: 'no_listener', why: String((e && e.message) || e) }));
-      return { ...row, ...M.machinePickRow(row) };
-    }));
-    return out.concat(rows);
+   *  (src/desktop-apps.js machinePickRow) — greyed rows carry their code, nothing is hidden — every machine PROBED NOW
+   *  (the probes in flight joined). The route answers machinesNow instead (at once). */
+  async function machines({ why = 'recheck' } = {}) {
+    await Promise.all(hostList().map((h) => refreshHost(h, why, { force: true })));
+    return rowsNow();
+  }
+  /** THE ROUTE'S ANSWER, AT ONCE: the last known rows, each machine's refresh kicked when due. `wait` = the answer once the
+   *  probes in flight landed (the page's follow-up — a broadcast it missed still lands); `fresh` = probe now and wait for
+   *  it (`host` = that machine only — Check again). → { machines, refreshing: [hostId] } */
+  async function machinesNow({ wait = false, fresh = false, host = null } = {}) {
+    const waits = [];
+    for (const h of hostList()) {
+      const force = !!fresh && (!host || host === h.id);
+      const p = refreshHost(h, force ? 'recheck' : 'picker', { force });
+      if (p && (wait || force)) waits.push(p);
+    }
+    if (waits.length) await Promise.all(waits);
+    return { machines: rowsNow(), refreshing: [...refreshing.keys()] };
   }
   /** The install rung's facts + the PURE plan for one machine: the plan is SHOWN before anything runs. `what` (§7.9) =
    *  which install — absent / 'xpra' the display rung, a LibreOffice install by its catalog id (I.installPlanFor: a
@@ -406,11 +465,25 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    * lists machines and when a desktop window first opens on a link — never on a timer. → the greeting verdict, or
    * `{ok:false, code:'no_listener'}` when nothing listens there.
    */
-  async function probeDesktop(hostId, dmIn = null) {
+  async function probeDesktop(hostId, dmIn = null, why = 'open') {
+    const t0 = Date.now();
     const dm = dmIn || await deviceOf(hostId);
+    const dial = Date.now() - t0;
+    const { vnc, steps } = await probeTimed(hostId, dm);
+    const ms = Date.now() - t0;
+    log.log?.(MC.probeLine(hostId, ms, vnc.ok ? 'desktop_ready' : 'no_vnc', why)); // lane desktop-picker-instant: every probe is ONE line
+    const slow = MC.slowLine(hostId, ms, { dial, ...steps });
+    if (slow) log.warn?.(slow);
+    return vnc;
+  }
+  /** THE PROBE ITSELF, timed by step (lane desktop-picker-instant): `forward` = the agent's tcp-connect, `greeting` = the
+   *  server's first bytes. → { vnc: the greeting verdict, steps } */
+  async function probeTimed(hostId, dm) {
+    const t0 = Date.now();
     let h;
-    try { h = await dm.tcpForward(vncPort); } catch (e) { return { ok: false, code: 'no_listener', why: `nothing listens on port ${vncPort} there (${(e && e.message) || 'refused'})` }; }
-    return new Promise((resolve) => {
+    try { h = await dm.tcpForward(vncPort); } catch (e) { return { vnc: { ok: false, code: 'no_listener', why: `nothing listens on port ${vncPort} there (${(e && e.message) || 'refused'})` }, steps: { forward: Date.now() - t0 } }; }
+    const t1 = Date.now();
+    const vnc = await new Promise((resolve) => {
       let buf = Buffer.alloc(0), replied = false, done = false, timer = null;
       const finish = (v) => { if (done) return; done = true; clearTimeout(timer); try { h.close(); } catch { /* gone */ } resolve(v); };
       const ended = (code, why) => { const g = D.rfbGreeting(buf); return g.ok || g.code !== 'truncated' ? g : { ...g, code: buf.length ? g.code : code, why: buf.length ? g.why : why }; };
@@ -424,6 +497,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
       };
       h.onClose = () => finish(ended('no_listener', `nothing listens on port ${vncPort} there`));
     });
+    return { vnc, steps: { forward: t1 - t0, greeting: Date.now() - t1 } };
   }
   const platformOfHandle = (dm) => { try { const st = dm && dm.status ? dm.status() : null; return st && st.connected && st.info ? st.info.platform || null : null; } catch { return null; } };
   const notDesktop = (hostId, platform) => named('not_desktop_machine', `${hostId} runs ${platform || 'an unknown system'} — "Its desktop" is for Windows and macOS machines (a Linux machine's apps open in their own windows)`);
@@ -550,7 +624,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (r.code !== 0) throw fail('install_failed', `the install exited ${r.code} on ${hostId} — the administrator window there said why`);
     desktops.delete(hostId);
     installedNow(hostId, plan.label); // lane machine-desktop-apps: what our door installed is on the machine's list at once
-    return { ok: true, what: plan.what, hostId, plan, before: null, after: await probeDesktop(hostId, dm), facts: null, reattached: false };
+    return { ok: true, what: plan.what, hostId, plan, before: null, after: await probeDesktop(hostId, dm, 'install'), facts: null, reattached: false };
   }
 
   /** ONE file of a paired machine, read through its agent (bounded) — the hosted xpra client's files when the hub has
@@ -575,12 +649,15 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   const listing = new Map(); // hostId → the in-flight listing
   const storeOf = () => { const st = typeof installedStore === 'function' ? installedStore() : installedStore; return st && typeof st.installedOf === 'function' ? st : null; };
   const listAnswer = (hostId, e, extra = {}) => ({ hostId, platform: (e && e.platform) || null, rows: e ? e.rows : [], total: e ? (Number.isFinite(e.total) ? e.total : e.rows.length) : 0, truncated: !!(e && e.truncated), listedAt: (e && e.listedAt) || null, ...extra });
-  async function installedApps(hostId, { why = 'open' } = {}) {
+  async function installedApps(hostId, { why = 'open', wait = true } = {}) {
     if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine\'s apps are in the Apps launcher');
     const store = storeOf();
     const cached = store ? store.installedOf(hostId) : null;
     if (!IA.listDue(cached, why, Date.now())) return listAnswer(hostId, cached);
-    if (listing.has(hostId)) return listing.get(hostId);
+    // lane desktop-picker-instant: a dialog OPENING never waits for the machine to list (391–446 apps took 5–20 s on the
+    // owner's Windows box) — `wait: false` answers the list it gave last with `listing: true`; the landed list is
+    // announced (`desktop-installed-updated`) and the page's follow-up (`wait`) joins the listing in flight
+    if (listing.has(hostId)) return wait ? listing.get(hostId) : listAnswer(hostId, cached, { listing: true });
     const p = (async () => {
       let dm;
       try { dm = await deviceOf(hostId); } catch (e) { if (e.code === 'unsupported-host') throw e; return listAnswer(hostId, cached, { code: e.code === 'host_needs_daemon' ? e.code : 'offline', error: e.message }); }
@@ -598,9 +675,10 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
       if (store) store.noteInstalled(hostId, entry);
       log.log?.(`[desktop] ${hostId} listed ${rows.length} installed app(s) in ${at - t0} ms (${why})`);
       return listAnswer(hostId, entry);
-    })().finally(() => listing.delete(hostId));
+    })().finally(() => listing.delete(hostId)).then((a) => { if (typeof broadcast === 'function') { try { broadcast(MC.installedPayload(hostId, a)); } catch { /* the notice never fails a listing */ } } return a; });
     listing.set(hostId, p);
-    return p;
+    p.catch(() => { /* a refused listing is the waiting asker's answer — an open that did not wait never sees it */ });
+    return wait ? p : listAnswer(hostId, cached, { listing: true });
   }
   /** An install through our door finished on a machine: its app is on the list AT ONCE (`pending` — nothing to press yet)
    *  and the machine is listed again; that listing (the machine's own records) replaces it. */
@@ -616,7 +694,11 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
   // a flapping link is not listed twice a minute); any other machine, or an agent without the op, is never asked
   if (hosts && typeof hosts.addDialInHook === 'function') {
     hosts.addDialInHook((hostId) => {
-      if (!hostId || !storeOf()) return;
+      if (!hostId) return;
+      // lane desktop-picker-instant: the machine's row is probed again once its link answers — an open picker hears it
+      const again = setTimeout(() => { const h = hostList().find((x) => x.id === hostId); if (h) refreshHost(h, 'hello', { force: true }); }, helloListMs);
+      again.unref?.();
+      if (!storeOf()) return;
       const t = setTimeout(() => { installedApps(hostId, { why: 'hello' }).catch(() => { /* not a Windows / macOS machine, or gone again */ }); }, helloListMs);
       t.unref?.();
     });
@@ -767,7 +849,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, streamFacts, streamWindows, settingsOpen, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, machinesNow, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, streamFacts, streamWindows, settingsOpen, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
   if (install) installed = layer;
   return layer;
 }

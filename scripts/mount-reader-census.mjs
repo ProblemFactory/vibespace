@@ -112,6 +112,7 @@ export const ROWS = [
   ['src/server/channels-attention.js', 'own-tree', 1, null, DATA],   // lane decision-attention: data/decision-examples.json (its ONE writer)
   ['src/server/doc-engine.js', 'own-tree', 1, null, DATA], // lane doc-comments-stopped-owner: data/doc-owners.json (the owner memo)
   ['src/server/design-engine.js', 'user-path', 6, 'DOOR\\.blocked\\(', 'the design watch relist: refused by name, never read'],
+  ['src/server/desktop-access.js', 'own-tree', 1, null, 'lane desktop-picker-instant: data/desktop-machines.json (the machine rows\' last known state), read once at boot — the server\'s own store'],
   ['src/server/desktop-app-keeper.js', 'own-tree', 1, null, DATA],
   ['src/server/desktop-webrtc.js', 'own-tree', 3, null, 'lane stream-p3m-build: the prebuilt Mac screen helper the hub pushes to a Mac with no compiler — data/bin/helpers/vibespace-screen (+ .version) in the checkout: its version, its size, its bytes'],
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],

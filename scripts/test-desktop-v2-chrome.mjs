@@ -32,6 +32,12 @@
 //      (② waits for them now — RED CONTROL: the old read right after 已连接 sees 显示器 1 / 显示器 2); 2 is pressed, then the
 //      table is released ⇒ display 2 STAYS drawn (carryPick: the RFB id → the OS id at the same place); RED CONTROL: the
 //      pre-fix machine-desktop.js falls back to the whole 2560 px framebuffer the moment the names arrive
+//   ⑯ lane desktop-picker-instant (owner 2026-10-19 「这个界面的加载时间怎么越来越长了」): a second Windows machine the hub never
+//      probed, every VNC greeting 1.5 s: the picker draws EVERY row at once (WIN-DESK1 就绪 from its last probe, its title
+//      「上次检查 N 秒前 · 探测 M ms」; WIN-DESK2 检查中…, not pressable); the person moves the focus (↓); the late probe arrives as the
+//      BROADCAST (the page's ?wait=1 follow-up is held) and patches WIN-DESK2's row IN PLACE (the same node) — the focus stays on
+//      their row. RED CONTROL: the pre-fix route (it awaited every probe) shows no remote machine for the 1.5 s
+//                                                                                     picker-instant.png, picker-patched.png
 // PNGs when `--shots <dir>`.
 import fs from 'node:fs';
 import net from 'node:net';
@@ -137,7 +143,7 @@ function stubVnc() {
   const server = net.createServer((sock) => {
     const c = { sock, stage: 0, buf: Buffer.alloc(0), ext: false, full: false, timer: null };
     conns.add(c); sock.on('error', () => { }); sock.on('close', () => { clearTimeout(c.timer); conns.delete(c); });
-    sock.write('RFB 003.008\n');
+    if (st.greetMs) setTimeout(() => { if (!sock.destroyed) sock.write('RFB 003.008\n'); }, st.greetMs); else sock.write('RFB 003.008\n'); // ⑯: a slow greeting
     sock.on('data', (d) => {
       c.buf = Buffer.concat([c.buf, d]);
       for (;;) {
@@ -164,8 +170,12 @@ vnc = await stubVnc();
 // ── the hub: the real access layer + routes + the ONE picture bridge ───────────────────────────────────────────────
 const quiet = { log() { }, warn() { } };
 const ACC = require(path.join(REPO, 'src/server/desktop-access.js'));
-const hosts = { list: () => [{ id: 'win-a', name: 'WIN-DESK1', transport: 'dial' }], linkState: () => 'online', connectedDevice: (id) => (id === 'win-a' ? dm : null), get: (id) => (id === 'win-a' ? { id, name: 'WIN-DESK1' } : null), isLocal: (id) => id === 'local', deviceBounded: async (id) => (id === 'win-a' ? dm : null) };
-const access = ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000 });
+const extra = { on: false }; // ⑯ (lane desktop-picker-instant): WIN-DESK2 — a machine the hub never probed (the same agent)
+const isMine = (id) => id === 'win-a' || (extra.on && id === 'win-b');
+const hosts = { list: () => [{ id: 'win-a', name: 'WIN-DESK1', transport: 'dial' }, ...(extra.on ? [{ id: 'win-b', name: 'WIN-DESK2', transport: 'dial' }] : [])], linkState: () => 'online', connectedDevice: (id) => (isMine(id) ? dm : null), get: (id) => (isMine(id) ? { id, name: id === 'win-a' ? 'WIN-DESK1' : 'WIN-DESK2' } : null), isLocal: (id) => id === 'local', deviceBounded: async (id) => (isMine(id) ? dm : null) };
+const bcast = { to: null, got: [] }; // ⑯: the hub's broadcasts, handed to the page while `to` is set
+const access = ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, broadcast: (m) => { bcast.got.push(m); if (bcast.to) bcast.to(m); } });
+await access.machines(); // the hub has probed WIN-DESK1 before (lane desktop-picker-instant: the rows answer from the last probe; ⑯ has one it never probed)
 const DS = require(path.join(REPO, 'src/server/desktop-stream.js'));
 const bridge = DS.create({ auth: { requestAuthed: () => true }, log: quiet, pingMs: 5000, resolveTarget: (id) => access.machineDesktopTarget(id), forwardPort: (h, p) => access.forwardPort(h, p) });
 const express = require(path.join(REPO, 'node_modules/express'));
@@ -185,7 +195,9 @@ const wm = { windows: new Map(), revealWindow() {},
     const w = { id, element: el, content, title, type }; wm.windows.set(id, w); return w; },
   closeWindow(id) { const w = wm.windows.get(id); if (!w) return; wm.windows.delete(id); w.onClose && w.onClose(); w.element.remove(); },
 };
-const app = { wm, _vncAvailable: true, _vncSeat: null, localOpened: 0, openDesktop() { app.localOpened++; }, _hideWelcome() {} };
+const BL = new Set(); // ⑯: the page's global broadcasts (the hub's, handed over by the suite)
+window.__bcast = (m) => { for (const f of [...BL]) f(m); return true; };
+const app = { wm, _vncAvailable: true, _vncSeat: null, localOpened: 0, openDesktop() { app.localOpened++; }, _hideWelcome() {}, ws: { onGlobal(fn) { BL.add(fn); return () => BL.delete(fn); } } };
 window.__app = app;
 window.__picker = (o) => openDesktopPicker(app, o || {});
 window.__dialog = (m) => showMachineDesktopDialog(app, m, { recheck: async () => m });
@@ -205,6 +217,9 @@ const app = express(); app.use(express.json());
 const dhold = { on: false, held: [] };
 app.use((q, s, next) => { if (dhold.on && q.path === '/api/desktop/machine-desktop/displays') { dhold.held.push(next); return; } next(); });
 const dRelease = () => { dhold.on = false; for (const f of dhold.held.splice(0)) f(); };
+// ⑯: while `whold.on` the page's follow-up (GET /api/desktop/machines?wait=1) waits here — only the broadcast can patch a row
+const whold = { on: false, held: [] };
+app.use((q, s, next) => { if (whold.on && q.path === '/api/desktop/machines' && q.query.wait === '1') { whold.held.push(next); return; } next(); });
 app.use(R.router);
 const CSS = ['style', 'viewers', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
 for (const n of CSS) app.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
@@ -470,6 +485,39 @@ console.log('⑮ the table lands late: 2 pressed on the -308 rects, then the mac
   const g = await lateTable('/prefix');
   ok(g.up && g.held === 1 && g.two && g.named && !g.after.crop && g.drawn,
     '⑮ RED CONTROL: the pre-fix machine-desktop.js drops the pick the moment the names arrive — the whole 2560 px framebuffer (the mirror\'s ③ {W:2560} and ④ press at x 1280)', g.after);
+}
+console.log('⑯ the rows at once: a late probe patches its row, the focus stays');
+{
+  const p = await page(1280, 800, DESK);
+  const VNCS = { status: async () => ({ available: true, running: false }) };
+  const ROW = (h) => `.desktop-picker-row[data-group="remote"][data-host="${h}"]`;
+  const firstRows = `(async () => { const t0 = performance.now(); window.__picker(); await new Promise((r) => { const tick = () => (document.querySelector('${ROW('win-b')}') ? r() : setTimeout(tick, 5)); tick(); }); return Math.round(performance.now() - t0); })()`;
+  const rowOf = (h) => `(() => { const b = document.querySelector('${ROW(h)}'); return b ? { state: b.querySelector('.desktop-picker-state').textContent, disabled: b.disabled, title: b.title } : null; })()`;
+  vnc.st.greetMs = 1500; extra.on = true;
+  // RED CONTROL: the pre-fix route (it awaited machines() — every machine's probe) over the same machines
+  const ctl = ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000 });
+  R.setup({ access: { ...ctl, machinesNow: undefined }, stream: bridge, vnc: VNCS });
+  const tCtl = await p.ev(firstRows);
+  await p.key('Escape', 'Escape', 27);
+  ok(tCtl >= 1400, `⑯ RED CONTROL: the pre-fix route — the picker shows no remote machine for ${tCtl} ms (it waited for the 1.5 s greeting)`, tCtl);
+  R.setup({ access, stream: bridge, vnc: VNCS });
+  // THE FIX: the hub's last known rows at once; the page's follow-up (?wait=1) is HELD — only the BROADCAST can patch a row
+  whold.on = true;
+  bcast.to = (m) => { p.ev(`window.__bcast(${JSON.stringify(m)})`).catch(() => { }); };
+  const t1 = await p.ev(firstRows);
+  const a = await p.ev(rowOf('win-a')), b0 = await p.ev(rowOf('win-b'));
+  ok(t1 < 500 && a && a.state === '就绪' && !a.disabled && /^上次检查 \d+ (秒|分钟)前 · 探测 \d+ ms$/.test(a.title) && b0 && b0.state === '检查中…' && b0.disabled, `⑯ the picker draws every machine in ${t1} ms with a 1.5 s greeting in flight: WIN-DESK1 就绪 from its last probe (title 「${a && a.title}」), WIN-DESK2 never probed 检查中… — that row only, not pressable`, { a, b0 });
+  await p.shot('picker-instant.png', '.desktop-picker');
+  await p.key('ArrowDown', 'ArrowDown', 40); // the person moves the focus
+  const mark = await p.ev(`(() => { const f = document.activeElement; f.dataset.mark = 'focus'; document.querySelector('${ROW('win-b')}').dataset.mark = 'b'; return f.dataset.group + ':' + f.dataset.host; })()`);
+  const landed = await p.until(`(() => { const b = document.querySelector('${ROW('win-b')}'); return !!b && b.querySelector('.desktop-picker-state').textContent === '就绪'; })()`, 8000);
+  const after = await p.ev(`(() => { const b = document.querySelector('${ROW('win-b')}'); return { same: b.dataset.mark === 'b', disabled: b.disabled, title: b.title, focus: document.activeElement.dataset.mark === 'focus', on: document.activeElement.dataset.group + ':' + document.activeElement.dataset.host }; })()`);
+  ok(landed && after.same && !after.disabled && after.focus && /^上次检查 \d+ 秒前 · 探测 1[5-9]\d\d ms$/.test(after.title) && whold.held.length >= 1 && bcast.got.some((m) => m.type === 'desktop-machines-updated' && m.hostId === 'win-b'), `⑯ the late probe arrives as the BROADCAST (the follow-up held): WIN-DESK2 → 就绪 on the SAME row node, the focus still on ${mark} (now ${after.on}), title 「${after.title}」`, after);
+  await p.shot('picker-patched.png', '.desktop-picker');
+  await p.key('Escape', 'Escape', 27);
+  whold.on = false; for (const f of whold.held.splice(0)) f();
+  bcast.to = null; vnc.st.greetMs = 0; extra.on = false;
+  p.close();
 }
 console.log('⑪ RED CONTROL: noVNC without the patch');
 {

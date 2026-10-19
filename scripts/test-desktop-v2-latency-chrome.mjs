@@ -152,6 +152,7 @@ const quiet = { log() { }, warn() { } };
 const ACC = require(path.join(REPO, 'src/server/desktop-access.js'));
 const hosts = { list: () => [{ id: 'win-a', name: 'WIN-DESK1', transport: 'dial' }], linkState: () => 'online', connectedDevice: (id) => (id === 'win-a' ? dm : null), get: (id) => (id === 'win-a' ? { id, name: 'WIN-DESK1' } : null), isLocal: (id) => id === 'local', deviceBounded: async (id) => (id === 'win-a' ? dm : null) };
 const access = ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000 });
+await access.machines(); // the hub has probed the machine before (lane desktop-picker-instant: the picker's rows answer from the last probe)
 const DS = require(path.join(REPO, 'src/server/desktop-stream.js'));
 const bridge = DS.create({ auth: { requestAuthed: () => true }, log: quiet, pingMs: 5000, resolveTarget: (id) => access.machineDesktopTarget(id), forwardPort: (h, p) => access.forwardPort(h, p) });
 const express = require(path.join(REPO, 'node_modules/express'));

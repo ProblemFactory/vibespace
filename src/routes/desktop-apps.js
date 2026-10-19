@@ -75,7 +75,10 @@
  *                                     launch dialog's machine picker — this machine + every
  *                                     paired machine, each with the PURE picker verdict
  *                                     (`selectable`, `code`: ready | connect | offline |
- *                                     host_needs_daemon | no_x11) — greyed, never hidden
+ *                                     host_needs_daemon | no_x11 | checking) — greyed, never hidden;
+ *                                     AT ONCE from the last known rows (lane desktop-picker-instant:
+ *                                     {machines, refreshing}; `wait=1` after the probes in flight,
+ *                                     `fresh=1[&host=]` = probe now — Check again)
  *   GET  /api/desktop/machine-desktop/apps?host=[&fresh=1]   lane machine-desktop-apps: a Windows / macOS machine's
  *                                     INSTALLED apps, listed on it by witness (people only) — {rows:[{name, launch,
  *                                     source, seenAt}], listedAt, total, truncated, code?}
@@ -332,8 +335,11 @@ router.post('/api/desktop/apps/adopt', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 // lane C2: the machine picker, the install rung's plan, and the install itself (streamed)
+// lane desktop-picker-instant: AT ONCE from the hub's last known rows (`?wait=1` = after the probes in flight; `?fresh=1[&host=]` =
+// probe now and wait — Check again); a landed probe is broadcast (`desktop-machines-updated`)
 router.get('/api/desktop/machines', async (req, res) => {
-  try { res.json({ machines: ctx.access ? await ctx.access.machines() : [{ hostId: 'local', label: null, transport: 'local', link: 'online', connected: true, selectable: true, code: 'ready' }] }); } catch (e) { fail(res, e); }
+  const q = req.query || {};
+  try { res.json(!ctx.access ? { machines: [{ hostId: 'local', label: null, transport: 'local', link: 'online', connected: true, selectable: true, code: 'ready' }] } : typeof ctx.access.machinesNow === 'function' ? await ctx.access.machinesNow({ wait: q.wait === '1', fresh: q.fresh === '1', host: q.host ? String(q.host) : null }) : { machines: await ctx.access.machines() }); } catch (e) { fail(res, e); }
 });
 router.get('/api/desktop/install-plan', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
@@ -637,7 +643,9 @@ router.get('/api/desktop/machine-desktop/apps', async (req, res) => {
   if (humanOnly(req, res)) return;
   const host = hostParam(req, res); if (!host) return;
   if (!ctx.access || typeof ctx.access.installedApps !== 'function') return noAccess(res);
-  try { res.json(await ctx.access.installedApps(host, { why: req.query.fresh === '1' ? 'recheck' : 'open' })); } catch (e) { fail(res, e); }
+  // lane desktop-picker-instant: an open answers the list the machine gave last AT ONCE (`listing: true` while it lists again);
+  // `wait=1` (the page's follow-up) / `fresh=1` (Check again) wait for the listing
+  try { res.json(await ctx.access.installedApps(host, { why: req.query.fresh === '1' ? 'recheck' : 'open', wait: req.query.fresh === '1' || req.query.wait === '1' })); } catch (e) { fail(res, e); }
 });
 /** lane desktop-v2-entry: the machine's own screen table (the display picker; 200 with `code` when it cannot say — an old agent,
  *  offline, a failed look — the window then offers the whole screen only). People only, like the picture. */

@@ -8815,6 +8815,10 @@ export default {
   "This host’s own screen is a Wayland session — it cannot be shown yet; the virtual desktop can": "このホストの画面は Wayland セッションのため、まだ表示できません。仮想デスクトップは使えます",
   "Checking machines…": "マシンを確認中…",
   "No paired Windows or Mac machine yet": "ペアリングした Windows / Mac はまだありません",
+  // lane desktop-picker-instant: a machine row's 技術詳細 (its title)
+  "Checked {n} s ago": "{n} 秒前に確認",
+  "Checked {n} min ago": "{n} 分前に確認",
+  "probe {ms} ms": "プローブ {ms} ms",
   "Display {n}": "ディスプレイ {n}",
   "Switch machine": "マシンを切り替え",
   "Full screen": "全画面",

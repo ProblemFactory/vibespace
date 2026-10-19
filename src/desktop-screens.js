@@ -36,7 +36,7 @@ const MAX_SCREENS = 16;
 /** A round trip longer than this is an idle screen (the server holds an incremental request until something changes), not latency. */
 const IDLE_TRIP_MS = 2000;
 const STATES = Object.freeze(['map', 'single', 'unknown']);
-const ROW_STATES = Object.freeze(['ready', 'setup', 'offline']);
+const ROW_STATES = Object.freeze(['ready', 'setup', 'offline', 'checking']); // checking = no probe landed yet (lane desktop-picker-instant)
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null));
 const text = (s, n = 80) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, n);
@@ -125,6 +125,7 @@ function screenMap({ fb, screens = null, rfb = null, dpr = null } = {}) {
 /** A machine row's state for the picker (the PURE row of GET /api/desktop/machines). */
 function rowState(m) {
   if (!m || m.code === 'offline') return 'offline';
+  if (m.code === 'checking') return 'checking'; // lane desktop-picker-instant: a machine the hub never probed yet — that row only
   return m.code === 'desktop_ready' ? 'ready' : 'setup';
 }
 
@@ -138,7 +139,7 @@ function pickerRows({ local = null, machines = [], recent = null } = {}) {
   const rows = [];
   const loc = { group: 'local', kind: 'local', hostId: 'local', display: null, state: local && local.available === false ? 'offline' : 'ready', enabled: !(local && local.available === false), seat: local && local.seat === 'wayland' ? 'wayland' : null, machine: null };
   const remote = (Array.isArray(machines) ? machines : []).filter((m) => m && m.hostId && m.hostId !== 'local' && m.desktop === 'vnc-native')
-    .map((m) => ({ group: 'remote', kind: 'machine', hostId: String(m.hostId), display: null, state: rowState(m), enabled: rowState(m) !== 'offline', machine: m }));
+    .map((m) => ({ group: 'remote', kind: 'machine', hostId: String(m.hostId), display: null, state: rowState(m), enabled: rowState(m) !== 'offline' && rowState(m) !== 'checking', machine: m }));
   const r = recent && typeof recent === 'object' && recent.hostId ? recent : null;
   const hit = r ? (r.hostId === 'local' ? loc : remote.find((x) => x.hostId === String(r.hostId))) : null;
   if (hit) rows.push({ ...hit, group: 'recent', display: hit.kind === 'machine' && r.display != null ? text(r.display, 60) : null });

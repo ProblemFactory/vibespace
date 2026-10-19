@@ -91,6 +91,7 @@ import { SIZE_CHOICES, launchPinOf } from '../desktop-pin.js'; // lane launch-pi
 import { sizeWords, sizeChoiceLabel, askCustomSize } from './pin-size-ui.js';
 import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
 import { showMachineDesktopDialog } from './machine-desktop.js'; // design 014 D1: a Windows / macOS machine's whole desktop
+import { watchMachines, recheckMachines, machineProbeText } from './desktop-picker.js'; // lane desktop-picker-instant: the rows at once, a late probe patches its row
 import { OFFICE_MODULES, installSpecFor, FONTS_ID } from '../office-open.js'; // §7.9: the LibreOffice table (PURE)
 import { splitWords, joinWords, commandLine } from '../argv-words.js'; // lane app-register-ui: a variant's / a recipe's ONE line ↔ its words (PURE, shared with the server)
 import { installPlace } from '../app-witness.js'; // lane apps-launcher-witness: THE install-place words (PURE, shared with the engine's outcome)
@@ -298,6 +299,7 @@ export function machineWhyText(code) {
   if (code === 'desktop_ready') return t('its desktop'); // design 014 D1
   if (code === 'no_vnc') return t('its desktop — set up once');
   if (code === 'connect') return t('connects when chosen');
+  if (code === 'checking') return t('Checking…'); // lane desktop-picker-instant: never probed yet — this row only
   return '';
 }
 /** lane C2: the dialog head's words when a machine's list failed, by the server's code. */
@@ -1017,13 +1019,20 @@ export async function showLaunchDialog(app, opts = {}) {
   };
 
   const shareRow = mountLaunchShareRow(app, $('.desktop-launch-share-row'), { isLocal: () => host === 'local' });
+  // lane desktop-picker-instant: each machine's button is KEYED by hostId and re-used — a probe that lands later (the broadcast)
+  // patches its row in place, never rebuilt under the pointer or the focus
+  const machineBtns = new Map();
   const renderMachines = () => {
     shareRow.render(); // lane E: the share row hides for a paired machine (its windows are no agent target)
-    for (const el of [...machinesEl.querySelectorAll('.desktop-launch-machine')]) el.remove();
-    if (machines.length < 2) { machinesEl.style.display = 'none'; return; } // this machine only: no picker at all (the dialog as before)
+    if (machines.length < 2) { for (const b of machineBtns.values()) b.remove(); machineBtns.clear(); machinesEl.style.display = 'none'; return; } // this machine only: no picker at all (the dialog as before)
     machinesEl.style.display = '';
+    const ids = new Set(machines.map((m) => m.hostId));
+    for (const [id, b] of machineBtns) if (!ids.has(id)) { b.remove(); machineBtns.delete(id); }
+    const label = machinesEl.querySelector('.desktop-launch-machines-label');
+    let at = label ? label.nextElementSibling : machinesEl.firstElementChild;
     for (const m of machines) {
-      const b = document.createElement('button'); b.type = 'button'; b.className = 'desktop-launch-machine';
+      let b = machineBtns.get(m.hostId);
+      if (!b) { b = document.createElement('button'); b.type = 'button'; b.className = 'desktop-launch-machine'; machineBtns.set(m.hostId, b); }
       b.dataset.host = m.hostId;
       b.setAttribute('aria-pressed', m.hostId === host ? 'true' : 'false');
       // §7.9 FILE MODE: the app runs WHERE THE FILE IS — every other machine greyed with the reason in words (the PURE
@@ -1031,15 +1040,17 @@ export async function showLaunchDialog(app, opts = {}) {
       const otherThanFile = !!doc && m.hostId !== (doc.host || 'local');
       const why = otherThanFile ? t('the file is on {machine}', { machine: docMachineName() }) : machineWhyText(m.code);
       const nameEl = document.createElement('span'); nameEl.textContent = machineName(m); // a host's name is peer-controlled text
-      b.appendChild(nameEl);
-      if (why && (otherThanFile || m.code !== 'ready')) { const w = document.createElement('span'); w.className = 'desktop-launch-machine-why'; w.textContent = why; b.appendChild(w); }
+      const kids = [nameEl];
+      if (why && (otherThanFile || m.code !== 'ready')) { const w = document.createElement('span'); w.className = 'desktop-launch-machine-why'; w.textContent = why; kids.push(w); }
+      b.replaceChildren(...kids);
       b.disabled = otherThanFile || !m.selectable;
-      b.title = !b.disabled ? machineName(m) : `${machineName(m)} — ${why}`;
+      const probe = machineProbeText(m); // 「上次检查 N 秒前 · 探测 M ms」
+      b.title = (!b.disabled ? machineName(m) : `${machineName(m)} — ${why}`) + (probe && m.code !== 'checking' ? `\n${probe}` : '');
       b.onclick = () => {
         // design 014 D1: a Windows / macOS row opens ITS DESKTOP's dialog — the app catalog stays on the machine it shows
-        if (m.desktop && !b.disabled) { showMachineDesktopDialog(app, m, { install: (mm, o) => showInstallDialog(mm, o), closeOpener: close, recheck: async (id) => { const r = await fetchJson('/api/desktop/machines'); if (!r || !Array.isArray(r.machines)) return null; if (overlay.isConnected) { machines = r.machines; renderMachines(); } return r.machines.find((x) => x.hostId === id) || null; } }); return; }
+        if (m.desktop && !b.disabled) { showMachineDesktopDialog(app, m, { install: (mm, o) => showInstallDialog(mm, o), closeOpener: close, recheck: async (id) => { const ms = await recheckMachines(id); if (!ms) return null; if (overlay.isConnected) { machines = ms; renderMachines(); } return ms.find((x) => x.hostId === id) || null; } }); return; }
         if (b.disabled || host === m.hostId) return; host = m.hostId; data = data ? { apps: data.apps } : null; listError = null; renderMachines(); render(); holdApps(refresh()); mountApps(); };
-      machinesEl.appendChild(b);
+      if (at === b) at = b.nextElementSibling; else machinesEl.insertBefore(b, at); // in order: a row already in place is never moved
     }
   };
   const renderInstall = () => {
@@ -1342,14 +1353,15 @@ export async function showLaunchDialog(app, opts = {}) {
   // lane D: a default scale chosen here, in a window's Scale ▸ or on another client re-renders the cards
   wireAppPrefs(app);
   const offPrefs = onAppPrefs(() => { if (overlay.isConnected) render(); });
-  const obs = new MutationObserver(() => { if (!overlay.isConnected) { try { off?.(); } catch {} try { offApps?.(); } catch {} try { offSeen?.(); } catch {} try { appsSec?.dispose(); } catch {} try { offDesk?.(); } catch {} try { offPrefs?.(); } catch {} obs.disconnect(); } });
+  const obs = new MutationObserver(() => { if (!overlay.isConnected) { try { off?.(); } catch {} try { offApps?.(); } catch {} try { offSeen?.(); } catch {} try { appsSec?.dispose(); } catch {} try { offDesk?.(); } catch {} try { offPrefs?.(); } catch {} try { offMachines?.(); } catch {} obs.disconnect(); } });
   obs.observe(document.body, { childList: true });
 
   render();
   // user state (recents + the disclosure preference) and the registry, then
   // decide the disclosure ONCE: the persisted preference, or forced open by an
   // empty catalog (nothing else to click — not persisted)
-  fetchJson('/api/desktop/machines').then((r) => { if (r && Array.isArray(r.machines) && overlay.isConnected) { machines = r.machines; renderMachines(); } else if (r && r.error) showToast(r.error, { type: 'error' }); });
+  // lane desktop-picker-instant: the hub's last known rows AT ONCE; a probe that lands later patches its row
+  const offMachines = watchMachines(app, (ms) => { if (!overlay.isConnected) return; machines = ms; renderMachines(); }, (r) => { if (r && r.error && overlay.isConnected) showToast(r.error, { type: 'error' }); });
   renderMachines();
   mountApps();
   const opened = Promise.all([fetchJson('/api/user-state'), refresh()]);
