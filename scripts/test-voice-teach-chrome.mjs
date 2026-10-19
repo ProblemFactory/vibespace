@@ -20,8 +20,12 @@
 //   ⑥ the per-project tier ⇒ a later identifier goes without a card and lands in the journal
 //   ⑦ phone 390
 //   ⑧ RETIRED (int263 seam c3): the polished card body it judged was deleted by plugin-settings-p0 (the Plugins list row)
+//   ⑨ THE FOR-YOU TRAY (lane foryou-plugin-notices, owner 2026-10-19): the REAL tray over the REAL store — the suggestion
+//     pinned right under an urgent ask (above a high one); its ✓ says what it does; a click on its BODY opens the plugin's
+//     sheet on that suggestion with its words chosen (a MUTANT bundle without the door line stays shut — RED); ✓ ⇒ ONE
+//     POST /v1/terms with exactly its words; × ⇒ nothing sent, dismissed, the batch still waits on the sheet
 // PNGs: VIBESPACE_VOICE_PNG_DIR (default: the scratch dir) → door-row, door-sheet, door-card, door-card-connected,
-//   connect, proposal, preview, journal, phone
+//   connect, proposal, preview, journal, phone, tray, door
 //   (card-fold / card-key / card-phone retired with ⑧)
 import fs from 'node:fs';
 import http from 'node:http';
@@ -110,12 +114,15 @@ const PORT = await freePort();
 const HUB = `https://hub.test:${PORT}`;
 // lane dropline-connect-door: the person connects FIRST and switches the plugin on after — it starts OFF
 const rec = { enabled: false, config: { language: 'auto' } };
-const items = [];
-const userTodos = { add: (k, it) => { const x = { id: 'ut' + items.length, sessionKey: k, status: 'open', ...it }; items.push(x); return x; }, get: (id) => items.find((x) => x.id === id), setStatus: (id, s) => { const x = items.find((i) => i.id === id); if (x) x.status = s; }, onStatus() { } };
 const quiet = { log() { }, warn() { }, error() { } };
 // lane dropline-connect-door: the REAL integration store (a scratch data dir) behind the REAL integrations routes — the card,
 // its Connect block, its Test (the row's runner, registered as the wiring does) and the client_id the first Connect writes
 fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+// lane foryou-plugin-notices: the REAL For-you store (its gate = the plugin's DECLARED capability) — ⑨ draws the REAL tray over it
+const UTM = require(path.join(REPO, 'src/user-todos.js'));
+const userTodos = new UTM.UserTodoManager({ dataDir: path.join(root, 'data'), expirySweepMs: 0 });
+const VPD = require(path.join(REPO, 'src/plugins/voice-input.js'));
+userTodos.setPluginGate((id) => id === VPD.id && VPD.provides.includes('reminders'));
 const store = require(path.join(REPO, 'src/server/integration-store.js')).create({ dataDir: path.join(root, 'data'), env: {}, log: quiet });
 const rowValues = () => store.resolveIntegration('dropline').values;
 const DO = require(path.join(REPO, 'src/server/dropline-oauth.js'));
@@ -132,14 +139,25 @@ const entry = `import { ChatInput } from ${JSON.stringify(path.join(REPO, 'src/l
 import { renderVoiceSheet } from ${JSON.stringify(path.join(REPO, 'src/lib/voice-plugin-card.js'))};
 import { installPluginsUI } from ${JSON.stringify(path.join(REPO, 'src/lib/plugins-ui.js'))};
 import { openIntegrationsWindow } from ${JSON.stringify(path.join(REPO, 'src/lib/integrations-window.js'))};
+import { installUserTodos } from ${JSON.stringify(path.join(REPO, 'src/lib/user-todos-panel.js'))};
 // lane dropline-connect-door: the REAL Plugins list + Integrations window on a fake App (a one-window manager, a silent ws)
 function App() { }
 installPluginsUI(App);
 App.prototype.openIntegration = function (id, opts) { return openIntegrationsWindow(this, { focus: id || null, ...(opts || {}) }); }; // = app.js
 const app = new App();
 app.wm = { windows: new Map(), revealWindow() { }, createWindow(o) { const content = document.createElement('div'); document.getElementById('win').replaceChildren(content); const w = { id: 'w' + (this.windows.size + 1), type: o.type, content }; this.windows.set(w.id, w); return w; } };
-app.ws = { onGlobal: () => () => { } };
+window.__wsFns = [];
+app.ws = { onGlobal: (fn) => { if (typeof fn === 'function') window.__wsFns.push(fn); return () => { }; }, onStateChange() { } };
 window.__app = app;
+// lane foryou-plugin-notices (⑨): THE For-you tray (src/lib/user-todos-panel.js) on this fake App — its button, popup and the
+// store's snapshot pushed as the server's broadcast would
+window.__tray = () => {
+  document.body.insertAdjacentHTML('beforeend', '<button id="mobile-nav-todos" style="display:none"></button><div class="taskbar" style="position:fixed;bottom:0;right:0;left:0;height:30px;z-index:6"><div id="taskbar-user-todos" class="taskbar-user-todos"></div></div><div id="user-todos-popup" class="usage-popup ut-popup hidden"></div>');
+  app.sidebar = { _webuiSessions: [], _sessionStatuses: {}, _tasks: [] }; app.sessions = new Map();
+  installUserTodos(app);
+  return true;
+};
+window.__pushTodos = async () => { const d = await (await fetch('/api/user-todos')).json(); for (const fn of window.__wsFns) fn({ type: 'user-todos-updated', todos: d.todos }); return d.todos.open.length; };
 window.__plugins = () => app.openPluginsDialog({ container: document.getElementById('plugins') });
 const ws = { send() {}, on() {}, off() {}, onMessage() {}, isConnected: () => true };
 window.__cwd = '/home/u/projects/vibespace';
@@ -166,6 +184,7 @@ window.__mount = () => {
 const MUTANTS = {
   m1: ['src/lib/plugins-ui.js', "chip = !p.configured ? t('Connect with Fish Audio') :", "chip = !p.configured ? t('no Dropline key yet') :"],   // the base's status chip
   m2: ['src/lib/integrations-window.js', '  if (v.connect) {\n    const box = el(', '  if (false) {\n    const box = el('],                    // the card without its block
+  m3: ['src/lib/user-todos-actions.js', "    if (item?.open?.kind === 'plugin-settings') { close(); app.openPluginDoor?.(item.open); return; }\n", ''],   // lane foryou-plugin-notices: the tray without the door
 };
 const mutantOnce = {};
 async function bundle(out, mut = null) {
@@ -194,6 +213,11 @@ const VP = require(path.join(REPO, 'src/plugins/voice-input.js'));
 const voiceRow = () => { const configured = client.connected(); return { id: VP.id, label: VP.label, description: VP.description, provides: VP.provides, installed: true, configured, enabled: !!rec.enabled && configured, running: !!rec.enabled && configured, integration: 'dropline' }; };
 app.get('/api/plugins', (q, s) => s.json({ plugins: [voiceRow()] }));
 app.get('/api/plugins/manifests', (q, s) => s.json({ plugins: [] }));
+// lane foryou-plugin-notices: the For-you routes the tray uses — the snapshot, 「全部标为已看」 (the real route) and a row's ✓ / ×
+// (server.js's one-line route, the same call)
+app.get('/api/user-todos', (q, s) => s.json({ todos: userTodos.snapshot() }));
+require(path.join(REPO, 'src/routes/user-todos-reply.js')).registerResolveManyRoute(app, { userTodos });
+app.post('/api/user-todos/:id', (q, s) => { try { s.json({ success: true, item: userTodos.setStatus(q.params.id, q.body?.status, 'user') }); } catch (e) { s.status(400).json({ error: e.message }); } });
 app.post(`/api/plugins/${VP.id}/enabled`, (q, s) => { if (q.body.enabled && !client.connected()) return s.status(400).json({ error: 'connect your Fish Audio account or paste your Dropline key first' }); rec.enabled = !!q.body.enabled; s.json({ ok: true }); });
 const CSS = ['style', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
 for (const n of CSS) app.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
@@ -395,7 +419,7 @@ try {
   await dictate(p, 'conv-1');
   const hasCard = await rerender(p, '.voice-proposal');
   const terms = await p.ev('[...document.querySelectorAll(".voice-proposal .voice-term")].map((x) => x.dataset.term)');
-  ok('the dictation made a PROPOSAL card (no write) + a For-you item 加入词库 / 忽略', hasCard && terms.includes('commentsBatches') && terms.includes('doc-window-ui.js') && !terms.includes('VibeSpace') && writes().length === 0 && items.length === 1 && items[0].options.join() === '加入词库,忽略', { terms, items, w: writes() });
+  ok('the dictation made a PROPOSAL card (no write) + a For-you item 加入词库 / 忽略', hasCard && terms.includes('commentsBatches') && terms.includes('doc-window-ui.js') && !terms.includes('VibeSpace') && writes().length === 0 && userTodos.openItems().length === 1 && userTodos.openItems()[0].options.join() === '加入词库,忽略', { terms, items: userTodos.openItems(), w: writes() });
   await p.shot('proposal.png');
   // the chips (lane voice-teach-candidates): words the person wrote start selected, a press toggles one, the count is live
   const chips = () => p.ev('({ on: [...document.querySelectorAll(".voice-proposal .voice-term")].filter((x) => x.getAttribute("aria-pressed") === "true").map((x) => x.dataset.term), add: document.querySelector(".voice-proposal-add").textContent, off: document.querySelector(".voice-proposal-add").disabled, tag: document.querySelector(".voice-proposal .voice-term").tagName })');
@@ -466,6 +490,68 @@ try {
   // ⑧ (lane voice-card-polish, rel262: the card's header chip + switch, 账号 / 语言 grid, the folded key) RETIRED by int263 seam (c3):
   // plugin-settings-p0 deleted the card body — the Voice row of the Plugins list (chip · switch · ⚙) is judged by
   // test-plugin-settings / test-plugins-grammar, the key lives in Integrations, language + teach are All Settings rows
+  console.log('⑨ the For-you tray (lane foryou-plugin-notices): the suggestion pinned under urgent; a body click opens the sheet with its words chosen; ✓ adds, × dismisses');
+  { // ⑨ its own scope (the legs above declare the same short names)
+  // beside the voice reminders: an urgent ask, a high one and a plain one (agents' items, the store's own add)
+  userTodos.add('claude:u9', { origin: 'agent', text: 'Approve the deploy?', urgency: 'urgent', sessionName: 'deploy' });
+  userTodos.add('claude:h9', { origin: 'agent', text: 'Pick a name', urgency: 'high', sessionName: 'naming' });
+  userTodos.add('claude:n9', { origin: 'agent', text: 'Read the report', sessionName: 'report' });
+  const t9 = await page(1280, 860);
+  await dictate(t9, 'conv-9', [{ role: 'user', content: [{ type: 'text', text: 'wire quuxFrobnicate into gamma_widget.md, then quuxFrobnicate again' }] }]);
+  await dictate(t9, 'conv-10', [{ role: 'user', content: [{ type: 'text', text: 'rename zorbleMint in delta_sheet.md, zorbleMint twice' }] }]);
+  const voiceOpen = () => userTodos.openItems().filter((i) => i.sessionKey === VPD.id).sort((a, b) => b.createdAt - a.createdAt);
+  const vIds = voiceOpen().map((i) => i.id);
+  ok('two suggestions are open as the voice PLUGIN\'s reminders (origin plugin, under its id, each with its door)', vIds.length >= 2 && voiceOpen().every((i) => i.origin === 'plugin' && i.plugin === VPD.id && i.open && i.open.kind === 'plugin-settings' && i.open.prefill.terms.length > 0), voiceOpen());
+  const trayOpen = async (pg) => {
+    if (!(await pg.ev('!!document.getElementById("taskbar-user-todos")'))) await pg.ev('window.__tray()');
+    await pg.ev('window.__pushTodos()');
+    if (await pg.ev('document.getElementById("user-todos-popup").classList.contains("hidden")')) await pg.clickSel('#taskbar-user-todos');
+    return pg.until('!!document.querySelector("#user-todos-popup:not(.hidden) .ut-item")', 6000);
+  };
+  ok('the tray opens on the REAL store\'s snapshot', await trayOpen(t9));
+  const keys = await t9.ev('[...document.querySelectorAll("#user-todos-popup .ut-groups > .ut-group")].map((g) => g.dataset.key)');
+  ok('THE PIN: the urgent ask first, the voice plugin\'s reminders RIGHT UNDER it — above the high ask and the plain one', keys[0] === 'claude:u9' && keys[1] === VPD.id && keys.indexOf('claude:h9') === 2 && keys.indexOf('claude:n9') === 3, keys);
+  const row0 = `#user-todos-popup .ut-item[data-id="${vIds[0]}"]`;
+  const tickTitle = await t9.ev(`(document.querySelector('${row0} .ut-done') || {}).title`);
+  ok('the reminder\'s ✓ says what it does (the door\'s `done` through t()): 把这些词加入 Dropline 词库', tickTitle === '把这些词加入 Dropline 词库', tickTitle);
+  await t9.shot('tray.png', '#user-todos-popup');
+  const it0 = userTodos.get(vIds[0]);
+  // THE DOOR PROBE: a click on the row's BODY ⇒ the plugin's sheet on THIS suggestion (marked), its words chosen
+  const doorProbe = async (pg, id) => {
+    await pg.clickSel(`#user-todos-popup .ut-item[data-id="${id}"] .ut-text`);
+    const pid = userTodos.get(id).open.prefill.proposal;
+    const opened = await pg.until(`!!document.querySelector('#voice-sheet .voice-proposal.voice-proposal-focus[data-id="${pid}"]')`, 5000);
+    return { opened, sheet: await pg.ev(`(() => { const c = document.querySelector('#voice-sheet .voice-proposal-focus'); return c ? { on: [...c.querySelectorAll('.voice-term[aria-pressed="true"]')].map((x) => x.dataset.term), all: [...c.querySelectorAll('.voice-term')].length, add: c.querySelector('.voice-proposal-add').textContent, focus: document.activeElement === c.querySelector('.voice-proposal-add'), trayHidden: document.getElementById('user-todos-popup').classList.contains('hidden') } : null; })()`) };
+  };
+  const dr = await doorProbe(t9, vIds[0]);
+  const want0 = it0.open.prefill.terms.slice().sort().join();
+  ok('a click on the reminder\'s BODY opens the voice plugin\'s sheet on THAT suggestion (marked), its words already chosen — one press of 加入所选 adds them; the tray closed', dr.opened && dr.sheet && dr.sheet.on.slice().sort().join() === want0 && dr.sheet.add === `加入所选 (${it0.open.prefill.terms.length})` && dr.sheet.trayHidden, dr);
+  await t9.shot('door.png', '#voice-sheet .dialog');
+  await t9.clickSel('#voice-sheet .dialog-close');
+  await t9.until('!document.getElementById("voice-sheet")');
+  // CONTROL: the same click on a bundle WITHOUT the door line (m3) stays shut — the probe can go red
+  const tm = await page(1280, 860, 'm3');
+  await trayOpen(tm);
+  const dm = await doorProbe(tm, vIds[0]);
+  ok('CONTROL (mutant m3 — the tray without the door line, its anchor patched once): the same body click opens NO sheet — the probe is RED', mutantOnce['src/lib/user-todos-actions.js'] === true && !dm.opened && !dm.sheet, dm);
+  tm.close();
+  // ✓ on the reminder ⇒ ONE POST /v1/terms with exactly its words
+  const w0 = writes().length;
+  await trayOpen(t9);
+  await t9.clickSel(`${row0} .ut-done`);
+  for (let i = 0; i < 60 && writes().length === w0; i++) await sleep(100);
+  await sleep(200);
+  const tw = writes().slice(w0);
+  ok('✓ on the reminder ⇒ ONE POST /v1/terms with EXACTLY its words; the row is done and its card gone from the sheet', tw.length === 1 && tw[0].p === '/v1/terms' && tw[0].body.terms.map((x) => x.term).sort().join() === want0 && userTodos.get(vIds[0]).status === 'done' && !teach.view().proposals.some((x) => x.id === it0.open.prefill.proposal), { tw, st: userTodos.get(vIds[0]).status });
+  // × on the other ⇒ nothing sent, dismissed, its batch still waits on the sheet
+  const it1 = userTodos.get(vIds[1]);
+  await t9.clickSel(`#user-todos-popup .ut-item[data-id="${vIds[1]}"] .ut-dismiss`);
+  for (let i = 0; i < 40 && userTodos.get(vIds[1]).status === 'open'; i++) await sleep(100);
+  await sleep(300);
+  ok('× on a reminder ⇒ nothing sent; it is dismissed and its batch still waits on the sheet (忽略这批 lives there)', writes().length === w0 + 1 && userTodos.get(vIds[1]).status === 'dismissed' && teach.view().proposals.some((x) => x.id === it1.open.prefill.proposal));
+  ok('no page error on the tray legs', (await t9.ev('window.__errs')).length === 0, await t9.ev('window.__errs'));
+  t9.close();
+  }
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e && e.stack || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 end(fail ? 1 : 0);

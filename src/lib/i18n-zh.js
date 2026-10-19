@@ -9223,4 +9223,7 @@ export default {
   "Hand over": "交给它", // lane desktop-handover
   "{name} drives {machine}’s desktop — any key or click of yours pauses it": "{name} 正在操作 {machine} 的桌面——你按任何键或点击都会让它暂停", // lane desktop-handover
   "No agent conversation is running — start one, then come back.": "没有正在运行的 agent 会话——先开一个再回来。", // lane desktop-handover
+  "Add these words to your Dropline dictionary": "把这些词加入 Dropline 词库", // lane foryou-plugin-notices
+  "That plugin is not on this instance any more": "这个插件已经不在本实例上了", // lane foryou-plugin-notices
+  "That suggestion was already added or ignored. Nothing waits for it.": "这批建议已经加入或忽略过了，没有要处理的。", // lane foryou-plugin-notices
 };

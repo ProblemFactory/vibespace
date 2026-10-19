@@ -184,7 +184,7 @@ for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2, label: 'mutan
   const pm = new PluginManager({ dataDir: fs.mkdtempSync(path.join(tmp, 'voice-')), opencodeServe: FAKE_SERVE, integrations: () => store, voiceBind: (v) => { bound = v; } });
   const row = (pm.list?.() || []).find?.((p) => p.id === 'voice-input') || null;
   const st0 = pm.status('voice-input');
-  ok('voice-input: declares dictation, default OFF, not configured without a key', pm.defs()['voice-input']?.provides?.join() === 'dictation' && st0.enabled === false && st0.configured === false && st0.language === 'auto', { st0, row: !!row });
+  ok('voice-input: declares dictation (+ reminders — lane foryou-plugin-notices: its suggestions file For-you items), default OFF, not configured without a key', pm.defs()['voice-input']?.provides?.join() === 'dictation,reminders' && st0.enabled === false && st0.configured === false && st0.language === 'auto', { st0, row: !!row });
   let refused = null; try { pm.setEnabled('voice-input', true); } catch (e) { refused = e.message; }
   ok('voice-input: turning it ON without a key is refused by name', /Dropline key/.test(refused || '') && !pm.status('voice-input').enabled, refused);
   key = 'dl_test_0123456789';

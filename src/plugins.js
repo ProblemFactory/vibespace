@@ -12,6 +12,8 @@
 // THE CONTRACT (validatePlugin — checked when the manager registers the list; a bad plugin throws by name):
 //   { id: 'kebab-id', label, description,            the panel row (description runs through the client's t())
 //     provides: ['tunnel' | 'relay' | 'serve' | …],  declared capabilities — the client's pluginProvides(cap) and
+//                                                    ('reminders': may file For-you items, origin 'plugin' — the
+//                                                    store's gate, lane foryou-plugin-notices)
 //                                                    the card read these, never an id; CAP_VERBS = the verbs a
 //                                                    capability obliges the plugin to have
 //     create(h) → { install, start, stop, status,    required verbs (install may be async)

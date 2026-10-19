@@ -30,6 +30,10 @@
  *              unanswered for 60 s — lane S1)
  *              + src/server/unexpected-exit.js (a conversation that exited
  *              unexpectedly while working: restarted once, or why not — B-f698)
+ *   plugin   — a built-in plugin's REMINDER (lane foryou-plugin-notices): src/server/voice-teach-engine.js (Dropline's
+ *              「建议加入词库」). The record names the plugin (`plugin`, its id — it files under that id) and its door
+ *              (`open`); the plugin DECLARES the capability (`provides: ['reminders']`) or the store refuses it. The
+ *              tray pins these under urgent (src/lib/user-todos-layout.js trayBand)
  *
  * Exactly the producers that file (r2: a `system` row was dropped — nothing
  * has ever filed with `by: 'system'`, so its group, chip and legacy-rung row
@@ -45,7 +49,7 @@
  * legacy rung, `originOf` in src/lib/user-todos-layout.js — no migration.
  */
 
-const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'apps', 'agent', 'server']);
+const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'apps', 'plugin', 'agent', 'server']);
 
 // The group / chip words — English t() keys (the panel words them per device;
 // i18nKey is the extraction marker scripts/i18n-extract.mjs reads).
@@ -59,6 +63,7 @@ const ORIGIN_LABELS = Object.freeze({
   browser: i18nKey('Agent browser'), // the agent-browser face's name (2.369.168 faces rename — the bare word is retired)
   machines: i18nKey('Machines'), // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (src/exit-proxy.js)
   apps: i18nKey('Apps'), // Layer 0 apps: "<conversation> wants to install <app>?" — Install / Not now (src/server/apps-engine.js)
+  plugin: i18nKey('Plugins'), // lane foryou-plugin-notices: a plugin's reminder (Dropline's dictionary suggestion), pinned under urgent
   agent: i18nKey('Agents'),
   server: i18nKey('This machine'), // lane browser-resource-care: memory pressure — ONE item per episode naming who started each top process (src/memory-pressure.js)
 });

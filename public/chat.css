@@ -1858,6 +1858,7 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 }
 .voice-proposal { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; display: flex; flex-direction: column; gap: 6px; background: var(--bg-input); }
 .voice-proposal-title { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.voice-proposal.voice-proposal-focus { outline: 2px solid var(--accent); outline-offset: 1px; } /* lane foryou-plugin-notices: the card a For-you reminder opened */
 .voice-proposal-why { font-size: 11px; color: var(--text-secondary); }
 /* the word chips (lane voice-teach-candidates): selected = filled accent, unselected = outline; 36 px on a phone (below) */
 .voice-proposal-terms { display: flex; flex-wrap: wrap; gap: 6px; }

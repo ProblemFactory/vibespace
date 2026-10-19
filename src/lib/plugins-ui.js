@@ -270,16 +270,27 @@ export function installPluginsUI(App) {
     b.onclick = () => this._openPluginSettings(id);
     return b;
   },
+  /** lane foryou-plugin-notices: A PLUGIN'S DOOR — a For-you reminder's body click (the item's `open`, the plugin's
+   *  declaration): the plugin's own sheet on the declared panel with the prefill chosen, else its settings row. The sheet
+   *  follows the plugin's DECLARED capability (a dictation plugin's sheet holds the teach panel), never its id. */
+  async openPluginDoor({ plugin, panel = null, prefill = null } = {}) {
+    const p = (((await fetchJson('/api/plugins')) || {}).plugins || []).find((x) => x.id === plugin);
+    if (!p) { showToast(t('That plugin is not on this instance any more'), { type: 'error' }); return false; }
+    if (panel === 'teach' && provides(p, 'dictation')) { this._voiceSheet(p, () => { }, { focus: prefill }); return true; }
+    if (pluginCategoryOf(p.id)) this._openPluginSettings(p.id); else this.openPluginsDialog(); // no settings rows ⇒ the Plugins list, never a click that does nothing
+    return true;
+  },
   _openPluginSettings(id) {
     const category = pluginCategoryOf(id);
     if (category) this._settingsUI?.open({ category });
   },
   /** the Voice row's chip: Connect with Fish Audio + the proposal cards (an action surface, not settings); `pasteKey` (lane
    *  dropline-connect-door) = the other door — the integration card the plugin row NAMES (`p.integration`), focused */
-  _voiceSheet(p, rerender) {
+  _voiceSheet(p, rerender, { focus = null } = {}) {
     const { body, close } = createModalShell({ id: 'voice-sheet', title: p.label, bodyClass: 'mounts-dialog-body', escapeToClose: true });
     const pasteKey = p.integration ? () => { close(); this.openIntegration?.(p.integration); } : null;
-    renderVoiceSheet(body, () => { close(); rerender(); this._voiceSheet(p, rerender); }, { pasteKey });
+    // `focus` (lane foryou-plugin-notices: a For-you reminder's door) = the proposal to land on + its words chosen — the first draw only
+    renderVoiceSheet(body, () => { close(); rerender(); this._voiceSheet(p, rerender); }, { pasteKey, focus });
   },
   /** the Tailscale row's 「Log in…」 chip: the guided sign-in (the server captures the auth URL; we poll until Running) */
   async _tailscaleLogin(p, api, rerender) {

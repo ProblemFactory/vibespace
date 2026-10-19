@@ -9222,4 +9222,7 @@ export default {
   "Hand over": "任せる", // lane desktop-handover
   "{name} drives {machine}’s desktop — any key or click of yours pauses it": "{name} が {machine} のデスクトップを操作中 — あなたのキー操作やクリックで一時停止します", // lane desktop-handover
   "No agent conversation is running — start one, then come back.": "実行中のエージェントの会話がありません — 始めてから戻ってください。", // lane desktop-handover
+  "Add these words to your Dropline dictionary": "これらの語を Dropline の辞書に追加", // lane foryou-plugin-notices
+  "That plugin is not on this instance any more": "このプラグインはもうこのインスタンスにありません", // lane foryou-plugin-notices
+  "That suggestion was already added or ignored. Nothing waits for it.": "この候補は追加済みか無視済みです。待っているものはありません。", // lane foryou-plugin-notices
 };

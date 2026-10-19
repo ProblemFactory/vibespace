@@ -33,8 +33,10 @@ const whyWords = (w) => (!w ? '' : w.byPerson > 1 ? t('You wrote this {n} times'
   : w.why === 'file' ? t('A file name') : t('Seen {n} times here', { n: w.seen }));
 const projectName = (cwd) => String(cwd || '').replace(/\/+$/, '').split('/').pop() || cwd;
 
-/** the teach section (shown once connected): switches + sentence, proposals, projects, journal */
-export async function renderTeachSection(box, rerender) {
+/** the teach section (shown once connected): switches + sentence, proposals, projects, journal. `focus` (lane
+ *  foryou-plugin-notices — the For-you reminder's door, `{proposal, terms}`): that proposal's card is marked and scrolled to,
+ *  its chips start as the reminder's words, so ONE press of 加入所选 adds them; a proposal already handled says so */
+export async function renderTeachSection(box, rerender, { focus = null } = {}) {
   const sec = el('div', 'voice-teach');
   box.appendChild(sec);
   let v;
@@ -45,13 +47,18 @@ export async function renderTeachSection(box, rerender) {
     el('div', 'plugin-detail voice-teach-why', t('Sends the names, terms and file names in the current conversation to Dropline (Fish Audio) — only what you confirm. Credentials, attachments and other conversations are never sent.')),
   );
   if (!v.settings.teach) sec.appendChild(el('div', 'plugin-detail plugin-cfg-hint voice-teach-off', t('Suggesting words is off — turn it on in All Settings › Plugins › Voice input · Dropline.')));
+  const want = focus && typeof focus.proposal === 'string' ? focus : null;
+  if (want && !v.proposals.some((p) => p.id === want.proposal)) sec.appendChild(el('div', 'plugin-detail plugin-cfg-hint voice-proposal-gone', t('That suggestion was already added or ignored. Nothing waits for it.')));
   for (const p of v.proposals) {
     const card = el('div', 'voice-proposal');
     card.dataset.id = p.id;
+    const focused = !!want && want.proposal === p.id;
+    if (focused) card.classList.add('voice-proposal-focus');
     card.appendChild(el('div', 'voice-proposal-title', t('Dropline suggests adding to your dictionary') + (p.title ? ` — ${p.title}` : '')));
     card.appendChild(el('div', 'plugin-detail voice-proposal-why', t("Names and identifiers this conversation used twice or more (the words dictation gets wrong most) — secrets and placeholders are not here")));
     // ≤ 12 chips (lane voice-teach-candidates): a press toggles one; only the plausible words start selected; the count is live
-    const picked = new Set(Array.isArray(p.pick) ? p.pick : []);
+    const pre = focused && Array.isArray(want.terms) ? want.terms.filter((x) => p.terms.includes(x)) : [];
+    const picked = new Set(pre.length ? pre : Array.isArray(p.pick) ? p.pick : []); // the door's words, else the plausible ones
     const terms = el('div', 'voice-proposal-terms');
     const add = el('button', 'mounts-btn mounts-btn-primary voice-proposal-add');
     const chosen = () => [...terms.querySelectorAll('.voice-term[aria-pressed="true"]')].map((x) => x.dataset.term);
@@ -86,6 +93,7 @@ export async function renderTeachSection(box, rerender) {
       card.appendChild(l);
     }
     sec.appendChild(card);
+    if (focused) requestAnimationFrame(() => { card.scrollIntoView({ block: 'nearest' }); if (!add.disabled) add.focus(); });
   }
   if (v.settings.autoProjects.length) {
     const list = el('div', 'voice-projects');

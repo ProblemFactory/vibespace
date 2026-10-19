@@ -124,6 +124,49 @@ function normalizeCard(x) {
   return out;
 }
 
+// THE DOOR (lane foryou-plugin-notices, owner 2026-10-19 on Dropline's 「建议加入词库」 rows: 「这个部分点击应该要自动跳转」): where a
+// click on the item's BODY takes the owner — declared by the producer at filing, validated like `action`:
+// `{kind, plugin, panel?, prefill?, done?}`. OPEN_KINDS is the closed set of doors the client owns a verb for
+// ('plugin-settings' = the plugin's own sheet, else its settings row — src/lib/plugins-ui.js openPluginDoor); an unknown
+// kind THROWS by name. `plugin` = the filing plugin's id (a plugin opens only its own door), `panel` a kebab word naming
+// the part of the sheet, `prefill` ≤ 8 flat fields (strings ≤ 200, lists ≤ 32 of strings ≤ 100) the door starts with,
+// `done` an English t() key saying what ✓ does (present ⇒ the plugin applies the prefill on the owner's ✓ and the ✓'s
+// title says so; absent ⇒ ✓ marks it handled). null = no door (the jump to the item's session, as before).
+const OPEN_KINDS = ['plugin-settings'];
+const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,40}$/;
+const OPEN_FIELDS = ['kind', 'plugin', 'panel', 'prefill', 'done'];
+function normalizeOpen(x, plugin) {
+  if (x == null) return null;
+  if (typeof x !== 'object' || Array.isArray(x)) throw new Error('open must be an object');
+  if (!OPEN_KINDS.includes(x.kind)) throw new Error(`open.kind must be one of ${OPEN_KINDS.join('/')}`);
+  for (const k of Object.keys(x)) if (!OPEN_FIELDS.includes(k)) throw new Error(`open.${k}: not a field of a door (${OPEN_FIELDS.join('/')})`);
+  if (typeof x.plugin !== 'string' || !PLUGIN_ID_RE.test(x.plugin)) throw new Error('open.plugin must be a plugin id');
+  if (x.plugin !== plugin) throw new Error(`open.plugin must be the filing plugin (${plugin || 'none — only a plugin\'s item has a door'})`);
+  const out = { kind: x.kind, plugin: x.plugin };
+  if (x.panel != null) {
+    if (typeof x.panel !== 'string' || !PLUGIN_ID_RE.test(x.panel)) throw new Error('open.panel must be a kebab-case word');
+    out.panel = x.panel;
+  }
+  if (x.prefill != null) {
+    if (typeof x.prefill !== 'object' || Array.isArray(x.prefill)) throw new Error('open.prefill must be an object');
+    const pf = {};
+    let n = 0;
+    for (const [k, v] of Object.entries(x.prefill)) {
+      if (++n > 8) throw new Error('open.prefill has too many fields (max 8)');
+      if (!/^[a-zA-Z][a-zA-Z0-9]{0,40}$/.test(k)) throw new Error(`open.prefill.${k}: not a plain field name`);
+      if (typeof v === 'string') pf[k] = v.slice(0, 200);
+      else if (Array.isArray(v) && v.length <= 32 && v.every((y) => typeof y === 'string')) pf[k] = v.map((y) => y.slice(0, 100));
+      else throw new Error(`open.prefill.${k} must be a string or a list of ≤ 32 strings`);
+    }
+    out.prefill = pf;
+  }
+  if (x.done != null) {
+    if (typeof x.done !== 'string' || !x.done.trim() || x.done.length > 200) throw new Error('open.done must be a sentence key (≤ 200 characters)');
+    out.done = x.done;
+  }
+  return out;
+}
+
 const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId', 'browser-proposal': 'id', 'app-install': 'id', 'open-channel': 'key', 'channel-api-proposal': 'id', 'main-ask': 'requestId' }); // lane browser-propose: one item per proposal (each is a different switch); Layer 0 apps (verify-r1 F2): one item per app proposal — another proposal of the same words never re-points this one's Install; channel-names verify r1 F2: one item per CONVERSATION (two rooms of one name merged — the click opened the last filer's, deciding one retracted both)
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
@@ -204,6 +247,7 @@ class UserTodoManager {
     this._onWriteError = typeof onWriteError === 'function' ? onWriteError : null; // lane-dead-bridge: session-status's twin — a failed background write is named, never a crash
     this._writeFailures = 0;
     this._statusListeners = []; // onStatus(fn): an item LEAVING 'open' by any door (verify-r2 ask-b), and (verify-r6 W2) a reopen
+    this._pluginGate = null; // lane foryou-plugin-notices: setPluginGate(fn) — does plugin <id> declare 'reminders'? (the server's; null = shape rules only)
     this._state = { items: [] };
     this._writeTimer = null; this._dirty = false; this._lastWritten = null;
     try {
@@ -242,10 +286,16 @@ class UserTodoManager {
    *  ALLOWED afterwards — two states for one question. `fn(item, {status, by})`, called after the save + broadcast;
    *  a throwing listener is contained. Returns an unsubscribe. */
   onStatus(fn) { if (typeof fn === 'function') this._statusListeners.push(fn); return () => { this._statusListeners = this._statusListeners.filter((f) => f !== fn); }; }
-  _emitStatus(items, by) {
+  // lane foryou-plugin-notices: `batch: true` = 「全部标为已看」 (setStatusMany) — a plugin whose ✓ APPLIES something (its
+  // door's `done`) acts on ONE ✓ by the owner, never on a whole group marked seen
+  _emitStatus(items, by, batch = false) {
     if (!this._statusListeners.length) return;
-    for (const it of items) for (const fn of this._statusListeners) { try { fn(it, { status: it.status, by }); } catch { } }
+    for (const it of items) for (const fn of this._statusListeners) { try { fn(it, batch ? { status: it.status, by, batch: true } : { status: it.status, by }); } catch { } }
   }
+  /** lane foryou-plugin-notices: THE CAPABILITY GATE of a plugin's reminder — `fn(pluginId)` → true when that plugin declares
+   *  'reminders' (src/plugins/<id>.js `provides`; the wiring hands PluginManager's answer in). A filing by a plugin the gate
+   *  refuses THROWS by name. */
+  setPluginGate(fn) { this._pluginGate = typeof fn === 'function' ? fn : null; }
 
   /** Resolve every OPEN item whose `expiresAt` has passed — `resolvedBy:
    *  'expired'`, status 'done', the record kept (the ledger is history). An
@@ -391,7 +441,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null } = {}) {
     const rawText = typeof text === 'string' ? text.trim() : '';
     text = rawText.slice(0, TEXT_MAX);
     const textCut = rawText.length > TEXT_MAX ? TEXT_MAX : 0; // the cap it hit, named on the return
@@ -423,6 +473,15 @@ class UserTodoManager {
     // `agent`, each server producer its own, every fixture explicitly
     // (test-user-todos-layout ⑪ is the census beside this throw).
     origin = normalizeOrigin(origin);
+    // A PLUGIN'S REMINDER (lane foryou-plugin-notices): origin 'plugin' names WHICH plugin (`plugin`, its id) and files under
+    // that id — one tray section per plugin, pinned under urgent (src/lib/user-todos-layout.js trayBand); the plugin must
+    // DECLARE 'reminders' (the gate); `plugin` on any other origin is refused, and so is a door on an item that is no plugin's
+    if (origin === 'plugin') {
+      if (typeof plugin !== 'string' || !PLUGIN_ID_RE.test(plugin)) throw new Error("a plugin's item names its plugin (plugin: <id>)");
+      if (sessionKey !== plugin) throw new Error(`a plugin files under its own id (${plugin}), not ${sessionKey}`);
+      if (this._pluginGate && !this._pluginGate(plugin)) throw new Error(`plugin ${plugin} does not declare 'reminders' — it cannot file For-you items`);
+    } else if (plugin != null) throw new Error("plugin: only a plugin's item names one (origin 'plugin')");
+    open = normalizeOpen(open, origin === 'plugin' ? plugin : null);
     if (urgency != null && !URGENCIES.includes(urgency)) throw new Error(`urgency must be one of ${URGENCIES.join('/')}`);
     // KIND (2.369.118, owner: spend notices are DISTRACTING beside real asks):
     // 'action' = the user must do something (default, every older item);
@@ -495,6 +554,7 @@ class UserTodoManager {
       if (artifacts && JSON.stringify(artifacts) !== JSON.stringify(existing.artifacts || null)) { existing.artifacts = artifacts; changed = true; } // lane foryou-attachments: the same rule as options
       if (cwd && cwd !== existing.cwd) { existing.cwd = cwd; changed = true; }
       if (hostId && hostId !== existing.hostId) { existing.hostId = hostId; changed = true; }
+      if (open && JSON.stringify(open) !== JSON.stringify(existing.open || null)) { existing.open = open; changed = true; } // lane foryou-plugin-notices: the door follows the latest filing (its prefill)
       // a DECLARED origin is kept (the item's producer does not change on a re-file);
       // an item filed before the field existed takes the re-filer's declaration
       if (!existing.origin) { existing.origin = origin; changed = true; }
@@ -517,6 +577,7 @@ class UserTodoManager {
       options, // the one-click answers (≤6 labels), or null — a chip's reply IS its label (design-user-inbox-reply D3a)
       ...(artifacts ? { artifacts } : {}), // lane foryou-attachments: what the agent asks the owner to open (chips → the one artifact door)
       ...(cwd ? { cwd } : {}), ...(hostId ? { hostId } : {}), // where its words' paths resolve (the asker's cwd on its host)
+      ...(origin === 'plugin' ? { plugin } : {}), ...(open ? { open } : {}), // lane foryou-plugin-notices: WHICH plugin, and where a click on the item opens
       reply: null, // {text, at} once the user replied from the inbox (resolveByReply)
       origin, // the PRODUCER (B-328d): spend|login|pool|jobs|channels|browser|agent — REQUIRED (r2), the Notices area groups by it
       createdAt: this._now(), resolvedAt: null, resolvedBy: null,
@@ -599,7 +660,7 @@ class UserTodoManager {
       changed.push(id);
       if (wasOpen && status !== 'open') went.push(item);
     }
-    if (changed.length) { this._save(); this._notify(); this._emitStatus(went, by); }
+    if (changed.length) { this._save(); this._notify(); this._emitStatus(went, by, true); }
     return { changed, unknown };
   }
 

@@ -88,6 +88,10 @@ export function inboxModel(app) {
     // now, so the key is usually a real session — the actionable thing is
     // still the job's form, which focusJobsPanel lands on in the sidebar)
     if (item?.jobId) { close(); app.openJobInteract?.(item.jobId); return; }
+    // lane foryou-plugin-notices: an item that DECLARES its door (`open` — src/user-todos.js normalizeOpen) opens THERE: a
+    // plugin's reminder lands on the plugin's own sheet with what it suggests already chosen (its key is no session — the
+    // click used to end in "Session not found")
+    if (item?.open?.kind === 'plugin-settings') { close(); app.openPluginDoor?.(item.open); return; }
     if (key === 'jobs') { close(); app.openJobs?.(); return; }
     // Account-level items (login-session expiry, 2026-09-07) belong to the
     // INSTANCE, not a session — the actionable surface is Manage Agents, the

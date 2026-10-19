@@ -213,7 +213,7 @@ function partsOf(entry, ctx) {
     ? `<span class="ut-actions">${view}<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}">↺</button></span>`
     : card ? `<span class="ut-actions">${view}${more}</span>`
     : `<span class="ut-actions">${actionBtnHtml(i, t)}${reauthBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
-      + `<button class="ut-act ut-done" title="${escHtml(t('Handled — mark done'))}">✓</button>`
+      + `<button class="ut-act ut-done" title="${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}">✓</button>` // lane foryou-plugin-notices: a door's `done` = what this ✓ does (the plugin applies it)
       + `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}">✕</button></span>`;
   return { cls, dot, body, actions, sig: cls + '\u0000' + dot + '\u0000' + body + '\u0000' + actions };
 }

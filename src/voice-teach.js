@@ -115,9 +115,9 @@ function journalAdd(state, { at, kind, title = '', chars = 0, added = 0, skipped
 
 // the For-you item's words (the hub files it; the person's UI language picked by the browser that saw the terms)
 const TEACH_WORDS = Object.freeze({
-  en: { proposal: 'Dropline suggests adding to your dictionary: {terms}', add: 'Add to dictionary', ignore: 'Ignore', detail: 'Add sends exactly these words to your Dropline (Fish Audio). Untick words first in Settings → Plugins → Voice input.' },
-  zh: { proposal: 'Dropline 建议加入词库：{terms}', add: '加入词库', ignore: '忽略', detail: '加入词库 = 把这些词发给你的 Dropline（Fish Audio）。要先取消勾选个别词，去 设置 → 插件 → 语音输入。' },
-  ja: { proposal: 'Dropline の辞書への追加候補：{terms}', add: '辞書に追加', ignore: '無視', detail: '「辞書に追加」でこれらの語をあなたの Dropline（Fish Audio）に送ります。語を外すには 設定 → プラグイン → 音声入力 へ。' },
+  en: { proposal: 'Dropline suggests adding to your dictionary: {terms}', add: 'Add to dictionary', ignore: 'Ignore', detail: '✓ sends exactly these words to your Dropline (Fish Audio). Click this item to untick some first.' },
+  zh: { proposal: 'Dropline 建议加入词库：{terms}', add: '加入词库', ignore: '忽略', detail: '✓ = 把这些词发给你的 Dropline（Fish Audio）。想先去掉个别词，点这一条。' },
+  ja: { proposal: 'Dropline の辞書への追加候補：{terms}', add: '辞書に追加', ignore: '無視', detail: '✓ でこれらの語をあなたの Dropline（Fish Audio）に送ります。語を外すには、この項目をクリック。' },
 });
 function teachWords(lang, key, params = {}) {
   const L = TEACH_WORDS[lang] || TEACH_WORDS.en;

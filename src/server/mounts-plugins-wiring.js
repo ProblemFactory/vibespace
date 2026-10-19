@@ -79,6 +79,7 @@ const plugins = new PluginManager({
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
   },
 });
+userTodos?.setPluginGate?.((id) => !!(plugins.defs()[id] || {}).provides?.includes('reminders')); // lane foryou-plugin-notices: a plugin files For-you reminders only when it DECLARES 'reminders'
 // port-forward can publish a forward publicly via the frp plugin (B-0b60)
 portForwards.plugins = plugins;
 // Dropline voice input (q-029 P0): THE vendor module (src/server/dropline-client.js) + the hub proxy /api/voice/*;

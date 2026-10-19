@@ -257,7 +257,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   const req = createRequire(import.meta.url);
   const O = req(path.join(ROOT, 'src/inbox-origin.js'));
   const L = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
-  const SET = ['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'apps', 'agent', 'server']; // lane browser-resource-care: server = the memory-pressure item (src/server/memory-pressure-watch.js); lane-pairing ⑥: machines = an exit's "ask me each time" (src/exit-proxy.js); Layer 0: apps = an agent's install proposal (src/server/apps-engine.js)
+  const SET = ['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'apps', 'plugin', 'agent', 'server']; // lane foryou-plugin-notices: plugin = a built-in plugin's reminder (src/server/voice-teach-engine.js, Dropline's dictionary suggestion); // lane browser-resource-care: server = the memory-pressure item (src/server/memory-pressure-watch.js); lane-pairing ⑥: machines = an exit's "ask me each time" (src/exit-proxy.js); Layer 0: apps = an agent's install proposal (src/server/apps-engine.js)
   eq(O.INBOX_ORIGINS, SET, 'the closed set = exactly the producers that file, in display order (mounts has no producer — the browser-switch proposal in mounts-plugins-wiring.js is the BROWSER\'s; r2: no system — nothing has ever filed with by:system)');
   ok(Object.isFrozen(O.INBOX_ORIGINS) && Object.isFrozen(O.ORIGIN_LABELS), 'the set and its words are frozen');
   eq(Object.keys(O.ORIGIN_LABELS), SET, 'one label per origin, no extra');
@@ -266,12 +266,12 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   for (const none of [null, undefined, '']) {
     let msg = '';
     try { O.normalizeOrigin(none); } catch (e) { msg = e.message; }
-    ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/machines/apps/agent/server)', `normalizeOrigin(${JSON.stringify(none)}) THROWS "origin required" naming the set (r2: fail closed, never a default)`, msg);
+    ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/machines/apps/plugin/agent/server)', `normalizeOrigin(${JSON.stringify(none)}) THROWS "origin required" naming the set (r2: fail closed, never a default)`, msg);
   }
   for (const bad of ['mounts', 'system', 'SPEND', ' spend', 5, {}, ['spend']]) {
     let msg = '';
     try { O.normalizeOrigin(bad); } catch (e) { msg = e.message; }
-    ok(msg === 'origin must be one of spend/login/pool/jobs/channels/browser/machines/apps/agent/server', `normalizeOrigin(${JSON.stringify(bad)}) THROWS naming the set`);
+    ok(msg === 'origin must be one of spend/login/pool/jobs/channels/browser/machines/apps/plugin/agent/server', `normalizeOrigin(${JSON.stringify(bad)}) THROWS naming the set`);
   }
   ok(JSON.stringify(L.INBOX_ORIGINS) === JSON.stringify(O.INBOX_ORIGINS) && JSON.stringify(L.ORIGIN_LABELS) === JSON.stringify(O.ORIGIN_LABELS), 'the layout re-exports THE set (one spelling)');
   const laySrc = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8');
@@ -382,13 +382,13 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
       for (const none of [undefined, null, '']) {
         msg = '';
         try { m.add('accounts', { text: 'an undeclared producer', kind: 'notice', sessionName: 'Manage Agents', origin: none }); } catch (e) { msg = e.message; }
-        ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/machines/apps/agent/server)' && m.snapshot().open.length === n0 && casts.length === c0, `r2 FAIL CLOSED: a filing naming no origin (${JSON.stringify(none)}) THROWS "origin required" and files nothing, broadcasts nothing (it used to land under Agents silently)`, msg);
+        ok(msg === 'origin required (one of spend/login/pool/jobs/channels/browser/machines/apps/plugin/agent/server)' && m.snapshot().open.length === n0 && casts.length === c0, `r2 FAIL CLOSED: a filing naming no origin (${JSON.stringify(none)}) THROWS "origin required" and files nothing, broadcasts nothing (it used to land under Agents silently)`, msg);
       }
       eq(m.add('claude:x', { text: 'an ask', origin: 'agent' }).origin, 'agent', "the agent route's shape declares 'agent' explicitly");
       msg = '';
       const n1 = m.snapshot().open.length;
       try { m.add('claude:x', { text: 'typo', origin: 'mounts' }); } catch (e) { msg = e.message; }
-      ok(/origin must be one of spend\/login\/pool\/jobs\/channels\/browser\/machines\/apps\/agent\/server$/.test(msg) && m.snapshot().open.length === n1, 'a value outside the set THROWS by name and files nothing');
+      ok(/origin must be one of spend\/login\/pool\/jobs\/channels\/browser\/machines\/apps\/plugin\/agent\/server$/.test(msg) && m.snapshot().open.length === n1, 'a value outside the set THROWS by name and files nothing');
       const re = m.add('accounts', { text: 'spend warning', kind: 'notice', origin: 'login', urgency: 'high' });
       eq([re.id === a.id, re.origin, re.urgency], [true, 'spend', 'high'], 'a re-file of the same item KEEPS its declared origin (other fields still merge)');
       // a LEGACY item on disk (no origin) re-filed by a declaring producer takes the declaration
@@ -443,7 +443,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
     'src/server/unexpected-exit.js': 'agent', // B-f698: a conversation that exited unexpectedly while working — restarted once, or why not
     'src/exit-proxy.js': 'machines', // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (Allow / Deny, 60 s)
     'src/server/memory-pressure-watch.js': 'server', // lane browser-resource-care: "Memory is N% full … — the most is held by <who>", ONE per pressure episode
-    'src/server/voice-teach-engine.js': 'server', // lane voice-p1-oauth-teach: "Dropline 建议加入词库：…" with 加入词库 / 忽略 — ONE per proposal (≤ 1/h per conversation, teach ON only)
+    'src/server/voice-teach-engine.js': 'plugin', // lane foryou-plugin-notices: a PLUGIN's reminder now (was 'server'); lane voice-p1-oauth-teach: "Dropline 建议加入词库：…" with 加入词库 / 忽略 — ONE per proposal (≤ 1/h per conversation, teach ON only)
     'src/server/tls.js': 'server', // lane https-tailscale: the owner's step for the hub's https address (the tailnet's HTTPS certificates off / the operator right), ONE per state
     'src/server/desktop-app-keeper.js': 'server', // lane app-display-notify-sink: "JASP: Export finished" — ONE per app while open, when its notification is critical or no pane shows its window
     'src/server/mount-health-watch.js': 'server', // lane fuse-canary-notice: "The folder <mount> stopped answering … — the most is open by <who>", ONE per wedged-mount episode
@@ -911,6 +911,149 @@ console.log("㉑ THE DECISION API'S TRAY SECTIONS (lane inbox-decision-group) �
     ok(newKeys.every((k) => !/—/.test(k) && !/—/.test(zhOf(k) || '—')), 'the card grammar: no em-dash sentence in the new chip words (en / zh)', newKeys.filter((k) => /—/.test(k) || /—/.test(zhOf(k) || '—')));
   } catch (e) { ok(false, 'v2 chip: the row renderer runs under the minimal DOM', e.stack); }
   finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
+}
+
+console.log('⑬ THE PIN (lane foryou-plugin-notices, owner 2026-10-19: 「这种插件的提醒最好 pin 在最头部，相当于 urgent 之下的优先级」 + 「这个部分点击应该要自动跳转」) — the PURE order verdict, the door\'s shape at filing, the gate, the ✓ batch flag');
+{
+  const os = await import('node:os');
+  const { createRequire } = await import('node:module');
+  const { pathToFileURL } = await import('node:url');
+  const req = createRequire(import.meta.url);
+  const L = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('ut-pin', ROOT);
+  const cleanup = [];
+  process.on('exit', () => { for (const f of cleanup) { try { fs.rmSync(f, { recursive: true, force: true }); } catch { } } });
+  const tmpdir = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-pin-')); cleanup.push(d); return d; };
+  // THE FIXTURE: an urgent ask, a high one, a decision (options), a plain normal ask, a low one, Background Work (urgent),
+  // and two plugins' reminders (one older with two items, one newer and LOW) — the plugin ids are not Dropline's on purpose
+  const P = (id, plugin, extra = {}) => it(id, plugin, { origin: 'plugin', plugin, ...extra });
+  const open = [
+    it('n1', 'claude:n', { createdAt: 100 }),                                 // the NEWEST item of all: a plain normal ask
+    it('u1', 'claude:u', { urgency: 'urgent', createdAt: 10 }),
+    it('h1', 'claude:h', { urgency: 'high', createdAt: 90 }),
+    it('d1', 'claude:d', { options: ['A', 'B'], createdAt: 80 }),
+    it('l1', 'claude:l', { urgency: 'low', createdAt: 95 }),
+    it('j1', 'jobs', { urgency: 'urgent', createdAt: 99 }),
+    P('p1', 'zz-older', { createdAt: 30 }), P('p2', 'zz-older', { createdAt: 50 }),
+    P('q1', 'aa-newer', { urgency: 'low', createdAt: 60 }),
+  ];
+  /** THE VERDICT as the tray uses it: off = sortGroups' keys; on = inboxSections' three sections over the same rows */
+  const verdict = (Lx, items = open) => {
+    const gs = Lx.sortGroups(items);
+    const rows = gs.map(([k, v]) => [k, v.map((item) => ({ item, resolved: false })), v.length]);
+    const sec = Lx.inboxSections(rows, { now: 1000 });
+    const flat = (list) => list.map(([k, es]) => `${k}:${es.map((e) => e.item.id).join('+')}`);
+    return { off: gs.map(([k, v]) => `${k}:${v.map((i) => i.id).join('+')}`), now: flat(sec.now), pending: flat(sec.pending), later: flat(sec.later), held: sec.held };
+  };
+  const want = {
+    off: ['claude:u:u1', 'aa-newer:q1', 'zz-older:p1+p2', 'claude:h:h1', 'claude:n:n1', 'claude:l:l1', 'claude:d:d1', 'jobs:j1'], // a LOW ask ranks as normal in sortGroups (the panel's `|| 1`, kept) — by newest
+    now: ['jobs:j1', 'claude:u:u1', 'aa-newer:q1', 'zz-older:p2+p1', 'claude:h:h1', 'claude:d:d1'],
+    pending: ['claude:n:n1'], later: ['claude:l:l1'],
+  };
+  const v = verdict(L);
+  eq(v.off, want.off, 'switch OFF (sortGroups): urgent first · the plugins next (the one with the NEWEST item first, a LOW one too) · then the rest exactly as before (high · normal/low by newest) · Background Work last');
+  eq([v.now, v.pending, v.later], [want.now, want.pending, want.later], 'switch ON (inboxSections): 「现在要你」 = the urgent rows · the plugins\' reminders (newest first — not judged, a LOW one and an option-less one included) · then the LLM order (high, decisions); the plain ask waits in 「待判断」, the low one in 「可以等」');
+  ok(L.pluginOf({ origin: 'plugin', plugin: 'x' }) === 'x' && L.pluginOf({ origin: 'server', plugin: 'x', sessionKey: 'x' }) === null && L.pluginOf({ sessionKey: 'voice-input', sessionName: 'Voice input · Dropline' }) === null && L.pluginOf(null) === null,
+    'pluginOf reads the DECLARED origin + plugin id only — never a key, a name or the words (an older Dropline item with origin server is not a plugin\'s)');
+  ok(L.trayBand([it('x', 'k', { origin: 'plugin', plugin: 'k', urgency: 'urgent' })]) === 0 && L.trayBand([P('y', 'k')]) === 1 && L.trayBand([it('z', 'k', { urgency: 'high' })]) === 2,
+    'trayBand: urgent wins whoever filed it (0) · a plugin\'s reminders (1) · the rest (2)');
+  // an URGENT reminder keeps its urgent rank; an arrival while the popup is open APPENDS (the slot law) — a plugin's in 「现在要你」
+  {
+    const vu = verdict(L, [...open, P('p3', 'zz-older', { urgency: 'urgent', createdAt: 5 })]);
+    eq(vu.off.slice(0, 2), ['zz-older:p1+p2+p3', 'claude:u:u1'], 'an URGENT reminder: its plugin group joins the urgent band (urgent stays first, whoever filed it)');
+    const rows0 = L.sortGroups(open).map(([k, vv]) => [k, vv.map((item) => ({ item, resolved: false })), vv.length]);
+    const held = new Map();
+    L.inboxSections(rows0, { prev: held, now: 1000 });
+    const late = P('p9', 'zz-older', { createdAt: 2000 });
+    const rows1 = rows0.map(([k, es, n]) => (k === 'zz-older' ? [k, [...es, { item: late, resolved: false }], n + 1] : [k, es, n]));
+    const s1 = L.inboxSections(rows1, { prev: held, now: 1000 });
+    const zz = s1.now.find(([k]) => k === 'zz-older');
+    ok(!!zz && zz[1].map((e) => e.item.id).join() === 'p2,p1,p9' && held.get('p9').sec === 'now' && held.get('p9').ix >= 1e9, 'a reminder ARRIVING while the popup is open: 「现在要你」 (pinned), appended at its group\'s end (the slot law — nothing moves under the pointer)', zz && zz[1].map((e) => e.item.id));
+  }
+  // the PRE-FIX order with no plugin item: byte for byte today's (the band only ever separates plugin groups)
+  {
+    const noPlug = open.filter((i) => !L.pluginOf(i));
+    const old = (o) => { const g = new Map(); for (const i of o) (g.get(i.sessionKey) || g.set(i.sessionKey, []).get(i.sessionKey)).push(i); const R = { low: 0, normal: 1, high: 2, urgent: 3 }; return [...g.entries()].sort((a, b) => { if ((a[0] === 'jobs') !== (b[0] === 'jobs')) return a[0] === 'jobs' ? 1 : -1; const w = (x) => Math.max(...x.map((i) => R[i.urgency || 'normal'] || 1)); return (w(b[1]) - w(a[1])) || (Math.max(...b[1].map((i) => i.createdAt)) - Math.max(...a[1].map((i) => i.createdAt))); }); };
+    eq(L.sortGroups(noPlug).map(([k]) => k), old(noPlug).map(([k]) => k), 'no plugin item ⇒ sortGroups is exactly the old rule (worst urgency, newest, jobs last)');
+    const { inboxRank } = req(path.join(ROOT, 'src/decision-model.js'));
+    eq(L.trayRank(noPlug, 1000).map((r) => r.id), inboxRank(noPlug, 1000).map((r) => r.id), 'no plugin item ⇒ trayRank is exactly inboxRank (the LLM order untouched)');
+  }
+  // THE MUTANT (the brief's control): plugin reminders sorted by time into the general list ⇒ the verdict goes RED
+  {
+    const src = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8');
+    const edits = [
+      ['  return list.some((i) => pluginOf(i)) ? 1 : 2;', '  return 2;'],
+      ['  const pinned = list.filter((i) => pluginOf(i) && ', '  const pinned = list.filter((i) => false && pluginOf(i) && '],
+      ["export function traySectionOf(item, now = 0) { return pluginOf(item) ? 'now' : inboxSectionOf(item, now); }", 'export function traySectionOf(item, now = 0) { return inboxSectionOf(item, now); }'],
+    ];
+    let m = src;
+    const missing = edits.filter(([a]) => m.split(a).length !== 2).map(([a]) => a.slice(0, 60));
+    ok(!missing.length, 'the mutant\'s needles each occur exactly once (else the control proves nothing)', missing);
+    for (const [a, b] of edits) m = m.split(a).join(b);
+    const Mut = await import(pathToFileURL(M.write('src/lib/user-todos-layout.js', m, 'pin', { esm: true })).href);
+    const vm = verdict(Mut);
+    ok(JSON.stringify(vm.off) !== JSON.stringify(want.off) && vm.off.indexOf('aa-newer:q1') > vm.off.indexOf('claude:h:h1'), 'MUTANT RED (switch off): the plugins sorted by time into the general list fall under the high ask (and the low one to the bottom)', vm.off);
+    ok(JSON.stringify(vm.pending) !== JSON.stringify(want.pending) || JSON.stringify(vm.later) !== JSON.stringify(want.later), 'MUTANT RED (switch on): the LOW reminder lands in 「可以等」 — no longer pinned', [vm.now, vm.later]);
+  }
+
+  console.log('   the store: a plugin\'s reminder names its plugin + files under its id; the door\'s shape is validated at filing; the gate');
+  const UT = req(path.join(ROOT, 'src/user-todos.js'));
+  const mk = () => new UT.UserTodoManager({ dataDir: tmpdir(), expirySweepMs: 0 });
+  const thr = (fn) => { try { fn(); return ''; } catch (e) { return e.message; } };
+  const door = { kind: 'plugin-settings', plugin: 'voice-input', panel: 'teach', prefill: { proposal: 'vp1', terms: ['LarkClient', 'termsOf'] }, done: 'Add these words to your Dropline dictionary' };
+  {
+    const m = mk();
+    const r = m.add('voice-input', { origin: 'plugin', plugin: 'voice-input', text: 'suggest', open: door });
+    eq([r.origin, r.plugin, r.open], ['plugin', 'voice-input', door], 'a plugin item keeps origin plugin, its plugin id and its door (normalized — the same shape back)');
+    const bad = [
+      [{ open: { ...door, kind: 'url' } }, 'open.kind must be one of plugin-settings', 'an UNKNOWN door kind is refused by name'],
+      [{ open: { ...door, href: 'https://x' } }, 'open.href: not a field of a door (kind/plugin/panel/prefill/done)', 'a field a door does not have is refused by name'],
+      [{ open: { ...door, plugin: 'frp' } }, "open.plugin must be the filing plugin (voice-input)", 'a plugin opens only ITS OWN door'],
+      [{ open: { ...door, panel: 'Teach Panel' } }, 'open.panel must be a kebab-case word', 'a panel is a kebab word'],
+      [{ open: { ...door, prefill: { terms: 'x'.repeat(10).split('').concat(Array(30).fill('y')) } } }, 'open.prefill.terms must be a string or a list of ≤ 32 strings', 'a prefill list past 32 is refused'],
+      [{ open: { ...door, prefill: { nested: { a: 1 } } } }, 'open.prefill.nested must be a string or a list of ≤ 32 strings', 'a nested prefill is refused'],
+      [{ open: { ...door, done: '' } }, 'open.done must be a sentence key (≤ 200 characters)', 'an empty done is refused'],
+      [{ open: 'plugin-settings' }, 'open must be an object', 'a door is an object'],
+    ];
+    for (const [extra, msg, what] of bad) eq(thr(() => mk().add('voice-input', { origin: 'plugin', plugin: 'voice-input', text: 't', ...extra })), msg, what);
+    eq(thr(() => mk().add('claude:s', { origin: 'agent', text: 't', open: door })), "open.plugin must be the filing plugin (none — only a plugin's item has a door)", 'an AGENT\'s item cannot carry a door (only a plugin\'s)');
+    eq(thr(() => mk().add('voice-input', { origin: 'plugin', text: 't' })), "a plugin's item names its plugin (plugin: <id>)", 'origin plugin without its plugin id is refused');
+    eq(thr(() => mk().add('claude:s', { origin: 'plugin', plugin: 'voice-input', text: 't' })), 'a plugin files under its own id (voice-input), not claude:s', 'a plugin files under its OWN id (one tray section per plugin)');
+    eq(thr(() => mk().add('claude:s', { origin: 'agent', plugin: 'voice-input', text: 't' })), "plugin: only a plugin's item names one (origin 'plugin')", '`plugin` on another origin is refused');
+    // re-file: the door follows the latest filing; resolved items carry it in the snapshot
+    const r2 = m.add('voice-input', { origin: 'plugin', plugin: 'voice-input', text: 'suggest', open: { ...door, prefill: { proposal: 'vp2', terms: ['x'] } } });
+    ok(r2.id === r.id && m.get(r.id).open.prefill.proposal === 'vp2', 'a re-file of the same words points the door at the NEW proposal (its prefill)');
+  }
+  {
+    const m = mk();
+    m.setPluginGate((id) => id === 'voice-input');
+    eq(thr(() => m.add('frp', { origin: 'plugin', plugin: 'frp', text: 't' })), "plugin frp does not declare 'reminders' — it cannot file For-you items", 'THE GATE: a plugin that does not declare \'reminders\' is refused by name');
+    ok(!thr(() => m.add('voice-input', { origin: 'plugin', plugin: 'voice-input', text: 't' })), 'THE GATE: the declaring plugin files');
+    const wire = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+    ok(/userTodos\?\.setPluginGate\?\.\(\(id\) => !!\(plugins\.defs\(\)\[id\] \|\| \{\}\)\.provides\?\.includes\('reminders'\)\);/.test(wire), 'the wiring hands the store PluginManager\'s answer (the declared capability, never a plugin id)');
+    const VP = req(path.join(ROOT, 'src/plugins/voice-input.js'));
+    ok(VP.provides.includes('reminders'), 'the voice plugin DECLARES reminders (src/plugins/voice-input.js provides)');
+  }
+  {
+    const m = mk();
+    const evs = [];
+    m.onStatus((itx, ev) => evs.push([itx.id, ev.status, ev.by, !!ev.batch]));
+    const a = m.add('voice-input', { origin: 'plugin', plugin: 'voice-input', text: 'a' }), b = m.add('voice-input', { origin: 'plugin', plugin: 'voice-input', text: 'b' }), c = m.add('voice-input', { origin: 'plugin', plugin: 'voice-input', text: 'c' });
+    m.setStatus(a.id, 'done', 'user');
+    m.setStatusMany([b.id, c.id], 'done', 'user');
+    eq(evs, [[a.id, 'done', 'user', false], [b.id, 'done', 'user', true], [c.id, 'done', 'user', true]], 'the status event says `batch` for 「全部标为已看」 (setStatusMany) — a plugin whose ✓ applies something acts on ONE ✓ only');
+    const RC = req(path.join(ROOT, 'src/record-clear.js'));
+    ok(RC.SHAPES.todo.some(([f, op]) => f === 'open' && op === 'drop'), 'record-clear: a cleared item drops its door (its prefill holds the suggested words)');
+  }
+  {
+    const rowSrc = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8');
+    ok(rowSrc.includes("title=\"${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}\">✓</button>"), 'the row\'s ✓ title = the door\'s `done` through t() (what this ✓ does), else 已处理——标记完成');
+    const act = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8');
+    const jumpAt = act.indexOf('const jump = (key, item');
+    const doorAt = act.indexOf("if (item?.open?.kind === 'plugin-settings') { close(); app.openPluginDoor?.(item.open); return; }");
+    ok(jumpAt > 0 && doorAt > jumpAt && doorAt < act.indexOf('const s = sessionFor(key);', jumpAt), 'THE CLICK: jump() opens an item\'s declared door BEFORE the session lookup (a plugin key is no session — it ended in "Session not found")');
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -121,7 +121,7 @@ let proposalCheck, previewCheck;
   const out = await r.E.seen(seenArgs());
   const p = out.proposal;
   proposalCheck = (rr, o) => !!o.proposal && rr.writes().length === 0;
-  ok('teach ON ⇒ a PROPOSAL (card) + ONE For-you item with 加入词库 / 忽略 — and NO /v1/terms', proposalCheck(r, out) && r.items.length === 1 && r.items[0].options.join() === '加入词库,忽略' && r.items[0].text.startsWith('Dropline 建议加入词库：') && r.items[0].origin === 'server', { calls: r.calls, items: r.items });
+  ok('teach ON ⇒ a PROPOSAL (card) + ONE For-you item with 加入词库 / 忽略 — and NO /v1/terms', proposalCheck(r, out) && r.items.length === 1 && r.items[0].options.join() === '加入词库,忽略' && r.items[0].text.startsWith('Dropline 建议加入词库：') && r.items[0].origin === 'plugin' && r.items[0].plugin === 'voice-input' && r.items[0].open?.kind === 'plugin-settings', { calls: r.calls, items: r.items });
   ok('the proposal = this conversation\'s identifiers + file names, minus the dictionary; never a tool call\'s argument', p && p.terms.includes('commentsBatches') && p.terms.includes('doc-window-ui.js') && p.terms.includes('doc-model.js') && !p.terms.includes('tool_only_name.js') && !p.terms.includes('VibeSpace'), p && p.terms);
   ok('the dictionary was READ (no confirmation needed for a read) once', r.calls.filter((c) => c[0] === 'vocabulary').length === 1);
   const pick = ['commentsBatches', 'doc-window-ui.js'];
@@ -216,6 +216,90 @@ console.log('③ RED controls (schedule copies)');
     const o2 = await r2.E.seen(seenArgs());
     ok('CONTROL: a schedule that sends the context without the first-time preview ⇒ the PREVIEW check is RED on it', !previewCheck(r2, o2) && r2.writes().some((c) => c[0] === 'context'), r2.writes());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+console.log('③ THE TRAY\'S DOOR (lane foryou-plugin-notices): the suggestion is a PLUGIN\'s reminder with its door; ONE ✓ by the owner adds, 「全部标为已看」 / × / a failed ✓ send nothing; the older items take the door at boot');
+{
+  const os = require('node:os');
+  const UT = require(path.join(path.dirname(ENGINE), '..', 'user-todos.js'));
+  const VP = require(path.join(path.dirname(ENGINE), '..', 'plugins', 'voice-input.js'));
+  const { DONE_KEY } = require(ENGINE);
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('voice-door', path.join(path.dirname(ENGINE), '..', '..'));
+  const dirs = [];
+  process.on('exit', () => { for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
+  // the REAL store (its status events, its gate: the plugin's DECLARED capability) under the rig's engine
+  const realRig = (enginePath = ENGINE, { settings = { teach: true } } = {}) => {
+    const r = rig(enginePath, { settings });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-door-')); dirs.push(dir);
+    const ut = new UT.UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
+    ut.setPluginGate((id) => id === VP.id && VP.provides.includes('reminders'));
+    delete require.cache[require.resolve(enginePath)];
+    r.E = require(enginePath).create({ client: { connected: () => true, vocabulary: async () => { r.calls.push(['vocabulary']); return ['VibeSpace']; }, terms: async (l) => { r.calls.push(['terms', l.slice()]); return { added: l.slice(), skipped: [] }; }, context: async (b) => { r.calls.push(['context', b]); return { ok: true }; } },
+      plugin: { peek: () => r.rec, update: (fn) => fn(r.rec), settings: () => r.rec.config || {}, writeSettings: (pp) => { r.rec.config = { ...(r.rec.config || {}), ...pp }; } }, userTodos: ut, now: () => 1e12, log: { warn() { }, log() { } } });
+    return { ...r, ut };
+  };
+  const settle = () => new Promise((res) => setTimeout(res, 30));
+  const tickLeg = async (enginePath = ENGINE) => {
+    const r = realRig(enginePath);
+    const out = await r.E.seen(seenArgs());
+    const it = r.ut.get(out.proposal.itemId);
+    r.ut.setStatus(it.id, 'done', 'user');   // the row's ✓ (POST /api/user-todos/:id {status:'done'})
+    await settle();
+    return { r, out, it };
+  };
+  {
+    const { r, out, it } = await tickLeg();
+    const want = { kind: 'plugin-settings', plugin: 'voice-input', panel: 'teach', prefill: { proposal: out.proposal.id, terms: out.proposal.pick }, done: DONE_KEY };
+    ok('the suggestion is filed by the REAL store as a PLUGIN\'s reminder: origin plugin, its plugin id, under that id, with its door (the teach panel, this proposal, its preselected words, what ✓ does)', it.origin === 'plugin' && it.plugin === VP.id && it.sessionKey === VP.id && JSON.stringify(it.open) === JSON.stringify(want), it);
+    ok('ONE ✓ by the owner ⇒ ONE POST /v1/terms with exactly the preselected words; the card is gone and the row stays done', r.writes().length === 1 && r.writes()[0][1].join() === out.proposal.pick.join() && r.E.view().proposals.length === 0 && r.ut.get(it.id).status === 'done', r.writes());
+  }
+  {
+    const r = realRig();
+    const a = await r.E.seen(seenArgs({ conv: 'conv-a' })), b = await r.E.seen(seenArgs({ conv: 'conv-b', messages: [{ role: 'user', content: [{ type: 'text', text: 'rename fooBarQux in zeta_notes.md, then fooBarQux again' }] }] }));
+    const ids = [a, b].map((o) => o.proposal && o.proposal.itemId).filter(Boolean);
+    r.ut.setStatusMany(ids, 'done', 'user');   // 「全部标为已看」 on the plugin's section head
+    await settle();
+    ok('「全部标为已看」 on the section (a batch) ⇒ nothing sent, both batches still wait on the sheet', ids.length === 2 && r.writes().length === 0 && r.E.view().proposals.length === 2, { ids, w: r.writes() });
+    const c = await (async () => { const rr = realRig(); const o = await rr.E.seen(seenArgs()); rr.ut.setStatus(o.proposal.itemId, 'dismissed', 'user'); await settle(); return { rr, o }; })();
+    ok('× (dismissed) ⇒ nothing sent, the batch still waits on the sheet', c.rr.writes().length === 0 && c.rr.E.view().proposals.length === 1);
+  }
+  {
+    const r = realRig();
+    const out = await r.E.seen(seenArgs());
+    r.rec.config.teach = false;   // the owner turned suggesting off after the row was filed
+    r.ut.setStatus(out.proposal.itemId, 'done', 'user');
+    await settle();
+    ok('a ✓ that could not add (teach turned off) sends nothing and REOPENS the row (the words were not sent)', r.writes().length === 0 && r.ut.get(out.proposal.itemId).status === 'open', r.ut.get(out.proposal.itemId).status);
+  }
+  {
+    // the items filed BEFORE the door (origin server, no open): one open with its proposal, one resolved — a new boot
+    const r = realRig();
+    const out = await r.E.seen(seenArgs());
+    const old = r.ut.get(out.proposal.itemId);
+    const hist = r.ut.add(VP.id, { origin: 'plugin', plugin: VP.id, text: 'an older handled suggestion' });
+    r.ut.setStatus(hist.id, 'done', 'agent');
+    r.ut.reshapeItems((x) => { if (x.sessionKey !== VP.id) return false; x.origin = 'server'; delete x.plugin; delete x.open; return true; });
+    delete require.cache[require.resolve(ENGINE)];
+    const E2 = require(ENGINE).create({ client: { connected: () => true, vocabulary: async () => [], terms: async (l) => ({ added: l, skipped: [] }), context: async () => ({}) }, plugin: { peek: () => r.rec, update: (fn) => fn(r.rec), settings: () => r.rec.config || {}, writeSettings() { } }, userTodos: r.ut, now: () => 1e12, log: { warn() { }, log() { } } });
+    const now = r.ut.get(old.id), h = r.ut.get(hist.id);
+    ok('BOOT: an OPEN item filed before the door takes origin plugin + its door (this proposal, its words); a RESOLVED one is history and stays as it was', !!E2 && now.origin === 'plugin' && now.plugin === VP.id && now.open && now.open.prefill.proposal === out.proposal.id && h.origin === 'server' && !h.open, { now, h });
+  }
+  {
+    // CONTROLS: the pre-fix listener (only a reply was a press) ⇒ the ✓ sends nothing; a listener blind to `batch` ⇒ 「全部标为已看」 sends
+    const src = fs.readFileSync(ENGINE, 'utf8');
+    const needle = "      const tick = !reply && ev.status === 'done' && ev.by === 'user' && !ev.batch;";
+    ok('the controls\' needle occurs exactly once', src.split(needle).length === 2);
+    const noTick = MC.write('src/server/voice-teach-engine.js', src.replace(needle, '      const tick = false;'), 'notick');
+    const c1 = await tickLeg(noTick);
+    ok('CONTROL RED: the pre-fix engine (only a reply is a press) ⇒ the owner\'s ✓ sends NOTHING (the words wait for ever behind a done row)', c1.r.writes().length === 0);
+    const blind = MC.write('src/server/voice-teach-engine.js', src.replace(needle, "      const tick = !reply && ev.status === 'done' && ev.by === 'user';"), 'blind');
+    const r = realRig(blind);
+    const a = await r.E.seen(seenArgs());
+    r.ut.setStatusMany([a.proposal.itemId], 'done', 'user');
+    await settle();
+    ok('CONTROL RED: a listener blind to `batch` ⇒ 「全部标为已看」 sends the words (a whole section marked seen would add to the dictionary)', r.writes().length === 1);
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

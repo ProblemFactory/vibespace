@@ -52,6 +52,15 @@
  *                                    the slot it was first drawn in
  * lane decision-inbox-rank (INBOX v2): the place and the order are src/decision-model.js `inboxPlace` / `inboxRank` —
  * ONE truth with the engine's facts (the decay, a blocked fact, the judge's three-way choice).
+ *
+ * lane foryou-plugin-notices (owner 2026-10-19: 「这种插件的提醒最好 pin 在最头部，相当于 urgent 之下的优先级」) — THE PIN:
+ *   pluginOf(item)                 — the plugin a reminder belongs to (its declared origin 'plugin' + `plugin`), else null
+ *   trayBand(items)                — a group's band: 0 urgent (whoever filed it) · 1 a plugin's reminders · 2 the rest
+ *   trayRank(items, now)           — `inboxRank` with every non-urgent plugin reminder lifted into 「现在要你」 right under
+ *                                    the urgent rows, newest first (the judge never moves it)
+ *   traySectionOf(item, now)       — 'now' for a plugin reminder, else `inboxSectionOf`
+ * sortGroups orders by the band first (urgent groups · plugin groups by their newest item · the rest as before), and
+ * inboxSections numbers by trayRank — the same pin with the LLM plugin's sections on or off.
  */
 import { replyVerdict, REPLY_HIDDEN_CODES } from '../inbox-reply.js';
 import { inboxPlace, inboxRank } from '../decision-model.js'; // PURE: the For-you tray's place + order (lane decision-inbox-rank)
@@ -89,10 +98,43 @@ export function sortGroups(open) {
     // Background Work is its OWN section, always after session groups
     // (owner report: it read as a weird phantom session mixed in)
     if ((a[0] === 'jobs') !== (b[0] === 'jobs')) return a[0] === 'jobs' ? 1 : -1;
+    const newest = (items) => Math.max(...items.map((i) => i.createdAt));
+    // THE PIN (lane foryou-plugin-notices): urgent groups first, then each plugin's reminders (the plugin with the newest
+    // item first, whatever its urgency), then the rest exactly as before
+    const ba = trayBand(a[1]), bb = trayBand(b[1]);
+    if (ba !== bb) return ba - bb;
+    if (ba === 1) return newest(b[1]) - newest(a[1]);
     const w = (items) => Math.max(...items.map((i) => GROUP_URG_RANK[i.urgency || 'normal'] || 1));
-    return (w(b[1]) - w(a[1])) || (Math.max(...b[1].map((i) => i.createdAt)) - Math.max(...a[1].map((i) => i.createdAt)));
+    return (w(b[1]) - w(a[1])) || (newest(b[1]) - newest(a[1]));
   });
 }
+
+// ── THE PIN (lane foryou-plugin-notices) ─────────────────────────────────────
+/** WHICH PLUGIN a reminder belongs to: the item's DECLARED origin 'plugin' + its `plugin` id (src/user-todos.js refuses a
+ *  plugin item that names none, and a plugin that does not declare 'reminders'), else null — never read off a name, a
+ *  key or the words. */
+export function pluginOf(item) { return item && item.origin === 'plugin' && typeof item.plugin === 'string' && item.plugin ? item.plugin : null; }
+/** A group's BAND in the tray: 0 = it holds an URGENT item (urgent stays first, whoever filed it), 1 = a plugin's reminders
+ *  (one group per plugin — a plugin files under its own id), 2 = everything else. */
+export function trayBand(items) {
+  const list = (items || []).filter(Boolean);
+  if (list.some((i) => (i.urgency || 'normal') === 'urgent')) return 0;
+  return list.some((i) => pluginOf(i)) ? 1 : 2;
+}
+/** THE PIN in the LLM plugin's sections: `inboxRank`'s order with every NON-URGENT plugin reminder lifted into 「现在要你」
+ *  right under the urgent rows, newest first (an urgent one keeps its urgent rank). → [{id, section, …, pin?}] */
+export function trayRank(items, now = 0) {
+  const list = (Array.isArray(items) ? items : []).filter((i) => i && i.id);
+  const pinned = list.filter((i) => pluginOf(i) && (i.urgency || 'normal') !== 'urgent').sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const ids = new Set(pinned.map((i) => i.id));
+  const ranked = inboxRank(list.filter((i) => !ids.has(i.id)), now);
+  let k = 0;
+  while (k < ranked.length && ranked[k].section === 'now' && ranked[k].tier === 0) k++;
+  return [...ranked.slice(0, k), ...pinned.map((i) => ({ id: i.id, section: 'now', why: null, tier: null, pin: 'plugin' })), ...ranked.slice(k)];
+}
+/** A row first seen while the popup is open: a plugin reminder joins 「现在要你」 (it is pinned), anything else goes where
+ *  `inboxPlace` says. */
+export function traySectionOf(item, now = 0) { return pluginOf(item) ? 'now' : inboxSectionOf(item, now); }
 
 /** THE WHOLE DETAIL THIS CLIENT ALREADY SAW (2026-09-27, the For-you window's
  *  verify round). A snapshot carries a RESOLVED item's detail as a 300-char
@@ -148,14 +190,14 @@ export function inboxSectionOf(item, now = 0) { return inboxPlace(item, now).sec
  *  law of this module; a row first seen while open goes last). */
 export function inboxSections(rows, { prev = null, now = 0 } = {}) {
   const held = prev instanceof Map ? prev : new Map();
-  if (!held.size) inboxRank((rows || []).flatMap(([, entries]) => (entries || []).map((e) => e && e.item).filter(Boolean)), now).forEach((r, k) => held.set(r.id, { sec: r.section, ix: k }));
+  if (!held.size) trayRank((rows || []).flatMap(([, entries]) => (entries || []).map((e) => e && e.item).filter(Boolean)), now).forEach((r, k) => held.set(r.id, { sec: r.section, ix: k })); // THE PIN (lane foryou-plugin-notices)
   const ixOf = (e) => { const h = held.get(e && e.item && e.item.id); return h ? h.ix : Infinity; };
   const out = { now: [], pending: [], later: [] };
   for (const [key, entries] of rows || []) {
     const by = { now: [], pending: [], later: [] };
     for (const e of entries || []) {
       const id = e && e.item && e.item.id;
-      if (!held.has(id)) held.set(id, { sec: inboxSectionOf(e && e.item, now), ix: 1e9 + held.size });
+      if (!held.has(id)) held.set(id, { sec: traySectionOf(e && e.item, now), ix: 1e9 + held.size });
       by[held.get(id).sec].push(e);
     }
     for (const s of INBOX_SECTIONS) if (by[s].length) { by[s].sort((a, b) => ixOf(a) - ixOf(b)); out[s].push([key, by[s], by[s].filter((e) => !e.resolved).length]); }

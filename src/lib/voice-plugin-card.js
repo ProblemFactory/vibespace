@@ -8,7 +8,7 @@ import { t } from './i18n.js';
 import { renderAccountRow, renderTeachSection } from './voice-teach-ui.js'; // P1: Connect with Fish Audio + teach
 import { noteVoiceStatus } from './voice-input.js'; // lane voice-everywhere: the card's read also tells every microphone
 
-export function renderVoiceSheet(box, rerender, { pasteKey = null } = {}) {
+export function renderVoiceSheet(box, rerender, { pasteKey = null, focus = null } = {}) {
   const acct = document.createElement('div');
   acct.className = 'voice-account-box';
   box.appendChild(acct);
@@ -16,6 +16,6 @@ export function renderVoiceSheet(box, rerender, { pasteKey = null } = {}) {
     noteVoiceStatus(st);
     if (!st || st.error) { acct.textContent = (st && st.error) || t('Server unreachable — nothing was changed'); return; }
     renderAccountRow(acct, st, rerender, { pasteKey });
-    if (st.connected) renderTeachSection(box, rerender);
+    if (st.connected) renderTeachSection(box, rerender, { focus }); // focus: a For-you reminder's door (lane foryou-plugin-notices)
   }).catch(() => { });
 }

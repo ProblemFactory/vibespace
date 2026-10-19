@@ -1875,6 +1875,7 @@ const I_RECV = {
   'src/port-forward.js|h': ['host', 'a machine name'], 'src/server/auto-cli-loop.js|it.pj': ['quota', 'a projection\'s label'],
   'src/server/auto-resume.js|chk': ['quota', 'a pre-fire check\'s reason'], 'src/server/auto-resume.js|ident': ['account', 'a billing identity'],
   'src/server/boot-restore.js|h': ['host', 'a machine name'], 'src/server/boot-restore.js|session': ['session', 'a session\'s name'],
+  'src/server/boot-restore.js|tally': ['count', 'the re-probe tally — its `open` is the list of sock files still unanswered, never a For-you item\'s door (lane foryou-plugin-notices gave the item an `open` field, a SHAPES drop row)'],
   'src/server/browser-env.js|f': ['browser profile', 'a pin repoint\'s previous profile'], 'src/server/browser-keeper.js|rec': ['browser profile', 'a browser record\'s label'], 'src/server/browser-builds-keeper.js|p': ['browser profile', 'a profile label (rv-browser F7: Change build… moved out of the keeper)'], 'src/server/browser-builds-keeper.js|bc': ['browser profile', 'verify r2 (B5): a Chrome build change\'s from / to — build words ("Chrome 151.0.7922.34"), never a record\'s text'],
   'src/server/browser-keeper.js|v': ['browser profile', 'a resource verdict\'s reason'], 'src/server/browser-stream.js|next.switched': ['browser profile', 'the browser a view switched from'],
   'src/server/browser-trace.js|p': ['browser profile', 'a profile label'], 'src/server/channels-engine.js|choice.fromMount': ['mount', 'a storage mount\'s name'],

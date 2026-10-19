@@ -8,7 +8,12 @@ const crypto = require('crypto');
 const T = require('../voice-teach.js');
 const VM = require('../voice-model.js');
 
-const ITEM_KEY = 'voice-input';   // the For-you items' session key (one producer, like 'browser')
+const ITEM_KEY = require('../plugins/voice-input.js').id;   // the For-you items' key = THE PLUGIN'S ID (a plugin files its reminders under its own id — src/user-todos.js)
+const i18nKey = (s) => s; // the extraction marker (scripts/i18n-extract.mjs): a t() key the client words per device
+// lane foryou-plugin-notices: what the row's ✓ does on a suggestion (its title) — ONE ✓ by the owner adds the preselected words
+const DONE_KEY = i18nKey('Add these words to your Dropline dictionary');
+/** the item's DOOR: the plugin's sheet on the teach panel, this proposal's card chosen with its preselected words */
+const openOf = (p) => (p ? { kind: 'plugin-settings', plugin: ITEM_KEY, panel: 'teach', prefill: { proposal: p.id, terms: (p.pick || []).slice(0, 32) }, done: DONE_KEY } : { kind: 'plugin-settings', plugin: ITEM_KEY, panel: 'teach' });
 
 function create({ client, plugin, userTodos = null, now = Date.now, log = console, model = T }) {
   let vocab = { at: 0, terms: [] };
@@ -31,7 +36,7 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
   function fileItem(p) {
     if (!userTodos) return null;
     try {
-      const r = userTodos.add(ITEM_KEY, { text: model.teachWords(p.lang, 'proposal', { terms: p.pick.join(', ') }), detail: model.teachWords(p.lang, 'detail'), options: [model.teachWords(p.lang, 'add'), model.teachWords(p.lang, 'ignore')], origin: 'server', kind: 'action', urgency: 'normal', by: 'agent', sessionName: 'Voice input · Dropline' });
+      const r = userTodos.add(ITEM_KEY, { text: model.teachWords(p.lang, 'proposal', { terms: p.pick.join(', ') }), detail: model.teachWords(p.lang, 'detail'), options: [model.teachWords(p.lang, 'add'), model.teachWords(p.lang, 'ignore')], origin: 'plugin', plugin: ITEM_KEY, open: openOf(p), kind: 'action', urgency: 'normal', by: 'agent', sessionName: 'Voice input · Dropline' });
       return (r && r.id) || null;
     } catch (e) { log.warn?.(`[voice] the proposal's For-you item was not filed: ${e && e.message}`); return null; }
   }
@@ -149,17 +154,39 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
     return { settings: settings(), proposals: st.proposals.map(({ id, conv, cwd, title, terms, pick, why, at }) => ({ id, conv, cwd, title, terms, pick: pick || [], why: why || {}, at })), journal: st.journal.slice().reverse(), caps: { terms: model.capLeft(st, 'terms', now()), context: model.capLeft(st, 'context', now()) } };
   }
   // the For-you chip IS the press: 加入词库 adds the preselected words it shows, 忽略 ignores the batch
+  // lane foryou-plugin-notices: and so is the row's ✓ (its title says so — the door's `done`): ONE ✓ by the owner adds the
+  // preselected words; 「全部标为已看」 (a batch), the expiry, × and a reopen send nothing. A ✓ that could not add (teach
+  // turned off, the hour's cap) REOPENS the row — the words were not sent, so the reminder stays
   if (userTodos && typeof userTodos.onStatus === 'function') {
-    userTodos.onStatus((it) => {
-      const reply = it && it.reply && it.reply.text;
-      if (!reply || it.sessionKey !== ITEM_KEY) return;
+    userTodos.onStatus((it, ev = {}) => {
+      if (!it || it.sessionKey !== ITEM_KEY) return;
+      const reply = it.reply && it.reply.text;
+      const tick = !reply && ev.status === 'done' && ev.by === 'user' && !ev.batch;
+      if (!reply && !tick) return;
       const p = state().proposals.find((x) => x.itemId === it.id);
       if (!p) return;
-      if (reply === model.teachWords(p.lang, 'add')) confirm(p.id, p.pick || p.terms).catch((e) => log.warn?.(`[voice] the For-you 加入词库 failed: ${e && e.message}`));
+      if (tick) {
+        confirm(p.id, p.pick || p.terms).catch((e) => {
+          log.warn?.(`[voice] the For-you ✓ did not add the words: ${e && e.message}`);
+          try { if (userTodos.get(it.id)?.status === 'done') userTodos.setStatus(it.id, 'open', 'voice-input'); } catch { }
+        });
+      } else if (reply === model.teachWords(p.lang, 'add')) confirm(p.id, p.pick || p.terms).catch((e) => log.warn?.(`[voice] the For-you 加入词库 failed: ${e && e.message}`));
       else if (reply === model.teachWords(p.lang, 'ignore')) { try { ignore(p.id); } catch { } }
     });
+  }
+  // lane foryou-plugin-notices: the items filed BEFORE the door existed (origin 'server', no `open`) take the plugin's origin
+  // and their door once, at boot (the store's reshaping door) — the owner's open rows jump and pin too, not only new ones
+  if (userTodos && typeof userTodos.reshapeItems === 'function') {
+    try {
+      const byItem = new Map(state().proposals.filter((p) => p.itemId).map((p) => [p.itemId, p]));
+      userTodos.reshapeItems((it) => {
+        if (it.sessionKey !== ITEM_KEY || it.status !== 'open' || it.origin === 'plugin') return false;
+        it.origin = 'plugin'; it.plugin = ITEM_KEY; it.open = openOf(byItem.get(it.id));
+        return true;
+      });
+    } catch (e) { log.warn?.(`[voice] the older For-you items were not given their door: ${e && e.message}`); }
   }
   return { seen, answerPreview, confirm, ignore, setSettings, view, capOk };
 }
 
-module.exports = { create, ITEM_KEY };
+module.exports = { create, ITEM_KEY, DONE_KEY };
