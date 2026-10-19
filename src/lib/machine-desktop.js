@@ -34,6 +34,7 @@ import { openMachineApp, openWindowPicker } from './machine-app.js'; // lane mac
 import { screenMap, hdrShown, carryPick } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
 import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
 import { enterSubmits } from './chat-enter-keys.js';
+import { createHandover } from './machine-desktop-handover.js'; // lane desktop-handover: 「交给 agent」 — the stream to ONE agent conversation
 
 const RUNS_KEY = 'vibespace.machineDesktopRuns'; // { [hostId]: [line…] } — the owner's latest lines per machine (≤ 3)
 function readRuns() { try { const o = JSON.parse(localStorage.getItem(RUNS_KEY) || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch { return {}; } }
@@ -181,7 +182,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
     seg.replaceChildren(...list.map((d, i) => { const b = btn('desktop-strip-seg', String(i + 1), () => pickStream(d.id)); b.title = d.name ? `${i + 1} · ${d.name}` : t('Display {n}', { n: i + 1 }); b.dataset.key = d.id; b.setAttribute('aria-pressed', String(d.id === streamDisplay)); return b; }));
     seg.hidden = false;
   };
-  const pickStream = (id) => { if (!stream || id === streamDisplay) return; streamDisplay = id; drawStreamSeg(); stream.dispose(); startStream({ kind: 'display', id }); };
+  const pickStream = (id) => { if (!stream || id === streamDisplay) return; streamDisplay = id; drawStreamSeg(); const after = stream.key; stream.dispose('switched'); startStream({ kind: 'display', id }, after); }; // lane desktop-handover: `switched` + `after` carry a hand-over to the next stream
   const apply = () => { if (!view) return; const d = shown(); view.setCrop(d ? d.rect : null); drawSeg(); hdrEl.hidden = !hdrShown({ screens: facts && facts.ok ? facts.displays : null, map, key: d ? d.key : null }); };
   const pick = (key) => { want = key; rememberDesktop(m.hostId, key); apply(); };
   const remap = () => {
@@ -335,17 +336,23 @@ export function openMachineDesktop(app, m, { display } = {}) {
       : code === 'input_unsupported' ? t('This machine cannot take input over the stream yet')
         : t('The machine did not take that input ({code})', { code }), null, 8000);
   };
-  const startStream = (source = null) => {
+  // lane desktop-handover (src/lib/machine-desktop-handover.js): 「交给 agent」 while the stream plays; the person's own input pauses it
+  const handover = createHandover({ app, hostId: m.hostId, machine, strip, before: chip, pane, streamOf: () => stream });
+  winInfo._handover = handover;
+  const startStream = (source = null, after = null) => {
     stream = createStreamView(pane, {
       hostId: m.hostId,
       hostPlatform: m.setup || null,
+      after,
+      onOwnerInput: () => handover.ownerInput(),
+      onHandover: (f) => handover.facts(f),
       source, // lane stream-mac-stall: a display the switcher picked (else the machine's main one)
       onSource: (src) => { streamDisplays = src && Array.isArray(src.displays) ? src.displays.slice().sort((a, b) => a.x - b.x || a.y - b.y) : null; streamDisplay = src && src.display != null ? String(src.display) : null; drawStreamSeg(); },
-      onStatus: () => { drawChip(); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
+      onStatus: (state) => { drawChip(); handover.playing(state === 'playing'); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
       onStats: () => drawChip(),
       onInput: inputWords,
       onFallback: (code, why, taken) => {
-        stream = null; streamEl.hidden = true; clearInterval(tick); tick = null;
+        stream = null; streamEl.hidden = true; clearInterval(tick); tick = null; handover.playing(false); handover.facts(null);
         streamDisplays = null; drawStreamSeg(); // the VNC picture draws its own switcher (remap)
         refusedWhy = STREAM_WHY[code] ? streamWords(code) : why || streamWords(code); // the page words a known code in its own language; else the machine's sentence
         if (code === 'screen_permission' || code === 'helper_changed_regrant') showTcc(code); // lane stream-p3m-build: which switch on the Mac
@@ -358,7 +365,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
     stream.connect();
   };
   winInfo._pickDisplay = (key) => pick(key);
-  winInfo.onClose = () => { clearInterval(tick); clearTimeout(noteTimer); document.removeEventListener('fullscreenchange', onFull); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); if (view) view.dispose(); };
+  winInfo.onClose = () => { handover.dispose(); clearInterval(tick); clearTimeout(noteTimer); document.removeEventListener('fullscreenchange', onFull); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); if (view) view.dispose(); };
   if (typeof RTCPeerConnection === 'function') startStream(); else startVnc();
   return winInfo;
 }

@@ -9200,4 +9200,25 @@ export default {
   "streaming now": "ストリーミング中", // lane stream-window-fixes
   "The machine encodes it at {kbps} kbps — never under {floor} kbps for a window this size": "マシンは {kbps} kbps でエンコードしています — このサイズのウィンドウでは {floor} kbps を下回りません", // lane stream-window-fixes
   "The machine encodes it at {kbps} kbps — never under {floor} kbps for a screen this size": "マシンは {kbps} kbps でエンコードしています — このサイズの画面では {floor} kbps を下回りません", // lane stream-mac-rate
+  "{machine}’s agent is too old for a hand-over — it updates itself with VibeSpace": "{machine} のエージェントは古く、任せられません — VibeSpace と一緒に自動更新されます", // lane desktop-handover
+  "That conversation is not running any more": "その会話はもう実行されていません", // lane desktop-handover
+  "The stream is not playing — a hand-over rides it": "ストリームが再生されていません — 任せるにはストリームが必要です", // lane desktop-handover
+  "A plain shell cannot drive a desktop": "ただのシェルはデスクトップを操作できません", // lane desktop-handover
+  "The hand-over did not start: {why}": "任せられませんでした: {why}", // lane desktop-handover
+  "{name} no longer drives {machine}’s desktop — its conversation ended": "{name} は {machine} のデスクトップの操作を終えました — 会話が終了しました", // lane desktop-handover
+  "{name} no longer drives {machine}’s desktop — the stream ended": "{name} は {machine} のデスクトップの操作を終えました — ストリームが終了しました", // lane desktop-handover
+  "{name} handed {machine}’s desktop back": "{name} が {machine} のデスクトップを返しました", // lane desktop-handover
+  "Hand to an agent": "エージェントに任せる", // lane desktop-handover
+  "Let it continue": "続けて任せる", // lane desktop-handover
+  "Take back": "取り戻す", // lane desktop-handover
+  "Paused — you are using it": "一時停止中 — あなたが操作中", // lane desktop-handover
+  "Switching display…": "ディスプレイを切り替え中…", // lane desktop-handover
+  "{name} is driving": "{name} が操作中", // lane desktop-handover
+  "{name} waits until you let it continue": "{name} は「続けて任せる」まで待ちます", // lane desktop-handover
+  "{name} drives this desktop — any key, click or scroll of yours pauses it": "{name} がこのデスクトップを操作中 — あなたのキー・クリック・スクロールで一時停止します", // lane desktop-handover
+  "Hand {machine}’s desktop to an agent": "{machine} のデスクトップをエージェントに任せる", // lane desktop-handover
+  "It sees this display and uses its keyboard and pointer through this window’s stream. Any key, click or scroll of yours here pauses it; Take back ends it — closing this window ends it too.": "このディスプレイが見え、このウィンドウのストリームを通してキーボードとポインターを使います。ここであなたがキーを押す・クリックする・スクロールすると一時停止し、「取り戻す」でいつでも終わります — このウィンドウを閉じても終わります。", // lane desktop-handover
+  "Hand over": "任せる", // lane desktop-handover
+  "{name} drives {machine}’s desktop — any key or click of yours pauses it": "{name} が {machine} のデスクトップを操作中 — あなたのキー操作やクリックで一時停止します", // lane desktop-handover
+  "No agent conversation is running — start one, then come back.": "実行中のエージェントの会話がありません — 始めてから戻ってください。", // lane desktop-handover
 };

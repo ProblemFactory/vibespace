@@ -511,7 +511,12 @@ router.post('/api/desktop/machine-app/untrack', (req, res) => {
 // between the page's RTCPeerConnection and the machine's agent, and the session's record (src/server/desktop-webrtc.js); people
 // only, like the picture. `start` answers `{take: false, code, why}` when the rung is not taken (the window shows the VNC picture)
 let webrtc = null;
-const webrtcOf = (res) => { if (ctx.webrtc) return ctx.webrtc; if (!ctx.access || typeof ctx.access.streamRung !== 'function') { noAccess(res); return null; } return webrtc || (webrtc = require('../server/desktop-webrtc.js').create({ access: ctx.access, log: console })); };
+const webrtcOf = (res) => {
+  if (ctx.webrtc) { ctx.handover?.setWebrtc(ctx.webrtc); return ctx.webrtc; }
+  if (!ctx.access || typeof ctx.access.streamRung !== 'function') { noAccess(res); return null; }
+  if (!webrtc) { webrtc = require('../server/desktop-webrtc.js').create({ access: ctx.access, log: console, handover: ctx.handover ? ctx.handover.hooks : null }); ctx.handover?.setWebrtc(webrtc); } // lane desktop-handover: the lease rides the stream
+  return webrtc;
+};
 const STREAM_STATUS = Object.freeze({ not_found: 404, 'bad-request': 400, answer_failed: 409, restart_failed: 409 });
 const streamFail = (res, e) => (e && STREAM_STATUS[e.code] ? res.status(STREAM_STATUS[e.code]).json({ error: String(e.message), code: e.code }) : fail(res, e));
 const streamKey = (req) => String((req.method === 'GET' ? req.query.key : req.body && req.body.key) || '');
@@ -520,7 +525,7 @@ router.post('/api/desktop/machine-desktop/stream/start', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
   const wr = webrtcOf(res); if (!wr) return;
   const b = req.body || {};
-  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null, source: b.source == null ? null : b.source, fp16: b.fp16 === true })); } catch (e) { streamFail(res, e); } // source: a display / ONE window (a Mac's — lane stream-p3m-build; a Windows machine's — stream-p2w-build)
+  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null, source: b.source == null ? null : b.source, fp16: b.fp16 === true, after: typeof b.after === 'string' && /^st[a-z0-9]{1,40}$/.test(b.after) ? b.after : null })); } catch (e) { streamFail(res, e); } // source: a display / ONE window (a Mac's — lane stream-p3m-build; a Windows machine's — stream-p2w-build)
 });
 // lane stream-p2w-build (design q-041 r3 §3 P2w): ONE application window of the machine as the stream — the picker's list (the
 // machine's application windows through its agent's `stream-windows` op) and 「还原它」 (a minimized one back, never the focus)
@@ -599,6 +604,29 @@ router.get('/api/desktop/machine-desktop/stream/facts', async (req, res) => {
   try { machine = await ctx.access.streamFacts(host, { force: !!req.query.force }); } catch (e) { machine = { ok: false, code: (e && e.code) || 'facts_failed', error: String((e && e.message) || e) }; }
   res.json({ sessions: wr.facts(host), machine });
 });
+// lane desktop-handover: THE HAND-OVER — the owner gives the window's live stream of this machine to ONE agent conversation
+// (`principal` = the picker's `agent:<conversation id>`), pauses it (their own input in the window), resumes it, takes it back;
+// people only (an agent token ⇒ human_only: no agent can ask for a desktop, nor pass one on) — src/server/desktop-handover-engine.js
+const HANDOVER_STATUS = Object.freeze({ stream_not_live: 409, not_a_display: 409, host_needs_update: 409, no_conversation: 409, not_an_agent: 409, no_lease: 404, 'bad-request': 400 });
+const handoverOf = (res) => { if (ctx.handover) return ctx.handover; res.status(503).json({ error: 'the hand-over is not wired on this instance', code: 'no-engine' }); return null; };
+const handoverFail = (res, e) => res.status(HANDOVER_STATUS[e && e.code] || 500).json({ error: String((e && e.message) || e), code: (e && e.code) || null });
+router.post('/api/desktop/machine-desktop/handover', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const ho = handoverOf(res); if (!ho) return;
+  if (!webrtcOf(res)) return;
+  const b = req.body || {};
+  try { res.json(await ho.give({ hostId: host, streamKey: String(b.key || ''), principal: String(b.principal || '') })); } catch (e) { handoverFail(res, e); }
+});
+const handoverVerb = (fn) => (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const ho = handoverOf(res); if (!ho) return;
+  try { res.json(fn(ho, host, req.body || {})); } catch (e) { handoverFail(res, e); }
+};
+router.post('/api/desktop/machine-desktop/handover/pause', handoverVerb((ho, host, b) => ho.pause(host, b.cause || 'owner_input'))); // the owner's own input in the window
+router.post('/api/desktop/machine-desktop/handover/resume', handoverVerb((ho, host) => ho.resume(host))); // 「继续交给它」
+router.post('/api/desktop/machine-desktop/handover/revoke', handoverVerb((ho, host) => ho.revoke(host))); // 「收回」
 /** lane machine-desktop-apps: the machine's INSTALLED apps — listed ON it by witness (src/installed-apps.js), kept by the
  *  hub; `fresh=1` = Check again (listed now). Answered 200 with the list as it is when the machine cannot list right
  *  now (`code`: host_needs_daemon = its agent predates the op, offline, list_failed) — the dialog words each. */

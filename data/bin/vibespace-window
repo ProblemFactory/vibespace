@@ -28,6 +28,9 @@
 // while the user has taken the window over in the live view every verb is
 // refused `window_paused` and NOTHING is injected — wait for the handback
 // (it is announced into your conversation), then snapshot again.
+// A MACHINE'S DESKTOP (lane desktop-handover): `md-<host>` rows are a paired machine's whole desktop its OWNER handed to
+// this conversation from that machine's desktop window — pixels only (screenshot, click --at, type, key, scroll), the
+// same records the owner's own keyboard and mouse send; their own input pauses you (window_paused); no verb asks for one.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -77,7 +80,7 @@ const USAGE = `vibespace-window — act on a native window through its accessibi
                                                  act on a NODE (its own declared action; --action picks one by name)
   vibespace-window click <handle> --at <x>,<y> [--button 1|2|3]
                                                  act on a POINT of the screenshot image — injection; refused with the probe when no backend exists
-  vibespace-window type <handle> ["text"] [@e7] [--replace]
+  vibespace-window type <handle> ["text"] [@e7] [--replace] [--keys]
                                                  insert text into an editable node (@ref, else the focused one); typed as KEYS
                                                  (pixel mode / a field with no text interface): at most 1500 characters a call
   vibespace-window key <handle> <chord>          a chord (ctrl+s, alt+F4, Return) — injection, same rule as --at
@@ -92,7 +95,12 @@ Rules: @ref beats coordinates; a node without an action is refused, never degrad
        window (the lease survives a restart); window_paused = the user is driving it — never retry in a loop.
 Dialogs: a dialog the app opens is part of its window — the screenshot shows it, the snapshot names it first, type
        goes into it; to dismiss it, click its button by ref or key Escape.
-       YOUR DESKTOP rows (dw-<pid>) are the user's real desktop: tree verbs only, no key / --at, no watch.`;
+       YOUR DESKTOP rows (dw-<pid>) are the user's real desktop: tree verbs only, no key / --at, no watch.
+A MACHINE'S DESKTOP (md-<host> rows): a paired machine's whole screen its OWNER handed you from that machine's desktop window
+       ("Hand to an agent") — no verb can ask for one. Pixels only: screenshot (the display), click --at x,y [--button 1|2|3],
+       type "text" (through the machine's clipboard — any language; --keys = US-layout keys, ASCII), key <chord>, scroll;
+       detach hands it back. The owner watches your pointer; their own key / click / scroll pauses you (window_paused —
+       wait, never loop); chords that lock / log off the machine are refused (chord_refused).`;
 
 async function call(method, p, body, { soft = false, raw = false } = {}) {
   const res = await fetch(API + p, { method, headers: { Authorization: 'Bearer ' + TOKEN, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined }).catch((e) => ({ _neterr: e.message }));
@@ -122,6 +130,14 @@ function printRefusal(r, status) {
   else if (r.code === 'no_live_view') console.error('  the user is looking at this window on their own desktop; there is no live pane to point them at — describe what you need in your reply instead');
   else if (r.code === 'capture_needs_portal' || r.code === 'capture_unavailable') console.error('  pixels of this window cannot be read here (the refusal says why); `snapshot` still reads its tree');
   else if (r.code === 'desktop_window_gone') console.error('  the application exited — `vibespace-window list` again');
+  else if (r.code === 'desktop_not_handed') console.error('  a machine\'s desktop is its owner\'s to hand over (its desktop window → "Hand to an agent") — ask in your reply; nothing here can request or take it');
+  else if (r.code === 'desktop_switching') console.error('  the owner is switching the window to another display — screenshot again in a moment');
+  else if (r.code === 'chord_refused') console.error('  that chord locks, logs off or powers the machine — it is never sent; if the task needs it, ask the owner');
+  else if (r.code === 'outside_display' || r.code === 'screenshot_first') console.error('  --at is a pixel of `vibespace-window screenshot md-<host>` (x from the left, y from the top) — take one and pick the point there');
+  else if (r.code === 'host_needs_update') console.error('  the machine\'s agent is older than the hand-over and was not asked — it updates itself with VibeSpace; tell the owner');
+  else if (r.code === 'mac_still_pending') console.error('  a Mac\'s screenshot comes with its screen helper\'s next version — clicks, keys, typing and scrolling work; ask the owner what the screen shows');
+  else if (r.code === 'type_too_long') console.error('  split the text: at most 1500 characters a call');
+  else if (r.code === 'not_ascii') console.error('  leave --keys off: the text then goes through the machine\'s clipboard (any language)');
   else if (r.code === 'browser_is_human') console.error('  the user starts their own browser and can share it with you (then `vibespace-window list` shows it) — for your own web work use YOUR browser: `vibespace-browser` (`vibespace-docs browser`); when it cannot reach a site, a real desktop browser of your own opens beside your chat through ONE door: `vibespace-browser new <label> --backend desktop-app [--url <https://…>]` (then drive it with these verbs)');
   else if (r.code === 'not_exposed') console.error('  the user has not shared this window with you — ask them (they can share it from the window\'s ⋯ menu); do not look for another road to it');
   else if (r.code === 'mode_pixels') console.error('  the user shared this window in pixel mode — read it with screenshot, act with click --at x,y / type / key / scroll');
@@ -254,7 +270,12 @@ function printNode(n) {
     const r = await call('GET', '/api/agent/window/targets');
     if (json) { console.log(JSON.stringify(r, null, 2)); return; }
     const desk = r.desktop || { enabled: false };
-    if (!r.targets.length) console.log(`no window is shared with you — the user shares windows from Desktop apps (a window's ⋯ → Share with agent…), or \`vibespace-window open <app>\` starts one of your own${desk.enabled ? ' (the user\'s real desktop is ON but no application is on its accessibility bus)' : ' (the user\'s own desktop is not listed: their switch is off)'}.`);
+    const machines = Array.isArray(r.machines) ? r.machines : []; // lane desktop-handover: desktops their owners handed to me
+    for (const mrow of machines) {
+      console.log(`* ${mrow.handle}  ${mrow.label}  A MACHINE'S DESKTOP — handed to you by its owner${mrow.state === 'paused' ? ' — the OWNER is using it right now (window_paused: wait)' : mrow.state === 'switching' ? ' — the owner is switching displays' : ''}`);
+      console.log(`      mode: pixels — screenshot, then click --at x,y / type / key / scroll${mrow.shot ? ` (last screenshot ${mrow.shot.w}x${mrow.shot.h})` : ''}; \`vibespace-window detach ${mrow.handle}\` hands it back`);
+    }
+    if (!r.targets.length && !machines.length) console.log(`no window is shared with you — the user shares windows from Desktop apps (a window's ⋯ → Share with agent…), or \`vibespace-window open <app>\` starts one of your own${desk.enabled ? ' (the user\'s real desktop is ON but no application is on its accessibility bus)' : ' (the user\'s own desktop is not listed: their switch is off)'}.`);
     for (const t of r.targets) {
       console.log(`${t.mine ? '*' : t.lease ? '+' : ' '} ${t.handle}  ${t.label}${t.browser ? '  [the user\'s browser]' : ''}  ${t.origin === 'desktop' ? 'YOUR DESKTOP (the user\'s own window)' : `${t.state} on ${t.display || '?'}`}  tree: ${t.a11y ? `yes (${t.a11y.name}, pid ${t.a11y.pid})` : 'not on the accessibility bus'}${t.lease ? `  held ${t.mine ? 'by me' : t.lease.orphaned ? 'by a session that is gone (free to attach)' : `by another session${t.lease.sessionName ? ` (${t.lease.sessionName})` : ''}`}${t.lease.input === 'user' ? ' — the USER is driving it (window_paused)' : ''}` : ''}`);
       if (t.origin !== 'desktop' && t.mode) console.log(`      mode: ${t.mode === 'auto' ? `auto → ${t.resolvedMode || '?'}` : t.mode} (${t.modeWhy || ''})${t.via ? ` · shared with you ${t.via === 'group' ? 'through a Task Group' : t.via === 'self-open' ? 'because you opened it' : 'directly'}` : ''}${t.note ? `\n      ${t.note}` : ''}`);
@@ -285,6 +306,7 @@ function printNode(n) {
   if (verb === 'attach') {
     const h = handleArg('vibespace-window attach <handle>');
     const r = await call('POST', '/api/agent/window/attach', { handle: h });
+    if (r.origin === 'machine') { console.log(json ? JSON.stringify(r, null, 2) : `${h}: ${r.note}`); return; } // lane desktop-handover
     const mline = r.mode ? `\nmode: ${r.mode.mode === 'auto' ? `auto → ${r.mode.resolved || '?'}` : r.mode.mode} — ${r.mode.why}${(r.mode.resolved || r.mode.mode) === 'pixels' ? ' (read with screenshot; act with click --at x,y / type / key / scroll)' : ''}` : '';
     console.log(json ? JSON.stringify(r, null, 2) : `${r.resumed ? 'already held' : r.orphanedFrom ? 'attached (the previous holder\'s session is gone)' : 'attached'}: ${r.app.label} (${r.handle}) on ${r.app.display}.${r.lease && r.lease.input === 'user' ? ' The USER is driving it right now — wait for the handback.' : ''} Next: ${r.next}${mline}${r.browserNote ? '\n' + r.browserNote : ''}${r.note ? '\n' + r.note : ''}`);
     return;
@@ -313,7 +335,7 @@ function printNode(n) {
   if (verb === 'detach') {
     const h = handleArg('vibespace-window detach <handle>');
     const r = await call('POST', '/api/agent/window/detach', { handle: h });
-    console.log(json ? JSON.stringify(r, null, 2) : `detached from ${r.handle}${r.appRunning ? ' — the app keeps running' : ' (the app is gone)'}`);
+    console.log(json ? JSON.stringify(r, null, 2) : r.ended === 'agent_done' ? `handed ${r.handle} back to its owner — the hand-over ended` : `detached from ${r.handle}${r.appRunning ? ' — the app keeps running' : ' (the app is gone)'}`);
     return;
   }
 
@@ -342,7 +364,7 @@ function printNode(n) {
     try { fd = fs.openSync(out, C.O_WRONLY | C.O_CREAT | C.O_TRUNC | (C.O_NOFOLLOW || 0), target.fresh ? 0o600 : 0o666); } catch (e) { printRefusal({ code: 'out_unusable', error: `\`${out}\` could not be written (${e.code || e.message}); the capture was discarded`, remedy: 'leave --out off, or name a new file in an existing directory' }); process.exit(1); }
     try { fs.writeFileSync(fd, buf); } finally { fs.closeSync(fd); }
     let meta = null; try { meta = JSON.parse(res.headers.get('x-window-shot') || 'null'); } catch { }
-    const where = meta ? (meta.coords === 'window' ? `, ${meta.w}x${meta.h} — the window's own pixels (origin ${meta.originX},${meta.originY} on its display${meta.scale && meta.scale !== 1 ? `, scale ${meta.scale}×` : ''}); \`click ${h} --at x,y\` takes a pixel of THIS image` : `, ${meta.w}x${meta.h}${meta.cropped ? ', the window\'s frame' : ', the whole display'} (display coordinates)`) : '';
+    const where = meta && meta.machine ? `, ${meta.w}x${meta.h} — ${meta.machine}'s display${meta.display ? ` ${meta.display}` : ''}, its own pixels; \`click ${h} --at x,y\` takes a pixel of THIS image` : meta ? (meta.coords === 'window' ? `, ${meta.w}x${meta.h} — the window's own pixels (origin ${meta.originX},${meta.originY} on its display${meta.scale && meta.scale !== 1 ? `, scale ${meta.scale}×` : ''}); \`click ${h} --at x,y\` takes a pixel of THIS image` : `, ${meta.w}x${meta.h}${meta.cropped ? ', the window\'s frame' : ', the whole display'} (display coordinates)`) : '';
     console.log(`${out} (${buf.length} bytes${where})${meta && meta.blank ? ' — the image is BLANK (the window drew nothing yet)' : ''}`);
     return;
   }
@@ -364,8 +386,9 @@ function printNode(n) {
     const ref = args.slice(2).find((a) => a.startsWith('@'));
     const text = args.slice(2).find((a) => !a.startsWith('@') && !a.startsWith('--'));
     if (text === undefined) usageOf('vibespace-window type <handle> "text" [@e7] [--replace]');
-    const r = await call('POST', '/api/agent/window/act', { handle: h, verb: 'type', ref, text, replace: has('--replace') });
+    const r = await call('POST', '/api/agent/window/act', { handle: h, verb: 'type', ref, text, replace: has('--replace'), ...(has('--keys') ? { keys: true } : {}) });
     if (json) { console.log(JSON.stringify(r, null, 2)); return; }
+    if (r.did.by === 'paste' || r.did.by === 'keys') { console.log(r.did.by === 'paste' ? `typed ${r.did.chars} character(s) through the machine's clipboard (it now holds them) into whatever has the focus — screenshot again to verify` : `typed ${r.did.chars} character(s) as keys into whatever has the focus — screenshot again to verify`); return; } // lane desktop-handover
     console.log(r.did.by === 'inject' ? `typed ${r.did.chars} character(s) as keys${r.did.ref ? ` into ${r.did.ref} (focused through the tree)` : ' into whatever holds focus'} — ${r.did.ref ? 'snapshot' : 'screenshot'} again to verify` : `${r.did.replaced ? 'set' : 'inserted'} ${r.did.chars} character(s) into ${r.did.ref} — snapshot again to verify`);
     return;
   }

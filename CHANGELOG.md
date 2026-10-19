@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.313 — 2026-10-19
+
+### Added
+- You can hand a paired machine's desktop to an agent to operate, and take it back any time.
+
 ## 2.369.312 — 2026-10-19
 
 ### Fixed

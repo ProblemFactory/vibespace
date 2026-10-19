@@ -19,6 +19,12 @@
  *                 gets it (a window's logs it with its children's exits)
  *   stream-stats  {sid, watch?}                                   → the session's numbers now; `watch` = THIS link owns the
  *                 session's pushes from now on (the hub's re-arm after a reconnect)
+ *   desktop-input {sid, events}                                   → { ok, n, refused: [{i, code}], display } — lane desktop-handover:
+ *                 an agent the owner handed the machine's desktop to — ITS records (the data channel's own shapes, the
+ *                 picture's pixels + the source's origin) into THIS session's sink: the same onInput as the `input`
+ *                 channel (the window's live place, the Mac's target, one ordered chain with the owner's own events)
+ *   desktop-grab  {sid}                                           → { ok, png64, w, h, display, origin, road } — ONE still of the
+ *                 session's display (the source's still(): the screen source's one-frame capture; a Mac's is pending)
  *   pushes        stream-ice {sid, candidate} · stream-stats {sid, stats, state, ended?} once a second and at every change
  * A session's owner is the link that asked; when that link dies the session is an ORPHAN for STREAM_LIMITS.orphanMs (the
  * media path does not ride the link — a re-armed hub finds it playing) and then stops.
@@ -114,9 +120,21 @@ function fakeSource(file, { fps = 30 } = {}) {
       timer.unref?.();
     },
     stop() { clearInterval(timer); timer = null; },
+    still: () => Promise.resolve(fakeStill()), // lane desktop-handover: a fixed picture of the fixture's size (the suites' desktop-grab)
     requestKeyframe() { wantKey = true; },
     setTargetKbps() { /* pre-encoded: nothing to follow */ },
   };
+}
+
+/** The fake source's still (lane desktop-handover): the fixture's 1280×720, a horizontal ramp in red, a vertical one in green, the
+ *  blue channel 0x5a — a suite reads any pixel back by arithmetic. */
+const FAKE_STILL = Object.freeze({ w: 1280, h: 720 });
+function fakeStill() {
+  const { w, h } = FAKE_STILL;
+  const rgb = new Uint8Array(w * h * 3);
+  for (let y = 0, o = 0; y < h; y++) for (let x = 0; x < w; x++, o += 3) { rgb[o] = (x * 255 / (w - 1)) | 0; rgb[o + 1] = (y * 255 / (h - 1)) | 0; rgb[o + 2] = 0x5a; }
+  const png = Buffer.from(SP.pngOf(rgb, w, h, (b) => require('zlib').deflateSync(b)));
+  return { ok: true, png, w, h, display: 'fake', origin: { x: 0, y: 0 }, road: 'fake' };
 }
 
 /**
@@ -270,21 +288,55 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
   }
 
   // ── the input channel: in order, one injector, moves coalesced while the injector is behind ──
+  // lane desktop-handover: every path answers the event's own outcome ({ refused } | { dropped } | { ack } | { done: a promise of
+  // the injector's answer }) — the `input` channel ignores it, the `desktop-input` op sums it for the agent that sent the records
   function onInput(s, raw) {
     let ev = SM.inputEventOf(typeof raw === 'string' ? raw : Buffer.isBuffer(raw) ? raw.toString('utf8') : raw);
-    if (ev.refused) { s.inputRefused = { code: ev.refused, at: now() }; return; }
+    if (ev.refused) { s.inputRefused = { code: ev.refused, at: now() }; return { refused: ev.refused }; }
     if (s.source && s.source.relative && typeof s.source.bounds === 'function') ev = SW.windowInputOf(ev, s.source.bounds()); // window pixels → the desktop (the window's live place)
-    if (ev.t === 'ack') { const sent = s.sentAt.get(ev.f); if (sent) { s.acks.push(now() - sent); if (s.acks.length > 30) s.acks.shift(); s.ackMs = [...s.acks].sort((a, b) => a - b)[s.acks.length >> 1]; } return; }
-    if (!injector) { s.inputRefused = { code: 'input_unsupported', at: now() }; return; }
-    if (ev.t === 'mv' && s.inputPending > 8) { s.inputDropped++; return; }
+    if (ev.t === 'ack') { const sent = s.sentAt.get(ev.f); if (sent) { s.acks.push(now() - sent); if (s.acks.length > 30) s.acks.shift(); s.ackMs = [...s.acks].sort((a, b) => a - b)[s.acks.length >> 1]; } return { ack: true }; }
+    if (!injector) { s.inputRefused = { code: 'input_unsupported', at: now() }; return { refused: 'input_unsupported' }; }
+    if (ev.t === 'mv' && s.inputPending > 8) { s.inputDropped++; return { dropped: true }; }
     s.inputPending++;
     const target = s.source && typeof s.source.inputTarget === 'function' ? s.source.inputTarget() : undefined; // a Mac's picture → its global points
-    s.inputChain = s.inputChain.then(() => (target === undefined ? injector.inject([ev]) : injector.inject([ev], target))).then((r) => {
+    const done = s.inputChain.then(() => (target === undefined ? injector.inject([ev]) : injector.inject([ev], target)));
+    s.inputChain = done.then((r) => {
       s.inputPending--;
       if (r && r.n) s.inputN += r.n;
       if (r && r.refused && r.refused.length) { const was = s.inputRefused && s.inputRefused.code; s.inputRefused = { code: r.refused[0].code, at: now() }; if (was !== s.inputRefused.code) pushStats(s); }
     }, () => { s.inputPending--; });
+    return { done };
   }
+  /** THE AGENT'S RECORDS (lane desktop-handover — `desktop-input`): each through onInput above, in order, behind whatever the
+   *  owner's channel queued; an `ack` is the page's own (refused). → { ok, n, refused: [{ i, code }], display } */
+  async function input(msg) {
+    const s = sessions.get(String(msg.sid || ''));
+    if (!s) return named('not_found', 'that stream session ended');
+    const list = Array.isArray(msg.events) ? msg.events.slice(0, L.handoverEventsMax) : [];
+    const refused = [], waits = [];
+    list.forEach((e, i) => {
+      if (e && typeof e === 'object' && e.t === 'ack') { refused.push({ i, code: 'not_an_act' }); return; }
+      const r = onInput(s, e);
+      if (r.refused) refused.push({ i, code: r.refused });
+      else if (r.done) waits.push(r.done.then((a) => ({ i, a }), (err) => ({ i, a: { refused: [{ code: 'inject_failed', error: String((err && err.message) || err) }] } })));
+    });
+    let n = 0;
+    for (const { i, a } of await Promise.all(waits)) { if (a && a.n) n += a.n; if (a && a.refused && a.refused.length) refused.push({ i, code: a.refused[0].code }); }
+    refused.sort((a, b) => a.i - b.i);
+    return { ok: !refused.length, n, refused, display: srcDisplay(s) };
+  }
+  /** ONE STILL of the session's display (lane desktop-handover — `desktop-grab`): the source's still(). */
+  async function still(msg) {
+    const s = sessions.get(String(msg.sid || ''));
+    if (!s) return named('not_found', 'that stream session ended');
+    if (!s.source || typeof s.source.still !== 'function') return named('no_still', 'this stream\'s source takes no still picture');
+    let r;
+    try { r = await s.source.still(); } catch (e) { return named('still_failed', String((e && e.message) || e)); }
+    if (!r || !r.ok) return r || named('still_failed', 'no picture');
+    if (r.png.length > L.stillMaxBytes) return named('still_too_big', `the picture is ${r.png.length} bytes (at most ${L.stillMaxBytes} over the link)`);
+    return { ok: true, png64: r.png.toString('base64'), w: r.w, h: r.h, display: r.display != null ? String(r.display) : srcDisplay(s), origin: r.origin || s.source.origin || { x: 0, y: 0 }, road: r.road || null };
+  }
+  const srcDisplay = (s) => (s.source && s.source.display != null ? String(s.source.display) : null);
 
   // ── the relay: the hub's ONE forward ⇄ a UDP shim per remote address ⇄ werift's own host candidate ──
   function openRelay(s) {
@@ -466,7 +518,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     }
   }
   function stopAll(why = 'agent_stopped') { for (const sid of [...sessions.keys()]) stop(sid, why); }
-  return { offer, replied, answer, stop, stats, linkDead, stopAll, sessions: () => [...sessions.keys()] };
+  return { offer, replied, answer, stop, stats, input, still, linkDead, stopAll, sessions: () => [...sessions.keys()] };
 }
 
-module.exports = { createStreamHost, fakeSource, createLeg, selfProbe };
+module.exports = { createStreamHost, fakeSource, fakeStill, FAKE_STILL, createLeg, selfProbe };

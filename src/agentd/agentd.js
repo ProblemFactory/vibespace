@@ -1544,7 +1544,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input'],
         }));
         return;
       }
@@ -2174,6 +2174,18 @@ function serveConnection(sock) {
         const sc = streamScreenOf();
         if (!sc || typeof sc.openSettings !== 'function') { mux.control({ op: 'settings-open-result', id: msg.id, result: { ok: false, code: 'not_mac', error: 'System Settings is a Mac\'s' } }); return; }
         sc.openSettings(String(msg.pane || '')).then((r) => mux.control({ op: 'settings-open-result', id: msg.id, result: r }), (e) => mux.control({ op: 'settings-open-result', id: msg.id, error: String((e && e.message) || e) }));
+        return;
+      }
+      // lane desktop-handover (THREE-TOUCH: these handlers, `desktop-grab` / `desktop-input` in the hello-ack, the client's gated
+      // desktopGrab / desktopInput): an agent the owner HANDED this machine's desktop to (the hub decides who — never this agent)
+      // reads ONE still of the stream session's display and sends ITS records into that session's own sink (src/agentd/stream-host.js
+      // input — the same onInput as the page's `input` data channel)
+      if (msg.op === 'desktop-grab') {
+        streamHostOf().still(msg).then((r) => mux.control({ op: 'desktop-grab-result', id: msg.id, result: r }), (e) => mux.control({ op: 'desktop-grab-result', id: msg.id, error: String((e && e.message) || e) }));
+        return;
+      }
+      if (msg.op === 'desktop-input') {
+        streamHostOf().input(msg).then((r) => mux.control({ op: 'desktop-input-result', id: msg.id, result: r }), (e) => mux.control({ op: 'desktop-input-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }
       if (msg.op === 'input-events') {

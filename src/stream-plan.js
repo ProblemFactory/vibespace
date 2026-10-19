@@ -21,6 +21,8 @@
  *                        ffmpegVerdict (≥ 7 with ddagrab, else `no_ffmpeg` naming where it was looked for — ffmpegCandidates)
  *   STREAM_FACTS_PS      the machine's screen facts script (DisplayConfig: each display's HDR state + SDR white level; DXGI:
  *                        which adapter/output ddagrab must open; Screen: bounds) → parseStreamFacts
+ *   ONE STILL            (lane desktop-handover) stillArgv / stillHalfArgv — one frame of the stream's capture as a PNG (SDR) or as
+ *                        its FP16 bits → rgbFromHalf (THE table) → pngOf; pngSize reads a PNG's IHDR
  *   planScreen           facts + the asked display → { mode: 'direct' (an SDR display: DDA's 8-bit picture is the screen
  *                        already) | 'mapped' (an HDR display: FP16 → the agent's mapping → NV12 → the encoder), the two
  *                        argvs, origin, encoder } or a refusal by name (no_ffmpeg, display_gone, display_other_gpu,
@@ -279,6 +281,48 @@ function encodeArgv(plan, kbps = plan.kbps) {
 /** The DIRECT road (an SDR display — DDA's 8-bit picture is exact): one ffmpeg, capture → NV12 (8-bit, BT.709) → the encoder. */
 function directArgv(plan, kbps = plan.kbps) {
   return [...QUIET, '-nostdin', '-f', 'lavfi', '-i', grab(plan.display.output, plan.fps, false), '-vf', 'hwdownload,format=bgra,scale=out_color_matrix=bt709:out_range=tv,format=nv12', ...encodeTail(plan.encoder, { kbps, fps: plan.fps, gop: plan.gop })];
+}
+// ── ONE STILL (lane desktop-handover: `desktop-grab` — the picture an agent the owner handed the desktop to reads) ──────
+/** The DIRECT road's still: ONE frame of the display (8-bit — DDA's picture is the SDR screen), the display's own pixels, as a
+ *  PNG on stdout. The same capture as the stream (ddagrab, draw_mouse=0), no encoder. */
+function stillArgv(plan) { return [...QUIET, '-nostdin', '-f', 'lavfi', '-i', grab(plan.display.output, STILL_FPS, false), '-vf', 'hwdownload,format=bgra,format=rgb24', '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1']; }
+/** The MAPPED road's still: ONE FP16 frame's raw bits (the stream's capture, one frame) — this agent maps it through THE table
+ *  (rgbFromHalf — the same mapping the stream's frames get) and writes the PNG itself (pngOf). */
+function stillHalfArgv(plan) { return [...QUIET, '-nostdin', '-f', 'lavfi', '-i', grab(plan.display.output, STILL_FPS, true), '-vf', 'hwdownload,format=rgbaf16le', '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgbaf16le', 'pipe:1']; }
+const STILL_FPS = 10;
+/** rgbaf16le (its bits, `w` pixels a row) → RGB8 through THE table (`lut` = buildLut of the display's white). */
+function rgbFromHalf(src, w, h, lut, out = new Uint8Array(w * h * 3)) {
+  for (let i = 0, o = 0, n = w * h * 4; i < n; i += 4, o += 3) { out[o] = lut[src[i]]; out[o + 1] = lut[src[i + 1]]; out[o + 2] = lut[src[i + 2]]; }
+  return out;
+}
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(bytes, c = 0xffffffff) { for (let i = 0; i < bytes.length; i++) c = CRC[(c ^ bytes[i]) & 0xff] ^ (c >>> 8); return c; }
+/** RGB8 rows → a PNG (8-bit truecolour, filter 0 on every row). `deflate` = zlib's deflateSync (handed in: this file is PURE).
+ *  → Uint8Array */
+function pngOf(rgb, w, h, deflate) {
+  const raw = new Uint8Array((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) raw.set(rgb.subarray(y * w * 3, (y + 1) * w * 3), y * (w * 3 + 1) + 1);
+  const chunk = (type, data) => {
+    const out = new Uint8Array(12 + data.length), dv = new DataView(out.buffer);
+    dv.setUint32(0, data.length);
+    for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+    out.set(data, 8);
+    dv.setUint32(8 + data.length, (crc32(out.subarray(4, 8 + data.length)) ^ 0xffffffff) >>> 0);
+    return out;
+  };
+  const ihdr = new Uint8Array(13), hv = new DataView(ihdr.buffer);
+  hv.setUint32(0, w); hv.setUint32(4, h); ihdr[8] = 8; ihdr[9] = 2; // 8 bits, truecolour; compression / filter / interlace 0
+  const parts = [Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a), chunk('IHDR', ihdr), chunk('IDAT', new Uint8Array(deflate(raw))), chunk('IEND', new Uint8Array(0))];
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0; for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
+}
+/** A PNG's size from its IHDR (the still's answer is checked, never trusted) → { w, h } | null */
+function pngSize(b) {
+  if (!b || b.length < 24 || b[0] !== 0x89 || b[1] !== 0x50 || b[2] !== 0x4e || b[3] !== 0x47 || String.fromCharCode(b[12], b[13], b[14], b[15]) !== 'IHDR') return null;
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const w = dv.getUint32(16), h = dv.getUint32(20);
+  return w > 0 && h > 0 ? { w, h } : null;
 }
 /**
  * The session's plan. `facts` = { platform, ffmpeg: {path, version, major, ddagrab, encoders}, displays } (the stream-facts
@@ -749,7 +793,7 @@ function windowEncodeArgv(plan, { w = plan.w, h = plan.h, kbps = plan.kbps } = {
 module.exports = {
   halfToFloat, srgbOetf, TONE_DEFAULT, toneCurve, mapLinear, srgb8OfHalf, buildLut, nv12FromHalf, nv12Bytes, CALIBRATION,
   ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, STREAM_FACTS_PS, parseStreamFacts,
-  SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, KBPS_RULE, kbpsDecision, MAC_KBPS_RULE, flvReader,
+  SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, stillArgv, stillHalfArgv, rgbFromHalf, pngOf, pngSize, KBPS_RULE, kbpsDecision, MAC_KBPS_RULE, flvReader,
   KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator,
   MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,
   macRungOf, planMacScreen, macInputTarget, macPoint,

@@ -31,6 +31,12 @@
 //   ⑩ THE MACHINE'S OWN SCREEN (lane stream-p1b-screen): a fake ffmpeg.exe + PowerShell facts (an HDR primary, SDR white
 //      200 nits): the HDR road plays, the strip reads NVENC · 编码 N ms, the chip's title says the HDR was mapped on the
 //      machine; the capture ffmpeg dies ⇒ 串流停了（机器的屏幕采集停了）and the VNC picture signs in and draws   screen.png, screen-fallback.png
+//   ⑭ THE HAND-OVER (lane desktop-handover): the strip's 「交给 agent」 (only while the stream plays) → the one-holder picker →
+//      「Alpha 正在操作」; the agent's still (desktop-grab through the REAL bundle: the fake source's 1280×720 PNG) and its click at
+//      the still's centre reach THE resident script as the owner's click did in ④ (M 640 360 · D 0 · U 0 — the same sink); its
+//      pointer shows over the picture, labelled Alpha; the owner's own click on the picture PAUSES it (已暂停——你在操作 + 「继续交给它」;
+//      the agent's next verb ⇒ window_paused, nothing sent); 「继续交给它」 resumes; the owner's wheel pauses it too; 「收回」 ends it
+//      (desktop_not_handed); handed again, the window's × ends it (window_closed)                                      handover.png, handover-paused.png
 //   ⑪ ONE WINDOW as the stream (lane stream-window-fixes — the owner's first real use): the agent's REAL window source (a fake
 //      csc "builds" a fake vibespace-wgc whose window is titled 中文窗口 🎨 测试) in the real src/lib/machine-app.js window: the
 //      title intact, THE stats row of the whole screen's window (往返 · 抖动 · fps · 解码 · kbps · NVENC · 编码); no 「还原它」 while
@@ -189,7 +195,8 @@ const wm = { windows: new Map(), revealWindow() {},
   closeWindow(id) { const w = wm.windows.get(id); if (!w) return; wm.windows.delete(id); w.onClose && w.onClose(); w.element.remove(); },
   setTitle(id, t) { const w = wm.windows.get(id); if (w) w.element.querySelector('.vs-win-title').textContent = t; }, resizeWindowTo() {},
 };
-const app = { wm, _hideWelcome() {} };
+const app = { wm, _hideWelcome() {}, sidebar: { _webuiSessions: [], _tasks: [] } }; // ⑭: the roster the hand-over's picker reads
+window.__app = app;
 window.__open = (m) => { openMachineDesktop(app, m); return true; };
 window.__openWin = (m, row) => { openWindowStream(app, m, row); return true; }; // ⑪
 window.__picker = (m) => { openWindowPicker(app, m, {}); return true; };
@@ -619,6 +626,73 @@ console.log('⑬ THE ESTIMATE: the agent reads its own transport-cc — werift 0
   ok(up && fits, `⑬ ~3 Mbps through the real agent bundle to this Chrome: the agent's estimate tracks what it sent (sent/estimated kbps: ${tail.map((x) => x.join('/')).join(', ')}) — werift's own would read ~1/11 (test-stream-plan §9's RED CONTROL)`, seen);
   await p.close();
   estHub.shutdown();
+  R.setup({ ...BASE });
+}
+console.log('⑭ THE HAND-OVER (lane desktop-handover): the strip gives the stream to ONE conversation; its records reach THE resident script; the owner\'s input pauses it; 「收回」');
+{
+  const ENG = require(path.join(REPO, 'src/server/desktop-handover-engine.js'));
+  const hoDir = path.join(root, 'ho-data'); fs.mkdirSync(hoDir, { recursive: true });
+  const live = new Map([['w1', { backend: 'claude', claudeSessionId: 'cid-hand', name: 'Alpha', agentToken: 'vsst_hand' }]]);
+  const ho = ENG.create({ dataDir: hoDir, activeSessions: live, tickMs: 0, log: quiet });
+  const hoHub = DW.create({ access, log: quiet, handover: ho.hooks });
+  R.setup({ ...BASE, webrtc: hoHub, handover: ho });
+  const A = { sessionId: 'w1', session: live.get('w1') };
+  const codeOf = async (fn) => { try { await fn(); return null; } catch (e) { return e.code || String(e.message); } };
+  const HO = `${WIN} .desktop-strip-handover`;
+  const shown = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); return !!e && !e.hidden && getComputedStyle(e).display !== 'none'; })()`;
+  const textOf = (sel) => p.ev(`(document.querySelector(${JSON.stringify(sel)}) || {}).textContent || null`);
+  const press = async (sel) => { const [x, y] = await p.ev(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`); await p.click(x, y); };
+  const p = await page(1280, 800, DESK);
+  await p.ev(`window.__app.sidebar._webuiSessions = [{ id: 'w1', claudeSessionId: 'cid-hand', name: 'Alpha', cwd: '/home/o/proj', backend: 'claude' }]`);
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  const up = await playing(p);
+  const give = up && await p.until(shown(`${WIN} .desktop-strip-handover-give`), 8000);
+  ok(up && give && (await textOf(`${WIN} .desktop-strip-handover-give`)) === '交给 agent' && !(await p.ev(shown(HO))), '⑭ while the stream plays the strip offers 「交给 agent」 (no lease yet)');
+  await press(`${WIN} .desktop-strip-handover-give`);
+  const dlg = await p.until(`!!document.querySelector('#machine-desktop-handover .pp-row[data-key="agent:cid-hand"]')`, 5000);
+  await press('#machine-desktop-handover .pp-row[data-key="agent:cid-hand"]');
+  await p.until(`!document.querySelector('#machine-desktop-handover .btn-create').disabled`, 3000);
+  await press('#machine-desktop-handover .btn-create');
+  const given = await p.until(`${shown(HO)} && /Alpha 正在操作/.test(document.querySelector('${WIN} .desktop-strip-handover-who').textContent)`, 5000);
+  ok(dlg && given && !(await p.ev(shown(`${WIN} .desktop-strip-handover-give`))) && (ho.stateOf('win-a') || {}).input === 'agent', '⑭ the one-holder picker (a live conversation) → 交给它 ⇒ the strip reads 「Alpha 正在操作 · 收回」, the lease is on the hub', ho.stateOf('win-a'));
+  const shot = await ho.screenshot('md-win-a', A);
+  ok(shot.w === 1280 && shot.h === 720 && shot.png.readUInt32BE(16) === 1280 && shot.coords === 'display', '⑭ the agent\'s screenshot = desktop-grab through the REAL bundle (the fake source\'s 1280×720 PNG) — its size printed', { w: shot.w, h: shot.h, bytes: shot.png.length });
+  const n0 = psLines().length;
+  await ho.act('md-win-a', A, { verb: 'click', at: '640,360' });
+  const got = await (async () => { for (let i = 0; i < 50; i++) { const l = linesSince(n0); if (l.includes('U 0')) return l; await sleep(100); } return linesSince(n0); })();
+  ok(JSON.stringify(got.slice(0, 4)) === JSON.stringify(['M 640 360', 'M 640 360', 'D 0', 'M 640 360']) || (got.includes('M 640 360') && got.includes('D 0') && got.includes('U 0') && got.indexOf('D 0') < got.indexOf('U 0') && got.every((l) => !/^M /.test(l) || l === 'M 640 360')), '⑭ the agent\'s click at the still\'s centre reached THE resident script as ④\'s owner click did: M 640 360 · D 0 · U 0 (desktop-input → the session\'s own sink)', got);
+  const dot = await p.until(`(() => { const c = document.querySelector('${WIN} .browser-live-agent-cursor'); if (!c || c.style.display === 'none') return false; const v = document.querySelector('${WIN} .stream-video').getBoundingClientRect(), b = c.getBoundingClientRect(); return Math.abs(b.left - (v.left + v.width / 2)) < 12 && Math.abs(b.top - (v.top + v.height / 2)) < 12 && /Alpha/.test(c.textContent); })()`, 5000);
+  ok(dot, '⑭ the agent\'s pointer shows over the picture where it clicked, labelled Alpha (browser-live-window\'s labelled cursor)');
+  await p.shot('handover.png', WIN);
+  // the owner's own click on the picture pauses it
+  const [cx, cy] = await centre(p);
+  const n1 = psLines().length;
+  await p.click(cx, cy - 100);
+  const paused = await p.until(`/已暂停/.test(document.querySelector('${WIN} .desktop-strip-handover-who').textContent) && ${shown(`${WIN} .desktop-strip-handover-resume`)}`, 5000);
+  await sleep(300);
+  const n2 = psLines().length;
+  const refused = await codeOf(() => ho.act('md-win-a', A, { verb: 'click', at: '10,10' }));
+  await sleep(300);
+  ok(paused && (ho.stateOf('win-a') || {}).input === 'user' && refused === 'window_paused' && psLines().length === n2 && linesSince(n1).includes('D 0'), '⑭ the owner\'s own click on the picture: it reaches the machine AND pauses the agent (已暂停——你在操作 + 「继续交给它」); the agent\'s next click ⇒ window_paused, nothing sent', { refused, state: ho.stateOf('win-a') });
+  await p.shot('handover-paused.png', WIN);
+  await press(`${WIN} .desktop-strip-handover-resume`);
+  const resumed = await p.until(`/Alpha 正在操作/.test(document.querySelector('${WIN} .desktop-strip-handover-who').textContent)`, 5000);
+  ok(resumed && (ho.stateOf('win-a') || {}).input === 'agent' && (await ho.act('md-win-a', A, { verb: 'key', chord: 'ctrl+s' })).ok, '⑭ 「继续交给它」 ⇒ Alpha drives again (its ctrl+s goes through)');
+  await p.cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: cx, y: cy, deltaX: 0, deltaY: 120 });
+  const wheelPaused = await p.until(`/已暂停/.test(document.querySelector('${WIN} .desktop-strip-handover-who').textContent)`, 5000);
+  ok(wheelPaused && (ho.stateOf('win-a') || {}).input === 'user', '⑭ the owner\'s wheel pauses it too');
+  await press(`${WIN} .desktop-strip-handover-take`);
+  const taken = await p.until(`${shown(`${WIN} .desktop-strip-handover-give`)} && !${shown(HO)}`, 5000);
+  ok(taken && ho.stateOf('win-a') === null && await codeOf(() => ho.screenshot('md-win-a', A)) === 'desktop_not_handed', '⑭ 「收回」 ⇒ the strip offers 「交给 agent」 again; the agent\'s verbs ⇒ desktop_not_handed');
+  const key = (await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/stream/facts?host=win-a`)).json()).sessions[0].key;
+  const again = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/handover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'win-a', key, principal: 'agent:cid-hand' }) })).json();
+  const asAgent = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/handover/revoke`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_hand' }, body: JSON.stringify({ host: 'win-a' }) })).json();
+  ok(again.ok && asAgent.code === 'human_only' && ho.stateOf('win-a') !== null, '⑭ handed again over the route; the agent\'s own token on the owner\'s revoke ⇒ human_only (the lease stays)');
+  await p.close();
+  await sleep(500);
+  const ends = fs.readFileSync(path.join(hoDir, 'window-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((l) => l.verb === 'lease-end').map((l) => l.cause);
+  ok(ho.stateOf('win-a') === null && JSON.stringify(ends) === JSON.stringify(['revoked', 'window_closed']), '⑭ the window\'s × ends it (window_closed) — the audit\'s lease ends: revoked, window_closed', ends);
+  ho.shutdown(); hoHub.shutdown();
   R.setup({ ...BASE });
 }
 ok((await sessions()).length === 0, 'every window closed ⇒ no stream session left on the hub');

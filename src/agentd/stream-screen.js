@@ -21,6 +21,10 @@
  *   measured (`keyWaitMs`). BITRATE: likewise fixed per process — src/stream-plan.js THE RATE (lane stream-mac-rate: the rule
  *   of every road — rateFollower, RATE_RULE) judges the estimate against what was sent and restarts the ENCODER only on a held
  *   shortfall, never under the display's floor (plan.floor); the new process opens with a key frame.
+ * ONE STILL (lane desktop-handover — `desktop-grab`, the picture an agent the owner handed the desktop to reads): the source's
+ *   still() runs ONE more capture of the same display for one frame — the direct road's 8-bit picture as ffmpeg's PNG, the
+ *   mapped road's FP16 bits through THE table (src/stream-plan.js rgbFromHalf — the stream's own mapping) into a PNG written
+ *   here; the display's own pixels, bounded (STILL_MS, the frame's exact size), its children windowsHide like every spawn.
  * ENDINGS, BY NAME (onEnd → the session's `ended`): `capture_exited` / `encoder_exited` (an ffmpeg died — its last stderr
  *   line is logged), `display_gone` (the capture died and the display is no longer in the facts), `capture_failed` (it could
  *   not start). The facts (`stream-facts`): the screens (DisplayConfig: HDR + SDR white level; DXGI: the output ddagrab
@@ -34,6 +38,8 @@ const RUN_MS = 15000;        // one facts child (PowerShell, an ffmpeg -version)
 const TAIL = 3;              // stderr lines kept per ffmpeg
 const named = (code, error) => ({ ok: false, code, error });
 const median = (a) => (a.length ? [...a].sort((x, y) => x - y)[a.length >> 1] : null);
+const STILL_MS = 10000;     // one still's capture at most (a display that hands no frame: ddagrab waits for one)
+const STILL_PNG_MAX = 48 * 1024 * 1024;
 
 /** THE screen source of this machine — a Mac's is src/agentd/stream-mac.js (lane stream-p3m-build: its helper, the same
  *  `{ facts, source }` and source interface); every other platform's is the one below (Windows; elsewhere not_windows). */
@@ -91,6 +97,37 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     if (!plan.ok && f.ok && plan.code !== 'not_windows') { f = await facts({ force: true }); plan = f.ok ? SP.planScreen(f, { display: msg.sourceId || null, kbps: maxKbps }) : f; } // a refusal re-reads once (ffmpeg installed a minute ago, a display plugged in)
     if (!plan.ok) return plan;
     return screenSource(plan, maxKbps);
+  }
+
+  /** ONE STILL of the plan's display (the header): → { ok, png, w, h, display, origin, road } | { ok: false, code, error } */
+  function still(plan) {
+    const mapped = plan.mode === 'mapped';
+    const want = mapped ? plan.srcW * plan.srcH * 8 : STILL_PNG_MAX;
+    return new Promise((resolve) => {
+      let c, done = false, n = 0;
+      const chunks = [], tail = [];
+      const finish = (r) => { if (done) return; done = true; clearTimeout(timer); if (c && c.exitCode == null) { try { c.kill(); } catch { /* gone */ } } resolve(r); };
+      const timer = setTimeout(() => finish(named('still_timeout', `the display handed no picture within ${STILL_MS / 1000} s`)), STILL_MS);
+      try { c = spawn(plan.ffmpeg, mapped ? SP.stillHalfArgv(plan) : SP.stillArgv(plan), { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { finish(named('still_failed', `the capture could not start (${(e && (e.code || e.message)) || e})`)); return; }
+      c.stdout.on('data', (d) => { n += d.length; if (n > want) { finish(named('still_failed', 'the capture handed more bytes than one picture')); return; } chunks.push(d); });
+      c.stderr.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l.trim().slice(0, 200)); if (tail.length > TAIL) tail.shift(); } });
+      c.on('error', (e) => finish(named('still_failed', `the capture could not start (${(e && (e.code || e.message)) || e})`)));
+      c.on('close', (code) => {
+        if (done) return;
+        const buf = Buffer.concat(chunks);
+        if (code !== 0) { finish(named('still_failed', `the capture exited ${code}${tail.length ? ': ' + tail[tail.length - 1] : ''}`)); return; }
+        let png = buf;
+        if (mapped) {
+          if (buf.length !== want) { finish(named('still_failed', `the capture handed ${buf.length} bytes, not one ${plan.srcW}×${plan.srcH} FP16 picture`)); return; }
+          const lut = SP.buildLut({ white: plan.white, knee: plan.tone.knee, peak: plan.tone.peak });
+          const rgb = SP.rgbFromHalf(new Uint16Array(buf.buffer, buf.byteOffset, buf.length >> 1), plan.srcW, plan.srcH, lut);
+          png = Buffer.from(SP.pngOf(rgb, plan.srcW, plan.srcH, (b) => require('zlib').deflateSync(b, { level: 6 })));
+        }
+        const size = SP.pngSize(png);
+        if (!size) { finish(named('still_failed', 'the capture handed no PNG')); return; }
+        finish({ ok: true, png, w: size.w, h: size.h, display: plan.display.id, origin: plan.origin, road: plan.mode });
+      });
+    });
   }
 
   function screenSource(plan, maxKbps) {
@@ -240,6 +277,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
         log(`[stream] screen source: ${plan.mode}, ${plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps, ${plan.encoder.label} ${rate.kbps} kbps (floor ${rate.floor})${plan.white ? `, white ${plan.white}` : ''}`);
       },
       stop() { if (stopped) return; stopped = true; for (const c of procs) { c.asked = true; end(c); } teardownMapper(); },
+      still: () => still(plan), // lane desktop-handover: ONE still of this display (desktop-grab)
       requestKeyframe() { if (keyAskedAt == null) keyAskedAt = now(); },
       setTargetKbps(target) {
         if (!onAu || stopped) return;

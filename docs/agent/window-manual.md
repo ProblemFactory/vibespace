@@ -438,6 +438,25 @@ default class:
   move to tier 3 is the user's act (the switch), and it opens a **window
   target** — it never creates or re-points a browser profile.
 
+## A machine's desktop its owner handed you (`md-<host>`)
+
+The owner can hand a paired Windows or Mac machine's WHOLE desktop to one conversation: in that machine's desktop window,
+the strip's «Hand to an agent» (交给 agent) and a pick of the conversation. Nothing you run can ask for it, and you cannot
+pass it on — a verb on a desktop nobody handed you answers `desktop_not_handed`: say in your reply what you need it for.
+
+* `vibespace-window list` shows it as `md-<host>` («A MACHINE'S DESKTOP — handed to you by its owner»). Pixels only:
+  `screenshot md-<host>` (ONE still of the display the owner's window shows — its own pixels; its size is printed),
+  `click md-<host> --at x,y [--button 1|2|3]` (a pixel of THAT image), `type md-<host> "text"` (through the machine's
+  clipboard, like the owner's own paste — any language, any keyboard layout; `--keys` types ASCII as physical keys, for a
+  field that refuses a paste), `key md-<host> <chord>`, `scroll md-<host> up|down|left|right [--by N] [--at x,y]`.
+  `snapshot` has no tree here (`mode_pixels`). `detach md-<host>` hands it back.
+* The owner watches in that window and sees your pointer, labelled with your name. Any key, click or scroll of theirs there
+  PAUSES you: every verb answers `window_paused` until they press «Let it continue» (继续交给它) — wait, never retry in a
+  loop. «Take back» (收回), closing the window, the stream ending or your conversation ending end it.
+* Refused by name: a chord that locks, logs off or powers the machine (`chord_refused` — Win+L, Ctrl+Alt+Del / End, ⌃⌘Q,
+  ⇧⌘Q); `--at` outside the screenshot (`outside_display`); more than 1500 characters a `type`. A Mac's screenshot is not
+  there yet (`mac_still_pending` — its keys, clicks and typing work). Every act is an audit line the owner can read.
+
 ## The full teaching behind the session intro's pointer line
 
 Every session's first prompt carries ONE line for this tool and points here (2.369.227 — the first prompt context must leave room for notices and messages). These are the words it used to carry in full:

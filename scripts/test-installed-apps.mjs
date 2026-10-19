@@ -241,12 +241,13 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
     './vnc-view.js': 'export const createVncView = () => ({ connect() {}, dispose() {} }); export const streamUrl = (u) => u;',
     './picture-shell.js': 'export const pageIsSecure = () => false;', // lane desktop-v2-latency: the strip's keyboard-lock gate (the real one imports utils.js)
     './stream-view.js': 'export const createStreamView = () => ({ connect() {}, dispose() {} });', // lane stream-p1a-transport: the window's WebRTC <video> (node has no RTCPeerConnection: the window takes the VNC view)
+    './machine-desktop-handover.js': 'export const createHandover = () => ({ facts() {}, ownerInput() {}, playing() {}, redraw() {}, dispose() {}, state: null });', // lane desktop-handover: the strip's hand-over (its picker imports the real utils.js)
   };
   // (and for src/lib/desktop-picker.js — lane desktop-v2-entry: the strip's machine ▾ opens the Desktop picker)
   // the same four stubs for src/lib/machine-app.js (machine-app-crop's "Run as its own window…" module the dialog imports — the real
   // utils.js wires document-level tooltips at load)
   const out = await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/machine-desktop.js')], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
-    plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|window-types|vnc-view|picture-shell|stream-view)\.js$/ }, (a) => (/(machine-(desktop|app)|desktop-picker|remoteapp-card|stream-stats)\.js$/.test(a.importer) ? { path: a.path, namespace: 'stub' } : null)); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
+    plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|window-types|vnc-view|picture-shell|stream-view|machine-desktop-handover)\.js$/ }, (a) => (/(machine-(desktop|app)|desktop-picker|remoteapp-card|stream-stats)\.js$/.test(a.importer) ? { path: a.path, namespace: 'stub' } : null)); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
   class N {
     constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.parent = null; this.style = { cssText: '' }; this.attrs = {}; this.className = ''; this._text = ''; this.hidden = false; this.disabled = false; this.value = ''; this.title = '';
       this.classList = { toggle: (c, on) => { const s = new Set(this.className.split(/\s+/).filter(Boolean)); if (on === undefined ? !s.has(c) : on) s.add(c); else s.delete(c); this.className = [...s].join(' '); }, contains: (c) => this.className.split(/\s+/).includes(c) }; }

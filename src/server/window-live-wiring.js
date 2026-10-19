@@ -30,6 +30,9 @@
  * membership the reach gate asks at VERB time — D2's "live now or later") and the ONE window-control request
  * producer (src/server/window-request.js — D3; its wake rides `deliver`, the gated ladder) is created here and
  * handed to the user routes beside the engine.
+ * LANE desktop-handover: the machine-desktop HAND-OVER engine (src/server/desktop-handover-engine.js) is created here and handed
+ * to both route families — the owner's give / pause / resume / revoke (desktop-apps) and the agent's verbs on `md-<hostId>`
+ * (window-targets); the stream module that carries it is created by the desktop-apps routes (they hand it to the engine).
  * `boot()` runs after restoreSessions (the live-session set is final);
  * `shutdown()` stops the tick. A missing python3/AT-SPI is a per-verb typed
  * refusal at call time, never a boot failure — this wiring throws only on a
@@ -76,15 +79,16 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   engine.setViewerProbe((id, viewerId) => stream.viewerAlive(id, viewerId));
   engine.setViewerCount?.((id) => stream.connections(id)); // lane e2a r3: an agent browser's end waits while a viewer has it open
   keeper.setWatchProbe?.((id) => stream.connections(id) > 0); // the fit belt checks a WATCHED session every tick (a window that appears without input), an unwatched one on the slow belt
-  { const { router, setup } = require('../routes/desktop-apps'); setup({ keeper, vnc, windowEngine: engine, stream, access, windowRequest }); app.use(router); }
-  { const wt = require('../routes/window-targets'); wt.setup({ engine }); app.use(wt.router); }
+  const handover = require('./desktop-handover-engine.js').create({ dataDir, activeSessions, log }); // lane desktop-handover
+  { const { router, setup } = require('../routes/desktop-apps'); setup({ keeper, vnc, windowEngine: engine, stream, access, windowRequest, handover }); app.use(router); }
+  { const wt = require('../routes/window-targets'); wt.setup({ engine, handover }); app.use(wt.router); }
   require('../routes/browser').setWindowEngine(engine); // lane e2a (§E2): `vibespace-browser new --backend desktop-app` launches through the engine
   let announced = false;
   if (browserHandback && typeof browserHandback.installWindow === 'function') { try { announced = browserHandback.installWindow(engine); } catch (e) { log.warn?.(`[window] handback announcer not attached — ${e && e.message}`); } }
   return {
-    desktopStream: stream, windowEngine: engine, windowRequest, announced,
+    desktopStream: stream, windowEngine: engine, windowRequest, handover, announced,
     boot: () => { try { const r = engine.boot(); if (r.leases || r.dropped) log.log?.(`[window] boot: ${r.leases} lease(s) kept, ${r.dropped} dropped`); return r; } catch (e) { log.warn?.(`[window] boot reconcile failed — ${e && e.message}`); return null; } },
-    shutdown: () => { try { engine.shutdown(); } catch { /* timers only */ } },
+    shutdown: () => { try { engine.shutdown(); } catch { /* timers only */ } try { handover.shutdown(); } catch { /* its tick only */ } },
   };
 }
 

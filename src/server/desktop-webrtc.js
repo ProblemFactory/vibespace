@@ -43,6 +43,11 @@
  * direct (host pairs, the highest priority) → this leg → the device link. `relay.via` + `relay.leg` on the record, a log
  * line at every change. `udpLeg: false` offers no leg (the suites' device-link control); `legMute()` true drops the leg's
  * PINGs unanswered (the suites' unreachable-hub proof) — a person never sets either.
+ * THE HAND-OVER (lane desktop-handover — src/server/desktop-handover-engine.js): `handover` = its hooks — ended(key, why) once
+ * per session (the page's stop, the machine's `ended`), started(key, hostId, after) when a session's offer is made (`after` =
+ * the page's previous key: a display switch carries the lease), factsOf(key) = the lease's facts every long poll answers
+ * (the strip's words and the agent's pointer); device(key) hands the engine a live session's link + sid, nudge(key) answers
+ * the page's waiting poll at once.
  * People only: the routes refuse an agent token (`human_only`) before anything here runs.
  */
 const crypto = require('crypto');
@@ -92,8 +97,9 @@ async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR) {
   return { ok: true, size: st.size };
 }
 
-function create({ access, log = console, now = Date.now, idleMs = L.idleMs, goneMs = L.goneMs, sweepMs = 5000, ips = hubIps, pollMaxMs = L.pollMaxMs, relay = true, direct = true, udpLeg = true, legMute = () => false, helpersDir = HELPERS_DIR } = {}) {
+function create({ access, log = console, now = Date.now, idleMs = L.idleMs, goneMs = L.goneMs, sweepMs = 5000, ips = hubIps, pollMaxMs = L.pollMaxMs, relay = true, direct = true, udpLeg = true, legMute = () => false, helpersDir = HELPERS_DIR, handover = null } = {}) {
   const sessions = new Map(); // key → session
+  const ended = (s, why) => { if (s.endNoted) return; s.endNoted = true; try { handover?.ended?.(s.key, why, s.hostId); } catch (e) { log.warn?.(`[stream] the hand-over did not hear ${s.key} end (${e && e.message})`); } };
   const keyOf = () => 'st' + now().toString(36) + Math.random().toString(36).slice(2, 10);
   const wake = (s) => { s.seq++; for (const f of s.waiters.splice(0)) { try { f(); } catch { /* gone */ } } };
   const relayFacts = (s) => {
@@ -115,7 +121,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     if (m.op === 'stream-stats') {
       if (m.stats) s.stats = m.stats;
       if (m.state) s.state = m.state;
-      if (m.ended && !s.ended) { s.ended = m.ended; closeRelay(s); }
+      if (m.ended && !s.ended) { s.ended = m.ended; closeRelay(s); ended(s, m.ended); }
       wake(s);
     }
   }
@@ -210,7 +216,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
   }
 
   /** The rung, then the offer. → { take: false, code, why } | { take: true, key, sid, offer, source, codec, seq } */
-  async function start(hostId, { maxKbps = null, source = null, fp16 = false } = {}) {
+  async function start(hostId, { maxKbps = null, source = null, fp16 = false, after = null } = {}) {
     if (!access || typeof access.streamRung !== 'function') throw named('host_unavailable', 'the desktop access layer is not wired on this instance');
     const src = SM.streamSourceOf(source);
     if (source != null && !src) return { take: false, code: 'bad_source', why: 'the stream names a display or a window by its id' };
@@ -218,7 +224,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     try { v = src ? await access.streamRung(hostId, { want: src.kind }) : await access.streamRung(hostId); } catch (e) { return { take: false, code: (e && e.code) || 'host_unavailable', why: String((e && e.message) || e) }; }
     if (!v.take) return { take: false, code: v.code, why: v.why };
     const key = keyOf();
-    const s = { key, hostId, dm: v.dm, sid: null, source: null, windowId: src && src.kind === 'window' ? String(src.id) : null, codec: null, startedAt: now(), state: 'new', stats: null, path: null, ended: null, cands: [], seq: 0, waiters: [], lastPoll: now(), goneTimer: null, relay: null, direct, relayLines: [] };
+    const s = { key, hostId, dm: v.dm, platform: v.platform || null, sid: null, source: null, windowId: src && src.kind === 'window' ? String(src.id) : null, codec: null, startedAt: now(), state: 'new', stats: null, path: null, ended: null, cands: [], seq: 0, waiters: [], lastPoll: now(), goneTimer: null, relay: null, direct, relayLines: [] };
     sessions.set(key, s);
     if (relay) { try { await bindRelay(s); } catch (e) { log.warn?.(`[stream] ${hostId}: the relay did not open (${e && e.message}) — direct only`); } }
     // the leg's spec rides the offer: the relay's port, the session's key (over the device link only) and this hub's addresses
@@ -244,6 +250,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     } else closeRelay(s); // an agent that offers no relay
     if (s.relay) s.relayLines = SM.relayCandidates(ips(), s.relay.port);
     const sdp = withRelay(direct === false ? stripHosts(r.offer.sdp) : r.offer.sdp, s.relayLines);
+    try { handover?.started?.(key, hostId, after != null ? String(after) : null); } catch (e) { log.warn?.(`[stream] the hand-over did not hear ${key} start (${e && e.message})`); }
     log.log?.(`[stream] ${hostId}: session ${s.sid} offered (${v.source}${s.relay ? `, relay udp ${s.relay.port}${s.relay.leg ? ' + the daemon\'s udp leg asked' : ''}` : ''})`);
     return { take: true, key, sid: s.sid, offer: { type: 'offer', sdp }, source: s.source, codec: s.codec, seq: s.seq, platform: v.platform };
   }
@@ -278,7 +285,8 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
       s.lastPoll = now();
     }
     const from = Math.max(0, Math.min(s.cands.length, Number(n) || 0));
-    return { key, seq: s.seq, n: s.cands.length, cands: s.cands.slice(from), state: s.state, stats: s.stats, ended: s.ended, relay: relayFacts(s) };
+    const ho = handover && typeof handover.factsOf === 'function' ? handover.factsOf(s.key) : null; // lane desktop-handover: the strip's lease words + the agent's pointer
+    return { key, seq: s.seq, n: s.cands.length, cands: s.cands.slice(from), state: s.state, stats: s.stats, ended: s.ended, relay: relayFacts(s), ...(ho ? { handover: ho } : {}) };
   }
   /** The page's own read of its path (getStats — direct | relay) is told here so the record says it. */
   function notePath(key, p) { const s = sessions.get(String(key || '')); if (s && (p === 'direct' || p === 'relay')) s.path = p; }
@@ -298,6 +306,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     s.ended = s.ended || why;
     closeRelay(s);
     wake(s);
+    ended(s, why);
     let stopped = false;
     try { stopped = !!(s.sid && (await s.dm.streamStop(s.sid, { why })).stopped); } catch { stopped = false; }
     log.log?.(`[stream] ${s.hostId}: session ${s.sid} stopped (${why})`);
@@ -310,10 +319,14 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     return { ok: true, sessions: keys.length, stopped: r.filter((x) => x.stopped).length };
   }
   function facts(hostId) { return [...sessions.values()].filter((s) => !hostId || s.hostId === hostId).map(view); }
+  /** lane desktop-handover: a LIVE session's way to its machine (the engine's ops ride its link and name its sid) | null */
+  function device(key) { const s = sessions.get(String(key || '')); return s && !s.ended && s.sid ? { key: s.key, hostId: s.hostId, sid: s.sid, dm: s.dm, platform: s.platform, source: s.source, stats: s.stats, state: s.state } : null; }
+  /** lane desktop-handover: the lease changed — the page's waiting long poll answers now (its strip redraws). */
+  function nudge(key) { const s = sessions.get(String(key || '')); if (s) wake(s); }
   const sweep = setInterval(() => { for (const s of [...sessions.values()]) if (now() - s.lastPoll > idleMs) stop(s.key, 'idle').catch(() => { }); }, sweepMs);
   sweep.unref?.();
   function shutdown() { clearInterval(sweep); for (const s of [...sessions.values()]) stop(s.key, 'shutdown').catch(() => { }); }
-  return { start, answer, candidate, restart, poll, pollGone, notePath, stop, stopWindow, facts, shutdown };
+  return { start, answer, candidate, restart, poll, pollGone, notePath, stop, stopWindow, facts, device, nudge, shutdown };
 }
 
 module.exports = { create, hubIps, stripHosts, withRelay, pushMacHelper, HELPERS_DIR };

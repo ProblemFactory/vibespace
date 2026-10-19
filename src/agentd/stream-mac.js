@@ -280,6 +280,10 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       },
       /** Where the picture sits on the Mac (the helper's started / frame lines) — the injector maps picture pixels with it. */
       inputTarget() { return target; },
+      // lane desktop-handover: ONE still (`desktop-grab`) is the helper's to take, and the helper has no still verb yet — a new verb
+      // is a new helper VERSION, and a new version asks the owner to switch Screen Recording on again: it rides the helper's next
+      // version, refused by name until then (the hand-over's input works: the session's own sink above)
+      still: () => Promise.resolve({ ok: false, code: 'mac_still_pending', error: 'the Mac\'s screen helper takes no still picture yet — click / type / key / scroll work now; the screenshot comes with the helper\'s next version (the owner then switches Screen Recording on again for it)' }),
     };
   }
 

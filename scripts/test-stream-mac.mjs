@@ -459,7 +459,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
   writeFakeMacHelper(hD, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted', accessibility: 'granted' }, log: logD, flv: flvFile(hD), displayFrame: { x: 0, y: 0, w: 1920, h: 1080 } });
   const dm = deviceOn(hD, macBundle);
   const conn = await dm.connect();
-  ok(conn.info.platform === 'darwin' && same(conn.info.capabilities.slice(-8), ['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open']), 'the hello-ack names stream-mac + stream-window (after stream-screen), then the picker op\'s stream-windows (int304), then 「打开系统设置」\'s settings-open (lane stream-mac-stall)', conn.info.capabilities.slice(-7));
+  ok(conn.info.platform === 'darwin' && same(conn.info.capabilities.slice(-10), ['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input']), 'the hello-ack names stream-mac + stream-window (after stream-screen), then the picker op\'s stream-windows (int304), then 「打开系统设置」\'s settings-open (lane stream-mac-stall), then the hand-over\'s desktop-grab / desktop-input (lane desktop-handover)', conn.info.capabilities.slice(-7));
   const v = SM.streamRungVerdict({ capabilities: conn.info.capabilities, desktop: true, platform: conn.info.platform });
   const f = await dm.streamFacts();
   ok(v.take && v.source === 'screen' && f.ok && f.platform === 'darwin' && f.helper.state === 'ready' && f.primary.rung === '1440p60' && f.windows.length === 2, 'the rung takes the Mac\'s screen; the stream-facts op answers the Mac\'s facts through its helper', f.primary);

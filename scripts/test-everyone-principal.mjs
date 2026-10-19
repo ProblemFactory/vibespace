@@ -84,6 +84,7 @@ const SURFACES = [
 ];
 const EXEMPT = [
   { file: 'src/lib/channel-group-dialogs.js', match: /label: t\('Members'\)/, surface: 'Agent group · New group / Invite…', why: 'MEMBERSHIP, not a permission: a group is its named members (design §22 D1, explicit); "every conversation" would be a broadcast channel, a different feature — reach to outsiders is msg-acl\'s (below)' },
+  { file: 'src/lib/machine-desktop-handover.js', match: /label: t\('Agent'\)/, surface: 'Machine desktop · Hand to an agent', why: 'ONE driver of a machine\'s desktop (one pointer, one keyboard — lane desktop-handover): "all agents" would be many hands on one mouse; the owner picks the one conversation, and takes it back' },
   { file: 'src/lib/window-share.js', match: /label: t\('Agent'\)/, surface: 'Desktop app · Ask an agent to take control…', why: 'a REQUEST to ONE agent (it is told and may be woken — a billed turn): "all agents" would be a fan-out of billed turns nobody chose; the share above is where All is offered' },
 ];
 /** THE MODELS (grep-derived candidates must each be a row; `spelled(mod)` proves the spelling is really there). */

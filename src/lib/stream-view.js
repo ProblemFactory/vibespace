@@ -15,6 +15,10 @@
 //     the machine's window id — the agent streams that application window (src/agentd/stream-window-source.js on Windows,
 //     src/agentd/stream-mac.js on a Mac); the picture's pixels are the WINDOW's (origin 0,0) and the agent adds its live place;
 //     `onSource(source)` hands the shell the window's facts (title, size, dpi) from the offer
+//   • THE HAND-OVER (lane desktop-handover — src/lib/machine-desktop-handover.js): `onOwnerInput(msg)` = the person's own key,
+//     pointer or wheel went down the channel (the shell pauses an agent the desktop is handed to); `onHandover(facts)` = the
+//     lease's facts each long poll answers; `after` = the previous stream's key (a display switch carries the lease); `key` =
+//     this stream's session key (what a hand-over names)
 import { fetchJson } from './utils.js';
 import { STREAM_LIMITS, streamStep, fallbackVerdict, statsOf, relayPathOf, firewallRuleCommand } from '../stream-model.js';
 import { viewerPlatform, keyMapFor, keyMessage, pointerMessage, wheelMessage } from './stream-input.js';
@@ -43,7 +47,10 @@ export function createStreamView(host, opts = {}) {
   let map = keyMapFor(viewerPlatform(), opts.hostPlatform || null);
   let refusedSeen = null;
 
-  const send = (msg) => { if (msg && dc && dc.readyState === 'open') { try { dc.send(JSON.stringify(msg)); } catch { /* closing */ } } };
+  const send = (msg) => {
+    if (msg && dc && dc.readyState === 'open') { try { dc.send(JSON.stringify(msg)); } catch { /* closing */ } }
+    if (msg && msg.t !== 'ack') { try { opts.onOwnerInput?.(msg); } catch { /* the shell's */ } } // lane desktop-handover: the person's own input pauses an agent
+  };
   function step(type, code = null) {
     if (disposed && type !== 'close') return;
     const r = streamStep(st, { type, code });
@@ -65,7 +72,7 @@ export function createStreamView(host, opts = {}) {
     if (!a || a.error) throw Object.assign(new Error((a && a.error) || 'the answer did not reach the machine'), { code: (a && a.code) || 'answer_failed' });
   }
   async function start() {
-    const r = await post(`${BASE}/start`, { host: hostId, ...(opts.source ? { source: opts.source, ...(opts.fp16 ? { fp16: true } : {}) } : {}) }).catch(() => null); // opts.source: a display / ONE window (a Mac's or a Windows machine's — int304's one door)
+    const r = await post(`${BASE}/start`, { host: hostId, ...(opts.source ? { source: opts.source, ...(opts.fp16 ? { fp16: true } : {}) } : {}), ...(opts.after ? { after: opts.after } : {}) }).catch(() => null); // opts.source: a display / ONE window (a Mac's or a Windows machine's — int304's one door)
     if (disposed) { if (r && r.key) post(`${BASE}/stop`, { key: r.key, why: closeWhy }); return; }
     if (!r || r.error || !r.take) { why = (r && (r.why || r.error)) || null; step('refused', (r && r.code) || 'start_failed'); return; }
     taken = true; key = r.key;
@@ -114,6 +121,7 @@ export function createStreamView(host, opts = {}) {
       n = r.n || n; seq = r.seq;
       if (r.stats) { agent = r.stats; inputWords(); }
       if (r.relay !== undefined) hubRelay = r.relay;
+      try { opts.onHandover?.(r.handover || null); } catch { /* the shell's */ } // lane desktop-handover: the lease's facts
       if (r.ended) { why = null; step('ended', r.ended === 'not_found' ? 'stream_ended' : r.ended); break; }
     }
     polling = false;
@@ -209,6 +217,7 @@ export function createStreamView(host, opts = {}) {
   return {
     video,
     get state() { return st.state; },
+    get key() { return key; }, // lane desktop-handover: the session a hand-over names
     connect() { if (st.state === 'idle') { step('start'); statsTimer = setInterval(() => { readStats(); }, STREAM_LIMITS.statsMs); } },
     focus() { video.focus({ preventScroll: true }); },
     stats: () => page,

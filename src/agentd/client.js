@@ -331,7 +331,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -1065,6 +1065,25 @@ class DeviceManager {
     const r = await this._request({ op: 'settings-open', pane: String(pane || ''), timeoutMs });
     if (r.error) throw new Error(r.error);
     return r.result || { ok: false, code: 'open_failed', error: 'no answer' };
+  }
+  /** lane desktop-handover: ONE still of a stream session's display (the `desktop-grab` op — the picture an agent the owner handed
+   *  this machine's desktop to reads; the hub decides who may ask). Capability-gated: an agent that predates the op is never
+   *  asked — `host_needs_daemon` + its version. → { ok, png64, w, h, display, origin, road } | { ok: false, code, error } */
+  async desktopGrab(sid, { timeoutMs = 30000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('desktop-grab')) { const e = new Error('daemon lacks desktop-grab (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
+    const r = await this._request({ op: 'desktop-grab', sid: String(sid || ''), timeoutMs });
+    if (r.error) throw new Error(r.error);
+    return r.result || { ok: false, code: 'still_failed', error: 'no answer' };
+  }
+  /** lane desktop-handover: the agent's input records (the data channel's own shapes) into a stream session's sink (the
+   *  `desktop-input` op). Capability-gated like desktopGrab. → { ok, n, refused: [{ i, code }], display } | { ok: false, code, error } */
+  async desktopInput(sid, events, { timeoutMs = 30000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('desktop-input')) { const e = new Error('daemon lacks desktop-input (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
+    const r = await this._request({ op: 'desktop-input', sid: String(sid || ''), events: Array.isArray(events) ? events : [], timeoutMs });
+    if (r.error) throw new Error(r.error);
+    return r.result || { ok: false, code: 'input_failed', error: 'no answer' };
   }
   /** lane desktop-v2-entry: the machine's own screen table (the display picker). Capability-gated (an old agent never hears
    *  an op it would not answer). → { ok, platform, displays } | { ok:false, code, error } */

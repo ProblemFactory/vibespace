@@ -9201,4 +9201,25 @@ export default {
   "streaming now": "正在串流", // lane stream-window-fixes
   "The machine encodes it at {kbps} kbps — never under {floor} kbps for a window this size": "机器以 {kbps} kbps 编码——这个大小的窗口不会低于 {floor} kbps", // lane stream-window-fixes
   "The machine encodes it at {kbps} kbps — never under {floor} kbps for a screen this size": "机器以 {kbps} kbps 编码——这个大小的屏幕不会低于 {floor} kbps", // lane stream-mac-rate
+  "{machine}’s agent is too old for a hand-over — it updates itself with VibeSpace": "{machine} 的 agent 版本太旧，不能交给 agent——它会随 VibeSpace 自动更新", // lane desktop-handover
+  "That conversation is not running any more": "那个会话已经不在运行了", // lane desktop-handover
+  "The stream is not playing — a hand-over rides it": "串流没有在播放——交给 agent 要靠它", // lane desktop-handover
+  "A plain shell cannot drive a desktop": "普通 shell 不能操作桌面", // lane desktop-handover
+  "The hand-over did not start: {why}": "没能交给它：{why}", // lane desktop-handover
+  "{name} no longer drives {machine}’s desktop — its conversation ended": "{name} 不再操作 {machine} 的桌面——它的会话已结束", // lane desktop-handover
+  "{name} no longer drives {machine}’s desktop — the stream ended": "{name} 不再操作 {machine} 的桌面——串流已结束", // lane desktop-handover
+  "{name} handed {machine}’s desktop back": "{name} 已把 {machine} 的桌面交还给你", // lane desktop-handover
+  "Hand to an agent": "交给 agent", // lane desktop-handover
+  "Let it continue": "继续交给它", // lane desktop-handover
+  "Take back": "收回", // lane desktop-handover
+  "Paused — you are using it": "已暂停——你在操作", // lane desktop-handover
+  "Switching display…": "正在切换显示器…", // lane desktop-handover
+  "{name} is driving": "{name} 正在操作", // lane desktop-handover
+  "{name} waits until you let it continue": "{name} 会等你点「继续交给它」", // lane desktop-handover
+  "{name} drives this desktop — any key, click or scroll of yours pauses it": "{name} 正在操作这个桌面——你按任何键、点击或滚动都会让它暂停", // lane desktop-handover
+  "Hand {machine}’s desktop to an agent": "把 {machine} 的桌面交给 agent", // lane desktop-handover
+  "It sees this display and uses its keyboard and pointer through this window’s stream. Any key, click or scroll of yours here pauses it; Take back ends it — closing this window ends it too.": "它能看到这块屏幕，并通过这个窗口的串流使用键盘和指针。你在这里按任何键、点击或滚动都会让它暂停；「收回」随时结束——关掉这个窗口也会结束。", // lane desktop-handover
+  "Hand over": "交给它", // lane desktop-handover
+  "{name} drives {machine}’s desktop — any key or click of yours pauses it": "{name} 正在操作 {machine} 的桌面——你按任何键或点击都会让它暂停", // lane desktop-handover
+  "No agent conversation is running — start one, then come back.": "没有正在运行的 agent 会话——先开一个再回来。", // lane desktop-handover
 };

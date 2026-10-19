@@ -27,6 +27,9 @@
 //   §9 THE RATE on the screen road (lane stream-mac-rate — every road's rule, src/stream-plan.js rateFollower): an echo restarts
 //      nothing; a shortfall that HOLDS 2 s restarts ONLY the encoder, once, at the display's floor (never under it; its first
 //      picture a key frame); a quiet 20 s climbs +25 % (the same module in-process, an injected clock, the fake ffmpeg)
+//   §2b THE HAND-OVER'S OPS (lane desktop-handover): `desktop-input` with the records the data channel just sent ⇒ THE injector
+//      records the SAME command lines (one sink); refused records by index + name; `desktop-grab` ⇒ the fake source's still (a
+//      PNG, its IHDR size); an unknown session ⇒ not_found; §7's old copy without desktop-grab / desktop-input is NEVER asked
 //   §10 THE UDP LEG (lane stream-relay-udp): a daemon that DIALS this hub (Transport B) through a link stand-in that carries
 //      2 Mbps (the owner's link delivered 1.3); a padded fixture at 30 fps / 8 Mbps; relay-only. The daemon's own UDP leg
 //      carries every picture for 10 s with 0 RTP gaps and no growing lag; a forged PING and a stray DATA mid-run are dropped
@@ -130,6 +133,23 @@ console.log('§2 input through the data channel and the op');
   ok(op.kind === 'stub' && op.n === 1 && JSON.stringify(op.refused.map((r) => [r.i, r.code])) === '[[1,"unknown_kind"],[2,"bad_x"]]' && cmds().includes('K 48 0 0'), 'the input-events op feeds the SAME injector (KeyB 0x30 recorded) and refuses the rest by index + name', op);
 }
 
+console.log('§2b the hand-over\'s ops: desktop-input into the SAME sink, desktop-grab');
+{
+  const cmds = () => (fs.existsSync(stub) ? fs.readFileSync(stub, 'utf8').trim().split('\n').map((l) => JSON.parse(l).cmd) : []);
+  ok(conn.info.capabilities.includes('desktop-grab') && conn.info.capabilities.includes('desktop-input'), 'the hello-ack names desktop-grab and desktop-input');
+  const before = cmds().length;
+  const recs = [{ t: 'kd', c: 'KeyA' }, { t: 'ku', c: 'KeyA' }, { t: 'md', x: 640, y: 360, b: 0 }, { t: 'mu', x: 640, y: 360, b: 0 }, { t: 'clip', text: 'hé' }, { t: 'wh', x: 1, y: 2, dx: 0, dy: -120 }];
+  const r = await dm.desktopInput(off.sid, recs);
+  await until(() => cmds().length >= before + 8, 5000);
+  ok(r.ok && r.n === 6 && JSON.stringify(cmds().slice(before, before + 8)) === JSON.stringify(cmds().slice(0, 8)), 'desktop-input with the records §2\'s data channel sent ⇒ THE injector recorded the SAME 8 command lines (one sink: the session\'s onInput)', { r, op: cmds().slice(before, before + 8) });
+  const bad = await dm.desktopInput(off.sid, [{ t: 'ack', f: 1 }, { t: 'kd', c: 'Pause' }, { t: 'kd', c: 'KeyC' }]);
+  ok(!bad.ok && JSON.stringify(bad.refused) === JSON.stringify([{ i: 0, code: 'not_an_act' }, { i: 1, code: 'unmapped_key' }]) && bad.n === 1, 'refused records by index + name (an ack is the page\'s; a key the table lacks), the rest lands', bad);
+  const g = await dm.desktopGrab(off.sid);
+  const png = Buffer.from(g.png64 || '', 'base64');
+  ok(g.ok && g.w === 1280 && g.h === 720 && png.slice(1, 4).toString() === 'PNG' && png.readUInt32BE(16) === 1280 && png.readUInt32BE(20) === 720 && g.road === 'fake', 'desktop-grab ⇒ the session\'s still: a 1280×720 PNG (its IHDR) over the device link', { ok: g.ok, w: g.w, h: g.h, bytes: png.length });
+  ok((await dm.desktopGrab('snope')).code === 'not_found' && (await dm.desktopInput('snope', [])).code === 'not_found', 'an unknown session ⇒ not_found');
+}
+
 console.log('§3 the numbers');
 {
   const st = await dm.streamStats(off.sid);
@@ -220,8 +240,9 @@ console.log('§6 the relay: the hub\'s UDP port ⇄ the device link ⇄ the daem
 
 console.log('§7 the capability gate');
 {
-  const oldText = bundleText.replace(CAP_LIST, (all, inner) => `capabilities: [${inner.split(',').map((x) => x.trim()).filter((x) => x && x !== '"stream-offer"' && x !== '"input-events"').join(', ')}]`).replace('if (msg.op === "stream-offer") {', 'if (false) {');
-  ok(capsOf(oldText).length === capsOf(bundleText).length - 2 && oldText.includes('if (false) {'), 'the old copy lacks both capabilities (by content) and its handler');
+  const OLD_OUT = ['"stream-offer"', '"input-events"', '"desktop-grab"', '"desktop-input"']; // + lane desktop-handover's two ops
+  const oldText = bundleText.replace(CAP_LIST, (all, inner) => `capabilities: [${inner.split(',').map((x) => x.trim()).filter((x) => x && !OLD_OUT.includes(x)).join(', ')}]`).replace('if (msg.op === "stream-offer") {', 'if (false) {');
+  ok(capsOf(oldText).length === capsOf(bundleText).length - 4 && oldText.includes('if (false) {'), 'the old copy lacks the four capabilities (by content) and its handler');
   const oldBundle = path.join(copyDir, 'old', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(oldBundle), { recursive: true }); fs.writeFileSync(oldBundle, oldText);
   const dmo = deviceOn(homeOld, oldBundle);
   const co = await dmo.connect();
@@ -230,7 +251,9 @@ console.log('§7 the capability gate');
   dmo._request = (msg) => { sent.push(msg && msg.op); return send0(msg); };
   const e1 = await dmo.streamOffer({ sourceKind: 'fake', sourceId: FIXTURE }).then(() => null, (x) => x);
   const e2 = await dmo.inputEvents([{ t: 'kd', c: 'KeyA' }]).then(() => null, (x) => x);
-  ok(e1 && e1.code === 'host_needs_daemon' && e1.daemonVersion === co.info.daemonVersion && e2 && e2.code === 'host_needs_daemon' && sent.length === 0, 'an older agent is refused by the capability (host_needs_daemon + its version) and NO request went to it');
+  const e3 = await dmo.desktopGrab('s1').then(() => null, (x) => x);
+  const e4 = await dmo.desktopInput('s1', [{ t: 'kd', c: 'KeyA' }]).then(() => null, (x) => x);
+  ok(e1 && e1.code === 'host_needs_daemon' && e1.daemonVersion === co.info.daemonVersion && e2 && e2.code === 'host_needs_daemon' && e3 && e3.code === 'host_needs_daemon' && e4 && e4.code === 'host_needs_daemon' && sent.length === 0, 'an older agent is refused by the capability (host_needs_daemon + its version) — stream-offer, input-events, desktop-grab, desktop-input — and NO request went to it');
   const raw = await send0({ op: 'stream-offer', sid: 'sraw', sourceKind: 'fake', sourceId: FIXTURE, timeoutMs: 1500 }).then((r) => ({ answered: r }), (x) => ({ error: String(x && x.message) }));
   ok(!raw.answered && /time(?:d)? ?out/i.test(raw.error || ''), 'CONTROL: asked past the gate, the old agent answers NOTHING — the request ends on its own timeout (the 2.300.0 rule)', raw);
   dmo.stop(); endDaemonsOf(rootOf(homeOld));
@@ -260,7 +283,7 @@ const FF = writeFakeFfmpeg(binS, { log: ffLog, fixture: FIXTURE, raw: rawFile, n
 const ffRuns = () => (fs.existsSync(ffLog) ? fs.readFileSync(ffLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 const dms = deviceOn(homeScr, scrBundle);
 const cs = await dms.connect();
-ok(cs.info.platform === 'win32' && JSON.stringify(cs.info.capabilities.slice(-8)) === JSON.stringify(['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open']), 'the hello-ack names stream-facts and stream-screen (after stream-offer / input-events; then lane stream-p3m-build\'s stream-mac / stream-window, then lane stream-p2w-build\'s stream-windows — the picker op\'s own word, int304; then lane stream-mac-stall\'s settings-open)');
+ok(cs.info.platform === 'win32' && JSON.stringify(cs.info.capabilities.slice(-10)) === JSON.stringify(['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input']), 'the hello-ack names stream-facts and stream-screen (after stream-offer / input-events; then lane stream-p3m-build\'s stream-mac / stream-window, then lane stream-p2w-build\'s stream-windows — the picker op\'s own word, int304; then lane stream-mac-stall\'s settings-open; then lane desktop-handover\'s desktop-grab / desktop-input)');
 /** One screen session with a fresh stand-in: offer → answer. */
 async function screenSession(pushArr) {
   const b = standIn();

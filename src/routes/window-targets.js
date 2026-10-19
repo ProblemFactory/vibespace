@@ -31,6 +31,12 @@
  *                                                  originX, originY, coords: 'window'|'display', scale, windows, blank} — lane E: the
  *                                                  image is the app's OWN windows and `--at x,y` is a pixel of it
  *   POST /api/agent/window/watch     {handle}
+ * LANE desktop-handover: a handle `md-<hostId>` is a paired machine's DESKTOP its owner HANDED to the caller (the owner's
+ * door: the machine-desktop window) — every verb above routes to src/server/desktop-handover-engine.js (targets lists them as
+ * `machines`): screenshot = ONE still of the display, act = click --at / key / type / scroll as the stream's own records;
+ * never handed to you ⇒ 403 desktop_not_handed (no verb asks for one), the owner driving ⇒ 409 window_paused, a chord that
+ * locks / logs off ⇒ 403 chord_refused, --at outside the still ⇒ 400 outside_display, an agent that predates the ops ⇒ 409
+ * host_needs_update (it is never asked)
  *
  * P10 (design §7.6 tier 3 / §6.6, D27 (b)) — the USER'S side of the other
  * class, cookie-authed (NOT under /api/agent/): the switch's state and the
@@ -43,6 +49,7 @@
 const express = require('express');
 const fs = require('fs');
 const DESK = require('../window-desktop');
+const DH = require('../desktop-handover'); // lane desktop-handover: md-<hostId> handles
 const router = express.Router();
 
 let ctx = null;
@@ -77,6 +84,10 @@ const STATUS = {
   desktop_injection_refused: 409, no_live_view: 409, tier3_is_a_window_target: 409, no_lease: 409, held: 409, not_taken: 409,
   desktop_window_gone: 404,
   capture_needs_portal: 503, capture_unavailable: 503,
+  // lane desktop-handover (src/desktop-handover.js + the engine): a machine's desktop handed to the caller
+  desktop_not_handed: 403, chord_refused: 403, desktop_switching: 409, screenshot_first: 409, outside_display: 400, type_too_long: 400, not_ascii: 400,
+  host_needs_update: 409, mac_still_pending: 409, no_still: 409, still_too_big: 413, still_timeout: 504, still_failed: 502, device_unreachable: 502,
+  uipi_blocked: 409, accessibility_permission: 409, unmapped_key: 400, input_unsupported: 409,
 };
 function fail(res, e) {
   const code = e?.code || null;
@@ -102,12 +113,19 @@ function handleOf(req, res) {
   if (!HANDLE_RE.test(h)) { res.status(400).json({ error: 'handle required (`vibespace-window list`)', code: 'bad-request' }); return null; }
   return h;
 }
+/** lane desktop-handover: an `md-<hostId>` handle → the hand-over engine (null = a window handle: the window engine's). */
+function machineOf(h, res) {
+  if (!DH.isMachineHandle(h)) return null;
+  if (ctx?.handover) return ctx.handover;
+  res.status(503).json({ error: 'the machine-desktop hand-over is not available in this process', code: 'no-engine' });
+  return false;
+}
 
 router.get('/api/agent/window/targets', async (req, res) => {
   if (refuseHost(req, res)) return;
   const engine = engineOr503(res); if (!engine) return;
   const f = agentFacts(req, res, engine); if (!f) return;
-  try { res.json(await engine.list(f)); } catch (e) { fail(res, e); }
+  try { const r = await engine.list(f); res.json(ctx.handover ? { ...r, machines: ctx.handover.rowsFor(f) } : r); } catch (e) { fail(res, e); } // lane desktop-handover: the desktops handed to the caller
 });
 // lane e2a r3 (verify r1 #0's door): the OPENER stops its own desktop browser (only a record its `--backend desktop-app` opened)
 router.post('/api/agent/window/stop', async (req, res) => {
@@ -144,6 +162,7 @@ router.post('/api/agent/window/attach', async (req, res) => {
   const engine = engineOr503(res); if (!engine) return;
   const f = agentFacts(req, res, engine); if (!f) return;
   const h = handleOf(req, res); if (!h) return;
+  const mh = machineOf(h, res); if (mh === false) return; if (mh) { try { res.json(mh.attach(h, f)); } catch (e) { fail(res, e); } return; }
   // lane E (D7): the attach answers the share's mode — auto is resolved here (a probe of the app's tree)
   try { res.json(typeof engine.attachWithMode === 'function' ? await engine.attachWithMode(h, f) : engine.attach(h, f)); } catch (e) { fail(res, e); }
 });
@@ -152,27 +171,35 @@ router.post('/api/agent/window/detach', (req, res) => {
   const engine = engineOr503(res); if (!engine) return;
   const f = agentFacts(req, res, engine); if (!f) return;
   const h = handleOf(req, res); if (!h) return;
-  try { res.json(engine.detach(h, f)); } catch (e) { fail(res, e); }
+  const mh = machineOf(h, res); if (mh === false) return;
+  try { res.json(mh ? mh.detach(h, f) : engine.detach(h, f)); } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/window/snapshot', async (req, res) => {
   if (refuseHost(req, res)) return;
   const engine = engineOr503(res); if (!engine) return;
   const f = agentFacts(req, res, engine); if (!f) return;
   const h = handleOf(req, res); if (!h) return;
-  try { res.json(await engine.snapshot(h, f, { budget: req.body?.budget, text: req.body?.text !== false })); } catch (e) { fail(res, e); }
+  const mh = machineOf(h, res); if (mh === false) return;
+  try { res.json(mh ? mh.snapshot(h, f) : await engine.snapshot(h, f, { budget: req.body?.budget, text: req.body?.text !== false })); } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/window/act', async (req, res) => {
   if (refuseHost(req, res)) return;
   const engine = engineOr503(res); if (!engine) return;
   const f = agentFacts(req, res, engine); if (!f) return;
   const h = handleOf(req, res); if (!h) return;
-  try { res.json(await engine.act(h, f, req.body || {})); } catch (e) { fail(res, e); }
+  const mh = machineOf(h, res); if (mh === false) return;
+  try { res.json(mh ? await mh.act(h, f, req.body || {}) : await engine.act(h, f, req.body || {})); } catch (e) { fail(res, e); }
 });
 router.get('/api/agent/window/screenshot', async (req, res) => {
   if (refuseHost(req, res)) return;
   const engine = engineOr503(res); if (!engine) return;
   const f = agentFacts(req, res, engine); if (!f) return;
   const h = handleOf(req, res); if (!h) return;
+  const mh = machineOf(h, res); if (mh === false) return;
+  if (mh) { // lane desktop-handover: ONE still of the handed machine's display, in memory (no temp file)
+    try { const r = await mh.screenshot(h, f); res.setHeader('Content-Type', 'image/png'); res.setHeader('X-Window-Shot', JSON.stringify({ handle: r.handle, w: r.w, h: r.h, originX: r.originX, originY: r.originY, coords: 'display', scale: 1, display: r.display, machine: r.machine, blank: false })); res.end(r.png); } catch (e) { fail(res, e); }
+    return;
+  }
   try {
     const r = await engine.screenshot(h, f);
     res.setHeader('Content-Type', 'image/png');
@@ -188,7 +215,8 @@ router.post('/api/agent/window/watch', (req, res) => {
   const engine = engineOr503(res); if (!engine) return;
   const f = agentFacts(req, res, engine); if (!f) return;
   const h = handleOf(req, res); if (!h) return;
-  try { res.json(engine.watch(h, f)); } catch (e) { fail(res, e); }
+  const mh = machineOf(h, res); if (mh === false) return;
+  try { res.json(mh ? mh.watch(h, f) : engine.watch(h, f)); } catch (e) { fail(res, e); }
 });
 
 // ── P10: the user's side of the desktop class (cookie auth by mount position — not an agent route) ──
