@@ -204,6 +204,18 @@ for (const [step, at] of [['write-record', ''], ['read-back', ''], ['marker', '.
     'a damaged key file stops the setup BEFORE anything moves (it could never be shredded safely)', JSON.stringify(r));
   e.close();
 }
+{
+  // verify r1 B3: THE DOUBLE FAULT — a shred fails after another landed AND that file cannot be put back: the record (read
+  // back, every key proven) is KEPT and the vault stays set up; the unlock resumes the seal. The old branch unlinked it ⇒ every key gone.
+  const { dir, files } = world({ keys: ['.accounts-key', '.mounts-key'] });
+  const realWrite = fs.writeFileSync; let armed = true;   // ONE fault: the resume at the unlock must run clean
+  const e = mk(dir, { faultAt: (s, nm) => { if (armed && s === 'shred' && nm === '.mounts-key') { armed = false; fs.writeFileSync = (f, ...a) => { if (path.basename(String(f)) === '.accounts-key') throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); return realWrite(f, ...a); }; throw Object.assign(new Error('injected shred'), { code: 'EIO' }); } } });
+  const r = await e.setup(PW);
+  fs.writeFileSync = realWrite;
+  ok(!r.ok && r.code === 'migration_failed' && /\.accounts-key/.test(r.why) && fs.existsSync(path.join(dir, 'vault.json')) && e.state() === 'locked', 'a shred fault + a restore fault ⇒ migration_failed naming the file not put back, the record KEPT, the vault locked', JSON.stringify(r));
+  ok((await e.unlock(PW)).ok && boxOf(dir, '.accounts-key').dec(files['.accounts-key'].ct) === 'secret under .accounts-key' && boxOf(dir, '.mounts-key').dec(files['.mounts-key'].ct) === 'secret under .mounts-key' && !fs.existsSync(path.join(dir, '.mounts-key')), '… and the unlock opens both keys and finishes the seal (nothing lost)');
+  e.close();
+}
 
 console.log('G  RESUME an interrupted seal');
 {
@@ -265,6 +277,25 @@ console.log('J  pacing, change, idle lock');
   ok((await e.change('wrong old one', 'brand new password')).code === 'wrong_password', 'change with a wrong old password ⇒ wrong_password');
   ok((await e.change(PW, PW)).code === 'same_password' && (await e.change(PW, 'the sign-in pw!')).code === 'same_as_sign_in', 'change refuses the same / the sign-in password');
   ok((await e.change(PW, 'brand new password')).ok, 'change ok');
+  {
+    // verify r1 B4: a change writes onto the record as it is NOW — a key minted and an idle lock set WHILE its derives ran survive
+    const real = crypto.scrypt; crypto.scrypt = (p, s, l, o, cb) => setTimeout(() => real(p, s, l, o, cb), 30);
+    const pending = e.change('brand new password', 'brand new password 2');
+    await new Promise((r) => setTimeout(r, 5));
+    const nb = boxOf(dir, '.race-key', false); const ct = nb.enc('during the change'); e.setIdleLock(3);
+    let ch; try { ch = await pending; } finally { crypto.scrypt = real; }
+    const rec = JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8'));
+    ok(ch.ok && !!rec.entries['.race-key'] && rec.idleLockHours === 3 && nb.dec(ct) === 'during the change', 'a key minted and an idle lock set WHILE the password changed are kept (the lost-update race)', JSON.stringify({ ch, entry: !!rec.entries['.race-key'], idle: rec.idleLockHours }));
+    e.setIdleLock(0); ok((await e.change('brand new password 2', 'brand new password')).ok, 'changed back');
+  }
+  {
+    // verify r1 A1: a PARALLEL burst — the derives in flight count toward the pace (40 concurrent wrong passwords landed 40 derives)
+    e.lock();
+    const real = crypto.scrypt; let derives = 0; crypto.scrypt = (...a) => { derives++; return real(...a); };
+    let rs; try { rs = await Promise.all(Array.from({ length: 12 }, (_, i) => e.unlock('burst wrong ' + i))); } finally { crypto.scrypt = real; }
+    ok(derives === 5 && rs.filter((r) => r.code === 'paced').length === 7 && rs.filter((r) => r.code === 'wrong_password').length === 5, `12 concurrent wrong passwords ⇒ 5 derives, 7 refused paced before any landed (${derives} derives)`);
+    clock += 60e3 + 1; ok((await e.unlock('brand new password')).ok && e.facts().failedTries === 0, 'after the minute the right password unlocks');
+  }
   e.lock();
   ok((await e.unlock(PW)).code === 'wrong_password' && (await e.unlock('brand new password')).ok, 'the old password stops, the new one opens');
   ok(boxOf(dir, '.accounts-key').dec(files['.accounts-key'].ct) === 'secret under .accounts-key', 'the keys are unchanged by a password change');

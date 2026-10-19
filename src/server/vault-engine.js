@@ -79,7 +79,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   const keys = new Map();     // name → unwrapped store key (zeroed by lock())
   let epoch = 0;              // bumped at every unlock / lock — a cache of a key (the passkey cipher) is good for one epoch
   let lockedSince = now();
-  let failedTries = 0, pacedUntil = 0, busy = false, lastActivity = now();
+  let failedTries = 0, pacedUntil = 0, busy = false, lastActivity = now(), inFlight = 0;   // inFlight: derives running now count toward the pace BEFORE they land (verify r1 A1: 40 concurrent wrong passwords landed 40 derives)
   const unlockHooks = [];   // what a locked start left undone and the unlock must retry (the wiring: mounts' restore)
 
   function load() {
@@ -139,10 +139,12 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   /** Put every planned file back byte for byte and drop its marker (the rollback of a failed seal). */
   function restore(plan) {
+    const lost = [];   // → the names NOT put back (verify r1 B3: the record is the only copy of those — it is never unlinked then)
     for (const it of plan) {
-      try { if (!fs.existsSync(it.file)) fs.writeFileSync(it.file, it.bytes, { mode: 0o600, flag: 'wx' }); } catch (e) { audit('vault-restore-failed', { why: `${it.name}: ${KF.errnoOf(e)}` }); }
+      try { if (!fs.existsSync(it.file)) fs.writeFileSync(it.file, it.bytes, { mode: 0o600, flag: 'wx' }); } catch (e) { lost.push(it.name); audit('vault-restore-failed', { why: `${it.name}: ${KF.errnoOf(e)}` }); }
       try { fs.unlinkSync(it.file + SEALED_SUFFIX); } catch { }
     }
+    return lost;
   }
 
   /** The unwrapped key for an entry (cached until lock), or null when the entry does not open. */
@@ -267,9 +269,10 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
         migrations: [{ id: `vault-seal-${rec.createdAt}`, note: `${items.length} key file(s) sealed into the vault`, run: () => { for (const it of items) sealOne(it, rec.createdAt); return { keys: items.length }; } }],
       });
       if (!res || res.status !== 'ran') {
-        restore(items); V.zero(made.dek); try { fs.unlinkSync(FILE); } catch { }
-        audit('vault-setup-refused', { ip, code: 'migration_failed', why: (res && res.error) || 'seal' });
-        return { ok: false, code: 'migration_failed', why: 'a key file could not be sealed — every file was put back, nothing changed' };
+        const lost = restore(items); V.zero(made.dek);
+        if (lost.length) load(); else try { fs.unlinkSync(FILE); } catch { }   // a file NOT put back lives in the record alone (read back, every key proven): the vault stays set up, LOCKED — the next unlock resumes its seal
+        audit('vault-setup-refused', { ip, code: 'migration_failed', why: (res && res.error) || 'seal', ...(lost.length ? { kept: lost } : {}) });
+        return { ok: false, code: 'migration_failed', why: lost.length ? `a key file could not be sealed and ${lost.join(', ')} could not be put back — the vault record holds every key: unlock it to finish the seal` : 'a key file could not be sealed — every file was put back, nothing changed' };
       }
       const { sealing, ...done } = back;
       try { writeRecord(done); record = done; } catch { record = back; /* the sealing list is resumed at the next unlock */ }
@@ -290,12 +293,13 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (!setUp()) return { ok: false, code: 'vault_not_set_up' };
     if (dek) return { ok: true, already: true };
     const t = now();
-    if (pacedUntil > t) return { ok: false, code: 'paced', retryInMs: pacedUntil - t, failedTries };
+    if (pacedUntil > t || failedTries % PACE_AFTER + inFlight >= PACE_AFTER) return { ok: false, code: 'paced', retryInMs: Math.max(pacedUntil - t, 0) || PACE_MS, failedTries };
     if (typeof password !== 'string' || !password) return { ok: false, code: 'password_not_text' };
     if (recordBad) { audit('vault-unlock-failed', { ip, code: 'corrupt' }); return { ok: false, code: 'corrupt' }; }
     const pw = Buffer.from(password, 'utf8');
     let r;
-    try { r = await V.unlock(record, pw); } finally { V.zero(pw); }
+    inFlight++;
+    try { r = await V.unlock(record, pw); } finally { V.zero(pw); inFlight--; }
     if (!r.ok) {
       if (r.code === 'wrong_password') {
         failedTries++;
@@ -329,7 +333,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (!setUp()) return { ok: false, code: 'vault_not_set_up' };
     if (recordBad) return { ok: false, code: 'corrupt' };
     const t = now();
-    if (pacedUntil > t) return { ok: false, code: 'paced', retryInMs: pacedUntil - t, failedTries };
+    if (pacedUntil > t || failedTries % PACE_AFTER + inFlight >= PACE_AFTER) return { ok: false, code: 'paced', retryInMs: Math.max(pacedUntil - t, 0) || PACE_MS, failedTries };
     if (typeof oldPassword !== 'string' || !oldPassword) return { ok: false, code: 'password_not_text' };
     const p = V.passwordOf(newPassword);
     if (!p.ok) return p;
@@ -338,15 +342,17 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (same) { V.zero(p.pw); return { ok: false, code: 'same_as_sign_in' }; }
     const oldPw = Buffer.from(oldPassword, 'utf8');
     let r;
-    try { r = await V.changePassword(record, oldPw, p.pw, { now: now() }); } finally { V.zero(oldPw, p.pw); }
+    inFlight++;
+    try { r = await V.changePassword(record, oldPw, p.pw, { now: now() }); } finally { V.zero(oldPw, p.pw); inFlight--; }
     if (!r.ok) {
       if (r.code === 'wrong_password') { failedTries++; if (failedTries % PACE_AFTER === 0) pacedUntil = now() + PACE_MS; }
       audit('vault-change-failed', { ip, code: r.code, tries: failedTries });
       announce();
       return { ok: false, code: r.code, failedTries };
     }
-    try { writeRecord(r.record); } catch (e) { return { ok: false, code: 'migration_failed', why: `the vault record could not be written (${KF.errnoOf(e)})` }; }
-    record = r.record; failedTries = 0; pacedUntil = 0;
+    const next = { ...record, kdf: r.record.kdf, check: r.record.check, wrapped: r.record.wrapped, rotatedAt: r.record.rotatedAt };   // onto the record as it is NOW (the DEK is the same): an entry minted / adopted or an idle lock set while the derives ran is kept (verify r1 B4: writing r.record dropped them — a store's key lost)
+    try { writeRecord(next); } catch (e) { return { ok: false, code: 'migration_failed', why: `the vault record could not be written (${KF.errnoOf(e)})` }; }
+    record = next; failedTries = 0; pacedUntil = 0;
     audit('vault-second-password-changed', { ip });
     announce();
     return { ok: true };
