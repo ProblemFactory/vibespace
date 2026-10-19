@@ -19,7 +19,7 @@ import vm from 'node:vm';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, PRESET_KEYS } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -107,7 +107,7 @@ ok(dn.vis === 'denied' && !dn.code, '③ access_denied with no way back: the pag
 // ④ the census: only the page's own two files; no storage
 const foreign = requests.filter((u) => !/\/favicon\.ico$/.test(u)).filter((u) => !(u.startsWith(PAGE) || u.startsWith(`http://127.0.0.1:${PAGE_PORT}/allow/`) || u.startsWith(`${INST}/api/channels/oauth/cb/slack`)));
 const own = [...new Set(served.map((p) => p.replace(/^\/allow/, '')))].sort().join();
-const stor = await ev("JSON.stringify([Object.keys(localStorage).filter(function (k) { return k !== 'vs-onboarded'; }).length, sessionStorage.length, document.cookie])");
+const stor = await ev(`JSON.stringify([Object.keys(localStorage).filter(function (k) { return ${JSON.stringify(Object.keys(PRESET_KEYS))}.indexOf(k) < 0; }).length, sessionStorage.length, document.cookie])`);
 ok(!foreign.length && own === '/,/relay.js' && stor === '[0,0,""]', `④ CDP census over ${requests.length} requests: the page asks only for itself and relay.js (and the one navigation back); nothing stored`, JSON.stringify({ foreign, own, stor }));
 // ⑤ lane voice-p1-oauth-teach: a dropline state (k) in a real browser lands on the instance's /cb/dropline
 {

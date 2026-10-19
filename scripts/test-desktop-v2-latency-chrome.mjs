@@ -252,7 +252,8 @@ const rung = (p) => p.ev(`(() => { const r = document.querySelector('${WIN} .des
 const log = (from, t) => vnc.seen.log.slice(from).filter((m) => !t || m.t === t);
 const ladderOf = (from) => log(from).filter((x) => x.t === 'enc' || (x.t === 'req' && x.inc === 0)).map((x) => (x.t === 'enc' ? `${x.q}/${x.c}` : `full:${x.rect}`));
 const rectOf = (p, sel) => p.ev(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
-const fullBtnAt = (p) => p.ev(`(() => { const b = [...document.querySelectorAll('${WIN} .desktop-strip-btn')].find((x) => x.textContent === '⤢ 全屏').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
+// .313 (lane stream-stats-popup): in TRUE full screen the strip is a pill and this button reads 退出全屏 — the same door both ways.
+const fullBtnAt = (p) => p.ev(`(() => { const b = [...document.querySelectorAll('${WIN} .desktop-strip-btn')].find((x) => x.textContent === '⤢ 全屏' || x.textContent === '退出全屏').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`);
 const keysBtn = (p) => p.ev(`(() => { const b = document.querySelector('${WIN} .desktop-strip-keys'); return { pressed: b.getAttribute('aria-pressed'), locked: b.classList.contains('is-locked'), title: b.title }; })()`);
 const ctrlV = async (p) => {
   await p.cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 2 });

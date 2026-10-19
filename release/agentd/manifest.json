@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "version": "2.369.315",
+  "sha256": "ba90221d3ed7afb64e7273bb5b075487ae4cc1bdf9321bc0aa2bd8f5082e1c52",
+  "keyId": "634fa9b38a807bd4",
+  "sig": "OILiVRHDF00K5hr3jAsYy7Q0E/ztuebLLg3R2QHXtWL8OWYQD8UjhRm0Ce3rYbAxdS9SawXMU3eCMF1AaRwpDQ==",
+  "chain": [],
+  "keys": [
+    {
+      "keyId": "634fa9b38a807bd4",
+      "publicKey": "tl0ocmuXhUBBnMK8j4ggQZ1xk3wLt9PQyTv57OorD74="
+    }
+  ]
+}

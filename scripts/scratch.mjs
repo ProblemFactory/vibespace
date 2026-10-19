@@ -38,7 +38,10 @@ export { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD };
  *  Lane vault-e2e-password: the same source snoozes the vault's setup ask (`vs-vault-later`, an epoch ms — src/lib/
  *  vault-unlock.js maybeNagVault): a scratch hub's vault is never set up, and its modal would cover the chrome under test
  *  the way the wizard did. A LOCKED vault's unlock modal is not snoozed by anything. */
-export const ONBOARDED_SOURCE = "try { localStorage.setItem('vs-onboarded', '1'); localStorage.setItem('vs-vault-later', '9999999999999'); } catch {}";
+/** The keys the preset writes. A suite that censuses what a PAGE stored excludes exactly these (test-slack-relay ④) — never
+ *  a literal of its own: the .314 mirror went red when the vault key joined and the relay census still knew only the first. */
+export const PRESET_KEYS = Object.freeze({ 'vs-onboarded': '1', 'vs-vault-later': '9999999999999' });
+export const ONBOARDED_SOURCE = `try { ${Object.entries(PRESET_KEYS).map(([k, v]) => `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join(' ')} } catch {}`;
 
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */
 export function scratch(name) {
