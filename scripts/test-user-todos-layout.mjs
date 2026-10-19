@@ -1076,8 +1076,8 @@ console.log("㉒ THE PHONE'S FIRST SCREEN (lane phone-first-screen, design q-044
   const homeSrc = a > 0 && b > a ? panel.slice(a, b) : '';
   ok(!!homeSrc && /const home = app\.isMobile \? document\.getElementById\('phone-home'\) : null;/.test(panel) && /app\.phoneHome = \{ shown: homeShown, hasRows: homeHasRows, show: showHome, hide: hideHome, boot: bootHome \};/.test(homeSrc),
     'the page exists on a phone only and is reached through app.phoneHome {shown, hasRows, show, hide, boot}');
-  ok(/H\.bands = bandLayout\(todos, \{ now, prev: H\.bands \}\);/.test(homeSrc) && /const drawn = bandEntries\(H\.bands, todos\);/.test(homeSrc) && /drawBands\(root\.querySelector\(':scope > \.ut-bands'\), drawn, H\.open\);/.test(homeSrc) && /bands = bandLayout\(todos, \{ now, prev: bands \}\);/.test(panel),
-    "the page draws the tray's bands: the same bandLayout (the same policy — the cap is the list's 6) / bandEntries / drawBands, with its own slots and open ids");
+  ok(/H\.bands = bandLayout\(todos, \{ now, prev: H\.bands, policy: attnPolicy\(\) \}\);/.test(homeSrc) && /const drawn = bandEntries\(H\.bands, todos\);/.test(homeSrc) && /drawBands\(root\.querySelector\(':scope > \.ut-bands'\), drawn, H\.open\);/.test(homeSrc) && /bands = bandLayout\(todos, \{ now, prev: bands, policy: attnPolicy\(\) \}\);/.test(panel),
+    "the page draws the tray's bands: the same bandLayout (the same policy reader attnPolicy — the owner's band switches + cap, .319 seam) / bandEntries / drawBands, with its own slots and open ids");
   ok(!!homeSrc && !/innerHeight|clientHeight|offsetHeight|getBoundingClientRect|matchMedia/.test(homeSrc), 'decision 5 / §5 不做: the page reads no height — no cap from the viewport');
   ok(/renderBtn\(\); renderPanel\(\); renderMini\(\); scheduleBadges\(\); renderHome\(\);/.test(panel) && /if \(homeShown\(\)\) roots\.push\(home\);/.test(panel), 'every snapshot repaints the page in place (keyed rows, the slot law); the live facts reach its rows');
   ok(/const jump = \(key, item\) => model\.jump\(key, item, \{ close: \(\) => \{ hidePopup\(\); hideHome\(\); \} \}\);/.test(panel) && /if \(item\) rowClick\(e, item\);/.test(homeSrc),

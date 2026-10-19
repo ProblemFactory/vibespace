@@ -916,14 +916,14 @@ export function installUserTodos(app) {
   // the popup's (rowClick, the reply box, a row's menu). The cap is the attention list's (6) — never the viewport's.
   const homeShown = () => !!home && !home.classList.contains('hidden');
   /** Would the page show a row now? (the first screen of a fresh layout — 搁置 and the notices alone are no first screen) */
-  const homeHasRows = () => !!home && bandLayout(todos, { now: Date.now() }).shown.size > 0;
+  const homeHasRows = () => !!home && bandLayout(todos, { now: Date.now(), policy: attnPolicy() }).shown.size > 0; // .319 seam: the phone page reads the owner's band switches + cap like the tray
   const renderHome = () => {
     if (!homeShown()) return;
     let root = home.querySelector(':scope > .ut-inbox');
     if (!root) { root = mk('div', 'ut-inbox ut-home'); root.append(mk('div', 'ut-groups ut-bands'), noticesEl()); home.append(root); }
     const now = Date.now();
     H.layout = H.layout ? nextLayout(H.layout, todos) : openLayout(sortGroups(todos.open)); // the notices' slots (the popup's rule)
-    H.bands = bandLayout(todos, { now, prev: H.bands });
+    H.bands = bandLayout(todos, { now, prev: H.bands, policy: attnPolicy() });
     const drawn = bandEntries(H.bands, todos);
     // NO EMPTY PAGE (decision 5): every row it held left the store (a resolved row keeps its slot — only a cleared or
     // pruned one goes) — the conversation list instead
@@ -972,7 +972,7 @@ export function installUserTodos(app) {
         return;
       }
       const fb = e.target.closest('.ut-fold');
-      if (fb) { if (H.bands) H.bands = bandLayout(todos, { now: Date.now(), prev: H.bands, expand: Number(fb.dataset.band) }); renderHome(); return; } // THE FOLD opens its band IN PLACE
+      if (fb) { if (H.bands) H.bands = bandLayout(todos, { now: Date.now(), prev: H.bands, expand: Number(fb.dataset.band), policy: attnPolicy() }); renderHome(); return; } // THE FOLD opens its band IN PLACE
       if (e.target.closest('.ut-notice-head')) { H.noticesOpen = !H.noticesOpen; renderHome(); return; }
       const sa = e.target.closest('.ut-seen-all');
       if (sa) { markAllSeen(sa); return; }
