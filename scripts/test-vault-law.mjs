@@ -127,7 +127,12 @@ console.log('④ the agent side has no unlock');
   ok(cli.length > 0 && /\/api\/agent\/vault\/state/.test(cli) && /\/api\/agent\/vault\/lock/.test(cli) && !/\/api\/(agent\/)?vault\/(unlock|setup|change)/.test(cli), 'data/bin/vibespace-vault calls state and lock — never unlock / setup / change');
   const routes = tree.get('src/routes/vault.js') || '';
   const agentDoors = [...routes.matchAll(/app\.(get|post)\('(\/api\/agent\/vault\/[^']+)'/g)].map((m) => m[2]);
-  ok(agentDoors.join() === '/api/agent/vault/state,/api/agent/vault/lock', `the agent doors are state and lock only (${agentDoors.join(', ')})`);
+  // lane vault-e2e-password-fix-r2: + the LINK TOKEN door — a remote session's attach child asks for ITS machine's device
+  // token (its own session token names the session; the engine is never asked to unlock: LOCKED ⇒ 423 vault_locked)
+  ok(agentDoors.join() === '/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/link-token', `the agent doors are state, lock and the session's own link token only (${agentDoors.join(', ')})`);
+  const lt = routes.slice(routes.indexOf("'/api/agent/vault/link-token'"));
+  ok(lt.length > 0 && !/vault\.(unlock|setup|change)\(/.test(lt.slice(0, lt.indexOf('\n  });'))) && /vsst_/.test(lt.slice(0, 900)) && /_agentdSession/.test(lt.slice(0, 900)),
+    'the link-token door answers a session token (vsst_) of a session on a paired machine only, and never unlocks / sets up / changes');
   const personDoors = [...routes.matchAll(/app\.post\('(\/api\/vault\/[^']+)', person\(/g)].map((m) => m[1]);
   ok(['setup', 'unlock', 'change', 'lock', 'idle', 'active'].every((d) => personDoors.includes('/api/vault/' + d)), `every person door is wrapped in person() (human_only + same-origin): ${personDoors.join(', ')}`);
 }

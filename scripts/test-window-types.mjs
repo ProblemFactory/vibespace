@@ -54,14 +54,14 @@ if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) {
 //   design — the Design window: a conversation's designs/<slug>/ artboards live on a canvas, one window per (host, dir) (lane design-window, 2026-10-02)
 //   doc — the Doc window: a markdown file read, edited and commented in one rendered view, one window per (host, path) (lane doc-window, 2026-10-05)
 const CORE_TYPES = ['artifacts', 'browser', 'browser-live', 'browser-profiles', 'browser-replay', 'channel', 'channel-outbox', 'channels', 'chat', 'design', 'desktop', 'doc', 'desktop-app', 'editor', 'files', 'hex-viewer', 'inbox', 'integrations', 'job-interact', 'jobs',
-  'machine-app', 'machine-desktop', 'ports', 'search', 'settings', 'stage-placeholder', 'system', 'task', 'terminal', 'usage', 'viewer', 'workflow']; // + search (lane global-search)
+  'machine-app', 'machine-desktop', 'ports', 'search', 'settings', 'stage-placeholder', 'system', 'task', 'terminal', 'usage', 'vault', 'viewer', 'workflow']; // + search (lane global-search); + vault (lane vault-contents-window)
 const CORE_ACTIONS = ['attachSession', 'openFileExplorer', 'openFile', 'openEditor', 'openBrowser', 'openBrowserLive', 'openBrowserProfiles', 'openDesktop', 'openDesktopApp',
   'openTaskDetail', 'openTaskLog', 'openJobs', 'openJobInteract', 'openUsage', 'openSettings', 'openSessionProps',
-  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts', 'openInbox', 'openBrowserReplay', 'openDesign', 'openDoc', 'openSearch', 'openArtifacts', 'openMachineDesktop']; // + lane desktop-display-modes: a machine's desktop window is restored by its openSpec (mode + display)
+  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts', 'openInbox', 'openBrowserReplay', 'openDesign', 'openDoc', 'openSearch', 'openArtifacts', 'openMachineDesktop', 'openVault']; // + lane desktop-display-modes: a machine's desktop window is restored by its openSpec (mode + display)
 // layout.js's former `TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder'])`
-const CORE_TRANSIENT = ['chat', 'terminal', 'stage-placeholder', 'machine-app']; // + lane machine-app-crop: one app of a machine is never re-opened by a reload (it asks the sign-in); lane desktop-display-modes: a machine's whole desktop now IS (its openSpec — the mode + display are the window's): a replay streams, never asks the sign-in by itself
+const CORE_TRANSIENT = ['chat', 'terminal', 'stage-placeholder', 'machine-app', 'vault']; // + lane machine-app-crop: one app of a machine is never re-opened by a reload (it asks the sign-in); lane desktop-display-modes: a machine's whole desktop now IS (its openSpec — the mode + display are the window's): a replay streams, never asks the sign-in by itself; + lane vault-contents-window: the Vault window is never restored by a reload nor synced to another client (showing a value is one page's act behind the second password)
 // kinds whose opener focuses an existing window of the kind instead of opening a second
-const CORE_SINGLETONS = ['browser-profiles', 'channel-outbox', 'channels', 'desktop', 'inbox', 'integrations', 'jobs', 'ports', 'search', 'settings', 'system', 'usage'];
+const CORE_SINGLETONS = ['browser-profiles', 'channel-outbox', 'channels', 'desktop', 'inbox', 'integrations', 'jobs', 'ports', 'search', 'settings', 'system', 'usage', 'vault'];
 
 console.log('window-type registry — functional (node, DOM-free)');
 ok(typeof document === 'undefined' && typeof window === 'undefined', 'harness has no DOM (the import below must not need one)');
@@ -246,6 +246,7 @@ const EXPECTED_OWNER = { chat: 'session-lifecycle.js', terminal: 'session-lifecy
   viewer: 'file-viewer.js', 'hex-viewer': 'file-viewer.js', browser: 'browser-window.js', 'browser-live': 'browser-live-window.js', 'browser-profiles': 'browser-trace-view.js', desktop: 'desktop-window.js', 'desktop-app': 'desktop-app-window.js',
   'machine-desktop': 'machine-desktop.js', // design 014 D1
   'machine-app': 'machine-app.js', // lane machine-app-crop
+  vault: 'vault-window.js', // lane vault-contents-window
   task: 'task-detail.js', jobs: 'jobs-panel.js', 'job-interact': 'jobs-panel.js', usage: 'usage-window.js',
   settings: 'settings-ui.js', workflow: 'workflow-detail.js', 'stage-placeholder': 'stage-manager.js', integrations: 'integrations-window.js',
   channels: 'channels-panel.js', system: 'sidebar-rail.js', ports: 'sidebar-rail.js', inbox: 'inbox-window.js', 'browser-replay': 'browser-replay-window.js', design: 'design-window.js', doc: 'doc-window.js', artifacts: 'artifacts-window.js' };

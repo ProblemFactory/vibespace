@@ -144,6 +144,9 @@ function dialLadder(c) {
             // shape, but over the dialed link. Live pty (no offset/replay);
             // pty-wrapper's REMOTE_RETRY respawns the attach on a link drop.
               if (!dialBridge || !agentdRemote) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: 'dial sessions not wired on this server' })); return; }
+              // lane vault-e2e-password-fix-r2: the device's link token is the vault's — LOCKED ⇒ refused BY NAME before anything
+              // is set up on the device (the page opens the vault's door on `vault_locked`)
+              { const lw = typeof agentdRemote.lockedWhy === 'function' ? agentdRemote.lockedWhy('dial-' + h.deviceId) : null; if (lw) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, code: 'vault_locked', message: lw })); return; } }
               // Account billing on a device: API keys ship (below); a
               // host-HELD subscription uses the device's own creds dir (no
               // ship — dialAcctAssign); any OTHER subscription can't be
@@ -185,9 +188,11 @@ function dialLadder(c) {
                   resolve: shellResolve, tokenAssign: da.tokenAssign, acctEnv: dialAcctAssign,
                   parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd0, ...(SP.loginShell ? ['-l'] : spawnArgs.map(shq))],
                 });
+                // lane vault-e2e-password-fix-r2: NO TOKEN in this file — the attach asks the hub for its link token at every
+                // (re)start (src/agentd/attach-cli.js askLinkToken; `hub` = where), holding it in memory only
                 const cfg = {
                   tcp: { port: bridgePort },
-                  hostToken: agentdRemote.agentdHostToken('dial-' + h.deviceId),
+                  hub: { port: PORT },
                   sid: id,
                   version: require('../../package.json').version,
                   pty: { cmd: 'sh', args: ['-lc', shellCmd], cwd, env: { TERM: 'xterm-256color', COLORTERM: 'truecolor' }, cols: 120, rows: 30 },
@@ -221,6 +226,8 @@ function dialLadder(c) {
               // VIBESPACE_API back-tunnel via reverseForward, hook registration
               // via runCmd — so vibespace-status/task/ask work on the device.
               if (!dialBridge || !agentdRemote) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'dial sessions not wired on this server' })); return; }
+              // lane vault-e2e-password-fix-r2: LOCKED ⇒ refused by name (the device's link token is the vault's)
+              { const lw = typeof agentdRemote.lockedWhy === 'function' ? agentdRemote.lockedWhy('dial-' + h.deviceId) : null; if (lw) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, code: 'vault_locked', message: lw })); return; } }
               // A harness may declare CHAT over a byte pipe unwired (codex, B-0588, same as the
               // ssh path): the codex-chat-wrapper speaks JSON-RPC to a local
               // codex app-server, not to the pipe-relayed device one. Fail
@@ -301,9 +308,9 @@ function dialLadder(c) {
                   tokenAssign: da.tokenAssign, acctEnv: dialAcctAssign,
                   parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)],
                 });
-                const cfg = {
+                const cfg = {   // NO TOKEN (lane vault-e2e-password-fix-r2) — the attach asks the hub (`hub`) at every (re)start
                   tcp: { port: bridgePort },
-                  hostToken: agentdRemote.agentdHostToken('dial-' + h.deviceId),
+                  hub: { port: PORT },
                   sid: dialKeeperSid || id,
                   version: require('../../package.json').version,
                   // cwd runs ON THE DEVICE — send the resolved device cwd, not

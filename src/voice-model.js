@@ -168,6 +168,7 @@ function dictateAnswerOf(body) {
 const RETRY_ONCE = Object.freeze([502, 503, 504]);
 /** an HTTP status (+ the vendor's error code) → the words code the browser shows. */
 function failureCodeOf(status, vendorCode) {
+  if (status === 423) return 'vault-locked';   // the hub's own answer: the vault keeps the sign-in closed (never a vendor's)
   if (status === 401 || status === 403) return 'reconnect';
   if (status === 413) return 'too-long';
   if (status === 422 && vendorCode === 'audio_invalid') return 'audio-invalid';
@@ -181,6 +182,7 @@ const VOICE_WORDS = Object.freeze({
   denied: { words: 'The browser refused the microphone — allow it in the site permissions in the address bar', action: null },
   'no-mic': { words: 'No microphone was found on this device', action: null },
   'not-connected': { words: 'Connect your Dropline first', action: 'open-plugin' },
+  'vault-locked': { words: 'The vault is locked — unlock it first', action: 'unlock' },   // lane vault-e2e-password-fix-r2: the sealed sign-in
   'plugin-off': { words: 'Voice input is turned off — turn it on in Plugins', action: 'open-plugin' },
   reconnect: { words: 'Your Dropline sign-in has expired — connect it again', action: 'open-plugin' },
   'rate-limited': { words: 'Dropline is rate limiting — try again in {n} s', action: null },

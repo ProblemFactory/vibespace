@@ -127,6 +127,7 @@ const RANDOM32 = new Map([
   ['src/server/channels-engine.js', [1, 'consentKey: this boot\'s HMAC key for consent state (memory only)']],
   ['src/server/desktop-webrtc.js', [1, 'a stream session\'s UDP-leg HMAC key (lane stream-relay-udp — memory only; handed to the daemon in stream-offer over the device link, never on UDP)']],
   ['src/agentd/client.js', [1, 'lane device-bundle-signing: the single-use LOCAL PROOF of an upgrade of this machine\'s own daemon (<root>/state/upgrade-proof, 0600; the daemon deletes it on any read) — a nonce, never a key']],
+  ['src/server/sealed-json.js', [1, 'a sealed JSON file\'s key — minted INTO the vault as its `file:<name>` entry (secretPut), never a file (lane vault-e2e-password-fix-r2)']],
 ]);
 const KEYNAME_RE = /^(\.[a-z0-9][a-z0-9._-]*[-.]key|[a-z0-9][a-z0-9._-]*\.key)$/; // a dotfile ending -key / .key, or any *.key (key-file-law-fix: dots too — '.vault.key')
 const KEYVAR_RE = /^(_?keyFile|KEY_FILE|\w*KeyFile|\w*_KEY_FILE)$/;
@@ -139,6 +140,7 @@ const FS_MOD_RE = /^(node:)?fs(\/promises)?$/;
 const RANDOM_EXPR = new Map([
   ['src/pairing-token.js', [1, 'randomBytes(k.bytes): a pairing token of its KINDS row — the token itself, never a key file']],
   ['src/server/vault-engine.js', [1, 'shred: random bytes the length of a key file being destroyed (overwritten before the unlink) — never a key']],
+  ['src/server/rfb-signin.js', [1, 'the ARD Diffie-Hellman private exponent, the length of the machine\'s prime — ephemeral for ONE sign-in, never persisted']], // lane desktop-vnc-remember
 ]);
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => d.isDirectory() ? walk(path.join(dir, d.name)) : d.name.endsWith('.js') ? [path.join(dir, d.name)] : []);
 const SRC = new Map(walk(path.join(REPO, 'src')).map((f) => [path.relative(REPO, f), fs.readFileSync(f, 'utf-8')]));

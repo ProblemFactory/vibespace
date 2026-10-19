@@ -6,6 +6,7 @@ import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override 
 import { pluginProvides } from './plugins-ui.js'; // the ONE relay probe (declared capability)
 import { t as tr, deviceLocale } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
 import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from './mounts-dialog.js'; // D1: the ONE dialog component (storage + channel accounts)
+import { revealHeaders, askRevealPassword } from './vault-reveal.js'; // lane vault-contents-window r2: a set-up vault prefills secrets only inside the reveal window of this page
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf } from '../dial-facts.js'; // lane-pairing ③: THE one dial state of a machine row (PURE, bundled); verify-r4 F6: the name rule + its collision verdict
 import { dialAddressPicker, dialStateText, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
@@ -89,6 +90,27 @@ function secondDialerLine(dh) {
     line.appendChild(copy);
   }
   return line;
+}
+
+/** lane vault-contents-window r2 (verify r1): outside the reveal window of this page the edit dialog's sealed fields come
+ *  back MASKED (GET /api/mounts/:id/config names them in `masked`) — each shows empty under a dotted placeholder and is sent
+ *  only when a new value is typed (empty = keep). → the masked field keys. */
+function maskVaultFields(fields, cfg) {
+  const keys = Array.isArray(cfg && cfg.masked) ? cfg.masked : [];
+  for (const f of fields) if (keys.includes(f[0])) { f[2] = '••••••••'; f[3] = ''; }
+  return keys;
+}
+/** …and the dialog says so: Show = the second password (验证是你), then `reopen` (the dialog again, with them). */
+function vaultMaskedNote(form, keys, reopen) {
+  if (!keys.length) return;
+  const note = document.createElement('div');
+  note.className = 'mounts-note mounts-masked-note';
+  note.textContent = tr('Saved secrets stay hidden and unchanged unless you type a new one.') + ' ';
+  const show = document.createElement('button');
+  show.type = 'button'; show.className = 'mounts-btn mounts-reveal-secrets'; show.textContent = tr('Show');
+  show.onclick = async () => { if (await askRevealPassword()) reopen(); };
+  note.appendChild(show);
+  form.insertBefore(note, form.querySelector('.mounts-note'));
 }
 
 export function installSidebarMounts(Sidebar) {
@@ -2304,7 +2326,7 @@ export function installSidebarMounts(Sidebar) {
       // Fetch the fully DECRYPTED connection first so every field (secrets
       // included) can be prefilled with its real current value.
       let cfg;
-      try { cfg = await api(`/api/mounts/${m.id}/config`); }
+      try { cfg = await api(`/api/mounts/${m.id}/config`, { headers: revealHeaders() }); }
       catch (e) { showToast(e.message || tr('Failed to load connection'), { type: 'error' }); return; }
       const name = cfg.name || m.name;
       const { body, close } = createModalShell({ id: 'mount-edit-dialog', title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true });
@@ -2315,6 +2337,7 @@ export function installSidebarMounts(Sidebar) {
         try { editPresets = (await api('/api/mounts/drive-defaults')).presets || []; } catch {}
       }
       const fields = [['name', tr('Name'), '', name], ...this._mountEditFields(cfg, editPresets)];
+      const maskedKeys = maskVaultFields(fields, cfg);   // lane vault-contents-window r2
       // Mount point: empty = default location — m.path shows the current/default
       // spot as a placeholder (prefilling the computed default would freeze it).
       fields.push(['customPath', tr('Mount point'), m.path || '/absolute/path', cfg.customPath || '']);
@@ -2334,6 +2357,7 @@ export function installSidebarMounts(Sidebar) {
         + `<div class="cfg-err"></div>
            <div class="dialog-actions"><button type="submit" class="btn-create">${tr('Save')}</button></div>`;
       body.appendChild(form);
+      vaultMaskedNote(form, maskedKeys, () => { close(); this._showEditMountDialog(m); });
       // Drive records: driveMode is a real SELECT (the raw text input demanded
       // magic strings — user report "can't change shared drive params"), and
       // teamDriveId gets the same "List shared drives" picker as the add

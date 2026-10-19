@@ -411,7 +411,7 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
       // dev-only netem (a relay that declares `netem`): the upgrade url's own `?netem=` wins, else what the hosted-client route remembered for this id
       let netem = null;
       if (relay.netem && netemEnabled) { const q = netemOfUrl(req.url); netem = q != null ? parseNetem(q) : netemOf(id); }
-      wss.handleUpgrade(req, socket, head, (ws) => { ws.once('close', release); bridges[target.kind]({ ws, id, port, viewerId, netem, req }); });
+      wss.handleUpgrade(req, socket, head, (ws) => { ws.once('close', release); bridges[target.kind]({ ws, id, port, viewerId, netem, req, signIn: target.signIn || null }); }); // lane desktop-vnc-remember: a remembered sign-in the relay answers with
     };
     const ep = streamEndpointFor(target);
     if (ep.local) { upgrade(ep.port, ep.release); return; }

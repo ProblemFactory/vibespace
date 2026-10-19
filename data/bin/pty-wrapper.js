@@ -53,6 +53,12 @@ let retries = 0;       // delay-ladder index — reset only when a child LIVED (
 let totalAttempts = 0; // monotonic cap: ssh's own stderr ("Connection refused") arrives as pty DATA,
                        // and resetting the ladder on any bytes made a dead host retry every 1s forever (B-b87b)
 let spawnedAt = 0;
+// THE VAULT WAIT (lane vault-e2e-password-fix-r2, verify RED-2): the device-link attach (src/agentd/attach-cli.js) exits 7
+// when the hub's vault is LOCKED (its link-token ask answered 423). That is a WAIT for a person, not a failure: it never
+// counts toward the 120-attempt cap (a locked boot used to end a dial terminal ~58 min in), and the ladder parks at its
+// longest rung (30 s) until the hub answers anything else. Only the attach's 7 — an ssh child's code is the remote's own.
+const VAULT_WAIT_EXIT = 7;
+const ATTACH_CHILD = [cmd, ...args].some((a) => /vibespace-agentd-attach/.test(String(a)));
 
 // Spawn child with PTY
 let child;
@@ -134,18 +140,20 @@ function onChildExit({ exitCode, signal }) {
   childDead = true;
   childExit = { code: exitCode ?? null, signal: sigName };
   log(`Child exited with code ${exitCode} signal ${sigName}`);
-  if (REMOTE_RETRY && exitCode !== 0 && totalAttempts < 120) {
+  const vaultWait = REMOTE_RETRY && ATTACH_CHILD && exitCode === VAULT_WAIT_EXIT;
+  if (REMOTE_RETRY && exitCode !== 0 && (vaultWait || totalAttempts < 120)) {
     // a child that survived a while = the link genuinely worked — restart the
     // DELAY ladder (but never the monotonic attempt cap)
     if (Date.now() - spawnedAt > 30000) retries = 0;
-    retries++; totalAttempts++;
+    if (vaultWait) retries = Math.max(retries, 5);   // parked at the 30 s rung; NOT counted (a wait, not a failure)
+    else { retries++; totalAttempts++; }
     // Mark the respawned child as a RECONNECT: a dial-terminal's device pty is
     // LIVE (killed with the link — not the dtach reattach shape), so the
     // respawn opens a brand-new CLI; attach-cli reads this to print an honest
     // new-session marker instead of silently impersonating a continuation.
     process.env.VIBESPACE_REMOTE_ATTEMPT = String(retries);
     const delay = [1000, 2000, 5000, 10000, 30000][Math.min(4, retries - 1)];
-    try { process.stdout.write(`\r\n\x1b[33m[vibespace] connection lost — reconnecting in ${Math.round(delay / 1000)}s (attempt ${retries})…\x1b[0m\r\n`); } catch {}
+    try { process.stdout.write(vaultWait ? `\r\n\x1b[33m[vibespace] waiting for the vault to be unlocked — retrying in ${Math.round(delay / 1000)}s…\x1b[0m\r\n` : `\r\n\x1b[33m[vibespace] connection lost — reconnecting in ${Math.round(delay / 1000)}s (attempt ${retries})…\x1b[0m\r\n`); } catch {}
     setTimeout(() => {
       try { spawnChild(); } catch (err) {
         log(`respawn failed: ${err.message}`);

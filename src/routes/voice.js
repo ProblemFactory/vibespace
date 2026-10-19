@@ -31,7 +31,7 @@ function create({ client, prefs = () => ({}), oauth = null, teach = null, log = 
   const status = () => {
     const p = prefs() || {};
     const c = (p.config) || {};
-    return { on: !!p.enabled && client.connected(), enabled: !!p.enabled, connected: client.connected(), language: VM.languageOf(c.language), account: client.account ? client.account() : null, teach: c.teach === true, context: c.context === true, connectVia: oauth ? oauth.callbackPlan().via : null, connectWhy: oauth ? oauth.connectWhy() : 'self-hosted' };
+    return { on: !!p.enabled && client.connected(), enabled: !!p.enabled, connected: client.connected(), vaultLocked: !!(client.locked && client.locked()), language: VM.languageOf(c.language), account: client.account ? client.account() : null, teach: c.teach === true, context: c.context === true, connectVia: oauth ? oauth.callbackPlan().via : null, connectWhy: oauth ? oauth.connectWhy() : 'self-hosted' };
   };
   const owner = (fn) => async (req, res) => {
     if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
@@ -62,6 +62,7 @@ function create({ client, prefs = () => ({}), oauth = null, teach = null, log = 
       if (err) return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'too-long' : 'audio-invalid' });
       const st = status();
       if (!st.enabled) return res.status(409).json({ error: 'plugin-off' });
+      if (!st.connected && st.vaultLocked) return res.status(423).json({ error: 'vault-locked' });   // lane vault-e2e-password-fix-r2
       if (!st.connected) return res.status(409).json({ error: 'not-connected' });
       const f = req.file;
       if (!f || !f.buffer || !f.buffer.length) return res.status(400).json({ error: 'audio-invalid' });

@@ -864,6 +864,9 @@ export class ChatStatusBar {
       // B-0845: session predates the keeper (2.124.0) — claude hangs bare off
       // the ssh pipe; one network wobble kills it. Rebuild = terminate+resume.
       chip('remote', 'chat-status-remote', t('This session was created before disconnect protection existed — a network drop can kill it. Terminate and Resume the session to rebuild it protected.'), `⚠ ${escHtml(t('no disconnect protection'))}`);
+    } else if (this._remoteState && (this._remoteState.state === 'vault-locked' || /\(vault_locked\)|the vault is locked/.test(String(this._remoteState.lastError || '')))) {
+      // lane vault-e2e-password-fix-r2 (verify RED-2): the link waits for the VAULT — a state, not a failure; the chip is its door
+      chip('remote', 'chat-status-remote chat-status-vault-wait chat-status-clickable', t('This session waits for the vault — unlock it with the second password; it reconnects by itself and nothing is lost.'), `${UI_ICONS.lock || ''} ${escHtml(t('waiting for the vault to be unlocked'))}`);
     } else if (this._remoteState) {
       const n = this._remoteState.attempts || 0;
       // Name the concrete failure (2.228.1): "reconnecting (9)…" alone is
@@ -1272,6 +1275,7 @@ export class ChatStatusBar {
   _onClick(e) {
     if (e.target.closest('.chat-status-more')) { e.stopPropagation(); this._foldOpen = !this._foldOpen; this.render(); return; }
     if (e.target.closest('.chat-status-search')) { e.stopPropagation(); this._onSearch?.(); return; }
+    if (e.target.closest('.chat-status-vault-wait')) { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); return; }   // r2: the vault's door
     if (e.target.closest('.chat-status-turnstate.chat-status-clickable')) { e.stopPropagation(); this._onJumpToAsk?.(); return; } // lane S1: go to the card that waits
     const wfChip = e.target.closest('.chat-status-wf');
     if (wfChip && this._onOpenWorkflow && wfChip.dataset.wfRun) {

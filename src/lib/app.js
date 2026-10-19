@@ -924,7 +924,7 @@ class App {
     );
     const passRow = document.createElement('div');
     passRow.className = 'cfg-pass-row hidden';
-    passRow.innerHTML = `<label>${t('Encryption passphrase')} <input type="password" id="cfg-exp-pass" placeholder="${t('min 4 chars')}" autocomplete="new-password"></label>`;
+    passRow.innerHTML = `<label>${t('Encryption passphrase')} <input type="password" id="cfg-exp-pass" placeholder="${t('min 4 chars')}" autocomplete="new-password"></label>` + (info.sensitive.secondPassword ? `<label class="cfg-second-row">${t('Second password (the vault)')} <input type="password" id="cfg-exp-second" autocomplete="off"></label>` : ''); // lane vault-contents-window r2: credentials leave a set-up vault only with the second password
     const syncPass = () => {
       const anySens = [...sensWrap.querySelectorAll('input:checked')].length > 0;
       passRow.classList.toggle('hidden', !anySens);
@@ -952,7 +952,7 @@ class App {
       try {
         const res = await fetch('/api/config/export', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sections, includeSensitive, passphrase, clientPrefs }),
+          body: JSON.stringify({ sections, includeSensitive, passphrase, clientPrefs, ...(includeSensitive.length && info.sensitive.secondPassword ? { secondPassword: passRow.querySelector('#cfg-exp-second')?.value || '' } : {}) }),
         });
         if (!res.ok) { err.textContent = (await res.json().catch(() => ({}))).error || t('Export failed'); return; }
         const blob = await res.blob();

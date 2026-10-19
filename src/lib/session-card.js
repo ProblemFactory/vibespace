@@ -379,8 +379,16 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     const rchip = document.createElement('span');
     rchip.className = 'sess-state-chip sess-state-derived sess-remote-chip';
     rchip.style.setProperty('--chip-color', 'var(--yellow)'); // theme var only (§17) — every theme defines --yellow, so the old literal fallback was dead as well as illegal
-    rchip.innerHTML = `<span class="chip-icon">⟳</span><span class="chip-text">${escHtml(tr('host unreachable'))}</span>`;
-    rchip.dataset.tip = tr('The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.');
+    if (s.remoteState === 'vault-locked') {
+      // lane vault-e2e-password-fix-r2 (verify RED-2): the link WAITS for the vault — a state with its door, never "unreachable"
+      rchip.classList.add('sess-vault-wait-chip');
+      rchip.innerHTML = `<span class="chip-icon">${UI_ICONS.lock || ''}</span><span class="chip-text">${escHtml(tr('waiting for the vault to be unlocked'))}</span>`;
+      rchip.dataset.tip = tr('This session waits for the vault — unlock it with the second password; it reconnects by itself and nothing is lost.');
+      rchip.addEventListener('click', (e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); });
+    } else {
+      rchip.innerHTML = `<span class="chip-icon">⟳</span><span class="chip-text">${escHtml(tr('host unreachable'))}</span>`;
+      rchip.dataset.tip = tr('The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.');
+    }
     stateChip.after(rchip);
   }
   // GIT CHIP (design-unknown-records, 2026-09-21): the last `vcs_state_changed`

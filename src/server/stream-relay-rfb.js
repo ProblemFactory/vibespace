@@ -10,6 +10,7 @@
  * { ws, id, port, viewerId, netem, req }.
  */
 const net = require('net');
+const RS = require('./rfb-signin.js'); // lane desktop-vnc-remember: the hub answers a machine's sign-in itself (a remembered row)
 
 const RFB_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 
@@ -148,7 +149,7 @@ function rfbInputSieve({ onDesktopSize = null } = {}) {
 function bridgeOf(ctx) {
   const { BLOCKED_CLOSE, BLOCKED_REASON, ENDED_CLOSE, INPUT_REPORT_MS, KA, WS_HIGH_WATER, WS_LOW_WATER, closeCodeOf, closeOversize, closed, inputPolicy, lastClose, leaveOnCut, log, now, onDesktopSize, onInput, onViewerLeft, opened, pingMs, resolveTargetSafe, seatState, stats, takeSeat, upstreamWhy, viewers, wsOversize } = ctx;
   /** RFB over WebSocket (websockify semantics: binary frames ↔ raw TCP). */
-  function bridgeRfb(ws, id, port, viewerId = null, req = {}) {
+  function bridgeRfb(ws, id, port, viewerId = null, req = {}, signIn = null) {
     stats.opened++; opened(id);
     let sock = null;      // the TCP side — opened at once, or (x5) only while this viewer is not blocked
     let cutDone = false;  // x5: this socket was cut (it became blocked while connected) — it never reconnects upstream
@@ -182,12 +183,38 @@ function bridgeOf(ctx) {
     // the app follows the size the server takes. It is not input, but since r8 a REFUSED viewer's is cut (never relayed,
     // never reported): the display is the holder's, shared — the twin of the xpra display-size fence
     const sieve = rfbInputSieve({ onDesktopSize: onDesktopSize ? (w, h) => onDesktopSize(id, w, h, viewerId) : null });
+    // lane desktop-vnc-remember: a target that carries a REMEMBERED sign-in (`signIn` — a paired machine's whole desktop,
+    // src/server/desktop-access.js) — the FIRST upstream of this socket is signed in by the hub itself (src/server/rfb-signin.js:
+    // the browser then meets a server that asks nothing). Refused or unusable ⇒ that upstream is dropped before the browser saw
+    // a byte of it and a fresh one is relayed plain: the person signs in as before (asked once per socket — never a loop)
+    let gate = null, signInAsked = false;
     const openTcp = () => {
       if (sock || cutDone || ws.readyState !== 1) return;
-      sock = net.connect(port, '127.0.0.1');
+      let creds = null;
+      if (signIn && !signInAsked) { signInAsked = true; try { creds = signIn.take(); } catch (e) { log.warn?.(`[desktop-stream] ${id}: the remembered sign-in could not be read — ${(e && e.code) || 'error'}`); } }
+      const mine = sock = net.connect(port, '127.0.0.1');
       sock.setNoDelay(true); // a key's release no longer waits ~40 ms behind its press for the delayed ACK (Nagle)
       log.log?.(`[desktop-stream] ${id}: bridge opened → 127.0.0.1:${port}${viewerId ? ` (viewer ${viewerId})` : ''}`);
+      if (creds) {
+        const kind = creds.auth;
+        gate = RS.signInGate(creds, {
+          toServer: (b) => { try { mine.write(b); } catch { /* closing */ } },
+          toBrowser: (b) => { if (ws.readyState === 1) ws.send(b); },
+          onEnd: (v) => {
+            try { signIn.said(v); } catch { /* the access layer's own */ }
+            if (v.ok) { log.log?.(`[desktop-stream] ${id}: signed in with the remembered sign-in (${kind})`); return; }
+            log.warn?.(`[desktop-stream] ${id}: the remembered sign-in ${v.code === 'refused' ? 'was refused' : 'could not be used'} (${v.why}) — a fresh connection, the person signs in`);
+            if (mine !== sock) return;
+            gate = null; sock = null;
+            try { mine.destroy(); } catch { /* gone */ }
+            openTcp();
+          },
+        });
+        creds = null;
+      }
       sock.on('data', (d) => {
+        if (mine !== sock) return;
+        if (gate && !gate.done) { gate.fromServer(d); return; } // the hub's own sign-in: the browser hears nothing of it
         if (ws.readyState !== 1) return;
         down += d.length;
         ws.send(d);
@@ -204,8 +231,8 @@ function bridgeOf(ctx) {
       // design 014 D1: `upstreamWhy(id)` names WHY the upstream went (a machine desktop's machine went offline), asked a
       // turn later — the agent link's own teardown closes its channels before it marks itself disconnected
       const upstreamClosed = () => { closedBy = closedBy || 'the VNC server closed its socket'; try { ws.close(); } catch { /* already closed */ } finish('server side'); };
-      sock.on('close', () => { if (cutDone) return; if (typeof upstreamWhy !== 'function') return upstreamClosed(); setImmediate(() => { try { const w = upstreamWhy(id); if (w) closedBy = closedBy || w; } catch { /* the plain words */ } upstreamClosed(); }); });
-      sock.on('error', (e) => { if (cutDone) return; closedBy = closedBy || `VNC server socket error ${(e && e.code) || ''}`.trim(); try { ws.close(); } catch { /* already closed */ } });
+      sock.on('close', () => { if (cutDone || mine !== sock) return; if (gate && !gate.ended) { gate.abort('the machine closed the connection during the sign-in'); return; } if (typeof upstreamWhy !== 'function') return upstreamClosed(); setImmediate(() => { try { const w = upstreamWhy(id); if (w) closedBy = closedBy || w; } catch { /* the plain words */ } upstreamClosed(); }); });
+      sock.on('error', (e) => { if (cutDone || mine !== sock) return; if (gate && !gate.ended) return; closedBy = closedBy || `VNC server socket error ${(e && e.code) || ''}`.trim(); try { ws.close(); } catch { /* already closed */ } });
     };
     /** x5: this socket became blocked while connected — its TCP side closes and the socket closes 4001 (see the header). */
     const cut = (why) => {
@@ -240,7 +267,7 @@ function bridgeOf(ctx) {
       if (s === 'watch') { allow = false; lastRefusal = 'watch-mode'; }
       else if (s === 'free' && inputPolicy) { try { const p = inputPolicy(id, viewerId); if (p && p.relay === false) { allow = false; lastRefusal = p.code || 'refused'; } } catch (e) { log.warn?.(`[desktop-stream] ${id}: inputPolicy threw — relaying: ${e && e.message}`); } }
       const r = sieve.strip(m, allow);
-      if (r.relay) { stats.relayed++; try { sock.write(r.relay); } catch { /* socket closing */ } }
+      if (r.relay) { stats.relayed++; try { if (gate && !gate.done) gate.fromBrowser(r.relay); else sock.write(r.relay); } catch { /* socket closing */ } }
       if (r.dropped) { dropped += r.dropped; stats.dropped += r.dropped; }
       if (r.oversize) { if (!oversized) { oversized = true; closedBy = closedBy || closeOversize(ws, id, viewerId, r.oversize, 'rfb'); } return; }
       if (!r.inputs || !allow) return; // a FramebufferUpdateRequest / SetEncodings / the handshake is not a human; a refused input is nobody at the keyboard
@@ -250,7 +277,7 @@ function bridgeOf(ctx) {
     ws.on('close', (code, reason) => { finish(`the browser closed, code ${code}${reason && reason.length ? ' ' + String(reason).slice(0, 60) : ''}`); try { sock?.destroy(); } catch { /* gone */ } });
     ws.on('error', (e) => { closedBy = closedBy || wsOversize(e, id, viewerId, 'rfb') || `browser socket error ${(e && e.code) || ''}`.trim(); try { sock?.destroy(); } catch { /* gone */ } });
   }
-  return (a) => bridgeRfb(a.ws, a.id, a.port, a.viewerId, a.req);
+  return (a) => bridgeRfb(a.ws, a.id, a.port, a.viewerId, a.req, a.signIn || null);
 }
 
 module.exports = { STREAM_KIND: 'rfb', serverName: 'VNC server', maxMessageBytes: RFB_MAX_MESSAGE_BYTES, netem: false, bridgeOf, RFB_MAX_MESSAGE_BYTES, RFB_INPUT_TYPES, RFB_FIXED_LEN, rfbInputSieve };

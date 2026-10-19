@@ -12,7 +12,7 @@ const { ptyListeners } = require('../pty-duck'); // the node-pty duck's listener
 const DF = require('../dial-facts.js');
 const PT = require('../pairing-token.js'); // verify-r3: THE ONE DOOR of a pairing token (mint, hash, compare)
 
-function create({ rootDir, AGENTD_DIR, agentdHostToken, getHosts, getMounts,
+function create({ rootDir, AGENTD_DIR, agentdHostToken, dropHostToken = (id) => { try { fs.unlinkSync(path.join(AGENTD_DIR, `host-${id}.token`)); } catch { } }, getHosts, getMounts,
   getMachineMounts, getPortForwards, getExitProxy, getDialHealth = () => null, bcastAll = () => { } }) {
   const hosts = mk(getHosts);
   const mounts = mk(getMounts);
@@ -45,6 +45,9 @@ const DUP_PROBE_MS = 1500;          // verify-r1 B9: how long the current stream
 // address (`from`) — through the hub's onDeviceAlert door (src/server/device-alerts.js; once per mint)
 function agentdMintDialPair(deviceId, { host = '', base = '', keepLink = false, by = 'system:dial-pairing', from = '' } = {}) {
   ensureDir(AGENTD_DIR);
+  // lane vault-e2e-password-fix-r2: the device token FIRST — a LOCKED vault refuses the pairing by name (`vault_locked`)
+  // before a dial token is minted or the pairing rotated (a rotation it could not finish would lock the holder out)
+  const hostToken = agentdHostToken('dial-' + deviceId);
   const tok = PT.mintToken('dial');
   hosts.setDialToken(deviceId, PT.tokenHash(tok));
   try { hosts.noteDial(deviceId, 'minted', { host, base }); } catch (e) { console.warn('[device] dial facts not stamped at mint:', e.message); }
@@ -52,7 +55,7 @@ function agentdMintDialPair(deviceId, { host = '', base = '', keepLink = false, 
   try { const h = hosts.findByDeviceId(deviceId); hosts.onDeviceAlert?.('pairing-minted', { hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, deviceId, by, from: String(from || '').slice(0, 120), generation, host: String(host || '').slice(0, 120) }); } catch (e) { console.warn('[device] pairing alert not filed:', e.message); }
   const lockedOut = keepLink === true ? false : lockOutDialHolder(deviceId);
   // the device token (vsht_) for in-mux auth ships in the install payload
-  return { deviceId, dialToken: tok, hostToken: agentdHostToken('dial-' + deviceId), generation, lockedOut };
+  return { deviceId, dialToken: tok, hostToken, generation, lockedOut };
 }
 /** The device dialed in RIGHT NOW holds a command that is no longer the pairing (verify-r2 B8-r2): its link is ended,
  *  its cached DeviceManager stopped, the disconnect noted — its next dial meets the token gate. → whether a link was
@@ -208,7 +211,7 @@ async function unpairDialDevice(deviceId) {
   try { await machineMounts.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
   try { portForwards.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
   try { exitProxy.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
-  try { fs.unlinkSync(path.join(AGENTD_DIR, `host-dial-${deviceId}.token`)); } catch { }
+  try { dropHostToken('dial-' + deviceId); } catch { }   // lane vault-e2e-password-fix-r2: the file before the vault, its entry after
   const live = agentdDials.get(deviceId);
   if (live) { try { live.destroy(); } catch { } agentdDials.delete(deviceId); }
   agentdDialDevices.delete(deviceId);
@@ -278,7 +281,7 @@ async function deviceForDial(deviceId, _retried = false) {
       dataDir: path.join(rootDir, 'data'),
       bundlePath: path.join(rootDir, 'data', 'bin', 'vibespace-agentd.js'),
       version: require('../../package.json').version,
-      transport: { kind: 'stream', hostToken: agentdHostToken('dial-' + deviceId), getStream: () => agentdDials.get(deviceId) || null },
+      transport: { kind: 'stream', hostToken: () => agentdHostToken('dial-' + deviceId), getStream: () => agentdDials.get(deviceId) || null },   // asked at every connect: a LOCKED vault refuses it by name (no cached copy outlives a lock)
       // lane device-upgrade-stuck: the line NAMES the device — two devices' upgrade lines read as one machine's "two versions"
       log: (...a) => console.log('[device-dial]', JSON.stringify(String(deviceId)), ...a),
       upgradeLedger: upgradeLedgerFor(deviceId), // the loop breaker's count outlives this instance (verify-r1 C1)

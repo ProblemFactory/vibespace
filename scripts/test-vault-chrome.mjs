@@ -9,6 +9,8 @@
 //   ④ the RIGHT password ⇒ the modal and the chip go, the integration's key opens again (the feature works)
 //   ⑤ RESTART again ⇒ locked again (no auto-unlock of any kind), and a phone viewport gets the same modal, inside the screen
 //   ⑥ the words in Chinese: 「解锁保险库」 / 「第二密码不对」
+//   ⑦ lane vault-e2e-password-fix-r2: auth.json holds the login's sha256, never the cookie's token; a LOCK from the page
+//      signs every login out — the page lands on the sign-in, and after it the unlock modal (the owner's decision ④)
 // Run: node scripts/test-vault-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -151,6 +153,20 @@ await splashGone();
 await typeInto('#vault-unlock-pw', 'wrong again!'); await click('.vault-unlock-go');
 check('「第二密码不对」', (await until(`document.querySelector('#vault-unlock-dialog .vault-err')?.textContent`, { timeout: 8000 })) === '第二密码不对');
 await shot('vault-5-zh.png');
+console.log('⑦ the login at rest + a LOCK signs every login out');
+const cookieTok = ((await cdp('Network.getCookies', { urls: [URL] })).cookies || []).find((c) => c.name === 'vs_token')?.value || '';
+const authText = fs.readFileSync(path.join(DATA, 'auth.json'), 'utf8');
+check('auth.json holds the login as sha256(token) — never the cookie\'s token', cookieTok.length === 48 && !authText.includes(cookieTok) && authText.includes(require('crypto').createHash('sha256').update(cookieTok).digest('hex')));
+await typeInto('#vault-unlock-pw', SECOND); await click('.vault-unlock-go');
+check('unlocked', !!(await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 15000 })));
+const locked = await api('POST', '/api/vault/lock');
+check('the page locks the vault (its own door)', locked.status === 200 && locked.json?.state === 'locked', locked);
+check('… every login is signed out: the page lands on the sign-in', !!(await until(`location.pathname === '/login'`, { timeout: 20000 })));
+check('… auth.json\'s login map is empty', Object.keys(JSON.parse(fs.readFileSync(path.join(DATA, 'auth.json'), 'utf8')).tokens || {}).length === 0);
+await shot('vault-6-signed-out.png');
+const relogin = await evalJs(`fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${JSON.stringify(SIGN_IN)} }) }).then((r) => r.status)`);
+await cdp('Page.navigate', { url: URL });
+check('signed in again ⇒ the unlock modal (the vault stayed locked)', relogin === 200 && !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })));
 const log = fs.readFileSync(path.join(SHOTS, 'server.log'), 'utf8') + fs.readFileSync(path.join(DATA, 'vault-audit.jsonl'), 'utf8');
 check('no password in the server log or the audit', ![SECOND, 'not the second password', 'wrong again!', SIGN_IN].some((p) => log.includes(p)));
 

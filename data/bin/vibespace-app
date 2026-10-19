@@ -18,13 +18,17 @@
 // `add --kind uv|npm|flatpak` installs a USER-LEVEL tool as you (in your home — no root, nothing to replay) and records it; it
 // is HELD by your CLI's own permission card (it runs an installer), like `vibespace-job run`. `add --kind appimage
 // <file>` is now `install --file <file>` (a proposal — nothing runs).
+// `refresh [--all]` is the MACHINE OPERATOR's verb (lane app-persist-layer1): no session — it speaks to this account's VibeSpace
+// over the unix socket ~/.vibespace/apps/operator/ops.sock (src/server/apps-ops-door.js) for a fleet script's
+// `runuser -u <user> -- vibespace-app refresh --all` or a Background Work job the user approved; refused in a conversation.
 'use strict';
 const path = require('path');
 const os = require('os');
 const { spawnSync } = require('child_process');
 const API = process.env.VIBESPACE_API;
 const TOKEN = process.env.VIBESPACE_SESSION_TOKEN;
-if (!API || !TOKEN) { console.error('vibespace-app: not inside a VibeSpace session (VIBESPACE_API / VIBESPACE_SESSION_TOKEN missing; a Background Work job cannot propose installs)'); process.exit(2); }
+const OPERATOR = process.argv[2] === 'refresh'; // answered before the session check (operatorRefresh)
+if (!OPERATOR && (!API || !TOKEN)) { console.error('vibespace-app: not inside a VibeSpace session (VIBESPACE_API / VIBESPACE_SESSION_TOKEN missing; a Background Work job cannot propose installs)'); process.exit(2); }
 
 const args = process.argv.slice(2);
 const verb = args[0];
@@ -63,6 +67,8 @@ const USAGE = `vibespace-app — apps that survive a rebuilt machine. You PROPOS
                                                    never leave it outside VibeSpace. Nothing executes: a launch the machine already
                                                    lists outside VibeSpace is recorded at once; any other is one For-you click
   vibespace-app docs                               the full manual (= vibespace-docs apps)
+  vibespace-app refresh [--all]                    the MACHINE OPERATOR's verb (no session; refused in a conversation): the known
+                                                   updates of what VibeSpace installed; --all upgrades them through the package slot
 Options: --host <machine> (default: the machine this conversation runs on) · --json
 Rules: installed something by other means (flatpak, pip, a vendor script)? REGISTER it: vibespace-app register … — never leave it outside VibeSpace.
        never \`sudo apt install\` an app the user wants to keep — it is lost when the machine is rebuilt; propose it here.
@@ -109,7 +115,47 @@ function planLine(p) {
   return `${(p.packages || []).join(' ')}: ${n} package${n === 1 ? '' : 's'} (${size(p.downloadBytes)} download, ${size(Math.max(0, p.installedBytes || 0))} on disk) from ${(p.origins || []).join(', ') || 'the machine\'s sources'}${p.canRun ? '' : ' — this machine has no passwordless sudo: the user would run the commands by hand'}`;
 }
 
+/** THE OPERATOR'S VERB over this account's socket (no session): the Refresh plan, or `--all` = that plan run through the
+ *  package slot exactly as the user's Refresh press runs it. Exit 0 done · 1 refused / failed · 2 usage or inside a
+ *  conversation · 3 no VibeSpace answers for this account · 75 the package slot is busy (try again later). */
+function operatorRefresh() {
+  const flags = process.argv.slice(3), all = flags.includes('--all'), asJson = flags.includes('--json');
+  if (flags.some((f) => f !== '--all' && f !== '--json')) { console.error('usage: vibespace-app refresh [--all] [--json]   (the machine operator\'s verb — no session)'); process.exit(2); }
+  if (TOKEN) { console.error('vibespace-app refresh: the machine OPERATOR\'s verb (a fleet script, or a job the user approved) — not a conversation\'s. Tell the user: Desktop apps → Your installed apps → Refresh (`vibespace-app status` shows the known updates).'); process.exit(2); }
+  const sock = path.join(os.homedir(), '.vibespace', 'apps', 'operator', 'ops.sock');
+  const c = require('net').connect(sock);
+  let buf = '', last = null;
+  c.setEncoding('utf8');
+  c.on('connect', () => c.write(JSON.stringify({ v: 1, op: 'refresh', apply: all }) + '\n'));
+  c.on('data', (d) => {
+    buf += d;
+    for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1);
+      let j; try { j = JSON.parse(line); } catch { continue; }
+      if (j && typeof j.log === 'string' && Object.keys(j).length === 1) { if (!asJson) console.log(j.log); } else last = j;
+    }
+  });
+  c.on('error', (e) => { console.error(`vibespace-app refresh: no VibeSpace answers for this account at ${sock} (${e.code || e.message}) — is it running? (the door opens a few seconds after it starts)`); process.exit(3); });
+  c.on('close', () => {
+    if (!last) { console.error('vibespace-app refresh: the door closed without an answer'); process.exit(1); }
+    if (asJson) console.log(JSON.stringify(last, null, 2));
+    if (!last.ok) { if (!asJson) console.error(`vibespace-app refresh: ${last.error || 'refused'} [${last.code || 'refused'}]`); process.exit(last.code === 'busy' ? 75 : 1); }
+    if (asJson) process.exit(0);
+    const where = (l) => (l === 'sys' ? 'the app system' : 'the image\'s packages');
+    if (last.plan) {
+      const p = last.plan;
+      console.log(`${p.count} known update(s) in ${where(p.layer)}${p.count ? ':' : ''}`);
+      for (const u of p.updates.slice(0, 50)) console.log(`  ${u.package} ${u.from || '?'} → ${u.to || '?'}`);
+      if (p.updates.length > 50) console.log(`  … ${p.updates.length - 50} more`);
+      if (p.skippedHost.length) console.log(`not upgraded by this Refresh (installed on the image, not in the app system): ${p.skippedHost.join(' ')}`);
+      console.log('(apt\'s lists as they are now — `vibespace-app refresh --all` fetches fresh lists, then upgrades)');
+    } else console.log(`refreshed ${where(last.layer)}: ${last.upgraded == null ? 'done' : `${last.upgraded} package(s) upgraded`}${last.partial ? ' (partial — see the log above)' : ''}`);
+    process.exit(0);
+  });
+}
+
 (async () => {
+  if (OPERATOR) return operatorRefresh();
   if (!verb || verb === 'help' || verb === '--help' || verb === '-h') { console.log(USAGE); return; }
   if (verb === 'docs') { const j = await call('GET', '/api/agent/docs/apps'); console.log(j.text || ''); return; }
   if (verb === 'search') {

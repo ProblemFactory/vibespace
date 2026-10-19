@@ -1215,7 +1215,7 @@ function registerWsHandler(wss, ctx) {
                 // jumps to the card even when it is outside the loaded window (`msgIndex`)
                 pendingAsks: (() => { try { const mm = session._normalizer; return mm ? (typeof mm.pendingAsks === 'function' ? mm.pendingAsks() : pendingAsksOf(mm.messages)) : []; } catch { return []; } })(),
                 normEpoch: session._normEpoch || 0,
-                remoteState: session._remoteState || (session._bareRemote ? { state: 'unprotected' } : null),
+                remoteState: session._vaultWait ? { state: 'vault-locked', at: session._vaultWait } : session._remoteState || (session._bareRemote ? { state: 'unprotected' } : null),   // lane vault-e2e-password-fix-r2: waiting for the vault
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null,
               };
               // + `opSeq` on both rungs (the capability advert: the last seq this

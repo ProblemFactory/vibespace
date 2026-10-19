@@ -55,15 +55,17 @@ function auTag() {
   return tag(data, Math.round((n++ * 1000) / fps));
 }
 const die = (f, msg) => { if (f && fs.existsSync(f)) { process.stderr.write(msg + '\\n'); process.exit(1); } };
+// lane stream-fallback-never-silent: cfg.dieCaptureTimes = a counter file — a capture dies while it holds n > 0 (n - 1 each time)
+const dieN = (f, msg) => { let n = 0; try { n = Number(fs.readFileSync(f, 'utf8')) || 0; } catch { return; } if (n > 0) { fs.writeFileSync(f, String(n - 1)); process.stderr.write(msg + '\\n'); process.exit(1); } };
 process.stdout.on('error', () => process.exit(0));
 const grab = argv.find((a) => /^ddagrab=/.test(a));
 if (grab && cfg.failCapture && fs.existsSync(cfg.failCapture)) { const left = Number(fs.readFileSync(cfg.failCapture, 'utf8')) || 0; if (left > 0) { fs.writeFileSync(cfg.failCapture, String(left - 1)); process.stderr.write('[D3D11VA @ 0000020000000000] Failed to create Direct3D device (8007000e)\\nError opening input files: Unknown error occurred\\n'); process.exit(2981409195 | 0); } }
 if (grab && /output_fmt=16bit/.test(grab)) {
   const frame = fs.readFileSync(cfg.raw);
-  setInterval(() => { die(cfg.dieCapture, '[Parsed_ddagrab_0] AcquireNextFrame failed: DXGI_ERROR_ACCESS_LOST'); if (!process.stdout.writableNeedDrain) out(frame); }, 1000 / fps); // a full pipe = no frame this tick (ddagrab blocks, never queues)
+  setInterval(() => { die(cfg.dieCapture, '[Parsed_ddagrab_0] AcquireNextFrame failed: DXGI_ERROR_ACCESS_LOST'); if (cfg.dieCaptureTimes && fs.existsSync(cfg.dieCaptureTimes)) dieN(cfg.dieCaptureTimes, '[Parsed_ddagrab_0] AcquireNextFrame failed: DXGI_ERROR_ACCESS_LOST'); if (!process.stdout.writableNeedDrain) out(frame); }, 1000 / fps); // a full pipe = no frame this tick (ddagrab blocks, never queues)
 } else if (grab) {
   out(flvHead());
-  setInterval(() => { die(cfg.dieCapture, '[Parsed_ddagrab_0] DuplicateOutput failed: DXGI_ERROR_UNSUPPORTED'); out(auTag()); }, 1000 / fps);
+  setInterval(() => { die(cfg.dieCapture, '[Parsed_ddagrab_0] DuplicateOutput failed: DXGI_ERROR_UNSUPPORTED'); if (cfg.dieCaptureTimes && fs.existsSync(cfg.dieCaptureTimes)) dieN(cfg.dieCaptureTimes, '[Parsed_ddagrab_0] DuplicateOutput failed: DXGI_ERROR_ACCESS_LOST'); out(auTag()); }, 1000 / fps);
 } else if (argv.includes('pipe:0') && argv[argv.indexOf('-pix_fmt') + 1] === 'p010le' && argv[argv.length - 4] === 'ivf') { // lane stream-hdr-passthrough: THE HDR ROAD's encoder
   const [w, h] = argv[argv.indexOf('-video_size') + 1].split('x').map(Number), size = w * h * 3;
   const ivf = fs.readFileSync(cfg.av1), units = [];

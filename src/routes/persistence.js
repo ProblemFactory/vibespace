@@ -766,12 +766,15 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         hosts: (getHosts?.()?.list?.() || []).length,
         mounts: (getMounts?.()?.list?.() || []).length,
         accounts: (getAccounts?.()?.list?.()?.accounts || []).length,
+        secondPassword: (() => { const g = req.app && req.app.locals ? req.app.locals.vaultGate : null; return !!g && g.state() !== 'not_set_up'; })(), // lane vault-contents-window r2: the dialog asks for it
       },
     });
   });
 
-  router.post('/api/config/export', (req, res) => {
+  router.post('/api/config/export', (req, res) => (async () => {   // async (lane vault-contents-window r2: the second password's derive) — a throw still answers 500
     const { sections = [], includeSensitive = [], passphrase, clientPrefs } = req.body || {};
+    const secondPassword = req.body ? req.body.secondPassword : undefined;   // lane vault-contents-window r2: taken off the request at once
+    if (req.body) delete req.body.secondPassword;
     const file = {
       app: 'vibespace-config', version: 1,
       exportedAt: new Date().toISOString(),
@@ -791,6 +794,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (includeSensitive.length) {
       if (!passphrase || String(passphrase).length < 4) {
         return res.status(400).json({ error: 'A passphrase (≥4 chars) is required to export sensitive items' });
+      }
+      // lane vault-contents-window r2 (verify r1): a set-up vault lets credentials leave only with the SECOND PASSWORD at the
+      // call (the engine's confirm — the unlock's pace, audited `vault-export-sensitive`); the export's shape is unchanged
+      const gate = req.app && req.app.locals ? req.app.locals.vaultGate : null;
+      if (gate && gate.state() !== 'not_set_up') {
+        const c = await gate.confirm(req, secondPassword, 'vault-export-sensitive');
+        if (!c.ok) return res.status(gate.statusOf(c.code)).json({ error: gate.refusalOf(c.code), code: c.code, ...(c.retryInMs ? { retryInMs: c.retryInMs } : {}) });
       }
       const sens = {};
       if (includeSensitive.includes('vsPassword')) {
@@ -827,7 +837,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const name = `vibespace-config-${new Date().toISOString().slice(0, 10)}.json`;
     res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
     res.json(file);
-  });
+  })().catch((e) => { if (!res.headersSent) res.status(500).json({ error: String((e && e.message) || e) }); }));
 
   router.post('/api/config/import', (req, res) => {
     const { file, sections = [], includeSensitive = [], passphrase } = req.body || {};

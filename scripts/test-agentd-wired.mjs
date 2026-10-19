@@ -48,13 +48,23 @@ fs.writeFileSync(fakeSsh, `#!/bin/sh\nwhile [ "$1" = "--" ]; do shift; done\nexe
 // stub "claude": stream-json-ish — emits lines, echoes input, exits on quit
 const STUB = 'let n=0;process.stdin.setEncoding("utf8");let b="";process.stdin.on("data",d=>{b+=d;let i;while((i=b.indexOf("\\n"))!==-1){const l=b.slice(0,i);b=b.slice(i+1);if(l.includes("quit"))process.exit(7);console.log(JSON.stringify({type:"echo",line:l}))}});const t=setInterval(()=>{console.log(JSON.stringify({type:"tick",n}));n++;if(n>=30)clearInterval(t)},60);';
 
+// lane vault-e2e-password-fix-r2: THE ONE ROAD — the attach config carries NO token; the attach asks the hub
+// (GET /api/agent/vault/link-token, its session token as the bearer) at every (re)start. A stand-in hub answers it here,
+// counting the asks (the reconnect below must ask again — the token lives in the attach's memory only).
+const SESSION = 'vsst_wired' + crypto.randomBytes(8).toString('hex');
+let linkAsks = 0;
+const hub = require('http').createServer((req, res) => {
+  if (req.url === '/api/agent/vault/link-token' && req.headers.authorization === 'Bearer ' + SESSION) { linkAsks++; res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, token: TOKEN })); return; }
+  res.writeHead(401, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: false, code: 'unauthorized' }));
+});
+await new Promise((r) => hub.listen(0, '127.0.0.1', r));
 // the ws-handler-shaped session config for agentd-attach
 const cfgFile = path.join(tmp, 'session-wired.json');
 fs.writeFileSync(cfgFile, JSON.stringify({
   sshBin: fakeSsh,
   sshArgs: [],
   remoteCmd: `VIBESPACE_AGENTD_ROOT=${JSON.stringify(AGENTD_ROOT)} exec node ${JSON.stringify(path.join(AGENTD_ROOT, 'current', 'agentd.js'))} --stdio`,
-  hostToken: TOKEN,
+  hub: { port: hub.address().port },
   sid: 'wired-1',
   version,
   spawn: { cmd: process.execPath, args: ['-e', STUB], cwd: os.homedir() },
@@ -68,7 +78,7 @@ console.log('— wired chain: chat-wrapper → agentd-attach → daemon → stub
 const w = spawn(process.execPath, [
   path.join(repo, 'data/bin/chat-wrapper.js'), buf, metaF,
   process.execPath, attachBundle, '--config', cfgFile, '--offset', '__VS_OFFSET__',
-], { env: { ...process.env, VIBESPACE_REMOTE_SID: 'wired-1' }, stdio: ['pipe', 'pipe', 'pipe'] });
+], { env: { ...process.env, VIBESPACE_REMOTE_SID: 'wired-1', VIBESPACE_SESSION_TOKEN: SESSION }, stdio: ['pipe', 'pipe', 'pipe'] });
 w.outText = '';
 w.stdout.on('data', (d) => { w.outText += d.toString(); });
 w.stderr.on('data', () => {});
@@ -86,6 +96,7 @@ check('stub claude SURVIVED the bridge kill (daemon-owned)', stubAlive, '');
 // send input through the reconnected chain (wrapper stdin → attach → fifo)
 w.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'hello-after-drop' }] } }) + '\n');
 await sleep(1200);
+check('the respawned attach asked the hub for the link token again (memory only — 2 asks, the config holds none)', linkAsks >= 2 && !fs.readFileSync(cfgFile, 'utf8').includes(TOKEN), `asks: ${linkAsks}`);
 check('input flows post-reconnect (echo arrives)', w.outText.includes('hello-after-drop') && w.outText.includes('"type":"echo"'), JSON.stringify(w.outText.slice(-200)));
 // tick continuity: all tick numbers seen exactly once across the drop
 const ticks = [...w.outText.matchAll(/"type":"tick","n":(\d+)/g)].map((m) => Number(m[1]));
@@ -97,6 +108,7 @@ w.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [
 const wrapperExit = await new Promise((r) => { w.on('exit', r); setTimeout(() => r('timeout'), 6000); });
 check('wrapper finalized with the child exit code (7)', wrapperExit === 7, String(wrapperExit));
 
+hub.close();
 endDaemonsAndWait(path.dirname(stateDir));
 execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 fs.rmSync(tmp, { recursive: true, force: true });

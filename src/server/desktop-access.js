@@ -56,6 +56,8 @@ const AGENT_VERSION = (() => { try { return require('../../package.json').versio
 const RA = require('../remoteapp.js'); // lane remoteapp-r1a (design q-024 §1.2): the RemoteApp setup words, the platform verdict, the RDP port
 const SMOD = require('../stream-model.js'); // lane stream-p1a-transport: the webrtc rung's PURE verdict (the agent's capability, a source)
 const MC = require('../desktop-machines-cache.js'); // lane desktop-picker-instant: the machine rows' last known state (PURE)
+const RS = require('./rfb-signin.js'); // lane desktop-vnc-remember: which sign-ins the hub answers itself (the bridge's gate)
+const KF = require('../key-file.js'); // lane desktop-vnc-remember: VAULT_LOCKED — the store's key read while the vault is locked
 const IA = require('../installed-apps.js'); // lane machine-desktop-apps: a Windows / macOS machine's installed apps (SHARED: the device lists, the hub judges again)
 
 let installed = null;
@@ -82,6 +84,10 @@ function access() {
     remoteappSetupView: () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     saveRemoteappSetup: () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     trustRemoteApp: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
+    // lane desktop-vnc-remember: a machine's remembered desktop sign-in
+    signinsView: () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
+    rememberSignin: () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
+    forgetSignin: () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
   };
 }
 
@@ -516,14 +522,20 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     const vnc = have && have.dm === dm && have.vnc && have.vnc.ok ? have.vnc : await probeDesktop(hostId, dm);
     if (!vnc.ok) { desktops.delete(hostId); const e = named('no_vnc', `${hostId}: ${vnc.why || vnc.code}`); e.vnc = vnc; e.platform = platform; throw e; }
     desktops.set(hostId, { dm, platform, vnc });
-    return { ok: true, id: M.machineDesktopId(hostId), hostId, platform, auth: vnc.auth, type: vnc.type };
+    return { ok: true, id: M.machineDesktopId(hostId), hostId, platform, auth: vnc.auth, type: vnc.type, signin: signinState(hostId) }; // lane desktop-vnc-remember: whether the hub signs in by itself
   }
   /** The bridge's target for a `machine-desktop.<hostId>` id (SYNC): the opened machine while its link is up — `rfb` to
-   *  its 5900 through the picture forward, people only (`humanOnly`: the bridge refuses an agent token by name). */
+   *  its 5900 through the picture forward, people only (`humanOnly`: the bridge refuses an agent token by name).
+   *  lane desktop-vnc-remember: `signIn` = the machine's REMEMBERED sign-in for the relay's gate — `take()` opens the sealed
+   *  row for ONE connection (null = the person signs in: none kept, the vault locked, refused before, a type the hub does not
+   *  speak), `said(verdict)` = how it went (a refusal is remembered against THAT row: never tried again). */
   function machineDesktopTarget(id) {
     const hostId = M.machineDesktopHost(id);
     const d = hostId ? desktops.get(hostId) : null;
-    return d && M.DESKTOP_PLATFORMS.includes(platformOfHandle(d.dm)) ? { kind: D.VNC_NATIVE.stream, port: vncPort, hostId, humanOnly: true } : null;
+    if (!d || !M.DESKTOP_PLATFORMS.includes(platformOfHandle(d.dm))) return null;
+    let taken = null;
+    const signIn = { take: () => { const c = rememberedSignin(hostId); taken = c ? c.at : null; return c; }, said: (v) => { if (v && !v.ok && v.code === 'refused' && taken != null) signinRefused.set(hostId, taken); } };
+    return { kind: D.VNC_NATIVE.stream, port: vncPort, hostId, humanOnly: true, signIn };
   }
   /** The bridge's words when a machine desktop's upstream closed: the machine's link is gone ⇒ it went offline. */
   function machineDesktopGone(id) {
@@ -839,6 +851,108 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     log.log?.(`[desktop] RemoteApp: ${hostId}'s Remote Desktop certificate pinned at the owner's click (sha256 ${r.certFp.slice(0, 11)}…)`);
     return { ...view, changed: !!before && before !== r.certFp, client: r.client || null };
   }
+
+  // ── lane desktop-vnc-remember (owner 2026-10-19 「现在远程桌面密码能保留了吧 就存到 vault 里？」): A MACHINE'S DESKTOP SIGN-IN,
+  // REMEMBERED — the sealed integration row `desktop-signin/<hostId>` {auth, username?, password} (its key is the vault's).
+  // WRITTEN only by the person's sign-in dialog with 「记住这台机器的登录」 ticked, after the machine took that sign-in (POST
+  // …/signin: the page sends it ONCE; no answer ever carries it back); READ only by the picture bridge when a window connects
+  // (machineDesktopTarget's `signIn.take` — the hub answers the machine's handshake itself, src/server/rfb-signin.js). A
+  // refusal there is remembered against THAT row (`signinRefused` — a machine's lockout counts failures: the hub never tries
+  // it again until the person signs in anew or forgets it); unpairing the machine forgets it (hosts.onRemoved below).
+  const signinRefused = new Map(); // hostId → the updatedAt of the row the machine refused
+  const hubSpeaks = (vnc) => !!(vnc && vnc.ok && vnc.reply !== 'RFB 003.003\n' && RS.rowAuthOf(vnc.type)); // verify r1: an RFB 3.3 server picks the type itself — the gate never answers one: no tick, no auto
+  const sealedSignin = (hostId) => { const st = credentialsOf(); return st && typeof st.resolveMachine === 'function' ? st.resolveMachine('desktop-signin', hostId) : null; }; // the row's id spelled at the call (the registry's consumer census)
+  /** Is the vault locked (the store's key unreadable for that reason — src/key-file.js VAULT_LOCKED)? */
+  const vaultLocked = () => { const st = credentialsOf(); try { const r = st && typeof st.keyRefusal === 'function' ? st.keyRefusal() : null; return !!r && r.code === KF.VAULT_LOCKED; } catch { return false; } };
+  /** THE STATE the page words (never a secret): `kept` a row exists · `auth` its kind · `at` when it was written · `locked`
+   *  the vault is · `refused` the machine refused THIS row · `can` the hub could sign in to this machine (its sign-in type,
+   *  from the last probe — the dialog offers the tick only then) · `auto` the next connection is signed in by the hub. */
+  function signinState(hostId) {
+    const st = credentialsOf();
+    const vnc = (desktops.get(hostId) || {}).vnc || null;
+    const can = !!(st && typeof st.setMachineValues === 'function' && hubSpeaks(vnc));
+    let view = null;
+    try { view = st && typeof st.machineView === 'function' ? st.machineView('desktop-signin', hostId) : null; } catch { view = null; }
+    const kept = !!(view && view.hasValues);
+    const at = kept ? view.updatedAt || null : null;
+    const auth = kept ? view.values.auth || null : null;
+    const locked = vaultLocked();
+    const refused = kept && signinRefused.has(hostId) && signinRefused.get(hostId) === at;
+    const auto = kept && !locked && !refused && hubSpeaks(vnc) && RS.pickType(auth, vnc.types) !== null;
+    return { kept, auth, at, locked, refused, can, auto };
+  }
+  /** The sealed row opened for ONE connection of the bridge — null when the hub does not sign in by itself. */
+  function rememberedSignin(hostId) {
+    const s = signinState(hostId);
+    if (!s.auto) return null;
+    const r = sealedSignin(hostId);
+    const v = (r && r.values) || {};
+    if (!v.password || !RS.AUTHS.includes(v.auth)) return null;
+    return { auth: v.auth, username: v.username || '', password: v.password, at: s.at };
+  }
+  // one audit line per remember / forget (the exit proxy's ONE writer) — WHAT happened, never a value
+  const auditSignin = (hostId, verb, extra) => {
+    if (typeof audit !== 'function') return;
+    try { audit({ hostId, machine: hostName(hostId), sessionId: null, sessionKey: null, name: 'you — desktop sign-in', by: 'user', verb, via: 'desktop', ...extra }); } catch (e) { log.warn?.(`[desktop] the ${verb} on ${hostId} was not audited: ${e && e.message}`); }
+  };
+  const signinStore = () => { const st = credentialsOf(); if (!st || typeof st.setMachineValues !== 'function') throw named('host_unavailable', 'the integration store is not wired on this instance'); return st; };
+  const pairedOnly = (hostId) => { if (isLocal(hostId) || !hostKnown(hostId)) throw named('unsupported-host', `${JSON.stringify(hostId)} is not a paired machine on this instance`); };
+  /** GET …/signins[?host=] — ONE machine's state, or every machine that has a row kept ({ signins: {hostId: state}, locked }). */
+  function signinsView(hostId = null) {
+    if (hostId) { pairedOnly(hostId); return { signin: signinState(hostId) }; }
+    const out = {};
+    let list = [];
+    try { list = hosts && typeof hosts.list === 'function' ? hosts.list() : []; } catch { list = []; }
+    for (const h of list) { if (!h || isLocal(h.id)) continue; const s = signinState(h.id); if (s.kept) out[h.id] = s; }
+    return { signins: out, locked: vaultLocked() };
+  }
+  /** 「记住这台机器的登录」 — the sign-in the machine just took, SEALED: `{ username?, password }` (the row's kind is the hub's
+   *  own probe of the machine, never the page's word). Refused by name: the vault locked (nothing stored), a sign-in type the
+   *  hub cannot answer itself, a missing part. → the state */
+  function rememberSignin(hostId, body = {}) {
+    pairedOnly(hostId);
+    const st = signinStore();
+    const vnc = (desktops.get(hostId) || {}).vnc || null;
+    const auth = hubSpeaks(vnc) ? RS.rowAuthOf(vnc.type) : null;
+    if (!auth) throw named('signin_unsupported', `the hub cannot sign in to ${hostName(hostId)}'s VNC server by itself (${vnc && vnc.ok ? `its sign-in type ${vnc.type}` : 'it was not reached yet'}) — nothing was stored`);
+    if (vaultLocked()) throw named('vault_locked', 'the vault is locked — unlock it first; nothing was stored');
+    const password = body && typeof body.password === 'string' ? body.password : '';
+    const username = body && typeof body.username === 'string' ? body.username : '';
+    if (!password) throw named('bad-request', 'a password is required — nothing was stored');
+    if (RS.namesUser(auth) && !username) throw named('bad-request', 'a user name is required for this machine — nothing was stored');
+    st.setMachineValues('desktop-signin', hostId, { auth, username: RS.namesUser(auth) ? username : '', password });
+    signinRefused.delete(hostId);
+    auditSignin(hostId, 'desktop-signin-remember', { ok: true, auth });
+    log.log?.(`[desktop] ${hostId}: its desktop sign-in remembered — sealed (${auth})`);
+    return signinState(hostId);
+  }
+  /** 「忘掉登录」 — the row gone (allowed while the vault is locked: nothing is opened). → the state */
+  function forgetSignin(hostId) {
+    pairedOnly(hostId);
+    const st = signinStore();
+    const had = signinState(hostId).kept;
+    st.clearMachineValues('desktop-signin', hostId);
+    signinRefused.delete(hostId);
+    if (had) { auditSignin(hostId, 'desktop-signin-forget', { ok: true }); log.log?.(`[desktop] ${hostId}: its desktop sign-in forgotten`); }
+    return signinState(hostId);
+  }
+  /** A machine UNPAIRED (src/hosts.js remove → onRemoved): every sign-in this layer sealed for it is forgotten — its desktop
+   *  sign-in and its RemoteApp sign-in — and its opened desktop dropped. */
+  function forgetMachineSignins(hostId) {
+    desktops.delete(hostId);
+    signinRefused.delete(hostId);
+    const st = credentialsOf();
+    if (!st || typeof st.clearMachineValues !== 'function') return;
+    for (const row of ['desktop-signin', RA.CREDENTIAL_ROW]) {
+      let had = false;
+      try { had = !!st.machineView(row, hostId).hasValues; } catch { had = false; }
+      if (!had) continue;
+      try { st.clearMachineValues(row, hostId); auditSignin(hostId, `${row}-forget`, { ok: true, why: 'unpaired' }); log.log?.(`[desktop] ${hostId} was unpaired — its ${row} sign-in forgotten`); }
+      catch (e) { log.warn?.(`[desktop] ${hostId} was unpaired, but its ${row} sign-in could not be forgotten: ${(e && e.code) || (e && e.message)}`); }
+    }
+  }
+  if (hosts && typeof hosts.onRemoved === 'function') hosts.onRemoved((hostId) => forgetMachineSignins(hostId));
+
   /** The hub ⇄ machine link's round trip now (one mux PING) — the stats strip's second number. → { ms } | { ms: null } */
   async function linkPing(hostId) {
     if (isLocal(hostId)) return { ms: 0 };
@@ -852,7 +966,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, machinesNow, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, streamFacts, streamWindows, settingsOpen, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, machinesNow, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, streamFacts, streamWindows, settingsOpen, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp, signinsView, rememberSignin, forgetSignin };
   if (install) installed = layer;
   return layer;
 }

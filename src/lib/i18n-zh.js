@@ -9159,6 +9159,9 @@ export default {
   "that display is on another graphics card": "那块显示器接在另一张显卡上",
   "the machine’s screen capture could not start": "机器的屏幕采集没能启动",
   "the machine’s screen capture stopped": "机器的屏幕采集停了",
+  "the machine’s screen capture kept being interrupted": "机器的屏幕采集一再中断", // lane stream-fallback-never-silent
+  "Stream interrupted: {why}": "串流中断：{why}", // lane stream-fallback-never-silent
+  "Stream interrupted: {why} — reconnecting…": "串流中断：{why}——正在重新连接…", // lane stream-fallback-never-silent
   "the machine’s video encoder stopped": "机器的视频编码器停了",
   "Open System Settings": "打开系统设置",
   "Opened System Settings › {pane} on {machine}": "已在 {machine} 上打开系统设置 › {pane}",
@@ -9318,7 +9321,7 @@ export default {
   "Vault locked": "保险库已锁定", // lane vault-e2e-password
   "Vault locked — click to unlock": "保险库已锁定——点击解锁", // lane vault-e2e-password
   "Unlock the vault": "解锁保险库", // lane vault-e2e-password
-  "VibeSpace restarted — the credentials it stores (accounts, mounts, channels, integrations, app logins, passkeys) stay locked until you enter the second password.": "VibeSpace 已重启——它保存的凭据（账号、挂载、渠道、集成、应用登录、通行密钥）在你输入第二密码之前一直锁着。", // lane vault-e2e-password
+  "The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.": "VibeSpace 保存的凭据（账号、挂载、渠道、集成、应用登录、通行密钥、已配对机器的连接、中继与语音登录）在你输入第二密码之前一直锁着——每次重启、每次锁定之后都是。", // lane vault-e2e-password (r2: machines, relay, voice; every lock)
   "Second password": "第二密码", // lane vault-e2e-password
   "Unlock": "解锁", // lane vault-e2e-password
   "Vault unlocked": "保险库已解锁", // lane vault-e2e-password
@@ -9336,6 +9339,49 @@ export default {
   "Locked": "已锁定", // lane vault-e2e-password
   "Not set up": "未设置", // lane vault-e2e-password
   "Vault": "保险库", // lane vault-e2e-password
+  "Enter the second password to see stored values on this page for the next 5 minutes. Another tab or window asks again. Every value you open is recorded.": "输入第二密码后，接下来 5 分钟内可在本页查看已存储的值。换一个标签页或窗口需要重新验证。每次查看都会留下记录。", // lane vault-contents-window r2
+  "Copied — cleared from the clipboard in 30 s if this tab stays open": "已复制——若此标签页保持打开，30 秒后清空剪贴板", // lane vault-contents-window r2
+  "Saved secrets stay hidden and unchanged unless you type a new one.": "已保存的密钥保持隐藏且不变，除非你输入新的值。", // lane vault-contents-window r2
+  "Second password (the vault)": "第二密码（保险库）", // lane vault-contents-window r2
+  "App logins": "应用登录", // lane vault-contents-window
+  "Client secret": "Client Secret", // lane vault-contents-window
+  "Could not delete — {reason}": "无法删除——{reason}", // lane vault-contents-window
+  "Deleted": "已删除", // lane vault-contents-window
+  "Enter the second password again to see stored values": "再次输入第二密码才能查看已存储的值", // lane vault-contents-window
+  "Hide all": "全部隐藏", // lane vault-contents-window
+  "Integrations": "集成", // lane vault-contents-window
+  "Login": "登录信息", // lane vault-contents-window
+  "Newest": "最新", // lane vault-contents-window
+  "No stored value matches “{q}”": "没有与「{q}」匹配的存储值", // lane vault-contents-window
+  "Nothing stored here": "这里没有存储内容", // lane vault-contents-window
+  "Parameter": "参数", // lane vault-contents-window
+  "Passkeys": "通行密钥", // lane vault-contents-window
+  "Recently used": "最近使用", // lane vault-contents-window
+  "Renew…": "换新…", // lane vault-contents-window
+  "Secret": "密钥", // lane vault-contents-window
+  "Session token": "会话令牌", // lane vault-contents-window
+  "Set a second password first — stored values are shown only behind it": "请先设置第二密码——存储的值只在它之后显示", // lane vault-contents-window
+  "That stored value could not be opened": "该存储值无法打开", // lane vault-contents-window
+  "That stored value is not there any more": "该存储值已不存在", // lane vault-contents-window
+  "The vault is locked — unlock it to see what it holds.": "保险库已锁定——解锁后才能查看其中内容。", // lane vault-contents-window
+  "Token": "令牌", // lane vault-contents-window
+  "Too many values shown — try again in {n} s": "查看次数过多——请 {n} 秒后再试", // lane vault-contents-window
+  "Values hidden again — the 5 minutes are over": "5 分钟已到，值已重新隐藏", // lane vault-contents-window
+  "Vault contents…": "保险库内容…", // lane vault-contents-window
+  "Verify it’s you": "验证是你", // lane vault-contents-window
+  "View contents…": "查看内容…", // lane vault-contents-window
+  "Visible for {time}": "可查看 {time}", // lane vault-contents-window
+  "could not be read ({code})": "无法读取（{code}）", // lane vault-contents-window
+  "key last used {when} by VibeSpace": "密钥最近由 VibeSpace 于 {when} 使用", // lane vault-contents-window
+  "last opened {when} by you": "你最近于 {when} 查看", // lane vault-contents-window
+  "length: {size}": "长度：{size}", // lane vault-contents-window
+  "long": "长", // lane vault-contents-window
+  "medium": "中", // lane vault-contents-window
+  "saved {when}": "保存于 {when}", // lane vault-contents-window
+  "short": "短", // lane vault-contents-window
+  "unknown length": "长度未知", // lane vault-contents-window
+  "very long": "很长", // lane vault-contents-window
+  "{n} stored values, sealed in the vault. Showing one asks for the second password again; they stay visible for 5 minutes.": "保险库中封存了 {n} 个值。显示时需要再次输入第二密码，之后 5 分钟内可见。", // lane vault-contents-window
   "Set up {when}": "设置于 {when}", // lane vault-e2e-password
   "Lock now": "锁定", // lane vault-e2e-password
   "Lock after idle": "闲置后锁定", // lane vault-e2e-password
@@ -9421,4 +9467,34 @@ export default {
   "HDR passthrough: AV1 10-bit PQ, at the brightness the machine’s display shows": "HDR 直通：AV1 10 位 PQ，亮度与机器屏幕一致", // lane stream-hdr-passthrough
   "HDR": "HDR", // lane stream-hdr-passthrough
   "Passthrough · {transfer} {bits}-bit · {primaries}": "直通 · {transfer} {bits} 位 · {primaries}", // lane stream-hdr-passthrough
+  "waiting for the vault to be unlocked": "等待保险库解锁", // lane vault-e2e-password-fix-r2
+  "This session waits for the vault — unlock it with the second password; it reconnects by itself and nothing is lost.": "这个会话在等保险库——用第二密码解锁后它会自己重连，什么也不会丢。", // lane vault-e2e-password-fix-r2
+  "vault locked": "保险库已锁定", // lane vault-e2e-password-fix-r2
+  "{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.": "{machine}需要你的 Mac 用户名和密码。VibeSpace 会把它们封进保险库，保险库解锁时自动登录。", // lane desktop-vnc-remember
+  "{machine} asks for its VNC password. VibeSpace seals it in the vault and signs in by itself while the vault is unlocked.": "{machine}需要它的 VNC 密码。VibeSpace 会把它封进保险库，保险库解锁时自动登录。", // lane desktop-vnc-remember
+  "The remembered password did not work — type it again": "上次记住的密码不对，请重输", // lane desktop-vnc-remember
+  "The vault is locked — unlock it to sign in automatically": "保险库已锁定——先解锁后可自动登录", // lane desktop-vnc-remember
+  "Remember this machine’s sign-in": "记住这台机器的登录", // lane desktop-vnc-remember
+  "{machine}’s sign-in remembered — sealed in the vault": "已记住{machine}的登录（封进了保险库）", // lane desktop-vnc-remember
+  "Could not remember the sign-in: {why}": "没能记住登录：{why}", // lane desktop-vnc-remember
+  "Forget sign-in": "忘掉登录", // lane desktop-vnc-remember
+  "VibeSpace signs in to {machine}’s desktop by itself with the sign-in sealed in the vault — forget it to be asked again": "VibeSpace 用封在保险库里的登录自动登录{machine}的桌面——忘掉后会重新询问", // lane desktop-vnc-remember
+  "{machine}’s sign-in forgotten": "已忘掉{machine}的登录", // lane desktop-vnc-remember
+  "This machine’s desktop sign-in is sealed in the vault; VibeSpace signs in by itself while the vault is unlocked. Forget it in the machine’s dialog (Apps → the machine).": "这台机器的桌面登录已封进保险库；保险库解锁时 VibeSpace 自动登录。可在机器对话框里忘掉（应用 → 这台机器）。", // lane desktop-vnc-remember
+  "Sign-in remembered": "登录已记住", // lane desktop-vnc-remember
+  "Desktop sign-in": "桌面登录", // lane desktop-vnc-remember
+  "Sign-in kind": "登录方式", // lane desktop-vnc-remember
+  "Which sign-in the machine’s VNC server asks for — set by VibeSpace, never typed.": "机器的 VNC 服务要求的登录方式——由 VibeSpace 设置，不用输入。", // lane desktop-vnc-remember
+  "The name you sign in to that machine with (none for a VNC password).": "登录那台机器用的用户名（VNC 密码不需要）。", // lane desktop-vnc-remember
+  "Sealed on this VibeSpace server; the hub signs in with it while the vault is unlocked.": "封存在这台 VibeSpace 服务器上；保险库解锁时由服务器用它登录。", // lane desktop-vnc-remember
+  "Checks that the remembered sign-in has every part the hub needs. Zero network.": "检查记住的登录是否齐全。不访问网络。", // lane desktop-vnc-remember
+  "This proves nothing about the machine — the next connection is what signs in to it.": "这不能证明机器那边可用——下一次连接才真正登录。", // lane desktop-vnc-remember
+  "Used by the desktop window of a paired Windows or macOS machine": "配对的 Windows 或 macOS 机器的桌面窗口使用", // lane desktop-vnc-remember
+  "Hub secrets": "Hub 密钥", // int317 (the Vault window's Hub secrets)
+  "Machine link token": "机器连接令牌", // int317 (the Vault window's Hub secrets)
+  "Sealed file key": "加密文件的密钥", // int317 (the Vault window's Hub secrets)
+  "Never shown — VibeSpace uses it itself": "从不显示——由 VibeSpace 自己使用", // int317 (the Vault window's Hub secrets)
+  "That stored value is never shown — VibeSpace uses it itself": "这条存储的值从不显示——由 VibeSpace 自己使用", // int317 (the Vault window's Hub secrets)
+  "Screen Sharing: name + password": "屏幕共享：用户名 + 密码", // int317 (the Vault window's Hub secrets)
+  "VNC password": "VNC 密码", // int317 (the Vault window's Hub secrets)
 };

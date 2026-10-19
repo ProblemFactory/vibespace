@@ -2,6 +2,23 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.317 — 2026-10-19
+
+### Added
+- New Vault window: every stored credential, masked; enter the second password again to see the values for 5 minutes. Each value you open is recorded.
+- A machine's desktop sign-in can be remembered: ticked, it is sealed in the vault and signs you in while that is unlocked. Forget it in the machine's dialog.
+
+### Fixed
+- A playing stream no longer switches to the VNC picture by itself: it reconnects first, then lets you choose Try again or Show the VNC picture.
+- On a Mac, closing one display's window no longer stops another display's stream; a brief capture hiccup recovers in place.
+
+### Security
+- Machine pairing and sign-in tokens, the frp token and the voice sign-in are in the vault too; a sign-in lasts 30 days from its last use; a lock signs all out.
+- While the vault is locked, a session on a paired machine waits and says so on its row; it reconnects by itself once you unlock.
+- Showing an API key in Manage Agents, a storage connection's saved secrets, or exporting credentials now asks for the second password first.
+- Your administrator can now apply the security updates of the apps VibeSpace installed for you, exactly as your Refresh button does.
+- Restarting VibeSpace signs nobody out — only locking the vault does. A sign-in stays valid for 30 days after its last use, and 180 days at most.
+
 ## 2.369.316 — 2026-10-19
 
 ### Added

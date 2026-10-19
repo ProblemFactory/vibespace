@@ -9,6 +9,9 @@
 //   • people only: the routes and the bridge refuse an agent token by name (`human_only`)
 //   • the sign-in (the Mac user's name + password, or the VNC password) is asked HERE each time and handed to noVNC
 //     only — it reaches the machine inside the RFB handshake the bridge relays as bytes; nothing keeps it
+//   • lane desktop-vnc-remember (owner 2026-10-19): …unless the person ticks 「记住这台机器的登录」 — then, once the machine took
+//     it, it is sent to the hub ONCE and sealed in the vault, and the HUB signs in from then on (src/server/rfb-signin.js: the
+//     page never gets it back); a refused one reopens the dialog saying so, a locked vault says so; 「忘掉登录」 in the dialog
 //   • the window says once what it is: everything on that machine's screen
 //   • a whole desktop is a real monitor: the picture is SCALED into the window and the server is never asked to resize
 //     (resizeSession off) — the fixed-size rule of app windows does not apply to it
@@ -36,6 +39,7 @@ import { screenMap, hdrShown, carryPick } from '../desktop-screens.js'; // lane 
 import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
 import { createDisplayPanes, rememberedMode, rememberMode, deviceTag, isPhone, modeOf, displayRows, displayName, displayLabel, sumStats, stillOf, MODE_WORDS, MODE_ICONS, modeRowHtml } from './machine-displays.js'; // lane desktop-display-modes: a machine's several displays — the three modes
 import { enterSubmits } from './chat-enter-keys.js';
+import { endingVerdict, NEVER_SILENT } from '../stream-model.js'; // lane stream-fallback-never-silent: a played stream never falls to the VNC picture by itself
 import { createHandover } from './machine-desktop-handover.js'; // lane desktop-handover: 「交给 agent」 — the stream to ONE agent conversation
 import { HDR_DECODE_QUERY, DYNAMIC_RANGE_QUERY, hdrViewerVerdict, hdrMachineVerdict, HDR_KEY, hdrRemembered, rememberHdr } from '../hdr-viewer.js'; // lane stream-hdr-passthrough: 「HDR 直通」
 
@@ -74,27 +78,55 @@ export function desktopRefusalText(r, m) {
   return (r && r.error) || t('Could not reach {machine}', { machine });
 }
 
-/** The sign-in the machine's VNC server asks for — asked HERE, handed to noVNC only, kept nowhere. → creds | null */
-function askCredentials(m, types, auth) {
+/** The sign-in the machine's VNC server asks for — asked HERE and handed to noVNC; kept nowhere UNLESS the person ticks
+ *  「记住这台机器的登录」 (lane desktop-vnc-remember: then the sentence says so). `sign` = the hub's word on this machine
+ *  (GET …/signins: `refused` — the remembered one did not work, the tick stays on · `locked` — the vault is: no tick, it is
+ *  said · `can` — the hub can sign in to this machine itself: only then is the tick offered). → creds (+ remember) | null */
+function askCredentials(m, types, auth, sign = null) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
     const machine = nameOf(m);
     const wantUser = Array.isArray(types) && types.includes('username');
+    const s = sign || {};
     const { body, close } = createModalShell({ id: 'machine-desktop-signin', title: t('Sign in to {machine}', { machine }), dialogClass: 'machine-desktop-signin', escapeToClose: true, onClose: () => finish(null) });
     const form = document.createElement('form');
-    form.append(el('p', NOTE, auth === 'ard' ? t('{machine} asks for your Mac user name and password. VibeSpace does not keep them.', { machine }) : wantUser ? t('{machine} asks for a user name and password. VibeSpace does not keep them.', { machine }) : t('{machine} asks for its VNC password. VibeSpace does not keep it.', { machine })));
+    const words = (kept) => (auth === 'ard'
+      ? (kept ? t('{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.', { machine }) : t('{machine} asks for your Mac user name and password. VibeSpace does not keep them.', { machine }))
+      : wantUser ? t('{machine} asks for a user name and password. VibeSpace does not keep them.', { machine }) // a name + password the hub cannot answer itself: never ticked
+        : (kept ? t('{machine} asks for its VNC password. VibeSpace seals it in the vault and signs in by itself while the vault is unlocked.', { machine }) : t('{machine} asks for its VNC password. VibeSpace does not keep it.', { machine })));
+    const said = el('p', NOTE); said.className = 'machine-desktop-signin-said';
+    form.append(said);
+    if (s.refused) { const w = el('p', 'color:var(--warning, #d9822b);font-size:12px;margin:6px 0', t('The remembered password did not work — type it again')); w.className = 'machine-desktop-signin-refused'; form.append(w); }
     const field = (type, ph) => { const i = el('input', 'display:block;width:100%;box-sizing:border-box;margin:6px 0'); i.type = type; i.autocomplete = 'off'; i.spellcheck = false; i.placeholder = ph; form.append(i); return i; };
     const user = wantUser ? field('text', t('User name')) : null;
     const pass = field('password', t('Password'));
+    let keep = null;
+    if (s.locked) { const w = el('p', NOTE, t('The vault is locked — unlock it to sign in automatically')); w.className = 'machine-desktop-signin-locked'; form.append(w); }
+    else if (s.can) {
+      const lab = el('label', 'margin:6px 0'); lab.className = 'dialog-check-row machine-desktop-signin-keep'; // the house checkbox row (the box beside its words)
+      keep = document.createElement('input'); keep.type = 'checkbox'; keep.checked = !!s.refused; // a refused one was remembered before: the tick stays on
+      keep.onchange = () => { said.textContent = words(keep.checked); };
+      lab.append(keep, el('span', null, t('Remember this machine’s sign-in')));
+      form.append(lab);
+    }
+    said.textContent = words(!!(keep && keep.checked));
     const row = el('div'); row.className = 'desktop-install-actions';
     const go = btn('btn-create', t('Sign in'), null); go.type = 'submit';
     row.append(btn('file-tool-btn', t('Cancel'), () => close()), go);
     form.append(row);
-    form.onsubmit = (e) => { e.preventDefault(); const v = { password: pass.value, ...(user ? { username: user.value } : {}) }; pass.value = ''; finish(v); close(); };
+    form.onsubmit = (e) => { e.preventDefault(); const v = { password: pass.value, ...(user ? { username: user.value } : {}), ...(keep && keep.checked ? { remember: true } : {}) }; pass.value = ''; finish(v); close(); };
     body.append(form);
     setTimeout(() => (user || pass).focus(), 0);
   });
+}
+/** lane desktop-vnc-remember: the sign-in the machine just TOOK, sent to the hub ONCE to be sealed (the answer is the row's
+ *  state, never the sign-in) — the toast says it was remembered, or why not. */
+async function rememberSignin(m, creds) {
+  const machine = nameOf(m);
+  const r = await post('/api/desktop/machine-desktop/signin', { host: m.hostId, ...creds });
+  if (r && !r.error) { showToast(t('{machine}’s sign-in remembered — sealed in the vault', { machine })); return; }
+  showToast(r && r.code === 'vault_locked' ? t('The vault is locked — unlock it to sign in automatically') : t('Could not remember the sign-in: {why}', { why: (r && r.error) || t('server unreachable') }), { type: 'error' });
 }
 
 /** THE WINDOW: the picture through the ONE bridge (VNC) or the machine's agent (the stream). `display` = the VNC picture's
@@ -484,6 +516,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     no_encoder: () => t('the machine’s ffmpeg has no H.264 encoder'), no_white_level: () => t('the machine’s HDR white level could not be read'),
     display_gone: () => t('the display it showed is gone'), display_other_gpu: () => t('that display is on another graphics card'),
     capture_failed: () => t('the machine’s screen capture could not start'), capture_exited: () => t('the machine’s screen capture stopped'), encoder_exited: () => t('the machine’s video encoder stopped'),
+    capture_interrupted: () => t('the machine’s screen capture kept being interrupted'), // lane stream-fallback-never-silent: the source's own restarts ran out
     // lane stream-p3m-build: a Mac's (its screen helper — src/agentd/stream-mac.js)
     no_helper: () => t('the Mac has no screen helper yet — install the Command Line Tools there (xcode-select --install) or update VibeSpace'),
     screen_permission: () => t('Screen Recording is off for vibespace-screen on the Mac'), helper_changed_regrant: () => t('the Mac’s screen helper was updated and needs its Screen Recording switch again'),
@@ -551,6 +584,42 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     v.connect();
     if (!tick) tick = setInterval(() => { drawChip(); }, 1000);
   };
+  // NEVER SILENT (lane stream-fallback-never-silent — incident inc-mvf7z2a3-9sxi: a playing Mac stream ended on a transient and this
+  // window started the VNC picture by itself): once a picture played here, an ending is answered by src/stream-model.js
+  // endingVerdict — the same display again (1 s on), the main display (it was gone), then the person's choice 「重试」 /
+  // 「显示 VNC 画面」; the last picture stays (`held`) until a stream plays again or the VNC picture is chosen
+  const ladder = { played: false, step: 0, at: 0 };
+  let held = null, retryTimer = null, closed = false;
+  const dropHeld = () => { if (held) { held.remove(); held = null; } };
+  /** The VNC picture instead of the stream — the rung's old answer before any picture played, or the person's press. */
+  const toVnc = (code, why, taken, info, pressed = false) => {
+    stats.ended(); clearInterval(tick); tick = null; handover.playing(false); handover.facts(null);
+    streamDisplays = null; drawStreamSeg(); // the VNC picture draws its own switcher (remap)
+    for (const [did, x] of [...many]) { many.delete(did); x.dispose(); }
+    panes.dispose(); held = null;
+    refusedWhy = STREAM_WHY[code] ? streamWords(code, info) : why || streamWords(code); // the page words a known code in its own language; else the machine's sentence
+    if (code === 'screen_permission' || code === 'helper_changed_regrant') showTcc(code); // lane stream-p3m-build: which switch on the Mac
+    if (taken && !pressed) note(t('Stream stopped ({why}) — showing the VNC picture', { why: streamWords(code, info) }), why || code);
+    chip.title = [scope, t('Not streamed: {why}', { why: refusedWhy })].join('\n');
+    if (syncId && !taken && !pressed) { askVnc(t('Not streamed: {why}', { why: refusedWhy })); return; }
+    startVnc();
+  };
+  /** A played stream ended: `act` = endingVerdict's — 'retry' (the same source, NEVER_SILENT.retryMs on), 'main' (the main display),
+   *  'ask' (the two buttons: the VNC picture only on 「显示 VNC 画面」). */
+  const interrupted = (act, src, code, why, info) => {
+    const words = STREAM_WHY[code] ? streamWords(code, info) : why || streamWords(code);
+    chip.title = [scope, t('Stream interrupted: {why}', { why: words })].join('\n');
+    handover.playing(false);
+    if (act === 'retry') { note(t('Stream interrupted: {why} — reconnecting…', { why: words }), why || code, 8000); clearTimeout(retryTimer); retryTimer = setTimeout(() => { retryTimer = null; if (!closed && !stream) startStream(src); }, NEVER_SILENT.retryMs); return; }
+    if (act === 'main') { note(t('Stream interrupted: {why} — reconnecting…', { why: words }), why || code, 8000); pickedFromMemory = false; streamDisplay = null; remember({ display: null }); startStream(null); return; }
+    stats.ended(); clearInterval(tick); tick = null; handover.facts(null); note('');
+    streamDisplays = null; drawStreamSeg();
+    panes.pane(''); panes.say('', t('Stream interrupted: {why}', { why: words }), [
+      { label: t('Try again'), run: () => { panes.say('', ''); ladder.step = 1; ladder.at = Date.now(); startStream(src); } },
+      { label: t('Show the VNC picture'), run: () => { panes.say('', ''); toVnc(code, why, false, info, true); } },
+    ]);
+    drawChip();
+  };
   /** A replayed window never asks the sign-in by itself (design 014 D1): the VNC picture waits for a press. */
   const askVnc = (words) => {
     const box = el('div'); box.className = 'desktop-display-say desktop-display-ask';
@@ -613,7 +682,10 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
         if (mode === 'all') spreadAll();
         remember(); setSpec(); drawTitle(); drawStreamSeg(); drawHdr(); // lane stream-hdr-passthrough: the offer says whether the machine can
       },
-      onStatus: (state) => { if (state === 'playing' && still) { still.remove(); still = null; } drawChip(); handover.playing(state === 'playing'); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
+      onStatus: (state) => {
+        if (state === 'playing') { ladder.played = true; dropHeld(); } // NEVER SILENT: a picture played here
+        if (state === 'fallback' && v === stream && v.played && !held) held = stillOf(v, panes.pane('')); // its last picture stays through the ladder
+        if (state === 'playing' && still) { still.remove(); still = null; } drawChip(); handover.playing(state === 'playing'); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
       onStats: () => drawChip(),
       onInput: inputWords,
       onFallback: (code, why, taken, info) => {
@@ -622,16 +694,9 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
         if (v !== stream) return; // replaced by a switch
         stream = null;
         if (!taken && pickedFromMemory && source && DISPLAY_GONE.includes(code)) { pickedFromMemory = false; streamDisplay = null; remember({ display: null }); startStream(null); return; }
-        stats.ended(); clearInterval(tick); tick = null; handover.playing(false); handover.facts(null);
-        streamDisplays = null; drawStreamSeg(); // the VNC picture draws its own switcher (remap)
-        for (const [did, x] of [...many]) { many.delete(did); x.dispose(); }
-        panes.dispose();
-        refusedWhy = STREAM_WHY[code] ? streamWords(code, info) : why || streamWords(code); // the page words a known code in its own language; else the machine's sentence
-        if (code === 'screen_permission' || code === 'helper_changed_regrant') showTcc(code); // lane stream-p3m-build: which switch on the Mac
-        if (taken) note(t('Stream stopped ({why}) — showing the VNC picture', { why: streamWords(code, info) }), why || code);
-        chip.title = [scope, t('Not streamed: {why}', { why: refusedWhy })].join('\n');
-        if (syncId && !taken) { askVnc(t('Not streamed: {why}', { why: refusedWhy })); return; }
-        startVnc();
+        const nv = endingVerdict({ ...ladder, now: Date.now(), gone: DISPLAY_GONE.includes(code), named: !!(source && source.id != null) }); // NEVER SILENT
+        if (nv.act !== 'fallback') { ladder.step = nv.step; ladder.at = nv.at; interrupted(nv.act, source, code, why, info); return; }
+        toVnc(code, why, taken, info);
       },
     });
     stream = v;
@@ -639,7 +704,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     stream.connect();
   };
   winInfo._pickDisplay = (key) => pick(key);
-  winInfo.onClose = () => { handover.dispose(); pill.dispose(); stats.dispose(); clearInterval(tick); clearTimeout(noteTimer); fit?.disconnect(); document.removeEventListener('fullscreenchange', onFull); hdrMq?.removeEventListener?.('change', onScreenRange); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); for (const v of many.values()) v.dispose(); many.clear(); if (view) view.dispose(); };
+  winInfo.onClose = () => { closed = true; clearTimeout(retryTimer); handover.dispose(); pill.dispose(); stats.dispose(); clearInterval(tick); clearTimeout(noteTimer); fit?.disconnect(); document.removeEventListener('fullscreenchange', onFull); hdrMq?.removeEventListener?.('change', onScreenRange); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); for (const v of many.values()) v.dispose(); many.clear(); if (view) view.dispose(); };
   // lane desktop-display-modes: the window's recipe from its first moment; a window another device opened (a replay) waits for a
   // press here — every client replaying it must not start a stream nobody watches (each takes one of the machine's streams)
   setSpec(); remember();
@@ -657,7 +722,15 @@ function machineViewOpts(m) {
   return {
     lastClose: async () => { const r = await fetchJson(`/api/desktop/machine-desktop/last-close?host=${encodeURIComponent(m.hostId)}`); return r && !r.error ? r.close : null; },
     before: async () => { const r = await post('/api/desktop/machine-desktop/connect', { host: m.hostId }); if (!r || r.error) return { ok: false, error: desktopRefusalText(r, m) }; auth = r.auth || auth; return { ok: true }; },
-    credentials: (types) => askCredentials(m, types, auth),
+    // lane desktop-vnc-remember: the hub's FRESH word on the machine's remembered sign-in (a refusal it met a moment ago on this
+    // very connection is in it), then the dialog; a ticked sign-in is sealed once the machine took it (`onAccepted`)
+    credentials: async (types) => {
+      const r = await fetchJson(`/api/desktop/machine-desktop/signins?host=${encodeURIComponent(m.hostId)}`);
+      const c = await askCredentials(m, types, auth, r && !r.error ? r.signin : null);
+      if (!c) return null;
+      const { remember, ...creds } = c;
+      return remember ? { ...creds, onAccepted: () => rememberSignin(m, creds) } : creds;
+    },
   };
 }
 /** lane machine-app-crop: "Run as its own window…" — the line confirmed as itself, run with the launch report, then the
@@ -785,6 +858,8 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   runRow.append(input, winBtn, ...(raBtn ? [raBtn] : []), runBtn);
   body.append(state, acts, scope, runHead, apps.el, presets, runRow, el('p', NOTE, t('It starts on {machine}’s desktop as you — the exact command is shown before it runs.', { machine })));
   let asked = 0; // the newest listing asked (an older answer never overwrites a newer one)
+  let signin = null; // lane desktop-vnc-remember: the hub's word on this machine's remembered sign-in (GET …/signins)
+  const readSignin = async () => { const r = await fetchJson(`/api/desktop/machine-desktop/signins?host=${encodeURIComponent(m.hostId)}`); if (!body.isConnected) return; signin = r && !r.error ? r.signin : null; render(); };
   const listApps = async (fresh) => {
     const mine = ++asked;
     apps.set({ ...apps.get(), loading: true });
@@ -814,6 +889,8 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     if (m.code === 'no_vnc' && m.setup === 'win32' && install) acts.append(btn('btn-create', t('Install TightVNC Server…'), () => install(m, { what: 'tightvnc', onDone: () => check() })));
     if (m.code !== 'offline' && recheck) acts.append(btn('file-tool-btn', t('Check again'), () => check()));
     if (m.setup === 'win32') { const rs = btn('file-tool-btn machine-remoteapp-settings', t('RemoteApp settings…'), () => openRemoteappSettings(app, m)); rs.title = t('Set up RemoteApp once for this Windows machine: its sign-in and its certificate'); acts.append(rs); } // lane remoteapp-r1b: never greyed — offline, the card says so
+    // lane desktop-vnc-remember: 「忘掉登录」 — only while a sign-in is remembered (the next desktop asks again)
+    if (signin && signin.kept) { const f = btn('file-tool-btn machine-signin-forget', t('Forget sign-in'), () => forgetSignin()); f.title = t('VibeSpace signs in to {machine}’s desktop by itself with the sign-in sealed in the vault — forget it to be asked again', { machine }); acts.append(f); }
     const offline = m.code === 'offline';
     input.disabled = offline; runBtn.disabled = offline; winBtn.disabled = offline; if (raBtn) raBtn.disabled = offline; apps.disable(offline); pickDefault();
     const list = desktopRunPresets(m.setup, readRuns()[m.hostId]);
@@ -848,9 +925,18 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     toWindow();
     app.openDesktopApp(r.id);
   }
+  /** lane desktop-vnc-remember: 「忘掉登录」 — the sealed row gone (the answer is the state). */
+  async function forgetSignin() {
+    const r = await post('/api/desktop/machine-desktop/signin/forget', { host: m.hostId });
+    if (!r || r.error) { showToast((r && r.error) || t('server unreachable'), { type: 'error' }); return; }
+    signin = r.signin || null;
+    showToast(t('{machine}’s sign-in forgotten', { machine }));
+    if (body.isConnected) render();
+  }
   input.onkeydown = (e) => { if (enterSubmits(e)) { e.preventDefault(); run({ window: asWindow() }); } };
   render();
   listApps(false);
+  readSignin();
   // lane desktop-picker-instant: a listing that landed elsewhere (the machine's hello, another window's Check again) is announced —
   // a newer list is read again (from the hub's store: nothing is asked of the machine)
   const offListed = app.ws && typeof app.ws.onGlobal === 'function' ? app.ws.onGlobal((msg) => {

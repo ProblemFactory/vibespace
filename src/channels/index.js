@@ -50,7 +50,17 @@ const CHANNEL_ERROR_CODES = Object.freeze([
   'too-large',
   'send-not-available',   // §4: not a failure — a capability that does not exist here
   'not-supported',        // an UNDECLARED capability was called
+  'vault-locked',         // lane vault-e2e-password-fix-r2: the sign-in (or the app credential) is sealed and the vault is LOCKED — never "expired"
 ]);
+/** A stored secret the vault keeps closed: the token store's `why` (src/server/channels-engine.js tokensFor → 'vault-locked')
+ *  or a credential store's sentence. */
+const vaultLockedWhy = (why) => why === 'vault-locked' || /the vault is locked/.test(String(why || ''));
+/** THE "not connected" refusal of an adapter's token read (lane vault-e2e-password-fix-r2): a LOCKED vault is its own code
+ *  (`vault-locked` — retryable, the card says 「保险库已锁定——先解锁」), never `auth-expired` ("the login expired"). */
+function notConnectedError(vendor, why) {
+  if (vaultLockedWhy(why)) return new ChannelError('vault-locked', `${vendor} cannot read its sign-in: the vault is locked — it opens after the owner unlocks the vault on the page`, { retryable: true });
+  return new ChannelError('auth-expired', `${vendor} is not connected (${why || 'no token'})`, { retryable: false });
+}
 
 class ChannelError extends Error {
   constructor(code, message, { retryable = false, detail = null } = {}) {
@@ -1170,7 +1180,7 @@ function validateConsent(kind, row) {
 }
 
 module.exports = {
-  createChannelRegistry, ChannelError, validateCaps, validateMethods, validateApi, API_ROW_KEYS,
+  createChannelRegistry, ChannelError, notConnectedError, vaultLockedWhy, validateCaps, validateMethods, validateApi, API_ROW_KEYS,
   CHANNEL_ERROR_CODES, RETENTION_MODES, AUDIENCE_KINDS, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS, RENDER_MODES, GLYPHS, TITLE_FORMS, FEED_METHODS, BY_ID_KINDS,
   SEARCH_METHODS, SEARCH_HIT_FIELDS, searchRowOf,
   peerName,

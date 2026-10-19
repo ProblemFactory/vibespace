@@ -24,14 +24,16 @@
 //                   lookup?(name) } }                a 'tunnel' plugin's own name answers (tunnelLookup — the ssh hosts)
 //   h (the host handle) = { id, dir: ~/.vibespace/plugins/<id>, rec() (the persistent record, created),
 //     peek() (the record or {}), save(), notify() (broadcast plugins-updated), opts (the constructor's extra
-//     options, e.g. opencodeServe), probeProto(port, opts) }.
+//     options, e.g. opencodeServe), probeProto(port, opts), vault() (the data dir's vault engine or null — a secret a
+//     plugin holds is its entry: lane vault-e2e-password-fix-r2), sealedDir() (that vault is set up) }.
 // The MANIFEST plugin-loader (src/server/plugin-loader.js — third-party sandboxed plugins, /api/plugins/manifests)
 // is a different family and stays separate; the two meet only in the ⚙ → Plugins panel (src/lib/plugins-ui.js
 // renders these rows, then renderManifestPlugins).
 //
 // State: data/plugins.json { plugins: { <id>: { enabled, desiredUp, … } } } — enabled = the on-switch; a plugin's
 // CONFIGURATION lives in data/settings.json (src/plugin-settings.js tables, read via h.setting / h.settings);
-// the one secret a plugin holds itself (frp's relay token) stays in its record (config.token), never a setting.
+// the one secret a plugin holds itself (frp's relay token) is the vault's entry `frp:token` (lane vault-e2e-password-fix-r2;
+// before the vault is set up its record's config.token), never a setting.
 // (enabled = replay at boot; runtime pid/state live in the plugin dir itself).
 const fs = require('fs');
 const os = require('os');
@@ -40,11 +42,12 @@ const path = require('path');
 const PLUGIN_ROOT = path.join(os.homedir(), '.vibespace', 'plugins');
 const BUILTIN = require('./plugins/index.js');
 const PS = require('./plugin-settings.js'); // PURE: one settings table per built-in plugin (docs/design-plugin-settings.zh.md)
+const SB = require('./secret-box.js');       // the data dir's vault (a plugin's secret is its entry)
 
 // the verbs a declared capability obliges (the manager's relay surface calls these on the 'relay' provider)
 const CAP_VERBS = Object.freeze({ relay: ['publish', 'unpublish', 'setSelfDialSub'] });
 const REQUIRED_VERBS = ['install', 'start', 'stop', 'status'];
-const OPTIONAL_VERBS = ['setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings', 'lookup'];
+const OPTIONAL_VERBS = ['setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings', 'lookup', 'sealSecrets'];   // sealSecrets: the vault's open hook (r2)
 
 /** The ONE contract check — a plugin that breaks it is refused at registration, by name. */
 function validatePlugin(def, verbs) {
@@ -87,6 +90,7 @@ class PluginManager {
         settings: () => PS.valuesOf(id, this._readSettings()),
         setting: (key) => PS.valuesOf(id, this._readSettings())[key],
         writeSettings: (patch) => this._writeSettings(id, patch),
+        vault: () => SB.vaultForDir(dataDir), sealedDir: () => SB.sealedDir(dataDir),
       };
       const verbs = def.create(h);
       validatePlugin(def, verbs);
@@ -103,6 +107,16 @@ class PluginManager {
   }
 
   _readSettings() { try { return this._settings.read() || {}; } catch { return {}; } }
+  /** THE VAULT'S OPEN HOOK (lane vault-e2e-password-fix-r2): every plugin holding a secret seals what its record still
+   *  holds in the clear (`sealSecrets` — frp's relay token). → the ids that sealed one. */
+  sealSecrets() {
+    const out = [];
+    for (const [id, v] of this._verbs) { if (typeof v.sealSecrets !== 'function') continue; try { if (v.sealSecrets()) out.push(id); } catch (e) { console.warn(`[plugins] ${id}: its secret was not sealed:`, e.message); } }
+    this._notify();   // every card re-reads its state (a relay / voice row the lock kept closed is open now)
+    return out;
+  }
+  /** The vault LOCKED: every card re-reads its state (frp's sealed token, the voice sign-in say 「保险库已锁定」). */
+  vaultChanged() { this._notify(); }
   /** a plugin's own rows written through the ONE settings writer (a key outside its table is refused by name) */
   _writeSettings(id, patch = {}) {
     const tbl = PS.PLUGIN_SETTINGS[id];

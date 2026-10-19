@@ -12,6 +12,9 @@
 //                                  edits it with set()) — a RUNNING input child keeps its birth's answer (macOS's per-process
 //                                  verdict) unless cfg.inputLive (its own AXIsProcessTrusted flipping: re-read at every line);
 //                                  cfg.inputDelayMs = every answer but `P`'s that late (lines in flight — lane stream-mac-ax-respawn).
+//                                  lane stream-fallback-never-silent: cfg.endOnce = a token file — the endAfter ending happens only
+//                                  while it exists, and takes it (ONE ending: the capture started again plays on); cfg.factsFail
+//                                  = a counter file — while it holds n > 0 a `facts` run fails (exit 1, nothing on stdout), n - 1.
 //   MAC_FACTS                      the canned facts (two 4K displays at 2×, two windows — names invented)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -46,6 +49,9 @@ const say = (o) => process.stderr.write(JSON.stringify(o) + '\\n');
 const opt = (k) => { const i = a.indexOf('--' + k); return i >= 0 ? a[i + 1] : null; };
 const lines = (f) => { let buf = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); f(l); } }); process.stdin.on('end', () => process.exit(0)); };
 if (a[0] === 'version') { process.stdout.write(cfg.version + '\\n'); process.exit(0); }
+const take = (f) => { try { fs.unlinkSync(f); return true; } catch { return false; } };
+const count = (f) => { try { const n = Number(fs.readFileSync(f, 'utf8')) || 0; if (n <= 0) return false; fs.writeFileSync(f, String(n - 1)); return true; } catch { return false; } };
+if (a[0] === 'facts' && cfg.factsFail && count(cfg.factsFail)) { process.stderr.write('fake facts: the shareable content could not be read\\n'); process.exit(1); }
 if (a[0] === 'facts') { process.stdout.write(JSON.stringify({ t: 'facts', version: cfg.reports || cfg.version, disclaimed: true, ...cfg.facts, tcc: cfg.tcc }) + '\\n'); process.exit(0); }
 if (a[0] === 'input') {
   process.stdout.write('ready\\n');
@@ -65,7 +71,7 @@ if (a[0] === 'input') {
   lines((l) => { log({ ctl: l }); if (l === 'key') { next = k0; forced++; } if (l === 'quit') process.exit(0); });
   setInterval(() => {
     if (cfg.dieAfter && sent >= cfg.dieAfter) process.exit(1);
-    if (cfg.endAfter && sent >= cfg.endAfter) { say({ t: 'end', code: cfg.endCode, error: 'the fake ended it' }); process.exit(3); }
+    if (cfg.endAfter && sent >= cfg.endAfter && (!cfg.endOnce || take(cfg.endOnce))) { say({ t: 'end', code: cfg.endCode, error: 'the fake ended it' }); process.exit(3); }
     if (cfg.moveAfter && sent === cfg.moveAfter) say({ t: 'frame', frame: cfg.movedFrame });
     if (next != null) { n = next; next = null; }
     process.stdout.write(pics[n % pics.length]); n++; sent++;

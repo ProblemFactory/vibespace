@@ -74,7 +74,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     const f = frp() || {};
     const eff = effective();
     return {
-      frpConfigured: !!f.configured, frpMissing: f.missing || [], subDomainHost: f.subDomainHost || null,
+      frpConfigured: !!f.configured, frpMissing: f.missing || [], frpVaultLocked: !!f.vaultLocked, subDomainHost: f.subDomainHost || null,
       authEnabled: !!authEnabled(),
       published: !!state.url, desired: !!state.desired, auto: !!state.auto,
       url: state.url || null, sub: state.sub || f.selfDialSub || null, at: state.at || null, error: state.error || null,

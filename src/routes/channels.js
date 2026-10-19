@@ -108,6 +108,7 @@ function fail(res, e) {
     if (code === 'auth-expired' && detail && detail.needsCredentials) { status = 409; code = 'needs-credentials'; }
     else if (code === 'not-supported') status = 501;
     else if (code === 'auth-expired') status = 401;
+    else if (code === 'vault-locked') status = 423;   // lane vault-e2e-password-fix-r2: a person unlocks the vault — never a re-authorize
     else status = 502;
   }
   // `detail` is WHITELISTED: the refusal's structure the client words (the

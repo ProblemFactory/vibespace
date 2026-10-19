@@ -87,6 +87,11 @@
  *   POST /api/desktop/machine-desktop/remoteapp/trust {host}    which fields are SET, the pinned certFp — never a password}; `trust` =
  *   GET  /api/desktop/machine-desktop/remoteapp/facts?host=   the first connection (pins the certificate); `facts` = the machine's
  *                                     Remote Desktop facts ({ok, facts, rows, ready} | agent_too_old {have, need})
+ *   GET  /api/desktop/machine-desktop/signins[?host=]   lane desktop-vnc-remember: a machine's REMEMBERED desktop sign-in (people only)
+ *   POST /api/desktop/machine-desktop/signin {host, username?, password}   — the state only ({signin: {kept, auth, at, locked,
+ *   POST /api/desktop/machine-desktop/signin/forget {host}                   refused, can, auto}} | {signins: {hostId: state},
+ *                                     locked}), never a password; `signin` SEALS the sign-in the machine just took (the
+ *                                     row's kind is the hub's own probe), refused by name: vault_locked | signin_unsupported
  *   GET  /api/desktop/machine-desktop/stream/windows?host=  lane stream-p2w-build: the machine's application windows (the
  *                                     one-window picker — {ok, windows: [{id, title, app, bounds, dpi, minimized…, streaming}]} |
  *                                     agent_too_old; a Mac's too — int304) · POST …/stream/restore {host, window} (a minimized
@@ -494,6 +499,34 @@ router.post('/api/desktop/machine-desktop/remoteapp/trust', async (req, res) => 
   const host = hostParam(req, res); if (!host) return;
   const acc = raAccess(res, 'trustRemoteApp'); if (!acc) return;
   try { res.json({ setup: await acc.trustRemoteApp(host) }); } catch (e) { raFail(res, e); }
+});
+// lane desktop-vnc-remember: A MACHINE'S DESKTOP SIGN-IN, REMEMBERED — people only, like the whole desktop. The page sends the
+// sign-in ONCE (after the machine took it, the 「记住这台机器的登录」 tick); every answer is the row's state, never its bytes.
+const SI_409 = new Set(['vault_locked', 'signin_unsupported']);
+const siFail = (res, e) => {
+  const c = e && e.code;
+  const status = SI_409.has(c) ? 409 : c === 'bad-request' || c === 'invalid-values' ? 400 : c === 'unsupported-host' || c === 'not-per-machine' ? 404 : null;
+  if (status) return res.status(status).json({ error: String(e.message), code: c });
+  return fail(res, e);
+};
+router.get('/api/desktop/machine-desktop/signins', (req, res) => {
+  if (humanOnly(req, res)) return;
+  const acc = raAccess(res, 'signinsView'); if (!acc) return;
+  const host = req.query && typeof req.query.host === 'string' && req.query.host ? req.query.host : null;
+  try { res.json(acc.signinsView(host)); } catch (e) { siFail(res, e); }
+});
+router.post('/api/desktop/machine-desktop/signin', (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const acc = raAccess(res, 'rememberSignin'); if (!acc) return;
+  const b = req.body || {};
+  try { res.json({ signin: acc.rememberSignin(host, { username: b.username, password: b.password }) }); } catch (e) { siFail(res, e); }
+});
+router.post('/api/desktop/machine-desktop/signin/forget', (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  const acc = raAccess(res, 'forgetSignin'); if (!acc) return;
+  try { res.json({ signin: acc.forgetSignin(host) }); } catch (e) { siFail(res, e); }
 });
 // lane machine-app-crop: ONE app of the machine as its own window — the device follows the app's window, the page crops the
 // whole picture to it (src/server/machine-app.js; people only, like the whole desktop). `not_tracked` = its watch ended.

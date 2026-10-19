@@ -32,7 +32,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BASE = '/api/desktop/machine-desktop/stream';
 
 /** `opts` = { hostId, hostPlatform?, source?, fp16?, hdr?, onStatus(state, code), onStats(page, agent), onFallback(code, why, taken, info),
- *  onInput(refused), onSource(source), onHdrFailed() } → { connect(), dispose(why?), focus(), get state, stats(), agent(), source(), video } —
+ *  onInput(refused), onSource(source), onHdrFailed() } → { connect(), dispose(why?), focus(), get state, get played, stats(), agent(), source(), video } —
  *  dispose(why) names the end for the hub and the machine's log ('closed' = the window's ×; 'stopped' = the person's 停止串流 —
  *  lane stream-window-fixes); `info` = a refusal's numbers (`too_many_streams`: the machine's live / cap / displays — lane
  *  desktop-display-modes) | null */
@@ -50,7 +50,7 @@ export function createStreamView(host, opts = {}) {
   let source = null; // the offer's source facts (a window's: {kind: 'window', window: {id, title, app, w, h, dpi, display}})
   let hubRelay = null; // lane stream-relay-udp: the hub relay's facts (the long poll's `relay` — which way it forwards: udp | link)
   let map = keyMapFor(viewerPlatform(), opts.hostPlatform || null);
-  let refusedSeen = null, switchSaid = 0;
+  let refusedSeen = null, switchSaid = 0, played = false;
   let refusal = null; // lane desktop-display-modes: a refused start's numbers (the per-machine cap's count)
   let hdrWatch = null, hdrFailed = false; // lane stream-hdr-passthrough: the decode watch of an HDR picture (hdrStallStep)
 
@@ -66,6 +66,7 @@ export function createStreamView(host, opts = {}) {
     if (disposed && type !== 'close') return;
     const r = streamStep(st, { type, code });
     st = { state: r.state, restarts: r.restarts };
+    if (st.state === 'playing') played = true; // lane stream-fallback-never-silent: a picture played (the window's NEVER SILENT rule)
     try { opts.onStatus?.(st.state, r.code); } catch { /* the shell's */ }
     if (r.action === 'start') start();
     else if (r.action === 'restart') restart();
@@ -245,6 +246,7 @@ export function createStreamView(host, opts = {}) {
   return {
     video,
     get state() { return st.state; },
+    get played() { return played; }, // lane stream-fallback-never-silent: did a picture of this stream ever play
     get key() { return key; }, // lane desktop-handover: the session a hand-over names
     get hdr() { return !!opts.hdr; }, // lane stream-hdr-passthrough: this view asked for the HDR road
     connect() { if (st.state === 'idle') { step('start'); statsTimer = setInterval(() => { readStats(); }, STREAM_LIMITS.statsMs); } },

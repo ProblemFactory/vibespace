@@ -206,16 +206,19 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
         try { c = await credentials((e.detail && e.detail.types) || ['password']); } catch { c = null; }
         if (mine !== rfb || shell.closed) return;
         if (!c) { refused = mine; shell.unwant(); try { rfb.disconnect(); } catch {} setStatus(t('Sign-in cancelled'), { reconnect: true }); return; }
-        try { rfb.sendCredentials(c); } catch (err) { signInFailed(mine, String((err && err.message) || err).slice(0, 160)); return; }
+        // lane desktop-vnc-remember: `onAccepted` (the 「记住」 tick) rides beside the sign-in, never into noVNC — it is told once
+        // the machine TOOK this sign-in (the 'connect' below), never for a refused one
+        const { onAccepted = null, ...creds } = c;
+        try { rfb.sendCredentials(creds); } catch (err) { signInFailed(mine, String((err && err.message) || err).slice(0, 160)); return; }
         endSignIn();
         setStatus(t('Signing in…'));
         const onRejection = (ev) => { const r = ev && ev.reason; if (/novnc/i.test(String((r && r.stack) || ''))) signInFailed(mine, String((r && r.message) || r).slice(0, 160)); };
         globalThis.addEventListener?.('unhandledrejection', onRejection);
-        signing = { rfb: mine, timer: setTimeout(() => signInFailed(mine, t('the machine did not answer in {n} s', { n: SIGNIN_BOUND_MS / 1000 })), SIGNIN_BOUND_MS), off: () => globalThis.removeEventListener?.('unhandledrejection', onRejection) };
+        signing = { rfb: mine, accepted: typeof onAccepted === 'function' ? onAccepted : null, timer: setTimeout(() => signInFailed(mine, t('the machine did not answer in {n} s', { n: SIGNIN_BOUND_MS / 1000 })), SIGNIN_BOUND_MS), off: () => globalThis.removeEventListener?.('unhandledrejection', onRejection) };
       });
       rfb.addEventListener('securityfailure', (e) => { if (signing && signing.rfb === mine) endSignIn(); refused = mine; shell.unwant(); setStatus(t('The machine refused the sign-in: {why}', { why: (e.detail && e.detail.reason) || t('wrong name or password') }), { error: true, reconnect: true }); emit('error', 'securityfailure'); });
     }
-    rfb.addEventListener('connect', () => { if (signing && signing.rfb === mine) endSignIn(); shell.resetLadder(); shell.setCloseWords(''); setStatus(t('Connected')); emit('connected'); });
+    rfb.addEventListener('connect', () => { if (signing && signing.rfb === mine) { const took = signing.accepted; endSignIn(); if (took) { try { took(); } catch { /* the page's own */ } } } shell.resetLadder(); shell.setCloseWords(''); setStatus(t('Connected')); emit('connected'); });
     rfb.addEventListener('disconnect', (e) => {
       if (mine === rfb) rfbLive = false;
       if (shell.closed) return;

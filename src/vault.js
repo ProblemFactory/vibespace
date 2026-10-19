@@ -166,7 +166,32 @@ function keyVerdict({ state, hasEntry = false, legacyFile = false, holdsCipherte
   return holdsCiphertext ? 'key-missing' : 'mint';
 }
 
+/**
+ * THE VAULT LAW, EXTENDED (lane vault-e2e-password-fix-r2 — docs/kb-design-lessons.md): EVERY SECRET AT REST NAMES ITS VAULT
+ * ENTRY — or a hash stands in its place, or it is an EXCEPTION named here with its reason. A new secret written to disk is
+ * a row in this table before it ships (scripts/test-vault-secrets.mjs ⑧ plants every sealed row's value in the clear,
+ * boots a hub's data dir through the migration and finds none in any file).
+ */
+const SECRETS_AT_REST = Object.freeze([
+  { what: 'the store keys', where: 'data/.accounts-key · .mounts-key · .integrations-key · .channels-key · .app-secrets-key · browser-passkeys.key', entry: '<the key file\'s name>' },
+  { what: 'the device link tokens (vsht_)', where: 'data/agentd/host-<id>.token', entry: 'host:<host id>' },
+  { what: 'the attach configs', where: 'data/agentd/session-<id>.json', holds: 'no token — the attach child asks GET /api/agent/vault/link-token at every (re)start' },
+  { what: 'the frp relay token (the owner\'s override)', where: 'data/plugins.json frp.config', entry: 'frp:token' },
+  { what: 'the voice sign-in pair', where: 'data/dropline-oauth.json', entry: 'file:dropline-oauth.json (the sealed file\'s key)' },
+  { what: 'the login tokens', where: 'data/auth.json tokens', holds: 'sha256 digests only' },
+  { what: 'the pairing / agentd / mount tokens', where: 'data/hosts.json dialTokenHash · agentd-tokens.json · mount-tokens.json', holds: 'sha256 digests only' },
+  { what: 'the TLS private key', where: 'data/tls/*.key', exception: 'the sign-in door needs it before any unlock' },
+  { what: 'the vendor CLIs\' own credentials', where: 'data/subs/*/.credentials.json · data/codex-subs/*/auth.json', exception: 'the vendor CLI reads its own file (q-040)' },
+  { what: 'the ssh private keys', where: 'data/ssh/*.key · a host\'s keyPath', exception: 'ssh(1) reads the file — a hub-owned ssh-agent is design q-042 D6' },
+  { what: 'the session agent tokens (vsst_)', where: 'data/session-meta/*.json agentToken', exception: 'the running agent\'s own credential (in its env for its life) — sealing the meta is design q-042 D1\'s next step' },
+  { what: 'the device side of a pairing', where: 'a device\'s state/token + state/dial.json · the hub\'s own ~/.vibespace/agentd/state/token', exception: 'the device holds its own key (design q-042 D3 retires it)' },
+  { what: 'the frpc admin password', where: '~/.vibespace/plugins/frp/admin.pw', exception: 'a loopback-only password for the hub\'s own frpc child' },
+  { what: 'the OTLP ingest token', where: 'data/usage-history/otel-token', exception: 'opens only the hub\'s own loopback telemetry door; the surviving sessions\' exporters hold it (a per-boot one would 403 them)' },
+  { what: 'an ssh install\'s staged token', where: '$TMPDIR/vs-agentd-stage-* (removed after the tar)', exception: 'transient: the tar that carries it rides ssh stdin, the stage is removed in the same call' },
+]);
+
 module.exports = {
+  SECRETS_AT_REST,
   VAULT_V, VAULT_FILE, KDF, KDF_FLOOR_MS, STATES, CODES, PASSWORD_MIN, PASSWORD_MAX, CHECK_TEXT, VERIFY_TEXT,
   zero, passwordOf, deriveKek, recordShapeOk, setup, unlock, changePassword, wrapEntry, unwrapEntry, stateOf, keyVerdict,
 };

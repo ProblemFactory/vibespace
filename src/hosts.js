@@ -513,7 +513,12 @@ class HostManager {
     try { fs.rmSync(path.join(this.dataDir, 'remote-jsonl', id), { recursive: true, force: true }); } catch {}
     this._save();
     this._reachChanged('remove');
+    this._removed(id);
   }
+  /** lane desktop-vnc-remember: who hears that a machine was REMOVED (its unpair) — a holder of a per-machine secret forgets
+   *  it (src/server/desktop-access.js: the machine's sealed sign-ins). → the unsubscribe function */
+  onRemoved(fn) { if (!this._removedFns) this._removedFns = new Set(); this._removedFns.add(fn); return () => this._removedFns.delete(fn); }
+  _removed(id) { for (const fn of this._removedFns || []) { try { fn(id); } catch (e) { console.warn('[hosts] a removal listener failed:', e && e.message); } } }
 
   // Boot sweep: remote-jsonl dirs whose host no longer exists (orphaned before
   // remove() learned to clean up) + cached transcripts unused for 30 days.
@@ -1222,7 +1227,7 @@ class HostManager {
       dataDir: this.dataDir,
       bundlePath: this.agentdDeps.bundlePath,
       version: this.agentdDeps.version,
-      transport: { kind: 'ssh', hostToken: this.agentdDeps.agentdHostToken(id), sshBin: 'ssh', sshArgs: this.sshArgs(h, { multiplex: true }), remoteCmd },
+      transport: { kind: 'ssh', hostToken: () => this.agentdDeps.agentdHostToken(id), sshBin: 'ssh', sshArgs: this.sshArgs(h, { multiplex: true }), remoteCmd },   // asked at every connect (lane vault-e2e-password-fix-r2: LOCKED ⇒ vault_locked by name)
       log: () => {},
       // lane device-upgrade-stuck: the same door as a dial device (src/server/device-upgrade-watch.js)
       onUpgradeStuck: (from, to, info) => this.onAgentUpgrade?.('stuck', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }),

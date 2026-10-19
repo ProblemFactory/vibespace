@@ -1412,6 +1412,25 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   /** The table as it may leave the server (publicRow only) + the profile's switch. */
   function passkeyList(profileId) { const p = PS.profileOf(pkRead(), String(profileId || '')); return { agentsOff: p.agentsOff, keys: p.rows.map(PS.publicRow), displaced: (pkDisplacedAt.get(String(profileId || '')) || []).filter((at) => now() - at < 3600e3).length, asks: [...pkAsks.values()].filter((a) => a.state === 'open' && a.profileId === String(profileId || '')).map((a) => a.card) }; }
+  /** lane vault-contents-window: THE VAULT WINDOW's rows of the passkey store — one per stored private key (its site and
+   *  user; the sealed key rides only to the length class); `passkeyVaultReveal` opens ONE (entry = `<profile>/<credential
+   *  id's first 40 characters>`). */
+  function passkeyVaultRows() {
+    if (!pks) return [];
+    const out = [];
+    for (const [pid, p] of Object.entries(pkRead().profiles || {})) for (const r of p.rows || []) out.push({ entry: `${pid}/${String(r.credentialId).slice(0, 40)}`, field: 'privateKey', kind: 'private-key', label: r.userName ? `${r.rpId} · ${r.userName}` : r.rpId, detail: pid, createdAt: r.createdAt || null, cipher: r.keySealed });
+    return out;
+  }
+  function passkeyVaultReveal(entry, field) {
+    const i = String(entry || '').indexOf('/');
+    if (!pks || field !== 'privateKey' || i < 1) return null;
+    const pid = String(entry).slice(0, i), cid = String(entry).slice(i + 1);
+    const rows = (PS.profileOf(pkRead(), pid).rows || []).filter((r) => String(r.credentialId).slice(0, 40) === cid);
+    if (rows.length !== 1) return null;
+    const v = pks.cipher.open(rows[0].keySealed);
+    if (v && typeof v === 'object' && v.ok === false) throw Object.assign(new Error(v.words || v.code), { code: v.code });
+    return typeof v === 'string' ? v : null;
+  }
   /** `forget`: an agent removes only keys an AGENT registered; the owner removes any. */
   function passkeyForget(profileId, ref, { by = 'agent' } = {}) {
     const pid = String(profileId || ''); const rows = PS.findRows(PS.profileOf(pkRead(), pid).rows, ref);
@@ -1585,6 +1604,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     ownsTab, pickTab, stopTab, closeTab, captureTab, noteCut, busyFor, // lane site-reset: a looping tab never disables the browser
     ownTabs, clearSite, // lane site-reset step 2: one site's stored login, cleared
     passkeyIn, cancelPasskey, // lane browser-passkey: a page waiting for a passkey, named and cancellable
+    passkeyVaultRows, passkeyVaultReveal, // lane vault-contents-window: the Vault window's masked rows + its one-value reveal
     answerPasskey, passkeyRegister, passkeyList, passkeyForget, passkeyPolicy, passkeySwitch, dropPasskeys, passkeyCounts, passkeyCards, // lane passkey-ui: + the counts // int258: + the chat cards a rebuild draws // lane passkey-store-core: the store, its cards, its grants
     paintFacts, freezePaint, thawPaint, // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
     promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable

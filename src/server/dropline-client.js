@@ -44,7 +44,13 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     const key = r && r.values && typeof r.values.apiKey === 'string' ? r.values.apiKey.trim() : '';
     return key ? { key, source: r.source || null } : { key: null, why: (r && r.why) || 'no Dropline key' };
   }
-  const pairNow = () => { try { return (tokens && tokens.read()) || null; } catch { return null; } };
+  // lane vault-e2e-password-fix-r2: the pair is a SEALED file (src/server/sealed-json.js) — a LOCKED vault refuses its read by
+  // name; that is remembered (`pairLocked`) so the card and the mic say 「保险库已锁定」, never "connect your Dropline"
+  let pairLocked = false;
+  const pairNow = () => { try { const p = (tokens && tokens.read()) || null; pairLocked = false; return p; } catch (e) { pairLocked = !!(e && e.code === 'vault_locked'); return null; } };
+  /** the vault keeps this instance's Dropline closed: the sealed pair, or the person's key in the locked integrations store */
+  const vaultLocked = () => { const p = pairNow(); if (p) return false; const c = credentialOf(); return !c.key && (pairLocked || /the vault is locked/.test(String(c.why || ''))); };
+  const lockedError = () => new DroplineError('vault-locked', 'the vault is locked — the Dropline sign-in opens after the owner unlocks it on the page', { status: 423 });
   const livePair = () => { const p = pairNow(); return p && p.access && p.state !== 'reconnect' ? p : null; };
   function pairOf(j, clientId, prev = null) {
     const t = now();
@@ -81,7 +87,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     const cred = credentialOf();
     if (cred.key) return { token: cred.key, tier: 'key' };
     const p = livePair();
-    if (!p) return null;
+    if (!p) { if (vaultLocked()) throw lockedError(); return null; }
     if (p.accessExp && p.accessExp - ACCESS_SKEW_MS <= now()) return { token: (await refreshPair()).access, tier: 'oauth' };
     return { token: p.access, tier: 'oauth' };
   }
@@ -204,6 +210,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   function account() {
     if (credentialOf().key) return { tier: 'key', state: 'connected', name: null, team: null };
     const p = pairNow();
+    if (!p && vaultLocked()) return { tier: 'oauth', state: 'vault-locked', name: null, team: null };   // r2: the door, never "connect"
     if (!p || !p.access) return { tier: null, state: null, name: null, team: null };
     return { tier: 'oauth', state: p.state === 'reconnect' ? 'reconnect' : 'connected', name: p.name || '', team: p.team || '' };
   }
@@ -237,7 +244,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     return { ok: true, request_id: (j && j.request_id) || null };
   }
 
-  return { dictate, me, credentialOf, testRunner, connected: () => !!credentialOf().key || !!livePair(), account, register, authorizeUrl, connectWith, refreshPair, disconnect, vocabulary, terms, context };
+  return { dictate, me, credentialOf, testRunner, connected: () => !!credentialOf().key || !!livePair(), locked: vaultLocked, account, register, authorizeUrl, connectWith, refreshPair, disconnect, vocabulary, terms, context };
 }
 
 module.exports = { create, DroplineError, DROPLINE_BASE, OAUTH_BASE, AUTHORIZE_URL, OAUTH_SCOPE };

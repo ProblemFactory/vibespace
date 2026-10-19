@@ -1,8 +1,6 @@
 {
  "i18n-unused": {},
- "export-dead": {
-  "src/app-system.js": 1
- },
+ "export-dead": {},
  "lib-unreached": {
   "src/lib/usage-pace.js": 1
  }

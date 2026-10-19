@@ -63,7 +63,11 @@ function create(engineCtx) {
     if (!c || !c.appSecretEnc) return none(`${(rec && (rec.label || rec.id)) || row.label} has no client of its own saved`, 'custom-missing', { fields: [cf.secretKey] });
     let secret;
     try { secret = box.dec(c.appSecretEnc); }
-    catch (e) { return none(`${(rec && (rec.label || rec.id)) || row.label}'s own client secret cannot be decrypted with ${KEY_FILE} (${(e && e.code) || 'bad-ciphertext'})`, 'custom-undecryptable'); }
+    catch (e) {
+      // lane vault-e2e-password-fix-r2: the vault keeps it closed — its own code and sentence, never "enter it again"
+      if (e && e.reason === 'key-unreadable:vault_locked') return none(`${(rec && (rec.label || rec.id)) || row.label}'s own client secret is sealed: ${e.message}`, 'vault-locked');
+      return none(`${(rec && (rec.label || rec.id)) || row.label}'s own client secret cannot be decrypted with ${KEY_FILE} (${(e && e.code) || 'bad-ciphertext'})`, 'custom-undecryptable');
+    }
     const values = {};
     if (c.appId) values[cf.idKey] = String(c.appId);
     values[cf.secretKey] = secret;
@@ -430,7 +434,7 @@ function create(engineCtx) {
     const memTokens = {
       read() {
         if (!p.tokenEnc) return { token: null, why: 'never-authenticated' };
-        try { return { token: JSON.parse(box.dec(p.tokenEnc)), why: null }; } catch (e) { return { token: null, why: `token-undecryptable: ${(e && e.message) || e}` }; }
+        try { return { token: JSON.parse(box.dec(p.tokenEnc)), why: null }; } catch (e) { return { token: null, why: e && e.reason === 'key-unreadable:vault_locked' ? 'vault-locked' : `token-undecryptable: ${(e && e.message) || e}` }; }   // r2
       },
       async write(token, meta = {}) {
         // verify r7: a consent cancelled meanwhile writes nothing; a consent naming nobody is refused here too

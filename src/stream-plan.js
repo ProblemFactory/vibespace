@@ -51,6 +51,9 @@
  *                        windowEncodeArgv) — or a refusal by name (helper_missing, no_ffmpeg, window_gone, no_encoder);
  *                        its RATE: THE RATE below at the window's size, and an intra-refresh wave instead of a periodic IDR
  *                        (WINDOW_REFRESH)
+ *   GONE MEANS GONE      (lane stream-fallback-never-silent) a capture that died is judged by the facts: display_gone only
+ *                        when two reads that succeeded lack it, 1 s apart (judgeGone); else the source captures again in
+ *                        place, twice a minute at most (captureRestart), then ends capture_interrupted
  *   flvReader            the encoder's output: FLV (length-framed — an Annex-B pipe only shows a picture's end when the NEXT
  *                        one starts, a frame of latency) → access units { nalus, key, tsMs }, SPS/PPS put in front of every
  *                        key frame (a browser that joins at a key frame needs them; FLV carries them once)
@@ -644,6 +647,33 @@ function rateFollower({ kbps, cap, floor = 0, rule = RATE_RULE } = {}) {
     },
   };
 }
+/** GONE MEANS GONE (lane stream-fallback-never-silent — owner incident inc-mvf7z2a3-9sxi: closing the window of a Mac's display 2
+ *  ended display 3's capture with ScreenCaptureKit -3805 «application connection interrupted», which the helper names
+ *  display_gone, and the page fell to the VNC picture). A capture that died is judged by THE FACTS, never by its own word:
+ *  `displaySeen(facts, want)` → 'present' | 'absent' | 'unknown' (`want` = { display } | { window }) — a read that failed, or
+ *  that listed none (a machine always has a display), is 'unknown', never 'absent'.
+ *  `judgeGone(read, want, wait)` → 'gone' only when TWO reads that SUCCEEDED lack it, GONE_RULE.gapMs apart; else 'present' |
+ *  'unknown' (`read` = a forced facts read, `wait(ms)` the caller's timer — this file keeps none).
+ *  `captureRestart(times, now)` → may the source capture again IN PLACE (the same session: the page sees a short freeze, never
+ *  an ending) — at most GONE_RULE.restarts within GONE_RULE.windowMs; past that it ends `capture_interrupted`, its own name. */
+const GONE_RULE = Object.freeze({ gapMs: 1000, restarts: 2, windowMs: 60000 });
+function displaySeen(f, want = {}) {
+  if (!f || !f.ok || f.displaysError) return 'unknown';
+  const win = want && want.window != null;
+  const list = win ? f.windows : f.displays;
+  if (!Array.isArray(list) || !list.length) return 'unknown';
+  const id = String(win ? want.window : want && want.display);
+  return list.some((x) => x && String(x.id) === id) ? 'present' : 'absent';
+}
+async function judgeGone(read, want, wait) {
+  const seen = async () => { try { return displaySeen(await read(), want); } catch { return 'unknown'; } };
+  const a = await seen();
+  if (a !== 'absent') return a;
+  await wait(GONE_RULE.gapMs);
+  const b = await seen();
+  return b === 'absent' ? 'gone' : b;
+}
+function captureRestart(times, now) { return (times || []).filter((t) => now - t < GONE_RULE.windowMs).length < GONE_RULE.restarts; }
 /** THE ESTIMATE (lane stream-mac-rate, measured with a real Chrome viewer): werift 0.25's send-side estimate counts ~ONE packet a
  *  picture. It notes a sent packet after `await dtlsTransport.sendRtp` under the transport's CURRENT number — by then the number of
  *  the burst's LAST packet — so a picture's packets leave one record (loopback: 14 093 packets sent, 979 records; 974 of the 14 579
@@ -990,7 +1020,7 @@ module.exports = {
   PQ, SCRGB_NITS, BT709_TO_BT2020, BT2020, HDR_VUI, pqOetf, pqCodeOfNits, buildPqTables, pqOfHalf, p010FromHalf, p010Bytes, HDR_LADDER, hdrFactsOf, hdrEncodeArgv, KBPS_FLOOR_HDR,
   ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, STREAM_FACTS_PS, parseStreamFacts, unthrottlePs, parseUnthrottle, screenDisplayRows, MAPPED_MIN_W, mappedStepOf, scaledInputOf,
   SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, stillArgv, stillHalfArgv, rgbFromHalf, pngOf, pngSize, KBPS_RULE, kbpsDecision, MAC_KBPS_RULE, flvReader,
-  KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator,
+  KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator, GONE_RULE, displaySeen, judgeGone, captureRestart,
   MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,
   macRungOf, planMacScreen, macInputTarget, macPoint,
   WGC_HELPER, WGC_RECIPE, wgcBuildPlan, wgcHead, wgcLine, WINDOW_DEFAULTS, WINDOW_REFRESH, windowIntervalMs, planWindow, wgcCaptureArgv, windowEncodeArgv,

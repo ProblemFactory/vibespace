@@ -62,7 +62,7 @@
  * record before this lane: no field reads as `false`) sends byte-identical requests.
  */
 const { makeRecord, makeConversation, peerName, validateFacts } = require('../channel-record.js');
-const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
+const { ChannelError, notConnectedError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
 const { budgetOf, paceOf } = require('../channel-settings.js');
 const MANIFEST = require('./slack/manifest.js');   // lane dc-channels-manifest: this vendor's declarations (PURE) — its settings table, integration row, option rows
 const Text = require('./slack-text.js');
@@ -412,7 +412,7 @@ function create(record = {}, deps = {}) {
   }
   function bearer() {
     const { token, why } = readToken();
-    if (!token || !token.access_token) throw new ChannelError('auth-expired', `Slack is not connected (${why || 'no token'})`, { retryable: false });
+    if (!token || !token.access_token) throw notConnectedError('Slack', why);   // lane vault-e2e-password-fix-r2: a LOCKED vault is `vault-locked`, never "expired"
     if (token.revokedAt) throw new ChannelError('auth-expired', 'Slack refused this token (revoked or the app was removed) — paste a new one with Re-authorize', { retryable: false, detail: { why: 'token-revoked' } });
     return token.access_token;
   }

@@ -32,7 +32,11 @@
  *   stdin (a key on the SAME frame; the bitrate LIVE — no encoder restart), JSON lines on stderr (started
  *   → the input's target, frame → a window that moved, stats once a second, end {code}). ENDINGS BY NAME: the helper's end code
  *   (window_minimized, window_gone, display_gone, screen_permission, encoder_failed, capture_failed); an exit without one =
- *   capture_exited (its last stderr line logged).
+ *   capture_exited (its last stderr line logged). GONE MEANS GONE (lane stream-fallback-never-silent — incident
+ *   inc-mvf7z2a3-9sxi): the helper names EVERY SCStream stop display_gone / window_gone (measured: -3805 «application connection
+ *   interrupted» the moment a sibling capture ended), so that word is believed only when two facts reads 1 s apart lack the
+ *   display / window (SP.judgeGone); else the SAME session captures again in place — a new helper, the same sid, the rate it had
+ *   reached — twice a minute at most (SP.captureRestart), then it ends capture_interrupted.
  * THE RATE (lane stream-mac-rate — 「mac画面有了但是压缩的厉害」: the owner's 1440p60 went 8000 → 300 kbps 2.2 s in and stayed —
  *   werift's estimate obeyed, which counts ~one packet a picture: THE ESTIMATE): src/stream-plan.js THE RATE, the window road's rule —
  *   SP.rateFollower with MAC_RATE_RULE: never under the picture's floor (plan.floor — kbpsFloor of its pixels × its rate), an
@@ -222,9 +226,10 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
   }
 
   function macSource(plan, maxKbps, f = {}) {
-    const st = { aus: 0, keyWaitMs: null, keysAnswered: 0, rateChanges: 0, helper: null };
+    const st = { aus: 0, keyWaitMs: null, keysAnswered: 0, rateChanges: 0, helper: null, captureRestarts: 0 };
     const rate = SP.rateFollower({ kbps: plan.kbps, cap: maxKbps, floor: plan.floor || 0, rule: SP.MAC_RATE_RULE }); // THE RATE (src/stream-plan.js)
     let child = null, onAu = null, onEnd = null, stopped = false, keyAskedAt = null, t0 = 0, lastTs = -1, started = null, target = null, ended = null;
+    const restartsAt = []; // GONE MEANS GONE: when the capture was started again in place
     const tail = [];
     const say = (line) => { if (child && child.stdin && !child.stdin.destroyed) { try { child.stdin.write(line + '\n'); } catch { /* its exit says it */ } } };
     function finish(code, why) {
@@ -246,15 +251,16 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     function startHelper() {
       const sp = H.spawnPlan(plan.args[0], plan.args.slice(1));
       const c = child = spawn(sp.file, sp.args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
-      c.on('error', (e) => finish('capture_failed', `the screen helper: ${e && (e.code || e.message)}`));
-      c.on('exit', (code, sig) => { if (stopped) return; finish(ended ? ended.code : 'capture_exited', ended ? ended.error : `the screen helper exit ${code == null ? sig : code}${tail.length ? ': ' + tail[tail.length - 1] : ''}`); });
+      c.on('error', (e) => { if (c === child) finish('capture_failed', `the screen helper: ${e && (e.code || e.message)}`); });
+      // its end line may trail the exit: judged once its stderr closed (200 ms at most)
+      c.on('exit', (code, sig) => { if (stopped || c !== child) return; let once = false; const go = () => { if (!once) { once = true; died(c, code, sig); } }; if (c.stderr.readableEnded) go(); else { c.stderr.once('close', go); setTimeout(go, 200).unref?.(); } });
       if (c.stdin) c.stdin.on('error', () => { /* its exit says it */ });
       let buf = '';
       c.stderr.setEncoding('utf8');
-      c.stderr.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (l) onLine(l); } if (buf.length > 65536) buf = ''; });
+      c.stderr.on('data', (d) => { if (c !== child) return; buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (l) onLine(l); } if (buf.length > 65536) buf = ''; });
       const r = SP.flvReader();
       c.stdout.on('data', (d) => {
-        if (stopped) return;
+        if (stopped || c !== child) return;
         for (const ev of r.push(d)) {
           if (ev.type === 'bad') { finish('encoder_failed', ev.error); return; }
           const ts = Math.max(lastTs + 1, Math.round((Math.max(now(), t0) - t0) * 90));
@@ -264,6 +270,26 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
           if (ev.key && keyAskedAt != null) { st.keyWaitMs = now() - keyAskedAt; st.keysAnswered++; keyAskedAt = null; }
           try { onAu({ nalus: ev.nalus.filter((n) => (n[0] & 0x1f) !== 9).map((n) => Buffer.from(n.buffer, n.byteOffset, n.length)), key: ev.key, ts90k: ts >>> 0 }); } catch { /* the host's */ }
         }
+      });
+    }
+    /** The helper ended by itself: by its own name — but its display_gone / window_gone only when THE FACTS agree (GONE MEANS
+     *  GONE, above); a word the facts refute starts the capture again in this same session (the picture freezes a moment). */
+    function died(c, code, sig) {
+      if (stopped || c !== child) return;
+      const said = ended, gone = plan.kind === 'window' ? 'window_gone' : 'display_gone';
+      if (!said || said.code !== gone) { finish(said ? said.code : 'capture_exited', said ? said.error : `the screen helper exit ${code == null ? sig : code}${tail.length ? ': ' + tail[tail.length - 1] : ''}`); return; }
+      const want = plan.kind === 'window' ? { window: plan.window.id } : { display: plan.display.id };
+      const what = plan.kind === 'window' ? `window ${plan.window.id}` : `display ${plan.display.id}`;
+      SP.judgeGone(() => facts({ force: true }), want, (ms) => new Promise((r) => { setTimeout(r, ms); })).then((v) => {
+        if (stopped || c !== child) return;
+        if (v === 'gone') { finish(said.code, said.error); return; }
+        const seen = v === 'present' ? 'still list' : 'could not be read for';
+        if (!SP.captureRestart(restartsAt, now())) { finish('capture_interrupted', `the helper said ${said.code} again while the facts ${seen} ${what} (${said.error})`); return; }
+        restartsAt.push(now()); st.captureRestarts++; ended = null;
+        log(`[stream] mac screen source: the helper said ${said.code} (${said.error}) but the facts ${seen} ${what} — capturing it again in place (${st.captureRestarts})`);
+        if (keyAskedAt == null) keyAskedAt = now(); // the new helper's first picture is a key frame
+        try { startHelper(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); return; }
+        if (rate.kbps !== plan.kbps) say(`bps ${rate.kbps * 1000}`); // the rate the session had reached, not the plan's
       });
     }
     return {
@@ -294,7 +320,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
         const h = st.helper || {};
         return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, kind: plan.kind, display: plan.display ? plan.display.id : null, window: plan.window, w: plan.w, h: plan.h, rung: plan.rung, white: null, kbps: rate.kbps, floor: rate.floor, rate: rate.last,
           encodeMs: h.encMs == null ? null : h.encMs, captureMs: h.capMs == null ? null : h.capMs, timing: 'helper', lowLatency: h.lowLatency == null ? null : h.lowLatency,
-          captured: h.captured || 0, idle: h.idle || 0, repeats: h.repeats || 0, aus: st.aus, dropped: h.dropped || 0, restarts: 0, rateChanges: st.rateChanges, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
+          captured: h.captured || 0, idle: h.idle || 0, repeats: h.repeats || 0, aus: st.aus, dropped: h.dropped || 0, restarts: 0, captureRestarts: st.captureRestarts, rateChanges: st.rateChanges, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
       },
       /** Where the picture sits on the Mac (the helper's started / frame lines) — the injector maps picture pixels with it. */
       inputTarget() { return target; },

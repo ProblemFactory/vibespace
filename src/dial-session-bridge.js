@@ -65,7 +65,10 @@ class DialSessionBridge {
       onControl: async (msg) => {
         if (msg.op === 'hello') {
           if (msg.protoVersion !== PROTO_VERSION) { mux.control({ op: 'proto-mismatch', protoVersion: PROTO_VERSION }); sock.end(); return; }
-          const want = this.hostTokenFor(deviceId);
+          // lane vault-e2e-password-fix-r2: the device token is the vault's — LOCKED ⇒ the attach is told by name and the link
+          // closed (a throw here would be an unhandled rejection in the hub); its wrapper retries after the unlock
+          let want = null;
+          try { want = this.hostTokenFor(deviceId); } catch (e) { mux.control({ op: 'session-error', error: (e && e.message) || 'the vault is locked', code: (e && e.code) || null }); sock.end(); return; }
           // verify-r3: THE ONE DOOR — a constant-time compare over the two digests (a raw `!==` stops at the first differing
           // character; any local process may knock on this loopback port)
           const PT = require('./pairing-token.js');

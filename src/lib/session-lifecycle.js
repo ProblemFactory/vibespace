@@ -247,6 +247,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           });
           return true;
         }
+        if (msg.code === 'vault_locked') { try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } }   // lane vault-e2e-password-fix-r2: a machine's session waits for the vault — its door
         const text = msg.message || t('Session create failed');
         // Failed RESUME rescue (2.219.0, real window-loss class): resumeSession
         // CLOSES the old read-only window before creating, so a failed create

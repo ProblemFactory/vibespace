@@ -346,8 +346,14 @@ app.post('/api/accounts/default', (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/accounts/:id/key', (req, res) => {
-  // reveal the decrypted key on request (cookie-authed; mounts-config trust
-  // model) — the store is the MASTER copy and the Console can't re-show it
+  // reveal the decrypted key on request — the store is the MASTER copy and the Console can't re-show it. lane
+  // vault-contents-window r2 (verify r1): a set-up vault shows it only through THIS page's reveal window — the Vault
+  // window's own door (people only, ONE value, paced, audited); Manage Agents' Show key… asks 验证是你 first
+  const gate = req.app && req.app.locals ? req.app.locals.vaultGate : null;
+  if (gate && gate.state() !== 'not_set_up') {
+    const r = gate.reveal(req, `accounts:${req.params.id}#key`);
+    return r.ok ? res.json({ key: r.value, leftMs: r.leftMs }) : res.status(gate.statusOf(r.code)).json({ error: gate.refusalOf(r.code), code: r.code, ...(r.retryInMs ? { retryInMs: r.retryInMs } : {}) });
+  }
   try { res.json({ key: accounts.revealKey(req.params.id) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });

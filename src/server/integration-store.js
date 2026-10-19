@@ -364,10 +364,14 @@ function create(deps = {}) {
    *  there is one, else the ciphertext does not belong to the current key. */
   const undecryptableWhy = (fields) => `stored values could not be decrypted (${fields.join(', ')}): ${keyError ? keyError.message : `the current key file (${KEY_FILE}) is not the one they were written with`}`;
   const UNDECRYPTABLE_REMEDY = `restore the ${KEY_FILE} this instance had when the keys were entered, or clear the keys and enter them again`;
+  /** lane vault-e2e-password-fix-r2: the key is the vault's and the vault is LOCKED — the values are fine, merely closed: its own
+   *  code (`vault-locked`, worded 「保险库已锁定——先解锁」), never "cannot be decrypted — restore / re-enter" */
+  const vaultLockedNow = () => !!(keyError && keyError.reason === 'key-unreadable:vault_locked');
+  const undecryptableCode = () => (vaultLockedNow() ? 'vault-locked' : 'undecryptable');
   /** Logged ONCE per row per transition (the view is polled); a row that decrypts again re-arms it. */
   function noteUndecryptable(row, fields) {
     if (!fields.length) { undecryptableSaid.delete(row.id); return; }
-    const line = `[integrations] ${row.id}: ${undecryptableWhy(fields)} — the cluster default is NOT consulted while the user's own values cannot be read; ${UNDECRYPTABLE_REMEDY}`;
+    const line = `[integrations] ${row.id}: ${undecryptableWhy(fields)} — the cluster default is NOT consulted while the user's own values cannot be read; ${vaultLockedNow() ? 'a person unlocks the vault on the page' : UNDECRYPTABLE_REMEDY}`;
     if (undecryptableSaid.get(row.id) === line) return;
     undecryptableSaid.set(row.id, line);
     log.error(line);
@@ -395,7 +399,7 @@ function create(deps = {}) {
       if (bindsPer(row)) return none(`${row.label}'s client is chosen per account — the saved values are no longer an account's client`, 'own-retired');
       const { values: own, undecryptable } = userValues(row);
       noteUndecryptable(row, undecryptable);
-      if (undecryptable.length) return none(undecryptableWhy(undecryptable), 'undecryptable', { fields: undecryptable.slice() });
+      if (undecryptable.length) return none(undecryptableWhy(undecryptable), undecryptableCode(), { fields: undecryptable.slice() });
       if (loadError) return none(loadError.message, 'store-unreadable');
       const res = R.resolvePrecedence(own, null, {});
       if (res.source !== 'user') return none(`no keys of your own are saved for ${row.label}`, 'own-missing');
@@ -481,7 +485,7 @@ function create(deps = {}) {
     // consulted — feeding the decrypted remainder (`{}`) to the precedence
     // rule handed the row to the cluster with no signal anywhere.
     const res = undecryptable.length
-      ? { source: 'none', values: {}, clusterKey: null, label: null, why: undecryptableWhy(undecryptable), whyCode: 'undecryptable', whyParams: { fields: undecryptable.slice() } }
+      ? { source: 'none', values: {}, clusterKey: null, label: null, why: undecryptableWhy(undecryptable), whyCode: undecryptableCode(), whyParams: { fields: undecryptable.slice() } }
       : R.resolvePrecedence(own, cluster.def, { clusterWhy: cluster.why, clusterWhyCode: cluster.whyCode, clusterWhyParams: cluster.whyParams });
     let why = res.why, whyCode = res.whyCode || null, whyParams = res.whyParams || null;
     // An unreadable store means the user's OWN values are UNKNOWN, not absent:
@@ -567,16 +571,20 @@ function create(deps = {}) {
    *  (`id` null — the channels engine re-asks every live adapter's
    *  `auth.state()` and re-pushes its digest, whose account dialogs read
    *  `presetsFor`). Returns the card ids it broadcast. */
-  function presetsChanged() {
+  function presetsChanged(why = 'presets') {
     const ids = [];
     for (const row of R.ROWS) {
       if (bindsPer(row) || bindsMachine(row)) continue; // not a card: its presets reach the dialogs through the listeners (a per-machine row has none)
-      try { broadcast({ type: 'integrations-updated', id: row.id, why: 'presets', integration: publicView(row.id) }); ids.push(row.id); }
+      try { broadcast({ type: 'integrations-updated', id: row.id, why, integration: publicView(row.id) }); ids.push(row.id); }
       catch (e) { log.warn(`[integrations] presets re-derive of ${row.id} failed:`, e && e.message); }
     }
-    for (const fn of listeners) { try { fn(null, 'presets'); } catch (e) { log.warn('[integrations] listener failed:', e && e.message); } }
+    for (const fn of listeners) { try { fn(null, why); } catch (e) { log.warn('[integrations] listener failed:', e && e.message); } }
     return ids;
   }
+  /** THE VAULT LOCKED OR OPENED (lane vault-e2e-password-fix-r2): every value this store seals became readable — or closed —
+   *  at once; the same ONE re-derive as a presets move (every card's view re-broadcast, the listeners once: the channels
+   *  engine re-asks every account's auth and re-pushes its digest — a locked account reads 「保险库已锁定」 by name). */
+  const vaultChanged = () => presetsChanged('vault');
   /** Value-free counts of the integration presets IN EFFECT, by where they
    *  came from: the directory's layers (from the reader's own status) or the
    *  env — `[{kind: rowId, source, n}]` for the summary (P3). */
@@ -781,6 +789,38 @@ function create(deps = {}) {
     return changedMachine(id, hostId, 'clear');
   }
 
+  // ── lane vault-contents-window: THE VAULT WINDOW's rows of this store — every SECRET field a record holds (a card's own
+  // values and each paired machine's `<id>/<hostId>` record), masked (the ciphertext rides only to the length class);
+  // `vaultReveal` = ONE value through the same box — never handed to anything but the Vault window's reveal door ──
+  // int317: a desktop sign-in lists ONE row per machine (the password) worded by its kind — the user name is neither a row nor
+  // ever revealed here; `machineName(hostId)` words a per-machine row's machine (the wiring's hosts; the id without it)
+  const UNLISTED = { 'desktop-signin': ['username'] };
+  const KIND_DETAIL = { 'desktop-signin': (vals) => (vals && vals.auth === 'ard' ? 'Screen Sharing: name + password' : 'VNC password') };
+  function vaultRows({ machineName = (h) => h } = {}) {
+    const s = load(), out = [];
+    for (const [key, r] of Object.entries((s && s.integrations) || {})) {
+      const [id, hostId] = key.split('/');
+      const row = R.rowById(id);
+      if (!row || !r || !r.values) continue;
+      const several = row.fields.filter((f) => f.secret).length > 1;   // the field's label only where a row seals more than one (an English key — the page words it)
+      const machine = hostId ? (() => { try { return String(machineName(hostId) || hostId); } catch { return hostId; } })() : '';
+      for (const f of row.fields) {
+        const v = r.values[f.key];
+        if (!f.secret || typeof v !== 'string' || !v || (UNLISTED[id] || []).includes(f.key)) continue;
+        const detail = KIND_DETAIL[id] ? KIND_DETAIL[id](r.values) : several ? (f.label || f.key) : '';
+        out.push({ entry: key, field: f.key, label: row.label + (hostId ? ` · ${machine}` : ''), detail, createdAt: r.updatedAt || null, cipher: v });
+      }
+    }
+    return out;
+  }
+  function vaultReveal(key, fieldKey) {
+    const s = load(), r = s && s.integrations && Object.prototype.hasOwnProperty.call(s.integrations, key) ? s.integrations[key] : null;
+    const row = R.rowById(String(key).split('/')[0]);
+    const f = row && row.fields.find((x) => x.key === fieldKey);
+    if (!r || !r.values || !f || !f.secret || typeof r.values[fieldKey] !== 'string' || !r.values[fieldKey] || (UNLISTED[String(key).split('/')[0]] || []).includes(fieldKey)) return null;
+    return box.dec(r.values[fieldKey]);
+  }
+
   // ── test: human-triggered, bounded, one in flight per id ─────────────────
   function registerTest(id, fn) {
     if (!R.rowById(id)) throw new Error(`registerTest: unknown integration '${id}'`);
@@ -826,8 +866,10 @@ function create(deps = {}) {
     resolveIntegration, offeredCredentials, presetsFor, legacyOwnValues, publicView, list,
     setIntegration, setClusterKey, useClusterDefault, clearUserValues, plainOf, renameRecord,
     resolveMachine, machineView, setMachineValues, clearMachineValues, // lane remoteapp-r1b: the per-machine rows' only doors
+    vaultRows, vaultReveal, // lane vault-contents-window: the Vault window's masked rows + its one-value reveal
     test, registerTest, hasTestRunner: (id) => runners.has(id),
-    onChange, presetsChanged, presetItems, file, keyFile: box.keyFile,
+    onChange, presetsChanged, vaultChanged, presetItems, file, keyFile: box.keyFile,
+    keyRefusal: () => box.refusal(), // lane desktop-vnc-remember: the key's state as a fact (`key-unreadable:vault_locked` while the vault is locked) — never throws, never mints
     IntegrationError, TEST_TIMEOUT_MS,
   };
 }

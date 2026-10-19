@@ -3,7 +3,8 @@
  * THE APPS WIRING (Layer 0 of docs/design-app-persistence.zh.md §3.1) — server.js's ONE line: the hub's apps engine
  * (src/server/apps-engine.js) over the desktop access layer (the machine's ONE package slot), its routes
  * (src/routes/apps.js — the user's door + the agent's proposals), the desktop catalog route's "restoring…" words, and
- * `afterListen()` — the rebuilt machine's replay, run AFTER the server listens (never on the boot path).
+ * `afterListen()` — the operator door (src/server/apps-ops-door.js) and the rebuilt machine's replay, both AFTER the server
+ * listens (never on the boot path).
  *
  * THE STUB SEAM (a chrome gate drives the dialog without a real apt): `VIBESPACE_APPS_STUB=<module path>` replaces the
  * engine's access layer by the module's `create({access, log})` — honoured ONLY by a throwaway server (its checkout
@@ -27,10 +28,15 @@ function install({ app, access, userTodos = null, deliver = null, activeSessions
   routes.setup({ engine, access: acc, activeSessions, sessionStatusKey });
   app.use(routes.router);
   try { require('../routes/desktop-apps.js').setApps(engine); } catch (e) { log.warn?.(`[apps] the desktop catalog route cannot word restoring rows: ${e.message}`); }
+  // the operator's door (vibespace-app refresh --all from a fleet script — no session token): a unix socket of this
+  // account under ~/.vibespace/apps/operator, opened after listen like the replay (src/server/apps-ops-door.js)
+  const door = require('./apps-ops-door.js').create({ engine, access: acc, log });
   return {
     engine,
-    /** after listen: the rebuilt machine's replay (marker hit = nothing; a miss = the slot, detached) — never throws */
-    afterListen: () => engine.afterListen().catch((e) => log.warn?.(`[apps] boot replay failed: ${e && e.message}`)),
+    door,
+    /** after listen: the operator door, then the rebuilt machine's replay (marker hit = nothing; a miss = the slot,
+     *  detached) — neither throws, neither is on the boot path */
+    afterListen: () => { door.open(); return engine.afterListen().catch((e) => log.warn?.(`[apps] boot replay failed: ${e && e.message}`)); },
   };
 }
 

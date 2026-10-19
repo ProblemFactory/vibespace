@@ -66,4 +66,37 @@ async function forgetAppSecrets({ rec, dir, env = process.env, timeout = 5000 })
   try { fs.unlinkSync(store); } catch (e) { if (!e || e.code !== 'ENOENT') return { ok: false, why: `the store could not be removed (${(e && e.code) || 'error'})` }; }
   return { ok: true, forgot: before, via: 'file' };
 }
-module.exports = { APP_SECRETS_SERVICE, APP_SECRETS_SEALER, APP_SECRETS_KEY_FILE, appSecretsFacts, appSecretsMaster, appSecretsOf, forgetAppSecrets };
+/** lane vault-contents-window: THE VAULT WINDOW's rows of the app logins — every app's sealed Secret Service store opened
+ *  with its per-display key (the master comes through the vault), one row per item: its label and the length class of its
+ *  secret, never the secret. `appSecretReveal` = ONE item's secret (the n-th, still created at the same second). */
+const appKeyOf = (master, id) => Buffer.from(crypto.hkdfSync('sha256', master, Buffer.from(String(id), 'utf8'), Buffer.from('vibespace app-secrets v1', 'utf8'), 32));
+function appItemsOf({ dataDir, id, master }) {
+  let raw;
+  try { raw = fs.readFileSync(path.join(dataDir, 'desktop-apps', id, 'portal', require('./desktop-apps').SECRETS_STORE_FILE), 'utf8'); } catch (e) { if (e && e.code === 'ENOENT') return []; throw e; }
+  const key = appKeyOf(master, id);
+  try { const items = JSON.parse(require('./secret-box').decWith(key, JSON.parse(raw).sealed)); return Array.isArray(items) ? items : []; } finally { key.fill(0); }
+}
+function withMaster(dataDir, fn) {
+  const r = appSecretsMaster({ dataDir });
+  if (!r.master) throw Object.assign(new Error(`the app logins' key could not be read (${r.refused.code})`), { code: r.refused.code });
+  try { return fn(r.master); } finally { r.master.fill(0); }
+}
+function appSecretRows({ dataDir } = {}) {
+  let ids = [];
+  try { ids = fs.readdirSync(path.join(dataDir, 'desktop-apps'), { withFileTypes: true }).filter((d) => d.isDirectory() && /^[\w.-]{1,120}$/.test(d.name)).map((d) => d.name); } catch { return []; }
+  const held = ids.filter((id) => fs.existsSync(path.join(dataDir, 'desktop-apps', id, 'portal', require('./desktop-apps').SECRETS_STORE_FILE)));
+  if (!held.length) return [];
+  return withMaster(dataDir, (master) => held.flatMap((id) => appItemsOf({ dataDir, id, master }).map((it, i) => ({
+    entry: id, field: `item.${i}.${Number(it && it.created) || 0}`, kind: 'login', label: String((it && it.label) || `#${i + 1}`), detail: id,
+    createdAt: Number(it && it.created) ? Number(it.created) * 1000 : null, bytes: typeof (it && it.secret) === 'string' ? Buffer.from(it.secret, 'base64').length : null,
+  }))));
+}
+function appSecretReveal({ dataDir } = {}, id, field) {
+  const m = /^item\.(\d{1,5})\.(\d{1,12})$/.exec(String(field || ''));
+  if (!m || !/^[\w.-]{1,120}$/.test(String(id || ''))) return null;
+  return withMaster(dataDir, (master) => {
+    const it = appItemsOf({ dataDir, id, master })[Number(m[1])];
+    return it && String(Number(it.created) || 0) === m[2] && typeof it.secret === 'string' ? Buffer.from(it.secret, 'base64').toString('utf8') : null;
+  });
+}
+module.exports = { APP_SECRETS_SERVICE, APP_SECRETS_SEALER, APP_SECRETS_KEY_FILE, appSecretsFacts, appSecretsMaster, appSecretsOf, forgetAppSecrets, appSecretRows, appSecretReveal };

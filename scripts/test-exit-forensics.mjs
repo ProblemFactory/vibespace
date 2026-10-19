@@ -31,6 +31,12 @@
 //      COUNTS signals, so a forwarded SIGHUP is no longer indistinguishable
 //      from the kernel's (the pty/SIGHUP forward control goes red now);
 //   ⑪ the REAL-keeper leg has its control (mutant-copy `selfPath`).
+// lane vault-e2e-password-fix-r2 (verify RED-2):
+//   ⑫ the device-link attach exits 7 while the hub's vault is LOCKED (its link-token ask answered 423) — pty-wrapper's
+//      REMOTE_RETRY counted it toward the 120-attempt cap, so a dial TERMINAL died ~58 min into a locked boot. §3d runs
+//      the REAL pty-wrapper under VIRTUAL time (a preload: every ≥ 1 s timer fires at once and moves the clock) for 2 h
+//      of 423s: alive, every respawn a WAIT (0 counted, the 30 s rung); a MUTANT that counts it dies at 120; an ssh
+//      child's own exit 7 is still counted (the cap still ends real failures); the chat wrapper is unchanged.
 // Every leg runs the REAL wrapper from this checkout against a fake child (a
 // node script that prints one JSON line and sleeps) and feeds what the wrapper
 // wrote into the REAL setupSessionPty teardown. Every product change has a
@@ -791,6 +797,54 @@ for (const kind of KINDS) {
   const c = await signalInReconnectWindow(kind, M.write(REL[kind], noBlock, 'nolastexit'));
   ok(!(c.meta?.childExitCode === 5), `control (${kind} last-exit): a copy without the "child already exited" block FAILS the childExitCode assertion`, c.meta);
   teardown(realEng, c.id);
+}
+
+// ── § 3d THE VAULT WAIT (lane vault-e2e-password-fix-r2, verify RED-2) ─────────
+console.log('— §3d the vault wait: the attach\'s exit 7 (vault 423) is a WAIT — never counted toward the 120 cap —');
+{
+  const VCLOCK = path.join(ROOT, 'vclock.cjs');
+  // VIRTUAL TIME for the wrapper's ladder: a timer of ≥ 1 s fires after 1 ms of real time and moves Date.now by its
+  // delay; at the limit the preload writes what it saw and ends the process (exit 99 = "still alive at the limit")
+  fs.writeFileSync(VCLOCK, `
+const fs = require('fs');
+const realNow = Date.now, START = realNow(); let off = 0;
+const LIMIT = Number(process.env.VS_VCLOCK_LIMIT_MS) || 0, OUT = process.env.VS_VCLOCK_OUT;
+Date.now = () => realNow() + off;
+const realST = global.setTimeout;
+global.setTimeout = function (fn, ms, ...a) {
+  if (!(ms >= 1000)) return realST(fn, ms, ...a);
+  return realST(() => { off += ms; if (LIMIT && Date.now() - START >= LIMIT) { try { fs.writeFileSync(OUT, JSON.stringify({ alive: true, virtualMs: Date.now() - START })); } catch {} process.exit(99); } fn(...a); }, 1);
+};
+`);
+  const ladder = (wrapperPath, childArgs, tag) => new Promise((resolve) => {
+    const id = `sess-xf-vault-${tag}-${++seq}`;
+    const out = path.join(ROOT, id + '.vclock.json');
+    const proc = spawn(process.execPath, ['--require', VCLOCK, wrapperPath, path.join(BUF, id + '.buf'), path.join(BUF, id + '.json'), ...childArgs],
+      { cwd: ROOT, env: { ...BASE_ENV, VIBESPACE_REMOTE_RETRY: '1', VS_VCLOCK_LIMIT_MS: String(2 * 3600e3), VS_VCLOCK_OUT: out }, stdio: ['pipe', 'pipe', 'pipe'] });
+    liveKids.add(proc.pid);
+    let text = '';
+    proc.stdout.on('data', (d) => { text += d; }); proc.stderr.on('data', () => { });
+    const t = setTimeout(() => { try { proc.kill('SIGKILL'); } catch { } }, 60000);
+    proc.on('exit', (code, signal) => {
+      clearTimeout(t); liveKids.delete(proc.pid);
+      let v = null; try { v = JSON.parse(fs.readFileSync(out, 'utf8')); } catch { }
+      resolve({ code, signal, v, waits: (text.match(/waiting for the vault to be unlocked — retrying in 30s/g) || []).length, lost: (text.match(/connection lost — reconnecting/g) || []).length, last: (text.match(/attempt (\d+)\)/g) || []).slice(-1)[0] || null });
+    });
+  });
+  const ATTACH_7 = ['/bin/sh', '-c', 'exit 7', 'vibespace-agentd-attach'];   // the attach's argv shape ($0 names the bundle); exits 7 at once = the 423
+  const r = await ladder(PTYW, ATTACH_7, 'fix');
+  ok(r.code === 99 && r.v && r.v.alive && r.v.virtualMs >= 2 * 3600e3 && r.waits >= 230 && r.lost === 0,
+    `a driven 423 for 2 h of virtual time: the wrapper is ALIVE (${r.waits} respawns, each a WAIT on the 30 s rung, 0 counted toward the cap)`, r);
+  const src = read(REL.pty);
+  const counted = src.replace('const vaultWait = REMOTE_RETRY && ATTACH_CHILD && exitCode === VAULT_WAIT_EXIT;', 'const vaultWait = false;');
+  ok(counted !== src, 'mutant (a 423 counted like a failure): the patch applies');
+  const m = await ladder(M.write(REL.pty, counted, 'count423'), ATTACH_7, 'mut');
+  ok(m.code === 7 && !m.v && m.lost === 120 && m.waits === 0, `MUTANT that counts the 423 ⇒ the wrapper gives up after 120 attempts (exit ${m.code}) — the ~58-minute death the fix removes`, m);
+  const s = await ladder(PTYW, ['/bin/sh', '-c', 'exit 7'], 'ssh');
+  ok(s.code === 7 && !s.v && s.lost === 120 && s.waits === 0, 'an ssh child\'s OWN exit 7 (not the attach) is still counted — the cap still ends real failures after 120', s);
+  const chat = read(REL.chat);
+  ok(!/VAULT_WAIT|vaultWait/.test(chat) && /const delay = \[1000, 2000, 5000, 10000, 30000\]\[Math\.min\(4, reconnectAttempts - 1\)\];/.test(chat) && !/totalAttempts/.test(chat),
+    'the chat wrapper is unchanged: no cap, its ladder parks at 30 s for any transport exit (a vault wait included)');
 }
 
 // ── § 3c THE REMOTE SENTINEL carries the signal ──────────────────────────────

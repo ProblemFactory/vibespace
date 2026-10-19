@@ -333,6 +333,12 @@ function sshLadder(c) {
             // ~/.vibespace/run and has never heard of these sids, so the
             // keeper-attach optimization never worked on modern ssh sessions.
             const agentdAttach = !!(agentdMode && keeperSid && data.keeperKind === 'agentd');
+            // lane vault-e2e-password-fix-r2: the machine's link token is the vault's — LOCKED ⇒ the device road is refused BY
+            // NAME (never a silent fall back to the keeper road: the page opens the vault's door on `vault_locked`)
+            if (agentdMode && (!keeperSid || agentdAttach)) {
+              const lw = typeof agentdRemote.lockedWhy === 'function' ? agentdRemote.lockedWhy(h.id) : null;
+              if (lw) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, code: 'vault_locked', message: lw })); return; }
+            }
             if (agentdMode && (!keeperSid || agentdAttach)) {
               try {
                 await agentdRemote.ensureAgentdOnHost(h.id);
@@ -344,11 +350,11 @@ function sshLadder(c) {
                   parts: [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)],
                 });
                 const remoteCmd = REMOTE_PRELUDE + 'exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio';
-                const cfg = {
+                const cfg = {   // NO TOKEN (lane vault-e2e-password-fix-r2) — the attach asks the hub (`hub`) at every (re)start
                   sshBin: 'ssh',
                   sshArgs: hosts.sshArgs(h, { reverse: ra.reverse }),
                   remoteCmd,
-                  hostToken: agentdRemote.agentdHostToken(h.id),
+                  hub: { port: PORT },
                   sid: agentdAttach ? keeperSid : id,
                   version: require('../../package.json').version,
                   // adopt (agentdAttach) sends NO spawn spec — the daemon
@@ -367,6 +373,7 @@ function sshLadder(c) {
                 session._agentdSession = true;
                 session._agentdCfgFile = cfgFile;
               } catch (e) {
+                if (e && e.code === 'vault_locked') { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, code: 'vault_locked', message: e.message })); return; }   // r2: locked mid-spawn — by name, never the keeper road
                 console.warn('[device] remote provisioning failed — keeper fallback:', e.message);
                 agentdMode = false;
               }

@@ -713,6 +713,25 @@ class AccountManager {
     return this._dec(a.keyEnc);
   }
 
+  /** lane vault-contents-window: THE VAULT WINDOW's rows of this store — one per sealed field (an API key, a long-lived
+   *  token), masked: the ciphertext rides only to src/vault-inventory.js's length class (rowOf keeps none of it). */
+  vaultRows() {
+    const out = [];
+    for (const a of this._state.accounts) {
+      if (!a || !a.id) continue;
+      let detail = ''; try { detail = (harnessOf(this._acctBackend(a)) || {}).label || ''; } catch { /* an unknown harness: no detail */ }   // the harness's own name (the kind word says the rest)
+      if (a.keyEnc) out.push({ entry: a.id, field: 'key', kind: 'api-key', label: a.name || a.id, detail, createdAt: a.createdAt || null, cipher: a.keyEnc });
+      if (a.oatEnc) out.push({ entry: a.id, field: 'oat', kind: 'oauth-token', label: a.name || a.id, detail, createdAt: a.oatMintedAt || null, cipher: a.oatEnc });
+    }
+    return out;
+  }
+  /** lane vault-contents-window: ONE value (the Vault window's reveal, inside its 5-minute window) — null when gone. */
+  vaultReveal(entry, field) {
+    const a = this._state.accounts.find((x) => x && x.id === entry);
+    const blob = a ? (field === 'key' ? a.keyEnc : field === 'oat' ? a.oatEnc : null) : null;
+    return blob ? this._dec(blob) : null;
+  }
+
   /** Free-text provenance/annotation shown as a dim tag in the roster —
    *  answers "where did this key come from?" (real report: a key imported
    *  from a host read as live-shared from it; the note + originHost make the

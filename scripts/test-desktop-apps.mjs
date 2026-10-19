@@ -685,7 +685,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
   });
   // the bridge refuses NOTHING by rung any more: an xpra target is relayed (the keeper suite drives it against a fake upstream + the real xpra)
   const src = read('src/server/desktop-stream.js');
-  ok(!/501, 'xpra stream not wired/.test(src) && /bridgeXpra\(a\.ws, a\.id, a\.port, a\.viewerId, a\.netem, a\.req\)/.test(read('src/server/stream-relay-xpra.js')) && /bridges\[target\.kind\]\(\{ ws, id, port, viewerId, netem, req \}\)/.test(src) && /const ep = streamEndpointFor\(target\)/.test(src), 'the 501-by-name refusal for xpra is gone; handleUpgrade hands an xpra target to bridgeXpra (lane C2: at the port streamEndpointFor answered — this machine\'s own, or the hub forward of a paired one)');
+  ok(!/501, 'xpra stream not wired/.test(src) && /bridgeXpra\(a\.ws, a\.id, a\.port, a\.viewerId, a\.netem, a\.req\)/.test(read('src/server/stream-relay-xpra.js')) && /bridges\[target\.kind\]\(\{ ws, id, port, viewerId, netem, req, signIn: target\.signIn \|\| null \}\)/.test(src) /* lane desktop-vnc-remember: + the target's remembered sign-in */ && /const ep = streamEndpointFor\(target\)/.test(src), 'the 501-by-name refusal for xpra is gone; handleUpgrade hands an xpra target to bridgeXpra (lane C2: at the port streamEndpointFor answered — this machine\'s own, or the hub forward of a paired one)');
   ok(/netemEnabled \? /.test(src) && !/parseNetem\(q\)/.test(src.replace(/netemEnabled\) \{ const q = netemOfUrl[^\n]*/, '')), 'netem is read ONLY behind the netemEnabled gate (never on by default)');
   ok(/VIBESPACE_DESKTOP_NETEM === '1'/.test(read('server.js')), 'server.js flips the gate from VIBESPACE_DESKTOP_NETEM=1 and nothing else');
 }

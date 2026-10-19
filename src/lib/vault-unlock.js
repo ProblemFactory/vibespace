@@ -14,6 +14,7 @@ import { createModalShell, fetchJson, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { registerMenuItem } from './contributions.js';
 import { enterSubmits } from './chat-enter-keys.js';
+import { replayOpenSpec } from './window-types.js'; // lane vault-contents-window: 「查看内容…」 opens the Vault window (src/lib/vault-window.js registers it)
 
 const MIN = 8;
 let facts = null;
@@ -79,10 +80,17 @@ function applyVaultFacts(f) {
   document.getElementById('vault-dialog')?.dispatchEvent(new CustomEvent('vault-facts'));
 }
 
+/** THE DOOR (lane vault-e2e-password-fix-r2): every card that cannot read its secret while the vault is LOCKED (a channel, the
+ *  voice sign-in, the relay, a machine's session) says 「保险库已锁定——先解锁」 and offers this — the unlock modal (or, once
+ *  unlocked meanwhile, the Vault dialog). One event (`window.dispatchEvent(new CustomEvent('vs-vault-door'))`), so a card
+ *  needs no import of this module. */
+const VAULT_DOOR_EVENT = 'vs-vault-door';
+
 /** THE UNLOCK MODAL — right after the page loads while the vault is locked. */
 export function showUnlock() {
+  if (document.getElementById('vault-unlock-dialog')) return;   // one modal (the door may be pressed while it is open)
   const { dialog, body, close } = createModalShell({ id: 'vault-unlock-dialog', title: t('Unlock the vault'), dialogClass: 'vault-dialog-box', minWidth: 'min(420px, 92vw)', closeOnBackdrop: false });
-  body.appendChild(el('p', 'vault-text', t('VibeSpace restarted — the credentials it stores (accounts, mounts, channels, integrations, app logins, passkeys) stay locked until you enter the second password.')));
+  body.appendChild(el('p', 'vault-text', t('The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.')));
   const pw = pwInput('vault-unlock-pw', t('Second password'));
   const err = el('div', 'vault-err'); err.setAttribute('role', 'alert');
   body.append(pw, err);
@@ -181,6 +189,7 @@ export async function openVaultDialog() {
     if (st === 'locked') btn(t('Unlock'), 'btn-create vault-do-unlock', () => showUnlock());
     if (st === 'unlocked') btn(t('Lock now'), 'btn-cancel vault-do-lock', async () => { const r = await post('/api/vault/lock'); if (r && r.ok) { applyVaultFacts(r); showToast(t('Vault locked')); } else showToast(vaultWords(r), { type: 'error' }); });
     if (st !== 'not_set_up') btn(t('Change the second password'), 'btn-cancel vault-do-change', () => showChange());
+    btn(t('View contents…'), 'btn-cancel vault-do-contents', () => replayOpenSpec(appRef, { action: 'openVault' }));   // lane vault-contents-window
     body.appendChild(row);
     if (st !== 'not_set_up') {
       const idle = el('label', 'vault-idle');
@@ -222,6 +231,7 @@ export async function initVault(app) {
   };
   document.addEventListener('pointerdown', ping, { capture: true, passive: true });
   document.addEventListener('keydown', ping, { capture: true, passive: true });
+  window.addEventListener(VAULT_DOOR_EVENT, () => { if (facts && facts.state === 'unlocked') openVaultDialog(); else showUnlock(); });
   const f = await fetchJson('/api/vault/state');
   if (!f || !f.state) return;
   applyVaultFacts(f);

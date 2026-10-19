@@ -34,7 +34,10 @@
 //      AV1 fixture's temporal units reach the browser OBU for OBU (IVF → aggregated-TU RTP → depacketized), the codec is AV1, its
 //      agent + both ffmpegs opted out of Windows power throttling in ONE script; a browser WITHOUT AV1 ⇒ the same offer answered
 //      H.264 ⇒ today's mapped road, byte for byte the H.264 fixture, no opt-out; hdr not asked ⇒ the offer is H.264 alone; a
-//      browser's mDNS candidate sent BEFORE its answer leaves the answer quick (RED CONTROL: werift handed it first waits 10 s)
+//      browser's mDNS candidate sent BEFORE its answer leaves the answer quick (RED CONTROL: werift handed it first waits 10 s);
+//      GONE MEANS GONE (lane stream-fallback-never-silent): a capture that dies mid-stream with its display still in the facts is
+//      captured again IN PLACE (the same session plays on), a failed facts read is no proof, display_gone only after two reads
+//      ≥ 1 s apart lack it; dying on, twice a minute — then capture_interrupted
 //   §9 THE RATE on the screen road (lane stream-mac-rate — every road's rule, src/stream-plan.js rateFollower): an echo restarts
 //      nothing; a shortfall that HOLDS 2 s restarts ONLY the encoder, once, at the display's floor (never under it; its first
 //      picture a key frame); a quiet 20 s climbs +25 % (the same module in-process, an injected clock, the fake ffmpeg)
@@ -280,20 +283,21 @@ ok(scrText !== winText && (scrText.match(/platform: "win32"/g) || []).length ===
 const scrBundle = path.join(copyDir, 'scr', 'vibespace-agentd.js'); fs.mkdirSync(path.dirname(scrBundle), { recursive: true }); fs.writeFileSync(scrBundle, scrText);
 const D1 = { id: '\\\\.\\DISPLAY1', x: 0, y: 0, w: 1280, h: 720, primary: true, hdr: true, white: SP.CALIBRATION.white, adapter: 0, output: 0 };
 const D2 = { id: '\\\\.\\DISPLAY2', x: 1280, y: 0, w: 1280, h: 720, primary: false, hdr: false, white: 1000, adapter: 0, output: 1 };
-const factsFile = path.join(homeScr, 'facts.json'), psArgsS = path.join(homeScr, 'ps-args.json');
+const factsFile = path.join(homeScr, 'facts.json'), psArgsS = path.join(homeScr, 'ps-args.json'), psRunsS = path.join(homeScr, 'ps-runs.txt'), psFailS = path.join(homeScr, 'ps-fail.txt');
 const setDisplays = (list) => fs.writeFileSync(factsFile, factsLine(list));
 setDisplays([D1, D2]);
 const qosLog = path.join(homeScr, 'qos.log'); // lane stream-hdr-passthrough: each power-throttling opt-out script's pids, one line a run
 fs.writeFileSync(path.join(binS, 'powershell.exe'), `#!${process.execPath}
 const fs = require('fs'); const a = process.argv.slice(2); const script = Buffer.from(a[a.length - 1] || '', 'base64').toString('utf16le');
-if (/'stream-facts'/.test(script)) { fs.writeFileSync(${JSON.stringify(psArgsS)}, JSON.stringify(a)); process.stdout.write(fs.readFileSync(${JSON.stringify(factsFile)}, 'utf8') + '\\r\\n'); process.exit(0); }
+if (/'stream-facts'/.test(script)) { fs.appendFileSync(${JSON.stringify(psRunsS)}, 'x'); try { const n = Number(fs.readFileSync(${JSON.stringify(psFailS)}, 'utf8')) || 0; if (n > 0) { fs.writeFileSync(${JSON.stringify(psFailS)}, String(n - 1)); process.stderr.write('DisplayConfig: a transient failure\\r\\n'); process.exit(1); } } catch { /* none asked */ } fs.writeFileSync(${JSON.stringify(psArgsS)}, JSON.stringify(a)); process.stdout.write(fs.readFileSync(${JSON.stringify(factsFile)}, 'utf8') + '\\r\\n'); process.exit(0); }
 if (/VsQos/.test(script)) { const ids = ((/foreach \\(\\$id in @\\(([\\d,]+)\\)\\)/.exec(script) || [])[1] || '').split(',').map(Number); fs.appendFileSync(${JSON.stringify(qosLog)}, ids.join(',') + '\\n'); process.stdout.write(JSON.stringify({ t: 'unthrottle', rows: ids.map((pid) => ({ pid, ok: true, err: 0 })) }) + '\\r\\n'); process.exit(0); }
 process.stdout.write('ready\\r\\n'); process.stdin.on('data', () => process.stdout.write('ok\\r\\n'));
 `, { mode: 0o755 });
 const cal = calibrationFrame(1280, 720, SP.CALIBRATION.rows);
-const rawFile = path.join(homeScr, 'cal.f16'), ffLog = path.join(homeScr, 'ffmpeg.log'), nv12File = path.join(homeScr, 'first.nv12'), dieCap = path.join(homeScr, 'die-capture'), dieEnc = path.join(homeScr, 'die-encoder');
+const rawFile = path.join(homeScr, 'cal.f16'), ffLog = path.join(homeScr, 'ffmpeg.log'), nv12File = path.join(homeScr, 'first.nv12'), dieCap = path.join(homeScr, 'die-capture'), dieEnc = path.join(homeScr, 'die-encoder'), dieN = path.join(homeScr, 'die-capture-times');
 fs.writeFileSync(rawFile, cal.buf);
-const FF = writeFakeFfmpeg(binS, { log: ffLog, fixture: FIXTURE, raw: rawFile, nv12: nv12File, dieCapture: dieCap, dieEncoder: dieEnc, version: '7.1', encoders: ['h264_nvenc', 'libx264'] });
+const FF = writeFakeFfmpeg(binS, { log: ffLog, fixture: FIXTURE, raw: rawFile, nv12: nv12File, dieCapture: dieCap, dieEncoder: dieEnc, dieCaptureTimes: dieN, version: '7.1', encoders: ['h264_nvenc', 'libx264'] });
+const psRuns = () => (fs.existsSync(psRunsS) ? fs.readFileSync(psRunsS, 'utf8').length : 0);
 const ffRuns = () => (fs.existsSync(ffLog) ? fs.readFileSync(ffLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 const dms = deviceOn(homeScr, scrBundle);
 const cs = await dms.connect();
@@ -336,11 +340,26 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const asked = await until(async () => { const s2 = await dms.streamStats(off.sid); return s2.stats.keyRequests > before && s2.stats.screen.keysAnswered > answered; }, 4000);
   const s3 = await dms.streamStats(off.sid);
   ok(answered === 1 && asked && s3.stats.screen.keyWaitMs <= 2500, `a PLI from the browser: counted, and answered by the next key frame ${s3.stats.screen.keyWaitMs} ms later (≤ the 2 s GOP — ffmpeg's CLI cannot force one)`, s3.stats.screen);
-  // ffmpeg dies mid-stream ⇒ the session ends BY NAME (the page falls back to the VNC picture on `ended`)
+  // GONE MEANS GONE (lane stream-fallback-never-silent): the capture dies ONCE mid-stream, its display still listed ⇒ the same
+  // session captures again in place and plays on
+  const ff0 = ffRuns().length;
+  fs.writeFileSync(dieN, '1');
+  const once = await until(async () => ((await dms.streamStats(off.sid)).stats || {}).screen?.captureRestarts === 1, 6000);
+  const atOnce = pictures(b.got.rtp).length;
+  const goesOn = await until(() => pictures(b.got.rtp).length >= atOnce + 10, 6000);
+  const so = (await dms.streamStats(off.sid)).stats.screen;
+  ok(once && goesOn && !endedOf(pushS) && fs.readFileSync(dieN, 'utf8') === '0' && ffRuns().slice(ff0).filter((x) => x.some((a) => /^ddagrab=/.test(a))).length === 1 && so.captureRestarts === 1, 'GONE MEANS GONE: the capture ffmpeg dies once mid-stream (DXGI_ERROR_ACCESS_LOST) while the facts still list its display ⇒ ONE new capture in the SAME session (the encoder and the mapper stay) — the pictures go on, nothing ends', { once, goesOn, ended: endedOf(pushS), restarts: so.captureRestarts });
+  // … a failed facts read is no proof: the capture dies, the forced read fails ⇒ never display_gone (in place again)
+  const ps0 = psRuns();
+  fs.writeFileSync(psFailS, '1'); fs.writeFileSync(dieN, '1');
+  const twice = await until(async () => ((await dms.streamStats(off.sid)).stats || {}).screen?.captureRestarts === 2, 6000);
+  const atTwice = pictures(b.got.rtp).length;
+  ok(twice && (await until(() => pictures(b.got.rtp).length >= atTwice + 10, 6000)) && !endedOf(pushS) && fs.readFileSync(psFailS, 'utf8') === '0' && psRuns() - ps0 === 1, 'a facts read that FAILED is no proof: the capture dies, the forced read fails (no displays listed) ⇒ never display_gone — captured again in place, the pictures go on', { twice, ended: endedOf(pushS), psRuns: psRuns() - ps0 });
+  // ffmpeg keeps dying ⇒ after two restarts within a minute the session ends BY NAME: capture_interrupted (the page: retry, then the person's choice)
   fs.writeFileSync(dieCap, '1');
   const ended = await until(() => endedOf(pushS), 6000);
   fs.rmSync(dieCap);
-  ok(ended && endedOf(pushS) === 'capture_exited' && (await dms.streamStats(off.sid)).code === 'not_found', 'the capture ffmpeg dies (DXGI_ERROR_ACCESS_LOST) ⇒ the session ends as capture_exited, pushed to the watcher; the session is gone', endedOf(pushS));
+  ok(ended && endedOf(pushS) === 'capture_interrupted' && (await dms.streamStats(off.sid)).code === 'not_found', 'the capture ffmpeg keeps dying (DXGI_ERROR_ACCESS_LOST) with its display still listed ⇒ twice a minute in place, then the session ends as capture_interrupted, pushed to the watcher; the session is gone', endedOf(pushS));
   b.pc.close();
 }
 {
@@ -358,10 +377,12 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const { off, b } = await screenSession(pushS);
   await until(() => pictures(b.got.rtp).length >= 5, 8000);
   setDisplays([{ ...D2, primary: true }]); // the HDR display is unplugged …
+  const ps0 = psRuns(), t0 = Date.now();
   fs.writeFileSync(dieCap, '1'); // … and its capture fails
   await until(() => endedOf(pushS), 8000);
+  const took = Date.now() - t0;
   fs.rmSync(dieCap);
-  ok(off.ok && endedOf(pushS) === 'display_gone', 'the display is unplugged under the capture ⇒ the facts are read again and say so: display_gone', endedOf(pushS));
+  ok(off.ok && endedOf(pushS) === 'display_gone' && psRuns() - ps0 === 2 && took >= 1000, `the display is unplugged under the capture ⇒ the facts are read again — TWICE, ≥ 1 s apart (${took} ms) — and both say so: display_gone`, { ended: endedOf(pushS), reads: psRuns() - ps0, took });
   b.pc.close();
 }
 {

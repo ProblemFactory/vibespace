@@ -78,7 +78,7 @@
  * the census reads code.
  */
 const { makeRecord, makeConversation } = require('../channel-record.js');
-const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
+const { ChannelError, notConnectedError, vaultLockedWhy, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
 const { budgetOf, paceOf } = require('../channel-settings.js');   // B-df40 part 3: the budget + pace rows are DECLARED there (the schema row, the engine bound and this caps all read it)
 const MANIFEST = require('./gmail/manifest.js');   // lane dc-channels-manifest: this vendor's declarations (PURE) — its settings table, integration row, option rows
 const { namelessSentence, looksLikeEmail } = require('../channel-identity.js');   // verify r6: a consent must name its account; r7: an address by the ONE rule
@@ -972,9 +972,9 @@ function create(record = {}, deps = {}) {
   let refreshing = null;
   async function accessToken(depth = 0) {   // verify r4 F1: `depth` bounds the re-entry (a superseded refresh re-reads ONCE)
     const cred = credential();
-    if (!cred.values) throw new ChannelError('auth-expired', `Google OAuth client missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
+    if (!cred.values) throw vaultLockedWhy(cred.why) ? notConnectedError('Gmail', cred.why) : new ChannelError('auth-expired', `Google OAuth client missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
     const { token, why } = readToken();
-    if (!token) throw new ChannelError('auth-expired', `Gmail is not connected (${why})`, { retryable: false });
+    if (!token) throw notConnectedError('Gmail', why);   // lane vault-e2e-password-fix-r2: a LOCKED vault is `vault-locked`, never "expired"
     if (token.invalidGrantAt) throw new ChannelError('auth-expired', 'Gmail refresh token was refused — re-authorize', { retryable: false });
     if (unsaved && unsaved.token === token) await persistToken(token, unsaved.supersedes);   // verify r5: the store's next chance at a token it could not persist
     if (token.access_token && Number(token.expiresAt) > now() + REFRESH_MARGIN_MS) return token.access_token;

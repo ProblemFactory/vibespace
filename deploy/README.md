@@ -339,6 +339,22 @@ Rolling it out:
 3. Then the other releases, the same two `--set`s. Watch PVC usage: the
    userland lives on the same disk as the user's data.
 
+Security updates: an image rebuild never patches the app system, so each user
+sees "N updates · last refreshed …" with a **Refresh** in Desktop apps — and the
+operator has one command per pod that runs exactly that Refresh (the same plan,
+the pod's one package slot; nothing new is installed, only what VibeSpace
+already installed is upgraded):
+
+    kubectl exec <pod> -- runuser -u <user> -- /home/<user>/vibespace/data/bin/vibespace-app refresh --all
+
+It needs no session: the CLI speaks to that user's VibeSpace over a unix socket
+of the account (`~/.vibespace/apps/operator/ops.sock`, opened a few seconds
+after the server starts). Exit 0 done · 75 the pod's package slot is busy (try
+again later) · 3 VibeSpace is not running there · 1 refused or failed (the log
+says why); `--json` prints the result as JSON; `refresh` alone lists the known
+updates. A Background Work job the user approves can run the same line on a
+schedule.
+
 Turning it off: `--set appSystem.enabled=false`. The rows grey out
 (`not-enabled`); the userland stays on the PVC untouched, and the helper and its
 drop-in are gone with the next pod (they were on the ephemeral rootfs).

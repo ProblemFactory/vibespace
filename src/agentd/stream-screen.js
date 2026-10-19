@@ -32,7 +32,10 @@
  *   here; the display's own pixels, bounded (STILL_MS, the frame's exact size), its children windowsHide like every spawn.
  * ENDINGS, BY NAME (onEnd → the session's `ended`): `capture_exited` / `encoder_exited` (an ffmpeg died — its last stderr
  *   line is logged), `display_gone` (the capture died and the display is no longer in the facts), `capture_failed` (it could
- *   not start). The facts (`stream-facts`): the screens (DisplayConfig: HDR + SDR white level; DXGI: the output ddagrab
+ *   not start). GONE MEANS GONE (lane stream-fallback-never-silent): display_gone only when TWO facts reads that succeeded, 1 s
+ *   apart, lack the display (SP.judgeGone — a failed read lists none, and once said display_gone); a capture that had pictures
+ *   and died while its display is still listed captures again IN PLACE (the same session, a short freeze) twice a minute at
+ *   most (SP.captureRestart), then the session ends `capture_interrupted`. The facts (`stream-facts`): the screens (DisplayConfig: HDR + SDR white level; DXGI: the output ddagrab
  *   opens) and the ffmpeg found (PATH → %LOCALAPPDATA%\vibespace\ffmpeg\bin → the probe folder), kept FACTS_MS.
  */
 const path = require('path');
@@ -166,6 +169,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     const st = { frames: 0, aus: 0, dropped: 0, restarts: 0, keyWaitMs: null, keysAnswered: 0, encode: [], map: [], mapper: null, startedAt: null, rate: null };
     const rate = SP.rateFollower({ kbps: plan.kbps, cap: maxKbps, floor: plan.floor || 0, rule: SP.RATE_RULE }); // THE RATE (src/stream-plan.js)
     let onAu = null, onEnd = null, stopped = false, keyAskedAt = null, t0 = 0, lastTs = -1, capRetries = 0;
+    const restartsAt = []; // GONE MEANS GONE: when the capture was started again in place
     const procs = new Set();
     const end = (c) => { if (c && c.exitCode == null && !c.killed) { try { c.kill(); } catch { /* gone */ } } };
     // lane stream-hdr-passthrough: WINDOWS POWER THROTTLING (src/stream-plan.js unthrottlePs — measured: a hidden agent's mapper 250–700
@@ -209,14 +213,23 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
         if (c.asked || stopped) return;
         const why = `${role} exit ${code == null ? sig : code}${tail.length ? ': ' + tail[tail.length - 1] : ''}`;
         if (role === 'encoder') { finish('encoder_exited', why); return; }
-        if (capRetries < CAPTURE_RETRY_MS.length && !(mappedRoad ? st.frames : st.aus)) { // it never gave a picture: asked again
+        const had = !!(mappedRoad ? st.frames : st.aus);
+        if (capRetries < CAPTURE_RETRY_MS.length && !had) { // it never gave a picture: asked again
           const wait = CAPTURE_RETRY_MS[capRetries++];
           st.captureRetries = capRetries;
           log(`[stream] screen source: the capture did not start (${why}) — asking again in ${wait} ms`);
           setTimeout(() => { if (!stopped) { if (mappedRoad) startCapture(); else startDirect(); } }, wait).unref?.();
           return;
         }
-        facts({ force: true }).then((f) => finish(f.ok && !f.displays.some((x) => x.id === plan.display.id) ? 'display_gone' : 'capture_exited', why), () => finish('capture_exited', why));
+        SP.judgeGone(() => facts({ force: true }), { display: plan.display.id }, (ms) => new Promise((r) => { setTimeout(r, ms); })).then((v) => {
+          if (stopped) return;
+          if (v === 'gone') { finish('display_gone', why); return; }
+          if (!had) { finish('capture_exited', why); return; }
+          if (!SP.captureRestart(restartsAt, now())) { finish('capture_interrupted', why); return; }
+          restartsAt.push(now()); st.captureRestarts = (st.captureRestarts || 0) + 1;
+          log(`[stream] screen source: the capture died (${why}) but the facts ${v === 'present' ? 'still list' : 'could not be read for'} ${plan.display.id} — capturing it again in place (${st.captureRestarts})`);
+          if (mappedRoad) startCapture(); else startDirect(); // the HDR road maps too (lane stream-hdr-passthrough)
+        }).catch(() => finish('capture_exited', why));
       });
       if (c.stdin) c.stdin.on('error', () => { /* the encoder died: its exit says so */ });
       return c;
@@ -370,7 +383,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
           encodeMs: mappedRoad ? median(st.encode) : null, timing: mappedRoad ? 'agent' : 'in-ffmpeg', mapMs: median(st.map), mapper: st.mapper,
           hdr: hdrRoad ? { codec: 'AV1', bits: 10, transfer: 'pq', primaries: 'bt2020' } : null, // lane stream-hdr-passthrough: the details' 「HDR」 row
           unthrottle: st.unthrottle || null, // lane stream-hdr-passthrough: { asked, ok } — Windows power throttling turned off
-          captured: st.frames, aus: st.aus, dropped: st.dropped, restarts: st.restarts, captureRetries: st.captureRetries || 0, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
+          captured: st.frames, aus: st.aus, dropped: st.dropped, restarts: st.restarts, captureRetries: st.captureRetries || 0, captureRestarts: st.captureRestarts || 0, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
       },
     };
   }

@@ -23,6 +23,9 @@
  *   streamStep(st, event)            THE SIGNALING STATE MACHINE the page runs (idle → starting → offered → connecting → playing
  *                                    ⇄ restarting → fallback | stopped) → { state, restarts, action, code }
  *   fallbackVerdict(facts)           when a sick connection becomes a fallback to the VNC picture (after the restart budget)
+ *   endingVerdict(facts)             NEVER SILENT (lane stream-fallback-never-silent): the window's answer to its stream's end —
+ *                                    before any picture played, the VNC picture (the old rule); once one played, never by itself:
+ *                                    the same source again, the main display (it was gone), then the person's choice
  *   videoToSource(pt, box, video, origin)   a point on the <video> element → the source's pixel (letterbox aware) + origin
  *   INPUT_KINDS / inputEventOf(raw)  the data channel's event table, validated (what the daemon accepts; anything else is
  *                                    refused by name, never guessed) · wheelUnitsOf(deltaY, deltaMode)
@@ -200,6 +203,22 @@ function fallbackVerdict({ pc = 'new', since = 0, now = 0, graceMs = STREAM_LIMI
   if (pc === 'failed' || pc === 'closed') return { sick: true, event: 'failed' };
   if (pc === 'disconnected') return now - since >= graceMs ? { sick: true, event: 'disconnected' } : { sick: false, event: null };
   return { sick: false, event: null };
+}
+
+/** NEVER SILENT (lane stream-fallback-never-silent — owner incident inc-mvf7z2a3-9sxi, 「把 mac 串流成功降级成了 vnc，which should not
+ *  be possible」: a playing stream ended on a transient and the window started the VNC picture by itself — the .305 lesson,
+ *  a silent fallback is a defect). The window's answer to its stream's ending, `played` = a picture played in this window:
+ *  never played ⇒ 'fallback' (the rung's old rule: a refusal shows the VNC picture — a replayed window asks first); played ⇒ never
+ *  the VNC picture by itself: 'retry' the same source once (NEVER_SILENT.retryMs on), then — the display gone (`gone`) and
+ *  the stream named one (`named`) — 'main' (the machine's main display) once, then 'ask' (「串流中断：…」 with 「重试」 and
+ *  「显示 VNC 画面」 — the VNC picture only on that press). An ending NEVER_SILENT.windowMs after the last retry starts the
+ *  ladder again. `step` / `at` = the ladder so far (the verdict's own, carried by the window). → { act, step, at } */
+const NEVER_SILENT = Object.freeze({ retryMs: 1000, windowMs: 60000 });
+function endingVerdict({ played = false, step = 0, at = 0, now = 0, gone = false, named = false } = {}) {
+  if (!played) return { act: 'fallback', step, at };
+  if (!step || now - at >= NEVER_SILENT.windowMs) return { act: 'retry', step: 1, at: now };
+  if (step === 1 && gone && named) return { act: 'main', step: 2, at };
+  return { act: 'ask', step: 3, at };
 }
 
 // ── COORDINATES ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -446,7 +465,7 @@ function firewallRuleCommand(program) {
 }
 
 module.exports = {
-  STREAM_CODEC, STREAM_CODEC_AV1, streamCodecsOf, isMdnsCandidate, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, streamCapOf, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict,
+  STREAM_CODEC, STREAM_CODEC_AV1, streamCodecsOf, isMdnsCandidate, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, streamCapOf, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict, NEVER_SILENT, endingVerdict,
   videoToSource, INPUT_KINDS, inputEventOf, wheelUnitsOf, statsOf, relayFrame, relayUnframe, relayCandidates,
   LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, streamNumbersOf, directInboundOf, firewallRuleCommand,
 };

@@ -171,6 +171,7 @@ function summaryOf(p) {
     case 'pool-orders': return x.orders && typeof x.orders === 'object' && x.orders.clearPool ? clean(`clear pool ${x.orders.clearPool}`) : `sealed pool orders · ${Array.isArray(x.orders) ? x.orders.length : (x.orders && Array.isArray(x.orders.orders) ? x.orders.orders.length : 0)}`;
     case 'settings-open': return clean(`Settings → ${x.pane}`);
     case 'window-pin': return clean(`window ${x.wid} ${x.on ? 'on top' : 'not on top'}`);
+    case 'link-token': return clean(`the link token of ${x.hostKey || '?'} → session ${x.sid || '?'} · ${Number(x.status) || 0}`); // never the token
     case 'upgrade': return clean(`agent ${x.from || '?'} → ${x.version || x.to || '?'}`) + (x.size ? ` · ${size(Number(x.size) || 0)}` : '');
     default: {
       if (k.startsWith('desktop-serve:') || k.startsWith('browser-serve:')) {
@@ -209,6 +210,15 @@ function lineOf({ at, hostId = null, machine = null, payload, by, ok = null, cod
     ...(askOf(ask) ? { ask } : {}), ...(askOf(ask) && validBy(answeredBy) ? { answeredBy } : {}), // lane hub-act-ask: the ask's verdict + who answered
   };
 }
+/** int317 (the r2 verify's RED-3): THE link-token door's line — who asked (the session `agent:<sid>`, its host key in the
+ *  summary), the outcome as the HTTP status (200 handed · 423 locked · 404 no link · 401 no such session · 500); `hostId` /
+ *  `machine` = the hub's record of that machine (its card lists the line). The token is never an argument. */
+function linkTokenLine({ at, sid = null, hostKey = null, hostId = null, machine = null, status } = {}) {
+  const st = Number(status) || 0;
+  // layer `session` (the life of a session's own link back), stated here: it is NO op sent to a device, so it has no TABLE row
+  // (a row would need a device-policy flag) — rowOf keeps a stored line's own layer
+  return { ...lineOf({ at, hostId: hostId != null ? hostId : hostKey, machine, payload: { op: 'link-token', sid: sid == null ? null : String(sid), hostKey: hostKey == null ? null : String(hostKey), status: st }, by: sid ? byAgent(sid) : null, ok: st === 200, code: st }), layer: 'session' };
+}
 /** A stored line, judged on the way out: bounded and re-redacted (idempotent). → the row, or null. */
 function rowOf(l) {
   if (!l || typeof l !== 'object' || typeof l.op !== 'string') return null;
@@ -241,5 +251,5 @@ const isLoopbackAddr = (addr) => LOOPBACK_RE.test(String(addr || '').trim());
 module.exports = {
   LAYERS, TABLE, ACTION_OPS, BY_KINDS, ASK_OUTCOMES, SUMMARY_MAX, OUT_HEAD_BYTES, CLIENT_ACT_METHODS, HOST_ARG_METHODS,
   keyOf, layerOf, needsBy, auditable, validBy, kindOf, byHuman, byAgent, byJob, bySystem, byOfWho,
-  summaryOf, outHeadOf, answerOf, lineOf, rowOf, addressKeyOf, isLoopbackAddr,
+  summaryOf, outHeadOf, answerOf, lineOf, linkTokenLine, rowOf, addressKeyOf, isLoopbackAddr,
 };

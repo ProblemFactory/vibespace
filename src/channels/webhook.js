@@ -412,7 +412,32 @@ function create(record = {}, deps = {}) {
 /** THE DECLARED EGRESS (§3.1): no vendor host — every request goes to an OWNER-CONFIGURED reply URL through
  *  src/egress-fence.js, judged by the address it resolves to (test-channels-egress's owner-configured leg). */
 const EGRESS = Object.freeze([]);
+/** lane vault-contents-window: THE VAULT WINDOW's rows of this adapter's own sealed file — each HMAC caller's secret and each
+ *  paired caller's outbound token (a Bearer caller keeps a hash only: nothing to show); masked — the ciphertext rides only
+ *  to src/vault-inventory.js's length class. `vaultReveal` opens ONE of them with the channels box the engine hands in. */
+const CALLER_FIELD_RE = /^caller\.(.+)\.(c-[0-9a-f]{1,32})\.(token|out)$/;
+function vaultRows({ ownDir } = {}) {
+  if (!ownDir) return [];
+  const S = callersStore(ownDir), out = [];
+  for (const slug of S.paths()) {
+    for (const c of S.callersRaw(slug)) {
+      if (!c || !/^c-[0-9a-f]{1,32}$/.test(String(c.id))) continue;
+      if (typeof c.tokenEnc === 'string' && c.tokenEnc) out.push({ field: `caller.${slug}.${c.id}.token`, kind: 'secret', label: c.name || c.id, detail: slug, createdAt: c.createdAt || null, cipher: c.tokenEnc });
+      if (typeof c.outEnc === 'string' && c.outEnc) out.push({ field: `caller.${slug}.${c.id}.out`, kind: 'token', label: c.name || c.id, detail: slug, createdAt: c.createdAt || null, cipher: c.outEnc });
+    }
+  }
+  return out;
+}
+function vaultReveal({ ownDir, secrets } = {}, field) {
+  const m = CALLER_FIELD_RE.exec(String(field || ''));
+  if (!m || !ownDir || !secrets || typeof secrets.open !== 'function') return null;
+  const c = callersStore(ownDir).caller(m[1], m[2]);
+  const blob = c && (m[3] === 'token' ? c.tokenEnc : c.outEnc);
+  return typeof blob === 'string' && blob ? secrets.open(blob) : null;
+}
+
 module.exports = {
+  vaultRows, vaultReveal, // lane vault-contents-window: the Vault window's rows of callers.json (the engine asks a module that declares them)
   kind: KIND, caps, create, label: 'Webhook', policyDefault: 'direct', sendStartsTurn: false, EGRESS,
   removable: false, consent: null, reach: 'grants', listed: true, seed: true,
   callersStore, callerView, deliveryVerdict, pollAnswer, cursorOf, cursorSeq, queueAppend, hmacHex, POLL_MAX, POLL_TTL_MS, REPLY_NAME_DEFAULT, pairPendingDoor, PENDING_FILE,

@@ -40,6 +40,8 @@ module.exports = {
         const hasKey = keyed();
         return {
           installed: true, configured: hasKey, enabled: !!rec.enabled && hasKey, running: !!rec.enabled && hasKey,
+          // lane vault-e2e-password-fix-r2: a sign-in the LOCKED vault keeps closed — the card says 「保险库已锁定」, never "connect"
+          vaultLocked: !hasKey && (() => { try { return typeof h.opts.droplineLocked === 'function' && !!h.opts.droplineLocked(); } catch { return false; } })(),
           language: VM.languageOf(h.setting('language')), integration: 'dropline',
         };
       },

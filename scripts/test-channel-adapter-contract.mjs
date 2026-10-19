@@ -219,7 +219,7 @@ for (const { kind, caps } of REGISTERED) {
 
 // ── ④ typed errors, and a bare throw becomes one ──
 {
-  ok(CH.CHANNEL_ERROR_CODES.length === 9 && CH.CHANNEL_ERROR_CODES.includes('send-not-available'), `the failure set is CLOSED (${CH.CHANNEL_ERROR_CODES.join(', ')})`);
+  ok(CH.CHANNEL_ERROR_CODES.length === 10 && CH.CHANNEL_ERROR_CODES.includes('send-not-available') && CH.CHANNEL_ERROR_CODES.includes('vault-locked'), `the failure set is CLOSED (${CH.CHANNEL_ERROR_CODES.join(', ')})`);
   const e = new CH.ChannelError('made-up-code', 'x');
   ok(e.code === 'vendor-error' && e.detail.undeclaredCode === 'made-up-code', 'a code outside the set is itself a contract violation: it becomes `vendor-error` and NAMES what was attempted');
   ok(JSON.stringify(new CH.ChannelError('rate-limited', 'slow down', { retryable: true }).toJSON()) === JSON.stringify({ ok: false, code: 'rate-limited', retryable: true, detail: null }), 'a typed failure serializes to the shape the routes answer with');

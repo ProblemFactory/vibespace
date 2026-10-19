@@ -22,6 +22,9 @@
 //      ONE `bps` (live) at the floor, never under it, a quiet 10 s ⇒ +25 % — and the pictures still coming after the `bps`
 //      (lane stream-mac-stall); 「打开系统设置」 = `open` on the pane's deep link, by name only; the numbers; the input target;
 //      a window (its id, its pid, a move); endings BY NAME (window_minimized, display_gone, capture_exited); refusals BY NAME
+//      · GONE MEANS GONE (lane stream-fallback-never-silent — incident inc-mvf7z2a3-9sxi): the helper's display_gone with the
+//      display still in the facts = captured again IN PLACE (one session, the pictures go on), a failed facts read is no proof,
+//      display_gone only after two reads 1 s apart lack it; twice a minute, then capture_interrupted — RED CONTROL: the helper's word
 //      (screen_permission + its Settings link + ONE row-adding run, helper_changed_regrant, no_helper with what the hub needs)
 //   §5 THE INJECTOR on a Mac: `P <pid>` once per target, keys as virtual key codes, the pointer in global points, no
 //      Accessibility ⇒ accessibility_permission, no helper ⇒ no_helper
@@ -256,6 +259,8 @@ const hS = home('smac-src'), logS = path.join(hS, 'helper.log');
 const FK = writeFakeMacHelper(hS, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted', accessibility: 'granted' }, log: logS, flv: flvFile(hS), displayFrame: { x: 0, y: 0, w: 1920, h: 1080 }, windowFrame: { x: -1678, y: 106, w: 656, h: 422 }, windowPid: 777, movedFrame: { x: -1600, y: 120, w: 656, h: 422 } });
 const envS = { HOME: hS, PATH: process.env.PATH };
 const logs = () => helperLog(logS);
+const capsOf = () => logs().filter((l) => l.argv && l.argv[1] === 'capture').length; // helpers started to capture
+const factsOf = () => logs().filter((l) => l.argv && l.argv[1] === 'facts').length; // facts reads run
 let skew = 0; // the bitrate leg moves this clock a second on instead of waiting one out
 const scr = MAC.createMacScreen({ spawn, execFile, env: envS, fs, log: () => { }, now: () => Date.now() + skew });
 {
@@ -343,11 +348,60 @@ const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   FK.set({ moveAfter: 0, endAfter: 6, endCode: 'window_minimized' });
   const r3 = await run({ sourceKind: 'window', sourceId: '4242' }, { want: 99 });
   FK.set({ endCode: 'display_gone' });
+  const caps0 = capsOf();
   const r4 = await run({ sourceKind: 'screen' }, { want: 99 });
+  const caps4 = capsOf() - caps0;
   FK.set({ endAfter: 0, dieAfter: 4 });
   const r5 = await run({ sourceKind: 'screen' }, { want: 99 });
   FK.set({ dieAfter: 0 });
-  ok(r3.ended === 'window_minimized' && r3.aus.length >= 5 && r4.ended === 'display_gone' && r5.ended === 'capture_exited', 'endings BY NAME: the helper\'s own (window_minimized — restore it; display_gone), an exit with no end line = capture_exited', { r3: r3.ended, r4: r4.ended, r5: r5.ended });
+  ok(r3.ended === 'window_minimized' && r3.aus.length >= 5 && r4.ended === 'capture_interrupted' && caps4 === 3 && r4.src.stats().captureRestarts === 2 && r5.ended === 'capture_exited', 'endings BY NAME: the helper\'s own (window_minimized — restore it); its display_gone while the facts still list the display = captured again IN PLACE twice (3 helpers, one session), then capture_interrupted (GONE MEANS GONE — lane stream-fallback-never-silent); an exit with no end line = capture_exited', { r3: r3.ended, r4: r4.ended, caps4, restarts: r4.src.stats().captureRestarts, r5: r5.ended });
+}
+console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4a GONE MEANS GONE (lane stream-fallback-never-silent — incident inc-mvf7z2a3-9sxi: closing display 2\'s window ended display 3\'s capture with SCK -3805, which the helper names display_gone)');
+{
+  const tok = path.join(hS, 'end-once'), failF = path.join(hS, 'facts-fail');
+  /** one display stream of `screen` (a createMacScreen), its pictures (with the moment each came) and its ending */
+  const play = async (screen, { want = 30, before = () => { } } = {}) => {
+    const src = await screen.source({ sourceKind: 'screen' }, { maxKbps: 8000 });
+    const out = { src, aus: [], at: [], ended: null, endedAt: 0 };
+    if (!src.ok) return out;
+    before();
+    src.start((au) => { out.aus.push(au); out.at.push(Date.now()); }, (code) => { out.ended = code; out.endedAt = Date.now(); });
+    await until(() => out.aus.length >= want || out.ended, 8000);
+    return out;
+  };
+  // THE INCIDENT: the helper says display_gone ONCE while display 3 is still there
+  fs.writeFileSync(tok, '1');
+  FK.set({ endAfter: 8, endCode: 'display_gone', endOnce: tok, dieAfter: 0, moveAfter: 0 });
+  const c0 = capsOf(), f0 = factsOf();
+  const a = await play(scr);
+  const sa = a.src.stats();
+  ok(a.src.ok && !a.ended && a.aus.length >= 30 && capsOf() - c0 === 2 && factsOf() - f0 >= 1 && sa.captureRestarts === 1 && a.aus[8] && a.aus[8].key && a.aus.every((x, i) => !i || x.ts90k > a.aus[i - 1].ts90k), 'THE INCIDENT: the helper says display_gone once while the facts still list display 3 ⇒ the SAME source captures it again in place (a second helper, one session): the pictures go on — the next one a key frame, the clock unbroken — and nothing ends', { ended: a.ended, aus: a.aus.length, caps: capsOf() - c0, restarts: sa.captureRestarts, key8: a.aus[8] && a.aus[8].key });
+  a.src.stop(); await sleep(150);
+  // a facts read that FAILED is no proof
+  fs.writeFileSync(tok, '1');
+  const b = await play(scr, { before: () => { fs.writeFileSync(failF, '1'); FK.set({ factsFail: failF }); } });
+  ok(b.src.ok && !b.ended && b.aus.length >= 30 && fs.readFileSync(failF, 'utf8') === '0' && b.src.stats().captureRestarts === 1, 'a facts read that FAILED is no proof: display_gone said, the forced read fails (the shareable content could not be read) ⇒ never display_gone — captured again in place, the pictures go on', { ended: b.ended, aus: b.aus.length, left: fs.readFileSync(failF, 'utf8'), restarts: b.src.stats().captureRestarts });
+  b.src.stop(); await sleep(150);
+  FK.set({ factsFail: 0 });
+  // REALLY gone: display 3 unplugged under the capture ⇒ two reads 1 s apart lack it ⇒ display_gone
+  fs.writeFileSync(tok, '1');
+  let f1 = 0;
+  const g = await play(scr, { want: 99, before: () => { f1 = factsOf(); FK.set({ facts: { ...MAC_FACTS, displays: [MAC_FACTS.displays[1]] } }); } });
+  const gap = g.endedAt && g.at[7] ? g.endedAt - g.at[7] : null;
+  ok(g.ended === 'display_gone' && factsOf() - f1 === 2 && gap >= 1000 && g.src.stats().captureRestarts === 0, `REALLY gone (display 3 unplugged under its capture): two facts reads that lack it, ${gap} ms after the helper's word (≥ 1 s apart) ⇒ display_gone — never captured again`, { ended: g.ended, reads: factsOf() - f1, gap });
+  FK.set({ facts: MAC_FACTS });
+  // RED CONTROL: the pre-lane rule — the helper's word believed
+  const macFile = path.join(REPO, 'src/agentd/stream-mac.js'), BELIEVE = 'if (!said || said.code !== gone) {';
+  const macText = fs.readFileSync(macFile, 'utf8');
+  const Mod = (await import('node:module')).default;
+  const mut = new Mod(macFile, null); mut.filename = macFile; mut.paths = Mod._nodeModulePaths(path.dirname(macFile));
+  mut._compile(macText.replace(BELIEVE, 'if (true) {'), macFile);
+  const scrOld = mut.exports.createMacScreen({ spawn, execFile, env: envS, fs, log: () => { } });
+  fs.writeFileSync(tok, '1');
+  const m = await play(scrOld);
+  ok(macText.includes(BELIEVE) && m.ended === 'display_gone' && m.aus.length < 30, 'RED CONTROL: the pre-lane rule (the helper\'s word believed) ends the incident\'s session display_gone — the page then showed the VNC picture', { ended: m.ended, aus: m.aus.length });
+  FK.set({ endAfter: 0, endOnce: null });
+  try { fs.rmSync(tok, { force: true }); } catch { /* gone */ }
 }
 {
   FK.set({ tcc: { screen: 'denied', accessibility: 'granted' } });

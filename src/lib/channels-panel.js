@@ -204,9 +204,12 @@ function accountDot(a) {
   if (a.flow && a.flow.running) return 'attn';
   if (auth.state === 'connected') return a.consecutiveFailures >= 3 ? 'warn' : 'ok';
   if (auth.state === 'expired') return 'bad';
-  if (auth.state === 'needs-credentials') return 'warn';
+  if (auth.state === 'needs-credentials' || auth.state === 'vault-locked') return 'warn';
   return 'idle';
 }
+/** lane vault-e2e-password-fix-r2: THE VAULT'S LINE — a sign-in the LOCKED vault keeps closed: its sentence and its one
+ *  verb, the vault's door (src/lib/vault-unlock.js listens) — never "expired", never "Re-authorize". */
+const vaultLine = (a) => healthLine(a, t('The vault is locked — unlock it first'), { warn: true, verbs: [btn(t('Unlock'), () => window.dispatchEvent(new CustomEvent('vs-vault-door')), 'mounts-btn-primary')] });
 /** "{n} min ago" in the device's words (the keys the Usage window reads). */
 function agoText(ms, now = Date.now()) {
   const s = Math.max(0, (now - Number(ms)) / 1000);
@@ -262,6 +265,8 @@ function accountLines(app, a, kinds) {
   }
   if (a.flow && a.flow.running) {
     out.push(healthLine(a, t('Signing in…'), { verbs: [btn(t('Cancel'), () => post(`/api/channels/adapters/${encodeURIComponent(a.id)}/auth/cancel`, {}))] }));
+  } else if (auth.state === 'vault-locked') {
+    out.push(vaultLine(a));
   } else if (auth.state === 'connected') {
     // THE AGGREGATED IM's health line (2026-09-26): connected · the mailbox
     // scope (a declared choice's own words) · push or polling · N
@@ -783,7 +788,7 @@ function adapterDot(a) {
   if (a.flow && a.flow.running) return 'attn';
   if (a.consecutiveFailures >= 3) return 'warn';
   if (auth.state === 'connected') return 'ok';
-  if (auth.state === 'expired' || auth.state === 'needs-credentials') return 'warn';
+  if (auth.state === 'expired' || auth.state === 'needs-credentials' || auth.state === 'vault-locked') return 'warn';
   return 'idle';
 }
 
@@ -812,6 +817,8 @@ function adapterNotes(app, a) {
       const who = auth.self ? t('connected — this instance') : auth.user ? t('connected as {user}', { user: auth.user }) : t('connected');
       line(`${who} · ${t('re-authorize in {eta}', { eta })}`, { warn: Number(auth.expiresAt) - Date.now() <= 0 });
     }
+  } else if (auth.state === 'vault-locked') {
+    line(t('The vault is locked — unlock it first'), { warn: true, verbs: [btn(t('Unlock'), () => window.dispatchEvent(new CustomEvent('vs-vault-door')))] });   // r2: the door
   } else if (auth.state === 'expired') {
     // `auth.why` is a CODE (token-expired / refresh-refused / …) — worded here (a3 i18n)
     line(t('needs re-authorization ({why})', { why: chanCaps.authWhyText(auth.why || 'token-expired', { t }) }), { warn: true });

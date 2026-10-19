@@ -8,6 +8,7 @@
 //   §3 THE SIGNALING STATE MACHINE (streamStep): start → offer → answer → connecting → playing; refusals, the ICE-restart
 //      budget (consecutive), ended / close, terminal states; every declared event is taken somewhere
 //   §4 fallbackVerdict · §5 videoToSource (letterbox, origin, clamp) · §6 the input table (inputEventOf, wheelUnitsOf)
+//   §4b NEVER SILENT (lane stream-fallback-never-silent): endingVerdict — a played stream's ending is never the VNC picture by itself
 //   §7 the page's door (src/lib/stream-input.js): a Mac viewer's ⌘ is the machine's Ctrl (THE table, side kept), other keys
 //      stay physical — CONTROL: an identity row keeps Meta (the door asks the map it is handed)
 //   §8 statsOf over a getStats report pair · §9 the relay framing + candidates
@@ -440,5 +441,18 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   ok(mine.length ? pr.verdict === 'open' && pr.addrs === mine.length && pr.reached === mine.length : pr.verdict === 'none', `the self-probe on this box (no firewall in the way): ${pr.verdict} — ${pr.reached} of ${pr.addrs} host addresses reached in ${pr.ms} ms (loopback never counts)`, pr);
 }
 
+console.log('§4b NEVER SILENT (lane stream-fallback-never-silent — incident inc-mvf7z2a3-9sxi): endingVerdict');
+{
+  const T = 5e6, V = (o) => SM.endingVerdict({ now: T, ...o });
+  const a = V({ played: false }), b = V({ played: false, gone: true, named: true });
+  ok(a.act === 'fallback' && b.act === 'fallback', 'never played ⇒ the rung\'s old answer (fallback: the VNC picture, a replayed window asks first) — before the first picture nothing changes');
+  const r = V({ played: true }), m = V({ played: true, step: 1, at: T - 3000, gone: true, named: true }), k = V({ played: true, step: 1, at: T - 3000 }), k2 = V({ played: true, step: 1, at: T - 3000, gone: true, named: false }), k3 = V({ played: true, step: 2, at: T - 3000, gone: true, named: true }), k4 = V({ played: true, step: 3, at: T - 3000 });
+  ok(r.act === 'retry' && r.step === 1 && r.at === T && m.act === 'main' && m.step === 2 && k.act === 'ask' && k2.act === 'ask' && k3.act === 'ask' && k4.act === 'ask', 'played ⇒ NEVER the VNC picture by itself: the same source again (retry), then — the display gone and the stream named one — the main display once, then the ask (重试 · 显示 VNC 画面); an ending of the main display or of any other code goes to the ask');
+  const again = V({ played: true, step: 3, at: T - SM.NEVER_SILENT.windowMs }), near = V({ played: true, step: 3, at: T - SM.NEVER_SILENT.windowMs + 1 });
+  ok(again.act === 'retry' && again.at === T && near.act === 'ask' && SM.NEVER_SILENT.retryMs === 1000, 'an ending a minute (NEVER_SILENT.windowMs) after the last retry starts the ladder again; the retry waits NEVER_SILENT.retryMs (1 s)');
+  const acts = []; let st = { played: true, step: 0, at: 0 };
+  for (const [now, gone] of [[T, false], [T + 2000, false], [T + 4000, false], [T + 6000, true]]) { const x = SM.endingVerdict({ ...st, now, gone, named: true }); acts.push(x.act); st = { played: true, step: x.step, at: x.at }; }
+  ok(same(acts, ['retry', 'ask', 'ask', 'ask']) && !acts.includes('fallback'), 'a stream that keeps ending (the window carries step/at): retry once, then the ask every time — the verdict never answers fallback once a picture played', acts);
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

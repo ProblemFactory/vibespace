@@ -10,6 +10,7 @@
 //   §4 FFMPEG FACTS: version / filters / encoders texts → the verdict; no_ffmpeg names where it looked
 //   §5 THE FACTS SCRIPT + PARSER: the three DisplayConfig types + the DXGI walk; the line → displays (PS 5's lone row too)
 //   §6 THE PLAN: the road by HDR state, the refusals by name, the argvs — the capture never converts a float format
+//   §11 GONE MEANS GONE (lane stream-fallback-never-silent): displaySeen / judgeGone (two successful reads 1 s apart) / captureRestart
 //      (RED CONTROL: the P0's first, clamping chain is caught by the same check); no road paints the machine's pointer
 //      (draw_mouse=0 — lane stream-cursor: the viewer's own pointer IS the pointer)
 //   §7 THE BITRATE: hysteresis (5 s, 25 %), rounding, floor and cap
@@ -255,5 +256,17 @@ console.log('§10 ② ON THE HDR ROAD (lane desktop-display-modes commit 2): N d
   ok(same(SP.scaledInputOf({ t: 'md', x: -3840 + 960, y: 540, b: 0 }, sc), { t: 'md', x: -1920, y: 1080, b: 0 }) && same(SP.scaledInputOf({ t: 'kd', c: 'KeyA' }, sc), { t: 'kd', c: 'KeyA' }) && same(SP.scaledInputOf({ t: 'mv', x: 5, y: 5 }, null), { t: 'mv', x: 5, y: 5 }), 'the pointer: the page\'s point (its picture\'s pixel + the origin) → the display\'s (×2 from the origin); keys and an unscaled picture untouched');
 }
 
+console.log('§11 GONE MEANS GONE (lane stream-fallback-never-silent — incident inc-mvf7z2a3-9sxi): the facts judge a dead capture');
+{
+  const F = (ids, extra = {}) => ({ ok: true, displays: ids.map((id) => ({ id })), windows: [{ id: 4242 }], ...extra });
+  ok(SP.displaySeen(F(['3', '2']), { display: '3' }) === 'present' && SP.displaySeen(F([2]), { display: '3' }) === 'absent' && SP.displaySeen(F([3]), { display: '3' }) === 'present' && SP.displaySeen(F([]), { display: '3' }) === 'unknown' && SP.displaySeen(F(['3'], { displaysError: 'DisplayConfig failed' }), { display: '3' }) === 'unknown' && SP.displaySeen({ ok: false, code: 'facts_failed' }, { display: '3' }) === 'unknown' && SP.displaySeen(null, { display: '3' }) === 'unknown', 'displaySeen: listed ⇒ present, a list without it ⇒ absent (ids compared as text: the Mac\'s 3 = "3"); a read that failed, or that listed NO display, is unknown — never absent');
+  ok(SP.displaySeen(F(['3']), { window: '4242' }) === 'present' && SP.displaySeen(F(['3']), { window: 9 }) === 'absent' && SP.displaySeen({ ok: true, displays: [{ id: 3 }], windows: [] }, { window: 9 }) === 'unknown', 'displaySeen of a window: the facts\' windows the same way');
+  const reads = (...answers) => { const log = []; let i = 0; return { log, read: async () => { const a = answers[Math.min(i++, answers.length - 1)]; log.push('read'); if (a instanceof Error) throw a; return a; }, wait: async (ms) => { log.push('wait ' + ms); } }; };
+  const r1 = reads(F(['3'])), r2 = reads(F(['2']), F(['2'])), r3 = reads(F(['2']), F(['3'])), r4 = reads(F(['2']), { ok: false }), r5 = reads(new Error('spawn EAGAIN')), r6 = reads(F([]));
+  const v = [await SP.judgeGone(r1.read, { display: '3' }, r1.wait), await SP.judgeGone(r2.read, { display: '3' }, r2.wait), await SP.judgeGone(r3.read, { display: '3' }, r3.wait), await SP.judgeGone(r4.read, { display: '3' }, r4.wait), await SP.judgeGone(r5.read, { display: '3' }, r5.wait), await SP.judgeGone(r6.read, { display: '3' }, r6.wait)];
+  ok(same(v, ['present', 'gone', 'present', 'unknown', 'unknown', 'unknown']) && same(r1.log, ['read']) && same(r2.log, ['read', 'wait 1000', 'read']) && same(r5.log, ['read']), 'judgeGone: gone ONLY when two reads that succeeded lack it, GONE_RULE.gapMs (1 s) apart — listed ⇒ present after one read; absent then listed ⇒ present; absent then a failed read ⇒ unknown; a read that threw or listed none ⇒ unknown', { v, r2: r2.log });
+  const T = 1e6;
+  ok(SP.captureRestart([], T) && SP.captureRestart([T - 1000], T) && !SP.captureRestart([T - 1000, T - 500], T) && SP.captureRestart([T - 61000, T - 500], T) && SP.GONE_RULE.restarts === 2 && SP.GONE_RULE.windowMs === 60000, 'captureRestart: in place at most twice within a minute — a third ⇒ the source ends capture_interrupted; a restart older than the minute no longer counts');
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

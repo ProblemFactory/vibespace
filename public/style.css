@@ -4813,6 +4813,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .agents-mach-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green, #3fb950); flex: none; }
 .agents-mach-dot.off { background: var(--red, #e55); }
 .agents-mach-quota { margin-left: auto; flex: none; font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 14%, transparent); white-space: nowrap; }
+/* lane desktop-vnc-remember: 「登录已记住」 — a technical fact about the machine, worded, beside its name */
+.agents-mach-chip { flex: none; font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 999px; color: var(--text-secondary); background: color-mix(in srgb, currentColor 12%, transparent); white-space: nowrap; }
 .agents-mach-acc > .agents-machine-sec { padding: 0 10px 8px; }
 .agents-adv-tab > .agents-adv-body { display: block; padding: 4px 0; }
 
@@ -7419,6 +7421,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .desktop-display-stub { position: absolute; pointer-events: auto; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .desktop-display-say { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 80%; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-window); color: var(--text); font-size: 12px; text-align: center; }
 .desktop-display-say .desktop-display-say-act { white-space: nowrap; }
+.desktop-display-say-acts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; } /* lane stream-fallback-never-silent: 重试 · 显示 VNC 画面 */
 .desktop-display-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1; pointer-events: none; }
 .desktop-machine-content:fullscreen { background: var(--bg-window, #1e1e1e); }
 /* lane stream-stats-popup: a stream's ONE summary (the strip's chip; a window stream's chip) says it opens the details — a chart
@@ -7514,4 +7517,39 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 @media (max-width: 600px) {
   .vault-dialog-box .dialog-footer button, .vault-actions button { min-height: 36px; }
   .vault-pw { min-height: 40px; font-size: 16px; }
+}
+/* THE VAULT WINDOW (lane vault-contents-window): every sealed value, masked; 「显示」 behind the second password for 5 minutes */
+.vw { height: 100%; display: flex; flex-direction: column; font-size: 12px; min-height: 0; }
+.vw-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.vw-state { font-weight: 600; color: var(--text); }
+.vw-state[data-state="locked"] { color: var(--warn-text); }
+.vw-timer { padding: 1px 8px; border-radius: 10px; background: var(--hover-overlay); color: var(--warn-text); font-variant-numeric: tabular-nums; }
+.vw-search { flex: 1 1 160px; min-width: 120px; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
+.vw-sort { padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
+.vw-btn { padding: 3px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; cursor: pointer; white-space: nowrap; }
+.vw-btn:hover { background: var(--hover-overlay); }
+.vw-btn:disabled { opacity: .5; cursor: default; }
+.vw-del { color: var(--bad-text); }
+.vw-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; color: var(--text-secondary); }
+.vw-note:empty { display: none; }
+.vw-list { flex: 1; overflow: auto; padding: 0 12px 14px; min-height: 0; }
+.vw-group { display: flex; align-items: baseline; gap: 8px; margin: 12px 0 4px; font-weight: 600; color: var(--text); }
+.vw-group-n { color: var(--text-dim); font-weight: normal; }
+.vw-group-err { color: var(--bad-text); font-weight: normal; }
+.vw-empty { padding: 4px 0 6px; color: var(--text-dim); }
+.vw-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 40%) auto; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); }
+.vw-label { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vw-meta { color: var(--text-dim); margin-top: 2px; overflow-wrap: anywhere; }
+.vw-tech { margin-top: 2px; color: var(--text-dim); }
+.vw-tech summary { cursor: pointer; width: max-content; }
+.vw-tech-body { font-family: var(--font-mono, monospace); overflow-wrap: anywhere; }
+.vw-value { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.vw-mask { flex: 1; letter-spacing: 2px; color: var(--text-secondary); }
+.vw-plain { flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid var(--border-active); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font-family: var(--font-mono, monospace); font-size: 12px; }
+.vw-doors { display: flex; gap: 6px; }
+.sys-vault-line { border-top: 1px solid var(--border); }
+@media (max-width: 600px) {
+  .vw-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .vw-btn, .vw-search, .vw-sort { min-height: 36px; }
+  .vw-plain { min-height: 36px; font-size: 16px; }
 }

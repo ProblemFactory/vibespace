@@ -18,7 +18,7 @@ const { mk } = require('./lazy.js');
 
 function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
   auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter, instanceUrl,
-  hosts, agentdDials, agentdHostToken, agentdMintDialPair, deviceForDial, lockOutDialHolder = () => false,
+  hosts, agentdDials, agentdDialDevices = null, agentdHostToken, agentdMintDialPair, deviceForDial, lockOutDialHolder = () => false,
   ensureAgentdOnHost, getPortForwards, onMountsUpdated, activeSessions, getTelemetry = null, serverNotice = null, broadcastActiveSessions = null,
   // agent browser P1 second half (§3.2.5 / §3.8): the Task-Group default rung, the
   // zero-billed notice queue and the session-meta writer the pin persists through
@@ -34,6 +34,8 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
   // agent browser P4 second half (§7.5): the integration store (src/server/integrations-wiring.js, created BEFORE this
   // wiring in server.js) the key consumer resolves through — never process.env
   integrations = null,
+  // lane vault-contents-window: the two stores the Vault window lists that server.js creates elsewhere (read at request time)
+  getAccounts = () => null, getChannels = () => null,
   // lane agent-feedback: server.js's SyncStore table — the `feedback` mirror registers here (live to every client)
   syncStores = null }) {
   const portForwards = mk(getPortForwards);
@@ -60,7 +62,29 @@ require('../routes/feedback.js').registerFeedbackRoutes(app, {
 // (secret-box `lawfulKey` asks it; a key read before this line answers exactly as the engine would — the files before the
 // setup, locked after). LOCKED after every start: only a person's door (src/routes/vault.js) unlocks it.
 const vault = require('./vault-engine.js').create({ dataDir: path.join(rootDir, 'data'), signInPassword: (pw) => !!(auth && auth.verifyPassword(pw)), bcast: (m) => bcastAll(m), signals: true });
-require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs });
+// lane vault-e2e-password-fix-r2: THE DEVICE LINK TOKENS (src/server/host-tokens.js — the vault's `host:<id>` entries): the ONE
+// road to a session is GET /api/agent/vault/link-token (the attach child asks with its session token); every attach config
+// an older build wrote loses its copy now, whatever the vault's state
+const hostTokens = require('./host-tokens.js').create({ dataDir: path.join(rootDir, 'data') });
+try { hostTokens.stripCopies(); } catch (e) { console.warn('[vault] the attach configs could not be swept:', e.message); }
+// THE VAULT'S CONTENTS (lane vault-contents-window): the Vault window's masked inventory and its 5-minute reveal — each store
+// lists and opens its own rows (`vaultRows` / `vaultReveal`); the getters are read at request time (the stores below exist by then)
+const appSecretsDoor = { vaultRows: () => require('../app-secrets.js').appSecretRows({ dataDir: path.join(rootDir, 'data') }), vaultReveal: (e, f) => require('../app-secrets.js').appSecretReveal({ dataDir: path.join(rootDir, 'data') }, e, f) };
+// int317: a machine's NAME on its rows (a link token's `dial-<deviceId>` or host id; a per-machine record's host id) — the id when
+// hosts know none; «Hub secrets» = the engine's own entries (r2), names and dates only
+const vaultHostOf = (k) => { try { const s = String(k || ''); return s ? (s.startsWith('dial-') ? hosts.findByDeviceId(s.slice(5)) : hosts.get(s)) || null : null; } catch { return null; } };
+const vaultMachineName = (k) => { const h = vaultHostOf(k); return String((h && (h.name || h.id)) || k); };
+const vaultContents = require('./vault-contents.js').create({ vault, sources: {
+  accounts: () => getAccounts(), integrations: () => (integrations ? { vaultRows: () => integrations.vaultRows({ machineName: vaultMachineName }), vaultReveal: (e, f) => integrations.vaultReveal(e, f) } : null), channels: () => getChannels(), mounts: () => mounts, 'app-secrets': () => appSecretsDoor,
+  secrets: () => require('./vault-contents.js').secretSource({ vault, machineName: vaultMachineName }),
+  passkeys: () => (browserDialogs && typeof browserDialogs.passkeyVaultRows === 'function' ? { vaultRows: () => browserDialogs.passkeyVaultRows(), vaultReveal: (e, f) => browserDialogs.passkeyVaultReveal(e, f) } : null),
+} });
+require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req),
+  linkTokenFor: (hostKey) => hostTokens.tokenFor(hostKey), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
+  // int317 (RED-3): the door's audit row → the device audit (the machine card's Activity…) — the session, its host key, the status
+  auditLink: ({ sid, hostKey, status }) => { const h = vaultHostOf(hostKey); if (hosts && hosts.deviceAudit) hosts.deviceAudit.append(require('../device-acts.js').linkTokenLine({ at: Date.now(), sid, hostKey, hostId: h ? h.id : null, machine: h ? (h.name || h.id) : null, status })); } });
+// r2 (verify r1): THE GATE the credential doors registered before this line ask (the account key, the mount config, the export)
+app.locals.vaultGate = require('../routes/vault.js').vaultGate({ vault, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req) });
 // THE DECISION ENGINE (lane decision-core): the ONE decisions-API caller — the plugin row attaches its switches, the
 // registry row `llm` gives the key, its Test runner is the engine's own one-question judgment
 const decisionEngine = require('./decision-engine.js').create({ dataDir: path.join(rootDir, 'data'), integrations, serverNotice });
@@ -78,7 +102,7 @@ const plugins = new PluginManager({
   dataDir: path.join(rootDir, 'data'), integrations: () => integrations,
   // lane plugin-settings-p0: THE settings store — every plugin configuration row is read / written here (one truth)
   settings: { read: () => (persistenceRouter && persistenceRouter.readSettings ? persistenceRouter.readSettings() : {}), patch: (p) => persistenceRouter.patchSettings(p) },
-  voiceBind: (v) => { voicePlugin = v; }, droplineConnected: () => !!(dropline && dropline.connected()), decisionEngine,
+  voiceBind: (v) => { voicePlugin = v; }, droplineConnected: () => !!(dropline && dropline.connected()), droplineLocked: () => !!(dropline && dropline.locked && dropline.locked()), decisionEngine,
   broadcast: (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
@@ -93,7 +117,7 @@ hosts.nameLookup = (name) => plugins.tunnelLookup(name); // lane tailscale-plugi
 // P1 (lane voice-p1-oauth-teach): the OAuth tier (a `public` consent flow; the pair in data/dropline-oauth.json, 0600;
 // its landing door on /api/channels/oauth/cb/dropline) + the teach engine (proposals / per-project tier / context preview)
 const droplineOAuthMod = require('./dropline-oauth.js');
-const droplineTokens = droplineOAuthMod.tokenFile(path.join(rootDir, 'data', 'dropline-oauth.json'));
+const droplineTokens = require('./sealed-json.js').sealedJson(path.join(rootDir, 'data', 'dropline-oauth.json'), { dataDir: path.join(rootDir, 'data') });   // lane vault-e2e-password-fix-r2: SEALED through the vault (the hourly refresh writes sealed; LOCKED ⇒ the voice card says 「保险库已锁定」)
 let droplineTeach = null;
 var dropline = require('./dropline-client.js').create({ integrations: () => integrations, pluginOn: () => !!voicePlugin.peek().enabled, tokens: droplineTokens, teachCap: (k) => !!droplineTeach && droplineTeach.capOk(k) });
 try { integrations?.registerTest('dropline', dropline.testRunner); } catch (e) { console.warn('[voice] the dropline Test runner was not registered:', e.message); }
@@ -295,7 +319,7 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
     let pair;
     const actBy = require('../device-audit.js').byOfReq(req); // lane device-act-audit: the owner's sign-in minted it (an URGENT For-you item names it)
     try { pair = agentdMintDialPair(deviceId, { host: DF.hostOf(dialUrl), base, keepLink: pushV.push, by: actBy, from: (req.socket && req.socket.remoteAddress) || '' }); }
-    catch (e) { return res.status(400).json({ error: e.message, code: /collides/.test(e.message) ? 'collision' : 'mint_failed' }); }
+    catch (e) { return res.status(e && e.code === 'vault_locked' ? 423 : 400).json({ error: e.message, code: e && e.code === 'vault_locked' ? 'vault_locked' : /collides/.test(e.message) ? 'collision' : 'mint_failed' }); }
     bcastAll({ type: 'hosts-updated' });
     let updatedInPlace = false;
     let lockedOut = !!pair.lockedOut;
@@ -490,6 +514,12 @@ try { onMountsUpdated?.(); } catch (e) { console.warn('[mounts] boot ctx resync 
 mounts.pathGuard = (p) => mountTokens.list().some((t) => String(t.root || '').startsWith(p));
 setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', e.message)), 2000);
 vault.onUnlock(() => mounts.restore().catch((e) => console.error('[mounts] restore after the vault unlocked:', e.message))); // lane vault-e2e-password: a boot over a LOCKED vault could not open a mount's secret — the unlock re-mounts what is desired
+// lane vault-e2e-password-fix-r2 — THE OPEN SWEEPS (seal what an older build left in the clear) and THE LOCK SIGNS EVERY LOGIN
+// OUT (the owner's decision ④): src/server/vault-hooks.js
+require('./vault-hooks.js').wireVaultHooks({ vault, auth, wss, hostTokens, plugins, sealed: [droplineTokens], integrations,
+  // a device that dialed in while LOCKED never got its hello (the hub could not read its token): its link is dropped at the
+  // open, so it re-dials and the whole dial-in runs — the hello, the mounts' heal, every session's back-tunnel re-owned
+  redial: () => { let n = 0; for (const [deviceId, stream] of agentdDials) { const dm = agentdDialDevices && agentdDialDevices.get(deviceId); if (dm && dm.status && dm.status().connected) continue; try { stream.destroy(); n++; } catch { } } if (n) console.log(`[vault] ${n} device link(s) dialed in while locked — dropped so they re-dial and say hello`); return n; } });
 // Hung-mount watchdog: one unreachable backend must never wedge the server
 // (libuv threadpool saturation — see mounts.js _healthSweep).
 mounts.startHealthWatchdog();
@@ -707,7 +737,12 @@ app.post('/api/mounts/:id/unmount', async (req, res) => {
 // user directive; cookie-authed, single-user instance model)
 app.get('/api/mounts/:id/config', (req, res) => {
   if (refuseAgentBearer(req, res)) return;   // verify r5: the plaintext client secret — the owner's dialog only
-  try { res.json(mounts.config(req.params.id)); }
+  // lane vault-contents-window r2 (verify r1): a set-up vault hands the sealed fields only inside THIS page's reveal window
+  // (the Vault window's door: paced, audited `vault-reveal` field '*'); else they come back MASKED (the dialog keeps them)
+  const gate = app.locals.vaultGate;
+  let masked = false;
+  if (gate && gate.state() !== 'not_set_up') { const g = gate.revealRecord(req, 'mounts', req.params.id); masked = !g.ok; if (g.code === 'human_only' || g.code === 'cross_site') return res.status(403).json({ error: gate.refusalOf(g.code), code: g.code }); }
+  try { res.json(mounts.config(req.params.id, { masked })); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 // D2: a bare client switch beside a held token is refused 409 by name

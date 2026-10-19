@@ -140,6 +140,8 @@ const TABLE = {
   'src/incident.js': 'incident capture — a READER of data/sockets',
   'src/mount-argv.js': 'rclone mount rc sockets — its own rcSocketPath: $XDG_RUNTIME_DIR/vibespace-mounts or /tmp/vs-mounts-<uid>, the 107-byte bound, never the data dir / a network fs (mounts.js verifies the dir with ensureSocketDir)',
   'data/bin/vibespace-remote-keeper': 'remote keeper socket under ~/.vibespace/run on the remote host — short by construction (existing)',
+  'src/server/apps-ops-door.js': 'the apps operator door ~/.vibespace/apps/operator/ops.sock (lane app-persist-layer1) — socketPathFits asked at open: over ⇒ the door stays off by name (path-too-long)',
+  'data/bin/vibespace-app': 'the operator\'s `refresh` — a READER: connects to the door\'s own path (~/.vibespace/apps/operator/ops.sock)',
 };
 const PRODUCER_RE = /\.sock['"`]|\bsockDir\b|\bsocketDir\b|agentd\.sock|ControlPath|\bdaemonSocketPath\b|\bwitnessOrRule\b|socketPathFits|data', 'sockets'|SOCKETS_DIR, 'cw-/;
 const codeLines = (src) => src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\s\/\/\s.*$/, ''));

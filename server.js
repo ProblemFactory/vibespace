@@ -281,18 +281,12 @@ const PTY_WRAPPER = path.join(__dirname, 'data', 'bin', 'pty-wrapper.js');
 // session handle so setupSessionPty is unchanged.
 let deviceMgr = null;
 // ── M2 host-level agentd provisioning (always on since the 2.175.0 flag graduation) ──
-// Per-host vsht_ token: plaintext in a 0600 local file (the attach bridge
-// reads it at spawn; never argv), sha256 recorded alongside for audit.
+// Per-host vsht_ token: the vault's entry `host:<id>` once it is set up (LOCKED ⇒ refused `vault_locked` by name; before
+// the setup the 0600 file as before) — src/server/host-tokens.js (lane vault-e2e-password-fix-r2); no attach config holds it.
 const AGENTD_DIR = path.join(__dirname, 'data', 'agentd');
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
-function agentdHostToken(hostId) {
-  ensureDir(AGENTD_DIR);
-  const f = path.join(AGENTD_DIR, 'host-' + hostId + '.token');
-  try { return fs.readFileSync(f, 'utf-8').trim(); } catch { }
-  const tok = require('./src/pairing-token.js').mintToken('host'); // verify-r3: THE ONE DOOR of a pairing token
-  fs.writeFileSync(f, tok, { mode: 0o600 });
-  return tok;
-}
+const hostTokens = require('./src/server/host-tokens.js').create({ dataDir: path.join(__dirname, 'data'), agentdDir: AGENTD_DIR });
+function agentdHostToken(hostId) { return hostTokens.tokenFor(hostId); }
 // Install/refresh the daemon on a host, throttled per boot+version: a marker
 // records the last version shipped; matching = skip (one ssh round trip saved
 // per spawn; a bundle change reinstalls because the version bumps with it).
@@ -302,7 +296,7 @@ const { CHAT_WRAPPER, agentdDialDevices, agentdDials,
   unpairDialDevice, gateDialUpgrade, admitDial, noteDialEvent, lockOutDialHolder,
 } = require('./src/server/dial-pairing.js').create({
   rootDir: __dirname, AGENTD_DIR, bcastAll: (...a) => bcastAll(...a),
-  agentdHostToken: (...a) => agentdHostToken(...a),
+  agentdHostToken: (...a) => agentdHostToken(...a), dropHostToken: (id) => hostTokens.drop(id),
   getHosts: () => { try { return hosts; } catch { return null; } },
   getMounts: () => { try { return mounts; } catch { return null; } },
   getMachineMounts: () => { try { return machineMounts; } catch { return null; } },
@@ -1443,7 +1437,7 @@ const integrationsWiring = require('./src/server/integrations-wiring.js').create
 const { decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
   app, server: hub, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, getJobs: () => jobsWiring.getJobs(), // + lane jobs-browser: a job browses as its owner conversation // + agent browser P4 second half (§7.5): the key consumer's store
-  auth, wss, WS_OPEN, syncStores,
+  auth, wss, WS_OPEN, syncStores, agentdDialDevices, getAccounts: () => accounts, getChannels: () => channelsWiring.channels, // + lane vault-contents-window: the Vault window lists these two stores
   bcastAll: (...a) => bcastAll(...a), serverNotice: (...a) => serverNotice(...a), // + agent browser P1: the keeper's runaway/ceiling notices
   serverSetting: (...a) => serverSetting(...a),
   mountTokens, persistenceRouter, hosts,
@@ -1505,7 +1499,7 @@ registerWsHandler(wss, {
   poolChooser: poolChooserForModel,
   sbNoteServerOp,
   otelEnv: otelIngest.envFor,
-  agentdRemote: { ensureAgentdOnHost, agentdHostToken, agentdDir: AGENTD_DIR, attachBundle: path.join(__dirname, 'data', 'bin', 'vibespace-agentd-attach.js') },
+  agentdRemote: { ensureAgentdOnHost, agentdHostToken, lockedWhy: (id) => hostTokens.lockedWhy(id), agentdDir: AGENTD_DIR, attachBundle: path.join(__dirname, 'data', 'bin', 'vibespace-agentd-attach.js') },
   dialBridge,
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
   setupSessionPty, reattachLocalPty, ptyQuietSince, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta, autoResume,
@@ -1567,7 +1561,7 @@ function activeSessionsPayload() {
       // transport truth for the card (2.219.1): a remote session whose local
       // wrapper is alive but whose HOST is unreachable used to show a plain
       // LIVE card — user read it as "conversable" while every input queued
-      remoteState: (s._remoteState && s._remoteState.state !== 'connected') ? s._remoteState.state : null,
+      remoteState: s._vaultWait ? 'vault-locked' : (s._remoteState && s._remoteState.state !== 'connected') ? s._remoteState.state : null,   // r2: waiting for the vault (a state)
       createdAt: s.createdAt,
       backend: s.backend || 'claude',
       backendSessionId: s.backendSessionId || s.claudeSessionId || null,

@@ -9,6 +9,8 @@
 //     own children and the daemon itself);
 //   · the hub's journal (its stdout/stderr), every ws broadcast a client receives, every file under the hub's data/
 //     (hosts.json holds HASHES; the host-token store data/agentd/host-*.token is the one legitimate holder, 0600);
+//   · lane vault-e2e-password-fix-r2 ⑤: the vault set up ⇒ NO file under data/ holds a host token (vault entries), the
+//     device stays online, and a LOCKED vault refuses a pairing by name before anything is minted or rotated;
 //   · the device's own files (state/dial.json + state/token are the legitimate holders, 0600; the log, the dial
 //     history, the socket witness hold none) and the hub's answers about the device (the dial-status route, the
 //     refusal frame of a knock carrying a real token under the wrong name).
@@ -182,6 +184,27 @@ try {
   ok(devHolders.length >= 4 && devHolders.every((h) => h.mode === '600'), 'state/dial.json + state/token hold them at 0600', devHolders);
   const st2 = await api('GET', `/api/hosts/${row1 && row1.id}/dial-status`);
   ok(S.every((t) => !JSON.stringify(st2.j).includes(t)), 'the dial-status answers name no token');
+
+  // ── ⑤ THE VAULT (lane vault-e2e-password-fix-r2, design q-042 D1): the host tokens become its entries ──
+  console.log('⑤ the vault set up: the host-token store is sealed; LOCKED ⇒ a pairing is refused by name');
+  const SO = { 'sec-fetch-site': 'same-origin' };   // a person on this page (the vault's doors are the page's only)
+  const su = await api('POST', '/api/vault/setup', { password: 'sinks second password 1' }, SO);
+  ok(su.status === 200 && su.j.ok, 'the second password set (the setup + its open sweep)', { status: su.status, code: su.j && su.j.code });
+  const leaks2 = [];
+  for (const f of walk(path.join(wt, 'data'))) {
+    let b = ''; try { b = fs.readFileSync(f, 'latin1'); } catch { continue; }
+    for (const t of S) if (b.includes(t)) leaks2.push({ f: path.relative(wt, f), t: t.slice(0, 9) });
+  }
+  ok(leaks2.length === 0 && !fs.readdirSync(path.join(wt, 'data', 'agentd')).some((n) => /^host-.+\.token$/.test(n)), 'no file under the hub\'s data/ holds a sentinel any more — the host tokens are vault entries (vault.json holds ciphertext), the host-*.token files gone', leaks2);
+  const still = await waitFor(async () => { const h = await W.hostRow('sink1'); return h && h.online ? h : null; }, 15000);
+  ok(!!still, 'the paired device stays online across the seal (its live link was authed; the hub reads its token from the vault)');
+  const hashBefore = fs.readFileSync(path.join(wt, 'data', 'hosts.json'), 'utf8');
+  const lk = await api('POST', '/api/vault/lock', {}, SO);
+  const pr = await api('POST', '/api/device/dial-pair', { deviceId: 'sink1', base: BASE });
+  ok(lk.status === 200 && pr.status === 423 && pr.j.code === 'vault_locked' && /the vault is locked/.test(pr.j.error || '') && fs.readFileSync(path.join(wt, 'data', 'hosts.json'), 'utf8') === hashBefore,
+    'LOCKED: "Generate a new command" is refused BY NAME (423 vault_locked) before a dial token is minted or the pairing rotated', { lock: lk.status, pair: pr.status, code: pr.j && pr.j.code });
+  const log2 = serverLog.join('');
+  ok(S.every((t) => !log2.includes(t)), 'the hub\'s journal still names no sentinel after the seal and the lock');
 } catch (e) {
   fail++; console.error('  ✗ threw:', e.stack || e.message);
 } finally {

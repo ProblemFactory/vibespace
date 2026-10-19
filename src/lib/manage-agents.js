@@ -43,11 +43,13 @@ import { installVerdictWords, installOutcomeWords, installConfirmWords } from '.
 import { dialRowState } from '../dial-facts.js'; // lane-pairing ③: THE one dial state (the machine row, this card, the pairing sheet)
 import { dialStateText, dialHistoryLine } from './dial-address-picker.js';
 import { openExitAccessDialog, exitSummaryText, exitCodeWords, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
+import { signinChipHtml } from './machine-signin-chip.js'; // lane desktop-vnc-remember: the Machines card's 「登录已记住」
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
 import { openDeviceActsDialog } from './device-acts-dialog.js'; // lane device-act-audit: what the hub did on the machine, who asked
 import { allowLineText, allowRemedyText } from './device-allow-words.js'; // lane device-allow-flags: the machine's own allow list in words
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it)
 import { enterSubmits } from './chat-enter-keys.js';
+import { revealAccountKey } from './vault-reveal.js'; // lane vault-contents-window r2: Show key… through THIS page's reveal window (验证是你 first)
 import { mintShowVerdict } from '../oat-mint-model.js'; // PURE (lane heavy3-flake-races): a late answer never repaints over a newer push
 
 // Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
@@ -2308,6 +2310,9 @@ export function installManageAgents(App, ctx = {}) {
           if (u && !stale()) { this._accountUsage = u.accounts || this._accountUsage; this._hostOwnUsage = u.hosts || this._hostOwnUsage; this._hostAccountUsage = u.hostAccounts || this._hostAccountUsage; }
         } catch {}
         const pctOf = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
+        // lane desktop-vnc-remember: which machines have their desktop sign-in REMEMBERED (one read — the rows' state, never a secret)
+        let signins = {};
+        try { const si = await fetchJson('/api/desktop/machine-desktop/signins'); if (si && si.signins && typeof si.signins === 'object' && !stale()) signins = si.signins; } catch {}
         for (const h of hostsList) {
           const det = document.createElement('details');
           det.className = 'agents-mach-acc';
@@ -2340,7 +2345,8 @@ export function installManageAgents(App, ctx = {}) {
             const tip = bs.map(([l, x]) => `${l} ${pctOf(x)}%`).join(' · ') + (hu.fetchedAt ? ' · ' + t('as of {when}', { when: agoText(hu.fetchedAt) }) : '');
             pill = `<span class="agents-mach-quota" style="color:${c}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${wEta ? ' · ' + escHtml(wEta) : ''}${escHtml(ageTxt)}</span>`;
           }
-          sum.innerHTML = `${dot}<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`)}</span>${pill}`;
+          const kept = signinChipHtml(Object.hasOwn(signins, h.id) ? signins[h.id] : null); // lane desktop-vnc-remember: 「登录已记住」
+          sum.innerHTML = `${dot}<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`)}</span>${kept}${pill}`;
           // the summary's SECOND line: the dial state's words + who can use it as an exit (textContent — names are the user's)
           {
             const l2 = document.createElement('span');
@@ -3188,7 +3194,8 @@ export function installManageAgents(App, ctx = {}) {
         // account has no key (it rendered "Show key…" once — real report).
         if (!isSub && !a?.pooled) items.push({ label: t('Show key…'), action: async () => {
           try {
-            const r2 = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/key`);
+            const r2 = await revealAccountKey(id);   // a set-up vault: the reveal window's door (验证是你 first when this page has none)
+            if (r2 === null) return;
             if (!r2?.key) { showToast(r2?.error || t('Could not read the key'), { type: 'error' }); return; }
             const act = await showInputDialog({
               title: t('API key — {name}', { name: a?.name }),

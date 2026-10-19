@@ -114,14 +114,16 @@ export function createDisplayPanes(area, { onFold = () => { } } = {}) {
     }));
     stubsEl.hidden = !layout.stubs.length;
   }
-  /** A pane's sentence (a refusal) with its one act, or none (text = ''). */
+  /** A pane's sentence (a refusal) with its act — or acts (lane stream-fallback-never-silent: 「重试」 + 「显示 VNC 画面」) — or none (text = ''). */
   function say(id, text, act = null) {
     const p = panes.get(id == null ? '' : String(id)); if (!p) return;
     if (p.say) { p.say.remove(); p.say = null; }
     if (!text) return;
     const box = document.createElement('div'); box.className = 'desktop-display-say';
     const words = document.createElement('span'); words.textContent = text; box.append(words);
-    if (act) { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn-create desktop-display-say-act'; b.textContent = act.label; b.onclick = act.run; box.append(b); }
+    const acts = (Array.isArray(act) ? act : [act]).filter(Boolean), row = acts.length > 1 ? document.createElement('div') : box;
+    if (row !== box) { row.className = 'desktop-display-say-acts'; box.append(row); }
+    for (const a of acts) { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn-create desktop-display-say-act'; b.textContent = a.label; b.onclick = a.run; row.append(b); }
     p.el.append(box); p.say = box;
   }
   // ② the keys follow the pointer: the pane it moves over takes the focus — only while this window holds it (never stolen

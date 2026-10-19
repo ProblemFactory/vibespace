@@ -467,6 +467,33 @@ const ROWS = Object.freeze([
     usedBy: i18nKey('Used by RemoteApp windows of a paired Windows machine'),
     docs: 'docs/kb-features.md',
   },
+
+  // ── A PAIRED MACHINE'S DESKTOP SIGN-IN, REMEMBERED (lane desktop-vnc-remember, owner 2026-10-19) ──
+  // ONE record per machine (`desktop-signin/<hostId>`), written only when the person ticks 「记住这台机器的登录」 in the machine
+  // desktop's sign-in dialog and the machine took that sign-in; the name and the password SEALED by the store. Read only by the
+  // hub's picture bridge (src/server/rfb-signin.js — the hub answers the machine's VNC handshake itself; the page is never handed
+  // it). `auth` = the kind the hub speaks: ard (a Mac's Screen Sharing: name + password) | vnc (a VNC password, TightVNC's too).
+  {
+    id: 'desktop-signin',
+    label: i18nKey('Desktop sign-in'),
+    fields: [
+      { key: 'auth', label: i18nKey('Sign-in kind'), secret: false, required: true, placeholder: '',
+        help: i18nKey('Which sign-in the machine’s VNC server asks for — set by VibeSpace, never typed.'), validate: V.oneOf(['ard', 'vnc']) },
+      { key: 'username', label: i18nKey('User name'), secret: true, required: false, placeholder: '',
+        help: i18nKey('The name you sign in to that machine with (none for a VNC password).'), validate: V.oneLine },
+      { key: 'password', label: i18nKey('Password'), secret: true, required: true, placeholder: '',
+        help: i18nKey('Sealed on this VibeSpace server; the hub signs in with it while the vault is unlocked.'), validate: V.oneLine },
+    ],
+    bindsPerMachine: true,
+    test: {
+      kind: 'shape-only',
+      describe: i18nKey('Checks that the remembered sign-in has every part the hub needs. Zero network.'),
+      caveat: i18nKey('This proves nothing about the machine — the next connection is what signs in to it.'),
+    },
+    consumers: ['src/server/desktop-access.js'],
+    usedBy: i18nKey('Used by the desktop window of a paired Windows or macOS machine'),
+    docs: 'docs/kb-features.md',
+  },
 ]);
 
 const byId = new Map(ROWS.map((r) => [r.id, r]));
@@ -548,6 +575,7 @@ function credentialWhyText({ whyCode = null, whyParams = null, why = null } = {}
     case 'preset-gone': return t('the preset you chose ({key}) is no longer provided by the cluster', { key: p.key || '?' });
     case 'ambiguous': return t('the cluster provides {n} presets and none is the preferred one — choose one', { n: p.n || 0 });
     case 'undecryptable': return t('the stored keys ({fields}) cannot be decrypted with the current key file', { fields: Array.isArray(p.fields) ? p.fields.join(', ') : '' });
+    case 'vault-locked': return t('The vault is locked — unlock it first');   // lane vault-e2e-password-fix-r2: sealed, not lost
     case 'store-unreadable': return t('the integrations store could not be read');
     case 'rebound': return t('the cluster default this row used ({from}) was re-keyed to {to} — the only default this instance offers', { from: p.from || '?', to: p.to || '?' });
     case 'no-store': return t('no integration store on this instance');

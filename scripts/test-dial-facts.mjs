@@ -642,8 +642,8 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
   ok(/^vsdt_[0-9a-f]{36}$/.test(d) && /^vsht_[0-9a-f]{48}$/.test(h) && PT.mintToken('dial') !== d, 'mintToken: vsdt_ + 36 hex, vsht_ + 48 hex, fresh each time');
   ok(PT.tokenMatches(d, PT.tokenHash(d)) && !PT.tokenMatches(d + 'x', PT.tokenHash(d)) && !PT.tokenMatches('', PT.tokenHash('')) && !PT.tokenMatches(d, 'nothex') && !PT.tokenMatches(null, PT.tokenHash(d)) && !PT.tokenMatches(d, PT.tokenHash(d).toUpperCase()), 'tokenMatches: the right token only; an empty / missing / malformed side is false');
   ok(/crypto\.timingSafeEqual\(Buffer\.from\(tokenHash\(token\), 'hex'\), Buffer\.from\(hash, 'hex'\)\)/.test(FILES[DOOR]), 'the compare is crypto.timingSafeEqual over the two 32-byte digests');
-  // the wiring: every token path names the door
-  const uses = { 'src/server/dial-pairing.js': [/PT\.mintToken\('dial'\)/, /PT\.tokenHash\(tok\)/, /PT\.tokenMatches\(tok, want\)/], 'server.js': [/pairing-token\.js'\)\.mintToken\('host'\)/], 'src/agentd/agentd.js': [/pairing-token\.js'\)\.tokenHash\(raw\)/, /pairing-token\.js'\)\.tokenMatches\(msg\.hostToken, want\)/], 'src/agentd/client.js': [/PT\.mintToken\('host'\)/, /PT\.tokenHash\(raw\)/], 'src/dial-session-bridge.js': [/PT\.tokenMatches\(msg\.hostToken, PT\.tokenHash\(want\)\)/], 'src/server/mounts-plugins-wiring.js': [/await dm\.placeSecret\(root \+ '\/state\/dial\.json', body, \{ by: actBy \}\)/] };
+  // the wiring: every token path names the door (lane vault-e2e-password-fix-r2: the host-token store is src/server/host-tokens.js — the vault's entries)
+  const uses = { 'src/server/dial-pairing.js': [/PT\.mintToken\('dial'\)/, /PT\.tokenHash\(tok\)/, /PT\.tokenMatches\(tok, want\)/], 'src/server/host-tokens.js': [/pairing-token\.js'\)\.mintToken\('host'\)/], 'src/agentd/agentd.js': [/pairing-token\.js'\)\.tokenHash\(raw\)/, /pairing-token\.js'\)\.tokenMatches\(msg\.hostToken, want\)/], 'src/agentd/client.js': [/PT\.mintToken\('host'\)/, /PT\.tokenHash\(raw\)/], 'src/dial-session-bridge.js': [/PT\.tokenMatches\(msg\.hostToken, PT\.tokenHash\(want\)\)/], 'src/server/mounts-plugins-wiring.js': [/await dm\.placeSecret\(root \+ '\/state\/dial\.json', body, \{ by: actBy \}\)/] };
   const miss = Object.entries(uses).flatMap(([f, res]) => res.filter((re) => !re.test(FILES[f])).map((re) => `${f}: ${re}`));
   ok(miss.length === 0, 'WIRING: the gate + minter, the host-token store, the device\'s hello, device #0\'s key, the session bridge and the in-place push all name the door', miss);
   // CONTROLS: a planted site per rule is caught
@@ -651,7 +651,7 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
   const SSH_CALL = 'execFile' + "('ssh'";
   const cases = [
     ['R1', 'src/server/dial-pairing.js', "  hosts.setDialToken(deviceId, PT.tokenHash(tok));", "  hosts.setDialToken(deviceId, require('crypto').createHash('sha256').update(tok).digest('hex'));"],
-    ['R2', 'server.js', "require('./src/pairing-token.js').mintToken('host');", "'vsht_' + require('crypto').randomBytes(24).toString('hex');"],
+    ['R2', 'src/server/host-tokens.js', "require('../pairing-token.js').mintToken('host')", "'vsht_' + require('crypto').randomBytes(24).toString('hex')"],
     ['R3', 'src/dial-session-bridge.js', "!PT.tokenMatches(msg.hostToken, PT.tokenHash(want))", 'msg.hostToken !== want'],
     ['R4', 'src/server/dial-pairing.js', "  const generation = (() =>", "  console.log(`[device] minted ${tok} for ${deviceId}`);\n  const generation = (() =>"],
     ['R5', 'src/server/mounts-plugins-wiring.js', "          try { await dm.placeSecret(root + '/state/dial.json', body, { by: actBy }); }", "          try { await dm.fsWrite(root + '/state/dial.json', body, { by: actBy }); }"], // lane device-act-audit: + by

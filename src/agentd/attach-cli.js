@@ -14,8 +14,10 @@
 //
 // Usage (assembled by ws-handler, spawned by chat-wrapper as its child):
 //   node vibespace-agentd-attach.js --config <json-file> --offset <n>
-// The 0600 config file carries { sshBin, sshArgs, remoteCmd, hostToken, sid,
-// spawn?: {cmd, args, cwd, env} } — nothing secret in argv (2.126.0 law).
+// The 0600 config file carries { sshBin, sshArgs, remoteCmd, sid, hub: {port},
+// spawn?: {cmd, args, cwd, env} } — nothing secret in argv (2.126.0 law), and
+// since lane vault-e2e-password-fix-r2 NO TOKEN in the file either: the device
+// link token is asked of the hub at every (re)start (askLinkToken below).
 'use strict';
 
 const fs = require('fs');
@@ -32,6 +34,38 @@ if (!configPath) { process.stderr.write('agentd-attach: --config <file> required
 let cfg;
 try { cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch (e) { process.stderr.write('agentd-attach: bad config: ' + e.message + '\n'); process.exit(2); }
 const log = (m) => { try { process.stderr.write('[agentd-attach] ' + m + '\n'); } catch { } };
+
+// ── THE LINK TOKEN (lane vault-e2e-password-fix-r2, design q-042 D1) — THE ONE ROAD: the config carries NO token (not in the
+// file, the argv or the env). The hub hands it over loopback to THIS session's attach — its own session token
+// (VIBESPACE_SESSION_TOKEN, already in this process's env) proves which session asks — and it lives in this process's
+// memory only. A LOCKED vault answers 423 `vault_locked`: said on stderr (the wrapper's reconnect line shows it) and exit 7
+// — the wrapper retries, and the session reattaches once a person unlocks. ──
+function askLinkToken() {
+  return new Promise((resolve) => {
+    const port = Number((cfg.hub && cfg.hub.port) || process.env.CLAUDE_WEBUI_PORT) || 0;
+    const session = String(process.env.VIBESPACE_SESSION_TOKEN || '');
+    if (!port || !session) return resolve({ ok: false, code: 'no-hub', why: 'this process holds no hub port or session token — it cannot ask for the link token' });
+    const req = require('http').get({ host: '127.0.0.1', port, path: '/api/agent/vault/link-token', headers: { Authorization: 'Bearer ' + session }, timeout: 15000 }, (res) => {
+      let b = '';
+      res.setEncoding('utf8');
+      res.on('data', (d) => { if (b.length < 65536) b += d; });
+      res.on('end', () => {
+        let j = null; try { j = JSON.parse(b); } catch { }
+        if (res.statusCode === 200 && j && typeof j.token === 'string' && j.token) resolve({ ok: true, token: j.token });
+        else resolve({ ok: false, code: (j && j.code) || `http-${res.statusCode}`, why: (j && j.error) || `the hub answered ${res.statusCode}` });
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('timed out')));
+    req.on('error', (e) => resolve({ ok: false, code: 'hub-unreachable', why: e.message }));
+  });
+}
+askLinkToken().then((r) => {
+  // 7 = THE VAULT WAIT (data/bin/pty-wrapper.js never counts it toward its cap; the chat-wrapper retries every 30 s anyway)
+  if (!r.ok) { log(`no link token (${r.code}): ${r.why}`); process.exit(r.code === 'vault_locked' ? 7 : 5); }
+  main(r.token);
+});
+
+function main(hostToken) {
 
 // ── transport: ssh stdio bridge to the standing remote daemon, OR a loopback
 // TCP bridge for DIAL devices (graduation B.2: the dialed-in ws link lives
@@ -124,7 +158,7 @@ if (cfg.pty) {
     onData(chan, buf) { if (chan !== CHAN) return; process.stdout.write(buf); mux.credit(chan, buf.length); },
     onDead(reason) { log('transport dead: ' + reason); process.exit(opened ? 1 : 5); },
   });
-  onTransportReady(() => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: cfg.hostToken, serverVersion: cfg.version || '0' }));
+  onTransportReady(() => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken, serverVersion: cfg.version || '0' }));
   process.stdin.on('data', (d) => { try { mux.data(CHAN, d); } catch { } });
   process.stdin.resume();
   // DEFER the size read: on SIGWINCH, Node's OWN listener refreshes
@@ -168,10 +202,11 @@ if (cfg.pty) {
     },
   });
   onTransportReady(() => {
-    mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: cfg.hostToken, serverVersion: cfg.version || '0' });
+    mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken, serverVersion: cfg.version || '0' });
   });
 
   process.stdin.on('data', (d) => { try { mux.data(CHAN, d); } catch { } });
   process.stdin.on('end', () => { /* dtach/pipe closed — keep relaying until killed */ });
   process.stdin.resume();
+}
 }

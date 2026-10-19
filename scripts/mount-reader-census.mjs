@@ -79,13 +79,17 @@ export const ROWS = [
   ['src/routes/window-targets.js', 'own-tree', 1, null, DATA],
   ['src/safe-fs-worker.js', 'exempt', 18, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked)'],
   ['src/search-index-worker.js', 'own-tree', 5, null, CLI],
-  ['src/secret-box.js', 'own-tree', 12, null, DATA], // lane key-file-law-stores: +3 — THE KEY-FILE LAW's reads (the key file raw/hex, each store's ciphertext files + their dirs); lane vault-e2e-password: +4 — data/vault.json and the `.sealed` markers beside a key file (is this dir's vault set up?)
-  ['src/app-secrets.js', 'own-tree', 4, null, DATA], // lane app-display-secrets: the service/sealer files beside it, the key file (secret-box), the app dir's sealed store + bus socket
+  ['src/secret-box.js', 'own-tree', 13, null, DATA], // lane key-file-law-stores: +3 — THE KEY-FILE LAW's reads (the key file raw/hex, each store's ciphertext files + their dirs); lane vault-e2e-password: +4 — data/vault.json and the `.sealed` markers beside a key file (is this dir's vault set up?); lane vault-e2e-password-fix-r2: +1 — sealedDir (data/vault.json's presence, for a process with no engine)
+  ['src/app-secrets.js', 'own-tree', 7, null, DATA], // lane app-display-secrets: the service/sealer files beside it, the key file (secret-box), the app dir's sealed store + bus socket; lane vault-contents-window +3 — the Vault window lists data/desktop-apps/*, asks each app dir for its sealed store and reads it (own data dir)
   ['src/app-secrets-seal.js', 'own-tree', 3, null, DATA], // lane app-display-secrets: the app dir's sealed store + its stdin; lane display-secret-fd +1: the per-display key off the inherited pipe fd (never a path anyone names)
   ['src/server/account-usage-routes.js', 'own-tree', 1, null, CLI],
   ['src/server/agent-tool-generators.js', 'user-path', 23, 'DOOR\\.blocked\\(', 'a session root’s git facts: the sentence as facts.error'], // lane cli-one-text-arg: +2 — src/agent-cli-text.js read and its copy beside the CLIs compared (own tree, every boot)
   ['src/server/apps-engine.js', 'own-tree', 1, null, DATA],
-  ['src/server/vault-engine.js', 'own-tree', 11, null, DATA], // lane vault-e2e-password: data/vault.json, the key files it seals (read, overwrite, unlink) and their `.sealed` markers
+  ['src/server/apps-ops-door.js', 'own-tree', 4, null, 'its own socket under ~/.vibespace/apps/operator (lane app-persist-layer1: lstat of that directory, of the socket path before listen + after it, and at close) — VibeSpace’s own state, never a path anyone names'],
+  ['src/server/vault-engine.js', 'own-tree', 14, null, DATA], // lane vault-e2e-password: data/vault.json, the key files it seals (read, overwrite, unlink) and their `.sealed` markers; lane vault-e2e-password-fix-r2: +1 — secretAdopt reads a plaintext secret file (a host token) it seals; verify r2 +2: shred's and secretAdopt's lstat (a SYMLINK is never followed — its target neither read nor overwritten)
+  ['src/secret-file.js', 'own-tree', 2, null, DATA], // lane vault-e2e-password-fix-r2: replaceShredding opens the file it replaces (r+), to overwrite its old bytes (a data/ secret file); verify r2 +1: its lstat (a symlink is refused before the open — the overwrite would reach the target)
+  ['src/server/host-tokens.js', 'own-tree', 7, null, DATA], // lane vault-e2e-password-fix-r2: data/agentd — the pre-vault host-<id>.token files (read / exists), the attach configs it strips, the dir listings, vault.json's presence (via secret-box)
+  ['src/server/sealed-json.js', 'own-tree', 1, null, DATA], // lane vault-e2e-password-fix-r2: the sealed JSON file itself (data/dropline-oauth.json)
   ['src/server/auto-cli-loop.js', 'own-tree', 2, null, CLI],
   ['src/server/auto-resume.js', 'own-tree', 1, null, CLI],
   ['src/server/boot-restore.js', 'own-tree', 14, null, DATA], // B-1319: +1 = probeSockets' readdir of the sockets folder (the restore's probes, before listen)

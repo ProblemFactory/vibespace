@@ -71,6 +71,11 @@ const vaultOf = (keyFile) => VAULTS.get(path.resolve(path.dirname(keyFile))) || 
 const sealedHere = (keyFile) => fs.existsSync(path.join(path.dirname(keyFile), 'vault.json')) || fs.existsSync(keyFile + '.sealed');
 /** Does a registered vault hold this key file's dir? (a holder of a key it got from the vault keeps it for ONE call) */
 const vaultHeld = (keyFile) => !!vaultOf(keyFile);
+/** THE VAULT of a data dir (lane vault-e2e-password-fix-r2: the device link tokens, the frp token and the sealed JSON files
+ *  ask it) → its provider, or null when no engine holds the dir in this process; `sealedDir` = its vault is set up (a
+ *  process with no engine reads it as LOCKED, never the files). */
+const vaultForDir = (dataDir) => VAULTS.get(path.resolve(dataDir)) || null;
+const sealedDir = (dataDir) => fs.existsSync(path.join(dataDir, 'vault.json'));
 
 class SecretBoxError extends Error {
   constructor(code, message, cause, reason) {
@@ -262,4 +267,4 @@ function decWith(key, blob) {
   }
 }
 
-module.exports = { secretBox, SecretBoxError, KEY_HEX_RE, BOX_CIPHERTEXT_RE, holdsCiphertext, lawfulKey, mintKeyFile, describeJsonError, encWith, decWith, registerVault, vaultHeld };
+module.exports = { secretBox, SecretBoxError, KEY_HEX_RE, BOX_CIPHERTEXT_RE, holdsCiphertext, lawfulKey, mintKeyFile, describeJsonError, encWith, decWith, registerVault, vaultHeld, vaultForDir, sealedDir };

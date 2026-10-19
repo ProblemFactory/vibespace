@@ -348,6 +348,10 @@ function authState(adapterRecord, now, { lastPass = undefined, adapterState = nu
   const a = (adapterRecord && adapterRecord.auth) || {};
   const lp = lastPass === undefined ? (adapterRecord && adapterRecord.lastPass) || null : lastPass;
   const expiresAt = num(a.expiresAt);
+  // lane vault-e2e-password-fix-r2: the sign-in (or the app credential) is SEALED and the vault is LOCKED — asked before
+  // everything else, because every answer below would be a wrong sentence ("expired", "no usable client") about a
+  // credential that is fine and merely closed until a person unlocks
+  if (adapterState && adapterState.state === 'vault-locked') return { state: 'vault-locked', why: 'vault-locked', expiresAt };
   // The adapter's OWN answer, when the engine has one (design §14.3): an
   // application credential that was withdrawn — the cluster env removed, the
   // user's keys cleared — makes the adapter `needs-credentials` however fresh
@@ -382,7 +386,7 @@ function authState(adapterRecord, now, { lastPass = undefined, adapterState = nu
  *  so the foot said "not known yet" for ever). The engine writes `{read:'unknown', sendAs:[], why, at, retryAt}`
  *  with one of these when the conversation's lookup was refused: the ChannelError codes the adapters throw, plus
  *  the engine's own `backoff` (the account's vendor back-off; the owner's Retry is exempt) and `not-connected`. */
-const CONV_CAPS_FAIL_WHYS = Object.freeze(['rate-limited', 'backoff', 'not-connected', 'vendor-error', 'auth-expired']);
+const CONV_CAPS_FAIL_WHYS = Object.freeze(['rate-limited', 'backoff', 'not-connected', 'vendor-error', 'auth-expired', 'vault-locked']);
 
 /**
  * THE per-conversation capability cache, resolved against its own age
@@ -534,6 +538,7 @@ function sendWhyText(why, { t = defaultT } = {}) {
     case 'vendor-error': return t('the vendor did not answer whether you can reply — it is asked again by itself');
     case 'auth-expired': return t('this account\'s sign-in expired — Re-authorize');
     case 'not-connected': return t('this account is not connected — Re-authorize');
+    case 'vault-locked': return t('The vault is locked — unlock it first');   // lane vault-e2e-password-fix-r2
     case 'checking': return t('checking whether you can reply…');
     case 'stale': return t('the send capability has not been re-checked recently');
     case 'unknown': return t('the send capability is not known yet');
@@ -556,12 +561,13 @@ function sendFoot(cc, why, { t = defaultT, vendor = '', checking = false } = {})
   const v = vendor || t('The vendor');
   const said = w === 'rate-limited' ? t('{vendor} is rate-limiting this account — the reply box returns when it answers', { vendor: v })
     : w === 'backoff' ? t('This account is paused after repeated vendor errors — the reply box returns when it answers')
+      : w === 'vault-locked' ? t('The vault is locked — unlock it first')   // r2: never "expired"
       : w === 'auth-expired' ? t('This account\'s sign-in expired — Re-authorize to reply')
         : w === 'not-connected' ? t('This account is not connected — Re-authorize to reply')
           : t('{vendor} did not answer whether you can reply here', { vendor: v });
   const at = cc ? num(cc.retryAt) : null;
   const text = at ? t('{sentence} (retrying at {time})', { sentence: said, time: hhmm(at) }) : said;
-  return { state: 'failed', why: w, text, retryAt: at, retry: true, reauth: w === 'auth-expired' || w === 'not-connected' };
+  return { state: 'failed', why: w, text, retryAt: at, retry: true, reauth: w === 'auth-expired' || w === 'not-connected', unlock: w === 'vault-locked' };
 }
 
 /** WHY REPLYING INTO A THREAD IS NOT OFFERED, in words (lane channel-threads,
@@ -931,6 +937,7 @@ function laneWhyText(why, { t = defaultT } = {}) {
 function errorCodeText(code, { t = defaultT } = {}) {
   switch (String(code || '')) {
     case 'auth-expired': return t('login expired');
+    case 'vault-locked': return t('vault locked');   // lane vault-e2e-password-fix-r2: never "login expired"
     case 'rate-limited': return t('rate limited');
     case 'not-found': return t('not found');
     case 'forbidden': return t('forbidden');

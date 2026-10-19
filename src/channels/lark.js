@@ -56,7 +56,7 @@
  */
 const crypto = require('crypto');
 const { makeRecord, makeConversation, peerName, validateFacts } = require('../channel-record.js');   // peerName: THE name door (the .197 integration — the D3 app names pass it, lark-search-poll ④g)
-const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
+const { ChannelError, notConnectedError, vaultLockedWhy, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
 const Holds = require('./vendor-hold.js');   // lane lark-send-hold: the ACCOUNT's send hold (the one shape Slack's per-method hold uses)
 const { namelessSentence } = require('../channel-identity.js');   // verify r6: a consent must name its account
 const { createLarkLive, NAMES_WAIT_MS, UNAVAILABLE_WORDS } = require('./live/lark.js');
@@ -1173,9 +1173,9 @@ function create(record = {}, deps = {}) {
   let refreshing = null;
   async function accessToken(depth = 0) {   // verify r4 F1: `depth` bounds the re-entry (a superseded refresh re-reads ONCE)
     const cred = credential();
-    if (!cred.values) throw new ChannelError('auth-expired', `Lark app credential missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
+    if (!cred.values) throw vaultLockedWhy(cred.why) ? notConnectedError('Lark', cred.why) : new ChannelError('auth-expired', `Lark app credential missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
     const { token, why } = readToken();
-    if (!token) throw new ChannelError('auth-expired', `Lark is not connected (${why})`, { retryable: false });
+    if (!token) throw notConnectedError('Lark', why);   // lane vault-e2e-password-fix-r2: a LOCKED vault is `vault-locked`, never "expired"
     if (token.invalidGrantAt) throw new ChannelError('auth-expired', 'Lark refresh token was refused — re-authorize', { retryable: false });   // verify r5: a dead grant is not POSTed again per request (auth.state already said needs-reauth)
     if (unsaved && unsaved.token === token) await persistToken(token, unsaved.supersedes);   // verify r5: the store's next chance at a token it could not persist
     if (token.access_token && Number(token.expiresAt) > now() + REFRESH_MARGIN_MS) return token.access_token;

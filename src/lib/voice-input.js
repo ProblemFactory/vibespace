@@ -109,6 +109,7 @@ export function attachDictation(textarea, { getFacts = () => ({}), getCwd = () =
     const act = (label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'voice-chip-btn'; b.textContent = label; b.onclick = fn; chip.appendChild(b); };
     if (w.action === 'copy-url') act(t('Copy'), () => { copyText(params.url); });
     if (w.action === 'open-plugin') act(t('Open Plugins'), () => { hideChip(); openPlugins(); });
+    if (w.action === 'unlock') act(t('Unlock'), () => { hideChip(); window.dispatchEvent(new CustomEvent('vs-vault-door')); });   // lane vault-e2e-password-fix-r2: the vault's door (src/lib/vault-unlock.js)
     if (w.action === 'undo') act(t('Undo'), () => { hideChip(); undoInsert(); });
     if (w.action === 'resend') act(t('Resend'), () => { hideChip(); if (held) send(held.blob, held.ctx); });
     const x = document.createElement('button'); x.type = 'button'; x.className = 'voice-chip-close'; x.textContent = '✕'; x.title = t('Close'); x.onclick = hideChip; chip.appendChild(x);
@@ -166,6 +167,7 @@ export function attachDictation(textarea, { getFacts = () => ({}), getCwd = () =
     try { st = await (await fetch('/api/voice/status')).json(); } catch { }
     lastStatus = st;
     if (!st) { state = 'idle'; say('offline'); return; }
+    if (!st.connected && st.vaultLocked) { state = 'idle'; say('vault-locked', {}, { sticky: true }); return; }   // r2: the sealed sign-in — the door, never "connect"
     if (!st.connected || !st.enabled) { state = 'idle'; say(st.connected ? 'plugin-off' : 'not-connected', {}, { sticky: true }); return; }
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) {
       state = 'idle'; release();

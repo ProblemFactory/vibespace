@@ -41,7 +41,7 @@ const ESRC = engineSource(REPO);
 console.log('\n① PURE: the closed why set, the row, the foot');
 {
   const W = C.CONV_CAPS_FAIL_WHYS;
-  ok(Object.isFrozen(W) && W.join() === 'rate-limited,backoff,not-connected,vendor-error,auth-expired', 'the closed set of why a send row was not resolved', W.join());
+  ok(Object.isFrozen(W) && W.join() === 'rate-limited,backoff,not-connected,vendor-error,auth-expired,vault-locked', 'the closed set of why a send row was not resolved', W.join());
   // CENSUS: every why the engine's failure writer can put into a convCaps row, and every why Gmail's convCaps
   // answers, has its own words — sendWhyText's `default: return String(why)` is unreachable for them
   const body = ESRC.slice(ESRC.indexOf('async function convCapsFailed('), ESRC.indexOf('async function retryConvCaps('));

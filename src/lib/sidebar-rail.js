@@ -9,11 +9,12 @@
 import { t as tr } from './i18n.js';
 import { openJobsWindow } from './jobs-panel.js';
 import { paintIndexLine } from './search-window.js';
+import { paintVaultLine } from './vault-window.js'; // lane vault-contents-window: the System panel's vault line (its state + 「查看内容…」)
 import { badgeCounts, badgeText, heldText } from './jobs-layout.js';
 import { renderChannelsPanel } from './channels-panel.js';
 import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog, absUrl } from './utils.js';
 import { registerMenuItem } from './contributions.js';
-import { pluginProvides } from './plugins-ui.js';
+import { pluginProvides, pluginState } from './plugins-ui.js';
 import { registerWindowType } from './window-types.js';
 import { track } from './telemetry-client.js';
 import { censusRows, WORDS as MEMORY_WORDS } from '../memory-census.js'; // PURE: the server memory census's rows (lane server-memory-census)
@@ -517,8 +518,9 @@ export function installSidebarRail(Sidebar) {
       if (!c.isConnected) return;
       // zone order: bars → history charts → process table LAST (owner
       // report: the long table pushed the charts out of sight)
-      c.innerHTML = '<div class="sys-host-row"></div><div class="sys-live"></div><div class="sys-hist"></div><div class="sys-procs"></div><div class="sys-search"></div>';
+      c.innerHTML = '<div class="sys-host-row"></div><div class="sys-live"></div><div class="sys-hist"></div><div class="sys-procs"></div><div class="sys-search"></div><div class="sys-vault"></div>';
       paintIndexLine(c.querySelector('.sys-search')).catch(() => {}); // lane global-search: the search index's size + Rebuild (one line)
+      paintVaultLine(c.querySelector('.sys-vault'), this.app).catch(() => {}); // lane vault-contents-window: the vault's state + 「查看内容…」 (one line)
       const hostRow = c.querySelector('.sys-host-row');
       const live = c.querySelector('.sys-live');
       const procsEl = c.querySelector('.sys-procs');
@@ -852,7 +854,8 @@ export function installSidebarRail(Sidebar) {
       const acts = document.createElement('span');
       acts.className = 'ports-row-acts';
       const btn = (icon, tip, fn) => { const b = document.createElement('button'); b.className = 'mounts-icon-btn'; b.innerHTML = icon; b.dataset.tip = tip; b.onclick = fn; return b; };
-      const FRP_MSG = tr('Public URLs need the frp relay — not configured on this instance');
+      // lane vault-e2e-password-fix-r2: the relay's token is sealed and the vault is LOCKED — the vault's sentence, never "not configured"
+      const FRP_MSG = st.frpVaultLocked ? tr('The vault is locked — unlock it first') : tr('Public URLs need the frp relay — not configured on this instance');
       if (st.published) {
         acts.append(btn(PORT_ICONS.open, tr('Open'), () => this.app.openBrowser?.(st.url)));
         acts.append(btn(PORT_ICONS.copy, tr('Copy'), () => { copyText(st.url); showToast(tr('Copied')); }));
@@ -870,7 +873,7 @@ export function installSidebarRail(Sidebar) {
             rerender();
             return;
           }
-          if (!st.frpConfigured) { showToast(FRP_MSG, { type: 'error' }); return; }
+          if (!st.frpConfigured) { showToast(FRP_MSG, { type: 'error' }); if (st.frpVaultLocked) window.dispatchEvent(new CustomEvent('vs-vault-door')); return; }
           if (!st.authEnabled) { showToast(tr('Turn on a password or SSO first — mapping would expose this instance with no login'), { type: 'error' }); return; }
           const sub = await showInputDialog({
             title: tr('Map this VibeSpace to a public URL'),
@@ -932,7 +935,7 @@ export function installSidebarRail(Sidebar) {
       try { hosts = ((await api('/api/hosts')) || {}).hosts || []; } catch { }
       // publish needs the frp relay — without it the button must SAY so, not no-op
       const frpOk = await pluginProvides('relay'); // the declared capability, never a plugin id
-      const FRP_MSG = tr('Public URLs need the frp relay — not configured on this instance');
+      const FRP_MSG = !frpOk && (await pluginState('relay')).vaultLocked ? tr('The vault is locked — unlock it first') : tr('Public URLs need the frp relay — not configured on this instance');   // lane vault-e2e-password-fix-r2: the sealed relay token, LOCKED
       const machines = [{ id: '__local__', name: tr('This machine'), online: true }, ...hosts.map((h) => ({ id: h.id, name: h.name || h.id, online: h.transport === 'dial' ? !!h.online : true }))];
       const nameOf = (hid) => (machines.find((m) => m.id === hid) || {}).name || hid;
 

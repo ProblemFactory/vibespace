@@ -105,9 +105,13 @@ function storeErrorText(err) {
 const whyWords = (v, fallback) => R.credentialWhyText({ whyCode: v.whyCode, whyParams: v.whyParams, why: fallback === undefined ? v.why : fallback }, { t });
 
 const undecryptable = (v) => !!(v.storeError && v.storeError.code === 'values-undecryptable');
+/** lane vault-e2e-password-fix-r2: the store's key is the vault's and the vault is LOCKED — the row is closed, not empty and
+ *  not broken: its chip says Locked, its one line is the vault's sentence with the door (never "Not configured") */
+const vaultLocked = (v) => !!(v.storeError && v.storeError.reason === 'key-unreadable:vault_locked');
 function sourceChip(v) {
   const chip = el('span', 'integ-chip');
-  if (undecryptable(v)) { chip.classList.add('integ-chip-bad'); chip.textContent = t('Cannot be decrypted'); }
+  if (vaultLocked(v)) { chip.classList.add('integ-chip-bad'); chip.textContent = t('Locked'); }
+  else if (undecryptable(v)) { chip.classList.add('integ-chip-bad'); chip.textContent = t('Cannot be decrypted'); }
   else if (v.source === 'user') { chip.classList.add('integ-chip-user'); chip.textContent = t('Your own'); }
   else if (v.source === 'cluster') {
     chip.classList.add('integ-chip-cluster');
@@ -134,11 +138,15 @@ function renderCard(app, v, { refresh, focus }) {
   // the undecryptable row says ONE sentence under its state chip (a1 I3: the
   // `why` said the same fact a second time above a chip that contradicted both)
   // (a row with a sign-in tier is not broken without a key: its line is plain, not a warning — lane dropline-connect-door)
-  if (v.why && v.source === 'none' && !undecryptable(v)) card.appendChild(el('div', 'plugin-detail' + (v.connect ? '' : ' plugin-cfg-warn') + ' integ-why', whyWords(v)));
+  if (v.why && v.source === 'none' && !undecryptable(v) && !vaultLocked(v)) card.appendChild(el('div', 'plugin-detail' + (v.connect ? '' : ' plugin-cfg-warn') + ' integ-why', whyWords(v)));
   // A `cluster` answer carries a `why` only when the saved default was re-keyed
   // to the instance's only one — said on the card, not only in the chip's title.
   if (v.why && v.source === 'cluster') card.appendChild(el('div', 'plugin-detail integ-why', whyWords(v)));
-  if (v.storeError) card.appendChild(el('div', 'plugin-detail plugin-cfg-warn integ-why', storeErrorText(v.storeError)));
+  if (v.storeError) {
+    const line = el('div', 'plugin-detail plugin-cfg-warn integ-why', storeErrorText(v.storeError));
+    if (vaultLocked(v)) { const b = el('button', 'mounts-btn mounts-btn-primary integ-unlock', t('Unlock')); b.onclick = () => window.dispatchEvent(new CustomEvent('vs-vault-door')); line.append(' ', b); }   // the vault's door
+    card.appendChild(line);
+  }
 
   // ── 2. SETUP BLOCK, ABOVE THE FIELDS ──
   if (v.setup) {

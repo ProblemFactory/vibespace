@@ -26,6 +26,12 @@
 //   THE OPENSPEC: each window's recipe (machine, mode, display, ②'s folded, who opened it); a replay by THIS device streams at
 //     once in its mode; another device's waits for 「在这里显示」 (no stream until the press); a replayed window whose stream is
 //     refused never asks the sign-in by itself (「显示 VNC 画面」 asks it)                                       restore.png
+//   ⑤ NEVER SILENT (lane stream-fallback-never-silent — owner incident inc-mvf7z2a3-9sxi): the incident's sequence (MODE →
+//     每显示器一窗 → a display segment → close one window) and the transient under the first window (its capture dies once):
+//     the SAME session plays on — no VNC bridge, no sign-in; a source that ends (capture_interrupted) ⇒ 「串流中断：…——正在重新连接…」
+//     and the same display again; ended again within the minute ⇒ 「串流中断：…」 over the last picture with 「重试」 「显示 VNC 画面」
+//     and NOTHING by itself; the VNC picture only on that press; a display really gone ⇒ the main one; a switch = one session
+//     (`switched` in the hub's log) — RED CONTROL: the pre-lane fallback opens the VNC picture by itself      never-silent*.png
 // PNGs when `--shots <dir>`.
 import fs from 'node:fs';
 import net from 'node:net';
@@ -81,7 +87,8 @@ process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n'
 `, { mode: 0o755 });
 const psLines = () => (fs.existsSync(PS_LOG) ? fs.readFileSync(PS_LOG, 'utf8').trim().split('\n').filter(Boolean) : []);
 const RAW = path.join(root, 'd2.f16'); fs.writeFileSync(RAW, Buffer.alloc(D2.w * D2.h * 8)); // DISPLAY2's FP16 frames (the HDR road's capture)
-const FF = writeFakeFfmpeg(BIN, { log: path.join(root, 'ffmpeg.log'), fixture: FIXTURE, raw: RAW, version: '7.1', encoders: ['h264_nvenc', 'libx264'] });
+const DIE_N = path.join(root, 'die-capture-times'); // ⑤: the next N captures die mid-stream (DXGI_ERROR_ACCESS_LOST)
+const FF = writeFakeFfmpeg(BIN, { log: path.join(root, 'ffmpeg.log'), fixture: FIXTURE, raw: RAW, dieCaptureTimes: DIE_N, version: '7.1', encoders: ['h264_nvenc', 'libx264'] });
 const bundleText = fs.readFileSync(BUNDLE, 'utf8');
 const HELLO = /(op: "hello-ack",[\s\S]{0,200}?)platform: process\.platform,/;
 const INJ = /(createInjector\(\{\s*)platform: process\.platform,/;
@@ -98,10 +105,11 @@ ok(dm.status().info.platform === 'win32' && dm.status().info.capabilities.includ
 
 // ── the machine's VNC server (the fallback's): a stub RFB 3.8, VNC-password sign-in, one green frame ────────────────────
 function stubVnc() {
-  const seen = { sessions: 0, authed: 0 };
+  const seen = { sessions: 0, authed: 0, conns: 0 };
   const u16 = (n) => Buffer.from([(n >> 8) & 255, n & 255]);
   const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n >>> 0); return b; };
   const server = net.createServer((sock) => {
+    seen.conns++; // ⑤: every VNC picture's upstream connects here
     const c = { stage: 0, buf: Buffer.alloc(0) };
     sock.on('error', () => { });
     sock.write('RFB 003.008\n');
@@ -123,13 +131,15 @@ vnc = await stubVnc();
 
 // ── the hub: the real access layer + routes + the stream module (the machine's own screen source — no fake source) ─────────
 const quiet = { log() { }, warn() { } };
+const hubLines = []; // ⑤: the hub's stream log + the VNC bridge's (`… stopped (switched)`, `bridge opened`)
+const rec = { log: (m) => { hubLines.push(String(m)); }, warn: (m) => { hubLines.push(String(m)); } };
 const ACC = require(path.join(REPO, 'src/server/desktop-access.js'));
 const DW = require(path.join(REPO, 'src/server/desktop-webrtc.js'));
 const hosts = { list: () => [{ id: 'win-a', name: 'WIN-DESK1', transport: 'dial' }], linkState: () => 'online', connectedDevice: (id) => (id === 'win-a' ? dm : null), get: (id) => (id === 'win-a' ? { id, name: 'WIN-DESK1' } : null), isLocal: (id) => id === 'local', deviceBounded: async (id) => (id === 'win-a' ? dm : null) };
 const access = ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, env: () => ({}) });
-const hub = DW.create({ access, log: quiet });
+const hub = DW.create({ access, log: rec });
 const DS = require(path.join(REPO, 'src/server/desktop-stream.js'));
-const bridge = DS.create({ auth: { requestAuthed: () => true }, log: quiet, pingMs: 5000, resolveTarget: (id) => access.machineDesktopTarget(id), forwardPort: (h, p) => access.forwardPort(h, p) });
+const bridge = DS.create({ auth: { requestAuthed: () => true }, log: rec, pingMs: 5000, resolveTarget: (id) => access.machineDesktopTarget(id), forwardPort: (h, p) => access.forwardPort(h, p) });
 const express = require(path.join(REPO, 'node_modules/express'));
 const R = require(path.join(REPO, 'src/routes/desktop-apps.js'));
 R.setup({ access, stream: bridge, vnc: { status: async () => ({ available: true, running: false }) }, webrtc: hub });
@@ -162,16 +172,22 @@ const STILL = "const still = stillOf(stream, panes.pane(''));";
 const noStill = { name: 'no-still', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(STILL)) throw new Error('the still line moved'); return { contents: src.replace(STILL, 'const still = null;'), loader: 'js' }; }); } };
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page.js'), loader: { '.css': 'empty' }, logLevel: 'error' });
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-nostill.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [noStill] });
+// ⑤ RED CONTROL: the pre-lane fallback — a played stream's ending shows the VNC picture by itself (the ladder never asked)
+const LADDER = "if (nv.act !== 'fallback') {";
+const oldFallback = { name: 'old-fallback', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(LADDER)) throw new Error('the ladder line moved'); return { contents: src.replace(LADDER, 'if (false) {'), loader: 'js' }; }); } };
+await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-oldfallback.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [oldFallback] });
 const web = express(); web.use(express.json());
 web.use(R.router);
 const CSS = ['style', 'viewers', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
 for (const n of CSS) web.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
 web.get('/page.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page.js'))));
 web.get('/page-nostill.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-nostill.js'))));
+web.get('/page-oldfallback.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-oldfallback.js'))));
 web.get('/novnc.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(NOVNC)));
 const HTML = `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-root);height:100vh;overflow:hidden}</style></head><body><script src="/page.js"></script></body></html>`;
 web.get('/', (q, s) => s.type('text/html').send(HTML));
 web.get('/nostill', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-nostill.js')));
+web.get('/oldfallback', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-oldfallback.js')));
 const PORT = await freePort();
 srv = http.createServer(web);
 srv.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head, bridge.upgradeId(new URL(req.url, 'http://x').pathname)));
@@ -490,6 +506,98 @@ console.log('THE OPENSPEC: a reload, another device');
   const dialog = await p.until(`!!document.querySelector('#machine-desktop-signin input[type=password]')`, 10000);
   fs.renameSync(FF.exe + '.away', FF.exe);
   ok(ask && noDialog && dialog, 'a replayed window whose stream is refused (no ffmpeg) never asks the sign-in by itself: 「没有串流：…」 + 「显示 VNC 画面」, which asks it', { ask, noDialog, dialog });
+  await p.close();
+}
+console.log('⑤ NEVER SILENT (lane stream-fallback-never-silent — incident inc-mvf7z2a3-9sxi): a playing stream never shows the VNC picture by itself');
+{
+  await untilN(async () => (await live()).length === 0, 5000);
+  const p = await page(1280, 860, HALF, { tile: true });
+  const signin = () => p.ev(`!!document.querySelector('#machine-desktop-signin')`);
+  /** no VNC picture since the mark: no upstream to the machine's VNC server, no bridge in the hub's log, no sign-in */
+  const noVnc = async (m) => vnc.seen.conns === m.conns && !hubLines.slice(m.lines).some((l) => /bridge opened/.test(l)) && !(await signin());
+  const mark = () => ({ conns: vnc.seen.conns, lines: hubLines.length });
+  const clock = (sel) => p.ev(`(() => { const v = document.querySelector(${JSON.stringify(sel + ' .stream-video')}); return v ? v.currentTime : -1; })()`);
+  const say = () => p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-display-say'); return s ? { text: s.querySelector('span').textContent, buttons: [...s.querySelectorAll('button')].map((b) => b.textContent) } : null; })()`);
+  const noteText = () => p.ev(`(() => { const n = document.querySelector('${WIN} .desktop-strip-note'); return n && !n.hidden ? n.textContent : ''; })()`);
+  await p.ev(`window.__open(${JSON.stringify(M)}, { mode: 'switch' })`);
+  await playingIn(p, WIN);
+  await p.until(`(() => { const b = document.querySelector('${WIN} .desktop-strip-mode'); return !!b && !b.hidden; })()`, 8000);
+  const m0 = mark();
+  // THE OWNER'S SEQUENCE (the incident pack's action ring): the strip's MODE button → a mode → a display segment → a window's ×
+  await p.ev(`document.querySelector('${WIN} .desktop-strip-mode').click()`);
+  const picked = await pressMenu(p, '/每显示器一窗/');
+  const two = (await p.until(`window.__wins().length === 2`, 8000)) && (await playingIn(p, WIN, 2)) && (await untilN(async () => (await live()).length === 2, 8000));
+  const w2 = (await p.ev('window.__wins()')).find((w) => w.display === D2.id) || {};
+  await p.ev(`(() => { const w = document.querySelector('${WIN}[data-id="${w2.id}"]'); ${byDisplay(WIN + '[data-id="' + w2.id + '"] .desktop-strip-seg', D1.id)}.click(); return !!w; })()`);
+  await sleep(600);
+  const each = await sourcesOf();
+  ok(picked && two && same(each, [D1.id, D2.id].sort()), '⑤ the incident\'s sequence: MODE → 每显示器一窗 ⇒ a window for DISPLAY2; its display segment 1 only shows the first window — ONE session per display (never two on one)', { picked, two, each });
+  const s1 = (await live()).find((s) => s.source && s.source.display === D1.id) || {};
+  await p.ev(`window.__close(${JSON.stringify(w2.id)})`);
+  await untilN(async () => same(await sourcesOf(), [D1.id]), 6000);
+  fs.writeFileSync(DIE_N, '1'); // THE TRANSIENT under the first window (on the Mac: SCK -3805 the moment the sibling helper quit)
+  const again = await untilN(async () => { const s = (await live()).find((x) => x.sid === s1.sid); return !!(s && s.stats && s.stats.screen && s.stats.screen.captureRestarts === 1); }, 8000);
+  const c1 = await clock(WIN); await sleep(1500); const c2 = await clock(WIN);
+  const live1 = await live();
+  ok(again && live1.length === 1 && live1[0].sid === s1.sid && c2 > c1 + 0.5 && (await noVnc(m0)), `⑤ the second window closed and DISPLAY1's capture died under the first: the SAME session (${s1.sid}) captured it again in place — the first window still streams (its clock ${c1.toFixed(1)} → ${c2.toFixed(1)} s), no VNC bridge, no sign-in`, { again, live: live1.map((s) => [s.sid, s.source && s.source.display]), c1, c2, conns: vnc.seen.conns - m0.conns });
+  await p.shot('never-silent-plays.png', WIN);
+  // the source runs out of restarts (capture_interrupted) ⇒ the window says so and starts the same display again
+  fs.writeFileSync(DIE_N, '3');
+  const said = await p.until(`/串流中断：机器的屏幕采集一再中断——正在重新连接/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 12000);
+  const back = (await untilN(async () => { const l = await live(); return l.length === 1 && l[0].sid !== s1.sid && l[0].source && l[0].source.display === D1.id; }, 10000)) && (await playingIn(p, WIN));
+  ok(said && back && (await noVnc(m0)), '⑤ the source ran out of restarts (capture_interrupted): 「串流中断：机器的屏幕采集一再中断——正在重新连接…」 and the SAME display again 1 s on — it plays; no VNC bridge, no sign-in', { said, back, live: (await live()).map((s) => s.source && s.source.display) });
+  // … and ends again within the minute ⇒ the person chooses; nothing starts by itself
+  fs.writeFileSync(DIE_N, '3');
+  const asked = await p.until(`(() => { const s = document.querySelector('${WIN} .desktop-display-say'); return !!s && s.querySelectorAll('button').length === 2; })()`, 15000);
+  await sleep(2500);
+  const ask = await say(), quiet1 = (await live()).length === 0 && (await noVnc(m0)), held = await p.ev(`!!document.querySelector('${WIN} .desktop-display-still')`);
+  ok(asked && ask && ask.text === '串流中断：机器的屏幕采集一再中断' && same(ask.buttons, ['重试', '显示 VNC 画面']) && quiet1 && held, '⑤ ended again within the minute: 「串流中断：机器的屏幕采集一再中断」 over the last picture with TWO buttons 「重试」 「显示 VNC 画面」 — 2.5 s on nothing started by itself: no stream, no VNC bridge, no sign-in', { ask, quiet1, held, note: await noteText() });
+  await p.shot('never-silent-ask.png', WIN);
+  await p.ev(`document.querySelectorAll('${WIN} .desktop-display-say button')[0].click()`);
+  const retried = (await untilN(async () => (await live()).length === 1, 8000)) && (await playingIn(p, WIN));
+  ok(retried && !(await say()) && !(await p.ev(`!!document.querySelector('${WIN} .desktop-display-still')`)) && (await noVnc(m0)), '⑤ 「重试」 ⇒ the display streams again; the ask and the last picture go', { retried, ask: await say() });
+  fs.writeFileSync(DIE_N, '3');
+  const asked2 = await p.until(`(() => { const s = document.querySelector('${WIN} .desktop-display-say'); return !!s && s.querySelectorAll('button').length === 2; })()`, 15000);
+  const quiet2 = await noVnc(m0);
+  await p.ev(`document.querySelectorAll('${WIN} .desktop-display-say button')[1].click()`);
+  const dialog = await p.until(`!!document.querySelector('#machine-desktop-signin input[type=password]')`, 10000);
+  ok(asked2 && quiet2 && dialog && vnc.seen.conns > m0.conns, '⑤ ended again ⇒ asked again (still no VNC); 「显示 VNC 画面」 ⇒ the VNC picture — its sign-in — only on that press', { asked2, quiet2, dialog, conns: vnc.seen.conns - m0.conns });
+  await p.close();
+  fs.writeFileSync(DIE_N, '0');
+  // a display REALLY gone (unplugged under its capture: two facts reads 1 s apart lack it) ⇒ the same display is refused ⇒ the main one
+  await untilN(async () => (await live()).length === 0, 5000);
+  const q = await page(1280, 800, DESK);
+  await q.ev(`window.__open(${JSON.stringify(M)}, { mode: 'switch' })`);
+  await playingIn(q, WIN);
+  await q.until(`document.querySelectorAll('${WIN} .desktop-strip-displays:not([hidden]) .desktop-strip-seg').length === 3`, 8000);
+  const m1 = { conns: vnc.seen.conns, lines: hubLines.length };
+  const sw0 = (await live())[0] || {};
+  await q.ev(`${byDisplay(WIN + ' .desktop-strip-seg', D2.id)}.click()`);
+  const onD2 = (await untilN(async () => same(await sourcesOf(), [D2.id]), 10000)) && (await playingIn(q, WIN));
+  const switched = hubLines.slice(m1.lines).some((l) => l.includes(`session ${sw0.sid} stopped (switched)`));
+  ok(onD2 && switched && (await live()).length === 1, '⑤ a display switch leaves ONE session — the old one stopped `switched` (the hub\'s log says so)', { onD2, switched, live: (await live()).length });
+  fs.writeFileSync(FACTS, factsLine([D1])); // DISPLAY2 unplugged …
+  fs.writeFileSync(DIE_N, '1'); // … under its capture
+  const main = (await untilN(async () => same(await sourcesOf(), [D1.id]), 15000)) && (await playingIn(q, WIN));
+  const qSignin = await q.ev(`!!document.querySelector('#machine-desktop-signin')`);
+  ok(main && vnc.seen.conns === m1.conns && !qSignin && hubLines.slice(m1.lines).some((l) => /stopped \(display_gone\)/.test(l)), '⑤ DISPLAY2 really gone (display_gone after two reads): the same display again is refused ⇒ the MAIN display streams — no VNC bridge, no sign-in', { main, src: await sourcesOf(), conns: vnc.seen.conns - m1.conns });
+  fs.writeFileSync(FACTS, factsLine([D1, D2]));
+  await q.ev("localStorage.removeItem('vibespace.desktopModes')");
+  await q.close();
+  fs.writeFileSync(DIE_N, '0');
+}
+console.log('⑤ RED CONTROL: the pre-lane fallback');
+{
+  await untilN(async () => (await live()).length === 0, 5000);
+  await dm.streamFacts({ force: true }).catch(() => null);
+  const p = await page(1280, 800, DESK, { at: '/oldfallback' });
+  await p.ev(`window.__open(${JSON.stringify(M)}, { mode: 'switch' })`);
+  await playingIn(p, WIN);
+  const c0 = vnc.seen.conns;
+  fs.writeFileSync(DIE_N, '3');
+  const dialog = await p.until(`!!document.querySelector('#machine-desktop-signin')`, 15000);
+  ok(dialog && vnc.seen.conns > c0, '⑤ RED CONTROL: the pre-lane fallback (the ladder never asked) — the same ending opens the VNC picture by itself (its sign-in on the screen, an upstream to the VNC server): the incident', { dialog, conns: vnc.seen.conns - c0 });
+  fs.writeFileSync(DIE_N, '0');
   await p.close();
 }
 ok((await live()).length === 0, 'every window closed ⇒ no stream session left on the hub');

@@ -15,7 +15,9 @@
 //   ④ input over the data channel into THE resident script: a click at the picture's centre = M 640 360 · D 0 · U 0; a key = its
 //      scan code; a Mac viewer's ⌘ = the machine's Ctrl (K 29 0 0) — RED CONTROL: the door without THE table sends K 91 1 0
 //   ⑤ UIPI: an elevated window in front ⇒ the strip names it (the press never reached it)
-//   ⑥ THE FALLBACK: the machine ends the stream ⇒ the <video> goes, the strip says why, the VNC picture signs in and draws  fallback.png
+//   ⑥ NEVER SILENT (lane stream-fallback-never-silent): the machine ends the PLAYING stream ⇒ 「串流中断：…——正在重新连接…」 and the
+//     same stream again (no VNC); ended again ⇒ 「重试」 「显示 VNC 画面」, nothing by itself; the press ⇒ the VNC picture signs in
+//     and draws  fallback.png
 //      ⓟ this stub sends no pointer of its own (a Mac's Screen Sharing showed none — lane stream-cursor): the canvas shows YOUR
 //      arrow (default), never noVNC's none; the chip's title says 指针是你的
 //   ⑦ relay-only — lane stream-relay-udp: the daemon's own UDP leg carries it, the strip says 经 hub 中转 · UDP; the copy's
@@ -377,12 +379,21 @@ console.log('① – ⑥ desk 1280 px');
   await p.shot('uipi.png', WIN);
   const sid = (await sessions())[0]?.sid;
   const raw = await dm._request({ op: 'stream-stop', sid, timeoutMs: 5000 }); // the MACHINE ends it (past the client's own stop, so its `ended` push is heard)
-  const fell = await p.until(`!document.querySelector('${WIN} .stream-video') && /串流停了/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 10000);
+  const said = await p.until(`/串流中断：机器那边结束了它（stopped）——正在重新连接/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 10000);
+  const back = (await p.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); return !!v && v.currentTime > 0.2; })()`, 15000)) && (await sessions()).some((x) => !x.ended && x.sid !== sid);
+  const quiet0 = !(await p.ev(`!!document.querySelector('#machine-desktop-signin')`)) && vnc.seen.authed === 0;
+  ok(raw && raw.stopped && said && back && quiet0, '⑥ NEVER SILENT (lane stream-fallback-never-silent): the machine ends the PLAYING stream ⇒ the strip says 串流中断：机器那边结束了它（stopped）——正在重新连接…, the same stream again 1 s on — it plays; no VNC picture, no sign-in', { raw, said, back, quiet0, vnc: vnc.seen });
+  const sid2 = (await sessions()).find((x) => !x.ended && x.sid !== sid)?.sid;
+  await dm._request({ op: 'stream-stop', sid: sid2, timeoutMs: 5000 }); // … and again within the minute
+  const ask = await p.until(`(() => { const s = document.querySelector('${WIN} .desktop-display-say'); return !!s && /串流中断：机器那边结束了它（stopped）/.test(s.textContent) && s.querySelectorAll('button').length === 2; })()`, 10000);
+  await sleep(1500);
+  const quiet1 = !(await p.ev(`!!document.querySelector('#machine-desktop-signin')`)) && vnc.seen.authed === 0 && !(await p.ev(`!!document.querySelector('${WIN} .stream-video')`));
+  await p.ev(`document.querySelectorAll('${WIN} .desktop-display-say button')[1].click()`); // 「显示 VNC 画面」
   const asked = await p.until(`!!document.querySelector('#machine-desktop-signin input[type=password]')`, 15000);
   if (asked) await p.ev(`(() => { const f = document.querySelector('#machine-desktop-signin form'); f.querySelector('input[type=password]').value = 'pw'; f.requestSubmit(); })()`);
   const drawn = await p.until(`(() => { const cv = document.querySelector('${WIN} canvas'); if (!cv || cv.width !== 1280) return false; const d = cv.getContext('2d').getImageData(640, 360, 1, 1).data; return Math.abs(d[0] - 40) < 8 && Math.abs(d[1] - 150) < 8 && Math.abs(d[2] - 70) < 8; })()`, 15000);
   const s3 = await stripText(p);
-  ok(raw && raw.stopped && fell && asked && drawn && vnc.seen.authed === 1 && /机器那边结束了它（stopped）/.test(s3.note || ''), '⑥ the machine ends the stream ⇒ the <video> goes, the strip says why (串流停了（机器那边结束了它（stopped））——改为显示 VNC 画面), the VNC picture signs in and draws', { raw, fell, asked, drawn, s3, vnc: vnc.seen });
+  ok(ask && quiet1 && asked && drawn && vnc.seen.authed === 1 && /没有串流：机器那边结束了它（stopped）/.test(s3.title || ''), '⑥ ended again within the minute ⇒ 「串流中断：机器那边结束了它（stopped）」 with 「重试」 「显示 VNC 画面」 — nothing by itself; the press ⇒ the VNC picture signs in and draws (the chip says why: 没有串流：…)', { ask, quiet1, asked, drawn, s3, vnc: vnc.seen });
   const vc = await p.ev(`(() => { const cv = document.querySelector('${WIN} canvas'), b = cv.getBoundingClientRect(), top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return { computed: getComputedStyle(cv).cursor, inline: cv.style.cursor, top: top === cv ? 'canvas' : top ? top.tagName.toLowerCase() : null }; })()`);
   const s6 = await stripText(p);
   ok(vc.computed === 'default' && vc.top === 'canvas' && /指针是你的/.test(s6.title || ''), `⑥ ⓟ the VNC picture with no pointer from the machine: the canvas shows YOUR arrow (${vc.computed}, inline ${vc.inline || '—'}), never noVNC's none; the chip's title says 指针是你的`, { vc, title: s6.title });
@@ -546,12 +557,15 @@ console.log('⑩ the machine\'s own screen: the HDR road, NVENC on the strip —
   ok(up && nv && /HDR 已在机器上映射（SDR 白点 200 nits）/.test(s.title) && f.source && f.source.kind === 'screen' && f.source.encoder === 'NVENC' && f.source.mode === 'mapped', '⑩ the machine\'s own screen (no fake source on the hub): the HDR road plays, the numbers read … · NVENC · 编码 N ms, the chip\'s title says HDR 已在机器上映射（SDR 白点 200 nits）', { s, src: f.source });
   await p.shot('screen.png', WIN);
   fs.writeFileSync(DIE, '1');
-  const fell = await p.until(`!document.querySelector('${WIN} .stream-video') && /串流停了（机器的屏幕采集停了）/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 12000);
+  const saidI = await p.until(`/串流中断：机器的屏幕采集一再中断——正在重新连接/.test((document.querySelector('${WIN} .desktop-strip-note') || {}).textContent || '')`, 15000);
+  const ask = await p.until(`(() => { const s = document.querySelector('${WIN} .desktop-display-say'); return !!s && /串流中断/.test(s.textContent) && s.querySelectorAll('button').length === 2; })()`, 25000);
+  const noSign = !(await p.ev(`!!document.querySelector('#machine-desktop-signin')`));
+  fs.rmSync(DIE);
+  await p.ev(`document.querySelectorAll('${WIN} .desktop-display-say button')[1].click()`); // 「显示 VNC 画面」
   const asked = await p.until(`!!document.querySelector('#machine-desktop-signin input[type=password]')`, 15000);
   if (asked) await p.ev(`(() => { const f = document.querySelector('#machine-desktop-signin form'); f.querySelector('input[type=password]').value = 'pw'; f.requestSubmit(); })()`);
   const drawn = await p.until(`(() => { const cv = document.querySelector('${WIN} canvas'); if (!cv || cv.width !== 1280) return false; const d = cv.getContext('2d').getImageData(640, 360, 1, 1).data; return Math.abs(d[0] - 40) < 8 && Math.abs(d[1] - 150) < 8 && Math.abs(d[2] - 70) < 8; })()`, 15000);
-  fs.rmSync(DIE);
-  ok(fell && drawn, '⑩ the capture ffmpeg dies ⇒ the stream ends BY NAME: the <video> goes, the strip says 串流停了（机器的屏幕采集停了）——改为显示 VNC 画面, the VNC picture signs in and draws', { fell, asked, drawn });
+  ok(saidI && ask && noSign && drawn, '⑩ the capture ffmpeg keeps dying ⇒ in place on the machine twice, then capture_interrupted: 串流中断：机器的屏幕采集一再中断——正在重新连接…; the retry dies too ⇒ 「串流中断：…」 with 「重试」 「显示 VNC 画面」 (no sign-in by itself); the press ⇒ the VNC picture signs in and draws', { saidI, ask, noSign, asked, drawn });
   await p.shot('screen-fallback.png', WIN);
   await p.close();
   screenHub.shutdown();

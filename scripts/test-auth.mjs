@@ -27,6 +27,11 @@
 //      mounts nothing before the gate (an AST walk of the statements between `express()` and the gate) and creates
 //      the only express app; no other origin rule in the tree (the Sec-Fetch-Site / Origin readers declared).
 //      RED CONTROLS: a planted router before the gate, the pre-fix auth-routes order, the gate cut ⇒ N outside.
+//   ⑦ LOGIN TOKENS AT REST (lane vault-e2e-password-fix-r2): auth.json keys a login by sha256(token) only; 30 days from the
+//      last use (the slide reaches the disk + the cookie at most hourly), never past 180 days from the sign-in; a plaintext
+//      map an older build wrote is hashed at the first start (each login valid once; the old bytes overwritten); a vault
+//      LOCK act (the real engine + src/server/vault-hooks.js) revokes every login and closes every page socket with 4401 —
+//      the shutdown's quiet lock does not.
 // Run: node scripts/test-auth.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -533,6 +538,98 @@ function beforeGate(src) {
   for (const f of hubFiles()) codeLines(readRepo(f)).forEach((l, i) => { if (/sec-fetch|req\.headers\.origin\b|headers\[['"]origin['"]\]/.test(l)) seen.push([f, i + 1, l]); });
   const stray = seen.filter(([f, , l]) => f !== 'src/write-origin.js' && !READERS.some((r) => r[0] === f && r[1] instanceof RegExp && r[1].test(l)));
   ok(stray.length === 0 && READERS.slice(1).every((r) => seen.some(([f, , l]) => f === r[0] && r[1].test(l))), `no second origin rule: Sec-Fetch-Site / Origin are read by write-origin.js and ${READERS.length - 1} declared readers (${READERS.slice(1).map((r) => r[0]).join(', ')})`, stray.map(([f, n, l]) => `${f}:${n} ${l.trim().slice(0, 90)}`));
+}
+
+console.log('⑦ LOGIN TOKENS AT REST (lane vault-e2e-password-fix-r2, the owner\'s decision ④ / design q-042 D9): sha256 only, 30-day slide, 180-day cap, a vault LOCK signs every login out');
+{
+  const A = fresh(AUTH);
+  const DAY = 86400e3;
+  const realNow = Date.now;
+  let clock = realNow();
+  Date.now = () => clock;
+  try {
+    const dataDir = path.join(DIR, `rest-${++seq}`); fs.mkdirSync(dataDir, { recursive: true });
+    const auth = new A.Auth(dataDir);
+    auth.setPassword('pw-rest-1');
+    const tok = auth.issueToken('ua-1');
+    const file = path.join(dataDir, 'auth.json');
+    const text = fs.readFileSync(file, 'utf8');
+    ok(!text.includes(tok) && text.includes(A.tokenDigest(tok)) && (fs.statSync(file).mode & 0o777) === 0o600 && JSON.parse(text).tokensHashed === 1, 'issueToken: auth.json keys the login by sha256(token) — the token itself is in no byte of the file (0600)');
+    ok(auth.checkToken(tok) && !auth.checkToken(A.tokenDigest(tok)), 'the cookie\'s token opens; the DIGEST (what a disk thief reads) opens nothing');
+    // MUTANT: the pre-r2 issue (the token itself as the map key) ⇒ the at-rest census above is RED
+    const anchor = "this._state.tokens[tokenDigest(token)] = { createdAt: now, usedAt: now, ua: String(ua).slice(0, 120) };";
+    const mutSrc = readRepo(AUTH);
+    ok(mutSrc.includes(anchor), 'the mutant\'s anchor is issueToken\'s write');
+    const AM = require(MUT.write(AUTH, mutSrc.replace(anchor, "this._state.tokens[token] = { createdAt: now, usedAt: now, ua: String(ua).slice(0, 120) };"), 'plain-key'));
+    const dm = path.join(DIR, `rest-mut-${++seq}`); fs.mkdirSync(dm, { recursive: true });
+    const am = new AM.Auth(dm); am.setPassword('pw-m'); const tm = am.issueToken('m');
+    ok(fs.readFileSync(path.join(dm, 'auth.json'), 'utf8').includes(tm), 'MUTANT (the token stored as the key) ⇒ RED: the census reads the token in auth.json');
+    // THE SLIDE: each use extends 30 days; THE CAP: 180 days from the sign-in, however often used
+    const t0 = clock;
+    clock = t0 + 29 * DAY; ok(auth.checkToken(tok), 'day 29, used: alive (and the slide moves)');
+    clock = t0 + 58 * DAY; ok(auth.checkToken(tok), 'day 58 (29 days after the last use): alive — the slide moved at day 29');
+    clock = t0 + 58 * DAY + 31 * DAY; ok(!auth.checkToken(tok), 'day 89 (31 days unused): DEAD — the 30-day slide');
+    const tok2 = (clock = t0, auth.issueToken('ua-2'));
+    for (let dd = 20; dd < 180; dd += 20) { clock = t0 + dd * DAY; auth.checkToken(tok2); }
+    clock = t0 + 179 * DAY; ok(auth.checkToken(tok2), 'used every 20 days: alive at day 179');
+    clock = t0 + 181 * DAY; ok(!auth.checkToken(tok2), 'day 181: DEAD however often it was used — the 180-day cap');
+    // the slide reaches the disk at most once an hour, and the cookie's Max-Age follows it (never past the cap)
+    clock = t0 + 200 * DAY;
+    const tok3 = auth.issueToken('ua-3');
+    const disk = () => JSON.parse(fs.readFileSync(file, 'utf8')).tokens[A.tokenDigest(tok3)].usedAt;
+    clock += 10 * 60e3; auth.checkToken(tok3);
+    ok(disk() === t0 + 200 * DAY, 'a use 10 min after the last: the slide is in memory only (no auth.json write per request)');
+    clock += 2 * 3600e3;
+    const cookies = [];
+    const res = { append: (k, v) => cookies.push([k, v]) };
+    ok(auth.checkToken(tok3) && disk() === clock, 'a use an hour later: usedAt reaches the disk');
+    auth._slideCookie({ headers: {} }, res, tok3);
+    const ma = Number((/Max-Age=(\d+)/.exec((cookies[0] || [])[1] || '') || [])[1]);
+    ok(cookies.length === 1 && ma === 30 * 86400, 'and the cookie is re-set with the slide\'s 30 days (Max-Age) — a login used every day never expires in the browser before the cap', cookies);
+    clock = t0 + 200 * DAY + 175 * DAY;
+    ok(A.Auth.cookieMaxAge(JSON.parse(fs.readFileSync(file, 'utf8')).tokens[A.tokenDigest(tok3)], clock) === 5 * 86400, 'near the cap the cookie\'s Max-Age is what is LEFT of the 180 days (5 days), never the full 30');
+    ok(/Max-Age=\$\{Math\.floor\(TOKEN_IDLE_MS \/ 1000\)\}/.test(readRepo(AUTH)) && !/Max-Age=\$\{Math\.floor\(TOKEN_TTL_MS/.test(readRepo(AUTH)), 'a sign-in sets the 30-day cookie (never the 180-day one)');
+    // THE MIGRATION: a plaintext map an older build wrote is hashed at the first start — every login inside the cap stays valid once
+    clock = realNow();
+    const d2 = path.join(DIR, `rest-${++seq}`); fs.mkdirSync(d2, { recursive: true });
+    const old = [crypto.randomBytes(24).toString('hex'), crypto.randomBytes(24).toString('hex'), crypto.randomBytes(24).toString('hex')];
+    fs.writeFileSync(path.join(d2, 'auth.json'), JSON.stringify({ passwordHash: 'x'.repeat(64), salt: 'ab'.repeat(16), userSet: true, tokens: { [old[0]]: { createdAt: clock - 5 * DAY }, [old[1]]: { createdAt: clock - 170 * DAY }, [old[2]]: { createdAt: clock - 190 * DAY } } }));
+    fs.linkSync(path.join(d2, 'auth.json'), path.join(d2, 'before.link'));
+    const a2 = new A.Auth(d2);
+    const t2 = fs.readFileSync(path.join(d2, 'auth.json'), 'utf8');
+    ok(old.every((x) => !t2.includes(x)) && !old.some((x) => fs.readFileSync(path.join(d2, 'before.link'), 'latin1').includes(x)), 'MIGRATION: the plaintext keys become digests at the first start, and the old file\'s bytes are overwritten (the hard link to the retired inode reads no token)');
+    ok(a2.checkToken(old[0]) && a2.checkToken(old[1]) && !a2.checkToken(old[2]), 'every login inside the cap stays valid once (the migration counts as its use); one past 180 days is gone');
+    const a3 = new A.Auth(d2);
+    ok(a3.checkToken(old[0]) && fs.readFileSync(path.join(d2, 'auth.json'), 'utf8') === fs.readFileSync(path.join(d2, 'auth.json'), 'utf8') && Object.keys(JSON.parse(fs.readFileSync(path.join(d2, 'auth.json'), 'utf8')).tokens).every((k) => /^[0-9a-f]{64}$/.test(k)), 'a second start does not hash the digests again (logins still valid)');
+  } finally { Date.now = realNow; }
+  // THE LOCK SIGNS EVERY LOGIN OUT — the REAL vault engine + the REAL hooks (src/server/vault-hooks.js) + a REAL ws server
+  {
+    const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
+    const { wireVaultHooks, SIGNED_OUT_CODE } = require(path.join(REPO, 'src/server/vault-hooks.js'));
+    const I = await instance('password', { authMod: A, extra: (app) => app.get('/api/home', (req, res) => res.json({ ok: true })) });
+    const vd = path.join(DIR, `vault-${++seq}`); fs.mkdirSync(vd, { recursive: true });
+    const v = VE.create({ dataDir: vd, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {} }, idleTimer: false, register: false });
+    const wss = new WebSocketServer({ port: 0, host: OWN_HOST });
+    await new Promise((r) => wss.on('listening', r));
+    const closed = [];
+    const c1 = new WebSocket(`ws://${OWN_HOST}:${wss.address().port}/ws`);
+    await new Promise((r) => c1.on('open', r));
+    c1.on('close', (code) => closed.push(code));
+    await new Promise((r) => setTimeout(r, 30));
+    wireVaultHooks({ vault: v, auth: I.auth, wss, log: { log() {}, warn() {} } });
+    ok((await v.setup('second-password-1', {})).ok, 'a vault set up (its hooks wired the way the hub wires them)');
+    const before = await hit(I, '/api/home', { method: 'GET', headers: I.cookie });
+    ok(before.status === 200, 'before the lock: the cookie opens /api/home');
+    v.lock('sigterm', { quiet: true });
+    ok((await hit(I, '/api/home', { method: 'GET', headers: I.cookie })).status === 200, 'the SHUTDOWN\'s quiet lock signs nobody out (a restart is not a lock act — the unlock modal is the gate)');
+    await v.unlock('second-password-1', {});
+    v.lock('door');
+    await new Promise((r) => setTimeout(r, 100));
+    const after = await hit(I, '/api/home', { method: 'GET', headers: I.cookie });
+    ok(after.status === 401 && closed.includes(SIGNED_OUT_CODE) && Object.keys(JSON.parse(fs.readFileSync(path.join(DIR, `password-${seq - 1}`, 'auth.json'), 'utf8')).tokens || {}).length === 0,
+      'a LOCK (the door): every login revoked (the old cookie ⇒ 401 — the page shows the sign-in, then the unlock), every page socket closed with 4401, auth.json\'s map empty', { status: after.status, closed });
+    v.close(); wss.close(); await I.close();
+  }
 }
 
 console.warn = warn0;

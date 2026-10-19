@@ -5,7 +5,13 @@
  * - Password sources: VIBESPACE_PASSWORD env var, or data/auth.json (persisted
  *   scrypt hash — written by setPassword / the generate path).
  * - Sessions: random bearer tokens in an HttpOnly cookie, persisted server-side
- *   in data/auth.json so restarts don't log everyone out.
+ *   in data/auth.json so restarts don't log everyone out — as sha256(token)
+ *   ONLY (lane vault-e2e-password-fix-r2: a copy of auth.json opens no login;
+ *   a plaintext map an older build wrote is hashed at the first start, every
+ *   login staying valid). A login lives 30 days from its LAST use (each use
+ *   slides it) and never past 180 days from its sign-in (the cap — the owner's
+ *   decision ④, design q-042 D9); a vault LOCK signs every login out (the hub's
+ *   wiring calls revokeAllTokens and closes every page's socket).
  * - Login attempts are rate limited per IP (5 fails → 60s lock).
  */
 
@@ -13,10 +19,16 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { crossSiteVerdict, ownOriginOf } = require('./write-origin.js');
+const { replaceShredding } = require('./secret-file.js');
 
 const TOKEN_COOKIE = 'vs_token';
-const TOKEN_TTL_MS = 180 * 24 * 3600 * 1000; // 180 days
+const TOKEN_TTL_MS = 180 * 24 * 3600 * 1000; // THE CAP: 180 days from the sign-in, however often the login is used
+const TOKEN_IDLE_MS = 30 * 24 * 3600 * 1000; // THE SLIDE: 30 days from the last use (each use extends it)
+const TOKEN_SLIDE_SAVE_MS = 3600 * 1000;     // a use moves `usedAt` on disk (and the cookie's Max-Age) at most once an hour
 const MAX_TOKENS = 200;
+/** auth.json keys a login by sha256(token) — never the token. A 48-hex key is a token an older build stored (hashed at load). */
+const tokenDigest = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
+const DIGEST_RE = /^[0-9a-f]{64}$/;
 
 class Auth {
   constructor(dataDir, { clerk = null } = {}) {
@@ -29,13 +41,42 @@ class Auth {
 
   _load() {
     try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { this._state = null; }
+    // THE MIGRATION (once, at the first start of this build): a plaintext token map becomes its digests — every login
+    // stays valid ONCE (the cookie's token hashes to its key; an older build never stamped a use, so the migration counts as
+    // one: 30 days from now, still inside its 180-day cap); the old file's bytes are overwritten (replaceShredding)
+    const t = this._state && this._state.tokens;
+    if (t && typeof t === 'object' && Object.keys(t).some((k) => !DIGEST_RE.test(k))) {
+      const out = {}, now = Date.now();
+      for (const [k, v] of Object.entries(t)) { const d = DIGEST_RE.test(k) ? k : tokenDigest(k); out[d] = { ...(v || {}), usedAt: Number(v && v.usedAt) || now }; }
+      this._state.tokens = out;
+      try { this._save(); } catch (e) { console.warn('[auth] the login tokens could not be re-written as digests:', e.message); }
+    }
   }
 
   _save() {
     if (!this._state) return;
-    const tmp = this._file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this._state));
-    fs.renameSync(tmp, this._file);
+    if (this._state.tokens) this._state.tokensHashed = 1;   // a reader's note: the keys are sha256 digests
+    replaceShredding(this._file, JSON.stringify(this._state));   // 0600, atomic; the replaced bytes overwritten
+  }
+
+  /** The login a cookie token names → its record, or null. Looked up by its DIGEST (the map key): the token itself never
+   *  meets a comparison — the only compare is the map's, over sha256 digests of what the caller sent, which leaks no prefix
+   *  of any stored login (no early exit over a secret: the constant-time property the plaintext keys never had). */
+  _login(token) {
+    if (!token || !this._state || !this._state.tokens) return null;
+    const d = tokenDigest(token);
+    return Object.prototype.hasOwnProperty.call(this._state.tokens, d) ? this._state.tokens[d] : null;
+  }
+  /** alive = inside the cap (180 days from the sign-in) AND the slide (30 days from the last use) */
+  static loginAlive(rec, now = Date.now()) {
+    if (!rec) return false;
+    const born = Number(rec.createdAt) || 0, used = Number(rec.usedAt || rec.createdAt) || 0;
+    return now - born < TOKEN_TTL_MS && now - used < TOKEN_IDLE_MS;
+  }
+  /** The cookie's Max-Age for a login: the slide, never past the cap. */
+  static cookieMaxAge(rec, now = Date.now()) {
+    const left = rec ? TOKEN_TTL_MS - (now - (Number(rec.createdAt) || now)) : TOKEN_IDLE_MS;
+    return Math.max(0, Math.floor(Math.min(TOKEN_IDLE_MS, left) / 1000));
   }
 
   /** A configured password specifically (Clerk SSO alone also enables auth). */
@@ -70,11 +111,16 @@ class Auth {
     this._save();
   }
 
-  /** Revoke every login token except (optionally) one — in-app password change kicks all other devices. */
+  /** Revoke every login token except (optionally) one — in-app password change kicks all other devices; a vault LOCK
+   *  revokes them all (lane vault-e2e-password-fix-r2 — the hub's wiring). → how many logins ended. */
   revokeAllTokens(exceptToken = null) {
-    const keep = exceptToken && this._state?.tokens?.[exceptToken];
-    this._state.tokens = keep ? { [exceptToken]: keep } : {};
+    if (!this._state) return 0;
+    const d = exceptToken ? tokenDigest(exceptToken) : null;
+    const keep = d && this._state.tokens ? this._state.tokens[d] : null;
+    const n = Object.keys(this._state.tokens || {}).length - (keep ? 1 : 0);
+    this._state.tokens = keep ? { [d]: keep } : {};
     this._save();
+    return n;
   }
 
   /** Export the password record for config transfer (hash + salt, never tokens). */
@@ -127,28 +173,45 @@ class Auth {
 
   issueToken(ua = '') {
     const token = crypto.randomBytes(24).toString('hex');
+    const now = Date.now();
     // Clerk-only instances may have no auth.json yet — tokens still persist
     this._state = this._state || { tokens: {} };
     this._state.tokens = this._state.tokens || {};
-    this._state.tokens[token] = { createdAt: Date.now(), ua: String(ua).slice(0, 120) };
-    // Evict expired + cap total (oldest first)
+    this._state.tokens[tokenDigest(token)] = { createdAt: now, usedAt: now, ua: String(ua).slice(0, 120) };   // the DIGEST — never the token
+    // Evict the dead + cap the total (the least recently used first)
     const entries = Object.entries(this._state.tokens)
-      .filter(([, v]) => Date.now() - v.createdAt < TOKEN_TTL_MS)
-      .sort((a, b) => a[1].createdAt - b[1].createdAt);
+      .filter(([, v]) => Auth.loginAlive(v, now))
+      .sort((a, b) => (a[1].usedAt || a[1].createdAt) - (b[1].usedAt || b[1].createdAt));
     while (entries.length > MAX_TOKENS) entries.shift();
     this._state.tokens = Object.fromEntries(entries);
     this._save();
     return token;
   }
 
+  /** A use of a login: alive ⇒ it SLIDES (in memory now; on disk at most once an hour) → true. */
   checkToken(token) {
     if (!this.enabled) return true;
-    const t = token && this._state.tokens?.[token];
-    return !!(t && Date.now() - t.createdAt < TOKEN_TTL_MS);
+    const rec = this._login(token);
+    const now = Date.now();
+    if (!Auth.loginAlive(rec, now)) return false;
+    const was = Number(rec.usedAt || rec.createdAt) || 0;
+    rec.usedAt = now;
+    if (now - was >= TOKEN_SLIDE_SAVE_MS) { (this._slid || (this._slid = new Set())).add(tokenDigest(token)); try { this._save(); } catch { /* the in-memory slide holds; the next use saves */ } }
+    return true;
+  }
+
+  /** The cookie follows the slide: a use that moved `usedAt` on disk re-sets the cookie's Max-Age (30 days, never past
+   *  the cap) — a login used every day never expires in the browser before the cap. */
+  _slideCookie(req, res, token) {
+    const rec = this._login(token), d = token ? tokenDigest(token) : null;
+    if (!rec || !this._slid || !this._slid.delete(d) || !res || typeof res.append !== 'function') return;
+    const secure = req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : '';
+    res.append('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Auth.cookieMaxAge(rec)}; SameSite=Lax;${secure}`);
   }
 
   revokeToken(token) {
-    if (this._state?.tokens?.[token]) { delete this._state.tokens[token]; this._save(); }
+    const d = token ? tokenDigest(token) : null;
+    if (d && this._state?.tokens?.[d]) { delete this._state.tokens[d]; this._save(); }
   }
 
   // ── Rate limiting ──
@@ -169,7 +232,7 @@ class Auth {
 
   /** lane device-act-audit: WHO a cookie request is, for an audit line — 12 hex of the sign-in cookie's sha256 (never the
    *  cookie itself; one sign-in = one handle), or null without one. The ONE cookie reader stays this file (test-auth). */
-  static signInHandle(req) { const t = Auth.cookieToken(req); return t ? crypto.createHash('sha256').update(String(t)).digest('hex').slice(0, 12) : null; }
+  static signInHandle(req) { const t = Auth.cookieToken(req); return t ? tokenDigest(t).slice(0, 12) : null; }   // int317: the ONE hash door — the first 12 hex of auth.json's key for this login (no secret)
 
   static cookieToken(req) {
     const h = req.headers.cookie || '';
@@ -273,7 +336,7 @@ class Auth {
       if (!this.enabled) return next();
       // the login flow (logout revokes only the token it presents)
       if (p === '/login' || p === '/api/login' || p === '/api/clerk-login' || p === '/api/logout' || p === '/favicon.ico') return next();
-      if (this.checkToken(Auth.cookieToken(req))) return next();
+      { const tok = Auth.cookieToken(req); if (this.checkToken(tok)) { this._slideCookie(req, res, tok); return next(); } }
       // Browsers navigating to pages get the login form; API calls get 401
       const wantsHtml = req.method === 'GET' && (req.headers.accept || '').includes('text/html');
       if (wantsHtml) return res.redirect('/login');
@@ -288,7 +351,7 @@ class Auth {
     // port + host with http, and a Secure cookie set over it would lock the http origin out (Chrome: an insecure origin
     // never reads or overwrites a Secure cookie) — lane https-tailscale, cookies as before (req.secure was never true)
     const secure = req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : '';
-    res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(TOKEN_TTL_MS / 1000)}; SameSite=Lax;${secure}`);
+    res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(TOKEN_IDLE_MS / 1000)}; SameSite=Lax;${secure}`);   // the slide's 30 days (each use re-sets it)
     return token;
   }
 
@@ -384,7 +447,7 @@ class Auth {
       this.revokeAllTokens();
       const token = this.issueToken(req.headers['user-agent']);
       const secure = req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : ''; // ingress only — the hub's own https shares the host with http (above)
-      res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(TOKEN_TTL_MS / 1000)}; SameSite=Lax;${secure}`);
+      res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(TOKEN_IDLE_MS / 1000)}; SameSite=Lax;${secure}`);
       res.json({ success: true, enabled: true });
     });
   }
@@ -516,4 +579,4 @@ function loginHtml({ clerk = null, passwordEnabled = true } = {}) {
 </script></body></html>`;
 }
 
-module.exports = { Auth, TOKEN_COOKIE };
+module.exports = { Auth, TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, tokenDigest };

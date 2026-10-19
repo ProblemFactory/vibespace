@@ -146,7 +146,7 @@ console.log('③ voiceWords — every code');
   for (const code of VM.VOICE_CODES) {
     const w = VM.voiceWords(code, { n: 7, url: 'http://localhost:<port>' });
     const key = '  ' + JSON.stringify(w.words) + ':';
-    ok(`${code}: words + zh + ja + a known action`, w.code === code && w.words.length > 5 && zh.includes(key) && ja.includes(key) && [null, 'copy-url', 'open-plugin', 'undo', 'resend'].includes(w.action), { code, zh: zh.includes(key), ja: ja.includes(key) });
+    ok(`${code}: words + zh + ja + a known action`, w.code === code && w.words.length > 5 && zh.includes(key) && ja.includes(key) && [null, 'copy-url', 'open-plugin', 'undo', 'resend', 'unlock'].includes(w.action), { code, zh: zh.includes(key), ja: ja.includes(key) });
   }
   ok('insecure offers the localhost address to copy; rate-limited names {n}; the not-connected rows open the plugin card', VM.voiceWords('insecure').action === 'copy-url' && VM.voiceWords('insecure').words.includes('{url}') && VM.voiceWords('rate-limited').words.includes('{n}') && VM.voiceWords('not-connected').action === 'open-plugin' && VM.voiceWords('reconnect').action === 'open-plugin');
   ok('an unknown code says the generic failure (never silence)', VM.voiceWords('zzz').code === 'failed');

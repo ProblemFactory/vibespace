@@ -309,7 +309,10 @@ class DeviceManager {
   }
 
   async _connectLoop() {
-    const token = this._transport.kind === 'local' ? this._ensureLocalToken() : this._transport.hostToken;
+    // lane vault-e2e-password-fix-r2: a remote transport's token may be a FUNCTION (the hub's vault entry, asked at every
+    // connect — a LOCKED vault throws `vault_locked` here, by name, and no copy outlives the lock in this object)
+    const tok = this._transport.hostToken;
+    const token = this._transport.kind === 'local' ? this._ensureLocalToken() : (typeof tok === 'function' ? tok() : tok);
     const backoffs = [500, 1000, 2000, 5000];
     for (let attempt = 0; !this._stopped; attempt++) {
       let lastErr = null;

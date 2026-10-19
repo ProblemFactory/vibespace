@@ -101,6 +101,7 @@ const { identityOf, identityMismatch, heldIdentity, mismatchSentence, namelessSe
 const caps = require('../channel-caps.js');
 const fake = require('../channels/fake.js');
 const { secretBox, holdsCiphertext } = require('../secret-box.js');
+const { VAULT_LOCKED: VAULT_LOCKED_CODE } = require('../key-file.js');   // lane vault-e2e-password-fix-r2: the vault's refusal code
 const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');   // the two credential-key forms, spelled ONCE (the store's)
 const R = require('../integration-registry.js');   // PURE: the rows' `bindsPerAccount` + `clientFieldsOf` (the custom client's two fields)
 const { createOAuthLoopback, OPTIONAL_SCOPES_MAX } = require('../oauth-loopback.js');
@@ -538,6 +539,9 @@ function create(deps = {}) {
   // THE KEY-FILE LAW (lane key-file-law-stores): a key is minted only while adapters.json and every account's own
   // callers.json hold no ciphertext — else `key-missing` (the account card's why), never a key that opens nothing
   const box = secretBox(path.join(dataDir, KEY_FILE), { hasCiphertext: () => holdsCiphertext({ files: [path.join(dataDir, 'channels', 'adapters.json')], each: [{ dir: path.join(dataDir, 'channels'), file: 'callers.json' }] }) });
+  /** lane vault-e2e-password-fix-r2: the vault holds this store's key and is LOCKED — every account's sign-in (and every
+   *  app credential the integrations store seals) is closed until a person unlocks: a STATE of its own, never "expired" */
+  const vaultLocked = () => { try { const r = box.refusal(); return !!(r && r.code === VAULT_LOCKED_CODE); } catch { return false; } };
   const flows = oauth || createOAuthLoopback({ now, log });
   // design 018 → lane dc-channels-consent: THE ONE CONSENT MACHINE — a per-boot HMAC key signs each redirect consent's
   // state (a restart ends every flow anyway). The state's SHAPE, the landing page and the relay setting are the
@@ -670,7 +674,7 @@ function create(deps = {}) {
       const a = rec.auth || {};
       if (!a.tokenEnc) return { token: null, why: 'never-authenticated' };
       try { return { token: JSON.parse(box.dec(a.tokenEnc)), why: null }; }
-      catch (e) { return { token: null, why: `token-undecryptable: ${(e && e.message) || e}` }; }
+      catch (e) { return { token: null, why: e && e.reason === VAULT_LOCKED_CODE ? 'vault-locked' : `token-undecryptable: ${(e && e.message) || e}` }; }   // r2: the adapter throws `vault-locked`
     };
     return {
       read,
@@ -835,6 +839,10 @@ function create(deps = {}) {
   async function refreshAuth(e) {
     try { e.authState = await e.adapter.auth.state(); }
     catch (err) { e.authState = { state: 'unknown', why: `auth.state threw: ${(err && err.message) || err}` }; }
+    // lane vault-e2e-password-fix-r2: a sign-in (or an app credential) the LOCKED vault keeps closed is the row's state BY
+    // NAME — the pass builds no request and counts no failure, the card says 「保险库已锁定——先解锁」 with the door
+    const why = String((e.authState && e.authState.why) || '');
+    if (vaultLocked() && ((e.record && e.record.auth && e.record.auth.tokenEnc) || why === 'vault-locked' || /the vault is locked/.test(why))) e.authState = { state: 'vault-locked', why: 'vault-locked', expiresAt: null };
     return e.authState;
   }
   let offIntegrations = null;
@@ -2414,7 +2422,7 @@ function create(deps = {}) {
         // connected". A DEAD token or a WITHDRAWN credential is different —
         // those passes run, fail with the vendor's typed refusal, and SPEAK
         // (fence 8), because the user has something to act on.
-        const connected = !(st && st.state === 'unknown' && st.why === 'never-authenticated');
+        const connected = !(st && ((st.state === 'unknown' && st.why === 'never-authenticated') || st.state === 'vault-locked'));   // r2: a LOCKED vault builds no request, counts no failure
         // `scan.hostFacts` TRIGGER ③ (design §4 / §5 invariant 7, r6): a scan-lane pass asks the host's facts of the RESOLVER, once, before its first fetch (Drain rule 14)
         const scanLane = laneOrScan(rec, {}).via === 'scan';
         e.dq = Drain.open(e.dq, { origin, force, backoff, timerDue: e.timerDue, hostScan: scanLane });
@@ -2437,7 +2445,7 @@ function create(deps = {}) {
           e.dq = Drain.apply(e.dq, act);   // the step is taken (an async action BEGINS)
           if (act.type === 'end') { ended = act; break; }
           if (act.type === 'refuse') { deliver(act.waiters, refusalFor(rec, e, act)); continue; }
-          if (act.type === 'answer') { for (const id of act.waiters) { const w = e.waiters.get(id); if (w) deliver([id], settlementFor(act, failure, w.key)); } continue; }
+          if (act.type === 'answer') { for (const id of act.waiters) { const w = e.waiters.get(id); if (w) deliver([id], settlementFor(act, failure, w.key, !!(st && st.state === 'vault-locked'))); } continue; }
           if (act.type === 'wait') { await sleepFor(e, act.ms); continue; }   // Drain rule 18: the bucket refills; the next step judges and picks again (a stop / a drop wakes it)
           let result;
           try {
@@ -2521,8 +2529,10 @@ function create(deps = {}) {
     }
   }
   /** A settlement the drain named for every waiter at once (Drain rules 2–4). */
-  function settlementFor(act, failure, key) {
+  function settlementFor(act, failure, key, vaultClosed = false) {
     if (act.outcome === 'stopped') return { ok: false, code: 'stopped', error: 'the channels engine is stopping — refresh again after the restart' };
+    // lane vault-e2e-password-fix-r2: a refresh of an account the LOCKED vault keeps closed hears the vault, never "not connected"
+    if (act.outcome === 'not-connected' && vaultClosed) return { ok: false, code: 'vault-locked', error: 'the vault is locked — this account\'s sign-in opens after the owner unlocks it on the page', polledAt: null };
     if (act.outcome === 'account-changed') return { ok: false, code: 'account-changed', error: 'the account changed while the refresh waited — refresh again' };
     if (act.outcome === 'not-connected') return { ok: false, code: 'not-connected', error: 'the refresh failed (not-connected)', polledAt: null };
     return failure ? { ...failure, polledAt: lastPollOf(key) } : { ok: false, code: String(act.code || 'failed'), error: `the refresh failed (${act.code || 'failed'})`, polledAt: lastPollOf(key) };
@@ -6439,7 +6449,7 @@ function create(deps = {}) {
     const code = whyIn || (err instanceof ChannelError ? err.code : 'vendor-error');
     const hint = err && err.detail ? Number(err.detail.retryAfterSec) : NaN;
     const hintMs = Number.isFinite(hint) && hint > 0 ? Math.min(RATE_RETRY_AFTER_MAX_MS, Math.max(1e3, Math.ceil(hint * 1000))) : 0;
-    const why = code === 'backoff' ? 'backoff' : code === 'rate-limited' ? 'rate-limited'
+    const why = code === 'backoff' ? 'backoff' : code === 'rate-limited' ? 'rate-limited' : code === 'vault-locked' ? 'vault-locked'   // r2: the sealed sign-in, LOCKED
       : code === 'auth-expired' ? (caps.authState(rec, t).state === 'unknown' ? 'not-connected' : 'auth-expired') : 'vendor-error';
     const retryAt = why === 'backoff' ? e.nextAt
       : why === 'rate-limited' ? t + (hintMs || (inBackoff(e) ? e.nextAt - t : RATE_BACKOFF_MS[RATE_BACKOFF_MS.length - 1] / 2))
@@ -6566,6 +6576,7 @@ function create(deps = {}) {
     const perAccount = !!(mod && rowOf(mod) && rowOf(mod).bindsPerAccount);
     switch (code) {
       case 'auth-expired': return `Re-authorize ${rec.label || rec.id} from the Channels panel (rail → Channels → ${rec.label || rec.id} → Re-authorize).${perAccount ? ' If its OAuth client was withdrawn, pick another one in the same dialog — switching the client is a re-authorization.' : ''}`;
+      case 'vault-locked': return 'The vault is locked — this account\'s sign-in opens after the owner unlocks the vault on the page (an agent never asks for the password). Nothing needs re-authorizing.';   // lane vault-e2e-password-fix-r2
       case 'rate-limited': return `The vendor is limiting how fast this account may read. VibeSpace paces its calls per second and per minute (Settings → Channels) and retries after a short wait — the vendor's own Retry-After when it sends one, else 5 s doubling to 60 s — never a 15-minute park. If this persists, lower the per-second setting, or check other clients reading the same account.`;
       case 'forbidden': return 'The vendor refuses this account access to these conversations. Check the app\'s granted scopes and the account\'s membership in them.';
       case 'transport': return 'The vendor could not be reached from this machine. Check egress / DNS; the loop retries with backoff.';
@@ -7924,6 +7935,30 @@ function create(deps = {}) {
       rateLimited: (sec) => { e.nextAt = Math.max(e.nextAt || 0, now() + Math.min(600, Math.max(1, Number(sec) || 30)) * 1000); },
     };
   }
+  // lane vault-contents-window: THE VAULT WINDOW's rows of this store — each account's consent token and custom client
+  // secret, plus what an adapter keeps sealed in its own dir (its module's declared `vaultRows` — never a branch on a
+  // kind); masked (the ciphertext rides only to the length class). `vaultReveal` = ONE value through this store's box.
+  const vaultModOf = (r) => { try { const m = registry.get(r.kind); return m && typeof m.vaultRows === 'function' ? m : null; } catch { return null; } };
+  function vaultRows() {
+    const out = [];
+    for (const r of adapterRecords().adapters) {
+      if (!r || !r.id) continue;
+      const label = r.label || r.id, detail = r.kind || '';
+      if (r.auth && typeof r.auth.tokenEnc === 'string' && r.auth.tokenEnc) out.push({ entry: r.id, field: 'token', kind: 'oauth-token', label, detail, createdAt: r.auth.updatedAt || null, cipher: r.auth.tokenEnc });
+      if (r.credential && typeof r.credential.appSecretEnc === 'string' && r.credential.appSecretEnc) out.push({ entry: r.id, field: 'appSecret', kind: 'client-secret', label, detail, cipher: r.credential.appSecretEnc });
+      const mod = vaultModOf(r);
+      if (mod) { try { for (const x of mod.vaultRows({ ownDir: path.join(dataDir, 'channels', String(r.id)) }) || []) out.push({ entry: r.id, field: x.field, kind: x.kind, label: x.label || label, detail: x.detail || detail, createdAt: x.createdAt || null, cipher: x.cipher }); } catch (e) { log.warn(`[channels] ${r.id}: the vault rows could not be listed (${(e && e.code) || 'error'})`); } }
+    }
+    return out;
+  }
+  function vaultReveal(entry, field) {
+    const r = adapterRecords().adapters.find((x) => x && x.id === entry);
+    if (!r) return null;
+    if (field === 'token') return r.auth && typeof r.auth.tokenEnc === 'string' && r.auth.tokenEnc ? box.dec(r.auth.tokenEnc) : null;
+    if (field === 'appSecret') return r.credential && typeof r.credential.appSecretEnc === 'string' && r.credential.appSecretEnc ? box.dec(r.credential.appSecretEnc) : null;
+    const mod = vaultModOf(r);
+    return mod && typeof mod.vaultReveal === 'function' ? mod.vaultReveal({ ownDir: path.join(dataDir, 'channels', String(r.id)), secrets: { open: (v) => box.dec(v) } }, field) : null;
+  }
   // the accounts whose adapter DECLARES a raw-API row (src/channels/index.js validateApi) — never a list of kinds
   const declaresApi = (kind) => { try { return registry.has(kind) && !!registry.get(kind).api; } catch { return false; } };
   function apiAccounts() { return adapterRecords().adapters.filter((r) => r && r.enabled !== false && declaresApi(r.kind)).map((r) => ({ id: r.id, kind: r.kind, label: r.label || r.id })); }
@@ -7962,6 +7997,7 @@ function create(deps = {}) {
       return { ...first, results };
     },
     adapterRecords, laneOrScan, start, stop,
+    vaultRows, vaultReveal, // lane vault-contents-window: the Vault window's masked rows + its one-value reveal
     // lane webhook-l1-server: THE HTTP INBOUND DOOR — an `http-inbound` push adapter's route hands a JUDGED event here and
     // it reaches the armed lane's emitter (onPushEvent: stored first, deduped by eventId, then indexed / broadcast / the
     // rule funnel); a lane not armed yet is armed now (its auth is local: `connected`). The route answers 200 only on

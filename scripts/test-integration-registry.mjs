@@ -134,7 +134,7 @@ console.log("§1b the window's groups");
   // the store's list() leaves it out and groupOf answers null for it BY THAT FLAG (asserted, with its control, below)
   const table = R.ROWS.filter((r) => r.bindsPerMachine !== true).map((r) => [r.id, R.groupOf(r)]);
   const perMachine = R.ROWS.filter((r) => r.bindsPerMachine === true);
-  ok(perMachine.map((r) => r.id).join() === 'remoteapp' && perMachine.every((r) => R.groupOf(r) === null) && R.groupOf({ ...R.rowById('cloak'), bindsPerMachine: true }) === null, 'the per-machine rows (exactly remoteapp) land in NO group — never drawn in the window; CONTROL: a browser key row flagged per-machine leaves its group too');
+  ok(perMachine.map((r) => r.id).join() === 'remoteapp,desktop-signin' && perMachine.every((r) => R.groupOf(r) === null) && R.groupOf({ ...R.rowById('cloak'), bindsPerMachine: true }) === null, 'the per-machine rows (exactly remoteapp + desktop-signin — lane desktop-vnc-remember) land in NO group — never drawn in the window; CONTROL: a browser key row flagged per-machine leaves its group too');
   const ids = (g) => table.filter(([, x]) => x === g).map(([id]) => id).sort().join();
   ok(JSON.stringify(R.GROUPS) === JSON.stringify(['communication', 'browser', 'plugins']) && R.GROUPS.every((g) => typeof R.GROUP_WORDS[g] === 'string' && R.GROUP_WORDS[g].length > 0), 'three groups in the window\'s order (communication, browser, plugins), each with its plain noun');
   ok(table.every(([, g]) => R.GROUPS.includes(g)), `every row lands in exactly ONE group (${table.map(([id, g]) => id + '→' + g).join(', ')})`);

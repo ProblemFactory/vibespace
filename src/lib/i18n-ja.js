@@ -9158,6 +9158,9 @@ export default {
   "that display is on another graphics card": "そのディスプレイは別のグラフィックカードにつながっています",
   "the machine’s screen capture could not start": "マシンの画面キャプチャを開始できませんでした",
   "the machine’s screen capture stopped": "マシンの画面キャプチャが止まりました",
+  "the machine’s screen capture kept being interrupted": "マシンの画面キャプチャが何度も中断されました", // lane stream-fallback-never-silent
+  "Stream interrupted: {why}": "ストリームが中断されました：{why}", // lane stream-fallback-never-silent
+  "Stream interrupted: {why} — reconnecting…": "ストリームが中断されました：{why} — 再接続しています…", // lane stream-fallback-never-silent
   "the machine’s video encoder stopped": "マシンのビデオエンコーダーが止まりました",
   "Open System Settings": "システム設定を開く",
   "Opened System Settings › {pane} on {machine}": "{machine} でシステム設定 › {pane} を開きました",
@@ -9317,7 +9320,7 @@ export default {
   "Vault locked": "保管庫はロック中", // lane vault-e2e-password
   "Vault locked — click to unlock": "保管庫はロック中 — クリックして解除", // lane vault-e2e-password
   "Unlock the vault": "保管庫のロックを解除", // lane vault-e2e-password
-  "VibeSpace restarted — the credentials it stores (accounts, mounts, channels, integrations, app logins, passkeys) stay locked until you enter the second password.": "VibeSpace が再起動しました — 保存している認証情報（アカウント、マウント、チャンネル、連携、アプリのログイン、パスキー）は第二パスワードを入力するまでロックされたままです。", // lane vault-e2e-password
+  "The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.": "VibeSpace が保存している認証情報（アカウント、マウント、チャンネル、連携、アプリのログイン、パスキー、ペアリング済みマシンの接続、リレーと音声のサインイン）は、第二パスワードを入力するまでロックされたままです — 再起動とロックのたびに。", // lane vault-e2e-password (r2: machines, relay, voice; every lock)
   "Second password": "第二パスワード", // lane vault-e2e-password
   "Unlock": "ロック解除", // lane vault-e2e-password
   "Vault unlocked": "保管庫のロックを解除しました", // lane vault-e2e-password
@@ -9335,6 +9338,49 @@ export default {
   "Locked": "ロック中", // lane vault-e2e-password
   "Not set up": "未設定", // lane vault-e2e-password
   "Vault": "保管庫", // lane vault-e2e-password
+  "Enter the second password to see stored values on this page for the next 5 minutes. Another tab or window asks again. Every value you open is recorded.": "第二パスワードを入力すると、これから 5 分間このページで保存された値を表示できます。別のタブやウィンドウではもう一度確認します。表示した値はすべて記録されます。", // lane vault-contents-window r2
+  "Copied — cleared from the clipboard in 30 s if this tab stays open": "コピーしました — このタブが開いていれば 30 秒後にクリップボードを消去します", // lane vault-contents-window r2
+  "Saved secrets stay hidden and unchanged unless you type a new one.": "保存済みのシークレットは、新しい値を入力しない限り隠れたまま変わりません。", // lane vault-contents-window r2
+  "Second password (the vault)": "第二パスワード（保管庫）", // lane vault-contents-window r2
+  "App logins": "アプリのログイン", // lane vault-contents-window
+  "Client secret": "クライアントシークレット", // lane vault-contents-window
+  "Could not delete — {reason}": "削除できませんでした — {reason}", // lane vault-contents-window
+  "Deleted": "削除しました", // lane vault-contents-window
+  "Enter the second password again to see stored values": "保存された値を見るには第二パスワードをもう一度入力してください", // lane vault-contents-window
+  "Hide all": "すべて非表示", // lane vault-contents-window
+  "Integrations": "連携", // lane vault-contents-window
+  "Login": "ログイン情報", // lane vault-contents-window
+  "Newest": "新しい順", // lane vault-contents-window
+  "No stored value matches “{q}”": "「{q}」に一致する保存値はありません", // lane vault-contents-window
+  "Nothing stored here": "ここには何も保存されていません", // lane vault-contents-window
+  "Parameter": "パラメーター", // lane vault-contents-window
+  "Passkeys": "パスキー", // lane vault-contents-window
+  "Recently used": "最近使った順", // lane vault-contents-window
+  "Renew…": "更新…", // lane vault-contents-window
+  "Secret": "シークレット", // lane vault-contents-window
+  "Session token": "セッショントークン", // lane vault-contents-window
+  "Set a second password first — stored values are shown only behind it": "先に第二パスワードを設定してください — 保存された値はその後ろでだけ表示されます", // lane vault-contents-window
+  "That stored value could not be opened": "その保存値は開けませんでした", // lane vault-contents-window
+  "That stored value is not there any more": "その保存値はもうありません", // lane vault-contents-window
+  "The vault is locked — unlock it to see what it holds.": "保管庫はロック中です — 中身を見るには解除してください。", // lane vault-contents-window
+  "Token": "トークン", // lane vault-contents-window
+  "Too many values shown — try again in {n} s": "表示が多すぎます — {n} 秒後にもう一度お試しください", // lane vault-contents-window
+  "Values hidden again — the 5 minutes are over": "5 分が過ぎたので、値を再び隠しました", // lane vault-contents-window
+  "Vault contents…": "保管庫の中身…", // lane vault-contents-window
+  "Verify it’s you": "本人確認", // lane vault-contents-window
+  "View contents…": "中身を見る…", // lane vault-contents-window
+  "Visible for {time}": "表示可能 {time}", // lane vault-contents-window
+  "could not be read ({code})": "読み取れません（{code}）", // lane vault-contents-window
+  "key last used {when} by VibeSpace": "鍵の最終使用 {when}（VibeSpace）", // lane vault-contents-window
+  "last opened {when} by you": "最終表示 {when}（あなた）", // lane vault-contents-window
+  "length: {size}": "長さ：{size}", // lane vault-contents-window
+  "long": "長い", // lane vault-contents-window
+  "medium": "中くらい", // lane vault-contents-window
+  "saved {when}": "保存 {when}", // lane vault-contents-window
+  "short": "短い", // lane vault-contents-window
+  "unknown length": "長さ不明", // lane vault-contents-window
+  "very long": "とても長い", // lane vault-contents-window
+  "{n} stored values, sealed in the vault. Showing one asks for the second password again; they stay visible for 5 minutes.": "保管庫に {n} 個の値が封印されています。表示するには第二パスワードをもう一度入力します。表示は 5 分間です。", // lane vault-contents-window
   "Set up {when}": "{when} に設定", // lane vault-e2e-password
   "Lock now": "今すぐロック", // lane vault-e2e-password
   "Lock after idle": "アイドル後にロック", // lane vault-e2e-password
@@ -9420,4 +9466,34 @@ export default {
   "HDR passthrough: AV1 10-bit PQ, at the brightness the machine’s display shows": "HDR パススルー：AV1 10 ビット PQ、マシンの画面と同じ明るさ", // lane stream-hdr-passthrough
   "HDR": "HDR", // lane stream-hdr-passthrough
   "Passthrough · {transfer} {bits}-bit · {primaries}": "パススルー · {transfer} {bits} ビット · {primaries}", // lane stream-hdr-passthrough
+  "waiting for the vault to be unlocked": "保管庫のロック解除待ち", // lane vault-e2e-password-fix-r2
+  "This session waits for the vault — unlock it with the second password; it reconnects by itself and nothing is lost.": "このセッションは保管庫を待っています — 第二パスワードでロックを解除すると自動で再接続し、何も失われません。", // lane vault-e2e-password-fix-r2
+  "vault locked": "保管庫はロック中", // lane vault-e2e-password-fix-r2
+  "{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.": "{machine}が Mac のユーザー名とパスワードを求めています。VibeSpace は保管庫に封印し、保管庫のロック解除中は自動でサインインします。", // lane desktop-vnc-remember
+  "{machine} asks for its VNC password. VibeSpace seals it in the vault and signs in by itself while the vault is unlocked.": "{machine}が VNC パスワードを求めています。VibeSpace は保管庫に封印し、保管庫のロック解除中は自動でサインインします。", // lane desktop-vnc-remember
+  "The remembered password did not work — type it again": "記憶したパスワードが通りませんでした。もう一度入力してください", // lane desktop-vnc-remember
+  "The vault is locked — unlock it to sign in automatically": "保管庫はロック中です — ロックを解除すると自動でサインインします", // lane desktop-vnc-remember
+  "Remember this machine’s sign-in": "このマシンのサインインを記憶する", // lane desktop-vnc-remember
+  "{machine}’s sign-in remembered — sealed in the vault": "{machine}のサインインを記憶しました（保管庫に封印）", // lane desktop-vnc-remember
+  "Could not remember the sign-in: {why}": "サインインを記憶できませんでした: {why}", // lane desktop-vnc-remember
+  "Forget sign-in": "サインインを忘れる", // lane desktop-vnc-remember
+  "VibeSpace signs in to {machine}’s desktop by itself with the sign-in sealed in the vault — forget it to be asked again": "VibeSpace は保管庫に封印したサインインで{machine}のデスクトップに自動でサインインします — 忘れると次回また尋ねます", // lane desktop-vnc-remember
+  "{machine}’s sign-in forgotten": "{machine}のサインインを忘れました", // lane desktop-vnc-remember
+  "This machine’s desktop sign-in is sealed in the vault; VibeSpace signs in by itself while the vault is unlocked. Forget it in the machine’s dialog (Apps → the machine).": "このマシンのデスクトップのサインインは保管庫に封印されています。保管庫のロック解除中は VibeSpace が自動でサインインします。マシンのダイアログ（アプリ → マシン）で忘れられます。", // lane desktop-vnc-remember
+  "Sign-in remembered": "サインイン記憶済み", // lane desktop-vnc-remember
+  "Desktop sign-in": "デスクトップのサインイン", // lane desktop-vnc-remember
+  "Sign-in kind": "サインインの種類", // lane desktop-vnc-remember
+  "Which sign-in the machine’s VNC server asks for — set by VibeSpace, never typed.": "マシンの VNC サーバーが求めるサインインの種類 — VibeSpace が設定し、入力はしません。", // lane desktop-vnc-remember
+  "The name you sign in to that machine with (none for a VNC password).": "そのマシンにサインインするユーザー名（VNC パスワードでは不要）。", // lane desktop-vnc-remember
+  "Sealed on this VibeSpace server; the hub signs in with it while the vault is unlocked.": "この VibeSpace サーバーに封印され、保管庫のロック解除中はサーバーがこれでサインインします。", // lane desktop-vnc-remember
+  "Checks that the remembered sign-in has every part the hub needs. Zero network.": "記憶したサインインに必要な項目が揃っているか確認します。ネットワークは使いません。", // lane desktop-vnc-remember
+  "This proves nothing about the machine — the next connection is what signs in to it.": "マシン側のことは何も証明しません — 次の接続で実際にサインインします。", // lane desktop-vnc-remember
+  "Used by the desktop window of a paired Windows or macOS machine": "ペアリングした Windows / macOS マシンのデスクトップ ウィンドウが使います", // lane desktop-vnc-remember
+  "Hub secrets": "Hub のシークレット", // int317 (the Vault window's Hub secrets)
+  "Machine link token": "マシンのリンクトークン", // int317 (the Vault window's Hub secrets)
+  "Sealed file key": "暗号化ファイルの鍵", // int317 (the Vault window's Hub secrets)
+  "Never shown — VibeSpace uses it itself": "表示しません — VibeSpace 自身が使います", // int317 (the Vault window's Hub secrets)
+  "That stored value is never shown — VibeSpace uses it itself": "この保存値は表示しません — VibeSpace 自身が使います", // int317 (the Vault window's Hub secrets)
+  "Screen Sharing: name + password": "画面共有：名前 + パスワード", // int317 (the Vault window's Hub secrets)
+  "VNC password": "VNC パスワード", // int317 (the Vault window's Hub secrets)
 };

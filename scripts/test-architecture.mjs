@@ -2852,7 +2852,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/design-home.js': [1, 'the Design window home\'s one-per-client re-open (a replay passes { replay }) — lane design-systems-home'],
     'src/lib/machine-desktop.js': [3, 'a machine\'s whole-desktop window: a second open reveals it — design 014 D1; lane desktop-display-modes: the machine\'s ONE window (③ / ②), a display\'s own window (①), a replayed window\'s own id'],
     'src/lib/desktop-app-window.js': [3, 'the singleton re-open (a replay passes { replay }) + a satellite the app just opened, in front — design 016 S2 + the person\'s click on an app notification\'s toast raises its window (lane app-display-notify-sink)'],
-    ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'browser-live-window', 'inbox-window']
+    ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'browser-live-window', 'inbox-window', 'vault-window']
       .map((n) => ['src/lib/' + n + '.js', [1, n === 'browser-live-window' ? 'the fold-back (D3)' : 'the singleton re-open (a replay passes { replay })']])),
   };
   const judge = (srcs) => {

@@ -70,7 +70,13 @@ const tunnelDnsWords = (d) => d.acceptDns ? t('DNS: Tailscale MagicDNS')
 /** Is a CONFIGURED plugin providing `cap` on this instance (e.g. 'relay' = public URLs)? The ONE probe the
  *  ports surfaces ask (rv-client F9: it was spelled twice, by id). An unreachable server answers false. */
 export async function pluginProvides(cap) {
-  return (((await fetchJson('/api/plugins')) || {}).plugins || []).some((p) => provides(p, cap) && p.configured);
+  return (await pluginState(cap)).ok;
+}
+/** The same probe with WHY not (lane vault-e2e-password-fix-r2): `{ ok, vaultLocked }` — a provider whose secret the LOCKED
+ *  vault keeps closed (frp's sealed relay token) says the vault's sentence, never "not configured". */
+export async function pluginState(cap) {
+  const ps = (((await fetchJson('/api/plugins')) || {}).plugins || []).filter((p) => provides(p, cap));
+  return { ok: ps.some((p) => p.configured), vaultLocked: !ps.some((p) => p.configured) && ps.some((p) => p.vaultLocked) };
 }
 
 export function installPluginsUI(App) {
@@ -123,10 +129,11 @@ export function installPluginsUI(App) {
           if (p.configured) { const v = await fetchJson('/api/voice/teach'); waiting = (v && Array.isArray(v.proposals)) ? v.proposals.length : 0; }
           // lane dropline-connect-door (a fleet user's report 2026-10-18): with no key and no sign-in the chip is THE DOOR — the
           // verb, like Tailscale's 「Log in…」, never a status sentence nobody guesses opens a sign-in; the sheet it opens is the same
-          chip = !p.configured ? t('Connect with Fish Audio') : waiting ? t('{n} waiting', { n: waiting }) : p.enabled ? t('on') : t('turned off');
-          tone = !p.configured ? 'primary' : waiting ? 'warn' : p.running ? 'ok' : '';
-          if (!p.configured) chipTitle = t('or paste a Dropline key in Services › Integrations');
-          onChip = () => this._voiceSheet(p, render);
+          // lane vault-e2e-password-fix-r2: a sign-in the LOCKED vault keeps closed — the vault's door, never "connect"
+          chip = p.vaultLocked ? t('The vault is locked — unlock it first') : !p.configured ? t('Connect with Fish Audio') : waiting ? t('{n} waiting', { n: waiting }) : p.enabled ? t('on') : t('turned off');
+          tone = p.vaultLocked ? 'warn' : !p.configured ? 'primary' : waiting ? 'warn' : p.running ? 'ok' : '';
+          if (!p.configured && !p.vaultLocked) chipTitle = t('or paste a Dropline key in Services › Integrations');
+          onChip = p.vaultLocked ? () => window.dispatchEvent(new CustomEvent('vs-vault-door')) : () => this._voiceSheet(p, render);
           swDisabled = !p.configured;
           onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
         } else if (isServe) {
@@ -145,10 +152,12 @@ export function installPluginsUI(App) {
           // relay (frp) / tunnel (Tailscale): on = start now + at boot; off = stop (said first) + not at boot
           const loginNeeded = isTunnel && running && p.backendState !== 'Running';
           chip = p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
+            : isRelay && p.vaultLocked ? t('The vault is locked — unlock it first')   // lane vault-e2e-password-fix-r2: the sealed relay token
             : isRelay && p.configured === false ? t('relay not configured on this instance')
               : loginNeeded ? t('Log in…') : running ? t('connected') : p.installed ? t('stopped') : t('not installed');
           tone = running && !loginNeeded ? 'ok' : loginNeeded ? 'warn' : '';
-          if (isRelay && p.configured === false) {
+          if (isRelay && p.vaultLocked) { tone = 'warn'; onChip = () => window.dispatchEvent(new CustomEvent('vs-vault-door')); }
+          else if (isRelay && p.configured === false) {
             const miss = (p.missing || []).map((k) => ({ serverAddr: t('relay address'), token: t('relay token') }[k] || k));
             chipTitle = miss.length ? t('Missing: {fields} — set it in the plugin\'s settings (⚙), or set VIBESPACE_FRPS_ADDR/_PORT/_TOKEN.', { fields: miss.join(', ') }) : t('Set VIBESPACE_FRPS_ADDR / _PORT / _TOKEN (the shared relay) to enable public URLs.');
             onChip = () => this._openPluginSettings(p.id);

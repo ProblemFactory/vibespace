@@ -14,7 +14,7 @@ const call = (url, body) => fetchJson(url, body === undefined ? {} : { method: '
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** `box` gets the row (+ its words line); `st` = the answer of `decl.status`; `rerender()` after a sign-in / Disconnect.
- *  Returns what was drawn: 'connected' | 'key' | 'connect'. */
+ *  Returns what was drawn: 'connected' | 'key' | 'vault-locked' | 'connect'. */
 export function renderConnectRow(box, decl, st, rerender) {
   const a = (st && st.account) || {};
   const W = decl.words || {};
@@ -33,6 +33,16 @@ export function renderConnectRow(box, decl, st, rerender) {
     return 'connected';
   }
   if (a.tier === 'key') return 'key';
+  // lane vault-e2e-password-fix-r2: the sign-in is SEALED and the vault is LOCKED — the vault's door, never "connect" (a new
+  // sign-in could not even be stored while locked)
+  if (a.state === 'vault-locked') {
+    words.classList.add('plugin-cfg-warn'); words.textContent = t('The vault is locked — unlock it first');
+    const open = el('button', 'mounts-btn mounts-btn-primary oauth-unlock', t('Unlock'));
+    open.onclick = () => window.dispatchEvent(new CustomEvent('vs-vault-door'));
+    row.append(words, open);
+    box.appendChild(row);
+    return 'vault-locked';
+  }
   const go = el('button', 'mounts-btn mounts-btn-primary oauth-connect-btn', t(decl.label));
   if (a.state === 'reconnect') { words.classList.add('plugin-cfg-warn'); words.textContent = t(W.expired); }
   const whys = decl.whys || {};

@@ -17,6 +17,12 @@
  *     step puts every file back byte for byte and removes the record (never lose data).
  *   · 5 wrong passwords in a row ⇒ the next minute refuses `paced` (the whole vault, every caller: an address that changes
  *     does not get five more); every failure is an audit line with the caller's address — never the password.
+ *   · THE SECRETS (lane vault-e2e-password-fix-r2): beside the store keys the record holds small VALUES under their own entry
+ *     names — a device's link token (`host:<id>`), the frp relay token (`frp:token`): `secretGet` / `secretPut` /
+ *     `secretDrop`, and `secretAdopt` seals a plaintext file written before the vault (wrapped, the record READ BACK, the file
+ *     overwritten then unlinked). `onOpen(fn)` runs after a setup and after every unlock (the sweeps that seal what the vault
+ *     does not hold yet); `onLock(fn)` after a person's / an agent's / the idle lock (never the shutdown's: a restart is not a
+ *     lock act — the hub's wiring signs every login out on one).
  */
 const fs = require('fs');
 const path = require('path');
@@ -42,6 +48,10 @@ const AUDIT_FILE = 'vault-audit.jsonl';
 const PACE_AFTER = 5;
 const PACE_MS = 60e3;
 const IDLE_MAX_HOURS = 720;
+/** A SECRET's entry name (r2): `host:<host id>` (a device's link token) · `frp:token` · `file:<name>` (a sealed JSON file's
+ *  key — src/server/sealed-json.js) — never a key file's name (STORE_KEYS names start with `.` or `browser-`). */
+const SECRET_RE = /^(?:host|frp|file):[\w.-]{1,160}$/;
+const isSecretName = (name) => SECRET_RE.test(String(name || ''));
 
 let SIGNALS_ARMED = false;
 const LIVE = new Set();   // every engine of this process — a signal locks them all
@@ -56,6 +66,7 @@ function writeAtomic(file, text) {
 
 /** Overwrite a file's bytes in place (random, same length, fsync) and unlink it — the plaintext key never lingers in a free block we could reach. */
 function shred(file) {
+  if (fs.lstatSync(file).isSymbolicLink()) throw Object.assign(new Error(`${path.basename(file)} is a symbolic link — never shredded through it`), { code: 'ELOOP' });   // verify r2: the overwrite would reach the link's TARGET
   const st = fs.statSync(file);
   const fd = fs.openSync(file, 'r+');
   try { if (st.size > 0) fs.writeSync(fd, crypto.randomBytes(st.size), 0, st.size, 0); try { fs.fsyncSync(fd); } catch { } } finally { fs.closeSync(fd); }
@@ -81,6 +92,10 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   let lockedSince = now();
   let failedTries = 0, pacedUntil = 0, busy = false, lastActivity = now(), inFlight = 0;   // inFlight: derives running now count toward the pace BEFORE they land (verify r1 A1: 40 concurrent wrong passwords landed 40 derives)
   const unlockHooks = [];   // what a locked start left undone and the unlock must retry (the wiring: mounts' restore)
+  const uses = new Map();   // lane vault-contents-window: entry name → { at, by } — the store key's last use (memory only; the Vault window's «last used»)
+  const keyNameOf = (store) => { const k = STORE_KEYS.find((x) => x.store === store); return k ? k.name : null; };   // a store id (src/vault-inventory.js STORES) → its key's entry name
+  const openHooks = [];     // r2: after a setup AND every unlock — seal what the vault does not hold yet (host token files, the frp field)
+  const lockHooks = [];     // r2: after a lock act (door / agent / idle) — the wiring signs every login out
 
   function load() {
     let text;
@@ -112,7 +127,8 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       pacedForMs: pacedUntil > t ? pacedUntil - t : 0,
       idleLockHours: record ? Number(record.idleLockHours) || 0 : 0,
       corrupt: !!recordBad,
-      keys: record ? Object.keys(record.entries).length : 0,
+      keys: record ? Object.keys(record.entries).filter((n) => !isSecretName(n)).length : 0,
+      secrets: record ? Object.keys(record.entries).filter(isSecretName).length : 0,   // r2: the device link tokens + the frp token
     };
   }
   const announce = () => { try { bcast({ type: 'vault-state', ...facts() }); } catch { } };
@@ -175,7 +191,14 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
 
   // ── THE PROVIDER secret-box asks (sync: every store reads its key synchronously) ──
-  function keyFor(name, { keyFile, raw = false, hasCiphertext = () => true, legacy } = {}) {
+  /** lane vault-contents-window: every key read that opened is a USE of that store key (`by` = who the read is for: a
+   *  reveal from the Vault window says 'human'; a store's own read carries no subject — 'system'). */
+  function keyFor(name, opts = {}) {
+    const r = keyRead(name, opts);
+    if (r && r.ok) uses.set(name, { at: now(), by: ['human', 'agent', 'job'].includes(opts.by) ? opts.by : 'system' });
+    return r;
+  }
+  function keyRead(name, { keyFile, raw = false, hasCiphertext = () => true, legacy } = {}) {
     const st = state();
     if (st === 'not_set_up') return typeof legacy === 'function' ? legacy() : { ok: false, code: KF.VAULT_LOCKED };
     if (st === 'locked') return { ok: false, code: KF.VAULT_LOCKED };
@@ -201,6 +224,70 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     try { return hasCiphertext() ? 'key-missing' : null; } catch { return 'key-missing'; }
   }
   const hasEntry = (name) => !!(record && record.entries[name]);
+
+  // ── THE SECRETS (r2): a small value under its own entry name — a device's link token, the frp token ──
+  const lockedCode = () => (state() === 'locked' ? KF.VAULT_LOCKED : 'vault_not_set_up');
+  /** → `{ ok: true, value: Buffer | null }` (null = no such entry; the Buffer is the caller's copy to zero) |
+   *  `{ ok: false, code: 'key-unreadable:vault_locked' | 'vault_not_set_up' | 'key-malformed' }`. Never reads a file. */
+  function secretGet(name) {
+    if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
+    if (state() !== 'unlocked') return { ok: false, code: lockedCode() };
+    const box = record.entries[name];
+    if (!box) return { ok: true, value: null };
+    const v = V.unwrapEntry(dek, name, box);
+    return v ? { ok: true, value: v } : { ok: false, code: 'key-malformed' };
+  }
+  /** Seal `value` under `name` (unlocked only — locked ⇒ refused by name, nothing written). */
+  function secretPut(name, value) {
+    if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
+    if (state() !== 'unlocked') return { ok: false, code: lockedCode() };
+    const plain = Buffer.isBuffer(value) ? Buffer.from(value) : Buffer.from(String(value == null ? '' : value), 'utf8');
+    try {
+      const next = { ...record, entries: { ...record.entries, [name]: { ...V.wrapEntry(dek, name, plain), at: now() } } };   // int317: `at` = when it was sealed (the Vault window's «saved»)
+      writeRecord(next); record = next;
+      return { ok: true };
+    } catch (e) { return { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; } finally { V.zero(plain); }
+  }
+  /** int317: the secret entries' NAMES and the instants they were sealed (null before this build) — never a box, never a
+   *  value; the Vault window's «Hub secrets» rows (src/server/vault-contents.js secretSource). */
+  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => ({ name, at: Number(record.entries[name].at) || null })) : []);
+  /** Forget an entry (an unpaired device, a cleared relay token) — needs no DEK, so a locked vault forgets too. */
+  function secretDrop(name) {
+    if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
+    if (!record || !record.entries[name]) return { ok: true, already: true };
+    const { [name]: gone, ...rest } = record.entries;
+    try { const next = { ...record, entries: rest }; writeRecord(next); record = next; } catch (e) { return { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; }
+    return { ok: true };
+  }
+  /** Seal a plaintext secret FILE (written before the vault was set up, or restored from a backup) into `name`: wrapped, the
+   *  record written and READ BACK (the entry opens to the very bytes), only then the file overwritten and unlinked. A file
+   *  that differs from the entry already held is KEPT and audited (a value we cannot prove redundant is never destroyed);
+   *  one that equals it is shredded. → secretGet's shape (the value the vault now holds). */
+  function secretAdopt(name, file) {
+    if (state() !== 'unlocked') return secretGet(name);
+    try { if (fs.lstatSync(file).isSymbolicLink()) { audit('vault-adopt-unsealed', { why: `${name}: ${path.basename(file)} is a symbolic link — never followed (its target is neither read nor shredded)` }); return { ok: false, code: 'key-unreadable:ELOOP' }; } } catch { /* absent: the read below says so */ }   // verify r2
+    let text;
+    try { text = fs.readFileSync(file, 'utf8').trim(); } catch (e) { return e && e.code === 'ENOENT' ? secretGet(name) : { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; }
+    if (!text) return { ok: false, code: 'key-malformed' };   // an emptied file is not a value — kept, never sealed
+    const want = Buffer.from(text, 'utf8');
+    const held = secretGet(name);
+    if (held.ok && held.value) {
+      const same = held.value.length === want.length && crypto.timingSafeEqual(held.value, want);
+      if (same) { try { shred(file); audit('vault-adopted', { why: name }); } catch (e) { audit('vault-adopt-unsealed', { why: `${name}: ${KF.errnoOf(e)}` }); } }
+      else audit('vault-seal-conflict', { why: `${name}: the file and the vault entry differ — the file is kept` });
+      V.zero(want);
+      return held;
+    }
+    const put = secretPut(name, want);
+    if (!put.ok) { V.zero(want); audit('vault-adopt-unsealed', { why: `${name}: the record could not be written (${put.code}) — the file is kept` }); return put; }   // verify r2 low: said, not silent
+    let back = null; try { back = readRecordFile(); } catch { back = null; }
+    const got = back && back.entries ? V.unwrapEntry(dek, name, back.entries[name]) : null;
+    const proven = !!got && got.equals(want); V.zero(got);
+    if (!proven) audit('vault-adopt-unsealed', { why: `${name}: the record read back did not open to the file's value — the file is kept` });
+    else { try { shred(file); audit('vault-adopted', { why: name }); } catch (e) { audit('vault-adopt-unsealed', { why: `${name}: ${KF.errnoOf(e)}` }); } }
+    return { ok: true, value: want };
+  }
+  const runHooks = (list, what, ...args) => { for (const fn of list) { try { const r = fn(...args); if (r && typeof r.catch === 'function') r.catch((e) => log.warn?.(`[vault] ${what} hook failed: ${(e && e.message) || e}`)); } catch (e) { log.warn?.(`[vault] ${what} hook failed: ${(e && e.message) || e}`); } } };
 
   // ── the migration ──
   /** The key files present now → the plan, or `{ error: { file, code } }` (an unreadable / damaged one stops the setup: it
@@ -280,6 +367,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       for (const it of items) keys.set(it.name, it.key);
       items = [];
       audit('vault-set-up', { ip, why: `${Object.keys(record.entries).length} key(s) sealed` });
+      runHooks(openHooks, 'an open');   // r2: the host token files, the frp field — sealed in the same act
       announce();
       return { ok: true, sealed: Object.keys(record.entries) };
     } finally {
@@ -314,7 +402,34 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     resumeSeal();
     audit('vault-unlocked', { ip });
     announce();
-    for (const fn of unlockHooks) { try { const r = fn(); if (r && typeof r.catch === 'function') r.catch((e) => log.warn?.(`[vault] an unlock hook failed: ${(e && e.message) || e}`)); } catch (e) { log.warn?.(`[vault] an unlock hook failed: ${(e && e.message) || e}`); } }
+    runHooks(openHooks, 'an open');
+    runHooks(unlockHooks, 'an unlock');
+    return { ok: true };
+  }
+
+  /** lane vault-contents-window: THE SECOND PASSWORD AGAIN (the Vault window's 「验证是你」) — checked against the record,
+   *  nothing unlocked, nothing changed: the derived DEK is zeroed at once. The unlock's pace and counters (a wrong one here
+   *  is a wrong one there); every failure is an audit line with the caller's address. → { ok } | { ok: false, code }. */
+  async function confirm(password, { ip = null, who = null } = {}) {
+    if (!setUp()) return { ok: false, code: 'vault_not_set_up' };
+    if (!dek) return { ok: false, code: 'vault_locked' };
+    const t = now();
+    if (pacedUntil > t || failedTries % PACE_AFTER + inFlight >= PACE_AFTER) return { ok: false, code: 'paced', retryInMs: Math.max(pacedUntil - t, 0) || PACE_MS, failedTries };
+    if (typeof password !== 'string' || !password) return { ok: false, code: 'password_not_text' };
+    if (recordBad) return { ok: false, code: 'corrupt' };
+    const pw = Buffer.from(password, 'utf8');
+    let r;
+    inFlight++;
+    try { r = await V.unlock(record, pw); } finally { V.zero(pw); inFlight--; }
+    if (r.ok) V.zero(r.dek);
+    if (!r.ok) {
+      if (r.code === 'wrong_password') { failedTries++; if (failedTries % PACE_AFTER === 0) pacedUntil = now() + PACE_MS; }
+      audit('vault-reveal-refused', { ip, who, code: r.code, tries: failedTries });
+      announce();
+      return { ok: false, code: r.code, failedTries, ...(pacedUntil > now() ? { retryInMs: pacedUntil - now() } : {}) };
+    }
+    if (!dek) return { ok: false, code: 'vault_locked' };   // locked while the derive ran
+    failedTries = 0; pacedUntil = 0;
     return { ok: true };
   }
 
@@ -325,7 +440,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     for (const k of keys.values()) V.zero(k);
     keys.clear();
     epoch++; lockedSince = now();
-    if (!quiet) { audit('vault-locked', { ip, why }); announce(); }
+    if (!quiet) { audit('vault-locked', { ip, why }); announce(); runHooks(lockHooks, 'a lock', why); }
     return { ok: true };
   }
 
@@ -377,12 +492,20 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   let timer = null;
   if (idleTimer) { timer = setInterval(idleTick, 60e3); timer.unref?.(); }
 
-  const provider = { keyFor, peek, hasEntry, state, epoch: () => epoch };
+  const provider = { keyFor, peek, hasEntry, state, epoch: () => epoch, secretGet, secretPut, secretDrop, secretAdopt };
   const unregister = register ? SB.registerVault(dataDir, provider) : () => {};
   const engine = {
     dataDir, file: FILE, state, facts, setup, unlock, lock, change, setIdleLock, touch, idleTick, keyFor, peek, hasEntry,
+    // lane vault-contents-window: the Vault window's doors (src/server/vault-contents.js) — the second password again, a
+    // store key's last use, a use by a person, and the vault's audit file (one line per reveal — never a value)
+    confirm, lastUse: (store) => { const n = keyNameOf(store); return n && uses.has(n) ? { ...uses.get(n) } : null; }, noteUse: (store, by) => { const n = keyNameOf(store); if (n) uses.set(n, { at: now(), by: ['human', 'agent', 'job'].includes(by) ? by : 'system' }); }, audit,
     /** `fn()` after every successful unlock (a boot step that ran while locked — mounts' restore — runs again). */
     onUnlock(fn) { if (typeof fn === 'function') unlockHooks.push(fn); },
+    /** r2: `fn()` after a setup and after every unlock (seal what the vault does not hold yet). */
+    onOpen(fn) { if (typeof fn === 'function') openHooks.push(fn); },
+    /** r2: `fn(why)` after a lock act — the door, an agent, the idle lock; never the shutdown's quiet lock. */
+    onLock(fn) { if (typeof fn === 'function') lockHooks.push(fn); },
+    secretGet, secretPut, secretDrop, secretAdopt, secretNames,
     epoch: () => epoch, resumeSeal,
     close() { if (timer) clearInterval(timer); lock('close', { quiet: true }); unregister(); LIVE.delete(engine); },
   };
@@ -398,4 +521,4 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   return engine;
 }
 
-module.exports = { create, STORE_KEYS, SEALED_SUFFIX, AUDIT_FILE, PACE_AFTER, PACE_MS, IDLE_MAX_HOURS, shred };
+module.exports = { create, STORE_KEYS, SEALED_SUFFIX, AUDIT_FILE, PACE_AFTER, PACE_MS, IDLE_MAX_HOURS, shred, isSecretName };

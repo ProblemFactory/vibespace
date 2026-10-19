@@ -73,6 +73,8 @@ const { ensureSocketDir } = require('./sock-path.js');
 const SHARE_PREFIX = 'vibespace-share:v1:';
 const CEPHMOUNT_PREFIX = 'vibespace-cephmount:v1:';
 
+/** lane vault-contents-window r2: what a sealed field answers outside the page's reveal window (never a character of it). */
+const VAULT_MASK = '••••••••';
 class MountManager {
   constructor({ dataDir, broadcast, getSetting }) {
     // Gmail-as-a-folder engine (2.134.0) — lazy so plain deployments pay nothing
@@ -453,6 +455,32 @@ class MountManager {
   }
 
 
+  // ── lane vault-contents-window: THE VAULT WINDOW's rows of this store — every `*Enc` field of every record (and the
+  // params maps), plus My storage's secret key; masked (the ciphertext rides only to the length class) ──
+  vaultRows() {
+    const out = [];
+    const each = (entry, label, detail, createdAt, rec) => {
+      for (const [k, v] of Object.entries(rec || {})) {
+        if (!/Enc$/.test(k) || !v) continue;
+        const name = k.slice(0, -3);
+        if (typeof v === 'string') out.push({ entry, field: name, label, detail, createdAt, cipher: v, kind: name === 'token' ? 'oauth-token' : name === 'cephSecret' ? 'secret-key' : undefined });
+        else if (typeof v === 'object' && !Array.isArray(v)) for (const [p, b] of Object.entries(v)) if (typeof b === 'string' && /^[\w.:-]{1,100}$/.test(p)) out.push({ entry, field: `${name}.${p}`, kind: 'parameter', label, detail, createdAt, cipher: b });
+      }
+    };
+    for (const m of this._state.mounts) if (m && m.id) each(m.id, m.name || m.id, m.type || 's3', m.createdAt || null, m);
+    if (this._state.myStorage) each('my-storage', 'My storage', this._state.myStorage.bucket || '', this._state.myStorage.updatedAt || null, this._state.myStorage);
+    return out;
+  }
+  /** lane vault-contents-window: ONE value — `field` names a `<name>Enc` field or `<map>.<param>`; null when gone. */
+  vaultReveal(entry, field) {
+    const rec = entry === 'my-storage' ? this._state.myStorage : this._state.mounts.find((x) => x && x.id === entry);
+    if (!rec) return null;
+    const [name, param] = String(field).split(/\.(.*)/s);
+    const v = rec[name + 'Enc'];
+    const blob = param ? (v && typeof v === 'object' ? v[param] : null) : (typeof v === 'string' ? v : null);
+    return typeof blob === 'string' && blob ? this._dec(blob) : null;
+  }
+
   // ── Config transfer ──
   // Secrets are stored encrypted under an INSTANCE-local key (data/.mounts-key),
   // so a raw mounts.json is useless elsewhere. Export decrypts to plaintext
@@ -739,8 +767,21 @@ class MountManager {
    * route; single-user instance model. Env-provisioned records return no
    * secrets (their connection is deployment-owned and not editable anyway).
    */
-  config(id) {
+  config(id, { masked = false } = {}) {
     const m = this._get(id);
+    // lane vault-contents-window r2 (verify r1): outside the page's reveal window every sealed field answers the MASK and
+    // is named in `masked` (the dialog leaves it as it is unless a new value is typed); the rest of the record is real
+    if (masked) {
+      const out = this.config(id);
+      const names = [];
+      for (const [k, v] of Object.entries(m)) {
+        if (!/Enc$/.test(k) || !v) continue;
+        const name = k.slice(0, -3);
+        if (typeof v === 'string' && out[name] !== undefined) { out[name] = VAULT_MASK; names.push(name); }
+        else if (typeof v === 'object' && !Array.isArray(v) && out[name] && typeof out[name] === 'object') for (const p of Object.keys(v)) if (p in out[name]) { out[name][p] = VAULT_MASK; names.push(`${name === 'params' ? 'param' : name}:${p}`); }
+      }
+      return { ...out, masked: names };
+    }
     const dec = (b) => (b ? this._dec(b) : undefined);
     const base = {
       id: m.id, name: m.name, kind: this._kindOf(m), parentId: m.parentId || null,
