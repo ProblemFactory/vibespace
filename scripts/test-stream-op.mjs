@@ -24,8 +24,9 @@
 //      the encoder got: every patch ±1); the ffmpegs ran the plan's argvs; a PLI answered by the next key; capture /
 //      encoder death and an unplugged display end the session BY NAME; an SDR primary = the direct road; x264 only = said;
 //      no ffmpeg = no_ffmpeg naming where it looked
-//   §9 the bitrate: werift's estimate restarts ONLY the encoder, at most once per 5 s and only on a ≥ 25 % move (the same
-//      module in-process, an injected clock, the fake ffmpeg)
+//   §9 THE RATE on the screen road (lane stream-mac-rate — every road's rule, src/stream-plan.js rateFollower): an echo restarts
+//      nothing; a shortfall that HOLDS 2 s restarts ONLY the encoder, once, at the display's floor (never under it; its first
+//      picture a key frame); a quiet 20 s climbs +25 % (the same module in-process, an injected clock, the fake ffmpeg)
 //   §10 THE UDP LEG (lane stream-relay-udp): a daemon that DIALS this hub (Transport B) through a link stand-in that carries
 //      2 Mbps (the owner's link delivered 1.3); a padded fixture at 30 fps / 8 Mbps; relay-only. The daemon's own UDP leg
 //      carries every picture for 10 s with 0 RTP gaps and no growing lag; a forged PING and a stray DATA mid-run are dropped
@@ -355,7 +356,7 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
 }
 dms.stop(); endDaemonsOf(rootOf(homeScr));
 
-console.log('§9 the bitrate follows the estimate: an encoder restart, with hysteresis (in-process, the same module + the fake ffmpeg)');
+console.log('§9 THE RATE on the screen road (lane stream-mac-rate): only a HELD shortfall restarts the encoder, never under the display\'s floor (in-process, the fake ffmpeg)');
 {
   const SS = require(path.join(REPO, 'src/agentd/stream-screen.js'));
   FF.set({ encoders: ['h264_nvenc', 'libx264'] });
@@ -367,17 +368,27 @@ console.log('§9 the bitrate follows the estimate: an encoder restart, with hyst
   const aus = [];
   src.start((au) => aus.push(au), () => { });
   await until(() => aus.length >= 5, 8000);
-  src.setTargetKbps(3000); // inside the first 5 s
-  const early = ffRuns().slice(n0).filter((a) => a.includes('pipe:0')).length;
-  clock += 6000;
-  src.setTargetKbps(3000);
+  const encs = () => ffRuns().slice(n0).filter((a) => a.includes('pipe:0')), rateOf = (a) => a[a.indexOf('-b:v') + 1];
+  const est = (k) => { for (let i = 0; i < 5; i++) src.setTargetKbps(k); }; // 5 = the rule's minSamples
+  const more = async (n = 3) => { const k = aus.length; await until(() => aus.length >= k + n, 8000); }; // pictures sent by the injected clock's new time
+  est(1); // within 2 s of the start
+  const early = { n: encs().length, why: src.stats().rate.why };
+  clock += 2100; await more(); est(99999);
+  const echo = { n: encs().length, why: src.stats().rate.why };
+  clock += 2100; await more(); est(1);
+  const held = { n: encs().length, why: src.stats().rate.why };
+  clock += 2100; await more(); est(1);
   const k = aus.length;
   await until(() => aus.length >= k + 5, 8000);
-  clock += 1000;
-  src.setTargetKbps(1500); // 1 s after the change
-  const encRuns = ffRuns().slice(n0).filter((a) => a.includes('pipe:0'));
-  const afterKey = aus.slice(k).findIndex((a) => a.key);
-  ok(early === 1 && encRuns.length === 2 && encRuns[1][encRuns[1].indexOf('-b:v') + 1] === '3000k' && src.stats().restarts === 1 && src.stats().kbps === 3000 && src.stats().mapper === 'inline' && afterKey === 0, 'the estimate inside 5 s changes nothing; after 5 s a 62 % drop restarts ONLY the encoder at 3000k (its first picture a key frame); 1 s later another drop waits', { early, encs: encRuns.length, stats: src.stats(), afterKey });
+  const st1 = src.stats(), runs1 = encs(), afterKey = aus.slice(k).findIndex((a) => a.key);
+  ok(early.n === 1 && early.why === 'wait' && echo.n === 1 && echo.why === 'echo' && held.n === 1 && held.why === 'hold', 'within 2 s of the start the estimate waits; an echo (above what was sent) restarts nothing; a shortfall starts a hold — no restart yet', { early, echo, held });
+  ok(runs1.length === 2 && rateOf(runs1[1]) === '2500k' && st1.kbps === 2500 && st1.floor === 2500 && st1.restarts === 1 && st1.mapper === 'inline' && afterKey === 0, 'held 2 s ⇒ ONE restart of the encoder alone, at the display\'s FLOOR (1280×720 @ 30 ⇒ 2500k — never the estimate\'s 1), its first picture a key frame', { encs: runs1.length, rate: rateOf(runs1[1] || []), st1: { kbps: st1.kbps, floor: st1.floor, restarts: st1.restarts, rate: st1.rate }, afterKey });
+  clock += 6000; await more(); est(1);
+  ok(encs().length === 2 && src.stats().kbps === 2500, 'more shortfall: nothing under the floor', { encs: encs().length });
+  clock += 21000; await more(); est(99999);
+  await until(() => encs().length >= 3, 5000); // the restarted encoder logs its argv as it starts
+  const runs2 = encs();
+  ok(runs2.length === 3 && rateOf(runs2[2]) === '3100k' && src.stats().kbps === 3100 && src.stats().rate.why === 'recover', 'a quiet 20 s (no shortfall) ⇒ +25 % toward the cap: the encoder restarts at 3100k', { encs: runs2.length, rate: rateOf(runs2[2] || []), st: src.stats().rate });
   src.stop();
   await sleep(200);
 }

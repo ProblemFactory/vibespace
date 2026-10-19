@@ -25,15 +25,20 @@
  *                        already) | 'mapped' (an HDR display: FP16 → the agent's mapping → NV12 → the encoder), the two
  *                        argvs, origin, encoder } or a refusal by name (no_ffmpeg, display_gone, display_other_gpu,
  *                        no_white_level, no_encoder)
- *   kbpsDecision         the bandwidth estimate → an encoder restart, with hysteresis (ffmpeg's CLI cannot change a
- *                        bitrate live): at most once per 5 s, only on a ≥ 25 % move, never under the source's `floor`
+ *   kbpsDecision         one rate step with hysteresis (ffmpeg's CLI cannot change a bitrate live): at most once per 5 s, only on
+ *                        a ≥ 25 % move, never under the source's `floor` (MAC_KBPS_RULE: VideoToolbox's live step — 1 s, 10 %)
+ *   THE RATE             EVERY road (lane stream-window-fixes: a Windows window; lane stream-mac-rate: the Mac, a Windows screen): a floor
+ *                        sized by the picture (KBPS_FLOOR — its pixels × its rate), werift's estimate judged against what the
+ *                        source SENT (rateDecision — an echo changes nothing; a held shortfall steps down; a quiet spell climbs
+ *                        back), one session's bookkeeping (rateFollower); the roads differ only in their step and climb
+ *                        (RATE_RULE — a restart costs a key frame; MAC_RATE_RULE — VideoToolbox follows `bps` live); THE
+ *                        ESTIMATE it judges, made right (twccPackets + sendEstimator — werift 0.25's counts ~one packet a picture)
  *   planWindow           ONE WINDOW (lane stream-p2w-build): the vibespace-wgc helper's build recipe (wgcBuildPlan — csc on the
  *                        machine), its frame head (wgcHead) and lines (wgcLine), the window's road (BGRA exact SDR by default,
  *                        FP16 → THE table on an HDR display when asked), the capture + encoder argvs (wgcCaptureArgv,
  *                        windowEncodeArgv) — or a refusal by name (helper_missing, no_ffmpeg, window_gone, no_encoder);
- *                        its RATE (lane stream-window-fixes): a floor sized by the window (WINDOW_KBPS_FLOOR — its pixels ×
- *                        its rate), werift's estimate judged against what was sent (windowRateDecision — an echo changes
- *                        nothing) and an intra-refresh wave instead of a periodic IDR (WINDOW_REFRESH)
+ *                        its RATE: THE RATE below at the window's size, and an intra-refresh wave instead of a periodic IDR
+ *                        (WINDOW_REFRESH)
  *   flvReader            the encoder's output: FLV (length-framed — an Annex-B pipe only shows a picture's end when the NEXT
  *                        one starts, a frame of latency) → access units { nalus, key, tsMs }, SPS/PPS put in front of every
  *                        key frame (a browser that joins at a key frame needs them; FLV carries them once)
@@ -301,7 +306,7 @@ function planScreen(facts, opts = {}) {
   const rate = Math.max(SCREEN_DEFAULTS.minKbps, Math.round(Number(kbps) || 8000));
   const r = Math.max(1, Math.min(120, Math.round(Number(fps) || SCREEN_DEFAULTS.fps)));
   return { ok: true, mode: hdr ? 'mapped' : 'direct', display: { id: d.id, output: mapped.output }, origin: { x: d.x, y: d.y }, w: d.w & ~1, h: d.h & ~1, srcW: d.w, srcH: d.h,
-    fps: r, kbps: rate, gop: r * SCREEN_DEFAULTS.gopSeconds, white: hdr ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder, note: pe.note, ffmpeg: f.ffmpeg.path };
+    fps: r, kbps: rate, floor: kbpsFloor({ w: d.w & ~1, h: d.h & ~1, fps: r, cap: rate }), gop: r * SCREEN_DEFAULTS.gopSeconds, white: hdr ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder, note: pe.note, ffmpeg: f.ffmpeg.path };
 }
 
 // ── THE BITRATE ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -315,6 +320,139 @@ function kbpsDecision({ current, target, cap, lastAt, now, floor = 0 }, rule = K
   if (now - lastAt < rule.minGapMs) return { change: false, kbps: current };
   if (Math.abs(t - current) / current < rule.band) return { change: false, kbps: current };
   return { change: true, kbps: t };
+}
+/** VideoToolbox's step (the Mac's helper takes `bps` LIVE — no restart, no key frame): ≥ 1 s apart, a ≥ 10 % move. */
+const MAC_KBPS_RULE = Object.freeze({ minGapMs: 1000, band: 0.1, stepKbps: 100 });
+
+// ── THE RATE — EVERY ROAD (lane stream-window-fixes: a Windows window; lane stream-mac-rate: the Mac, a Windows screen) ──
+// Measured twice. The owner's first window stream (a 2698×2078 Lightroom window) restarted its encoder at 300 kbps 5 s in and
+// stayed there. The owner's Mac screen (2560×1440 @ 60 over the hub's UDP leg — 「mac画面有了但是压缩的厉害」) went 8000 → 300 kbps at
+// 2.2 s on werift's first estimate and stayed 30 s. Both were werift 0.25's estimate (THE ESTIMATE below: ~one packet a picture,
+// ~300 kbps whatever is sent), obeyed. Even made right, an estimate is min(send, receive) of what WE sent: a still picture sends a
+// trickle and no estimate rises above what is sent. So no road goes under a FLOOR sized by its picture (its pixels × its rate; the
+// session's cap still wins), and the estimate is judged, never obeyed.
+const KBPS_FLOOR = Object.freeze([
+  Object.freeze({ maxPixels: 640 * 480, at30: 1000, at60: 1500 }),
+  Object.freeze({ maxPixels: 1280 * 800, at30: 2500, at60: 3500 }),
+  Object.freeze({ maxPixels: 1920 * 1200, at30: 4000, at60: 6000 }),
+  Object.freeze({ maxPixels: 2560 * 1600, at30: 6000, at60: 8000 }),
+  Object.freeze({ maxPixels: Infinity, at30: 8000, at60: 12000 }),
+]);
+/** A picture's rate floor: the row of its pixel count, 30 → 60 fps interpolated, rounded to 100, never over the session's `cap`. */
+function kbpsFloor({ w = 0, h = 0, fps = SCREEN_DEFAULTS.fps, cap = Infinity } = {}) {
+  const px = Math.max(0, Number(w) || 0) * Math.max(0, Number(h) || 0);
+  const row = KBPS_FLOOR.find((r) => px <= r.maxPixels);
+  const f = Math.max(0, Math.min(1, ((Number(fps) || SCREEN_DEFAULTS.fps) - 30) / 30));
+  const k = Math.round((row.at30 + (row.at60 - row.at30) * f) / 100) * 100;
+  return Math.max(SCREEN_DEFAULTS.minKbps, Math.min(Number(cap) > 0 ? Number(cap) : Infinity, k));
+}
+/** THE RATE RULE — the estimate judged, never obeyed. A correctly fed estimate of a lossless link spreads around what was sent
+ *  (a real 30 s window stream replayed — the owner's machine, NVENC ~7.4 Mbps: p10 6.2 / p50 ~10 / p90 14–17 Mbps, one 976 kbps;
+ *  THE ESTIMATE below, live through Chrome on loopback, 4.3 Mbps sent: 4.9–6.4 Mbps) — so a rule that obeys one sample walks at
+ *  random. Here: the MEDIAN of the last `windowMs` of samples against the kbps the source itself SENT over the same span — at or above `echo` ×
+ *  sent it is an echo (no evidence of a limit: nothing changes); under it the link may receive less than is sent (it drops or
+ *  queues) — a real bottleneck HOLDS (the estimate sits at its capacity), a sampling dip does not (measured live: NVENC's
+ *  intra-refresh cycle swings the sent rate 4 ↔ 14 Mbps a second, and one median dipped) — so only a shortfall that held `holdMs`
+ *  acts: one `step` (kbpsDecision) toward the median, never under the floor, never up; with no shortfall for `recoverMs`, one
+ *  `recoverStep` back toward the cap (blind — an echo never shows headroom; a cap it cannot carry shows as the next shortfall).
+ *  `shortSince` = when the current shortfall began (0 = none), `shortAt` = the last shortfall seen. → { change, kbps, why:
+ *  'shortfall' | 'hold' | 'recover' | 'echo' | 'wait', median, shortSince } */
+const RATE_RULE = Object.freeze({ windowMs: 2000, minSamples: 5, echo: 0.75, holdMs: 2000, recoverMs: 20000, recoverStep: 1.25, step: KBPS_RULE });
+/** The Mac's road (lane stream-mac-rate): the same judgement, VideoToolbox's live step, and the climb back after 10 s without a
+ *  shortfall (+25 % toward the cap; the window road waits 20 s — each of its changes restarts the encoder: a key frame). */
+const MAC_RATE_RULE = Object.freeze({ ...RATE_RULE, recoverMs: 10000, step: MAC_KBPS_RULE });
+function rateDecision({ current, cap, floor = 0, samples = [], sentKbps = 0, lastAt = 0, shortAt = 0, shortSince = 0, now = 0 }, rule = RATE_RULE) {
+  const keep = { change: false, kbps: current, shortSince: 0 };
+  const s = (Array.isArray(samples) ? samples : []).filter((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0).sort((a, b) => a - b);
+  if (s.length < rule.minSamples || !(sentKbps > 0) || now - lastAt < rule.windowMs) return { ...keep, why: 'wait' };
+  const median = s[s.length >> 1];
+  if (median < rule.echo * sentKbps) {
+    const since = shortSince || now;
+    if (now - since < rule.holdMs) return { change: false, kbps: current, why: 'hold', median, shortSince: since };
+    const d = kbpsDecision({ current, target: Math.min(median, current), cap, lastAt, now, floor }, rule.step || KBPS_RULE); // a shortfall only ever lowers
+    return { ...d, why: 'shortfall', median, shortSince: since };
+  }
+  const top = Math.max(SCREEN_DEFAULTS.minKbps, Number(cap) || current);
+  if (current < top && now - Math.max(lastAt, shortAt) >= rule.recoverMs) return { change: true, kbps: Math.min(top, Math.round((current * rule.recoverStep) / 100) * 100), why: 'recover', median };
+  return { ...keep, why: 'echo', median };
+}
+/** ONE SESSION's rate — the bookkeeping both roads' sources share: what the source SENT (`sent(bytes, at)` per access unit) and
+ *  werift's estimates over the rule's last windowMs, judged by rateDecision with its state carried. `estimate(kbps, at)` → the
+ *  decision (`change` ⇒ the source applies `kbps`: the window road restarts its encoder, the Mac's helper takes `bps` live);
+ *  `setFloor(f)` (a window's new size) lifts the rate to the new floor at once (→ true when it did); `begin(at)` = the stream
+ *  started (no change within windowMs of it). `kbps`, `floor`, `last` ({ why, median } — the source's stats) read the state. */
+function rateFollower({ kbps, cap, floor = 0, rule = RATE_RULE } = {}) {
+  const sent = [], samples = [];
+  const st = { kbps: Math.max(Number(kbps) || 0, floor), floor, lastAt: 0, shortAt: 0, shortSince: 0, last: null };
+  const sum = (a) => a.reduce((n, x) => n + x[1], 0);
+  return {
+    get kbps() { return st.kbps; },
+    get floor() { return st.floor; },
+    get last() { return st.last; },
+    begin(at) { st.lastAt = at; },
+    sent(bytes, at) { sent.push([at, bytes]); },
+    setFloor(f) { st.floor = f; if (st.kbps < f) { st.kbps = f; return true; } return false; },
+    estimate(target, at) {
+      samples.push([at, Number(target)]);
+      while (samples.length && at - samples[0][0] > rule.windowMs) samples.shift();
+      while (sent.length && at - sent[0][0] > rule.windowMs) sent.shift();
+      const d = rateDecision({ current: st.kbps, cap, floor: st.floor, samples: samples.map((x) => x[1]), sentKbps: (sum(sent) * 8) / rule.windowMs, lastAt: st.lastAt, shortAt: st.shortAt, shortSince: st.shortSince, now: at }, rule);
+      if (d.why !== 'wait') st.shortSince = d.shortSince || 0;
+      if (d.why === 'shortfall' || d.why === 'hold') st.shortAt = at;
+      st.last = { why: d.why, median: d.median == null ? null : Math.round(d.median) };
+      if (d.change) { st.kbps = d.kbps; st.lastAt = at; }
+      return d;
+    },
+  };
+}
+/** THE ESTIMATE (lane stream-mac-rate, measured with a real Chrome viewer): werift 0.25's send-side estimate counts ~ONE packet a
+ *  picture. It notes a sent packet after `await dtlsTransport.sendRtp` under the transport's CURRENT number — by then the number of
+ *  the burst's LAST packet — so a picture's packets leave one record (loopback: 14 093 packets sent, 979 records; 974 of the 14 579
+ *  the browser reported matched one), and its `packetResults` skips status-vector chunks, counts every run one too long and starts
+ *  every chunk at the base again. Its estimate is ~300 kbps at 30–60 fps whatever is sent (the owner's Mac: 2.3 Mbps sent, nothing
+ *  lost, the estimate 240–390) — the owner's 300 kbps on both roads; not an echo. So stream-host records each packet under the
+ *  number in ITS OWN header and reads each feedback here. twccPackets: one transport-cc feedback (werift's parsed fields, which are
+ *  right: baseSequenceNumber, packetStatusCount, referenceTime — 64 ms units, packetChunks — a run { packetStatus, runLength } or
+ *  a vector { symbolList }, recvDeltas — µs, one per received packet in order) → the packets it names: [{ seq, recvUs | null }]. */
+function twccPackets(fb) {
+  const out = [], count = Math.max(0, Number(fb && fb.packetStatusCount) || 0), deltas = (fb && Array.isArray(fb.recvDeltas)) ? fb.recvDeltas : [];
+  let seq = (Number(fb && fb.baseSequenceNumber) || 0) & 0xffff, di = 0, at = (Number(fb && fb.referenceTime) || 0) * 64000;
+  const one = (status) => { // 0 not received · 1 small delta · 2 large delta (signed)
+    let recvUs = null;
+    if (status === 1 || status === 2) { const d = deltas[di++]; if (d && Number.isFinite(d.delta)) { at += d.delta; recvUs = at; } }
+    out.push({ seq, recvUs });
+    seq = (seq + 1) & 0xffff;
+  };
+  for (const c of (fb && Array.isArray(fb.packetChunks)) ? fb.packetChunks : []) {
+    if (c && Array.isArray(c.symbolList)) { for (const v of c.symbolList) { if (out.length >= count) break; one(v); } } else if (c) { for (let i = 0; i < (Number(c.runLength) || 0) && out.length < count; i++) one(c.packetStatus); }
+  }
+  return out;
+}
+/** One session's send-side estimate: `sent(seq, bytes, atMs)` per packet (its first send — a retransmit keeps the number),
+ *  `feedback(packets)` per report → kbps = min(the send rate, the receive rate) of ≥ minPackets reported packets spanning ≥ minMs
+ *  (werift's intent), or null (not yet — a still picture's trickle waits for its 20 packets). Loopback Chrome, 4.3 Mbps sent:
+ *  4.9–6.4 Mbps (werift's own: median 41 kbps). The last `keep` numbers are kept. */
+function sendEstimator({ minPackets = 20, minMs = 100, keep = 4096 } = {}) {
+  const sent = new Map();
+  let acc = null;
+  return {
+    sent(seq, bytes, at) { if (!sent.has(seq)) sent.set(seq, [Number(bytes) || 0, at]); sent.delete((seq - keep) & 0xffff); },
+    feedback(packets) {
+      for (const p of Array.isArray(packets) ? packets : []) {
+        if (!p || p.recvUs == null) continue;
+        const x = sent.get(p.seq);
+        if (!x) continue;
+        const r = p.recvUs / 1000;
+        if (!acc) acc = { n: 0, bytes: 0, s0: x[1], s1: x[1], r0: r, r1: r };
+        acc.n++; acc.bytes += x[0];
+        acc.s0 = Math.min(acc.s0, x[1]); acc.s1 = Math.max(acc.s1, x[1]); acc.r0 = Math.min(acc.r0, r); acc.r1 = Math.max(acc.r1, r);
+      }
+      if (!acc || acc.n < minPackets || Math.max(acc.s1 - acc.s0, acc.r1 - acc.r0) < minMs) return null;
+      const k = Math.round(Math.min((acc.bytes * 8) / Math.max(1, acc.s1 - acc.s0), (acc.bytes * 8) / Math.max(1, acc.r1 - acc.r0)));
+      acc = null;
+      return k;
+    },
+  };
 }
 
 // ── THE ENCODER'S OUTPUT: FLV → access units ─────────────────────────────────────────────────────────────────────────
@@ -489,7 +627,7 @@ function planMacScreen(facts, { display = null, window = null, fps = null, kbps 
   const rate = Math.max(SCREEN_DEFAULTS.minKbps, Math.round(Number(kbps) || 8000));
   const fr = fps != null ? Math.max(1, Math.min(r.fps, Math.round(Number(fps) || r.fps))) : r.fps;
   const args = ['capture', kind === 'window' ? '--window' : '--display', kind === 'window' ? w.id : d.id, '--fps', String(fr), '--size', `${r.w}x${r.h}`, '--kbps', String(rate)];
-  return { ok: true, mode: 'videotoolbox', kind, display: d ? { id: d.id } : null, window: windowSourceOf(w, d), origin: { x: 0, y: 0 }, w: r.w, h: r.h, fps: fr, kbps: rate, rung: r.rung,
+  return { ok: true, mode: 'videotoolbox', kind, display: d ? { id: d.id } : null, window: windowSourceOf(w, d), origin: { x: 0, y: 0 }, w: r.w, h: r.h, fps: fr, kbps: rate, floor: kbpsFloor({ w: r.w, h: r.h, fps: fr, cap: rate }), rung: r.rung,
     encoder: { id: 'videotoolbox', label: 'VideoToolbox', hw: true }, note: null, white: null, bin: h.bin, args };
 }
 /** Where the picture sits on the Mac (the helper's `started` / `frame` line: its frame in global points, the picture's
@@ -507,10 +645,6 @@ function macPoint(target, x, y) {
   if (!target) return { x: r2(x), y: r2(y) };
   return { x: r2(target.ox + x * target.sx), y: r2(target.oy + y * target.sy) };
 }
-/** VideoToolbox follows a bitrate LIVE (no restart, unlike ffmpeg's CLI): follow the estimate, at most once a second and only
- *  on a ≥ 10 % move, rounded to 100 kbps, never under the floor or over the session's cap. → { change, kbps } */
-const MAC_KBPS_RULE = Object.freeze({ minGapMs: 1000, band: 0.1, stepKbps: 100 });
-const macKbpsDecision = (o) => kbpsDecision(o, MAC_KBPS_RULE);
 
 // ── ONE WINDOW (lane stream-p2w-build, design q-041 r3 §3 P2w — the probe: lane stream-p2w-capture-probe) ─────────────
 // THE HELPER: tools/vibespace-wgc/vibespace-wgc.cs (Windows.Graphics.Capture by HWND) is BUILT ON THE MACHINE by its agent
@@ -557,57 +691,10 @@ function wgcLine(line) {
 }
 
 const WINDOW_DEFAULTS = Object.freeze({ fps: 30 });
-// THE WINDOW ROAD'S RATE (lane stream-window-fixes — the owner's first real stream, a 2698×2078 Lightroom window, pulsed blurry ↔
-// sharp). Measured on his agent: 5 s in, werift's estimate restarted the encoder at 300 kbps and it stayed there. werift's
-// `availableBitrate` is min(send, receive) of the packets WE sent in its last ≥ 100 ms — a still window sends a trickle, so the
-// estimate is that trickle, and no estimate can rise 25 % above what is sent: a ratchet down to minKbps. So the window road
-// never goes under a FLOOR sized by the window (its pixels × its rate; the session's cap still wins), and its picture is
-// refreshed by an intra-refresh wave — a column of intra blocks sweeping the picture once per GOP — instead of a periodic IDR
-// (the whole picture re-coded in one frame of a two-frame VBV: the blurry key frame, then P-frames sharpening it, then the next
-// key frame). A key frame only when the viewer asks (PLI ⇒ the encoder restarts: its first picture is one).
-const WINDOW_KBPS_FLOOR = Object.freeze([
-  Object.freeze({ maxPixels: 640 * 480, at30: 1000, at60: 1500 }),
-  Object.freeze({ maxPixels: 1280 * 800, at30: 2500, at60: 3500 }),
-  Object.freeze({ maxPixels: 1920 * 1200, at30: 4000, at60: 6000 }),
-  Object.freeze({ maxPixels: 2560 * 1600, at30: 6000, at60: 8000 }),
-  Object.freeze({ maxPixels: Infinity, at30: 8000, at60: 12000 }),
-]);
-/** A window's rate floor: the row of its pixel count, 30 → 60 fps interpolated, rounded to 100, never over the session's `cap`. */
-function windowKbpsFloor({ w = 0, h = 0, fps = WINDOW_DEFAULTS.fps, cap = Infinity } = {}) {
-  const px = Math.max(0, Number(w) || 0) * Math.max(0, Number(h) || 0);
-  const row = WINDOW_KBPS_FLOOR.find((r) => px <= r.maxPixels);
-  const f = Math.max(0, Math.min(1, ((Number(fps) || WINDOW_DEFAULTS.fps) - 30) / 30));
-  const k = Math.round((row.at30 + (row.at60 - row.at30) * f) / 100) * 100;
-  return Math.max(SCREEN_DEFAULTS.minKbps, Math.min(Number(cap) > 0 ? Number(cap) : Infinity, k));
-}
-/** THE WINDOW ROAD'S RATE RULE — werift's estimate judged, never obeyed. Replayed on the access units of a real 30 s window stream
- *  (the owner's machine, NVENC ~7.4 Mbps, a lossless link): its samples spread p10 6.2 / p50 ~10 / p90 14–17 Mbps around what was
- *  sent, ~9 % under 0.85 × the sent rate (one 976 kbps) — so the old rule (the first sample after 5 s) restarted the encoder at
- *  whatever sample came, and once low, werift's 20-packet window spans longer, the estimate becomes an exact echo, and nothing
- *  rises 25 % above it again (the owner's 300 kbps). Here: the MEDIAN of the last `windowMs` of samples against the kbps the source
- *  itself SENT over the same span — at or above `echo` × sent it is an echo (no evidence of a limit: nothing changes); under it the
- *  link may receive less than is sent (it drops or queues) — a real bottleneck HOLDS (the estimate sits at its capacity), a
- *  sampling dip does not (measured live: NVENC's intra-refresh cycle swings the sent rate 4 ↔ 14 Mbps a second, and one median
- *  dipped) — so only a shortfall that held `holdMs` acts: kbpsDecision toward the median, never under the floor, never up; with
- *  no shortfall for `recoverMs`, one `recoverStep` back toward the cap. `shortSince` = when the current shortfall began (0 = none),
- *  `shortAt` = the last shortfall seen. → { change, kbps, why: 'shortfall' | 'hold' | 'recover' | 'echo' | 'wait', median,
- *  shortSince } */
-const WINDOW_RATE_RULE = Object.freeze({ windowMs: 2000, minSamples: 5, echo: 0.75, holdMs: 2000, recoverMs: 20000, recoverStep: 1.25 });
-function windowRateDecision({ current, cap, floor = 0, samples = [], sentKbps = 0, lastAt = 0, shortAt = 0, shortSince = 0, now = 0 }, rule = WINDOW_RATE_RULE) {
-  const keep = { change: false, kbps: current, shortSince: 0 };
-  const s = (Array.isArray(samples) ? samples : []).filter((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0).sort((a, b) => a - b);
-  if (s.length < rule.minSamples || !(sentKbps > 0) || now - lastAt < rule.windowMs) return { ...keep, why: 'wait' };
-  const median = s[s.length >> 1];
-  if (median < rule.echo * sentKbps) {
-    const since = shortSince || now;
-    if (now - since < rule.holdMs) return { change: false, kbps: current, why: 'hold', median, shortSince: since };
-    const d = kbpsDecision({ current, target: Math.min(median, current), cap, lastAt, now, floor }); // a shortfall only ever lowers
-    return { ...d, why: 'shortfall', median, shortSince: since };
-  }
-  const top = Math.max(SCREEN_DEFAULTS.minKbps, Number(cap) || current);
-  if (current < top && now - Math.max(lastAt, shortAt) >= rule.recoverMs) return { change: true, kbps: Math.min(top, Math.round((current * rule.recoverStep) / 100) * 100), why: 'recover', median };
-  return { ...keep, why: 'echo', median };
-}
+// THE WINDOW ROAD'S RATE (lane stream-window-fixes): THE RATE above at the window's size, and its picture refreshed by an
+// intra-refresh wave — a column of intra blocks sweeping the picture once per GOP — instead of a periodic IDR (the whole picture
+// re-coded in one frame of a two-frame VBV: the blurry key frame, then P-frames sharpening it, then the next key frame). A key
+// frame only when the viewer asks (PLI ⇒ the encoder restarts: its first picture is one).
 /** The encoders whose intra-refresh wave was measured (the owner's NVENC; x264 on the lane's box): ONE key frame at the start,
  *  then the GOP is the wave's period. AMF and Quick Sync keep the periodic GOP (not measured on any machine of ours). */
 const WINDOW_REFRESH = Object.freeze({ h264_nvenc: Object.freeze(['-intra-refresh', '1']), libx264: Object.freeze(['-intra-refresh', '1']) });
@@ -620,7 +707,7 @@ const windowIntervalMs = (fps) => Math.max(1, Math.floor(1000 / Math.max(1, fps)
  * (BT.709 limited, NV12) → the encoder ladder → FLV. `fp16` (the start route's flag, off by default) = the FP16 road: scRGB like DDA →
  * THE table (white of the window's display) → NV12 → the encoder — only on an HDR display (an SDR display: BGRA, `note`).
  * The source sends WINDOW pixels (origin 0,0, `relative`): the daemon adds the window's live place to every pointer event.
- * THE RATE: `floor` = windowKbpsFloor at the window's size (the source moves it with each new size), `refresh` = the encoder
+ * THE RATE: `floor` = kbpsFloor at the window's size (the source moves it with each new size), `refresh` = the encoder
  * refreshes by an intra-refresh wave (WINDOW_REFRESH) — no periodic key frame.
  * → { ok, mode: 'window-bgra' | 'window-f16', fmt, window, origin, relative, w, h, fps, interval, kbps, floor, refresh, gop,
  *   white, tone, encoder, note, ffmpeg, helper } | { ok: false, code, error }
@@ -642,7 +729,7 @@ function planWindow(facts, { window = null, fps = WINDOW_DEFAULTS.fps, kbps = 80
     ok: true, mode: f16 ? 'window-f16' : 'window-bgra', fmt: f16 ? 'f16' : 'bgra',
     window: { id: w.id, title: w.title, app: w.app, display: w.display, dpi: w.dpi, bounds: { ...w.bounds }, minimized: !!w.minimized },
     origin: { x: 0, y: 0 }, relative: true, w: w.bounds.w & ~1, h: w.bounds.h & ~1, fps: r, interval: windowIntervalMs(r),
-    kbps: rate, floor: windowKbpsFloor({ w: w.bounds.w, h: w.bounds.h, fps: r, cap: rate }), refresh: Object.hasOwn(WINDOW_REFRESH, pe.encoder.id), gop: r * SCREEN_DEFAULTS.gopSeconds,
+    kbps: rate, floor: kbpsFloor({ w: w.bounds.w, h: w.bounds.h, fps: r, cap: rate }), refresh: Object.hasOwn(WINDOW_REFRESH, pe.encoder.id), gop: r * SCREEN_DEFAULTS.gopSeconds,
     white: f16 ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder,
     note: pe.note || (fp16 && !f16 ? 'fp16_sdr_display' : null), ffmpeg: f.ffmpeg.path, helper: f.helper.exe,
   };
@@ -662,8 +749,9 @@ function windowEncodeArgv(plan, { w = plan.w, h = plan.h, kbps = plan.kbps } = {
 module.exports = {
   halfToFloat, srgbOetf, TONE_DEFAULT, toneCurve, mapLinear, srgb8OfHalf, buildLut, nv12FromHalf, nv12Bytes, CALIBRATION,
   ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, STREAM_FACTS_PS, parseStreamFacts,
-  SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, KBPS_RULE, kbpsDecision, flvReader,
+  SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, KBPS_RULE, kbpsDecision, MAC_KBPS_RULE, flvReader,
+  KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator,
   MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,
-  macRungOf, planMacScreen, macInputTarget, macPoint, MAC_KBPS_RULE, macKbpsDecision,
-  WGC_HELPER, WGC_RECIPE, wgcBuildPlan, wgcHead, wgcLine, WINDOW_DEFAULTS, WINDOW_KBPS_FLOOR, windowKbpsFloor, WINDOW_RATE_RULE, windowRateDecision, WINDOW_REFRESH, windowIntervalMs, planWindow, wgcCaptureArgv, windowEncodeArgv,
+  macRungOf, planMacScreen, macInputTarget, macPoint,
+  WGC_HELPER, WGC_RECIPE, wgcBuildPlan, wgcHead, wgcLine, WINDOW_DEFAULTS, WINDOW_REFRESH, windowIntervalMs, planWindow, wgcCaptureArgv, windowEncodeArgv,
 };

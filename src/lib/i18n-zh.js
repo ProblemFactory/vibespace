@@ -9199,4 +9199,5 @@ export default {
   "Stream again": "重新串流", // lane stream-window-fixes
   "streaming now": "正在串流", // lane stream-window-fixes
   "The machine encodes it at {kbps} kbps — never under {floor} kbps for a window this size": "机器以 {kbps} kbps 编码——这个大小的窗口不会低于 {floor} kbps", // lane stream-window-fixes
+  "The machine encodes it at {kbps} kbps — never under {floor} kbps for a screen this size": "机器以 {kbps} kbps 编码——这个大小的屏幕不会低于 {floor} kbps", // lane stream-mac-rate
 };

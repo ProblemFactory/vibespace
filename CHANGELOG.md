@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.311 — 2026-10-18
+
+### Fixed
+- A Mac's desktop stream is no longer heavily compressed: its bitrate has a floor sized to the picture and no longer sinks on a wrong bandwidth estimate.
+- Streams of a Windows machine's screen or one of its windows no longer drop to a low bitrate on a wrong bandwidth estimate either.
+
 ## 2.369.310 — 2026-10-18
 
 ### Fixed

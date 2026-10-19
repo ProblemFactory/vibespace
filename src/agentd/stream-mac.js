@@ -26,10 +26,14 @@
  *   (the window list needs it — never a node-attributed read instead); `look({ windows: false })` = the table (no grant needed,
  *   the facts kept FACTS_MS); `starts(pids)` = each process's start (`ps -o lstart=` — a process read).
  * THE SOURCE: `vibespace-screen --disclaim capture …` → FLV on stdout (SP.flvReader — no new parser), `key` / `bps <n>` on
- *   stdin (a key on the SAME frame; the bitrate LIVE — SP.macKbpsDecision, no encoder restart), JSON lines on stderr (started
+ *   stdin (a key on the SAME frame; the bitrate LIVE — no encoder restart), JSON lines on stderr (started
  *   → the input's target, frame → a window that moved, stats once a second, end {code}). ENDINGS BY NAME: the helper's end code
  *   (window_minimized, window_gone, display_gone, screen_permission, encoder_failed, capture_failed); an exit without one =
  *   capture_exited (its last stderr line logged).
+ * THE RATE (lane stream-mac-rate — 「mac画面有了但是压缩的厉害」: the owner's 1440p60 went 8000 → 300 kbps 2.2 s in and stayed —
+ *   werift's estimate obeyed, which counts ~one packet a picture: THE ESTIMATE): src/stream-plan.js THE RATE, the window road's rule —
+ *   SP.rateFollower with MAC_RATE_RULE: never under the picture's floor (plan.floor — kbpsFloor of its pixels × its rate), an
+ *   echo changes nothing, a shortfall held 2 s steps down (`bps`, live), 10 s without one climbs 25 % back toward the cap.
  */
 const SP = require('../stream-plan.js');
 const SRC = require('./mac-helper-source.js');
@@ -203,7 +207,8 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
 
   function macSource(plan, maxKbps, f = {}) {
     const st = { aus: 0, keyWaitMs: null, keysAnswered: 0, rateChanges: 0, helper: null };
-    let child = null, onAu = null, onEnd = null, stopped = false, kbps = plan.kbps, rateAt = 0, keyAskedAt = null, t0 = 0, lastTs = -1, started = null, target = null, ended = null;
+    const rate = SP.rateFollower({ kbps: plan.kbps, cap: maxKbps, floor: plan.floor || 0, rule: SP.MAC_RATE_RULE }); // THE RATE (src/stream-plan.js)
+    let child = null, onAu = null, onEnd = null, stopped = false, keyAskedAt = null, t0 = 0, lastTs = -1, started = null, target = null, ended = null;
     const tail = [];
     const say = (line) => { if (child && child.stdin && !child.stdin.destroyed) { try { child.stdin.write(line + '\n'); } catch { /* its exit says it */ } } };
     function finish(code, why) {
@@ -239,6 +244,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
           const ts = Math.max(lastTs + 1, Math.round((Math.max(now(), t0) - t0) * 90));
           lastTs = ts;
           st.aus++;
+          rate.sent(ev.nalus.reduce((n, x) => n + x.length, 0), now());
           if (ev.key && keyAskedAt != null) { st.keyWaitMs = now() - keyAskedAt; st.keysAnswered++; keyAskedAt = null; }
           try { onAu({ nalus: ev.nalus.filter((n) => (n[0] & 0x1f) !== 9).map((n) => Buffer.from(n.buffer, n.byteOffset, n.length)), key: ev.key, ts90k: ts >>> 0 }); } catch { /* the host's */ }
         }
@@ -251,23 +257,24 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       ...(plan.kind === 'display' && plan.display ? { display: plan.display.id, displays: (f.displays || []).map((d) => ({ id: d.id, main: !!d.main, x: d.x, y: d.y, w: d.w, h: d.h, name: d.name || null })) } : {}),
       start(onAccessUnit, onEnded) {
         if (onAu || stopped) return;
-        onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rateAt = t0;
+        onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rate.begin(t0);
         if (keyAskedAt == null) keyAskedAt = t0; // the helper's first picture is a key frame
         try { startHelper(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); }
-        log(`[stream] mac screen source: ${plan.kind} ${plan.kind === 'window' ? plan.window.id : plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps (${plan.rung}), VideoToolbox ${kbps} kbps`);
+        log(`[stream] mac screen source: ${plan.kind} ${plan.kind === 'window' ? plan.window.id : plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps (${plan.rung}), VideoToolbox ${rate.kbps} kbps (floor ${rate.floor})`);
       },
       stop() { if (stopped) return; stopped = true; say('quit'); const c = child; if (c) setTimeout(() => { if (c.exitCode == null) { try { c.kill(); } catch { /* gone */ } } }, 1000).unref?.(); },
       requestKeyframe() { if (keyAskedAt == null) keyAskedAt = now(); say('key'); },
       setTargetKbps(want) {
         if (!onAu || stopped) return;
-        const d = SP.macKbpsDecision({ current: kbps, target: want, cap: maxKbps, lastAt: rateAt, now: now() });
+        const d = rate.estimate(want, now());
         if (!d.change) return;
-        kbps = d.kbps; rateAt = now(); st.rateChanges++;
-        say(`bps ${kbps * 1000}`);
+        st.rateChanges++;
+        say(`bps ${rate.kbps * 1000}`);
+        log(`[stream] mac screen source: ${rate.kbps} kbps (${d.why}: the estimate's median ${Math.round(d.median)} kbps, floor ${rate.floor})`);
       },
       stats() {
         const h = st.helper || {};
-        return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, kind: plan.kind, display: plan.display ? plan.display.id : null, window: plan.window, w: plan.w, h: plan.h, rung: plan.rung, white: null, kbps,
+        return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, kind: plan.kind, display: plan.display ? plan.display.id : null, window: plan.window, w: plan.w, h: plan.h, rung: plan.rung, white: null, kbps: rate.kbps, floor: rate.floor, rate: rate.last,
           encodeMs: h.encMs == null ? null : h.encMs, captureMs: h.capMs == null ? null : h.capMs, timing: 'helper', lowLatency: h.lowLatency == null ? null : h.lowLatency,
           captured: h.captured || 0, idle: h.idle || 0, repeats: h.repeats || 0, aus: st.aus, dropped: h.dropped || 0, restarts: 0, rateChanges: st.rateChanges, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
       },

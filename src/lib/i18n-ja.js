@@ -9198,4 +9198,5 @@ export default {
   "Stream again": "もう一度ストリーミング", // lane stream-window-fixes
   "streaming now": "ストリーミング中", // lane stream-window-fixes
   "The machine encodes it at {kbps} kbps — never under {floor} kbps for a window this size": "マシンは {kbps} kbps でエンコードしています — このサイズのウィンドウでは {floor} kbps を下回りません", // lane stream-window-fixes
+  "The machine encodes it at {kbps} kbps — never under {floor} kbps for a screen this size": "マシンは {kbps} kbps でエンコードしています — このサイズの画面では {floor} kbps を下回りません", // lane stream-mac-rate
 };

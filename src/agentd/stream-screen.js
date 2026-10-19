@@ -18,8 +18,9 @@
  *   encoder: map + encode + both pipes). The direct road's capture and encode happen inside ffmpeg: no per-picture clock
  *   (encodeMs null, said in stats as `timing: 'in-ffmpeg'`).
  * KEYFRAMES: ffmpeg's CLI cannot force an IDR on a running encoder — the GOP (2 s) bounds a keyframe request; the wait is
- *   measured (`keyWaitMs`). BITRATE: likewise fixed per process — werift's estimate restarts the ENCODER (kbpsDecision: at
- *   most once per 5 s, only on a ≥ 25 % move); the new process opens with a key frame.
+ *   measured (`keyWaitMs`). BITRATE: likewise fixed per process — src/stream-plan.js THE RATE (lane stream-mac-rate: the rule
+ *   of every road — rateFollower, RATE_RULE) judges the estimate against what was sent and restarts the ENCODER only on a held
+ *   shortfall, never under the display's floor (plan.floor); the new process opens with a key frame.
  * ENDINGS, BY NAME (onEnd → the session's `ended`): `capture_exited` / `encoder_exited` (an ffmpeg died — its last stderr
  *   line is logged), `display_gone` (the capture died and the display is no longer in the facts), `capture_failed` (it could
  *   not start). The facts (`stream-facts`): the screens (DisplayConfig: HDR + SDR white level; DXGI: the output ddagrab
@@ -93,8 +94,9 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
   }
 
   function screenSource(plan, maxKbps) {
-    const st = { frames: 0, aus: 0, dropped: 0, restarts: 0, keyWaitMs: null, keysAnswered: 0, encode: [], map: [], mapper: null, startedAt: null };
-    let onAu = null, onEnd = null, stopped = false, kbps = plan.kbps, rateAt = 0, keyAskedAt = null, t0 = 0, lastTs = -1;
+    const st = { frames: 0, aus: 0, dropped: 0, restarts: 0, keyWaitMs: null, keysAnswered: 0, encode: [], map: [], mapper: null, startedAt: null, rate: null };
+    const rate = SP.rateFollower({ kbps: plan.kbps, cap: maxKbps, floor: plan.floor || 0, rule: SP.RATE_RULE }); // THE RATE (src/stream-plan.js)
+    let onAu = null, onEnd = null, stopped = false, keyAskedAt = null, t0 = 0, lastTs = -1;
     const procs = new Set();
     const end = (c) => { if (c && c.exitCode == null && !c.killed) { try { c.kill(); } catch { /* gone */ } } };
     function finish(code, why) {
@@ -134,6 +136,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
           const ts = Math.max(lastTs + 1, Math.round((at - t0) * 90));
           lastTs = ts;
           st.aus++;
+          rate.sent(ev.nalus.reduce((n, x) => n + x.length, 0), now());
           if (ev.key && keyAskedAt != null) { st.keyWaitMs = now() - keyAskedAt; st.keysAnswered++; keyAskedAt = null; }
           try { onAu({ nalus: ev.nalus.filter((n) => (n[0] & 0x1f) !== 9).map((n) => Buffer.from(n.buffer, n.byteOffset, n.length)), key: ev.key, ts90k: ts >>> 0 }); } catch { /* the host's */ }
         }
@@ -143,7 +146,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     // ── the DIRECT road: one ffmpeg ──
     let direct = null;
     function startDirect() {
-      direct = ffmpeg(SP.directArgv(plan, kbps), 'capture');
+      direct = ffmpeg(SP.directArgv(plan, rate.kbps), 'capture');
       readAus(direct, () => Math.max(now(), t0));
     }
 
@@ -216,7 +219,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       });
     }
     function startEncoder() {
-      enc = ffmpeg(SP.encodeArgv(plan, kbps), 'encoder', { stdin: 'pipe' });
+      enc = ffmpeg(SP.encodeArgv(plan, rate.kbps), 'encoder', { stdin: 'pipe' });
       const clock = encClock = [];
       readAus(enc, () => { const at = clock.shift(); if (at != null) { st.encode.push(now() - at); if (st.encode.length > 30) st.encode.shift(); } return at != null ? at : now(); });
     }
@@ -231,23 +234,24 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       ok: true, kind: 'screen', origin: plan.origin, fps: plan.fps, mode: plan.mode, encoder: plan.encoder.label,
       start(onAccessUnit, onEnded) {
         if (onAu || stopped) return;
-        onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rateAt = t0; st.startedAt = t0;
+        onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rate.begin(t0); st.startedAt = t0;
         if (keyAskedAt == null) keyAskedAt = t0;
         try { if (plan.mode === 'mapped') startMapped(); else startDirect(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); }
-        log(`[stream] screen source: ${plan.mode}, ${plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps, ${plan.encoder.label} ${kbps} kbps${plan.white ? `, white ${plan.white}` : ''}`);
+        log(`[stream] screen source: ${plan.mode}, ${plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps, ${plan.encoder.label} ${rate.kbps} kbps (floor ${rate.floor})${plan.white ? `, white ${plan.white}` : ''}`);
       },
       stop() { if (stopped) return; stopped = true; for (const c of procs) { c.asked = true; end(c); } teardownMapper(); },
       requestKeyframe() { if (keyAskedAt == null) keyAskedAt = now(); },
       setTargetKbps(target) {
         if (!onAu || stopped) return;
-        const d = SP.kbpsDecision({ current: kbps, target, cap: maxKbps, lastAt: rateAt, now: now() });
+        const d = rate.estimate(target, now());
+        st.rate = rate.last;
         if (!d.change) return;
-        kbps = d.kbps; rateAt = now(); st.restarts++;
+        st.restarts++;
         if (plan.mode === 'mapped') { const old = enc; old.asked = true; end(old); startEncoder(); } else { const old = direct; old.asked = true; end(old); startDirect(); }
-        log(`[stream] screen source: encoder restarted at ${kbps} kbps`);
+        log(`[stream] screen source: encoder restarted at ${rate.kbps} kbps (${d.why}: the estimate's median ${Math.round(d.median)} kbps, floor ${rate.floor})`);
       },
       stats() {
-        return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, display: plan.display.id, w: plan.w, h: plan.h, white: plan.white, kbps,
+        return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, display: plan.display.id, w: plan.w, h: plan.h, white: plan.white, kbps: rate.kbps, floor: rate.floor, rate: st.rate,
           encodeMs: plan.mode === 'mapped' ? median(st.encode) : null, timing: plan.mode === 'mapped' ? 'agent' : 'in-ffmpeg', mapMs: median(st.map), mapper: st.mapper,
           captured: st.frames, aus: st.aus, dropped: st.dropped, restarts: st.restarts, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
       },

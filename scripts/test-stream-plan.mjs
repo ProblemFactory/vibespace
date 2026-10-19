@@ -14,6 +14,12 @@
 //      (draw_mouse=0 — lane stream-cursor: the viewer's own pointer IS the pointer)
 //   §7 THE BITRATE: hysteresis (5 s, 25 %), rounding, floor and cap
 //   §8 THE FLV READER: THE fixture as an encoder writes it, fed in odd chunks → its access units, SPS/PPS before each key
+//   §9 THE ESTIMATE (lane stream-mac-rate — werift 0.25's send-side estimate counts ~one packet a picture): a transport-cc
+//      feedback written by hand (a run, a 2-bit status vector with a lost packet and a large delta, a run) read by werift's own
+//      parser → twccPackets names its 20 packets in order with their receive times (RED CONTROL: werift's `packetResults` on the
+//      same feedback: the vector's packets missing, a phantom per run, the last run renumbered from the base); sendEstimator: a
+//      lossless 9.6 Mbps burst stream ⇒ ~9.6 Mbps, a 4.8 Mbps bottleneck ⇒ ~4.8, a still picture's trickle ⇒ nothing yet (RED
+//      CONTROL: werift's estimator fed as its sender feeds it — each packet noted under the burst's LAST number ⇒ ~1/10)
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -172,6 +178,51 @@ console.log('§8 the FLV reader');
   ok(tagOf2 > 0 && (flv[tagOf2 + 9] & 31) !== 7, 'CONTROL: in the FLV a key frame carries no SPS (they ride once, in the sequence header) — the reader is what lets a browser join at any key frame');
   const bad = SP.flvReader();
   ok(same(bad.push(Buffer.from('not an flv at all')).map((e) => e.type), ['bad']) && bad.push(Buffer.from('more')).length === 0, 'not FLV ⇒ ONE `bad` (the source ends by name), then silence');
+}
+
+console.log('§9 THE ESTIMATE (lane stream-mac-rate): our transport-cc reading vs werift 0.25\'s');
+{
+  const WR = path.join(REPO, 'node_modules/werift/lib');
+  const T = require(path.join(WR, 'rtp/src/rtcp/rtpfb/twcc.js'));
+  const { SenderBandwidthEstimator } = require(path.join(WR, 'webrtc/src/media/sender/senderBWE.js'));
+  // the feedback's body after the RTCP header: sender ssrc, media ssrc, base 100, 20 packets, reference time 1000 (× 64 ms), count 7;
+  // chunks: a run of 10 received (small deltas) · a 2-bit vector [small, lost, LARGE, small, small, small, small] · a run of 3 small;
+  // deltas (250 µs units): 1 ms each, the large one 10 ms
+  const body = Buffer.from([0, 0, 0, 1, 0, 0, 0, 2, 0, 100, 0, 20, 0x00, 0x03, 0xe8, 7, 0x20, 0x0a, 0xd2, 0x55, 0x20, 0x03,
+    ...Array(11).fill(4), 0x00, 0x28, ...Array(7).fill(4)]);
+  const fb = T.TransportWideCC.deSerialize(body, null);
+  const got = SP.twccPackets(fb), base = 1000 * 64000;
+  const want = []; let at = base;
+  for (let i = 0; i < 20; i++) { const lost = i === 11; if (!lost) at += i === 12 ? 10000 : 1000; want.push({ seq: 100 + i, recvUs: lost ? null : at }); }
+  ok(same(got, want), 'twccPackets: the 20 packets in order (100 … 119), the lost one null, each receive time the running sum of its deltas — the large one 10 ms', got.slice(9, 14));
+  const wr = fb.packetResults;
+  ok(wr.length !== 20 && !wr.some((r) => r.sequenceNumber === 112) && wr.filter((r) => r.sequenceNumber === 100).length === 2 && wr.some((r) => r.sequenceNumber === 110 && r.received), `RED CONTROL: werift's own packetResults on the same feedback names ${wr.length} packets — the vector's 7 missing (112 never), a phantom after each run (110 "received"), the last run renumbered from the base (100 twice)`, wr.map((r) => r.sequenceNumber));
+  const wrap = SP.twccPackets({ baseSequenceNumber: 65534, packetStatusCount: 4, referenceTime: 0, packetChunks: [{ packetStatus: 1, runLength: 4 }], recvDeltas: Array.from({ length: 4 }, () => ({ delta: 250 })) });
+  ok(same(wrap.map((p) => p.seq), [65534, 65535, 0, 1]) && wrap[3].recvUs === 1000 && SP.twccPackets(null).length === 0, 'the numbers wrap at 65 536; nothing parsed ⇒ nothing');
+  // a sender: 40 pictures of 10 packets × 1200 B, one picture every 10 ms (9.6 Mbps), each picture's packets in one burst; the
+  // browser reports every 50 packets, packet i received at i × gap (the link's pace)
+  const fbOf = (from, n, gapUs) => ({ baseSequenceNumber: from & 0xffff, packetStatusCount: n, referenceTime: 0, packetChunks: [{ packetStatus: 1, runLength: n }], recvDeltas: Array.from({ length: n }, (_, i) => ({ delta: i ? gapUs : from * gapUs })) });
+  const run = (gapUs) => {
+    const e = SP.sendEstimator(), out = [];
+    for (let p = 0; p < 40; p++) for (let k = 0; k < 10; k++) e.sent(p * 10 + k, 1200, p * 10 + k * 0.05);
+    for (let f = 0; f < 8; f++) { const k = e.feedback(SP.twccPackets(fbOf(f * 50, 50, gapUs))); if (k != null) out.push(k); }
+    return out;
+  };
+  const clean = run(1000), neck = run(2000);
+  ok(clean.length >= 2 && clean.every((k) => k >= 8000 && k <= 12000), `a lossless link (the packets arrive as sent: 1 ms apart) ⇒ ${clean.join(', ')} kbps ≈ the 9.6 Mbps sent — an echo`, clean);
+  ok(neck.length >= 2 && neck.every((k) => k >= 4300 && k <= 5300), `a 4.8 Mbps bottleneck (2 ms apart) ⇒ ${neck.join(', ')} kbps — what the link carries`, neck);
+  const still = SP.sendEstimator(); for (let i = 0; i < 6; i++) still.sent(i, 300, i * 500);
+  ok(still.feedback(SP.twccPackets(fbOf(0, 6, 500000))) === null, 'a still picture\'s trickle (6 packets) ⇒ no estimate yet (≥ 20 packets over ≥ 100 ms — werift\'s own bound)');
+  // werift's estimator fed as werift's RTCRtpSender feeds it: rtpPacketSent after `await sendRtp`, under the transport's CURRENT number
+  const bwe = new SenderBandwidthEstimator(); let wk = null; bwe.onAvailableBitrate.subscribe((b) => { wk = Math.round(b / 1000); });
+  const U = require(path.join(WR, 'webrtc/src/utils.js')), realNow = U.milliTime, T0 = realNow(); // werift's clock (= Date.now, bound at load)
+  const ests = [];
+  for (let p = 0; p < 20; p++) {
+    for (let k = 0; k < 10; k++) bwe.rtpPacketSent({ wideSeq: p * 10 + 9, size: 1200, sendingAtMs: T0 + p * 10, sentAtMs: T0 + p * 10 }); // the burst's LAST number
+  }
+  U.milliTime = () => T0 + 200;
+  try { for (let f = 0; f < 4; f++) { const raw = new T.TransportWideCC({ baseSequenceNumber: f * 50, packetStatusCount: 50, referenceTime: 0, packetChunks: [new T.RunLengthChunk({ packetStatus: 1, runLength: 49 })], recvDeltas: Array.from({ length: 50 }, (_, i) => new T.RecvDelta({ type: 1, delta: i ? 1000 : 0 })) }); wk = null; bwe.receiveTWCC(raw); if (wk != null) ests.push(wk); } } finally { U.milliTime = realNow; }
+  ok(ests.length >= 1 && ests.every((k) => k < 2500), `RED CONTROL: werift's own estimator, fed the way its sender feeds it (each packet noted after the await under the burst's last number), reads ${ests.join(', ')} kbps of the same 9.6 Mbps — ~one packet a picture (the owner's 300 at 30–60 fps)`, ests);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

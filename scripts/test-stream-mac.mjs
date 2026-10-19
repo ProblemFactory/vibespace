@@ -7,7 +7,10 @@
 //   §1 PURE — the darwin plan table (the size ladder 1440p60 / 4K30, a window at its own pixels, every refusal by name), the
 //      facts parser, the disclaimed-spawn plan (argv + the flag), the fixed path, the on-box build's argvs, the window source
 //      shape (the seam with lane stream-p2w-build), the input mapping (picture pixel → global point, virtual key codes), the
-//      live bitrate rule, the rung verdicts (an older Mac agent ⇒ agent_too_old; Windows unchanged)
+//      rung verdicts (an older Mac agent ⇒ agent_too_old; Windows unchanged); THE RATE (lane stream-mac-rate — 「mac画面有了但是
+//      压缩的厉害」): the picture's floor, the owner's measured sessions replayed (the .309 rule ⇒ 300 kbps at werift's first
+//      estimate; THE rule ⇒ 8000 throughout), an echo changes nothing, a held shortfall steps down — never under the floor —
+//      and 10 s without one climbs back (live; the restarting window road waits 20 s)
 //   §2 the helper's source rides the bundle verbatim (src/agentd/mac-helper-source.js = tools/…swift; VERSION = its sha) and
 //      carries the probe's laws (disclaim, sRGB, NSApplication before a window filter, the key / bitrate never set from the
 //      output callback — nor from the encode thread while it holds its lock: lane stream-mac-stall's deadlock, + a RED control)
@@ -15,8 +18,9 @@
 //      run); the hub's pushed prebuilt is put in place; a compiler ⇒ built (both slices at once, then lipo, codesign); a
 //      REPLACED helper that held its grant ⇒ regrant until the facts see the grant again; never rebuilt at the same version
 //   §4 THE SOURCE end to end over the fake: facts; the display's pictures = THE fixture byte for byte; the argv it ran; a key
-//      on the SAME request (`key` on stdin); the bitrate LIVE (`bps`, once a second at most) and the pictures still coming after
-//      it (lane stream-mac-stall); 「打开系统设置」 = `open` on the pane's deep link, by name only; the numbers; the input target;
+//      on the SAME request (`key` on stdin); THE RATE over the helper's own output: an echo changes nothing, a held shortfall ⇒
+//      ONE `bps` (live) at the floor, never under it, a quiet 10 s ⇒ +25 % — and the pictures still coming after the `bps`
+//      (lane stream-mac-stall); 「打开系统设置」 = `open` on the pane's deep link, by name only; the numbers; the input target;
 //      a window (its id, its pid, a move); endings BY NAME (window_minimized, display_gone, capture_exited); refusals BY NAME
 //      (screen_permission + its Settings link + ONE row-adding run, helper_changed_regrant, no_helper with what the hub needs)
 //   §5 THE INJECTOR on a Mac: `P <pid>` once per target, keys as virtual key codes, the pointer in global points, no
@@ -97,8 +101,35 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§1 PURE — the 
   ok(SP.macHelperSourceFile('vs-1', 'print(1)') === 'let HELPER_VERSION = "vs-1"\nprint(1)', 'the ONE file swiftc compiles = the version line + the source');
   const t = SP.macInputTarget({ w: 2560, h: 1440, frame: { x: -1920, y: 0, w: 1920, h: 1080 }, pid: 0 });
   ok(same(t, { pid: 0, wid: 0, ox: -1920, oy: 0, sx: 0.75, sy: 0.75 }) && same(SP.macInputTarget({ w: 1312, h: 844, frame: { x: 1, y: 2, w: 656, h: 422 }, pid: 777, window: 4242 }), { pid: 777, wid: 4242, ox: 1, oy: 2, sx: 0.5, sy: 0.5 }) && same(SP.macPoint(t, 1280, 720), { x: -960, y: 540 }) && same(SP.macPoint(null, 10.123, 5), { x: 10.12, y: 5 }) && SP.macInputTarget({ w: 0 }) === null, 'the input target: a 2560-px picture of a 1920-pt display ⇒ 0.75 pt a pixel from its origin (a picture pixel → the Mac\'s global point)', t);
-  const kd = (o) => SP.macKbpsDecision({ current: 8000, cap: 8000, lastAt: 0, ...o });
-  ok(kd({ target: 4000, now: 1500 }).kbps === 4000 && !kd({ target: 4000, now: 500 }).change && !kd({ target: 7400, now: 5000 }).change && kd({ target: 7000, now: 5000 }).kbps === 7000 && kd({ target: 99000, now: 5000, current: 4000 }).kbps === 8000, 'the bitrate follows LIVE: once a second at most, a ≥ 10 % move, never over the cap');
+  // THE RATE (lane stream-mac-rate): the floor of the picture the helper sends (src/stream-plan.js kbpsFloor — the window road's table)
+  ok(SP.planScreen(facts()).floor === 8000 && SP.planScreen(facts(), { kbps: 20000 }).floor === 8000 && SP.planScreen(facts(), { quality: 'full', kbps: 20000 }).floor === 8000 && SP.planScreen(facts(), { window: '4242' }).floor === 6000 && SP.planScreen(facts(), { kbps: 5000 }).floor === 5000, 'the floor: 2560×1440 @ 60 (the owner\'s display) 8000 kbps = the session\'s cap; 4K @ 30 8000; a 1312×844 window @ 60 6000; never over the cap');
+  // the owner's sessions, measured on his Mac over the hub's UDP leg with a real Chrome (werift's estimates, ms after the start)
+  const BASE = [[2240, 253], [2617, 218], [3301, 141], [4052, 138], [4489, 254], [4864, 323], [5239, 309], [5614, 330], [5989, 317], [6365, 325], [6740, 326], [7114, 320], [7491, 324], [7865, 314], [8240, 336], [8615, 299]];
+  const LANE = [[1913, 287], [2284, 273], [2661, 387], [3034, 377], [3409, 336], [3783, 279], [4160, 307], [4535, 346], [4911, 325], [5284, 381], [5660, 305], [6034, 316], [6411, 339], [6786, 243], [7160, 293], [7534, 332], [7909, 330]];
+  let old = 8000, oldAt = 0;
+  for (const [t, k] of BASE) { const d = SP.kbpsDecision({ current: old, target: k, cap: 8000, lastAt: oldAt, now: t }, SP.MAC_KBPS_RULE); if (d.change) { old = d.kbps; oldAt = t; } }
+  const fol = SP.rateFollower({ kbps: 8000, cap: 8000, floor: SP.planScreen(facts()).floor, rule: SP.MAC_RATE_RULE });
+  fol.begin(0);
+  const whys = new Set();
+  let ix = 0;
+  for (let t = 0; t <= 8000; t += 17) { // 57 pictures a second of ~5 KB (the 2.3–2.5 Mbps the helper sent at 8000)
+    fol.sent(5200, t);
+    while (ix < LANE.length && LANE[ix][0] <= t) { const d = fol.estimate(LANE[ix][1], LANE[ix][0]); whys.add(d.why); ok(!d.change || d.kbps >= 8000, 'never under the floor', d); ix++; }
+  }
+  ok(old === 300 && fol.kbps === 8000 && whys.has('shortfall'), `the owner's sessions replayed: the .309 rule (follow werift's estimate, ≥ 10 % once a second) went 8000 → ${old} kbps at its FIRST estimate (253, 2.2 s in — what his Mac did); THE rule held ${fol.kbps} through 17 estimates of ~300 against ~2.4 Mbps sent (a shortfall, at the floor)`, { old, now: fol.kbps, whys: [...whys] });
+  // the Mac's rule (MAC_RATE_RULE): a cap above the floor (the page's maxKbps 20000), estimates every 200 ms, the source sending what it decided
+  const M = (rule) => { const f = SP.rateFollower({ kbps: 20000, cap: 20000, floor: 8000, rule }); f.begin(0); return f; };
+  const drive = (f, t0, ms, est, out = []) => { for (let t = t0; t < t0 + ms; t += 100) { f.sent((f.kbps * 100) / 8, t); if (t % 200 === 0) { const d = f.estimate(est(f), t); if (d.change) out.push([t, d.why, d.kbps]); } } return out; };
+  const m1 = M(SP.MAC_RATE_RULE), ch1 = drive(m1, 0, 6000, (f) => f.kbps * 1.25);
+  ok(ch1.length === 0 && m1.kbps === 20000 && m1.last.why === 'echo', 'an echo (the estimate at or above 0.75 × what was sent — measured: 1.15–1.4 × on a lossless link) changes nothing', { ch1, last: m1.last });
+  const ch2 = drive(m1, 6000, 5000, () => 12000);
+  ok(ch2.length === 1 && ch2[0][1] === 'shortfall' && ch2[0][2] === 12000 && ch2[0][0] >= 8000, 'a shortfall (the link carries 12 Mbps of the 20 sent) that HOLDS 2 s ⇒ ONE step, live, to what it carries', ch2);
+  const ch3 = drive(m1, 11000, 5000, () => 3000);
+  ok(ch3.length === 1 && ch3[0][2] === 8000 && m1.kbps === 8000 && drive(m1, 16000, 4000, () => 1000).length === 0, 'a deeper one (3 Mbps) ⇒ down to the FLOOR (8000), and never under it however low the estimate', { ch3, now: m1.kbps });
+  const ch4 = drive(m1, 20000, 25000, (f) => f.kbps * 1.2);
+  ok(ch4.length >= 2 && ch4[0][1] === 'recover' && ch4[0][2] === 10000 && ch4[0][0] - 19800 >= 10000 && ch4[0][0] - 19800 <= 12000 && ch4[1][0] - ch4[0][0] === 10000 && ch4[1][2] === 12500, 'quiet 10 s (no shortfall — the last low estimate leaves the 2 s window first) ⇒ +25 % toward the cap, live (8000 → 10000 → 12500 …, 10 s apart)', ch4);
+  const w1 = M(SP.RATE_RULE); drive(w1, 0, 6000, () => 3000); const wch = drive(w1, 6000, 15000, (f) => f.kbps * 1.2);
+  ok(w1.kbps === 8000 && wch.length === 0 && SP.MAC_RATE_RULE.recoverMs === 10000 && SP.RATE_RULE.recoverMs === 20000 && SP.MAC_RATE_RULE.step === SP.MAC_KBPS_RULE && SP.RATE_RULE.step === SP.KBPS_RULE, 'the same rule, two steps: the window road (each change restarts ffmpeg: a key frame) waits 20 s to climb and moves ≥ 25 % at most every 5 s; the Mac (live `bps`) climbs after 10 s, ≥ 10 % once a second', { w: w1.kbps, wch });
   const c = ['stream-offer', 'input-events', 'stream-facts', 'stream-screen'], V = (o) => SM.streamRungVerdict({ desktop: true, ...o });
   ok(V({ capabilities: c, platform: 'darwin' }).code === 'agent_too_old' && V({ capabilities: [...c, 'stream-mac'], platform: 'darwin' }).source === 'screen' && V({ capabilities: [...c, 'stream-mac'], platform: 'darwin', want: 'window' }).code === 'agent_too_old' && V({ capabilities: [...c, 'stream-mac', 'stream-window'], platform: 'darwin', want: 'window' }).source === 'window', 'the rung: an older Mac agent (it already says stream-screen) ⇒ agent_too_old; stream-mac ⇒ the screen; ONE window needs stream-window too');
   ok(V({ capabilities: c, platform: 'win32' }).source === 'screen' && V({ capabilities: c, platform: 'win32', want: 'window' }).code === 'agent_too_old' && V({ capabilities: [...c, 'stream-window'], platform: 'win32', want: 'window' }).source === 'window' && V({ capabilities: [...c, 'stream-window'], platform: 'linux', want: 'window' }).code === 'no_window_source' && V({ capabilities: c.slice(0, 2), platform: 'win32' }).code === 'no_screen_source' && V({ capabilities: [...c, 'stream-mac'], platform: 'darwin', fakeSource: '/f.h264' }).source === 'fake' && SM.STREAM_SOURCES.includes('window'), 'Windows: the screen, and ONE window with stream-window (int304: lane stream-p2w-build\'s source behind the same want — an older agent ⇒ agent_too_old; no window source ⇒ no_window_source); a fake source still wins for a screen; STREAM_SOURCES takes window');
@@ -256,21 +287,40 @@ const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   await until(() => r.src.stats().keysAnswered > st0.keysAnswered, 2000);
   const st1 = r.src.stats();
   ok(logs().some((l) => l.ctl === 'key') && st1.keysAnswered === st0.keysAnswered + 1 && st1.keyWaitMs <= 500, `a key frame on request: \`key\` on the helper's stdin, answered ${st1.keyWaitMs} ms later (the SAME frame on a Mac — no GOP to wait out)`, st1);
-  skew += 1100;
-  r.src.setTargetKbps(4000);
-  r.src.setTargetKbps(4000);
-  r.src.setTargetKbps(2000);
-  await sleep(50);
-  const ctl = logs().filter((l) => l.ctl && l.ctl.startsWith('bps')).map((l) => l.ctl);
-  ok(same(ctl, ['bps 4000000']) && r.src.stats().kbps === 4000 && r.src.stats().rateChanges === 1, 'the bitrate LIVE: one `bps` line (no restart) — and nothing again within a second', ctl);
-  const atBps = r.aus.length;
-  ok(await until(() => r.aus.length >= atBps + 10, 3000), 'lane stream-mac-stall: the pictures keep coming after the `bps` (the agent\'s half; the helper\'s: §2\'s lock law + the report\'s real Mac leg)', { atBps, now: r.aus.length });
+  // THE RATE over the helper's own output (lane stream-mac-rate): the session's cap 8000 = the floor of 2560×1440 @ 60 ⇒ nothing moves it
+  skew += 2100; await sleep(300);
+  for (let i = 0; i < 6; i++) r.src.setTargetKbps(1);
+  skew += 2100; await sleep(300);
+  for (let i = 0; i < 6; i++) r.src.setTargetKbps(1);
+  const st8 = r.src.stats();
+  ok(!logs().some((l) => l.ctl && l.ctl.startsWith('bps')) && st8.kbps === 8000 && st8.floor === 8000 && st8.rateChanges === 0 && st8.rate.why === 'shortfall', 'at the floor already (the cap 8000 = the floor of 2560×1440 @ 60): a held shortfall sends NO `bps` — never under the floor', st8);
   await until(() => r.src.stats().encodeMs != null, 2000);
   const st2 = r.src.stats();
   ok(st2.mode === 'videotoolbox' && st2.encoder === 'VideoToolbox' && st2.encodeMs === 9.5 && st2.captureMs === 1.2 && st2.captured >= 10 && st2.timing === 'helper' && st2.kind === 'display' && st2.display === '3' && st2.white === null && st2.rung === '1440p60', 'the numbers: the helper\'s encode / capture ms and counts (the strip shows VideoToolbox · encode ms)', st2);
   r.src.stop();
   await sleep(150);
   ok(logs().some((l) => l.ctl === 'quit') && r.ended === null, 'stop: `quit` on stdin, and no ending reported (asked)');
+}
+{
+  const r = await run({ sourceKind: 'screen' }, { kbps: 20000, want: 10 });
+  const ctl = () => logs().filter((l) => l.ctl && l.ctl.startsWith('bps')).map((l) => l.ctl);
+  const n0 = ctl().length, st0 = r.src.stats();
+  const est = async (k, n = 5) => { for (let i = 0; i < n; i++) r.src.setTargetKbps(k); await sleep(30); }; // 5 = the rule's minSamples: the last one decides
+  skew += 2100; await sleep(300); await est(99999);
+  ok(ctl().length === n0 && st0.kbps === 20000 && st0.floor === 8000 && r.src.stats().rate.why === 'echo', 'THE RATE (the page\'s cap 20000, the floor 8000): the helper starts at the cap; an echo (the estimate above what was sent) sends nothing', { st0, rate: r.src.stats().rate });
+  skew += 2100; await sleep(300); await est(1); // the echo's samples gone: a shortfall begins (held)
+  const held = r.src.stats().rate.why;
+  skew += 2100; await sleep(300); await est(1);
+  const after = r.src.stats();
+  ok(same(ctl().slice(n0), ['bps 8000000']) && after.kbps === 8000 && after.rateChanges === 1 && after.rate.why === 'shortfall' && held === 'hold', 'a shortfall held 2 s ⇒ ONE `bps` line — LIVE (no restart), at the FLOOR (8000 kbps), not the estimate\'s 1', { ctl: ctl().slice(n0), after });
+  const atBps = r.aus.length;
+  ok(await until(() => r.aus.length >= atBps + 5, 3000), 'lane stream-mac-stall: the pictures keep coming after the `bps` (the agent\'s half; the helper\'s: §2\'s lock law + the report\'s real Mac leg)', { atBps, now: r.aus.length });
+  skew += 2100; await sleep(300); await est(1);
+  ok(ctl().length === n0 + 1 && r.src.stats().kbps === 8000, 'more shortfall: nothing under the floor', ctl().slice(n0));
+  skew += 10100; await sleep(300); await est(99999);
+  ok(same(ctl().slice(n0), ['bps 8000000', 'bps 10000000']) && r.src.stats().kbps === 10000 && r.src.stats().rate.why === 'recover', '10 s without a shortfall ⇒ +25 % toward the cap, live (8000 → 10000)', ctl().slice(n0));
+  r.src.stop();
+  await sleep(150);
 }
 {
   const r = await run({ sourceKind: 'window', sourceId: '4242' }, { want: 25 });

@@ -135,9 +135,9 @@ console.log('§4 the plan, the helper\'s recipe, head and lines');
   ok(SP.wgcLine('{"ev":"size","w":2,"h":2}').ev === 'size' && SP.wgcLine('csc noise') === null && SP.wgcLine('{"x":1}') === null && SP.wgcLine('{bad') === null, 'a helper line → its event; anything else ⇒ null');
 }
 
-console.log('§4b THE WINDOW ROAD\'S RATE (lane stream-window-fixes): the floor table, the owner\'s session replayed, the intra-refresh wave');
+console.log('§4b THE WINDOW ROAD\'S RATE (lane stream-window-fixes — every road\'s since lane stream-mac-rate: SP.kbpsFloor / SP.rateDecision): the floor table, the owner\'s session replayed, the intra-refresh wave');
 {
-  const F = (w, h, fps = 30, cap = 8000) => SP.windowKbpsFloor({ w, h, fps, cap });
+  const F = (w, h, fps = 30, cap = 8000) => SP.kbpsFloor({ w, h, fps, cap });
   ok(same([F(640, 480), F(1280, 800), F(1920, 1200), F(2560, 1600), F(2698, 2078)], [1000, 2500, 4000, 6000, 8000]), 'THE TABLE at 30 fps: ≤ 0.3 MP 1000 · ≤ 1 MP 2500 · ≤ 2.3 MP 4000 · ≤ 4.1 MP 6000 · larger (the owner\'s 2698×2078 Lightroom window) 8000 kbps');
   ok(F(1920, 1080, 60, 50000) === 6000 && F(1920, 1080, 45, 50000) === 5000 && F(2698, 2078, 60, 50000) === 12000, '60 fps ⇒ the 60 column; between, interpolated');
   ok(F(2698, 2078, 30, 5000) === 5000 && F(10, 10, 30, 8000) === 1000 && F(0, 0) >= SP.SCREEN_DEFAULTS.minKbps, 'never over the session\'s cap; a tiny window has the first row');
@@ -147,7 +147,7 @@ console.log('§4b THE WINDOW ROAD\'S RATE (lane stream-window-fixes): the floor 
   ok(old.change && old.kbps === 300 && !owner.change && pad.change && pad.kbps === 6000, 'the owner\'s session replayed (8000 kbps; 5 s in, werift echoes a still window\'s trickle — 280): no floor ⇒ 300 kbps (what his agent logged); his window\'s floor ⇒ no change; a 2100×1400 window ⇒ 6000', { old, owner, pad });
   ok(SP.kbpsDecision({ current: 6000, target: 9000, cap: 8000, lastAt: 0, now: 6000, floor: 6000 }).kbps === 8000, 'kbpsDecision: an estimate above still climbs, to the cap');
   // THE RATE RULE: werift's samples judged against what the source SENT (the median of the last 2 s)
-  const R = (o) => SP.windowRateDecision({ current: 8000, cap: 8000, floor: 6000, samples: [9800, 6200, 14000, 976, 10100, 8900, 12500], sentKbps: 7400, lastAt: 0, shortAt: 0, shortSince: 7000, now: 10000, ...o });
+  const R = (o) => SP.rateDecision({ current: 8000, cap: 8000, floor: 6000, samples: [9800, 6200, 14000, 976, 10100, 8900, 12500], sentKbps: 7400, lastAt: 0, shortAt: 0, shortSince: 7000, now: 10000, ...o });
   ok(!R().change && R().why === 'echo' && R().median === 9800, 'lossless noise (the replayed samples of a real 7.4 Mbps stream: 976 … 14000, median 9800) ⇒ an echo: nothing changes — the old rule took the 976', R());
   const sf = R({ samples: [3000, 3400, 2900, 3100, 3300], sentKbps: 7400 });
   ok(sf.change && sf.kbps === 6000 && sf.why === 'shortfall' && R({ floor: 1000, samples: [3000, 3400, 2900, 3100, 3300] }).kbps === 3100, 'the median clearly under what was sent, for 2 s (a bottleneck: the link receives less — it drops or queues) ⇒ down to it, never under the floor', sf);

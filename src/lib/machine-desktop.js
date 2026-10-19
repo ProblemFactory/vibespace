@@ -323,6 +323,7 @@ export function openMachineDesktop(app, m, { display } = {}) {
     if (!p) return;
     const sc = a && a.screen; // lane stream-p1b-screen: the machine's own screen — its encoder and what encoding costs there
     chip.title = [scope, t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }),
+      ...(sc && sc.floor != null && sc.kbps != null ? [t('The machine encodes it at {kbps} kbps — never under {floor} kbps for a screen this size', { kbps: sc.kbps, floor: sc.floor })] : []), // lane stream-mac-rate: THE RATE's decision, beside what the page receives
       ...(sc && sc.white ? [t('HDR mapped on the machine (SDR white {nits} nits)', { nits: Math.round(sc.white * 0.08) })] : []), ...(sc && sc.note === 'no_hw_encoder' ? [t('software encoding (no hardware encoder found)')] : []),
       t('Pointer: yours — the machine draws none into the picture')].join('\n'); // lane stream-cursor: no source paints the machine's
   };

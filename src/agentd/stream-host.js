@@ -4,8 +4,10 @@
  * P1/P1b, lane stream-p1a-transport). A session is ONE werift RTCPeerConnection with ONE H.264 video track (the source's
  * access units, packetized here — src/stream-h264.js) and ONE ordered data channel `input` (the person's pointer, keys and
  * clipboard text into THE daemon's injector — src/input-inject.js — and frame acks). werift brings NACK retransmits (its
- * RTP cache), PLI (→ the source's next key frame) and the transport-cc bandwidth estimate (reported; part B's encoder
- * follows it, capped by `maxKbps`).
+ * RTP cache), PLI (→ the source's next key frame) and the transport-cc feedback; THE ESTIMATE is made here (lane
+ * stream-mac-rate — werift 0.25's own counts ~one packet a picture, ~300 kbps whatever is sent): each packet recorded under
+ * the transport-cc number in its own header, each feedback read by src/stream-plan.js twccPackets → sendEstimator → the
+ * source's setTargetKbps (its rate rule judges it — THE RATE), capped by `maxKbps`.
  *
  * THE OPS (agentd.js answers each by id, `op` on the reply — the three-touch rule):
  *   stream-offer  {sid, sourceKind, sourceId?, maxKbps?, relay?}  → { ok, sid, offer, source, relayPort } — the offer goes
@@ -61,10 +63,30 @@ const net = require('net');
 const dgram = require('dgram');
 const crypto = require('crypto');
 const SM = require('../stream-model.js');
+const SP = require('../stream-plan.js'); // THE ESTIMATE (twccPackets, sendEstimator)
 const SW = require('../stream-window.js');
 const H = require('../stream-h264.js');
 
 const L = SM.STREAM_LIMITS;
+const TWCC_URI = 'http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01';
+/** THE ESTIMATE on a werift sender (lane stream-mac-rate): every RTP packet recorded under the transport-cc number in ITS header
+ *  (werift notes it after the await, under the transport's current number — the burst's last), every feedback read by
+ *  SP.twccPackets (werift's `packetResults` drops vector chunks and misnumbers runs) → SP.sendEstimator → onKbps. Wired once
+ *  the sender's DTLS transport and its negotiated extension exist (the session's `connected`) → the estimator, or null. */
+function wireEstimate(sender, onKbps) {
+  const bwe = sender && sender.senderBWE, dt = sender && sender.dtlsTransport;
+  const ext = (sender && Array.isArray(sender.headerExtensions) ? sender.headerExtensions : []).find((e) => e && e.uri === TWCC_URI);
+  if (!bwe || !dt || !ext || typeof dt.sendRtp !== 'function' || typeof bwe.receiveTWCC !== 'function') return null;
+  const est = SP.sendEstimator(), send = dt.sendRtp.bind(dt), rx = bwe.receiveTWCC.bind(bwe);
+  dt.sendRtp = async (payload, header) => {
+    const x = header && Array.isArray(header.extensions) ? header.extensions.find((e) => e && e.id === ext.id) : null;
+    const size = await send(payload, header);
+    if (x && x.payload && x.payload.length >= 2) est.sent(x.payload.readUInt16BE(0), size, Date.now());
+    return size;
+  };
+  bwe.receiveTWCC = (fb) => { try { rx(fb); } catch { /* werift's own (its congestion flag) */ } const k = est.feedback(SP.twccPackets(fb)); if (k != null) onKbps(k); };
+  return est;
+}
 const SID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const named = (code, error) => ({ ok: false, code, error });
 
@@ -353,7 +375,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       // and runs the checks — to a host candidate it can reach (LAN, a tailnet), or to the hub relay's. No public STUN/TURN.
       iceLite: true, iceServers: [], bundlePolicy: 'max-bundle', iceUseIpv6: false,
     });
-    const s = { sid, owner, pc, source, maxKbps, track: null, dc: null, relay: null, leg: null, directInbound: null, frames: 0, bytes: 0, dropped: 0, keyRequests: 0, bweKbps: null, congested: false,
+    const s = { sid, owner, pc, source, maxKbps, track: null, dc: null, relay: null, leg: null, directInbound: null, frames: 0, bytes: 0, dropped: 0, keyRequests: 0, bweKbps: null, congested: false, estimate: null,
       inputN: 0, inputRefused: null, inputDropped: 0, inputPending: 0, inputChain: Promise.resolve(), acks: [], ackMs: null, sentAt: new Map(),
       mark: { at: now(), frames: 0, bytes: 0 }, sending: false, statsTimer: null, orphanTimer: null, failTimer: null, seq: Math.floor(Math.random() * 65536), early: [], replied: false, startedAt: now() };
     sessions.set(sid, s);
@@ -361,7 +383,6 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       s.track = new w.MediaStreamTrack({ kind: 'video' });
       const tr = pc.addTransceiver(s.track, { direction: 'sendonly' });
       tr.sender.onPictureLossIndication.subscribe(() => { s.keyRequests++; source.requestKeyframe(); });
-      tr.sender.senderBWE.onAvailableBitrate.subscribe((bps) => { s.bweKbps = Math.round(bps / 1000); try { source.setTargetKbps(Math.min(maxKbps, s.bweKbps)); } catch { } });
       tr.sender.senderBWE.onCongestion.subscribe((c) => { s.congested = !!c; });
       s.dc = pc.createDataChannel('input', { ordered: true });
       s.dc.onMessage.subscribe((m) => onInput(s, m));
@@ -371,6 +392,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       pc.onIceCandidate.subscribe((c) => { if (!c) { endIce(); return; } iceOut(typeof c.toJSON === 'function' ? c.toJSON() : c); });
       pc.iceGatheringStateChange.subscribe((g) => { if (g === 'complete') endIce(); });
       pc.connectionStateChange.subscribe((st) => {
+        if (st === 'connected' && !s.estimate) { s.estimate = wireEstimate(tr.sender, (k) => { s.bweKbps = k; try { source.setTargetKbps(Math.min(maxKbps, k)); } catch { } }); if (!s.estimate) log(`[stream] ${sid} no send-side estimate (werift's sender shape changed) — the rate holds`); }
         if (st === 'connected' && !s.sending) { s.sending = true; source.requestKeyframe(); source.start(sendAccessUnit, (why) => stop(sid, why || 'source_ended')); } // the picture starts at a KEY frame the moment the browser can take it; a source that dies ends the session by its name
         pushStats(s);
         clearTimeout(s.failTimer);

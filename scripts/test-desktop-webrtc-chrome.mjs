@@ -43,6 +43,11 @@
 //   ⑫ a Mac's strip (lane stream-mac-stall): over a STREAM the switcher lists the Mac's displays (its offer's rows, left to right,
 //      the streamed one pressed, no 全部); a pick restarts the stream ON that display; 「打开系统设置」 opens the pane ON the Mac
 //      (POST settings-open — the toast says so), the link copied only when the agent predates it      mac-switcher.png, mac-tcc-door.png
+//   ⑩ also (lane stream-mac-rate): the chip's title says what the machine DECIDED — 机器以 N kbps 编码——这个大小的屏幕不会低于 F
+//      kbps — N and F the agent's own numbers (THE RATE: the screen's floor, 1280×720 @ 30 ⇒ 2500)
+//   ⑬ THE ESTIMATE (lane stream-mac-rate — werift 0.25's send-side estimate counts ~one packet a picture: the owner's 300 kbps):
+//      THE fixture padded to ~3 Mbps (a filler NAL a picture — 11 packets each) through the real agent bundle to this Chrome:
+//      the agent's estimate (its own transport-cc reading) stays within 0.7–2.5 × what it sent — werift's would read ~1/11
 import fs from 'node:fs';
 import net from 'node:net';
 import http from 'node:http';
@@ -484,8 +489,11 @@ console.log('⑩ the machine\'s own screen: the HDR road, NVENC on the strip —
   await p.ev(`window.__open(${JSON.stringify(M)})`);
   const up = await playing(p);
   const nv = await p.until(`/ · NVENC · 编码 \\d+ ms$/.test((document.querySelector('${WIN} .desktop-strip-stream') || {}).textContent || '')`, 10000);
+  const rated = await p.until(`/机器以 \\d+ kbps 编码——这个大小的屏幕不会低于 \\d+ kbps/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).title || '')`, 8000);
   const s = await stripText(p);
   const f = screenHub.facts('win-a')[0] || {};
+  const sc = (f.stats && f.stats.screen) || {}, said = /机器以 (\d+) kbps 编码——这个大小的屏幕不会低于 (\d+) kbps/.exec(s.title || '') || [];
+  ok(rated && Number(said[1]) === sc.kbps && Number(said[2]) === sc.floor && sc.floor === 2500 && sc.kbps >= sc.floor, `⑩ the chip's title says what the machine decided: ${said[0]} — the agent's own kbps ${sc.kbps} and floor ${sc.floor} (1280×720 @ 30 ⇒ 2500: THE RATE)`, { said: said[0], sc: { kbps: sc.kbps, floor: sc.floor, rate: sc.rate } });
   ok(up && nv && /HDR 已在机器上映射（SDR 白点 200 nits）/.test(s.title) && f.source && f.source.kind === 'screen' && f.source.encoder === 'NVENC' && f.source.mode === 'mapped', '⑩ the machine\'s own screen (no fake source on the hub): the HDR road plays, the strip reads … · NVENC · 编码 N ms, the chip\'s title says HDR 已在机器上映射（SDR 白点 200 nits）', { s, src: f.source });
   await p.shot('screen.png', WIN);
   fs.writeFileSync(DIE, '1');
@@ -587,6 +595,30 @@ console.log('⑪ ONE WINDOW as the stream: the stats row, 「还原它」 only w
   deaf.shutdown();
   await untilN(() => !alive(v2.pid), 4000);
   winHub.shutdown();
+  R.setup({ ...BASE });
+}
+console.log('⑬ THE ESTIMATE: the agent reads its own transport-cc — werift 0.25\'s counts ~one packet a picture');
+{
+  const H = require(path.join(REPO, 'src/stream-h264.js'));
+  const AUS = H.accessUnits(H.splitNalus(fs.readFileSync(FIXTURE)));
+  const PER = Math.round((3000 * 1000) / 8 / 30), SC = Buffer.from([0, 0, 0, 1]), parts = [];
+  for (const au of AUS.slice(AUS.findIndex((a) => a.key))) { // each picture grown to ~3 Mbps at 30 fps by one filler NAL (type 12 — a decoder skips it)
+    const have = au.nalus.reduce((a, n) => a + n.length + 4, 0);
+    for (const n of au.nalus) parts.push(SC, n);
+    const fill = Buffer.alloc(Math.max(2, PER - have - 4), 0xff); fill[0] = 0x0c; fill[fill.length - 1] = 0x80; parts.push(SC, fill);
+  }
+  const PADDED = path.join(root, 'padded-3mbps.h264'); fs.writeFileSync(PADDED, Buffer.concat(parts));
+  const estHub = DW.create({ access: ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: PADDED }) }), log: quiet });
+  R.setup({ ...BASE, webrtc: estHub });
+  const p = await page(1280, 800, DESK);
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  const up = await playing(p);
+  const seen = [];
+  for (let i = 0; i < 6; i++) { await sleep(1000); const st = (estHub.facts('win-a')[0] || {}).stats || {}; if (st.bweKbps != null && st.kbps > 0) seen.push([st.kbps, st.bweKbps]); }
+  const tail = seen.slice(-3), fits = tail.length === 3 && tail.every(([k, b]) => k >= 2000 && b >= 0.7 * k && b <= 2.5 * k);
+  ok(up && fits, `⑬ ~3 Mbps through the real agent bundle to this Chrome: the agent's estimate tracks what it sent (sent/estimated kbps: ${tail.map((x) => x.join('/')).join(', ')}) — werift's own would read ~1/11 (test-stream-plan §9's RED CONTROL)`, seen);
+  await p.close();
+  estHub.shutdown();
   R.setup({ ...BASE });
 }
 ok((await sessions()).length === 0, 'every window closed ⇒ no stream session left on the hub');
