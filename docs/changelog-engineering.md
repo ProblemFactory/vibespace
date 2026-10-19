@@ -9,6 +9,11 @@ This file is the engineers' record of every release: the lanes, the verification
 ### 主开发 — the .319 Actions mirror (fast): test-tailscale-dns 「Log in: the auth URL captured — {done:true}」 = a PRODUCT race
 - src/plugins/tailscale.js loginStart resolved {done:true} on the child's `exit` with code 0; on the 2-vCPU runner `exit` fired BEFORE the stdout chunk carrying the auth URL was delivered (the suite's fake prints the URL and exits at once; a real `tailscale up` blocks until the login, so only an already-authorized exit-0 could show it in the field). The handler is now `close` (stdio drained). RED CONTROL in test-tailscale-dns ⑥(d): a fake `up` that prints the URL from a backgrounded subshell after exiting — the real plugin captures it, a copy settling on `exit` answers {done:true}. 60/60 ×3.
 
+
+### mirror-319-record-clear — the .319 Actions mirror (heavy 5/6): test-record-clear-client's BEFORE census = a SUITE gap, not a product red
+- 「BEFORE: every surface carries the round's word (13 surfaces)」 missed `window:channels:openChannels` on the runner twice and on the dev box on e23b1bee (49/50): since lane attention-predicate-shared the Channels first screen is 需要我 (0, "Nothing waits for you right now") and every other row sits under 「相关」, FOLDED by default (`channelsPanelFolds.related`). The census group's row — nothing of it needs the owner — was folded away, so the word was not in the DOM before the clear and the AFTER absence on that window would prove nothing.
+- FIX (scripts/test-record-clear-client.mjs): the owner's own unfold, beside the int206 one for "VibeSpace internal" — ONE `PATCH /api/user-state {channelsPanelFolds: {related: false, internal: false}}` before the first page, the check reading both back. The Channels window then draws the planted row before the clear and the AFTER census reads the opened fold, so its absence afterwards is never vacuous. No product change.
+- Suites: test-record-clear-client 50/50 (was 49/50, 72 s), test-record-clear-ui 89/89, test-channels-internal-look 23/23.
 ## 2.369.319 — 2026-10-19
 
 ### 主开发 — the .319 integration seam: the phone page reads the owner's band policy like the tray

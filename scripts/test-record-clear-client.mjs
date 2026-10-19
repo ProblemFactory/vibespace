@@ -277,8 +277,11 @@ async function page(P, { lang = null } = {}) {
 }
 const reload = async (P) => { await P.cdp('Page.reload', { ignoreCache: true }); await sleep(500); await P.waitApp(); await sleep(900); };
 // int206 (channels-fold): "VibeSpace internal" is FOLDED by default — the census group is an internal row, so the owner's own
-// unfold (the panel's PATCH, merge-only) keeps it on the Channels window's screen for every page below
-check('the owner unfolded "VibeSpace internal" (the census group\'s row stays on the Channels window)', (await api('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: J({ channelsPanelFolds: { internal: false } }) })).success === true && (await api('/api/user-state')).channelsPanelFolds?.internal === false);
+// unfold (the panel's PATCH, merge-only) keeps it on the Channels window's screen for every page below. 2.369.319 (lane
+// attention-predicate-shared): the Channels first screen is 需要我 and every other row sits under 「相关」, FOLDED by default
+// (`channelsPanelFolds.related`) — the census group's row (nothing of it needs the owner) is there, so the owner opens that
+// fold too, or the BEFORE census reads no word on the Channels window and the clear's absence there proves nothing
+check('the owner unfolded 「相关」 and "VibeSpace internal" (the census group\'s row stays on the Channels window)', (await api('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: J({ channelsPanelFolds: { related: false, internal: false } }) })).success === true && (await api('/api/user-state')).channelsPanelFolds?.internal === false && (await api('/api/user-state')).channelsPanelFolds?.related === false);
 const P1 = await connect(target.webSocketDebuggerUrl);
 let BROWSER = null;
 const newPage = async () => {
