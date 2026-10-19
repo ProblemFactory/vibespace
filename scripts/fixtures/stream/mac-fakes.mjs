@@ -8,7 +8,10 @@
 //                                  picture is the file's first key frame; cfg.endAfter pictures ⇒ an `end` line with cfg.endCode
 //                                  (exit 3); cfg.dieAfter ⇒ exit 1 with no end line; cfg.moveAfter ⇒ a `frame` line (the window
 //                                  moved to cfg.movedFrame); `input` answers `ready`, then one line per command (cfg.inputAnswer
-//                                  for every command but `P`). cfg is re-read at every start (a leg edits it with set()).
+//                                  for every command but `P`; logged with the child's pid). cfg is re-read at every start (a leg
+//                                  edits it with set()) — a RUNNING input child keeps its birth's answer (macOS's per-process
+//                                  verdict) unless cfg.inputLive (its own AXIsProcessTrusted flipping: re-read at every line);
+//                                  cfg.inputDelayMs = every answer but `P`'s that late (lines in flight — lane stream-mac-ax-respawn).
 //   MAC_FACTS                      the canned facts (two 4K displays at 2×, two windows — names invented)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -46,7 +49,8 @@ if (a[0] === 'version') { process.stdout.write(cfg.version + '\\n'); process.exi
 if (a[0] === 'facts') { process.stdout.write(JSON.stringify({ t: 'facts', version: cfg.reports || cfg.version, disclaimed: true, ...cfg.facts, tcc: cfg.tcc }) + '\\n'); process.exit(0); }
 if (a[0] === 'input') {
   process.stdout.write('ready\\n');
-  lines((l) => { log({ input: l }); process.stdout.write((l[0] === 'P' ? 'ok' : cfg.inputAnswer || 'ok') + '\\n'); });
+  const answer = () => { if (!cfg.inputLive) return cfg.inputAnswer || 'ok'; try { return JSON.parse(fs.readFileSync(${JSON.stringify(cfgFile)}, 'utf8')).inputAnswer || 'ok'; } catch { return cfg.inputAnswer || 'ok'; } };
+  lines((l) => { log({ input: l, pid: process.pid }); const out = (l[0] === 'P' ? 'ok' : answer()) + '\\n'; if (cfg.inputDelayMs && l[0] !== 'P') setTimeout(() => process.stdout.write(out), cfg.inputDelayMs); else process.stdout.write(out); });
 } else if (a[0] === 'capture') {
   if (cfg.tcc.screen !== 'granted') { say({ t: 'end', code: 'screen_permission', error: 'Screen Recording is off for vibespace-screen' }); process.exit(3); }
   const [w, h] = String(opt('size') || '1280x720').split('x').map(Number), fps = Number(opt('fps')) || 30, win = opt('window');

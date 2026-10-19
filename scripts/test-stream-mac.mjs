@@ -25,6 +25,11 @@
 //      (screen_permission + its Settings link + ONE row-adding run, helper_changed_regrant, no_helper with what the hub needs)
 //   §5 THE INJECTOR on a Mac: `P <pid>` once per target, keys as virtual key codes, the pointer in global points, no
 //      Accessibility ⇒ accessibility_permission, no helper ⇒ no_helper
+//   §5b THE RESPAWN RULE (lane stream-mac-ax-respawn — macOS judges posting per RUNNING process): the rule table (PURE), then the
+//      REAL injector + the REAL facts over the fake: the facts flip denied → granted under a child that answered ax_denied ⇒ a NEW
+//      child (pid differs) lands `ok`; granted → denied ⇒ replaced too; no flip ⇒ ONE child across 50 injects; the child's own
+//      answer flipping ⇒ replaced once (the facts that follow replace nothing more); its lines in flight answer `err replaced`;
+//      the Accessibility door's re-read replaces a child born before it; the log line once per replacement
 //   §6 A REAL Mac-shaped daemon: the hello-ack names stream-mac + stream-window (+ stream-windows); stream-facts answers the Mac's facts;
 //      stream-windows answers its picker rows (int304: the one picker of both platforms); a screen
 //      offer plays THE fixture to a werift stand-in; the data channel's key + click reach the helper's input in points; an
@@ -261,7 +266,8 @@ const scr = MAC.createMacScreen({ spawn, execFile, env: envS, fs, log: () => { }
   const a = await so.openSettings('accessibility'), s = await so.openSettings('screen'), bad = await so.openSettings('../screen');
   openErr = Object.assign(new Error('spawn /usr/bin/open ENOENT'), { code: 'ENOENT' });
   const gone = await so.openSettings('screen');
-  ok(a.ok && a.pane === 'accessibility' && s.ok && same(calls.slice(0, 2), [['/usr/bin/open', [SP.MAC_SETTINGS.accessibility]], ['/usr/bin/open', [SP.MAC_SETTINGS.screen]]]) && bad.code === 'bad_pane' && calls.length === 3 && gone.code === 'open_failed' && /ENOENT/.test(gone.error), 'lane stream-mac-stall: 「打开系统设置」 on the Mac = /usr/bin/open on THE pane\'s deep link (SP.MAC_SETTINGS, by name — anything else bad_pane, nothing run); a failed open by name', { calls, bad, gone });
+  const opens = calls.filter((c) => c[0] === '/usr/bin/open'), reads = calls.filter((c) => c[0] !== '/usr/bin/open');
+  ok(a.ok && a.pane === 'accessibility' && s.ok && same(opens.slice(0, 2), [['/usr/bin/open', [SP.MAC_SETTINGS.accessibility]], ['/usr/bin/open', [SP.MAC_SETTINGS.screen]]]) && bad.code === 'bad_pane' && opens.length === 3 && gone.code === 'open_failed' && /ENOENT/.test(gone.error) && reads.length === 1 && same(reads[0][1], ['--disclaim', 'facts']), 'lane stream-mac-stall: 「打开系统设置」 on the Mac = /usr/bin/open on THE pane\'s deep link (SP.MAC_SETTINGS, by name — anything else bad_pane, nothing run); a failed open by name; lane stream-mac-ax-respawn: the Accessibility door re-reads the facts ONCE (a disclaimed `facts` — the injector\'s respawn rule hears it), the Screen Recording pane none', { calls, bad, gone });
 }
 const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   const src = await scr.source(msg, { maxKbps: kbps });
@@ -420,6 +426,113 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5 THE INJECTOR 
   const injN = I.createInjector({ platform: 'darwin', spawn, env: {}, mac: () => MAC.createMacHelper({ execFile: fakeExec({}).ef, fs, home: home('smac-inj-none') }) });
   const rn = await injN.inject([{ t: 'kd', c: 'KeyA' }]);
   ok(ra.ok === false && ra.refused[0].code === 'accessibility_permission' && rn.code === 'no_helper' && rn.refused[0].code === 'no_helper', 'no Accessibility ⇒ accessibility_permission (macOS would drop them silently — the helper says ax_denied); no helper ⇒ no_helper', { ra, rn });
+}
+
+console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5b THE RESPAWN RULE (lane stream-mac-ax-respawn)');
+{
+  const R = I.macRespawn;
+  const rc = (r) => (r && r.refused && r.refused[0] ? r.refused[0].code : null); // a refusal's code — or none
+  const run = (evs) => { let st = null; const out = []; for (const e of evs) { const r = R(st, e); st = r.state; if (r.replace) out.push(r.replace); } return { st, out }; };
+  const A = (answer) => ({ t: 'answer', answer }), Fx = (to) => ({ t: 'facts', to }), SPAWN = { t: 'spawn' };
+  const t1 = run([Fx('denied'), SPAWN, A('ax_denied'), Fx('granted')]);
+  const t2 = run([Fx('granted'), SPAWN, A('ok'), Fx('denied')]);
+  const t3 = run([Fx('denied'), SPAWN, ...Array.from({ length: 50 }, () => A('ax_denied')), Fx('denied'), Fx('denied')]);
+  const t4 = run([Fx('denied'), SPAWN, A('ax_denied'), A('ok'), SPAWN, A('ok'), Fx('granted'), Fx('granted')]);
+  const t5 = run([Fx('granted'), SPAWN, A('ax_denied'), Fx('granted'), SPAWN, A('ax_denied'), Fx('granted'), Fx('granted')]);
+  const t6 = run([Fx('granted'), SPAWN, A('ok'), { t: 'door' }, Fx('granted'), SPAWN, Fx('granted')]);
+  const t7 = run([{ t: 'door' }, Fx('granted'), SPAWN, Fx('granted')]);
+  const t8 = run([SPAWN, A('ok'), Fx('unknown'), Fx('granted'), A('ax_denied'), { t: 'gone' }, Fx('granted')]);
+  const t9 = run([Fx('denied'), SPAWN, A('ax_denied'), A('ok'), Fx('denied'), SPAWN]); // a flip, then the facts say denied before the next child: it is born denied
+  ok(same(t1.out, [{ from: 'denied', to: 'granted', why: 'facts' }]) && t1.st.child === null && same(t1.st.next, { born: 'granted' })
+    && same(t2.out, [{ from: 'granted', to: 'denied', why: 'facts' }])
+    && same(t3.out, [])
+    && same(t4.out, [{ from: 'denied', to: 'granted', why: 'answer' }])
+    && same(t5.out, [{ from: 'denied', to: 'granted', why: 'facts' }])
+    && same(t6.out, [{ from: 'granted', to: 'granted', why: 'door' }]) && same(t7.out, [])
+    && same(t8.out, []) && t9.st.child.born === 'denied' && t9.st.child.origin === 'replace',
+  'THE RESPAWN RULE (PURE): ax_denied then facts granted ⇒ replaced (denied → granted); granted → denied ⇒ replaced; 50 ax_denied + the same facts ⇒ never; the child\'s own ax_denied → ok ⇒ replaced ONCE (the facts that follow find it born granted); a child born BY a replacement still saying ax_denied under granted facts ⇒ not again (no loop); the door\'s re-read ⇒ replaced once, a door with no child ⇒ nothing; an ok with no denial, an unknown value, a child gone ⇒ nothing', { t1, t2, t3: t3.out, t4: t4.out, t5: t5.out, t6: t6.out, t7: t7.out, t8: t8.out, t9: t9.st });
+
+  // THE REAL injector + THE REAL facts (createMacScreen's helper — the daemon's wiring: mac: () => macHelperOf()) over the fake
+  const rig = (name, cfg, injOpts = {}) => {
+    const h = home(name), lg = path.join(h, 'h.log'), said = [];
+    const fk = writeFakeMacHelper(h, { version: SRC.VERSION, facts: MAC_FACTS, log: lg, ...cfg });
+    const exe = (file, args, o, cb) => (file === '/usr/bin/open' ? setImmediate(() => cb(null, '', '')) : execFile(file, args, o, cb)); // no `open` here (Linux's is xdg-open)
+    const sc = MAC.createMacScreen({ spawn, execFile: exe, env: { HOME: h, PATH: process.env.PATH }, fs, log: () => { } });
+    const inj = I.createInjector({ platform: 'darwin', spawn, env: { HOME: h, PATH: process.env.PATH }, mac: () => sc.helper, log: (l) => said.push(l), ...injOpts });
+    cleanups.push(() => inj.close());
+    const rows = () => helperLog(lg);
+    return {
+      fk, sc, inj, said, rows,
+      pids: () => [...new Set(rows().filter((l) => l.input && l.input[0] !== 'P').map((l) => l.pid))],
+      births: () => rows().filter((l) => l.argv && l.argv.includes('input')).length,
+      replaced: () => said.filter((l) => /^\[input\] replaced the Mac input child: accessibility /.test(l)),
+    };
+  };
+  const tg = { pid: 77, wid: 4242, ox: 0, oy: 0, sx: 1, sy: 1 };
+  const key = (inj) => inj.inject([{ t: 'kd', c: 'KeyA' }, { t: 'ku', c: 'KeyA' }], tg);
+  const GRANTED = { screen: 'granted', accessibility: 'granted' }, DENIED = { screen: 'granted', accessibility: 'denied' };
+
+  // ① + ② + no flip — the owner's Mac: a child born before the grant keeps its verdict (the fake's child keeps its birth's answer)
+  const X = rig('smac-respawn', { tcc: DENIED, inputAnswer: 'ax_denied' });
+  await X.sc.facts({ force: true });
+  const a1 = await key(X.inj);
+  X.fk.set({ tcc: GRANTED, inputAnswer: 'ok' }); // the owner turns Accessibility on — the RUNNING child still answers ax_denied
+  const a2 = await key(X.inj);
+  const before = X.births();
+  await X.sc.facts({ force: true }); // the facts: granted ⇒ THE child is replaced
+  const a3 = await key(X.inj);
+  const p3 = X.pids();
+  ok(rc(a1) === 'accessibility_permission' && rc(a2) === 'accessibility_permission' && before === 1 && a3.ok && a3.n === 2 && X.births() === 2 && p3.length === 2 && p3[0] !== p3[1]
+    && same(X.replaced(), ['[input] replaced the Mac input child: accessibility denied → granted']),
+  '① a child that answered ax_denied + the facts now granted ⇒ REPLACED: the next inject spawns a NEW child (pid differs) and lands ok; the log line once', { a1, a2, a3, births: X.births(), pids: p3, said: X.said });
+  X.fk.set({ tcc: DENIED, inputAnswer: 'ax_denied' });
+  await X.sc.facts({ force: true }); // revoked: the child born granted would post "ok" into a void
+  const b1 = await key(X.inj);
+  ok(X.births() === 3 && X.pids().length === 3 && rc(b1) === 'accessibility_permission' && X.replaced().length === 2 && X.replaced()[1] === '[input] replaced the Mac input child: accessibility granted → denied',
+    '② granted → denied ⇒ replaced too (a revoked grant never keeps a child WindowServer now ignores): the new child says ax_denied — the strip\'s banner', { b1, said: X.said });
+  const no = [];
+  for (let i = 0; i < 50; i++) { no.push(await X.inj.inject([{ t: 'mv', x: i, y: i }], { ...tg, pid: 77 + (i % 2) })); if (i % 10 === 9) await X.sc.facts({ force: true }); } // two apps in turn: a `P` line (answered ok unasked) before every move
+  ok(no.every((r) => rc(r) === 'accessibility_permission') && X.births() === 3 && X.replaced().length === 2,
+    'no flip ⇒ NO replacement across 50 injects (ax_denied every time, five more facts reads still denied, a `P` answered ok between — never a flip): ONE child — at most one replacement per change', { births: X.births(), said: X.said });
+
+  // the child's OWN answer flips ax_denied → ok (its AXIsProcessTrusted re-read — every 2 s on a Mac)
+  const F = rig('smac-flip', { tcc: DENIED, inputAnswer: 'ax_denied', inputLive: true });
+  await F.sc.facts({ force: true });
+  const f1 = await F.inj.inject([{ t: 'mv', x: 5, y: 5 }], tg);
+  F.fk.set({ tcc: GRANTED, inputAnswer: 'ok' });
+  const f2 = await F.inj.inject([{ t: 'mv', x: 6, y: 6 }], tg); // ok — the flip: that move went into the void; the child is replaced
+  const f3 = await key(F.inj);
+  await F.sc.facts({ force: true }); // denied → granted: the child born after the flip is NOT replaced again
+  const f4 = await key(F.inj);
+  ok(rc(f1) === 'accessibility_permission' && f2.ok && f3.ok && f4.ok && F.births() === 2 && F.pids().length === 2 && same(F.replaced(), ['[input] replaced the Mac input child: accessibility denied → granted']),
+    'its own answer flips ax_denied → ok ⇒ replaced ONCE — the key after it reaches a NEW child; the facts that then say granted replace nothing more', { f1, f2, f3, f4, births: F.births(), said: F.said });
+
+  // the old child's lines IN FLIGHT answer `err replaced` (the stream host's refusal by name: injector_replaced)
+  const D = rig('smac-inflight', { tcc: GRANTED, inputAnswer: 'ok', inputDelayMs: 8000 }, { lineMs: 15000 }); // only the replacement can settle that line in time
+  await D.sc.facts({ force: true });
+  const pending = D.inj.inject([{ t: 'kd', c: 'KeyA' }], tg);
+  const reached = await until(() => D.rows().some((l) => l.input === 'K 0 0'), 5000);
+  D.fk.set({ tcc: DENIED });
+  await D.sc.facts({ force: true });
+  const d1 = await pending; // without the replacement that line would answer `ok` (8 s later)
+  ok(reached && d1.ok === false && d1.n === 0 && rc(d1) === 'injector_replaced' && (d1.refused[0] || {}).detail === 'err replaced 0' && D.replaced().length === 1,
+    'a replacement answers the old child\'s lines in flight `err replaced` (refused BY NAME: injector_replaced) — never the old child\'s late `ok`, never the next child\'s answer', { d1, said: D.said });
+
+  // THE DOOR: 「打开系统设置」 → Accessibility; its re-read replaces a child born before it — the value never moved
+  const O = rig('smac-door', { tcc: GRANTED, inputAnswer: 'ok' });
+  await O.sc.facts({ force: true });
+  const o1 = await key(O.inj);
+  const scr1 = await O.sc.openSettings('screen');
+  await O.sc.facts({ force: true });
+  const afterScreen = O.replaced().length;
+  const od = await O.sc.openSettings('accessibility');
+  const swapped = await until(() => O.replaced().length === 1, 3000);
+  const o2 = await key(O.inj);
+  await O.sc.facts({ force: true });
+  const o3 = await key(O.inj);
+  ok(o1.ok && scr1.ok && afterScreen === 0 && od.ok && swapped && o2.ok && o3.ok && O.births() === 2 && O.pids().length === 2 && same(O.replaced(), ['[input] replaced the Mac input child: accessibility granted → granted']),
+    '③ the Accessibility door (settings-open) re-reads the facts and THAT read replaces the child born before it (the owner deleted + re-added the row: the value never moved); the Screen Recording door replaces nothing; a later read nothing more', { o1, o2, o3, births: O.births(), said: O.said });
+  for (const z of [X, F, D, O]) z.inj.close();
 }
 
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§6 a REAL Mac-shaped daemon');

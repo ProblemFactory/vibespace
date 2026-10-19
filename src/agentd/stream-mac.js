@@ -19,6 +19,9 @@
  *   plan then refuses `helper_changed_regrant`, never a bare screen_permission.
  * FACTS (`stream-facts` on a Mac): the helper's own (run disclaimed, so its TCC answer is ITS grant) — displays, windows, TCC,
  *   the lock, its version — and the helper's state; kept FACTS_MS (a window source re-reads once when its window is not in them).
+ *   THE GRANT'S EVENTS (lane stream-mac-ax-respawn): the helper keeps the last tcc a facts read saw; every read, and the
+ *   Accessibility door (openSettings — then ONE forced re-read), reach whoever listens through ONE hook, `helper.onTcc(fn)` —
+ *   THE injector (src/input-inject.js macRespawn: a grant that changed under its resident input child replaces that child).
  * THE PICKER (`stream-windows` on a Mac — int304: the one picker of both platforms): the facts' windows in src/stream-window.js's
  *   shape (SP.macWindowRows); `restore` is Windows' only (a Mac's stream of a minimized window ends): restore_unsupported.
  * THE WINDOW LOOK + THE SCREEN TABLE of src/machine-window.js (`window-track`, `display-facts` — lane mac-window-list-helper:
@@ -109,17 +112,27 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
     })().finally(() => { building = null; });
     return building;
   }
-  /** What the facts saw: the grant under THIS version (a grant seen clears regrant). */
+  /** What the facts saw (their tcc — or its Screen Recording word alone): the grant under THIS version (a grant seen clears
+   *  regrant); the tcc is KEPT and told to every listener (lane stream-mac-ax-respawn: { t: 'facts', to: <accessibility> }). */
   // the state is about the INSTALLED helper: a state file that names no version (a helper put there by hand) is that one's
   const current = () => { const st = readState(); return st.version === version || (!st.version && installed() === version) ? { ...st, version } : null; };
-  function sawTcc(screen) {
+  let tcc = null;
+  const tccSubs = new Set();
+  const tell = (e) => { for (const fn of [...tccSubs]) { try { fn(e); } catch (err) { log(`[stream] a tcc listener threw (${err && err.message})`); } } };
+  function sawTcc(seen) {
+    const screen = seen && typeof seen === 'object' ? seen.screen : seen;
     const st = current();
     if (st && screen === 'granted' && (!st.granted || st.regrant)) writeState({ ...st, granted: true, regrant: false });
+    if (seen && typeof seen === 'object') { tcc = { screen: seen.screen, accessibility: seen.accessibility }; tell({ t: 'facts', to: tcc.accessibility }); }
   }
+  /** The Accessibility door was opened (「打开系统设置」 → that pane): the owner is about to change the grant. */
+  function sawDoor(pane) { if (pane === 'accessibility') tell({ t: 'door' }); }
+  /** ONE hook: fn hears every facts read ({ t: 'facts', to }) and the door ({ t: 'door' }) — the kept tcc at once. → unsubscribe */
+  function onTcc(fn) { tccSubs.add(fn); if (tcc) fn({ t: 'facts', to: tcc.accessibility }); return () => { tccSubs.delete(fn); }; }
   /** Ask the helper once per version to add its (off) row in Settings — the owner then only toggles it. */
   function rowAsked() { const st = current(); if (!st || st.rowAsked === version) return true; writeState({ ...st, rowAsked: version }); return false; }
   const spawnPlan = (cmd, args = []) => SP.macHelperSpawn(P.bin, cmd, args);
-  return { paths: P, version, ensure, sawTcc, rowAsked, spawnPlan, installed, run };
+  return { paths: P, version, ensure, sawTcc, sawDoor, onTcc, rowAsked, spawnPlan, installed, run };
 }
 
 function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'), log = () => { }, now = Date.now, home = null, helper = null } = {}) {
@@ -133,7 +146,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     const r = await H.run(sp.file, sp.args, RUN_MS);
     const d = SP.parseMacFacts(r.stdout);
     if (!d.ok) return { ...base, tcc: { screen: 'unknown', accessibility: 'unknown' }, displays: [], windows: [], displaysError: (r.stderr.trim().split('\n').pop() || (r.err && r.err.message) || d.error).slice(0, 200), primary: { code: 'facts_failed', error: d.error } };
-    H.sawTcc(d.tcc.screen);
+    H.sawTcc(d.tcc);
     const facts = { ...base, helper: { ...h, ...(d.tcc.screen === 'granted' ? { regrant: false, granted: true } : {}), reports: d.version, disclaimed: d.disclaimed }, tcc: d.tcc, locked: d.locked, front: d.front, os: d.os, arch: d.arch, displays: d.displays, windows: d.windows };
     const p = SP.planScreen(facts);
     facts.primary = p.ok ? { mode: p.mode, encoder: p.encoder.label, display: p.display.id, w: p.w, h: p.h, fps: p.fps, rung: p.rung } : { code: p.code, error: p.error };
@@ -188,13 +201,16 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
   }
   /** 「打开系统设置」 ON the Mac (lane stream-mac-stall — the agent's `settings-open` op): `/usr/bin/open <the pane's deep link>`,
    *  LaunchServices shows System Settings at that pane in the owner's session (measured on the owner's Mac: exit 0 in 77 ms, no
-   *  TCC request — `open` needs no grant). The pane BY NAME from SP.MAC_SETTINGS — no text from the hub reaches argv. → { ok, pane } */
+   *  TCC request — `open` needs no grant). The pane BY NAME from SP.MAC_SETTINGS — no text from the hub reaches argv. → { ok, pane }
+   *  Lane stream-mac-ax-respawn: the Accessibility pane's door is told to the helper's listeners, and once `open` answers the
+   *  facts are re-read (forced) — THE injector replaces an input child born before the door when that read returns. */
   function openSettings(pane) {
     const url = Object.prototype.hasOwnProperty.call(SP.MAC_SETTINGS, pane) ? SP.MAC_SETTINGS[pane] : null;
     if (!url) return Promise.resolve(named('bad_pane', `no Settings pane named ${JSON.stringify(String(pane).slice(0, 20))}`));
+    H.sawDoor(pane);
     return new Promise((resolve) => {
       try { execFile('/usr/bin/open', [url], { env, timeout: 10000 }, (err) => resolve(err ? named('open_failed', `open did not show it (${err.code || err.message})`) : { ok: true, pane })); } catch (e) { resolve(named('open_failed', `open did not show it (${(e && e.code) || e})`)); }
-    });
+    }).then((r) => { if (pane === 'accessibility') facts({ force: true }); return r; });
   }
   /** 「还原它」 is Windows' (a Mac's stream of a minimized window ENDS window_minimized — SCK sends no picture): refused by name. */
   async function restore() { return named('restore_unsupported', 'a minimized Mac window is restored on the Mac itself (its stream ends while it is minimized)'); }

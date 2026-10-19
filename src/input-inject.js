@@ -21,7 +21,9 @@
  *             the frontmost one is posted at the HID tap, any other by CGEventPostToPid (not activated), and its streamed
  *             window is made its key window before a press (an app's keys land in its key window). No Accessibility ⇒
  *             macOS drops the events silently, so the helper says `ax_denied` and the strip names the Settings pane
- *             (accessibility_permission).
+ *             (accessibility_permission). macOS judges posting PER RUNNING PROCESS (lane stream-mac-ax-respawn — measured on the
+ *             owner's Mac: a child born before the grant changed posts into the void, its own AXIsProcessTrusted may even say
+ *             yes): THE RESPAWN RULE (macRespawn) replaces the resident child when the grant changed under it.
  *
  *   SCAN_CODES            DOM `code` → [set-1 scan code, extended] (a code the table lacks is refused `unmapped_key`)
  *   commandsOf(ev)        a validated stream-model input event → its command lines (`M x y` · `D b` · `U b` · `W dx dy` ·
@@ -29,6 +31,7 @@
  *   MAC_KEYCODES / macCommandsOf(ev, target)   the Mac's: `M x y` in global points · `D b` · `U b` · `W dx dy` · `K vk up` ·
  *                         `C <base64 utf-8>` — PURE
  *   INPUT_PS              the resident script (its C# compiles once)
+ *   macRespawn(state, ev) THE RESPAWN RULE of the Mac's resident input child (lane stream-mac-ax-respawn) — PURE
  *   createInjector(opts)  → { kind, inject(events, target?) → { ok, n, refused: [{ i, t, code }] }, clip(op, text?) | null, close() }
  */
 const MD = require('./machine-desktop-model.js');
@@ -177,6 +180,45 @@ const INPUT_PS = [
   '}',
 ].join('\r\n');
 
+/** THE RESPAWN RULE (lane stream-mac-ax-respawn — the owner turned Accessibility back on for vibespace-screen and the stream's
+ *  keys and clicks still did nothing, no error) — PURE. macOS judges event posting PER RUNNING PROCESS: the resident `input`
+ *  child keeps the verdict it was born with (WindowServer / tccd), so a grant that changed under it is honoured only by a NEW
+ *  child. The child is REPLACED (killed now — its lines in flight answer `err replaced`; the next inject spawns the new one):
+ *    its own answer flips ax_denied → ok                   it saw the change itself (that `ok` was posted into the void)
+ *    a facts read says granted after it answered ax_denied  the facts (the helper's `facts`, run disclaimed) are fresh —
+ *                                                          never for a child born BY a replacement (no loop)
+ *    the facts' tcc.accessibility changes value            denied → granted or granted → denied — unless the child was born
+ *                                                          under the new value
+ *    the first facts read after the Accessibility door     「打开系统设置」 (the agent's settings-open op) re-reads the facts —
+ *                                                          the owner is about to change the grant, the next child is born after
+ *  and NEVER otherwise: an ax_denied (however many), an `ok` with no denial before it, a value read again, an unknown value.
+ *  state = { acc: the last facts' tcc.accessibility | null, child: null | { born, denied, door, origin: 'spawn' | 'replace' },
+ *  next: { born } of the child a replacement owes | null }; ev = { t: 'spawn' } · { t: 'gone' } · { t: 'door' } ·
+ *  { t: 'answer', answer } (an AX-checked line's: M D U W K — `P` / `C` answer ok unasked) · { t: 'facts', to }
+ *  → { state, replace: null | { from, to, why: 'answer' | 'facts' | 'door' } } */
+const AX_VALUES = new Set(['granted', 'denied']);
+function macRespawn(state, ev) {
+  const s = { acc: null, child: null, next: null, ...(state || {}) };
+  const c = s.child, keep = (st) => ({ state: st, replace: null });
+  const swap = (st, from, to, why) => ({ state: { ...st, child: null, next: { born: to } }, replace: { from, to, why } });
+  const t = ev && ev.t;
+  if (t === 'spawn') return keep({ ...s, child: { born: s.next ? s.next.born : s.acc, denied: false, door: false, origin: s.next ? 'replace' : 'spawn' }, next: null });
+  if (t === 'gone') return keep(c ? { ...s, child: null } : s);
+  if (t === 'door') return keep(c ? { ...s, child: { ...c, door: true } } : s);
+  if (t === 'answer') {
+    if (!c) return keep(s);
+    if (ev.answer === 'ax_denied') return keep(c.denied ? s : { ...s, child: { ...c, denied: true } });
+    return ev.answer === 'ok' && c.denied ? swap(s, 'denied', 'granted', 'answer') : keep(s);
+  }
+  if (t !== 'facts' || !AX_VALUES.has(ev.to)) return keep(s);
+  const prev = s.acc, to = ev.to, n = { ...s, acc: to };
+  if (!c) return keep(n.next ? { ...n, next: { born: to } } : n);
+  if (c.door) return swap(n, c.denied ? 'denied' : c.born || prev || 'unknown', to, 'door');
+  if (c.denied && to === 'granted' && c.origin !== 'replace') return swap(n, 'denied', to, 'facts');
+  if (prev && prev !== to && c.born !== to) return swap(n, prev, to, 'facts');
+  return keep(n);
+}
+
 const LINE_MS = 2000;           // one answer's longest wait (the first waits for the compile too: READY_MS)
 const READY_MS = 20000;
 const RESPAWNS_PER_MIN = 3;
@@ -187,41 +229,51 @@ const STUB_MAX_BYTES = 256 * 1024;
 function createInjector({ platform = process.platform, spawn = null, env = process.env, stubFile = null, fs = null, log = () => { }, lineMs = LINE_MS, readyMs = READY_MS, mac = null } = {}) {
   const kind = platform === 'win32' ? 'sendinput' : platform === 'linux' ? 'stub' : platform === 'darwin' ? 'cgevent' : null;
   let child = null, ready = false, buf = '', closed = false, helper = null, lastTarget = null;
-  const queue = []; // { resolve, timer } in line order
+  let rs = null, spare = false, unTcc = null; // THE RESPAWN RULE's state (a Mac's); a replacement's respawn is no crash's
+  const queue = []; // { resolve, timer, ax } in line order
   const spawns = [];
   const settleAll = (answer) => { for (const q of queue.splice(0)) { clearTimeout(q.timer); q.resolve(answer); } };
+  /** THE RESPAWN RULE's events (a Mac's only): the child's birth / end, its AX-checked answers, the helper's facts + door. */
+  function step(ev) {
+    if (kind !== 'cgevent' || closed) return;
+    const r = macRespawn(rs, ev); rs = r.state;
+    if (!r.replace) return;
+    log(`[input] replaced the Mac input child: accessibility ${r.replace.from} → ${r.replace.to}`);
+    settleAll('err replaced 0'); kill(); spare = true;
+  }
   function start() {
     const now = Date.now();
     while (spawns.length && now - spawns[0] > 60000) spawns.shift();
-    if (spawns.length >= RESPAWNS_PER_MIN) return false;
-    spawns.push(now);
+    if (spare) spare = false; else { if (spawns.length >= RESPAWNS_PER_MIN) return false; spawns.push(now); }
     const argv = kind === 'cgevent' ? (helper ? [helper.file, ...helper.args] : null) : [...MD.PS_ARGV, MD.psEncoded(INPUT_PS)];
     if (!argv) return false;
     try { child = spawn(argv[0], argv.slice(1), { env, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] }); } catch (e) { log(`[input] the injector did not start: ${e && e.message}`); child = null; return false; }
     ready = false; buf = ''; lastTarget = null;
     const me = child;
-    me.on('error', () => { if (child === me) { child = null; settleAll('err spawn 0'); } });
-    me.on('exit', () => { if (child === me) { child = null; settleAll('err exited 0'); } });
+    step({ t: 'spawn' });
+    me.on('error', () => { if (child === me) { child = null; step({ t: 'gone' }); settleAll('err spawn 0'); } });
+    me.on('exit', () => { if (child === me) { child = null; step({ t: 'gone' }); settleAll('err exited 0'); } });
     me.stdin.on('error', () => { });
     me.stdout.setEncoding('utf8');
     me.stdout.on('data', (d) => {
+      if (child !== me) return; // a replaced / timed-out child's late answers are never the next child's
       buf += d;
       let i;
-      while ((i = buf.indexOf('\n')) >= 0) {
+      while (child === me && (i = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, i).replace(/\r$/, '').trim(); buf = buf.slice(i + 1);
         if (!ready) { if (line === 'ready') ready = true; continue; }
-        const q = queue.shift(); if (q) { clearTimeout(q.timer); q.resolve(line); }
+        const q = queue.shift(); if (q) { clearTimeout(q.timer); q.resolve(line); if (q.ax) step({ t: 'answer', answer: line }); }
       }
     });
     return true;
   }
-  function kill() { const c = child; child = null; ready = false; if (c) { try { c.kill(); } catch { /* gone */ } } }
+  function kill() { const c = child; child = null; ready = false; if (c) { step({ t: 'gone' }); try { c.kill(); } catch { /* gone */ } } }
   function sendLine(line) {
     return new Promise((resolve) => {
       if (closed) return resolve('err closed 0');
       if (!child && !start()) return resolve('err injector_down 0');
       const timer = setTimeout(() => { const i = queue.findIndex((q) => q.timer === timer); if (i >= 0) queue.splice(i, 1); resolve('err timeout 0'); kill(); }, ready ? lineMs : readyMs);
-      queue.push({ resolve, timer });
+      queue.push({ resolve, timer, ax: kind === 'cgevent' && /^[MDUWK] /.test(line) });
       try { child.stdin.write(line + '\n'); } catch { /* the exit handler settles */ }
     });
   }
@@ -234,7 +286,7 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
       return 'ok';
     } catch (e) { return `err stub ${(e && e.code) || 0}`; }
   }
-  const codeOf = (answer) => (answer === 'ok' ? null : answer === 'uipi' ? 'uipi_blocked' : answer === 'ax_denied' ? 'accessibility_permission' : /^err (timeout|injector_down|exited|spawn|closed)\b/.test(answer) ? 'injector_' + answer.split(' ')[1].replace('injector_', '') : kind === 'cgevent' ? 'cgevent_failed' : 'sendinput_failed');
+  const codeOf = (answer) => (answer === 'ok' ? null : answer === 'uipi' ? 'uipi_blocked' : answer === 'ax_denied' ? 'accessibility_permission' : /^err (timeout|injector_down|exited|spawn|closed|replaced)\b/.test(answer) ? 'injector_' + answer.split(' ')[1].replace('injector_', '') : kind === 'cgevent' ? 'cgevent_failed' : 'sendinput_failed');
   /** The Mac: its screen helper in place (built / prebuilt) before the first line; a target change = one `P <pid>` line. */
   async function macReady() {
     if (helper) return null;
@@ -242,6 +294,7 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
     const st = h ? await h.ensure() : null;
     if (!st || st.state !== 'ready') return { code: (st && st.code) || 'no_helper', error: (st && st.error) || 'this Mac has no screen helper for its input' };
     helper = h.spawnPlan('input');
+    if (typeof h.onTcc === 'function') unTcc = h.onTcc(step); // THE RESPAWN RULE hears the helper's facts + the Settings door
     return null;
   }
   /** Inject validated events in order. → { ok, n (events fully sent), refused: [{ i, t, code, detail? }] } */
@@ -269,11 +322,11 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
     }
     return { ok: refused.length === 0, n, refused };
   }
-  function close() { closed = true; settleAll('err closed 0'); kill(); }
+  function close() { closed = true; settleAll('err closed 0'); kill(); if (unTcc) { unTcc(); unTcc = null; } }
   /** THE MACHINE'S CLIPBOARD around an agent's paste (Windows only — the resident script reads it; the Mac's helper cannot yet):
    *  clip('save') before it, clip('restore', theAgentsText) after it → the script's answer (ok | kept | err …) */
   const clip = kind === 'sendinput' ? (op, text = '') => sendLine(op === 'save' ? 'S' : `R ${Buffer.from(String(text), 'utf16le').toString('base64')}`) : null;
   return { kind, inject, clip, close };
 }
 
-module.exports = { SCAN_CODES, commandsOf, MAC_KEYCODES, macCommandsOf, INPUT_PS, createInjector };
+module.exports = { SCAN_CODES, commandsOf, MAC_KEYCODES, macCommandsOf, INPUT_PS, macRespawn, createInjector };

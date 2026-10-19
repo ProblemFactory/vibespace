@@ -7,6 +7,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - You can hand a paired machine's desktop to an agent to operate, and take it back any time.
 
+### Fixed
+- On a Mac, keys and clicks over the stream work as soon as Accessibility is turned on for vibespace-screen — no restart needed.
+
 ## 2.369.312 — 2026-10-19
 
 ### Fixed
