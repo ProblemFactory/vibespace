@@ -906,7 +906,7 @@ export function installUserTodos(app) {
       return;
     }
     const exitBtn = e.target.closest('.ut-action-exit');
-    if (exitBtn && exitBtn.dataset.answer === 'allow') {
+    if (exitBtn && (exitBtn.dataset.answer === 'allow' || exitBtn.classList.contains('ut-exit-allow'))) { // lane hub-act-ask: Allow once / Always too
       // verify-r6 V1: an Allow that appeared or moved under the pointer a moment ago is not the one the user read
       armExitButtons();
       const pv = pressVerdict({ since: exitBtn._armSince ?? null, now: performance.now() });

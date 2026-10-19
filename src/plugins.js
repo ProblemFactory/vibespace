@@ -20,7 +20,8 @@
 //                   setup?,                          guided setup (→ POST /api/plugins/:id/login)
 //                   config?(patch), mode?(mode),     settings (→ /config, /mode); absent ⇒ refused by name
 //                   enable?(on),                     owns the on-switch (default: rec.enabled, saved + broadcast)
-//                   bootReplay?() } }                owns its boot replay (default: enabled + desiredUp ⇒ start)
+//                   bootReplay?(),                   owns its boot replay (default: enabled + desiredUp ⇒ start)
+//                   lookup?(name) } }                a 'tunnel' plugin's own name answers (tunnelLookup — the ssh hosts)
 //   h (the host handle) = { id, dir: ~/.vibespace/plugins/<id>, rec() (the persistent record, created),
 //     peek() (the record or {}), save(), notify() (broadcast plugins-updated), opts (the constructor's extra
 //     options, e.g. opencodeServe), probeProto(port, opts) }.
@@ -43,7 +44,7 @@ const PS = require('./plugin-settings.js'); // PURE: one settings table per buil
 // the verbs a declared capability obliges (the manager's relay surface calls these on the 'relay' provider)
 const CAP_VERBS = Object.freeze({ relay: ['publish', 'unpublish', 'setSelfDialSub'] });
 const REQUIRED_VERBS = ['install', 'start', 'stop', 'status'];
-const OPTIONAL_VERBS = ['setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings'];
+const OPTIONAL_VERBS = ['setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings', 'lookup'];
 
 /** The ONE contract check — a plugin that breaks it is refused at registration, by name. */
 function validatePlugin(def, verbs) {
@@ -301,6 +302,12 @@ class PluginManager {
   async frpPublish(name, localPort, opts) { return this._provider('relay', 'publish', 'public URLs are not available')(name, localPort, opts); }
   setSelfDialSub(sub) { return this._provider('relay', 'setSelfDialSub', 'no relay')(sub); }
   async frpUnpublish(name) { return this._provider('relay', 'unpublish', 'no relay')(name); }
+  /** a tailnet name → { name, ip, ips } from whichever plugin declares 'tunnel' (its own peer table — lane
+   *  tailscale-plugin-pod-dns: the container's resolver is never the tunnel's), null when none answers. Sync. */
+  tunnelLookup(name) {
+    const id = this.providerId('tunnel'), v = id && this._verbs.get(id);
+    try { return v && typeof v.lookup === 'function' ? v.lookup(name) || null : null; } catch { return null; }
+  }
 }
 
 /** Sniff what a service speaks so publish/UI pick the right exposure mode.

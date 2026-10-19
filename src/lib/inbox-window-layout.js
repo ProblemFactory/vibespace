@@ -195,6 +195,8 @@ export function itemView(item, ctx = {}) {
     ? { type: 'reset-credit', accountKey: i.action.accountKey, sessionId: i.action.sessionId || null } : null;
   // lane-pairing ⑥: an exit's "ask me each time" item is answered HERE — Allow / Deny first (never a producer button)
   const exitAsk = !resolved && i.action && i.action.type === 'exit-run-ask' && i.action.askId ? { askId: i.action.askId, cmd: String(i.action.cmd || '') } : null;
+  // lane hub-act-ask: a hub act held on a cluster instance — Allow once / Always on this machine / Deny, first
+  const hubAsk = !resolved && i.action && i.action.type === 'hub-act-ask' && i.action.askId ? { askId: String(i.action.askId) } : null;
   // lane browser-propose: the agent's browser proposal is answered HERE too — Approve / Reject first (the plan is the detail)
   const proposal = !resolved && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-watch-request') && i.action.id ? { id: i.action.id, shown: String(i.action.shown || '') } : null;   // lane channel-agent-watch: an agent's wake request too
   // Layer 0 apps: an agent's install proposal — Install… (THE install dialog, the plan first) / Not now, answered here too
@@ -209,7 +211,7 @@ export function itemView(item, ctx = {}) {
     : card.state === 'installing' ? ['more'] : card.state === 'failed' ? ['app-retry', 'more'] : card.state === 'done' ? [...(cardOpen ? ['app-open'] : []), 'more'] : ['app-install', 'app-reject', 'more'];
   // lane app-display-notify-sink: an app's notification that needs the person — Show window, first (the app's id only)
   const appNoteAsk = !resolved && i.action && i.action.type === 'desktop-app-notify' && i.action.appId ? { appId: String(i.action.appId) } : null;
-  const actions = resolved ? ['reopen', 'copy'] : [...(appNoteAsk ? ['desktop-app-show'] : []), ...(restartAsk ? ['browser-restart'] : []), ...(floorAsk ? ['browser-floor-check'] : []), ...(reauthAsk ? ['channel-reauth'] : []), ...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
+  const actions = resolved ? ['reopen', 'copy'] : [...(appNoteAsk ? ['desktop-app-show'] : []), ...(restartAsk ? ['browser-restart'] : []), ...(floorAsk ? ['browser-floor-check'] : []), ...(reauthAsk ? ['channel-reauth'] : []), ...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(hubAsk ? ['hub-once', 'hub-always', 'hub-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
   const title = String(ctx.words != null ? ctx.words : (i.text || ''));
   const detail = String(ctx.detail != null ? ctx.detail : (i.detail || ''));
   const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text ? i.reply.text : null;
@@ -223,6 +225,6 @@ export function itemView(item, ctx = {}) {
   return {
     id: i.id || null, sessionKey: i.sessionKey || null, title, detail, name: String(ctx.name || ''),
     urgency: resolved || notice ? '' : urgency, notice, resolved, status: resolved ? (i.status === 'dismissed' ? 'dismissed' : 'done') : 'open',
-    meta, replied, options, reply, actions: cardActs || actions, producer, exitAsk, proposal, appAsk, restartAsk, copy, cut,
+    meta, replied, options, reply, actions: cardActs || actions, producer, exitAsk, hubAsk, proposal, appAsk, restartAsk, copy, cut,
   };
 }

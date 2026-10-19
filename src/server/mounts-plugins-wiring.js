@@ -87,6 +87,7 @@ const plugins = new PluginManager({
 userTodos?.setPluginGate?.((id) => !!(plugins.defs()[id] || {}).provides?.includes('reminders')); // lane foryou-plugin-notices: a plugin files For-you reminders only when it DECLARES 'reminders'
 // port-forward can publish a forward publicly via the frp plugin (B-0b60)
 portForwards.plugins = plugins;
+hosts.nameLookup = (name) => plugins.tunnelLookup(name); // lane tailscale-plugin-pod-dns: tailnet names for ssh hosts, never the container's resolver
 // Dropline voice input (q-029 P0): THE vendor module (src/server/dropline-client.js) + the hub proxy /api/voice/*;
 // the `dropline` row's Test = one GET /v1/me through the same module
 // P1 (lane voice-p1-oauth-teach): the OAuth tier (a `public` consent flow; the pair in data/dropline-oauth.json, 0600;
@@ -170,7 +171,9 @@ async function graduateHostToDial(h, { serverUrl, viaRelay, by = 'system:graduat
     // command line (the same on the machine). Now the remote command is the bare `bash -s` and the arguments are a
     // `set -- …` line bash reads from stdin before the installer's own text — the installer parses "$@" unchanged.
     const installer = fs.readFileSync(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');
-    const args = `--bundle-url ${JSON.stringify(base + '/vibespace-device.js')} --dial ${JSON.stringify(dialUrl)} --dial-token ${pair.dialToken} --host-token ${pair.hostToken}`;
+    // lane device-allow-flags: the graduated machine's allow list = this instance kind's default (a cluster's: no socks / lan / input)
+    const allowDefault = require('../device-policy.js').defaultAllow({ cluster: !!process.env.VIBESPACE_INSTANCE_NAME });
+    const args = `--bundle-url ${JSON.stringify(base + '/vibespace-device.js')} --dial ${JSON.stringify(dialUrl)} --dial-token ${pair.dialToken} --host-token ${pair.hostToken} --allow ${require('../device-policy.js').allowArg(allowDefault)}`;
     const inv = require('../dial-facts.js').sshInstallInvocation({ args, installer });
     const inst = await new Promise((resolve) => {
       const { execFile } = require('child_process');
@@ -325,6 +328,9 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
       repair: existed,
       updatedInPlace, holderConnected, lockedOut, inPlace: pushV.why, // a connected holder NOT updated is DISCONNECTED now and refused at its next dial (the row says `refused (token mismatch)`)
       relayUrl, // the public subdomain the device dials (double-NAT mode)
+      // lane device-allow-flags (design q-042 D5, owner ③): the allow list the dialog's command says when nobody changes it —
+      // a CLUSTER instance (VIBESPACE_INSTANCE_NAME) leaves socks / lan / input off; a local one allows all
+      allowDefault: require('../device-policy.js').defaultAllow({ cluster: !!process.env.VIBESPACE_INSTANCE_NAME }), clusterInstance: !!process.env.VIBESPACE_INSTANCE_NAME,
       command: `VIBESPACE_DIAL_TOKEN=${pair.dialToken} node vibespace-device.js --dial ${dialUrl}`, // verify-r3 B-inst: the token in the environment (the daemon reads it once and removes it), never an argv
       note: 'install the device daemon bundle on the device, write the hostToken to <root>/state/token (0600), then run with --dial',
     });

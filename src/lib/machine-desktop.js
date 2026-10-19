@@ -37,6 +37,7 @@ import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from
 import { createDisplayPanes, rememberedMode, rememberMode, deviceTag, isPhone, modeOf, displayRows, displayName, displayLabel, sumStats, stillOf, MODE_WORDS, MODE_ICONS, modeRowHtml } from './machine-displays.js'; // lane desktop-display-modes: a machine's several displays — the three modes
 import { enterSubmits } from './chat-enter-keys.js';
 import { createHandover } from './machine-desktop-handover.js'; // lane desktop-handover: 「交给 agent」 — the stream to ONE agent conversation
+import { HDR_DECODE_QUERY, DYNAMIC_RANGE_QUERY, hdrViewerVerdict, hdrMachineVerdict, HDR_KEY, hdrRemembered, rememberHdr } from '../hdr-viewer.js'; // lane stream-hdr-passthrough: 「HDR 直通」
 
 const RUNS_KEY = 'vibespace.machineDesktopRuns'; // { [hostId]: [line…] } — the owner's latest lines per machine (≤ 3)
 function readRuns() { try { const o = JSON.parse(localStorage.getItem(RUNS_KEY) || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch { return {}; } }
@@ -189,11 +190,18 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   // tone mapping, we do not transcode) — the bar says so with the remedy; only a measured `hdr: true` shows it
   const hdrEl = el('span'); hdrEl.className = 'desktop-strip-hdr'; hdrEl.hidden = true; hdrEl.textContent = t('HDR on · the picture looks washed out');
   hdrEl.title = t('Windows HDR is captured by TightVNC as it is, with no tone mapping; while you work remotely, turn off "Use HDR" in Windows Settings › Display (or press Win+Alt+B)');
+  // lane stream-hdr-passthrough (q-041 r3 P4 road B): 「HDR 直通」 — the machine's HDR display travels as AV1 10-bit PQ at its own
+  // brightness. Shown only where it can work (src/hdr-viewer.js): THIS screen is HDR and this browser decodes WebRTC AV1 in
+  // hardware, and the stream's offer says the machine can (its display in HDR, an AV1 10-bit encoder); off until the person turns
+  // it on, remembered per machine in this browser; a stream in a window per display / the one window (③ ①), never ②'s panes
+  const hdrBtn = btn('desktop-strip-btn desktop-strip-hdr-pass', t('HDR passthrough'), () => { setHdr(!hdrRemembered(hdrMemory(), m.hostId)); });
+  hdrBtn.hidden = true;
+  hdrBtn.title = t('Show this machine’s HDR as it is — AV1 10-bit PQ at its own brightness (this screen is HDR and this browser decodes it in hardware)');
   chip.setAttribute('role', 'button'); chip.tabIndex = 0;
   const cmp = el('div'); cmp.className = 'desktop-strip-compare'; cmp.hidden = true;
   chip.onclick = () => { if (stream) { stats.toggle(chip); return; } cmp.hidden = !cmp.hidden; drawChip(); }; // lane stream-stats-popup: a stream's summary opens its details
   chip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chip.onclick(); } };
-  strip.append(hostBtn, seg, modeBtn, scaledEl, fullBtn, keysBtn, chip, rungEl, slowEl, hdrEl);
+  strip.append(hostBtn, seg, modeBtn, scaledEl, fullBtn, keysBtn, chip, rungEl, slowEl, hdrEl, hdrBtn);
   c.append(strip, cmp);
   const pane = el('div', 'position:relative;flex:1 1 auto;min-height:0'); c.append(pane);
   // the displays: the machine's own table (display-facts, once per window) + the server's -308 rects → the PURE screenMap
@@ -315,7 +323,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     for (const [wid, w] of [...app.wm.windows]) if (w !== winInfo && w._machineDesktop === m.hostId) app.wm.closeWindow(wid);
     mode = next; winInfo._desktopMode = mode; winInfo._desktopDisplay = null;
     if (next === 'all') spreadAll(); else collapseTo(chosen || panes.lastPointer() || streamDisplay || firstShown());
-    remember(); setSpec(); drawTitle(); drawStreamSeg(); drawChip();
+    remember(); setSpec(); drawTitle(); drawStreamSeg(); drawChip(); drawHdr();
   };
   /** ② a pane folds to its stub (its stream stops) / unfolds (a stream again). */
   const fold = (did, f) => {
@@ -487,12 +495,12 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   const drawStream = () => {
     if (!stream && many.size) { drawMany(); return; }
     const { playing, page: p, agent: a, words } = stats.draw(stream); // the firewall notice + the details' series (src/lib/stream-stats.js)
-    chip.textContent = playing ? t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · connecting…');
+    chip.textContent = (playing ? t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · connecting…')) + (a && a.screen && a.screen.hdr ? ' · HDR' : ''); // lane stream-hdr-passthrough
     if (!p) return;
     const sc = a && a.screen; // lane stream-p1b-screen: the machine's own screen — its encoder and what encoding costs there
     chip.title = [scope, ...(words ? [words] : []), t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }), // lane stream-stats-popup: the numbers sentence, here now
       ...(sc && sc.floor != null && sc.kbps != null ? [t('The machine encodes it at {kbps} kbps — never under {floor} kbps for a screen this size', { kbps: sc.kbps, floor: sc.floor })] : []), // lane stream-mac-rate: THE RATE's decision, beside what the page receives
-      ...(sc && sc.white ? [t('HDR mapped on the machine (SDR white {nits} nits)', { nits: Math.round(sc.white * 0.08) })] : []), ...(sc && sc.note === 'no_hw_encoder' ? [t('software encoding (no hardware encoder found)')] : []),
+      ...(sc && sc.hdr ? [t('HDR passthrough: AV1 10-bit PQ, at the brightness the machine’s display shows')] : sc && sc.white ? [t('HDR mapped on the machine (SDR white {nits} nits)', { nits: Math.round(sc.white * 0.08) })] : []), ...(sc && sc.note === 'no_hw_encoder' ? [t('software encoding (no hardware encoder found)')] : []),
       t('Pointer: yours — the machine draws none into the picture')].join('\n'); // lane stream-cursor: no source paints the machine's
   };
   // lane desktop-display-modes ② THE STATS of N streams (PURE sumStats): fps and kbps summed over the playing displays, the slowest
@@ -549,12 +557,50 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     box.append(el('span', null, words), btn('btn-create desktop-display-say-act', t('Show the VNC picture'), () => { box.remove(); startVnc(); }));
     pane.append(box);
   };
+  // ── 「HDR 直通」 (lane stream-hdr-passthrough) ──
+  const hdrMemory = () => { try { return localStorage.getItem(HDR_KEY); } catch { return null; } };
+  const hdrMq = typeof matchMedia === 'function' ? matchMedia(DYNAMIC_RANGE_QUERY) : null;
+  let hdrDecoding; // this browser's answer to HDR_DECODE_QUERY (undefined = not asked yet, null = no API)
+  const viewerHdr = () => hdrViewerVerdict({ dynamicRange: !!(hdrMq && hdrMq.matches), decoding: hdrDecoding });
+  const machineHdr = () => hdrMachineVerdict(stream ? stream.source() : null);
+  /** The HDR road is asked when: this screen + browser can, the machine can (the last offer said), and the person turned it on. */
+  const hdrWanted = () => viewerHdr().show && hdrRemembered(hdrMemory(), m.hostId) && (!stream || !stream.source() || machineHdr().can);
+  const drawHdr = () => {
+    const on = hdrRemembered(hdrMemory(), m.hostId);
+    hdrBtn.hidden = !(stream && mode !== 'all' && viewerHdr().show && machineHdr().can);
+    hdrBtn.setAttribute('aria-pressed', String(on));
+  };
+  /** Restart the one view's stream with (or without) the HDR road — THE STILL covers the gap, the hand-over rides it (`after`). */
+  const restartHdr = (why) => {
+    if (!stream || mode === 'all') { drawHdr(); return; }
+    const still = stillOf(stream, panes.pane('')); const old = stream; stream = null; const after = old.key; old.dispose(why);
+    startStream(streamDisplay != null ? { kind: 'display', id: streamDisplay } : null, { still, after });
+  };
+  const setHdr = (on) => {
+    try { localStorage.setItem(HDR_KEY, rememberHdr(hdrMemory(), m.hostId, on)); } catch { /* storage refused: this window only */ }
+    if (on) note('');
+    if (stream && stream.hdr !== hdrWanted()) restartHdr(on ? 'hdr_on' : 'hdr_off'); else drawHdr();
+  };
+  // the window moved to another screen (an SDR one ⇒ the SDR picture; back on the HDR screen ⇒ HDR again when it is on)
+  const onScreenRange = () => { drawHdr(); if (stream && mode !== 'all' && stream.hdr !== hdrWanted()) restartHdr('hdr_screen'); };
+  hdrMq?.addEventListener?.('change', onScreenRange);
+  // this browser's answer (asked once a window): a window that opens with HDR on waits for it before its first stream (begin, below)
+  const hdrAsked = (typeof navigator !== 'undefined' && navigator.mediaCapabilities && typeof navigator.mediaCapabilities.decodingInfo === 'function'
+    ? navigator.mediaCapabilities.decodingInfo(HDR_DECODE_QUERY).then((a) => a || null, () => null) : Promise.resolve(null)).then((a) => { hdrDecoding = a; drawHdr(); });
   const startStream = (source = null, { still = null, after = null } = {}) => {
     let v = null;
     v = createStreamView(panes.pane(''), {
       hostId: m.hostId,
       hostPlatform: m.setup || null,
       after,
+      hdr: mode !== 'all' && hdrWanted(), // lane stream-hdr-passthrough: 「HDR 直通」 on, where this screen, browser and machine can
+      // THE FALLBACK: this browser did not decode the HDR picture (its bytes came, no frame in 2 s) ⇒ the SDR picture, said, the switch off
+      onHdrFailed: () => {
+        if (v !== stream) return;
+        try { localStorage.setItem(HDR_KEY, rememberHdr(hdrMemory(), m.hostId, false)); } catch { /* storage refused */ }
+        note(t('HDR passthrough fell back: this browser cannot decode it'), t('The machine sent AV1 10-bit PQ and this browser decoded no frame of it in 2 s — the stream restarted as the SDR picture; turn 「HDR passthrough」 on to try again'));
+        restartHdr('hdr_undecodable');
+      },
       onOwnerInput: () => handover.ownerInput(),
       onHandover: (f) => handover.facts(f),
       source, // lane stream-mac-stall: a display the switcher picked (else the machine's main one)
@@ -565,7 +611,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
         if (src && src.display != null) streamDisplay = String(src.display);
         if (mode === 'windows') winInfo._desktopDisplay = streamDisplay;
         if (mode === 'all') spreadAll();
-        remember(); setSpec(); drawTitle(); drawStreamSeg();
+        remember(); setSpec(); drawTitle(); drawStreamSeg(); drawHdr(); // lane stream-hdr-passthrough: the offer says whether the machine can
       },
       onStatus: (state) => { if (state === 'playing' && still) { still.remove(); still = null; } drawChip(); handover.playing(state === 'playing'); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
       onStats: () => drawChip(),
@@ -593,12 +639,13 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     stream.connect();
   };
   winInfo._pickDisplay = (key) => pick(key);
-  winInfo.onClose = () => { handover.dispose(); pill.dispose(); stats.dispose(); clearInterval(tick); clearTimeout(noteTimer); fit?.disconnect(); document.removeEventListener('fullscreenchange', onFull); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); for (const v of many.values()) v.dispose(); many.clear(); if (view) view.dispose(); };
+  winInfo.onClose = () => { handover.dispose(); pill.dispose(); stats.dispose(); clearInterval(tick); clearTimeout(noteTimer); fit?.disconnect(); document.removeEventListener('fullscreenchange', onFull); hdrMq?.removeEventListener?.('change', onScreenRange); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); for (const v of many.values()) v.dispose(); many.clear(); if (view) view.dispose(); };
   // lane desktop-display-modes: the window's recipe from its first moment; a window another device opened (a replay) waits for a
   // press here — every client replaying it must not start a stream nobody watches (each takes one of the machine's streams)
   setSpec(); remember();
   const begin = () => (typeof RTCPeerConnection === 'function' ? startStream(streamDisplay != null && mode !== 'all' ? { kind: 'display', id: streamDisplay } : null) : syncId ? askVnc(t('{machine}’s desktop', { machine })) : startVnc());
   if (restored) { panes.pane(''); panes.say('', t('{machine}’s desktop was open on another device', { machine }), { label: t('Show it here'), run: () => { panes.say('', ''); begin(); } }); }
+  else if (hdrRemembered(hdrMemory(), m.hostId) && hdrMq && hdrMq.matches) hdrAsked.then(begin); // lane stream-hdr-passthrough: HDR on ⇒ the browser's answer first
   else begin();
   return winInfo;
 }

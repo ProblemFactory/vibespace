@@ -130,7 +130,9 @@ console.log('§2 replyVerdict');
   const exitItem = { ...item, action: { type: 'exit-run-ask', askId: 'a'.repeat(32), hostId: 'host-dial-mac', machine: 'mac', cmd: 'id' } };
   const e1 = v(liveChat, exitItem), e2 = v({ ...liveChat, turn: 'running' }, exitItem), e3 = v(null, exitItem);
   ok(e1.code === 'exit_ask' && e1.why === 'Answer it with Allow or Deny — a typed reply does not answer it' && e2.code === 'exit_ask' && e3.code === 'exit_ask', 'F5: an exit ask ⇒ exit_ask on a live, a mid-turn and a dead session alike (Allow / Deny is the answer, never a typed reply)', [e1, e2, e3]);
-  ok(R.REPLY_HIDDEN_CODES.includes('exit_ask') && R.ANSWER_ACTION_TYPES.includes('exit-run-ask') && R.ANSWER_ACTION_TYPES.length === 1, 'F5: exit_ask is HIDDEN (no Reply button, no option chips) and exit-run-ask is the one answer-by-buttons kind');
+  ok(R.REPLY_HIDDEN_CODES.includes('exit_ask') && R.ANSWER_ACTION_TYPES.includes('exit-run-ask') && R.ANSWER_ACTION_TYPES.includes('hub-act-ask') && R.ANSWER_ACTION_TYPES.length === 2, 'F5: exit_ask is HIDDEN (no Reply button, no option chips); the answer-by-buttons kinds are exit-run-ask and (lane hub-act-ask) a held hub act');
+  const hubItem = { ...item, action: { type: 'hub-act-ask', askId: 'b'.repeat(32), hostId: 'host-dial-mac', machine: 'mac', kind: 'run' } };
+  ok(v(liveChat, hubItem).code === 'exit_ask' && v(null, hubItem).code === 'exit_ask', 'lane hub-act-ask: a held hub act\'s card is answered by its buttons too — a typed reply never answers it');
 }
 
 // ── §3 the store ──────────────────────────────────────────────────────────

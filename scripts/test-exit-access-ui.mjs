@@ -18,6 +18,8 @@
 //     never markdown); CONTROL = a bundle rendering it as markdown again
 //   · verify-r4 F5: an exit ask offers no typed Reply (row, For-you window) and the route refuses one — the ask keeps waiting
 //   · THE RECT CENSUS at 860 px and 360 px (radios ≥ 44 px, picker rows ≥ 40 px on the phone, no horizontal overflow)
+//   · lane hub-act-ask: THE THIRD LIST Hub 自动化 (从不 / 每次都问我 / 一直允许): not set on this LOCAL instance ⇒ 一直允许, said
+//     under the radios; untouched ⇒ not in the PATCH; 每次都问我 picked ⇒ ONE PATCH with hub {mode: ask}, drawn back from the server
 // Requires google-chrome (SKIP without). Run: node scripts/test-exit-access-ui.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -65,6 +67,9 @@ try {
   ok(await P.realClick(exitIcon), 'a real click on the row\'s exit icon');
   ok(await P.waitFor(`!!document.querySelector('${sec('run')}')`, 8000), 'the dialog 谁能使用 exmac？ opens');
   ok(await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-header h3').textContent === '谁能使用 exmac？'`), 'its title');
+  // lane hub-act-ask: THE THIRD LIST — this world is a LOCAL instance: not set ⇒ 一直允许, and the dialog says why
+  const hubView = await P.evalJs(`(() => { const s = document.querySelector('${sec('hub')}'); if (!s) return null; return { title: s.querySelector('h4')?.textContent, radios: [...s.querySelectorAll('input[name="exit-hub-mode"]')].map((r) => r.value + ':' + r.checked + ':' + r.closest('label').textContent.trim()), note: s.querySelector('.exit-access-hub-default')?.textContent }; })()`);
+  ok(hubView && hubView.title === 'Hub 自动化' && hubView.radios.join('|') === 'nobody:false:从不|ask:false:每次都问我|everyone:true:一直允许' && hubView.note === '未设置——本地实例默认允许。', 'lane hub-act-ask: the THIRD list Hub 自动化 — 从不 / 每次都问我 / 一直允许; not set on a local instance ⇒ 一直允许, said under the radios', hubView);
   ok(await P.evalJs(`document.querySelector('${sec('use')} input[value="only"]').checked && [...document.querySelectorAll('${sec('use')} .pp-chip')].map((c) => c.dataset.key).join() === 'everyone:*' && !document.querySelector('${sec('use')} input[value="everyone"]')`), 'the dialog shows the SERVER\'s list (network: 你选的 agent with the 所有 agent chip — the stored everyone mode, no radio of its own), not the row\'s stale copy (mirror-193)');
   // naive-user N-radio: `.dialog-body label` (0,1,1) is a COLUMN flex — the six mode radios and "每次都问我" sat above
   // their words (the checkbox centred on its own line). THE LABEL CENSUS + a patched copy of style.css as the control.
@@ -74,7 +79,7 @@ try {
   const g0 = await P.evalJs(greyedJs);
   ok(g0.length === 0 && !(await P.evalJs(`!!document.querySelector('${sec('run')} .exit-access-ask')?.offsetParent`)), 'N-greyed: with commands = 没有人 the dialog shows NO greyed control — "每次都问我" is not shown under Nobody', g0);
   const lcx = await P.evalJs(labelRowCensusJs('#exit-access-dialog'));
-  ok(lcx.ok && lcx.n === 4, `N-radio: every mode radio sits BESIDE its words (${lcx.n} labels — two answers per list since lane everyone-principal)`, lcx);
+  ok(lcx.ok && lcx.n === 7, `N-radio: every mode radio sits BESIDE its words (${lcx.n} labels — two answers per list since lane everyone-principal, three in Hub 自动化 since lane hub-act-ask)`, lcx);
   {
     const real = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
     const MUT = mutantCopies('exitui', REPO);
@@ -82,7 +87,7 @@ try {
     await P.evalJs(swapStyleJs(fs.readFileSync(fPre, 'utf8')));
     await sleep(200);
     const pre = await P.evalJs(labelRowCensusJs('#exit-access-dialog'));
-    ok(!pre.ok && pre.bad.length === 4, `CONTROL (N-radio): the pre-fix style.css stacks all ${pre.bad.length} controls above their words`, pre);
+    ok(!pre.ok && pre.bad.length === 7, `CONTROL (N-radio): the pre-fix style.css stacks all ${pre.bad.length} controls above their words`, pre);
     await P.evalJs(swapStyleJs(real));
     await sleep(200);
   }
@@ -129,6 +134,7 @@ try {
   const body = pd[0] && JSON.parse(pd[0].body);
   ok(pd.length === 1 && body && typeof body.base === 'string' && body.run.mode === 'only' && body.run.ask === true && body.run.who.some((r) => r.kind === 'session' && r.session === S[1].sid) && body.run.who.some((r) => r.kind === 'group' && r.id === groups[0].id), 'ONE PATCH: `session:<webui id>` rows + the group + ask + the base it read', pd.map((x) => x.body));
   ok(await P.waitFor(`[...document.querySelectorAll('.global-toast')].some((t) => /^谁能使用 exmac：网络 — 所有 agent；命令 — 已选 2 个（每次问我）✕?$/.test(t.textContent.trim()))`, 4000), 'the toast: 谁能使用 exmac：网络 — 所有 agent；命令 — 已选 2 个（每次问我）', await P.evalJs(`[...document.querySelectorAll('.global-toast')].map((t) => t.textContent).join(' | ')`));
+  ok(body && !('hub' in body), 'lane hub-act-ask: Hub 自动化 untouched ⇒ not in the PATCH (not set stays the instance\'s default)', body);
   const stored = (await W.hostRow('exmac')).exit;
   ok(stored.run.mode === 'only' && stored.run.ask === true && stored.run.who.some((w) => w.kind === 'session' && w.id === 'claude:' + S[1].cid), 'the server resolved the live pick to its durable key (claude:<conversation id>)', stored.run);
   const P2 = await W.openPage({ width: 1280, height: 820, lang: 'zh' });
@@ -171,6 +177,25 @@ try {
   await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-close').click(); document.querySelector('#agents-dialog-overlay .dialog-close')?.click(); true`);
   await P.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });
   await sleep(300);
+  // lane hub-act-ask: the third list written from the dialog, drawn back from the server — then cleared (the legs below run
+  // vibespace-exit, which never asks the Hub automation list, but the device's own upkeep would)
+  console.log('⑤ (lane hub-act-ask) Hub 自动化: 每次都问我 ⇒ the PATCH carries it; the dialog draws it back');
+  ok(await P.realClick(exitIcon), 'the dialog again');
+  await P.waitFor(`!!document.querySelector('${sec('hub')}')`, 8000);
+  ok(await P.realClick(`${sec('hub')} input[value="ask"]`), 'a real click on Hub 自动化 → 每次都问我');
+  ok(await P.evalJs(`(document.querySelector('${sec('hub')} .exit-access-hub-default')?.textContent || '') === ''`), 'the default line goes once a choice is made');
+  const pHub = patches(P).length;
+  await P.realClick('#exit-access-dialog .exit-access-save');
+  ok(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000), 'saved — the dialog closes');
+  const hb = patches(P).slice(pHub).map((r) => JSON.parse(r.body));
+  const hubStored = (await W.hostRow('exmac')).exit;
+  ok(hb.length === 1 && hb[0].hub && hb[0].hub.mode === 'ask' && hubStored.hub && hubStored.hub.mode === 'ask', 'ONE PATCH with hub {mode: ask}; the server stored it', { hb, hubStored });
+  await P.realClick(exitIcon);
+  await P.waitFor(`!!document.querySelector('${sec('hub')}')`, 8000);
+  ok(await P.evalJs(`document.querySelector('${sec('hub')} input[value="ask"]').checked && (document.querySelector('${sec('hub')} .exit-access-hub-default')?.textContent || '') === ''`), 'drawn again from the server: 每次都问我, no default line');
+  await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-close').click(); true`);
+  const hubClear = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { hub: { mode: 'default' } });
+  ok(hubClear.status === 200 && !(await W.hostRow('exmac')).exit.hub, '`default` clears it (the instance\'s default applies again)');
   // ④ ask me: Allow / Deny, the card, the CLI, the refusals
   console.log('④ ask me each time — Allow runs it, Deny refuses it, the card in the chat, the CLI, the refusals');
   await P.evalJs(`app.attachSession(${JSON.stringify(S[1].sid)}, 'conv2', ${JSON.stringify(path.join(W.home, 'proj2'))}, { mode: 'chat', backend: 'claude' }); true`);

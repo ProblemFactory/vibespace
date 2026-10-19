@@ -10,11 +10,18 @@
 // managed. Our instance runs with its OWN --socket and --statedir so it can
 // coexist with a system daemon. The node key lives in the statedir → a pod
 // rebuild reconnects WITHOUT re-login (the whole point).
+// THE DNS RULE (lane tailscale-plugin-pod-dns, 2026-10-19 — PURE src/tailscale-dns.js): Tailscale never takes over this
+// container's resolver. Every `tailscale up` and every start of OUR daemon carries --accept-dns=<verdict> (false on a
+// cluster pod, a cluster-managed resolv.conf or userspace networking; true only on a bare machine in kernel mode whose
+// person turned on the MagicDNS row); a resolv.conf Tailscale rewrote while the verdict says no is healed at start /
+// boot with ONE `tailscale set --accept-dns=false` (tailscaled restores the resolver it saved), logged once. Tailnet
+// names keep working without it: lookup(name) answers from OUR daemon's `status --json` (the hub's ssh host records).
 // The plugin contract (create(h) → verbs, the host handle h) is described in src/plugins.js.
 const fs = require('fs');
 const path = require('path');
-const { spawn, execFileSync } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 const { pidCmdline, pidAlive } = require('./proc.js');
+const DNS = require('../tailscale-dns.js');
 
 const SOCKS_PORT = Number(process.env.VIBESPACE_TAILSCALE_SOCKS_PORT || 1055);
 
@@ -72,8 +79,62 @@ module.exports = {
     const upFlags = () => {
       const raw = h.setting('upFlags'); // a settings row (lane plugin-settings-p0)
       if (!raw) return [];
-      const OWNED = /^--(socket|tun|socks5-server|outbound-http-proxy-listen|accept-routes)(=|$)/;
+      const OWNED = /^--(socket|tun|socks5-server|outbound-http-proxy-listen|accept-routes|accept-dns)(=|$)/;
       return String(raw).split(/\s+/).filter(Boolean).filter((tok) => !OWNED.test(tok));
+    };
+    // THE DNS VERDICT over this box's facts (h.opts.resolvConf / resolvBackup: a suite's planted files)
+    const readHead = (f) => {
+      try { const fd = fs.openSync(f, 'r'); try { const b = Buffer.alloc(4096); return b.toString('utf-8', 0, fs.readSync(fd, b, 0, 4096, 0)); } finally { fs.closeSync(fd); } } catch { return ''; }
+    };
+    const dnsVerdict = () => DNS.dnsPolicy({
+      cluster: !!process.env.VIBESPACE_INSTANCE_NAME,
+      resolv: readHead(h.opts.resolvConf || DNS.RESOLV_CONF), backup: readHead(h.opts.resolvBackup || DNS.RESOLV_BACKUP),
+      tun: h.peek().mode === 'kernel', magicDns: h.setting('magicDns') === true,
+    });
+    // the CLI against OUR daemon — a kernel-mode daemon is root's, so its prefs go through the same sudo as setup's `up`
+    const ourCli = (args) => {
+      const cli = tsBin('tailscale');
+      if (!cli) return null;
+      const argv = [`--socket=${tsSock()}`, ...args];
+      return h.peek().mode === 'kernel' && process.getuid?.() !== 0 ? ['sudo', ['-n', cli, ...argv]] : [cli, argv];
+    };
+    let dnsRun = null; // the one apply in flight
+    /** the verdict onto OUR running daemon: ONE `tailscale set --accept-dns=<v>` (retried while its socket comes up);
+     *  a heal (Tailscale's header in resolv.conf, verdict false) is logged once → { ok, verdict, healed, error } */
+    const applyDns = (why, { tries = 20, gapMs = 500 } = {}) => {
+      if (dnsRun) return dnsRun;
+      const v = dnsVerdict();
+      const run = ourCli(['set', DNS.acceptDnsArg(v)]);
+      if (!run) return Promise.resolve({ ok: false, verdict: v, healed: false, error: 'the tailscale CLI is not installed' });
+      dnsRun = new Promise((resolve) => {
+        const attempt = (left) => execFile(run[0], run[1], { timeout: 5000 }, (err, _out, errOut) => {
+          if (!err) {
+            if (v.heal) console.log(`[tailscale] ${why}: /etc/resolv.conf carried Tailscale's header — set ${DNS.acceptDnsArg(v)} (${v.why}); tailscaled restores the resolver it saved`);
+            names.at = 0; // the daemon answers: the name table is read at the next lookup
+            return resolve({ ok: true, verdict: v, healed: v.heal });
+          }
+          if (left > 1 && tsOurDaemonPid()) return setTimeout(() => attempt(left - 1), gapMs);
+          const error = (String(errOut || '').trim() || err.message || '').split('\n').pop().slice(0, 200);
+          console.warn(`[tailscale] ${why}: set ${DNS.acceptDnsArg(v)} failed — ${error}`);
+          resolve({ ok: false, verdict: v, healed: false, error });
+        });
+        attempt(tries);
+      }).finally(() => { dnsRun = null; });
+      return dnsRun;
+    };
+    // MagicDNS without the system resolver: OUR daemon's `status --json` → host records (status() refreshes them;
+    // lookup() starts a background read when they are older than a minute — it is sync, ssh argv builders call it)
+    const names = { list: [], at: 0, busy: false };
+    const refreshNames = () => {
+      if (names.busy) return;
+      names.at = Date.now();
+      const cli = tsOurDaemonPid() ? tsBin('tailscale') : null; // a read: never through sudo (status() reads it plain too)
+      if (!cli) { names.list = []; return; }
+      names.busy = true;
+      execFile(cli, [`--socket=${tsSock()}`, 'status', '--json'], { timeout: 5000, maxBuffer: 16 << 20 }, (err, out) => {
+        names.busy = false;
+        if (!err) { try { names.list = DNS.hostRecords(JSON.parse(out)); } catch { } }
+      });
     };
 
     const verbs = {
@@ -122,13 +183,14 @@ module.exports = {
         fs.rmSync(tgz, { force: true });
         h.rec().installedAt = Date.now();
         h.save();
+        if (tsOurDaemonPid()) applyDns('upgrade'); // the new binaries' first look: the verdict again
         h.notify();
         return { installed: true, version: extracted.replace(/^tailscale_/, '').replace(/_[^_]+$/, '') };
       },
 
       start() {
         if (systemTailscaled()) throw new Error('a system tailscaled is already running — this machine is managed outside VibeSpace');
-        if (tsOurDaemonPid()) return { running: true };
+        if (tsOurDaemonPid()) { applyDns('start'); return { running: true }; }
         const daemon = tsBin('tailscaled');
         if (!daemon) throw new Error('tailscaled not installed — run install first');
         // the socket-path census (src/sock-path.js, lane-pairing ④): tailscaled's socket lives under the plugin root —
@@ -159,8 +221,30 @@ module.exports = {
         rec.desiredUp = true;
         rec.mode = kernel ? 'kernel' : 'userspace';
         h.save();
+        applyDns('start'); // the persisted prefs may say accept-dns (an older plugin, a manual `up`) — the verdict wins
         setTimeout(() => h.notify(), 1500);
         return { starting: true, mode: rec.mode };
+      },
+
+      // boot: enabled + desiredUp ⇒ start (the manager's default rule); a daemon of OURS that outlived the server (a
+      // VibeSpace upgrade restarts only the server) gets the DNS verdict — an old install self-heals here
+      bootReplay() {
+        const rec = h.peek();
+        const pid = tsOurDaemonPid();
+        if (!pid && !(rec.enabled && rec.desiredUp)) return;
+        try {
+          if (pid) { applyDns('boot'); return; }
+          if (systemTailscaled() || !tsBin('tailscaled')) return;
+          console.log('[plugins] boot replay: starting tailscale');
+          verbs.start();
+        } catch (e) { console.warn('[plugins] boot replay tailscale failed:', e.message); }
+      },
+
+      /** a tailnet name (full MagicDNS, or the bare host label) → { name, ip, ips } | null — OUR daemon's peers only */
+      lookup(name) {
+        const hit = names.list.length ? DNS.lookupName(names.list, name) : null;
+        if (Date.now() - names.at > (names.list.length ? 60000 : 5000)) refreshNames(); // an empty table (a daemon still logging in) is re-read sooner
+        return hit;
       },
 
       stop() {
@@ -197,6 +281,7 @@ module.exports = {
           try {
             const out = execFileSync(cli, [...(sockArg ? [`--socket=${sockArg}`] : []), 'status', '--json'], { encoding: 'utf-8', timeout: 5000 });
             const j = JSON.parse(out);
+            if (sockArg) { names.list = DNS.hostRecords(j); names.at = Date.now(); }
             return {
               backendState: j.BackendState,
               self: j.Self ? { dnsName: j.Self.DNSName, ips: j.Self.TailscaleIPs } : null,
@@ -210,7 +295,8 @@ module.exports = {
         }
         const pid = tsOurDaemonPid();
         if (!pid) return { ...base, running: false, mode: rec.mode || null };
-        return { ...base, running: true, mode: rec.mode || 'userspace', pid, ...(probe(tsSock()) || {}) };
+        const v = dnsVerdict(); // whose resolver this instance uses — the row's DNS line
+        return { ...base, running: true, mode: rec.mode || 'userspace', pid, dns: { acceptDns: v.acceptDns, why: v.why, rewritten: v.rewritten }, ...(probe(tsSock()) || {}) };
       },
 
       // Guided login: `tailscale up` prints the auth URL — capture it for the UI
@@ -230,7 +316,7 @@ module.exports = {
         const useSudo = running === 'kernel' && process.getuid?.() !== 0;
         // Base flags + user-tuned `tailscale up` flags (advertise-routes, exit-node,
         // hostname, ssh, …). Stored per-plugin; validated to look like flags.
-        const argv = [`--socket=${tsSock()}`, 'up', '--accept-routes', ...upFlags()];
+        const argv = [`--socket=${tsSock()}`, 'up', '--accept-routes', DNS.acceptDnsArg(dnsVerdict()), ...upFlags()];
         const proc = spawn(useSudo ? 'sudo' : cli, useSudo ? ['-n', cli, ...argv] : argv, { stdio: ['ignore', 'pipe', 'pipe'] });
         const entry = { proc, authUrl: null };
         loginProcs.set(id, entry);

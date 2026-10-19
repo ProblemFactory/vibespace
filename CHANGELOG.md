@@ -2,6 +2,21 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.316 — 2026-10-19
+
+### Added
+- A Windows desktop stream can pass HDR through: on an HDR screen, in a browser that decodes AV1 10-bit in hardware, the bar shows an HDR passthrough switch.
+
+### Fixed
+- A desktop stream no longer sometimes waits about 10 seconds before its picture appears.
+- The Tailscale plugin no longer rewrites the container's DNS settings: cluster instances keep their network and updates, and Tailscale names still resolve.
+- On Windows, the VibeSpace device agent no longer opens a terminal window at startup or sign-in; older installs stop too after their next self-update.
+
+### Security
+- A paired machine keeps its own allow list, changed only by re-running its pairing command there; cluster-paired ones start without SOCKS, LAN or keyboard/mouse.
+- On a cluster instance, agents and background work ask before acting on your machines (one card per machine and kind, 60 s); local ones and your clicks don't.
+- A machine's Who can use it gains Hub automation: Never, Ask me each time or Always allow.
+
 ## 2.369.315 — 2026-10-19
 
 ### Security

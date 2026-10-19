@@ -7,6 +7,9 @@
 //                               next access unit as FLV; plain `ddagrab=…` (the SDR road) writes the fixture as FLV at fps.
 //                               Every argv → cfg.log (one JSON line). A die file (cfg.dieCapture / cfg.dieEncoder) ends that
 //                               process with a DDA-shaped error. cfg is re-read at every start (a leg edits it).
+//                               lane stream-hdr-passthrough: an encoder asked for P010 into IVF (the HDR road: `-pix_fmt p010le … -f ivf`)
+//                               reads P010 frames (3 bytes a pixel), keeps the FIRST in cfg.p010, and answers each with cfg.av1's
+//                               (an IVF fixture) next temporal unit — the IVF head first
 //                               cfg.failCapture = a file holding N: the next N captures die at START (before a picture) with
 //                               ddagrab's «Failed to create Direct3D device (8007000e)» — the owner box's second display (lane
 //                               desktop-display-modes); each such start counts N down
@@ -61,6 +64,23 @@ if (grab && /output_fmt=16bit/.test(grab)) {
 } else if (grab) {
   out(flvHead());
   setInterval(() => { die(cfg.dieCapture, '[Parsed_ddagrab_0] DuplicateOutput failed: DXGI_ERROR_UNSUPPORTED'); out(auTag()); }, 1000 / fps);
+} else if (argv.includes('pipe:0') && argv[argv.indexOf('-pix_fmt') + 1] === 'p010le' && argv[argv.length - 4] === 'ivf') { // lane stream-hdr-passthrough: THE HDR ROAD's encoder
+  const [w, h] = argv[argv.indexOf('-video_size') + 1].split('x').map(Number), size = w * h * 3;
+  const ivf = fs.readFileSync(cfg.av1), units = [];
+  for (let o = ivf.readUInt16LE(6); o + 12 <= ivf.length;) { const n = ivf.readUInt32LE(o); units.push(ivf.subarray(o, o + 12 + n)); o += 12 + n; }
+  out(ivf.subarray(0, ivf.readUInt16LE(6)));
+  let have = [], len = 0, kept = false, k = 0;
+  process.stdin.on('data', (d) => {
+    have.push(d); len += d.length;
+    while (len >= size) {
+      const all = Buffer.concat(have), fr = all.subarray(0, size);
+      have = [all.subarray(size)]; len -= size;
+      if (!kept && cfg.p010) { fs.writeFileSync(cfg.p010, fr); kept = true; }
+      die(cfg.dieEncoder, '[av1_nvenc] EncodePicture failed: an NVENC error');
+      out(units[k++ % units.length]);
+    }
+  });
+  process.stdin.on('end', () => process.exit(0));
 } else if (argv.includes('pipe:0')) {
   const [w, h] = argv[argv.indexOf('-video_size') + 1].split('x').map(Number), size = argv[argv.indexOf('-pix_fmt') + 1] === 'bgra' ? w * h * 4 : (w * h * 3) / 2; // lane stream-p2w-build: a window's BGRA frames
   out(flvHead());

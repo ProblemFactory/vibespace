@@ -6,6 +6,7 @@
  * the daemon (src/agentd/stream-host.js), the hub (src/server/desktop-webrtc.js) and the page (src/lib/stream-view.js) all
  * ask THIS file, so the three cannot disagree:
  *
+ *   STREAM_CODEC_AV1 / streamCodecsOf   lane stream-hdr-passthrough: the HDR road's AV1, offered first only when the page asks HDR
  *   STREAM_CODEC / STREAM_LIMITS     the one codec offered (H.264 constrained baseline, packetization-mode 1, NACK + PLI +
  *                                    transport-cc) and every bound (the sessions cap, poll, orphan grace, restart budget …)
  *   streamCapOf(displays)            THE PER-MACHINE CAP (lane desktop-display-modes): a picture per display (a window per
@@ -51,6 +52,22 @@ const STREAM_CODEC = Object.freeze({
   fmtp: 'level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f',
   rtcpFeedback: Object.freeze([Object.freeze({ type: 'nack' }), Object.freeze({ type: 'nack', parameter: 'pli' }), Object.freeze({ type: 'transport-cc' })]),
 });
+// lane stream-hdr-passthrough (q-041 r3 P4 road B): THE HDR ROAD's codec — AV1 (profile 0 carries 10-bit; the bitstream's sequence
+// header says BT.2020 / PQ), offered FIRST beside STREAM_CODEC only when the page asked for HDR (its screen is HDR and its browser
+// decodes WebRTC AV1 in hardware — src/hdr-viewer.js); the browser's answer decides (werift sends the answer's first codec), a
+// browser that drops AV1 gets the H.264 picture. The P4 probe's fmtp (Chrome's own AV1 line); its RTP payloads: src/stream-av1.js
+const STREAM_CODEC_AV1 = Object.freeze({
+  mimeType: 'video/AV1',
+  clockRate: 90000,
+  fmtp: 'level-idx=5;profile=0;tier=0',
+  rtcpFeedback: STREAM_CODEC.rtcpFeedback,
+});
+/** lane stream-hdr-passthrough: a browser's mDNS host candidate (`<uuid>.local` — Chrome's host address without a STUN server)?
+ *  An ICE-LITE agent never needs one (it answers the browser's checks from wherever they come); werift resolves it by multicast
+ *  with a 10 s timeout INSIDE the call that hands it over. */
+const isMdnsCandidate = (line) => /^(?:a=)?candidate:\S+ \d+ \S+ \d+ \S+\.local \d+ typ /i.test(String(line || ''));
+/** The codecs a session offers, in order: H.264 alone (the SDR road — the offer unchanged), or AV1 then H.264 (`hdr`). */
+const streamCodecsOf = ({ hdr = false } = {}) => (hdr ? [STREAM_CODEC_AV1, STREAM_CODEC] : [STREAM_CODEC]);
 const STREAM_SOURCES = Object.freeze(['screen', 'fake', 'window']); // 'window' = ONE window of the machine (lane stream-p3m-build on a Mac; stream-p2w-build on Windows)
 const MAC_CAPABILITY = 'stream-mac';       // the agent captures a Mac's screen through its helper (an older Mac agent already says stream-screen)
 const WINDOW_CAPABILITY = SW.WINDOW_CAPABILITY; // 'stream-window': the agent captures ONE window — the one word of both platforms (src/stream-window.js; int304)
@@ -429,7 +446,7 @@ function firewallRuleCommand(program) {
 }
 
 module.exports = {
-  STREAM_CODEC, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, streamCapOf, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict,
+  STREAM_CODEC, STREAM_CODEC_AV1, streamCodecsOf, isMdnsCandidate, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, streamCapOf, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict,
   videoToSource, INPUT_KINDS, inputEventOf, wheelUnitsOf, statsOf, relayFrame, relayUnframe, relayCandidates,
   LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, streamNumbersOf, directInboundOf, firewallRuleCommand,
 };

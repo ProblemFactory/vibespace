@@ -62,6 +62,11 @@ const SERVICE_START_WAIT_MS = 25000;
 /** A built-in plugin row (GET /api/plugins) declares what it provides — 'relay' / 'tunnel' / 'serve' (its
  *  src/plugins/<id>.js `provides`). Every client gate reads that declaration, never a plugin id. */
 const provides = (p, cap) => Array.isArray(p?.provides) && p.provides.includes(cap);
+/** a running tunnel's DNS line (lane tailscale-plugin-pod-dns): the server's verdict (PURE src/tailscale-dns.js) in words */
+const tunnelDnsWords = (d) => d.acceptDns ? t('DNS: Tailscale MagicDNS')
+  : d.rewritten ? t('DNS: Tailscale still holds /etc/resolv.conf — turn Tailscale off and on to restore it')
+    : d.why === 'cluster' || d.why === 'cluster-resolver' ? t('DNS: the cluster resolver (Tailscale names resolve through the plugin)')
+      : t('DNS: this machine\'s resolver (Tailscale names resolve through the plugin)');
 /** Is a CONFIGURED plugin providing `cap` on this instance (e.g. 'relay' = public URLs)? The ONE probe the
  *  ports surfaces ask (rv-client F9: it was spelled twice, by id). An unreachable server answers false. */
 export async function pluginProvides(cap) {
@@ -150,6 +155,7 @@ export function installPluginsUI(App) {
           } else if (isRelay && p.configured) chipTitle = t('publishes forwarded ports to {host}', { host: p.publicHost || '' });
           if (loginNeeded) onChip = () => this._tailscaleLogin(p, api, render);
           if (p.self?.ips?.length) chipTitle = `${t('Tailnet address')}: ${p.self.ips[0]}`;
+          if (isTunnel && running && p.dns) fact = Object.assign(document.createElement('div'), { className: 'plugin-row-fact', textContent: tunnelDnsWords(p.dns) });
           swOn = !!p.enabled || running; swDisabled = p.mode === 'system' || !p.installed || (isRelay && p.configured === false);
           onSwitch = async (on, cb) => {
             if (!on) {

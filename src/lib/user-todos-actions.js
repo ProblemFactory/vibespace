@@ -246,6 +246,16 @@ export function inboxModel(app) {
       showToast(w, { type: 'error' });
       return false;
     }
+    if (rec && rec.action && rec.action.type === 'hub-act-ask') {
+      // lane hub-act-ask (design q-042 D4): THE person's answer to a hub act held on a cluster instance (cookie route; any
+      // bearer is refused human_only) — once / always (the machine's Hub automation list → Always allow, every kind) / deny.
+      // The server resolves the item; a failure is said, never swallowed.
+      const r = await fetchJson(`/api/hub-acts/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) });
+      if (r && r.ok) { showToast(r.state === 'always' ? t('Always allowed on {machine} — its Hub automation is Always allow now', { machine: String(r.machine || rec.action.machine || '') }) : r.state === 'allowed' ? t('allowed') : t('denied')); return true; }
+      const code = r && r.code;
+      showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone') : (r && r.error) || t('server unreachable'), { type: 'error' });
+      return false;
+    }
     if (rec && rec.action && rec.action.type === 'channel-watch-request') {
       // lane channel-agent-watch W1: an agent asked to be WOKEN by a conversation — Approve writes exactly what the item
       // says, through the access request's own decide route (the one door; never a second approval surface)

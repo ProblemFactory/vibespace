@@ -45,6 +45,7 @@ import { dialStateText, dialHistoryLine } from './dial-address-picker.js';
 import { openExitAccessDialog, exitSummaryText, exitCodeWords, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
 import { openDeviceActsDialog } from './device-acts-dialog.js'; // lane device-act-audit: what the hub did on the machine, who asked
+import { allowLineText, allowRemedyText } from './device-allow-words.js'; // lane device-allow-flags: the machine's own allow list in words
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it)
 import { enterSubmits } from './chat-enter-keys.js';
 import { mintShowVerdict } from '../oat-mint-model.js'; // PURE (lane heavy3-flake-races): a late answer never repaints over a newer push
@@ -2349,6 +2350,16 @@ export function installManageAgents(App, ctx = {}) {
             const plat = platformLabel(h.dial && h.dial.lastAccept && h.dial.lastAccept.platform);
             l2.textContent = [dialWords, plat, exitSummaryText(h.exit), agentUpgradeText(h)].filter(Boolean).join(' · '); // no `exit` ⇒ nobody / nobody (the ONE reader)
             sum.appendChild(l2);
+          }
+          // lane device-allow-flags (design q-042 D5): the machine's OWN allow list (what its agent stated, kept on the record) —
+          // what this VibeSpace may do there and what is off; only re-running the pairing command ON the machine changes it
+          if (h.devicePolicy) {
+            const l3 = document.createElement('span');
+            l3.className = 'agents-machine-sub agents-mach-allow';
+            l3.dataset.allowSource = h.devicePolicy.source || '';
+            l3.textContent = allowLineText(h.devicePolicy);
+            l3.title = allowRemedyText(h.name || h.id);
+            sum.appendChild(l3);
           }
           det.appendChild(sum);
           // lane-pairing ③⑥: two human-triggered tools per machine — its dial history (the device's own record, the

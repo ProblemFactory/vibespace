@@ -10,8 +10,11 @@
 #   dials your VibeSpace instance. Mint the pairing via POST /api/agentd/dial-pair
 #   (see docs/device-agent.md) — it returns the URL + token; paste them into:
 #       curl -fsSL <vibespace>/agentd-install.sh | VIBESPACE_DIAL_TOKEN=<t> VIBESPACE_HOST_TOKEN=<h> bash -s -- \
-#         --dial wss://<vibespace-host>/api/agentd-dial?device=<id>
+#         --dial wss://<vibespace-host>/api/agentd-dial?device=<id> --allow run,files,sessions,upgrade
 #   (the tokens in the environment, never on a command line other users can read; --dial-token / --host-token still work)
+#   --allow (lane device-allow-flags, design q-042 D5): what the VibeSpace may do on THIS machine — all, none, or some of
+#   run, files, input, socks, lan, sessions, upgrade. It lands in <root>/state/policy.json; only running this command
+#   again on this machine changes it (the VibeSpace cannot). Without --allow a re-run keeps the list it already has.
 #
 # Requires: curl (or wget) + tar. Node is provisioned automatically (into the
 # install root, verified against nodejs.org's SHASUMS256.txt) if the machine
@@ -27,7 +30,7 @@ DIAL_URL=""
 # daemon's) ever sees them — the one child that needs the dial token gets it in ITS environment only.
 DIAL_TOKEN="${VIBESPACE_DIAL_TOKEN:-}"; HOST_TOKEN="${VIBESPACE_HOST_TOKEN:-}"
 unset VIBESPACE_DIAL_TOKEN VIBESPACE_HOST_TOKEN
-NODE_BIN_OVERRIDE="${VIBESPACE_NODE_BIN:-}"; NODE_ONLY=""; NO_CHECK=""
+NODE_BIN_OVERRIDE="${VIBESPACE_NODE_BIN:-}"; NODE_ONLY=""; NO_CHECK=""; ALLOW=""
 while [ $# -gt 0 ]; do case "$1" in
   --dial) DIAL_URL="$2"; shift 2;;
   --no-check) NO_CHECK=1; shift;;             # skip the dial check below (lane-pairing ⑤ — ON by default)
@@ -36,6 +39,8 @@ while [ $# -gt 0 ]; do case "$1" in
   --bundle-url) BUNDLE_URL="$2"; shift 2;;
   --node) NODE_BIN_OVERRIDE="$2"; shift 2;;   # use THIS node, skip discovery
   --node-only) NODE_ONLY=1; shift;;           # resolve/provision node, print it, exit (support + tests)
+  --allow) ALLOW="$2"; shift 2;;              # lane device-allow-flags: this machine's own allow list (written below)
+  --allow=*) ALLOW="${1#--allow=}"; shift;;
   *) echo "unknown arg: $1"; exit 2;;
 esac; done
 
@@ -262,6 +267,15 @@ if [ -n "$DIAL_URL" ] && [ -z "$NO_CHECK" ]; then
   fi
 fi
 
+# THE ALLOW LIST (lane device-allow-flags, design q-042 D5): written by the agent's OWN parser (`--write-policy`, PURE
+# src/device-policy.js) into state/policy.json at 0600 — BEFORE the host token, dial.json or the unit: an unknown flag
+# stops here (exit 2) with nothing installed. The daemon reads it when it starts (the take-over below restarts it).
+if [ -n "$ALLOW" ]; then
+  if ! VIBESPACE_DEVICE_ROOT="$ROOT" VIBESPACE_AGENTD_ROOT="$ROOT" "$NODE_BIN" "$ROOT/current/vibespace-device.js" --write-policy "$ALLOW"; then
+    echo "✗ nothing was installed — the --allow list was refused (above)"; exit 2
+  fi
+fi
+
 # node-pty for TERMINAL sessions (B-0d70): the daemon bundle is zero-dep, but a
 # terminal-on-dial session opens a real device-side pty via node-pty. Best-
 # effort install into the agentd root (node-pty ships prebuilds for mac/linux/
@@ -349,6 +363,7 @@ if [ -f "$ROOT/state/agentd.lock" ]; then
           # 2.170+ daemon re-reads it every dial attempt — it adopts by itself.
           echo "→ pid $OLDPID won't die (often: stuck on a dead network mount) — that's OK:"
           echo "  the new pairing is saved and the running daemon adopts it within ~30s."
+          [ -n "$ALLOW" ] && echo "  (its allow list is read when it starts — it takes effect at its next start)"
           echo "  If the machine stays offline, clear the stuck mount (or reboot) and re-run this command."
           exit 0
         fi

@@ -1429,7 +1429,6 @@ module.exports = {
   claimJsonls,
   findSessionJsonlPath,
   parseSessionJsonl,
-  extractSessionMeta,
   getSubagentMetas,
   getHistorySessionId,
   SessionMessages,

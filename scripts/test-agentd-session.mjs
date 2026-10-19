@@ -205,6 +205,10 @@ if (!fs.existsSync('/proc/self/environ')) {
   // environment ONCE — agentd.js reads and deletes them at boot. They are read but NEVER kept: a server-spawned daemon
   // must never inherit a token, so they leave the derived set here and the keep set is asserted to lack them
   for (const n of ['VIBESPACE_DIAL_TOKEN', 'VIBESPACE_HOST_TOKEN']) readByDaemonTier.delete(n);
+  // lane win-device-boot-hidden: the console self-heal's mark is ONE hop — the successor is spawned WITH it explicitly
+  // (startSuccessor's env), so it is read but never kept: no session and no later re-exec inherits it
+  readByDaemonTier.delete('VIBESPACE_AGENTD_HIDDEN');
+  check('the console self-heal\'s mark VIBESPACE_AGENTD_HIDDEN is NOT in DAEMON_ENV_KEEP and daemonEnv drops it (one hop)', !DAEMON_ENV_KEEP.has('VIBESPACE_AGENTD_HIDDEN') && !('VIBESPACE_AGENTD_HIDDEN' in daemonEnv({ ...process.env, VIBESPACE_AGENTD_HIDDEN: '1' })));
   check('the pairing tokens the daemon reads ONCE from its own environment are NEVER in DAEMON_ENV_KEEP (a server-spawned daemon never inherits one)', !DAEMON_ENV_KEEP.has('VIBESPACE_DIAL_TOKEN') && !DAEMON_ENV_KEEP.has('VIBESPACE_HOST_TOKEN') && !('VIBESPACE_DIAL_TOKEN' in daemonEnv({ ...process.env, VIBESPACE_DIAL_TOKEN: 'x', VIBESPACE_HOST_TOKEN: 'y' })) && !('VIBESPACE_HOST_TOKEN' in daemonEnv({ ...process.env, VIBESPACE_DIAL_TOKEN: 'x', VIBESPACE_HOST_TOKEN: 'y' })));
   const missing = [...readByDaemonTier].filter((n) => !DAEMON_ENV_KEEP.has(n));
   const extra = [...DAEMON_ENV_KEEP].filter((n) => !AGENT_ENV_KEEP.has(n) && !readByDaemonTier.has(n));

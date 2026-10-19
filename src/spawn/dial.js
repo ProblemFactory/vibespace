@@ -38,6 +38,10 @@ function dialLadder(c) {
             // nothing to place at all.
             if (!integrationOn && !spawnAccount?.secret && !needsClaudeLoginHelper) return { envPairs: [], tokenAssign: '' };
             const dm = await hosts.device(h.id); // dial → deviceForDial
+            // lane device-allow-flags (design q-042 D5): a machine whose OWN allow list leaves `sessions` off runs no conversation
+            // here — asked BEFORE the first setup act, so no tool, no session token, no account key or OAuth env ever travels
+            // to it (the open itself is refused the same way; the device refuses regardless)
+            { const off = await dm.refusalOf({ op: 'open-pipe-session', sid }); if (off) throw off; }
             // lane device-act-audit: the session's setup acts name WHO created it (the browser sign-in of the socket that asked —
             // ws-handler stamps it), else the spawn ladder itself
             const by = (ws && ws._actBy) || 'system:spawn';

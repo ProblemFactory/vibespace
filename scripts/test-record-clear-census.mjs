@@ -764,6 +764,7 @@ const STORAGE = {
   'src/lib/desktop-picker.js|localStorage|RECENT_KEY': ['pref', 'lane desktop-v2-entry: this browser\'s last Desktop choice — a host id + a display key (the picker\'s first row); no words of any record'],
   'src/lib/desktop-picker.js|localStorage|DISPLAYS_KEY': ['pref', 'lane desktop-v2-entry: per machine, the displays its window mapped last (key, number, the OS display name) — the picker\'s chips; no words of any record'],
   'src/lib/stream-stats.js|localStorage|PIN_KEY': ['pref', 'lane stream-stats-popup: per machine, the corner this browser pins a stream\'s details in (tl / tr / bl / br — src/stream-series.js rememberCorner, ≤ 32 machines); no words of any record'],
+  'src/lib/machine-desktop.js|localStorage|HDR_KEY': ['pref', 'lane stream-hdr-passthrough: per machine, 「HDR 直通」 on (true) in this browser — src/hdr-viewer.js rememberHdr, off = forgotten, ≤ 32 machines; no words of any record'],
   'src/lib/stream-pill.js|localStorage|PILL_KEY': ['pref', 'lane stream-stats-popup: per machine, the corner of the full-screen pill (tl / tr / bl / br — src/stream-series.js rememberCorner, ≤ 32 machines); no words of any record'],
   'src/lib/machine-displays.js|localStorage|MODES_KEY': ['pref', 'lane desktop-display-modes: per machine, this browser\'s display mode (switch / windows / all), the display shown and the display ids ① opened / ② folded — ids only; no words of any record'],
   'src/lib/machine-displays.js|localStorage|\'vibespace.deviceTag\'': ['ids', 'the same random device tag as browser-live-window.js — which device opened a restored machine desktop window'],
@@ -1947,6 +1948,9 @@ const I_RECV = {
   'src/server/device-upgrade-watch.js|w': ['host', 'the stuck-upgrade item\'s words — a machine name and two agent versions (itemOf), the machine\'s own record'],
   // ── lane host-stale-dialer (B-6136) ──
   'src/server/device-alerts.js|w': ['host', 'the three urgent device items\' words (itemOf, lane device-act-audit) — a machine name, an address, a sign-in handle, two agent versions: the machine\'s own record and the hub\'s own facts, never a record\'s text'],
+  // ── lane hub-act-ask (design q-042 D4) ──
+  'src/server/hub-act-ask.js|w': ['host', 'the held hub act\'s card words (P.cardOf) — who asked (a conversation\'s name or a `by`), a machine name, the act\'s summary the hub built itself (device-acts summaryOf, bounded and redacted): the hub\'s own act, never a record\'s text'],
+  'src/server/hub-act-ask.js|v': ['host', 'the verdict\'s reason / kind (PURE hub-act-policy askVerdict: a closed word) in the refusal sentence — the machine\'s own list'],
   'src/server/dial-health-watch.js|w': ['host', 'the second-dialer item\'s words — a machine name, an address, a time (itemOf), the machine\'s own record'],
   'src/server/dial-health-watch.js|v': ['host', 'the verdict\'s refusing address (secondDialerVerdict) in the journal line — the machine\'s own dial record'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──

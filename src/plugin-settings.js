@@ -115,8 +115,11 @@ const PLUGIN_SETTINGS = {
       { key: 'mode', type: 'enum', default: 'auto', apply: 'plugin-config', // rec.mode is the RUNNING mode (written at start) — no migration; a missing pref = auto
         options: [{ value: 'auto', label: t('Auto') }, { value: 'kernel', label: t('Kernel (full tunnel)') }, { value: 'userspace', label: t('Userspace (proxy only)') }],
         label: t('Networking'), description: t('Auto uses the kernel tunnel when /dev/net/tun is usable, else userspace (reach tailnet hosts through SOCKS5). A change reconnects a running Tailscale; the login persists.') },
+      // lane tailscale-plugin-pod-dns: the container's resolver is never Tailscale's unless asked here (PURE src/tailscale-dns.js)
+      { key: 'magicDns', type: 'boolean', default: false, apply: 'plugin-config',
+        label: t('Let Tailscale set this machine\'s DNS (MagicDNS)'), description: t('Off: Tailscale never changes /etc/resolv.conf, and tailnet names still reach ssh hosts through the plugin. On: a machine of your own in kernel mode resolves through Tailscale (100.100.100.100). Never on a cluster instance.') },
       { key: 'upFlags', type: 'string', default: '', apply: 'server', migrate: { from: 'upFlags' },
-        label: t('tailscale up flags'), description: t('Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/proxy) are ignored.') },
+        label: t('tailscale up flags'), description: t('Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/--accept-dns/proxy) are ignored.') },
     ],
   },
 };

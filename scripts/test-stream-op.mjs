@@ -27,7 +27,14 @@
 //      machine's displays (their own names — the switcher's rows on Windows too), a display picked = that display's offer, and
 //      THE PER-MACHINE CAP: two displays ⇒ three live streams (one per display + one), the fourth refused too_many_streams with
 //      its count (live 3, cap 3, displays 2); a capture that dies at START (8007000e) is asked again twice before the session ends;
-//      commit 2: an HDR display offered with `share: 2` (②) is mapped at every 2nd pixel (the encoder gets half the size, `scaled`)
+//      commit 2: an HDR display offered with `share: 2` (②) is mapped at every 2nd pixel (the encoder gets half the size, `scaled`);
+//      lane stream-hdr-passthrough — THE NEGOTIATION: `hdr: true` to the HDR display with av1_nvenc ⇒ the offer lists AV1 FIRST then
+//      H.264; a browser that takes AV1 ⇒ the agent runs THE HDR ROAD (P010 → av1_nvenc → IVF — the plan's argvs), the P010 its
+//      encoder got IS p010FromHalf of the owner's calibration frame (the worker's mapping = the function, sample for sample), the
+//      AV1 fixture's temporal units reach the browser OBU for OBU (IVF → aggregated-TU RTP → depacketized), the codec is AV1, its
+//      agent + both ffmpegs opted out of Windows power throttling in ONE script; a browser WITHOUT AV1 ⇒ the same offer answered
+//      H.264 ⇒ today's mapped road, byte for byte the H.264 fixture, no opt-out; hdr not asked ⇒ the offer is H.264 alone; a
+//      browser's mDNS candidate sent BEFORE its answer leaves the answer quick (RED CONTROL: werift handed it first waits 10 s)
 //   §9 THE RATE on the screen road (lane stream-mac-rate — every road's rule, src/stream-plan.js rateFollower): an echo restarts
 //      nothing; a shortfall that HOLDS 2 s restarts ONLY the encoder, once, at the display's floor (never under it; its first
 //      picture a key frame); a quiet 20 s climbs +25 % (the same module in-process, an injected clock, the fake ffmpeg)
@@ -54,6 +61,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(50); } return false; };
 const SM = require(path.join(REPO, 'src/stream-model.js'));
 const H = require(path.join(REPO, 'src/stream-h264.js'));
+const AV1 = require(path.join(REPO, 'src/stream-av1.js')); // lane stream-hdr-passthrough
 const SP = require(path.join(REPO, 'src/stream-plan.js'));
 const ACC = require(path.join(REPO, 'src/server/desktop-access.js'));
 const DW = require(path.join(REPO, 'src/server/desktop-webrtc.js'));
@@ -78,8 +86,8 @@ function deviceOn(h, bundlePath = BUNDLE, env = {}) {
   return dm;
 }
 /** The browser's stand-in: a FULL ICE agent (the daemon is lite). Its STUN server is a dead loopback port — never a public one. */
-function standIn() {
-  const pc = new w.RTCPeerConnection({ iceServers: [{ urls: 'stun:127.0.0.1:9' }], iceStunGatherTimeout: 0.2, iceUseIpv6: false, codecs: { video: [new w.RTCRtpCodecParameters({ mimeType: SM.STREAM_CODEC.mimeType, clockRate: SM.STREAM_CODEC.clockRate, rtcpFeedback: SM.STREAM_CODEC.rtcpFeedback.map((f) => ({ ...f })), parameters: SM.STREAM_CODEC.fmtp })] } });
+function standIn(codecs = [SM.STREAM_CODEC]) { // lane stream-hdr-passthrough: a browser that takes AV1 too = [SM.STREAM_CODEC_AV1, SM.STREAM_CODEC]
+  const pc = new w.RTCPeerConnection({ iceServers: [{ urls: 'stun:127.0.0.1:9' }], iceStunGatherTimeout: 0.2, iceUseIpv6: false, codecs: { video: codecs.map((C) => new w.RTCRtpCodecParameters({ mimeType: C.mimeType, clockRate: C.clockRate, rtcpFeedback: C.rtcpFeedback.map((f) => ({ ...f })), parameters: C.fmtp })) } });
   peers.push(pc);
   const got = { rtp: [], dc: null };
   pc.onTrack.subscribe((t) => t.onReceiveRtp.subscribe((r) => { got.ssrc = r.header.ssrc; got.rtp.push({ ts: r.header.timestamp, marker: r.header.marker, payload: Buffer.from(r.payload), at: Date.now() }); }));
@@ -275,9 +283,11 @@ const D2 = { id: '\\\\.\\DISPLAY2', x: 1280, y: 0, w: 1280, h: 720, primary: fal
 const factsFile = path.join(homeScr, 'facts.json'), psArgsS = path.join(homeScr, 'ps-args.json');
 const setDisplays = (list) => fs.writeFileSync(factsFile, factsLine(list));
 setDisplays([D1, D2]);
+const qosLog = path.join(homeScr, 'qos.log'); // lane stream-hdr-passthrough: each power-throttling opt-out script's pids, one line a run
 fs.writeFileSync(path.join(binS, 'powershell.exe'), `#!${process.execPath}
 const fs = require('fs'); const a = process.argv.slice(2); const script = Buffer.from(a[a.length - 1] || '', 'base64').toString('utf16le');
 if (/'stream-facts'/.test(script)) { fs.writeFileSync(${JSON.stringify(psArgsS)}, JSON.stringify(a)); process.stdout.write(fs.readFileSync(${JSON.stringify(factsFile)}, 'utf8') + '\\r\\n'); process.exit(0); }
+if (/VsQos/.test(script)) { const ids = ((/foreach \\(\\$id in @\\(([\\d,]+)\\)\\)/.exec(script) || [])[1] || '').split(',').map(Number); fs.appendFileSync(${JSON.stringify(qosLog)}, ids.join(',') + '\\n'); process.stdout.write(JSON.stringify({ t: 'unthrottle', rows: ids.map((pid) => ({ pid, ok: true, err: 0 })) }) + '\\r\\n'); process.exit(0); }
 process.stdout.write('ready\\r\\n'); process.stdin.on('data', () => process.stdout.write('ok\\r\\n'));
 `, { mode: 0o755 });
 const cal = calibrationFrame(1280, 720, SP.CALIBRATION.rows);
@@ -439,6 +449,104 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   ok(whole.ok && !whole.source.scaled, 'alone (no share): the whole picture, no `scaled`', whole.source || whole);
   if (whole.ok) await dms.streamStop(whole.sid);
   FF.set({ raw: rawFile }); setDisplays([D1, D2]); // the later sections read the same facts file
+}
+{
+  // lane stream-hdr-passthrough — THE NEGOTIATION through the real daemon (the fake ffmpeg's P010 → IVF role answers with THE AV1 fixture)
+  const AV1_FIX = path.join(REPO, 'scripts/fixtures/stream/fake-desk-av1-10.ivf'), p010File = path.join(homeScr, 'first.p010');
+  const TUS = AV1.ivfReader().push(fs.readFileSync(AV1_FIX)).filter((e) => e.type === 'tu');
+  FF.set({ encoders: ['h264_nvenc', 'av1_nvenc', 'libx264'], av1: AV1_FIX, p010: p010File }); setDisplays([D1, D2]);
+  const fsAll = await dms.streamFacts({ force: true });
+  ok(fsAll.ok && JSON.stringify(fsAll.ffmpeg.encoders) === '["h264_nvenc","av1_nvenc","libx264"]', 'stream-facts keep av1_nvenc (the HDR rung) in the machine\'s encoders', fsAll.ffmpeg);
+  const rtpmaps = (sdp) => [...String(sdp).matchAll(/a=rtpmap:\d+ ([A-Za-z0-9]+)\/90000/g)].map((m) => m[1]);
+  // hdr NOT asked: the offer as before — H.264 alone
+  const plain = await dms.streamOffer({ sourceKind: 'screen' });
+  ok(plain.ok && JSON.stringify(rtpmaps(plain.offer.sdp)) === '["H264"]' && plain.source.mode === 'mapped' && JSON.stringify(plain.source.hdr) === '{"can":true,"on":false,"why":null}' && !plain.codecs, 'hdr not asked: the offer lists H.264 alone (the SDR road\'s offer unchanged); the source says the machine CAN (the page may show 「HDR 直通」)', { maps: rtpmaps(plain.offer.sdp), hdr: plain.source.hdr });
+  if (plain.ok) await dms.streamStop(plain.sid);
+  const hdrSession = async (codecs) => {
+    const b = standIn(codecs), push = [];
+    const off = await dms.streamOffer({ sourceKind: 'screen', hdr: true }, { onPush: (m) => { push.push(m); if (m.op === 'stream-ice' && m.candidate) b.pc.addIceCandidate(m.candidate).catch(() => { }); } });
+    if (off.ok) { await b.pc.setRemoteDescription(off.offer); await b.pc.setLocalDescription(await b.pc.createAnswer()); await dms.streamAnswer(off.sid, { answer: { type: 'answer', sdp: b.pc.localDescription.sdp } }); }
+    return { off, b, push };
+  };
+  const units = (rtp) => { const out = []; let cur = []; for (const p of rtp) { cur.push(p.payload); if (p.marker) { out.push(AV1.depacketize(cur)); cur = []; } } return out; };
+  // A: a browser that takes AV1 (its answer lists it first)
+  const n0 = ffRuns().length, q0 = fs.existsSync(qosLog) ? fs.readFileSync(qosLog, 'utf8').trim().split('\n').filter(Boolean).length : 0;
+  const A = await hdrSession([SM.STREAM_CODEC_AV1, SM.STREAM_CODEC]);
+  ok(A.off.ok && JSON.stringify(rtpmaps(A.off.offer.sdp)) === '["AV1","H264"]' && /a=fmtp:\d+ level-idx=5;profile=0;tier=0/.test(A.off.offer.sdp) && A.off.source.mode === 'hdr' && A.off.source.encoder === 'NVENC AV1' && JSON.stringify(A.off.source.hdr) === '{"can":true,"on":true,"why":null}' && JSON.stringify(A.off.codecs) === '["video/AV1","video/H264"]',
+    'hdr asked of the HDR display with av1_nvenc: the offer lists AV1 FIRST (profile 0, the probe\'s fmtp) then H.264; the source says hdr, NVENC AV1', { maps: A.off.ok && rtpmaps(A.off.offer.sdp), src: A.off.source });
+  const flowsA = await until(() => units(A.b.got.rtp).length >= 40, 15000);
+  const gotA = units(A.b.got.rtp), k0 = TUS.findIndex((t) => t.key);
+  const same40 = gotA.slice(0, 40).filter((obus, i) => { const want = AV1.obusOf(TUS[(k0 + i) % TUS.length].tu).filter((o) => o.type !== AV1.OBU.td); return obus && obus.length === want.length && obus.every((o, j) => o.type === want[j].type && Buffer.compare(Buffer.from(o.body), Buffer.from(want[j].body)) === 0); }).length;
+  ok(flowsA && same40 === 40, 'the browser that took AV1 gets THE AV1 fixture\'s temporal units from its first key frame, OBU for OBU (IVF → the aggregated-TU RTP payloads → depacketized)', { n: gotA.length, same40 });
+  const runsA = ffRuns().slice(n0), capA = runsA.find((a) => a.some((x) => /^ddagrab=/.test(x))), encA = runsA.find((a) => a.includes('pipe:0'));
+  const planA = SP.planScreen({ platform: 'win32', ffmpeg: { path: 'x', major: 7, ddagrab: true, encoders: ['h264_nvenc', 'av1_nvenc'] }, displays: [D1] }, { hdr: true });
+  ok(JSON.stringify(capA) === JSON.stringify(SP.captureArgv(planA)) && JSON.stringify(encA) === JSON.stringify(SP.hdrEncodeArgv(planA)), 'the two ffmpegs ran EXACTLY the hdr plan\'s argvs (the FP16 capture; P010 → av1_nvenc → IVF, the frames tagged bt2020 / PQ)', { capA, encA });
+  const p010 = fs.existsSync(p010File) ? fs.readFileSync(p010File) : null;
+  const wantP = new Uint16Array(SP.p010Bytes(1280, 720) / 2); SP.p010FromHalf(new Uint16Array(cal.buf.buffer, cal.buf.byteOffset, cal.buf.length / 2), 1280, 720, SP.buildPqTables(), wantP);
+  ok(p010 && p010.length === 1280 * 720 * 3 && Buffer.compare(p010, Buffer.from(wantP.buffer)) === 0, 'THE PQ GATE through the real daemon: the P010 its encoder got IS p010FromHalf of the owner\'s FP16 calibration frame, sample for sample (the worker\'s own tables = the function)', p010 && p010.length);
+  const stA = A.off.ok ? await dms.streamStats(A.off.sid) : {};
+  const qos = await until(() => { const l = fs.existsSync(qosLog) ? fs.readFileSync(qosLog, 'utf8').trim().split('\n').filter(Boolean) : []; return l.length > q0; }, 4000);
+  const qLines = fs.readFileSync(qosLog, 'utf8').trim().split('\n').filter(Boolean).slice(q0), qPids = (qLines[0] || '').split(',').map(Number);
+  const stA2 = A.off.ok ? await dms.streamStats(A.off.sid) : {};
+  ok(stA.ok && stA.stats.codec === 'AV1' && stA.stats.screen.mode === 'hdr' && JSON.stringify(stA.stats.screen.hdr) === '{"codec":"AV1","bits":10,"transfer":"pq","primaries":"bt2020"}' && stA.stats.screen.mapper === 'worker' && stA.stats.screen.captured >= 40,
+    'the numbers: the codec sent is AV1, the road hdr (PQ 10-bit BT.2020 — the details\' 「HDR」 row), mapped by the worker', stA.stats && { codec: stA.stats.codec, screen: stA.stats.screen });
+  ok(qos && qLines.length === 1 && qPids.length === 3 && qPids.every((p) => Number.isInteger(p) && p > 0) && new Set(qPids).size === 3 && stA2.stats.screen.unthrottle && stA2.stats.screen.unthrottle.asked === 3 && stA2.stats.screen.unthrottle.ok === 3,
+    'Windows POWER THROTTLING: ONE opt-out script for the agent and its two ffmpegs (three pids — the start batched), all three ok in the numbers', { qLines, un: stA2.stats && stA2.stats.screen.unthrottle });
+  if (A.off.ok) await dms.streamStop(A.off.sid);
+  A.b.pc.close();
+  // B: a browser WITHOUT AV1 — the same hdr offer, answered H.264 ⇒ the mapped road (today's picture), no opt-out
+  const n1 = ffRuns().length, q1 = fs.readFileSync(qosLog, 'utf8').trim().split('\n').filter(Boolean).length;
+  const B = await hdrSession([SM.STREAM_CODEC]);
+  const flowsB = await until(() => pictures(B.b.got.rtp).length >= 20, 12000);
+  const picsB = pictures(B.b.got.rtp), kh = AUS.findIndex((a) => a.key);
+  const sameB = picsB.slice(0, 20).filter((p, i) => { const a = AUS[kh + i]; return p.length === a.nalus.length && p.every((n, k) => Buffer.compare(n, a.nalus[k]) === 0); }).length;
+  const stB = B.off.ok ? await dms.streamStats(B.off.sid) : {};
+  const runsB = ffRuns().slice(n1), encB = runsB.find((a) => a.includes('pipe:0'));
+  const planB = SP.planScreen({ platform: 'win32', ffmpeg: { path: 'x', major: 7, ddagrab: true, encoders: ['h264_nvenc', 'av1_nvenc'] }, displays: [D1] });
+  ok(B.off.ok && JSON.stringify(rtpmaps(B.off.offer.sdp)) === '["AV1","H264"]' && flowsB && sameB === 20 && stB.stats.codec === 'H264' && stB.stats.screen.mode === 'mapped' && stB.stats.screen.hdr === null && JSON.stringify(encB) === JSON.stringify(SP.encodeArgv(planB)),
+    'a browser WITHOUT AV1 answers the same offer with H.264 ⇒ the agent runs today\'s mapped road (NV12 → NVENC H.264, the plan\'s argv byte for byte) and the H.264 fixture plays byte for byte', { sameB, codec: stB.stats && stB.stats.codec, mode: stB.stats && stB.stats.screen.mode, encB });
+  await sleep(600);
+  ok(fs.readFileSync(qosLog, 'utf8').trim().split('\n').filter(Boolean).length === q1 && !stB.stats.screen.unthrottle, 'the SDR road opts nothing out (the power-throttling script is the HDR road\'s)');
+  if (B.off.ok) await dms.streamStop(B.off.sid);
+  B.b.pc.close();
+  FF.set({ av1: null, p010: null, encoders: ['h264_nvenc', 'libx264'] }); await dms.streamFacts({ force: true });
+}
+{
+  // lane stream-hdr-passthrough (the real leg: 2 of 3 HDR switches waited 10 s): a browser's mDNS host candidate that reaches the agent
+  // BEFORE its answer — werift resolves `<uuid>.local` by multicast with a 10 s timeout, flushed INSIDE setRemoteDescription
+  const MDNS = { candidate: 'candidate:2984 1 udp 2122260223 3f6a1c2e-0d51-4c7e-9a3b-6d2f1e0c9b8a.local 54400 typ host generation 0', sdpMid: '0', sdpMLineIndex: 0 };
+  // THE MECHANISM'S CONSTANT (the mirror rule — a wall-clock bound = the mechanism's own constant × a stated slack): werift's mDNS
+  // lookup gives up after MDNS_TIMEOUT_MS (node_modules/werift/lib/ice/src/dns/lookup.js MdnsLookup.lookup — its `setTimeout(…, 10000)`,
+  // read below so a werift that changes it fails HERE, not silently); the RED CONTROL measured 10 002 ms of it. The fixed answer must
+  // take under a fifth of it (no lookup at all — measured 4 ms), the control at least 0.9 of it (the lookup itself, waited out)
+  const MDNS_TIMEOUT_MS = 10000;
+  const lookupSrc = fs.readFileSync(path.join(REPO, 'node_modules/werift/lib/ice/src/dns/lookup.js'), 'utf8');
+  const lookupMs = Number((/No mDNS response"\)\);\s*\},\s*(\d+)\)/.exec(lookupSrc) || [])[1]);
+  ok(lookupMs === MDNS_TIMEOUT_MS, `the pinned constant IS werift's: its MdnsLookup gives up after ${lookupMs} ms`, lookupMs);
+  const trickled = (sdp) => sdp.split('\r\n').filter((l) => l !== 'a=end-of-candidates').join('\r\n'); // Chrome's answer: its candidates trickle (werift's stand-in says end-of-candidates — werift then takes no more)
+  const b = standIn();
+  const off = await dms.streamOffer({ sourceKind: 'screen' }, { onPush: (m) => { if (m.op === 'stream-ice' && m.candidate) b.pc.addIceCandidate(m.candidate).catch(() => { }); } });
+  await b.pc.setRemoteDescription(off.offer); await b.pc.setLocalDescription(await b.pc.createAnswer());
+  const c = await dms.streamAnswer(off.sid, { candidate: MDNS });
+  const t0 = Date.now();
+  const a = await dms.streamAnswer(off.sid, { answer: { type: 'answer', sdp: trickled(b.pc.localDescription.sdp) } });
+  const answerMs = Date.now() - t0;
+  const plays = await until(() => pictures(b.got.rtp).length >= 5, 8000);
+  ok(off.ok && c.ok && a.ok && answerMs < MDNS_TIMEOUT_MS / 5 && plays, `a browser's mDNS candidate (<uuid>.local) BEFORE its answer: the agent never hands it to werift — the answer took ${answerMs} ms and the picture plays`, { c, a, answerMs });
+  if (off.ok) await dms.streamStop(off.sid);
+  b.pc.close();
+  // RED CONTROL: werift as the agent uses it (ICE-lite, the offerer), handed the same candidate before the answer
+  const lite = new w.RTCPeerConnection({ iceLite: true, iceServers: [], bundlePolicy: 'max-bundle', iceUseIpv6: false, codecs: { video: [new w.RTCRtpCodecParameters({ mimeType: SM.STREAM_CODEC.mimeType, clockRate: SM.STREAM_CODEC.clockRate, rtcpFeedback: [], parameters: SM.STREAM_CODEC.fmtp })] } });
+  peers.push(lite);
+  lite.addTransceiver(new w.MediaStreamTrack({ kind: 'video' }), { direction: 'sendonly' });
+  await lite.setLocalDescription(await lite.createOffer());
+  const peer = standIn(); await peer.pc.setRemoteDescription(lite.localDescription); await peer.pc.setLocalDescription(await peer.pc.createAnswer());
+  lite.addIceCandidate(MDNS).catch(() => { });
+  const t1 = Date.now();
+  await lite.setRemoteDescription({ type: 'answer', sdp: trickled(peer.pc.localDescription.sdp) });
+  const ctlMs = Date.now() - t1;
+  ok(ctlMs >= MDNS_TIMEOUT_MS * 0.9, `RED CONTROL: werift itself, handed that candidate before the answer, waited ${ctlMs} ms in setRemoteDescription (its multicast lookup's 10 s timeout — the page sat at 「连接中」)`, ctlMs);
+  lite.close(); peer.pc.close();
 }
 dms.stop(); endDaemonsOf(rootOf(homeScr));
 

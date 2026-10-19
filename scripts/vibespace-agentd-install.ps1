@@ -4,7 +4,9 @@
 # has none. Usage (from the pairing dialog):
 #   & ([scriptblock]::Create((iwr -UseBasicParsing <vibespace>/agentd-install.ps1).Content)) `
 #     -BundleUrl <vibespace>/agentd.js -Dial wss://<host>/api/agentd-dial?device=<id> `
-#     -DialToken <vsdt_…> -HostToken <vsht_…>
+#     -DialToken <vsdt_…> -HostToken <vsht_…> -Allow run,files,sessions,upgrade
+# -Allow (lane device-allow-flags, design q-042 D5): what the VibeSpace may do on THIS machine — all, none, or some of
+# run, files, input, socks, lan, sessions, upgrade → <root>\state\policy.json; only running this again here changes it.
 # (a scriptblock's parameters live inside this PowerShell — no process's command line carries the tokens; the
 #  dial check gets the token in its environment and the daemon starts argless — verify-r3 B-inst)
 # -NodeExe <path> forces a specific node.exe and skips discovery/provisioning.
@@ -14,6 +16,7 @@ param(
   [Parameter(Mandatory=$true)][string]$DialToken,
   [Parameter(Mandatory=$true)][string]$HostToken,
   [string]$NodeExe,
+  [string]$Allow,
   [switch]$NoCheck
 )
 $ErrorActionPreference = 'Stop'
@@ -127,6 +130,14 @@ if (-not $NoCheck) {
   }
 }
 
+# THE ALLOW LIST (lane device-allow-flags): the agent's own parser writes state\policy.json — BEFORE the host token,
+# dial.json or the task: an unknown flag stops here (exit 2) with nothing installed
+if ($Allow) {
+  $env:VIBESPACE_DEVICE_ROOT = $root; $env:VIBESPACE_AGENTD_ROOT = $root
+  & $nodeExe "$current\vibespace-device.js" --write-policy $Allow
+  if ($LASTEXITCODE -ne 0) { Write-Host "x nothing was installed - the -Allow list was refused (above)"; exit 2 }
+}
+
 Set-Content -NoNewline -Path (Join-Path $root 'state\token') -Value $HostToken
 Write-Host "-> host token at $root\state\token"
 # THE RELEASE-KEY PIN RESETS (design q-042 D2): a (re-)pair = a new trust-on-first-use; the new bundle pins ITS keys at its first start
@@ -165,7 +176,8 @@ $out = Join-Path $root 'state\agentd.out'
 $env:VIBESPACE_DEVICE_ROOT = $root; $env:VIBESPACE_AGENTD_ROOT = $root
 # ARGLESS (verify-r3 B-inst): the daemon reads state\dial.json written above — the token never rides its command line
 # (a self-upgrade re-exec carries every original flag, so it stayed there for the daemon's whole life)
-$p = Start-Process -PassThru -WindowStyle Hidden $nodeExe -ArgumentList @("$current\vibespace-device.js") `
+# the script path quoted FOR NODE: PS 5.1's Start-Process joins -ArgumentList unquoted (a space in the profile path split it)
+$p = Start-Process -PassThru -WindowStyle Hidden $nodeExe -ArgumentList @("`"$current\vibespace-device.js`"") `
   -RedirectStandardOutput $out -RedirectStandardError (Join-Path $root 'state\agentd.err')
 Start-Sleep -Seconds 2
 if ($p.HasExited) {
@@ -178,15 +190,24 @@ if ($p.HasExited) {
 # PERSISTENCE (best-effort): without this a reboot/logout kills the device for
 # good — the same dead-Mac lesson launchd/systemd cover on the other platforms.
 # Starts ARGLESS: the daemon reads state\dial.json (no token in any task XML).
+# HIDDEN (lane win-device-boot-hidden): the action is a hidden PowerShell that runs the first launch above at every logon
+# (Start-Process -WindowStyle Hidden). It was `cmd.exe /c ... node`: a console program a task starts gets a console of its
+# own, Windows 11 hands it to Windows Terminal, and the daemon lived in that window (closing it ended the agent). The
+# daemon builds the SAME text (src/agentd/hidden-start.js logonTaskArgs) and re-registers an old install's task with it.
+# A PowerShell single-quoted literal (the curly single quotes PowerShell also reads as quotes are doubled too)
+function Quote-Ps([string]$s) { return "'" + ($s -replace '[''\u2018\u2019\u201A\u201B]', '$0$0') + "'" }
 $persist = 'none (re-run this command after a reboot)'
 try {
   $task = "VibeSpaceDevice-$dialHost"
   # NB: never name this $args — that's a PowerShell automatic variable
-  $taskArgs = "/c set VIBESPACE_DEVICE_ROOT=$root&& set VIBESPACE_AGENTD_ROOT=$root&& `"$nodeExe`" `"$current\vibespace-device.js`""
-  $a = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $taskArgs
-  $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+  $launch = '$env:VIBESPACE_DEVICE_ROOT=' + (Quote-Ps $root) + '; $env:VIBESPACE_AGENTD_ROOT=' + (Quote-Ps $root) +
+    '; Start-Process -WindowStyle Hidden -FilePath ' + (Quote-Ps $nodeExe) + ' -ArgumentList ([char]34+' + (Quote-Ps "$current\vibespace-device.js") + '+[char]34)' +
+    ' -RedirectStandardOutput ' + (Quote-Ps "$root\state\agentd.out") + ' -RedirectStandardError ' + (Quote-Ps "$root\state\agentd.err")
+  $taskArgs = '-NoProfile -NonInteractive -WindowStyle Hidden -Command "' + $launch + '"'
+  $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $taskArgs
+  $s = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
   Register-ScheduledTask -TaskName $task -Action $a -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings $s -Force | Out-Null
-  $persist = "scheduled task '$task' (starts at logon)"
+  $persist = "scheduled task '$task' (starts at logon, hidden)"
 } catch { Write-Host "   (no scheduled task: $_)" }
 
 Write-Host "OK vibespace device agent running (pid $($p.Id)). Restart after reboot: $persist"

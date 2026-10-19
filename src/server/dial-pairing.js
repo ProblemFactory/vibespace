@@ -294,6 +294,12 @@ async function deviceForDial(deviceId, _retried = false) {
       onUpgradeRefused: (from, to, info) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('refused', { ...(info || {}), hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, from, to }); },
       // fix r2 (verify-r1 RED-2): a device that trusted no release key pinned the first validly signed one (TOFU)
       onUpgradeTrusted: (from, to, info) => { const h = hosts.findByDeviceId(deviceId); hosts.onAgentUpgrade?.('trusted', { ...(info || {}), hostKey: h ? h.id : 'host-dial-' + deviceId, machine: (h && h.name) || deviceId, from, to }); },
+      // lane device-allow-flags: the allow list the device states (its hello-ack) → its record, the card repainted when it moved;
+      // its name in a refusal's re-run sentence
+      onPolicy: (p) => { const h = hosts.findByDeviceId(deviceId); if (h && hosts.notePolicy?.(h.id, p)) { try { bcastAll({ type: 'hosts-updated' }); } catch { } } },
+      machine: () => { const h = hosts.findByDeviceId(deviceId); return (h && h.name) || deviceId; },
+      // lane hub-act-ask: an act nobody clicked follows the machine's Hub automation list (asks on a cluster instance)
+      actGate: hosts.actGateFor(() => { const h = hosts.findByDeviceId(deviceId); return h ? h.id : 'host-dial-' + deviceId; }),
     });
     agentdDialDevices.set(deviceId, dm);
   }

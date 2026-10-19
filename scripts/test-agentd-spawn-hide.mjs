@@ -15,7 +15,8 @@
 //   §2 the sites the owner hit, by name: run-cmd, the code-page probe (PURE XS.codePageAsker — agentd keeps no probe of its
 //      own), both discovery-snapshot children, the usage-scan child, the stdio-bridge daemon spawn, the streaming exec,
 //      the detached session spawn, `claude --version`, the OpenCode serve + its `git init`, codex app-server; the
-//      self-upgrade re-exec keeps `detached: true, stdio: 'ignore', windowsHide: true`.
+//      self-upgrade re-exec keeps `detached: true, stdio: 'ignore', windowsHide: true`; the daemon's own PowerShell one-shots
+//      (lane win-device-boot-hidden: the console look + the logon task) are hidden too.
 //   §3 CONTROLS (patched copies of the text in memory, never src/): run-cmd without windowsHide ⇒ RED; the re-exec without
 //      it ⇒ RED; the asker's probe without it ⇒ RED; a planted unhidden `require('child_process').execFile(` ⇒ RED; a
 //      planted multi-line `{ spawn: sp2 }` call ⇒ RED, and green once its own line says windowsHide; a module the entry
@@ -188,7 +189,9 @@ const NAMED = [
   ['the stdio-bridge daemon spawn (cpB.spawn)', ENTRY, 'cpB.spawn(process.execPath, [__filename]', 1],
   ['the streaming exec (`{ spawn: sp }`)', ENTRY, 'sp(String(cmd)', 1],
   ['the detached session spawn', ENTRY, "require('child_process').spawn(cmd, args || [], {", 1],
-  ['the self-upgrade re-exec', ENTRY, 'spawn(process.execPath, reExecArgv(', 1],
+  ['the re-exec (startSuccessor: the self-upgrade + the console self-heal)', ENTRY, 'spawn(process.execPath, argv, {', 1],
+  ['the console look (psOnceSync, before the singleton)', ENTRY, "execFileSync('powershell.exe', psOnceArgs(script)", 1],
+  ['the logon task one-shot (psOnce)', ENTRY, "execFile('powershell.exe', psOnceArgs(script)", 1],
   ['the console code-page probe (XS.codePageAsker)', 'src/exit-shell.js', 'execFile(p.file, p.args, {', 1],
   ['`claude --version` (machine-probes)', 'src/machine-probes.js', 'execFile(cmd, args, {', 1],
   ['the OpenCode serve', 'src/opencode-serve.js', "spawnImpl(cmd, ['serve'", 1],
@@ -197,7 +200,7 @@ const NAMED = [
 ];
 for (const [name, file, needle, n] of NAMED) { const s = site(file, needle); ok(s.length === n && s.every((r) => r.kind === 'hidden'), `${name}: ${n} site(s), windowsHide: true`, s.map((r) => `${r.file}:${r.line} ${r.kind}`)); }
 const AD = realRead(ENTRY);
-const reexec = site(ENTRY, 'spawn(process.execPath, reExecArgv(')[0];
+const reexec = site(ENTRY, 'spawn(process.execPath, argv, {')[0];
 ok(!!reexec && /detached: true, stdio: 'ignore', windowsHide: true/.test(reexec.text), 'the re-exec keeps `detached: true, stdio: \'ignore\', windowsHide: true` (the daemon itself is console-less)', reexec && reexec.text);
 ok(/XS\.codePageAsker\(\{ execFile: require\('child_process'\)\.execFile/.test(AD) && !/CODEPAGE_PROBES/.test(AD), 'agentd asks the code page through the PURE asker only (no probe of its own)');
 ok(site(ENTRY, 'pty().spawn(').length === 1 && site(ENTRY, 'pty().spawn(')[0].kind === 'exempt', 'node-pty\'s ConPTY spawn is the one named exception in agentd.js');
@@ -209,9 +212,9 @@ const swap = (rel, from, to) => { const s = realRead(rel); const t = s.replace(f
 const ca = swap(ENTRY, 'windowsHide: true, timeout: Math.min(Number(msg.timeoutMs)', 'timeout: Math.min(Number(msg.timeoutMs)');
 const ra = redOf({ [ENTRY]: ca.text });
 ok(ca.applies && ra.red.length === 1 && /execFile\(plan\.file, plan\.args/.test(ra.red[0]), 'CONTROL (a): run-cmd without windowsHide ⇒ RED at its line', ra.red);
-const cb = swap(ENTRY, "so must the re-exec\n              detached: true, stdio: 'ignore', windowsHide: true,", "so must the re-exec\n              detached: true, stdio: 'ignore',");
+const cb = swap(ENTRY, "so must the re-exec\n    detached: true, stdio: 'ignore', windowsHide: true,", "so must the re-exec\n    detached: true, stdio: 'ignore',");
 const rb = redOf({ [ENTRY]: cb.text });
-ok(cb.applies && rb.red.length === 1 && /reExecArgv/.test(rb.red[0]), 'CONTROL (b): the re-exec without windowsHide ⇒ RED', rb.red);
+ok(cb.applies && rb.red.length === 1 && /spawn\(process\.execPath, argv/.test(rb.red[0]), 'CONTROL (b): the re-exec without windowsHide ⇒ RED', rb.red);
 const cc = swap('src/exit-shell.js', "env: envOf(), windowsHide: true, windowsVerbatimArguments: true", "env: envOf(), windowsVerbatimArguments: true");
 const rc = redOf({ 'src/exit-shell.js': cc.text });
 ok(cc.applies && rc.red.length === 1 && /p\.file, p\.args/.test(rc.red[0]), 'CONTROL (c): the code-page probe without windowsHide ⇒ RED', rc.red);

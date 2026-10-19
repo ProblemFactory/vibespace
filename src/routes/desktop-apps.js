@@ -93,9 +93,10 @@
  *                                     Windows window back, no focus)
  *   POST /api/desktop/machine-desktop/settings-open {host, pane}   lane stream-mac-stall: 「打开系统设置」 — the Mac shows that
  *                                     Settings pane itself (pane: screen | accessibility) — {ok, pane} | not_mac | agent_too_old
- *   POST /api/desktop/machine-desktop/stream/start {host, source?, fp16?}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
+ *   POST /api/desktop/machine-desktop/stream/start {host, source?, fp16?, hdr?}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
  *                                     (or `source: {kind:'window', id}` = ONE window — lane stream-p3m-build on a Mac,
- *                                     stream-p2w-build on Windows; `fp16` = a Windows window's FP16 road, off)
+ *                                     stream-p2w-build on Windows; `fp16` = a Windows window's FP16 road, off; `hdr` = 「HDR 直通」 —
+ *                                     lane stream-hdr-passthrough: AV1 10-bit PQ where the machine can and the browser answers it)
  *                                     as a WebRTC stream from its agent — {take: false, code, why} (the window shows the VNC
  *                                     picture) | {take: true, key, sid, offer, source, codec, seq}; then, by `key`:
  *   POST …/stream/answer {key, sdp} · …/stream/candidate {key, candidate} · …/stream/restart {key} (an ICE-restart offer) ·
@@ -542,7 +543,7 @@ router.post('/api/desktop/machine-desktop/stream/start', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
   const wr = webrtcOf(res); if (!wr) return;
   const b = req.body || {};
-  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null, source: b.source == null ? null : b.source, fp16: b.fp16 === true, after: typeof b.after === 'string' && /^st[a-z0-9]{1,40}$/.test(b.after) ? b.after : null })); } catch (e) { streamFail(res, e); } // source: a display / ONE window (a Mac's — lane stream-p3m-build; a Windows machine's — stream-p2w-build)
+  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null, source: b.source == null ? null : b.source, fp16: b.fp16 === true, hdr: b.hdr === true, after: typeof b.after === 'string' && /^st[a-z0-9]{1,40}$/.test(b.after) ? b.after : null })); } catch (e) { streamFail(res, e); } // source: a display / ONE window (a Mac's — lane stream-p3m-build; a Windows machine's — stream-p2w-build)
 });
 // lane stream-p2w-build (design q-041 r3 §3 P2w): ONE application window of the machine as the stream — the picker's list (the
 // machine's application windows through its agent's `stream-windows` op) and 「还原它」 (a minimized one back, never the focus)

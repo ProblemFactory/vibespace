@@ -41,7 +41,9 @@ function agentOr401(req, res) {
 }
 const STATUS = { not_granted: 403, ask_denied: 403, ask_changed: 409, ask_expired: 403, ask_unfiled: 409, groups_unreadable: 409, fork_pending: 409, ask_pending: 409, no_machine: 404, no_exits: 404, ambiguous: 400, offline: 503, run_failed: 502, spawn_failed: 502, bad_command: 400, unknown_shape: 409, conversation_gone: 410, remote_session: 409,
   // lane exit-transfer: pull / push refusals
-  too_big: 413, not_a_file: 409, local_path_refused: 403, exists: 409, hash_mismatch: 502, transfer_failed: 502, bad_path: 400, target_busy: 409 };
+  too_big: 413, not_a_file: 409, local_path_refused: 403, exists: 409, hash_mismatch: 502, transfer_failed: 502, bad_path: 400, target_busy: 409,
+  // lane device-allow-flags: the machine's OWN allow list refused it (the sentence names the flag + the re-run)
+  op_not_allowed: 403 };
 // lane-exit-run-output E2: a spawn failure's answer carries the error, the interpreter, the platform and the shell's exit code (the CLI exits by it)
 const agentFail = (res, e) => res.status(STATUS[e && e.code] || 400).json({ error: (e && e.message) || 'failed', code: (e && e.code) || 'failed', ...(e && e.grant ? { grant: e.grant } : {}), ...(e && e.has ? { has: e.has } : {}), ...(e && e.spawnError ? { spawnError: e.spawnError, interpreter: e.interpreter || null, platform: e.platform || null, exitCode: e.exitCode } : {}) });
 app.get('/api/agent/exit', (req, res) => {
@@ -204,6 +206,19 @@ app.get('/api/exits/asks', (req, res) => {
 app.post('/api/exits/asks/:askId', (req, res) => {
   if (isAnyBearer(req)) return res.status(403).json({ error: 'only the user answers this — an agent cannot approve its own command', code: 'human_only' });
   try { res.json(exitProxy.answerAsk(req.params.askId, { answer: (req.body || {}).answer, by: 'user' })); }
+  catch (e) { cookieFail(res, e); }
+});
+// lane hub-act-ask (design q-042 D4): a hub act on a paired machine nobody clicked, held while its card is up — a PERSON's answer
+// (once | always | deny). Cookie ONLY: any bearer (vsst_ / jbt_) is refused human_only (an agent never approves an act); who
+// answered (the sign-in's handle) rides the act's audit line
+app.get('/api/hub-acts/asks', (req, res) => {
+  if (isAnyBearer(req)) return res.status(403).json({ error: 'only the user answers these', code: 'human_only' });
+  res.json({ asks: hosts.hubActs ? hosts.hubActs.list() : [] });
+});
+app.post('/api/hub-acts/asks/:askId', async (req, res) => {
+  if (isAnyBearer(req)) return res.status(403).json({ error: 'only the user answers this — an agent cannot approve a hub act', code: 'human_only' });
+  if (!hosts.hubActs) return res.status(503).json({ error: 'hub-act asks are not wired on this server', code: 'no_asks' });
+  try { res.json(await hosts.hubActs.answer(req.params.askId, { answer: (req.body || {}).answer, by: 'user', answeredBy: DAU.byOfReq(req) })); }
   catch (e) { cookieFail(res, e); }
 });
 setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache

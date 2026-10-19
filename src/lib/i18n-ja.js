@@ -2295,7 +2295,13 @@ export default {
   "Userspace (proxy only)": "ユーザースペース（プロキシのみ）",
   "Networking": "ネットワークモード",
   "tailscale up flags": "tailscale up フラグ",
-  "Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/proxy) are ignored.": "追加の tailscale up フラグ——次回のログイン/モード変更時に適用。管理対象の到達性フラグ（--socket/--tun/--accept-routes/proxy）は無視されます。",
+  "Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/--accept-dns/proxy) are ignored.": "追加の tailscale up フラグ——次回のログイン/モード変更時に適用。管理対象の到達性フラグ（--socket/--tun/--accept-routes/--accept-dns/proxy）は無視されます。",
+  "Let Tailscale set this machine's DNS (MagicDNS)": "このマシンの DNS を Tailscale に任せる（MagicDNS）",
+  "Off: Tailscale never changes /etc/resolv.conf, and tailnet names still reach ssh hosts through the plugin. On: a machine of your own in kernel mode resolves through Tailscale (100.100.100.100). Never on a cluster instance.": "オフ：Tailscale は /etc/resolv.conf を変えず、tailnet の名前はプラグイン経由で ssh ホストに届きます。オン：自分のマシンのカーネルモードで Tailscale（100.100.100.100）経由の名前解決になります。クラスターのインスタンスでは常にオフ。",
+  "DNS: Tailscale MagicDNS": "DNS：Tailscale MagicDNS",
+  "DNS: Tailscale still holds /etc/resolv.conf — turn Tailscale off and on to restore it": "DNS：/etc/resolv.conf はまだ Tailscale のもの——Tailscale をオフにしてオンに戻すと元に戻ります",
+  "DNS: the cluster resolver (Tailscale names resolve through the plugin)": "DNS：クラスターのリゾルバー（Tailscale の名前はプラグイン経由で解決）",
+  "DNS: this machine's resolver (Tailscale names resolve through the plugin)": "DNS：このマシンのリゾルバー（Tailscale の名前はプラグイン経由で解決）",
   "via tunnel": "トンネル経由",
   "via address": "アドレス経由",
   "Rides the device agent link — no public address or VPN needed": "デバイスエージェントのリンクを経由——公開アドレスや VPN は不要",
@@ -9369,4 +9375,49 @@ export default {
   "{machine} refused an agent update with a bad signature ({from} → {to})": "{machine} が署名の正しくないエージェント更新を拒否しました（{from} → {to}）", // lane device-act-audit
   "This VibeSpace sent {machine} a device agent ({from} → {to}, asked by {by}) that is not signed by the release key; the machine refused it and keeps running {from}.": "この VibeSpace が {machine} にリリース鍵の署名がないデバイスエージェント（{from} → {to}、依頼元 {by}）を送りました。マシンは拒否し、{from} のまま動いています。", // lane device-act-audit
   "Someone may control this hub: read the machine card's Activity…, and rotate this hub's secrets before anything else.": "誰かがこの hub を操作している可能性があります：マシンカードの「アクティビティ…」を確認し、まずこの hub のシークレットをすべて入れ替えてください。", // lane device-act-audit
+  "commands": "コマンド", // lane device-allow-flags
+  "files": "ファイル", // lane device-allow-flags
+  "keyboard & mouse": "キーボード・マウス", // lane device-allow-flags
+  "LAN": "LAN", // lane device-allow-flags
+  "updates": "更新", // lane device-allow-flags
+  "Allows everything — paired before allow lists existed": "すべて許可 — 許可リストより前にペアリング", // lane device-allow-flags
+  "Allows only reads — its allow list could not be read": "読み取りのみ許可 — 許可リストを読めません", // lane device-allow-flags
+  "Allows everything": "すべて許可", // lane device-allow-flags
+  "Allows only reads | Off: {off}": "読み取りのみ ｜ オフ：{off}", // lane device-allow-flags
+  "Allows: {on} | Off: {off}": "許可：{on} ｜ オフ：{off}", // lane device-allow-flags
+  "Only re-running the pairing command on {machine} changes this list (Remote → {machine} → Pairing command → tick what it may do).": "このリストを変えられるのは {machine} でペアリングコマンドを再実行したときだけです（リモート → {machine} → ペアリングコマンド → 許可する項目にチェック）。", // lane device-allow-flags
+  "What this VibeSpace may do on the device": "この VibeSpace がデバイスでできること", // lane device-allow-flags
+  "Sessions need commands and files — a conversation runs commands there": "セッションにはコマンドとファイルが必要です — 会話はそこでコマンドを実行します", // lane device-allow-flags
+  "The device keeps this list; only running the command again on the device changes it — this VibeSpace cannot.": "このリストはデバイスが保持します。変えられるのはデバイスでコマンドを再実行したときだけで、この VibeSpace からは変えられません。", // lane device-allow-flags
+  "On a cluster instance SOCKS, LAN and keyboard & mouse start off.": "クラスタインスタンスでは SOCKS・LAN・キーボード・マウスは最初オフです。", // lane device-allow-flags
+  "refused: the machine’s own allow list leaves it off": "拒否：マシン自身の許可リストでオフです", // lane device-allow-flags
+  "refused: that is the machine’s own allow list": "拒否：それはマシン自身の許可リストです", // lane device-allow-flags
+  "{who} wants to run a command on {machine}": "{who} が {machine} でコマンドを実行しようとしています", // lane hub-act-ask
+  "{who} wants to change files on {machine}": "{who} が {machine} のファイルを変更しようとしています", // lane hub-act-ask
+  "{who} wants to use the keyboard, mouse or windows of {machine}": "{who} が {machine} のキーボード・マウス・ウィンドウを操作しようとしています", // lane hub-act-ask
+  "{who} wants to reach other hosts through {machine}": "{who} が {machine} 経由で他のホストに接続しようとしています", // lane hub-act-ask
+  "{who} wants to share a folder or a browser from {machine}": "{who} が {machine} からフォルダーまたはブラウザーを共有しようとしています", // lane hub-act-ask
+  "{who} wants to install or remove an app on {machine}": "{who} が {machine} にアプリをインストールまたは削除しようとしています", // lane hub-act-ask
+  "{who} wants to update the device agent on {machine}": "{who} が {machine} のデバイスエージェントを更新しようとしています", // lane hub-act-ask
+  "It would: {summary} — asked by {by}.": "内容：{summary} — 依頼元：{by}。", // lane hub-act-ask
+  "Allow once lets it go ahead (with any act of the same kind waiting beside it). Always on this machine sets Hub automation of {machine} to Always allow — every kind, no more asks. Deny refuses it. No answer in 60 s: refused.": "「1 回だけ許可」でこの操作を実行します（同じ種類で待っている操作も）。「このマシンでは常に許可」は {machine} の「Hub 自動化」を「常に許可」にします — すべての種類で、以後確認しません。「拒否」で実行しません。60 秒以内に応答がなければ拒否されます。", // lane hub-act-ask
+  "Always on this machine": "このマシンでは常に許可", // lane hub-act-ask
+  "Always allowed on {machine} — its Hub automation is Always allow now": "{machine} では常に許可しました — 「Hub 自動化」は「常に許可」になりました", // lane hub-act-ask
+  "Sets Hub automation of this machine to Always allow — every kind, no more asks": "このマシンの「Hub 自動化」を「常に許可」にします — すべての種類で、以後確認しません", // lane hub-act-ask
+  "Hub automation": "Hub 自動化", // lane hub-act-ask
+  "What VibeSpace does on {machine} when no person clicked: its own upkeep, background jobs, and agents' tools other than the two lists above. Ask me each time = an urgent card in \"For you\" (one per kind, 60 s, then refused). Your own clicks never ask.": "誰もクリックしていないときに VibeSpace が {machine} で行うこと：VibeSpace 自身の保守、バックグラウンドジョブ、上の 2 つのリスト以外のエージェントのツール。「毎回確認する」=「あなた宛て」に緊急カード（種類ごとに 1 枚、60 秒で拒否）。あなた自身のクリックは確認しません。", // lane hub-act-ask
+  "Not set — the default in Settings applies (Integration → Hub automation on paired machines).": "未設定 — 設定の既定値に従います（連携 → ペアリング済みマシンの Hub 自動化）。", // lane hub-act-ask
+  "Not set — this cluster instance asks by default.": "未設定 — クラスターインスタンスでは既定で毎回確認します。", // lane hub-act-ask
+  "Not set — this local instance allows by default.": "未設定 — ローカルインスタンスでは既定で許可します。", // lane hub-act-ask
+  "{n} act(s) wait for your answer in \"For you\"": "{n} 件の操作が「あなた宛て」で応答を待っています", // lane hub-act-ask
+  "Auto (a cluster instance asks, a local one does not)": "自動（クラスターインスタンスは毎回確認、ローカルは確認しない）", // lane hub-act-ask
+  "Hub automation on paired machines (default)": "ペアリング済みマシンの Hub 自動化（既定）", // lane hub-act-ask
+  "What VibeSpace itself, its background jobs and agents' tools may do on a paired machine without your click (run a command, change files, use its keyboard, install an app, update its agent …), for every machine whose \"Who can use it\" dialog does not set Hub automation. Ask me each time = an urgent card in For you, one per machine and kind, refused after 60 s. Your own clicks never ask; vibespace-exit follows its own two lists.": "VibeSpace 自身、そのバックグラウンドジョブ、エージェントのツールが、あなたのクリックなしにペアリング済みマシンで行えること（コマンドの実行、ファイルの変更、キーボードの操作、アプリのインストール、エージェントの更新 …）。「使える会話」ダイアログで「Hub 自動化」を設定していないすべてのマシンに適用されます。「毎回確認する」=「あなた宛て」に緊急カード（マシンと種類ごとに 1 枚、60 秒で拒否）。あなた自身のクリックは確認しません。vibespace-exit は独自の 2 つのリストに従います。", // lane hub-act-ask
+  "HDR passthrough": "HDR パススルー", // lane stream-hdr-passthrough
+  "Show this machine’s HDR as it is — AV1 10-bit PQ at its own brightness (this screen is HDR and this browser decodes it in hardware)": "マシンの HDR をそのまま表示 — AV1 10 ビット PQ、マシンの画面と同じ明るさ（この画面は HDR で、ブラウザーがハードウェアでデコードできます）", // lane stream-hdr-passthrough
+  "HDR passthrough fell back: this browser cannot decode it": "HDR パススルーを解除しました：このブラウザーではデコードできません", // lane stream-hdr-passthrough
+  "The machine sent AV1 10-bit PQ and this browser decoded no frame of it in 2 s — the stream restarted as the SDR picture; turn 「HDR passthrough」 on to try again": "マシンは AV1 10 ビット PQ を送りましたが、このブラウザーは 2 秒間 1 フレームもデコードできませんでした — SDR の画面で再開しました。もう一度「HDR パススルー」をオンにすると再試行します", // lane stream-hdr-passthrough
+  "HDR passthrough: AV1 10-bit PQ, at the brightness the machine’s display shows": "HDR パススルー：AV1 10 ビット PQ、マシンの画面と同じ明るさ", // lane stream-hdr-passthrough
+  "HDR": "HDR", // lane stream-hdr-passthrough
+  "Passthrough · {transfer} {bits}-bit · {primaries}": "パススルー · {transfer} {bits} ビット · {primaries}", // lane stream-hdr-passthrough
 };

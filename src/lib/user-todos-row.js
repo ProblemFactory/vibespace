@@ -106,6 +106,16 @@ const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
     + (i.action.askId ? `<div class="ut-exit-answer"><button type="button" class="ut-act ut-action-exit ut-exit-allow" data-answer="allow">${escHtml(t('Allow'))}</button><button type="button" class="ut-act ut-action-exit ut-exit-deny" data-answer="deny">${escHtml(t('Deny'))}</button></div>` : '')
     + `<div class="ut-exit-note">${escHtml(t('Nothing runs until you answer. After 60 s it is refused.'))}</div>` : '');
 
+/** lane hub-act-ask (design q-042 D4): a hub act nobody clicked, HELD on a cluster instance — answered where it appears:
+ *  Allow once / Always on this machine / Deny; its words (what it would do, who asked, what each answer does) shown whole
+ *  ABOVE them, never folded below (the exit-ask lesson). Allow once / Always are armed like every Allow (press-arm). */
+const HUB_ANSWERS = ['once', 'always', 'deny'];
+const hubAnswerWord = (a, t) => (a === 'once' ? t('Allow once') : a === 'always' ? t('Always on this machine') : t('Deny'));
+const hubAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'hub-act-ask'
+  ? `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
+    + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${HUB_ANSWERS.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t))}</button>`).join('')}</div>` : '')
+  : '');
+
 /** lane browser-propose (2026-09-30): the agent's PROPOSAL, answered where it appears — its words (the card's, line for
  *  line: what Approve runs) ABOVE Approve / Reject, never folded (the exit-ask lesson: a folded detail below the button
  *  read as the whole story). ONE primary (Approve), a quiet Reject; open items only. */
@@ -185,7 +195,7 @@ function partsOf(entry, ctx) {
   // (an exit ask's detail IS its command — shown whole above its Allow / Deny, never again folded below them)
   const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${linkedHtml(detail, { escape: escHtml })}</div></details>` : '';
   // lane browser-propose: an open proposal's words are shown whole ABOVE its Approve (proposalAskHtml) — never folded again below
-  const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal') && !resolved ? '' : detailHtml;
+  const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal' || i.action.type === 'hub-act-ask') && !resolved ? '' : detailHtml; // lane hub-act-ask: shown whole above its answers
   // OPTION CHIPS (design-user-inbox-reply D3a): one click = a reply whose text
   // IS the label. Addressed by INDEX — the label never rides an attribute.
   const opts = !resolved && rs.show && Array.isArray(i.options) && i.options.length
@@ -204,7 +214,7 @@ function partsOf(entry, ctx) {
     meta = (notice ? `<span class="ut-sess">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
       + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '') + judgedChipHtml(i, t, ctx);
   }
-  const body = `<div class="ut-text">${card ? escHtml(words) : linkedHtml(words, { escape: escHtml })}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
+  const body = `<div class="ut-text">${card ? escHtml(words) : linkedHtml(words, { escape: escHtml })}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}">⤢</button>`;
   // design 009: a card's Reply / Mark done / Ignore / Copy / Clear content… live behind its ⋯ (two buttons on its face)

@@ -35,6 +35,13 @@ const { sessionKeyOf, callerKeys, normPrincipal, principalKey, principalsNow } =
 
 const GRANTS = Object.freeze(['use', 'run']);
 const MODES = Object.freeze(['nobody', 'everyone', 'only']);
+// lane hub-act-ask (design q-042 D4): THE THIRD LIST, 「Hub 自动化」 — what VibeSpace itself, its background jobs and agents' other
+// tools may do on the machine without a person's click: nobody | everyone | ask (PURE src/hub-act-policy.js judges; `default`
+// = never set — the instance's default applies: a cluster instance asks, a local one does not). Stored `exit.hub = {mode}`
+// only when set; a bad stored mode makes the WHOLE access `unknown` (fail closed — the hub list then asks)
+const HP = require('./hub-act-policy.js');
+const HUB_MODES = HP.POLICIES;
+const normHub = (x) => (x === undefined || x === null ? { mode: 'default' } : x && typeof x === 'object' && !Array.isArray(x) && HUB_MODES.includes(x.mode) ? { mode: x.mode } : null);
 const WHO_MAX = 64;
 const REFUSALS = Object.freeze(['not_granted', 'groups_unreadable', 'unknown_shape', 'fork_pending', 'no_machine', 'ambiguous',
   'no_exits', 'offline', 'ask_pending', 'ask_denied', 'ask_changed', 'ask_expired', 'ask_settled', 'ask_unfiled', 'human_only',
@@ -43,7 +50,9 @@ const REFUSALS = Object.freeze(['not_granted', 'groups_unreadable', 'unknown_sha
   // lane exit-transfer (design 013 B): pull / push refusals, each by name
   'too_big', 'not_a_file', 'local_path_refused', 'exists', 'hash_mismatch', 'transfer_failed', 'bad_path',
   // fix r1: a second pull into a local file another pull is writing
-  'target_busy']);
+  'target_busy',
+  // lane device-allow-flags: the machine's OWN allow list leaves it off (the device's sentence names the flag + the re-run)
+  'op_not_allowed']);
 /** THE run bound: the device daemon kills a `run-cmd` child at 30 s (src/agentd/agentd.js `Math.min(…, 30000)`);
  *  the exit route used to promise 120 s and never got it. ONE number: the daemon's cap, the CLI's help, the card
  *  (test-architecture pins the daemon's literal to this). */
@@ -148,16 +157,16 @@ function normLastRun(x) {
  *   absent ⇒ nobody / nobody.
  */
 function exitAccessOf(h) {
-  if (!h || typeof h !== 'object') return { use: { mode: 'nobody', who: [] }, run: { mode: 'nobody', who: [], ask: false }, updatedAt: 0, lastRun: null };
+  if (!h || typeof h !== 'object') return { use: { mode: 'nobody', who: [] }, run: { mode: 'nobody', who: [], ask: false }, hub: { mode: 'default' }, updatedAt: 0, lastRun: null };
   if (h.exit !== undefined) {
     const e = h.exit;
     if (!e || typeof e !== 'object' || Array.isArray(e)) return { mode: 'unknown' };
-    const use = normGrant(e.use, 'use'), run = normGrant(e.run, 'run');
-    if (!use || !run) return { mode: 'unknown', lastRun: normLastRun(e.lastRun) };
-    return { use, run, updatedAt: Number(e.updatedAt) || 0, updatedBy: typeof e.updatedBy === 'string' ? e.updatedBy.slice(0, 20) : null, lastRun: normLastRun(e.lastRun) };
+    const use = normGrant(e.use, 'use'), run = normGrant(e.run, 'run'), hub = normHub(e.hub);
+    if (!use || !run || !hub) return { mode: 'unknown', lastRun: normLastRun(e.lastRun) };
+    return { use, run, hub, updatedAt: Number(e.updatedAt) || 0, updatedBy: typeof e.updatedBy === 'string' ? e.updatedBy.slice(0, 20) : null, lastRun: normLastRun(e.lastRun) };
   }
-  if (h.allowExit === true) return { use: { mode: 'everyone', who: [] }, run: { mode: 'everyone', who: [], ask: false }, updatedAt: 0, lastRun: null, legacy: true };
-  return { use: { mode: 'nobody', who: [] }, run: { mode: 'nobody', who: [], ask: false }, updatedAt: 0, lastRun: null };
+  if (h.allowExit === true) return { use: { mode: 'everyone', who: [] }, run: { mode: 'everyone', who: [], ask: false }, hub: { mode: 'default' }, updatedAt: 0, lastRun: null, legacy: true };
+  return { use: { mode: 'nobody', who: [] }, run: { mode: 'nobody', who: [], ask: false }, hub: { mode: 'default' }, updatedAt: 0, lastRun: null };
 }
 const isUnknown = (a) => !a || a.mode === 'unknown';
 
@@ -207,6 +216,7 @@ function exitStamp(access) {
     if (p === 'r') lines.push(JSON.stringify([p, 'ask', g.ask ? 1 : 0]));
     for (const w of g.who) lines.push(JSON.stringify([p, `${w.kind}:${w.id}`]));
   }
+  if (access.hub && access.hub.mode && access.hub.mode !== 'default') lines.push(JSON.stringify(['h', 'mode', access.hub.mode])); // lane hub-act-ask
   return lines.sort().join('\n');
 }
 /** The whole-list write's verdict on its base: absent = unconditional (a script); equal = ok; else list_changed
@@ -216,7 +226,7 @@ function exitBaseVerdict(access, base) {
   const now = exitStamp(access);
   if (typeof base === 'string' && base === now) return { ok: true };
   const keysOf = (stamp) => new Set(String(stamp || '').split('\n').map((l) => {
-    try { const v = JSON.parse(l); if (!Array.isArray(v)) return null; const g = v[0] === 'u' ? 'use' : v[0] === 'r' ? 'run' : v[0]; return v.length === 3 ? `${g}:${v[1]}=${v[2]}` : `${g}:${v[1]}`; } catch { return null; }
+    try { const v = JSON.parse(l); if (!Array.isArray(v)) return null; const g = v[0] === 'u' ? 'use' : v[0] === 'r' ? 'run' : v[0] === 'h' ? 'hub' : v[0]; return v.length === 3 ? `${g}:${v[1]}=${v[2]}` : `${g}:${v[1]}`; } catch { return null; }
   }).filter(Boolean));
   const was = keysOf(typeof base === 'string' ? base : ''), is = keysOf(now);
   return refuse('list_changed', {
@@ -234,10 +244,10 @@ function exitBaseVerdict(access, base) {
  * by the route BEFORE this (arriving here it is bad_principal). A grant absent from the body is kept.
  */
 function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return refuse('bad_grant', { error: 'send {use?: {mode, who?}, run?: {mode, who?, ask?}, base?}' });
-  const extra = Object.keys(body).filter((k) => !['use', 'run', 'base'].includes(k));
-  if (extra.length) return refuse('bad_grant', { error: extra.includes('on') ? 'exit access is two lists now — send use / run ({mode, who}), not {on}' : `unknown keys: ${extra.join(', ')} — send use / run / base` });
-  if (!('use' in body) && !('run' in body)) return refuse('bad_grant', { error: 'send use and/or run' });
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return refuse('bad_grant', { error: 'send {use?: {mode, who?}, run?: {mode, who?, ask?}, hub?: {mode}, base?}' });
+  const extra = Object.keys(body).filter((k) => !['use', 'run', 'hub', 'base'].includes(k));
+  if (extra.length) return refuse('bad_grant', { error: extra.includes('on') ? 'exit access is two lists now — send use / run ({mode, who}), not {on}' : `unknown keys: ${extra.join(', ')} — send use / run / hub / base` });
+  if (!('use' in body) && !('run' in body) && !('hub' in body)) return refuse('bad_grant', { error: 'send use, run and/or hub' });
   const cur = current || exitAccessOf(null);
   const bv = exitBaseVerdict(cur, body.base);
   if (!bv.ok) return bv;
@@ -273,7 +283,16 @@ function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
     next[grant] = out;
     changed[grant] = !was || JSON.stringify(was) !== JSON.stringify(out);
   }
-  const access = { use: next.use, run: next.run, updatedAt: Number(now) || Date.now(), updatedBy: by, lastRun: cur.lastRun || null };
+  // lane hub-act-ask: the third list — {mode: nobody | everyone | ask | default}; absent from the body ⇒ kept
+  let hub = isUnknown(cur) ? { mode: 'default' } : (cur.hub || { mode: 'default' });
+  if ('hub' in body) {
+    const g = body.hub;
+    if (!g || typeof g !== 'object' || Array.isArray(g)) return refuse('bad_grant', { grant: 'hub', error: 'hub must be {mode}' });
+    if (g.mode !== 'default' && !HUB_MODES.includes(g.mode)) return refuse('bad_mode', { grant: 'hub', error: `hub.mode is one of ${HUB_MODES.join(' | ')} | default` });
+    changed.hub = hub.mode !== g.mode;
+    hub = { mode: g.mode };
+  }
+  const access = { use: next.use, run: next.run, hub, updatedAt: Number(now) || Date.now(), updatedBy: by, lastRun: cur.lastRun || null };
   return { ok: true, access, changed };
 }
 /** The stored shape of an access (what hosts.json carries under `exit`) — `everyone` with the rows it keeps. */
@@ -281,6 +300,7 @@ function storedExit(access) {
   const kept = (g) => (g.mode === 'only' || (g.mode === 'everyone' && g.who.length) ? { who: g.who } : {});
   return { use: { mode: access.use.mode, ...kept(access.use) },
     run: { mode: access.run.mode, ask: !!access.run.ask, ...kept(access.run) },
+    ...(access.hub && HUB_MODES.includes(access.hub.mode) ? { hub: { mode: access.hub.mode } } : {}), // lane hub-act-ask: only when set
     updatedAt: access.updatedAt || 0, updatedBy: access.updatedBy || null, ...(access.lastRun ? { lastRun: access.lastRun } : {}) };
 }
 
@@ -598,6 +618,7 @@ function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', er
     case 'target_busy': return `${q(tp)} here is being written by another pull right now — nothing was copied; wait until that one ends, or pull to another local path`;
     case 'transfer_failed': return `the ${verb === 'push' ? 'push of' : 'pull of'} ${q(tp)} ${verb === 'push' ? 'to' : 'from'} ${M} stopped — ${String(error || 'the link failed').slice(0, 200)}; nothing was kept, run it again`;
     case 'local_path_refused': case 'bad_path': return String(error || code).slice(0, 400);
+    case 'op_not_allowed': return String(error || `${M}'s own allow list leaves this off — re-run its pairing command there with the flag ticked`).slice(0, 400); // lane device-allow-flags
     // lane device-upgrade-stuck: a Windows agent without run-shell CANNOT run a line (no `sh` there; it cannot pick cmd.exe)
     // — refused BEFORE anything is sent, by name: the machine, its agent, the first agent that can, the one step
     case 'device_agent_outdated':
@@ -698,7 +719,7 @@ function migrateExitAccess(h, { now = Date.now() } = {}) {
 
 module.exports = {
   agentVersionOf, reinstallStep,
-  GRANTS, MODES, WHO_MAX, REFUSALS, EXIT_RUN_TIMEOUT_MS, ASK_TTL_MS, CMD_MAX, LAST_RUN_CMD_MAX, ASK_STATES, WAY_OUT,
+  GRANTS, MODES, HUB_MODES, WHO_MAX, REFUSALS, EXIT_RUN_TIMEOUT_MS, ASK_TTL_MS, CMD_MAX, LAST_RUN_CMD_MAX, ASK_STATES, WAY_OUT,
   OUTPUT_HEAD_BYTES, RUNS_DEFAULT, RUNS_MAX, RUN_SHELL_CAP, CMD_FOLD_LINES, CMD_FOLD_CHARS,
   sessionKeyOf, callerKeys, principalsNow, cmdBytes, hiddenOrderOf, askDetailOf,
   encodedCommandOf, commandHeadOf,   // lane machine-card-fold

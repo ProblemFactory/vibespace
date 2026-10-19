@@ -6940,6 +6940,14 @@ label.chan-cap-row { cursor: default; }
 .device-pair-err { color: var(--red); font-size: 12px; min-height: 0; }
 .device-pair-err:empty { display: none; }
 .device-pair-os { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
+/* lane device-allow-flags: the pairing dialog's allow-list boxes (the command carries them) + the machine card's allow line */
+#device-pair-dialog .device-pair-allow { border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px 6px; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 2px 12px; min-width: 0; }
+#device-pair-dialog .device-pair-allow legend { font-size: 11px; color: var(--text-dim); padding: 0 4px; }
+#device-pair-dialog .device-pair-allow-flag { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; min-height: 28px; }
+#device-pair-dialog .device-pair-allow-flag:has(input:disabled) { opacity: .75; }
+#device-pair-dialog .device-pair-allow-note { flex-basis: 100%; margin: 2px 0 0; }
+.agents-mach-allow { flex-basis: 100%; order: 11; padding-left: 16px; white-space: normal; font-size: 10px; color: var(--text-dim); }
+.agents-mach-allow[data-allow-source="unreadable"] { color: var(--red); }
 #device-pair-dialog .device-pair-cmd { min-height: 110px; font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace; overflow-wrap: anywhere; width: 100%; box-sizing: border-box; }
 .dap { display: flex; flex-direction: column; gap: 2px; }
 .dap-head { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px; }
@@ -7364,6 +7372,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 /* lane desktop-v2-latency: the ⌨ toggle, the ladder's rung, the slow-link chip, the comparison row (the status chip opens it), full screen */
 .desktop-strip-keys[aria-pressed="true"] { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }
 .desktop-strip-keys.is-locked { background: var(--accent, #3b82f6); color: #fff; }
+.desktop-strip-hdr-pass[aria-pressed="true"] { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); } /* lane stream-hdr-passthrough: 「HDR 直通」 on */
 .desktop-strip-status[role="button"] { cursor: pointer; }
 .desktop-strip-rung, .desktop-strip-slow { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text-secondary); }
 .desktop-strip-rung[data-rung="sharp"], .desktop-strip-rung[data-rung="balanced"] { color: var(--text); }

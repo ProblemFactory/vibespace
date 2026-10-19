@@ -212,6 +212,7 @@
   "/api/hosts/:id/recent-cwds",
   "/api/hosts/:id/sessions",
   "/api/hosts/bootstrap-steps",
+  "/api/hub-acts/asks",
   "/api/incidents",
   "/api/instance-url",
   "/api/integrations",

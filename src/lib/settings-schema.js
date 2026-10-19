@@ -870,6 +870,18 @@ const SETTINGS_SCHEMA = {
     description: t('Agents with "Run commands on it" on a paired machine can copy one file at a time between that machine and this one (vibespace-exit pull / push — sha256-checked, shown as a card and in the machine\'s command list). A bigger file is refused and nothing is copied. Default 1024 MB (1 GB).'),
     category: t('Integration'), liveApply: true,
   },
+  // lane hub-act-ask (design q-042 D4, owner ② 2026-10-19): what a paired machine that never set its 「Hub 自动化」 list follows —
+  // auto = by the instance's kind (a cluster instance asks, a local one does not); PURE src/hub-act-policy.js reads it
+  'remote.hubAutomationDefault': {
+    type: 'enum', default: 'auto', options: [
+      { value: 'auto', label: t('Auto (a cluster instance asks, a local one does not)') },
+      { value: 'ask', label: t('Ask me each time') },
+      { value: 'everyone', label: t('Always allow') },
+      { value: 'nobody', label: t('Never') },
+    ], label: t('Hub automation on paired machines (default)'),
+    description: t('What VibeSpace itself, its background jobs and agents\' tools may do on a paired machine without your click (run a command, change files, use its keyboard, install an app, update its agent …), for every machine whose "Who can use it" dialog does not set Hub automation. Ask me each time = an urgent card in For you, one per machine and kind, refused after 60 s. Your own clicks never ask; vibespace-exit follows its own two lists.'),
+    category: t('Integration'), liveApply: true,
+  },
   'agents.jobNotify': {
     type: 'boolean', default: true,
     label: t('Background jobs: notify the owner conversation'),

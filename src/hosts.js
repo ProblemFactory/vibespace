@@ -332,6 +332,29 @@ class HostManager {
     try { const h = hostId === 'local' ? null : this.get(hostId); if (h) machine = h.name || h.id; } catch { /* a removed row: its id */ }
     try { return this.deviceAudit.append({ ...line, hostId: String(hostId), machine }); } catch { return null; }
   }
+  /** lane device-allow-flags: the allow list a machine's agent STATES (every hello-ack — src/device-policy.js reportOf) kept on
+   *  its record as `devicePolicy` (the Machines card shows it, offline too). Persisted only when it moved. → true = moved. */
+  notePolicy(hostId, policy) {
+    const DPx = require('./device-policy.js');
+    const p = DPx.reportOf(policy);
+    let h = null; try { h = this.get(hostId); } catch { return false; }
+    if (!h || !p) return false;
+    const was = h.devicePolicy ? JSON.stringify([h.devicePolicy.allow, h.devicePolicy.source, h.devicePolicy.at]) : '';
+    if (was === JSON.stringify([p.allow, p.source, p.at])) return false;
+    h.devicePolicy = p;
+    try { this._save(); } catch (e) { console.warn('[hosts] save failed:', e.message); }
+    return true;
+  }
+  /** lane hub-act-ask: THE ASK's door of a REMOTE machine's device client (src/agentd/client.js `actGate`) — the asker
+   *  server.js puts on `hubActs` (src/server/hub-act-ask.js); none wired (a suite, a tool) ⇒ every act goes (the audit still
+   *  names who asked). `hostIdOf` = the row's id, or a function (a dial device's row is looked up at the act). */
+  actGateFor(hostIdOf) {
+    const id = () => (typeof hostIdOf === 'function' ? hostIdOf() : hostIdOf);
+    return {
+      check: (payload, o) => (this.hubActs ? this.hubActs.check(id(), payload, o) : Promise.resolve(null)),
+      verdict: (payload, o) => (this.hubActs ? this.hubActs.verdict(id(), payload, o) : { verdict: 'allow', reason: 'unwired' }),
+    };
+  }
   noteDial(deviceId, event, facts = {}) {
     const h = this.findByDeviceId(deviceId);
     if (!h) return null;
@@ -577,7 +600,7 @@ class HostManager {
    *  unrelated sessions), and long-lived pipes pin the master forever. */
   sshArgs(h, { tty = false, reverse = null, multiplex = false } = {}) {
     if (h && h.transport === 'dial') throw new Error(`"${h.name}" is a dial-out device — it has no ssh; this operation must ride the device link`);
-    const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22)];
+    const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22), ...this._tailnetOpts(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     if (multiplex) {
       args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
@@ -595,7 +618,7 @@ class HostManager {
   /** ssh option STRING for tools that take a transport command (rsync -e):
    *  everything sshArgs adds except the destination. */
   sshCmd(h) {
-    const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22)];
+    const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22), ...this._tailnetOpts(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     // rsync transports are short-lived per-op — ride the shared master too
     args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
@@ -603,6 +626,15 @@ class HostManager {
   }
 
   dest(h) { return `${h.user}@${h.host}`; }
+
+  /** A TAILNET NAME WITHOUT THE SYSTEM RESOLVER (lane tailscale-plugin-pod-dns): the tunnel plugin never takes over
+   *  the container's DNS, so `<host>.<tailnet>.ts.net` is answered by the plugin's own peer table (nameLookup — wired
+   *  to plugins.tunnelLookup) and ssh dials that IP; HostKeyAlias keeps known_hosts keyed by the name. [] otherwise. */
+  _tailnetOpts(h) {
+    let hit = null;
+    try { hit = typeof this.nameLookup === 'function' && h && h.host ? this.nameLookup(String(h.host)) : null; } catch { }
+    return hit && hit.ip ? ['-o', `HostName=${hit.ip}`, '-o', `HostKeyAlias=${h.host}`] : [];
+  }
 
   /** Run a read-only shell probe on ANY machine — ssh hosts via _ssh, dial
    *  devices via the device daemon's run-cmd (2.188.0: the Manage-Agents
@@ -1200,6 +1232,8 @@ class HostManager {
       onAct: (line) => this.noteAct(id, line), // lane device-act-audit: every act sent over this link = one line of data/device-audit.jsonl
       onUpgradeRefused: (from, to, info) => this.onAgentUpgrade?.('refused', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }), // lane device-bundle-signing
       onUpgradeTrusted: (from, to, info) => this.onAgentUpgrade?.('trusted', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }), // fix r2: a first trust (TOFU)
+      onPolicy: (p) => this.notePolicy(id, p), machine: () => h.name || id, // lane device-allow-flags: its stated allow list; its name in a refusal
+      actGate: this.actGateFor(id), // lane hub-act-ask: an act nobody clicked follows the machine's Hub automation list (asks on a cluster instance)
     });
     await dm.connect();
     this._devices.set(id, dm);

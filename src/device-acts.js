@@ -41,6 +41,11 @@ const SUMMARY_MAX = 240;      // characters of a line's summary
 const OUT_HEAD_BYTES = 200;   // bytes of a line's output head
 const BY_KINDS = Object.freeze(['human', 'agent', 'job', 'system']);
 const BY_RE = /^(human|agent|job|system):[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,159}$/;
+// lane hub-act-ask: what the ask said about an act (its line's `ask`) — asked and allowed once / always, denied, unanswered in
+// 60 s, not filed (For you refused the card), the machine's list is Never, refused in a background subject's quiet window,
+// the gate could not judge it
+const ASK_OUTCOMES = Object.freeze(['allowed', 'always', 'denied', 'expired', 'unfiled', 'never', 'quiet', 'error']);
+const askOf = (a) => (ASK_OUTCOMES.includes(a) ? a : null);
 
 // THE TABLE. A key is an op, or `op:action` for the ops whose action decides (fs-op, design-fs, desktop-serve,
 // browser-serve). tcp-connect is judged by its host (loopback = read, another host = act) in keyOf.
@@ -195,12 +200,13 @@ function answerOf(m) {
 }
 const codeOf = (c) => (c == null ? null : typeof c === 'number' && Number.isFinite(c) ? c : String(c).replace(/[^\w.-]/g, '').slice(0, 40) || null);
 /** THE audit line (both ends; the device's has no answer fields). */
-function lineOf({ at, hostId = null, machine = null, payload, by, ok = null, code = null, outHead = '', ms = null } = {}) {
+function lineOf({ at, hostId = null, machine = null, payload, by, ok = null, code = null, outHead = '', ms = null, ask = null, answeredBy = null } = {}) {
   const p = payload || {};
   return {
     at: Number(at) || 0, ...(hostId != null ? { hostId: String(hostId).slice(0, 160) } : {}), ...(machine != null ? { machine: clean(machine, 80) } : {}),
     op: keyOf(p), layer: layerOf(p), by: validBy(by) ? by : null, summary: summaryOf(p),
     ...(ok === null ? {} : { ok: !!ok }), ...(code != null ? { code: codeOf(code) } : {}), ...(outHead ? { outHead: cutBytes(String(outHead), OUT_HEAD_BYTES) } : {}), ...(ms != null ? { ms: Math.max(0, Math.round(Number(ms) || 0)) } : {}),
+    ...(askOf(ask) ? { ask } : {}), ...(askOf(ask) && validBy(answeredBy) ? { answeredBy } : {}), // lane hub-act-ask: the ask's verdict + who answered
   };
 }
 /** A stored line, judged on the way out: bounded and re-redacted (idempotent). → the row, or null. */
@@ -213,6 +219,7 @@ function rowOf(l) {
     hostId: l.hostId == null ? null : String(l.hostId).slice(0, 160), machine: l.machine == null ? null : clean(l.machine, 80),
     op, layer, by: validBy(l.by) ? l.by : null, summary: clean(l.summary),
     ok: l.ok == null ? null : !!l.ok, code: codeOf(l.code), outHead: l.outHead ? cutBytes(redactSecrets(fold(String(l.outHead))).text, OUT_HEAD_BYTES) : '', ms: l.ms == null ? null : Math.max(0, Number(l.ms) || 0),
+    ...(askOf(l.ask) ? { ask: l.ask, ...(validBy(l.answeredBy) ? { answeredBy: l.answeredBy } : {}) } : {}),
   };
 }
 
@@ -232,7 +239,7 @@ function addressKeyOf(addr) {
 const isLoopbackAddr = (addr) => LOOPBACK_RE.test(String(addr || '').trim());
 
 module.exports = {
-  LAYERS, TABLE, ACTION_OPS, BY_KINDS, SUMMARY_MAX, OUT_HEAD_BYTES, CLIENT_ACT_METHODS, HOST_ARG_METHODS,
+  LAYERS, TABLE, ACTION_OPS, BY_KINDS, ASK_OUTCOMES, SUMMARY_MAX, OUT_HEAD_BYTES, CLIENT_ACT_METHODS, HOST_ARG_METHODS,
   keyOf, layerOf, needsBy, auditable, validBy, kindOf, byHuman, byAgent, byJob, bySystem, byOfWho,
   summaryOf, outHeadOf, answerOf, lineOf, rowOf, addressKeyOf, isLoopbackAddr,
 };

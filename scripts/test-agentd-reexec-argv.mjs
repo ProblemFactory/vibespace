@@ -46,7 +46,9 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
 {
   const src = fs.readFileSync(path.join(repo, 'src/agentd/agentd.js'), 'utf-8');
   // the spawn must go through reExecArgv, NOT a bare `[path.join(dir, ...)]`
-  const reExecLine = src.split('\n').find((l) => l.includes('spawn(process.execPath') && l.includes('reExecArgv'));
+  // lane win-device-boot-hidden: the ONE spawn lives in startSuccessor(argv, env); every caller hands it reExecArgv(…)
+  const succCalls = src.split('\n').filter((l) => l.includes('startSuccessor(') && !l.includes('function startSuccessor(') && !/^\s*\/\//.test(l));
+  const reExecLine = succCalls.length === 2 && succCalls.every((l) => l.includes('startSuccessor(reExecArgv(')) && src.includes('function startSuccessor(argv, env) {') && src.split('\n').some((l) => l.includes('spawn(process.execPath, argv, {'));
   check('agentd.js re-exec spawns via reExecArgv', !!reExecLine, 'the upgrade spawn no longer preserves argv');
   check('agentd.js imports reExecArgv from the side-effect-free module', /require\(['"]\.\/reexec['"]\)/.test(src));
   // the old bare-array form must be GONE from the upgrade spawn
@@ -190,8 +192,11 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
   }
   // agentd.js WIRES both halves (and nothing else listens/exits around them)
   const src = fs.readFileSync(path.join(repo, 'src/agentd/agentd.js'), 'utf-8');
-  const ho = src.indexOf('handOver({ server, log, exit: exitDaemon, spawnNext: () => {'), sp = src.indexOf('spawn(process.execPath, reExecArgv('), ho2 = src.indexOf('          } });', ho);
-  check('agentd.js: the re-exec spawn runs INSIDE handOver (close first), no bare exitDaemon(0) after it', ho > 0 && sp > ho && sp < ho2 && !/child\.unref\(\);\n\s*exitDaemon\(0\);/.test(src));
+  // lane win-device-boot-hidden: THE re-exec spawn lives in startSuccessor (one site); the self-upgrade calls it INSIDE
+  // handOver, the console self-heal calls it before any listener exists (the console step precedes the singleton)
+  const ho = src.indexOf('handOver({ server, log, exit: exitDaemon, spawnNext: () => {'), sp = src.indexOf("startSuccessor(reExecArgv(path.join(dir, path.basename(process.argv[1] || 'agentd.js')))", ho), ho2 = src.indexOf('          } });', ho);
+  const def = src.indexOf('function startSuccessor(argv, env) {'), heal = src.indexOf('reExec: () => { startSuccessor(reExecArgv('), listen = src.indexOf('listenWithRetry(server, SOCK');
+  check('agentd.js: the self-upgrade starts its successor INSIDE handOver (close first) through startSuccessor — the ONE re-exec spawn; the console self-heal starts its successor before any listener exists; no bare exitDaemon(0) after a spawn', ho > 0 && sp > ho && sp < ho2 && (src.match(/spawn\(process\.execPath, argv, \{/g) || []).length === 1 && src.indexOf('spawn(process.execPath, argv, {') > def && def > 0 && heal > 0 && heal < listen && !/child\.unref\(\);\n\s*exitDaemon\(0\);/.test(src));
   check('agentd.js: the listen goes through listenWithRetry gated by the singleton lock; the exit-on-any-error handler is gone', src.includes('listenWithRetry(server, SOCK, { log, lockIsOurs,') && /const lockIsOurs = \(\) => \{ try \{ return fs\.readFileSync\(LOCK/.test(src) && !src.includes("server.on('error', (e) => { log('server error: ' + e.message); process.exit(1); });") && !src.includes('server.listen(SOCK'));
   // CONTROLS (scripts/mutant-copy.mjs): each half removed — its leg goes red
   const rsrc = fs.readFileSync(path.join(repo, 'src/agentd/reexec.js'), 'utf-8');

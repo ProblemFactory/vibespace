@@ -383,6 +383,19 @@ function posixShells() {
 // kept for the daemon's life, a failed / timed-out probe answers its runs with utf-8-fallback and is NEVER cached — pre-lane
 // one probe timed out under a stall and its null stood for ever; at most one probe in flight). Built at the first run.
 let codePageAsk = null;
+// lane win-device-boot-hidden: the daemon's own PowerShell one-shots (the console look — sync, before the singleton; the
+// logon task — async, after the start): -EncodedCommand (nothing quoted through a command line), bounded, hidden
+const psOnceArgs = (script) => ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', HS.encodePs(script)];
+function psOnceSync(script) {
+  try { return { code: 0, stdout: String(require('child_process').execFileSync('powershell.exe', psOnceArgs(script), { windowsHide: true, timeout: 30000, maxBuffer: 64 * 1024, env: spawnEnv(), stdio: ['ignore', 'pipe', 'ignore'] })) }; }
+  catch (e) { return { code: e && typeof e.status === 'number' ? e.status : null, stdout: String((e && e.stdout) || '') }; }
+}
+function psOnce(script) {
+  return new Promise((resolve) => {
+    try { require('child_process').execFile('powershell.exe', psOnceArgs(script), { windowsHide: true, timeout: 60000, maxBuffer: 64 * 1024, env: spawnEnv() }, (err, stdout) => resolve({ code: err ? (typeof err.code === 'number' ? err.code : null) : 0, stdout: String(stdout || '') })); }
+    catch { resolve({ code: null, stdout: '' }); }
+  });
+}
 function consoleCodePage() {
   if (!codePageAsk) codePageAsk = XS.codePageAsker({ execFile: require('child_process').execFile, envOf: () => spawnEnv() });
   return codePageAsk;
@@ -451,11 +464,32 @@ const DA = require('../device-acts.js');
 const ACTS_LOG = path.join(STATE, 'acts.log');
 const ACTS_LOG_MAX = 2 * 1024 * 1024;
 let actsQ = Promise.resolve();
-function noteAct(msg) {
-  if (!msg || typeof msg !== 'object' || !DA.auditable(msg)) return;
-  let text; try { text = JSON.stringify(DA.lineOf({ at: Date.now(), payload: msg, by: msg.by })) + '\n'; } catch { return; }
+function noteAct(msg, code = null) {
+  if (!msg || typeof msg !== 'object' || (!DA.auditable(msg) && !code)) return; // a refused op is a line whatever its layer
+  let text; try { text = JSON.stringify(DA.lineOf({ at: Date.now(), payload: msg, by: msg.by, ...(code ? { ok: false, code } : {}) })) + '\n'; } catch { return; }
   actsQ = actsQ.then(() => fs.promises.stat(ACTS_LOG).then((st) => (st.size + Buffer.byteLength(text) > ACTS_LOG_MAX ? fs.promises.rename(ACTS_LOG, ACTS_LOG + '.1') : null), () => null))
     .then(() => fs.promises.appendFile(ACTS_LOG, text, { mode: 0o600 })).catch(() => { /* the act runs; a full disk loses the line, never the op */ });
+}
+// lane device-allow-flags (design q-042 §3 D5, owner decision ③): THIS machine's own allow list — the flags its hub may
+// use here (PURE src/device-policy.js), written ONLY by the install command the person runs on this machine
+// (`--allow …` → `--write-policy` below) and read ONCE, now: a file the hub rewrote through a shell waits for the next
+// start. Every op after `authed` is judged before dispatch; a refused one is answered with its flag + the re-run
+// sentence and never runs. No file = paired before the list existed (every flag, `legacy`); an unreadable one = reads only.
+const DP = require('../device-policy.js');
+const POLICY_FILE = path.join(STATE, DP.FILE);
+const POLICY = (() => { let text = null; try { text = fs.readFileSync(POLICY_FILE, 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') text = ''; } return DP.readOf(text); })();
+/** The verdict of one hub request: the file itself first (no hub write / move / removal reaches it, `files` on or not). */
+function policyVerdict(msg) {
+  if (DP.touchesPolicy(msg, { policyFile: POLICY_FILE, home: os.homedir(), pathMod: path })) return DP.ownRefusal(POLICY_FILE);
+  return DP.verdict(POLICY, msg, { platform: process.platform });
+}
+/** A refused request's answer, in the shape its caller waits for (an upgrade's failure, an id's, a channel's error). */
+function refuseOp(mux, msg, v) {
+  const why = { code: v.code, flag: v.flag || null, remedy: v.remedy || null, error: DP.sentenceOf(v) };
+  try { log(`refused ${DA.keyOf(msg)} (${v.code}${v.flag ? ' ' + v.flag : ''}) — asked by ${DA.validBy(msg.by) ? msg.by : 'nobody named'}`); } catch { }
+  if (msg.op === 'upgrade') { mux.control({ op: 'upgrade-failed', ...why }); return; }
+  if (msg.id != null) { mux.control({ op: 'op-refused', id: msg.id, ...why }); return; }
+  if (msg.chan != null && /^(open-session|open-pipe-session|attach-pipe-session)$/.test(String(msg.op))) mux.control({ op: 'session-error', chan: msg.chan, ...why });
 }
 // Windows has no unix sockets for node's net.listen — use a named pipe keyed
 // by the root path so several per-instance daemons coexist (EXPERIMENTAL).
@@ -534,6 +568,23 @@ if (process.argv.includes('--stdio')) {
 // and removed from the environment, so no session, tool or worker this daemon starts ever inherits one.
 const ENV_DIAL_TOKEN = String(process.env.VIBESPACE_DIAL_TOKEN || '');
 delete process.env.VIBESPACE_DIAL_TOKEN; delete process.env.VIBESPACE_HOST_TOKEN;
+// ── ALLOW LIST WRITER (lane device-allow-flags): `vibespace-device.js --write-policy <all | none | run,files,…>` — the
+// INSTALLER's one writer of state/policy.json (the person's --allow / -Allow, judged by THE parser in PURE
+// src/device-policy.js); atomic at 0600; an unknown flag writes nothing (exit 2, the flags it knows). No lock, no socket:
+// the daemon reads the file when it starts (the installer restarts it).
+if (process.argv.includes('--write-policy')) {
+  const r = DP.parseAllow(process.argv[process.argv.indexOf('--write-policy') + 1]);
+  if (!r.ok) { fs.writeSync(2, `✗ --allow: ${r.error}\n`); process.exit(2); }
+  try {
+    fs.mkdirSync(STATE, { recursive: true, mode: 0o700 });
+    const tmp = POLICY_FILE + '.tmp-' + process.pid;
+    try { fs.unlinkSync(tmp); } catch { }
+    fs.writeFileSync(tmp, JSON.stringify(DP.fileOf(r, { at: Date.now() })) + '\n', { mode: 0o600 });
+    fs.renameSync(tmp, POLICY_FILE);
+  } catch (e) { fs.writeSync(2, `✗ could not write ${POLICY_FILE}: ${e.message}\n`); process.exit(1); }
+  fs.writeSync(1, `→ allow list: ${DP.allowArg(r.allow)} (${POLICY_FILE})\n`);
+  process.exit(0);
+}
 // ── DIAL CHECK (lane-pairing ⑤): `vibespace-device.js --dial-check <url> --dial-token <t> [--timeout-ms 15000]`
 // — the installer runs the daemon's OWN dial once, BEFORE it writes dial.json / state/token / the service: ONE
 // attempt carrying `x-vibespace-dial-probe: 1` (the server answers 200 after the same token check and registers
@@ -593,6 +644,21 @@ function pidCmdline(pid) {
 // side-effect-free module so the regression test can import it without
 // executing the daemon.
 const { reExecArgv, repointCurrent, handOver, listenWithRetry } = require('./reexec');
+// lane win-device-boot-hidden: the daemon's OWN launch on Windows — the console look + the logon task (PURE rules + texts)
+const HS = require('./hidden-start.js');
+// THE RE-EXEC — the one site that starts this daemon's successor: the self-upgrade (beginUpgrade) and the console
+// self-heal at the start (lane win-device-boot-hidden). Each caller hands `reExecArgv(<script>)` (the script + EVERY
+// original flag); the successor is born sanitized (src/agent-env.js) with the caller's own names on top.
+function startSuccessor(argv, env) {
+  const { spawn } = require('child_process');
+  const child = spawn(process.execPath, argv, {
+    // windowsHide (lane device-upgrade-stuck): a DETACHED child on Windows gets its own console window — a
+    // visible black window whose close kills the daemon; the installer starts it hidden, so must the re-exec
+    detached: true, stdio: 'ignore', windowsHide: true,
+    env: { ...daemonEnv(process.env), ...env },
+  });
+  child.unref();
+}
 
 // THE RELEASE SIGNATURE (lane device-bundle-signing, design q-042 D2): an upgrade lands only when it is signed by a
 // release key THIS device trusts (src/agentd-signature.js) — or, on this machine's OWN socket (never the dial link),
@@ -765,6 +831,18 @@ if (process.argv.includes('--land-upgrade')) {
 }
 
 if (!process.argv.includes('--stdio') && !process.argv.includes('--dial-check') && !process.argv.includes('--land-upgrade')) {
+// lane win-device-boot-hidden: THE DAEMON ITSELF IS CONSOLE-LESS. A Windows daemon that writes to a console the person
+// can SEE (an old install's logon task: cmd.exe → Windows Terminal, 「vibespace-device」 — closing it ended the agent)
+// re-execs ONCE through the hidden road (startSuccessor, its successor marked so it never loops) and exits. Looked at
+// BEFORE the singleton, so the successor takes it; a hidden / windowless console, none, or a look that cannot tell ⇒ stay
+// (src/agentd/hidden-start.js consoleStep — the mark is one hop: daemonEnv drops it, so nothing past the successor sees it).
+HS.consoleStep({
+  platform: process.platform, marked: process.env.VIBESPACE_AGENTD_HIDDEN === '1',
+  attached: [0, 1, 2].some((fd) => { try { return require('tty').isatty(fd); } catch { return false; } }),
+  look: () => psOnceSync(HS.consoleProbeScript(process.pid)).code,
+  reExec: () => { startSuccessor(reExecArgv(process.argv[1] || __filename), { [HS.HIDDEN_MARK]: '1' }); exitDaemon(0); },
+  log,
+});
 if (!acquireSingleton()) {
   process.stderr.write(`vibespace-device: already running (pid ${blockingPid || '?'}, root ${ROOT})` +
     ' — a running daemon adopts a re-pair by itself within ~30s; to force-replace it: kill the pid and the installer/launchd restarts it\n');
@@ -804,6 +882,13 @@ if (!fs.existsSync(TRUST_FILE) && RK.RELEASE_KEYS.length) { try { pinTrust(RK.RE
 // THE FLOOR (fix r2, verify-r1 RED-1): the newest version this install ever ran — a release older than it lands only as
 // a signed rollback (landBundle). Raised here, at every start; a signed rollback below it leaves it where it was.
 try { let f = null; try { f = SIG.parseFloor(fs.readFileSync(FLOOR_FILE, 'utf-8')); } catch { } if (SIG.VERSION_RE.test(VERSION) && (!f || !f.floor || SIG.compareVersions(VERSION, f.floor) > 0)) { writeFloor({ floor: VERSION, honoured: f ? f.honoured : [] }); log(`release floor: ${VERSION} (the newest version this install ran)`); } } catch (e) { log(`release floor NOT written: ${e.message}`); }
+// lane win-device-boot-hidden: an old install's logon task starts this daemon through `cmd.exe` — a console window at every
+// logon. Re-registered ONCE with the hidden action (src/agentd/hidden-start.js ensureLogonTask: our task by name; absent ⇒
+// never created; a task under our name that starts something else ⇒ left alone; the hidden one already ⇒ nothing written).
+if (process.platform === 'win32') {
+  setTimeout(() => HS.ensureLogonTask({ root: ROOT, nodeExe: process.execPath, script: path.join(ROOT, 'current', path.basename(process.argv[1] || 'vibespace-device.js')), ps: psOnce, log })
+    .catch((e) => log('logon task check failed: ' + ((e && e.message) || e))), 3000);
+}
 
 // ── upgrade: receive a new bundle on chan 1, land it versioned, re-exec ──
 // verify-r1 C3: the re-exec ENDS this process's link on purpose. The dial loop reads this flag when its socket
@@ -866,7 +951,6 @@ function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { d
         // (userW-class wedge, masked most of the time by the launchd relaunch
         // winning the race — lost under rapid upgrade churn).
         setTimeout(() => {
-          const { spawn } = require('child_process');
           // lane win-upgrade-pipe: FREE THE ADDRESS, THEN START THE SUCCESSOR (src/agentd/reexec.js handOver) — on Windows
           // SOCK is a named pipe no unlink frees; the successor's listen died EADDRINUSE while this process still held it
           handOver({ server, log, exit: exitDaemon, spawnNext: () => {
@@ -879,13 +963,7 @@ function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { d
             // born under an older build is cleaned at the FOLLOWING re-exec or
             // a restart — while its CHILDREN are protected from the moment this
             // bundle runs, because spawnEnv() sanitizes its base regardless.
-            const child = spawn(process.execPath, reExecArgv(path.join(dir, path.basename(process.argv[1] || 'agentd.js'))), {
-              // windowsHide (lane device-upgrade-stuck): a DETACHED child on Windows gets its own console window — a
-              // visible black window whose close kills the daemon; the installer starts it hidden, so must the re-exec
-              detached: true, stdio: 'ignore', windowsHide: true,
-              env: { ...daemonEnv(process.env), VIBESPACE_AGENTD_VERSION: version },
-            });
-            child.unref();
+            startSuccessor(reExecArgv(path.join(dir, path.basename(process.argv[1] || 'agentd.js'))), { VIBESPACE_AGENTD_VERSION: version });
           } });
         }, 200);
       }
@@ -1686,6 +1764,7 @@ function serveConnection(sock, { dialed = false } = {}) {
           op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: VERSION,
           platform: process.platform, arch: process.arch, nodeVersion: process.version,
           posixShells: shells, // lane windows-device-fs verify-r1 F1: the shells THIS machine starts (the hub's door keys on it)
+          policy: DP.reportOf(POLICY), // lane device-allow-flags: THIS machine's allow list (read-only for the hub: it shows it, asks it first)
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
@@ -1694,7 +1773,9 @@ function serveConnection(sock, { dialed = false } = {}) {
         return;
       }
       if (!authed) { sock.end(); return; }
-      noteAct(msg); // lane device-act-audit: an act / code op from the hub = one line of state/acts.log (who asked, what)
+      const pv = policyVerdict(msg); // lane device-allow-flags: judged BEFORE dispatch (the hub asked first; this machine decides)
+      noteAct(msg, pv.ok ? null : pv.code); // lane device-act-audit: an act / code op from the hub = one line of state/acts.log (who asked, what)
+      if (!pv.ok) { refuseOp(mux, msg, pv); return; }
       if (msg.op === 'ok') return; // server accepted us as-is
       if (msg.op === 'upgrade') { upgrade = beginUpgrade(mux, msg, { dialed }); return; }
       if (msg.op === 'ping-info') { mux.control({ op: 'info', version: VERSION, pid: process.pid, uptime: process.uptime() }); return; }
@@ -2706,6 +2787,7 @@ listenWithRetry(server, SOCK, { log, lockIsOurs, onFatal: (e) => { log('server e
     try { const w = SOCKP.witnessPathOf(ROOT), tmp = w + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, SOCK + '\n', { mode: 0o600 }); fs.renameSync(tmp, w); } catch (e) { log('socket witness not written: ' + e.message); }
     log(`listening on ${SOCK} (${SOCK_PICK.via}, ${SOCK_PICK.bytes}/${SOCK_PICK.max} bytes)`);
   } else log('listening on ' + SOCK);
+  log(`allow list: ${DP.allowArg(POLICY.allow)} (${POLICY.source}${POLICY.source === 'install' ? ', ' + POLICY_FILE : ''})`); // lane device-allow-flags
 } });
 // desktop apps (lane C1): a daemon restarted (a self-upgrade, a crash) with a LIVE app session on its record re-adopts
 // it at boot — owning a detached session must not wait for the hub's next op (its idle/tick/teardown would lapse)

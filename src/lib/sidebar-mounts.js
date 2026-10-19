@@ -15,6 +15,7 @@ import { UI_ICONS } from './icons.js'; // lane host-stale-dialer: the second-dia
 import { keyFileWords } from './key-file-words.js'; // lane key-file-law-stores: .mounts-key cannot open a row's secret ⇒ the row says restore
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it: Windows ⇒ cmd.exe)
 import { enterSubmits } from './chat-enter-keys.js';
+import { FLAGS, SHOWN, IMPLIES, normalize, allowWord, allowArgOf } from './device-allow-words.js'; // lane device-allow-flags: the device's own allow list, ticked here
 
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
@@ -1437,7 +1438,7 @@ export function installSidebarMounts(Sidebar) {
     // Shared by "Pair a device" and the machine row's pairing sheet: fill a modal body with the per-OS installer
     // command for a mint result. lane-pairing ①: BOTH urls of every command are the address the user CHOSE
     // (`r.httpBase` + the bundle / installer paths, and `r.dialUrl`) — never location.origin, never a guess.
-    _fillPairCommandBody(body, close, r, { regenerated = false, deviceOs = null } = {}) {
+    _fillPairCommandBody(body, close, r, { regenerated = false, deviceOs = null, allowNow = null } = {}) {
       const httpBase = String(r.httpBase || '').replace(/\/$/, '');
       const dialUrl = String(r.dialUrl || '');
       // The full installer line: bundle + dial URL + BOTH tokens — the hostToken is what the daemon verifies OUR
@@ -1451,6 +1452,12 @@ export function installSidebarMounts(Sidebar) {
         linux: `curl -fsSL ${httpBase}/vibespace-device-install.sh | \\\n  VIBESPACE_DIAL_TOKEN=${r.dialToken} \\\n  VIBESPACE_HOST_TOKEN=${r.hostToken} \\\n  bash -s -- \\\n  --bundle-url ${httpBase}/vibespace-device.js \\\n  --dial '${dialUrl}'`,
         win: `& ([scriptblock]::Create((iwr -UseBasicParsing ${httpBase}/vibespace-device-install.ps1).Content)) \`\n  -BundleUrl ${httpBase}/vibespace-device.js \`\n  -Dial '${dialUrl}' \`\n  -DialToken ${r.dialToken} -HostToken ${r.hostToken}`,
       };
+      // lane device-allow-flags (design q-042 D5, owner ③): the command carries the device's OWN allow list — ticked below
+      // (default: the list the device itself states, else this instance kind's: a cluster's leaves SOCKS / LAN / keyboard
+      // & mouse off); the device keeps it, and only running the command again THERE changes it
+      let allow = normalize(Array.isArray(allowNow) ? allowNow : Array.isArray(r.allowDefault) ? r.allowDefault : FLAGS);
+      const cmdOf = (k) => CMDS[k] + (k === 'win' ? ` \`\n  -Allow ${allowArgOf(allow)}` : ` \\\n  --allow ${allowArgOf(allow)}`);
+      let curOs = null;
       const NOTES = {
         mac: tr('macOS: nothing to install first — the command brings its own Node if needed. No ssh, no FUSE.'),
         linux: tr('Linux: needs curl (or wget) — Node is installed automatically if the machine has none.'),
@@ -1482,7 +1489,7 @@ export function installSidebarMounts(Sidebar) {
       const guessOs = deviceOs || (/Mac/i.test(navigator.platform || '') ? 'mac' : /Win/i.test(navigator.platform || '') ? 'win' : 'linux');
       const chips = {};
       const setOs = (k) => {
-        ta.value = CMDS[k]; note.textContent = NOTES[k];
+        curOs = k; ta.value = cmdOf(k); note.textContent = NOTES[k];
         for (const [ck, el] of Object.entries(chips)) el.className = ck === k ? 'btn-create' : 'btn-cancel';
       };
       for (const [k, label] of [['mac', 'macOS'], ['linux', 'Linux'], ['win', 'Windows']]) {
@@ -1501,7 +1508,32 @@ export function installSidebarMounts(Sidebar) {
       const closeBtn = document.createElement('button');
       closeBtn.className = 'btn-cancel'; closeBtn.textContent = tr('Close'); closeBtn.onclick = () => close();
       act2.append(closeBtn, copy);
-      body.append(done, seg, ta, note, tail, act2);
+      // the allow list's boxes (a box `sessions` brings is ticked and held: a conversation runs commands and writes its tools)
+      const box = document.createElement('fieldset');
+      box.className = 'device-pair-allow';
+      const lg = document.createElement('legend');
+      lg.textContent = tr('What this VibeSpace may do on the device');
+      box.appendChild(lg);
+      const ticks = {};
+      const paintTicks = () => {
+        const held = new Set(allow.flatMap((f) => IMPLIES[f] || []));
+        for (const f of FLAGS) { ticks[f].checked = allow.includes(f); ticks[f].disabled = held.has(f); ticks[f].parentElement.title = held.has(f) ? tr('Sessions need commands and files — a conversation runs commands there') : ''; }
+      };
+      for (const f of SHOWN) {
+        const lab = document.createElement('label');
+        lab.className = 'device-pair-allow-flag';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.dataset.flag = f;
+        cb.onchange = () => { allow = normalize(cb.checked ? [...allow, f] : allow.filter((x) => x !== f)); paintTicks(); if (curOs) setOs(curOs); };
+        lab.append(cb, ' ' + allowWord(f));
+        ticks[f] = cb; box.appendChild(lab);
+      }
+      const allowNote = document.createElement('p');
+      allowNote.className = 'agents-note device-pair-allow-note';
+      allowNote.textContent = tr('The device keeps this list; only running the command again on the device changes it — this VibeSpace cannot.') + (r.clusterInstance ? ' ' + tr('On a cluster instance SOCKS, LAN and keyboard & mouse start off.') : '');
+      box.appendChild(allowNote);
+      paintTicks();
+      body.append(done, box, seg, ta, note, tail, act2);
       // verify-r5 A1: THIS command can be replaced while it is on screen (another window pressed Generate / Replace, or
       // another user) — the device row's generation moves past the one minted here: said on this sheet, once
       const gen = Number(r.generation) || 0;
@@ -1664,7 +1696,7 @@ export function installSidebarMounts(Sidebar) {
           const keep = !!(keepBox && keepBox.checked);
           const r = await api('/api/device/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: name, base: v.base, viaRelay: !!v.viaRelay, updateInPlace: keep, ...(keep ? { keepLinkSince: keepSince } : {}), expect }) });
           if (nameTick) clearInterval(nameTick);
-          this._fillPairCommandBody(body, close, r, { regenerated: existing, deviceOs: existing ? commandOsOf(h.dial && h.dial.lastAccept && h.dial.lastAccept.platform) : null });
+          this._fillPairCommandBody(body, close, r, { regenerated: existing, deviceOs: existing ? commandOsOf(h.dial && h.dial.lastAccept && h.dial.lastAccept.platform) : null, allowNow: existing && h.devicePolicy && h.devicePolicy.source === 'install' ? h.devicePolicy.allow : null }); // lane device-allow-flags: a re-pair keeps the device's own list
         } catch (e) {
           go.disabled = false; go.textContent = goWord;
           if (e && e.code === 'already_paired') raced = { deviceId: name, online: !!(e.body && e.body.online) };

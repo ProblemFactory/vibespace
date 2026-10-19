@@ -2295,7 +2295,13 @@ export default {
   "Userspace (proxy only)": "用户态（仅代理）",
   "Networking": "网络模式",
   "tailscale up flags": "tailscale up 参数",
-  "Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/proxy) are ignored.": "额外的 tailscale up 参数——下次登录/切换模式时生效。我们管理的可达性参数（--socket/--tun/--accept-routes/代理）会被忽略。",
+  "Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/--accept-dns/proxy) are ignored.": "额外的 tailscale up 参数——下次登录/切换模式时生效。我们管理的可达性参数（--socket/--tun/--accept-routes/--accept-dns/代理）会被忽略。",
+  "Let Tailscale set this machine's DNS (MagicDNS)": "让 Tailscale 接管本机 DNS（MagicDNS）",
+  "Off: Tailscale never changes /etc/resolv.conf, and tailnet names still reach ssh hosts through the plugin. On: a machine of your own in kernel mode resolves through Tailscale (100.100.100.100). Never on a cluster instance.": "关：Tailscale 从不改动 /etc/resolv.conf，tailnet 名字照样经插件连到 ssh 主机。开：你自己的机器在内核模式下经 Tailscale（100.100.100.100）解析。集群实例上永远不开。",
+  "DNS: Tailscale MagicDNS": "DNS：Tailscale MagicDNS",
+  "DNS: Tailscale still holds /etc/resolv.conf — turn Tailscale off and on to restore it": "DNS：/etc/resolv.conf 仍被 Tailscale 占着——关掉再打开 Tailscale 即可恢复",
+  "DNS: the cluster resolver (Tailscale names resolve through the plugin)": "DNS：集群解析器（Tailscale 名字经插件解析）",
+  "DNS: this machine's resolver (Tailscale names resolve through the plugin)": "DNS：本机解析器（Tailscale 名字经插件解析）",
   "via tunnel": "经隧道",
   "via address": "经地址",
   "Rides the device agent link — no public address or VPN needed": "走设备代理链路——无需公网地址或 VPN",
@@ -9370,4 +9376,49 @@ export default {
   "{machine} refused an agent update with a bad signature ({from} → {to})": "{machine} 拒绝了一个签名不对的代理更新（{from} → {to}）", // lane device-act-audit
   "This VibeSpace sent {machine} a device agent ({from} → {to}, asked by {by}) that is not signed by the release key; the machine refused it and keeps running {from}.": "这个 VibeSpace 向 {machine} 发送了一个没有发布钥签名的设备代理（{from} → {to}，由 {by} 要求）；机器拒绝了它，继续运行 {from}。", // lane device-act-audit
   "Someone may control this hub: read the machine card's Activity…, and rotate this hub's secrets before anything else.": "可能有人控制了这个 hub：查看机器卡片的「活动…」，并先轮换这个 hub 的所有密钥。", // lane device-act-audit
+  "commands": "命令", // lane device-allow-flags
+  "files": "文件", // lane device-allow-flags
+  "keyboard & mouse": "键鼠", // lane device-allow-flags
+  "LAN": "局域网", // lane device-allow-flags
+  "updates": "更新", // lane device-allow-flags
+  "Allows everything — paired before allow lists existed": "全部允许——配对早于允许清单", // lane device-allow-flags
+  "Allows only reads — its allow list could not be read": "只允许读取——它的允许清单读不出来", // lane device-allow-flags
+  "Allows everything": "全部允许", // lane device-allow-flags
+  "Allows only reads | Off: {off}": "只允许读取 ｜ 未开：{off}", // lane device-allow-flags
+  "Allows: {on} | Off: {off}": "允许：{on} ｜ 未开：{off}", // lane device-allow-flags
+  "Only re-running the pairing command on {machine} changes this list (Remote → {machine} → Pairing command → tick what it may do).": "只有在 {machine} 上重跑配对命令才能改这份清单（远程 → {machine} → 配对命令 → 勾选允许的事）。", // lane device-allow-flags
+  "What this VibeSpace may do on the device": "这个 VibeSpace 能在设备上做什么", // lane device-allow-flags
+  "Sessions need commands and files — a conversation runs commands there": "会话需要命令和文件——对话会在那里跑命令", // lane device-allow-flags
+  "The device keeps this list; only running the command again on the device changes it — this VibeSpace cannot.": "清单存在设备上；只有在设备上重跑命令才能改——这个 VibeSpace 改不了。", // lane device-allow-flags
+  "On a cluster instance SOCKS, LAN and keyboard & mouse start off.": "集群实例上 SOCKS、局域网和键鼠默认不开。", // lane device-allow-flags
+  "refused: the machine’s own allow list leaves it off": "已拒绝：机器自己的允许清单没开这一项", // lane device-allow-flags
+  "refused: that is the machine’s own allow list": "已拒绝：那是机器自己的允许清单", // lane device-allow-flags
+  "{who} wants to run a command on {machine}": "{who} 想在 {machine} 上运行命令", // lane hub-act-ask
+  "{who} wants to change files on {machine}": "{who} 想改动 {machine} 上的文件", // lane hub-act-ask
+  "{who} wants to use the keyboard, mouse or windows of {machine}": "{who} 想操作 {machine} 的键盘、鼠标或窗口", // lane hub-act-ask
+  "{who} wants to reach other hosts through {machine}": "{who} 想经 {machine} 连到别的主机", // lane hub-act-ask
+  "{who} wants to share a folder or a browser from {machine}": "{who} 想从 {machine} 共享一个文件夹或浏览器", // lane hub-act-ask
+  "{who} wants to install or remove an app on {machine}": "{who} 想在 {machine} 上安装或卸载应用", // lane hub-act-ask
+  "{who} wants to update the device agent on {machine}": "{who} 想更新 {machine} 上的设备代理", // lane hub-act-ask
+  "It would: {summary} — asked by {by}.": "要做的是：{summary} —— 由 {by} 发起。", // lane hub-act-ask
+  "Allow once lets it go ahead (with any act of the same kind waiting beside it). Always on this machine sets Hub automation of {machine} to Always allow — every kind, no more asks. Deny refuses it. No answer in 60 s: refused.": "「允许一次」放行这一次（连同正在等待的同类动作）。「这台机器总是允许」把 {machine} 的「Hub 自动化」设为「一直允许」——所有类别，以后不再问。「拒绝」则不执行。60 秒内不回答：拒绝。", // lane hub-act-ask
+  "Always on this machine": "这台机器总是允许", // lane hub-act-ask
+  "Always allowed on {machine} — its Hub automation is Always allow now": "已对 {machine} 总是允许——它的「Hub 自动化」现在是「一直允许」", // lane hub-act-ask
+  "Sets Hub automation of this machine to Always allow — every kind, no more asks": "把这台机器的「Hub 自动化」设为「一直允许」——所有类别，以后不再问", // lane hub-act-ask
+  "Hub automation": "Hub 自动化", // lane hub-act-ask
+  "What VibeSpace does on {machine} when no person clicked: its own upkeep, background jobs, and agents' tools other than the two lists above. Ask me each time = an urgent card in \"For you\" (one per kind, 60 s, then refused). Your own clicks never ask.": "没有人点击时 VibeSpace 在 {machine} 上做的事：它自己的维护、后台任务，以及上面两张名单之外的 agent 工具。「每次都问我」= 在「待你处理」里出一张紧急卡片（每类一张，60 秒后拒绝）。你自己的点击永远不问。", // lane hub-act-ask
+  "Not set — the default in Settings applies (Integration → Hub automation on paired machines).": "未设置——按设置里的默认（集成 → 已配对机器上的 Hub 自动化）。", // lane hub-act-ask
+  "Not set — this cluster instance asks by default.": "未设置——集群实例默认每次都问。", // lane hub-act-ask
+  "Not set — this local instance allows by default.": "未设置——本地实例默认允许。", // lane hub-act-ask
+  "{n} act(s) wait for your answer in \"For you\"": "{n} 个动作在「待你处理」里等你回答", // lane hub-act-ask
+  "Auto (a cluster instance asks, a local one does not)": "自动（集群实例每次都问，本地实例不问）", // lane hub-act-ask
+  "Hub automation on paired machines (default)": "已配对机器上的 Hub 自动化（默认）", // lane hub-act-ask
+  "What VibeSpace itself, its background jobs and agents' tools may do on a paired machine without your click (run a command, change files, use its keyboard, install an app, update its agent …), for every machine whose \"Who can use it\" dialog does not set Hub automation. Ask me each time = an urgent card in For you, one per machine and kind, refused after 60 s. Your own clicks never ask; vibespace-exit follows its own two lists.": "VibeSpace 自身、它的后台任务以及 agent 的工具在没有你点击时可以在已配对机器上做什么（运行命令、改文件、用它的键盘、安装应用、更新它的代理 …），适用于「谁能使用」对话框里没有设置「Hub 自动化」的每台机器。「每次都问我」= 在「待你处理」里出一张紧急卡片，每台机器每类一张，60 秒后拒绝。你自己的点击永远不问；vibespace-exit 按它自己的两张名单。", // lane hub-act-ask
+  "HDR passthrough": "HDR 直通", // lane stream-hdr-passthrough
+  "Show this machine’s HDR as it is — AV1 10-bit PQ at its own brightness (this screen is HDR and this browser decodes it in hardware)": "按机器的 HDR 原样显示——AV1 10 位 PQ，亮度与机器屏幕一致（这块屏是 HDR，且浏览器能硬解）", // lane stream-hdr-passthrough
+  "HDR passthrough fell back: this browser cannot decode it": "HDR 直通已回退：浏览器无法解码", // lane stream-hdr-passthrough
+  "The machine sent AV1 10-bit PQ and this browser decoded no frame of it in 2 s — the stream restarted as the SDR picture; turn 「HDR passthrough」 on to try again": "机器发出了 AV1 10 位 PQ，浏览器 2 秒内一帧也没解出——串流已改回 SDR 画面；再次打开「HDR 直通」可重试", // lane stream-hdr-passthrough
+  "HDR passthrough: AV1 10-bit PQ, at the brightness the machine’s display shows": "HDR 直通：AV1 10 位 PQ，亮度与机器屏幕一致", // lane stream-hdr-passthrough
+  "HDR": "HDR", // lane stream-hdr-passthrough
+  "Passthrough · {transfer} {bits}-bit · {primaries}": "直通 · {transfer} {bits} 位 · {primaries}", // lane stream-hdr-passthrough
 };

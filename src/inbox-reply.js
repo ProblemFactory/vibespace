@@ -56,7 +56,7 @@ const REPLY_WHY = Object.freeze({
 // audit why item-done-by-reply) while the agent read the "yes" as a new message.
 const REPLY_HIDDEN_CODES = Object.freeze(['no_session', 'job_item', 'card_item', 'exit_ask']);
 // The action kinds answered by their own buttons on the item (Allow / Deny), never by a typed reply.
-const ANSWER_ACTION_TYPES = Object.freeze(['exit-run-ask']);
+const ANSWER_ACTION_TYPES = Object.freeze(['exit-run-ask', 'hub-act-ask']); // lane hub-act-ask: a held hub act too (Allow once / Always on this machine / Deny)
 // The action kinds that are answered on a card, never by a typed reply.
 const CARD_ACTION_TYPES = Object.freeze(['helper-ask', 'main-ask']); // lane parked-ask-inbox: a conversation's own ask too
 // lane S1 verify r3: what a typed reply DOES to a helper's ask is the ask's own transition table's

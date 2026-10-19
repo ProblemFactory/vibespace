@@ -4,12 +4,15 @@
  * desktop window whose machine passes the rung (src/server/desktop-access.js streamRung — the agent's `stream-offer`
  * capability and a source) plays the machine's picture as WebRTC: the agent's werift offers, the PAGE's RTCPeerConnection
  * answers, and this module is only the SIGNALING relay between the page's requests and the agent's ops, plus the record:
- *   • start(hostId, {source, fp16}) the rung's verdict; when taken, `stream-offer` on the agent → the offer (+ the relay's candidates)
+ *   • start(hostId, {source, fp16, hdr}) the rung's verdict; when taken, `stream-offer` on the agent → the offer (+ the relay's candidates)
  *                            and a session KEY the page names from now on — `{ take: false, code, why }` otherwise (`too_many_streams`
  *                            adds the machine's `live` / `cap` / `displays` — lane desktop-display-modes' per-machine cap; the window
  *                            shows the VNC picture and says why). `source` = the page's choice (src/stream-model.js
  *                            streamSourceOf: a display, or ONE window — lane stream-p3m-build on a Mac, stream-p2w-build on
  *                            Windows: int304's one door); none = the main display. `fp16` = a Windows window's FP16 road (off).
+ *                            `hdr` (lane stream-hdr-passthrough) = the page's screen is HDR and its browser decodes WebRTC AV1 in
+ *                            hardware, and the person turned 「HDR 直通」 on — asked of a SCREEN source only (the agent offers
+ *                            AV1 first where its display and encoder can; the browser's answer decides)
  *                            THE MAC'S HELPER (lane stream-p3m-build): an offer refused `no_helper` (a Mac with no screen
  *                            helper and no compiler) is answered by pushing THIS hub's prebuilt (`helpersDir`: data/bin/helpers/
  *                            vibespace-screen + .version, put there by the release — scripts/build-mac-helper.sh) beside the
@@ -217,7 +220,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
   }
 
   /** The rung, then the offer. → { take: false, code, why } | { take: true, key, sid, offer, source, codec, seq } */
-  async function start(hostId, { maxKbps = null, source = null, fp16 = false, after = null } = {}) {
+  async function start(hostId, { maxKbps = null, source = null, fp16 = false, hdr = false, after = null } = {}) {
     if (!access || typeof access.streamRung !== 'function') throw named('host_unavailable', 'the desktop access layer is not wired on this instance');
     const src = SM.streamSourceOf(source);
     if (source != null && !src) return { take: false, code: 'bad_source', why: 'the stream names a display or a window by its id' };
@@ -232,7 +235,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     const relayLeg = s.relay && s.relay.leg ? { port: s.relay.port, key: s.relay.leg.key.toString('base64'), hosts: ips().filter((ip) => /^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip))).slice(0, L.legTargets) } : null;
     let r;
     const sourceId = v.sourceId != null ? v.sourceId : src ? src.id : null; // the verdict's own (a fake source's file), else the page's choice
-    const offer = () => v.dm.streamOffer({ sourceKind: v.source, sourceId, maxKbps, relay, ...(src && src.share ? { share: src.share } : {}), ...(relayLeg ? { relayLeg } : {}), ...(v.source === 'window' && fp16 ? { fp16: true } : {}) }, { onPush: (m) => onPush(s, m) }); // fp16: a Windows window's FP16 road (lane stream-p2w-build)
+    const offer = () => v.dm.streamOffer({ sourceKind: v.source, sourceId, maxKbps, relay, ...(src && src.share ? { share: src.share } : {}), ...(relayLeg ? { relayLeg } : {}), ...(v.source === 'window' && fp16 ? { fp16: true } : {}), ...(v.source === 'screen' && hdr === true ? { hdr: true } : {}) }, { onPush: (m) => onPush(s, m) }); // fp16: a Windows window's FP16 road (lane stream-p2w-build); hdr: lane stream-hdr-passthrough
     try {
       r = await offer();
       if (r && !r.ok && r.code === 'no_helper' && r.helper) { // a Mac without its screen helper: this hub's prebuilt, then once more

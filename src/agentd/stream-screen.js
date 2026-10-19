@@ -12,6 +12,11 @@
  *           FP16 frames' raw bits (rgbaf16le, never a float `format=` conversion — swscale clamps them), THIS agent maps
  *           them (÷ white/80 → OETF through ONE 64 K table per white level, src/stream-plan.js nv12FromHalf) in a worker
  *           thread (the loop that holds the device links never maps a frame), ffmpeg #2 encodes the NV12 → FLV
+ *   hdr     (lane stream-hdr-passthrough — q-041 r3 P4 road B) the page asked HDR, the display is in HDR and the machine has
+ *           an AV1 10-bit encoder: the MAPPED road's capture, THE PQ MAPPING (FP16 scRGB → BT.2020 → PQ → P010, src/stream-plan.js
+ *           p010FromHalf — absolute: the machine's own nits) in the same worker, av1_nvenc → IVF (src/stream-av1.js ivfReader →
+ *           temporal units). The source is made BEFORE the browser answers, so it holds both plans: the host tells it the codec the
+ *           answer took (`useCodec` — at `connected`, before start) and it runs the hdr plan for AV1, else the plan's `sdr` (mapped)
  *   Reading and mapping overlap (two frame buffers move between this thread and the worker); when both are full the
  *   capture's pipe is paused — ddagrab then hands the newest picture, so a slow mapper drops frames, never queues them.
  * TIMING: a mapped frame's clock is its first byte's arrival (ts90k for RTP; encodeMs = that → its access unit out of the
@@ -32,6 +37,7 @@
  */
 const path = require('path');
 const SP = require('../stream-plan.js');
+const AV1 = require('../stream-av1.js'); // lane stream-hdr-passthrough: the HDR road's IVF → temporal units
 
 const FACTS_MS = 30000;      // a facts answer is reused this long (a refused offer re-reads them: `force`)
 // lane desktop-display-modes (measured on the owner's box): with one 4K HDR display streaming, the SECOND display's capture died
@@ -97,11 +103,31 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
   async function source(msg = {}, { maxKbps = 8000 } = {}) {
     if (msg.sourceKind === 'window') return named('no_window_source', 'this agent cannot stream one window of a Windows desktop yet');
     let f = await facts();
-    const want = { display: msg.sourceId || null, kbps: maxKbps, share: Number(msg.share) || 1 }; // share: ② (lane desktop-display-modes)
+    const want = { display: msg.sourceId || null, kbps: maxKbps, share: Number(msg.share) || 1, hdr: msg.hdr === true }; // share: ② (lane desktop-display-modes); hdr: lane stream-hdr-passthrough
     let plan = f.ok ? SP.planScreen(f, want) : f;
     if (!plan.ok && f.ok && plan.code !== 'not_windows') { f = await facts({ force: true }); plan = f.ok ? SP.planScreen(f, want) : f; } // a refusal re-reads once (ffmpeg installed a minute ago, a display plugged in)
     if (!plan.ok) return plan;
-    return screenSource(plan, maxKbps, f);
+    return plan.mode === 'hdr' ? hdrSource(plan, maxKbps, f) : screenSource(plan, maxKbps, f);
+  }
+
+  /** THE HDR ROAD's source (lane stream-hdr-passthrough): made before the browser answers, it holds both plans — `useCodec(mimeType)`
+   *  (the host: the codec werift negotiated, at `connected`, before start) picks the hdr plan for AV1, else its `sdr` plan (the
+   *  mapped road: a browser whose answer dropped AV1). The offer's facts are the hdr plan's (the same display, origin, size). */
+  function hdrSource(plan, maxKbps, f) {
+    const made = new Map();
+    let chosen = null;
+    const make = (c) => made.get(c) || made.set(c, screenSource(c === 'AV1' ? plan : plan.sdr, maxKbps, f)).get(c);
+    const cur = () => make(chosen || 'H264');
+    return {
+      ...make('AV1'), offersAv1: true,
+      useCodec(mime) { if (!chosen) chosen = /^video\/av1$/i.test(String(mime || '')) ? 'AV1' : 'H264'; return chosen; },
+      start(onAccessUnit, onEnded) { if (!chosen) chosen = 'H264'; cur().start(onAccessUnit, onEnded); }, // never told: the SDR road
+      stop(why) { for (const x of made.values()) x.stop(why); },
+      still: () => make('H264').still(), // an agent reads the SDR picture (THE table of the mapped road)
+      requestKeyframe: () => cur().requestKeyframe(),
+      setTargetKbps: (k) => cur().setTargetKbps(k),
+      stats: () => cur().stats(),
+    };
   }
 
   /** ONE STILL of the plan's display (the header): → { ok, png, w, h, display, origin, road } | { ok: false, code, error } */
@@ -136,16 +162,36 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
   }
 
   function screenSource(plan, maxKbps, f = {}) {
+    const hdrRoad = plan.mode === 'hdr', mappedRoad = plan.mode === 'mapped' || hdrRoad; // lane stream-hdr-passthrough: the HDR road maps too
     const st = { frames: 0, aus: 0, dropped: 0, restarts: 0, keyWaitMs: null, keysAnswered: 0, encode: [], map: [], mapper: null, startedAt: null, rate: null };
     const rate = SP.rateFollower({ kbps: plan.kbps, cap: maxKbps, floor: plan.floor || 0, rule: SP.RATE_RULE }); // THE RATE (src/stream-plan.js)
     let onAu = null, onEnd = null, stopped = false, keyAskedAt = null, t0 = 0, lastTs = -1, capRetries = 0;
     const procs = new Set();
     const end = (c) => { if (c && c.exitCode == null && !c.killed) { try { c.kill(); } catch { /* gone */ } } };
+    // lane stream-hdr-passthrough: WINDOWS POWER THROTTLING (src/stream-plan.js unthrottlePs — measured: a hidden agent's mapper 250–700
+    // ms a 4K frame, 1–5 fps; opted out 79 ms, 13 fps): the HDR road opts this agent and each of its ffmpegs out, once each, the pids
+    // of one start batched into one PowerShell (a restarted encoder / a re-asked capture: its new pid). The SDR roads: unchanged
+    const qosDone = new Set();
+    let qosWant = [], qosTimer = null;
+    function unthrottle(pid) {
+      if (!hdrRoad || platform !== 'win32' || !(pid > 0) || qosDone.has(pid)) return;
+      qosDone.add(pid); qosWant.push(pid);
+      if (!qosTimer) { qosTimer = setTimeout(flushQos, 100); qosTimer.unref?.(); }
+    }
+    function flushQos() {
+      const list = qosWant; qosWant = []; qosTimer = null;
+      if (!list.length || stopped) return;
+      run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(SP.unthrottlePs(list), 'utf16le').toString('base64')]).then((r) => {
+        const rows = SP.parseUnthrottle(r.stdout) || [];
+        st.unthrottle = { asked: (st.unthrottle ? st.unthrottle.asked : 0) + list.length, ok: (st.unthrottle ? st.unthrottle.ok : 0) + rows.filter((x) => x.ok).length };
+        log(`[stream] screen source: Windows power throttling off for ${list.join(', ')} — ${rows.length ? rows.map((x) => `${x.pid} ${x.ok ? 'ok' : `error ${x.err}`}`).join(', ') : 'no answer'}`);
+      });
+    }
     function finish(code, why) {
       if (stopped) return;
       stopped = true;
       for (const c of procs) end(c);
-      teardownMapper();
+      teardownMapper(); clearTimeout(qosTimer);
       log(`[stream] screen source ended: ${code}${why ? ` (${why})` : ''}`);
       try { onEnd && onEnd(code); } catch { /* the host's */ }
     }
@@ -155,6 +201,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       const tail = [];
       c.asked = false;
       procs.add(c);
+      unthrottle(c.pid); // lane stream-hdr-passthrough: the HDR road's ffmpegs (a no-op on every other road)
       c.stderr.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l.trim().slice(0, 200)); if (tail.length > TAIL) tail.shift(); } });
       c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('capture_failed', `${role}: ${e && (e.code || e.message)}`); });
       c.on('exit', (code, sig) => {
@@ -162,11 +209,11 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
         if (c.asked || stopped) return;
         const why = `${role} exit ${code == null ? sig : code}${tail.length ? ': ' + tail[tail.length - 1] : ''}`;
         if (role === 'encoder') { finish('encoder_exited', why); return; }
-        if (capRetries < CAPTURE_RETRY_MS.length && !(plan.mode === 'mapped' ? st.frames : st.aus)) { // it never gave a picture: asked again
+        if (capRetries < CAPTURE_RETRY_MS.length && !(mappedRoad ? st.frames : st.aus)) { // it never gave a picture: asked again
           const wait = CAPTURE_RETRY_MS[capRetries++];
           st.captureRetries = capRetries;
           log(`[stream] screen source: the capture did not start (${why}) — asking again in ${wait} ms`);
-          setTimeout(() => { if (!stopped) { if (plan.mode === 'mapped') startCapture(); else startDirect(); } }, wait).unref?.();
+          setTimeout(() => { if (!stopped) { if (mappedRoad) startCapture(); else startDirect(); } }, wait).unref?.();
           return;
         }
         facts({ force: true }).then((f) => finish(f.ok && !f.displays.some((x) => x.id === plan.display.id) ? 'display_gone' : 'capture_exited', why), () => finish('capture_exited', why));
@@ -174,9 +221,9 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       if (c.stdin) c.stdin.on('error', () => { /* the encoder died: its exit says so */ });
       return c;
     }
-    /** Access units out of an encoder's FLV → the host, in order, each once. */
+    /** Access units out of an encoder's FLV (an H.264 road) or IVF (the HDR road's AV1 temporal units) → the host, in order, each once. */
     function readAus(c, clockOf) {
-      const r = SP.flvReader();
+      const r = hdrRoad ? AV1.ivfReader() : SP.flvReader();
       c.stdout.on('data', (d) => {
         if (stopped || c.asked) return; // a retired encoder's last pictures: the new one opens with a key frame
         for (const ev of r.push(d)) {
@@ -185,9 +232,12 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
           const ts = Math.max(lastTs + 1, Math.round((at - t0) * 90));
           lastTs = ts;
           st.aus++;
-          rate.sent(ev.nalus.reduce((n, x) => n + x.length, 0), now());
+          rate.sent(ev.type === 'tu' ? ev.tu.length : ev.nalus.reduce((n, x) => n + x.length, 0), now());
           if (ev.key && keyAskedAt != null) { st.keyWaitMs = now() - keyAskedAt; st.keysAnswered++; keyAskedAt = null; }
-          try { onAu({ nalus: ev.nalus.filter((n) => (n[0] & 0x1f) !== 9).map((n) => Buffer.from(n.buffer, n.byteOffset, n.length)), key: ev.key, ts90k: ts >>> 0 }); } catch { /* the host's */ }
+          try {
+            if (ev.type === 'tu') onAu({ tu: Buffer.from(ev.tu.buffer, ev.tu.byteOffset, ev.tu.length), key: ev.key, ts90k: ts >>> 0 });
+            else onAu({ nalus: ev.nalus.filter((n) => (n[0] & 0x1f) !== 9).map((n) => Buffer.from(n.buffer, n.byteOffset, n.length)), key: ev.key, ts90k: ts >>> 0 });
+          } catch { /* the host's */ }
         }
       });
     }
@@ -200,8 +250,9 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     }
 
     // ── the MAPPED road: capture → this agent's mapping → encoder ──
-    const FB = plan.srcW * plan.srcH * 8, NB = SP.nv12Bytes(plan.w, plan.h), STEP = plan.step || 1; // the capture's whole frame → the (maybe k-times smaller) picture
-    const lut = plan.white ? SP.buildLut({ white: plan.white, knee: plan.tone.knee, peak: plan.tone.peak }) : null;
+    const FB = plan.srcW * plan.srcH * 8, NB = hdrRoad ? SP.p010Bytes(plan.w, plan.h) : SP.nv12Bytes(plan.w, plan.h), STEP = plan.step || 1; // the capture's whole frame → the (maybe k-times smaller) picture
+    const lut = plan.white && !hdrRoad ? SP.buildLut({ white: plan.white, knee: plan.tone.knee, peak: plan.tone.peak }) : null;
+    let pqTables = null; // the HDR road's (inline mapping only — a worker builds its own: no 2.3 MB copy)
     let cap = null, enc = null, encClock = [], worker = null, busy = false, waiting = null, fill = null, fillU8 = null, filled = 0, fillAt = 0, carry = null, paused = false;
     const inFree = [], outFree = [];
     function setupMapper() {
@@ -211,8 +262,8 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
           worker = makeWorker();
           worker.on('message', (m) => { if (m && m.op === 'mapped') mapped(m.input, m.output, m.ms); else if (m && m.op === 'error') finish('capture_failed', `mapper: ${m.error}`); });
           worker.on('error', (e) => { log(`[stream] mapper worker failed (${e && e.message}) — mapping inline`); worker = null; });
-          const l = lut.slice().buffer;
-          worker.postMessage({ op: 'lut', lut: l }, [l]);
+          if (hdrRoad) worker.postMessage({ op: 'pq' });
+          else { const l = lut.slice().buffer; worker.postMessage({ op: 'lut', lut: l }, [l]); }
           st.mapper = 'worker';
         } catch (e) { worker = null; log(`[stream] no mapper worker (${e && e.message}) — mapping inline`); }
       }
@@ -243,9 +294,10 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       busy = true;
       const out = outFree.pop();
       mapping = f;
-      if (worker) { worker.postMessage({ op: 'map', input: f.buf, output: out, w: plan.srcW, h: plan.srcH, step: STEP }, [f.buf, out]); return; }
+      if (worker) { worker.postMessage({ op: 'map', road: hdrRoad ? 'p010' : 'nv12', input: f.buf, output: out, w: plan.srcW, h: plan.srcH, step: STEP }, [f.buf, out]); return; }
       const t = now();
-      SP.nv12FromHalf(new Uint16Array(f.buf), plan.srcW, plan.srcH, lut, new Uint8Array(out), STEP);
+      if (hdrRoad) SP.p010FromHalf(new Uint16Array(f.buf), plan.srcW, plan.srcH, pqTables || (pqTables = SP.buildPqTables()), new Uint16Array(out), STEP);
+      else SP.nv12FromHalf(new Uint16Array(f.buf), plan.srcW, plan.srcH, lut, new Uint8Array(out), STEP);
       const ms = now() - t;
       setImmediate(() => mapped(f.buf, out, ms));
     }
@@ -268,7 +320,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       });
     }
     function startEncoder() {
-      enc = ffmpeg(SP.encodeArgv(plan, rate.kbps), 'encoder', { stdin: 'pipe' });
+      enc = ffmpeg(hdrRoad ? SP.hdrEncodeArgv(plan, rate.kbps) : SP.encodeArgv(plan, rate.kbps), 'encoder', { stdin: 'pipe' });
       const clock = encClock = [];
       readAus(enc, () => { const at = clock.shift(); if (at != null) { st.encode.push(now() - at); if (st.encode.length > 30) st.encode.shift(); } return at != null ? at : now(); });
     }
@@ -286,6 +338,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
 
     return {
       ok: true, kind: 'screen', origin: plan.origin, fps: plan.fps, mode: plan.mode, encoder: plan.encoder.label,
+      hdr: plan.hdr || null, // lane stream-hdr-passthrough: the offer's word on the HDR road ({ can, on, why }) — the page's switch
       // lane desktop-display-modes: THE SWITCHER's rows on Windows too — the display streamed + the machine's displays (the facts this
       // plan read: their own names, sizes, HDR); a pick restarts the stream with `source: {kind: 'display', id}`
       display: plan.display.id, displays: SP.screenDisplayRows(f),
@@ -295,11 +348,12 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       start(onAccessUnit, onEnded) {
         if (onAu || stopped) return;
         onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rate.begin(t0); st.startedAt = t0;
+        unthrottle(process.pid); // lane stream-hdr-passthrough: this agent (its mapper's worker thread is this process's)
         if (keyAskedAt == null) keyAskedAt = t0;
-        try { if (plan.mode === 'mapped') startMapped(); else startDirect(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); }
-        log(`[stream] screen source: ${plan.mode}, ${plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps, ${plan.encoder.label} ${rate.kbps} kbps (floor ${rate.floor})${plan.white ? `, white ${plan.white}` : ''}`);
+        try { if (mappedRoad) startMapped(); else startDirect(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); }
+        log(`[stream] screen source: ${plan.mode}, ${plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps, ${plan.encoder.label} ${rate.kbps} kbps (floor ${rate.floor})${plan.white ? `, white ${plan.white}` : ''}${hdrRoad ? ', PQ 10-bit BT.2020 (passthrough)' : ''}`);
       },
-      stop() { if (stopped) return; stopped = true; for (const c of procs) { c.asked = true; end(c); } teardownMapper(); },
+      stop() { if (stopped) return; stopped = true; for (const c of procs) { c.asked = true; end(c); } teardownMapper(); clearTimeout(qosTimer); },
       still: () => still(plan), // lane desktop-handover: ONE still of this display (desktop-grab)
       requestKeyframe() { if (keyAskedAt == null) keyAskedAt = now(); },
       setTargetKbps(target) {
@@ -308,12 +362,14 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
         st.rate = rate.last;
         if (!d.change) return;
         st.restarts++;
-        if (plan.mode === 'mapped') { const old = enc; old.asked = true; end(old); startEncoder(); } else { const old = direct; old.asked = true; end(old); startDirect(); }
+        if (mappedRoad) { const old = enc; old.asked = true; end(old); startEncoder(); } else { const old = direct; old.asked = true; end(old); startDirect(); }
         log(`[stream] screen source: encoder restarted at ${rate.kbps} kbps (${d.why}: the estimate's median ${Math.round(d.median)} kbps, floor ${rate.floor})`);
       },
       stats() {
         return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, display: plan.display.id, w: plan.w, h: plan.h, step: plan.step || 1, white: plan.white, kbps: rate.kbps, floor: rate.floor, rate: st.rate,
-          encodeMs: plan.mode === 'mapped' ? median(st.encode) : null, timing: plan.mode === 'mapped' ? 'agent' : 'in-ffmpeg', mapMs: median(st.map), mapper: st.mapper,
+          encodeMs: mappedRoad ? median(st.encode) : null, timing: mappedRoad ? 'agent' : 'in-ffmpeg', mapMs: median(st.map), mapper: st.mapper,
+          hdr: hdrRoad ? { codec: 'AV1', bits: 10, transfer: 'pq', primaries: 'bt2020' } : null, // lane stream-hdr-passthrough: the details' 「HDR」 row
+          unthrottle: st.unthrottle || null, // lane stream-hdr-passthrough: { asked, ok } — Windows power throttling turned off
           captured: st.frames, aus: st.aus, dropped: st.dropped, restarts: st.restarts, captureRetries: st.captureRetries || 0, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
       },
     };
@@ -324,13 +380,15 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
 
 /** THE MAPPER WORKER's body (agentd.js runs it in its `stream-map` worker branch): the table once, then frames. */
 function mapperServant(port) {
-  let lut = null;
+  let lut = null, pq = null;
   port.on('message', (m) => {
     try {
       if (m.op === 'lut') { lut = new Uint8Array(m.lut); return; }
-      if (m.op !== 'map' || !lut) return;
+      if (m.op === 'pq') { pq = SP.buildPqTables(); return; } // lane stream-hdr-passthrough: the HDR road's tables, built here
+      if (m.op !== 'map' || (m.road === 'p010' ? !pq : !lut)) return;
       const t = Date.now();
-      SP.nv12FromHalf(new Uint16Array(m.input), m.w, m.h, lut, new Uint8Array(m.output), m.step || 1);
+      if (m.road === 'p010') SP.p010FromHalf(new Uint16Array(m.input), m.w, m.h, pq, new Uint16Array(m.output), m.step || 1);
+      else SP.nv12FromHalf(new Uint16Array(m.input), m.w, m.h, lut, new Uint8Array(m.output), m.step || 1);
       port.postMessage({ op: 'mapped', input: m.input, output: m.output, ms: Date.now() - t }, [m.input, m.output]);
     } catch (e) { try { port.postMessage({ op: 'error', error: String((e && e.message) || e) }); } catch { /* gone */ } }
   });

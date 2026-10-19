@@ -51,6 +51,7 @@ const ROW_WORDS = {
   kbps: [() => t('Received'), (r) => `${ms(r.kbps)} kbps` + (r.sent != null ? ' · ' + t('sent {n}', { n: r.sent }) : '')],
   path: [() => t('Path'), (r) => PATH_WORDS[r.via]()],
   codec: [() => t('Codec'), (r) => r.codec],
+  hdr: [() => t('HDR'), (r) => t('Passthrough · {transfer} {bits}-bit · {primaries}', { transfer: r.transfer === 'pq' ? 'PQ' : r.transfer, bits: r.bits == null ? '—' : r.bits, primaries: r.primaries === 'bt2020' ? 'BT.2020' : r.primaries })], // lane stream-hdr-passthrough
   encoder: [() => t('Encoder'), (r) => (r.ms != null ? t('{encoder} · encode {ms} ms', { encoder: r.encoder, ms: r.ms }) : r.encoder)],
   display: [() => t('Screen'), (r) => (r.name ? `${r.name} · ${r.id}` : r.id)],
   size: [() => t('Picture'), (r) => `${r.w}×${r.h}` + (r.sw != null && r.sh != null && (r.sw !== r.w || r.sh !== r.h) ? ' · ' + t('encoded {w}×{h}', { w: r.sw, h: r.sh }) : '')],

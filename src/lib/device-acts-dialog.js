@@ -25,6 +25,8 @@ export function whoText(by) {
 export function actVerdictText(r) {
   if (!r) return '';
   if (r.code === 'act_without_by') return t('refused: nobody was named for it — never sent');
+  if (r.code === 'op-not-allowed') return t('refused: the machine’s own allow list leaves it off'); // lane device-allow-flags (the head says the re-run)
+  if (r.code === 'policy_is_the_devices') return t('refused: that is the machine’s own allow list');
   if (r.ok === false) return typeof r.code === 'number' ? t('exit {code}', { code: r.code }) : t('failed ({code})', { code: r.code || '?' });
   if (typeof r.code === 'number') return t('exit {code}', { code: r.code });
   return r.ok === true ? t('ok') : '';

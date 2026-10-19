@@ -29,6 +29,14 @@
  *                        argvs, origin, encoder } or a refusal by name (no_ffmpeg, display_gone, display_other_gpu,
  *                        no_white_level, no_encoder); `share` N (lane desktop-display-modes: ② — N displays in one window)
  *                        maps an HDR display at every k-th pixel (mappedStepOf; `step`, `scaled`; scaledInputOf for the pointer)
+ *   THE HDR ROAD         (lane stream-hdr-passthrough — q-041 r3 P4 road B, owner 2026-10-19) `hdr: true` on an HDR display with an
+ *                        AV1 10-bit hardware encoder (HDR_LADDER: av1_nvenc) ⇒ mode `hdr`: the same FP16 capture → THE PQ MAPPING
+ *                        (scRGB is absolute, 1.0 = 80 nits, and so is PQ: the machine's picture passes through at its own nits —
+ *                        linear BT.709 → BT.2020 (BT.2087) → the ST 2084 OETF → BT.2020-NCL Y'CbCr, 10-bit limited, P010:
+ *                        buildPqTables + p010FromHalf) → av1_nvenc → IVF (hdrEncodeArgv: the frames TAGGED bt2020 / PQ — an
+ *                        output tag that differs from the frames' makes ffmpeg insert a CPU conversion, measured); `sdr` = the
+ *                        plan the session falls back to when the browser's answer carries no AV1; hdrFactsOf = the offer's word
+ *                        on it ({ can, why }) whether asked or not
  *   kbpsDecision         one rate step with hysteresis (ffmpeg's CLI cannot change a bitrate live): at most once per 5 s, only on
  *                        a ≥ 25 % move, never under the source's `floor` (MAC_KBPS_RULE: VideoToolbox's live step — 1 s, 10 %)
  *   THE RATE             EVERY road (lane stream-window-fixes: a Windows window; lane stream-mac-rate: the Mac, a Windows screen): a floor
@@ -118,6 +126,84 @@ function nv12FromHalf(src, w, h, lut, out, step = 1) {
 }
 const nv12Bytes = (w, h) => (w & ~1) * (h & ~1) * 3 / 2;
 
+// ── THE HDR ROAD's MAPPING (lane stream-hdr-passthrough — the P4 probe's recipe, report §Leg 3 «What src/stream-plan.js's mapper
+// would need») ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+// PASSTHROUGH: scRGB is absolute (1.0 = 80 nits) and so is PQ, so the machine's own picture travels at its own luminance — its
+// SDR white at the owner's slider (200 nits reads 2.5), a highlight at its nits — no white level, no tone curve (PQ reaches
+// 10 000 nits). BT.2020 primaries (the HDR10 signal the probe's eye test saw bright and band-free in the owner's Edge): the
+// linear BT.709 values go through BT.2087's 3×3 BEFORE the OETF, so a wide-gamut scRGB value (a negative channel) keeps its
+// colour instead of clipping; the channels then mix, so the table is two: FP16 bits → linear (65 536 floats) and float32 bits
+// >>> 13 → the PQ signal (2^19 floats — buckets ≤ 2^-11 apart: < 0.1 of a 10-bit code), three lookups + a 3×3 per pixel.
+const PQ = Object.freeze({ m1: 0.1593017578125, m2: 78.84375, c1: 0.8359375, c2: 18.8515625, c3: 18.6875, peakNits: 10000 });
+const SCRGB_NITS = 80;
+const BT709_TO_BT2020 = Object.freeze([0.627403896, 0.329283039, 0.043313065, 0.069097289, 0.919540395, 0.011362316, 0.016391439, 0.088013308, 0.895595253]);
+const BT2020 = Object.freeze({ kr: 0.2627, kg: 0.678, kb: 0.0593 });
+/** What the encoder's bitstream says (the frames are tagged with it — hdrEncodeArgv). */
+const HDR_VUI = Object.freeze({ primaries: 'bt2020', trc: 'smpte2084', matrix: 'bt2020nc', range: 'tv' });
+/** The ST 2084 inverse EOTF: luminance ÷ 10 000 nits → the signal [0, 1] (≤ 0 / NaN ⇒ 0, ≥ 1 ⇒ 1). */
+function pqOetf(y) {
+  if (!(y > 0)) return 0;
+  const v = Math.min(1, y) ** PQ.m1;
+  return ((PQ.c1 + PQ.c2 * v) / (1 + PQ.c3 * v)) ** PQ.m2;
+}
+/** A grey of `nits` → its 10-bit limited-range code (64 + 876·E) — the probe's clips: 100 nits 509, 203 nits 573, 1000 nits 723. */
+const pqCodeOfNits = (nits) => Math.round(64 + 876 * pqOetf(nits / PQ.peakNits));
+const PQ_SHIFT = 13;
+/** THE HDR TABLES (one set — PQ is absolute: no white level): { lin: FP16 bits → linear BT.709 ÷ 10 000 nits (±inf / NaN ⇒ 0),
+ *  pq: float32 bits >>> 13 → the signal at the bucket's middle (negative ⇒ 0, above 10 000 nits ⇒ 1) }. */
+function buildPqTables() {
+  const lin = new Float32Array(65536);
+  for (let h = 0; h < 65536; h++) { const v = halfToFloat(h); lin[h] = Number.isFinite(v) ? (v * SCRGB_NITS) / PQ.peakNits : 0; }
+  const pq = new Float32Array(1 << (32 - PQ_SHIFT)), f = new Float32Array(1), u = new Uint32Array(f.buffer);
+  for (let i = 0; i < pq.length; i++) { u[0] = (i << PQ_SHIFT) | (1 << (PQ_SHIFT - 1)); pq[i] = pqOetf(f[0]); }
+  pq[0] = 0; // the bucket of +0 (black, a NaN / inf channel's 0): exactly 0, not its middle's 7e-7
+  return { lin, pq };
+}
+/** One pixel's FP16 bits (r, g, b) → its PQ R'G'B' signals [0, 1] (the frame loop's own steps — the suites' function). */
+function pqOfHalf(rh, gh, bh, T) {
+  const r = T.lin[rh], g = T.lin[gh], b = T.lin[bh], m = BT709_TO_BT2020, f = new Float32Array(1), u = new Uint32Array(f.buffer);
+  const one = (x) => { f[0] = x; return T.pq[u[0] >>> PQ_SHIFT]; };
+  return [one(m[0] * r + m[1] * g + m[2] * b), one(m[3] * r + m[4] * g + m[5] * b), one(m[6] * r + m[7] * g + m[8] * b)];
+}
+/** THE HDR FRAME LOOP: rgbaf16le (a Uint16Array of its bits, `w` pixels a row) → P010 of the even part into `out` (a Uint16Array of
+ *  ⌊w⌋₂·⌊h⌋₂·3/2 samples, each 10-bit code << 6): luma per pixel, chroma from each 2×2 block's mean R'G'B' (BT.2020-NCL,
+ *  limited range); `step` k > 1 = every k-th pixel of every k-th row (② beside other displays, as nv12FromHalf). Unrolled, the
+ *  constants at module level, one scratch float: 66 ms a 4K frame of noise on the lane's box (a closure per pixel: 235; the NV12
+ *  loop: 23) — every variant measured gave the same samples. → bytes written */
+const M709 = BT709_TO_BT2020, [P0, P1, P2, P3, P4, P5, P6, P7, P8] = M709;
+const YR = 876 * BT2020.kr, YG = 876 * BT2020.kg, YB = 876 * BT2020.kb, CB4 = 896 / (2 * (1 - BT2020.kb)) / 4, CR4 = 896 / (2 * (1 - BT2020.kr)) / 4;
+const PQF = new Float32Array(3), PQU = new Uint32Array(PQF.buffer);
+function p010FromHalf(src, w, h, T, out, step = 1) {
+  const k = Math.max(1, step | 0), W = Math.floor(w / k) & ~1, H = Math.floor(h / k) & ~1, uv = W * H, px = 4 * k;
+  const lin = T.lin, pq = T.pq, f = PQF, u = PQU, kr = BT2020.kr, kg = BT2020.kg, kb = BT2020.kb;
+  for (let y = 0; y < H; y += 2) {
+    let i0 = y * k * w * 4, i1 = (y + 1) * k * w * 4, o0 = y * W, o1 = o0 + W, c = uv + (y >> 1) * W;
+    for (let x = 0; x < W; x += 2) {
+      let r = lin[src[i0]], g = lin[src[i0 + 1]], b = lin[src[i0 + 2]];
+      f[0] = P0 * r + P1 * g + P2 * b; f[1] = P3 * r + P4 * g + P5 * b; f[2] = P6 * r + P7 * g + P8 * b;
+      let R = pq[u[0] >>> PQ_SHIFT], G = pq[u[1] >>> PQ_SHIFT], B = pq[u[2] >>> PQ_SHIFT], sr = R, sg = G, sb = B;
+      out[o0] = ((64.5 + YR * R + YG * G + YB * B) | 0) << 6;
+      r = lin[src[i0 + px]]; g = lin[src[i0 + px + 1]]; b = lin[src[i0 + px + 2]];
+      f[0] = P0 * r + P1 * g + P2 * b; f[1] = P3 * r + P4 * g + P5 * b; f[2] = P6 * r + P7 * g + P8 * b;
+      R = pq[u[0] >>> PQ_SHIFT]; G = pq[u[1] >>> PQ_SHIFT]; B = pq[u[2] >>> PQ_SHIFT]; sr += R; sg += G; sb += B;
+      out[o0 + 1] = ((64.5 + YR * R + YG * G + YB * B) | 0) << 6;
+      r = lin[src[i1]]; g = lin[src[i1 + 1]]; b = lin[src[i1 + 2]];
+      f[0] = P0 * r + P1 * g + P2 * b; f[1] = P3 * r + P4 * g + P5 * b; f[2] = P6 * r + P7 * g + P8 * b;
+      R = pq[u[0] >>> PQ_SHIFT]; G = pq[u[1] >>> PQ_SHIFT]; B = pq[u[2] >>> PQ_SHIFT]; sr += R; sg += G; sb += B;
+      out[o1] = ((64.5 + YR * R + YG * G + YB * B) | 0) << 6;
+      r = lin[src[i1 + px]]; g = lin[src[i1 + px + 1]]; b = lin[src[i1 + px + 2]];
+      f[0] = P0 * r + P1 * g + P2 * b; f[1] = P3 * r + P4 * g + P5 * b; f[2] = P6 * r + P7 * g + P8 * b;
+      R = pq[u[0] >>> PQ_SHIFT]; G = pq[u[1] >>> PQ_SHIFT]; B = pq[u[2] >>> PQ_SHIFT]; sr += R; sg += G; sb += B;
+      out[o1 + 1] = ((64.5 + YR * R + YG * G + YB * B) | 0) << 6;
+      const Y = kr * sr + kg * sg + kb * sb;
+      out[c] = ((512.5 + CB4 * (sb - Y)) | 0) << 6; out[c + 1] = ((512.5 + CR4 * (sr - Y)) | 0) << 6;
+      i0 += 2 * px; i1 += 2 * px; o0 += 2; o1 += 2; c += 2;
+    }
+  }
+  return (uv + uv / 2) * 2;
+}
+const p010Bytes = (w, h) => (w & ~1) * (h & ~1) * 3;
+
 /** The owner's real capture (2026-10-16, HDR on, SDR white 2500 = 200 nits): [label, the sRGB drawn, the FP16 bits read]. */
 const CALIBRATION = Object.freeze({
   white: 2500,
@@ -139,6 +225,14 @@ const ENCODER_LADDER = Object.freeze([
   Object.freeze({ id: 'h264_amf', label: 'AMF', hw: true, profile: 'constrained_baseline', args: Object.freeze(['-usage', 'ultralowlatency', '-quality', 'speed', '-rc', 'cbr']) }),
   Object.freeze({ id: 'h264_qsv', label: 'Quick Sync', hw: true, profile: 'baseline', args: Object.freeze(['-preset', 'veryfast', '-look_ahead', '0', '-low_delay_brc', '1']) }),
   Object.freeze({ id: 'libx264', label: 'x264', hw: false, profile: 'baseline', args: Object.freeze(['-preset', 'ultrafast', '-tune', 'zerolatency']) }),
+]);
+/** THE HDR ROAD's encoder (lane stream-hdr-passthrough): AV1, 10-bit from P010, in hardware — the one measured (the owner's RTX 5090,
+ *  the probe: av1_nvenc 10-bit 4K 231 / 277 fps; it writes BT.2020 / PQ / BT.2020-NCL into the sequence header itself). The
+ *  H.264 NVENC rung's low-latency switches — `-delay` defaults to INT_MAX frames here too (`-h encoder=av1_nvenc` on the owner's
+ *  ffmpeg N-127564); no `-profile` (AV1 4:2:0 10-bit is Main). AMF's / Quick Sync's AV1 were never measured on a machine of ours:
+ *  not offered. */
+const HDR_LADDER = Object.freeze([
+  Object.freeze({ id: 'av1_nvenc', label: 'NVENC AV1', hw: true, codec: 'AV1', args: Object.freeze(['-preset', 'p1', '-tune', 'ull', '-rc', 'cbr', '-zerolatency', '1', '-delay', '0', '-rc-lookahead', '0']) }),
 ]);
 /** The first ladder rung the installed ffmpeg has. → { ok, encoder, note: 'no_hw_encoder' | null } | { ok: false, code } */
 function pickEncoder(encoders, ladder = ENCODER_LADDER) {
@@ -171,7 +265,7 @@ function parseFfmpegFacts(versionText, filtersText, encodersText) {
   const ddagrab = /^\s*\S+\s+ddagrab\s/m.test(String(filtersText || ''));
   const encoders = [];
   for (const line of String(encodersText || '').split(/\r?\n/)) { const m = /^\s*V[.A-Z]{5}\s+(\S+)/.exec(line); if (m) encoders.push(m[1]); }
-  return { version: first.replace(/^ffmpeg version\s*/i, '').split(' ')[0] || null, major, ddagrab, encoders: encoders.filter((e) => ENCODER_LADDER.some((r) => r.id === e)) };
+  return { version: first.replace(/^ffmpeg version\s*/i, '').split(' ')[0] || null, major, ddagrab, encoders: encoders.filter((e) => ENCODER_LADDER.some((r) => r.id === e) || HDR_LADDER.some((r) => r.id === e)) };
 }
 /** May this ffmpeg capture? → { ok } | { ok: false, code: 'no_ffmpeg', error } */
 function ffmpegVerdict(ff) {
@@ -242,6 +336,40 @@ const STREAM_FACTS_PS = ["$ErrorActionPreference = 'Stop'",
   'foreach ($s in [System.Windows.Forms.Screen]::AllScreens) { $b = $s.Bounds; $c = \'\'; if ($dc.ContainsKey($s.DeviceName)) { $c = $dc[$s.DeviceName] }; $o = \'\'; if ($dx.ContainsKey($s.DeviceName)) { $o = $dx[$s.DeviceName] }; $rows += @{ id = $s.DeviceName; x = $b.X; y = $b.Y; w = $b.Width; h = $b.Height; primary = [int]$s.Primary; dc = $c; dxgi = $o } }',
   "[Console]::Out.WriteLine((ConvertTo-Json -InputObject @{ t = 'stream-facts'; aware = $aware; dxgi = $dx.Count; rows = $rows } -Compress -Depth 4))"].join('\n');
 
+// ── WINDOWS POWER THROTTLING (lane stream-hdr-passthrough — measured on the owner's i9-12900K, 2026-10-19) ─────────────────
+// Windows slows a BACKGROUND process (EcoQoS: lower clocks, the efficient cores) and the agent and its ffmpegs are hidden: the HDR
+// road's mapper took 250–700 ms a 4K frame (65 idle) and its encoder fell behind (1–5 fps); with execution-speed throttling OFF on
+// the agent and both ffmpegs (SetProcessInformation ProcessPowerThrottling, ControlMask EXECUTION_SPEED, StateMask 0 — a process
+// of the same user, no elevation) 79 ms and 13 fps. The SDR roads measured the same (3–6 → 19–22 fps) — NOT changed by this lane.
+/** The script that opts these processes out (one JSON line: { t: 'unthrottle', rows: [{ pid, ok, err }] }). */
+function unthrottlePs(pids) {
+  const list = (Array.isArray(pids) ? pids : []).map(Number).filter((p) => Number.isInteger(p) && p > 0).slice(0, 8);
+  return ["$ErrorActionPreference = 'Stop'",
+    "Add-Type -TypeDefinition @'",
+    'using System; using System.Runtime.InteropServices;',
+    'public static class VsQos {',
+    '  [StructLayout(LayoutKind.Sequential)] public struct PPTS { public uint Version; public uint ControlMask; public uint StateMask; }',
+    '  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint a, bool i, int pid);',
+    '  [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetProcessInformation(IntPtr h, int cls, ref PPTS s, int size);',
+    '  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);',
+    '  public static int Off(int pid) {',
+    '    IntPtr h = OpenProcess(0x0200, false, pid); if (h == IntPtr.Zero) return Marshal.GetLastWin32Error();',
+    '    var s = new PPTS { Version = 1, ControlMask = 1, StateMask = 0 }; bool ok = SetProcessInformation(h, 4, ref s, Marshal.SizeOf(s)); int e = ok ? 0 : Marshal.GetLastWin32Error(); CloseHandle(h); return e;',
+    '  }',
+    '}',
+    "'@",
+    `$rows = @(); foreach ($id in @(${list.join(',') || '0'})) { if ($id -gt 0) { $e = [VsQos]::Off($id); $rows += @{ pid = $id; ok = ($e -eq 0); err = $e } } }`,
+    "[Console]::Out.WriteLine((ConvertTo-Json -InputObject @{ t = 'unthrottle'; rows = @($rows) } -Compress -Depth 3))"].join('\n');
+}
+/** Its one line → [{ pid, ok, err }] (PowerShell 5 writes a lone row as an object) | null. */
+function parseUnthrottle(stdout) {
+  for (const line of String(stdout || '').split(/\r?\n/)) {
+    const l = line.trim(); if (!l.startsWith('{')) continue;
+    try { const v = JSON.parse(l); if (v && v.t === 'unthrottle') { const r = Array.isArray(v.rows) ? v.rows : v.rows && typeof v.rows === 'object' ? [v.rows] : []; return r.map((x) => ({ pid: Number(x.pid) || 0, ok: x.ok === true, err: Number(x.err) || 0 })); } } catch { /* not ours */ }
+  }
+  return null;
+}
+
 /** The script's one line → { ok, displays: [{ id, x, y, w, h, primary, hdr, wideColor, white, adapter, output, name }], dxgi }.
  *  hdr: advanced colour on and not the SDR wide-colour mode (true | false | null unknown); white: SDRWhiteLevel | null; name:
  *  the monitor's own (its EDID friendly name — lane desktop-display-modes: the switcher's words) | null. */
@@ -288,6 +416,17 @@ function encodeArgv(plan, kbps = plan.kbps) {
 /** The DIRECT road (an SDR display — DDA's 8-bit picture is exact): one ffmpeg, capture → NV12 (8-bit, BT.709) → the encoder. */
 function directArgv(plan, kbps = plan.kbps) {
   return [...QUIET, '-nostdin', '-f', 'lavfi', '-i', grab(plan.display.output, plan.fps, false), '-vf', 'hwdownload,format=bgra,scale=out_color_matrix=bt709:out_range=tv,format=nv12', ...encodeTail(plan.encoder, { kbps, fps: plan.fps, gop: plan.gop })];
+}
+/** The encoder ffmpeg of the HDR ROAD (lane stream-hdr-passthrough): the agent's P010 (PQ, BT.2020) on stdin, the frames TAGGED with
+ *  what they are (setparams — the probe's trap: an output -color_* that differs from the frames' own makes ffmpeg 8 insert a CPU
+ *  swscale conversion, 97–99 fps instead of 231–277), av1_nvenc 10-bit (P010 in ⇒ 10-bit out), IVF out — length-framed like the
+ *  FLV of the H.264 roads (an Annex-B / OBU stream shows a picture's end only when the next starts). */
+function hdrEncodeArgv(plan, kbps = plan.kbps) {
+  const k = Math.round(kbps);
+  return [...QUIET, '-f', 'rawvideo', '-pix_fmt', 'p010le', '-video_size', `${plan.w}x${plan.h}`, '-framerate', String(plan.fps), '-i', 'pipe:0',
+    '-vf', `setparams=range=${HDR_VUI.range}:color_primaries=${HDR_VUI.primaries}:color_trc=${HDR_VUI.trc}:colorspace=${HDR_VUI.matrix}`,
+    '-c:v', plan.encoder.id, ...plan.encoder.args, '-bf', '0', '-g', String(plan.gop), '-b:v', `${k}k`, '-maxrate', `${k}k`, '-bufsize', `${Math.max(1, Math.round((k * 2) / plan.fps))}k`,
+    '-fps_mode', 'passthrough', '-f', 'ivf', '-flush_packets', '1', 'pipe:1'];
 }
 // ── ONE STILL (lane desktop-handover: `desktop-grab` — the picture an agent the owner handed the desktop to reads) ──────
 /** The DIRECT road's still: ONE frame of the display (8-bit — DDA's picture is the SDR screen), the display's own pixels, as a
@@ -339,7 +478,7 @@ function pngSize(b) {
 function planScreen(facts, opts = {}) {
   const f = facts || {};
   if (f.platform === 'darwin') return planMacScreen(f, opts); // lane stream-p3m-build: the Mac's helper road
-  const { display = null, fps = SCREEN_DEFAULTS.fps, kbps = 8000, tone = TONE_DEFAULT, share = 1 } = opts || {};
+  const { display = null, fps = SCREEN_DEFAULTS.fps, kbps = 8000, tone = TONE_DEFAULT, share = 1, hdr: wantHdr = false } = opts || {};
   if (f.platform !== 'win32') return { ok: false, code: 'not_windows', error: `the screen source captures a Windows desktop (this machine runs ${f.platform || 'an unknown system'})` };
   if (f.displaysError) return { ok: false, code: 'facts_failed', error: `the machine's screen facts could not be read (${f.displaysError})` };
   const fv = ffmpegVerdict(f.ffmpeg);
@@ -358,9 +497,25 @@ function planScreen(facts, opts = {}) {
   const r = Math.max(1, Math.min(120, Math.round(Number(fps) || SCREEN_DEFAULTS.fps)));
   const step = hdr ? mappedStepOf(d.w, share) : 1; // lane desktop-display-modes: ② on the HDR road — a smaller picture per display
   const w = Math.floor(d.w / step) & ~1, h = Math.floor(d.h / step) & ~1;
-  return { ok: true, mode: hdr ? 'mapped' : 'direct', display: { id: d.id, output: mapped.output }, origin: { x: d.x, y: d.y }, w, h, srcW: d.w, srcH: d.h, step,
+  const can = hdrFactsOf(d, f.ffmpeg); // lane stream-hdr-passthrough: the offer's word on the HDR road, asked or not
+  const plan = { ok: true, mode: hdr ? 'mapped' : 'direct', display: { id: d.id, output: mapped.output }, origin: { x: d.x, y: d.y }, w, h, srcW: d.w, srcH: d.h, step,
     scaled: step > 1 ? { share: Math.round(Number(share)), step, w, h, from: { w: d.w, h: d.h } } : null,
-    fps: r, kbps: rate, floor: kbpsFloor({ w, h, fps: r, cap: rate }), gop: r * SCREEN_DEFAULTS.gopSeconds, white: hdr ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder, note: pe.note, ffmpeg: f.ffmpeg.path };
+    fps: r, kbps: rate, floor: kbpsFloor({ w, h, fps: r, cap: rate }), gop: r * SCREEN_DEFAULTS.gopSeconds, white: hdr ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder, note: pe.note, ffmpeg: f.ffmpeg.path,
+    hdr: { can: can.can, on: false, why: can.why } };
+  if (wantHdr !== true || !can.can) return plan;
+  // THE HDR ROAD: the mapped road's capture and size, THE PQ MAPPING, the AV1 rung — `sdr` = the mapped plan the session falls
+  // back to when the browser's answer carries no AV1
+  return { ...plan, mode: 'hdr', encoder: HDR_LADDER.find((e) => f.ffmpeg.encoders.includes(e.id)), note: null, floor: kbpsFloor({ w, h, fps: r, cap: rate, hdr: true }), tone: null,
+    hdr: { can: true, on: true, why: null }, sdr: plan };
+}
+/** May this display travel as HDR? → { can, why: null | 'sdr_display' (not in Windows HDR) | 'no_av1_encoder' (the machine's ffmpeg has
+ *  no HDR_LADDER encoder) | 'no_white_level' } — the page shows 「HDR 直通」 only when `can` (and its own screen and decoder can). */
+function hdrFactsOf(d, ff) {
+  if (!d || d.hdr !== true) return { can: false, why: 'sdr_display' };
+  if (!(d.white > 0)) return { can: false, why: 'no_white_level' };
+  const have = new Set(ff && Array.isArray(ff.encoders) ? ff.encoders : []);
+  if (!HDR_LADDER.some((e) => have.has(e.id))) return { can: false, why: 'no_av1_encoder' };
+  return { can: true, why: null };
 }
 
 /** THE SWITCHER's rows of a Windows machine (lane desktop-display-modes — the Mac's offer carried them since .309): the facts'
@@ -415,12 +570,19 @@ const KBPS_FLOOR = Object.freeze([
   Object.freeze({ maxPixels: 2560 * 1600, at30: 6000, at60: 8000 }),
   Object.freeze({ maxPixels: Infinity, at30: 8000, at60: 12000 }),
 ]);
-/** A picture's rate floor: the row of its pixel count, 30 → 60 fps interpolated, rounded to 100, never over the session's `cap`. */
-function kbpsFloor({ w = 0, h = 0, fps = SCREEN_DEFAULTS.fps, cap = Infinity } = {}) {
+/** THE HDR ROW (lane stream-hdr-passthrough): the HDR road's floor = the picture's row × `factor`. MEASURED on the owner's machine
+ *  (45 frames of his live 4K HDR desktop through THE PQ mapping into av1_nvenc at the same constant quantizer, 10-bit P010 against
+ *  the same PQ signal cut to 8 bits): 10-bit costs NO more — 371 729 vs 374 597 bytes at qp 90 (0.992), 220 196 vs 220 611 at qp 150
+ *  (0.998) — and AV1 is the more efficient codec than the H.264 baseline the rows were sized for: the SDR row holds (1.0). The live
+ *  HDR stream ran 2.4–4.6 Mbps at its 8 Mbps cap (a still-ish desktop). */
+const KBPS_FLOOR_HDR = Object.freeze({ factor: 1, measured: Object.freeze({ frames: 45, qp90: 0.992, qp150: 0.998 }) });
+/** A picture's rate floor: the row of its pixel count, 30 → 60 fps interpolated (`hdr`: × the HDR row's factor), rounded to 100,
+ *  never over the session's `cap`. */
+function kbpsFloor({ w = 0, h = 0, fps = SCREEN_DEFAULTS.fps, cap = Infinity, hdr = false } = {}) {
   const px = Math.max(0, Number(w) || 0) * Math.max(0, Number(h) || 0);
   const row = KBPS_FLOOR.find((r) => px <= r.maxPixels);
   const f = Math.max(0, Math.min(1, ((Number(fps) || SCREEN_DEFAULTS.fps) - 30) / 30));
-  const k = Math.round((row.at30 + (row.at60 - row.at30) * f) / 100) * 100;
+  const k = Math.round(((row.at30 + (row.at60 - row.at30) * f) * (hdr ? KBPS_FLOOR_HDR.factor : 1)) / 100) * 100;
   return Math.max(SCREEN_DEFAULTS.minKbps, Math.min(Number(cap) > 0 ? Number(cap) : Infinity, k));
 }
 /** THE RATE RULE — the estimate judged, never obeyed. A correctly fed estimate of a lossless link spreads around what was sent
@@ -825,7 +987,8 @@ function windowEncodeArgv(plan, { w = plan.w, h = plan.h, kbps = plan.kbps } = {
 
 module.exports = {
   halfToFloat, srgbOetf, TONE_DEFAULT, toneCurve, mapLinear, srgb8OfHalf, buildLut, nv12FromHalf, nv12Bytes, CALIBRATION,
-  ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, STREAM_FACTS_PS, parseStreamFacts, screenDisplayRows, MAPPED_MIN_W, mappedStepOf, scaledInputOf,
+  PQ, SCRGB_NITS, BT709_TO_BT2020, BT2020, HDR_VUI, pqOetf, pqCodeOfNits, buildPqTables, pqOfHalf, p010FromHalf, p010Bytes, HDR_LADDER, hdrFactsOf, hdrEncodeArgv, KBPS_FLOOR_HDR,
+  ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, STREAM_FACTS_PS, parseStreamFacts, unthrottlePs, parseUnthrottle, screenDisplayRows, MAPPED_MIN_W, mappedStepOf, scaledInputOf,
   SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, stillArgv, stillHalfArgv, rgbFromHalf, pngOf, pngSize, KBPS_RULE, kbpsDecision, MAC_KBPS_RULE, flvReader,
   KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator,
   MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,

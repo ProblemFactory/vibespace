@@ -17,8 +17,11 @@ const { spawn } = require('child_process');
 const { Mux, PROTO_VERSION } = require('./mux.js');
 const { daemonEnv } = require('../agent-env.js');
 const DA = require('../device-acts.js'); // lane device-act-audit: the op layers + `by` + THE audit line (PURE)
+/** lane hub-act-ask: the ask's facts an act's audit line carries (`ask`, `answeredBy`) — none when nothing was asked. */
+const askFacts = (g) => (g && g.ask ? { ask: g.ask, ...(g.answeredBy ? { answeredBy: g.answeredBy } : {}) } : {});
 const BY_UPGRADE = 'system:device-upgrade'; // the hub's version-drift rule pushes a new agent (no person, no agent asked)
 const SIG = require('../agentd-signature.js'); // design q-042 D2: the release record a pushed bundle must carry
+const DP = require('../device-policy.js'); // lane device-allow-flags: the device's OWN allow list — asked here first, decided there
 
 // lane windows-device-fs — THE DOOR: a POSIX shell is never asked of a WINDOWS agent THAT HAS NONE. The hub ran `sh -c …`
 // over the device link for the Files view, the home, path completion, the sweeps; a Windows machine without `sh` answered
@@ -58,7 +61,7 @@ class DeviceManager {
    *  version      release version (= daemonVersion expected)
    *  log          logger fn
    */
-  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null, onAct = null, onUpgradeRefused = null, onUpgradeTrusted = null } = {}) {
+  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null, onAct = null, onUpgradeRefused = null, onUpgradeTrusted = null, onPolicy = null, machine = null, actGate = null } = {}) {
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
@@ -89,6 +92,14 @@ class DeviceManager {
     this._onUpgradeTrusted = typeof onUpgradeTrusted === 'function' ? onUpgradeTrusted : null;
     this._releaseCache = null;
     this._unsignedSaid = new Set();
+    // lane device-allow-flags: the allow list each hello-ack states (src/device-policy.js reportOf) → the construction site
+    // keeps it on the machine's record (the Machines card shows it); `machine` names the machine in a refusal's re-run sentence
+    this._onPolicy = typeof onPolicy === 'function' ? onPolicy : null;
+    this._machine = machine;
+    // lane hub-act-ask: THE ASK's door — a REMOTE machine's client (hosts.js ssh, dial-pairing.js dial; never this machine's
+    // own daemon: that is the hub) is built with the machine's gate (src/server/hub-act-ask.js over PURE src/hub-act-policy.js):
+    // `check(payload, {consent})` → null | {ok: true, ask, answeredBy} | {ok: false, code, error, ask}; `verdict(payload)` sync
+    this._actGate = actGate && typeof actGate.check === 'function' ? actGate : null;
     // The version a freshly-upgraded daemon will REPORT is the one baked into
     // the bundle we ship — not this server's package version. They diverge
     // whenever the repo is rebuilt without restarting the server (or vice
@@ -367,6 +378,8 @@ class DeviceManager {
             clearTimeout(timer);
             const expected = this._expectedVersion();
             try { this._onAnswer?.(msg.daemonVersion); } catch { }
+            const pol = DP.reportOf(msg.policy); // lane device-allow-flags: null = an agent older than the list (it judges nothing)
+            if (pol) { try { this._onPolicy?.(pol); } catch { } }
             // LOOP BREAKER (2.330.0): an upgrade that does not change the
             // reported version can never converge — a daemon that fails to
             // install, a stale singleton that will not die, a host missing
@@ -375,6 +388,12 @@ class DeviceManager {
             // safe to talk to; spinning forever is not (it re-installed every
             // ~10s for 8h, drove RSS to 20GB and produced no error anywhere).
             const led = this._ledgerRead(expected);
+            // lane hub-act-ask: the update is an act too (`code`) — and it NEVER holds this link (every op behind the hello would
+            // wait on the owner): asked ⇒ the link opens on the agent as it is (capability-gated) and an Allow pushes the update
+            // over it; refused ⇒ the agent stays as it is (one audit line), asked again at the next hello
+            // int316: the owner is asked only about an update this hub WOULD push — the device's own list allows `upgrade`
+            // (device-allow-flags) and this build is the signed release (device-bundle-signing: an unsigned one is never asked)
+            const held = msg.daemonVersion !== expected && led.tries <= 2 && DP.allows(pol, 'upgrade') && fs.existsSync(this._bundlePath) && this._mayPush(msg.daemonVersion, expected) ? this._upgradeHeld(msg.daemonVersion) : null;
             if (msg.daemonVersion !== expected && led.tries > 2) {
               if (!led.gaveUp) {
                 led.gaveUp = true; this._ledgerWrite(expected, led);
@@ -382,7 +401,12 @@ class DeviceManager {
                 try { global.__vsEvent?.('agentd-upgrade-stuck', { detail: `${msg.daemonVersion}→${expected}` }); } catch { }
                 try { this._onUpgradeStuck?.(msg.daemonVersion, expected, { platform: msg.platform, capabilities: msg.capabilities }); } catch { }
               }
-            } else if (msg.daemonVersion !== expected && fs.existsSync(this._bundlePath) && this._mayPush(msg.daemonVersion, expected)) {
+            } else if (msg.daemonVersion !== expected && !DP.allows(pol, 'upgrade')) {
+              // lane device-allow-flags: THIS machine's own list leaves `upgrade` off — no push (the device would refuse it
+              // anyway); the link is kept as-is (capability-gated), said once per link, one refused line in the audit
+              this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — its allow list leaves "upgrade" off; using it as-is (${DP.remedyOf({ machine: this._machineName(), allow: pol.allow, flag: 'upgrade', platform: msg.platform })})`);
+              this._refusedLine({ op: 'upgrade', version: expected, from: msg.daemonVersion, by: BY_UPGRADE }, DP.verdict(pol, { op: 'upgrade' }, { machine: this._machineName(), platform: msg.platform }));
+            } else if (msg.daemonVersion !== expected && fs.existsSync(this._bundlePath) && this._mayPush(msg.daemonVersion, expected) && !held) {
               led.tries += 1; this._ledgerWrite(expected, led);
               // version drift → stream the new bundle (self-upgrade), then reconnect
               this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — upgrading (attempt ${led.tries}/3)`);
@@ -412,7 +436,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -468,6 +492,7 @@ class DeviceManager {
               this._log('[agentd] connection lost');
             };
             resolve(this._conn);
+            if (held === 'ask') this._askUpgrade(msg.daemonVersion, { mux, sock, platform: msg.platform }); // lane hub-act-ask
             // self-heal reverse forwards: re-own each registered device port
             for (const [port] of this._reverseForwards) {
               this._request({ op: 'tcp-listen', port }).catch(() => { });
@@ -504,13 +529,13 @@ class DeviceManager {
     });
   }
 
-  async _upgrade(mux, { from = null } = {}) {
+  async _upgrade(mux, { from = null, asked = null } = {}) {
     const bundle = fs.readFileSync(this._bundlePath);
     // lane device-act-audit: the `code` layer's ONE send — it carries its `by` (the version-drift rule) and is ONE audit line
     // (from → to, the size) whatever its end; the device records it in its own state/acts.log
     const req = { op: 'upgrade', version: this._expectedVersion(), size: bundle.length, from: from || undefined, by: BY_UPGRADE };
     const t0 = Date.now();
-    const said = (ok, code) => this._act(req, { ok, code, ms: Date.now() - t0 });
+    const said = (ok, code) => this._act(req, { ok, code, ms: Date.now() - t0, ...askFacts(asked) });
     // THE HUB SHIPS NO UNSIGNED CODE (design q-042 D2): the release record rides the control line (`sig`) and the device
     // verifies it before anything points at the bytes; an unsigned local build reaches only THIS machine's own daemon,
     // with the single-use local proof (src/agentd/agentd.js landingVerdict)
@@ -547,6 +572,7 @@ class DeviceManager {
   async openSession({ cmd, args, cols, rows, cwd, env }) {
     const conn = await this.connect();
     const noShell = posixShellRefusal(conn.info, cmd); if (noShell) throw noShell; // lane windows-device-fs: THE DOOR
+    const noFlag = this._policyError(conn, { op: 'open-session' }, true); if (noFlag) throw noFlag; // lane device-allow-flags
     const chan = conn.nextChan++;
     const handle = { chan, onData: null, onExit: null };
     let resolveReady, rejectReady, readySettled = false;
@@ -579,6 +605,7 @@ class DeviceManager {
   async openPipeSession({ sid, cmd, args, cwd, env, offset = 0 }) {
     const conn = await this.connect();
     const noShell = cmd === undefined ? null : posixShellRefusal(conn.info, cmd); if (noShell) throw noShell; // lane windows-device-fs: THE DOOR (an attach names no cmd)
+    const noFlag = this._policyError(conn, { op: cmd === undefined ? 'attach-pipe-session' : 'open-pipe-session', sid }, true); if (noFlag) throw noFlag; // lane device-allow-flags
     const chan = conn.nextChan++;
     const handle = { chan, sid, onData: null, onExit: null };
     let resolveReady, rejectReady, readySettled = false;
@@ -610,26 +637,101 @@ class DeviceManager {
    *  (`human:` / `agent:` / `job:` / `system:`) — or it is refused HERE, in-process, `act_without_by`, logged and NEVER sent;
    *  every act that IS sent is ONE audit line (op, by, summary, ok / code, the redacted output head, ms). `audit: false` =
    *  the caller writes the line itself (a stream's line is written at its end — `_streamOp`). */
-  async _request(payload, { audit = true } = {}) {
+  async _request(payload, { audit = true, consent = false, asked } = {}) {
     const act = DA.needsBy(payload);
     if (act && !DA.validBy(payload.by)) return this._refuseAct(payload);
+    // lane hub-act-ask: THE ASK — an act is judged (and HELD while the owner is asked) BEFORE the send; a refusal throws, never
+    // sent. `asked` = the caller judged it already (a stream's request, a write-stream's open)
+    const facts = asked !== undefined ? asked : act && DA.auditable(payload) ? await this._gate(payload, { consent }) : null;
     const conn = await this.connect();
+    const noFlag = this._policyError(conn, payload, true); if (noFlag) return Promise.reject(noFlag); // lane device-allow-flags: never travels
     const id = conn.nextId++;
     const line = audit && act && DA.auditable(payload);
     const t0 = Date.now();
     return new Promise((resolve, reject) => {
       conn.pending.set(id, (m) => {
-        if (line) this._act(payload, { ...DA.answerOf(m), outHead: DA.outHeadOf(m), ms: Date.now() - t0 });
-        return m.error ? reject(Object.assign(new Error(m.error), m.linkLost ? { code: 'link_lost' } : {})) : resolve(m);
+        if (line) this._act(payload, { ...DA.answerOf(m), outHead: DA.outHeadOf(m), ms: Date.now() - t0, ...askFacts(facts) });
+        return m.error ? reject(Object.assign(new Error(m.error), m.linkLost ? { code: 'link_lost' } : {}, m.op === 'op-refused' ? { code: m.code, flag: m.flag, remedy: m.remedy } : {})) : resolve(m);
       });
       conn.mux.control({ ...payload, id });
-      setTimeout(() => { if (conn.pending.delete(id)) { if (line) this._act(payload, { ok: false, code: 'timeout', ms: Date.now() - t0 }); reject(new Error(payload.op + ' timeout')); } }, payload.waitMs || payload.timeoutMs || 30000);
+      setTimeout(() => { if (conn.pending.delete(id)) { if (line) this._act(payload, { ok: false, code: 'timeout', ms: Date.now() - t0, ...askFacts(facts) }); reject(new Error(payload.op + ' timeout')); } }, payload.waitMs || payload.timeoutMs || 30000);
     });
   }
   /** One audit line of an act sent through this client (never throws). */
   _act(payload, facts = {}) {
     if (!this._onAct) return;
     try { this._onAct(DA.lineOf({ at: Date.now(), payload, by: payload.by, ...facts })); } catch { /* the act's answer is the caller's; a writer's failure is the writer's */ }
+  }
+  /** lane device-allow-flags: the machine's name for a refusal's sentence (`machine` is a name or a getter). */
+  _machineName() { try { const m = typeof this._machine === 'function' ? this._machine() : this._machine; return m ? String(m) : null; } catch { return null; } }
+  /** lane device-allow-flags: THE hub half of the device's allow list — the verdict over the list its hello-ack stated
+   *  (none stated = an older agent = not judged). → null, or the refusal as an Error {code:'op-not-allowed', flag, op,
+   *  remedy, allow} whose message names the flag and THE re-run sentence; `line` = said in the journal + ONE audit line. */
+  _policyError(conn, payload, line = false) {
+    const info = (conn && conn.info) || {};
+    const v = DP.verdict(DP.reportOf(info.policy), payload, { machine: this._machineName(), platform: info.platform });
+    if (v.ok) return null;
+    const e = Object.assign(new Error(DP.sentenceOf(v, { machine: this._machineName() })), { code: v.code, flag: v.flag, op: v.op, remedy: v.remedy, allow: v.allow });
+    if (line) this._refusedLine(payload, v, e.message);
+    return e;
+  }
+  /** One refused request: the journal line + ONE audit line (`op-not-allowed`, the re-run sentence as its head). */
+  _refusedLine(payload, v, sentence = null) {
+    try { this._log(`[device-policy] REFUSED ${DA.keyOf(payload)} — ${sentence || DP.sentenceOf(v, { machine: this._machineName() })}`); } catch { }
+    if (this._onAct) { try { this._onAct(DA.lineOf({ at: Date.now(), payload, by: payload.by, ok: false, code: v.code, outHead: v.remedy || '' })); } catch { } }
+  }
+  /** lane device-allow-flags: would the machine's own list refuse this request? (a caller that must not START a chain —
+   *  a session's setup — asks before its first act). → null | the refusal Error (said + ONE audit line; nothing sent). */
+  async refusalOf(payload) { const conn = await this.connect(); return this._policyError(conn, payload, true); }
+  /** lane device-allow-flags: the allow list the connected agent states (null = none stated / not connected). */
+  policy() { return DP.reportOf(this._conn && this._conn.info && this._conn.info.policy); }
+  /** lane hub-act-ask: THE ASK at the ONE send point — the machine's 「Hub 自动化」 list judges an act by an agent / job / system
+   *  (src/server/hub-act-ask.js): it goes (null), it is HELD while the owner is asked (≤ 60 s; one card per machine per kind)
+   *  and goes with the answer's facts, or it is refused by name — ONE audit line (`ask`: never / quiet / denied / expired /
+   *  unfiled), NEVER sent. A gate that throws refuses (fail closed). */
+  async _gate(payload, { consent = false } = {}) {
+    if (!this._actGate) return null;
+    // int316: the device's OWN allow list (device-allow-flags) is judged BEFORE the owner is asked — a card never asks about
+    // an act the device would refuse (the list the live link stated; no link yet ⇒ the send point's own check after connect)
+    const noFlag = this._conn ? this._policyError(this._conn, payload, true) : null; if (noFlag) throw noFlag;
+    let g = null;
+    try { g = await this._actGate.check(payload, { consent }); }
+    catch (e) { g = { ok: false, code: 'hub_act_denied', error: `this act could not be judged (${String(e && e.message).slice(0, 120)}) — nothing was done`, ask: 'error' }; }
+    if (!g || g.ok) return g || null;
+    const l = DA.lineOf({ at: Date.now(), payload, by: payload.by, ok: false, code: g.code, ask: g.ask, answeredBy: g.answeredBy });
+    try { this._log(`[device-acts] NOT SENT ${l.op} by ${l.by} — ${g.code}: ${l.summary}`); } catch { }
+    if (this._onAct) { try { this._onAct(l); } catch { } }
+    throw Object.assign(new Error(g.error || g.code), { code: g.code });
+  }
+  /** lane hub-act-ask: the hello's update verdict (sync) → null (push it now) | 'ask' | 'deny' (said once, the agent kept). */
+  _upgradeHeld(from) {
+    if (!this._actGate || typeof this._actGate.verdict !== 'function') return null;
+    const req = { op: 'upgrade', version: this._expectedVersion(), from: from || undefined, by: BY_UPGRADE };
+    let v = null;
+    try { v = this._actGate.verdict(req); } catch { v = { verdict: 'deny', code: 'hub_act_denied', reason: 'error' }; }
+    if (!v || v.verdict === 'allow') return null;
+    if (v.verdict === 'ask') return 'ask';
+    this._act(req, { ok: false, code: v.code || 'hub_act_denied', ask: v.reason === 'nobody' ? 'never' : v.reason === 'quiet' ? 'quiet' : 'denied' });
+    this._log(`[agentd] daemon ${from} ≠ ${req.version} — the update is not allowed on this machine (${v.code || 'hub_act_denied'}); using it as-is`);
+    return 'deny';
+  }
+  /** lane hub-act-ask: the owner is asked about the update while the link runs on the agent as it is; an Allow pushes it over
+   *  THIS link (the daemon takes `upgrade` any time after hello), then the link is dropped and dialed again (the re-exec). */
+  _askUpgrade(from, { mux, sock, platform } = {}) {
+    const expected = this._expectedVersion();
+    const req = { op: 'upgrade', version: expected, from: from || undefined, by: BY_UPGRADE };
+    this._log(`[agentd] daemon ${from} ≠ ${expected} — the update waits for the owner's answer (For you)`);
+    Promise.resolve(this._actGate.check(req)).then((g) => {
+      if (g && !g.ok) { this._act(req, { ok: false, code: g.code, ask: g.ask, ...(g.answeredBy ? { answeredBy: g.answeredBy } : {}) }); this._log(`[agentd] the update to ${expected} was not allowed (${g.code}) — the agent stays at ${from}`); return; }
+      if (!this._conn || this._conn.mux !== mux) { this._log('[agentd] the update was allowed but its link is gone — the next hello asks again'); return; }
+      const led = this._ledgerRead(expected); led.tries += 1; this._ledgerWrite(expected, led);
+      try { this._onUpgradeBegin?.(from, expected, { platform }); } catch { }
+      return this._upgrade(mux, { from, asked: g }).then((done) => {
+        this._trusted(done, from, expected); // int316: device-bundle-signing's first-trust door, as at hello
+        try { sock.destroy(); } catch { }
+        setTimeout(() => { this.connect().catch(() => { }); }, 700); // the re-exec window, as at hello
+      }, (e) => { this._refused(e, from, expected, led); throw e; }); // int316: a signature the device refused gives up at once, as at hello
+    }).catch((e) => this._log(`[agentd] the allowed update did not land: ${e && e.message}`));
   }
   /** An act without a `by`: refused in-process, said in the journal and the audit, never sent. */
   _refuseAct(payload) {
@@ -726,10 +828,11 @@ class DeviceManager {
    *  is full); `end` with the count and the sha256 THIS side computed ⇒ the device compares both, renames, answers.
    *  `size` is announced up front: more or fewer bytes is a failure, never a short file. `check()` is asked every
    *  window (8 MiB) — a throw (the grant revoked, the caller gone) aborts. Any failure removes the part. → `{size, sha256}`. */
-  async fsWriteStream(p, { source, size, overwrite = false, check = null, windowBytes = 8 * 1024 * 1024, by } = {}) {
+  async fsWriteStream(p, { source, size, overwrite = false, check = null, windowBytes = 8 * 1024 * 1024, by, consent = false } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('fs-write-stream')) { const e = new Error('daemon lacks fs-write-stream (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
     if (!DA.validBy(by)) return this._refuseAct({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, size }); // lane device-act-audit: before the channel opens (after the capability gate — §74)
+    const asked = await this._gate({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, size, overwrite: !!overwrite, by }, { consent }); // lane hub-act-ask: before the channel opens (a refusal sends nothing, not even an abort)
     const chan = conn.nextChan++;
     const crypto = require('crypto');
     const contentHash = crypto.createHash('sha256'); // the bytes of a file (the device compares it at `end`)
@@ -738,7 +841,7 @@ class DeviceManager {
     const linkGone = () => this._stopped || this._conn !== conn;
     const abort = async () => { if (linkGone()) return; try { await this._request({ op: 'fs-op', action: 'write-stream', step: 'abort', path: p, chan, waitMs: 15000, by }); } catch { } }; // a dropped link: the agent removes the part itself
     try {
-      await this._request({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, chan, size, overwrite: !!overwrite, waitMs: 20000, by });
+      await this._request({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, chan, size, overwrite: !!overwrite, waitMs: 20000, by }, { asked });
       // never destroyOnReturn: a refusal mid-body must still answer the HTTP request the body arrived on
       const it = typeof source.iterator === 'function' ? source.iterator({ destroyOnReturn: false }) : source;
       for await (const piece of it) {
@@ -852,11 +955,11 @@ class DeviceManager {
   }
   /** `waitMs` (lane-pairing ⑥): how long THIS side waits for the reply — the daemon kills the child at `timeoutMs`
    *  (capped at 30 s there) and still has to send the result, so a caller that uses the cap itself waits past it. */
-  async runCmd(cmd, args = [], { stdin, env, timeoutMs, waitMs, by } = {}) {
+  async runCmd(cmd, args = [], { stdin, env, timeoutMs, waitMs, by, consent = false } = {}) {
     if (!DA.validBy(by)) return this._refuseAct({ op: 'run-cmd', cmd, args }); // lane device-act-audit: refused before the link is even asked
     const { info } = await this.connect();
     const noShell = posixShellRefusal(info, cmd); if (noShell) throw noShell; // lane windows-device-fs: THE DOOR (the device's fact)
-    const r = await this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, ...(waitMs ? { waitMs } : {}), stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined, by });
+    const r = await this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, ...(waitMs ? { waitMs } : {}), stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined, by }, { consent });
     const failed = posixShellFailed(info, cmd, r); if (failed) throw failed; // verify-r1 F1: asked, and it was not there ⇒ named
     return r;
   }
@@ -864,11 +967,11 @@ class DeviceManager {
    *  PURE src/exit-shell.js decides THERE); the reply carries `interpreter`, and `spawnError` when the child never
    *  started. Capability-gated (`run-shell` in the hello-ack): an older daemon only knows the argv form — the caller
    *  falls back to `sh -lc` itself and says which it ran; a daemon is never asked an op it lacks (it would hang). */
-  async runShell(line, { env, timeoutMs, waitMs, by } = {}) {
+  async runShell(line, { env, timeoutMs, waitMs, by, consent = false } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('run-shell')) { const e = new Error('daemon lacks run-shell (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
     if (!DA.validBy(by)) return this._refuseAct({ op: 'run-cmd', shell: String(line) }); // lane device-act-audit: after the capability gate (an old agent's refusal stays its own)
-    return this._request({ op: 'run-cmd', shell: String(line), env, timeoutMs, ...(waitMs ? { waitMs } : {}), by });
+    return this._request({ op: 'run-cmd', shell: String(line), env, timeoutMs, ...(waitMs ? { waitMs } : {}), by }, { consent });
   }
   /** streaming argv exec: stdout arrives via onData (byte channel); resolves
    *  {code} at exit. For outputs too large for runCmd (usage-scan NDJSON).
@@ -887,13 +990,15 @@ class DeviceManager {
   }
   /** ONE streaming-op consumer (run-stream + usage-scan): count-gated settle
    *  (stream-exit's `sent` vs received), link-death settles, deadline belt. */
-  async _streamOp(req, { onData, timeoutMs = 120000 } = {}) {
+  async _streamOp(req, { onData, timeoutMs = 120000, consent = false } = {}) {
     // lane device-act-audit: an act stream (run-stream) names who asked BEFORE its channel opens, and is ONE audit line at
     // its END (the exit code, the first bytes of its output — redacted —, the whole duration)
     if (DA.needsBy(req) && !DA.validBy(req.by)) return this._refuseAct(req);
+    const asked = DA.auditable(req) ? await this._gate(req, { consent }) : null; // lane hub-act-ask: THE ASK, before the channel opens
     const line = DA.auditable(req), t0 = Date.now();
     let head = [], headLen = 0;
     const conn = await this.connect();
+    const noFlag = this._policyError(conn, req, true); if (noFlag) throw noFlag; // lane device-allow-flags: before the channel opens
     const chan = conn.nextChan++;
     let exitR;
     const done = new Promise((r) => { exitR = r; });
@@ -902,7 +1007,7 @@ class DeviceManager {
       if (settled) return; settled = true;
       clearTimeout(stall); conn.sessions.delete(chan);
       const res = { code: exitMsg?.code, error: exitMsg?.error, ...(extra || {}) };
-      if (line) this._act(req, { ...DA.answerOf(res), outHead: DA.outHeadOf({ stdout: Buffer.concat(head).toString('utf8') }), ms: Date.now() - t0 });
+      if (line) this._act(req, { ...DA.answerOf(res), outHead: DA.outHeadOf({ stdout: Buffer.concat(head).toString('utf8') }), ms: Date.now() - t0, ...askFacts(asked) });
       head = [];
       exitR(res);
     };
@@ -930,9 +1035,9 @@ class DeviceManager {
     if (deadline.unref) deadline.unref();
     done.finally?.(() => clearTimeout(deadline));
     let ack;
-    try { ack = await this._request({ ...req, chan }, { audit: false }); }
-    catch (e) { settled = true; clearTimeout(deadline); conn.sessions.delete(chan); if (line) this._act(req, { ok: false, code: (e && e.code) || 'error', ms: Date.now() - t0 }); throw e; }
-    if (ack.error) { settled = true; clearTimeout(deadline); conn.sessions.delete(chan); clearTimeout(stall); if (line) this._act(req, { ok: false, code: ack.code || 'error', ms: Date.now() - t0 }); throw new Error(ack.error); }
+    try { ack = await this._request({ ...req, chan }, { audit: false, asked }); }
+    catch (e) { settled = true; clearTimeout(deadline); conn.sessions.delete(chan); if (line) this._act(req, { ok: false, code: (e && e.code) || 'error', ms: Date.now() - t0, ...askFacts(asked) }); throw e; }
+    if (ack.error) { settled = true; clearTimeout(deadline); conn.sessions.delete(chan); clearTimeout(stall); if (line) this._act(req, { ok: false, code: ack.code || 'error', ms: Date.now() - t0, ...askFacts(asked) }); throw new Error(ack.error); }
     return done;
   }
   /** R4 `usage.scan`: run the daemon's BUNDLED ledger walker (no per-harvest
@@ -1113,7 +1218,7 @@ class DeviceManager {
     if (onPush) this._streamWatches.set(sid, onPush);
     const forget = () => { if (fresh) this._streamWatches.delete(sid); };
     let r;
-    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, ...(params.relayLeg ? { relayLeg: params.relayLeg } : {}), ...(params.fp16 ? { fp16: true } : {}), ...(params.share ? { share: params.share } : {}), iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
+    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, ...(params.relayLeg ? { relayLeg: params.relayLeg } : {}), ...(params.fp16 ? { fp16: true } : {}), ...(params.share ? { share: params.share } : {}), ...(params.hdr ? { hdr: true } : {}), iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
     if (r.error) { forget(); throw new Error(r.error); }
     const res = r.result || { ok: false, code: 'offer_failed', error: 'no answer' };
     if (!res.ok) forget();
@@ -1292,6 +1397,7 @@ class DeviceManager {
    *  it over, in order, when onData / onClose are set (lane mirror-green-212 — kb-bugfix-invariants). */
   async tcpForward(port, host, { by } = {}) {
     const conn = await this.connect();
+    const noFlag = this._policyError(conn, { op: 'tcp-connect', port, ...(host && host !== '127.0.0.1' ? { host } : {}), by }, true); if (noFlag) throw noFlag; // lane device-allow-flags: before a channel is held
     const chan = conn.nextChan++;
     const early = []; let dataFn = null, closeFn = null, closed = false;
     const drain = () => { while (dataFn && early.length) dataFn(early.shift()); if (closed && closeFn && !early.length) { closed = false; closeFn(); } };
@@ -1299,7 +1405,8 @@ class DeviceManager {
     conn.sessions.set(chan, { onData: (b) => { if (dataFn && !early.length) dataFn(b); else early.push(b); }, onClose: () => { closed = true; drain(); } });
     // host defaults to loopback on the device; an explicit host reaches the
     // device's LAN (a user-driven forward to another internal machine)
-    await this._request({ op: 'tcp-connect', port, chan, ...(host && host !== '127.0.0.1' ? { host } : {}), by }); // lane device-act-audit: another LAN host = an act (`by`); the loopback = a read
+    try { await this._request({ op: 'tcp-connect', port, chan, ...(host && host !== '127.0.0.1' ? { host } : {}), by }); } // lane device-act-audit: another LAN host = an act (`by`); the loopback = a read
+    catch (e) { if (e && (e.code === 'hub_act_denied' || e.code === 'ask_expired' || e.code === 'ask_unfiled')) conn.sessions.delete(chan); throw e; } // lane hub-act-ask: refused ⇒ no channel kept
     handle.write = (b) => conn.mux.data(chan, Buffer.isBuffer(b) ? b : Buffer.from(b));
     handle.close = () => { conn.sessions.delete(chan); conn.mux.closeChan(chan); };
     return handle;
@@ -1328,7 +1435,7 @@ class DeviceManager {
 
   // on-demand egress: the device serves a SOCKS5 proxy on its loopback, the
   // server reaches it via tcpForward (the exit-proxy shape). CONNECT only.
-  serveSocks({ by } = {}) { return this._request({ op: 'serve-socks', by }); }
+  serveSocks({ by, consent = false } = {}) { return this._request({ op: 'serve-socks', by }, { consent }); }
   unserveSocks(port) { return this._request({ op: 'unserve-socks', port }); }
   _onTcpAccept(m) {
     const conn = this._conn;

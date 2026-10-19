@@ -19,16 +19,20 @@
 //     pointer or wheel went down the channel (the shell pauses an agent the desktop is handed to); `onHandover(facts)` = the
 //     lease's facts each long poll answers; `after` = the previous stream's key (a display switch carries the lease); `key` =
 //     this stream's session key (what a hand-over names)
+//   • HDR 直通 (lane stream-hdr-passthrough — src/hdr-viewer.js): `hdr` = ask the machine for its HDR road (AV1 10-bit PQ); the
+//     answer puts AV1 first (setCodecPreferences — werift sends the answer's first codec); a picture whose bytes arrive while no
+//     frame is decoded for 2 s (hdrStallStep) = this browser cannot decode it ⇒ `onHdrFailed()` (the shell restarts in SDR, says so)
 import { fetchJson } from './utils.js';
 import { STREAM_LIMITS, streamStep, fallbackVerdict, statsOf, relayPathOf, firewallRuleCommand } from '../stream-model.js';
 import { viewerPlatform, keyMapFor, keyMessage, pointerMessage, wheelMessage } from './stream-input.js';
+import { hdrStallStep } from '../hdr-viewer.js';
 
 const post = (url, body) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BASE = '/api/desktop/machine-desktop/stream';
 
-/** `opts` = { hostId, hostPlatform?, source?, fp16?, onStatus(state, code), onStats(page, agent), onFallback(code, why, taken, info),
- *  onInput(refused), onSource(source) } → { connect(), dispose(why?), focus(), get state, stats(), agent(), source(), video } —
+/** `opts` = { hostId, hostPlatform?, source?, fp16?, hdr?, onStatus(state, code), onStats(page, agent), onFallback(code, why, taken, info),
+ *  onInput(refused), onSource(source), onHdrFailed() } → { connect(), dispose(why?), focus(), get state, stats(), agent(), source(), video } —
  *  dispose(why) names the end for the hub and the machine's log ('closed' = the window's ×; 'stopped' = the person's 停止串流 —
  *  lane stream-window-fixes); `info` = a refusal's numbers (`too_many_streams`: the machine's live / cap / displays — lane
  *  desktop-display-modes) | null */
@@ -48,6 +52,7 @@ export function createStreamView(host, opts = {}) {
   let map = keyMapFor(viewerPlatform(), opts.hostPlatform || null);
   let refusedSeen = null, switchSaid = 0;
   let refusal = null; // lane desktop-display-modes: a refused start's numbers (the per-machine cap's count)
+  let hdrWatch = null, hdrFailed = false; // lane stream-hdr-passthrough: the decode watch of an HDR picture (hdrStallStep)
 
   const send = (msg) => {
     const open = !!(msg && dc && dc.readyState === 'open');
@@ -71,14 +76,25 @@ export function createStreamView(host, opts = {}) {
     clearTimeout(connectTimer);
     connectTimer = setTimeout(() => { if (st.state === 'connecting' || st.state === 'restarting' || st.state === 'offered') step('timeout'); }, STREAM_LIMITS.connectMs);
   }
+  /** lane stream-hdr-passthrough: the answer lists AV1 first (the machine offered it first; some browsers answer in their own order). */
+  function preferAv1() {
+    try {
+      const caps = typeof RTCRtpReceiver !== 'undefined' && typeof RTCRtpReceiver.getCapabilities === 'function' ? RTCRtpReceiver.getCapabilities('video') : null;
+      const isAv1 = (c) => /^video\/av1$/i.test(c.mimeType);
+      if (!caps || !caps.codecs.some(isAv1)) return;
+      const order = [...caps.codecs.filter(isAv1), ...caps.codecs.filter((c) => !isAv1(c))];
+      for (const tr of pc.getTransceivers()) if (typeof tr.setCodecPreferences === 'function' && tr.receiver && tr.receiver.track && tr.receiver.track.kind === 'video') tr.setCodecPreferences(order);
+    } catch { /* the browser's own order */ }
+  }
   async function answerOffer(offer) {
     await pc.setRemoteDescription(offer);
+    if (opts.hdr) preferAv1();
     await pc.setLocalDescription(await pc.createAnswer());
     const a = await post(`${BASE}/answer`, { key, sdp: pc.localDescription.sdp });
     if (!a || a.error) throw Object.assign(new Error((a && a.error) || 'the answer did not reach the machine'), { code: (a && a.code) || 'answer_failed' });
   }
   async function start() {
-    const r = await post(`${BASE}/start`, { host: hostId, ...(opts.source ? { source: opts.source, ...(opts.fp16 ? { fp16: true } : {}) } : {}), ...(opts.after ? { after: opts.after } : {}) }).catch(() => null); // opts.source: a display / ONE window (a Mac's or a Windows machine's — int304's one door)
+    const r = await post(`${BASE}/start`, { host: hostId, ...(opts.source ? { source: opts.source, ...(opts.fp16 ? { fp16: true } : {}) } : {}), ...(opts.hdr ? { hdr: true } : {}), ...(opts.after ? { after: opts.after } : {}) }).catch(() => null); // opts.source: a display / ONE window (a Mac's or a Windows machine's — int304's one door)
     if (disposed) { if (r && r.key) post(`${BASE}/stop`, { key: r.key, why: closeWhy }); return; }
     if (!r || r.error || !r.take) { why = (r && (r.why || r.error)) || null; refusal = r && Number.isInteger(r.cap) ? { live: r.live, cap: r.cap, displays: r.displays } : null; step('refused', (r && r.code) || 'start_failed'); return; }
     taken = true; key = r.key;
@@ -145,6 +161,12 @@ export function createStreamView(host, opts = {}) {
     page = statsOf(prev, list, performance.now());
     prev = page;
     try { opts.onStats?.(page, agent); } catch { /* the shell's */ }
+    // lane stream-hdr-passthrough: an HDR picture this browser does not decode (its bytes arrive, no frame) ⇒ the shell's SDR restart
+    if (opts.hdr && !hdrFailed && (st.state === 'connecting' || st.state === 'playing') && (!page.codec || /av1/i.test(page.codec))) {
+      const r = hdrStallStep(hdrWatch, page);
+      hdrWatch = r.st;
+      if (r.failed) { hdrFailed = true; try { opts.onHdrFailed?.(); } catch { /* the shell's */ } return; }
+    }
     const v = fallbackVerdict({ pc: pc.connectionState, since: pcSince, now: performance.now() });
     if (v.sick && (st.state === 'playing' || st.state === 'connecting')) step(v.event, v.event === 'failed' ? 'ice_failed' : 'ice_disconnected');
   }
@@ -224,6 +246,7 @@ export function createStreamView(host, opts = {}) {
     video,
     get state() { return st.state; },
     get key() { return key; }, // lane desktop-handover: the session a hand-over names
+    get hdr() { return !!opts.hdr; }, // lane stream-hdr-passthrough: this view asked for the HDR road
     connect() { if (st.state === 'idle') { step('start'); statsTimer = setInterval(() => { readStats(); }, STREAM_LIMITS.statsMs); } },
     focus() { video.focus({ preventScroll: true }); },
     stats: () => page,

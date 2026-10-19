@@ -287,6 +287,8 @@ class ExitProxyManager {
       },
       lastRun: a.lastRun || null,
       audit: this.auditTail({ hostId, limit: 10 }),
+      // lane hub-act-ask: the third list as it applies NOW (stored, or the instance's default and why) + the cards that are up
+      hub: this.hosts.hubActs ? { ...this.hosts.hubActs.policyFor(hostId), asks: this.hosts.hubActs.list().filter((k) => k.hostId === hostId) } : null,
     };
   }
   /**
@@ -307,6 +309,7 @@ class ExitProxyManager {
     const heldBefore = liveBefore ? [...new Set([...liveBefore.users, ...(liveBefore.bySession ? liveBefore.bySession.keys() : [])])] : [];
     const asksBefore = [...this._asks.values()].filter((k) => k.hostId === hostId).map((k) => k.askId);
     this.hosts.setExitAccess(hostId, E.storedExit(v.access));
+    try { this.hosts.hubActs?.onPolicyChanged?.(hostId); } catch { } // lane hub-act-ask: the cards of this machine re-judged by its list
     const now = E.exitAccessOf(this._raw(hostId));
     this.audit({ hostId, machine: h.name || h.id, verb: 'access-changed', by, ok: true, changed: v.changed, summary: E.summaryOf(now) });
     this.log(`${h.name || h.id}: who can use it changed by ${by} — network ${now.use.mode}${now.use.mode === 'only' ? ` (${now.use.who.length})` : ''}, commands ${now.run.mode}${now.run.mode === 'only' ? ` (${now.run.who.length})` : ''}${now.run.ask ? ' (ask)' : ''}`);
@@ -486,7 +489,7 @@ class ExitProxyManager {
     const existing = this._live.get(h.id);
     if (existing && existing.server.listening) return { machine: h.name || h.id, hostId: h.id, localPort: existing.localPort, url: `socks5h://127.0.0.1:${existing.localPort}` };
     const dm = await this.hosts.deviceBounded(h.id, 8000); // throws if offline
-    const { port: socksPort } = await dm.serveSocks({ by }); // lane device-act-audit: the conversation whose `use` opened it
+    const { port: socksPort } = await dm.serveSocks({ by, consent: true }).catch((e) => { throw e && e.code === 'op-not-allowed' ? Object.assign(e, { code: 'op_not_allowed' }) : e; }); // lane device-act-audit: the conversation whose `use` opened it; lane hub-act-ask: `use` judged it — never asked twice; lane device-allow-flags: `socks` off is a 403 by name
     const sockets = new Set();
     const server = net.createServer({ allowHalfOpen: true }, async (sock) => {
       sockets.add(sock);
@@ -578,7 +581,7 @@ class ExitProxyManager {
       const caps = Array.isArray(info.capabilities) ? info.capabilities : [];
       platform = typeof info.platform === 'string' ? info.platform.replace(/[^a-z0-9]/gi, '').slice(0, 16) || null : null; // verify r1 F5a: a daemon's word, bounded to a platform name's shape
       const useShell = caps.includes(XS.RUN_SHELL_CAP);
-      const opts = { timeoutMs: E.EXIT_RUN_TIMEOUT_MS, waitMs: E.EXIT_RUN_TIMEOUT_MS + 10000, by: require('./device-acts.js').byAgent(this.keyOf(session, sessionId)) };
+      const opts = { timeoutMs: E.EXIT_RUN_TIMEOUT_MS, waitMs: E.EXIT_RUN_TIMEOUT_MS + 10000, by: require('./device-acts.js').byAgent(this.keyOf(session, sessionId)), consent: true }; // lane hub-act-ask: `run` (and its own ask) judged it — the Hub automation list never asks twice
       // lane device-upgrade-stuck: a Windows agent WITHOUT run-shell can run no line (no `sh` there) — the hub KNOWS it from
       // the hello and refuses by name below; pre-fix it sent `sh -lc` anyway and the card read "exit 1 · 0.0 s · no output"
       if (!XS.canRunLine(platform, caps)) outdated = { agentVersion: E.agentVersionOf(info.daemonVersion) };
@@ -589,6 +592,9 @@ class ExitProxyManager {
         interpreter = XS.knownInterpreter(r && r.interpreter) || (useShell ? XS.interpreterOf(platform) : XS.POSIX_SHELL);
       }
     } catch (e) {
+      // lane device-allow-flags: the machine's OWN allow list leaves `run` off — refused before it was sent (never "the link
+      // failed while it ran"); the sentence is the device's: the flag + the re-run
+      if (e && e.code === 'op-not-allowed') { card({ outcome: 'not_granted', cmd }); throw this._refused(session, sessionId, { code: 'op_not_allowed', grant: 'run', h, cmd, error: e.message }); }
       const offline = /offline|not dialed in|unreachable|timed out connecting|ECONNREFUSED/i.test(String(e && e.message));
       const outcome = offline ? 'offline' : 'run_failed';
       card({ outcome, cmd });
@@ -849,10 +855,11 @@ class ExitProxyManager {
       }
     } else {
       try {
-        const r = await dm.fsWriteStream(remote, { source: o.source, size: tv.size, overwrite: o.overwrite, check: stillOn, windowBytes: E.TRANSFER_WINDOW_BYTES, by: require('./device-acts.js').byAgent(by.key) });
+        const r = await dm.fsWriteStream(remote, { source: o.source, size: tv.size, overwrite: o.overwrite, check: stillOn, windowBytes: E.TRANSFER_WINDOW_BYTES, by: require('./device-acts.js').byAgent(by.key), consent: true }); // lane hub-act-ask: `run` judged it
         bytes = Number(r.size) || 0; sha256 = typeof r.sha256 === 'string' ? r.sha256 : null;
       } catch (e) {
         const nm = named(e); if (nm) throw nm;
+        if (e && e.code === 'op-not-allowed') throw fail('op_not_allowed', { error: e.message }, 'not_granted'); // lane device-allow-flags: `files` off
         const m = String(e && e.message || '');
         if (/hash_mismatch/.test(m)) throw fail('hash_mismatch');
         if (/already exists/.test(m)) throw fail('exists', { side: 'remote' });

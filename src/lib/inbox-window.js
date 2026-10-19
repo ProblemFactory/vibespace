@@ -323,6 +323,10 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     'browser-floor-check': () => actBtn('browser-floor-check', UI_ICONS.refresh, t('Check again'), t('Ask for the browser version once more now — this notice goes away by itself once it reads'), 'iw-act-primary'), // B-0b8c
     'exit-allow': () => actBtn('exit-allow', UI_ICONS.check, t('Allow'), t('Allow'), 'iw-act-primary iw-act-exit'),
     'exit-deny': () => actBtn('exit-deny', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit'),
+    // lane hub-act-ask: a hub act held on a cluster instance — Allow once (primary) / Always on this machine / Deny
+    'hub-once': () => actBtn('hub-once', UI_ICONS.check, t('Allow once'), t('Allow once'), 'iw-act-primary iw-act-exit'),
+    'hub-always': () => actBtn('hub-always', UI_ICONS.check, t('Always on this machine'), t('Sets Hub automation of this machine to Always allow — every kind, no more asks'), 'iw-act-exit'),
+    'hub-deny': () => actBtn('hub-deny', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit'),
     // lane browser-propose: the agent's browser proposal — ONE primary Approve (runs exactly what the item says), a quiet Reject
     'proposal-approve': () => actBtn('proposal-approve', UI_ICONS.check, t('Approve'), t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit'),
     'proposal-reject': () => actBtn('proposal-reject', UI_ICONS.close, t('Reject'), t('Reject'), 'iw-act-exit'),
@@ -635,6 +639,12 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       // lane browser-propose: an Approve on a pane shown a moment ago is not a press on what the user read (the exit ask's V1 rule)
       if (a === 'proposal-approve') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Approve moved under the pointer just now — read it, then press it again')); return; } }
       if (await model.runAction(it, a === 'proposal-approve' ? 'approve' : 'reject')) advance(id);
+      return;
+    }
+    if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny') {
+      // lane hub-act-ask: the same arm as every Allow (a pane shown ARM_MS ago or less is not the one the user read)
+      if (a !== 'hub-deny') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again')); return; } }
+      if (await model.runAction(it, a.slice(4))) advance(id);
       return;
     }
     if (a === 'exit-allow' || a === 'exit-deny') {

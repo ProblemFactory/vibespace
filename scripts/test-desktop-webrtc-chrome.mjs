@@ -45,6 +45,13 @@
 //      picker marks the window 正在串流 with 「停止」; 「停止串流」, the picker's 「停止」 and the window's × each end the session on
 //      the hub AND the machine's helper (by name, in the agent's log); a viewer that vanishes (its tab gone, no word) ends it
 //      within 5 s — RED CONTROL: a hub that never acts on the closed poll still streams at 6 s       window-*.png
+//   ⑯ 「HDR 直通」 (lane stream-hdr-passthrough — a mocked HDR viewer: (dynamic-range: high) + decodingInfo; the agent's screen source
+//      with av1_nvenc and THE AV1 fixtures): no switch on an SDR screen, for a software-only AV1 decoder, or for a machine without
+//      an AV1 encoder; shown and OFF for an HDR screen + hardware AV1 + a machine that can; THE FALLBACK for real — the press asks
+//      HDR, this Chrome's dav1d refuses 10-bit, 2 s later 「HDR 直通已回退：浏览器无法解码」, the session ends hdr_undecodable, the
+//      SDR picture plays, the switch is off; CONTROL — the 8-bit AV1 stream through the same road decodes (· HDR on the summary);
+//      the details' codec AV1 + 「HDR」 row; an SDR screen ⇒ SDR, back ⇒ HDR; remembered per machine (a new window starts in HDR)
+//                                                                              hdr-switch.png, hdr-fallback.png, hdr-details.png
 // PNGs when `--shots <dir>`.
 //   ⑫ a Mac's strip (lane stream-mac-stall): over a STREAM the switcher lists the Mac's displays (its offer's rows, left to right,
 //      the streamed one pressed, no 全部); a pick restarts the stream ON that display; 「打开系统设置」 opens the pane ON the Mac
@@ -109,7 +116,8 @@ fs.mkdirSync(path.join(home, '.local/bin'), { recursive: true });
 const PS_LOG = path.join(root, 'ps-lines.txt'), ELEVATED = path.join(root, 'elevated'), FACTS = path.join(root, 'stream-facts.json');
 fs.writeFileSync(FACTS, factsLine([{ id: '\\\\.\\DISPLAY1', x: 0, y: 0, w: 1280, h: 720, primary: true, hdr: true, white: 2500, adapter: 0, output: 0 }])); // ⑧ ⑩: the machine's screen facts (an HDR primary, SDR white 200 nits)
 fs.writeFileSync(path.join(home, '.local/bin/powershell.exe'), `#!${process.execPath}
-const fs = require('fs'); { const a = process.argv.slice(2); if (/'stream-facts'/.test(Buffer.from(a[a.length - 1] || '', 'base64').toString('utf16le'))) { process.stdout.write(fs.readFileSync(${JSON.stringify(FACTS)}, 'utf8') + '\\r\\n'); process.exit(0); } }
+const fs = require('fs'); { const a = process.argv.slice(2), sc = Buffer.from(a[a.length - 1] || '', 'base64').toString('utf16le'); if (/'stream-facts'/.test(sc)) { process.stdout.write(fs.readFileSync(${JSON.stringify(FACTS)}, 'utf8') + '\\r\\n'); process.exit(0); }
+  if (/VsQos/.test(sc)) { const ids = ((/foreach \\(\\$id in @\\(([\\d,]+)\\)\\)/.exec(sc) || [])[1] || '').split(',').map(Number); process.stdout.write(JSON.stringify({ t: 'unthrottle', rows: ids.map((pid) => ({ pid, ok: true, err: 0 })) }) + '\\r\\n'); process.exit(0); } } // ⑯: the HDR road's power-throttling opt-out
 process.stdout.write('ready\\r\\n');
 let buf = ''; process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); fs.appendFileSync(${JSON.stringify(PS_LOG)}, l + '\\n'); process.stdout.write(((l[0] === 'D' || (l[0] === 'K' && l.endsWith(' 0'))) && fs.existsSync(${JSON.stringify(ELEVATED)}) ? 'uipi' : 'ok') + '\\r\\n'); } });
@@ -257,7 +265,15 @@ const cenv = { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun }; d
 chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'chrome-profile')}`, 'about:blank'], { stdio: 'ignore', env: cenv, detached: true });
 const WebSocket = require(path.join(REPO, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
-async function page(w, h, winCss, { at = '/', mac = false, touch = false } = {}) {
+// ⑯ (lane stream-hdr-passthrough): a mocked HDR viewer — headless Chrome has no HDR screen; `screen` = (dynamic-range: high), switchable
+// later (window.__hdrScreen(v) fires the media query's change, as moving the window to another screen does); `decoder` = the
+// decodingInfo answer for WebRTC AV1 PQ (window.__hdrDecoder)
+const HDR_MOCK = (screen, decoder) => `(() => { const mq = { matches: ${!!screen}, media: '(dynamic-range: high)', ls: [], addEventListener(t, f) { if (t === 'change') mq.ls.push(f); }, removeEventListener(t, f) { mq.ls = mq.ls.filter((x) => x !== f); }, addListener() {}, removeListener() {}, onchange: null };
+  const real = window.matchMedia.bind(window); window.matchMedia = (q) => (q === '(dynamic-range: high)' ? mq : real(q));
+  window.__hdrScreen = (v) => { mq.matches = !!v; for (const f of [...mq.ls]) f({ matches: mq.matches, media: mq.media }); return true; };
+  window.__hdrDecoder = ${JSON.stringify(decoder)};
+  const mc = navigator.mediaCapabilities; if (mc) { const di = mc.decodingInfo.bind(mc); mc.decodingInfo = async (c) => (c && c.type === 'webrtc' && /av1/i.test((c.video && c.video.contentType) || '') ? { ...window.__hdrDecoder } : di(c)); } })();`;
+async function page(w, h, winCss, { at = '/', mac = false, touch = false, hdr = null } = {}) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
@@ -266,6 +282,7 @@ async function page(w, h, winCss, { at = '/', mac = false, touch = false } = {})
   const cdp = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   await cdp('Runtime.enable'); await cdp('Page.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+  if (hdr) await cdp('Page.addScriptToEvaluateOnNewDocument', { source: HDR_MOCK(hdr.screen, hdr.decoder) });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); } catch {} window.__winCss = ${JSON.stringify(winCss)};${mac ? " Object.defineProperty(navigator, 'userAgentData', { value: { platform: 'macOS' }, configurable: true });" : ''}` });
   await cdp('Emulation.setFocusEmulationEnabled', { enabled: true });
   await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: w < 600 });
@@ -539,6 +556,89 @@ console.log('⑩ the machine\'s own screen: the HDR road, NVENC on the strip —
   await p.close();
   screenHub.shutdown();
   R.setup({ ...BASE });
+}
+console.log('⑯ 「HDR 直通」 (lane stream-hdr-passthrough): the switch only where it can work, remembered per machine; this Chrome refuses 10-bit ⇒ the fallback, said; the 8-bit control decodes');
+{
+  const SP = require(path.join(REPO, 'src/stream-plan.js'));
+  const cal = calibrationFrame(1280, 720, SP.CALIBRATION.rows);
+  const RAW = path.join(root, 'cal16.f16'); fs.writeFileSync(RAW, cal.buf);
+  const AV1_10 = path.join(REPO, 'scripts/fixtures/stream/fake-desk-av1-10.ivf'), AV1_8 = path.join(REPO, 'scripts/fixtures/stream/fake-desk-av1-8.ivf');
+  const FF = writeFakeFfmpeg(path.join(home, '.local/bin'), { log: path.join(root, 'ffmpeg16.log'), fixture: FIXTURE, raw: RAW, version: '7.1', encoders: ['h264_nvenc', 'av1_nvenc', 'libx264'], av1: AV1_10 });
+  await dm.streamFacts({ force: true });
+  const hub16 = DW.create({ access: ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, env: () => ({}) }), log: quiet });
+  const stops = [], seen = []; const realStop = hub16.stop; hub16.stop = (k, why) => { stops.push(why); return realStop(k, why); };
+  const watch = setInterval(() => { for (const f of hub16.facts('win-a')) if (f.source && !seen.some((x) => x.key === f.key)) seen.push({ key: f.key, mode: f.source.mode, hdr: f.source.hdr || null }); }, 100);
+  R.setup({ ...BASE, webrtc: hub16 });
+  const YES = { supported: true, smooth: true, powerEfficient: true }, LINUX = { supported: true, smooth: true, powerEfficient: false };
+  const SW = `(() => { const b = document.querySelector('${WIN} .desktop-strip-hdr-pass'); return b ? { hidden: b.hidden, pressed: b.getAttribute('aria-pressed'), text: b.textContent, title: b.title } : null; })()`;
+  const MEM = `localStorage.getItem('vibespace.streamHdr')`;
+  const NOTE = `(() => { const e = document.querySelector('${WIN} .desktop-strip-note'); return e && !e.hidden ? e.textContent : null; })()`;
+  const shown = async (opts) => { const p = await page(1280, 800, DESK, opts); await p.ev(`localStorage.removeItem('vibespace.streamHdr')`); await p.ev(`window.__open(${JSON.stringify(M)})`); const up = await playing(p); await sleep(400); return { p, up, sw: await p.ev(SW) }; };
+  const a = await shown({});
+  ok(a.up && a.sw && a.sw.hidden === true, '⑯ a screen that is not HDR (this headless Chrome: (dynamic-range: high) false): the machine CAN (its HDR display, av1_nvenc) but no 「HDR 直通」', a.sw);
+  await a.p.close();
+  const b = await shown({ hdr: { screen: true, decoder: LINUX } });
+  ok(b.up && b.sw && b.sw.hidden === true, '⑯ an HDR screen whose browser decodes WebRTC AV1 only in software (supported, NOT power-efficient — the measured Linux Chrome, whose decoder refuses 10-bit): no switch', b.sw);
+  await b.p.close();
+  FF.set({ encoders: ['h264_nvenc', 'libx264'] }); await dm.streamFacts({ force: true });
+  const c0 = await shown({ hdr: { screen: true, decoder: YES } });
+  ok(c0.up && c0.sw && c0.sw.hidden === true, '⑯ an HDR viewer, a machine whose ffmpeg has no AV1 encoder (its offer says can: false): no switch', c0.sw);
+  await c0.p.close();
+  FF.set({ encoders: ['h264_nvenc', 'av1_nvenc', 'libx264'], av1: AV1_10 }); await dm.streamFacts({ force: true });
+  const c = await shown({ hdr: { screen: true, decoder: YES } });
+  const p = c.p;
+  ok(c.up && c.sw && c.sw.hidden === false && c.sw.pressed === 'false' && c.sw.text === 'HDR 直通' && /AV1 10 位 PQ/.test(c.sw.title) && (await p.ev(MEM)) === null && seen.filter((x) => x.mode === 'hdr').length === 0,
+    '⑯ an HDR screen + hardware AV1 (the owner\'s Edge) + a machine that can: 「HDR 直通」 on the strip, OFF (today\'s picture until the person turns it on)', c.sw);
+  await p.shot('hdr-switch.png', WIN);
+  // THE FALLBACK: this Chrome's WebRTC decoder (dav1d) refuses 10-bit — the press asks HDR, no frame is decoded, 2 s later SDR again, said
+  const s0 = seen.length, stop0 = stops.length;
+  await p.ev(`document.querySelector('${WIN} .desktop-strip-hdr-pass').click()`);
+  const memOn = await p.ev(MEM);
+  const said = await p.until(`${NOTE} === 'HDR 直通已回退：浏览器无法解码'`, 20000);
+  const back = said && await p.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); return !!v && v.videoWidth === 1280 && v.currentTime > 0.2 && window.__band() !== null; })()`, 20000);
+  const b1 = back ? await p.ev('window.__band()') : null; await sleep(700); const b2 = back ? await p.ev('window.__band()') : null;
+  const hdrS = seen.slice(s0).find((x) => x.mode === 'hdr'), sdrS = seen.slice(s0).filter((x) => x.mode === 'mapped');
+  ok(memOn === '{"win-a":true}' && hdrS && JSON.stringify(hdrS.hdr) === '{"can":true,"on":true,"why":null}' && stops.slice(stop0).includes('hdr_undecodable') && said && back && b1 !== null && b2 !== null && b2 !== b1 && sdrS.length >= 1,
+    `⑯ THE FALLBACK for real: the press remembers HDR for this machine and the agent sends AV1 10-bit (an hdr session); THIS Chrome decodes no frame of it (dav1d: 10-bit unhandled) ⇒ 2 s later the strip says 「HDR 直通已回退：浏览器无法解码」, the session ends hdr_undecodable and the SDR picture plays again (the band advances ${b1} → ${b2})`, { memOn, hdrS, stops: stops.slice(stop0), said, back, b1, b2 });
+  ok((await p.ev(MEM)) === '{}' && (await p.ev(SW)).pressed === 'false', '⑯ … and the switch is OFF again (remembered off — the next window does not repeat the black 2 s)', await p.ev(SW));
+  await p.shot('hdr-fallback.png', WIN);
+  // THE CONTROL: the same road with an 8-bit AV1 stream — this Chrome decodes it, so the refusal above was the bit depth, never our packetizer
+  FF.set({ av1: AV1_8 });
+  const s1 = seen.length;
+  await p.ev(`document.querySelector('${WIN} .desktop-strip-hdr-pass').click()`);
+  const hdr8 = await p.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); return !!v && v.videoWidth === 1280 && v.currentTime > 0.2 && window.__band() !== null && / · HDR$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || ''); })()`, 20000);
+  const c1 = hdr8 ? await p.ev('window.__band()') : null; await sleep(1500); const c2 = hdr8 ? await p.ev('window.__band()') : null;
+  ok(hdr8 && seen.slice(s1).some((x) => x.mode === 'hdr') && c1 !== null && c2 !== c1 && (await p.ev(NOTE)) === null && (await p.ev(SW)).pressed === 'true',
+    `⑯ CONTROL: the same HDR road carrying an 8-bit AV1 stream DECODES in this Chrome (the band advances ${c1} → ${c2}, the summary ends · HDR, no fallback) — the aggregated-TU packetizer through Chrome's own depacketizer; the refusal was the bit depth`, { hdr8, c1, c2, note: await p.ev(NOTE) });
+  await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);
+  const tab = await p.until(`!!document.querySelector('.stream-stats-pop .stream-stats-table tr[data-k="hdr"]')`, 6000) ? await p.ev(`[...document.querySelectorAll('.stream-stats-pop .stream-stats-table tr')].map((tr) => [tr.dataset.k, tr.cells[0].textContent, tr.cells[1].textContent])`) : null;
+  const rowHdr = tab && tab.find((r) => r[0] === 'hdr'), rowCodec = tab && tab.find((r) => r[0] === 'codec');
+  ok(rowHdr && rowHdr[1] === 'HDR' && rowHdr[2] === '直通 · PQ 10 位 · BT.2020' && rowCodec && rowCodec[2] === 'AV1' && tab.findIndex((r) => r[0] === 'hdr') === tab.findIndex((r) => r[0] === 'codec') + 1, '⑯ the details: the codec row says AV1 and the 「HDR」 row right after it says 直通 · PQ 10 位 · BT.2020', tab);
+  await p.shot('hdr-details.png', '.stream-stats-pop');
+  await p.ev(`document.querySelector('${WIN} .desktop-strip-status').click()`);
+  // the window moves to an SDR screen ⇒ the SDR picture (an SDR viewer tone-maps PQ: dim); back on the HDR screen ⇒ HDR again (remembered)
+  const s2 = seen.length;
+  await p.ev('window.__hdrScreen(false)');
+  const sdrNow = await p.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); const b = document.querySelector('${WIN} .desktop-strip-hdr-pass'); return !!v && v.videoWidth === 1280 && v.currentTime > 0.2 && b.hidden && !/ · HDR$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || ''); })()`, 20000);
+  const s3 = seen.length;
+  await p.ev('window.__hdrScreen(true)');
+  const hdrAgain = await p.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); const b = document.querySelector('${WIN} .desktop-strip-hdr-pass'); return !!v && v.currentTime > 0.2 && !b.hidden && b.getAttribute('aria-pressed') === 'true' && / · HDR$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || ''); })()`, 20000);
+  ok(sdrNow && seen.slice(s2, s3).some((x) => x.mode === 'mapped') && hdrAgain && seen.slice(s3).some((x) => x.mode === 'hdr') && (await p.ev(MEM)) === '{"win-a":true}', '⑯ the window moves to an SDR screen ((dynamic-range: high) changes) ⇒ the stream restarts as the SDR picture and the switch hides; back on the HDR screen ⇒ HDR again (still remembered on)', { sdrNow, hdrAgain });
+  await p.close();
+  // REMEMBERED PER MACHINE: a new window of this machine starts in HDR at once (its first start asks hdr — no SDR stream first)
+  const s4 = seen.length;
+  const q = await page(1280, 800, DESK, { hdr: { screen: true, decoder: YES } });
+  const memQ = await q.ev(MEM);
+  await q.ev(`window.__open(${JSON.stringify(M)})`);
+  const firstHdr = await q.until(`/ · HDR$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || '')`, 20000);
+  const firsts = seen.slice(s4);
+  ok(memQ === '{"win-a":true}' && firstHdr && firsts.length >= 1 && firsts[0].mode === 'hdr', '⑯ remembered per machine: a new window of the same machine asks HDR in its FIRST start (no SDR stream before it)', { memQ, firsts });
+  await q.ev(`localStorage.removeItem('vibespace.streamHdr')`); // per-machine memory persists across this profile's pages — reset
+  await q.close();
+  clearInterval(watch);
+  hub16.shutdown();
+  R.setup({ ...BASE });
+  FF.set({ encoders: ['h264_nvenc', 'libx264'], av1: null }); await dm.streamFacts({ force: true });
 }
 console.log('⑪ ONE WINDOW as the stream: the stats row, 「还原它」 only while minimized, and every way it ends on the machine');
 {

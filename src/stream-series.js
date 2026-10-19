@@ -21,7 +21,8 @@
  *   xOf(i, len, width) / indexAt(x, len, width)   THE WINDOW is a fixed 120 s: the newest second on the right edge
  *   readoutAt(rows, i, kind)           a hovered second's values (the chart's readout) — `gap: true` where nothing was read
  *   detailRows({page, agent, via, source})   the details table, in THE order: rtt · jitter · fps · decode · kbps · path · codec ·
- *                                      encoder · display · size · rate · loss — the first five always (— until read), the rest
+ *                                      hdr (lane stream-hdr-passthrough: the machine sends PQ 10-bit) · encoder · display · size ·
+ *                                      rate · loss — the first five always (— until read), the rest
  *                                      only when someone said them
  *   CORNERS / cornerOf / cornerFrom / cornerMemory / rememberCorner   the pinned panel's and the pill's place: a corner of their
  *                                      frame (the nearest one where a drag ends), remembered per machine (≤ 32 machines)
@@ -149,6 +150,7 @@ function detailRows({ page = null, agent = null, via = null, source = null } = {
     { k: 'decode', ms: num(page.decodeMs) }, { k: 'kbps', kbps: num(page.kbps), sent: agent ? num(agent.kbps) : null });
   if (['direct', 'udp', 'link', 'relay'].includes(via)) rows.push({ k: 'path', via });
   if (typeof page.codec === 'string' && page.codec) rows.push({ k: 'codec', codec: page.codec.slice(0, 24) });
+  if (sc && sc.hdr && typeof sc.hdr === 'object') rows.push({ k: 'hdr', bits: num(sc.hdr.bits), transfer: String(sc.hdr.transfer || '').slice(0, 12), primaries: String(sc.hdr.primaries || '').slice(0, 12) }); // lane stream-hdr-passthrough
   if (sc && sc.encoder) rows.push({ k: 'encoder', encoder: String(sc.encoder).slice(0, 40), ms: num(sc.encodeMs) });
   const did = sc && sc.display != null ? String(sc.display) : source && source.display != null ? String(source.display) : null;
   if (did) {

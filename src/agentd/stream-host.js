@@ -31,6 +31,12 @@
  * A session's owner is the link that asked; when that link dies the session is an ORPHAN for STREAM_LIMITS.orphanMs (the
  * media path does not ride the link — a re-armed hub finds it playing) and then stops.
  *
+ * THE HDR ROAD (lane stream-hdr-passthrough — q-041 r3 P4 road B): `stream-offer {hdr: true}` (the page's screen is HDR and its
+ * browser decodes WebRTC AV1 in hardware — src/hdr-viewer.js) to a source that `offersAv1` (src/agentd/stream-screen.js: an HDR
+ * display, an AV1 10-bit encoder) offers AV1 FIRST, then H.264 (src/stream-model.js streamCodecsOf); werift sends the codec the
+ * browser's answer put first, and at `connected` — before the source starts — the source is told it (`useCodec`): AV1 ⇒ PQ 10-bit
+ * temporal units (`{ tu, key, ts90k }`, packetized by src/stream-av1.js), anything else ⇒ its SDR plan. Not asked, or a source
+ * that cannot: the offer is the H.264 one, unchanged.
  * THE SOURCE INTERFACE: `{ kind, origin: {x, y}, start(onAccessUnit, onEnd?), stop(), requestKeyframe(), setTargetKbps(kbps),
  * stats?() }` where `onAccessUnit({ nalus: Buffer[], key, ts90k })` is called once per encoded picture, in order
  * (src/stream-h264.js splits Annex-B) and `onEnd(code)` = the source died — the session ends by that name. Here: the FAKE
@@ -74,6 +80,7 @@ const SM = require('../stream-model.js');
 const SP = require('../stream-plan.js'); // THE ESTIMATE (twccPackets, sendEstimator)
 const SW = require('../stream-window.js');
 const H = require('../stream-h264.js');
+const AV1 = require('../stream-av1.js'); // lane stream-hdr-passthrough: the HDR road's RTP payloads
 
 const L = SM.STREAM_LIMITS;
 const TWCC_URI = 'http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01';
@@ -263,7 +270,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     const st = {
       fps: Math.round((s.frames - s.mark.frames) / dt), kbps: Math.round(((s.bytes - s.mark.bytes) * 8) / dt / 1000),
       frames: s.frames, dropped: s.dropped, encodeMs: null, // the screen source's encoder reports it (below); a pre-encoded source spends none
-      bweKbps: s.bweKbps, congested: s.congested, keyRequests: s.keyRequests,
+      bweKbps: s.bweKbps, congested: s.congested, keyRequests: s.keyRequests, codec: s.codec, // lane stream-hdr-passthrough: what is sent (AV1 | H264)
       input: { n: s.inputN, refused: s.inputRefused, dropped: s.inputDropped }, ackMs: s.ackMs,
       source: s.source ? s.source.kind : null,
       relay: s.relay ? { peers: s.relay.shims.size, forwarded: s.relay.fwd, port: s.relay.port, via: s.leg && s.leg.state === 'up' ? 'udp' : 'link', leg: s.leg ? s.leg.facts() : null } : null,
@@ -503,9 +510,9 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     if (sessions.size >= SM.streamCapOf(displaysKnown)) { try { source.stop(); } catch { } return full(displaysKnown); } // a start that raced another while the facts were read
     let w;
     try { w = werift(); } catch (e) { try { source.stop(); } catch { } return named('stream_unsupported', `this agent cannot stream here (${(e && e.message) || e}; Node ${process.version})`); }
-    const C = SM.STREAM_CODEC;
+    const hdr = msg.hdr === true && source.offersAv1 === true; // lane stream-hdr-passthrough: AV1 first, H.264 beside it
     const pc = new w.RTCPeerConnection({
-      codecs: { video: [new w.RTCRtpCodecParameters({ mimeType: C.mimeType, clockRate: C.clockRate, rtcpFeedback: C.rtcpFeedback.map((f) => ({ ...f })), parameters: C.fmtp })] },
+      codecs: { video: SM.streamCodecsOf({ hdr }).map((C) => new w.RTCRtpCodecParameters({ mimeType: C.mimeType, clockRate: C.clockRate, rtcpFeedback: C.rtcpFeedback.map((f) => ({ ...f })), parameters: C.fmtp })) },
       headerExtensions: { video: [w.useTransportWideCC()] },
       // ICE-LITE, no ICE servers (measured, werift 0.25.0): its ICE agent asks stun.l.google.com:19302 for a server-reflexive
       // candidate whenever no STUN server is set — `iceServers: []` included (a hard-coded DEFAULT_STUN_SERVER) — and only
@@ -513,7 +520,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       // and runs the checks — to a host candidate it can reach (LAN, a tailnet), or to the hub relay's. No public STUN/TURN.
       iceLite: true, iceServers: [], bundlePolicy: 'max-bundle', iceUseIpv6: false,
     });
-    const s = { sid, owner, pc, source, maxKbps, track: null, dc: null, relay: null, leg: null, directInbound: null, frames: 0, bytes: 0, dropped: 0, keyRequests: 0, bweKbps: null, congested: false, estimate: null,
+    const s = { sid, owner, pc, source, maxKbps, codec: hdr ? null : 'H264', track: null, dc: null, relay: null, leg: null, directInbound: null, frames: 0, bytes: 0, dropped: 0, keyRequests: 0, bweKbps: null, congested: false, estimate: null,
       inputN: 0, inputRefused: null, inputDropped: 0, ownerQ: [], agentQ: [], agentHeld: new Map(), inFlight: null, pumping: false, releaseDue: false, acks: [], ackMs: null, sentAt: new Map(),
       mark: { at: now(), frames: 0, bytes: 0 }, sending: false, statsTimer: null, orphanTimer: null, failTimer: null, seq: Math.floor(Math.random() * 65536), early: [], replied: false, startedAt: now() };
     sessions.set(sid, s);
@@ -531,6 +538,11 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       pc.iceGatheringStateChange.subscribe((g) => { if (g === 'complete') endIce(); });
       pc.connectionStateChange.subscribe((st) => {
         if (st === 'connected' && !s.estimate) { s.estimate = wireEstimate(tr.sender, (k) => { s.bweKbps = k; try { source.setTargetKbps(Math.min(maxKbps, k)); } catch { } }); if (!s.estimate) log(`[stream] ${sid} no send-side estimate (werift's sender shape changed) — the rate holds`); }
+        if (st === 'connected' && !s.codec) { // the HDR road: the codec werift negotiated (the browser's answer's first) picks the source's road
+          const mime = tr.sender.codec && tr.sender.codec.mimeType;
+          s.codec = typeof source.useCodec === 'function' ? source.useCodec(mime) : 'H264';
+          log(`[stream] ${sid} the browser took ${mime || 'no codec'} — ${s.codec === 'AV1' ? 'HDR (AV1, PQ 10-bit)' : 'the SDR picture (H.264)'}`);
+        }
         if (st === 'connected' && !s.sending) { s.sending = true; source.requestKeyframe(); source.start(sendAccessUnit, (why) => stop(sid, why || 'source_ended')); } // the picture starts at a KEY frame the moment the browser can take it; a source that dies ends the session by its name
         pushStats(s);
         clearTimeout(s.failTimer);
@@ -551,7 +563,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     // skips while ICE restarts
     function sendAccessUnit(au) {
       if (stateOf(s) !== 'connected') return;
-      const pl = H.rtpPayloads(au.nalus);
+      const pl = au.tu ? AV1.rtpPayloads(au.tu).payloads : H.rtpPayloads(au.nalus); // lane stream-hdr-passthrough: an AV1 temporal unit
       for (const p of pl) {
         try { s.track.writeRtp(new w.RtpPacket(new w.RtpHeader({ payloadType: 96, sequenceNumber: s.seq, timestamp: au.ts90k, marker: p.marker, ssrc: 1 }), Buffer.from(p.payload))); s.bytes += p.payload.length + 12; }
         catch { s.dropped++; }
@@ -570,7 +582,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       if (r.verdict === 'blocked') log(`[stream] ${sid} direct inbound UDP: blocked — none of ${r.addrs} host address${r.addrs === 1 ? '' : 'es'} reached from this machine itself (its firewall); the hub relay carries the stream`);
       pushStats(s);
     }, () => { });
-    return { ok: true, sid, offer: { type: 'offer', sdp: pc.localDescription.sdp }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null, ...(source.window ? { window: source.window } : {}), ...(source.displays ? { display: source.display, displays: source.displays } : {}), ...(source.scaled ? { scaled: source.scaled } : {}), ...(source.tcc ? { tcc: source.tcc } : {}) }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, maxKbps };
+    return { ok: true, sid, offer: { type: 'offer', sdp: pc.localDescription.sdp }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null, ...(source.window ? { window: source.window } : {}), ...(source.displays ? { display: source.display, displays: source.displays } : {}), ...(source.scaled ? { scaled: source.scaled } : {}), ...(source.tcc ? { tcc: source.tcc } : {}), ...(source.hdr ? { hdr: source.hdr } : {}) }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, ...(hdr ? { codecs: SM.streamCodecsOf({ hdr }).map((C) => C.mimeType) } : {}), maxKbps };
   }
   /** After the offer's reply went out: the candidates gathered while it was made follow as pushes, in order. */
   function replied(sid) {
@@ -584,7 +596,10 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     if (!s) return named('not_found', 'that stream session ended');
     try {
       if (msg.answer && typeof msg.answer.sdp === 'string') await s.pc.setRemoteDescription({ type: 'answer', sdp: msg.answer.sdp });
-      if (msg.candidate && typeof msg.candidate.candidate === 'string' && msg.candidate.candidate) await s.pc.addIceCandidate(msg.candidate);
+      // lane stream-hdr-passthrough (measured on the owner's box): a browser's mDNS host candidate (`<uuid>.local`) never helps this
+      // ICE-LITE agent — werift resolves it by multicast with a 10 s timeout, and one that arrived BEFORE the answer is resolved inside
+      // setRemoteDescription: the answer, and the page's start, waited 10 s (2 of 3 HDR switches) — it is not handed to werift
+      if (msg.candidate && typeof msg.candidate.candidate === 'string' && msg.candidate.candidate && !SM.isMdnsCandidate(msg.candidate.candidate)) await s.pc.addIceCandidate(msg.candidate);
     } catch (e) { return named('answer_failed', `the browser's answer did not apply (${(e && e.message) || e})`); }
     return { ok: true };
   }

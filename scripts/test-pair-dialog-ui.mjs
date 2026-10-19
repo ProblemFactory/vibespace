@@ -28,6 +28,8 @@
 //   · verify-r4 F7: from a Windows browser, a paired device's new command comes in ITS OS's form (CONTROL: the pre-fix
 //     sheet's navigator.platform tab)
 //   · verify-r4 F8: a device not dialed in hears what Generate does to it BEFORE the button (never-connected, offline)
+//   · lane device-allow-flags (design q-042 D5): the boxes compose the command's --allow / -Allow (the device's own list
+//     first, a cluster's default); the Machines card's allow line in zh / en / ja
 //   · THE RECT CENSUS at 860 px and 360 px: the dialog inside the viewport, no horizontal overflow, address rows
 //     ≥ 44 px on the phone, the command textarea inside the dialog
 // Requires google-chrome (SKIP without). Run: node scripts/test-pair-dialog-ui.mjs
@@ -516,6 +518,71 @@ try {
     const c8p = await sheetCons(Q8);
     ok(c8p.cons === '' && !c8p.before, 'CONTROL (F8): the pre-fix sheet says nothing before 生成新命令 — the F8 leg goes red', c8p);
     await Q8.cdp('Page.close').catch(() => {});
+  }
+  // ── lane device-allow-flags (design q-042 D5, owner ③): the device's OWN allow list — the dialog's boxes compose the
+  // command's --allow / -Allow (default: the device's own list, else the instance kind's); a paired device's list is on
+  // the Machines card in zh / en / ja ──
+  console.log('device-allow-flags: the boxes compose --allow; the Machines card says the device\'s own list (zh / en / ja)');
+  {
+    const { spawnSync } = await import('node:child_process');
+    const fresh = await W.api('POST', '/api/device/dial-pair', { deviceId: 'allownew', base: W.BASE });
+    ok(fresh.status === 200 && JSON.stringify(fresh.j.allowDefault) === JSON.stringify(['run', 'files', 'input', 'socks', 'lan', 'sessions', 'upgrade']) && fresh.j.clusterInstance === false, 'a LOCAL instance\'s pairing answer: the default list is everything (no VIBESPACE_INSTANCE_NAME)', fresh.j.allowDefault);
+    const pr = await W.pairDevice('allowmac', { start: false });
+    const wp = spawnSync(process.execPath, [W.bundle, '--write-policy', 'run,files,sessions,upgrade'], { env: { ...process.env, HOME: W.home, VIBESPACE_DEVICE_ROOT: pr.root, VIBESPACE_AGENTD_ROOT: pr.root }, encoding: 'utf8' });
+    ok(wp.status === 0 && /allow list: run,files,sessions,upgrade/.test(wp.stdout), 'the installer\'s writer (the agent\'s own --write-policy) put the list on the device', wp.stdout + wp.stderr);
+    W.startDaemon(pr.root, pr.dialUrl, pr.dialToken);
+    let row = null; for (let i = 0; i < 80 && !(row && row.online && row.devicePolicy); i++) { row = await W.hostRow('allowmac'); if (!(row && row.online && row.devicePolicy)) await sleep(250); }
+    ok(!!row && row.online && !!row.devicePolicy && row.devicePolicy.allow.join() === 'run,files,sessions,upgrade' && row.devicePolicy.source === 'install', 'it dials in; the list its hello-ack states is on its record (devicePolicy)', row && row.devicePolicy);
+    const cardLine = async (lang) => {
+      const Q = await W.openPage({ width: 1280, height: 820, lang });
+      await Q.evalJs(`(() => { localStorage.setItem('vibespace.agentsTab', 'machines'); app._showAgentsDialog({ forceModal: true }); return true; })()`);
+      await Q.waitFor(`[...document.querySelectorAll('.agents-mach-acc')].some((d) => d.dataset.host === 'host-dial-allowmac' && !!d.querySelector('.agents-mach-allow'))`, 15000);
+      const r = await Q.evalJs(`(() => { const d = [...document.querySelectorAll('.agents-mach-acc')].find((x) => x.dataset.host === 'host-dial-allowmac'); const l = d && d.querySelector('.agents-mach-allow'); return l ? { text: l.textContent, title: l.title } : null; })()`);
+      return { Q, r };
+    };
+    const zh = await cardLine('zh');
+    ok(zh.r && zh.r.text === '允许：命令 · 文件 · 会话 · 更新 ｜ 未开：SOCKS · 局域网 · 键鼠' && zh.r.title === '只有在 allowmac 上重跑配对命令才能改这份清单（远程 → allowmac → 配对命令 → 勾选允许的事）。', 'zh: 允许：命令 · 文件 · 会话 · 更新 ｜ 未开：SOCKS · 局域网 · 键鼠 — its title says who changes it', zh.r);
+    const en = await cardLine('en');
+    ok(en.r && en.r.text === 'Allows: commands · files · sessions · updates | Off: SOCKS · LAN · keyboard & mouse' && /^Only re-running the pairing command on allowmac changes this list/.test(en.r.title), 'en: Allows: commands · files · sessions · updates | Off: SOCKS · LAN · keyboard & mouse', en.r);
+    const ja = await cardLine('ja');
+    ok(ja.r && ja.r.text === '許可：コマンド · ファイル · セッション · 更新 ｜ オフ：SOCKS · LAN · キーボード・マウス', 'ja: 許可：コマンド · ファイル · セッション · 更新 ｜ オフ：SOCKS · LAN · キーボード・マウス', ja.r);
+    await en.Q.cdp('Page.close').catch(() => {}); await ja.Q.cdp('Page.close').catch(() => {});
+    // the device's sheet: Generate ⇒ the command carries the DEVICE's own list; the boxes compose it
+    const Z = zh.Q;
+    await Z.evalJs(`document.querySelector('#agents-dialog-overlay .dialog-close')?.click(); true`);
+    ok(await Z.waitFor(`!document.querySelector('#agents-dialog-overlay')`, 5000), 'the Agents dialog is closed before the sheet opens');
+    await openRemote(Z);
+    await cachedRow(Z, 'host-dial-allowmac', '(h) => !!h.devicePolicy');
+    await Z.evalJs(`app.sidebar._showDevicePairDialog((app.sidebar._hostsData?.hosts || []).find((h) => h.id === 'host-dial-allowmac')); true`);
+    await Z.waitFor(`!!document.querySelector('#device-pair-dialog .dap-row input:checked') && !!document.querySelector('#device-pair-dialog .device-pair-go:not([disabled])')`, 10000);
+    await Z.realClick(`#device-pair-dialog .device-pair-go`);
+    const gen = await Z.waitFor(`!!document.querySelector('#device-pair-dialog .device-pair-allow') && !!document.querySelector('#device-pair-dialog .device-pair-cmd')`, 15000);
+    ok(gen, 'Generate ⇒ the command, with the allow list\'s boxes above it', gen ? undefined : await Z.evalJs(`(document.querySelector('#device-pair-dialog')?.textContent || 'no sheet').slice(0, 400)`));
+    if (!gen) throw new Error('no command on the sheet');
+    const boxes = () => Z.evalJs(`(() => { const d = document.querySelector('#device-pair-dialog'); return { flags: [...d.querySelectorAll('.device-pair-allow input')].map((i) => ({ f: i.dataset.flag, on: i.checked, held: i.disabled, word: i.parentElement.textContent.trim() })), cmd: d.querySelector('.device-pair-cmd').value, legend: d.querySelector('.device-pair-allow legend').textContent }; })()`);
+    const b0 = await boxes();
+    ok(b0.flags.map((x) => x.f + (x.on ? '+' : '-') + (x.held ? '!' : '')).join(' ') === 'run+! files+! sessions+ upgrade+ socks- lan- input-' && b0.flags.map((x) => x.word).join('/') === '命令/文件/会话/更新/SOCKS/局域网/键鼠' && b0.legend === '这个 VibeSpace 能在设备上做什么', 'the boxes default to the DEVICE\'s own list (run + files held by sessions), in zh', b0);
+    ok(/\n  --allow run,files,sessions,upgrade$/.test(b0.cmd), 'the command ends `--allow run,files,sessions,upgrade` (a re-run keeps the device\'s list)', b0.cmd.slice(-80));
+    await Z.realClick(`#device-pair-dialog .device-pair-allow input[data-flag="input"]`);
+    const b1 = await boxes();
+    ok(/--allow run,files,input,sessions,upgrade$/.test(b1.cmd), 'tick 键鼠 ⇒ `--allow run,files,input,sessions,upgrade`', b1.cmd.slice(-60));
+    await Z.realClick(`#device-pair-dialog .device-pair-allow input[data-flag="sessions"]`);
+    const b2 = await boxes();
+    ok(/--allow run,files,input,upgrade$/.test(b2.cmd) && b2.flags.every((x) => !x.held), 'untick 会话 ⇒ run / files no longer held; `--allow run,files,input,upgrade`', b2);
+    await Z.evalJs(`[...document.querySelectorAll('#device-pair-dialog .device-pair-os button')].find((b) => b.textContent === 'Windows').click(); true`);
+    const b3 = await boxes();
+    ok(/`\n  -Allow run,files,input,upgrade$/.test(b3.cmd), 'the Windows command says -Allow run,files,input,upgrade', b3.cmd.slice(-60));
+    await Z.cdp('Emulation.setDeviceMetricsOverride', { width: 360, height: 740, deviceScaleFactor: 1, mobile: true });
+    await sleep(300);
+    const r360 = await Z.evalJs(`(() => { const d = document.querySelector('#device-pair-dialog .dialog'); const f = d.querySelector('.device-pair-allow'); const dr = d.getBoundingClientRect(), fr = f.getBoundingClientRect(); const labs = [...f.querySelectorAll('.device-pair-allow-flag')].map((l) => l.getBoundingClientRect()); return { inside: fr.left >= dr.left - 1 && fr.right <= dr.right + 1, fits: dr.right <= document.documentElement.clientWidth + 1, labsIn: labs.every((r) => r.left >= fr.left - 1 && r.right <= fr.right + 1), minH: Math.min(...labs.map((r) => r.height)) }; })()`);
+    ok(r360.inside && r360.fits && r360.labsIn && r360.minH >= 28, 'RECT CENSUS 360 px: the boxes inside the dialog, each label inside its box, ≥ 28 px tall', r360);
+    await Z.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });
+    await Z.evalJs(`document.querySelector('#device-pair-dialog .dialog-close').click(); true`);
+    // a CLUSTER instance's answer (allowDefault + clusterInstance, as the route says it with VIBESPACE_INSTANCE_NAME): its default + its note
+    const cl = await Z.evalJs(`(() => { const b = document.createElement('div'); b.className = 'vs-allow-probe'; document.body.appendChild(b); app.sidebar._fillPairCommandBody(b, () => b.remove(), { httpBase: location.origin, dialUrl: 'ws://hub.example/api/device-dial?device=c1', dialToken: 'vsdt_x', hostToken: 'vsht_x', deviceId: 'c1', allowDefault: ['run', 'files', 'sessions', 'upgrade'], clusterInstance: true }, { deviceOs: 'linux' }); const r = { cmd: b.querySelector('.device-pair-cmd').value, note: b.querySelector('.device-pair-allow-note').textContent, off: [...b.querySelectorAll('.device-pair-allow input')].filter((i) => !i.checked).map((i) => i.dataset.flag).join() }; b.remove(); return r; })()`);
+    ok(/--allow run,files,sessions,upgrade$/.test(cl.cmd) && cl.off === 'socks,lan,input' && /集群实例上 SOCKS、局域网和键鼠默认不开。$/.test(cl.note), 'a CLUSTER instance\'s command: SOCKS / LAN / 键鼠 unticked, `--allow run,files,sessions,upgrade`, said in the note', cl);
+    ok(Z.errors.length === 0, 'no page exception on the allow-list pages', Z.errors.slice(0, 3));
+    await Z.cdp('Page.close').catch(() => {});
   }
   ok(P.errors.length === 0 && E.errors.length === 0, 'no page exception', [...P.errors, ...E.errors].slice(0, 3));
 } catch (e) {

@@ -5,6 +5,9 @@
 //   · Borrow its network — `vibespace-exit use / url` (the command runs here, only its traffic leaves there)
 //   · Run commands on it — `vibespace-exit run` (a shell command ON the machine, as the user, up to 30 s),
 //     with "Ask me each time" (every command waits for the user's Allow in For you, 60 s, then refused)
+//   · Hub automation (lane hub-act-ask, design q-042 D4) — what VibeSpace itself, its background jobs and agents' OTHER tools
+//     do on the machine without a person's click: Never / Ask me each time / Always allow (PURE src/hub-act-policy.js);
+//     not set ⇒ the instance's default (a cluster instance asks, a local one does not), said under the radios
 // "Only these" is THE principal picker (src/lib/principal-picker.js — conversations and Task Groups; a Task Group
 // means every conversation in it, now or later) plus every row of the CURRENT list the live roster does not
 // cover (a stopped conversation "not running now", a deleted Task Group). The dialog draws from a FRESH
@@ -23,6 +26,15 @@ const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls)
 // to the stored `everyone` mode — lane everyone-principal)
 const MODE_WORDS = { nobody: () => t('Nobody'), only: () => t('Agents you pick') };
 const EVERYONE_KEY = 'everyone:*';
+// lane hub-act-ask: the third list's three answers (stored `nobody | ask | everyone`)
+const HUB_WORDS = { nobody: () => t('Never'), ask: () => t('Ask me each time'), everyone: () => t('Always allow') };
+/** Why the radios show what they show when the machine never set its list (the GET's `hub`: source, instance kind). */
+function hubDefaultText(info) {
+  if (!info || info.stored) return '';
+  if (info.source === 'setting') return t('Not set — the default in Settings applies (Integration → Hub automation on paired machines).');
+  if (info.source === 'instance') return info.instanceKind === 'cluster' ? t('Not set — this cluster instance asks by default.') : t('Not set — this local instance allows by default.');
+  return '';
+}
 
 /** The words of one grant's summary (row, toast): nobody · everyone · {n} picked (+ " (ask me)" for run). */
 function grantWords(g, { ask = false } = {}) {
@@ -196,6 +208,31 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       if (askBox) askBox.onchange = () => syncCount();
       sections[grant] = { get mode() { return mode; }, picker, askBox, syncSec, radioEls };
     }
+    // lane hub-act-ask: THE THIRD LIST — never vibespace-exit (the two lists above decide it), never your own clicks
+    const hubInfo = d.hub || null;
+    const hubStored = !unknown && access.hub && access.hub.mode !== 'default' ? access.hub.mode : null;
+    let hubMode = hubStored || (hubInfo && hubInfo.policy) || 'ask', hubTouched = false;
+    const hubSec = el('section', 'exit-access-sec exit-access-hub');
+    hubSec.dataset.grant = 'hub';
+    hubSec.appendChild(el('h4', 'exit-access-title', t('Hub automation')));
+    hubSec.appendChild(el('p', 'agents-note', t('What VibeSpace does on {machine} when no person clicked: its own upkeep, background jobs, and agents\' tools other than the two lists above. Ask me each time = an urgent card in "For you" (one per kind, 60 s, then refused). Your own clicks never ask.', { machine })));
+    const hubRadios = el('div', 'exit-access-modes');
+    hubRadios.setAttribute('role', 'radiogroup');
+    hubRadios.setAttribute('aria-label', t('Hub automation'));
+    const hubDefault = el('p', 'agents-note exit-access-hub-default', hubDefaultText(hubInfo));
+    for (const m of ['nobody', 'ask', 'everyone']) {
+      const lab = el('label', 'exit-access-mode');
+      const r = document.createElement('input');
+      r.type = 'radio'; r.name = 'exit-hub-mode'; r.value = m; r.checked = hubMode === m;
+      r.onchange = () => { hubMode = m; hubTouched = true; hubDefault.textContent = ''; };
+      lab.append(r, el('span', null, HUB_WORDS[m]()));
+      hubRadios.appendChild(lab);
+    }
+    hubSec.appendChild(hubRadios);
+    hubSec.appendChild(hubDefault);
+    const waiting = hubInfo && Array.isArray(hubInfo.asks) ? hubInfo.asks.length : 0;
+    if (waiting) hubSec.appendChild(el('p', 'agents-note exit-access-hub-waiting', t('{n} act(s) wait for your answer in "For you"', { n: waiting })));
+    body.appendChild(hubSec);
     const lr = el('p', 'agents-note exit-access-last', lastRunText(d.lastRun));
     if (d.lastRun && d.lastRun.cmd) lr.title = d.lastRun.cmd;
     // lane-exit-run-output E4: the machine's command list (the last 50 runs with their output) — human-triggered
@@ -236,6 +273,7 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
         if (grant === 'run') g.ask = !!(s.askBox && s.askBox.checked);
         out[grant] = g;
       }
+      if (hubTouched) out.hub = { mode: hubMode }; // lane hub-act-ask: written only when picked (not set = the instance's default)
       save.disabled = true;
       let res, j;
       try {
