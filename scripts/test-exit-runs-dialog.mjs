@@ -12,13 +12,17 @@
 //   §2 the chat card's command block (src/lib/chat-renderers.js exitRunBlock) — lane exit-card-margin (2026-10-18, the
 //      owner: 「No raw strings in cards」): the command sits in ONE closed 技术细节 fold (data-fold="tech") AFTER the output,
 //      naming its length ("Command · 4096 characters" / "· 200 lines") and holding it whole (a 4 096-byte token, a
-//      200-line script, four short lines — no clamp, no second fold); a card without `cmd` (an older card) draws none
+//      200-line script, four short lines — no clamp, no second fold); a card without `cmd` (an older card) draws none;
+//      lane win-run-hide-console: a card whose device decoded the output as `utf-8-fallback` (its console code page was
+//      not read) says so in ONE line of that fold (en / zh 按 UTF-8 解码（未取到该机控制台的代码页） / ja); any other
+//      decoding, or none, draws nothing
 //   §3 the Remote panel's machine row (source census of src/lib/sidebar-mounts.js): the Commands icon and the
 //      last-run line both open openExitRunsDialog, no hover title on the last-run line; the CSS: both command pres
 //      wrap anywhere; inside 技术细节 the whole command scrolls past 60vh (no four-line clamp left)
 //   §4 CONTROLS (patched copies of the source, bundled in memory — src/ never touched): the painter's hover title back;
 //      the body's command cut to the head; the card without its command block; the command on the card again
-//      outside its fold (d); a row without the icon; the 2.369.207 duration words (f) — each goes red
+//      outside its fold (d); a row without the icon; the 2.369.207 duration words (f); the fold without the device's
+//      decoding handed in (g, the pre-lane line) — each goes red
 // Run: node scripts/test-exit-runs-dialog.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -122,6 +126,19 @@ const c3 = cardOf(R, { cmd: 'a\nb\nc\nd', code: 0, stdout: 'x', stderr: '', cut:
 ok(c3.text === 'a\nb\nc\nd' && c3.inFold && c3.len === 'Command · 4 lines' && !c3.clamp, 'four short lines: whole, in the fold too (a command on the card is technical detail)', c3.len);
 const c4 = cardOf(R, { code: 0, stdout: 'x', stderr: '', cut: {} });
 ok(!c4.det && !c4.box && !!c4.b.querySelector('.chat-exit-out'), 'a card without `cmd` (an older card) draws no fold, its output as before');
+// lane win-run-hide-console: the output was decoded as UTF-8 because the machine's console code page was not read — ONE line
+// in the 技术细节 fold (never the card's sentence: actor + verb + named object); any other decoding, or none, draws nothing
+const ENC_EN = "Decoded as UTF-8 (this machine's console code page was not read)";
+const FALLBACK = { cmd: 'type missing.txt', code: 1, stdout: '', stderr: '\u03f5\u0373\ufffd', cut: {}, encoding: 'utf-8-fallback' };
+const encOf = (Rm, x) => { const c = cardOf(Rm, x); const lines = c.b.querySelectorAll('.chat-exit-enc'); return { c, n: lines.length, text: lines[0] ? lines[0].textContent : null, inFold: !!(c.det && lines[0] && c.det.all.includes(lines[0])) }; };
+const e1 = encOf(R, FALLBACK);
+ok(e1.n === 1 && e1.text === ENC_EN && e1.inFold && e1.c.folds === 1 && e1.c.inFold, 'a card whose output fell back to UTF-8: ONE line in its 技术细节 fold says so (the command still whole in the same fold)', e1.text);
+const e2 = ['gbk', 'utf-8', 'shift_jis', undefined].map((encoding) => encOf(R, { cmd: 'ver', code: 0, stdout: 'x', stderr: '', cut: {}, ...(encoding ? { encoding } : {}) }));
+ok(e2.every((e) => e.n === 0 && e.c.det), '…a gbk / utf-8 / shift_jis decoding, or none (POSIX, an older card), draws no such line', e2.map((e) => e.n));
+const langBundle = async (lang) => { const g = globalThis.localStorage.getItem; globalThis.localStorage.getItem = (k) => (k === 'vibespace.lang' ? lang : null); try { return await bundle('src/lib/chat-renderers.js'); } finally { globalThis.localStorage.getItem = g; } };
+const ez = encOf(await langBundle('zh'), FALLBACK), ej = encOf(await langBundle('ja'), FALLBACK);
+ok(ez.text === '按 UTF-8 解码（未取到该机控制台的代码页）' && ez.c.label === '技术细节', 'zh: 「按 UTF-8 解码（未取到该机控制台的代码页）」 under 技术细节', [ez.text, ez.c.label]);
+ok(ej.text === 'UTF-8 としてデコード（このマシンのコンソールのコードページを取得できませんでした）' && ej.n === 1, 'ja: 「UTF-8 としてデコード（このマシンのコンソールのコードページを取得できませんでした）」', ej.text);
 
 // ── §3 the machine row + the CSS (source census) ──
 console.log('§3 the Remote panel\'s machine row and the CSS');
@@ -145,10 +162,12 @@ console.log('§4 controls (patched copies, bundled in memory)');
 const pa = patched('src/lib/exit-runs-dialog.js', "  main.append(el('code', 'exit-runs-cmd',", "  sum.title = cmd; // CONTROL: the hover title back\n  main.append(el('code', 'exit-runs-cmd',");
 const pb = patched('src/lib/exit-runs-dialog.js', "const w = wrapPre('exit-runs-cmd-all', cmd);", "const w = wrapPre('exit-runs-cmd-all', flat.slice(0, CMD_HEAD)); // CONTROL: the head again");
 const pf = patched('src/lib/exit-runs-dialog.js', "return Number(s) === 0 ? '<0.1 s' : `${s} s`;", "return `${s} s`; // CONTROL: the 2.369.207 words");
-const TECH = "  const tech = typeof x.cmd === 'string' && x.cmd ? exitTechFold(x.cmd) : null;";
+const TECH = "  const tech = typeof x.cmd === 'string' && x.cmd ? exitTechFold(x.cmd, { encoding: x.encoding }) : null;";
 const pc = patched('src/lib/chat-renderers.js', TECH, '  const tech = null; // CONTROL: no command block');
 const pd = patched('src/lib/chat-renderers.js', TECH, TECH + "\n  if (tech) wrap.appendChild(exitCmdBlock(x.cmd)); // CONTROL: the command on the card again, outside its fold");
-ok(pa.applies && pb.applies && pc.applies && pd.applies && pf.applies, 'every patch applies');
+const pg = patched('src/lib/chat-renderers.js', TECH, "  const tech = typeof x.cmd === 'string' && x.cmd ? exitTechFold(x.cmd) : null; // CONTROL: the pre-lane fold, no decoding handed in");
+ok(pa.applies && pb.applies && pc.applies && pd.applies && pf.applies && pg.applies, 'every patch applies');
+ok(encOf(await bundle('src/lib/chat-renderers.js', pg), FALLBACK).n === 0, 'CONTROL (g): the fold without the device\'s decoding handed in (the pre-lane line) — a utf-8-fallback card says nothing: §2\'s fallback line goes red');
 ok(!DUR((await bundle('src/lib/exit-runs-dialog.js', pf)).durationText).ok, 'CONTROL (f): the old duration words ("0.0 s" for a 0 ms transfer) — §1b goes red');
 ok((await painterCase(await bundle('src/lib/exit-runs-dialog.js', pa))).titles > 0, 'CONTROL (a): the hover title back on the row — §1\'s title census goes red');
 const pbr = await painterCase(await bundle('src/lib/exit-runs-dialog.js', pb));

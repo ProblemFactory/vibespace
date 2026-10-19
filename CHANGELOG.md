@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.312 — 2026-10-19
+
+### Fixed
+- On a Windows machine, a command's Chinese output no longer stays garbled after one slow start; if it still can't be read, Technical details says why.
+- On a Windows machine, the coding tools' version checks, OpenCode and the browser no longer flash a terminal window either.
+
 ## 2.369.311 — 2026-10-18
 
 ### Fixed

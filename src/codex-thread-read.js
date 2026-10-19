@@ -202,7 +202,7 @@ function readThreadViaAppServer(threadId, { codexCmd, extraArgs, timeoutMs = REA
       try { child.stdin.write(JSON.stringify({ id, method, params }) + '\n'); } catch (e) { pending.delete(id); rej(e); }
     });
     try {
-      child = spawn(cmd, ['app-server', ...(Array.isArray(extraArgs) ? extraArgs : _cfg.extraArgs)], { stdio: ['pipe', 'pipe', 'pipe'], env: env || process.env });
+      child = spawn(cmd, ['app-server', ...(Array.isArray(extraArgs) ? extraArgs : _cfg.extraArgs)], { stdio: ['pipe', 'pipe', 'pipe'], env: env || process.env, windowsHide: true }); // lane win-run-hide-console
     } catch (e) { return finish(e); }
     child.on('error', (e) => finish(e));
     child.on('exit', (code) => finish(new Error(`app-server exited (${code}) before thread/read answered`)));

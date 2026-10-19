@@ -151,7 +151,11 @@ async function main() {
         : r.outcome === 'timed_out' ? 'timed out after 30 s' : r.outcome === 'refused' ? `refused (${r.refusal})`
         : r.transfer ? `${r.transfer.verb === 'push' ? 'pushed' : 'pulled'} ${r.transfer.bytes} bytes` : `exit ${r.code == null ? '?' : r.code}`;
       const secs = `${(Math.max(0, Number(r.ms) || 0) / 1000).toFixed(1)} s`;
-      console.log(`  ${when}  ${r.machine}  ${verdict} · ${secs}${r.interpreter ? ' · ' + r.interpreter : ''}  ${r.cmd.length > 100 ? r.cmd.slice(0, 99) + '…' : r.cmd}`);
+      // lane win-run-hide-console: the child's own time when the hub's differs by > 2 s (a slow channel, not a slow command),
+      // and a decoding that fell back (the machine's console code page was not read — non-ASCII output may be garbled)
+      const child = Number.isFinite(r.spawnMs) && Math.abs((Number(r.ms) || 0) - r.spawnMs) > 2000 ? ` (child ${(r.spawnMs / 1000).toFixed(1)} s)` : '';
+      const enc = r.encoding === 'utf-8-fallback' ? ' · decoded as UTF-8 (console code page unknown)' : '';
+      console.log(`  ${when}  ${r.machine}  ${verdict} · ${secs}${child}${r.interpreter ? ' · ' + r.interpreter : ''}${enc}  ${r.cmd.length > 100 ? r.cmd.slice(0, 99) + '…' : r.cmd}`);
       const first = (r.stderr && r.stderr.trim() ? r.stderr : r.stdout || '').split('\n').find((l) => l.trim());
       if (first) console.log(`      ${r.stderr && r.stderr.trim() ? 'stderr' : 'stdout'}: ${first.slice(0, 200)}${(r.cut && (r.cut.stdout || r.cut.stderr)) ? '  (cut at 4 KiB)' : ''}`);
     }

@@ -267,7 +267,7 @@ async function ensureServeCwd(dataDir, { execImpl = execFile, log = null } = {})
   if (fs.existsSync(path.join(gitDir, 'HEAD'))) return { dir, isolated: true };
   if (fs.existsSync(gitDir)) { try { fs.rmSync(gitDir, { recursive: true, force: true }); } catch { } }
   const ok = await new Promise((resolve) => {
-    try { execImpl('git', ['init', '-q', '.'], { cwd: dir, timeout: 10000 }, (err) => resolve(!err)); }
+    try { execImpl('git', ['init', '-q', '.'], { cwd: dir, timeout: 10000, windowsHide: true }, (err) => resolve(!err)); }
     catch { resolve(false); }
   });
   if (!ok) log?.warn?.('[opencode-serve] `git init` failed in the isolated serve cwd — OpenCode will resolve the ENCLOSING checkout (or "/") as its default project; nothing indexes it while discovery stays on the v1 routes, but the isolation is weaker');
@@ -1293,7 +1293,7 @@ function createServeLocator({
     if (cancelled(epoch)) return null;   // never START a third-party daemon for a service that was turned off mid-ladder
     let child;
     try {
-      child = spawnImpl(cmd, ['serve', '--port', String(port), '--hostname', '127.0.0.1', '--log-level', 'WARN'], { cwd: state.cwd || cwd || os.homedir(), env: env(), stdio: 'ignore', detached: true });
+      child = spawnImpl(cmd, ['serve', '--port', String(port), '--hostname', '127.0.0.1', '--log-level', 'WARN'], { cwd: state.cwd || cwd || os.homedir(), env: env(), stdio: 'ignore', detached: true, windowsHide: true }); // lane win-run-hide-console: a detached child on Windows = its own console window
     } catch (e) { state.lastError = `spawn failed: ${e.message}`; state.crashes++; if (state.crashes >= maxCrashes) { state.parked = true; state.parkedKind = 'crash'; state.retryAfter = 0; } notify(); return null; }
     if (typeof child.unref === 'function') child.unref();
     state.child = child; state.pid = child.pid || null; state.startedAt = Date.now();

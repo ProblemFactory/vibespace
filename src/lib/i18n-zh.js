@@ -7489,6 +7489,7 @@ export default {
   "(access was removed while it ran)": "（运行期间访问权限被移除）",
   "Command · {n} characters": "命令 · {n} 个字符",
   "Command · {n} lines": "命令 · {n} 行",
+  "Decoded as UTF-8 (this machine's console code page was not read)": "按 UTF-8 解码（未取到该机控制台的代码页）",
   "Archived channels": "已归档频道",
   "Skip archived channels": "跳过已归档频道",
   "Also list archived channels (read once, never polled)": "也列出已归档频道（只读一次，不轮询）",

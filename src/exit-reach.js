@@ -375,9 +375,13 @@ function withoutHalfMarker(t) {
   if (i < 0 || t.length - i >= REDACTED.length) return t;
   return REDACTED.startsWith(t.slice(i)) ? t.slice(0, i) : t;
 }
+/** lane win-run-hide-console: the device's spawn → exit time (`cmd-result.spawnMs`, beside the hub's own `ms`) — a
+ *  non-negative number, bounded at an hour; anything else ⇒ null (an older daemon sends none). */
+function spawnMsOf(x) { return typeof x === 'number' && Number.isFinite(x) && x >= 0 ? Math.min(Math.round(x), 3600000) : null; }
 /** The structured block the chat card carries beside its words (exit-proxy builds it, the renderer draws it). */
-function cardOutput({ code = null, ms = 0, timedOut = false, truncated = false, spawnError = null, interpreter = null, heads = null, cmd = null } = {}) {
+function cardOutput({ code = null, ms = 0, timedOut = false, truncated = false, spawnError = null, interpreter = null, heads = null, cmd = null, encoding = null } = {}) {
   const h = heads && typeof heads === 'object' ? heads : { stdout: '', stderr: '', cut: { stdout: false, stderr: false } };
+  const enc = XS.knownEncoding(encoding);   // lane win-run-hide-console: the device's decoding, the closed set (the card's fold says a fallback)
   return {
     code: Number.isInteger(code) ? code : null, ms: Number(ms) || 0, timedOut: !!timedOut, truncated: !!truncated,
     spawnError: spawnErrorOf(spawnError), interpreter: knownInterpreter(interpreter),
@@ -386,6 +390,7 @@ function cardOutput({ code = null, ms = 0, timedOut = false, truncated = false, 
     // lane exit-see-whole (design 013 piece 1a): the WHOLE command the run sent (≤ CMD_MAX, its lines kept) — the card draws it
     // above the output, folded by `cmdFold`; the head line (`cardText`) keeps its 80 characters
     ...(typeof cmd === 'string' && cmd.trim() ? { cmd: cleanLines(cmd, CMD_MAX) } : {}),
+    ...(enc ? { encoding: enc } : {}),
   };
 }
 /** lane exit-see-whole (design 013 piece 1a): THE FOLD of a shown command — folded past CMD_FOLD_LINES lines, or one line
@@ -420,6 +425,9 @@ function runRow(l, { agent = false } = {}) {
     timedOut: !!l.timedOut, truncated: !!l.truncated, asked: !!l.asked, revokedDuringRun: !!l['revoked-during-run'],
     refusal: outcome === 'refused' ? refusal : null, spawnError: sf,
     interpreter: knownInterpreter(l.interpreter),   // verify r1 F5a: the closed set, never a stored string as itself
+    // lane win-run-hide-console: how the device decoded the output (the closed set) + its spawn → exit time — `runs` says a
+    // fallback, and a run whose hub time and child time differ (a 28 s `echo`: the channel, not the child)
+    ...(XS.knownEncoding(l.encoding) ? { encoding: XS.knownEncoding(l.encoding) } : {}), ...(spawnMsOf(l.spawnMs) != null ? { spawnMs: spawnMsOf(l.spawnMs) } : {}),
     stdout: judgeHead(l.stdout), stderr: judgeHead(l.stderr), cut,   // verify r1 F5b: judged at read, never trusted raw
     ...(xfer ? { verb: l.verb, transfer: transferOf(l) } : {}),
   };
@@ -696,7 +704,7 @@ module.exports = {
   encodedCommandOf, commandHeadOf,   // lane machine-card-fold
   exitAccessOf, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit,
   askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, migrateExitAccess,
-  spawnErrorOf, outputHeads, outputPreview, cardOutput, cmdFold, cleanLines, runRow, platformLabel, interpreterOf, knownInterpreter, spawnFailureText,
+  spawnErrorOf, spawnMsOf, outputHeads, outputPreview, cardOutput, cmdFold, cleanLines, runRow, platformLabel, interpreterOf, knownInterpreter, spawnFailureText,
   TRANSFER_VERBS, TRANSFER_WINDOW_BYTES, TRANSFER_SETTING, TRANSFER_MAX_DEFAULT_MB, TRANSFER_MAX_MB, PATH_MAX_BYTES, PUSH_SINCE, PUSH_CAP,
   transferMaxOf, fmtBytes, statFacts, transferPathVerdict, transferVerdict, transferLine, transferCardText, transferCliLine, verifiedText,
 };

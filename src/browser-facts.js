@@ -206,7 +206,7 @@ function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, no
       // absent (or only the shim on PATH) = "there is no binary", the cached FACT
       if (!bin) return finish(null, 'binary_absent: no browser CLI on PATH beside the shim');
       try {
-        execFileImpl(bin, ['--version'], { timeout: timeoutMs, encoding: 'utf8', env: probeEnv }, (err, stdout, stderr) => {
+        execFileImpl(bin, ['--version'], { timeout: timeoutMs, encoding: 'utf8', env: probeEnv, windowsHide: true }, (err, stdout, stderr) => { // windowsHide: lane win-run-hide-console
           // ENOENT = not installed. Any other failure is "we asked and could not
           // tell", which floorVerdict spells 'unknown' — deliberately NOT the
           // same answer as 'absent', because one of them deserves a sentence.
@@ -599,7 +599,7 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
     const dc = runDir(daemonCwd);
     if (!dc.ok) { resolve({ ok: false, code: dc.code, stdout: '', stderr: '', json: null, error: `${dc.code}: ${dc.error}` }); return; }
     try {
-      execFileImpl(bin, args, { timeout, encoding: 'utf8', env: e, maxBuffer: 4 * 1024 * 1024, cwd: dc.dir }, (err, stdout, stderr) => {
+      execFileImpl(bin, args, { timeout, encoding: 'utf8', env: e, windowsHide: true, maxBuffer: 4 * 1024 * 1024, cwd: dc.dir }, (err, stdout, stderr) => { // windowsHide: lane win-run-hide-console
         let json = null;
         try { json = JSON.parse(String(stdout || '').trim().split('\n').filter(Boolean).pop() || ''); } catch { json = null; }
         resolve({ ok: !err, code: err ? (err.code || err.status || 1) : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), json, error: err ? String(err.message || err) : null });

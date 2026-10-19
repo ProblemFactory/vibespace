@@ -7488,6 +7488,7 @@ export default {
   "(access was removed while it ran)": "（実行中にアクセス権が削除されました）",
   "Command · {n} characters": "コマンド · {n} 文字",
   "Command · {n} lines": "コマンド · {n} 行",
+  "Decoded as UTF-8 (this machine's console code page was not read)": "UTF-8 としてデコード（このマシンのコンソールのコードページを取得できませんでした）",
   "Archived channels": "アーカイブ済みチャンネル",
   "Skip archived channels": "アーカイブ済みチャンネルを除外",
   "Also list archived channels (read once, never polled)": "アーカイブ済みチャンネルも一覧に入れる（一度だけ読み、ポーリングしない）",

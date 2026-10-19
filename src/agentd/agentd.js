@@ -378,25 +378,14 @@ function posixShells() {
   posixShellsRun = Promise.all(['sh', 'bash', 'dash', 'zsh', 'ksh'].map(one)).then((l) => l.filter(Boolean)).finally(() => { posixShellsRun = null; });
   return posixShellsRun;
 }
-// lane win-run-codepage: the console's code page a run-cmd child writes in — asked ONCE per daemon (one cmd.exe spawn,
-// the registry's OEMCP when chcp names none), cached even when unknown (null ⇒ XS.decodeRunOutput keeps UTF-8).
-let consoleCodePageP = null;
+// lane win-run-codepage → lane win-run-hide-console: the console's code page a run-cmd child writes in — ASKED UNTIL KNOWN
+// (PURE XS.codePageAsker: one hidden cmd.exe spawn, the registry's OEMCP when chcp names none, 15 s each; a known answer is
+// kept for the daemon's life, a failed / timed-out probe answers its runs with utf-8-fallback and is NEVER cached — pre-lane
+// one probe timed out under a stall and its null stood for ever; at most one probe in flight). Built at the first run.
+let codePageAsk = null;
 function consoleCodePage() {
-  if (!consoleCodePageP) consoleCodePageP = new Promise((resolve) => {
-    const { execFile } = require('child_process');
-    const ask = (i) => {
-      if (i >= XS.CODEPAGE_PROBES.length) return resolve(null);
-      const p = XS.shellPlan('win32', XS.CODEPAGE_PROBES[i]);
-      try {
-        execFile(p.file, p.args, { windowsHide: true, timeout: 5000, maxBuffer: 64 * 1024, encoding: 'buffer', env: spawnEnv(), windowsVerbatimArguments: true }, (err, out) => {
-          const cp = err ? null : XS.parseCodePage(out);
-          if (cp) resolve(cp); else ask(i + 1);
-        });
-      } catch { ask(i + 1); }
-    };
-    ask(0);
-  });
-  return consoleCodePageP;
+  if (!codePageAsk) codePageAsk = XS.codePageAsker({ execFile: require('child_process').execFile, envOf: () => spawnEnv() });
+  return codePageAsk;
 }
 function spawnEnv(extra) {
   const home = os.homedir();
@@ -2300,19 +2289,25 @@ function serveConnection(sock) {
         try {
           const { execFile } = require('child_process');
           // lane win-run-codepage: on win32 the streams arrive as BYTES and are decoded per the console's code page
-          // (PURE XS.decodeRunOutput — valid UTF-8 stays UTF-8, else chcp's code page; asked once per daemon).
+          // (PURE XS.decodeRunOutput — valid UTF-8 stays UTF-8, else chcp's code page). lane win-run-hide-console: asked at
+          // the START — ONE probe in flight serves every run meanwhile; this run reads ITS probe's answer (or one kept since):
+          // a failed probe answers it with the fallback and the next run asks again.
           const win = process.platform === 'win32';
-          if (win) consoleCodePage();
+          const cpAsked = win ? consoleCodePage().ask() : null;
           // lane-exit-run-output E1: THE SHELL IS THE DEVICE'S FACT — `{shell: <line>}` runs under the interpreter THIS
           // machine has (PURE src/exit-shell.js: win32 ⇒ cmd.exe /d /s /c "<line>" + windowsVerbatimArguments, else
           // sh -lc); the hub never names it (it used to send `sh -lc` to a Windows box: ENOENT in 8 ms, read as exit 1).
           // A line cmd.exe cannot run whole (CR / LF) is refused by name BEFORE a spawn, as a spawn failure.
           const plan = typeof msg.shell === 'string' ? XS.shellPlan(process.platform, msg.shell) : { ok: true, file: String(msg.cmd), args: (msg.args || []).map(String), windowsVerbatimArguments: false, interpreter: null };
           if (!plan.ok) { mux.control({ op: 'cmd-result', id: msg.id, code: XS.spawnExitCode(plan), spawnError: { code: plan.code, message: plan.message }, interpreter: plan.interpreter, stdout: '', stderr: '', timedOut: false, signal: null, truncated: false }); return; }
+          // lane win-run-hide-console: `spawnMs` = spawn → exit, beside the hub's own `ms` — a slow run is told apart as the
+          // channel vs the child (the owner's 28.3 s `echo`)
+          const tSpawn = Date.now();
           const child = execFile(plan.file, plan.args, {
             windowsHide: true, timeout: Math.min(Number(msg.timeoutMs) || 10000, 30000), maxBuffer: 2 * 1024 * 1024,
             env: spawnEnv(msg.env), ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}), ...(win ? { encoding: 'buffer' } : {}),
           }, (err, stdout, stderr) => {
+            const spawnMs = Date.now() - tSpawn;
             // lane-pairing ⑥: a command the 30 s cap killed says so (`timedOut` + the signal) — it read as a bare `code 1`.
             // verify-r1 A5: `code` is ALWAYS a number (node's maxBuffer overflow set it to the STRING
             // 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER', on which the CLI's process.exit() threw), and an output cut here
@@ -2329,9 +2324,9 @@ function serveConnection(sock) {
               const so = dec ? dec.stdout : String(stdout), se = dec ? dec.stderr : String(stderr);
               mux.control({ op: 'cmd-result', id: msg.id, code: sf ? XS.spawnExitCode(sf) : err ? (Number.isInteger(err.code) ? err.code : 1) : 0, ...(sf ? { spawnError: sf } : {}), ...(plan.interpreter ? { interpreter: plan.interpreter } : {}),
                 stdout: dec ? XS.cutText(so, 1024 * 1024) : so.slice(0, 1024 * 1024), stderr: dec ? XS.cutText(se, 65536) : se.slice(0, 65536), ...(dec ? { encoding: dec.encoding } : {}),
-                timedOut: !!(err && err.killed && !overflow), signal: (err && err.signal) || null, truncated: overflow || so.length > 1024 * 1024 || se.length > 65536 });
+                timedOut: !!(err && err.killed && !overflow), signal: (err && err.signal) || null, truncated: overflow || so.length > 1024 * 1024 || se.length > 65536, spawnMs });
             };
-            if (win) consoleCodePage().then(send, () => send(null)); else send();
+            if (win) cpAsked.then((cp) => send(cp || consoleCodePage().known()), () => send(consoleCodePage().known())); else send();
           });
           if (msg.stdin64) { try { child.stdin.end(Buffer.from(msg.stdin64, 'base64')); } catch { } } else { try { child.stdin.end(); } catch { } }
         } catch (e) { mux.control({ op: 'cmd-result', id: msg.id, code: 127, error: e.message }); }
@@ -2346,7 +2341,7 @@ function serveConnection(sock) {
         try {
           const { spawn: sp } = require('child_process');
           const child = sp(String(cmd), (args || []).map(String), {
-            env: spawnEnv(msg.env), cwd: msg.cwd || process.env.HOME,
+            env: spawnEnv(msg.env), cwd: msg.cwd || process.env.HOME, windowsHide: true, // lane win-run-hide-console
           });
           const chanS = msg.chan;
           // count stdout bytes → stream-exit carries `sent` so the client can

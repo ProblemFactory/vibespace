@@ -378,6 +378,7 @@
 .chat-exit-tech > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); }
 .chat-exit-tech[open] > summary { margin-bottom: 4px; }
 .chat-exit-cmd-len { font-size: 10px; color: var(--text-dim); margin: 0 0 2px; }
+.chat-exit-enc { font-size: 10px; color: var(--text-dim); margin: 0 0 2px; }
 .chat-exit-tech .chat-exit-cmd { max-height: 60vh; overflow: auto; }
 /* lane machine-card-fold: a PowerShell -EncodedCommand drawn as its decoded script; the line itself one click away; a hidden character a visible mark */
 .chat-exit-cmd-what { font-size: 10px; color: var(--text-dim); margin: 0 0 2px; }

@@ -631,13 +631,16 @@ class ExitProxyManager {
     // card and the history row; a cut is said. The whole streams still ride the API back to the agent as before.
     const heads = E.outputHeads({ stdout: r.stdout, stderr: r.stderr });
     const anyCut = heads.cut.stdout || heads.cut.stderr;
+    // lane win-run-hide-console: the device's decoding (`utf-8-fallback` = its console's code page was not read) and its
+    // spawn → exit time ride the audit line, the card and the reply — read through the closed set / the bound, never raw
+    const encoding = XS.knownEncoding(r.encoding), spawnMs = E.spawnMsOf(r.spawnMs);
     const rec = E.runRecord({ cmd, code, ms, by, at: t0, outcome: 'ran', timedOut: !!timedOut, revokedDuringRun, interpreter });
     try { this.hosts.setLastRun?.(h.id, rec); } catch (e) { this.log(`last run not recorded: ${e.message}`); }
-    this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code, ms, ok: true, via: again.via, asked, interpreter, ...(platform ? { platform } : {}), ...(timedOut ? { timedOut: true } : {}), ...(truncated ? { truncated: true } : {}), ...(revokedDuringRun ? { 'revoked-during-run': true } : {}), stdout: heads.stdout, stderr: heads.stderr, ...(anyCut ? { cut: heads.cut } : {}) });
+    this.audit({ hostId: h.id, machine, sessionId, sessionKey: by.key, name: session && session.name || null, grant: 'run', verb: 'run', cmd, code, ms, ok: true, via: again.via, asked, interpreter, ...(platform ? { platform } : {}), ...(timedOut ? { timedOut: true } : {}), ...(truncated ? { truncated: true } : {}), ...(revokedDuringRun ? { 'revoked-during-run': true } : {}), ...(encoding ? { encoding } : {}), ...(spawnMs != null ? { spawnMs } : {}), stdout: heads.stdout, stderr: heads.stderr, ...(anyCut ? { cut: heads.cut } : {}) });
     this.log(`${machine}: ran "${cmd.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)}" for ${(session && session.name) || sessionId} — ${timedOut ? 'timed out' : 'exit ' + code}, ${ms} ms (${interpreter})`);
-    card({ outcome: 'ran', cmd, code, ms, timedOut: !!timedOut, revokedDuringRun, exitRun: E.cardOutput({ cmd, code, ms, timedOut: !!timedOut, truncated: !!truncated, interpreter, heads }) });
+    card({ outcome: 'ran', cmd, code, ms, timedOut: !!timedOut, revokedDuringRun, exitRun: E.cardOutput({ cmd, code, ms, timedOut: !!timedOut, truncated: !!truncated, interpreter, heads, encoding }) });
     try { this.bcastAll({ type: 'hosts-updated' }); } catch { }
-    return { machine, code, stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), ms, timedOut, truncated, asked, revokedDuringRun, interpreter, platform, line: E.cliLine({ outcome: 'ran', code, ms, timedOut: !!timedOut, truncated: !!truncated }, { machine }) };
+    return { machine, code, stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), ms, timedOut, truncated, asked, revokedDuringRun, interpreter, platform, ...(encoding ? { encoding } : {}), ...(spawnMs != null ? { spawnMs } : {}), line: E.cliLine({ outcome: 'ran', code, ms, timedOut: !!timedOut, truncated: !!truncated }, { machine }) };
   }
   // ── pull / push (lane exit-transfer, design 013 B) ─────────────────────────
   /**

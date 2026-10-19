@@ -453,15 +453,19 @@ function exitCmdBlock(cmd, { raw = false, marks = false } = {}) {
 
 /** lane exit-card-margin (the owner 2026-10-18: 「No raw strings in cards」): the card's ONE 技术细节 fold, closed, after the
  *  output — the command's length (a line count, or the characters of one line) and the command itself, whole. */
-function exitTechFold(cmd) {
+function exitTechFold(cmd, { encoding = null } = {}) {
   const f = cmdFold(cmd);
   const det = document.createElement('details');
   det.className = 'chat-exit-tech';
   det.dataset.fold = 'tech';
   const sum = document.createElement('summary'); sum.textContent = t('Technical details');
+  det.appendChild(sum);
+  // lane win-run-hide-console: the output was decoded as UTF-8 because the machine's console code page was not read (the
+  // device's `utf-8-fallback`, the closed set) — ONE line in this fold, never in the card's sentence (actor + verb + object)
+  if (encoding === 'utf-8-fallback') { const enc = document.createElement('div'); enc.className = 'chat-exit-enc'; enc.textContent = t("Decoded as UTF-8 (this machine's console code page was not read)"); det.appendChild(enc); }
   const len = document.createElement('div'); len.className = 'chat-exit-cmd-len';
   len.textContent = f.lines > 1 ? t('Command · {n} lines', { n: f.lines }) : t('Command · {n} characters', { n: f.chars });
-  det.append(sum, len, exitCmdBlock(cmd));
+  det.append(len, exitCmdBlock(cmd));
   return det;
 }
 
@@ -519,7 +523,7 @@ export function exitRunBlock(x) {
   const wrap = document.createElement('div');
   wrap.className = 'chat-exit-run';
   // lane exit-see-whole: the command AS ITSELF on the card — lane exit-card-margin: in its 技术细节 fold, after the output
-  const tech = typeof x.cmd === 'string' && x.cmd ? exitTechFold(x.cmd) : null;
+  const tech = typeof x.cmd === 'string' && x.cmd ? exitTechFold(x.cmd, { encoding: x.encoding }) : null;
   const heads = { stdout: String(x.stdout || ''), stderr: String(x.stderr || ''), cut: { stdout: !!(x.cut && x.cut.stdout), stderr: !!(x.cut && x.cut.stderr) } };
   const pv = outputPreview(heads, 3);
   if (!pv.stream) {

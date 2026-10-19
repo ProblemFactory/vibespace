@@ -30,8 +30,8 @@
  * PowerShell error came back as mojibake — cmd.exe and console programs write in the console's OEM code page (936 =
  * GBK) and the daemon read every byte as UTF-8 (`String(stdout)`). On win32 the daemon now takes the streams as bytes
  * and `decodeRunOutput` decodes EACH one: valid UTF-8 stays UTF-8 (PowerShell with UTF8 output, node, git…), anything
- * else is decoded with the code page `chcp` names (read once per daemon, `parseCodePage`; the registry's OEMCP when chcp
- * answers nothing) — BEFORE the 1 MiB / 64 KiB cut, so a character is never split; a stream cut by maxBuffer or a kill
+ * else is decoded with the code page `chcp` names (`parseCodePage`; the registry's OEMCP when chcp answers nothing —
+ * ASKED UNTIL KNOWN, `codePageAsker`, lane win-run-hide-console) — BEFORE the 1 MiB / 64 KiB cut, so a character is never split; a stream cut by maxBuffer or a kill
  * drops its unfinished last character instead. The record names the decoding (`encoding`): a code page this node cannot
  * decode (no full ICU) or an unknown one keeps UTF-8 and says `utf-8-fallback`. POSIX streams are never touched.
  */
@@ -112,6 +112,8 @@ const CODEPAGE_LABELS = Object.freeze({ 936: 'gbk', 932: 'shift_jis', 949: 'euc-
 const UTF8_FALLBACK = 'utf-8-fallback';
 // the lines the daemon asks ONCE for its console's code page, in order (shellPlan('win32', line) runs each)
 const CODEPAGE_PROBES = Object.freeze(['chcp', 'reg query HKLM\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage /v OEMCP']);
+// lane win-run-hide-console: ONE probe line's bound (5 s before: both lines timed out under a transient stall on the owner's box)
+const CODEPAGE_PROBE_MS = 15000;
 function codePageLabel(cp) { return Object.prototype.hasOwnProperty.call(CODEPAGE_LABELS, cp) ? CODEPAGE_LABELS[cp] : 'latin1'; }
 /** The code page in a probe's output (`Active code page: 936` / `活动代码页: 936` in the console's own bytes /
  *  `OEMCP    REG_SZ    936`): its LAST number — the words around it are localized, the digits are ASCII. → number | null. */
@@ -120,6 +122,38 @@ function parseCodePage(out) {
   const all = t.match(/\d+/g);
   const n = all ? Number(all[all.length - 1]) : NaN;
   return Number.isInteger(n) && n > 0 && n < 65536 ? n : null;
+}
+/** lane win-run-hide-console (owner 2026-10-19: every cmd.exe message came back as mojibake) — THE CONSOLE'S CODE PAGE IS
+ *  ASKED UNTIL KNOWN. Pre-lane the daemon asked ONCE: both probe lines timed out under a transient stall and the null
+ *  stood for the daemon's life (one attempt decided for ever). `execFile` = node's, handed in (this module imports
+ *  nothing); `envOf()` = a probe's env. → `{ask, known}`:
+ *  · `ask()` → a Promise of the code page | null. A KNOWN answer is kept for the asker's life and never asked again; a
+ *    probe that fails or times out answers the asks that waited on it with null (⇒ utf-8-fallback) and leaves the cache
+ *    EMPTY — the next ask probes again; at most ONE probe is in flight (every ask meanwhile shares it);
+ *  · each CODEPAGE_PROBES line, in order, is bounded at `timeoutMs` and spawned HIDDEN (windowsHide: a console program
+ *    the console-less daemon starts otherwise gets a console window of its own);
+ *  · `known()` = the kept answer | null. */
+function codePageAsker({ execFile, envOf = () => undefined, timeoutMs = CODEPAGE_PROBE_MS } = {}) {
+  let known = null, inFlight = null;
+  const probe = () => new Promise((resolve) => {
+    const one = (i) => {
+      if (i >= CODEPAGE_PROBES.length) return resolve(null);
+      const p = shellPlan('win32', CODEPAGE_PROBES[i]);
+      try {
+        execFile(p.file, p.args, { timeout: timeoutMs, maxBuffer: 64 * 1024, encoding: 'buffer', env: envOf(), windowsHide: true, windowsVerbatimArguments: true }, (err, out) => {
+          const cp = err ? null : parseCodePage(out);
+          if (cp) resolve(cp); else one(i + 1);
+        });
+      } catch { one(i + 1); }
+    };
+    one(0);
+  });
+  const ask = () => {
+    if (known) return Promise.resolve(known);
+    if (!inFlight) inFlight = probe().then((cp) => { inFlight = null; if (cp) known = cp; return cp; });
+    return inFlight;
+  };
+  return { ask, known: () => known };
 }
 function decodeStream(buf, label, cut) {
   if (!Buffer.isBuffer(buf)) return { text: String(buf == null ? '' : buf), encoding: 'utf-8' };
@@ -137,6 +171,10 @@ function decodeRunOutput(stdout, stderr, cp, { cut = false } = {}) {
   const o = decodeStream(stdout, label, !!cut), e = decodeStream(stderr, label, !!cut);
   return { stdout: o.text, stderr: e.text, encoding: o.encoding !== 'utf-8' ? o.encoding : e.encoding };
 }
+/** lane win-run-hide-console: the decodings a daemon's `cmd-result.encoding` may name — the hub reads it through this CLOSED
+ *  set (verify r1 F5a's rule for any daemon word: a raw string never reaches the record, the card or a row as itself). */
+const RUN_ENCODINGS = Object.freeze([...new Set([...Object.values(CODEPAGE_LABELS), 'utf-8', 'latin1', UTF8_FALLBACK])]);
+function knownEncoding(x) { return typeof x === 'string' && RUN_ENCODINGS.includes(x) ? x : null; }
 /** `text` bounded at `max` UTF-16 units without splitting a surrogate pair (the win32 cut runs on decoded text). */
 function cutText(text, max) {
   const s = String(text);
@@ -145,4 +183,4 @@ function cutText(text, max) {
   return s.slice(0, c >= 0xD800 && c <= 0xDBFF ? max - 1 : max);
 }
 
-module.exports = { CODEPAGE_LABELS, CODEPAGE_PROBES, UTF8_FALLBACK, codePageLabel, parseCodePage, decodeRunOutput, cutText, RUN_SHELL_CAP, RUN_SHELL_SINCE, POSIX_SHELL, WIN_SHELL, WIN_LINE_MAX, PLATFORM_LABELS, canRunLine, interpreterOf, knownInterpreter, platformLabel, shellPlan, spawnFailure, spawnExitCode, spawnFailureText };
+module.exports = { CODEPAGE_LABELS, CODEPAGE_PROBES, CODEPAGE_PROBE_MS, UTF8_FALLBACK, RUN_ENCODINGS, codePageLabel, parseCodePage, codePageAsker, knownEncoding, decodeRunOutput, cutText, RUN_SHELL_CAP, RUN_SHELL_SINCE, POSIX_SHELL, WIN_SHELL, WIN_LINE_MAX, PLATFORM_LABELS, canRunLine, interpreterOf, knownInterpreter, platformLabel, shellPlan, spawnFailure, spawnExitCode, spawnFailureText };

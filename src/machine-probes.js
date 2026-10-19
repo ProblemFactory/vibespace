@@ -23,8 +23,10 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { cliVersionOf } = require('./cli-caps.js'); // PURE: the one version spelling the long-lived-token gate reads
 
+// windowsHide (lane win-run-hide-console): `claude --version` on a Windows device is a console program the console-less
+// daemon starts — without it, a console window per probe
 const exec = (cmd, args, timeout = 5000) => new Promise((resolve) => {
-  try { execFile(cmd, args, { encoding: 'utf-8', timeout }, (err, stdout) => resolve(err ? null : String(stdout || ''))); }
+  try { execFile(cmd, args, { encoding: 'utf-8', timeout, windowsHide: true }, (err, stdout) => resolve(err ? null : String(stdout || ''))); }
   catch { resolve(null); }
 });
 

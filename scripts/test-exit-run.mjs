@@ -30,7 +30,16 @@
 //      daemon built from a copy that never consults the judge (the production shape: code 1, no spawnError)
 //   §9 lane win-run-codepage: a Windows run's bytes decoded per the console's code page (GBK / Shift-JIS / UTF-8 byte
 //      fixtures, the whole-stream judge, an invalid sequence, the cut, no-ICU fallback), a REAL daemon made a fake
-//      Windows box (chcp asked once, 2.2 MB of GBK cut clean), POSIX byte-identical; two controls (String(stdout))
+//      Windows box (chcp asked once, 2.2 MB of GBK cut clean), POSIX byte-identical; two controls (String(stdout));
+//      lane win-run-hide-console: the same fake box whose FIRST probe fails — run 1 utf-8-fallback, run 2 asks again and
+//      decodes GBK, every cmd.exe it started handed windowsHide: true, each result its spawnMs
+//   §9b lane win-run-hide-console: THE CODE PAGE IS ASKED UNTIL KNOWN (PURE XS.codePageAsker over a stubbed execFile, in
+//      process): a probe that times out answers its run with utf-8-fallback and is never cached, the retry decodes
+//      系统找不到指定的文件。 from its GBK bytes; 10 concurrent runs share ONE probe in flight; each probe hidden, 15 s;
+//      CONTROLS: an asker that caches the null, one without the single flight, the 5 s bound, a shown probe — each red
+//   §9c lane win-run-hide-console: the device's `encoding` + `spawnMs` reach the audit line, the reply, the card's exitRun
+//      and the history row through the closed set / the bound (a raw daemon word dropped); `vibespace-exit runs` says a
+//      utf-8-fallback and the child's time when the hub's differs by > 2 s
 // Run: node scripts/test-exit-run.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1391,6 +1400,9 @@ const CHCP_SJIS = Buffer.from([0x8c, 0xbb, 0x8d, 0xdd, 0x82, 0xcc, 0x83, 0x52, 0
 const ZH_UTF8 = Buffer.from([0xe4, 0xb8, 0xad, 0xe6, 0x96, 0x87]); // 中文
 const ZHONG_GBK = Buffer.from([0xd6, 0xd0]); // 中 (GBK 路 = c2 b7 is a valid UTF-8 middle dot — never a fixture for the judge)
 const ZH_PATH = '系统找不到指定的路径。\r\n';
+// lane win-run-hide-console: the owner's `type` on a missing file (2026-10-19) — the bytes cmd.exe wrote on a 936 console
+const GBK_FILE = Buffer.from([0xcf, 0xb5, 0xcd, 0xb3, 0xd5, 0xd2, 0xb2, 0xbb, 0xb5, 0xbd, 0xd6, 0xb8, 0xb6, 0xa8, 0xb5, 0xc4, 0xce, 0xc4, 0xbc, 0xfe, 0xa1, 0xa3]); // 系统找不到指定的文件。
+const ZH_FILE = '系统找不到指定的文件。';
 const mojibake = (s) => /\uFFFD/.test(s);
 const cpTable = (X) => {
   const rows = [];
@@ -1440,26 +1452,28 @@ else if (line === 'dir-missing') { process.stderr.write(B(${JSON.stringify([...G
 else if (line === 'utf8') process.stdout.write(B(${JSON.stringify([...ZH_UTF8])}));
 else if (line === 'flood') { const b = Buffer.alloc(1 + 2 * 1100000); b[0] = 0x61; for (let i = 1; i < b.length; i += 2) { b[i] = 0xd6; b[i + 1] = 0xd0; } process.stdout.write(b); }
 `);
-  const fakeWin = (agentdFile, tag) => {
+  const fakeWin = (agentdFile, tag, cmdFile = fakeCmd) => {
     const flag = path.join(SCR, `win-flag-${tag}`), log = path.join(SCR, `cmd-log-${tag}`);
     const entry = path.join(SCR, `fake-win-${tag}.cjs`);
     fs.writeFileSync(entry, `const fs = require('fs'); const cp = require('child_process'); const real = process.platform;
 Object.defineProperty(process, 'platform', { get: () => (fs.existsSync(${JSON.stringify(flag)}) ? 'win32' : real), configurable: true });
 const execFile = cp.execFile;
-cp.execFile = function (file, args, opts, cb) { if (file !== 'cmd.exe') return execFile.apply(this, arguments); fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n'); return execFile.call(this, process.execPath, [${JSON.stringify(fakeCmd)}, ...args], opts, cb); };
+cp.execFile = function (file, args, opts, cb) { if (file !== 'cmd.exe') return execFile.apply(this, arguments); fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n'); fs.appendFileSync(${JSON.stringify(log + '.opts')}, JSON.stringify({ args, hide: opts && opts.windowsHide, timeout: opts && opts.timeout }) + '\\n'); return execFile.call(this, process.execPath, [${JSON.stringify(cmdFile)}, ...args], opts, cb); };
 require(${JSON.stringify(agentdFile)});
 `);
     return { bundle: bundleFrom(entry, tag), flag, log };
   };
-  const runWin = async (agentdFile, tag, lines = ['dir-missing', 'utf8', 'flood']) => {
-    const fw = fakeWin(agentdFile, tag);
+  const runWin = async (agentdFile, tag, lines = ['dir-missing', 'utf8', 'flood'], cmdFile = fakeCmd) => {
+    const fw = fakeWin(agentdFile, tag, cmdFile);
     const { dm } = await realDaemon(fw.bundle, tag);
-    const out = {};
+    const out = { seq: [] };
     try {
       fs.writeFileSync(fw.flag, '1');
-      for (const l of lines) out[l] = await dm.runShell(l, { timeoutMs: 30000, waitMs: 40000 });
+      for (const l of lines) out.seq.push(out[l] = await dm.runShell(l, { timeoutMs: 30000, waitMs: 40000 }));
     } finally { try { fs.unlinkSync(fw.flag); } catch { } try { dm.stop(); } catch { } }
-    out.cmdLog = fs.existsSync(fw.log) ? fs.readFileSync(fw.log, 'utf8').trim().split('\n').map((x) => JSON.parse(x)) : [];
+    const lines0 = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').map((x) => JSON.parse(x)) : []);
+    out.cmdLog = lines0(fw.log);
+    out.optsLog = lines0(fw.log + '.opts');
     return out;
   };
   const w = await runWin(path.join(REPO, 'src/agentd/agentd.js'), 'win');
@@ -1478,6 +1492,28 @@ require(${JSON.stringify(agentdFile)});
     ok(r && r.stdout === Buffer.from([0xe4, 0xb8, 0xad, 0xcf, 0xb5, 0xcd, 0xb3, 0xd5, 0xd2]).toString() && !('encoding' in r), 'POSIX: the bytes ride String() byte for byte, no `encoding` key (a byte-identical leg)', r);
   } finally { try { dmP.stop(); } catch { } }
 
+  // lane win-run-hide-console: the SAME fake Windows box, its FIRST code-page probe failing (chcp, then reg — the owner's
+  // stall): run 1 answers utf-8-fallback, run 2 asks AGAIN and decodes GBK, run 3 asks nothing; every cmd.exe the daemon
+  // started (the probes AND the runs) was handed windowsHide: true; each result carries the child's spawnMs
+  const flakyCmd = path.join(SCR, 'fake-cmd-flaky.cjs'), flakyCount = path.join(SCR, 'flaky-probes');
+  fs.writeFileSync(flakyCmd, `const fs = require('fs'); const a = process.argv.slice(2); const line = String(a[3] || '').replace(/^"|"$/g, '');
+const probe = line === 'chcp' || /^reg /.test(line);
+const n = probe ? Number(fs.existsSync(${JSON.stringify(flakyCount)}) ? fs.readFileSync(${JSON.stringify(flakyCount)}, 'utf8') : 0) + 1 : 0;
+if (probe) fs.writeFileSync(${JSON.stringify(flakyCount)}, String(n));
+if (probe && n <= 2) process.exitCode = 1;
+else if (line === 'chcp') process.stdout.write(Buffer.from(${JSON.stringify([...CHCP_GBK])}));
+else if (line === 'file-missing') { process.stderr.write(Buffer.from(${JSON.stringify([...GBK_FILE])})); process.exitCode = 1; }
+`);
+  const wf = await runWin(path.join(REPO, 'src/agentd/agentd.js'), 'winflaky', ['file-missing', 'file-missing', 'file-missing'], flakyCmd);
+  const [fr1, fr2, fr3] = wf.seq;
+  ok(fr1 && fr1.code === 1 && fr1.encoding === 'utf-8-fallback' && fr1.stderr === GBK_FILE.toString('utf8') && mojibake(fr1.stderr), 'the fake Windows daemon whose FIRST code-page probe fails: run 1 answers utf-8-fallback (the bytes as UTF-8, and said)', fr1);
+  ok(fr2 && fr2.code === 1 && fr2.stderr === ZH_FILE && fr2.encoding === 'gbk', '…run 2 asks AGAIN (the failure was never cached) and decodes 系统找不到指定的文件。 as GBK (pre-lane: mojibake for the daemon\'s life)', fr2);
+  const probesF = wf.cmdLog.filter((a) => a[3] === '"chcp"').length, regsF = wf.cmdLog.filter((a) => /^"reg /.test(a[3])).length;
+  ok(fr3 && fr3.encoding === 'gbk' && probesF === 2 && regsF === 1 && wf.cmdLog.length === 6, `…run 3 asks nothing: the known answer is kept (chcp ${probesF}×, reg ${regsF}×, 3 runs)`, wf.cmdLog);
+  ok(wf.optsLog.length === 6 && wf.optsLog.every((o) => o.hide === true), 'every cmd.exe this daemon started — the 3 probes and the 3 runs — was handed windowsHide: true (no console window)', wf.optsLog);
+  ok(wf.optsLog.filter((o) => /^"(chcp|reg )/.test(o.args[3])).every((o) => o.timeout === 15000), '…each code-page probe bounded at 15 s');
+  ok(wf.seq.every((r) => r && Number.isInteger(r.spawnMs) && r.spawnMs >= 0 && r.spawnMs < 30000), 'each result carries the child\'s own spawnMs (spawn → exit)', wf.seq.map((r) => r && r.spawnMs));
+
   // CONTROLS (patched copies, never src/)
   const M9 = mutantCopies('exo9', REPO);
   const xsSrc9 = fs.readFileSync(path.join(REPO, 'src/exit-shell.js'), 'utf8');
@@ -1494,6 +1530,123 @@ require(${JSON.stringify(agentdFile)});
   const wc = await runWin(adCopy9, 'winctl', ['dir-missing']);
   ok(wc['dir-missing'] && mojibake(wc['dir-missing'].stderr) && wc['dir-missing'].stderr !== ZH_PATH && !wc['dir-missing'].encoding, 'CONTROL (w2): a daemon whose run-cmd keeps String(stdout) answers the production mojibake — the fake-Windows leg goes red', wc['dir-missing']);
   for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 2, label: 'mutant-copy (win-run-codepage): ' })) ok(r.pass, r.name, r.detail);
+});
+
+// ── §9b lane win-run-hide-console ──
+// The owner's Windows 11 box (2026-10-19, agent 2.369.308): the first run after a daemon start took 28.3 s for `echo` (a
+// transient stall), BOTH code-page probes timed out at 5 s, and the null was cached for the daemon's life — every later
+// 系统找不到指定的文件。 arrived as "ϵͳ�Ҳ���ָ�����ļ���". The rule: ONE attempt never decides for ever.
+const tick = () => new Promise((r) => setImmediate(r));
+/** a stubbed execFile: `answer(line)` → {err, out} | 'hold' (the callback kept until `drain`); every call logged */
+function stubExec(answer) {
+  const calls = [], held = [];
+  const execFile = (file, args, opts, cb) => {
+    const line = String((args || [])[3] || '').replace(/^"|"$/g, '');
+    calls.push({ file, args, opts, line });
+    const a = answer(line);
+    if (a === 'hold') held.push(cb); else setImmediate(() => cb(a.err || null, a.out || Buffer.alloc(0)));
+    return { kill() { } };
+  };
+  return { execFile, calls, held };
+}
+const TIMED_OUT = () => Object.assign(new Error('Command failed: cmd.exe /d /s /c "chcp"'), { killed: true, signal: 'SIGTERM', code: null });
+/** answer every held probe (and the ones the answers start) with `ans()` → [err, out] */
+const drain = async (st, ans) => { for (let k = 0; k < 64; k++) { await tick(); if (!st.held.length) return; while (st.held.length) st.held.shift()(...ans()); } };
+/** ONE run as agentd's run-cmd does it: the code page asked at the start, the child's bytes decoded with ITS answer (or one kept since) */
+const runOn = async (X, asker, bytes) => { const cp = await asker.ask(); return X.decodeRunOutput(Buffer.alloc(0), bytes, cp || asker.known()); };
+const askerLegs = async (X) => {
+  const rows = [];
+  // ① the first probe times out (chcp, then reg), the retry answers 936
+  let phase = 1;
+  const s1 = stubExec((line) => (phase === 1 ? { err: TIMED_OUT() } : line === 'chcp' ? { out: CHCP_GBK } : { err: TIMED_OUT() }));
+  const a1 = X.codePageAsker({ execFile: s1.execFile, envOf: () => ({ PATH: 'C:\\Windows\\system32' }) });
+  const r1 = await runOn(X, a1, GBK_FILE);
+  rows.push([r1.encoding === 'utf-8-fallback' && r1.stderr === GBK_FILE.toString('utf8') && s1.calls.length === 2 && s1.calls[0].line === 'chcp' && /^reg query /.test(s1.calls[1].line), 'run 1: chcp then reg time out ⇒ THAT run decodes utf-8-fallback (the bytes as UTF-8, said)', { r1, calls: s1.calls.map((c) => c.line) }]);
+  rows.push([a1.known() === null, '…and NOTHING is kept (pre-lane: the null stood for the daemon\'s life)', a1.known()]);
+  phase = 2;
+  const r2 = await runOn(X, a1, GBK_FILE);
+  rows.push([r2.stderr === ZH_FILE && r2.encoding === 'gbk' && s1.calls.length === 3 && s1.calls[2].line === 'chcp', 'run 2 asks AGAIN: chcp answers 活动代码页: 936 ⇒ 系统找不到指定的文件。 decoded from its GBK bytes', { r2, n: s1.calls.length }]);
+  const r3 = await runOn(X, a1, GBK_FILE);
+  rows.push([r3.encoding === 'gbk' && s1.calls.length === 3 && a1.known() === 936, 'run 3: the known answer is kept for the asker\'s life — no third probe', s1.calls.length]);
+  rows.push([s1.calls.every((c) => c.file === 'cmd.exe' && c.opts.windowsHide === true && c.opts.timeout === 15000 && c.opts.encoding === 'buffer' && c.opts.windowsVerbatimArguments === true && c.opts.env && /system32/.test(c.opts.env.PATH)), 'every probe: cmd.exe, hidden (windowsHide), a 15 s bound, bytes, the env handed in', s1.calls.map((c) => c.opts)]);
+  // ② 10 concurrent runs while the probe is in flight: ONE probe, its answer decodes all ten
+  const s2 = stubExec(() => 'hold');
+  const a2 = X.codePageAsker({ execFile: s2.execFile });
+  const ten = Array.from({ length: 10 }, () => runOn(X, a2, GBK_FILE));
+  await tick();
+  const inFlight2 = s2.calls.length;
+  await drain(s2, () => [null, CHCP_GBK]);
+  const got2 = await Promise.all(ten);
+  rows.push([inFlight2 === 1 && s2.calls.length === 1, `10 concurrent runs share ONE probe in flight (${inFlight2} spawned)`, s2.calls.length]);
+  rows.push([got2.every((g) => g.stderr === ZH_FILE && g.encoding === 'gbk'), '…its answer decodes all ten as GBK', got2.map((g) => g.encoding)]);
+  // ②b a FAILING probe under 10 concurrent runs: the chain ran once (chcp + reg), all ten fall back, the 11th asks again
+  const s3 = stubExec(() => 'hold');
+  const a3 = X.codePageAsker({ execFile: s3.execFile });
+  const tenB = Array.from({ length: 10 }, () => runOn(X, a3, GBK_FILE));
+  await drain(s3, () => [TIMED_OUT(), Buffer.alloc(0)]);
+  const got3 = await Promise.all(tenB);
+  rows.push([got3.every((g) => g.encoding === 'utf-8-fallback') && s3.calls.length === 2, `a probe that fails under 10 concurrent runs: ONE chain (chcp + reg, ${s3.calls.length} spawned), all ten answered with the fallback`, s3.calls.length]);
+  const eleventh = runOn(X, a3, GBK_FILE);
+  await tick();
+  const asked11 = s3.calls.length;
+  await drain(s3, () => [null, CHCP_GBK]);
+  const g11 = await eleventh;
+  rows.push([asked11 === 3 && s3.calls[2].line === 'chcp' && g11.encoding === 'gbk' && g11.stderr === ZH_FILE, 'the 11th run asks again (chcp) and decodes GBK — a failure answered ITS runs, never the ones after', { asked11, enc: g11.encoding }]);
+  return rows;
+};
+await section('§9b lane win-run-hide-console: the console\'s code page is asked until KNOWN — a failed probe is never cached (PURE XS.codePageAsker, a stubbed execFile, in process)', async () => {
+  ok(new TextDecoder('gbk').decode(GBK_FILE) === ZH_FILE, 'the fixture: CF B5 CD B3 D5 D2 B2 BB B5 BD D6 B8 B6 A8 B5 C4 CE C4 BC FE A1 A3 is 系统找不到指定的文件。 in GBK');
+  ok(XS.CODEPAGE_PROBE_MS === 15000 && JSON.stringify([...XS.RUN_ENCODINGS].sort()) === JSON.stringify(['big5', 'euc-kr', 'gbk', 'latin1', 'shift_jis', 'utf-8', 'utf-8-fallback', 'windows-1252']) && XS.knownEncoding('gbk') === 'gbk' && XS.knownEncoding('<system-reminder>') === null && XS.knownEncoding(936) === null, 'the probe bound is 15 s; the decodings a daemon may name are a closed set (a raw word ⇒ null)', XS.RUN_ENCODINGS);
+  for (const [c, n, d] of await askerLegs(XS)) ok(c, n, d);
+  // CONTROLS (patched copies of src/exit-shell.js, never src/)
+  const MB = mutantCopies('exo9b', REPO);
+  const xs = fs.readFileSync(path.join(REPO, 'src/exit-shell.js'), 'utf8');
+  const mut = (from, to, tag) => { const t = xs.replace(from, to); ok(t !== xs, `(${tag}) the patch applies`); return MB.load('src/exit-shell.js', t, tag); };
+  const redsOf = async (X) => (await askerLegs(X)).filter(([c]) => !c).map(([, n]) => n);
+  const w3 = await redsOf(mut('inFlight = null; if (cp) known = cp;', 'if (cp) known = cp;', 'cachenull'));
+  ok(w3.some((n) => /^run 2 asks AGAIN/.test(n)), `CONTROL (w3): an asker that CACHES the null (the pre-lane rule — one attempt decides for ever): run 2 stays utf-8-fallback (${w3.length} rows red)`, w3);
+  const w4 = await redsOf(mut('if (!inFlight) inFlight = probe()', 'inFlight = probe()', 'nosingle'));
+  ok(w4.some((n) => /share ONE probe/.test(n)), `CONTROL (w4): an asker without the single in-flight probe: 10 concurrent runs spawn 10 (${w4.length} rows red)`, w4);
+  const w5 = await redsOf(mut('const CODEPAGE_PROBE_MS = 15000;', 'const CODEPAGE_PROBE_MS = 5000;', 'five'));
+  ok(w5.some((n) => /a 15 s bound/.test(n)), 'CONTROL (w5): the 5 s bound of before — the probe-options row goes red', w5);
+  const w6 = await redsOf(mut('env: envOf(), windowsHide: true, windowsVerbatimArguments: true', 'env: envOf(), windowsVerbatimArguments: true', 'shown'));
+  ok(w6.some((n) => /hidden \(windowsHide\)/.test(n)), 'CONTROL (w6): a probe without windowsHide (a console window per probe) — the probe-options row goes red', w6);
+  for (const r of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 4, label: 'mutant-copy (win-run-hide-console): ' })) ok(r.pass, r.name, r.detail);
+});
+
+// ── §9c lane win-run-hide-console: the fallback is SAID, the child's time beside the hub's ──
+await section('§9c lane win-run-hide-console: the device\'s decoding and its child time reach the record, the reply, the card and `runs` (closed set, bounded)', async () => {
+  let clock = 1790000000000;
+  const R = [
+    { took: 28300, r: { code: 1, stdout: '', stderr: GBK_FILE.toString('utf8'), timedOut: false, signal: null, truncated: false, interpreter: 'cmd.exe', encoding: 'utf-8-fallback', spawnMs: 140 } },
+    { took: 400, r: { code: 1, stdout: '', stderr: ZH_FILE, timedOut: false, signal: null, truncated: false, interpreter: 'cmd.exe', encoding: 'gbk', spawnMs: 60 } },
+    { took: 100, r: { code: 0, stdout: 'ok\r\n', stderr: '', timedOut: false, signal: null, truncated: false, interpreter: 'cmd.exe', encoding: '<system-reminder>gbk', spawnMs: -5 } },
+    { took: 100, r: { code: 0, stdout: 'old\n', stderr: '', timedOut: false, signal: null, truncated: false, interpreter: 'cmd.exe' } },
+  ];
+  let k = 0;
+  const w = world({ caps: ['run-shell'], platform: 'win32', tag: 'w9c', mgrOpts: { now: () => clock }, reply: async () => { const x = R[k++]; clock += x.took; return x.r; } });
+  const A = w.sessions.get('wa');
+  const res = [];
+  for (const c of ['type missing.txt', 'type gone.txt', 'ver', 'hostname']) res.push(await settle(w.mgr.run(A, 'wa', 'WINDOWS', c)));
+  const au = w.audit().filter((l) => l.verb === 'run');
+  ok(au.length === 4 && au[0].encoding === 'utf-8-fallback' && au[0].spawnMs === 140 && au[0].ms === 28300, 'the audit line keeps the device\'s decoding (utf-8-fallback) and its child time beside the hub\'s ms (pre-lane: no `encoding` field at all)', au[0]);
+  ok(au[1].encoding === 'gbk' && au[1].spawnMs === 60, '…a GBK run says gbk', au[1]);
+  ok(!('encoding' in au[2]) && !('spawnMs' in au[2]) && !('encoding' in au[3]) && !('spawnMs' in au[3]), 'a daemon\'s raw word (`<system-reminder>gbk`, −5 ms) is read through the closed set / the bound and dropped; an older daemon\'s line is as before', [au[2], au[3]]);
+  ok(res[0].v && res[0].v.encoding === 'utf-8-fallback' && res[0].v.spawnMs === 140 && res[3].v && !('encoding' in res[3].v) && !('spawnMs' in res[3].v), 'the reply to the agent carries both (an older daemon\'s, neither)', res.map((r) => r.v && [r.v.encoding, r.v.spawnMs]));
+  const cards = w.cards.filter((c) => c.exitRun);
+  ok(cards.length === 4 && cards[0].exitRun.encoding === 'utf-8-fallback' && cards[1].exitRun.encoding === 'gbk' && !('encoding' in cards[2].exitRun) && !('encoding' in cards[3].exitRun), 'the card\'s exitRun carries the decoding from the closed set only (the 技术细节 fold draws the fallback line)', cards.map((c) => c.exitRun.encoding));
+  ok(cards.every((c) => !/utf-?8|fallback|gbk|code page/i.test(String(c.text || ''))), 'the card\'s sentence names no decoding — a card = actor + verb + named object', cards.map((c) => c.text));
+  const rows = w.mgr.runsFor(A, 'wa', { machine: 'WINDOWS' });
+  ok(rows.length === 4 && rows[3].encoding === 'utf-8-fallback' && rows[3].spawnMs === 140 && rows[2].encoding === 'gbk' && !('encoding' in rows[1]) && !('spawnMs' in rows[1]) && !('encoding' in rows[0]), 'the history row (`runs`, the owner\'s list) re-reads both through the closed set (newest first)', rows.map((r) => [r.cmd, r.encoding, r.spawnMs]));
+  // `vibespace-exit runs` over a stub API answering exactly those rows
+  const srv = http.createServer((q, s) => { s.setHeader('Content-Type', 'application/json'); s.end(JSON.stringify(q.url.startsWith('/api/agent/exit/runs') ? { runs: rows } : {})); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    const c = await new Promise((res2) => { const ch = spawn(process.execPath, [path.join(REPO, 'data/bin/vibespace-exit'), 'runs'], { env: { ...process.env, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_A' } }); let out = ''; ch.stdout.on('data', (d) => { out += d; }); ch.on('close', (code) => res2({ code, out })); });
+    const L1 = c.out.split('\n').find((l) => l.includes('type missing.txt')) || '', L2 = c.out.split('\n').find((l) => l.includes('type gone.txt')) || '', L3 = c.out.split('\n').find((l) => / ver$/.test(l)) || '';
+    ok(c.code === 0 && /exit 1 · 28\.3 s \(child 0\.1 s\) · cmd\.exe · decoded as UTF-8 \(console code page unknown\)/.test(L1), '`vibespace-exit runs`: the 28.3 s run names the child\'s 0.1 s (the channel, not the command) and its fallback decoding', L1);
+    ok(/exit 1 · 0\.4 s · cmd\.exe {2}type gone\.txt/.test(L2) && !/child|decoded/.test(L2 + L3), '…a GBK run within 2 s of its child says neither', [L2, L3]);
+  } finally { srv.close(); }
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
