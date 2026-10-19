@@ -34,6 +34,12 @@
 //       another window shown, listed under Minimized); the phone's next save
 //       does NOT restore it; the phone's own restore tap does
 //   defect: the settings nav strip wraps (no horizontal scroller)
+//   FIRST SCREEN (lane phone-first-screen, design q-044 decision 5): the phone OPENS on the attention page (the seeded
+//       ask its row, under the nav, the nav naming it, its ✕ hidden); ☰ reaches the conversation list in one tap; at
+//       the end the server restarts on the PRODUCTION SHAPE: at 375×812 and 390×844 the 6 rows + every band / fold head
+//       + the notices' line fit without scrolling (a CONTROL with whole words does not); a row's tap opens its
+//       conversation, the back gesture returns to the list; every ask answered ⇒ the next back lands on the
+//       conversation list and a boot draws no page; the 1280×800 desktop draws none
 // Requires google-chrome (SKIP without). Run: node scripts/test-mobile-gaps.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -136,7 +142,8 @@ for a in "$@"; do case "$a" in --version) echo "2.1.274 (Claude Code) stub"; exi
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"${LIVE_SID}","model":"claude-fable-5","cwd":"${CWD}","tools":[],"permissionMode":"default","claude_code_version":"2.1.274"}'
 exec cat >/dev/null
 `, { mode: 0o755 });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const startServer = () => spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+let srv = startServer(); // `let`: the first-screen legs restart it on another For-you store (lane phone-first-screen)
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
@@ -148,6 +155,46 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 for (let i = 0; i < 60; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+
+// lane phone-first-screen: restart the throwaway server on another For-you store (the store reads data/user-todos.json at boot)
+const restartWith = async (items) => {
+  const was = srv; was.kill('SIGKILL');
+  await new Promise((r) => { if (was.exitCode !== null || was.signalCode) r(); else { was.once('exit', r); setTimeout(r, 3000); } });
+  fs.writeFileSync(path.join(wt, 'data', 'user-todos.json'), JSON.stringify({ items }, null, 2));
+  srv = startServer();
+  for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+};
+// THE PRODUCTION SHAPE by shape (lane foryou-folds' counts over the .314 store: the first screen's bands {2: 1, 3: 4, 4: 7,
+// 5: 6, 搁置 13} + 5 notices; ask text p50 ~150 / p90 ~300 characters, ~40 % CJK, a detail on every ask) — the WORDS are
+// invented. Every ask is the LIVE stub conversation's (the stub always announces LIVE_SID — a tap attaches its window).
+const prodShape = () => {
+  const now = Date.now();
+  const EN = 'Should the nightly export run against the staging bucket or the archive bucket? The staging one is faster but keeps only thirty days of history, ';
+  const ZH = '要不要把夜间导出改到归档桶？暂存桶更快但只保留三十天，归档桶慢一些但不会丢历史记录，你决定后我就改配置并重跑一次。';
+  const words = (n, k) => { let out = ''; let i = 0; while (out.length < n) out += (i++ + k) % 5 < 2 ? ZH : EN; return out.slice(0, n); };
+  const LENS = [97, 147, 239, 120, 304, 180, 90, 260, 150, 110, 200, 140];
+  let n = 0;
+  const item = (o) => ({ id: 'ut-shape' + String(++n).padStart(3, '0'), sessionKey: 'claude:' + LIVE_SID, sessionName: 'live stub', status: 'open', kind: 'action', origin: 'agent', urgency: 'normal', by: 'agent', createdAt: now - n * 37 * 60e3, resolvedAt: null, resolvedBy: null, jobId: null, detail: null, ...o });
+  const ask = (k, o = {}) => item({ text: words(LENS[k % 12], k), detail: words(LENS[(k + 3) % 12] + 50, k + 1), ...o });
+  return [
+    ask(0, { judged: { group: 'now', p: 0.8, facts: { state: 'blocked', askedAt: now - 3 * 3600e3 } } }), // band 2: a blocked board
+    ...[1, 2, 3, 4].map((k) => ask(k, { due: now + (6 + k * 8) * 3600e3 })),                            // band 3: a date inside 48 h
+    ...[5, 6, 7, 8, 9, 10, 11].map((k) => ask(k, { options: ['Run now', 'Wait for backup'] })),         // band 4: option chips
+    ...[12, 13, 14, 15, 16, 17].map((k) => ask(k)),                                                      // band 5
+    ...Array.from({ length: 13 }, (_, k) => ask(k + 3, { createdAt: now - (8 + k) * 864e5 })),           // 搁置 (7 days unanswered)
+    ...Array.from({ length: 5 }, (_, k) => item({ text: words(80, k), kind: 'notice', origin: 'browser', sessionKey: 'browser' })),
+  ];
+};
+// the page's first screen by getBoundingClientRect: its rows, every band bar / fold head, the notices' line
+const MEASURE_PAGE = `(() => {
+  const p = document.getElementById('phone-home'); const pr = p.getBoundingClientRect();
+  const box = (el) => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) }; };
+  const rows = [...p.querySelectorAll('.ut-bands .ut-item')].map((el) => ({ band: el.closest('.ut-band').dataset.band, ...box(el) }));
+  const heads = [...p.querySelectorAll('.ut-band-bar, .ut-bands .ut-fold')].map((el) => ({ band: el.closest('.ut-band').dataset.band, fold: el.classList.contains('ut-fold'), ...box(el) }));
+  const nh = p.querySelector('.ut-notice-head'); const notices = nh && nh.offsetParent ? box(nh) : null;
+  const all = [...rows, ...heads, ...(notices ? [notices] : [])];
+  return { rows, heads, folds: heads.filter((x) => x.fold).length, notices, top: Math.round(pr.top), scrollTop: p.scrollTop, last: Math.max(...all.map((x) => x.bottom)), allInside: all.every((x) => x.top >= pr.top - 0.5 && x.bottom <= innerHeight + 0.5) };
+})()`;
 
 // ── raw CDP ─────────────────────────────────────────────────────────────────
 const WebSocket = require('ws');
@@ -266,11 +313,32 @@ try {
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   await phone.waitApp();
+  // a reload that never evaluates on the outgoing page (a marker the new document does not carry)
+  const reloadPhone = async () => {
+    await phone.evalJs('window.__fsOld = 1; true');
+    await phone.cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+    for (let i = 0; i < 150; i++) { try { if (await phone.evalJs('!window.__fsOld && !!window.app')) break; } catch { } await sleep(200); }
+    await phone.waitApp();
+  };
   await sleep(1200);
 
   console.log('phone emulation');
   const env = await evalJs(`({ mobile: app.isMobile, touch: app.isTouch, nav: !!app._mobileNav, toolbar: getComputedStyle(document.getElementById('toolbar')).display, taskbar: getComputedStyle(document.getElementById('taskbar')).display, iw: innerWidth, ih: innerHeight })`);
   check(`app.isMobile + app.isTouch + MobileNav present, #toolbar/#taskbar display:none at ${env.iw}×${env.ih}`, env.mobile && env.touch && env.nav && env.toolbar === 'none' && env.taskbar === 'none', env);
+
+  // ── THE FIRST SCREEN (lane phone-first-screen, design q-044 decision 5): the phone opens on the attention list ──
+  console.log('first screen: the attention page (lane phone-first-screen)');
+  await waitFor(`!document.getElementById('phone-home').classList.contains('hidden')`, 8000);
+  const fs0 = await evalJs(`(() => { const h = document.getElementById('phone-home'); const r = h.getBoundingClientRect(); const nb = document.getElementById('mobile-nav').getBoundingClientRect(); const hit = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+    return { shown: !h.classList.contains('hidden') && getComputedStyle(h).display !== 'none', top: Math.round(r.top), navBottom: Math.round(nb.bottom), bottom: Math.round(r.bottom), w: Math.round(r.width), rows: [...h.querySelectorAll('.ut-bands .ut-item')].map((x) => x.dataset.id), onPage: !!hit && h.contains(hit), sb: app.sidebar.isOpen, title: document.getElementById('mobile-nav-title').textContent, close: getComputedStyle(document.getElementById('mobile-nav-close')).display }; })()`);
+  check(`the phone opens on the attention page: under the nav (top ${fs0.top} = the nav's bottom ${fs0.navBottom}), the whole window area (${fs0.w}×${fs0.bottom - fs0.top}), the seeded ask its row, the sidebar shut`, fs0.shown && fs0.top === fs0.navBottom && fs0.bottom === VH && fs0.w === VW && fs0.rows.join() === 'ut-mobilegap01' && fs0.onPage && !fs0.sb, fs0);
+  check(`the nav names the page ("${fs0.title}") and hides the ✕ that would close a window under it (display ${fs0.close})`, fs0.title === 'For you' && fs0.close === 'none', fs0);
+  await shot('first-screen-boot.png');
+  await tap('#mobile-nav-menu'); await sleep(250);
+  const fs1 = await evalJs(`(() => { const hit = document.elementFromPoint(innerWidth / 2, innerHeight / 2); return { sb: app.sidebar.isOpen, inSidebar: !!hit && !!hit.closest('#sidebar'), page: !document.getElementById('phone-home').classList.contains('hidden') }; })()`);
+  check('☰ reaches the conversation list in one tap: the sidebar opens over the page (the page stays beneath)', fs1.sb && fs1.inSidebar && fs1.page, fs1);
+  await tap('#sidebar-close'); await sleep(250);
+  check('…its ✕ closes it — back on the page', await evalJs(`!app.sidebar.isOpen && !document.getElementById('phone-home').classList.contains('hidden') && document.getElementById('phone-home').contains(document.elementFromPoint(innerWidth / 2, innerHeight / 2))`));
 
   // ── #8 touch targets: the nav bar ──
   console.log('#8 touch targets');
@@ -515,6 +583,7 @@ try {
   await sleep(300);
   const denv = await desk.evalJs(`({ mobile: app.isMobile, rail: !!app.sidebar._railEl, tab: app.sidebar._activeTab, iw: innerWidth, wins: app.wm.windows.size, seq: app.layoutManager._lastRemoteSeq })`);
   check(`a desktop client (${denv.iw} px, activity rail ${denv.rail ? 'on' : 'OFF'}, tab '${denv.tab}') joins the same instance (${denv.wins} windows restored from the shared record)`, !denv.mobile && denv.rail && denv.iw === 1280, denv);
+  check('lane phone-first-screen: the 1280×800 desktop draws no attention page (its first screen is the desktop\'s own; the seeded ask stays in its tray)', await desk.evalJs(`!app.phoneHome && getComputedStyle(document.getElementById('phone-home')).display === 'none' && document.getElementById('phone-home').childElementCount === 0`));
 
   // ── #9 ⚙ System… / Ports… / Channels… land in windows (no rail on a phone) ──
   console.log('#9 gear rows → windows on the phone, WINDOWS on the desktop');
@@ -625,6 +694,60 @@ try {
   check('no uncaught page exceptions during the battery', pageErrors.length === 0, pageErrors.slice(0, 3));
   check('no uncaught page exceptions on the desktop client either', desk.pageErrors.length === 0, desk.pageErrors.slice(0, 3));
   try { desk.sock.close(); } catch {}
+
+  // ── THE FIRST SCREEN, MEASURED (lane phone-first-screen, design q-044 decision 5 + brief step 2) ──
+  console.log('first screen, measured: the production shape at 375×812 and 390×844; a row → its conversation; back; the empty list');
+  const fsErrors0 = pageErrors.length;
+  await restartWith(prodShape());
+  for (const [w, h] of [[375, 812], [390, 844]]) {
+    await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 2, mobile: true });
+    await reloadPhone();
+    await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.querySelectorAll('#phone-home .ut-bands .ut-item').length > 0`, 15000);
+    await sleep(500);
+    const m = await evalJs(MEASURE_PAGE);
+    check(`${w}×${h}: the first screen = ${m.rows.length} rows [${m.rows.map((r) => r.band + ':' + r.h).join(' ')} px] + every band / fold head (${m.heads.map((x) => (x.fold ? 'fold ' : '') + x.band + '@' + x.top).join(' ')}) + the notices' line, all inside the viewport at scrollTop 0 (last bottom ${m.last} ≤ ${h})`,
+      m.rows.length === 6 && m.folds === 3 && !!m.notices && m.allInside && m.scrollTop === 0, m);
+    await shot(`first-screen-${w}x${h}.png`);
+    if (w === 375) { // CONTROL: whole words (the page's two-line preview switched off) — measured 1161 px: the same screen does NOT fit
+      await evalJs(`(() => { const st = document.createElement('style'); st.id = 'fs-control'; st.textContent = '#phone-home .ut-bands .ut-item > .ut-body > .ut-text { display: block !important; -webkit-line-clamp: none !important; line-clamp: none !important; overflow: visible !important; }'; document.head.append(st); return true; })()`);
+      await sleep(200);
+      const c = await evalJs(MEASURE_PAGE);
+      await evalJs(`document.getElementById('fs-control').remove(); true`);
+      check(`CONTROL: the same first screen with whole words does not fit (last bottom ${c.last} > ${h}) — the measure can see an overflow`, !c.allInside && c.last > h, { last: c.last, rows: c.rows.map((r) => r.h) });
+    }
+  }
+  // a row's tap opens its conversation: a LIVE chat (the stub behind the real wrapper, the #4 leg's path) is the asks' conversation
+  {
+    const liveWs = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    await new Promise((r) => liveWs.on('open', r));
+    const frames = [];
+    liveWs.on('message', (d) => { try { frames.push(JSON.parse(String(d))); } catch {} });
+    liveWs.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: CWD, reqId: 'live-fs' }));
+    let created = false;
+    for (let i = 0; i < 80 && !created; i++) { if (frames.some((m) => m?.type === 'created')) created = true; else await sleep(500); }
+    try { liveWs.close(); } catch {}
+    const listed = await waitFor(`(app.sidebar._allSessions || []).some((s) => app.sidebar._getSessionStateKey(s) === ${JSON.stringify('claude:' + LIVE_SID)} && s.webuiId)`, 20000);
+    check('the asks\' conversation is live and listed on the phone (created through the real spawn path after the restart)', created && listed, frames.slice(-2).map((f) => JSON.stringify(f).slice(0, 160)));
+  }
+  const firstRow = await evalJs(`document.querySelector('#phone-home .ut-bands .ut-item')?.dataset.id || null`);
+  await tap(`#phone-home .ut-item[data-id="${firstRow}"] .ut-text`);
+  check('a row\'s tap opens its conversation: a chat window on show, the page stepped aside, the nav names the window and its ✕ is back',
+    await waitFor(`document.getElementById('phone-home').classList.contains('hidden') && app.wm.windows.get(app.wm.activeWindowId)?.type === 'chat' && document.getElementById('mobile-nav-title').textContent !== 'For you' && getComputedStyle(document.getElementById('mobile-nav-close')).display !== 'none'`, 15000),
+    await evalJs(`({ hidden: document.getElementById('phone-home').classList.contains('hidden'), active: app.wm.activeWindowId, type: app.wm.windows.get(app.wm.activeWindowId)?.type, title: document.getElementById('mobile-nav-title').textContent, row: ${JSON.stringify(firstRow)}, toasts: [...document.querySelectorAll('#global-toasts .global-toast-body')].map((e) => e.textContent) })`));
+  const wins = await evalJs('app.wm.windows.size');
+  await evalJs('history.back(); true'); await sleep(900);
+  check('the back gesture returns to the attention list (a fresh first screen of 6 rows; the conversation\'s window kept)', await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.querySelectorAll('#phone-home .ut-bands .ut-item').length === 6 && app.wm.windows.size === ${wins} && !app.sidebar.isOpen`, 6000));
+  // every ask answered elsewhere: the rows keep their slots while the page is read (the slot law), then the list is empty
+  const openIds = ((await (await fetch(`http://127.0.0.1:${PORT}/api/user-todos`)).json()).todos.open || []).map((i) => i.id);
+  await fetch(`http://127.0.0.1:${PORT}/api/user-todos/resolve-many`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: openIds, status: 'dismissed' }) });
+  check(`${openIds.length} asks answered elsewhere: the page keeps its 6 rows in their slots, struck — nothing jumps while it is read`, await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.querySelectorAll('#phone-home .ut-bands .ut-item').length === 6 && !app.phoneHome.hasRows()`, 6000));
+  await evalJs('app.wm.focusWindow(app.wm.activeWindowId); true'); await sleep(300);
+  check('…a window navigation hides it (the central yield)', await evalJs(`document.getElementById('phone-home').classList.contains('hidden')`));
+  await evalJs('history.back(); true'); await sleep(900);
+  check('empty list ⇒ the conversation list: the next back lands on the sidebar (home), no empty page', await waitFor(`app.sidebar.isOpen && document.getElementById('phone-home').classList.contains('hidden')`, 5000));
+  await reloadPhone(); await sleep(1500);
+  check('a boot with nothing on the first screen draws no page — the phone opens where its restore put it', await evalJs(`document.getElementById('phone-home').classList.contains('hidden') && document.getElementById('phone-home').childElementCount === 0`));
+  check('no uncaught page exceptions in the first-screen legs', pageErrors.length === fsErrors0, pageErrors.slice(fsErrors0, fsErrors0 + 3));
 } catch (e) {
   failed++;
   console.error('  ✗ battery crashed: ' + (e.stack || e.message));

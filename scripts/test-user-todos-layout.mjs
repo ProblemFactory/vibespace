@@ -6,6 +6,8 @@
 // ⑨ ⑩ ㉑ ⑬ (lane foryou-folds, design q-044): the tray is THE ATTENTION LIST — five bands + 搁置, the first 6 rows,
 // folds BY BAND (PURE bandLayout / bandEntries over src/attention-model.js), 「全部标为已看」 per band, the LLM sections
 // and the per-group flood fold retired, a plugin's reminder heading band 2.
+// ㉒ (lane phone-first-screen, design q-044 decision 5): the phone's first screen is the SAME bands as a page — the
+// production shape's first screen, the empty rule, the cap never read off the viewport, the wiring.
 // ⑪ (B-328d): notices by ORIGIN — the closed producer set (src/inbox-origin.js),
 // the legacy read-time rung, groups / chips / tab counts, the HELD filter (r2),
 // the store's origin field (REQUIRED since r2 — a filing naming none throws),
@@ -269,7 +271,7 @@ console.log('⑩ MARK ALL SEEN (chunk 4; lane foryou-folds: one band) — wiring
   const acts = fs.existsSync(path.join(ROOT, 'src/lib/user-todos-actions.js')) ? fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8') : '';
   ok(/_sessionStatuses/.test(acts) && /msg\.type === 'session-status-updated' && msg\.statuses\) queueMicrotask\(\(\) => emit\('status'\)\)/.test(acts) && !/'ut-board'/.test(panel) && !/model\.on\('status'/.test(panel),
     'the board chip left the tray with the group heads (lane foryou-folds — a blocked board now PLACES the row, in band 2); the model still reads app.sidebar._sessionStatuses for the For-you window');
-  ok(/const ids = \(bEl && bandOpen\.get\(bEl\.dataset\.band\)\) \|\| \[\];/.test(panel) && /if \(band !== 1\) bar\.append\(seenAllEl\(\)\);/.test(panel), "lane foryou-folds: 'Mark all seen' acts on ONE band (its open rows, folded ones included) — and 紧急 has none");
+  ok(/const ids = \(bEl && \(home && home\.contains\(bEl\) \? H\.open : bandOpen\)\.get\(bEl\.dataset\.band\)\) \|\| \[\];/.test(panel) && /if \(band !== 1\) bar\.append\(seenAllEl\(\)\);/.test(panel), "lane foryou-folds: 'Mark all seen' acts on ONE band (its open rows, folded ones included) — and 紧急 has none");
   ok(L_BOARD_OK(acts), "the chip's words are t()'d board states (needs input / blocked / review / working)");
 }
 function L_BOARD_OK(src) { return ["t('needs input')", "t('blocked')", "t('review')", "t('working')"].every((k) => src.includes(k)); }
@@ -639,13 +641,13 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
   ok(/import \{[^}]*\bnoticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY\b[^}]*\} from '\.\/user-todos-layout\.js'/.test(panel), 'the panel imports the four PURE functions + the two per-device keys');
   eq([L.NOTICE_FILTER_KEY, L.HISTORY_SEEN_KEY], ['vibespace.ut-notice-filter', 'vibespace.ut-history-seen'], 'the per-device localStorage keys');
-  ok(/const groups = noticeGroups\(entries, noticeFilter, \{ prev: noticeOrder \}\);/.test(panel) && /noticeOrder = groups\.map\(\(g\) => g\.origin\);/.test(panel), 'the groups are laid out by noticeGroups with the last paint\'s order (append-only while open)');
+  ok(/const groups = noticeGroups\(entries, noticeFilter, \{ prev: st \? st\.noticeOrder : noticeOrder \}\);/.test(panel) && /const order = groups\.map\(\(g\) => g\.origin\);\n    if \(st\) st\.noticeOrder = order; else noticeOrder = order;/.test(panel), 'the groups are laid out by noticeGroups with the last paint\'s order (append-only while open) — per surface (lane phone-first-screen: the phone page holds its own)');
   ok(/const disp = g\.shown \? '' : 'none';/.test(panel) && /reconcileRows\(el, g\.entries, head\);/.test(panel), 'a filtered-out group is HIDDEN (display), its rows still reconciled through THE row reconciler — never removed');
   ok(/renderNotices\(nBox, notices\.map\(/.test(panel) && !/ut-notice-rows/.test(panel), 'the flat notice list is gone: the Notices area renders through renderNotices');
   ok(/const disp = chips\.length > 2 \? '' : 'none';/.test(panel), 'the chip strip hides when only one origin is present (nothing to filter)');
   ok(/localStorage\.setItem\(NOTICE_FILTER_KEY, noticeFilter\)/.test(panel) && /localStorage\.getItem\(NOTICE_FILTER_KEY\)/.test(panel), 'the filter is persisted per device');
-  ok(/if \(knownIds !== null\) \{ const eff = noticeFilterFor\(noticeFilter, entries\); if \(eff !== noticeFilter\) setNoticeFilter\(eff\); \}\n    const groups = noticeGroups\(entries, noticeFilter, \{ prev: noticeOrder \}\);/.test(panel), 'r2 THE HELD FILTER: before the groups are laid out, the filter goes through noticeFilterFor and its answer BECOMES the filter (held + stored) — an arrival never re-applies a stored choice');
-  ok(/patchChips\(nBox\.querySelector\(':scope > \.ut-chips'\), noticeChips\(entries, \{ prev: noticeOrder \}\), noticeFilter\);/.test(panel) && (panel.match(/noticeFilterFor\(/g) || []).length === 1, '…the strip marks the HELD filter (the one call of noticeFilterFor is the hold — no second derivation that could disagree)');
+  ok(/if \(knownIds !== null\) \{ const eff = noticeFilterFor\(noticeFilter, entries\); if \(eff !== noticeFilter\) setNoticeFilter\(eff\); \}\n    const groups = noticeGroups\(entries, noticeFilter, \{ prev: st \? st\.noticeOrder : noticeOrder \}\);/.test(panel), 'r2 THE HELD FILTER: before the groups are laid out, the filter goes through noticeFilterFor and its answer BECOMES the filter (held + stored) — an arrival never re-applies a stored choice');
+  ok(/patchChips\(nBox\.querySelector\(':scope > \.ut-chips'\), noticeChips\(entries, \{ prev: order \}\), noticeFilter\);/.test(panel) && (panel.match(/noticeFilterFor\(/g) || []).length === 1, '…the strip marks the HELD filter (the one call of noticeFilterFor is the hold — no second derivation that could disagree)');
   ok(/noticeFilter = readFilter\(\); \/\/ …read afresh from the device on every open/.test(panel), '…read afresh from the device on every open (then held)');
   ok(/if \(tb\) \{ if \(tb\.dataset\.tab !== tab\) \{ tab = tb\.dataset\.tab; renderPanel\(\); \} return; \}/.test(panel) && !/popup\.replaceChildren\(tabsEl\(\)/.test(panel), 'a tab click switches the PAGE; the tabs are never rebuilt (no replaceChildren(tabsEl(), …))');
   ok(/const c = tabCounts\(todos\.open, getToastHistory\(\), histSeen\(\), now, attnPolicy\(\)\);/.test(panel) && /ut-tab-n\[data-n="\$\{k\}"\]/.test(panel), 'the tab counts come from tabCounts (lane foryou-folds: with `now` — the Inbox tab = the badge\'s bands 1–4) and patch keyed `.ut-tab-n[data-n]` spans');
@@ -653,7 +655,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   ok(/markHistorySeen\(\); \/\/ the page is being LOOKED AT/.test(panel) && /if \(histSeen\(\) == null\) markHistorySeen\(\);/.test(panel), 'showing the Notifications page stamps the last look; a device that never looked is stamped at install');
   ok(/btn\.title = actionWords\(action\)/.test(panel) && /const words = actionWords\(action\); \/\/ the taskbar badge's own sentence/.test(panel), 'the Inbox tab\'s count and the taskbar badge share ONE sentence (actionWords)');
   const css = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
-  ok(/\.ut-chip \{[^}]*var\(--border\)/.test(css) && /\.ut-chip\.on \{[^}]*var\(--accent\)/.test(css) && !/\.ut-chip[^{]*\{[^}]*#[0-9a-f]{3}/i.test(css) && /#user-todos-popup \.ut-chip \{ min-height: 36px;/.test(css), 'the chips use theme vars only and are ≥ 36 px on the phone sheet');
+  ok(/\.ut-chip \{[^}]*var\(--border\)/.test(css) && /\.ut-chip\.on \{[^}]*var\(--accent\)/.test(css) && !/\.ut-chip[^{]*\{[^}]*#[0-9a-f]{3}/i.test(css) && /#user-todos-popup \.ut-chip, #phone-home \.ut-chip \{ min-height: 36px;/.test(css), 'the chips use theme vars only and are ≥ 36 px on the phone sheet (and the phone page)');
   const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
   const KEYS = [...Object.values(O.ORIGIN_LABELS), 'All', 'Notices by source', 'Show all notices', 'Show only {source} notices', '{n} unread', 'Inbox', 'Notifications'];
   ok(KEYS.every((k) => zh.includes(`  ${JSON.stringify(k)}: `) && ja.includes(`  ${JSON.stringify(k)}: `)), 'every origin label and every new chrome string has a zh AND a ja entry', KEYS.filter((k) => !zh.includes(`  ${JSON.stringify(k)}: `) || !ja.includes(`  ${JSON.stringify(k)}: `)));
@@ -1047,5 +1049,50 @@ console.log('⑭ THE OWNER\'S SWITCHES IN THE TRAY (lane attention-predicate-sha
   ok(cap4.shown.size === 4, 'attention.cap 4 ⇒ the tray\'s first screen holds 4 rows');
 }
 
+
+console.log("㉒ THE PHONE'S FIRST SCREEN (lane phone-first-screen, design q-044 decision 5) — the SAME bands as a page: its rows, the empty rule, the cap (never the viewport), the wiring");
+{
+  const L = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
+  const NOW = Date.UTC(2026, 9, 19, 12), Hh = 3600e3, D = 24 * Hh;
+  // the production shape BY SHAPE (lane foryou-folds §3 over the .314 store: bands {2: 1, 3: 4, 4: 7, 5: 6, 搁置 13} + 5 notices)
+  const open = [
+    it('w0', 'claude:a', { createdAt: NOW - 3 * Hh, judged: { group: 'now', p: 0.8, facts: { state: 'blocked', askedAt: NOW - 3 * Hh } } }),
+    ...[1, 2, 3, 4].map((k) => it('d' + k, 'claude:b', { createdAt: NOW - k * Hh, due: NOW + (6 + k * 8) * Hh })),
+    ...[1, 2, 3, 4, 5, 6, 7].map((k) => it('o' + k, 'claude:c', { createdAt: NOW - k * Hh, options: ['Yes', 'No'] })),
+    ...[1, 2, 3, 4, 5, 6].map((k) => it('a' + k, 'claude:d', { createdAt: NOW - k * Hh })),
+    ...Array.from({ length: 13 }, (_, k) => it('p' + k, 'claude:e', { createdAt: NOW - (8 + k) * D })),
+    ...Array.from({ length: 5 }, (_, k) => it('n' + k, 'browser', { kind: 'notice', origin: 'browser', createdAt: NOW - k * Hh })),
+  ];
+  const td = { open, resolved: [] };
+  const view = (lay) => L.bandEntries(lay, td).map((b) => [b.band, b.entries.map((e) => e.item.id), b.hidden]);
+  eq(view(L.bandLayout(td, { now: NOW })), [[2, ['w0'], 0], [3, ['d1', 'd2', 'd3', 'd4'], 0], [4, ['o1'], 6], [5, [], 6], [6, [], 13]],
+    'the production shape: the first screen = 6 rows (w0 · d1–d4 · o1) + three fold heads (要你决定 6 · 其余的问 6 · 搁置 13) — what the phone page draws (the tray\'s own bandLayout / bandEntries)');
+  const has = (o) => L.bandLayout({ open: o, resolved: [] }, { now: NOW }).shown.size > 0; // = the panel's homeHasRows
+  ok(has(open) && !has(open.filter((i) => /^[pn]/.test(i.id))) && !has([]) && has([it('x', 'claude:z', { createdAt: NOW })]),
+    'the page shows only when its first screen holds a row: 搁置 and the notices alone are no first screen (⇒ the conversation list); one plain ask is');
+  const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
+  const panel = read('src/lib/user-todos-panel.js'), win = read('src/lib/window.js'), appjs = read('src/lib/app.js'), nav = read('src/lib/mobile-nav.js'), css = read('public/style.css'), html = read('public/index.html');
+  const a = panel.indexOf("// ── THE PHONE'S FIRST SCREEN"), b = panel.indexOf('// the For-you button the user can SEE');
+  const homeSrc = a > 0 && b > a ? panel.slice(a, b) : '';
+  ok(!!homeSrc && /const home = app\.isMobile \? document\.getElementById\('phone-home'\) : null;/.test(panel) && /app\.phoneHome = \{ shown: homeShown, hasRows: homeHasRows, show: showHome, hide: hideHome, boot: bootHome \};/.test(homeSrc),
+    'the page exists on a phone only and is reached through app.phoneHome {shown, hasRows, show, hide, boot}');
+  ok(/H\.bands = bandLayout\(todos, \{ now, prev: H\.bands \}\);/.test(homeSrc) && /const drawn = bandEntries\(H\.bands, todos\);/.test(homeSrc) && /drawBands\(root\.querySelector\(':scope > \.ut-bands'\), drawn, H\.open\);/.test(homeSrc) && /bands = bandLayout\(todos, \{ now, prev: bands \}\);/.test(panel),
+    "the page draws the tray's bands: the same bandLayout (the same policy — the cap is the list's 6) / bandEntries / drawBands, with its own slots and open ids");
+  ok(!!homeSrc && !/innerHeight|clientHeight|offsetHeight|getBoundingClientRect|matchMedia/.test(homeSrc), 'decision 5 / §5 不做: the page reads no height — no cap from the viewport');
+  ok(/renderBtn\(\); renderPanel\(\); renderMini\(\); scheduleBadges\(\); renderHome\(\);/.test(panel) && /if \(homeShown\(\)\) roots\.push\(home\);/.test(panel), 'every snapshot repaints the page in place (keyed rows, the slot law); the live facts reach its rows');
+  ok(/const jump = \(key, item\) => model\.jump\(key, item, \{ close: \(\) => \{ hidePopup\(\); hideHome\(\); \} \}\);/.test(panel) && /if \(item\) rowClick\(e, item\);/.test(homeSrc),
+    "a row's tap is the tray's rowClick — its body opens the conversation and the page steps aside (the jump's close)");
+  ok(/home\.classList\.add\('hidden'\);\n    stashDrafts\(home\);\n    home\.replaceChildren\(\);/.test(homeSrc), 'a hidden page keeps nothing but the drafts (its rows leave the DOM — the popup\'s rule, verify r7)');
+  ok(/if \(!homeHasRows\(\)\) return false;/.test(homeSrc) && /if \(!drawn\.length\) \{ hideHome\(\); app\.sidebar\?\.toggle\?\.\(true\); return; \}/.test(homeSrc),
+    'no empty page: nothing on its first screen ⇒ show() refuses (the caller opens the conversation list); every row gone while shown ⇒ the conversation list');
+  ok(/if \(location\.search\) return;/.test(homeSrc) && /if \(pressed \|\| document\.getElementById\('welcome'\)\?\.classList\.contains\('onboarding'\)\) return;/.test(homeSrc) && /if \(showHome\(\) && app\.sidebar\?\.isOpen\) app\.sidebar\.toggle\(false\);/.test(homeSrc) && appjs.includes('if (this.isMobile) this.ready.then(() => this.phoneHome?.boot?.());'),
+    'the boot: after app.ready (a phone only) the page shows over what the restore put up — never on a `?` link, over the first-run wizard, or after a press');
+  ok(/if \(app\.phoneHome\?\.shown\?\.\(\) && !app\.layoutManager\?\._applying\) app\.phoneHome\.hide\(\);/.test(win) && /if \(app\.layoutManager\?\._restoring\) return;\n    app\.sidebar\.toggle\(false\);/.test(win),
+    'THE CENTRAL YIELD (kb §7a): every window open / focus hides the page but a remote apply in progress; the sidebar keeps its own guard');
+  ok(/this\._titleEl\.textContent = this\.app\.phoneHome\?\.shown\?\.\(\) \? t\('For you'\) :/.test(nav) && /body\.phone-home-on #mobile-nav-close \{ display: none; \}/.test(css), 'the nav names the page and hides the ✕ that would close the window under it');
+  ok(/#phone-home \{ display: none; \}/.test(css) && /#phone-home \.ut-bands \.ut-item:not\(:has\(\.ut-detail-exp\[open\], \.ut-reply\)\) > \.ut-body > \.ut-text \{ display: -webkit-box;[^}]*-webkit-line-clamp: 2;/.test(css) && /#user-todos-popup \.ut-opt, #phone-home \.ut-opt \{ min-height: 36px;/.test(css),
+    "style.css: never on a desktop; the page's own two-line preview rule (measured: whole words need 1161 px for the 6 rows at 375×812); the sheet's touch targets");
+  ok(/<main id="workspace">[\s\S]{0,400}<div id="phone-home" class="hidden" role="region" aria-label="For you" data-i18n-attr="aria-label"><\/div>/.test(html), 'index.html: the page lives in the window area (#workspace), hidden until shown');
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -2,7 +2,8 @@
 // App installs it only when app.isMobile — a desktop browser's back is never touched. ONE sentinel history entry stands
 // above the page's own; a back press is a popstate onto the page's entry, and then:
 //   close — the topmost layer closes exactly as Esc / its own ✕ / the sidebar's ‹ row would (the window area yields
-//           to the sidebar, the phone's home), then history.go(1) steps back onto the same sentinel
+//           to the phone's HOME: the attention page when the attention list has rows, else the sidebar — lane
+//           phone-first-screen), then history.go(1) steps back onto the same sentinel
 //   arm   — at home: the 「再返回一次退出」 toast, and the page stays on its own entry for BACK_WINDOW_MS, so a second
 //           back is the browser's own and leaves (also when VibeSpace is the tab's first page); after the window a
 //           timer steps back onto the sentinel (a later back re-arms)
@@ -21,6 +22,7 @@ function layersOf(app) {
   const shells = [...document.querySelectorAll('.dialog-overlay')].filter((o) => o.id !== 'dialog-overlay' && shown(o)); // createModalShell overlays (z 99998, above the static one)
   const sheets = [...document.querySelectorAll('.usage-popup')].filter(shown); // the For-you tray + the usage popup — full-width sheets on a phone
   const backRow = sb?._mobileDrilldown ? sb.listEl?.querySelector('.mobile-folder-back') : null;
+  const home = app.phoneHome; // lane phone-first-screen: the attention page (src/lib/user-todos-panel.js) — home while it has rows
   const snap = {
     popover: !!document.querySelector('[data-popover]'),
     dialog: shells.length > 0 || shown(document.getElementById('dialog-overlay')),
@@ -28,6 +30,8 @@ function layersOf(app) {
     sheet: sheets.length > 0,
     sidebarOpen: !!sb?.isOpen,
     drilldown: !!backRow,
+    home: !!home?.shown?.(),
+    homeRows: !!home?.hasRows?.(),
   };
   const close = {
     popover: () => document.querySelectorAll('[data-popover]').forEach((el) => el.remove()), // Esc's own rule: every float at once
@@ -39,7 +43,8 @@ function layersOf(app) {
     },
     switcher: () => document.querySelectorAll('.mobile-win-switcher').forEach((el) => el.remove()),
     sheet: () => { for (const el of sheets) if (el.dispatchEvent(new CustomEvent(BACK_DISMISS_EVENT, { cancelable: true }))) el.classList.add('hidden'); },
-    window: () => sb.toggle(true),
+    window: () => { if (!home?.show?.()) sb.toggle(true); }, // home: the attention page when it has rows, else the conversation list
+    sidebar: () => sb.toggle(false), // back to what it covered (the attention page, or the window it was opened over)
     drilldown: () => backRow.click(),
   };
   return { snap, close };

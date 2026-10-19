@@ -78,6 +78,13 @@ ok(T({ sheet: true, sidebarOpen: true, drilldown: true }) === 'sheet', 'order: t
 ok(T({ sidebarOpen: false, drilldown: true }) === 'window', 'order: then the window area (sidebar closed)');
 ok(T({ sidebarOpen: true, drilldown: true }) === 'drilldown', 'order: then the sidebar\'s drill-down');
 ok(T({ sidebarOpen: true }) === null, 'the sidebar at its top level = home (null)');
+// lane phone-first-screen (design q-044 decision 5): HOME = the attention page while its first screen holds a row
+ok(T({ sidebarOpen: false, home: true, homeRows: true }) === null, 'the attention page on show = home (null)');
+ok(T({ sidebarOpen: false, home: false, homeRows: true }) === 'window', 'a window on show, rows in the attention list: the window area yields (to the page)');
+ok(T({ sidebarOpen: true, homeRows: true }) === 'sidebar', 'the sidebar open while the list has rows: one layer above home — it closes');
+ok(T({ sidebarOpen: true, homeRows: true, drilldown: true }) === 'drilldown', '…its drill-down first');
+ok(T({ sheet: true, home: true, homeRows: true }) === 'sheet' && T({ dialog: true, home: true, homeRows: true }) === 'dialog', 'a sheet / a dialog over the page closes first');
+ok(T({ sidebarOpen: true, homeRows: false }) === null && T({ sidebarOpen: false, homeRows: false }) === 'window', 'an empty list: the sidebar is home again (the rule before)');
 ok(BG.bootStep({ phone: true, enabled: true, state: null }) === 'push', 'boot: a phone pushes the sentinel');
 ok(BG.bootStep({ phone: true, enabled: true, state: { vs: 1 } }) === 'keep', 'boot: a reload / restored tab ON the sentinel keeps it (no second one)');
 ok(BG.bootStep({ phone: true, enabled: false, state: { vs: 1 } }) === 'keep', 'boot: setting off but standing on a sentinel: kept (its next back leaves)');
@@ -213,6 +220,19 @@ function wiringLegs(M) {
     const kept = !p.removed && w.toggles.length === 0 && w.onSentinel() && w.H.pushes === 2;
     w.back(); w.advance(600); // a real back onto the fragment entry: the popover closes, back on the sentinel
     R.fragment = kept && p.removed && w.onSentinel() && w.H.pushes === 2; R.fragDetail = { kept, removed: p.removed, pushes: w.H.pushes, toggles: w.toggles }; }
+  // lane phone-first-screen: the attention page (app.phoneHome — a duck: on show?, rows?, show() → false when nothing is on its first screen)
+  const pageDuck = (w, ph) => { w.app.phoneHome = { shown: () => ph.on, hasRows: () => ph.rows, show: () => { ph.shows++; if (!ph.rows) return false; ph.on = true; return true; } }; };
+  { const w = world({ sidebarOpen: false }); const ph = { on: false, rows: true, shows: 0 }; pageDuck(w, ph); M.installMobileBack(w.app);
+    w.back(); w.advance(600);
+    const toPage = ph.on && ph.shows === 1 && w.toggles.length === 0 && w.onSentinel();
+    w.back(); // on the page = at home: the exit toast arms, nothing closes
+    R.homePage = toPage && ph.on && w.toasts.length === 1 && w.toggles.length === 0; R.homeDetail = { toPage, ph, toggles: w.toggles, toasts: w.toasts.length }; }
+  { const w = world({ sidebarOpen: false }); const ph = { on: false, rows: false, shows: 0 }; pageDuck(w, ph); M.installMobileBack(w.app);
+    w.back(); w.advance(600);
+    R.homeEmpty = !ph.on && w.toggles.join() === 'true' && w.app.sidebar.isOpen && w.onSentinel(); }
+  { const w = world({ sidebarOpen: true }); const ph = { on: true, rows: true, shows: 0 }; pageDuck(w, ph); M.installMobileBack(w.app);
+    w.back(); w.advance(600);
+    R.homeSidebar = w.toggles.join() === 'false' && !w.app.sidebar.isOpen && ph.on && w.toasts.length === 0 && w.onSentinel(); }
   return R;
 }
 console.log('\n§2 the real wiring (fake history + clock)');
@@ -232,6 +252,9 @@ ok(R.rearm, 'at home, the window lapsed: a timer steps back onto the sentinel (n
 ok(R.off, 'the Mobile setting turned off mid-session: the next back leaves at once, no toast');
 ok(R.onLater, 'the setting off at boot (nothing pushed), turned on later: a sentinel is pushed then');
 ok(R.fragment, 'a #fragment link (a same-document navigation to another URL) is no back: nothing closes, a sentinel stands above it; the next real back closes the menu', R.fragDetail);
+ok(R.homePage, 'lane phone-first-screen: a back from a window while the attention list has rows shows the PAGE (home — the sidebar stays shut); a back on the page arms the exit toast', R.homeDetail);
+ok(R.homeEmpty, '…the list empty: the page refuses and the sidebar opens (the conversation list, the home before)');
+ok(R.homeSidebar, '…the sidebar opened over the page (☰): a back closes it — back on the page, no toast');
 { // the forward sentinel vanished (a same-document navigation dropped it): go(1) answers nothing ⇒ pushed again after 500 ms
   const w = world({ sidebarOpen: true }); MW.installMobileBack(w.app);
   const p = w.add('popovers', el('context-menu')), rm = p.remove;
@@ -284,6 +307,14 @@ const bgSrc = read('src/lib/back-guard.js');
   const RR = wiringLegs(M);
   Object.assign(globalThis, { setTimeout: realClock.setTimeout, clearTimeout: realClock.clearTimeout }); Date.now = realClock.now;
   ok(wiringSrc.includes(from) && !RR.fragment && RR.popover && RR.window, 'CONTROL: a wiring without the URL check reads a #fragment link as a back (closes the menu) — the fragment leg fails, the others hold', RR.fragDetail);
+}
+
+{
+  const from = 'window: () => { if (!home?.show?.()) sb.toggle(true); },';
+  const M = await bundleWiring(wiringSrc.replace(from, 'window: () => sb.toggle(true),'), 'no-home');
+  const RR = wiringLegs(M);
+  Object.assign(globalThis, { setTimeout: realClock.setTimeout, clearTimeout: realClock.clearTimeout }); Date.now = realClock.now;
+  ok(wiringSrc.includes(from) && !RR.homePage && RR.homeEmpty && RR.homeSidebar && RR.window, 'CONTROL (lane phone-first-screen): a wiring whose window area yields to the sidebar only fails the page leg (the empty-list, sidebar and window legs hold)', RR.homeDetail);
 }
 
 // ── §4 wiring pins ──

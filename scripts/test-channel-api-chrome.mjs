@@ -282,6 +282,11 @@ const c6 = await agentCalls('POST', '/api/chat.postMessage', { channel: 'C0VIBE'
 const pid6 = c6.json && c6.json.proposal && c6.json.proposal.id;
 const p3 = await newPage({ lang: 'zh', width: 390, height: 844 });
 await openChat(p3);
+// lane phone-first-screen: a phone booting with asks open lands on the attention page once its restore is done (app.ready)
+// — the chat attached above, before ready (no person can: the splash covers the page), lies under it; open it again as a
+// person would after the boot (the existing window is focused — the central yield hides the page)
+await p3.evaljs('app.ready.then(() => new Promise((r) => setTimeout(r, 800)))');
+await openChat(p3);
 const phone = await until(() => p3.evaljs(`(() => { const c = document.querySelector('.chat-api-cards .chan-api-card[data-key=${JSON.stringify(pid6)}]'); if (!c || !c.offsetWidth) return null; c.scrollIntoView({ block: 'center' }); const off = [...c.querySelectorAll('*')].filter((e) => e.offsetWidth && (e.getBoundingClientRect().right > innerWidth + 0.5 || e.getBoundingClientRect().left < -0.5)).map((e) => e.className + ' ' + Math.round(e.getBoundingClientRect().right)); const btns = [...c.querySelectorAll('.chan-api-actions > *')].map((b) => Math.round(b.getBoundingClientRect().top)); const r = c.getBoundingClientRect(), top = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + Math.min(r.height, innerHeight) / 2)); return top && c.contains(top) ? { off, rows: new Set(btns).size, w: Math.round(r.width) } : null; })()`), 30000);
 ok(phone && !phone.off.length, `390 px: the card is on top (no overlay) and nothing of it is off-screen (card ${phone && phone.w} px)`, phone);
 ok(phone && phone.rows >= 2, `390 px: the action row wraps (${phone && phone.rows} lines)`, phone);

@@ -1396,6 +1396,14 @@ button.ut-notice-head:hover { color: var(--accent); }
    a band row's words are a TWO-LINE preview, so the first screen holds its 6 rows + the fold heads; the row's 「▸ 详情」
    (or a reply box being typed) shows the whole words in place — the For-you window (⤢) always does */
 #user-todos-popup .ut-bands .ut-item:not(:has(.ut-detail-exp[open], .ut-reply)) > .ut-body > .ut-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* lane phone-first-screen (design q-044 decision 5): THE PHONE'S FIRST SCREEN — the attention list as a page over the
+   window area (under the nav bar; the sidebar, a sheet, a dialog and the toasts stand above it): the tray's bands, rows
+   and folds (src/lib/user-todos-panel.js app.phoneHome) — never on a desktop. MEASURED on the real client at 375×812 /
+   390×844 (the production shape): whole words need 1161 px for the 6 rows + their heads (only 4 rows fit the 768 px
+   page) — so the page's band rows take the tray's TWO-LINE preview, in the page's own scope (「▸ 详情」, a reply box
+   being typed and ⤢ show the whole words, as in the tray) */
+#phone-home { display: none; }
+#phone-home .ut-bands .ut-item:not(:has(.ut-detail-exp[open], .ut-reply)) > .ut-body > .ut-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .ut-group-n { color: var(--text-dim); font-weight: 400; }
 .ut-item { display: flex; gap: 7px; padding: 4px 2px 5px 8px; cursor: pointer; border-radius: var(--radius-sm); }
 .ut-item:hover { background: var(--hover-overlay, rgba(255,255,255,0.05)); }
@@ -2359,28 +2367,32 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   .mobile-term-keys { flex-wrap: wrap; overflow-x: hidden; }
   .mobile-term-key { min-height: 36px; min-width: 36px; display: inline-flex; align-items: center; justify-content: center; }
   .mobile-term-key svg { width: 16px; height: 16px; display: block; }
+  /* lane phone-first-screen: the attention PAGE under the nav (the window area), its rows the sheet's touch targets */
+  #phone-home { display: block; position: absolute; inset: 0; z-index: 9500; overflow-y: auto; overscroll-behavior: contain; background: var(--bg-workspace); padding: 4px 12px 24px; }
+  #phone-home.hidden { display: none; }
+  body.phone-home-on #mobile-nav-close { display: none; } /* it closes the ACTIVE window — the page covers that window */
   /* For-you sheet (#1, verifier r2): tabs 17 px, ✓ / ✕ / ⤢ 20 px, the
      session header 18 px — the button that OPENS it was lifted, these were not */
-  #user-todos-popup .ut-tab { min-height: 36px; padding: 6px 14px; font-size: 12px; }
-  #user-todos-popup .ut-act { min-width: 36px; min-height: 36px; width: auto; height: auto; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
-  #user-todos-popup .ut-actions { opacity: 1; gap: 4px; }
-  #user-todos-popup .ut-band-bar { min-height: 36px; font-size: 12px; } /* lane foryou-folds: the band bar is a touch row on the phone */
-  #user-todos-popup .ut-notice-head { min-height: 36px; font-size: 11px; }
+  #user-todos-popup .ut-tab, #phone-home .ut-tab { min-height: 36px; padding: 6px 14px; font-size: 12px; }
+  #user-todos-popup .ut-act, #phone-home .ut-act { min-width: 36px; min-height: 36px; width: auto; height: auto; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
+  #user-todos-popup .ut-actions, #phone-home .ut-actions { opacity: 1; gap: 4px; }
+  #user-todos-popup .ut-band-bar, #phone-home .ut-band-bar { min-height: 36px; font-size: 12px; } /* lane foryou-folds: the band bar is a touch row on the phone */
+  #user-todos-popup .ut-notice-head, #phone-home .ut-notice-head { min-height: 36px; font-size: 11px; }
   /* the reply controls are touch targets too (design-user-inbox-reply chunk 2) */
-  #user-todos-popup .ut-opt { min-height: 36px; padding: 6px 14px; font-size: 12px; line-height: 22px; }
-  #user-todos-popup .ut-art, .iw-arts .ut-art { min-height: 36px; padding: 6px 12px 6px 10px; font-size: 12px; } /* lane foryou-attachments: touch targets */
-  #user-todos-popup .ut-reply-input { min-height: 36px; font-size: 13px; padding: 7px 8px; }
+  #user-todos-popup .ut-opt, #phone-home .ut-opt { min-height: 36px; padding: 6px 14px; font-size: 12px; line-height: 22px; }
+  #user-todos-popup .ut-art, .iw-arts .ut-art, #phone-home .ut-art { min-height: 36px; padding: 6px 12px 6px 10px; font-size: 12px; } /* lane foryou-attachments: touch targets */
+  #user-todos-popup .ut-reply-input, #phone-home .ut-reply-input { min-height: 36px; font-size: 13px; padding: 7px 8px; }
   /* lane voice-everywhere: the microphone inside the reply box's trailing edge, like the chat composer (40×40 hit area) */
-  html:not(.voice-absent) #user-todos-popup .voice-field > .ut-reply-input, html:not(.voice-absent) .ut-mini-popover .voice-field > .ut-reply-input { min-height: 44px; padding-right: 46px; }
-  #user-todos-popup .ut-reply-send { min-width: 36px; min-height: 36px; }
-  #user-todos-popup .ut-reply-btn svg, #user-todos-popup .ut-reply-send svg { width: 15px; height: 15px; }
-  #user-todos-popup .ut-live-dot { width: 9px; height: 9px; }
+  html:not(.voice-absent) #user-todos-popup .voice-field > .ut-reply-input, html:not(.voice-absent) .ut-mini-popover .voice-field > .ut-reply-input, html:not(.voice-absent) #phone-home .voice-field > .ut-reply-input { min-height: 44px; padding-right: 46px; }
+  #user-todos-popup .ut-reply-send, #phone-home .ut-reply-send { min-width: 36px; min-height: 36px; }
+  #user-todos-popup .ut-reply-btn svg, #user-todos-popup .ut-reply-send svg, #phone-home .ut-reply-btn svg, #phone-home .ut-reply-send svg { width: 15px; height: 15px; }
+  #user-todos-popup .ut-live-dot, #phone-home .ut-live-dot { width: 9px; height: 9px; }
   /* chunk 4: "Mark all seen" and the fold's expander are touch targets too */
-  #user-todos-popup .ut-seen-all { min-height: 36px; padding: 6px 12px; font-size: 12px; }
-  #user-todos-popup .ut-fold { min-height: 36px; font-size: 12px; }
+  #user-todos-popup .ut-seen-all, #phone-home .ut-seen-all { min-height: 36px; padding: 6px 12px; font-size: 12px; }
+  #user-todos-popup .ut-fold, #phone-home .ut-fold { min-height: 36px; font-size: 12px; }
   /* B-328d: the notice filter chips are touch targets too */
-  #user-todos-popup .ut-chip { min-height: 36px; padding: 6px 12px; font-size: 12px; }
-  #user-todos-popup .ut-notice-group-head { font-size: 12px; min-height: 28px; }
+  #user-todos-popup .ut-chip, #phone-home .ut-chip { min-height: 36px; padding: 6px 12px; font-size: 12px; }
+  #user-todos-popup .ut-notice-group-head, #phone-home .ut-notice-group-head { font-size: 12px; min-height: 28px; }
   /* the title-bar mini inbox (chunk 3) takes the same full-width sheet shape and the same ≥36 px targets */
   .ut-mini-popover {
     left: 8px !important; right: 8px !important; top: 48px !important;

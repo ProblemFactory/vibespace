@@ -75,9 +75,16 @@ class WindowManager {
   // stays true for 1s past switchTo's resolve, which would make cross-desktop
   // goToWindow (the sidebar's own 前往窗口) leave the sidebar open; on mobile
   // no other switchTo path can run while the sidebar is open.
+  // lane phone-first-screen: the phone's ATTENTION PAGE (app.phoneHome, src/lib/user-todos-panel.js) yields here too —
+  // it covers the window area the way the sidebar covers the screen. Its guard is NARROWER: only a remote apply in
+  // progress (layoutManager._applying) keeps it up. It is shown only after the boot restore has resolved (app.ready), so
+  // the boot's 5 s autosave tail (`_restoring` still true) is no restore — measured: "+" → Files in those seconds opened
+  // the explorer BEHIND the page (test-mobile-gaps #6's long-press landed on the page).
   _mobileYieldSidebar() {
     const app = this.app;
-    if (!app?.isMobile || !app.sidebar?.isOpen) return;
+    if (!app?.isMobile) return;
+    if (app.phoneHome?.shown?.() && !app.layoutManager?._applying) app.phoneHome.hide();
+    if (!app.sidebar?.isOpen) return;
     if (app.layoutManager?._restoring) return;
     app.sidebar.toggle(false);
   }

@@ -22,6 +22,10 @@
 // keyed rows patched); 「全部标为已看」 acts on one band (never 紧急); notices are a grey count that opens in one
 // click; the badge counts bands 1–4; an arrival toasts only in bands 1–2. The LLM plugin's three sections and the
 // per-conversation flood fold are retired (the judge only breaks a band-5 tie).
+// lane phone-first-screen (design q-044 decision 5): ON A PHONE THE SAME BANDS ARE THE FIRST SCREEN — a page over the
+// window area (#phone-home, `app.phoneHome`): the boot opens on it when its first screen holds a row; a row's tap opens
+// the conversation (every window open / focus hides the page — window.js's central yield); the back gesture returns to
+// it (mobile-back.js: HOME = the page while the list has rows, else the conversation list); ☰ still opens the list.
 import { t, tc } from './i18n.js';
 import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
@@ -60,6 +64,11 @@ export function installUserTodos(app) {
   const attnPolicy = () => settingsPolicy((k) => app.settings?.get?.(k));
   let bandOff = [];
   let noticesOpen = false; // the notices are a grey count until one click opens them (per open, like the folds)
+  // THE PHONE'S FIRST SCREEN (lane phone-first-screen): the SAME bands drawn as a PAGE (#phone-home) — while it is on show
+  // it holds its own slots, folds, notice order and per-band open ids (the popup's rules: null on every show); hidden, it
+  // keeps nothing but the drafts. Phone only (null on a desktop — nothing below runs there).
+  const home = app.isMobile ? document.getElementById('phone-home') : null;
+  const H = { layout: null, bands: null, open: new Map(), noticesOpen: false, noticeOrder: null };
   // NOTICES BY ORIGIN (B-328d): the filter is per DEVICE (like the language) and
   // survives a close; the group ORDER is append-only while the popup is open
   // (the origins the last paint listed — null on every open, like the layout).
@@ -92,7 +101,7 @@ export function installUserTodos(app) {
   const hidePopup = () => { popup.classList.add('hidden'); layout = null; dropRows(); };
   popup.addEventListener(BACK_DISMISS_EVENT, (e) => { e.preventDefault(); hidePopup(); }); // the phone's back gesture: drafts stashed, rows dropped — the one closer
   const dropRows = () => { if (!popup.firstChild) return; stashDrafts(popup); popup.replaceChildren(); };
-  const jump = (key, item) => model.jump(key, item, { close: hidePopup });
+  const jump = (key, item) => model.jump(key, item, { close: () => { hidePopup(); hideHome(); } }); // leaving: the popup AND the phone's page step aside (a jump to a dialog, the jobs panel or a plugin's sheet opens no window — the central yield never runs)
   /** lane foryou-attachments: a press on an ask's chip (THE one artifact door) or a link in its words (resolved against the
    *  asker's cwd on its host) — the tray steps aside first (on the phone it covers the viewer). True = handled. */
   const fyPress = (e, close) => {
@@ -260,12 +269,8 @@ export function installUserTodos(app) {
       : `<div class="empty-hint">${escHtml(t('No notifications yet.'))}</div>`;
     showPage(list);
   };
-  const ensureInbox = () => {
-    let root = popup.querySelector(':scope > .ut-inbox');
-    if (root) { ensureTabs(); return root; }
-    root = mk('div', 'ut-inbox');
-    const title = mk('div', 'usage-section-title ut-title', t('For you'));
-    title.append(mk('span', 'ut-head-sub'));
+  /** The notices' box (the popup's and the phone page's). */
+  const noticesEl = () => {
     const notices = mk('div', 'ut-notices');
     // lane foryou-folds: the notices' head is ONE button — the grey count, a click opens the strip and the groups in place
     const nh = mk('button', 'ut-notice-head', t('Notices'));
@@ -277,6 +282,15 @@ export function installUserTodos(app) {
     chips.setAttribute('role', 'group');
     chips.setAttribute('aria-label', t('Notices by source'));
     notices.append(nh, chips, mk('div', 'ut-notice-groups'));
+    return notices;
+  };
+  const ensureInbox = () => {
+    let root = popup.querySelector(':scope > .ut-inbox');
+    if (root) { ensureTabs(); return root; }
+    root = mk('div', 'ut-inbox');
+    const title = mk('div', 'usage-section-title ut-title', t('For you'));
+    title.append(mk('span', 'ut-head-sub'));
+    const notices = noticesEl();
     const recent = mk('div', 'ut-recent');
     recent.append(mk('div', 'ut-resolved-head', t('Recently resolved')), mk('div', 'ut-recent-rows'));
     root.append(title, mk('div', 'ut-groups ut-bands'), mk('div', 'empty-hint ut-empty', t('Nothing needs you right now. Agents file items here with vibespace-ask when they need a decision or input.')), notices, recent);
@@ -323,7 +337,7 @@ export function installUserTodos(app) {
     return g;
   };
   /** The bands, keyed by data-band, in the list's order (PURE bandEntries over the held slots). */
-  const drawBands = (box, drawn) => {
+  const drawBands = (box, drawn, open = bandOpen) => { // `open` = the surface's band → open ids (the popup's, or the phone page's H.open)
     const existing = new Map([...box.children].map((c) => [c.dataset.band, c]));
     let prev = null;
     for (const b of drawn) {
@@ -338,7 +352,7 @@ export function installUserTodos(app) {
       if (nm.textContent !== word) nm.textContent = word;
       const n = bar.querySelector(':scope > .ut-band-n');
       if (n.textContent !== String(b.openCount)) n.textContent = String(b.openCount);
-      bandOpen.set(String(b.band), b.openIds);
+      open.set(String(b.band), b.openIds);
       const sa = bar.querySelector(':scope > .ut-seen-all');
       if (sa) { const show = b.openIds.length >= 2 ? '' : 'none'; if (sa.style.display !== show) sa.style.display = show; }
       // lane attention-predicate-shared (decision 4): A BAND SWITCHED OFF IS SAID, ONCE — on band 5's head, where its rows now sit
@@ -368,7 +382,7 @@ export function installUserTodos(app) {
         if (bar.lastElementChild !== fe) bar.append(fe);
       } else if (fe) fe.remove();
     }
-    for (const g of existing.values()) { bandOpen.delete(g.dataset.band); g.remove(); }
+    for (const g of existing.values()) { open.delete(g.dataset.band); g.remove(); }
   };
   // ── NOTICES BY ORIGIN (B-328d) ── the strip and the groups, keyed in place
   /** The filter strip, keyed by `data-origin`: `all` first, then one chip per
@@ -410,7 +424,7 @@ export function installUserTodos(app) {
   /** The groups, keyed by `data-origin`, each head + its rows through THE row
    *  reconciler. A filtered-out group is HIDDEN, never removed — a reply box
    *  typed into on one of its rows keeps its node and its text. */
-  const renderNotices = (nBox, entries) => {
+  const renderNotices = (nBox, entries, st = null) => { // `st` = the phone page's state (its own group order); null = the popup's
     // THE FILTER IN FORCE IS ALWAYS A DRAWN CHIP (r2, verifier: a stored choice
     // whose group was absent at open showed All — then a broadcast carrying one
     // notice of that origin silently re-applied it and every other group
@@ -420,9 +434,10 @@ export function installUserTodos(app) {
     // filter — held for this open and stored for the device, so the strip and
     // the store agree and an arrival never changes the filter in force.
     if (knownIds !== null) { const eff = noticeFilterFor(noticeFilter, entries); if (eff !== noticeFilter) setNoticeFilter(eff); }
-    const groups = noticeGroups(entries, noticeFilter, { prev: noticeOrder });
-    noticeOrder = groups.map((g) => g.origin);
-    patchChips(nBox.querySelector(':scope > .ut-chips'), noticeChips(entries, { prev: noticeOrder }), noticeFilter);
+    const groups = noticeGroups(entries, noticeFilter, { prev: st ? st.noticeOrder : noticeOrder });
+    const order = groups.map((g) => g.origin);
+    if (st) st.noticeOrder = order; else noticeOrder = order;
+    patchChips(nBox.querySelector(':scope > .ut-chips'), noticeChips(entries, { prev: order }), noticeFilter);
     const box = nBox.querySelector(':scope > .ut-notice-groups');
     const existing = new Map([...box.children].map((c) => [c.dataset.origin, c]));
     let prev = null;
@@ -443,6 +458,16 @@ export function installUserTodos(app) {
       reconcileRows(el, g.entries, head);
     }
     for (const el of existing.values()) el.remove();
+  };
+  /** The notices under the bands — a GREY COUNT that opens in one click (lane foryou-folds); open: grouped by ORIGIN
+   *  behind the filter strip (B-328d). `open` = drawn open; `st` = the phone page's state (null = the popup's). */
+  const paintNotices = (nBox, notices, open, st = null) => {
+    nBox.style.display = notices.length ? '' : 'none';
+    const nHead = nBox.querySelector(':scope > .ut-notice-head');
+    nHead.querySelector(':scope > .ut-head-sub').textContent = t('{n} for your information', { n: notices.filter((e) => !e.resolved).length });
+    if (nHead.getAttribute('aria-expanded') !== String(open)) nHead.setAttribute('aria-expanded', String(open));
+    if (nBox.classList.contains('ut-notices-open') !== open) nBox.classList.toggle('ut-notices-open', open); // closed: the strip and the groups are not drawn (style.css)
+    renderNotices(nBox, notices.map((e) => ({ item: e.item, resolved: e.resolved, notice: true })), st);
   };
   const setNoticeFilter = (origin) => {
     noticeFilter = origin || 'all';
@@ -473,13 +498,7 @@ export function installUserTodos(app) {
     drawBands(root.querySelector(':scope > .ut-bands'), drawn);
     root.querySelector(':scope > .ut-empty').style.display = drawn.length ? 'none' : '';
     // notices — a GREY COUNT that opens in one click (lane foryou-folds); open: grouped by ORIGIN behind the filter strip (B-328d)
-    const nBox = root.querySelector(':scope > .ut-notices');
-    nBox.style.display = notices.length ? '' : 'none';
-    const nHead = nBox.querySelector(':scope > .ut-notice-head');
-    nHead.querySelector(':scope > .ut-head-sub').textContent = t('{n} for your information', { n: notices.filter((e) => !e.resolved).length });
-    if (nHead.getAttribute('aria-expanded') !== String(noticesOpen)) nHead.setAttribute('aria-expanded', String(noticesOpen));
-    if (nBox.classList.contains('ut-notices-open') !== noticesOpen) nBox.classList.toggle('ut-notices-open', noticesOpen); // closed: the strip and the groups are not drawn (style.css)
-    renderNotices(nBox, notices.map((e) => ({ item: e.item, resolved: e.resolved, notice: true })));
+    paintNotices(root.querySelector(':scope > .ut-notices'), notices, noticesOpen);
     // the recently-resolved tail (a row still holding its slot above is not listed twice)
     const recent = todos.resolved.filter((i) => !inPlace.has(i.id)).slice(0, 6);
     const rBox = root.querySelector(':scope > .ut-recent');
@@ -492,6 +511,7 @@ export function installUserTodos(app) {
     const roots = [];
     if (!popup.classList.contains('hidden') && tab === 'inbox') roots.push(popup);
     if (mini && mini.pop.isConnected) roots.push(mini.pop); // the title-bar mini inbox follows the same facts
+    if (homeShown()) roots.push(home); // …and so does the phone's page (lane phone-first-screen)
     for (const root of roots) {
       root.querySelectorAll('.ut-live-dot').forEach(patchDot);
       root.querySelectorAll('.ut-item').forEach((row) => { const i = byId(row.dataset.id); if (i) applyLive(row, i, rowCtx); });
@@ -735,7 +755,7 @@ export function installUserTodos(app) {
   // failure is a toast.
   const markAllSeen = async (btnEl) => {
     const bEl = btnEl.closest('.ut-band');
-    const ids = (bEl && bandOpen.get(bEl.dataset.band)) || [];
+    const ids = (bEl && (home && home.contains(bEl) ? H.open : bandOpen).get(bEl.dataset.band)) || []; // the band where it was pressed (the popup's, or the phone page's)
     if (!ids.length || btnEl.dataset.busy === '1') return;
     btnEl.dataset.busy = '1'; btnEl.disabled = true;
     const r = await fetchJson('/api/user-todos/resolve-many', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, status: 'dismissed' }) });
@@ -890,6 +910,102 @@ export function installUserTodos(app) {
     }
   }
 
+  // ── THE PHONE'S FIRST SCREEN (lane phone-first-screen, design q-044 decision 5) ─────────────────────────────────────
+  // The attention list as a PAGE over the phone's window area: the bands' rows (THE row renderer, keyed, the slot law —
+  // PURE bandLayout / bandEntries with the page's own slots), their fold heads and the notices' grey line; every verb is
+  // the popup's (rowClick, the reply box, a row's menu). The cap is the attention list's (6) — never the viewport's.
+  const homeShown = () => !!home && !home.classList.contains('hidden');
+  /** Would the page show a row now? (the first screen of a fresh layout — 搁置 and the notices alone are no first screen) */
+  const homeHasRows = () => !!home && bandLayout(todos, { now: Date.now() }).shown.size > 0;
+  const renderHome = () => {
+    if (!homeShown()) return;
+    let root = home.querySelector(':scope > .ut-inbox');
+    if (!root) { root = mk('div', 'ut-inbox ut-home'); root.append(mk('div', 'ut-groups ut-bands'), noticesEl()); home.append(root); }
+    const now = Date.now();
+    H.layout = H.layout ? nextLayout(H.layout, todos) : openLayout(sortGroups(todos.open)); // the notices' slots (the popup's rule)
+    H.bands = bandLayout(todos, { now, prev: H.bands });
+    const drawn = bandEntries(H.bands, todos);
+    // NO EMPTY PAGE (decision 5): every row it held left the store (a resolved row keeps its slot — only a cleared or
+    // pruned one goes) — the conversation list instead
+    if (!drawn.length) { hideHome(); app.sidebar?.toggle?.(true); return; }
+    drawBands(root.querySelector(':scope > .ut-bands'), drawn, H.open);
+    const { notices } = splitNotices(entriesFor(H.layout, todos).map((g) => [g.key, g.entries, g.openCount]));
+    paintNotices(root.querySelector(':scope > .ut-notices'), notices, H.noticesOpen, H);
+  };
+  /** Show the page (a fresh layout from its first screen, scrolled to the top) → true; false = nothing on its first
+   *  screen (the caller shows the conversation list). Already on show: repainted where it stands. */
+  const showHome = () => {
+    if (!home) return false;
+    if (!homeShown()) {
+      if (!homeHasRows()) return false;
+      Object.assign(H, { layout: null, bands: null, noticesOpen: false, noticeOrder: null });
+      H.open.clear();
+      home.replaceChildren();
+      home.classList.remove('hidden');
+      home.scrollTop = 0;
+      document.body.classList.add('phone-home-on'); // the nav's ✕ closes the ACTIVE window — hidden while the page covers it (style.css)
+      app._updateMobileNavTitle?.();
+    }
+    renderHome();
+    armExitButtons(); // sampled where the page now IS (the popup's open does the same)
+    return homeShown();
+  };
+  /** Hide the page: its rows leave the DOM with it (a typed reply is kept as a draft first — the popup's rule, verify r7). */
+  const hideHome = () => {
+    if (!homeShown()) return;
+    home.classList.add('hidden');
+    stashDrafts(home);
+    home.replaceChildren();
+    Object.assign(H, { layout: null, bands: null });
+    H.open.clear();
+    document.body.classList.remove('phone-home-on');
+    app._updateMobileNavTitle?.();
+  };
+  if (home) {
+    home.addEventListener('click', (e) => {
+      if (fyPress(e, hideHome)) return; // a chip / a link in the words opens what it names (the page steps aside for its viewer)
+      const chipEl = e.target.closest('.ut-chip');
+      if (chipEl) { // a notice filter chip: per device (the popup's own rule), the active origin chip again = all
+        const o = chipEl.dataset.origin;
+        setNoticeFilter(o !== 'all' && chipEl.classList.contains('on') ? 'all' : o);
+        renderHome();
+        return;
+      }
+      const fb = e.target.closest('.ut-fold');
+      if (fb) { if (H.bands) H.bands = bandLayout(todos, { now: Date.now(), prev: H.bands, expand: Number(fb.dataset.band) }); renderHome(); return; } // THE FOLD opens its band IN PLACE
+      if (e.target.closest('.ut-notice-head')) { H.noticesOpen = !H.noticesOpen; renderHome(); return; }
+      const sa = e.target.closest('.ut-seen-all');
+      if (sa) { markAllSeen(sa); return; }
+      if (e.target.closest('.ut-detail-exp')) return;
+      const item = e.target.closest('.ut-item');
+      if (item) rowClick(e, item); // the row's verbs; its body opens the conversation (jump ⇒ the page steps aside)
+    });
+    home.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !e.isComposing) { const box = e.target?.closest?.('.ut-reply'); if (box) { foldBox(box); e.preventDefault(); e.stopPropagation(); } return; } // a reply box folds (its text kept as a draft)
+      if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('fy-link')) { e.preventDefault(); e.target.click(); return; }
+      replyKeys(e);
+    });
+    home.addEventListener('input', growOnInput);
+    home.addEventListener('contextmenu', rowMenu);
+    /** THE PHONE OPENS ON THE ATTENTION LIST — once, after the boot's restore (app.ready) and the store's first snapshot;
+     *  never when a `?` link opened a place, over the first-run wizard, or after the person already pressed something.
+     *  An empty first screen leaves the phone where its restore put it (the conversation list is HOME — back gets there). */
+    const bootHome = () => {
+      if (location.search) return;
+      let pressed = false;
+      const press = () => { pressed = true; };
+      document.addEventListener('pointerdown', press, { capture: true, once: true });
+      const go = () => {
+        document.removeEventListener('pointerdown', press, { capture: true });
+        if (pressed || document.getElementById('welcome')?.classList.contains('onboarding')) return;
+        if (showHome() && app.sidebar?.isOpen) app.sidebar.toggle(false);
+      };
+      if (model.loaded) { go(); return; }
+      const off = model.on('todos', () => { off(); go(); });
+    };
+    app.phoneHome = { shown: homeShown, hasRows: homeHasRows, show: showHome, hide: hideHome, boot: bootHome };
+  }
+
   // the For-you button the user can SEE on this device (taskbar, else the phone nav)
   const trayRect = () => {
     for (const b of [btn, mBtn]) {
@@ -940,7 +1056,7 @@ export function installUserTodos(app) {
       const want = `${el.dataset.todoHead} · ${nameFor(it.sessionKey, [it])}: ${wordsOf(it)}`;
       if (b.textContent !== want) b.textContent = want;
     }
-    renderBtn(); renderPanel(); renderMini(); scheduleBadges();
+    renderBtn(); renderPanel(); renderMini(); scheduleBadges(); renderHome();
   };
 
   // THE MODEL'S THREE BROADCASTS (§9 — the subscriptions, the reconnect resync and

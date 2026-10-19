@@ -600,6 +600,9 @@ class App {
     // The phone's back gesture (lane mobile-back-guard): one sentinel history entry — a back closes the topmost panel like Esc,
     // at the sidebar home it arms 「再返回一次退出」. Phone only: a desktop browser's back stays the browser's.
     this._mobileBack = this.isMobile ? installMobileBack(this) : null;
+    // THE PHONE'S FIRST SCREEN (lane phone-first-screen, design q-044 decision 5): after the boot's restore the phone opens
+    // on the attention list (user-todos-panel.js `app.phoneHome`); an empty list leaves the restore's own screen
+    if (this.isMobile) this.ready.then(() => this.phoneHome?.boot?.());
   }
 
   /** The reconnect queue's order key for a (suspended) ChatView: [desktop rank, window rank].

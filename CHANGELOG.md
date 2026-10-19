@@ -13,6 +13,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The sidebar puts urgent and blocked conversations first, then the ones asking you something.
 - The settings menu has one Vault… entry: its state, unlock, lock, the second password and what it holds are in the same window.
 - In the Vault window, an account's setup-token now says Long-lived OAuth token, so it is not mistaken for the browser sign-in.
+- On a phone, VibeSpace opens on what needs you — the same rows as For you; the conversation list is one tap away under ☰.
+- On a phone, going back from a conversation returns to that list, or to the conversation list when nothing needs you.
 
 ## 2.369.318 — 2026-10-19
 

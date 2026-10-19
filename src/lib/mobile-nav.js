@@ -161,7 +161,9 @@ export class MobileNav {
     const wm = this.app.wm;
     const win = wm.windows.get(wm.activeWindowId);
     const count = [...wm.windows.values()].filter(w => !w._hiddenByDesktop && !minimizedOf(wm, w)).length;
-    this._titleEl.textContent = (win?.title || 'VibeSpace') + (count > 1 ? ` (${count})` : '');
+    // lane phone-first-screen: the attention page covers the window area — the bar names the page, never a window it hides
+    // (a tap on the title still lists the windows; the ✕ that closes the active one is hidden meanwhile — style.css)
+    this._titleEl.textContent = this.app.phoneHome?.shown?.() ? t('For you') : (win?.title || 'VibeSpace') + (count > 1 ? ` (${count})` : '');
     this._titleEl.classList.toggle('arrived', [...wm.windows.values()].some((w) => w.element.classList.contains('window-arrived'))); // an agent placed a window (never shown in front of this one)
   }
 

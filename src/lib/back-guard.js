@@ -29,16 +29,19 @@ export function bootStep({ phone, enabled, state }) {
 }
 
 /** What one back press closes, topmost first — Esc's order (every [data-popover] float, then a dialog), then the
- *  phone's own layers: the window switcher, a sheet (the For-you tray, the usage popup), the window area (it yields to
- *  the sidebar — the sidebar is home), the sidebar's drill-down (its ‹ back row). null = at home: nothing to close. */
-export function backTarget({ popover = false, dialog = false, switcher = false, sheet = false, sidebarOpen = false, drilldown = false } = {}) {
+ *  phone's own layers: the window switcher, a sheet (the For-you tray, the usage popup), the sidebar's drill-down (its
+ *  ‹ back row), the window area (it yields to HOME). null = at home: nothing to close.
+ *  HOME (lane phone-first-screen, design q-044 decision 5): the attention page when the attention list has a row on its
+ *  first screen (`homeRows`), else the sidebar (the conversation list) — so with rows, an open sidebar is one layer
+ *  above home ('sidebar': it closes, back to what it covered); `home` = the attention page is on show (at home). */
+export function backTarget({ popover = false, dialog = false, switcher = false, sheet = false, sidebarOpen = false, drilldown = false, home = false, homeRows = false } = {}) {
   if (popover) return 'popover';
   if (dialog) return 'dialog';
   if (switcher) return 'switcher';
   if (sheet) return 'sheet';
-  if (!sidebarOpen) return 'window';
-  if (drilldown) return 'drilldown';
-  return null;
+  if (sidebarOpen) return drilldown ? 'drilldown' : homeRows ? 'sidebar' : null;
+  if (home) return null;
+  return 'window';
 }
 
 /** The verdict for one back press that landed on the page's entry.

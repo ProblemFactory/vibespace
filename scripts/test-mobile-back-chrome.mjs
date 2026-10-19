@@ -16,6 +16,9 @@
 //   C  a `?` deep link in zh: the first back closes no window and says 再返回一次退出; after 2 s the window yields
 //   D  the Mobile setting off: one browser back leaves at once
 //   E  a 1280×800 desktop: no sentinel, `overscroll-behavior` stays auto (the phone: none), one back leaves
+//   F  (lane phone-first-screen, design q-044 decision 5) asks open ⇒ the boot lands on the ATTENTION PAGE, which is home:
+//      a back on it arms the toast; ☰ then back closes the sidebar (back on the page, no toast); a window opened from it
+//      hides it and one back returns to the page (the window kept); the For-you sheet over it closes on one back
 // Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-mobile-back-chrome.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -48,7 +51,15 @@ fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const stubPath = `${wt}-claude-stub`; // never a vendor CLI: the boot probes get a version and nothing else
 fs.writeFileSync(stubPath, '#!/bin/sh\nfor a in "$@"; do case "$a" in --version) echo "2.1.288 (Claude Code) stub"; exit 0;; esac; done\nexit 0\n', { mode: 0o755 });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const startServer = () => spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+let srv = startServer(); // `let`: F restarts it on a For-you store with asks (the store reads data/user-todos.json at boot)
+const restartWith = async (items) => {
+  const was = srv; was.kill('SIGKILL');
+  await new Promise((r) => { if (was.exitCode !== null || was.signalCode) r(); else { was.once('exit', r); setTimeout(r, 3000); } });
+  fs.writeFileSync(path.join(wt, 'data', 'user-todos.json'), JSON.stringify({ items }, null, 2));
+  srv = startServer();
+  for (let i = 0; i < 80; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
+};
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
@@ -242,6 +253,34 @@ try {
   check('C2 then the same rule: the next back (after the window) yields the window to the sidebar', c2.sb && c2.n === c0.n, c2);
   await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: zh.identifier });
   await evalJs("localStorage.removeItem('vibespace.lang'); true");
+
+  // ── F: the attention page is HOME (lane phone-first-screen, design q-044 decision 5) — before D: D's setting write must not race F's restart ──
+  console.log('F  asks open: the attention page is home');
+  await restartWith([1, 2, 3].map((k) => ({ id: 'ut-fback' + k, sessionKey: 'claude:back-guard-' + k, sessionName: 'back guard', text: 'Which bucket should the nightly export use? (' + k + ')', detail: null, urgency: 'normal', kind: 'action', origin: 'agent', status: 'open', by: 'agent', createdAt: Date.now() - k * 60e3, resolvedAt: null, resolvedBy: null, jobId: null })));
+  await boot(); const F_at = await touchOnce(); // (195, 640): the page's empty area below its three rows
+  const F_act = await evalJs('({ active: navigator.userActivation?.hasBeenActive, state: history.state, len: history.length })');
+  const F_pageOn = () => evalJs(`!document.getElementById('phone-home').classList.contains('hidden')`);
+  const F_exitToasts = async () => (await toasts()).filter((x) => x.includes('Press back again to exit')).length;
+  const F_f0 = await evalJs(`({ page: !document.getElementById('phone-home').classList.contains('hidden'), rows: document.querySelectorAll('#phone-home .ut-item').length, sb: app.sidebar.isOpen, state: history.state })`);
+  check('F0 asks open: the boot lands on the attention page (home) — 3 rows, the sidebar shut, ONE sentinel above the page\'s entry', F_f0.page && F_f0.rows === 3 && !F_f0.sb && F_f0.state?.vs === 1, { ...F_f0, F_at, F_act });
+  await browserBack(300);
+  const F_fa = await toasts(); let F_fn = await nav();
+  check('F1 at home on the page: one back arms the exit toast; the page stays, VibeSpace stays', F_fa.includes('Press back again to exit') && (await F_pageOn()) && onApp(F_fn), { F_fa, F_fn });
+  await sleep(2400);
+  await tap('#mobile-nav-menu'); await sleep(300);
+  const F_sbOpen = await evalJs('app.sidebar.isOpen'); const F_tb = await F_exitToasts();
+  await browserBack();
+  const F_f2 = await evalJs(`({ sb: app.sidebar.isOpen, page: !document.getElementById('phone-home').classList.contains('hidden') })`); F_fn = await nav();
+  check('F2 ☰ over the page, then one back: the sidebar closes — back on the page, no exit toast', F_sbOpen && !F_f2.sb && F_f2.page && (await F_exitToasts()) === F_tb && onApp(F_fn), { F_sbOpen, F_f2, F_tb, F_fn });
+  await evalJs('app.openFileExplorer(); true'); await sleep(900);
+  const F_f3a = await evalJs(`({ n: app.wm.windows.size, page: !document.getElementById('phone-home').classList.contains('hidden'), sb: app.sidebar.isOpen })`);
+  await browserBack();
+  const F_f3b = await evalJs(`({ n: app.wm.windows.size, page: !document.getElementById('phone-home').classList.contains('hidden'), sb: app.sidebar.isOpen })`); F_fn = await nav();
+  check('F3 a window opened over the page hides it (the central yield); one back returns to the PAGE — the window kept, the sidebar shut', F_f3a.n >= 1 && !F_f3a.page && F_f3b.page && !F_f3b.sb && F_f3b.n === F_f3a.n && onApp(F_fn), { F_f3a, F_f3b, F_fn });
+  await tap('#mobile-nav-todos'); await sleep(400);
+  const F_fy = await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden')`);
+  await browserBack();
+  check('F4 the For-you sheet over the page: one back closes the sheet, the page stays', F_fy && (await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`)) && (await F_pageOn()) && onApp(await nav()), { F_fy });
 
   // ── D: the Mobile setting off ──
   console.log('D  the Mobile setting off');
