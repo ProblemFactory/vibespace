@@ -70,4 +70,19 @@ function crossSiteVerdict({ method = 'GET', headers = {} } = {}, own = '') {
   return { ok: false, why: offered.trim().toLowerCase() === 'null' ? 'null-origin' : 'origin', origin: offered, own: ours || null };
 }
 
-module.exports = { crossSiteVerdict, ownOriginOf, normOrigin, WRITES };
+/**
+ * THE STRICT FORM (lane vault-e2e-password — the vault's person doors): `crossSiteVerdict` lets a browser-less write through
+ * (no Origin and no Sec-Fetch-Site — a script on an instance nobody signs in to); a door that must be a PERSON on THIS
+ * instance's own page asks this one instead: Sec-Fetch-Site same-origin, or (a browser that sends no Sec-Fetch-Site) an
+ * Origin equal to `own`. → `{ ok, why }` — why ∈ same-origin | origin | same-site | cross-site | none | no-browser.
+ */
+function pageVerdict(headers = {}, own = '') {
+  const h = headers || {};
+  const site = String(h['sec-fetch-site'] || '').toLowerCase();
+  if (site) return site === 'same-origin' ? { ok: true, why: 'same-origin' } : { ok: false, why: site };
+  const offered = h.origin == null ? '' : normOrigin(String(h.origin));
+  const ours = normOrigin(own);
+  return ours && offered && offered === ours ? { ok: true, why: 'origin' } : { ok: false, why: offered ? 'origin' : 'no-browser' };
+}
+
+module.exports = { crossSiteVerdict, pageVerdict, ownOriginOf, normOrigin, WRITES };

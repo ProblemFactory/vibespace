@@ -204,7 +204,8 @@ await section('§2 THE SINKS — the password\'s bytes nowhere but the child\'s 
   const leaked = sinks.filter(([, h]) => h).map(([n]) => n);
   ok(leaked.length === 0 && sinks.length === 14, `the password in 0 of ${sinks.length} sinks (${sinks.map(([n]) => n).join(' · ')})`, leaked);
   ok(frames.some((f) => f.includes(rec1.id)) && gl.status === 200 && gl.text.includes(rec1.id) && gi.status === 200, 'the sinks were live: the broadcasts and both GETs carry the record');
-  ok(!/"password"/i.test(fs.readFileSync(path.join(dataDir, 'desktop-apps.json'), 'utf8')) && !/password/i.test(JSON.stringify(rec1)), 'no `password` field anywhere in the record');
+  // the checkout's own path is not the record's content (lane vault-e2e-password: its worktree is …/wt-vault-e2e-password, and the fixture exec path rides the record)
+  ok(!/"password"/i.test(fs.readFileSync(path.join(dataDir, 'desktop-apps.json'), 'utf8')) && !/password/i.test(JSON.stringify(rec1).split(repo).join('<repo>')), 'no `password` field anywhere in the record');
 });
 
 await section('§3 stop — the forward goes with the session', async () => {

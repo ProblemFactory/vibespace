@@ -78,12 +78,13 @@ export const ROWS = [
   ['src/routes/window-targets.js', 'own-tree', 1, null, DATA],
   ['src/safe-fs-worker.js', 'exempt', 18, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked)'],
   ['src/search-index-worker.js', 'own-tree', 5, null, CLI],
-  ['src/secret-box.js', 'own-tree', 8, null, DATA], // lane key-file-law-stores: +3 — THE KEY-FILE LAW's reads (the key file raw/hex, each store's ciphertext files + their dirs)
+  ['src/secret-box.js', 'own-tree', 12, null, DATA], // lane key-file-law-stores: +3 — THE KEY-FILE LAW's reads (the key file raw/hex, each store's ciphertext files + their dirs); lane vault-e2e-password: +4 — data/vault.json and the `.sealed` markers beside a key file (is this dir's vault set up?)
   ['src/app-secrets.js', 'own-tree', 4, null, DATA], // lane app-display-secrets: the service/sealer files beside it, the key file (secret-box), the app dir's sealed store + bus socket
   ['src/app-secrets-seal.js', 'own-tree', 3, null, DATA], // lane app-display-secrets: the app dir's sealed store + its stdin; lane display-secret-fd +1: the per-display key off the inherited pipe fd (never a path anyone names)
   ['src/server/account-usage-routes.js', 'own-tree', 1, null, CLI],
   ['src/server/agent-tool-generators.js', 'user-path', 23, 'DOOR\\.blocked\\(', 'a session root’s git facts: the sentence as facts.error'], // lane cli-one-text-arg: +2 — src/agent-cli-text.js read and its copy beside the CLIs compared (own tree, every boot)
   ['src/server/apps-engine.js', 'own-tree', 1, null, DATA],
+  ['src/server/vault-engine.js', 'own-tree', 11, null, DATA], // lane vault-e2e-password: data/vault.json, the key files it seals (read, overwrite, unlink) and their `.sealed` markers
   ['src/server/auto-cli-loop.js', 'own-tree', 2, null, CLI],
   ['src/server/auto-resume.js', 'own-tree', 1, null, CLI],
   ['src/server/boot-restore.js', 'own-tree', 14, null, DATA], // B-1319: +1 = probeSockets' readdir of the sockets folder (the restore's probes, before listen)

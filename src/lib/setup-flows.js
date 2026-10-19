@@ -1,4 +1,5 @@
 import { escHtml, showToast, showConfirmDialog, fetchJson, createModalShell } from './utils.js';
+import { maybeNagVault } from './vault-unlock.js'; // lane vault-e2e-password: the tour ends ⇒ the second password (while not set up)
 import { TerminalSession } from './terminal.js';
 import { t, setLang, getLangPref } from './i18n.js';
 import { THEMES, BUILTIN_THEMES } from './themes.js';
@@ -185,6 +186,7 @@ export function installSetupFlows(App) {
       localStorage.setItem('vs-onboarded', '1');
       teardown();
       this._checkWelcome();
+      maybeNagVault(); // the mandatory step of a new instance: the vault's second password
     };
     // PAUSE (not finish): a wizard action that needs the workspace — Log in /
     // Install open a terminal the user must interact with — used to just hide

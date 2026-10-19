@@ -34,8 +34,11 @@ export { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD };
  *  own capture-phase Escape eats the first Esc (2.369.125 r7 — test-gear-menu's
  *  Esc legs, and the three suites red on every mirror run since 2.369.75).
  *  Every suite passes this to Page.addScriptToEvaluateOnNewDocument BEFORE its
- *  first Page.navigate; test-architecture §47 is the census. */
-export const ONBOARDED_SOURCE = "try { localStorage.setItem('vs-onboarded', '1'); } catch {}";
+ *  first Page.navigate; test-architecture §47 is the census.
+ *  Lane vault-e2e-password: the same source snoozes the vault's setup ask (`vs-vault-later`, an epoch ms — src/lib/
+ *  vault-unlock.js maybeNagVault): a scratch hub's vault is never set up, and its modal would cover the chrome under test
+ *  the way the wizard did. A LOCKED vault's unlock modal is not snoozed by anything. */
+export const ONBOARDED_SOURCE = "try { localStorage.setItem('vs-onboarded', '1'); localStorage.setItem('vs-vault-later', '9999999999999'); } catch {}";
 
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */
 export function scratch(name) {

@@ -9282,4 +9282,45 @@ export default {
   "Show it here": "ここに表示", // lane desktop-display-modes
   "Lower resolution for {n} displays": "{n} 画面のため解像度を下げています", // lane desktop-display-modes commit 2
   "Each HDR display streams at {w}×{h} instead of {fw}×{fh} so {n} of them keep their frame rate": "各 HDR ディスプレイを {fw}×{fh} ではなく {w}×{h} で送り、{n} 台でもフレームレートを保ちます", // lane desktop-display-modes commit 2
+  "That is not the second password": "第二パスワードが違います", // lane vault-e2e-password
+  "Too many wrong passwords — try again in {n} s": "間違いが多すぎます — {n} 秒後にもう一度", // lane vault-e2e-password
+  "The vault record is damaged — nothing can be opened; restore data/vault.json from a backup": "保管庫の記録が壊れています — 何も開けません。data/vault.json をバックアップから戻してください", // lane vault-e2e-password
+  "At least 8 characters": "8 文字以上", // lane vault-e2e-password
+  "The second password must not be the sign-in password": "第二パスワードはサインインのパスワードと同じにできません", // lane vault-e2e-password
+  "The new second password is the old one": "新しい第二パスワードが古いものと同じです", // lane vault-e2e-password
+  "The key files could not be moved into the vault — nothing changed ({why})": "鍵ファイルを保管庫に移せませんでした — 何も変わっていません（{why}）", // lane vault-e2e-password
+  "The vault is not set up yet": "保管庫はまだ設定されていません", // lane vault-e2e-password
+  "The vault is already set up": "保管庫はすでに設定済みです", // lane vault-e2e-password
+  "The vault is being set up — try again in a moment": "保管庫を設定中です — 少し待ってからもう一度", // lane vault-e2e-password
+  "Only a person can do this": "これは人だけが行えます", // lane vault-e2e-password
+  "Could not reach the vault — {reason}": "保管庫に届きませんでした — {reason}", // lane vault-e2e-password
+  "Vault locked": "保管庫はロック中", // lane vault-e2e-password
+  "Vault locked — click to unlock": "保管庫はロック中 — クリックして解除", // lane vault-e2e-password
+  "Unlock the vault": "保管庫のロックを解除", // lane vault-e2e-password
+  "VibeSpace restarted — the credentials it stores (accounts, mounts, channels, integrations, app logins, passkeys) stay locked until you enter the second password.": "VibeSpace が再起動しました — 保存している認証情報（アカウント、マウント、チャンネル、連携、アプリのログイン、パスキー）は第二パスワードを入力するまでロックされたままです。", // lane vault-e2e-password
+  "Second password": "第二パスワード", // lane vault-e2e-password
+  "Unlock": "ロック解除", // lane vault-e2e-password
+  "Vault unlocked": "保管庫のロックを解除しました", // lane vault-e2e-password
+  "Set a second password": "第二パスワードを設定", // lane vault-e2e-password
+  "Every credential VibeSpace stores is sealed in a vault that only this second password opens. After every restart, the first sign-in asks for it; until then nothing stored can be read.": "VibeSpace が保存するすべての認証情報は、この第二パスワードでしか開かない保管庫に封印されます。再起動のたびに最初のサインインで入力を求められ、それまでは保存したものを何も読めません。", // lane vault-e2e-password
+  "There is no recovery: forget it and the stored credentials are gone — you would connect every account again. An export of the credentials is not part of this version.": "復旧はできません。忘れると保存した認証情報は失われ、すべてのアカウントを接続し直すことになります。認証情報のエクスポートはこのバージョンにはありません。", // lane vault-e2e-password
+  "Repeat the second password": "第二パスワードをもう一度", // lane vault-e2e-password
+  "The two passwords differ": "2 つのパスワードが一致しません", // lane vault-e2e-password
+  "Vault set up — {n} key(s) sealed": "保管庫を設定しました — 鍵を {n} 個封印しました", // lane vault-e2e-password
+  "Change the second password": "第二パスワードを変更", // lane vault-e2e-password
+  "Current second password": "現在の第二パスワード", // lane vault-e2e-password
+  "New second password": "新しい第二パスワード", // lane vault-e2e-password
+  "Second password changed": "第二パスワードを変更しました", // lane vault-e2e-password
+  "Unlocked": "ロック解除中", // lane vault-e2e-password
+  "Locked": "ロック中", // lane vault-e2e-password
+  "Not set up": "未設定", // lane vault-e2e-password
+  "Vault": "保管庫", // lane vault-e2e-password
+  "Set up {when}": "{when} に設定", // lane vault-e2e-password
+  "Lock now": "今すぐロック", // lane vault-e2e-password
+  "Lock after idle": "アイドル後にロック", // lane vault-e2e-password
+  "Lock the vault after this long with no keyboard or mouse on any VibeSpace page": "どの VibeSpace ページでもキーボードやマウスの操作がこの時間なければ保管庫をロックします", // lane vault-e2e-password
+  "Vault…": "保管庫…", // lane vault-e2e-password
+  "The vault is locked — unlock it first": "保管庫はロック中です — 先にロックを解除してください", // lane vault-e2e-password
+  "Lock the vault": "保管庫をロック", // lane vault-e2e-password
+  "Check whether the vault is locked": "保管庫がロック中か確認", // lane vault-e2e-password
 };

@@ -412,6 +412,8 @@ const ROUTES = {
   // lane agent-feedback: agentCaller = jobByToken (a jbt_ caller's identity, as the design routes do); the answer = the
   // caller's OWN report / reports from data/feedback.json (src/server/feedback-store.js) — no record of the five kinds
   'POST /api/agent/feedback': 'meta', 'GET /api/agent/feedback/mine': 'meta',
+  // lane vault-e2e-password: the vault's state (a state word, three times and a key COUNT) and its lock — no record of the five kinds
+  'GET /api/agent/vault/state': 'meta', 'POST /api/agent/vault/lock': 'meta',
   'GET /api/agent/design/systems': 'meta', 'GET /api/agent/design/system': 'meta', // lane design-systems-home: the design systems' names (belted) + ONE system's tokens.css — registry rows and a folder's file, no record
   // ── the 2.369.202 integration: lane jobs-browser's job principal — agentFacts → jobAgentFacts / refuseAgentBearer ask the
   //    jobs store jobByToken (a jbt_ caller's identity, as the other agent routes do), never a record's text ──
@@ -748,6 +750,7 @@ const STORAGE = {
   'src/lib/settings-ui.js|localStorage|\'vibespace.settingsNavFolds\'': ['pref', 'the Settings nav folds'],
   'src/lib/settings.js|localStorage|\'webui-settings\'': ['pref', 'the settings mirror'],
   'src/lib/setup-flows.js|localStorage|\'vs-onboarded\'': ['marker', 'the onboarding wizard ran'],
+  'src/lib/vault-unlock.js|sessionStorage|\'vs-vault-later\'': ['marker', 'the vault\'s setup ask snoozed for this tab (lane vault-e2e-password)'],
   'src/lib/sidebar-rail.js|localStorage|\'vibespace.railItem\'': ['pref', 'the active rail panel'],
   'src/lib/sidebar-state.js|localStorage|\'starredSessions\'': ['ids', 'starred session ids'],
   'src/lib/sidebar-state.js|localStorage|\'archivedSessions\'': ['ids', 'archived session ids'],
@@ -1874,6 +1877,8 @@ const I_RECV = {
   // ── verify r8 ③: the journal's receivers (every server console / log line rides the incident ring) ──
   'data/bin/codex-chat-wrapper.js|r': ['harness', 'an app-server answer\'s reason / detail (an RPC refusal)'], 'data/bin/codex-chat-wrapper.js|st': ['harness', 'a steer answer\'s reason / detail (an RPC refusal)'],
   'src/accounts.js|to': ['account', 'a pool member (the deleted default\'s re-point target — lane pool-pin)'], 'src/accounts.js|pool': ['account', 'a pool'],
+  // lane vault-e2e-password: a key file the vault seals — its NAME is a STORE_KEYS constant (.accounts-key …), never a record's words
+  'src/server/vault-engine.js|it': ['migration', 'a key file the vault seals (its constant name)'], 'src/server/vault-engine.js|k': ['migration', 'a STORE_KEYS row (a key file\'s constant name)'],
   'src/migration-runner.js|m': ['migration', 'a migration\'s own note'], 'src/normalizers.js|session': ['session', 'a session\'s name'],
   'src/normalizers.js|e': ['chat card', 'a rebuild queue entry — its `card` is a chat card the transcript already holds (peer / browser / group / proposal), never a For-you item\'s card (design 009 named that field `card` too)'],
   'src/port-forward.js|h': ['host', 'a machine name'], 'src/server/auto-cli-loop.js|it.pj': ['quota', 'a projection\'s label'],

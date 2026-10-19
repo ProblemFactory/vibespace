@@ -73,6 +73,7 @@ import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, 
 import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
 import { noteVoicePlugins } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off)
 import { enterSubmits } from './chat-enter-keys.js';
+import { initVault, maybeNagVault } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -497,6 +498,7 @@ class App {
       this._localHome = d.home; // restored as the cwd hint when host → Local (B-0d70)
       this._authEnabled = !!d.authEnabled;
       this._ssoEnabled = !!d.ssoEnabled; // Clerk SSO on → password step/import ignored
+      initVault(this); // THE VAULT (lane vault-e2e-password): locked ⇒ the unlock modal now, behind the sign-in this page just passed
       this._repoDir = d.repoDir || null; // server install dir (⚙ self-update)
       this._publicUrlDefault = d.publicUrlDefault || null; // cluster-injected agentd.publicUrl default (settings placeholder)
       setInstanceUrl(d.instancePublicUrl || null); // the address every "link to something here" helper uses (utils.absUrl)
@@ -861,13 +863,13 @@ class App {
   // container / new user). Guides: what VibeSpace is → connect Claude/Codex
   // (live install/login status + one-click login) → first session.
   async _maybeShowOnboarding() {
-    if (localStorage.getItem('vs-onboarded')) return;
+    if (localStorage.getItem('vs-onboarded')) { maybeNagVault(); return; } // no tour ⇒ the vault's setup ask (while not set up)
     let hasSessions = false;
     try {
       const d = await fetchJson('/api/sessions');
       hasSessions = (d.sessions || []).length > 0;
     } catch {}
-    if (hasSessions) { localStorage.setItem('vs-onboarded', '1'); return; }
+    if (hasSessions) { localStorage.setItem('vs-onboarded', '1'); maybeNagVault(); return; }
     this._showOnboarding();
   }
 

@@ -20,6 +20,7 @@ server. `vibespace-docs <topic>` prints it.
 | `window` | `vibespace-window` | a NATIVE app window the user shared with you (or you opened) as a target: accessibility tree + @refs, or pixels | `vibespace-docs window` |
 | `browser` | `vibespace-browser` | THE browser tool: open / snapshot / click @ref / fill in THIS conversation's own browser, shown live to the user | `vibespace-docs browser` |
 | `apps` | `vibespace-app` | apps that survive the machine's rebuild: search, then PROPOSE an install or a removal (the user installs) | `vibespace-docs apps` |
+| `vault` | `vibespace-vault` | the vault that seals every stored credential: its state, and lock it now (unlocking is the user's, never yours) | `vibespace-docs vault` |
 | `index` | `vibespace-docs` | this list; `vibespace-docs <topic>` prints one tool's full manual, always matching the running server | `vibespace-docs` |
 
 `vibespace-docs <topic>` prints one manual (`app` = `apps`); `vibespace-docs` alone prints this index. Every tool prints its own usage when run with no arguments.

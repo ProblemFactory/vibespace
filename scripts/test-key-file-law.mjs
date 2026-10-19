@@ -106,9 +106,12 @@ const STORES = [
   { name: '.app-secrets-key', file: 'src/app-secrets.js', via: 'lawfulKey', ciphertext: 'desktop-apps/<id>/portal/secrets.json with n > 0', rows: 'the app window ⋯: Stored logins: …' },
   { name: 'browser-passkeys.key', file: 'src/server/mounts-plugins-wiring.js', via: 'lawfulKey', ciphertext: 'browser-passkeys.json v1 sealed rows', rows: 'the passkey ceremony line (a named refusal)' },
 ];
+// THE VAULT (lane vault-e2e-password): the ONE file besides a store that names every store key — its STORE_KEYS rows are what it seals
+const VAULT_HOLDER = 'src/server/vault-engine.js';
 // files that may hold a key-shaped READ or WRITE that is NOT a store key (each with its reason)
 const IO_EXEMPT = new Map([
   ['src/secret-box.js', 'THE one reader + minter (lawfulKey / mintKeyFile)'],
+  ['src/server/vault-engine.js', 'THE VAULT (lane vault-e2e-password): reads a key file ONCE to seal it into data/vault.json, then overwrites + unlinks it (setup / an interrupted seal resumed / a restored file adopted) — never a mint into a file'],
   ['src/server/tls.js', 'readPair(certFile, keyFile): the TLS private key the person configured — a certificate pair, read only, never minted'],
 ]);
 // ONE fs call (file · door · a needle of its arguments) that touches a key-NAMED file which is no data/ store key (each with its reason)
@@ -118,6 +121,8 @@ const IO_SITES = [
 // randomBytes(32) per file: a new one is RED until classified here
 const RANDOM32 = new Map([
   ['src/secret-box.js', [1, 'mintKeyFile: THE mint']],
+  ['src/vault.js', [1, 'setup: THE vault DEK — wrapped under the second password\'s KEK, in memory only (lane vault-e2e-password)']],
+  ['src/server/vault-engine.js', [1, 'keyFor: a store\'s FIRST key minted INTO the vault (an entry, never a file — lane vault-e2e-password)']],
   ['src/server/dropline-oauth.js', [2, 'a PKCE verifier + this boot\'s state key (memory only)']],
   ['src/server/channels-engine.js', [1, 'consentKey: this boot\'s HMAC key for consent state (memory only)']],
   ['src/server/desktop-webrtc.js', [1, 'a stream session\'s UDP-leg HMAC key (lane stream-relay-udp — memory only; handed to the daemon in stream-offer over the device link, never on UDP)']],
@@ -132,6 +137,7 @@ const FS_MOD_RE = /^(node:)?fs(\/promises)?$/;
 // randomBytes(<not a literal>) per file: RED until classified (a same-file `const N = 32` counts as randomBytes(32))
 const RANDOM_EXPR = new Map([
   ['src/pairing-token.js', [1, 'randomBytes(k.bytes): a pairing token of its KINDS row — the token itself, never a key file']],
+  ['src/server/vault-engine.js', [1, 'shred: random bytes the length of a key file being destroyed (overwritten before the unlink) — never a key']],
 ]);
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => d.isDirectory() ? walk(path.join(dir, d.name)) : d.name.endsWith('.js') ? [path.join(dir, d.name)] : []);
 const SRC = new Map(walk(path.join(REPO, 'src')).map((f) => [path.relative(REPO, f), fs.readFileSync(f, 'utf-8')]));
@@ -247,7 +253,7 @@ function judgeFile(rel, text) {
         seen.names.push(`${t.value}@${rel}`);
         const row = STORES.find((s) => s.name === t.value);
         if (!row) red.push(`${rel}: a NEW key file '${t.value}' — add a STORES row (its ciphertext, its rows) and its legs`);
-        else if (row.file !== rel) red.push(`${rel}: names ${t.value}, the key file of ${row.file} — a second reader; read it through its store`);
+        else if (row.file !== rel && rel !== VAULT_HOLDER) red.push(`${rel}: names ${t.value}, the key file of ${row.file} — a second reader; read it through its store`);
       }
       if ((t.type.label === 'string' || t.type.label === 'template') && STEMS.has(String(t.value)) && STEMS.get(String(t.value)).file !== rel) red.push(`${rel}:${line}: '${t.value}' — the key file of ${STEMS.get(String(t.value)).file} (${STEMS.get(String(t.value)).name}) built at runtime; read it through its store`);
       if (isName(t, 'randomBytes') && isPunc(toks[i + 1], '(')) {
@@ -319,8 +325,9 @@ plant('src/mounts.js', MOUNTS_BOX, 'secretBox(this._keyFile);', 'mounts\' box wi
 const ACCT_KEY = SRC.get('src/accounts.js').match(/  _key\(\) \{[^]*?\n  \}\n/)?.[0] || 'MISSING';
 const OLD_ACCT_KEY = "  _key() {\n    try { return Buffer.from(fs.readFileSync(this._keyFile, 'utf-8').trim(), 'hex'); }\n    catch {\n      const k = crypto.randomBytes(32);\n      fs.writeFileSync(this._keyFile, k.toString('hex'), { mode: 0o600 });\n      return k;\n    }\n  }\n";
 plant('src/accounts.js', ACCT_KEY, OLD_ACCT_KEY, 'accounts\' old _key() (mint on ANY read error)');
-const PK_NEW = SRC.get('src/server/mounts-plugins-wiring.js').match(/            const SB = require\('\.\.\/secret-box\.js'\), k = SB\.lawfulKey[^\n]*\n[^\n]*\n            cipher = PS\.cipherOf\(crypto, k\.key\); return cipher;/)?.[0] || 'MISSING';
-const PK_OLD = "            let key = null; try { key = fs.readFileSync(keyFile); } catch (e) { if (e.code !== 'ENOENT') throw e; }\n            if (!key) { key = crypto.randomBytes(32); try { fs.writeFileSync(keyFile, key, { mode: 0o600, flag: 'wx' }); } catch (e) { if (e.code !== 'EEXIST') throw e; key = fs.readFileSync(keyFile); } }\n            cipher = PS.cipherOf(crypto, key); return cipher;";
+// lane vault-e2e-password: the wiring reads its key per CALL under a vault (withCipher) — the anchor is that block
+const PK_NEW = SRC.get('src/server/mounts-plugins-wiring.js').match(/            const k = SB\.lawfulKey[^\n]*\n[^\n]*\n            const c = PS\.cipherOf\(crypto, k\.key\);\n[^\n]*\n            try \{ return op\(c\); \} finally \{ k\.key\.fill\(0\); \}[^\n]*/)?.[0] || 'MISSING';
+const PK_OLD = "            let key = null; try { key = fs.readFileSync(keyFile); } catch (e) { if (e.code !== 'ENOENT') throw e; }\n            if (!key) { key = crypto.randomBytes(32); try { fs.writeFileSync(keyFile, key, { mode: 0o600, flag: 'wx' }); } catch (e) { if (e.code !== 'EEXIST') throw e; key = fs.readFileSync(keyFile); } }\n            cipher = PS.cipherOf(crypto, key); return op(cipher);";
 plant('src/server/mounts-plugins-wiring.js', PK_NEW, PK_OLD, 'the passkey store\'s old inline mint (ENOENT, no ciphertext question)');
 plant('src/server/foo-store.js', null, "'use strict';\nconst path = require('path');\nconst { secretBox } = require('../secret-box.js');\nconst KEY_FILE = '.foo-key';\nmodule.exports = (d) => secretBox(path.join(d, KEY_FILE), { hasCiphertext: () => false });\n", 'a NEW store with its own key file and no STORES row');
 plant('src/server/integration-store.js', "const KEY_FILE = '.integrations-key';", "const KEY_FILE = '.integrations-key';\nconst { writeFileSync: put } = require('fs');\nconst mintAside = (d) => put(require('path').join(d, 'x'), require('crypto').randomBytes(32));", 'an ALIASED mint (writeFileSync: put + randomBytes(32))');

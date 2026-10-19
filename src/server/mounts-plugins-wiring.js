@@ -56,6 +56,11 @@ require('../routes/feedback.js').registerFeedbackRoutes(app, {
   },
   instance: () => ({ name: process.env.VIBESPACE_INSTANCE_NAME || os.hostname(), version: require('../../package.json').version }),
 });
+// THE VAULT (lane vault-e2e-password): the ONE holder of the DEK (memory only) and the provider of every store key under data/
+// (secret-box `lawfulKey` asks it; a key read before this line answers exactly as the engine would — the files before the
+// setup, locked after). LOCKED after every start: only a person's door (src/routes/vault.js) unlocks it.
+const vault = require('./vault-engine.js').create({ dataDir: path.join(rootDir, 'data'), signInPassword: (pw) => !!(auth && auth.verifyPassword(pw)), bcast: (m) => bcastAll(m), signals: true });
+require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs });
 // THE DECISION ENGINE (lane decision-core): the ONE decisions-API caller — the plugin row attaches its switches, the
 // registry row `llm` gives the key, its Test runner is the engine's own one-question judgment
 const decisionEngine = require('./decision-engine.js').create({ dataDir: path.join(rootDir, 'data'), integrations, serverNotice });
@@ -477,6 +482,7 @@ try { onMountsUpdated?.(); } catch (e) { console.warn('[mounts] boot ctx resync 
 // CephFS) came up `desired: unmounted` on its very first boot.
 mounts.pathGuard = (p) => mountTokens.list().some((t) => String(t.root || '').startsWith(p));
 setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', e.message)), 2000);
+vault.onUnlock(() => mounts.restore().catch((e) => console.error('[mounts] restore after the vault unlocked:', e.message))); // lane vault-e2e-password: a boot over a LOCKED vault could not open a mount's secret — the unlock re-mounts what is desired
 // Hung-mount watchdog: one unreachable backend must never wedge the server
 // (libuv threadpool saturation — see mounts.js _healthSweep).
 mounts.startHealthWatchdog();
@@ -925,16 +931,19 @@ function createSessionMessages(session, sessionId) {
           const PS = require('../browser-passkey-store.js'), crypto = require('crypto');
           const file = path.join(rootDir, 'data', 'browser-passkeys.json'), keyFile = path.join(rootDir, 'data', 'browser-passkeys.key');
           let cipher = null;
-          const cipherNow = () => {
-            if (cipher) return cipher;
-            const SB = require('../secret-box.js'), k = SB.lawfulKey(keyFile, { raw: true, hasCiphertext: () => SB.holdsCiphertext({ files: [file], re: /v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}\./ }) }); // THE KEY-FILE LAW
+          const withCipher = (op) => {
+            const SB = require('../secret-box.js');
+            if (cipher) return op(cipher);
+            const k = SB.lawfulKey(keyFile, { raw: true, hasCiphertext: () => SB.holdsCiphertext({ files: [file], re: /v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}\./ }) }); // THE KEY-FILE LAW
             if (!k.ok) return { ok: false, code: k.code, file: path.basename(keyFile), words: require('../key-file.js').refusalWords(k.code, path.basename(keyFile)) }; // sealed passkeys stay sealed: never a new key over them — a VALUE (key-file-law-fix: a throw here left the ws listener ⇒ the hub's exit)
-            cipher = PS.cipherOf(crypto, k.key); return cipher;
+            const c = PS.cipherOf(crypto, k.key);
+            if (!SB.vaultHeld(keyFile)) { cipher = c; return op(c); }   // a key file (no vault in this process): cached as before
+            try { return op(c); } finally { k.key.fill(0); }   // THE VAULT LAW: a vault-held key lives for this one call — a lock reaches it
           };
           return {
             read: () => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } },
             write: (o) => require('../channel-store.js').writeJsonAtomic(file, o, { mode: 0o600 }),
-            cipher: { seal: (t) => { const c = cipherNow(); return c.ok === false ? c : c.seal(t); }, open: (t) => { const c = cipherNow(); return c.ok === false ? c : c.open(t); } }, // a refusal = the answer of both doors
+            cipher: { seal: (t) => withCipher((c) => c.seal(t)), open: (t) => withCipher((c) => c.open(t)) }, // a refusal = the answer of both doors
           };
         })(),
         leaseCountOf: (profileId) => new Set(holdersOf(profileId).map((h) => h.browserKey)).size,

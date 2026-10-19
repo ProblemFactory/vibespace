@@ -165,7 +165,7 @@ console.log('— ② the rows');
   ok(rowProblems(mutate('vibespace-exit', () => ({ summary: 'x'.repeat(2048) }))).some((p) => /vibespace-exit: summary 2048 B/.test(p)), 'MUTANT: a 2 KB summary ⇒ RED');
   ok(rowProblems(mutate('vibespace-page', () => ({ gate: 'pages' }))).length === 1 && rowProblems(mutate('vibespace-page', () => ({ manual: 'nope-manual.md' }))).length === 1, 'MUTANT: a gate the hook never evaluates, a manual not on disk ⇒ RED');
   const taught = REG.ROWS.filter((r) => r.teach).map((r) => r.topic), indexOnly = REG.ROWS.filter((r) => !r.teach).map((r) => r.topic);
-  ok(taught.join(' ') === 'status ask task jobs channels msg feedback index' && indexOnly.join(' ') === 'pages design exit window browser apps', `taught rows: ${taught.join(' ')} · index-only: ${indexOnly.join(' ')} (no injected bytes for them)`);
+  ok(taught.join(' ') === 'status ask task jobs channels msg feedback index' && indexOnly.join(' ') === 'pages design exit window browser apps vault' /* lane vault-e2e-password: + vibespace-vault */, `taught rows: ${taught.join(' ')} · index-only: ${indexOnly.join(' ')} (no injected bytes for them)`);
 }
 
 console.log('— ③ the caps (every gate open, the widest shape)');
@@ -224,7 +224,7 @@ console.log('— ⑤ the index, the topics, the gates');
   const off = surf({ ...T4, status: false });
   ok(!/vibespace-status|status\|/.test(off) && REG.pointerTopics({ ...T4, status: false })[0] === 'ask', 'status toggled off ⇒ no vibespace-status in the section or the reminder, no `status` in the docs pointer');
   ok(REG.renderSessionStartTools({ status: false, ask: false, task: false, jobs: false }).length === 0 && REG.renderSessionStartTools({ status: false, ask: false, task: false, jobs: false, channels: 'read' }).length > 0, 'every toggle and the reach closed ⇒ no section (the msg pointer never rides alone); reach alone opens it');
-  ok(REG.pointerTopics(T_ALL('read')).join('|') === 'status|ask|task|jobs|channels|msg|feedback|pages|design|exit|window|browser|apps', `the pointer, every gate open: vibespace-docs [${REG.pointerTopics(T_ALL('read')).join('|')}]`);
+  ok(REG.pointerTopics(T_ALL('read')).join('|') === 'status|ask|task|jobs|channels|msg|feedback|pages|design|exit|window|browser|apps|vault', `the pointer, every gate open: vibespace-docs [${REG.pointerTopics(T_ALL('read')).join('|')}]`);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

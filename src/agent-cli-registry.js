@@ -126,6 +126,12 @@ const ROWS = Object.freeze([
     summary: 'apps that survive the machine\'s rebuild: search, then PROPOSE an install or a removal (the user installs)',
   },
   {
+    // lane vault-e2e-password: the vault's state and its lock (unlock is never an agent's) — INDEX-ONLY: a locked vault says
+    // itself in every refusal (`vault_locked`), so no injected surface pays for it
+    name: 'vibespace-vault', topic: 'vault', manual: 'vault-manual.md', gate: 'always', teach: null,
+    summary: 'the vault that seals every stored credential: its state, and lock it now (unlocking is the user\'s, never yours)',
+  },
+  {
     name: 'vibespace-docs', topic: 'index', manual: 'index-manual.md', gate: 'always',
     summary: 'this list; `vibespace-docs <topic>` prints one tool\'s full manual, always matching the running server',
     teach: {

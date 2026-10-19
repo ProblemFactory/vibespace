@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.314 — 2026-10-19
+
+### Security
+- Every stored credential is now sealed in a vault only your second password opens; after a restart the first sign-in asks for it — nothing unlocks by itself.
+
 ## 2.369.313 — 2026-10-19
 
 ### Added

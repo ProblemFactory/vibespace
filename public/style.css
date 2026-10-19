@@ -7485,3 +7485,24 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .fb-meta { font-size: 10px; color: var(--text-dim); overflow-wrap: anywhere; }
 .fb-meta:empty { display: none; }
 @media (max-width: 768px) { .fb-act { min-height: 32px; } .fb-tab { min-height: 32px; } }
+
+/* THE VAULT (lane vault-e2e-password): the unlock / setup / change modals, ⚙ System ▸ Vault…, the taskbar lock chip */
+.vault-dialog-box .dialog-body { display: flex; flex-direction: column; gap: 10px; }
+.vault-text { margin: 0; color: var(--text-secondary); line-height: 1.5; }
+.vault-warn { margin: 0; color: var(--warn-text); line-height: 1.5; }
+.vault-pw { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
+.vault-pw:focus { outline: none; border-color: var(--border-active); }
+.vault-err { min-height: 1.3em; color: var(--bad-text); font-size: 12px; }
+.vault-state-line { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.vault-state-line[data-state="locked"] { color: var(--warn-text); }
+.vault-state-when { color: var(--text-dim); font-size: 12px; }
+.vault-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.vault-idle { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
+.vault-chip { display: flex; align-items: center; gap: 4px; padding: 2px 6px; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--warn-text); cursor: pointer; font: inherit; font-size: 12px; }
+.vault-chip:hover { background: var(--hover-overlay); }
+#mobile-nav-vault { min-width: 36px; min-height: 36px; justify-content: center; }
+#mobile-nav-vault .vault-chip-label { display: none; }
+@media (max-width: 600px) {
+  .vault-dialog-box .dialog-footer button, .vault-actions button { min-height: 36px; }
+  .vault-pw { min-height: 40px; font-size: 16px; }
+}

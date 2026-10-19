@@ -57,6 +57,21 @@ const path = require('path');
 const crypto = require('crypto');
 const KF = require('./key-file.js'); // THE KEY-FILE LAW (PURE): mint only when absent AND no ciphertext; else a named refusal
 
+// THE VAULT LAW (lane vault-e2e-password): a data dir whose vault is registered here answers EVERY key under it — the key-file
+// law below is the vault's `not_set_up` branch only (src/server/vault-engine.js holds the DEK in memory; src/vault.js the record)
+const VAULTS = new Map();   // path.resolve(dataDir) → { keyFor, peek, hasEntry, state, epoch }
+/** Register a data dir's vault (the hub's engine) → its unregister function. */
+function registerVault(dataDir, provider) {
+  const k = path.resolve(dataDir);
+  VAULTS.set(k, provider);
+  return () => { if (VAULTS.get(k) === provider) VAULTS.delete(k); };
+}
+const vaultOf = (keyFile) => VAULTS.get(path.resolve(path.dirname(keyFile))) || null;
+/** A dir whose vault is set up, seen from a process that holds no vault for it: LOCKED — its keys open in the hub only. */
+const sealedHere = (keyFile) => fs.existsSync(path.join(path.dirname(keyFile), 'vault.json')) || fs.existsSync(keyFile + '.sealed');
+/** Does a registered vault hold this key file's dir? (a holder of a key it got from the vault keeps it for ONE call) */
+const vaultHeld = (keyFile) => !!vaultOf(keyFile);
+
 class SecretBoxError extends Error {
   constructor(code, message, cause, reason) {
     super(message);
@@ -131,12 +146,17 @@ function mintKeyFile(keyFile, { raw = false } = {}) {
  * (scripts/test-key-file-law.mjs: a reader of a data/ key file that does not come through here is RED).
  */
 function lawfulKey(keyFile, { hasCiphertext, raw = false } = {}) {
-  return KF.loadOrMintKey({
+  const legacy = () => KF.loadOrMintKey({
     readKey: () => (raw ? fs.readFileSync(keyFile) : fs.readFileSync(keyFile, 'utf-8')),
     mintKey: () => mintKeyFile(keyFile, { raw }),
     hasCiphertext,
     parse: raw ? KF.parseRawKey : KF.parseHexKey,
   });
+  // THE VAULT LAW: the dir's vault answers (its `not_set_up` branch runs `legacy` — the migration window); no vault in this
+  // process over a dir whose vault is set up ⇒ locked here, never the file
+  const v = vaultOf(keyFile);
+  if (v) return v.keyFor(path.basename(keyFile), { keyFile, raw, hasCiphertext, legacy });
+  return sealedHere(keyFile) ? { ok: false, code: KF.VAULT_LOCKED } : legacy();
 }
 
 /**
@@ -177,11 +197,14 @@ function secretBox(keyFile, { hasCiphertext = NO_STORE } = {}) {
    *  `key-unreadable` | `key-malformed`), `reason` = the law's whole code (`key-unreadable:EIO`). Nothing is cached
    *  on a refusal: the next call reads again. */
   function readKey() {
-    if (cached) return cached;
+    if (cached && !vaultOf(keyFile)) return cached;
+    if (cached) { cached.fill(0); cached = null; }   // a key cached before the vault registered (the boot's first reads) ends here
     const r = lawfulKey(keyFile, { hasCiphertext });
-    if (r.ok) { cached = r.key; return cached; }
+    if (r.ok) { if (vaultOf(keyFile)) return r.key; cached = r.key; return cached; }   // a vault-held key is never cached here: lock() reaches every reader
     const { kind, errno } = KF.refusalOf(r.code);
-    const why = kind === 'key-missing'
+    const why = errno === 'vault_locked'
+      ? `the vault is locked — ${path.basename(keyFile)} opens after the owner unlocks it with the second password`
+      : kind === 'key-missing'
       ? `the secret key file ${keyFile} is missing while this store holds encrypted values — restore it from a backup (no new key was made: it could never decrypt them)`
       : kind === 'key-malformed'
         ? `the secret key file ${keyFile} is not a 64-hex-character key — a truncated or emptied key file is NOT a fresh key; restore it from a backup or delete it deliberately to start over`
@@ -191,18 +214,28 @@ function secretBox(keyFile, { hasCiphertext = NO_STORE } = {}) {
   /** The key file's state as a row fact: null (readable, or absent over an empty store) or `{ code, file }` — never
    *  throws, never mints (a list may ask it on every render). */
   function refusal() {
-    if (cached) return null;
     const file = path.basename(keyFile);
+    const v = vaultOf(keyFile);
+    if (v && v.state() !== 'not_set_up') { const code = v.peek(file, { keyFile, hasCiphertext }); return code ? { code, file } : null; }
+    if (!v && sealedHere(keyFile)) return { code: KF.VAULT_LOCKED, file };
+    if (cached) return null;
     try { fs.statSync(keyFile); } catch (e) {
       if (e && e.code === 'ENOENT') { let holds = true; try { holds = !!hasCiphertext(); } catch { /* unreadable store = holds */ } return holds ? { code: 'key-missing', file } : null; }
     }
     try { readKey(); return null; } catch (e) { return { code: (e instanceof SecretBoxError && e.reason) || 'key-unreadable:error', file }; }
   }
 
-  const enc = (text) => encWith(readKey(), text);
-  const dec = (blob) => decWith(readKey(), blob);
+  // a vault-held key is a COPY made for this one call — zeroed when the call is done
+  const withKey = (fn) => { const k = readKey(); try { return fn(k); } finally { if (vaultOf(keyFile)) k.fill(0); } };
+  const enc = (text) => withKey((k) => encWith(k, text));
+  const dec = (blob) => withKey((k) => decWith(k, blob));
 
-  const hasKey = () => { try { fs.statSync(keyFile); return true; } catch { return false; } };
+  const hasKey = () => {
+    const v = vaultOf(keyFile);
+    if (v && v.state() !== 'not_set_up') return v.hasEntry(path.basename(keyFile)) || fs.existsSync(keyFile);
+    if (fs.existsSync(keyFile + '.sealed')) return true;   // the vault holds it (a process with no vault reads it as locked)
+    try { fs.statSync(keyFile); return true; } catch { return false; }
+  };
 
   return { enc, dec, readKey, hasKey, refusal, keyFile };
 }
@@ -229,4 +262,4 @@ function decWith(key, blob) {
   }
 }
 
-module.exports = { secretBox, SecretBoxError, KEY_HEX_RE, BOX_CIPHERTEXT_RE, holdsCiphertext, lawfulKey, mintKeyFile, describeJsonError, encWith, decWith };
+module.exports = { secretBox, SecretBoxError, KEY_HEX_RE, BOX_CIPHERTEXT_RE, holdsCiphertext, lawfulKey, mintKeyFile, describeJsonError, encWith, decWith, registerVault, vaultHeld };

@@ -12,6 +12,7 @@ export function keyFileWords(code, file) {
   const f = String(file || '');
   if (m[1] === 'key-missing') return t('Key file {file} is missing — restore it from a backup', { file: f });
   if (m[1] === 'key-malformed') return t('Key file {file} is damaged — restore it from a backup; nothing was replaced', { file: f });
+  if (m[2] === 'vault_locked') return t('The vault is locked — unlock it first'); // THE VAULT LAW (lane vault-e2e-password): the taskbar's lock chip is the door
   return t('Key file {file} could not be read ({code}) — no new key was made', { file: f, code: m[2] || '?' });
 }
 

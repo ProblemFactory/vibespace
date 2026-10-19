@@ -903,7 +903,7 @@ class HostManager {
    *  src/browser-stuck.js); `vibespace-browser-passkey.js` its passkey words (lane browser-passkey, copied at boot from
    *  src/browser-passkey.js); `agent-cli-text.js` the ONE-text rule vibespace-msg / -channels / -ask / -task
    *  share (lane cli-one-text-arg, copied at boot from src/agent-cli-text.js). test-architecture §52 fails a static tool left out. */
-  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-design', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'vibespace-browser-passkey.js', 'agent-cli-text.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-feedback', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
+  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-design', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'vibespace-browser-passkey.js', 'agent-cli-text.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-feedback', 'vibespace-vault', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
   /** Plugin agent-tool shims (Plugin Ph4, 2.369.30): the loader installs a
    *  provider returning the `vibespace-tool-<plugin>-<name>` files it
    *  generates right now, so they ship to ssh hosts and dial devices with the

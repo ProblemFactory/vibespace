@@ -1,0 +1,303 @@
+#!/usr/bin/env node
+// THE VAULT ENGINE (lane vault-e2e-password — src/server/vault-engine.js over src/secret-box.js). Fast tier: scratch data
+// dirs with REAL-SHAPED key files (64 hex / 32 raw bytes, 0600) and ciphertext sealed under them before the setup.
+//   A  not set up = the key-file law over the files, exactly as before (read, mint on an empty store)
+//   B  setup = THE MIGRATION: every key file → an entry, read back, a `.sealed` marker, the file overwritten then unlinked
+//      (a hard link sees the overwrite), the ledger row, no key byte in vault.json, every old ciphertext still opens
+//   C  LOCKED ⇒ every read answers key-unreadable:vault_locked and touches NO file; the row facts say it; a process with
+//      no engine over a sealed dir is locked too (never the legacy branch)
+//   D  unlock ⇒ reads; a NEW store key is minted INTO the vault (no file); key-missing is kept (never a mint over ciphertext)
+//   E  lock ⇒ the DEK and every unwrapped key zeroed; the password Buffer of every door zeroed
+//   F  ROLLBACK: a fault at the record write / the read-back / a marker / a shred ⇒ every file back byte for byte, no
+//      marker, no vault.json, not_set_up
+//   G  RESUME: a seal interrupted after the record — the next unlock seals what matches, keeps what differs (and says so)
+//   H  ADOPT: a key file restored after the setup is sealed in at its first read
+//   I  a damaged vault.json ⇒ locked for good (never the files beside it)
+//   J  pacing: 5 wrong ⇒ the next minute refused (the right password too); change keeps the keys; idle lock (off by default)
+//   K  SIGTERM / SIGINT lock (the prepended listener), the broadcast on every change, the audit lines (no password)
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
+import { scratch } from './scratch.mjs';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
+const V = require(path.join(REPO, 'src/vault.js'));
+const SB = require(path.join(REPO, 'src/secret-box.js'));
+const KF = require(path.join(REPO, 'src/key-file.js'));
+let pass = 0, fail = 0;
+const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const ROOT = scratch('vault-engine');
+fs.rmSync(ROOT, { recursive: true, force: true });
+fs.mkdirSync(ROOT, { recursive: true });
+const CHEAP = { N: 1024, r: 8, p: 1 };
+const PW = 'correct horse battery staple';
+const quiet = { log() {}, warn() {} };
+let n = 0;
+/** A data dir shaped like production's: five key files (four hex + the passkeys' raw 32 bytes) and a ciphertext under each. */
+function world({ keys = ['.accounts-key', '.mounts-key', '.channels-key', '.app-secrets-key', 'browser-passkeys.key'] } = {}) {
+  const dir = path.join(ROOT, 'd' + (++n));
+  fs.mkdirSync(dir, { recursive: true });
+  const files = {};
+  for (const k of keys) {
+    const raw = k === 'browser-passkeys.key';
+    const key = crypto.randomBytes(32);
+    const bytes = raw ? key : Buffer.from(key.toString('hex') + (k === '.mounts-key' ? '\n' : ''));   // one with a trailing newline (hand-written files have one)
+    fs.writeFileSync(path.join(dir, k), bytes, { mode: 0o600 });
+    files[k] = { key, bytes, ct: SB.encWith(key, 'secret under ' + k) };
+  }
+  return { dir, files };
+}
+const mk = (dir, o = {}) => VE.create({ dataDir: dir, kdf: CHEAP, log: quiet, idleTimer: false, ...o });
+const boxOf = (dir, name, holds = true) => SB.secretBox(path.join(dir, name), { hasCiphertext: () => holds });
+const isZero = (b) => Buffer.isBuffer(b) && b.every((x) => x === 0);
+const refusalOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+
+console.log('A  not set up = the key-file law over the files');
+{
+  const { dir, files } = world();
+  const e = mk(dir);
+  ok(e.state() === 'not_set_up' && e.facts().state === 'not_set_up', 'no vault.json ⇒ not_set_up');
+  ok(boxOf(dir, '.channels-key').dec(files['.channels-key'].ct) === 'secret under .channels-key', 'a key file is read as before (the migration window)');
+  const nb = boxOf(dir, '.integrations-key', false);
+  ok(nb.dec(nb.enc('x')) === 'x' && /^[0-9a-f]{64}$/.test(fs.readFileSync(path.join(dir, '.integrations-key'), 'utf8')), 'a store\'s FIRST key is minted as a file, as before (sealed in at setup)');
+  ok(e.lock().code === 'vault_not_set_up' && e.facts().keys === 0, 'lock before setup ⇒ vault_not_set_up');
+  e.close();
+}
+
+console.log('B  setup = THE MIGRATION');
+let B = null;
+{
+  const { dir, files } = world();
+  const link = path.join(ROOT, 'hardlink-of-accounts-key');
+  fs.linkSync(path.join(dir, '.accounts-key'), link);
+  const seen = [];
+  const e = mk(dir, { bcast: (m) => seen.push(m) });
+  const r = await e.setup(PW, { ip: '10.0.0.7' });
+  ok(r.ok && r.sealed.length === 5 && e.state() === 'unlocked', 'setup seals the five key files and leaves the vault unlocked', JSON.stringify(r));
+  const names = Object.keys(files);
+  ok(names.every((k) => !fs.existsSync(path.join(dir, k))), 'every key file is gone');
+  const markers = names.map((k) => { try { return JSON.parse(fs.readFileSync(path.join(dir, k + '.sealed'), 'utf8')); } catch { return null; } });
+  ok(markers.every((m, i) => m && m.sealed === true && m.entry === names[i] && m.vault === 'vault.json'), 'a .sealed marker names each file\'s entry');
+  const vt = fs.readFileSync(path.join(dir, 'vault.json'), 'utf8'), rec = JSON.parse(vt);
+  ok(V.recordShapeOk(rec) && names.every((k) => rec.entries[k]) && !rec.sealing, 'vault.json holds an entry per key, no pending seal');
+  ok(names.every((k) => !vt.includes(files[k].key.toString('hex')) && !vt.includes(files[k].key.toString('base64'))) && !vt.includes(PW), 'no key byte and no password in vault.json');
+  ok((fs.statSync(path.join(dir, 'vault.json')).mode & 0o777) === 0o600, 'vault.json is 0600');
+  const lk = fs.readFileSync(link);
+  ok(lk.length === files['.accounts-key'].bytes.length && !lk.equals(files['.accounts-key'].bytes), 'the key file was OVERWRITTEN before the unlink (a hard link to it now holds other bytes)');
+  const led = JSON.parse(fs.readFileSync(path.join(dir, 'migrations.json'), 'utf8'));
+  ok(led.applied[`vault-seal-${rec.createdAt}`] && led.reports[`vault-seal-${rec.createdAt}`].keys === 5, 'the seal is a ledger-keyed one-shot (src/migration-runner.js)');
+  ok(names.every((k) => boxOf(dir, k).dec(files[k].ct) === 'secret under ' + k), 'every ciphertext sealed BEFORE the setup still opens');
+  ok(seen.some((m) => m.type === 'vault-state' && m.state === 'unlocked'), 'the setup is broadcast (vault-state)');
+  ok((await e.setup('another password here')).code === 'already_set_up', 'a second setup ⇒ already_set_up');
+  B = { dir, files, e };
+}
+
+console.log('C  LOCKED');
+{
+  const { dir, files, e } = B;
+  ok(e.lock('test').ok && e.state() === 'locked', 'lock() ⇒ locked');
+  const reads = { n: 0 };
+  const real = { r: fs.readFileSync, x: fs.existsSync, s: fs.statSync };
+  fs.readFileSync = (...a) => { reads.n++; return real.r(...a); }; fs.existsSync = (...a) => { reads.n++; return real.x(...a); }; fs.statSync = (...a) => { reads.n++; return real.s(...a); };
+  let r;
+  try { r = e.keyFor('.accounts-key', { keyFile: path.join(dir, '.accounts-key'), hasCiphertext: () => true, legacy: () => ({ ok: true, key: Buffer.alloc(32) }) }); } finally { Object.assign(fs, { readFileSync: real.r, existsSync: real.x, statSync: real.s }); }
+  ok(r && !r.ok && r.code === KF.VAULT_LOCKED && reads.n === 0, `a locked keyFor answers ${KF.VAULT_LOCKED} and touches no file (${reads.n} fs calls)`);
+  for (const k of Object.keys(files)) {
+    const err = refusalOf(() => boxOf(dir, k).dec(files[k].ct));
+    if (!(err && err.reason === KF.VAULT_LOCKED && err.code === 'key-unreadable')) { ok(false, `locked: ${k}`, String(err && err.message)); }
+  }
+  ok(true, 'every store\'s read is refused key-unreadable:vault_locked (the key-file law\'s transient refusal family)');
+  ok(JSON.stringify(boxOf(dir, '.mounts-key').refusal()) === JSON.stringify({ code: KF.VAULT_LOCKED, file: '.mounts-key' }), 'the row fact says vault_locked');
+  ok(boxOf(dir, '.mounts-key').hasKey() === true, 'hasKey: the vault holds it (no integration-key-missing while locked)');
+  ok(SB.lawfulKey(path.join(dir, '.channels-key'), { hasCiphertext: () => true }).code === KF.VAULT_LOCKED, 'lawfulKey (the shim every store calls) ⇒ vault_locked');
+  ok(/vault is locked/.test(KF.refusalWords(KF.VAULT_LOCKED, '.mounts-key')), 'the refusal in words says the vault is locked');
+  // a process with NO engine over this dir (another process, a suite): locked, never the legacy branch
+  const unreg = SB.registerVault(path.join(ROOT, 'elsewhere'), { keyFor: () => ({ ok: false, code: 'x' }), peek: () => null, hasEntry: () => false, state: () => 'locked', epoch: () => 0 });
+  e.close(); unreg();
+  ok(SB.lawfulKey(path.join(dir, '.accounts-key'), { hasCiphertext: () => true }).code === KF.VAULT_LOCKED, 'no engine registered + a vault.json beside ⇒ vault_locked (a sealed dir never falls back to the files)');
+  const solo = path.join(ROOT, 'marker-only'); fs.mkdirSync(solo); fs.writeFileSync(path.join(solo, '.mounts-key.sealed'), '{}');
+  ok(SB.lawfulKey(path.join(solo, '.mounts-key'), { hasCiphertext: () => false }).code === KF.VAULT_LOCKED && !fs.existsSync(path.join(solo, '.mounts-key')), 'a .sealed marker alone ⇒ vault_locked, nothing minted beside it');
+}
+
+console.log('D  unlock ⇒ reads; minted INTO the vault; key-missing kept');
+{
+  const { dir, files } = B;
+  const e = mk(dir);
+  ok(e.state() === 'locked', 'a new engine over a set-up dir starts LOCKED (default after every start)');
+  ok((await e.unlock('wrong password!!')).code === 'wrong_password' && e.state() === 'locked', 'a wrong password leaves it locked');
+  ok((await e.unlock(PW)).ok && e.state() === 'unlocked', 'the right password unlocks');
+  ok(Object.keys(files).every((k) => boxOf(dir, k).dec(files[k].ct) === 'secret under ' + k), 'every store reads again');
+  const nb = boxOf(dir, '.integrations-key', false);
+  ok(nb.dec(nb.enc('fresh')) === 'fresh' && !fs.existsSync(path.join(dir, '.integrations-key')) && JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).entries['.integrations-key'], 'a store\'s first key is minted INTO the vault — no file');
+  const mb = SB.secretBox(path.join(dir, 'other-store.key'), { hasCiphertext: () => true });
+  const err = refusalOf(() => mb.enc('x'));
+  ok(err && err.code === 'key-missing' && !JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).entries['other-store.key'], 'no entry + ciphertext ⇒ key-missing (never a new key over what is stored)');
+  B.e = e;
+}
+
+console.log('D2 the unlock hooks (a boot step that ran while locked runs again)');
+{
+  const { dir } = B;
+  const e = B.e;
+  let ran = 0;
+  e.onUnlock(() => { ran++; });
+  e.onUnlock(() => { throw new Error('a hook that throws'); });
+  e.onUnlock(async () => { throw new Error('a hook that rejects'); });
+  e.lock();
+  await e.unlock('not the password');
+  ok(ran === 0, 'a failed unlock runs no hook');
+  await e.unlock(PW);
+  ok(ran === 1 && e.state() === 'unlocked', 'a successful unlock runs every hook once — a throwing / rejecting hook does not stop it');
+  await e.unlock(PW);
+  ok(ran === 1, 'an unlock of an unlocked vault runs nothing again');
+  void dir;
+}
+
+console.log('E  zeroing');
+{
+  const { dir, files, e } = B;
+  const zeroed = [];
+  const realZero = V.zero;
+  V.zero = (...bufs) => { for (const b of bufs) if (Buffer.isBuffer(b)) zeroed.push(b); return realZero(...bufs); };
+  try { boxOf(dir, '.accounts-key').dec(files['.accounts-key'].ct); e.lock('zero-test'); } finally { V.zero = realZero; }
+  ok(zeroed.length >= 2 && zeroed.every((b) => b.length === 32 && isZero(b)), `lock zeroes the DEK and every unwrapped key (${zeroed.length} buffers, all zeros)`);
+  const seen = [];
+  const real = crypto.scrypt;
+  crypto.scrypt = (p, s, l, o, cb) => { seen.push(p); return real(p, s, l, o, cb); };
+  try { await e.unlock('not it at all'); await e.unlock(PW); } finally { crypto.scrypt = real; }
+  ok(seen.length === 2 && seen.every(isZero), 'the password Buffer of every unlock is zeros once the door returns');
+  const copies = [];
+  const k1 = e.keyFor('.mounts-key', { keyFile: path.join(dir, '.mounts-key') });
+  copies.push(k1.key);
+  ok(k1.ok && !isZero(k1.key), 'a reader gets a COPY of the key');
+  const box = boxOf(dir, '.mounts-key');
+  const realEnc = SB.encWith; let handed = null;
+  ok(box.dec(box.enc('copy')) === 'copy', 'secretBox under a vault: the copy is used for one call');
+  void handed; void realEnc;
+}
+
+console.log('F  ROLLBACK on an injected failure');
+for (const [step, at] of [['write-record', ''], ['read-back', ''], ['marker', '.channels-key'], ['shred', '.app-secrets-key']]) {
+  const { dir, files } = world();
+  const before = Object.fromEntries(Object.keys(files).map((k) => [k, fs.readFileSync(path.join(dir, k))]));
+  const e = mk(dir, { faultAt: (s, name) => {
+    if (s !== step || name !== at) return;
+    if (s === 'read-back') { fs.writeFileSync(path.join(dir, 'vault.json'), '{"v":1}'); return; }   // the disk answers something else
+    throw Object.assign(new Error('injected ' + s), { code: 'EIO' });
+  } });
+  const r = await e.setup(PW);
+  const back = Object.keys(files).every((k) => { try { return fs.readFileSync(path.join(dir, k)).equals(before[k]); } catch { return false; } });
+  const markers = Object.keys(files).filter((k) => fs.existsSync(path.join(dir, k + '.sealed')));
+  ok(!r.ok && r.code === 'migration_failed' && back && !markers.length && !fs.existsSync(path.join(dir, 'vault.json')) && e.state() === 'not_set_up',
+    `a fault at ${step}${at ? ' (' + at + ')' : ''} ⇒ migration_failed, every file back byte for byte, no marker, no vault.json, not_set_up`, JSON.stringify({ r, back, markers }));
+  ok(boxOf(dir, '.channels-key').dec(files['.channels-key'].ct) === 'secret under .channels-key', `  … and the stores read their files as before (${step})`);
+  e.close();
+}
+{
+  const { dir } = world({ keys: ['.accounts-key'] });
+  fs.writeFileSync(path.join(dir, '.mounts-key'), 'not a key', { mode: 0o600 });
+  const e = mk(dir);
+  const r = await e.setup(PW);
+  ok(!r.ok && r.code === 'migration_failed' && r.file === '.mounts-key' && r.why === 'key-malformed' && fs.existsSync(path.join(dir, '.accounts-key')) && !fs.existsSync(path.join(dir, 'vault.json')),
+    'a damaged key file stops the setup BEFORE anything moves (it could never be shredded safely)', JSON.stringify(r));
+  e.close();
+}
+
+console.log('G  RESUME an interrupted seal');
+{
+  const { dir, files } = world({ keys: ['.accounts-key', '.mounts-key'] });
+  const e = mk(dir);
+  await e.setup(PW); e.close();
+  // the crash: the record says "sealing", the files are still there (one matches its entry, one does not)
+  fs.writeFileSync(path.join(dir, '.accounts-key'), files['.accounts-key'].bytes, { mode: 0o600 });
+  fs.writeFileSync(path.join(dir, '.mounts-key'), crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
+  const rec = JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8'));
+  fs.writeFileSync(path.join(dir, 'vault.json'), JSON.stringify({ ...rec, sealing: { files: ['.accounts-key', '.mounts-key'], at: 1 } }));
+  const e2 = mk(dir);
+  await e2.unlock(PW);
+  const audit = fs.readFileSync(path.join(dir, VE.AUDIT_FILE), 'utf8');
+  ok(!fs.existsSync(path.join(dir, '.accounts-key')) && fs.existsSync(path.join(dir, '.mounts-key')) && /vault-seal-conflict/.test(audit) && !JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).sealing,
+    'the next unlock seals the file that matches its entry, KEEPS the one that differs (audited vault-seal-conflict), and clears the pending list');
+  ok(boxOf(dir, '.mounts-key').dec(files['.mounts-key'].ct) === 'secret under .mounts-key', 'the vault entry wins over a stray file for the store\'s reads');
+  e2.close();
+}
+
+console.log('H  ADOPT a restored key file');
+{
+  const { dir, files } = world({ keys: ['.accounts-key'] });
+  const e = mk(dir);
+  await e.setup(PW);
+  const k = crypto.randomBytes(32), ct = SB.encWith(k, 'restored');
+  fs.writeFileSync(path.join(dir, '.channels-key'), k.toString('hex'), { mode: 0o600 });
+  ok(boxOf(dir, '.channels-key').dec(ct) === 'restored' && !fs.existsSync(path.join(dir, '.channels-key')) && fs.existsSync(path.join(dir, '.channels-key.sealed'))
+    && JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8')).entries['.channels-key'], 'a key file restored after the setup is sealed in at its first read (entry + marker, file shredded)');
+  e.lock();
+  ok(SB.lawfulKey(path.join(dir, '.channels-key'), { hasCiphertext: () => true }).code === KF.VAULT_LOCKED, '… and is locked with the rest');
+  void files; e.close();
+}
+
+console.log('I  a damaged vault.json');
+{
+  const { dir } = world({ keys: ['.accounts-key'] });
+  fs.writeFileSync(path.join(dir, 'vault.json'), '{ not json');
+  const e = mk(dir);
+  ok(e.state() === 'locked' && e.facts().corrupt === true, 'an unreadable vault.json ⇒ locked, corrupt: true');
+  ok((await e.unlock(PW)).code === 'corrupt' && (await e.setup(PW)).code === 'already_set_up', 'unlock ⇒ corrupt; setup ⇒ already_set_up (a broken vault is never replaced)');
+  ok(SB.lawfulKey(path.join(dir, '.accounts-key'), { hasCiphertext: () => true }).code === KF.VAULT_LOCKED, 'the key file beside a broken vault is NOT read (locked)');
+  e.close();
+}
+
+console.log('J  pacing, change, idle lock');
+{
+  const { dir, files } = world({ keys: ['.accounts-key'] });
+  let clock = 1_000_000;
+  const e = mk(dir, { now: () => clock, signInPassword: (p) => p === 'the sign-in pw!' });
+  ok((await e.setup('the sign-in pw!')).code === 'same_as_sign_in', 'the sign-in password is refused as the second password');
+  ok((await e.setup('short')).code === 'password_too_short', 'a short password is refused');
+  await e.setup(PW); e.lock();
+  for (let i = 0; i < 5; i++) await e.unlock('wrong ' + i + ' password');
+  const p = await e.unlock(PW);
+  ok(!p.ok && p.code === 'paced' && p.retryInMs > 0 && p.retryInMs <= 60e3 && e.facts().failedTries === 5, '5 wrong ⇒ the next try is refused paced — the RIGHT password too', JSON.stringify(p));
+  clock += 60e3 + 1;
+  ok((await e.unlock(PW)).ok && e.facts().failedTries === 0, 'after the minute the right password unlocks and the count resets');
+  ok((await e.change('wrong old one', 'brand new password')).code === 'wrong_password', 'change with a wrong old password ⇒ wrong_password');
+  ok((await e.change(PW, PW)).code === 'same_password' && (await e.change(PW, 'the sign-in pw!')).code === 'same_as_sign_in', 'change refuses the same / the sign-in password');
+  ok((await e.change(PW, 'brand new password')).ok, 'change ok');
+  e.lock();
+  ok((await e.unlock(PW)).code === 'wrong_password' && (await e.unlock('brand new password')).ok, 'the old password stops, the new one opens');
+  ok(boxOf(dir, '.accounts-key').dec(files['.accounts-key'].ct) === 'secret under .accounts-key', 'the keys are unchanged by a password change');
+  clock += 1000 * 3600e3; e.idleTick();
+  ok(e.state() === 'unlocked' && e.facts().idleLockHours === 0, 'the idle lock is OFF by default (1000 h later, still unlocked)');
+  ok(e.setIdleLock(2).ok && e.setIdleLock(1.5).code === 'bad_hours' && e.setIdleLock(721).code === 'bad_hours', 'the idle lock is whole hours 0..720');
+  e.touch(); clock += 2 * 3600e3 - 1; e.idleTick();
+  ok(e.state() === 'unlocked', 'just under 2 h idle ⇒ still unlocked');
+  clock += 2; e.idleTick();
+  ok(e.state() === 'locked', '2 h with no person\'s input ⇒ locked');
+  e.close();
+}
+
+console.log('K  signals, broadcast, audit');
+{
+  const { dir } = world({ keys: ['.accounts-key'] });
+  const seen = [], logs = [];
+  const e = mk(dir, { bcast: (m) => seen.push(m), signals: true, log: { log: (m) => logs.push(m), warn: (m) => logs.push(m) } });
+  await e.setup(PW, { ip: '192.0.2.9' });
+  await e.lock(); await e.unlock('a wrong password', { ip: '192.0.2.10' }); await e.unlock(PW, { ip: '192.0.2.10' });
+  const first = process.listeners('SIGTERM')[0];
+  first();
+  ok(e.state() === 'locked', 'the FIRST SIGTERM listener (prepended) locks the vault before the hub\'s own shutdown');
+  await e.unlock(PW); process.listeners('SIGINT')[0](); ok(e.state() === 'locked', 'SIGINT locks it too');
+  ok(['unlocked', 'locked'].every((s) => seen.some((m) => m.type === 'vault-state' && m.state === s)) && seen.every((m) => !JSON.stringify(m).includes(PW)), 'every change is broadcast as vault-state (no secret in it)');
+  const audit = fs.readFileSync(path.join(dir, VE.AUDIT_FILE), 'utf8');
+  ok(/"event":"vault-unlock-failed"[^\n]*"ip":"192\.0\.2\.10"/.test(audit) && /"event":"vault-set-up"/.test(audit) && /"event":"vault-unlocked"/.test(audit), 'the audit has the failure with its address, the setup and the unlock');
+  ok(!audit.includes(PW) && !audit.includes('a wrong password') && !logs.join('\n').includes(PW) && !logs.join('\n').includes('a wrong password'), 'no password — right or wrong — in the audit or the log');
+  ok((fs.statSync(path.join(dir, VE.AUDIT_FILE)).mode & 0o777) === 0o600, 'the audit file is 0600');
+  e.close();
+  for (const sig of ['SIGTERM', 'SIGINT']) for (const l of process.listeners(sig)) process.removeListener(sig, l);
+}
+
+fs.rmSync(ROOT, { recursive: true, force: true });
+console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
+process.exit(fail ? 1 : 0);

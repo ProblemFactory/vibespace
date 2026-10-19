@@ -9283,4 +9283,45 @@ export default {
   "Show it here": "在这里显示", // lane desktop-display-modes
   "Lower resolution for {n} displays": "已按 {n} 屏降分辨率", // lane desktop-display-modes commit 2
   "Each HDR display streams at {w}×{h} instead of {fw}×{fh} so {n} of them keep their frame rate": "每个 HDR 显示器以 {w}×{h}（原 {fw}×{fh}）串流，{n} 个一起也能保住帧率", // lane desktop-display-modes commit 2
+  "That is not the second password": "第二密码不对", // lane vault-e2e-password
+  "Too many wrong passwords — try again in {n} s": "错误次数过多——{n} 秒后再试", // lane vault-e2e-password
+  "The vault record is damaged — nothing can be opened; restore data/vault.json from a backup": "保险库记录已损坏——什么也打不开；请从备份恢复 data/vault.json", // lane vault-e2e-password
+  "At least 8 characters": "至少 8 个字符", // lane vault-e2e-password
+  "The second password must not be the sign-in password": "第二密码不能和登录密码相同", // lane vault-e2e-password
+  "The new second password is the old one": "新的第二密码和旧的一样", // lane vault-e2e-password
+  "The key files could not be moved into the vault — nothing changed ({why})": "密钥文件没能移入保险库——什么都没有改变（{why}）", // lane vault-e2e-password
+  "The vault is not set up yet": "保险库还没有设置", // lane vault-e2e-password
+  "The vault is already set up": "保险库已经设置过了", // lane vault-e2e-password
+  "The vault is being set up — try again in a moment": "保险库正在设置——稍后再试", // lane vault-e2e-password
+  "Only a person can do this": "只有人能做这件事", // lane vault-e2e-password
+  "Could not reach the vault — {reason}": "无法访问保险库——{reason}", // lane vault-e2e-password
+  "Vault locked": "保险库已锁定", // lane vault-e2e-password
+  "Vault locked — click to unlock": "保险库已锁定——点击解锁", // lane vault-e2e-password
+  "Unlock the vault": "解锁保险库", // lane vault-e2e-password
+  "VibeSpace restarted — the credentials it stores (accounts, mounts, channels, integrations, app logins, passkeys) stay locked until you enter the second password.": "VibeSpace 已重启——它保存的凭据（账号、挂载、渠道、集成、应用登录、通行密钥）在你输入第二密码之前一直锁着。", // lane vault-e2e-password
+  "Second password": "第二密码", // lane vault-e2e-password
+  "Unlock": "解锁", // lane vault-e2e-password
+  "Vault unlocked": "保险库已解锁", // lane vault-e2e-password
+  "Set a second password": "设置第二密码", // lane vault-e2e-password
+  "Every credential VibeSpace stores is sealed in a vault that only this second password opens. After every restart, the first sign-in asks for it; until then nothing stored can be read.": "VibeSpace 保存的所有凭据都封存在一个只有这个第二密码才能打开的保险库里。每次重启后，第一次登录都会要求输入它；在那之前，任何保存的凭据都读不出来。", // lane vault-e2e-password
+  "There is no recovery: forget it and the stored credentials are gone — you would connect every account again. An export of the credentials is not part of this version.": "无法找回：忘了它，保存的凭据就没了——所有账号都得重新连接。「导出凭据备份」不在这个版本里。", // lane vault-e2e-password
+  "Repeat the second password": "再输一次第二密码", // lane vault-e2e-password
+  "The two passwords differ": "两次输入的密码不一致", // lane vault-e2e-password
+  "Vault set up — {n} key(s) sealed": "保险库已设置——封存了 {n} 个密钥", // lane vault-e2e-password
+  "Change the second password": "修改第二密码", // lane vault-e2e-password
+  "Current second password": "当前的第二密码", // lane vault-e2e-password
+  "New second password": "新的第二密码", // lane vault-e2e-password
+  "Second password changed": "第二密码已修改", // lane vault-e2e-password
+  "Unlocked": "已解锁", // lane vault-e2e-password
+  "Locked": "已锁定", // lane vault-e2e-password
+  "Not set up": "未设置", // lane vault-e2e-password
+  "Vault": "保险库", // lane vault-e2e-password
+  "Set up {when}": "设置于 {when}", // lane vault-e2e-password
+  "Lock now": "锁定", // lane vault-e2e-password
+  "Lock after idle": "闲置后锁定", // lane vault-e2e-password
+  "Lock the vault after this long with no keyboard or mouse on any VibeSpace page": "在任何 VibeSpace 页面上都没有键盘或鼠标操作这么久之后锁定保险库", // lane vault-e2e-password
+  "Vault…": "保险库…", // lane vault-e2e-password
+  "The vault is locked — unlock it first": "保险库已锁定——先解锁", // lane vault-e2e-password
+  "Lock the vault": "锁定保险库", // lane vault-e2e-password
+  "Check whether the vault is locked": "查看保险库是否锁定", // lane vault-e2e-password
 };

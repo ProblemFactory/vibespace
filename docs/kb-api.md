@@ -205,6 +205,16 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 - `PATCH /api/feedback/:id` `{status: open|handled}` — the owner's (cookie; the write-origin gate refuses a cross-site write first); → `{ok, report}`; 404 not_found, 400 status_unknown.
 - Live: the `feedback` StateSync store (`GET /api/sync/feedback` + `state-sync` ops; key = id, value = the public row) — server-owned: a client's `state-set` into it is refused.
 
+#### Vault (lane vault-e2e-password — src/routes/vault.js, the engine src/server/vault-engine.js, the record src/vault.js)
+Every answer carries the facts `{state: not_set_up|locked|unlocked, setUpAt, rotatedAt, lockedSince, failedTries, pacedForMs, idleLockHours, corrupt, keys}` (no secret: `keys` is a count). The person doors are POST, behind the sign-in gate, refuse any bearer / body `token` (403 `human_only`) and anything but this instance's own page (403 `cross_site`: Sec-Fetch-Site same-origin, or Origin = own — a browser-less write the gate passes is refused here). A refusal = `{ok:false, code, error}` + the facts.
+- `GET /api/vault/state` — the facts.
+- `POST /api/vault/setup` `{password}` — not_set_up only (409 `already_set_up`); ≥ 8 code points (400 `password_too_short`), not the sign-in password (400 `same_as_sign_in`); seals every key file into the vault (→ `{ok, sealed: [names]}`, unlocked); 500 `migration_failed` `{file?, why}` = nothing changed.
+- `POST /api/vault/unlock` `{password}` — 403 `wrong_password` `{failedTries}`; 429 `paced` `{retryInMs}` after 5 wrong in a row (one minute, the whole vault); 500 `corrupt` (data/vault.json damaged); 409 `vault_not_set_up`.
+- `POST /api/vault/change` `{old, new}` — re-wraps the DEK only; a wrong `old` counts toward the pacing; 400 `same_password` / `same_as_sign_in`.
+- `POST /api/vault/lock` — zeroes the DEK and every unwrapped key. `POST /api/vault/idle` `{hours: 0..720}` — the idle lock (0 = never, the default). `POST /api/vault/active` — a person's keyboard / pointer on a page (the idle lock's clock).
+- Agents (vsst_ / jbt_ bearer): `GET /api/agent/vault/state` → `{state, setUpAt, lockedSince, keys}`; `POST /api/agent/vault/lock`. There is no agent unlock / setup / change (404). `vibespace-vault status|lock`.
+- WS: `{type: 'vault-state', …facts}` to every client on every change. Audit: data/vault-audit.jsonl (0600) — `vault-set-up`, `vault-unlocked`, `vault-unlock-failed {ip, code, tries}`, `vault-locked {why: door|agent|idle|…}`, `vault-second-password-changed`, `vault-adopted`, `vault-seal-conflict` — never a password.
+
 #### OpenCode serve actions (S9 remainder, B-eac2 — src/routes/opencode.js)
 EVERY route takes `host` (query for GETs, body for POSTs) and hands it STRAIGHT to the ONE access layer (`src/server/opencode-access.js`): this machine's own facts / the `opencode-serve` agentd op on a paired device / the shipped `data/bin/vibespace-opencode-op` over ssh. `hostId` is a parameter, never a branch, and nothing downstream asks "is this remote?" again.
 - `GET /api/opencode/state?host=` — `{installed, ready, parked, parkedKind, version, port, caps, liveLaneHealthy, pendingQuestions, busySessions, lastError}` for the serve on that machine. No client calls it: a test seam (test-opencode-s9, test-restore-smoke).

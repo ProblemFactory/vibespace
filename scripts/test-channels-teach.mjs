@@ -58,8 +58,8 @@ console.log('① PURE: the paragraph, the header count, the reminder segment');
   const r0 = AR.perTurnToolsLine(T4), rOff = AR.perTurnToolsLine({ ...T4, channels: false });
   const rRead = AR.perTurnToolsLine({ ...T4, channels: 'read' }), rReq = AR.perTurnToolsLine({ ...T4, channels: 'request' });
   // lane cli-registry: the docs pointer names every OPEN row's topic in the registry's order (channels after jobs)
-  ok(r0 === rOff && !/channels/.test(r0) && r0.includes('vibespace-docs [status|ask|task|jobs|msg|feedback|pages|design|exit|window|browser|apps] —'), 'no reach ⇒ the reminder line is the one without the flag, no `channels` anywhere in it');
-  ok(rRead.includes(S.read) && rRead.includes('vibespace-docs [status|ask|task|jobs|channels|msg|feedback|pages|design|exit|window|browser|apps] —') && rReq.includes(S.request) && !rReq.includes(S.read), 'read reach ⇒ the read segment + `channels` in the vibespace-docs list; request-only ⇒ the request segment');
+  ok(r0 === rOff && !/channels/.test(r0) && r0.includes('vibespace-docs [status|ask|task|jobs|msg|feedback|pages|design|exit|window|browser|apps|vault] —'), 'no reach ⇒ the reminder line is the one without the flag, no `channels` anywhere in it');
+  ok(rRead.includes(S.read) && rRead.includes('vibespace-docs [status|ask|task|jobs|channels|msg|feedback|pages|design|exit|window|browser|apps|vault] —') && rReq.includes(S.request) && !rReq.includes(S.read), 'read reach ⇒ the read segment + `channels` in the vibespace-docs list; request-only ⇒ the request segment');
   ok(B(rRead) - B(r0) === B(S.read) + B(' · ') + B('|channels'), `the reminder grows by the segment + its separator + "|channels" only (${B(r0)} → ${B(rRead)} B)`);
   ok(AR.perTurnToolsLine({ ...T4, channels: 'read' }, { multi: true, manager: true }).includes('vibespace-task --group <id> progress') && AR.perTurnToolsLine(T4, { manager: true }).includes('you are a Group MANAGER'), 'the moved line keeps its multi-group and manager clauses');
 }
