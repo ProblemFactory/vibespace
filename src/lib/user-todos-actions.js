@@ -320,6 +320,20 @@ export function inboxModel(app) {
         : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
     }
+    if (rec && rec.action && rec.action.type === 'vault-grant-ask') {
+      // lane vault-manual-and-lock (design q-043 D4): THE person's answer to an agent's request for a stored secret (cookie
+      // route; any bearer is refused human_only) — once (its next run) / 8h (every run for 8 hours) / deny. A click: a grant
+      // never outlives 8 hours nor a lock, and each new kind of command still shows its own card. A grant opens the entry the
+      // way the row's switch does, so Allow asks 验证是你 FIRST, in the press's own task (Deny is a click).
+      if (answer !== 'deny' && !revealLeftMs() && !(await askRevealPassword())) return false;
+      const r = await fetchJson(`/api/vault/request/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(answer !== 'deny' ? revealHeaders() : {}) }, body: JSON.stringify({ answer }) });
+      if (r && r.ok) { showToast(r.outcome === 'granted' ? t('Granted for 8 hours — a lock ends it') : r.outcome === 'granted-once' ? t('Granted for its next run') : t('denied')); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer)
+      const code = r && r.code;
+      if (code === 'reveal_needs_password') forgetReveal();
+      showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_unknown' ? t('That request is gone')
+        : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : (r && r.error) || t('server unreachable'), { type: 'error' });
+      return false;
+    }
     if (rec && rec.action && rec.action.type === 'channel-watch-request') {
       // lane channel-agent-watch W1: an agent asked to be WOKEN by a conversation — Approve writes exactly what the item
       // says, through the access request's own decide route (the one door; never a second approval surface)

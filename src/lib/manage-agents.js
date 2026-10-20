@@ -113,7 +113,7 @@ function oatFileRefusedText(reason, code = '') {
   if (reason === 'oat-unreadable') return t('the long-lived token can’t be decrypted — mint it again');
   // the KEY FILE is why (lane oat-census-closure, O1): restore it / it will be read again — never a new key, never a re-mint
   if (reason === 'key-missing') return t('the key file is missing — restore it from a backup');
-  if (reason === 'key-unreadable' && code === 'vault_locked') return t('The vault is locked — unlock it first'); // lane vault-e2e-password: the taskbar's lock chip is the door
+  if (reason === 'key-unreadable' && code === 'vault_locked') return t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)'); // lane vault-e2e-password: the taskbar's lock chip is the door
   if (reason === 'key-unreadable') return t('the key file could not be read ({code}) — nothing was replaced', { code: escHtml(code || '?') });
   return '';
 }

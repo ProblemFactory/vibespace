@@ -27,7 +27,7 @@ const CAUSE_RULES = [   // first match wins; the sentences are src/plugins/frp.j
 const CLASSES = Object.freeze(CAUSE_RULES.map(([c]) => c));
 const SAID_PER_JOB = (cause) => cause !== 'vault_locked';
 // the status words of the vault class (the agent is told the owner already has it — never asked to pass it on)
-const VAULT_WAIT = 'waiting for the vault — it is locked; the owner has the unlock item, and this republishes by itself when it opens';
+const VAULT_WAIT = 'waiting for the vault — it is locked; the owner has the unlock item (For you) and unlocks it on this instance\'s page; this republishes by itself when it opens';
 const ERROR_MAX = 300;
 
 const clip = (s, n) => ([...String(s)].length <= n ? String(s) : [...String(s)].slice(0, n - 1).join('') + '…');

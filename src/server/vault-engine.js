@@ -30,6 +30,13 @@
  *     «VibeSpace», the store as the verb). A note that changes what the owner reads re-announces the facts (`blocked` = the
  *     count the lock strip shows) and runs `onBlocked(fn)` (the wiring refreshes its ONE For-you item). Nothing here reads a
  *     key or unlocks: the lock law is unchanged.
+ *   · THE USE LAW (lane vault-use-law — design q-043 D1 「用途，不给值」, D2, D7): `noteUse(entry, use, o)` is the ONE writer
+ *     of a use — keyFor (a store's own read: by system, door `store`), a door that uses an entry for a caller, the Vault
+ *     window's reveal, a bearer refused at a person's door — in ONE shape (src/vault-use.js `useOf`: at, by, door, conv; the
+ *     window's «last used» reads it). A BEARER's use (agent / job / automation key) is ONE `vault-use` audit line (`useLine`:
+ *     entry, purpose, actor, door, outcome, receipt — a closed key set, never a value); a failure that is the actor's own is
+ *     counted per actor × entry and the 20th in a day runs `onFailing(fn)` ONCE (the wiring files the owner's card). A wrong
+ *     second password counts the same way, its address the actor (design §2 T7). Nothing here hands a value to anyone.
  */
 const fs = require('fs');
 const path = require('path');
@@ -39,6 +46,7 @@ const SB = require('../secret-box.js');
 const KF = require('../key-file.js');
 const { runMigrations } = require('../migration-runner.js');
 const VB = require('../vault-blocked.js');   // PURE: who a refusal stopped, this lock epoch (lane vault-locked-refusal-notice)
+const VU = require('../vault-use.js');   // PURE: the use's ONE shape, its audit line, the daily failure count (lane vault-use-law)
 
 /** THE STORE KEYS the vault holds — the key files the key-file law used to keep beside their data (name = the base name under
  *  data/; `raw` = the file holds the 32 bytes, else 64 hex characters). scripts/test-vault-law.mjs: every key file a src/
@@ -53,6 +61,7 @@ const STORE_KEYS = Object.freeze([
 ]);
 const SEALED_SUFFIX = '.sealed';
 const AUDIT_FILE = 'vault-audit.jsonl';
+const USES_TAIL = 512 * 1024;   // lane vault-manual-and-lock: `vibespace-vault uses` reads the audit file's last 512 KiB, never more
 const PACE_AFTER = 5;
 const PACE_MS = 60e3;
 const IDLE_MAX_HOURS = 720;
@@ -105,7 +114,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   const startedAt = now();    // lane vault-relock-door (owner 2026-10-20): the engine's construction = the server's boot (ms); the open tab tells a RESTART (a NEW startedAt) from a lock act (the SAME one)
   let failedTries = 0, pacedUntil = 0, busy = false, lastActivity = now(), inFlight = 0;   // inFlight: derives running now count toward the pace BEFORE they land (verify r1 A1: 40 concurrent wrong passwords landed 40 derives)
   const unlockHooks = [];   // what a locked start left undone and the unlock must retry (the wiring: mounts' restore)
-  const uses = new Map();   // lane vault-contents-window: entry name → { at, by } — the store key's last use (memory only; the Vault window's «last used»)
+  const uses = new Map();   // lane vault-contents-window: entry name → its last use (memory only; the Vault window's «last used») — lane vault-use-law: VU.useOf's ONE shape { at, by, door, conv }, written by noteUse only
   const keyNameOf = (store) => { const k = STORE_KEYS.find((x) => x.store === store); return k ? k.name : null; };   // a store id (src/vault-inventory.js STORES) → its key's entry name
   const openHooks = [];     // r2: after a setup AND every unlock — seal what the vault does not hold yet (host token files, the frp field)
   const lockHooks = [];     // r2: after a lock act (door / agent / idle) — the wiring signs every login out
@@ -210,10 +219,12 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
 
   // ── THE PROVIDER secret-box asks (sync: every store reads its key synchronously) ──
   /** lane vault-contents-window: every key read that opened is a USE of that store key (`by` = who the read is for: a
-   *  reveal from the Vault window says 'human'; a store's own read carries no subject — 'system'). */
+   *  reveal from the Vault window says 'human'; a store's own read carries no subject — 'system'). lane vault-use-law: the
+   *  use carries its `door` (a store's own read: `store`) and `conv` (the conversation it is for, when a door knows one),
+   *  written by THE ONE WRITER below. */
   function keyFor(name, opts = {}) {
     const r = keyRead(name, opts);
-    if (r && r.ok) uses.set(name, { at: now(), by: ['human', 'agent', 'job'].includes(opts.by) ? opts.by : 'system' });
+    if (r && r.ok) noteUse(name, { by: opts.by, door: opts.door || 'store', conv: opts.conv });
     else if (r && r.code === KF.VAULT_LOCKED) blocked(VB.HUB, storeVerb(name));   // lane vault-locked-refusal-notice: the store-key road notes itself
     return r;
   }
@@ -355,6 +366,54 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   const runHooks = (list, what, ...args) => { for (const fn of list) { try { const r = fn(...args); if (r && typeof r.catch === 'function') r.catch((e) => log.warn?.(`[vault] ${what} hook failed: ${(e && e.message) || e}`)); } catch (e) { log.warn?.(`[vault] ${what} hook failed: ${(e && e.message) || e}`); } } };
 
+  // ── THE USE LAW (lane vault-use-law — design q-043 D1 / D2 / D7) ──
+  const failures = VU.createFailures();   // failed uses per actor × entry, a rolling day (memory only: a restart starts afresh)
+  const failingHooks = [];                // … and who is told: the wiring's card per actor × entry (src/server/vault-hooks.js)
+  /** THE ONE WRITER of a use of an entry. `entry` = an entry name, or a store id (the Vault window passes its store: the use
+   *  is of that store's key); `use` = { by, door, conv } (VU.useOf — a bare `by` string too); `o` = { outcome ('ok' or the
+   *  refusal's code), purpose, actor (a NAME a person reads), key (the counted actor when there is no conversation: a
+   *  person's address), ip }. A use that opened is the entry's «last used»; a BEARER's use, allowed or refused, is ONE
+   *  `vault-use` audit line (VU.useLine — a closed key set: whatever else `o` holds never reaches the file); a failure that
+   *  is the actor's own (VU.counts) is counted and the 20th in a day runs the onFailing hooks once. → { receipt }.
+   *  lane vault-manual-and-lock: `o.receipt` (VU.RECEIPT_RE) = ONE receipt a door already gave its caller (a run naming three
+   *  entries answers one receipt and writes three lines carrying it); `o.store` = the store an entry lives in (its «last used»). */
+  function noteUse(entry, use = {}, o = {}) {
+    const name = keyNameOf(entry) || String(entry || '');
+    const u = VU.useOf(use, now());
+    const outcome = VU.outcomeOf(o.outcome);
+    if (outcome === 'ok' || o.used === true) { uses.set(name, u); const sn = o.store ? keyNameOf(o.store) : null; if (sn) uses.set(sn, u); }   // o.used: a run's child had the value, whatever ended it
+    if (u.by === 'system') return { receipt: null };   // the hub's own read: its «last used» only (a line per store read would drown the file)
+    const receipt = VU.RECEIPT_RE.test(String(o.receipt || '')) ? String(o.receipt) : `vr-${crypto.randomBytes(6).toString('hex')}`;
+    if (VU.BEARERS.includes(u.by)) audit('vault-use', VU.useLine({ at: u.at, entry: name, purpose: o.purpose, use: u, actor: o.actor, outcome, receipt, ip: o.ip }));
+    if (VU.counts(outcome)) {
+      const f = failures.note({ key: `${u.by}:${u.conv || o.key || o.actor || '-'}`, actor: o.actor, by: u.by, entry: name, door: u.door, outcome, at: u.at });
+      if (f.fire) runHooks(failingHooks, 'a failing actor', f.card);
+    }
+    return { receipt };
+  }
+  /** D7 (design §2 T7): a wrong SECOND PASSWORD is a failed use of the vault by whoever typed it — its address names them
+   *  (the door's own line is the audit; this is the count). */
+  /** lane vault-manual-and-lock (design D4 — `vibespace-vault uses`): ONE conversation's own `vault-use` lines, newest first —
+   *  the audit file's tail read BOUNDED (its last USES_TAIL bytes: a long file is never read whole; a FIFO never stalls), each
+   *  line's closed fields re-checked (VU.usesOf) — never a value (a line holds none), never another conversation's. */
+  function usesOf(conv, { limit = VU.USES_MAX } = {}) {
+    let text = '';
+    let fd = null;
+    try {
+      fd = fs.openSync(path.join(dataDir, AUDIT_FILE), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+      const st = fs.fstatSync(fd);
+      if (st.isFile()) {
+        const n = Math.min(st.size, USES_TAIL), buf = Buffer.alloc(n);
+        let got = 0;
+        while (got < n) { const r = fs.readSync(fd, buf, got, n - got, st.size - n + got); if (!r) break; got += r; }
+        text = buf.subarray(0, got).toString('utf8');
+        if (st.size > n) text = text.slice(text.indexOf('\n') + 1);   // the first line was cut — it is skipped whole
+      }
+    } catch { text = ''; } finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } }
+    return VU.usesOf(text, conv, limit);
+  }
+  const wrongPassword = (door, ip) => noteUse(VU.VAULT_ENTRY, { by: 'human', door }, { outcome: 'wrong_password', actor: ip ? `someone at ${ip}` : 'someone on this instance', key: ip || '-', ip });
+
   // ── the migration ──
   /** The key files present now → the plan, or `{ error: { file, code } }` (an unreadable / damaged one stops the setup: it
    *  could never be shredded safely, and the owner must see it). */
@@ -460,6 +519,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
         if (failedTries % PACE_AFTER === 0) pacedUntil = now() + PACE_MS;
       }
       audit('vault-unlock-failed', { ip, code: r.code, tries: failedTries });
+      if (r.code === 'wrong_password') wrongPassword('unlock', ip);
       announce();
       return { ok: false, code: r.code, failedTries, ...(pacedUntil > now() ? { retryInMs: pacedUntil - now() } : {}) };
     }
@@ -491,6 +551,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (!r.ok) {
       if (r.code === 'wrong_password') { failedTries++; if (failedTries % PACE_AFTER === 0) pacedUntil = now() + PACE_MS; }
       audit('vault-reveal-refused', { ip, who, code: r.code, tries: failedTries });
+      if (r.code === 'wrong_password') wrongPassword('confirm', ip);
       announce();
       return { ok: false, code: r.code, failedTries, ...(pacedUntil > now() ? { retryInMs: pacedUntil - now() } : {}) };
     }
@@ -528,6 +589,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (!r.ok) {
       if (r.code === 'wrong_password') { failedTries++; if (failedTries % PACE_AFTER === 0) pacedUntil = now() + PACE_MS; }
       audit('vault-change-failed', { ip, code: r.code, tries: failedTries });
+      if (r.code === 'wrong_password') wrongPassword('change', ip);
       announce();
       return { ok: false, code: r.code, failedTries };
     }
@@ -567,13 +629,14 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   let timer = null;
   if (idleTimer) { timer = setInterval(idleTick, 60e3); timer.unref?.(); }
 
-  const provider = { keyFor, peek, hasEntry, state, epoch: () => epoch, secretGet, secretPut, secretDrop, secretAdopt, blocked };   // `blocked`: a door that holds only the data dir reaches the ONE helper (SB.vaultForDir)
+  const provider = { keyFor, peek, hasEntry, state, epoch: () => epoch, secretGet, secretPut, secretDrop, secretAdopt, secretNames, blocked };   // secretNames: the agent-output belt (src/agent-output-belt.js) enumerates the maskable entries from a data dir   // `blocked`: a door that holds only the data dir reaches the ONE helper (SB.vaultForDir)
   const unregister = register ? SB.registerVault(dataDir, provider) : () => {};
   const engine = {
     dataDir, file: FILE, state, facts, setup, unlock, lock, change, setIdleLock, touch, idleTick, keyFor, peek, hasEntry,
     // lane vault-contents-window: the Vault window's doors (src/server/vault-contents.js) — the second password again, a
     // store key's last use, a use by a person, and the vault's audit file (one line per reveal — never a value)
-    confirm, lastUse: (store) => { const n = keyNameOf(store); return n && uses.has(n) ? { ...uses.get(n) } : null; }, noteUse: (store, by) => { const n = keyNameOf(store); if (n) uses.set(n, { at: now(), by: ['human', 'agent', 'job'].includes(by) ? by : 'system' }); }, audit,
+    confirm, lastUse: (store) => { const n = keyNameOf(store); return n && uses.has(n) ? { ...uses.get(n) } : null; }, noteUse, audit,
+    usesOf,   // lane vault-manual-and-lock: ONE conversation's own vault-use lines (vibespace-vault uses) — names, codes, receipts   // lane vault-use-law: noteUse = THE ONE WRITER of a use (the window's reveal, a door's use, a refusal)
     /** `fn()` after every successful unlock (a boot step that ran while locked — mounts' restore — runs again). */
     onUnlock(fn) { if (typeof fn === 'function') unlockHooks.push(fn); },
     /** r2: `fn()` after a setup and after every unlock (seal what the vault does not hold yet). */
@@ -583,6 +646,9 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     /** lane vault-locked-refusal-notice: THE ONE HELPER (above) + the epoch's list + `fn(summary)` after a note that changed it. */
     blocked, blockedSummary: () => blockedList.summary(),
     onBlocked(fn) { if (typeof fn === 'function') blockedHooks.push(fn); },
+    /** lane vault-use-law (design q-043 D7): `fn(card)` once when an actor's failed uses of one entry reach 20 in a day —
+     *  card = { actor, by, key, entry, door, outcome, n, since, at } (names and codes; never a value). */
+    onFailing(fn) { if (typeof fn === 'function') failingHooks.push(fn); },
     secretGet, secretPut, secretDrop, secretAdopt, secretNames, agentMint, agentPut,   // lane vault-mint-put
     macOf,   // lane vault-run-door: a mark under a DEK-derived key (the run door's store) — null unless unlocked
     epoch: () => epoch, resumeSeal,

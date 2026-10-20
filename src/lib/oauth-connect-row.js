@@ -36,7 +36,7 @@ export function renderConnectRow(box, decl, st, rerender) {
   // lane vault-e2e-password-fix-r2: the sign-in is SEALED and the vault is LOCKED — the vault's door, never "connect" (a new
   // sign-in could not even be stored while locked)
   if (a.state === 'vault-locked') {
-    words.classList.add('plugin-cfg-warn'); words.textContent = t('The vault is locked — unlock it first');
+    words.classList.add('plugin-cfg-warn'); words.textContent = t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)');
     const open = el('button', 'mounts-btn mounts-btn-primary oauth-unlock', t('Unlock'));
     open.onclick = () => window.dispatchEvent(new CustomEvent('vs-vault-door'));
     row.append(words, open);

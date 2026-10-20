@@ -171,7 +171,7 @@ class MachineMounts {
     }
     const sshArgs = [...this.hosts.sshArgs(h, { multiplex: true }), '--', [cmd, ...args.map((a) => `'${String(a).replace(/'/g, `'\\''`)}'`)].join(' ')];
     return await new Promise((resolve) => {
-      const child = execFile('ssh', sshArgs, { timeout: 60000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const child = execFile('ssh', sshArgs, { env: this.hosts.sshEnv(), timeout: 60000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) resolve({ code: err.code || 1, stdout: (stdout || '').toString(), stderr: (stderr || err.message).toString() });
         else resolve({ code: 0, stdout: (stdout || '').toString(), stderr: '' });
       });

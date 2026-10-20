@@ -95,7 +95,7 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     case 'agent-forbidden': return t('Only you can do this, from the Channels panel — an agent may not');
     case 'unknown-option': return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused');
     case 'auth-expired': return t('The login expired — re-authorize the channel');
-    case 'vault-locked': return t('The vault is locked — unlock it first');   // lane vault-e2e-password-fix-r2: the sign-in is sealed, not expired
+    case 'vault-locked': return t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)');   // lane vault-e2e-password-fix-r2: the sign-in is sealed, not expired
     case 'auth-failed': return raw ? t('The consent flow failed: {error}', { error: raw }) : t('The consent flow failed');
     case 'not-supported': return t('This channel does not support that');
     case 'send-not-available': return t('Sending is not available here: {why}', { why: chanCaps.sendWhyText(r.why || 'unknown', { t }) });

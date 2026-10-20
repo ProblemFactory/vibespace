@@ -160,7 +160,8 @@ try {
 
   console.log('⑦ _rcStats over a fake rclone');
   const FAKE = path.join(D, 'rclone');
-  fs.writeFileSync(FAKE, '#!/bin/bash\n[ "$1" = rc ] || exit 2\n[ "$2" = --unix-socket ] || exit 3\n[ -n "$FAKE_HANG" ] && sleep 5\ncase "$4" in core/stats) echo \'{"bytes": 7, "errors": 1}\';; vfs/queue) echo \'{"queue": [{"name": "a.txt"}]}\';; *) exit 4;; esac\n', { mode: 0o755 });
+  // the hang knob is a FILE (lane spawn-env-debts): the rc child's env is BUILT (rcloneEnv) — a test's own name never reaches it
+  fs.writeFileSync(FAKE, '#!/bin/bash\n[ "$1" = rc ] || exit 2\n[ "$2" = --unix-socket ] || exit 3\n[ -e "' + path.join(D, 'hang') + '" ] && sleep 5\ncase "$4" in core/stats) echo \'{"bytes": 7, "errors": 1}\';; vfs/queue) echo \'{"queue": [{"name": "a.txt"}]}\';; *) exit 4;; esac\n', { mode: 0o755 });
   mgr.rcloneBin = () => FAKE;
   process.env.XDG_RUNTIME_DIR = run;
   try {
@@ -170,12 +171,12 @@ try {
     try {
       const st = await mgr._rcStats(mgr._get('od'));
       ok(st.stats?.bytes === 7 && st.queue?.queue?.[0]?.name === 'a.txt', '⑦ core/stats + vfs/queue parsed', JSON.stringify(st));
-      process.env.FAKE_HANG = '1';
+      fs.writeFileSync(path.join(D, 'hang'), '');
       const t1 = Date.now(), h = await mgr._rcStats(mgr._get('od'), 300);
       // the bound's own word (lane wall-clock-ratchet-down: `< 2500 ms` judged the machine): the 300 ms kill answered —
       // the fake left to run would print its stats after 5 s, no error; the ms are information
       ok(/no answer in 300 ms/.test(h.error || '') && !h.stats, '⑦ a daemon that does not answer ⇒ {error} from the bound\'s own kill', `${h.error} ${Date.now() - t1} ms`);
-      delete process.env.FAKE_HANG;
+      fs.rmSync(path.join(D, 'hang'), { force: true });
     } finally { srv.close(); }
   } finally { if (env0 === undefined) delete process.env.XDG_RUNTIME_DIR; else process.env.XDG_RUNTIME_DIR = env0; }
 

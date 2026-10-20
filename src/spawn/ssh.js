@@ -88,7 +88,7 @@ function sshLadder(c) {
                   const tar = await execFileAsync('tar', [...tarArgs, ...tokArgs], { timeout: 15000 });
                   const h2 = hosts.get(data.hostId);
                   await execFileAsync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin" "$HOME/.vibespace/editor"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* "$HOME/.vibespace/bin/agent-browser" 2>/dev/null; [ -f "$HOME/.vibespace/bin/code" ] && { mv -f "$HOME/.vibespace/bin/code" "$HOME/.vibespace/editor/code"; chmod +x "$HOME/.vibespace/editor/code"; } || true'],
-                    { input: tar, timeout: 20000 });
+                    { env: hosts.sshEnv(), input: tar, timeout: 20000 });
                   if (integrationOn) {
                     // NODE FINDER (2.244.4, userN's Novita — the chicken-and-egg
                     // behind "hook still says node: not found"): the spawn shell is
@@ -164,7 +164,7 @@ function sshLadder(c) {
             if (spawnAccount.secret) {
               const kf = `$HOME/.vibespace/${spawnAccount.id}.key`; // id shape acct-/sub-<hex>, metachar-free
               await execFileAsync('ssh', [...hosts.sshArgs(h), '--', `umask 077; mkdir -p "$HOME/.vibespace"; cat > "${kf}"`],
-                { input: spawnAccount.secret.value, timeout: 15000 });
+                { env: hosts.sshEnv(), input: spawnAccount.secret.value, timeout: 15000 });
               return `${spawnAccount.secret.var}="$(cat "${kf}")" `;
             }
             if (spawnAccount.remoteCreds?.shippable === false) {
@@ -213,7 +213,7 @@ function sshLadder(c) {
             // consumed the ssh stdin stream, a fallback would extract nothing
             // and silently spawn with missing creds. Non-GNU hosts fail LOUD.
             const script = [`umask 077`, `mkdir -p "${rdir}"`, ...heal, `tar -x --keep-newer-files -C "${rdir}"`, ...(rc.ensureTargets || []), ...links].join('; ');
-            await execFileAsync('ssh', [...hosts.sshArgs(h), '--', script], { input: tar, timeout: 20000 });
+            await execFileAsync('ssh', [...hosts.sshArgs(h), '--', script], { env: hosts.sshEnv(), input: tar, timeout: 20000 });
             return `${rc.envVar}="${rdir}" `;
           };
   async function terminal() {

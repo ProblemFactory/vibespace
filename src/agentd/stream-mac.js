@@ -320,7 +320,8 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
         const h = st.helper || {};
         return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, kind: plan.kind, display: plan.display ? plan.display.id : null, window: plan.window, w: plan.w, h: plan.h, rung: plan.rung, white: null, kbps: rate.kbps, floor: rate.floor, rate: rate.last,
           encodeMs: h.encMs == null ? null : h.encMs, captureMs: h.capMs == null ? null : h.capMs, timing: 'helper', lowLatency: h.lowLatency == null ? null : h.lowLatency,
-          captured: h.captured || 0, idle: h.idle || 0, repeats: h.repeats || 0, aus: st.aus, dropped: h.dropped || 0, restarts: 0, captureRestarts: st.captureRestarts, rateChanges: st.rateChanges, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
+          captured: h.captured || 0, idle: h.idle || 0, repeats: h.repeats || 0, aus: st.aus, dropped: h.dropped || 0, restarts: 0, captureRestarts: st.captureRestarts, rateChanges: st.rateChanges, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered,
+          ecoqos: 'n/a' }; // lane stream-sdr-ecoqos: Windows' power throttling (EcoQoS) is not a Mac's — nothing opted out here, no details row
       },
       /** Where the picture sits on the Mac (the helper's started / frame lines) — the injector maps picture pixels with it. */
       inputTarget() { return target; },

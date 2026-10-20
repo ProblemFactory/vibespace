@@ -153,7 +153,7 @@ function onChildExit({ exitCode, signal }) {
     // new-session marker instead of silently impersonating a continuation.
     process.env.VIBESPACE_REMOTE_ATTEMPT = String(retries);
     const delay = [1000, 2000, 5000, 10000, 30000][Math.min(4, retries - 1)];
-    try { process.stdout.write(vaultWait ? `\r\n\x1b[33m[vibespace] waiting for the vault to be unlocked — retrying in ${Math.round(delay / 1000)}s…\x1b[0m\r\n` : `\r\n\x1b[33m[vibespace] connection lost — reconnecting in ${Math.round(delay / 1000)}s (attempt ${retries})…\x1b[0m\r\n`); } catch {}
+    try { process.stdout.write(vaultWait ? `\r\n\x1b[33m[vibespace] waiting for the vault to be unlocked — retrying in ${Math.round(delay / 1000)}s… (the owner has been told: For you names what is waiting on it; Unlock… at the top of this instance's page)\x1b[0m\r\n` : `\r\n\x1b[33m[vibespace] connection lost — reconnecting in ${Math.round(delay / 1000)}s (attempt ${retries})…\x1b[0m\r\n`); } catch {}
     setTimeout(() => {
       try { spawnChild(); } catch (err) {
         log(`respawn failed: ${err.message}`);

@@ -101,10 +101,10 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
 
 // ── ④ patched-copy controls: the pre-move ladders restored ⇒ ② red ──
 {
-  const ENV_LINE = '    remote = (row.rclone ? row : PROVIDERS.defaultRow).rclone(m, env, P, R, this);';
+  const ENV_LINE = '    remote = (row.rclone ? row : PROVIDERS.defaultRow).rclone(m, cfg, P, R, this);';   // the provider fills the RCLONE_CONFIG_VS_* object (lane spawn-env-debts: `cfg`, built into the env after)
   const VENDOR = 'static OAUTH_CLIENT_VENDOR = Object.freeze(Object.fromEntries(PROVIDERS.rows.filter((r) => r.oauth).map((r) => [r.id, r.oauth])));';
   ok(mountsSrc.split(ENV_LINE).length === 2 && mountsSrc.split(VENDOR).length === 2, '④ control anchors exist once');
-  const m1 = await drive(withList(mountsSrc.replace(ENV_LINE, '    remote = PROVIDERS.defaultRow.rclone(m, env, P, R, this);'), 'ladder'), 'ladder');
+  const m1 = await drive(withList(mountsSrc.replace(ENV_LINE, '    remote = PROVIDERS.defaultRow.rclone(m, cfg, P, R, this);'), 'ladder'), 'ladder');
   ok(m1.listed && !m1.env, '④ NEGATIVE CONTROL: a rclone env that knows only its old arms (default = S3) mounts the fake as S3 — the env assert is red', JSON.stringify(m1));
   const m2 = await drive(withList(mountsSrc.replace(VENDOR, "static OAUTH_CLIENT_VENDOR = Object.freeze({ drive: 'google', gmail: 'google', onedrive: 'microsoft' });"), 'vendor'), 'vendor');
   ok(m2.listed && !m2.lent, '④ NEGATIVE CONTROL: the literal vendor map restored never offers the fake\'s client — the borrow assert is red', JSON.stringify(m2));
@@ -300,6 +300,31 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
   });
   ok(bad.length === 0, `⑥ dirCache census: ${PROV.rows.filter((r) => r.dirCache).length} rclone rows declare it, poll < ttl, poll only on onedrive / drive`, bad.join('; '));
   ok(PROV.rows.filter((r) => r.dirCache?.poll).map((r) => r.id).sort().join() === 'drive,onedrive', '⑥ the polling rows are exactly onedrive + drive ({5m, 1m} = rclone\'s own defaults)');
+}
+// ⑦ lane spawn-env-debts — THE rclone ENV IS BUILT: a hub env PLANTED with runtime-built fakes (an agent conversation's
+// tokens, a cloud key, a stray RCLONE_CONFIG_* remote) beside the names rclone measurably reads (an egress proxy, a trust
+// root, SSH_AUTH_SOCK, XDG_CACHE_HOME): _rcloneFor hands every mount daemon / probe the service list + RCLONE_ENV_KEEP +
+// the egress door + the record's own RCLONE_CONFIG_VS_* — nothing else. CONTROL: the pre-fix `{ ...process.env }` (a
+// patched copy) hands the daemon every planted name ⇒ RED.
+{
+  const r8 = () => require('crypto').randomBytes(8).toString('hex');
+  const PLANT = { VIBESPACE_SESSION_TOKEN: 'vs-sess-' + r8(), CLAUDE_CODE_MESSAGING_TOKEN: 'cc-msg-' + r8(), AWS_SECRET_ACCESS_KEY: 'aws-' + r8(), RCLONE_CONFIG_STRAY_TOKEN: 'stray-' + r8() };
+  const KEPT = { HTTPS_PROXY: 'http://127.0.0.1:9', no_proxy: 'localhost', SSL_CERT_FILE: '/etc/ssl/x.pem', SSH_AUTH_SOCK: '/tmp/a.sock', XDG_CACHE_HOME: '/tmp/xc' };
+  const saved = Object.fromEntries(Object.keys({ ...PLANT, ...KEPT }).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, PLANT, KEPT);
+  const env7 = (MM, tag) => { const dd = path.join(ROOT, 'env-' + tag); fs.mkdirSync(dd, { recursive: true }); const mm = new MM({ dataDir: dd }); const id = mm.add({ type: 's3', name: 'e7 ' + tag, endpoint: 'https://s3.example', bucket: 'b', accessKey: 'AK', secretKey: 'SK7' }); return mm._rcloneFor(mm._get(id)).env; };
+  try {
+    const e = env7(MountManager, 'real');
+    const { SERVICE_ENV_KEEP, RCLONE_ENV_KEEP, EGRESS_ENV } = require(path.join(REPO, 'src/agent-env.js'));
+    const allowed = new Set([...SERVICE_ENV_KEEP, ...RCLONE_ENV_KEEP, ...EGRESS_ENV]);
+    const extra = Object.keys(e).filter((k) => !allowed.has(k) && !/^LC_[A-Z]+$/.test(k) && !k.startsWith('RCLONE_CONFIG_VS_'));
+    ok(Object.keys(PLANT).every((k) => process.env[k] === PLANT[k]), '⑦ the planted names reached the hub (the leg is not vacuous)');
+    ok(extra.length === 0 && !Object.values(PLANT).some((v) => Object.values(e).includes(v)), '⑦ the rclone env = the service list + RCLONE_ENV_KEEP + egress + its own RCLONE_CONFIG_VS_*: no planted name or value, no stray RCLONE_CONFIG_ remote', JSON.stringify(extra));
+    ok(e.RCLONE_CONFIG_VS_SECRET_ACCESS_KEY === 'SK7' && Object.keys(KEPT).every((k) => e[k] === KEPT[k]), "⑦ kept: the record's credential, the egress proxy + trust root, SSH_AUTH_SOCK (an sftp remote through ssh-agent), XDG_CACHE_HOME (rclone's default cache)", JSON.stringify(Object.keys(e)));
+    const mSpread = mountsSrc.replace('const env = rcloneEnv(cfg);', 'const env = { ...process.env, ...cfg };');
+    const b = env7(MC.load('src/mounts.js', mSpread, 'env-spread').MountManager, 'spread');
+    ok(mSpread !== mountsSrc && Object.keys(PLANT).every((k) => b[k] === PLANT[k]), '⑦ CONTROL: the pre-fix `{ ...process.env }` (a patched copy) hands the daemon every planted name ⇒ RED');
+  } finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -189,7 +189,7 @@ export function installPluginsUI(App) {
           // lane dropline-connect-door (a fleet user's report 2026-10-18): with no key and no sign-in the chip is THE DOOR — the
           // verb, like Tailscale's 「Log in…」, never a status sentence nobody guesses opens a sign-in; the sheet it opens is the same
           // lane vault-e2e-password-fix-r2: a sign-in the LOCKED vault keeps closed — the vault's door, never "connect"
-          chip = p.vaultLocked ? t('The vault is locked — unlock it first') : !p.configured ? t('Connect with Fish Audio') : waiting ? t('{n} waiting', { n: waiting }) : p.enabled ? t('on') : t('turned off');
+          chip = p.vaultLocked ? t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)') : !p.configured ? t('Connect with Fish Audio') : waiting ? t('{n} waiting', { n: waiting }) : p.enabled ? t('on') : t('turned off');
           tone = p.vaultLocked ? 'warn' : !p.configured ? 'primary' : waiting ? 'warn' : p.running ? 'ok' : '';
           if (!p.configured && !p.vaultLocked) chipTitle = t('or paste a Dropline key in Services › Integrations');
           onChip = p.vaultLocked ? () => window.dispatchEvent(new CustomEvent('vs-vault-door')) : () => this._voiceSheet(p, render);
@@ -211,7 +211,7 @@ export function installPluginsUI(App) {
           // relay (frp) / tunnel (Tailscale): on = start now + at boot; off = stop (said first) + not at boot
           const loginNeeded = isTunnel && running && p.backendState !== 'Running';
           chip = p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
-            : isRelay && p.vaultLocked ? t('The vault is locked — unlock it first')   // lane vault-e2e-password-fix-r2: the sealed relay token
+            : isRelay && p.vaultLocked ? t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)')   // lane vault-e2e-password-fix-r2: the sealed relay token
             : isRelay && p.configured === false ? t('relay not configured on this instance')
               : loginNeeded ? t('Log in…') : running ? t('connected') : p.installed ? t('stopped') : t('not installed');
           tone = running && !loginNeeded ? 'ok' : loginNeeded ? 'warn' : '';

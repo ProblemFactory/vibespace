@@ -12,7 +12,9 @@
  *     keeps in its memory (verify r1: a hub with no sign-in shared ONE window with every local process; a second tab of
  *     the same sign-in shared it too) — the window's key is (who, the secret's hash). Never extended by activity; a lock
  *     ends it (the window carries the engine's epoch, which moves at every lock and unlock); a wall clock stepped back
- *     cannot stretch it (a monotonic stamp bounds it too).
+ *     cannot stretch it (a monotonic stamp bounds it too). lane vault-manual-and-lock (decision ③, the lock's first
+ *     consequence): a lock act CLOSES every window at once (`vault.onLock` — test-vault-engine's census), and a 验证是你 still
+ *     checking the password when the vault locks opens none (its epoch moved under it: `vault_locked`).
  *   · `reveal(who, page, id)` — inside the window, ONE value for ONE row reference (never a list), paced 20 a minute per
  *     sign-in and 60 for the whole vault, audited as `vault-reveal` {who, ip, store, entry, field} in
  *     data/vault-audit.jsonl — never the value. `revealRecord(who, page, store, entry)` = the same door for ONE record a
@@ -78,8 +80,10 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
     const st = vault.state();
     if (st === 'not_set_up') return { ok: false, code: 'vault_not_set_up' };
     if (st !== 'unlocked') return { ok: false, code: 'vault_locked' };
+    const ep0 = vault.epoch();
     const r = await vault.confirm(password, { ip, who: whoOf(who) });
     if (!r || !r.ok) return r || { ok: false, code: 'error' };
+    if (vault.epoch() !== ep0 || vault.state() !== 'unlocked') return { ok: false, code: 'vault_locked' };   // locked while the password was checked: the pending window is forgotten
     const page = crypto.randomBytes(16).toString('hex');
     const t = now();
     windows.set(keyOf(who, page), { who: whoOf(who), startedAt: t, until: t + VI.REVEAL_MS, epoch: vault.epoch(), startedMono: mono() });
@@ -116,7 +120,8 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
     try { value = src && typeof src.vaultReveal === 'function' ? src.vaultReveal(ref.entry, ref.field) : null; }
     catch (e) { vault.audit('vault-reveal-unreadable', { who: whoOf(who), ip, store: ref.store, entry: ref.entry, field: ref.field, code: codeOf(e) }); return { ok: false, code: 'unreadable', why: codeOf(e) }; }
     if (typeof value !== 'string') return { ok: false, code: 'not_found' };
-    if (typeof vault.noteUse === 'function') vault.noteUse(ref.store, 'human');
+    // lane vault-use-law: a use through the engine's ONE writer, in its ONE shape (the window is the door)
+    if (typeof vault.noteUse === 'function') vault.noteUse(ref.store, { by: 'human', door: 'vault-window' });
     vault.audit('vault-reveal', { who: whoOf(who), ip, by: 'human', store: ref.store, entry: ref.entry, field: ref.field });
     return { ok: true, id: VI.refOf(ref.store, ref.entry, ref.field), value, leftMs: v.leftMs };
   }
@@ -127,7 +132,7 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
     if (!VI.refOf(store, entry, 'record')) return { ok: false, code: 'not_found' };
     const v = door(who, page, ip);
     if (!v.ok) return v;
-    if (typeof vault.noteUse === 'function') vault.noteUse(store, 'human');
+    if (typeof vault.noteUse === 'function') vault.noteUse(store, { by: 'human', door: 'vault-window' });
     vault.audit('vault-reveal', { who: whoOf(who), ip, by: 'human', store, entry: String(entry), field: '*' });
     return { ok: true, leftMs: v.leftMs };
   }
@@ -137,6 +142,10 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
     const p = pageOf(page);
     return { ok: true, ended: p ? windows.delete(keyOf(who, p)) : false };
   }
+
+  // THE LOCK (decision ③ — lane vault-manual-and-lock): every page's window closes now (the epoch would refuse it at its next
+  // use; this forgets it at once — the census over the engine's onLock subscribers counts this one)
+  if (typeof vault.onLock === 'function') vault.onLock(() => { windows.clear(); });
 
   return { list, windowFacts, startReveal, reveal, revealRecord, endReveal, _windows: windows };
 }

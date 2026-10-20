@@ -20,7 +20,10 @@
 //  • LINKS: web/mail open in a new tab; #bookmarks scroll; every other scheme
 //    (javascript:, data:, …) is removed. altChunk HTML parts — the library puts
 //    them in a SAME-ORIGIN iframe with scripts on — are re-hosted in a
-//    `sandbox=""` iframe with a no-network CSP.
+//    sandboxed iframe NAVIGATED to the hub's frame host (lane
+//    frame-host-preview: `kind=docx` — nothing of the part runs, the host's
+//    own line alone by its response's nonce; no network) with the no-network
+//    CSP meta as well. A srcdoc frame ran under the APP page's policy.
 //  • EMBEDDED FONTS are registered on document.fonts (Chrome ignores
 //    @font-face inside a shadow root — measured on 153) and removed on close.
 //  • HEADER/FOOTER INHERITANCE (Word's "Link to Previous") and STYLE TAB
@@ -34,6 +37,7 @@
 //    pass has run, then shown at the chosen zoom.
 import { parseAsync, renderDocument } from 'docx-preview';
 import { t } from './i18n.js';
+import { writeFrame, hostAddress } from './frame-host.js'; // lane frame-host-preview: the altChunk's frame
 import { uiScale } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import {
@@ -177,10 +181,10 @@ async function rehostAltChunks(root, stash) {
   for (let i = 0; i < frames.length; i++) {
     const html = i < stash.length ? String(await stash[i] || '') : '';
     const f = document.createElement('iframe');
-    f.setAttribute('sandbox', ''); // no scripts, an opaque origin, no navigation
+    f.setAttribute('sandbox', 'allow-scripts'); // the HOST's one line only — its header lets nothing of the part run
     f.className = 'docx-altchunk';
     f.title = t('Embedded HTML content');
-    f.srcdoc = ALTCHUNK_CSP + html;
+    writeFrame(f, ALTCHUNK_CSP + html, hostAddress('docx'));
     frames[i].replaceWith(f);
   }
   return frames.length;

@@ -38,6 +38,12 @@ const { spawn, execFile, execFileSync } = require('child_process');
 // ANY read failure and silently orphan every stored ciphertext.
 const { secretBox, holdsCiphertext, BOX_CIPHERTEXT_RE, describeJsonError } = require('./secret-box');
 const { parseDriveClients } = require('./preset-layers.js');
+const { serviceEnv, RCLONE_ENV_KEEP } = require('./agent-env.js');
+const { obscure: rcloneObscure } = require('./rclone-obscure.js'); // lane mount-password-off-argv: rclone's public obscure, computed IN-PROCESS (a secret never rides argv)
+/** EVERY rclone child's env (lane spawn-env-debts, 2026-10-20): the service list + RCLONE_ENV_KEEP + the egress door +
+ *  the caller's RCLONE_CONFIG_* — never the hub's whole env (its tokens, an agent conversation's, a cloud key) in a mount
+ *  daemon that lives for days (detached, it survives server restarts). */
+const rcloneEnv = (cfg = {}) => serviceEnv(process.env, { keep: RCLONE_ENV_KEEP, egress: true, add: cfg });
 const LIVENESS = require('./mount-liveness.js');   // lane mount-liveness: THE sweep's verdict table (PURE)
 const CACHE_PLACE = require('./vfs-cache-place.js');   // lane vfs-cache-local: where the VFS cache lives + the dirty witnesses (PURE)
 // The vfsMeta walk, run in a CHILD node (never the loop, never the threadpool: 164 788 files over NFS): each file judged
@@ -1045,10 +1051,14 @@ class MountManager {
 
   // ── Mount / unmount ──
 
-  // rclone obscure: rclone requires PASS-type params in its reversible
-  // obscured form. We store the REAL secret AES-GCM'd and obscure at use time.
+  // rclone requires PASS-type params in its reversible obscured form. We store the
+  // REAL secret AES-GCM'd (secret-box — our actual protection) and produce the
+  // obscured form IN-PROCESS at use time (src/rclone-obscure.js, a public algorithm).
+  // It used to shell out to `rclone obscure <plain>`: the password rode the child's
+  // ARGV — readable in /proc/<pid>/cmdline by any local user — on a SYNC exec that
+  // blocked the loop. A secret never rides argv; a public algorithm runs in-process.
   _obscure(plain) {
-    return execFileSync(this.rcloneBin(), ['obscure', String(plain)], { encoding: 'utf-8', timeout: 5000 }).trim();
+    return rcloneObscure(String(plain));
   }
 
   /** Per-type rclone env + remote string for a mount record. */
@@ -1056,12 +1066,13 @@ class MountManager {
     m = this._connOf(m); // child mounts resolve to credential + own path
     const R = 'VS';
     const P = (k) => `RCLONE_CONFIG_${R}_${k}`;
-    const env = { ...process.env };
+    const cfg = {};   // the provider's RCLONE_CONFIG_VS_* — the remote's ONLY channel (credentials ride env, never argv)
     let remote;
     const row = rowFor(this, m);
-    remote = (row.rclone ? row : PROVIDERS.defaultRow).rclone(m, env, P, R, this);
+    remote = (row.rclone ? row : PROVIDERS.defaultRow).rclone(m, cfg, P, R, this);
     // Advanced extra params (custom API keys, tuning) override/extend any type
-    for (const [k, blob] of Object.entries(m.extraParamsEnc || {})) env[P(k.toUpperCase())] = this._dec(blob);
+    for (const [k, blob] of Object.entries(m.extraParamsEnc || {})) cfg[P(k.toUpperCase())] = this._dec(blob);
+    const env = rcloneEnv(cfg);
     return { env, remote };
   }
 
@@ -1816,7 +1827,7 @@ class MountManager {
     try { if (!(await fs.promises.stat(pick.path)).isSocket()) return { error: `${pick.path} is not a socket` }; }
     catch { return { error: `no rc socket at ${pick.path}` }; }
     const ask = (cmd) => new Promise((resolve) => {
-      execFile(this.rcloneBin(), ['rc', '--unix-socket', pick.path, cmd], { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, out, stderr) => {
+      execFile(this.rcloneBin(), ['rc', '--unix-socket', pick.path, cmd], { env: rcloneEnv(), timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, out, stderr) => {
         if (err) return resolve({ error: `${cmd}: ${err.killed ? `no answer in ${timeoutMs} ms` : String(stderr || err.message).trim().split('\n').pop()}` });
         try { resolve({ v: JSON.parse(out) }); } catch { resolve({ error: `${cmd}: not JSON` }); }
       });
@@ -2240,7 +2251,7 @@ class MountManager {
       let tok = String(token).trim();
       const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
       JSON.parse(tok); // validate
-      env = { ...process.env, RCLONE_CONFIG_VS_TYPE: 'drive', RCLONE_CONFIG_VS_TOKEN: tok, RCLONE_CONFIG_VS_SCOPE: 'drive' };
+      env = rcloneEnv({ RCLONE_CONFIG_VS_TYPE: 'drive', RCLONE_CONFIG_VS_TOKEN: tok, RCLONE_CONFIG_VS_SCOPE: 'drive' });
       let cid = clientId, csec = clientSecret;
       if (!cid) { const pc = MountManager._driveClient({ clientPreset: clientPreset || null }); if (pc) { cid = pc.clientId; csec = pc.clientSecret; } }
       if (cid) { env.RCLONE_CONFIG_VS_CLIENT_ID = cid; if (csec) env.RCLONE_CONFIG_VS_CLIENT_SECRET = csec; }
@@ -2345,7 +2356,7 @@ class MountManager {
     }
     if (clientId && clientSecret) authArgs.push(String(clientId), String(clientSecret));
     authArgs.push('--auth-no-open-browser');
-    const child = spawn(this.rcloneBin(), authArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(this.rcloneBin(), authArgs, { env: rcloneEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     const st = { child, url: null, token: null, error: null, buf: '', startedAt: Date.now() };
     this._driveAuth = st;
     const onData = (d) => {

@@ -26,6 +26,7 @@ import prettierTypescript from 'prettier/plugins/typescript';
 import prettierYaml from 'prettier/plugins/yaml';
 import prettierGraphql from 'prettier/plugins/graphql';
 import { onFileChanged, sameFile } from './file-changed.js'; // §7.9: the server's file-changed signal
+import { writeFrame, hostAddress } from './frame-host.js'; // lane frame-host-preview: the HTML preview's frame
 
 const PRETTIER_PLUGINS = [prettierBabel, prettierEstree, prettierHtml, prettierCss, prettierMarkdown, prettierTypescript, prettierYaml, prettierGraphql];
 
@@ -519,25 +520,20 @@ class CodeEditor {
     }
   }
 
+  // lane frame-host-preview (B-5b2c): the previewed page is an agent's (or a cloned repo's) — it runs in an OPAQUE frame,
+  // never `allow-same-origin` (it ran AS THE APP: the cookie, storage, every API). The frame navigates to the hub's frame
+  // host (the preview policy, a real header — src/server/frame-host.js) and the page is posted in; a LOCAL file's folder
+  // is handed to the host, which serves the frame that folder's files at the folder's own address (relative links,
+  // stylesheets, scripts and pictures resolve there — no <base> is written into the page); a remote file has none.
   _renderHtmlPreview(src) {
     if (!this._previewIframe) {
       this._previewIframe = document.createElement('iframe');
-      this._previewIframe.sandbox = 'allow-scripts allow-same-origin';
+      this._previewIframe.setAttribute('sandbox', 'allow-scripts');
       this._previewIframe.style.cssText = 'width:100%;height:100%;border:none';
       this._previewBody.appendChild(this._previewIframe);
     }
-    const dir = this.filePath.replace(/\/[^/]*$/, '');
-    const baseHref = '/api/file/serve/' + dir.split('/').map(encodeURIComponent).join('/') + '/' + (this._host ? '?host=' + encodeURIComponent(this._host) : '');
-    const baseTag = `<base href="${baseHref}">`;
-    let html = src;
-    if (/<head[^>]*>/i.test(html)) {
-      html = html.replace(/(<head[^>]*>)/i, '$1' + baseTag);
-    } else if (/<html[^>]*>/i.test(html)) {
-      html = html.replace(/(<html[^>]*>)/i, '$1<head>' + baseTag + '</head>');
-    } else {
-      html = baseTag + html;
-    }
-    this._previewIframe.srcdoc = html;
+    const dir = this._host ? '' : (this.filePath.replace(/\/[^/]*$/, '') || '/');
+    writeFrame(this._previewIframe, src, hostAddress('preview', { base: dir }));
   }
 
   /** Show/hide Preview button based on current language. Single source of truth. */

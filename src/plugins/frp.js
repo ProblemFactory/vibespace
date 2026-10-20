@@ -122,7 +122,10 @@ module.exports = {
         subDomainHost: v.subDomainHost || process.env.VIBESPACE_FRPS_SUBDOMAIN_HOST || '',
         portMin: Number(FRP_PORT_MIN),
         portMax: Number(FRP_PORT_MAX),
-        fromEnv: !!(FRPS_ADDR && (FRPS_TOKEN || process.env[RT.CLUSTER_TOKEN_ENV])),   // was the RELAY provided by the cluster?
+        // was the RELAY provided by the cluster? its ADDRESS + a key to it: the shared token, the cluster's — or, once the relay's
+        // grace is over and the chart drops VIBESPACE_FRPS_TOKEN, this instance's OWN identity (lane fleet-instance-publish: the
+        // env-token-only rule turned every such pod's default-on relay OFF at its next restart — no frpc, no public URL)
+        fromEnv: !!(FRPS_ADDR && (FRPS_TOKEN || process.env[RT.CLUSTER_TOKEN_ENV] || ident.token)),
       };
     };
     const frpConfigured = () => { const c = frpCfg(); return !!(c.serverAddr && (c.token || c.ident.token)); };

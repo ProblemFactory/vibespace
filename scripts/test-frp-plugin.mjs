@@ -22,6 +22,14 @@
 //   ①p the SAME hub launched from a POLLUTED env (lane frp-spawn-env-allowlist — planted now, whatever env the suite runs from:
 //      an agent conversation's session tokens, the cluster's shared token, a cloud key, proxies): frpc's env holds the kept
 //      names + the two relay variables only, none of the planted names or values — MUTANT the pre-fix copy of process.env ⇒ RED
+//   ①c A FLEET POD RESTARTS (lane fleet-instance-publish — a fleet canary red 2026-10-20: the pod's boot restore of its instance
+//      URL refused «the frp relay is not configured on this instance» while frpc ran): the pod's env (VIBESPACE_INSTANCE_NAME +
+//      VIBESPACE_FRPS_*), the vault SET UP and LOCKED, data/instance-url.json desired — the REAL instance-url over the object
+//      server.js hands it (its text, read from server.js), the server's order (the restore's first try 3 s, the boot replay 5 s):
+//      published at the boot and at the restart, the knock = the ENV token (never the vault's); RED CONTROL = the base's two lines
+//      (refused twice, the second try after frpc ran — the order is not the cause); the vault's unlock re-tries a restore the
+//      lock refused (the wiring's own line; MUTANT no pull-forward ⇒ RED); AFTER THE GRACE (no env token) the plugin's own boot
+//      replay starts the relay on the identity alone and the URL comes back (MUTANT the env-token-only default-on ⇒ RED)
 //   ② LIVE against the REAL frps relay (needs VIBESPACE_FRPS_* or VIBESPACE_FRP_SECRETS → a private frps-secrets.env):
 //      installs frpc, publishes a local echo server, verifies the public URL round-trips. Skips if no relay config.
 import fs from 'node:fs';
@@ -77,6 +85,14 @@ async function hubChild(tag, args = [], plant = {}) {
   const plant = { VIBESPACE_SESSION_TOKEN: 'vs-sess-' + rnd(), CLAUDE_CODE_MESSAGING_TOKEN: 'cc-msg-' + rnd(), VIBESPACE_FRPS_TOKEN: 'frps-shared-' + rnd(), AWS_SECRET_ACCESS_KEY: 'aws-' + rnd(), HTTPS_PROXY: 'http://u:' + rnd() + '@127.0.0.1:9' };
   const r = await hubChild('frp-hub-p', ['--polluted'], { ...plant, http_proxy: 'http://127.0.0.1:9', FRP_HUB_PLANTED: Object.keys(plant).join(',') });
   check('①p the polluted-env legs passed (the child exited 0)', r.status === 0, `exit ${r.status}${r.signal ? ' ' + r.signal : ''}`);
+}
+{
+  // lane fleet-instance-publish: the pod's env shape, PLANTED for the child (the relay address on loopback — the fake frpc
+  // never dials; the shared token a value built now)
+  console.log('①c A FLEET POD RESTARTS (the cluster\'s relay env, the vault SET UP and LOCKED, a desired instance URL — instance-url over server.js\'s own object)');
+  const pod = { VIBESPACE_INSTANCE_NAME: 'podx', VIBESPACE_FRPS_ADDR: '127.0.0.1', VIBESPACE_FRPS_PORT: '7000', VIBESPACE_FRPS_TOKEN: 'frps-cluster-' + crypto.randomBytes(8).toString('hex'), VIBESPACE_FRPS_SUBDOMAIN_HOST: 'frp.example.invalid' };
+  const r = await hubChild('frp-hub-c', ['--cluster'], pod);
+  check('①c the fleet-pod restart legs passed (the child exited 0)', r.status === 0, `exit ${r.status}${r.signal ? ' ' + r.signal : ''}`);
 }
 
 /** THE FAKE frpc: records what it was given (sha256s of the env tokens, never a value), logs a login the way frpc does, and
@@ -204,6 +220,131 @@ async function hubLegs() {
   const ut = new UserTodoManager({ dataDir: path.join(ROOT, 'todos'), expirySweepMs: 0 });
   fs.mkdirSync(path.join(ROOT, 'todos'), { recursive: true });
   try {
+    if (process.argv.includes('--cluster')) {
+      const KN = process.env.VIBESPACE_FRPS_TOKEN, URL0 = 'https://podx-vibespace.frp.example.invalid/';
+      const IU = R('src/server/instance-url.js'), IU_PATH = path.join(REPO, 'src/server/instance-url.js');
+      const compiled = (file, text) => { const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(text, file); return m.exports; };
+      // THE OBJECT server.js HANDS instance-url (its text — the wiring under test, never a copy written here)
+      const SV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+      const HANDED = (SV.match(/require\('\.\/src\/server\/instance-url\.js'\)\.create\(\{[^\n]*?\bplugins: (\{[^{}\n]*\})/) || [])[1] || null;
+      check('server.js\'s object for instance-url is read from its text (the wiring under test)', !!HANDED, 'no `plugins: { … }` in instance-url\'s create() call');
+      const handedOf = (text, pm) => new Function('plugins', `return (${text});`)(pm);
+      const podDir = (tag) => { const D = path.join(ROOT, tag, 'data'); fs.mkdirSync(D, { recursive: true }); fs.writeFileSync(path.join(D, 'instance-url.json'), JSON.stringify({ desired: true, sub: 'podx-vibespace' })); return D; };
+      /** the vault SET UP, then closed (the next engine finds it LOCKED); `seal` = the owner's override sealed into it */
+      const setUpLocked = async (D, { seal = null } = {}) => {
+        const v = VE.create({ dataDir: D, kdf: CHEAP, log: quiet, idleTimer: false });
+        await v.setup(PW, {});
+        if (seal) new PM.PluginManager({ dataDir: D, settings: settingsStore }).setConfig('frp', { token: seal });
+        v.close();
+      };
+      /** THE POD BOOTS in server.js's order: instance-url's restore (its first try at 3 s), the plugins' boot replay at 5 s */
+      const podBoot = async (D, { def = null, iuMod = IU, text = HANDED, delayMs = 20000, waitMs = 9000, until = null } = {}) => {
+        const { v, pm } = boot({ dataDir: D, def });
+        const iu = iuMod.create({ dataDir: D, port: 3456, plugins: handedOf(text, pm), serverSetting: () => null, authEnabled: () => true, log: () => { } });
+        const n = sawAll().length, t0 = Date.now();
+        const done = until || ((s) => s.published && !s.error && (s.at || 0) >= t0);   // published IN THIS BOOT (a restart reads the last one from disk)
+        iu.restore({ retries: 2, delayMs });
+        const br = setTimeout(() => { try { pm.bootReplay(); } catch { } }, 5000);
+        let st = iu.status();
+        while (Date.now() - t0 < waitMs && !done(st)) { await sleep(100); st = iu.status(); }
+        return { D, v, pm, iu, st, t0, br, saws: () => sawAll().slice(n) };
+      };
+      const podDown = async (P) => { clearTimeout(P.br); P.iu.stop(); await killFrpc(); try { P.v.close(); } catch { } };
+      const proxyOf = async (user) => { try { const st = await (await fetch(`http://127.0.0.1:${ADMIN}/api/status`)).json(); return (st.http || []).find((p) => p.name === `${user}.vibespace-instance`) || null; } catch { return null; } };
+
+      console.log('  c1 — a fresh pod restarts: the vault LOCKED, the instance URL desired');
+      setMode({ askKnock: true, prefix: true });
+      const DA = podDir('pod');
+      await setUpLocked(DA);
+      const A = await podBoot(DA);
+      const recA = recOf(DA), sA = A.saws();
+      check('the vault is SET UP and LOCKED through the whole boot (never unlocked)', A.v.state() === 'locked', A.v.state());
+      check(`THE CANARY: the desired instance URL is PUBLISHED at the boot — ${URL0}, no error (was «the frp relay is not configured on this instance»)`, A.st.published && A.st.url === URL0 && !A.st.error && A.st.desired && A.st.at >= A.t0, JSON.stringify({ url: A.st.url, error: A.st.error }));
+      check('instance-url reads the relay as the plugin does: configured on both, no read error', A.st.frpConfigured === true && A.pm.status('frp').configured === true && A.st.frpReadError === null, JSON.stringify({ iu: A.st.frpConfigured, plugin: A.pm.status('frp').configured, readError: A.st.frpReadError }));
+      const tomlA = (() => { try { return fs.readFileSync(path.join(PDIR, 'proxies', 'vibespace-instance.toml'), 'utf8'); } catch { return ''; } })();
+      const runA = recA ? await proxyOf(recA.instanceId) : null;
+      check('the proxy: vibespace-instance on subdomain podx-vibespace, RUNNING at the relay as `<instance id>.vibespace-instance`', /^subdomain = "podx-vibespace"$/m.test(tomlA) && !!runA && runA.status === 'running', runA || tomlA);
+      check('the pod minted its own identity at the boot; frpc logs in as it (user + its own token)', !!recA && !!sA[0] && sA[0].user === recA.instanceId && sA[0].relaySha === sha(recA.token), sA[0] && sA[0].user);
+      check('THE KNOCK during the grace = the cluster\'s ENV token (frpc sent sha256(VIBESPACE_FRPS_TOKEN)) — never the vault\'s: no tokenSealed, the plugin not vault-locked, knock on', !!sA[0] && sA[0].knockSha === sha(KN) && !(pjOf(DA).config || {}).tokenSealed && A.pm.status('frp').vaultLocked === false && A.pm.status('frp').relay.knock === 'on', sA[0] && { knock: sA[0].knockSha === sha(KN), relay: A.pm.status('frp').relay.knock });
+      await sleep(Math.max(0, 5600 - (Date.now() - A.t0)));
+      check('ONE frpc for the boot: the restore started it, the boot replay at 5 s found it running', A.saws().length === 1, String(A.saws().length));
+      await podDown(A);
+
+      console.log('  c2 — the pod restarts again (its identity on disk, the vault still LOCKED)');
+      const B = await podBoot(DA);
+      const sB = B.saws();
+      check('the RESTART publishes again — the same URL, frpc as the same instance id, the knock the env token, the vault LOCKED', B.st.published && B.st.url === URL0 && !B.st.error && B.st.at >= B.t0 && !!sB[0] && sB[0].user === recA.instanceId && sB[0].knockSha === sha(KN) && B.v.state() === 'locked', JSON.stringify({ url: B.st.url, error: B.st.error, user: sB[0] && sB[0].user }));
+      await podDown(B);
+
+      console.log('  c3 — RED CONTROL = the base: instance-url\'s relay read + server.js\'s object as 2.369.214–.330 shipped them');
+      {
+        const src = fs.readFileSync(IU_PATH, 'utf8');
+        const baseSrc = src.replace(/  const frp = \(\) => \{[^\n]*\n/, "  const frp = () => { try { return plugins ? plugins.status(plugins.providerId?.('relay')) : null; } catch { return null; } };\n");
+        const baseText = HANDED ? HANDED.replace('relayStatus: () => plugins.relayStatus(),', 'status: (id) => plugins.status(id),') : null;
+        const IUB = baseSrc !== src && baseText && baseText !== HANDED ? compiled(IU_PATH, baseSrc) : null;
+        const DC = podDir('pod-base');
+        await setUpLocked(DC);
+        const C = IUB ? await podBoot(DC, { iuMod: IUB, text: baseText, delayMs: 2500, waitMs: 7000, until: () => false }) : null;
+        check('the base REFUSES the same restart «the frp relay is not configured on this instance» — its second try ran AFTER the boot replay started frpc (the order is not the cause), the plugin itself configured: RED', !!C && !C.st.published && C.st.error === 'the frp relay is not configured on this instance' && C.saws().length >= 1 && C.pm.status('frp').configured === true, C ? JSON.stringify({ published: C.st.published, error: C.st.error, frpc: C.saws().length }) : 'the control did not apply');
+        if (C) await podDown(C);
+      }
+
+      console.log('  c4 — the vault\'s unlock re-tries a restore the lock refused (the second half)');
+      const WR = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+      const HOOK = (WR.match(/^vault\.onUnlock\(\(\) => \{ try \{ instanceUrl\?\.restore\?\.\(\{ ifFailed: true \}\);[^\n]*$/m) || [])[0] || null;
+      check('the wiring hands the vault\'s unlock to instance-url (its line, read from mounts-plugins-wiring.js)', !!HOOK, 'no vault.onUnlock(… instanceUrl?.restore?.({ ifFailed: true }) …) line');
+      const sealedLeg = async (tag, iuMod) => {
+        const D = podDir(tag);
+        await setUpLocked(D, { seal: 'owner-override-' + crypto.randomBytes(8).toString('hex') });
+        const S = await podBoot(D, { iuMod, waitMs: 3800, until: (s) => !!s.error });
+        const before = { error: S.st.error, published: S.st.published, vaultLocked: S.st.frpVaultLocked };
+        if (HOOK) new Function('vault', 'instanceUrl', HOOK)(S.v, S.iu);
+        const tU = Date.now();
+        await S.v.unlock(PW, {});
+        let su = S.iu.status();
+        while (Date.now() - tU < 6000 && !(su.published && !su.error && su.at >= tU)) { await sleep(100); su = S.iu.status(); }
+        return { S, D, before, after: su, ms: Date.now() - tU };
+      };
+      const U = await sealedLeg('pod-sealed', IU);
+      check('the relay\'s only key = the owner\'s override SEALED in the LOCKED vault (no identity yet): the boot\'s restore is refused BY THE LOCK — the plugin\'s words, never «not configured»', /vault is locked/.test(U.before.error || '') && !U.before.published && U.before.vaultLocked === true, JSON.stringify(U.before));
+      check(`THE UNLOCK: the restore waiting on its 20 s timer is pulled forward — published ${U.ms} ms after the unlock (< 6 s), on the identity the unlock minted`, U.after.published && !U.after.error && U.after.at >= U.S.t0 && U.after.url === URL0 && U.ms < 6000 && !!recOf(U.D), JSON.stringify({ url: U.after.url, error: U.after.error, ms: U.ms }));
+      await podDown(U.S);
+      {
+        const src = fs.readFileSync(IU_PATH, 'utf8');
+        const mut = src.replace('    if (nextTry) { if (healTimer) { clearTimeout(healTimer); healTimer = setTimeout(nextTry, firstMs); } return; }\n', '    if (nextTry) return;\n');
+        const M = mut !== src ? await sealedLeg('pod-sealed-m', compiled(IU_PATH, mut)) : null;
+        check('MUTANT the unlock joins the waiting cycle (no pull-forward) ⇒ not published within 6 s of the unlock: RED', !!M && !(M.after.published && !M.after.error), M ? JSON.stringify({ published: M.after.published, ms: M.ms }) : 'the mutant did not apply');
+        if (M) await podDown(M.S);
+      }
+
+      console.log('  c5 — AFTER THE GRACE: the chart drops VIBESPACE_FRPS_TOKEN — the identity serves alone');
+      process.env.VIBESPACE_FRPS_TOKEN = '';
+      setMode({ askKnock: false, prefix: true });
+      const frpSrc = fs.readFileSync(FRP_PATH, 'utf8');
+      const FRESH = compiled(FRP_PATH, frpSrc);   // frp.js reads its env at load
+      const G = boot({ dataDir: DA, def: FRESH });
+      const nG = sawAll().length;
+      G.pm.bootReplay();
+      const sawG = await nextSaw(nG);
+      const stG = G.pm.status('frp');
+      check('the plugin\'s OWN boot replay starts the relay: default-on (fromEnv: the cluster\'s address + this instance\'s identity), configured, frpc on its own token with NO knock', !!sawG && sawG.user === recA.instanceId && sawG.relaySha === sha(recA.token) && sawG.knockSha === null && stG.enabled === true && stG.fromEnv === true && stG.configured === true, JSON.stringify({ frpc: !!sawG, enabled: stG.enabled, fromEnv: stG.fromEnv, configured: stG.configured }));
+      const iuG = IU.create({ dataDir: DA, port: 3456, plugins: handedOf(HANDED, G.pm), serverSetting: () => null, authEnabled: () => true, log: () => { } });
+      const tG = Date.now();
+      iuG.restore({ retries: 1, firstMs: 5 });
+      let sg = iuG.status(); for (let i = 0; i < 80 && !(sg.published && !sg.error && sg.at >= tG); i++) { await sleep(100); sg = iuG.status(); }
+      check('…and the instance URL is restored on it — the same URL, the vault LOCKED', sg.published && sg.url === URL0 && !sg.error && sg.at >= tG && G.v.state() === 'locked', JSON.stringify({ url: sg.url, error: sg.error }));
+      iuG.stop(); await killFrpc(); try { G.v.close(); } catch { }
+      {
+        const mut = frpSrc.replace('fromEnv: !!(FRPS_ADDR && (FRPS_TOKEN || process.env[RT.CLUSTER_TOKEN_ENV] || ident.token)),', 'fromEnv: !!(FRPS_ADDR && (FRPS_TOKEN || process.env[RT.CLUSTER_TOKEN_ENV])),');
+        const MG = mut !== frpSrc ? boot({ dataDir: DA, def: compiled(FRP_PATH, mut) }) : null;
+        const nM = sawAll().length;
+        if (MG) MG.pm.bootReplay();
+        const sawM = MG ? await nextSaw(nM, 2500) : null;
+        check('MUTANT the env-token-only default-on (the base) ⇒ after the grace the pod\'s relay is OFF at its restart — no frpc: RED', !!MG && !sawM && MG.pm.status('frp').enabled === false, MG ? JSON.stringify({ frpc: !!sawM, enabled: MG.pm.status('frp').enabled }) : 'the mutant did not apply');
+        if (MG) { await killFrpc(); try { MG.v.close(); } catch { } }
+      }
+      return;
+    }
     if (process.argv.includes('--polluted')) {
       console.log('  p — frpc\'s env is BUILT: nothing the launching shell planted reaches it');
       const planted = String(process.env.FRP_HUB_PLANTED || '').split(',').filter(Boolean);

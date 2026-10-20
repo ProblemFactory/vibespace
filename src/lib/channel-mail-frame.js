@@ -5,10 +5,13 @@
 // A message whose record names a formatted BODY (`role: 'body'`, a mail's
 // text/html part) gets ONE slot under its row: a small bar — Formatted |
 // Plain text, and "Show pictures" while a remote picture is blocked — over the
-// frame. THIS FILE IS THE CHANNEL SURFACE'S ONE srcdoc (test-channel-record
-// ⑧ pins it by name: exactly one `.srcdoc =` in the channel files, here, fed
-// by `sanitizeMailHtml` → DOMPurify → `composeSrcdoc`, on an iframe whose
-// `sandbox` is `allow-scripts` and nothing else — NEVER allow-same-origin).
+// frame. THIS FILE IS THE CHANNEL SURFACE'S ONE FRAME DOCUMENT (test-channel-record
+// ⑧ pins it by name: exactly one `writeFrame(` in the channel files, here, and
+// no srcdoc anywhere), fed by `sanitizeMailHtml` → DOMPurify → `composeSrcdoc`,
+// on an iframe whose `sandbox` is `allow-scripts` and nothing else — NEVER
+// allow-same-origin. The frame NAVIGATES to the hub's frame host (lane
+// design-frame-host: `MF.frameHostSrc`, this mail's own policy as a header —
+// a srcdoc frame ran under the app page's) and the document is posted in.
 // Everything else in this file is textContent, like the rest of the window.
 //
 //  · THE BYTES come through OUR attachment route (the engine kept them at
@@ -35,6 +38,7 @@ import { el, icon } from './channel-chrome.js';
 import { attachmentReasonText } from './channel-words.js';
 import { track } from './telemetry-client.js';
 import { readBounded } from './bounded-read.js';
+import { writeFrame } from './frame-host.js';
 
 /** SHOW PICTURES, for this page session (every window shares it — "this sender, this session"). */
 const PICTURES = MF.picturesState();
@@ -205,14 +209,15 @@ export function createMailFrames({ list, base, signal = null, modes = new Map() 
     s.budget = MF.heightBudget(Date.now()); s.frozenSaid = false; delete s.box.dataset.frozen;
     // the quoted history's toggle inside the frame speaks the device's language (naive-user verify: a thread's
     // replies opened on walls of quoted mail — the plain view folds its quotes, the frame folds them too)
-    const doc = MF.composeSrcdoc({ body: clean, nonce: rnd(), token: s.token, pictures, quoteShow: t('Show quoted text'), quoteHide: t('Hide quoted text') });
+    const nonce = rnd();
+    const doc = MF.composeSrcdoc({ body: clean, nonce, token: s.token, pictures, quoteShow: t('Show quoted text'), quoteHide: t('Hide quoted text') });
     const f = document.createElement('iframe');
     f.setAttribute('sandbox', 'allow-scripts');
     f.setAttribute('referrerpolicy', 'no-referrer');
     f.className = 'chanmail-frame';
     f.title = t('Formatted message');
     f.style.height = (s.h || MF.PLACEHOLDER_PX) + 'px';
-    f.srcdoc = doc;
+    writeFrame(f, doc, MF.frameHostSrc({ nonce, pictures }));
     s.frame = f;
     s.box.replaceChildren(f);
     // the pictures bar: "Show pictures" while a remote one is blocked (this message, this sender)

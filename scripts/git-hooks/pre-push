@@ -95,6 +95,9 @@ is_code_path() {
     docs/mockups/*) return 0 ;;
     # the Slack relay page ships as a static file: test-slack-relay drives it and holds its rule to slack-manifest.js (design 018)
     docs/slack-relay|docs/slack-relay/*) return 0 ;;
+    # the communication-panel mockup (a page + its css + a module script): test-frame-host-viewers previews it in the code
+    # editor with its folder (lane frame-host-preview — the repo's own pages are the preview's measure)
+    docs/design-mockups/communication-panel|docs/design-mockups/communication-panel/*) return 0 ;;
     # (b) documentation: nothing the gate reads.
     docs/*|*.md) return 1 ;;
   esac

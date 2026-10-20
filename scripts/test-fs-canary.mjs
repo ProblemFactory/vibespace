@@ -17,9 +17,10 @@
 process.env.UV_THREADPOOL_SIZE = '2';
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
@@ -36,9 +37,27 @@ function harness(createFn, opts = {}) {
   const c = createFn({ file: FILE, record: (ev) => recs.push(ev), log: (l) => lines.push(l), onWedged: () => { wedged++; }, slowMs: 100, deadlineMs: 1000, ...opts });
   return { c, recs, lines, wedged: () => wedged, names: () => recs.map((r) => r.name) };
 }
-// the shared libuv pool, busy from the MAIN thread (the main loop stays free): pbkdf2 jobs of ~`ms` each
-const PER_MS = (() => { const t = performance.now(); crypto.pbkdf2Sync('x', 's', 20000, 32, 'sha256'); return 20000 / Math.max(1, performance.now() - t); })();
-const saturate = (jobs, ms) => Promise.all(Array.from({ length: jobs }, () => new Promise((r) => crypto.pbkdf2('x', 's', Math.max(1000, Math.round(PER_MS * ms)), 32, 'sha256', r))));
+// A DETERMINISTIC libuv-threadpool wedge (lane quiet-box-flakes, B-c820). The pre-fix §3 made the pool "slow" by racing
+// pbkdf2 jobs sized off a startup calibration (`saturate`): on a quiet / turbo box the jobs drained before the canary's
+// stat ever queued, the stat answered in < slowMs and §3 went RED — while loaded it passed (the box was slower than the
+// jobs). The wedge is now a MECHANISM, not a race: both pool workers (UV_THREADPOOL_SIZE = 2, pinned above, before the
+// first pool op) block on a read of an empty FIFO that only the test writes to. The process-global libuv pool's queue is
+// FIFO and the canary's stat is submitted a cross-thread round-trip later (tick → its SafeFs worker → fs.promises.stat),
+// so the stat is ALWAYS behind the two blocked reads and waits exactly as long as the test holds the wedge — fast box
+// as slow. The hold is the slow pool's duration (the test chooses it), never a guess about the machine.
+const HOLD_MS = 300; // §3's P leg: the slow pool lasts this long (well past slowMs = 100), then answers — not a timeout
+function poolWedge() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fscan-wedge-'));
+  const fifo = path.join(dir, 'pipe');
+  execFileSync('mkfifo', [fifo]);
+  const fd = fs.openSync(fifo, 'r+'); // O_RDWR: opens at once and never EOFs (its own writer); a read of it blocks while empty
+  const buf = Buffer.alloc(1);
+  for (let i = 0; i < 2; i++) fs.read(fd, buf, 0, 1, null, () => {}); // occupy BOTH pool workers
+  return {
+    release() { try { fs.writeSync(fd, Buffer.from('xxxx')); } catch {} }, // wakes both reads ⇒ the queued stat(s) run
+    close() { try { fs.closeSync(fd); } catch {} try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} },
+  };
+}
 
 console.log('§1 a healthy probe');
 const H = harness(createFsCanary);
@@ -72,27 +91,45 @@ console.log('§2 a blocked loop is not a slow mount');
 
 console.log('§3 a slow pool is still seen');
 {
-  // its own canary, its deadline far past the saturation (lane wall-clock-ratchet-down: H's 1 s deadline is §2's
-  // subject, W's below — here the leg is WHICH fact a slow pool's stat is counted as; on a starved box the pool's wait
-  // outran 1 s and read as a timeout)
+  // its own canary, its deadline far past the wedge (lane wall-clock-ratchet-down: H's 1 s deadline is §2's subject):
+  // the leg is WHICH fact a slow pool's stat is counted as. The pool is wedged by MECHANISM (poolWedge above), not by
+  // racing pbkdf2 against a quiet / turbo box (B-c820): the stat is mechanically behind the two blocked workers.
   const P = harness(createFsCanary, { deadlineMs: 60e3 });
   await P.c.tick(); // spawns its worker
-  const busy = saturate(12, 120);
-  const r = await P.c.tick();
-  await busy;
-  // the loop's part is SMALL against the stat's wait (lane wall-clock-ratchet-down: `loopMs < 100` judged the machine)
+  const wedge = poolWedge();
+  const probe = P.c.tick(); // its stat queues behind the two blocked reads — the pool is now slow, deterministically
+  const held = setTimeout(() => wedge.release(), HOLD_MS); // the slow pool lasts HOLD_MS, then answers (never a timeout)
+  const r = await probe;
+  clearTimeout(held); wedge.release(); wedge.close();
+  // the loop's part is SMALL against the stat's wait (the loop stayed free through the hold): a busy pool reads as fs
   ok(r && r.fsMs >= 100 && r.loopMs * 4 < r.fsMs && !r.timedOut, `the stat waited for the shared pool: fs ${r && r.fsMs} ms, loop ${r && r.loopMs} ms`);
   ok(P.names().join() === 'srv-fs-canary-ms' && P.c.counts.slowFs === 1 && /took \d+ms off the main thread/.test(P.lines[0] || ''), `counted as the fs fact (${JSON.stringify(P.recs)}; ${P.lines[0]})`);
   P.c.close();
+
   const W = harness(createFsCanary, { deadlineMs: 60 });
   await W.c.tick();
+  const wedgeW = poolWedge(); // stays wedged across the three ticks — each stat is held past the 60 ms deadline
   const strikes = [];
-  for (let i = 0; i < 3; i++) { const b = saturate(8, 80); strikes.push(await W.c.tick()); await b; }
+  for (let i = 0; i < 3; i++) strikes.push(await W.c.tick()); // the worker's own 60 ms timer fires while the stat is queued ⇒ a strike
+  wedgeW.release(); wedgeW.close(); // the abandoned stats drain; the pool is free for the healthy tick below
   ok(strikes.map((s) => s && s.strike).join() === '1,2,3' && W.wedged() === 1 && W.names().filter((n) => n === 'srv-fs-canary-ms').length === 3 && W.names().includes('srv-threadpool-wedged'),
     `three stats past the deadline in a row: strikes ${strikes.map((s) => s && s.strike).join()}, the wedged event, the health sweep kicked once (${W.names().join()})`);
   const after = await W.c.tick();
   ok(after && after.strike === 0 && !after.timedOut, 'a healthy stat after the wedge resets the strikes');
   W.c.close();
+}
+
+console.log('§3 CONTROL: a pool that is NOT wedged answers fast (the quiet box the old timed wedge raced)');
+{
+  // The pre-fix wedge (`saturate`) papered a race: when its pbkdf2 jobs drained before the stat queued — a quiet / fast
+  // box — the pool was effectively FREE, the stat answered in < slowMs, and §3's "slow pool" reads went red. With NO
+  // wedge the canary records NOTHING: so §3 above is non-vacuous only because the wedge is a real, held mechanism.
+  const Q = harness(createFsCanary, { deadlineMs: 60e3 });
+  await Q.c.tick(); // spawns its worker
+  const r = await Q.c.tick(); // a FREE pool: the stat sails through
+  ok(r && !r.timedOut && r.strike === 0 && Q.c.counts.slowFs === 0 && Q.names().length === 0,
+    `CONTROL: a free pool records nothing (fs ${r && r.fsMs} ms, loop ${r && r.loopMs} ms) — §3's slow-pool reads need a real wedge, not one raced against the box`);
+  Q.c.close();
 }
 
 console.log('§4 a probe that gets no answer');

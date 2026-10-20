@@ -75,6 +75,70 @@ export function endScratchAtExit(dir) {
 export function keepScratch(dir) { ENDS.delete(dir); return dir; }
 function endAll() { for (const d of ENDS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { } } }
 
+/** lane app-page-csp (design q-043 D6, §5 P0-d): EVERY CHROME SUITE ENDS WITH ZERO CSP REPORTS — the ONE teardown check.
+ *  A SUITE's hubs inherit `VIBESPACE_CSP_REPORTS_FILE` (set here at import; server.js hands it to src/server/csp-reports.js):
+ *  every report the app page's report-only policy (src/app-csp.js) posts to a scratch hub lands in THIS process's one
+ *  file, whatever the suite's tree, data dir or cleanup order. At exit — before the scratch roots are removed — that file
+ *  and every `<root>/data/csp-reports.jsonl` / `<root>/<dir>/data/csp-reports.jsonl` under a root still standing (a hub
+ *  spawned without the inherited env) are read: a line ⇒ the reports are printed and the suite FAILS (exit 1). That is
+ *  how the policy is proven complete before a later lane enforces it. A suite that posts reports ON PURPOSE
+ *  (test-csp-report) hands its sink an explicit file of its own. */
+export const CSP_REPORTS_ENV = 'VIBESPACE_CSP_REPORTS_FILE';
+export const CSP_REPORTS_FILE = IS_SUITE ? path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}csp-reports-${process.pid}`, 'csp-reports.jsonl') : null;
+/** THE ONE EXCEPTION LIST (主开发's ruling, 2026-10-20): a report a suite may end with, pinned by suite + directive + what
+ *  was blocked + where. Every other report in any suite FAILS it. Never 'unsafe-inline' on the app page instead.
+ *  EMPTY since lane design-frame-host (B-8679): its two rows — test-design-window's artboard / print / print-all srcdoc
+ *  frames and test-channels-aggregate-ui's mail frame, both inheriting the app page's policy — went when those frames
+ *  moved to the hub's frame host (src/server/frame-host.js: their own policy, a real header). A suite's OWN probe frame
+ *  (a srcdoc it makes to read or forge a document) takes its reports with `takeCspReports`. */
+export const CSP_EXCEPTIONS = Object.freeze([]);
+/** The exception row a report line is excused by, or null. `suite` = the suite file's basename. */
+export function cspExcused(line, suite = path.basename(process.argv[1] || '')) {
+  let r; try { r = typeof line === 'string' ? JSON.parse(line) : line; } catch { return null; }
+  return CSP_EXCEPTIONS.find((x) => x.suite === suite && r && (!x.directive || x.directive.test(String(r.directive))) && (x.blocked == null || r.blocked === x.blocked) && (x.source == null || r.source === x.source) && r.document === x.document) || null;
+}
+/** A suite that plants a violation ON PURPOSE (a negative control) TAKES its report: waits ≤ `ms` for `want` lines matching
+ *  `match` (a parsed line → bool) in this suite's file, removes them and returns them (the hub never writes the same key
+ *  twice). What is left is what the teardown judges. */
+export async function takeCspReports(match, { ms = 5000, step = 100, want = 1 } = {}) {
+  const t0 = Date.now();
+  for (;;) {
+    let lines = []; try { lines = fs.readFileSync(CSP_REPORTS_FILE, 'utf8').split('\n').filter(Boolean); } catch { }
+    const parsed = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } });
+    const hit = parsed.filter((r) => r && match(r));
+    if (hit.length >= want || Date.now() - t0 > ms) {
+      if (hit.length) { const keep = lines.filter((l, i) => !(parsed[i] && match(parsed[i]))); const tmp = CSP_REPORTS_FILE + '.take'; fs.writeFileSync(tmp, keep.length ? keep.join('\n') + '\n' : ''); fs.renameSync(tmp, CSP_REPORTS_FILE); }
+      return hit;
+    }
+    await new Promise((r) => setTimeout(r, step));
+  }
+}
+/** The report lines in these files: [{ file, lines }] (a file that is missing or empty is not listed). */
+export function cspReportsIn(files) {
+  const out = [];
+  for (const f of files) { let t = ''; try { t = fs.readFileSync(f, 'utf8'); } catch { continue; } const lines = t.split('\n').filter(Boolean); if (lines.length) out.push({ file: f, lines }); }
+  return out;
+}
+function cspReportsAtExit() {
+  const files = [CSP_REPORTS_FILE];
+  for (const r of ENDS) {
+    files.push(path.join(r, 'data', 'csp-reports.jsonl'));
+    try { for (const e of fs.readdirSync(r, { withFileTypes: true })) if (e.isDirectory()) files.push(path.join(r, e.name, 'data', 'csp-reports.jsonl')); } catch { }
+  }
+  const all = cspReportsIn(files);
+  try { fs.rmSync(path.dirname(CSP_REPORTS_FILE), { recursive: true, force: true }); } catch { }
+  const excused = all.flatMap((f) => f.lines.filter((l) => cspExcused(l)));
+  if (excused.length) console.log(`\n  CSP: ${excused.length} report(s) excused by the ONE exception list (scripts/scratch.mjs CSP_EXCEPTIONS — ${[...new Set(excused.map((l) => cspExcused(l).suite))].join(', ')})`);
+  const found = all.map((f) => ({ ...f, lines: f.lines.filter((l) => !cspExcused(l)) })).filter((f) => f.lines.length);
+  if (!found.length) return;
+  const n = found.reduce((a, f) => a + f.lines.length, 0);
+  console.error(`\n  ✗ CSP: the app page reported ${n} thing(s) its content-security policy would block (src/app-csp.js — the policy must be complete before it is enforced):`);
+  for (const f of found) { console.error(`    ${f.file}`); for (const l of f.lines.slice(0, 40)) console.error(`      ${l}`); if (f.lines.length > 40) console.error(`      … ${f.lines.length - 40} more`); }
+  console.error('FAILED (CSP reports at the end of the suite)');
+  process.exitCode = 1;
+}
+if (CSP_REPORTS_FILE) { process.env[CSP_REPORTS_ENV] = CSP_REPORTS_FILE; process.on('exit', cspReportsAtExit); }
+
 /** WHAT THE GATE'S DIRECTORY SWEEP MAY JUDGE (B-60d2) — scripts/scratch-sweep.mjs reads these, never a hand list.
  *  `prefixes`: a unit is a directory `<under>/<prefix><name>` — what scratch() mints, and a verify workspace
  *  `/tmp/vs-work/<lane>` (lane-ops: verifiers work there; the workspace itself is never a unit). `production`: never a

@@ -69,6 +69,16 @@ function jobEnv(extra = {}, base = process.env) {
   }
   return { ...env, ...extra };
 }
+// THE WRAPPER'S OWN ENV IS BUILT, NEVER INHERITED (lane job-spec-off-argv, 2026-10-20): the wrapper reads its spec file
+// and hands spec.env to the job — nothing of the server's env is its to carry (measured: it runs on an EMPTY env; a bare
+// argv[0] resolves through spec.env's PATH). An allowlist, not jobEnv's denylist. serviceEnv when it lands.
+const WRAPPER_ENV_KEEP = Object.freeze(['PATH', 'HOME', 'LANG', 'TMPDIR']);
+function wrapperEnv(jobId, base = process.env) {
+  const env = {};
+  for (const k of WRAPPER_ENV_KEEP) if (typeof base[k] === 'string' && base[k]) env[k] = base[k];
+  env.VIBESPACE_JOB_ID = String(jobId);
+  return env;
+}
 const now = () => Date.now();
 const rid = () => 'jb-' + crypto.randomBytes(4).toString('hex');
 // triage archive (design §13): newest ARCHIVE_CAP records kept; the sweep
@@ -972,7 +982,8 @@ class JobManager {
     if (!vet.ok) { this._refuseRun(job, vet, trigger); throw new Error(vet.error); }
     const runTs = now();
     const ctl = this._ctlDir(job, runTs);
-    fs.mkdirSync(ctl, { recursive: true });
+    fs.mkdirSync(ctl, { recursive: true, mode: 0o700 });
+    fs.chmodSync(ctl, 0o700); // the run's dir holds its spec file and its log — the owner's alone (mkdir's mode is umask-masked)
     job.state = 'starting';
     delete job.ack; // a NEW run is a new claim on the user's attention (triage §13)
     job.runs = job.runs || [];
@@ -986,8 +997,18 @@ class JobManager {
       env: jobEnv({ ...(job.cmd.env || {}), ...this._secretsFor(job), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
       logCapBytes: 50 * 1024 * 1024, stdinOpen: !!job.stdinOpen,
     };
+    // A SECRET NEVER RIDES ARGV (lane job-spec-off-argv, 2026-10-20): the spec carries the job's secrets and its jbt_
+    // token, and /proc/<pid>/cmdline is readable by every local user for the wrapper's whole life — so the spec rides a
+    // file: 0600, O_EXCL (never written through a name already there), a fresh name per start; the wrapper reads it
+    // ONCE and unlinks it. Nothing re-reads it: a job back after a restart is adopted by its stamp or re-spawned HERE.
+    const specPath = path.join(ctl, `spec.${runTs}.json`);
+    const fd = fs.openSync(specPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600); // EEXIST ⇒ no start (that name is not ours to remove)
     const wrapper = path.join(this.d.dataDir, 'bin', 'job-wrapper.js');
-    const child = spawn(process.execPath, [wrapper, ctl, Buffer.from(JSON.stringify(spec)).toString('base64')], { detached: true, stdio: 'ignore' });
+    let child;
+    try {
+      try { fs.writeFileSync(fd, JSON.stringify(spec)); } finally { fs.closeSync(fd); }
+      child = spawn(process.execPath, [wrapper, ctl, specPath], { detached: true, stdio: 'ignore', env: wrapperEnv(job.id) });
+    } catch (e) { try { fs.unlinkSync(specPath); } catch { } throw e; } // a failed write or spawn leaves no spec behind
     child.unref();
     job.state = 'up';
     job.proc = { pid: child.pid };
@@ -1653,4 +1674,4 @@ class JobManager {
   _hum(ms) { const m = Math.round(Math.abs(ms) / 60000); return m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; }
 }
 
-module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS, jobEnv };
+module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS, jobEnv, wrapperEnv, WRAPPER_ENV_KEEP };

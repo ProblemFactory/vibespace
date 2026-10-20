@@ -7,12 +7,15 @@
 //   · PRINT ALL: ⋯ "Print all artboards on this page" (and Print itself on a page of several when no artboard is
 //     open) — ONE print document (printAllSrcdoc: one PDF page per artboard at its own size, each artboard in its own
 //     script-only frame, the text kept as text by the browser's Save as PDF) in a transient frame sandboxed
-//     `allow-scripts allow-modals`, exactly like Print's; a refused artboard is left out and said.
+//     `allow-scripts allow-modals`, exactly like Print's, handed its document through the FRAME HOST (lane
+//     design-frame-host: the inner artboard frames are srcdoc frames of the HOST's document, so they inherit the
+//     design policy, never the app page's); a refused artboard is left out and said.
 //   · DOWNLOAD HTML: GET /api/design/bundle — the publish bundle as a FILE (one self-contained page: it opens offline
 //     and presents; nothing is hosted); a refusal is the window's chip in the hub's words. DOWNLOAD FOLDER (.zip): the
 //     File Explorer's own act (GET /api/download-zip?path=<dir>&host=…).
 import { t } from './i18n.js';
-import { presentOrder, printAllSrcdoc } from './design-canvas-model.js';
+import { presentOrder, printAllSrcdoc, FRAME_HOST } from './design-canvas-model.js';
+import { writeFrame } from './frame-host.js';
 
 const PRINT_FRAME_MS = 10 * 60 * 1000;
 const hostKey = (h) => (!h || h === 'local' ? '' : String(h));
@@ -59,7 +62,7 @@ export function mountDesignPresent({ winInfo, canvas, button = null, signal, hos
     ifr.tabIndex = -1;
     ifr.style.width = Math.max(...list.map((f) => f.w)) + 'px';
     ifr.style.height = Math.max(...list.map((f) => f.h)) + 'px';
-    ifr.srcdoc = printAllSrcdoc(list);
+    writeFrame(ifr, printAllSrcdoc(list), FRAME_HOST);
     document.body.appendChild(ifr);
     frame = ifr;
     timer = setTimeout(drop, PRINT_FRAME_MS);

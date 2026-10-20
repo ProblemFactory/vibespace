@@ -46,12 +46,15 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
   const file = path.join(dataDir, 'instance-url.json');
   let state = { desired: false, auto: false, sub: null, url: null, proto: null, at: null, error: null };
   try { Object.assign(state, JSON.parse(fs.readFileSync(file, 'utf-8')) || {}); } catch { }
-  let healTimer = null;
+  let healTimer = null, nextTry = null;   // nextTry: the running restore cycle's next attempt (null = no cycle)
 
   const save = () => { try { writeJsonAtomic(file, state); } catch (e) { log('[instance-url] persist failed: ' + e.message); } };
   const settingUrl = () => { try { return String(serverSetting('agentd.publicUrl') || '').trim() || null; } catch { return null; } };
   const envUrl = () => String(process.env.VIBESPACE_PUBLIC_URL || '').trim() || null;
-  const frp = () => { try { return plugins ? plugins.status(plugins.providerId?.('relay')) : null; } catch { return null; } }; // the plugin that DECLARES 'relay'
+  // the relay's state through the manager's relay door (whichever plugin DECLARES 'relay' — src/plugins.js relayStatus). A read
+  // that FAILED is named, never read as «not configured» (lane fleet-instance-publish: from 2.369.214 every read was
+  // status(undefined) — a `providerId` the object server.js hands this module never had — and the catch said «not configured»)
+  const frp = () => { if (!plugins) return null; try { return plugins.relayStatus(); } catch (e) { return { readError: String((e && e.message) || e) }; } };
 
   /** The effective address + WHERE it came from. An `auto` publish is visible
    *  but never outranks the configured setting (see the header). */
@@ -74,7 +77,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     const f = frp() || {};
     const eff = effective();
     return {
-      frpConfigured: !!f.configured, frpMissing: f.missing || [], frpVaultLocked: !!f.vaultLocked, subDomainHost: f.subDomainHost || null,
+      frpConfigured: !!f.configured, frpMissing: f.missing || [], frpVaultLocked: !!f.vaultLocked, frpReadError: f.readError || null, subDomainHost: f.subDomainHost || null,
       authEnabled: !!authEnabled(),
       published: !!state.url, desired: !!state.desired, auto: !!state.auto,
       url: state.url || null, sub: state.sub || f.selfDialSub || null, at: state.at || null, error: state.error || null,
@@ -97,7 +100,9 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
   async function doPublish({ sub } = {}) {
     if (!plugins) throw new Error('public URLs are not available on this instance');
     const f = frp() || {};
-    if (!f.configured) throw new Error(`the frp relay is not configured on this instance${(f.missing || []).length ? ' (missing: ' + f.missing.join(', ') + ')' : ''}`);
+    if (f.readError) throw new Error(`the relay's state could not be read (${f.readError})`);
+    // a LOCKED vault holding the relay's only key goes on to the plugin: its refusal names the lock (and the vault notes it)
+    if (!f.configured && !f.vaultLocked) throw new Error(`the frp relay is not configured on this instance${(f.missing || []).length ? ' (missing: ' + f.missing.join(', ') + ')' : ''}`);
     if (sub !== undefined && sub !== null && String(sub).length) {
       if (!SUB_RE.test(String(sub))) throw new Error('subdomain must be lowercase letters/digits/hyphens');
       state.sub = String(sub);
@@ -140,27 +145,34 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
   }
 
   /** Boot: a mapping the user asked for must come back by itself. The relay /
-   *  frpc may not be up yet, so failures retry instead of silently vanishing. */
-  function restore({ retries = 6, delayMs = 20000 } = {}) {
+   *  frpc may not be up yet, so failures retry instead of silently vanishing.
+   *  ONE cycle at a time; `ifFailed` (the vault's unlock — lane fleet-instance-publish) re-tries only a restore that FAILED:
+   *  a cycle waiting on its timer has its next try pulled forward, none running ⇒ a new cycle. */
+  function restore({ retries = 6, delayMs = 20000, firstMs = 3000, ifFailed = false } = {}) {
     if (!state.desired) return;
+    if (ifFailed && !state.error) return;
+    if (nextTry) { if (healTimer) { clearTimeout(healTimer); healTimer = setTimeout(nextTry, firstMs); } return; }
     // The persisted URL is NOT cleared: frpc is its own long-lived process, so
     // the mapping usually outlives a VibeSpace restart. We re-assert it anyway
     // (writing the proxy config is idempotent) and only a FAILURE is news.
     let left = retries;
-    const attempt = async () => {
+    const attempt = nextTry = async () => {
+      healTimer = null;
+      if (!state.desired) { nextTry = null; return; }   // unmapped while the cycle waited
       try {
         await doPublish({});
+        nextTry = null;
         emit();
         log(`[instance-url] republished ${state.url}`);
       } catch (e) {
         state.error = e.message; save(); emit();
         if (--left > 0) healTimer = setTimeout(attempt, delayMs);
-        else log('[instance-url] gave up republishing: ' + e.message);
+        else { nextTry = null; log('[instance-url] gave up republishing: ' + e.message); }
       }
     };
-    healTimer = setTimeout(attempt, 3000);
+    healTimer = setTimeout(attempt, firstMs);
   }
-  const stop = () => { if (healTimer) { clearTimeout(healTimer); healTimer = null; } };
+  const stop = () => { if (healTimer) { clearTimeout(healTimer); healTimer = null; } nextTry = null; };
 
   function registerRoutes(app) {
     app.get('/api/instance-url', (req, res) => res.json(status()));

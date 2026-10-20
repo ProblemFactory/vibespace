@@ -21,6 +21,18 @@
 //      re-announces (facts().blocked = the strip's count) and runs onBlocked once; the unlock and a lock act clear it
 //   N  the `totp:<name>` entry (design q-047 L1, lane vault-totp): a secret name, sealed + read back unlocked, refused locked,
 //      forgotten locked too; a name outside the grammar is no secret
+//   P  THE USE LAW (lane vault-use-law, design q-043 D1/D2/D7): ONE shape (useOf), ONE writer (noteUse — keyFor, the window,
+//      a door), the vault-use AUDIT LEG (a bearer's use is one line of a closed key set: entry, purpose, actor, door, conv,
+//      outcome, receipt — a value a door hands the writer is in no form in the file); the daily failure count (the 20th of
+//      an actor × entry fires once; the lock's refusals never count; 20 wrong second passwords from one address); MUTANTS:
+//      a writer that spreads a door's options into the line, a line without its closed key set ⇒ RED
+//   O  THE LOCK'S FOUR CONSEQUENCES (lane vault-manual-and-lock — decision ③, design q-043 D3 ⑤): ONE census over the
+//      engine's onLock subscribers (grep-derived: every `.onLock(` of the tree classified by what it ends; each of the four
+//      carried; every file that files a vault ASK subscribes) and ONE live world holding all four at once — a page's reveal
+//      window, the waiting asks (a run's card, an agent's request, a held automation call), the one-time grants (a request's
+//      grant, an unspent automation once-grant) and a running `vault run` child — that a lock by the door, an agent or the
+//      idle timer ENDS whole (the asks withdrawn `vault_locked`), while the shutdown's QUIET lock runs no subscriber;
+//      MUTANTS: a copy dropping ONE consequence (the window, the request, the grants, the run) ⇒ RED on that one
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -491,6 +503,236 @@ console.log('O  agent mint / put (q-043 §9)');
   const vm = new Mod(vf); vm.filename = vf; vm.paths = Mod._nodeModulePaths(path.dirname(vf)); vm._compile(vcut, vf);
   ok(vcut !== vsrc && V.agentEntryName('conv-7', 'other/evil').code === 'bad_name' && vm.exports.agentEntryName('conv-7', 'other/evil').name === 'agent:conv-7/other/evil',
     'MUTANT (the name regex allows /) ⇒ agent:conv-7/other/evil is BUILT — the real agentEntryName refuses it (would RED the namespace-escape assert)');
+}
+
+console.log('P  THE USE LAW (lane vault-use-law — design q-043 D1 / D2 / D7): ONE shape, ONE writer, the vault-use line, the daily failure count');
+{
+  const VU = require(path.join(REPO, 'src/vault-use.js'));
+  // the PURE half
+  const u0 = VU.useOf({ by: 'agent', door: 'link-token', conv: 'c-1', extra: 'x' }, 7);
+  ok(JSON.stringify(u0) === JSON.stringify({ at: 7, by: 'agent', door: 'link-token', conv: 'c-1' }), 'THE ONE SHAPE: useOf → { at, by, door, conv } (nothing else rides along)', JSON.stringify(u0));
+  ok(VU.useOf('human', 1).by === 'human' && VU.useOf({ by: 'root' }, 1).by === 'system' && VU.useOf({ door: 'Not A Door!' }, 1).door === null && VU.useOf({ conv: 'a\nb' }, 1).conv === 'a b', 'a bare `by` string; an unknown subject is the hub (system); a door is an id or null; a conversation key one line');
+  const belt = (U) => U.useLine({ at: 1, entry: 'frp:token', purpose: 'p', use: { by: 'agent', door: 'run', conv: 'c' }, actor: 'Lane', outcome: 'ok', receipt: 'vr-0123456789ab', ip: '10.0.0.1', value: 'SENTINEL-VALUE', token: 'SENTINEL-TOKEN' });
+  const l0 = belt(VU);
+  ok(Object.keys(l0).join() === VU.LINE_KEYS.join() && l0.event === 'vault-use' && !JSON.stringify(l0).includes('SENTINEL'), `THE LINE: a CLOSED key set (${VU.LINE_KEYS.join(', ')}) — a value a door hands it never reaches the file`, JSON.stringify(l0));
+  ok(VU.outcomeOf(undefined) === 'ok' && VU.outcomeOf('human_only') === 'human_only' && VU.outcomeOf('the value is hunter2') === 'error', 'an outcome is ok or a code — a sentence is `error`, never itself');
+  ok(VU.counts('human_only') && VU.counts('no_link') && VU.counts('wrong_password') && !VU.counts('ok') && !VU.counts('vault_locked') && !VU.counts('key-unreadable:vault_locked') && !VU.counts('paced') && !VU.counts('vault_not_set_up'), 'COUNTED: the actor\'s own refusals — never the lock\'s, the pace\'s or a vault not set up');
+  const F = VU.createFailures();
+  const fires = []; let t = 1e12;
+  for (let i = 1; i <= 45; i++) { t += 60e3; const r = F.note({ key: 'agent:c-1', actor: 'Lane', by: 'agent', entry: 'vault', door: 'unlock', outcome: 'human_only', at: t }); if (r.fire) fires.push([i, r.card.n]); }
+  ok(fires.length === 1 && fires[0][0] === VU.FAIL_PER_DAY && fires[0][1] === VU.FAIL_PER_DAY, `the ${VU.FAIL_PER_DAY}th failure in a day FIRES, once — 45 failures, one card`, JSON.stringify(fires));
+  ok(F.note({ key: 'agent:c-2', entry: 'vault', at: t }).n === 1 && F.note({ key: 'agent:c-1', entry: 'contents', at: t }).n === 1, 'a pair is an actor × an entry: another actor, another entry count apart');
+  t += VU.DAY_MS + 1; let again = 0;
+  for (let i = 0; i < 20; i++) { t += 1000; if (F.note({ key: 'agent:c-1', entry: 'vault', at: t }).fire) again++; }
+  ok(again === 1, 'a day after its card, the same pair fires again (20 more in a day)');
+  const B = VU.createFailures({ maxPairs: 5 });
+  for (let i = 0; i < 9; i++) B.note({ key: `k${i}`, entry: 'e', at: i + 1 });
+  ok(B.size() === 5, 'BOUNDED: ≤ maxPairs pairs (the stalest leaves)');
+  ok(VU.entryLabel('host:dial-mac01') === 'a machine link token' && VU.entryLabel('.accounts-key') === 'the accounts store key' && VU.entryLabel('browser-passkeys.key') === 'the passkeys store key' && VU.entryLabel(VU.VAULT_ENTRY) === 'the second password' && VU.entryLabel(VU.CONTENTS_ENTRY) === 'the stored values', 'an entry in words — never a machine\'s or a key\'s id');
+
+  // the engine: THE ONE WRITER
+  const { dir } = world({ keys: ['.accounts-key'] });
+  let clock = 1800000000000;
+  const e = mk(dir, { now: () => clock });
+  await e.setup(PW, {});
+  const cards = []; e.onFailing((c) => cards.push(c));
+  const box = boxOf(dir, '.accounts-key');
+  box.dec(box.enc('a store\'s own read'));
+  const lu = e.lastUse('accounts');
+  ok(lu && lu.by === 'system' && lu.door === 'store' && lu.conv === null && lu.at === clock, 'keyFor: a store\'s own read is a use in THE shape — by system, door store (the window\'s «last used»)', JSON.stringify(lu));
+  e.noteUse('accounts', { by: 'human', door: 'vault-window' });
+  ok(e.lastUse('accounts').by === 'human' && e.lastUse('accounts').door === 'vault-window', 'the Vault window\'s reveal goes through the SAME writer (by human, door vault-window)');
+  const SENT = 'sentinel-' + crypto.randomBytes(16).toString('hex');
+  e.secretPut('frp:token', SENT);
+  const rc = e.noteUse('frp:token', { by: 'agent', door: 'run', conv: 'c-law' }, { outcome: 'ok', purpose: 'publish the relay', actor: 'Law lane', value: SENT, why: SENT, ip: '10.0.0.9' });
+  e.noteUse('host:dial-mac01', { by: 'job', door: 'link-token', conv: 'job-j1' }, { outcome: 'no_link', purpose: 'attach', actor: 'Law job' });
+  /** THE AUDIT LEG: every vault-use line in the file → { lines, extra keys, hits of the sentinel in any form } */
+  const auditLeg = (d) => {
+    const text = fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8');
+    const lines = text.split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((l) => l.event === 'vault-use');
+    const forms = [SENT, Buffer.from(SENT).toString('hex'), Buffer.from(SENT).toString('base64')];
+    return { lines, extra: lines.filter((l) => Object.keys(l).join() !== VU.LINE_KEYS.join()).length, hits: forms.filter((f) => text.includes(f)).length };
+  };
+  const a1 = auditLeg(dir);
+  ok(/^vr-[0-9a-f]{12}$/.test(rc.receipt) && a1.lines.length === 2 && a1.extra === 0 && a1.hits === 0, `THE AUDIT LEG: a bearer's use is ONE vault-use line each (2: an agent's ok, a job's no_link), the closed key set, a receipt — and the value a door handed the writer is in NO form in the file`, JSON.stringify(a1));
+  const [ok1, no1] = a1.lines;
+  ok(ok1.entry === 'frp:token' && ok1.purpose === 'publish the relay' && ok1.by === 'agent' && ok1.door === 'run' && ok1.conv === 'c-law' && ok1.actor === 'Law lane' && ok1.outcome === 'ok' && ok1.receipt === rc.receipt && ok1.ip === '10.0.0.9' && no1.outcome === 'no_link' && no1.by === 'job', 'the line: entry, purpose, actor, door, conversation, outcome, receipt (design q-043 D2) — names and codes only');
+  ok(!a1.lines.some((l) => l.by === 'system' || l.by === 'human'), 'no line for the hub\'s own reads (a flood) or a person\'s (their doors keep their own lines)');
+  // the daily count through the writer
+  for (let i = 0; i < 25; i++) { clock += 30e3; e.noteUse('vault', { by: 'agent', door: 'unlock', conv: 'c-law' }, { outcome: 'human_only', actor: 'Law lane' }); }
+  for (let i = 0; i < 30; i++) { clock += 30e3; e.noteUse('host:dial-mac01', { by: 'agent', door: 'link-token', conv: 'c-other' }, { outcome: 'vault_locked', actor: 'Other lane' }); }
+  ok(cards.length === 1 && cards[0].actor === 'Law lane' && cards[0].entry === 'vault' && cards[0].door === 'unlock' && cards[0].outcome === 'human_only' && cards[0].n === VU.FAIL_PER_DAY && !JSON.stringify(cards[0]).includes(SENT), 'onFailing runs ONCE at the 20th failure of an actor × entry in a day (25 tries) — the lock\'s own refusals count nothing (30 vault_locked)', JSON.stringify(cards));
+  e.lock('door');
+  for (let i = 0; i < 20; i++) { clock += i % 5 === 0 ? 61e3 : 1e3; await e.unlock('not the password', { ip: '198.51.100.7' }); }
+  ok(cards.length === 2 && cards[1].by === 'human' && cards[1].actor === 'someone at 198.51.100.7' && cards[1].entry === VU.VAULT_ENTRY && cards[1].outcome === 'wrong_password', 'design §2 T7: 20 wrong SECOND PASSWORDS in a day from one address ⇒ its card (someone at <address>, the second password)', JSON.stringify(cards[1] || null));
+  ok(auditLeg(dir).lines.every((l) => l.by !== 'human') && !fs.readFileSync(path.join(dir, VE.AUDIT_FILE), 'utf8').includes('not the password'), 'the wrong passwords keep their own lines (vault-unlock-failed) — never the password, never a second line');
+  e.close();
+
+  // THE MUTANTS — each judged by the SAME leg ⇒ RED
+  const Mod = require('module');
+  const loadAs = (rel, src) => { const abs = path.join(REPO, rel); const m = new Mod(abs, null); m.filename = abs; m.paths = Mod._nodeModulePaths(path.dirname(abs)); m._compile(src, abs); return m.exports; };
+  const ES = fs.readFileSync(path.join(REPO, 'src/server/vault-engine.js'), 'utf8');
+  const from = "audit('vault-use', VU.useLine({ at: u.at, entry: name, purpose: o.purpose, use: u, actor: o.actor, outcome, receipt, ip: o.ip }));";
+  ok(ES.split(from).length === 2, 'the engine mutant\'s anchor is the writer\'s ONE audit call');
+  const VEm = loadAs('src/server/vault-engine.js', ES.replace(from, "audit('vault-use', { ...o, ...VU.useLine({ at: u.at, entry: name, purpose: o.purpose, use: u, actor: o.actor, outcome, receipt, ip: o.ip }) });"));
+  const { dir: dm } = world({ keys: ['.accounts-key'] });
+  const em = VEm.create({ dataDir: dm, kdf: CHEAP, log: quiet, idleTimer: false, register: false });
+  await em.setup(PW, {});
+  em.noteUse('frp:token', { by: 'agent', door: 'run', conv: 'c-law' }, { outcome: 'ok', purpose: 'publish the relay', actor: 'Law lane', value: SENT });
+  const am = auditLeg(dm);
+  ok(am.hits > 0 && am.extra > 0, `MUTANT RED: a writer that spreads a door's options into the vault-use line puts the value in the audit (${am.hits} hit(s), ${am.extra} line(s) off the closed set)`, JSON.stringify(am));
+  em.close();
+  const VS = fs.readFileSync(path.join(REPO, 'src/vault-use.js'), 'utf8');
+  const fromV = '  return Object.fromEntries(LINE_KEYS.map((k) => [k, line[k]]));';
+  ok(VS.split(fromV).length === 2, 'the PURE mutant\'s anchor is the line\'s closed key set');
+  const VUm = loadAs('src/vault-use.js', VS.replace(fromV, '  return { ...arguments[0], ...line };'));
+  const lm = belt(VUm);
+  ok(JSON.stringify(lm).includes('SENTINEL') && Object.keys(lm).join() !== VU.LINE_KEYS.join(), 'MUTANT RED: a line that keeps what a door hands it carries the value (the belt above is the judge)');
+}
+
+console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — decision ③): one census over the engine\'s onLock subscribers, one live world, a mutant per consequence');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const VC = require(path.join(REPO, 'src/server/vault-contents.js'));
+  const DOOR = require(path.join(REPO, 'src/server/vault-run-door.js'));
+  const AE = require(path.join(REPO, 'src/server/automation-engine.js'));
+  const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+  const code = (rel) => read(rel).replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/(^|[^:'"`\\])\/\/.*$/, '$1')).join('\n');
+  // (1) THE CENSUS — every `.onLock(` of src/ + server.js, by file, with what it ends; a new subscriber unclassified ⇒ RED
+  const CONSEQUENCES = ['view', 'asks', 'grants', 'runs'];   // decision ③: the view session, every unanswered ask, every one-time grant, every running `vault run`
+  const SUBSCRIBERS = {
+    'src/server/vault-contents.js': { n: 1, ends: ['view'], why: 'every page\'s reveal window closes at once (the epoch would refuse it at its next use); a 验证是你 still checking opens none' },
+    'src/server/vault-run-door.js': { n: 1, ends: ['asks', 'grants', 'runs'], why: 'every run card and every agent request withdrawn vault_locked; every grant, seen shape and 8-hour «always» ended; every running child ended whole (its group, its marked strays, its files)' },
+    'src/server/automation-engine.js': { n: 1, ends: ['asks', 'grants'], why: 'every held automation call answers vault_locked; every once-grant no call spent is spent' },
+    'src/server/vault-hooks.js': { n: 2, ends: ['logins', 'sealed'], why: 'r2: every login signed out (the vault\'s fifth consequence, the sign-in\'s); a sealed file forgets its decrypted copy' },
+  };
+  const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.(c|m)?js$/.test(e.name) ? [path.join(d, e.name)] : []));
+  const files = [...walk('src'), 'server.js'];
+  const sites = new Map();
+  for (const f of files) { const k = (code(f).match(/\.onLock\(/g) || []).length; if (k) sites.set(f, k); }
+  const unknown = [...sites].filter(([f, k]) => !SUBSCRIBERS[f] || SUBSCRIBERS[f].n !== k).map(([f, k]) => `${f}: ${k}`);
+  const dead = Object.keys(SUBSCRIBERS).filter((f) => !sites.has(f));
+  ok(sites.size >= 4 && !unknown.length && !dead.length, `the census: every onLock subscriber of the tree (${[...sites].map(([f, k]) => `${path.basename(f)}×${k}`).join(', ')}) is a row with what it ends — none unclassified, none dead`, JSON.stringify({ unknown, dead }));
+  ok(CONSEQUENCES.every((c) => Object.values(SUBSCRIBERS).some((s) => s.ends.includes(c))), 'each of the four consequences (view · asks · grants · runs) is carried by a subscriber');
+  const askFiles = files.filter((f) => /origin: 'vault',[^}]{0,240}?kind: 'action'/.test(code(f)));
+  ok(askFiles.length >= 2 && askFiles.every((f) => SUBSCRIBERS[f] && SUBSCRIBERS[f].ends.includes('asks')), `every file that files a vault ASK (origin vault, kind action: ${askFiles.map((f) => path.basename(f)).join(', ')}) subscribes and withdraws it on a lock`, askFiles.join(', '));
+  const eng = code('src/server/vault-engine.js');
+  ok(/if \(!quiet\) \{ audit\('vault-locked', \{ ip, why \}\); announce\(\); runHooks\(lockHooks, 'a lock', why\); \}/.test(eng) && /close\(\) \{[^}]*lock\('close', \{ quiet: true \}\)/.test(eng), 'the engine runs them on a lock ACT only (door / agent / idle) — the shutdown\'s quiet lock runs none');
+  // (2) THE LIVE WORLD — the four at once
+  const ROWS = [{ entry: 'm1', field: 'secretKey', label: 'bucket', cipher: 'x'.repeat(60) }, { entry: 'm2', field: 'secretKey', label: 'second', cipher: 'x'.repeat(60) }, { entry: 'm3', field: 'secretKey', label: 'third', cipher: 'x'.repeat(60) }];
+  const VAL = { m1: 'lock-census-value-one-0123', m2: 'lock-census-value-two-4567', m3: 'lock-census-value-three-89' };
+  const src = { vaultRows: () => ROWS, vaultReveal: (e, f) => (f === 'secretKey' ? VAL[e] || null : null) };
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 10)); } return fn(); };
+  async function lockWorld({ contentsMod = VC, doorMod = DOOR, autoMod = AE } = {}) {
+    const top = path.join(ROOT, 'lock' + (++n)), dir = path.join(top, 'data');   // the data dir beside the work folder (a run never starts inside the data dir)
+    fs.mkdirSync(dir, { recursive: true });
+    let clock = Date.now();
+    const v = mk(dir, { now: () => clock, register: false });
+    await v.setup(PW, {});
+    const userTodos = new UserTodoManager({ dataDir: dir, expirySweepMs: 3600e3 });
+    const runRoot = path.join(top, 'run'), work = path.join(top, 'work'); fs.mkdirSync(runRoot); fs.mkdirSync(work);
+    const contents = contentsMod.create({ vault: v, sources: { mounts: () => src } });
+    const door = doorMod.create({ dataDir: dir, vault: v, sources: { mounts: () => src }, userTodos, instanceKind: () => 'cluster', runRoot: () => runRoot, agentEnv: () => ({ ...process.env }), killGraceMs: 300, pipeGraceMs: 200, liveOf: () => true });
+    const auto = autoMod.create({ dataDir: dir, vault: v, userTodos, now: () => clock, verbs: { 'conversations.rename': () => ({ ok: true }) } });
+    const open = () => userTodos.snapshot().open || [];
+    const cardOf = async (type, not = null) => { let c = null; await until(() => (c = open().find((i) => i.action && i.action.type === type && i.action.askId !== not)) != null); return c; };
+    // (a) THE VIEW: 验证是你 opened this page's window
+    const rs = await contents.startReveal('who-1', PW);
+    // (d) A RUN IN FLIGHT: a child that sleeps (its pid in a file), its card answered once (a cluster asks every run)
+    const caller = { conversationId: 'conv-1', sessionKey: 'claude:conv-1', name: 'Lane L', cwd: work, scope: 'webui-1' };
+    door.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });
+    const pidFile = path.join(work, 'pid');
+    const running = door.run({ caller, args: ['--env', 'T=vault://mounts/m1/secretKey', '--', process.execPath, '-e', 'require("fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)', pidFile], cwd: work });
+    const c1 = await cardOf('vault-run-ask');
+    door.answer(c1.action.askId, { answer: 'once' });
+    await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').length > 0);
+    const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    // (b) THE ASKS: a second run held on its card, an agent's request, a held automation call
+    const held = door.run({ caller, args: ['--env', 'T=vault://mounts/m1/secretKey', '--', process.execPath, '-e', 'console.log(2)'], cwd: work });
+    const c2 = await cardOf('vault-run-ask', c1.action.askId);
+    const rq = door.request({ caller, entry: 'vault://mounts/m3/secretKey', purpose: 'read the third bucket' });
+    const reqId = (open().find((i) => i.action && i.action.type === 'vault-grant-ask' && i.action.askId === rq.askId) || {}).id;
+    const key = auto.mint({ name: 'census', scopes: ['conversations.rename'], by: 'user' });
+    const call = auto.use({ caller: { conversationId: 'conv-1', sessionKey: 'claude:conv-1', name: 'Lane L', live: true, groups: [] }, verb: 'conversations.rename', args: { name: 'x' } });
+    const c3 = await cardOf('automation-ask');
+    // (c) THE ONE-TIME GRANTS: a request answered «8 hours», an automation «once» no call spent
+    const rg = door.request({ caller, entry: 'vault://mounts/m2/secretKey', purpose: 'sync the second bucket' });
+    door.answerRequest(rg.askId, { answer: '8h', reauthed: true });
+    auto.grant(key.key.id, ['session:conv-2'], { mode: 'once', by: 'user' });
+    const live = { view: contents._windows.size === 1 && rs.ok, run: alive(pid) && door.running() === 1, asks: !!(c2 && rq.ok && reqId && c3), grants: door._grants.size === 1 && auto.list().keys[0].grants.some((g) => g.mode === 'once' && !g.spentAt) };
+    return { dir, v, contents, door, auto, userTodos, open, pid, running, held, call, rq, reqId, live, tick: (ms) => { clock += ms; } };
+  }
+  /** What the lock ENDED — each of the four, judged from the outside. */
+  async function ended(w) {
+    const view = w.contents._windows.size === 0 && !w.contents.windowFacts('who-1', 'x'.repeat(32)).open;
+    const heldR = await Promise.race([w.held, new Promise((r) => setTimeout(() => r({ code: 'still-waiting' }), 2000))]);
+    const callR = await Promise.race([w.call, new Promise((r) => setTimeout(() => r({ code: 'still-waiting' }), 2000))]);
+    const reqItem = w.reqId ? w.userTodos.get(w.reqId) : null;
+    const asks = heldR.code === 'vault_locked' && callR.code === 'vault_locked' && !w.door._requests.size && !!reqItem && reqItem.status !== 'open' && reqItem.resolvedBy === 'vault_locked'
+      && !w.open().some((i) => i.action && ['vault-run-ask', 'vault-grant-ask', 'automation-ask'].includes(i.action.type));
+    const grants = w.door._grants.size === 0 && !w.auto.list().keys[0].grants.some((g) => g.mode === 'once' && !g.spentAt);
+    const gone = await until(() => !alive(w.pid) && w.door.running() === 0, 3000);
+    const runR = gone ? await w.running : { code: 'still-running' };
+    const runs = gone && runR.code === 'vault_locked' && runR.killed === true;
+    if (!gone) w.door.closeAll();   // a mutant left it: end it here (never a stray past the suite)
+    return { view, asks, grants, runs, why: { heldR: heldR.code, callR: callR.code, reqItem: reqItem && [reqItem.status, reqItem.resolvedBy], runR: runR.code } };
+  }
+  const four = (e) => CONSEQUENCES.every((c) => e[c] === true);
+  for (const why of ['door', 'agent', 'idle']) {
+    const w = await lockWorld();
+    ok(Object.values(w.live).every(Boolean), `(${why}) the world holds all four before the lock: a reveal window, a running child, three waiting asks, two one-time grants`, JSON.stringify(w.live));
+    if (why === 'idle') { w.v.setIdleLock(1); w.tick(2 * 3600e3); w.v.idleTick(); } else w.v.lock(why);
+    const e = await ended(w);
+    ok(w.v.state() === 'locked' && four(e), `a lock by ${why === 'door' ? 'the DOOR (a person)' : why === 'agent' ? 'an AGENT' : 'the IDLE timer'} ENDS all four: the view closed · every ask withdrawn vault_locked (the run card, the request, the automation call) · every one-time grant ended · the running child gone (vault_locked, killed)`, JSON.stringify(e));
+    w.door.closeAll(); w.v.close();
+  }
+  {
+    const dir = path.join(ROOT, 'quiet'); fs.mkdirSync(dir, { recursive: true });
+    const v = mk(dir, { register: false }); await v.setup(PW, {});
+    let hooks = 0; v.onLock(() => { hooks++; });
+    v.lock('close', { quiet: true });
+    const q1 = hooks; await v.unlock(PW); v.close();
+    ok(q1 === 0 && hooks === 0, 'the shutdown\'s QUIET lock (and close()) runs no subscriber — its runs end with the process (the door\'s closeAll), nothing is withdrawn into a store a restart re-reads');
+  }
+  {
+    // the review: a lock whose store write FAILS still ends the automation once-grant (the engine remembers the lock)
+    const dir = path.join(ROOT, 'lockwrite'); fs.mkdirSync(dir, { recursive: true });
+    const v = mk(dir, { register: false }); await v.setup(PW, {});
+    const userTodos = new UserTodoManager({ dataDir: path.join(dir, 'todos'), expirySweepMs: 3600e3 });
+    const ran = [];
+    const auto = AE.create({ dataDir: dir, vault: v, userTodos, verbs: { 'conversations.rename': () => { ran.push(1); return { ok: true }; } } });
+    const key = auto.mint({ name: 'w', scopes: ['conversations.rename'], by: 'user' });
+    auto.grant(key.key.id, ['session:conv-2'], { mode: 'once', by: 'user' });
+    fs.chmodSync(dir, 0o555);   // the store's directory read-only: the lock's write throws
+    v.lock('agent');
+    fs.chmodSync(dir, 0o755);
+    await v.unlock(PW);
+    const still = auto.list().keys[0].grants.some((g) => g.mode === 'once' && !g.spentAt);
+    const call = auto.use({ caller: { conversationId: 'conv-2', sessionKey: 'claude:conv-2', name: 'Two', live: true, groups: [] }, verb: 'conversations.rename', args: { name: 'x' } });
+    let card = null; await until(() => (card = (userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'automation-ask')) != null, 2000);
+    if (card) auto.answer(card.action.askId, { answer: 'deny', answeredBy: 'user' });
+    const r = await call;
+    ok(still && card && !ran.length && r.ok === false, 'a lock whose store write FAILED still ends the automation once-grant: the next use asks again (the engine remembers the lock), nothing ran', JSON.stringify({ still, card: !!card, ran: ran.length, code: r.code }));
+    v.close();
+  }
+  // (3) MUTANTS — a copy dropping ONE consequence ⇒ RED, on that one
+  const MO = mutantCopies('vault-engine-lock', REPO);
+  const CSRC = read('src/server/vault-contents.js'), DSRC = read('src/server/vault-run-door.js');
+  const patch = (rel, srcText, from, to, tag) => (srcText.split(from).length === 2 ? MO.load(rel, srcText.replace(from, to), tag) : null);
+  const MUT = [
+    ['view', 'a lock that leaves the reveal window open', { contentsMod: patch('src/server/vault-contents.js', CSRC, "vault.onLock(() => { windows.clear(); });", "vault.onLock(() => { });", 'view') }],
+    ['asks', 'a lock that leaves an agent\'s request open', { doorMod: patch('src/server/vault-run-door.js', DSRC, "for (const q of [...requests.values()]) settleRequest(q, 'vault_locked', 'locked');", '', 'asks') }],
+    ['grants', 'a lock that does not end the one-time grants', { doorMod: patch('src/server/vault-run-door.js', DSRC, 'seen.clear(); shortAlways.clear(); grants.clear();', 'seen.clear(); shortAlways.clear();', 'grants') }],
+    ['runs', 'a lock that does not stop the running child', { doorMod: patch('src/server/vault-run-door.js', DSRC, "for (const rec of [...runs]) { log(`the vault locked (${why}): stopping the run of ${rec.name || rec.conv}`); stop(rec, 'lock'); shredDir(rec.dir); }", '', 'runs') }],
+  ];
+  for (const [c, name, mods] of MUT) {
+    const loaded = Object.values(mods).every(Boolean);
+    let e = null;
+    if (loaded) { const w = await lockWorld(mods); w.v.lock('agent'); e = await ended(w); w.door.closeAll(); w.v.close(); }
+    ok(loaded && e && e[c] === false && CONSEQUENCES.filter((x) => x !== c).every((x) => e[x] === true), `MUTANT «${name}»: the patch hits once and the census goes RED on ${c} alone — the shipped tree ends it`, JSON.stringify(e));
+  }
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });

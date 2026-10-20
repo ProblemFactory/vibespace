@@ -403,7 +403,8 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
 // ── ⑧ THE ONE SANDBOXED FRAME (lane channel-rich D2) ──
 // Channel rule 1 (textContent everywhere) holds on every channel surface but ONE: the mail frame. This census
 // knows that exception BY NAME — over every tracked channel file (src/lib/channel-*.js + src/mail-frame.js),
-// comments blanked: exactly ONE `.srcdoc =`, in src/lib/channel-mail-frame.js; innerHTML only in
+// comments blanked: NO srcdoc anywhere and exactly ONE `writeFrame(` (the frame host — lane design-frame-host: a srcdoc
+// frame runs under the app page's policy), in src/lib/channel-mail-frame.js; innerHTML only in
 // channel-chrome.js (the icon library's own SVG); the frame's sandbox is `allow-scripts` and nothing else;
 // `allow-same-origin` / `allow-popups` / `allow-top-navigation` / `allow-forms` nowhere.
 {
@@ -415,28 +416,32 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([;{}),])\s*\/\/[^'"`\n]*$/gm, '$1');
   const judge = (texts) => {
     const problems = [];
-    const srcdoc = [], html = [];
+    const srcdoc = [], html = [], hosted = [];
     for (const [f, t0] of Object.entries(texts)) {
       const t = strip(t0);
       for (const m of t.matchAll(/\.srcdoc\s*=|setAttribute\(\s*['"]srcdoc['"]/g)) srcdoc.push(f);
+      for (const m of t.matchAll(/\bwriteFrame\(/g)) hosted.push(f);
       for (const m of t.matchAll(/\.(innerHTML|outerHTML)\s*=|insertAdjacentHTML\(|document\.write\(/g)) html.push(f);
       if (/allow-same-origin|allow-popups|allow-top-navigation|allow-forms|allow-modals/.test(t)) problems.push(`${f}: a sandbox widening token`);
     }
-    if (srcdoc.length !== 1 || srcdoc[0] !== 'src/lib/channel-mail-frame.js') problems.push(`srcdoc sites: ${srcdoc.join(', ') || 'none'} (want exactly src/lib/channel-mail-frame.js)`);
+    if (srcdoc.length) problems.push(`srcdoc sites: ${srcdoc.join(', ')} (want none — the mail frame's document goes through the frame host)`);
+    if (hosted.length !== 1 || hosted[0] !== 'src/lib/channel-mail-frame.js') problems.push(`frame-host writes: ${hosted.join(', ') || 'none'} (want exactly src/lib/channel-mail-frame.js)`);
     for (const f of html) if (f !== 'src/lib/channel-chrome.js') problems.push(`${f}: writes HTML (only channel-chrome.js's icon() may)`);
     const mf = strip(texts['src/lib/channel-mail-frame.js'] || '');
     const sb = [...mf.matchAll(/setAttribute\(\s*'sandbox'\s*,\s*'([^']*)'\s*\)/g)].map((m) => m[1]);
     if (sb.length !== 1 || sb[0] !== 'allow-scripts') problems.push(`sandbox values: ${JSON.stringify(sb)} (want exactly ["allow-scripts"])`);
-    if (!/sanitizeMailHtml\(/.test(mf) || !/DOMPurify\.sanitize\(/.test(mf) || !/composeSrcdoc\(/.test(mf)) problems.push('the srcdoc is not fed by sanitizeMailHtml → DOMPurify → composeSrcdoc');
+    if (!/sanitizeMailHtml\(/.test(mf) || !/DOMPurify\.sanitize\(/.test(mf) || !/composeSrcdoc\(/.test(mf)) problems.push('the frame document is not fed by sanitizeMailHtml → DOMPurify → composeSrcdoc');
     return problems;
   };
   if (files) {
     const texts = Object.fromEntries(files.map((f) => [f, fsx.readFileSync(path.join(REPO, f), 'utf-8')]));
     ok(files.includes('src/lib/channel-mail-frame.js') && files.includes('src/lib/channel-window.js') && files.includes('src/mail-frame.js') && files.length >= 10, `the census walked ${files.length} tracked channel files (a census that finds nothing proves nothing)`, files.join(','));
     const pr = judge(texts);
-    ok(!pr.length, 'THE ONE EXCEPTION, BY NAME: one srcdoc (src/lib/channel-mail-frame.js, fed by the sanitizer), sandbox "allow-scripts" only, no widening token, no other HTML write on the channel surface', pr.join(' ; '));
+    ok(!pr.length, 'THE ONE EXCEPTION, BY NAME: one frame document (src/lib/channel-mail-frame.js, fed by the sanitizer, handed in through the frame host — no srcdoc anywhere), sandbox "allow-scripts" only, no widening token, no other HTML write on the channel surface', pr.join(' ; '));
     const twice = { ...texts, 'src/lib/channel-window.js': texts['src/lib/channel-window.js'] + '\nconst ff = document.createElement("iframe"); ff.srcdoc = rec.text;\n' };
-    ok(judge(twice).some((x) => /srcdoc sites/.test(x)), 'NEGATIVE CONTROL: a SECOND srcdoc (in channel-window.js) is flagged');
+    ok(judge(twice).some((x) => /srcdoc sites/.test(x)), 'NEGATIVE CONTROL: a srcdoc (in channel-window.js) is flagged');
+    const back = { ...texts, 'src/lib/channel-mail-frame.js': texts['src/lib/channel-mail-frame.js'].replace('writeFrame(f, doc, MF.frameHostSrc({ nonce, pictures }));', 'f.srcdoc = doc;') };
+    ok(back['src/lib/channel-mail-frame.js'] !== texts['src/lib/channel-mail-frame.js'] && judge(back).some((x) => /srcdoc sites/.test(x)) && judge(back).some((x) => /frame-host writes: none/.test(x)), 'NEGATIVE CONTROL: the mail frame put back on srcdoc is flagged');
     const wide = { ...texts, 'src/lib/channel-mail-frame.js': texts['src/lib/channel-mail-frame.js'].replace("f.setAttribute('sandbox', 'allow-scripts');", "f.setAttribute('sandbox', 'allow-scripts allow-same-origin');") };
     ok(judge(wide).some((x) => /widening|sandbox values/.test(x)), 'NEGATIVE CONTROL: allow-same-origin on the frame is flagged');
     const inner = { ...texts, 'src/lib/channel-window.js': texts['src/lib/channel-window.js'] + '\nrow.innerHTML = rec.text;\n' };

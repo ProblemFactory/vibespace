@@ -29,10 +29,12 @@
  *     temp folder or ~/Downloads (exit-transfer's fence); env = agentEnv() + the agent's plain env + the injected values;
  *     each file 0600 (O_EXCL | O_NOFOLLOW) in a 0700 directory `vs-vault-run-<rand>` under $XDG_RUNTIME_DIR, SHREDDED and
  *     unlinked once the child is gone; stdin = the value + a newline, closed at once; NEVER argv (the model refuses it); its
- *     own process group; a hard timeout (120 s by default, ≤ 600 s: SIGTERM, then SIGKILL 5 s later); stdout and stderr each
- *     through its own streaming scrubber (StringDecoder → createMasker: the value and its five forms over a chunk window),
- *     ≤ 2 MiB together, then secret-shapes (a name stays, its value «redacted»). ONLY that reaches the agent. A stream CUT (the
- *     bound, the timeout, a lock, the caller gone) never flushes its scrubber's held tail: a value begun there is dropped whole.
+ *     own process group; a hard timeout (120 s by default, ≤ 600 s: SIGTERM, then SIGKILL 5 s later); stdout and stderr
+ *     through ONE streaming scrubber per run, fed in arrival order (a StringDecoder each → createRunMasker: the value in every
+ *     spelling of vault-run.js's FORMS over ONE window — a value split between the two pipes is seen whole; lane
+ *     vault-scrub-forms), ≤ 2 MiB together, then secret-shapes (a name stays, its value «redacted»). ONLY that reaches the
+ *     agent. A stream CUT (the bound, the timeout, a lock, the caller gone) never flushes the scrubber's held tail: a value
+ *     begun there is dropped whole.
  *   · A RUN ENDS WHOLE (the security review): when its child is gone, the child's process group is SIGKILLed (a backgrounded
  *     `cmd &` holds the value in its environ) and so is every process still carrying the run's MARK (`VS_RUN_MARK`
  *     in its environ — a descendant that left the group: setsid, a double fork), found by a fresh /proc scan. A run folder
@@ -40,8 +42,19 @@
  *     GONE, after ending the processes that still carry their mark (another hub on the box keeps its runs).
  *   · THE LOCK (decision ③): a lock act ends every running child BY NAME (its process group: SIGTERM, SIGKILL after the
  *     grace — then the end above) and the agent's answer is `vault_locked`; its run files are shredded AT ONCE; every card
- *     up settles `vault_locked`; the seen shapes and the 8-hour «always» go with it. A locked vault refuses before anything
- *     is read and notes WHO it stopped (the vault's one helper).
+ *     up settles `vault_locked`; the seen shapes and the 8-hour «always» go with it — and (lane vault-manual-and-lock) every
+ *     open REQUEST is withdrawn `vault_locked` and every GRANT ends (one of the lock's four consequences, test-vault-engine's
+ *     census). A locked vault refuses before anything is read and notes WHO it stopped (the vault's one helper).
+ *   · THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — design q-043 D4 + D3 ⑤): an agent whose entry is closed asks
+ *     the owner for it WITH ITS PURPOSE (`request`: ONE For-you ask naming the agent, the entry and the purpose — it waits for
+ *     nobody and never expires; a second request for the same conversation × entry while one is open ⇒ `request_pending`).
+ *     The owner's answer (允许一次 / 8 小时 / 拒绝 — a person's door) writes a GRANT ROW in THIS door, the «always» rows' shape
+ *     `{conv, key: null, entries, until, at, by}` + `once` and the purpose — memory only, ≤ 8 hours: it opens that entry for
+ *     THAT conversation's runs as the per-row switch opens it for everyone (the shape card still shows each new command); a
+ *     once-grant is spent before its run starts. The run's use line carries the grant's purpose.
+ *   · THE USE LINE (lane vault-manual-and-lock — the use law's seam): every run that ran, and every refusal past the plan, is
+ *     ALSO one `vault-use` line per entry through the engine's ONE writer (`noteUse`: door `run`, the conversation, the
+ *     purpose, the outcome, the run's receipt) — what `vibespace-vault uses` reads back for that conversation.
  *   · THE AUDIT: ONE `vault-run` line in data/vault-audit.jsonl per run and per refusal past the parse — the actor, the
  *     entries (references), the shape (its id and its key, secret-shapes'd), the tool, the hosts, the injection, the verdict,
  *     the exit code, the time, the scrubbed bytes, and the scrubbed heads of the command and of each stream (≤ 4 KiB) — NEVER
@@ -53,8 +66,8 @@
  *     the HUB spawns, never the CLI, so nothing here changes shape when it lands);
  *   ② a tool can SEND the value elsewhere (`curl -d @$VAULT_FILE{x} https://elsewhere`): the card shows the hosts and the whole
  *     command, a destination-unknown tool gets no «always»; the egress fence is P1 (vault-run-egress);
- *   ③ THE SCRUBBER IS A SIEVE: it reads the child's stdout and stderr — a custom encoding, compression, encryption, a hash or
- *     the last four characters pass it, and a value the tool WRITES TO A FILE that the agent then reads with its own shell
+ *   ③ THE SCRUBBER IS A SIEVE: it reads the child's stdout and stderr in the spellings a real tool prints by itself —
+ *     a custom encoding, compression, encryption, a hash or the last four characters pass it, and a value the tool WRITES TO A FILE that the agent then reads with its own shell
  *     never meets it. WRITE-THEN-CAT IS ACCEPTED AND AUDITED (the run's line names the command, the folder and the entries) —
  *     not closed; the copy / print / pack tools are refused by the model already.
  */
@@ -73,6 +86,13 @@ const DOOR = require('../mount-door.js');   // B-afc4: a blocked storage path is
 const PI = require('../proc-identity.js');   // a run folder's hub: its identity, never a bare pid (the boot sweep)
 
 const ACTION_TYPE = 'vault-run-ask';
+const REQUEST_TYPE = 'vault-grant-ask';      // lane vault-manual-and-lock: an agent's request for an entry (its For-you ask)
+const PURPOSE_MAX = 200;                     // the request's purpose, in the agent's own words (one line)
+const GRANT_MS = 8 * 3600e3;                 // a grant lives ≤ 8 hours (once: until its run; 8h: every run) — and never past a lock
+const GRANT_ANSWERS = Object.freeze(['once', '8h', 'deny']);
+const REQUESTS_PER_CALLER = 8, REQUESTS_MAX = 64;
+const REQUEST_QUIET_MS = 10 * 60e3;          // a Deny (or the card dismissed) quiets that conversation × entry 10 minutes (the automation card's rule)
+const USE_SKIP = new Set(['ask_pending', 'too_many_runs', 'spawn_failed', 'storage_blocked']);   // a wait or the hub's own failure before any child ran — not a use's outcome (a child that ran is always one)
 const STORE_FILE = 'vault-run.json';
 const MARK_LABEL = 'vault-run-store-v1';
 const RUN_DIR_PREFIX = 'vs-vault-run-';
@@ -95,6 +115,7 @@ const STATUS = Object.freeze({
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, caller_gone: 410, too_many_runs: 429,
   spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400,
+  request_pending: 409, request_quiet: 429, purpose_required: 400, purpose_too_long: 400, too_many_requests: 429,   // lane vault-manual-and-lock
 });
 const MORE_WORDS = Object.freeze({
   hidden_chars: 'the command holds characters that show differently than they run (control or direction marks) — refused',
@@ -103,6 +124,12 @@ const MORE_WORDS = Object.freeze({
   storage_blocked: `${DOOR.SENTENCE} (the run's folder, its program or a template is on it) — nothing ran`,
   request_too_large: `the run's words are over ${ARGS_MAX} characters or its folder over ${CWD_MAX} — refused before anything is read`,
   failed: 'the run door failed — nothing ran',
+  // lane vault-manual-and-lock: the request's own codes
+  request_pending: 'you already asked the user for that entry — the question waits in their For you tray; `vibespace-vault uses` shows the answer when it comes',
+  purpose_required: 'say what the entry is for: vibespace-vault request <vault://…> --for "<what you will run with it, and why>"',
+  purpose_too_long: `the purpose is one line of at most ${PURPOSE_MAX} characters`,
+  too_many_requests: 'too many questions are waiting on the user already — wait for their answers',
+  request_quiet: 'the user said no to that a moment ago — do not ask again for 10 minutes; do other work',
 });
 const named = (code, extra = {}) => (MORE_WORDS[code] ? { ok: false, code, words: MORE_WORDS[code], ...extra } : VR.refusalOf(code, extra));
 const NO_ALWAYS = Object.freeze({
@@ -217,6 +244,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const seen = new Map();      // pair → at — the owner allowed this shape once, THIS unlock (a local instance asks no more)
   const shortAlways = new Map(); // pair → until — an 8-hour «always» (memory only: a lock ends it)
   const runs = new Set();      // the children running now
+  // lane vault-manual-and-lock: an agent's REQUESTS (one For-you ask each, open until answered or the lock) and the GRANT ROWS
+  // their answers write (memory only — the «always» rows' shape + once + purpose; a lock ends them all)
+  const requests = new Map();  // askId → { askId, pair, scope, conv, sessionKey, who, ref, id, label, purpose, detail, askedAt, todoId }
+  const reqByPair = new Map(); // `${scope}\n${entry id}` → askId (ONE open request per conversation × entry)
+  const grants = new Map();    // `${scope}\n${entry id}` → { conv, key: null, entries: [id], until, once, at, by, askId, purpose }
+  const reqQuiet = new Map();  // pair → until (a Deny / a dismissed card: no new card for that pair for 10 minutes)
   let db = null, dbEpoch = -1;
   const hubIdentity = (() => { try { return PI.identityOf(process.pid); } catch { return null; } })();   // written into every run folder (the boot sweep's proof)
   const vaultState = () => { try { return vault.state(); } catch { return 'locked'; } };
@@ -297,22 +330,26 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (on) runnable.add(key); else runnable.delete(key);
     // OFF takes back every «always» and seen shape that names this entry (the review: an «always» outlived its switch)
     const always = on ? d.always : d.always.filter((a) => !a.entries.includes(key));
-    if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) shortAlways.delete(p); for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); }
+    if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) shortAlways.delete(p); for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) grants.delete(p); }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation)
     const r = save({ runnable, always });
     if (!r.ok) return r;
     audit('vault-run-switch', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, open: !!on });
     return { ok: true, id: key, open: !!on };
   }
-  /** What THIS caller may reference (vibespace-vault list): the opened rows — a reference, a label, a kind; never a value. */
-  function runnableFor() {
+  /** What THIS caller may reference (vibespace-vault list): the opened rows — a reference, a label, a kind; never a value —
+   *  and (lane vault-manual-and-lock) the entries a grant opened for THIS conversation (`by: 'grant'`, its purpose and end). */
+  function runnableFor(caller = {}) {
     const st = vaultState();
     if (st !== 'unlocked') return named(st === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
-    const d = load(), out = [];
-    for (const id of [...d.runnable].sort()) {
+    const d = load(), out = [], scope = scopeOf(caller);
+    const ids = new Set(d.runnable);
+    if (scope) for (const g of grants.values()) if (g.conv === scope && g.until > now()) ids.add(g.entries[0]);
+    for (const id of [...ids].sort()) {
       const ref = VI.parseRef(id), row = ref && rowOf(ref);
       if (!row || !classOf(ref, row).runnable) continue;
       const r = VR.refFor(ref.store, ref.entry, ref.field);   // the canonical spelling (the review: encodeURIComponent left !'()* raw)
-      out.push({ ref: r ? r.ref : null, store: ref.store, label: row.label, kind: row.kind, field: ref.field });
+      const g = d.runnable.has(id) || !scope ? null : grantOf(scope, id);
+      out.push({ ref: r ? r.ref : null, store: ref.store, label: row.label, kind: row.kind, field: ref.field, ...(g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : {}) });
     }
     return { ok: true, entries: out.filter((x) => x.ref) };
   }
@@ -399,9 +436,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // THE ITEM AND THE ASK ARE ONE STATE: the item leaving 'open' by another door settles the ask refused; a reopen of an ask that is over goes back to done
   if (userTodos && typeof userTodos.onStatus === 'function') {
     userTodos.onStatus((it, { status, by }) => {
-      if (!it || !it.action || it.action.type !== ACTION_TYPE) return;
-      const q = asks.get(String(it.action.askId || ''));
+      if (!it || !it.action || (it.action.type !== ACTION_TYPE && it.action.type !== REQUEST_TYPE)) return;
+      const req = it.action.type === REQUEST_TYPE;
+      const q = (req ? requests : asks).get(String(it.action.askId || ''));
       if (status === 'open') { if (!q) { try { userTodos.setStatus(it.id, 'done', 'ask-over'); } catch { } } return; }
+      if (req) { if (q && q.todoId === it.id) settleRequest(q, 'denied', `item-${String(status)}-by-${String(by || 'user')}`); return; }   // a request's card closed elsewhere = not granted
       if (!q || q.todoId !== it.id) return;
       settle(q, by === 'expired' ? 'expired' : 'denied', by === 'expired' ? 'timeout' : `item-${String(status)}-by-${String(by || 'user')}`);
     });
@@ -410,10 +449,148 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function reconcile() {
     if (!userTodos) return 0;
     let n = 0;
-    try { for (const it of (userTodos.snapshot?.() || {}).open || []) if (it && it.action && it.action.type === ACTION_TYPE && !asks.has(it.action.askId)) { try { userTodos.setStatus(it.id, 'done', 'ask-expired'); n++; } catch { } } } catch (e) { log(`run card reconcile failed: ${e.message}`); }
+    try { for (const it of (userTodos.snapshot?.() || {}).open || []) if (it && it.action && ((it.action.type === ACTION_TYPE && !asks.has(it.action.askId)) || (it.action.type === REQUEST_TYPE && !requests.has(it.action.askId)))) { try { userTodos.setStatus(it.id, 'done', it.action.type === REQUEST_TYPE ? 'vault_locked' : 'ask-expired'); n++; } catch { } } } catch (e) { log(`run card reconcile failed: ${e.message}`); }
     return n;
   }
   const shapeIdOf = (key) => crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16);
+
+  // ── THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — design q-043 D4: `vibespace-vault request <entry> --for "<why>"`) ──
+  /** THIS conversation as the use law spells it (its `conv` — the session's registered id; a mint's scope) — the run's own
+   *  card / «always» keep the conversation id they always had. */
+  const scopeOf = (caller) => String((caller && (caller.scope || caller.conversationId)) || '');
+  /** A live grant of `id` to `scope` — or null (an expired one goes). */
+  function grantOf(scope, id) {
+    const p = pairOf(scope, id), g = grants.get(p);
+    if (!g) return null;
+    if (!(g.until > now())) { grants.delete(p); return null; }
+    return g;
+  }
+  const requestWords = (r) => [
+    { key: 'Secret: {label} — {ref}', params: { label: r.label, ref: r.ref } },
+    { key: 'What for, in the agent\'s words: {purpose}', params: { purpose: r.purpose } },
+    { key: 'Allow once: its next run with this secret (within 8 hours). For 8 hours: every run with it. Both ask for the second password, as «Usable by agent runs» does; a new kind of command still shows you its card first, and locking the vault ends the grant.' },
+    { key: 'To let every conversation use it, turn on «Usable by agent runs» on its row in ⚙ System ▸ Vault….' },
+  ];
+  const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
+  function settleRequest(q, outcome, why = outcome) {
+    if (!requests.has(q.askId)) return false;
+    requests.delete(q.askId);
+    if (reqByPair.get(q.pair) === q.askId) reqByPair.delete(q.pair);
+    settled.set(q.askId, 'settled');
+    while (settled.size > SETTLED_MAX) settled.delete(settled.keys().next().value);
+    if (q.todoId && userTodos) { try { const it = userTodos.get?.(q.todoId); if (it && it.status === 'open') userTodos.setStatus(q.todoId, 'done', outcome === 'vault_locked' ? 'vault_locked' : outcome === 'changed' ? 'ask-changed' : outcome); } catch { } }
+    if (outcome === 'denied') { reqQuiet.set(q.pair, now() + REQUEST_QUIET_MS); for (const [p, u] of reqQuiet) if (!(u > now())) reqQuiet.delete(p); }
+    log(`${q.who}: the request for ${q.ref} ${outcome}${why !== outcome ? ` (${why})` : ''}`);
+    return true;
+  }
+  /**
+   * An AGENT asks the owner for an entry, with its purpose. `caller` as `run` reads it; `entry` = a `vault://` reference;
+   * `purpose` = one line. → { ok: true, askId } (ONE For-you ask filed — nothing waits on it) | { ok: true, already: 'open' |
+   * 'granted', … } | a named refusal.
+   */
+  function request({ caller = {}, entry = '', purpose = '' } = {}) {
+    if (caller.job) return named('job_no_use');
+    const scope = scopeOf(caller);
+    if (!scope || !caller.conversationId) return named('unauthorized');
+    const st = vaultState();
+    if (st === 'not_set_up') return named('vault_not_set_up');
+    if (st !== 'unlocked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault request'); } catch { } return named('vault_locked'); }
+    if (caller.remote) return named('device_road_later');
+    const raw = String(entry == null ? '' : entry).trim(), why0 = String(purpose == null ? '' : purpose);
+    if (raw.length > 1024 || why0.length > 4 * PURPOSE_MAX) return named('request_too_large');
+    if (HC.hiddenCharsOf(raw, { max: 1 }).length || HC.hiddenCharsOf(why0, { max: 1 }).length) return named('hidden_chars');
+    const ref = VR.parseRef(raw);
+    if (!ref) return named('bad_reference');
+    const why = why0.replace(/\s+/g, ' ').trim();
+    if (!why) return named('purpose_required');
+    if (why.length > PURPOSE_MAX) return named('purpose_too_long');
+    const said = SS.redactSecrets(why).text;   // the purpose lands in the owner's tray and the audit: a value pasted into it is «redacted»
+    const row = rowOf(ref), c = classOf(ref, row);
+    if (!c.runnable) return named('entry_has_its_own_door', { ref: ref.ref, door: c.door, words: `${VR.WORDS.entry_has_its_own_door}: ${c.door}` });
+    if (!row) return named('entry_unknown', { ref: ref.ref });
+    const sc = VR.agentScopeOf(ref);
+    if (sc && sc !== scope && sc !== caller.conversationId) return named('use_not_granted', { ref: ref.ref });   // another conversation's own entry is its own
+    const pair = pairOf(scope, ref.id);
+    const g = grantOf(scope, ref.id);
+    if (g) return { ok: true, already: 'granted', ref: ref.ref, once: g.once, until: g.until };
+    const d = load();
+    if (d && d.runnable.has(ref.id)) return { ok: true, already: 'open', ref: ref.ref };
+    const up = reqByPair.get(pair);
+    if (up && requests.has(up)) return named('request_pending', { ref: ref.ref });
+    const qu = reqQuiet.get(pair);
+    if (qu && qu > now()) return named('request_quiet', { ref: ref.ref, until: new Date(qu).toISOString() });
+    if ([...requests.values()].filter((x) => x.scope === scope).length >= REQUESTS_PER_CALLER || requests.size >= REQUESTS_MAX) return named('too_many_requests');
+    const askId = randomBytes(16).toString('hex');
+    const who = String(VB.actorName(caller.name, 'a conversation')).slice(0, 80);
+    const q = { askId, pair, scope, conv: caller.conversationId, sessionKey: caller.sessionKey || null, who, ref: ref.ref, id: ref.id, label: String(row.label || ref.label).slice(0, 120), purpose: said, detail: '', askedAt: now(), todoId: null };
+    const lines = requestWords(q);
+    q.detail = lines.map(fill).join('\n');
+    if (q.detail.length > DETAIL_MAX) return named('card_too_long');
+    if (userTodos) {
+      try {
+        const it = userTodos.add(caller.sessionKey || 'vault', {
+          origin: 'vault', urgency: 'high', kind: 'action', by: 'agent', sessionName: who,   // NO expiresAt: a request waits for the owner (design D4 — never expires; a lock withdraws it)
+          text: `${who} asks to use a stored secret`,
+          detail: q.detail,
+          i18n: { text: { key: '{who} asks to use a stored secret', params: { who } }, detail: lines },
+          action: { type: 'vault-grant-ask', askId },   // = REQUEST_TYPE (spelled for the approval census's grep)
+        });
+        q.todoId = it && it.id;
+      } catch (e) {
+        log(`${who}: the request could not be filed in For you: ${e.message}`);
+        return named('ask_unfiled');
+      }
+    }
+    requests.set(askId, q); reqByPair.set(pair, askId);
+    audit('vault-request', { by: { kind: 'agent', key: caller.sessionKey || null, name: caller.name || null }, conv: scope, entry: ref.ref, purpose: said, askId });
+    return { ok: true, askId, ref: ref.ref };
+  }
+  /** A PERSON's answer to a request (src/routes/vault.js: people only): once | 8h | deny → the grant row. A grant opens a
+   *  closed entry for a conversation — the per-row switch's job — so it needs the switch's 验证是你 (`reauthed`: this page's
+   *  window, the second password again; the review: a click alone is a header a local process can forge on a hub with no
+   *  sign-in); Deny stays a click. */
+  function answerRequest(askId, { answer: a, reauthed = false, by = 'user' } = {}) {
+    const id = String(askId || '');
+    const q = requests.get(id);
+    if (!q) return { ok: false, code: settled.has(id) ? 'ask_settled' : 'ask_unknown' };
+    if (!GRANT_ANSWERS.includes(a)) return { ok: false, code: 'bad_grant_answer' };
+    const said = { by: String(by).slice(0, 40), conv: q.scope, entry: q.ref, askId: q.askId };
+    if (a === 'deny') { settleRequest(q, 'denied', 'answered'); audit('vault-grant', { ...said, answer: 'deny' }); return { ok: true, outcome: 'denied' }; }
+    if (vaultState() !== 'unlocked') { settleRequest(q, 'vault_locked'); return { ok: false, code: 'vault_locked' }; }
+    if (!reauthed) return { ok: false, code: 'reveal_needs_password' };   // the card stays up
+    // THE BELT (as the run card's): a grant is for what the owner was SHOWN — the item still open, this request's, its very detail
+    if (q.todoId && userTodos && typeof userTodos.get === 'function') {
+      let it = null; try { it = userTodos.get(q.todoId); } catch { }
+      const shown = !!(it && it.status === 'open' && it.action && it.action.type === REQUEST_TYPE && it.action.askId === q.askId && String(it.detail || '') === q.detail);
+      if (!shown) { settleRequest(q, 'changed', 'item-changed'); return { ok: false, code: 'ask_changed' }; }
+    }
+    if (!liveOf(q.conv)) { settleRequest(q, 'denied', 'gone'); return { ok: false, code: 'conversation_gone' }; }
+    const ref = VR.parseRef(q.ref), row = ref && rowOf(ref);
+    if (!row) { settleRequest(q, 'denied', 'entry gone'); return { ok: false, code: 'entry_unknown' }; }
+    if (!classOf(ref, row).runnable) { settleRequest(q, 'denied', 'its own door'); return { ok: false, code: 'entry_has_its_own_door' }; }
+    const t = now(), until = t + GRANT_MS;
+    grants.set(q.pair, { conv: q.scope, key: null, entries: [q.id], until, once: a === 'once', at: t, by: said.by, askId: q.askId, purpose: q.purpose });
+    audit('vault-grant', { ...said, answer: a, until });
+    settleRequest(q, 'granted', 'answered');
+    return { ok: true, outcome: a === 'once' ? 'granted-once' : 'granted', until };
+  }
+  /** `vibespace-vault uses` (design D4): THIS conversation's grants, its open requests and its own use lines (the engine reads
+   *  the audit file's tail) — references, purposes, times, outcomes, receipts; never a value, never another conversation's. */
+  function usesFor(caller = {}) {
+    if (caller.job) return named('job_no_use');
+    const scope = scopeOf(caller);
+    if (!scope) return named('unauthorized');
+    const t = now(), mine = [];
+    for (const [p, g] of grants) { if (!(g.until > t)) { grants.delete(p); continue; } if (g.conv === scope) mine.push(g); }
+    const refOfId = (id) => { const r = VI.parseRef(id); const x = r && VR.refFor(r.store, r.entry, r.field); return x ? x.ref : null; };
+    return {
+      ok: true,
+      state: vaultState(),
+      grants: mine.map((g) => ({ entry: refOfId(g.entries[0]), purpose: g.purpose, once: g.once, until: new Date(g.until).toISOString(), at: new Date(g.at).toISOString() })),
+      requests: [...requests.values()].filter((q) => q.scope === scope).map((q) => ({ entry: q.ref, purpose: q.purpose, at: new Date(q.askedAt).toISOString() })),
+      uses: typeof vault.usesOf === 'function' ? vault.usesOf(scope) : [],
+    };
+  }
 
   // ── THE PLACE: the cwd fence, argv[0] on the base PATH, a template's text ──
   const BV = () => require('../browser-verbs.js');
@@ -495,7 +672,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   async function run({ caller = {}, args = [], cwd = null, signal = null } = {}) {
     const t0 = now();
     const by = { kind: caller.job ? 'job' : 'agent', key: caller.sessionKey || null, name: caller.name || null };
-    const note = (outcome, extra = {}) => audit('vault-run', { by, outcome, ...extra });   // ONE line: the actor, the outcome (ran | the refusal's code), the facts — never a value
+    const scope = scopeOf(caller);
+    const runReceipt = `vr-${randomBytes(8).toString('hex')}`;   // ONE receipt per run: the answer of a run that ran, its run line and every entry's use line (a refusal's lines carry it too — the audit's)
+    let usedRefs = null;           // the plan's references, once it parsed — each one's use line (lane vault-manual-and-lock)
+    const purposes = new Map();    // entry id → the purpose of the grant that opened it
+    const useLines = (outcome, receipt, ran = false) => {
+      if (!usedRefs || (USE_SKIP.has(outcome) && !ran) || typeof vault.noteUse !== 'function') return;   // a child that RAN with the value is a use whatever ended it
+      for (const r of usedRefs) { try { vault.noteUse(r.ref, { by: by.kind, door: 'run', conv: scope }, { outcome: outcome === 'ran' ? 'ok' : outcome, purpose: purposes.get(r.id) || null, actor: VB.actorName(caller.name, 'a conversation'), receipt, store: r.store, used: ran }); } catch { } }
+    };
+    const note = (outcome, extra = {}) => { audit('vault-run', { by, outcome, ...extra }); useLines(outcome, runReceipt, !!extra.receipt); };   // ONE line: the actor, the outcome (ran | the refusal's code), the facts — never a value; + each entry's use line
     if (caller.job) { note('job_no_use'); return named('job_no_use'); }
     if (!caller.conversationId) return named('unauthorized');
     const st = vaultState();
@@ -524,6 +709,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const programWritable = !!resolved && (writable(resolved) || writable(path.dirname(resolved)));   // an agent (the same uid) could have written it
     const spec = VR.planOf({ ...req, resolved, templates: tp.templates, programWritable });
     if (!spec.ok) { note(spec.code, { tool: resolved, why: spec.why || null }); return spec; }
+    usedRefs = spec.refs;
     const shape = VR.shapeOf(spec), key = VR.shapeKeyOf(shape), shapeId = shapeIdOf(key);
     const detail = detailOf(spec, shape, place);
     if (detail.length > DETAIL_MAX) return named('card_too_long');
@@ -531,10 +717,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
     const d = load();
     const entries = [];
+    const admitted = [];   // a GRANT that opened a closed entry (lane vault-manual-and-lock) — a once-grant is spent before the run starts
     for (const r of spec.refs) {
       const row = rowOf(r), c = classOf(r, row);
       if (!c.runnable) { note('entry_has_its_own_door', { ...head, ref: r.ref }); return named('entry_has_its_own_door', { ref: r.ref, door: c.door, words: `${VR.WORDS.entry_has_its_own_door}: ${c.door}` }); }
-      const open = !!(row && d && d.runnable.has(r.id));
+      const sw = !!(row && d && d.runnable.has(r.id)), g = row ? grantOf(scope, r.id) : null;
+      if (g) purposes.set(r.id, g.purpose);
+      if (g && !sw) admitted.push({ pair: pairOf(scope, r.id), g });
+      const open = sw || !!g;   // the owner's switch (every conversation) OR the grant his answer wrote (this one)
       let bytes = 0;
       if (row && open) { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } }
       entries.push({ id: r.id, exists: !!row, open, bytes });
@@ -545,7 +735,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const remembered = stored && (stored.until == null || stored.until > now()) ? stored : short && short.until > now() ? { until: short.until } : null;
     // granted: P0 has no who-may-use list — the owner's per-row switch and the card ARE the grant (P1 vault-use-reach narrows it
     // to whom); an AGENT's own entry (`agent:<scope>/<name>`) is its conversation's only
-    const granted = spec.refs.every((r) => { const sc = VR.agentScopeOf(r); return !sc || sc === caller.conversationId || sc === caller.scope; });   // SEAM (int330): accept the mint scope too (routes callerOf carries it) — q-043 P0-c decision 3
+    const granted = spec.refs.every((r) => { const sc = VR.agentScopeOf(r); return !sc || sc === scope || sc === caller.conversationId; });   // a mint's scope is the use law's conv (lane vault-mint-put)
     let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair), instance: instanceKind(), policy: policy(), now: now() });
     let askId = null, asked = null;
     if (!verdict.ok && verdict.ask) {
@@ -557,17 +747,30 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (outcome) { note(outcome, { ...head, askId }); return named(outcome); }
       // allowed / always — the verdict AGAIN over the facts as they stand NOW (a lock, a switch closed while the card waited)
       const d2 = load();
-      const again = spec.refs.map((r) => { const row = rowOf(r); return { id: r.id, exists: !!row, open: !!(row && d2 && d2.runnable.has(r.id)), bytes: entries.find((e) => e.id === r.id).bytes }; });
+      const again = spec.refs.map((r) => { const row = rowOf(r); return { id: r.id, exists: !!row, open: !!(row && ((d2 && d2.runnable.has(r.id)) || grantOf(scope, r.id))), bytes: entries.find((e) => e.id === r.id).bytes }; });
       verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries: again, granted, remembered: { until: null }, seen: true, instance: instanceKind(), policy: 'allow', now: now() });
       if (verdict.ok) verdict = { ok: true, by: asked === 'always' ? 'always' : 'once' };
     }
     if (!verdict.ok) { if (verdict.code === 'vault_locked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } } note(verdict.code, { ...head, askId }); return verdict; }
     if (signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); }
     if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) return named('too_many_runs');
-    return spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note });
+    // A ONCE-GRANT IS SPENT BEFORE THE RUN (a grant never runs twice): still the very row the verdict read — a lock, the switch
+    // or another run of this conversation took it meanwhile ⇒ nothing runs
+    const spent = [];
+    for (const a of admitted) {
+      if (grants.get(a.pair) !== a.g || !(a.g.until > now())) { note('use_not_granted', head); return named('use_not_granted'); }
+      if (a.g.once) spent.push(a);
+    }
+    for (const a of spent) grants.delete(a.pair);
+    // L3 (int331): a once-grant is spent only when a child RAN — restore it when nothing ran (entry_unknown / too-short / spawn_failed,
+    // sync or the async spawn error) so a failure before the child does not burn the owner's one-time grant (the agent runs it again)
+    const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed']);
+    const restoreOnce = (r) => { if (r && r.ok === false && BURNED.has(r.code)) for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); return r; };
+    const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt });
+    return out && typeof out.then === 'function' ? out.then(restoreOnce) : restoreOnce(out);
   }
 
-  function spawnRun({ caller, spec, head, verdict, askId, place, base, signal, t0, note }) {
+  function spawnRun({ caller, spec, head, verdict, askId, place, base, signal, t0, note, receipt }) {
     // THE VALUES — read now, held in this closure only for the spawn and the scrubbers; never stored, never logged
     let values = new Map();
     for (const r of spec.refs) {
@@ -578,8 +781,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       values.set(r.ref, v);
     }
     const secrets = spec.refs.map((r) => ({ ref: r, value: values.get(r.ref) }));
-    let masks;
-    try { masks = { out: VR.createMasker(secrets), err: VR.createMasker(secrets) }; }   // BEFORE any file holds a value (the review: a throw here leaked the folder)
+    let scrub;
+    try { scrub = VR.createRunMasker(secrets, ['out', 'err']); }   // ONE per run, both pipes in arrival order (one window); BEFORE any file holds a value (the review: a throw here leaked the folder)
     catch (e) { values = null; note('spawn_failed', { ...head, why: `the scrubber (${(e && e.code) || 'error'})` }); return named('spawn_failed', { why: 'the scrubber could not be built' }); }
     let dir = null;
     try {
@@ -595,11 +798,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         try { fs.writeSync(fd, f.content); } finally { fs.closeSync(fd); }
       }
     } catch (e) { shredDir(dir); values = null; note('spawn_failed', { ...head, why: `a run file (${e.code || e.message})` }); return named('spawn_failed', { why: 'a run file could not be written' }); }
-    for (const r of spec.refs) { try { vault.noteUse(r.store, 'agent'); } catch { } }
     return new Promise((resolve) => {
       const rec = { conv: caller.conversationId, name: caller.name || null, child: null, stopped: null, hard: null, timer: null, dir, mark, piped: false };
       const dec = { out: new StringDecoder('utf8'), err: new StringDecoder('utf8') };
       const parts = { out: [], err: [] };
+      const handOn = (o) => { parts.out.push(o.out); parts.err.push(o.err); };   // what the run's scrubber hands on, each to the stream it came on
       let got = 0, truncated = false, done = false, spawnError = null;
       const take = (k, buf) => {
         if (truncated) return;
@@ -607,7 +810,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         if (got + b.length > VR.OUTPUT_MAX_BYTES) { b = b.subarray(0, VR.OUTPUT_MAX_BYTES - got); truncated = true; }
         got += b.length;
         const text = dec[k].write(b);
-        if (text) parts[k].push(masks[k].push(text));
+        if (text) handOn(scrub.push(k, text));
       };
       const finish = (code, sig) => {
         if (done) return;
@@ -623,14 +826,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         // A CUT STREAM (the 2 MiB bound, a timeout, a lock, the caller gone) keeps its held tail BACK for good: a value that
         // began in the last (longest form − 1) characters may be only half there — flushed, its half would pass unscrubbed
         const cut = truncated || !!rec.stopped || rec.piped;   // + the pipes cut 2 s after the child's exit (the review)
-        for (const k of ['out', 'err']) parts[k].push(masks[k].push(dec[k].end()), ...(cut ? [] : [masks[k].end()]));
+        for (const k of ['out', 'err']) handOn(scrub.push(k, dec[k].end()));
+        if (!cut) handOn(scrub.end());
         values = null;
         const ms = now() - t0;
         const outT = redactLong(parts.out.join('')), errT = redactLong(parts.err.join(''));
-        const scrubbed = { hits: masks.out.hits + masks.err.hits, bytes: masks.out.bytes + masks.err.bytes, byForm: Object.fromEntries(VR.FORMS.map((f) => [f, (masks.out.byForm[f] || 0) + (masks.err.byForm[f] || 0)]).filter(([, n]) => n)) };
-        const receipt = randomBytes(8).toString('hex');   // the run's RECEIPT: the agent's answer and its audit line carry the same one (design D1: a use + a receipt)
+        const scrubbed = { hits: scrub.hits, bytes: scrub.bytes, byForm: Object.fromEntries(VR.FORMS.map((f) => [f, scrub.byForm[f] || 0]).filter(([, n]) => n)) };
+        // the run's RECEIPT (minted at the run's start): the agent's answer, its audit line and each entry's use line carry the same one (design D1: a use + a receipt)
         const line = { ...head, receipt, allowedBy: verdict.by, askId, exit: Number.isInteger(code) ? code : null, signal: sig || null, ms, timedOut: rec.stopped === 'timeout', truncated, tailDropped: cut, strays, scrubbed, redacted: outT.redacted + errT.redacted, stdout: utf8Head(outT.text), stderr: utf8Head(errT.text) };
-        if (spawnError) { note('spawn_failed', { ...line, why: spawnError }); resolve(named('spawn_failed', { why: spawnError })); return; }
+        if (spawnError) { const { receipt: _r, ...noRun } = line; note('spawn_failed', { ...noRun, why: spawnError }); resolve(named('spawn_failed', { why: spawnError })); return; }   // no child ran: no receipt, no use
         if (rec.stopped === 'lock') { note('vault_locked', { ...line, killed: true }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(named('vault_locked', { killed: true })); return; }
         if (rec.stopped === 'gone') { note('caller_gone', { ...line, killed: true }); resolve(named('caller_gone')); return; }
         note('ran', line);
@@ -659,7 +863,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function onLocked(why = 'lock') {
     for (const rec of [...runs]) { log(`the vault locked (${why}): stopping the run of ${rec.name || rec.conv}`); stop(rec, 'lock'); shredDir(rec.dir); }   // its files go AT ONCE (the child is being stopped)
     for (const q of [...asks.values()]) settle(q, 'vault_locked', 'locked');
-    seen.clear(); shortAlways.clear(); db = null; dbEpoch = -1;
+    for (const q of [...requests.values()]) settleRequest(q, 'vault_locked', 'locked');   // lane vault-manual-and-lock: every open request is withdrawn
+    seen.clear(); shortAlways.clear(); grants.clear(); db = null; dbEpoch = -1;   // … and every grant ends (once / 8 hours)
   }
   if (typeof vault.onLock === 'function') vault.onLock((why) => onLocked(why));
 
@@ -684,8 +889,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** The process ends: every child, its strays and its files with it (sync — an exit handler). */
   function closeAll() { for (const rec of [...runs]) { killGroup(rec, 'SIGKILL'); endMarked(rec.mark); shredDir(rec.dir); } runs.clear(); }
 
-  return { run, answer, setRunnable, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen };
+  return { run, answer, setRunnable, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor,
+    listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet,
+    listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen };
 }
 
 const statusOf = (code) => STATUS[code] || 400;
-module.exports = { create, classOf, statusOf, STATUS, MORE_WORDS, ACTION_TYPE, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };
+module.exports = { create, classOf, statusOf, STATUS, MORE_WORDS, ACTION_TYPE, REQUEST_TYPE, GRANT_MS, GRANT_ANSWERS, PURPOSE_MAX, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };

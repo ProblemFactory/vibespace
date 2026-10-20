@@ -222,6 +222,12 @@ const OPS = {
     return { result: { exists: fs.existsSync(p) } };
   },
 
+  // the frame host's preview folder (lane frame-host-preview): a file's REAL path — a symlink out of the folder is judged
+  // by where it lands, never by its name
+  realpath({ path: p }) {
+    return { result: { path: fs.realpathSync(p) } };
+  },
+
   access({ path: p }) {
     fs.accessSync(p);
     return { result: { success: true } };

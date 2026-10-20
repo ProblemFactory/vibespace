@@ -4304,6 +4304,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 /* a previewed detail (a resolved item's snapshot carries 300 chars) says so while the rest loads; a failed load by name */
 .iw-detail-cut { margin-top: 6px; font-size: 11px; color: var(--text-dim); font-style: italic; }
 .iw-detail-cut[data-state="failed"] { color: var(--red, #e55); font-style: normal; }
+.iw-run-note { margin-top: 6px; font-size: 11px; color: var(--text-dim); }   /* lane vault-scrub-forms: what a run card's scrubbing does not promise */
 .iw-replied {
   margin-top: 12px; padding: 8px 10px; border-left: 3px solid var(--accent); border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text-secondary);

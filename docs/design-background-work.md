@@ -175,6 +175,11 @@ CLIENT `src/lib/jobs-panel.js` (+ `src/lib/job-interact.js` §6.4) · M2 DEVICE
   declared-port liveness BEFORE replay decisions. Adopt and every kill re-verify
   the full stamp at act time. Tasks are adopt-first too; non-adoptable-but-
   possibly-alive parks `unverified`, never terminal-while-running.
+  The wrapper's spec (argv, cwd, env — the secrets and the jbt_ token) rides a
+  0600 file in the run's 0700 dir, never argv: `spec.<runTs>.json`, O_EXCL,
+  read once and unlinked; the wrapper's own env is an allowlist and a spec
+  without env is refused (lane job-spec-off-argv, 2026-10-20 — until then the
+  spec rode base64 on argv, readable in /proc/<pid>/cmdline).
 - **Survival promise (v3, simplified per owner decision)**: services survive ANY
   restart — same-process-tree restarts by detach+adopt, pod rebuilds by **boot
   replay** (respawn from spec; that is the accepted semantic). Long tasks

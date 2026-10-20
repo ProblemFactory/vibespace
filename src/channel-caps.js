@@ -549,7 +549,7 @@ function sendWhyText(why, { t = defaultT } = {}) {
     case 'vendor-error': return t('the vendor did not answer whether you can reply — it is asked again by itself');
     case 'auth-expired': return t('this account\'s sign-in expired — Re-authorize');
     case 'not-connected': return t('this account is not connected — Re-authorize');
-    case 'vault-locked': return t('The vault is locked — unlock it first');   // lane vault-e2e-password-fix-r2
+    case 'vault-locked': return t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)');   // lane vault-e2e-password-fix-r2
     case 'checking': return t('checking whether you can reply…');
     case 'stale': return t('the send capability has not been re-checked recently');
     case 'unknown': return t('the send capability is not known yet');
@@ -572,7 +572,7 @@ function sendFoot(cc, why, { t = defaultT, vendor = '', checking = false } = {})
   const v = vendor || t('The vendor');
   const said = w === 'rate-limited' ? t('{vendor} is rate-limiting this account — the reply box returns when it answers', { vendor: v })
     : w === 'backoff' ? t('This account is paused after repeated vendor errors — the reply box returns when it answers')
-      : w === 'vault-locked' ? t('The vault is locked — unlock it first')   // r2: never "expired"
+      : w === 'vault-locked' ? t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)')   // r2: never "expired"
       : w === 'auth-expired' ? t('This account\'s sign-in expired — Re-authorize to reply')
         : w === 'not-connected' ? t('This account is not connected — Re-authorize to reply')
           : t('{vendor} did not answer whether you can reply here', { vendor: v });

@@ -5987,6 +5987,7 @@ export default {
   "running again": "再び実行中",
   "running again (resumed {time})": "再び実行中（{time} に再開）",
   "Nothing runs until you answer. After 60 s it is refused.": "回答するまで何も実行されません。60 秒で拒否されます。",
+  "The output is scrubbed of the secret's common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.": "出力からはこの秘密のよくある表記が消されます。それを再エンコードするコマンドなら表示されることがあります——許可する前にコマンド全体を読んでください。",
   "Allow \"{name}\" to run a command on {machine}?": "\"{name}\" に {machine} でコマンドの実行を許可しますか？",
   // verify r6 (what you approve is what runs): the whole request, hidden characters, every Always-Allow update
   "{first} … (+{n} more lines)": "{first} …（ほかに {n} 行）",
@@ -9326,15 +9327,20 @@ export default {
   "Only a person can do this": "これは人だけが行えます", // lane vault-e2e-password
   "Could not reach the vault — {reason}": "保管庫に届きませんでした — {reason}", // lane vault-e2e-password
   "Vault locked": "保管庫はロック中", // lane vault-e2e-password
-  "Vault locked — click to unlock": "保管庫はロック中 — クリックして解除", // lane vault-e2e-password
+  "Vault locked — click to unlock (For you names what is waiting on it)": "保管庫はロック中 — クリックして解除（待っているものは「あなた宛て」に載っています）", // lane vault-e2e-password
   "Unlock the vault": "保管庫のロックを解除", // lane vault-e2e-password
-  "The vault is locked — device links, the relay and account switching are waiting.": "保管庫はロック中 — デバイス連携・中継・アカウント切り替えが待機中です", // lane vault-relock-door: the persistent lock strip
+  "The vault is locked — device links, the relay and account switching are waiting (For you names whatever it stops). Unlock… enters the second password.": "保管庫はロック中 — デバイス連携・中継・アカウント切り替えが待機中です（止めたものは「あなた宛て」に載ります）。「ロック解除…」で第二パスワードを入力します。", // lane vault-relock-door: the persistent lock strip
   "The vault locked after a restart — enter the second password to unlock. Device links, the relay and account switching are waiting.": "再起動後に保管庫がロックされました — 第二パスワードを入力して解除してください。デバイス連携・中継・アカウント切り替えが待機中です", // lane vault-relock-door: the restart For-you notice
-  "The vault is locked — {n} waiting on it (For you names them).": "保管庫はロック中 — {n} 件が待機中です（「あなた宛て」に一覧があります）", // lane vault-locked-refusal-notice: the strip's count
+  "The vault is locked — {n} waiting on it (For you names them). Unlock… enters the second password.": "保管庫はロック中 — {n} 件が待機中です（「あなた宛て」に一覧があります）。「ロック解除…」で第二パスワードを入力します。", // lane vault-locked-refusal-notice: the strip's count
   "The vault is locked — waiting on it: {who}. Enter the second password to unlock.": "保管庫はロック中 — 待機中：{who}。第二パスワードを入力して解除してください", // lane vault-locked-refusal-notice: the For-you item names who was blocked
   "Nothing has been refused yet — whatever the lock stops is named here as it happens.": "まだ何も拒否されていません — ロックで止まったものはその都度ここに表示されます", // lane vault-locked-refusal-notice: the item's detail before any refusal
   "{who} — {what}": "{who} — {what}", // lane vault-locked-refusal-notice: one blocked caller and what it was refused
   "…and {n} more, refused while it is locked": "…ほか {n} 件がロック中に拒否されました", // lane vault-locked-refusal-notice: past the item's lines
+  "{who} was refused {what} {n} times in a day — the vault handed nothing out. Look at what it is doing.": "{who} は {what} の使用を1日に {n} 回拒否されました — 保管庫は何も渡していません。何をしているか確認してください", // lane vault-use-law: the daily-failure card (design q-043 D7)
+  "{who} entered a wrong second password {n} times in a day.": "{who} が1日に {n} 回、第二パスワードを間違えました", // lane vault-use-law: the daily-failure card (design q-043 D7)
+  "Through {door}; the last answer was {code}.": "{door} 経由；最後の応答は {code} でした", // lane vault-use-law: the daily-failure card (design q-043 D7)
+  "Filed once a day for this caller and this entry — mark it done when you have looked.": "同じ呼び出し元と同じ項目については1日1回だけ通知します — 確認したら完了にしてください", // lane vault-use-law: the daily-failure card (design q-043 D7)
+  "If it was not you: lock the vault and change the sign-in password.": "心当たりがなければ：保管庫をロックし、サインインパスワードを変更してください", // lane vault-use-law: the daily-failure card (design q-043 D7)
   "The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.": "VibeSpace が保存している認証情報（アカウント、マウント、チャンネル、連携、アプリのログイン、パスキー、ペアリング済みマシンの接続、リレーと音声のサインイン）は、第二パスワードを入力するまでロックされたままです — 再起動とロックのたびに。", // lane vault-e2e-password (r2: machines, relay, voice; every lock)
   "Second password": "第二パスワード", // lane vault-e2e-password
   "Unlock": "ロック解除", // lane vault-e2e-password
@@ -9377,7 +9383,7 @@ export default {
   "Set a second password first — stored values are shown only behind it": "先に第二パスワードを設定してください — 保存された値はその後ろでだけ表示されます", // lane vault-contents-window
   "That stored value could not be opened": "その保存値は開けませんでした", // lane vault-contents-window
   "That stored value is not there any more": "その保存値はもうありません", // lane vault-contents-window
-  "The vault is locked — unlock it to see what it holds.": "保管庫はロック中です — 中身を見るには解除してください。", // lane vault-contents-window
+  "The vault is locked — Unlock… above shows what it holds (For you names what is waiting on it).": "保管庫はロック中です — 上の「ロック解除…」で中身を表示できます（待っているものは「あなた宛て」に載っています）。", // lane vault-contents-window
   "Token": "トークン", // lane vault-contents-window
   "Too many values shown — try again in {n} s": "表示が多すぎます — {n} 秒後にもう一度お試しください", // lane vault-contents-window
   "Values hidden again — the 5 minutes are over": "5 分が過ぎたので、値を再び隠しました", // lane vault-contents-window
@@ -9405,7 +9411,7 @@ export default {
   "Change the second password…": "第二パスワードを変更…", // lane vault-one-door
   "since {when}": "{when} から", // lane vault-one-door
   "Long-lived OAuth token": "長期 OAuth トークン", // lane vault-one-door (the Vault window's kind word for an account's setup-token; the shared "OAuth token" stays)
-  "The vault is locked — unlock it first": "保管庫はロック中です — 先にロックを解除してください", // lane vault-e2e-password
+  "The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)": "保管庫はロック中です — 先にロックを解除してください（ページ上部の「ロック解除…」。待っているものは「あなた宛て」に載っています）", // lane vault-e2e-password
   "Lock the vault": "保管庫をロック", // lane vault-e2e-password
   "Check whether the vault is locked": "保管庫がロック中か確認", // lane vault-e2e-password
   "Activity…": "アクティビティ…", // lane device-act-audit
@@ -9486,7 +9492,7 @@ export default {
   "HDR": "HDR", // lane stream-hdr-passthrough
   "Passthrough · {transfer} {bits}-bit · {primaries}": "パススルー · {transfer} {bits} ビット · {primaries}", // lane stream-hdr-passthrough
   "waiting for the vault to be unlocked": "保管庫のロック解除待ち", // lane vault-e2e-password-fix-r2
-  "This session waits for the vault — unlock it with the second password; it reconnects by itself and nothing is lost.": "このセッションは保管庫を待っています — 第二パスワードでロックを解除すると自動で再接続し、何も失われません。", // lane vault-e2e-password-fix-r2
+  "This session waits for the vault — unlock it with the second password (Unlock… at the top of the page; For you names what is waiting on it); it reconnects by itself and nothing is lost.": "このセッションは保管庫を待っています — 第二パスワードでロックを解除すると（ページ上部の「ロック解除…」。待っているものは「あなた宛て」に載っています）自動で再接続し、何も失われません。", // lane vault-e2e-password-fix-r2
   "vault locked": "保管庫はロック中", // lane vault-e2e-password-fix-r2
   "{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.": "{machine}が Mac のユーザー名とパスワードを求めています。VibeSpace は保管庫に封印し、保管庫のロック解除中は自動でサインインします。", // lane desktop-vnc-remember
   "{machine} asks for its VNC password. VibeSpace seals it in the vault and signs in by itself while the vault is unlocked.": "{machine}が VNC パスワードを求めています。VibeSpace は保管庫に封印し、保管庫のロック解除中は自動でサインインします。", // lane desktop-vnc-remember
@@ -9830,4 +9836,19 @@ export default {
   "An agent may use it in vibespace-vault run without ever seeing it — each new command asks you first": "エージェントは値を見ることなく vibespace-vault run でこれを使えます — 新しいコマンドごとに先に確認します", // lane vault-run-door
   "Agents may use it in a run now — each new command asks you first": "エージェントが実行でこれを使えるようになりました — 新しいコマンドごとに先に確認します", // lane vault-run-door
   "Agents can no longer use it in a run": "エージェントは実行でこれを使えなくなりました", // lane vault-run-door
+  "The page security policy would block {directive}: {blocked}": "ページのセキュリティポリシーが適用されると {directive} がブロックされます：{blocked}", // lane app-page-csp
+  "Seen on {document}{where}. Nothing is blocked yet — this release only reports; the policy is enforced in a later release, so tell the developers if this is something you use.": "{document}{where} で検出。まだ何もブロックしていません。このリリースは報告のみで、ポリシーは後のリリースで適用されます。お使いの機能であれば開発者に知らせてください。", // lane app-page-csp
+  "Page security policy (reports only): {app} on the app page · {frames} from frames the page made": "ページのセキュリティポリシー（報告のみ）：アプリのページ {app} 件 · ページが作ったフレーム {frames} 件", // lane app-page-csp
+  "Lines in data/csp-reports.jsonl. A report from the app page also files a For-you notice; one from a frame the page made (a mail, a design) never does.": "data/csp-reports.jsonl の行数。アプリのページからの報告は「あなた宛て」にも表示されます。ページが作ったフレーム（メール、デザイン）からの報告は表示されません。", // lane app-page-csp
+  "For 8 hours": "8 時間", // lane vault-manual-and-lock
+  "Every run of this conversation with this secret, for 8 hours — a new kind of command still shows its card; locking the vault ends it": "この会話がこのシークレットを使う実行を 8 時間すべて許可——新しい種類のコマンドは引き続きカードを表示し、保管庫をロックすると終わります", // lane vault-manual-and-lock
+  "Granted for 8 hours — a lock ends it": "8 時間許可しました——ロックで終わります", // lane vault-manual-and-lock
+  "Granted for its next run": "次の 1 回の実行を許可しました", // lane vault-manual-and-lock
+  "{who} asks to use a stored secret": "{who} が保管庫のシークレットの使用を求めています", // lane vault-manual-and-lock
+  "Secret: {label} — {ref}": "シークレット: {label} — {ref}", // lane vault-manual-and-lock
+  "What for, in the agent's words: {purpose}": "用途（エージェントの言葉）: {purpose}", // lane vault-manual-and-lock
+  "Allow once: its next run with this secret (within 8 hours). For 8 hours: every run with it. Both ask for the second password, as «Usable by agent runs» does; a new kind of command still shows you its card first, and locking the vault ends the grant.": "1 回許可: このシークレットを使う次の 1 回の実行（8 時間以内）。8 時間: その間のすべての実行。どちらも「エージェントの実行で使用可」と同じく第二パスワードを求めます。新しい種類のコマンドは先にカードを表示し、保管庫をロックすると許可は終わります。", // lane vault-manual-and-lock
+  "To let every conversation use it, turn on «Usable by agent runs» on its row in ⚙ System ▸ Vault….": "すべての会話で使えるようにするには、⚙ システム ▸ 保管庫… でその行の「エージェントの実行で使用可」をオンにします。", // lane vault-manual-and-lock
+  "Unlock… at the top of the page; For you names what is waiting on it": "ページ上部の「ロック解除…」。待っているものは「あなた宛て」に載っています", // lane vault-manual-and-lock: the two facts beside the owner's own words
+  "Power throttling": "電力調整", // lane stream-sdr-ecoqos: the stream details' row (Windows' EcoQoS on the machine's stream processes)
 };

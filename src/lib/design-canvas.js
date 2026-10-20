@@ -7,10 +7,12 @@
 //   · THE VIEWPORT sits at NET zoom 1 (the caller hands `counterZoom` — the window passes utils.js COUNTER_ZOOM; the
 //     published page has no body zoom): the pointer is read in viewport px and the world is a transform
 //     `translate(x, y) scale(z)` of one layer, so a frame is drawn at exactly its artboard size × z.
-//   · ONE FRAME PER ARTBOARD: an `<iframe sandbox="allow-scripts" srcdoc>` — never allow-same-origin (an artboard is
+//   · ONE FRAME PER ARTBOARD: an `<iframe sandbox="allow-scripts">` — never allow-same-origin (an artboard is
 //     agent-written HTML rendered inside the owner's logged-in page; the frame is an opaque origin with no cookies and
-//     no same-origin reach). `updateFrame` swaps ONE srcdoc in place (the element, the view and every other frame
-//     untouched); a frame the read refused draws a NAMED card, never a blank box.
+//     no same-origin reach). Its document is handed in by `opts.writeFrame` — the Design window's is the FRAME HOST's
+//     (src/lib/frame-host.js: the frame navigates to the hub's host and gets the design policy, never the app page's);
+//     without one (the published page) it is the srcdoc. `updateFrame` swaps ONE document in place (the element, the
+//     view and every other frame untouched); a frame the read refused draws a NAMED card, never a blank box.
 //   · NAVIGATING vs USING: on the canvas a transparent SHIELD lies over every frame, so wheel / drag / pinch move the
 //     canvas wherever the pointer is; the focused view (one artboard, fit-width) and the pick mode lift the shields —
 //     the artboard is then live (its own scroll, its own clicks, the picker's outline).
@@ -76,18 +78,20 @@ const WHEEL_ZOOM_RATE = 0.0015;
  *   opts.signal        — the caller's AbortSignal (a window's `_listenerCtl.signal`)
  *   opts.counterZoom   — CSS `zoom` for the viewport (net zoom 1 under the body's DPI zoom), or null
  *   opts.pickerSrc     — the picker script injected into every frame's head ('' = no picker: the published page)
+ *   opts.writeFrame(iframe, html) — hands a frame its document (the window: the frame host's writer); default = srcdoc
  *   opts.words         — { refused(code, why) → string, missing → string, untitled → string }
  *   opts.onPick(msg, frame) / opts.onKey(msg, frame) — a fenced frame message
  *   opts.onActivate(file, how) — a frame's dblclick ('dblclick') or a touch tap on its shield ('tap')
  *   opts.onChange(state)      — view / page / focus / pick / present changed ({view, page, focused, pick, present})
  */
-export function createDesignCanvas(host, { signal = null, counterZoom = null, pickerSrc = '', words = {}, onPick = null, onKey = null, onActivate = null, onChange = null } = {}) {
+export function createDesignCanvas(host, { signal = null, counterZoom = null, pickerSrc = '', writeFrame = null, words = {}, onPick = null, onKey = null, onActivate = null, onChange = null } = {}) {
   const doc = host.ownerDocument || document;
   const win = doc.defaultView || window;
   const ctl = new AbortController();
   const sig = ctl.signal;
   if (signal) { if (signal.aborted) ctl.abort(); else signal.addEventListener('abort', () => ctl.abort(), { once: true }); }
   const L = { signal: sig };
+  const writeDoc = typeof writeFrame === 'function' ? writeFrame : (ifr, html) => { ifr.srcdoc = html; };
   const W = {
     refused: (code, why) => `artboard refused: ${why || code}`,
     missing: 'artboard refused: listed in design.json but not in the folder',
@@ -160,7 +164,7 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
         // lane design-tweaks: only the user's layer moved (a Tweaks write) — the LIVE frame restyles in place, no reload
         const swap = swapFn && rec.live && rec.html != null ? swapFn(rec.html, f.html) : null;
         rec.srcdoc = srcdoc;
-        if (swap) { for (const m of swap) say(rec, m); } else { rec.live = false; rec.iframe.srcdoc = srcdoc; }
+        if (swap) { for (const m of swap) say(rec, m); } else { rec.live = false; writeDoc(rec.iframe, srcdoc); }
       }
       rec.html = f.html;
     } else {

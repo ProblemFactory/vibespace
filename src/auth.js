@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const appCsp = require('./app-csp.js'); // PURE: the sign-in page's report-only policy (lane app-page-csp)
 const { crossSiteVerdict, ownOriginOf } = require('./write-origin.js');
 const { replaceShredding } = require('./secret-file.js');
 
@@ -297,6 +298,18 @@ class Auth {
       // with the shared Bearer token — the ROUTE enforces it (404 when the
       // collector is off, 403 on a bad token); no cookie exists on the sender.
       if (p === '/api/telemetry/ingest') return next();
+      // CSP reports (lane app-page-csp, design q-043 D6): a browser posts what the app page's report-only policy would
+      // block with NO cookie, and a sandboxed frame's report with `Origin: null` — so neither the cookie nor the same-origin
+      // rule can judge it. The ROUTE judges its own (src/server/csp-reports.js): a report content type only (a page on
+      // another site cannot send one without a preflight), 32 KB, a per-address pace. POST exactly. Pinned by test-auth's
+      // DOORS row and scripts/test-csp-report.mjs.
+      if (req.method === 'POST' && p === '/api/csp-report') return next();
+      // THE PREVIEW'S FOLDER (lane frame-host-preview, B-5b2c): the code editor's HTML preview is an opaque frame (no
+      // allow-same-origin) and its requests carry NO cookie (measured: SameSite=Lax, Sec-Fetch-Site cross-site) — its
+      // page's own files come from /frame-host/f/<token>/…, the token minted on the SIGNED-IN navigation for ONE folder.
+      // The ROUTE judges it (src/server/frame-host.js: a live token, a web file under that folder, no dot name, no symlink
+      // out). GET exactly. Pinned by scripts/test-csp-report.mjs ⑧.
+      if (req.method === 'GET' && /^\/frame-host\/f\/[A-Za-z0-9_-]{24}\//.test(p)) return next();
       // Path-mounted services (2.359.0): auth is PER MOUNT — the handler in
       // src/server/path-mounts.js enforces requestAuthed for private mounts
       // and lets `pathPublic` ones through (the shareable-link case). A
@@ -359,7 +372,10 @@ class Auth {
   registerRoutes(app) {
     app.get('/login', (req, res) => {
       if (!this.enabled || this.requestAuthed(req)) return res.redirect('/');
-      res.type('html').send(loginHtml({ clerk: this._clerk, passwordEnabled: this.passwordEnabled }));
+      // lane app-page-csp: the sign-in page reports too — its one inline script carries this response's nonce
+      const nonce = crypto.randomBytes(16).toString('base64');
+      res.set(appCsp.HEADER, appCsp.loginPolicy({ nonce, clerkHost: this._clerk?.enabled ? this._clerk.frontendApi : '' }));
+      res.type('html').send(loginHtml({ clerk: this._clerk, passwordEnabled: this.passwordEnabled, nonce }));
     });
 
     // Clerk SSO exchange: the login page verified the user on Clerk's hosted
@@ -473,7 +489,7 @@ function express_json_lite(req, res, next) {
  * our cookie. A 403 (email not allowed / missing claim) offers an SSO
  * sign-out link so the user can retry with a different account.
  */
-function loginHtml({ clerk = null, passwordEnabled = true } = {}) {
+function loginHtml({ clerk = null, passwordEnabled = true, nonce = '' } = {}) {
   const clerkOn = !!clerk?.enabled;
   const sub = passwordEnabled
     ? 'Enter the workspace password'
@@ -512,7 +528,7 @@ function loginHtml({ clerk = null, passwordEnabled = true } = {}) {
   <button type="button" class="sso" id="sso" disabled>Loading SSO…</button>` : ''}
   <div class="err" id="err"></div>
 </form>
-<script>
+<script nonce="${nonce}">
   const err = document.getElementById('err');
   document.getElementById('f').addEventListener('submit', async (e) => {
     e.preventDefault();

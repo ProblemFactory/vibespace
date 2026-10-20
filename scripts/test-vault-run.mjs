@@ -7,8 +7,11 @@
 //      'opened', even when the model's ownDoorOf is made to say yes (the engine's own class check); the store is MARKED by the
 //      vault (a hand edit reads as empty, said in the audit)
 //   ② THE SCRUB — env / a 0600 file ($VAULT_FILE) / a template / stdin: the child prints the value raw, base64 (std / URL /
-//      inside `Basic user:pass`), percent, JSON and hex (upper / lower), every one cut across two pipe chunks, on stdout AND
-//      stderr ⇒ an independent decoding oracle finds 0 bytes of it in what the agent gets; the file is 0600 in a 0700 dir
+//      inside `Basic user:pass`), percent, JSON and hex (upper / lower) and — lane vault-scrub-forms — UTF-16 LE / BE (bytes),
+//      base32, quoted-printable, a Python bytes repr, HTML entities, colour escapes and wrapped base64, every one cut across
+//      two pipe chunks, on stdout AND stderr ⇒ an independent decoding oracle (every view: colours stripped, lines joined, QP /
+//      \xNN / entities decoded, NULs dropped) finds 0 bytes of it in what the agent gets; ONE WINDOW PER RUN: a value split
+//      between stdout and stderr is masked; a long new form across the 2 MiB cut is dropped whole; the file is 0600 in a 0700 dir
 //      and gone after the run; the exit code passes; 2 MiB cut; the refusals (argv, a print tool, a short value, a hidden
 //      character, a cut card, a job, a remote conversation, --on, a cwd or a template outside the fence, no such tool)
 //   ③ THE CARD (decisions ② ④) — a NEW shape draws the card on a cluster AND a local instance; a local one runs a SEEN shape
@@ -26,10 +29,17 @@
 //      non-hex mark reads as empty, never a throw), its generation (a restored older copy = a replay, read as empty),
 //      switch-off taking its «always» back; bounded requests; the program on the card (a writable one gets no «always»);
 //      the folder's hidden characters; `list` spelling an entry with !'()*
-//   ⑦ MUTANTS — patched copies of the door RED: a new shape without a card; an audit line carrying a value
+//   ⑦ MUTANTS — patched copies of the door RED: a new shape without a card; an audit line carrying a value; two scrubbers
+//      (one per pipe — the split leaks); a cut that flushes the held tail (the edge leaks)
 //   ⑧ PINS — the headers (the three holes, the sieve, write-then-cat accepted and audited), the wiring
 //   ⑨ THE CARD ON THE PAGE — the For-you window's buttons (PURE itemView: Allow once / Always for this shape / Deny, no
 //      «always» when not offered), the popup row, «always» and the switch asking 验证是你 FIRST, a typed reply never answering
+//   ⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — design D4): a closed entry's refusal names `request`; a request
+//      lands ONCE (agent, entry, purpose — no expiry), a second for the same entry while one is open ⇒ request_pending by
+//      name; its refusals by name; Allow once = a grant the run verdict honours for THAT conversation (the shape card still
+//      asks) and spends; 8 hours = every run; deny / the card closed elsewhere / a changed item / a gone conversation grant
+//      nothing; the switch OFF and a LOCK end every grant and withdraw every request; the use lines carry the purpose and the
+//      run's receipt and `uses` reads back this conversation's alone; the request's card on the page
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -76,6 +86,9 @@ const [mode, arg] = process.argv.slice(2);
     return;
   }
   if (mode === 'ran') { fs.writeFileSync(arg, 'ran'); return; }
+  if (mode === 'split') { const v = process.env.T, h = v.length >> 1; process.stdout.write('<' + v.slice(0, h)); await sleep(40); process.stderr.write(v.slice(h) + '>\\n'); await sleep(40); process.stdout.write(' tail\\n'); return; }   // ONE value, half on each pipe
+  if (mode === 'edge2') { process.stdout.write('x'.repeat(2 * 1024 * 1024 - 60) + [...process.env.T].map((c) => '&#' + c.codePointAt(0) + ';').join('') + 'y'.repeat(4096)); return; }   // a LONG new form across the 2 MiB cut
+  if (mode === 'edge3') { process.stdout.write(Buffer.concat([Buffer.from('x'.repeat(2 * 1024 * 1024 - 40)), Buffer.from(process.env.T, 'utf16le'), Buffer.from('y'.repeat(4096))])); return; }
   let v;
   if (mode === 'env') v = process.env.T;
   else if (mode === 'file') { const st = fs.statSync(arg), dst = fs.statSync(path.dirname(arg)); process.stdout.write('FILE ' + (st.mode & 0o777).toString(8) + ' ' + (dst.mode & 0o777).toString(8) + ' ' + path.dirname(arg) + '\\n'); v = fs.readFileSync(arg, 'utf8'); }
@@ -85,7 +98,19 @@ const [mode, arg] = process.argv.slice(2);
   else if (mode === 'edge') { process.stdout.write('x'.repeat(2 * 1024 * 1024 - 12) + process.env.T + 'y'.repeat(4096)); return; }   // the value ACROSS the 2 MiB cut
   const b = Buffer.from(v);
   const forms = [v, b.toString('base64'), b.toString('base64url'), b.toString('base64').replace(/=+$/, ''), encodeURIComponent(v), encodeURIComponent(v).toLowerCase(), JSON.stringify(v), JSON.stringify(v).slice(1, -1), b.toString('hex'), b.toString('hex').toUpperCase(), 'Authorization: Basic ' + Buffer.from('user:' + v).toString('base64'), 'Basic ' + Buffer.from('ab:' + v).toString('base64')];
-  for (const f of forms) for (const out of [process.stdout, process.stderr]) { const h = f.length >> 1; out.write('<' + f.slice(0, h)); await sleep(6); out.write(f.slice(h) + '>\\n'); }
+  // lane vault-scrub-forms: what a real producer prints by itself (base32, a quoted-printable body, a Python bytes repr, HTML
+  // entities, colour escapes, base64 wrapped at 76) — and UTF-16 as BYTES (the door decodes them)
+  const bits = [...b].map((x) => x.toString(2).padStart(8, '0')).join(''); let b32 = ''; for (let i = 0; i < bits.length; i += 5) b32 += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[parseInt(bits.slice(i, i + 5).padEnd(5, '0'), 2)]; b32 += '='.repeat((8 - (b32.length % 8)) % 8);
+  const qp = [...b].map((x) => (x >= 33 && x <= 126 && x !== 61 ? String.fromCharCode(x) : '=' + x.toString(16).padStart(2, '0').toUpperCase()));
+  forms.push(b32, b32.replace(/=+$/, '').toLowerCase(), qp.slice(0, 9).join('') + '=\\r\\n' + qp.slice(9).join(''),
+    "b'" + [...b].map((x) => (x === 92 ? '\\\\\\\\' : x === 39 ? "\\\\'" : x >= 32 && x < 127 ? String.fromCharCode(x) : '\\\\x' + x.toString(16).padStart(2, '0'))).join('') + "'",
+    [...v].map((c) => '&#' + c.codePointAt(0) + ';').join(''), [...v].map((c, i) => (i && i % 4 === 0 ? '\\x1b[0m' : '') + c).join(''),
+    Buffer.from('x'.repeat(48) + v).toString('base64').replace(/(.{76})/g, '$1\\n'));
+  // each spelling cut across two chunks on BOTH pipes at once — the other pipe's half arrives between a pipe's two halves
+  // (the run's one scrubber reads each pipe on its own too, lane vault-scrub-forms)
+  const pipes = [process.stdout, process.stderr];
+  for (const f of forms) { const h = f.length >> 1; for (const out of pipes) out.write('<' + f.slice(0, h)); await sleep(6); for (const out of pipes) out.write(f.slice(h) + '>\\n'); }
+  for (const f of [Buffer.from(v, 'utf16le'), Buffer.from(v, 'utf16le').swap16()]) { const h = f.length >> 1; for (const out of pipes) out.write(Buffer.concat([Buffer.from('<'), f.subarray(0, h)])); await sleep(6); for (const out of pipes) out.write(Buffer.concat([f.subarray(h), Buffer.from('>\\n')])); }
   process.stdout.write('DONE ' + mode + '\\n');
   process.exitCode = 3;
 })();
@@ -99,7 +124,22 @@ const NODE = process.execPath;
 
 // THE ORACLE: does `text` carry any byte of `value` — raw, any 10-character window of it, or after decoding every base64 /
 // hex / percent run and every JSON string in it (Node's own decoders, not the scrubber's forms)
+// lane vault-scrub-forms: the oracle reads EVERY view a real producer's spelling needs — colours stripped, lines joined,
+// quoted-printable / \xNN / HTML entities decoded, the NULs of UTF-16 dropped, base32 runs decoded — each with its own
+// decoder written here (never the module's)
+const VIEWS_OF = (t) => {
+  const latin = (s) => Buffer.from(s, 'latin1').toString('utf8');
+  return [t, t.replace(/\x1b\[[0-9;]*[mK]/g, ''), t.replace(/[\r\n]/g, ''), latin(t.replace(/=\r?\n/g, '').replace(/=([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)))),
+    latin(t.replace(/\\x([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\\\/g, '\\')), t.replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d)).replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16))), t.replace(/\0/g, '')];
+};
+const unb32 = (s) => { const bits = [...s.toUpperCase().replace(/=+$/, '')].map((c) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'.indexOf(c).toString(2).padStart(5, '0')).join(''); const out = []; for (let i = 0; i + 8 <= bits.length; i += 8) out.push(parseInt(bits.slice(i, i + 8), 2)); return Buffer.from(out).toString('utf8'); };
 function leaks(text, value) {
+  const out = [];
+  for (const t of VIEWS_OF(String(text || ''))) out.push(...leaksIn(t, value));
+  for (const m of String(text || '').matchAll(/[A-Za-z2-7]{16,}=*/g)) if (/^[A-Z2-7]+=*$|^[a-z2-7]+=*$/.test(m[0]) && unb32(m[0]).includes(String(value))) out.push('base32');
+  return [...new Set(out)];
+}
+function leaksIn(text, value) {
   const t = String(text || ''), v = String(value), out = [];
   if (t.includes(v)) out.push('raw');
   for (let i = 0; i + 10 <= v.length; i++) if (t.includes(v.slice(i, i + 10))) { out.push('raw-window@' + i); break; }
@@ -112,6 +152,10 @@ function leaks(text, value) {
 }
 ok(leaks('a ' + VALUE + ' b', VALUE).length && leaks(Buffer.from('user:' + VALUE).toString('base64'), VALUE).includes('base64') && leaks(Buffer.from(VALUE).toString('hex').toUpperCase(), VALUE).includes('hex') && leaks(encodeURIComponent(VALUE), VALUE).includes('percent') && leaks(JSON.stringify({ v: VALUE }), VALUE).includes('json') && !leaks('[vault:mounts/m1/secretKey] nothing here', VALUE).length,
   'THE ORACLE (independent of the scrubber): Node\'s own decoders find the value raw, in base64 inside Basic, upper hex, percent and JSON — and nothing in a placeholder');
+{ const v = VALUE2, u16 = (x) => { const d = new (require('node:string_decoder').StringDecoder)('utf8'); return d.write(x) + d.end(); };
+  const seen = [[u16(Buffer.from(v, 'utf16le')), 'UTF-16LE'], [[...v].map((c) => '&#' + c.codePointAt(0) + ';').join(''), 'entities'], [[...v].map((c, i) => (i && i % 4 === 0 ? '\x1b[0m' : '') + c).join(''), 'colours'], [[...Buffer.from(v)].map((x) => '=' + x.toString(16).toUpperCase()).join('').replace(/^(.{30})/, '$1=\r\n'), 'quoted-printable'], [[...Buffer.from(v)].map((x) => '\\x' + x.toString(16)).join(''), '\\xNN'], [Buffer.from(v).toString('base64').replace(/(.{8})/g, '$1\n'), 'wrapped base64']];
+  const miss = seen.filter(([x]) => !leaks(x, v).length).map(([, n]) => n);
+  ok(!miss.length && leaks('JZTW4ZDPOU', 'not-there').length === 0, 'THE ORACLE reads the new spellings in the clear too (UTF-16LE, entities, colours, quoted-printable, \\xNN, wrapped base64) — so a 0 below is not vacuous', miss); }
 
 // ── A WORLD: a real engine (set up, unlocked), the real For-you store, stores with rows, the door ──
 const ROWS = {
@@ -159,6 +203,14 @@ const auditOf = (w) => { try { return fs.readFileSync(path.join(w.dataDir, 'vaul
 const runLines = (w) => auditOf(w).split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.event === 'vault-run');
 const runDirs = (w) => fs.readdirSync(w.runRoot).filter((x) => x.startsWith(DOOR.RUN_DIR_PREFIX));
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const PH1 = '[vault:mounts/m1/secretKey]';
+/** ONE value, half on stdout and half on stderr (40 ms apart) → { ok, so, se, lk } (lane vault-scrub-forms). */
+async function splitLeg(w, door = w.door) {
+  if (!w.door.rowFacts({ id: 'mounts:m1#secretKey' }).open) openRow(w);
+  const { r } = await runAnswered(w, ENV('split'), { door });
+  const so = r.stdout || '', se = r.stderr || '';
+  return { ok: !!r.ok, so, se, lk: [...leaks(so + se, VALUE), ...leaks(se + so, VALUE), ...leaks(so.split(PH1).join('') + se.split(PH1).join(''), VALUE)] };
+}
 
 console.log('① THE SWITCH — the owner opens an entry for runs; a login / pairing / channel token never');
 {
@@ -210,8 +262,8 @@ console.log('② THE SCRUB — every form of the value, cut across chunks, on bo
     const { r, card } = await runAnswered(w, args);
     const out = (r.stdout || '') + (r.stderr || '');
     const lk = leaks(out, VALUE);
-    ok(r.ok && r.exit === 3 && !lk.length && (out.match(/\[vault:mounts\/m1\/secretKey\]/g) || []).length >= 20 && /DONE/.test(r.stdout) && r.scrubbed.hits >= 20 && r.scrubbed.bytes > 20 * VALUE.length && !!card,
-      `${name}: the child printed the value in 12 spellings, each cut across two chunks, on stdout AND stderr — the oracle finds NOTHING (0 bytes), ${r.scrubbed && r.scrubbed.hits} placeholders, ${r.scrubbed && r.scrubbed.bytes} bytes scrubbed; the exit code (3) passes`, { lk, code: r.code, exit: r.exit, out: out.slice(0, 400) });
+    ok(r.ok && r.exit === 3 && !lk.length && (out.match(/\[vault:mounts\/m1\/secretKey\]/g) || []).length >= 40 && /DONE/.test(r.stdout) && r.scrubbed.hits >= 40 && r.scrubbed.bytes > 40 * VALUE.length && !!card,
+      `${name}: the child printed the value in 21 spellings (the 12 + UTF-16 LE / BE bytes, base32 ×2, quoted-printable, a Python bytes repr, HTML entities, colour escapes, wrapped base64), each cut across two chunks on stdout AND stderr at once (the other pipe's half between them) — the oracle finds NOTHING (0 bytes; the whole percent line lower-cased changes the value's own letters — a case swap, never masked, never the value), ${r.scrubbed && r.scrubbed.hits} placeholders, ${r.scrubbed && r.scrubbed.bytes} bytes scrubbed; the exit code (3) passes`, { lk, code: r.code, exit: r.exit, out: out.slice(0, 400) });
     if (name === 'file') {
       const m = /FILE (\d+) (\d+) (\S+)/.exec(r.stdout || '');
       ok(m && m[1] === '600' && m[2] === '700' && m[3].startsWith(w.runRoot + '/' + DOOR.RUN_DIR_PREFIX) && !fs.existsSync(m[3]) && !runDirs(w).length, 'the file is 0600 in a 0700 run folder under the run root — and the folder is SHREDDED and gone once the child is', m && m.slice(1));
@@ -223,6 +275,14 @@ console.log('② THE SCRUB — every form of the value, cut across chunks, on bo
   const edge = await runAnswered(w, ENV('edge'));
   const tail = (edge.r.stdout || '').slice(-400);
   ok(edge.r.ok && edge.r.truncated === true && !leaks(tail, VALUE).length && !tail.includes(VALUE.slice(0, 12)) && !tail.includes(VALUE.slice(0, 6)), 'a value printed ACROSS the 2 MiB cut: its first 12 bytes are inside the bound — the scrubber\'s held tail is DROPPED at a cut, never flushed (not even 6 bytes of it arrive)', { truncated: edge.r.truncated, tail: tail.slice(-60) });
+  // ONE WINDOW PER RUN (the desk's q-043 M1): the run's ONE scrubber reads both pipes in arrival order
+  const sp = await splitLeg(w);
+  ok(sp.ok && sp.so === '<' + PH1 + ' tail\n' && sp.se === PH1 + '>\n' && !sp.lk.length, 'ONE WINDOW PER RUN: the child printed half the value on stdout and the rest on stderr — the run\'s one scrubber saw it whole: stdout «<[vault:…] tail», stderr «[vault:…]>» (each pipe shows where its part was), 0 bytes of it', sp);
+  for (const [mode, what, dec] of [['edge2', 'its HTML entities (~200 characters, 60 inside the bound)', (s) => s.replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d))], ['edge3', 'its UTF-16LE bytes (40 inside the bound)', (s) => s.replace(/\0/g, '')]]) {
+    const e2 = await runAnswered(w, ENV(mode));
+    const t2 = (e2.r.stdout || '').slice(-1200), d2 = dec(t2);
+    ok(e2.r.ok && e2.r.truncated === true && !leaks(t2, VALUE).length && !d2.includes(VALUE.slice(0, 6)) && /x$/.test(t2), `a value printed ACROSS the 2 MiB cut as ${what}: the held tail is the window as the VIEW reads it (longest form − 1 characters of the value, its escapes and NULs beside them) — dropped at the cut, not even 6 characters of it arrive`, { truncated: e2.r.truncated, tail: JSON.stringify(t2.slice(-80)) });
+  }
   const app = await runAnswered(w, ['--env', 'T=vault://app-secrets/app1/item.0.1', '--', NODE, PRINTER, 'env']);
   ok(app.r.ok && !leaks(app.r.stdout + app.r.stderr, VALUE2).length && /\[vault:app-secrets\/app1\/item\.0\.1\]/.test(app.r.stdout), 'an app login opened for runs: the same — its placeholder, 0 bytes of it', app.r.code);
   // the refusals — each BY NAME, before anything is read or spawned
@@ -390,7 +450,7 @@ async function auditClean(doorMod) {
   ok(a.ran && !a.leaks.length, 'every byte the door wrote (data/vault-audit.jsonl, data/user-todos.json, data/vault-run.json) — the oracle finds NO value', a.leaks);
   ok(!!ran && ran.by.kind === 'agent' && ran.by.name === 'Lane X' && ran.entries[0] === 'vault://mounts/m1/secretKey' && /^[0-9a-f]{16}$/.test(ran.shapeId) && ran.exit === 3 && ran.allowedBy === 'once' && ran.scrubbed.bytes > 0 && ran.scrubbed.hits > 0 && Array.isArray(ran.injection) && typeof ran.cmd === 'string' && typeof ran.ms === 'number' && /\[vault:mounts\/m1\/secretKey\]/.test(ran.stdout),
     'the run\'s line: the actor, the entries (references), the shape, the injection, the command, what allowed it, the exit code, the time, the scrubbed bytes, the scrubbed head of the output', ran);
-  ok(/^[0-9a-f]{16}$/.test(ran.receipt) && a.receipt === ran.receipt, 'the agent\'s answer and the audit line carry ONE receipt (design D1: a use + a receipt)', [a.receipt, ran.receipt]);
+  ok(/^vr-[0-9a-f]{16}$/.test(ran.receipt) && a.receipt === ran.receipt, 'the agent\'s answer and the audit line carry ONE receipt (design D1: a use + a receipt)', [a.receipt, ran.receipt]);
 }
 
 console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program on the card (the security review)');
@@ -496,6 +556,16 @@ console.log('⑦ MUTANTS — patched copies of the door, each RED on its leg');
   const m2 = mutate('const line = { ...head, receipt, allowedBy: verdict.by,', 'const line = { ...head, receipt, env: m.env, allowedBy: verdict.by,', 'auditvalue');
   const r2 = m2.mod ? await auditClean(m2.mod) : null;
   ok(m2.n === 1 && r2 && r2.leaks.length > 0, `MUTANT «an audit line carrying a value» (the child's env on the line): the patch hits once and the leg goes RED (the oracle finds ${r2 && r2.leaks.join(', ')}); the shipped door writes none`, r2 && r2.leaks);
+  // lane vault-scrub-forms: ONE scrubber per run — two (one per pipe, the shape before) let a split value by
+  const m3 = mutate("scrub = VR.createRunMasker(secrets, ['out', 'err'])", "scrub = ((a, b) => ({ push: (k, x) => (k === 'out' ? { out: a.push(x), err: '' } : { out: '', err: b.push(x) }), end: () => ({ out: a.end(), err: b.end() }), hits: 0, bytes: 0, byForm: {} }))(VR.createMasker(secrets), VR.createMasker(secrets))", 'twomasks');
+  let r3 = null;
+  if (m3.mod) { const w3 = await world({ doorMod: m3.mod }); openRow(w3); r3 = await splitLeg(w3); }
+  ok(m3.n === 1 && r3 && r3.lk.length > 0, `MUTANT «two scrubbers, one per pipe» (the pre-lane shape): the patch hits once and the split leg goes RED (the oracle finds ${r3 && r3.lk.join(', ')}); the shipped door's ONE scrubber masks it`, r3);
+  // a CUT keeps the held tail back: flushed, a long new form begun inside the bound would arrive in part
+  const m4 = mutate('if (!cut) handOn(scrub.end());', 'handOn(scrub.end());', 'cutflush');
+  let r4 = null;
+  if (m4.mod) { const w4 = await world({ doorMod: m4.mod }); openRow(w4); const e = await runAnswered(w4, ENV('edge2')); const tl = (e.r.stdout || '').slice(-1200); r4 = { truncated: e.r.truncated, lk: leaks(tl, VALUE), head: tl.replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d)).includes(VALUE.slice(0, 6)) }; }
+  ok(m4.n === 1 && r4 && r4.truncated && (r4.lk.length > 0 || r4.head), 'MUTANT «a cut flushes the held tail»: the patch hits once and the edge leg goes RED (the first characters of the value\'s entities arrive); the shipped door drops them', r4);
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass, c.name, c.detail);
 }
 
@@ -505,6 +575,8 @@ console.log('⑧ PINS — the headers say the holes; the wiring');
   const routes = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8');
   const wire = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   ok(/THE SCRUBBER IS A SIEVE/.test(door) && /WRITE-THEN-CAT IS ACCEPTED AND AUDITED/.test(door) && /NOT isolation/.test(door) && /egress fence is P1/.test(door), 'the door\'s header names §8.6\'s three holes: the same uid (not isolation), a tool sending it elsewhere (P1 egress), THE SCRUBBER IS A SIEVE — write-then-cat accepted and audited');
+  const manual = fs.readFileSync(path.join(REPO, 'docs/agent/vault-manual.md'), 'utf8').replace(/\s+/g, ' ');
+  ok(manual.includes('the output is scrubbed of the value\'s common spellings; a command that re-encodes it can still show it — the owner sees the whole command before it runs') && /A part of a value is never blanked; a value under 8 bytes is never used at all/.test(manual), 'the manual says what scrubbing does not promise in ONE sentence (lane vault-scrub-forms, the desk\'s q-043 M1) — and states the floor');
   ok(/THE THREE HOLES this door does NOT close/.test(routes) && /THE SCRUBBER IS A SIEVE/.test(routes) && /write-then-cat is accepted and audited/.test(routes), 'the route\'s header restates them');
   ok(/require\('\.\/vault-run-door\.js'\)\.create\(\{ dataDir: path\.join\(rootDir, 'data'\), vault, sources: vaultSources, userTodos,/.test(wire) && /agentEnv: \(\) => require\('\.\.\/agent-env\.js'\)\.agentEnv\(process\.env, \{ drop: require\('\.\.\/harness-env\.js'\)\.agentCredentialEnvNames/.test(wire) && /registerVaultRoutes\(app, \{[^\n]*run: vaultRun,/.test(wire) && /process\.once\('exit', \(\) => \{ try \{ vaultRun\.closeAll\(\); \} catch \{ \} \}\);/.test(wire) && /instanceKindOf\(process\.env/.test(wire),
     'the hub wires the door: the vault, the Vault window\'s sources, For you, agentEnv() (the harness credentials dropped), the instance\'s kind, the routes — and every child ends with the hub');
@@ -519,11 +591,150 @@ console.log('⑨ THE CARD ON THE PAGE — the For-you window, the popup row, the
   ok(a1.slice(0, 3).join() === 'hub-once,shape-always,hub-deny' && a0.slice(0, 2).join() === 'hub-once,hub-deny' && !a0.includes('shape-always') && !a1.includes('reply'), 'the For-you window: Allow once / Always for this shape / Deny first — no «always» button when the card does not offer it, no reply box', { a1, a0 });
   const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
   const row = read('src/lib/user-todos-row.js'), win = read('src/lib/inbox-window.js'), act = read('src/lib/user-todos-actions.js'), vw = read('src/lib/vault-window.js');
-  ok(/const HELD_ASKS = \['hub-act-ask', 'automation-ask', 'pool-cross-provider', 'vault-run-ask'\];/.test(row) && /heldAnswers\(i\)\.map/.test(row) && /type === 'vault-run-ask' \? t\('Always for this shape'\)/.test(row) && /i\.action\.type === 'vault-run-ask' && i\.action\.always === false/.test(row), 'the popup row: Allow once / Always for this shape (not when the card offers none) / Deny');
+  ok(/const HELD_ASKS = \['hub-act-ask', 'automation-ask', 'pool-cross-provider', 'vault-run-ask', 'vault-grant-ask'\];/.test(row) && /heldAnswers\(i\)\.map/.test(row) && /type === 'vault-run-ask' \? t\('Always for this shape'\)/.test(row) && /i\.action\.type === 'vault-run-ask' && i\.action\.always === false/.test(row), 'the popup row: Allow once / Always for this shape (not when the card offers none) / Deny');
   ok(/'shape-always': \(\) => actBtn\('shape-always'/.test(win) && /a === 'auto-always' \|\| a === 'pool-always' \|\| a === 'shape-always' \? 'always'/.test(win), 'the For-you window\'s «Always for this shape» answers always');
   ok(/if \(answer === 'always' && !revealLeftMs\(\) && !\(await askRevealPassword\(\)\)\) return false;/.test(act) && /\/api\/vault\/run\/asks\//.test(act) && /\.\.\.\(answer === 'always' \? revealHeaders\(\) : \{\}\)/.test(act) && /r\.outcome === 'always'/.test(act), '«always» opens 验证是你 FIRST, in the press\'s own task, and sends this page\'s window; the answer reads `outcome`');
   ok(/if \(row\.run && row\.run\.can\)/.test(vw) && /if \(on && !revealLeftMs\(\) && !\(await askRevealPassword\(\)\)\) \{ box\.checked = false; return; \}/.test(vw) && /fetchJson\('\/api\/vault\/runnable'/.test(vw), 'the Vault window: «Usable by agent runs» on a row that can be opened; ON asks 验证是你 first, OFF never');
   ok(R('src/inbox-reply.js').ANSWER_ACTION_TYPES.includes('vault-run-ask'), 'a typed reply never answers the run card — its buttons do');
+  // lane vault-scrub-forms (q-043 verify M1): the card says what scrubbing does NOT promise — on the row, in the window, in three languages
+  const NOTE = 'The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.';
+  const call = "t('" + NOTE.replace(/'/g, "\\'") + "')", zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  ok(row.includes("(i.action.type === 'vault-run-ask' ? `<div class=\"ut-exit-note\">${escHtml(" + call + ")}</div>` : '')") && win.includes("if (!card && it.action && it.action.type === 'vault-run-ask') c.detail.append(mk('div', 'iw-run-note', " + call + "));")
+    && zh.includes(JSON.stringify(NOTE) + ': "') && ja.includes(JSON.stringify(NOTE) + ': "'), 'the RUN card says what the scrubbing does not promise («…a command that re-encodes it can still show it — read the whole command before you allow it») — on the popup row and under the For-you window\'s detail, with its Chinese and Japanese');
+}
+
+console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — design D4: vibespace-vault request / uses)');
+{
+  const w = await world();   // a LOCAL instance (a seen shape runs without its card)
+  const caller = { ...w.caller, scope: 'webui-1' };   // the use law's spelling of this conversation (its vault-use conv)
+  const other = { conversationId: 'conv-9', sessionKey: 'claude:conv-9', name: 'Lane Nine', cwd: w.work, scope: 'webui-9' };
+  const reqsOf = () => (w.userTodos.snapshot().open || []).filter((i) => i.action && i.action.type === 'vault-grant-ask');
+  const M1 = 'vault://mounts/m1/secretKey', PURPOSE = 'upload the nightly backup to my bucket';
+  const r0 = await w.door.run({ caller, args: ENV('env'), cwd: w.work });
+  ok(r0.code === 'entry_not_runnable' && /vibespace-vault request <vault:\/\/…> --for/.test(r0.words) && !/in the chat/.test(r0.words), 'a CLOSED entry ⇒ entry_not_runnable, its words naming `vibespace-vault request … --for` (never «ask in the chat»)', r0.words);
+  const bad = [
+    [{ caller, entry: M1, purpose: '' }, 'purpose_required'], [{ caller, entry: M1, purpose: 'x'.repeat(201) }, 'purpose_too_long'],
+    [{ caller, entry: 'mounts/m1/secretKey', purpose: 'p' }, 'bad_reference'], [{ caller, entry: 'vault://accounts/acct1/apiKey', purpose: 'p' }, 'entry_has_its_own_door'],
+    [{ caller, entry: 'vault://channels/lark1/token', purpose: 'p' }, 'entry_has_its_own_door'], [{ caller, entry: 'vault://mounts/nope/secretKey', purpose: 'p' }, 'entry_unknown'],
+    [{ caller: { ...caller, job: true }, entry: M1, purpose: 'p' }, 'job_no_use'], [{ caller: { ...caller, remote: true }, entry: M1, purpose: 'p' }, 'device_road_later'],
+    [{ caller: other, entry: 'vault://agent:conv-1/gh-token', purpose: 'p' }, 'use_not_granted'], [{ caller, entry: M1, purpose: 'deploy \u202eit' }, 'hidden_chars'],
+  ];
+  const got = bad.map(([a]) => w.door.request(a).code);
+  ok(got.every((c, i) => c === bad[i][1]) && !reqsOf().length, 'refused BY NAME, nothing filed: no purpose, a purpose over 200, not a reference, a login / a channel token (their own doors), no such entry, a job, a remote conversation, ANOTHER conversation\'s own entry, a hidden character', got);
+  const q1 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
+  const it = reqsOf()[0];
+  ok(q1.ok && q1.askId && reqsOf().length === 1 && it.origin === 'vault' && it.kind === 'action' && it.urgency === 'high' && !it.expiresAt && it.text === 'Lane X asks to use a stored secret'
+    && it.detail.includes('my bucket — ' + M1) && it.detail.includes(PURPOSE) && it.action.askId === q1.askId, 'the request lands ONCE: one For-you ask naming the agent, the entry (label + reference) and the purpose — urgency high, NO expiry (it waits for the owner)', it);
+  const q2 = w.door.request({ caller, entry: M1, purpose: 'again, please' });
+  ok(q2.code === 'request_pending' && /already asked/.test(q2.words) && reqsOf().length === 1, 'a second request for the same entry while one is open ⇒ request_pending BY NAME — still ONE ask', q2);
+  const u0 = w.door.usesFor(caller);
+  ok(u0.ok && u0.requests.length === 1 && u0.requests[0].entry === M1 && u0.requests[0].purpose === PURPOSE && !u0.grants.length && !w.door.usesFor(other).requests.length, 'uses names the open request to ITS conversation only');
+  const GHP = ['gh', 'p_abcdefghijklmnopqrstuvwxyz0123456789'].join('');   // a token shape built at runtime (the secret scan)
+  const leaky = w.door.request({ caller, entry: 'vault://app-secrets/app1/item.0.1', purpose: `push with ${GHP} please` });
+  const leakIt = reqsOf().find((x) => x.action.askId === leaky.askId);
+  ok(leaky.ok && leakIt && !leakIt.detail.includes(GHP) && /«redacted»/.test(leakIt.detail) && !auditOf(w).includes(GHP), 'a purpose holding a secret shape lands «redacted» in the tray and the audit (the agent\'s words are a sink too)');
+  ok(w.door.answerRequest(leaky.askId, { answer: 'deny' }).outcome === 'denied' && !w.door._grants.size && !reqsOf().some((x) => x.action.askId === leaky.askId), 'deny (a click) ⇒ no grant, the ask resolved');
+  const again = w.door.request({ caller, entry: 'vault://app-secrets/app1/item.0.1', purpose: 'once more' });
+  ok(again.code === 'request_quiet' && /10 minutes/.test(again.words) && !reqsOf().some((x) => x.detail.includes('once more')), 'the same entry asked again right after a deny ⇒ request_quiet for 10 minutes (no card — the owner is not asked twice)', again);
+  w.door._reqQuiet.clear();   // (the suite's later legs ask for it again)
+  ok(w.door.answerRequest(q1.askId, { answer: 'always' }).code === 'bad_grant_answer', 'the answer is once, 8h or deny (no «always» — the per-row switch is the owner\'s always)');
+  const nr = w.door.answerRequest(q1.askId, { answer: 'once' });
+  ok(nr.code === 'reveal_needs_password' && reqsOf().length === 1 && !w.door._grants.size, 'Allow WITHOUT this page\'s 验证是你 ⇒ reveal_needs_password, the card stays up (a grant opens the entry as the switch does — the review: a click alone is forgeable on a hub with no sign-in)', nr);
+  const g1 = w.door.answerRequest(q1.askId, { answer: 'once', reauthed: true });
+  ok(g1.ok && g1.outcome === 'granted-once' && !reqsOf().length && w.door._grants.size === 1 && !fs.existsSync(path.join(w.dataDir, DOOR.STORE_FILE)), 'Allow once ⇒ ONE grant row, in memory only (the store file holds no grant)', g1);
+  ok(w.door.answerRequest(q1.askId, { answer: 'once', reauthed: true }).code === 'ask_settled', 'a second answer ⇒ ask_settled');
+  const ro = await w.door.run({ caller: other, args: ENV('env'), cwd: w.work });
+  ok(ro.code === 'entry_not_runnable', 'the grant is THAT conversation\'s — another conversation\'s run of the same entry ⇒ entry_not_runnable');
+  const run1 = await runAnswered(w, ENV('env'), { caller });
+  ok(run1.card && run1.r.ok && run1.r.stdout.includes('[vault:mounts/m1/secretKey]') && !leaks(run1.r.stdout + run1.r.stderr, VALUE).length, 'THE GRANT IS HONOURED BY THE RUN VERDICT: the closed entry runs for this conversation — its new shape still draws the card first (the owner sees the command), the output scrubbed', run1.r && run1.r.code);
+  ok(!w.door._grants.size, 'Allow once is SPENT by that run (before it started)');
+  const run2 = await w.door.run({ caller, args: ENV('env'), cwd: w.work });
+  ok(run2.code === 'entry_not_runnable', 'the same (now seen) shape again ⇒ entry_not_runnable — once is once');
+  const uses = w.door.usesFor(caller).uses;
+  ok(uses.some((u) => u.outcome === 'ok' && u.entry === M1 && u.door === 'run' && u.purpose === PURPOSE && u.receipt === run1.r.receipt) && uses[0].outcome === 'entry_not_runnable' && !w.door.usesFor(other).uses.some((u) => u.outcome === 'ok'),
+    'THE USE LINES: `uses` reads back THIS conversation\'s own — the entry, the purpose its grant carried, the outcome, the run\'s receipt (one receipt: the answer, the run line, the use line), newest first; another conversation\'s are not its', uses.slice(0, 3));
+  const lines = auditOf(w).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  ok(lines.filter((l) => l.event === 'vault-request').length === 2 && lines.some((l) => l.event === 'vault-grant' && l.answer === 'once' && l.conv === 'webui-1') && lines.some((l) => l.event === 'vault-grant' && l.answer === 'deny') && !leaks(auditOf(w), VALUE).length, 'the audit: each request and each answer is a line (conversation, entry, purpose, answer) — never a value');
+  // L3 (int331): a once-grant whose run FAILS before the child ran is NOT burned — it is restored, the agent runs it again
+  const ql3 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
+  w.door.answerRequest(ql3.askId, { answer: 'once', reauthed: true });
+  ok(w.door._grants.size === 1, 'L3 setup: a fresh once-grant opens the entry again');
+  const _vL3 = ROWS.mounts[0].v; ROWS.mounts[0].v = null;   // the entry's value momentarily unreadable ⇒ the run gets entry_unknown, nothing runs
+  const l3fail = await runAnswered(w, ENV('env'), { caller });
+  ROWS.mounts[0].v = _vL3;
+  ok(l3fail.r.code === 'entry_too_short_to_mask' && w.door._grants.size === 1, 'L3: a run that FAILS before the child ran (the value cannot be scrubbed — nothing ran) RESTORES the once-grant, it is not burned');
+  const l3ok = await runAnswered(w, ENV('env'), { caller });
+  ok(l3ok.r.ok && !w.door._grants.size, '…then a real run honours the restored grant once and SPENDS it (a once-grant is spent only when a child ran)');
+  // 8 HOURS: every run of the conversation, until the switch goes OFF or the vault locks
+  const q3 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
+  const g3 = w.door.answerRequest(q3.askId, { answer: '8h', reauthed: true });
+  const ra = await w.door.run({ caller, args: ENV('env'), cwd: w.work }), rb = await w.door.run({ caller, args: ENV('env'), cwd: w.work });
+  ok(g3.outcome === 'granted' && ra.ok && rb.ok && w.door._grants.size === 1 && [...w.door._grants.values()][0].until - Date.now() <= DOOR.GRANT_MS, 'For 8 hours ⇒ every run of the conversation (the seen shape without a card on a local instance), the grant stays — ≤ 8 hours', [ra.code, rb.code]);
+  ok(w.door.request({ caller, entry: M1, purpose: 'x' }).already === 'granted' && w.door.runnableFor(caller).entries.some((e) => e.ref === M1 && e.by === 'grant') && !w.door.runnableFor(other).entries.length, 'a request for an entry already granted answers so (nothing filed); `list` names it to THAT conversation alone');
+  openRow(w); w.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });
+  ok(!w.door._grants.size, 'switching the entry OFF ends its grants too (OFF = closed for every conversation)');
+  // the card closed elsewhere / a changed item / a gone conversation — no grant
+  const q4 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
+  w.userTodos.setStatus(reqsOf()[0].id, 'dismissed', 'user');
+  w.door._reqQuiet.clear();   // a dismissed card quiets the pair like a deny (the next legs ask again)
+  ok(w.door.answerRequest(q4.askId, { answer: 'once', reauthed: true }).code === 'ask_settled' && !w.door._grants.size, 'the request\'s card closed by another door (dismissed) ⇒ settled, not granted — a late answer is ask_settled');
+  const q5 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
+  const i5 = reqsOf()[0]; const held5 = w.userTodos._state.items.find((x) => x.id === i5.id); held5.detail = held5.detail.replace('nightly', 'Nightly');
+  const a5 = w.door.answerRequest(q5.askId, { answer: 'once', reauthed: true });
+  ok(q5.ok && a5.code === 'ask_changed' && !w.door._grants.size, 'a request whose item changed after it was shown ⇒ ask_changed, nothing granted (the belt)', a5);
+  const q6 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
+  if (q6.ok) { w.gone.add('conv-1'); const a6 = w.door.answerRequest(q6.askId, { answer: 'once', reauthed: true }); w.gone.delete('conv-1'); ok(a6.code === 'conversation_gone' && !w.door._grants.size, 'the conversation that asked has ended ⇒ conversation_gone, nothing granted', a6); }
+  // THE LOCK: an open request withdrawn vault_locked, every grant ended
+  w.door._reqQuiet.clear();
+  const q7 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
+  const q8 = w.door.request({ caller, entry: 'vault://app-secrets/app1/item.0.1', purpose: 'log in to the app' });
+  w.door.answerRequest(q8.askId, { answer: '8h', reauthed: true });
+  const i7 = reqsOf()[0];
+  w.vault.lock('agent');
+  const after = w.userTodos.get(i7.id);
+  ok(q7.ok && after && after.status === 'done' && after.resolvedBy === 'vault_locked' && !w.door._requests.size && !w.door._grants.size, 'A LOCK withdraws every open request (its item resolved by vault_locked) and ends every grant', after && [after.status, after.resolvedBy]);
+  await w.vault.unlock(PW);
+  const r9 = await w.door.run({ caller, args: ['--env', 'T=vault://app-secrets/app1/item.0.1', '--', NODE, PRINTER, 'env'], cwd: w.work });
+  ok(r9.code === 'entry_not_runnable', 'after the unlock the 8-hour grant is gone — the entry is closed again');
+  const lockedReq = (w.vault.lock('agent'), w.door.request({ caller, entry: M1, purpose: PURPOSE }));
+  ok(lockedReq.code === 'vault_locked' && /already been told/.test(lockedReq.words) && w.vault.blockedSummary().actors.some((a) => a.verbs.includes('vibespace-vault request')), 'a LOCKED vault refuses a request first (the told words) and notes who it stopped', lockedReq);
+  await w.vault.unlock(PW);
+  // THE REVIEW'S USE-LINE LEGS: one receipt for every entry of a refused run; a child that RAN is a use whatever ended it;
+  // the owner's silence / the hub's tray / the agent's own cancel never count toward the daily-failure card
+  const two = await w.door.run({ caller, args: ['--env', 'A=vault://app-secrets/app1/item.0.1', '--env', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'env'], cwd: w.work });
+  const twoLines = w.door.usesFor(caller).uses.slice(0, 2);
+  ok(two.code === 'entry_not_runnable' && twoLines.length === 2 && twoLines.every((u) => u.outcome === 'entry_not_runnable' && /^vr-[0-9a-f]{16}$/.test(u.receipt)) && twoLines[0].receipt === twoLines[1].receipt && !JSON.stringify(two).includes('vr-'),
+    'a refused run naming two entries: one use line each, ONE receipt between them (the audit\'s — never in the refused answer)', twoLines);
+  openRow(w);
+  const ac = new AbortController(), pidF = path.join(w.work, 'gone.pid');
+  const pg = w.door.run({ caller, args: ['--env', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'sleep', pidF], cwd: w.work, signal: ac.signal });
+  const c0 = await waitCard(w); if (c0) w.door.answer(c0.action.askId, { answer: 'once' });
+  for (let k = 0; k < 300 && !fs.existsSync(pidF); k++) await sleep(10);
+  ac.abort();
+  const rg = await pg;
+  const goneUse = w.door.usesFor(caller).uses[0];
+  ok(rg.code === 'caller_gone' && goneUse && goneUse.outcome === 'caller_gone' && goneUse.door === 'run' && /^vr-/.test(goneUse.receipt), 'a run whose child RAN with the value and whose caller went away is still a use line (caller_gone, its receipt)', goneUse);
+  w.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });
+  const VU = R('src/vault-use.js');
+  ok(['ask_expired', 'ask_unfiled', 'caller_gone', 'vault_locked'].every((c) => !VU.counts(c)) && ['ask_denied', 'entry_not_runnable', 'use_not_granted'].every((c) => VU.counts(c)), 'the daily-failure count: the owner\'s silence, the hub\'s tray, the agent\'s own cancel and the lock never count; a refusal that IS the actor\'s (denied, closed, not granted) does');
+  // the agent's OWN entry: its conversation may ask for it (the mint's scope = the use law's conv)
+  const qa = w.door.request({ caller: { ...caller, conversationId: 'conv-x', scope: 'conv-1' }, entry: 'vault://agent:conv-1/gh-token', purpose: 'push the release tag' });
+  ok(qa.ok, 'an agent may ask for its OWN minted entry (scope = the use law\'s conv, as vault-mint-put spells it)', qa);
+  // a previous process's request: reconcile resolves it (the hub forgot it — and a restart locks the vault anyway)
+  const w2 = await world();
+  const d1 = w2.mk(); const qx = d1.request({ caller, entry: M1, purpose: PURPOSE });
+  const d2 = w2.mk();
+  ok(qx.ok && d2.reconcile() >= 1 && !(w2.userTodos.snapshot().open || []).some((x) => x.action && x.action.type === 'vault-grant-ask'), 'boot: a request a previous process filed is resolved (reconcile) — it can never be answered');
+  const bounded = []; for (let k = 0; k < 9; k++) bounded.push(w2.door.request({ caller: { ...caller, scope: 'webui-b' }, entry: k < 3 ? ['vault://mounts/m1/secretKey', 'vault://mounts/m2/secretKey', 'vault://app-secrets/app1/item.0.1'][k] : 'vault://mounts/m1/secretKey', purpose: 'p' + k }).code || 'ok');
+  ok(bounded.filter((c) => c === 'ok').length === 3 && bounded.slice(3).every((c) => c === 'request_pending'), 'one open request per conversation × entry — each further one for an entry already asked ⇒ request_pending', bounded);
+  // the card on the page
+  const L = await import(pathToFileURL(path.join(REPO, 'src/lib/inbox-window-layout.js')).href);
+  const view = L.itemView({ id: 'ut-r', sessionKey: 'claude:conv-1', text: 'Lane X asks to use a stored secret', detail: 'Secret: my bucket — ' + M1, urgency: 'high', kind: 'action', status: 'open', createdAt: 1, options: null, reply: null,
+    action: { type: 'vault-grant-ask', askId: 'b'.repeat(32) } }, { t: (x) => x, words: 'w', detail: 'd', name: 'Lane X', origin: { origin: 'vault', label: 'Vault' }, notice: false, reply: { show: false }, ago: () => '', expires: () => '', resolvedBy: () => '' });
+  ok(view.actions.slice(0, 3).join() === 'hub-once,grant-8h,hub-deny' && !view.actions.includes('reply'), 'the For-you window: Allow once / For 8 hours / Deny first — no reply box', view.actions);
+  const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+  ok(/const GRANT_ANSWERS = \['once', '8h', 'deny'\];/.test(read('src/lib/user-todos-row.js')) && /a === '8h' \? t\('For 8 hours'\)/.test(read('src/lib/user-todos-row.js')) && /a === 'grant-8h' \? '8h'/.test(read('src/lib/inbox-window.js'))
+    && /\/api\/vault\/request\/asks\//.test(read('src/lib/user-todos-actions.js')) && R('src/inbox-reply.js').ANSWER_ACTION_TYPES.includes('vault-grant-ask') && /'vault-grant-ask': 'askId'/.test(read('src/user-todos.js')), 'the popup row and the window answer once / 8h / deny through POST /api/vault/request/asks/:askId; a typed reply never answers it; one item per request');
 }
 
 try { fs.chmodSync(BIN, 0o755); } catch { }   // the read-only bin given back (the scratch dir is removed)

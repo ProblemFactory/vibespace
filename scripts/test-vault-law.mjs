@@ -18,12 +18,20 @@
 //      caching a vault key, lawfulKey going legacy before asking the vault
 //   ⑥ THE REAL STORES (accounts, mounts, integrations, app-secrets) across the states: a secret sealed before setup;
 //      setup; read; lock ⇒ vault_locked (the row says it); unlock ⇒ read; a restart (a new engine) ⇒ locked
+//   ⑦ THE AUTOMATION KEYS (design q-046): a key's value never reaches an agent; everything stops while the vault is locked
 //   ⑧ THE NAMED EXCEPTION the owner decided (design q-051, 2026-10-20): the per-instance relay token is NOT a vault entry —
 //      SECRETS_AT_REST names it with the decision, its date and its reason; it is no store key (no STORE_KEYS row, no
 //      key-file name); the shared relay token stays the vault's `frp:token` until it retires (the row says when)
+//   ⑨ THE USE LAW (lane vault-use-law, design q-043 D1 「用途，不给值」): every CLI verb, agent vault route and engine key
+//      CLASSIFIED (purpose-door / receipt / refusal / owner-only / hub-only + the ONE exception, the link-token door); an
+//      agent route reaches no owner-only / hub-only key; the SENTINEL SWEEP (every route × bearer, every verb, every
+//      broadcast ⇒ no stored value in any form, the exception's own answer the positive control); MUTANTS: a planted
+//      agent route answering a value, a planted CLI verb printing one ⇒ RED
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
@@ -144,7 +152,7 @@ console.log('④ the agent side has no unlock');
   const agentDoors = [...routes.matchAll(/app\.(get|post)\('(\/api\/agent\/vault\/[^']+)'/g)].map((m) => m[2]);
   // lane vault-e2e-password-fix-r2: + the LINK TOKEN door — a remote session's attach child asks for ITS machine's device
   // token (its own session token names the session; the engine is never asked to unlock: LOCKED ⇒ 423 vault_locked)
-  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/mint,/api/agent/vault/put,/api/agent/vault/link-token,/api/agent/vault/run,/api/agent/vault/runnable', `the agent doors are the two-step code, state, lock, mint, put, the session's own link token, run and runnable only (${agentDoors.join(', ')})`);
+  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/mint,/api/agent/vault/put,/api/agent/vault/link-token,/api/agent/vault/run,/api/agent/vault/runnable,/api/agent/vault/request,/api/agent/vault/uses', `the agent doors are the two-step code, state, lock, mint, put, the session's own link token, run and runnable only (${agentDoors.join(', ')})`);
   // design q-047 L1 (lane vault-totp): + the TWO-STEP CODE door — a GET answering a granted entry's CURRENT code (never the
   // seed: its answer is built from named fields only — test-vault-routes ⑨ plants a seed and ⑩'s mutant leaks it ⇒ RED)
   const codeDoor = (() => { const i = routes.indexOf("app.get('/api/agent/vault/totp/:name'"); const j = routes.indexOf('\n    });', i); return i > 0 && j > i ? routes.slice(i, j) : ''; })();
@@ -154,17 +162,23 @@ console.log('④ the agent side has no unlock');
   // RUNNABLE (the entries a run may reference — names, never a value)
   const cliRuns = /\/api\/agent\/vault\/run'/.test(cli) && /\/api\/agent\/vault\/runnable'/.test(cli);
   ok(cliRuns, 'data/bin/vibespace-vault calls run and runnable (lane vault-run-door) — and still no unlock / setup / change (above)');
-  // THE RUN DOOR'S ANSWER (lane vault-run-door): every chunk of the child's stdout / stderr reaches `parts` only through its
-  // stream's scrubber, the tail at the end too; the answer's two streams are those parts through secret-shapes — nothing else
+  // THE RUN DOOR'S ANSWER (lane vault-run-door): every chunk of the child's stdout / stderr reaches `parts` only through the
+  // run's scrubber, the tail at the end too; the answer's two streams are those parts through secret-shapes — nothing else.
+  // Lane vault-scrub-forms: ONE scrubber per run (createRunMasker, both pipes in arrival order — one window): `parts` is
+  // written in ONE place, `handOn`, and `handOn` is handed only what that scrubber's push / end answer
   const door = tree.get('src/server/vault-run-door.js') || '';
   const scrubbedOnly = (t) => {
-    const pushes = [...t.matchAll(/parts\[k\]\.push\(([^;]*)\);/g)].map((m) => m[1]);
-    return pushes.length === 2 && pushes.every((a) => /^masks\[k\]\.push\(/.test(a))
+    const writes = [...t.matchAll(/parts(?:\[k\]|\.out|\.err)\.push\([^;]*\);/g)].map((m) => m[0]);
+    const handed = [...t.matchAll(/handOn\(([^;]*)\);/g)].map((m) => m[1]);
+    return writes.join(' ') === 'parts.out.push(o.out); parts.err.push(o.err);'
+      && /const handOn = \(o\) => \{ parts\.out\.push\(o\.out\); parts\.err\.push\(o\.err\); \};/.test(t)
+      && handed.length === 3 && handed.every((a) => /^scrub\.(push|end)\(/.test(a)) && /scrub = VR\.createRunMasker\(secrets, \['out', 'err'\]\)/.test(t)
       && /const outT = redactLong\(parts\.out\.join\(''\)\), errT = redactLong\(parts\.err\.join\(''\)\);/.test(t)
       && /stdout: outT\.text, stderr: errT\.text/.test(t) && !/stdout: (?!outT\.text|utf8Head\(outT\.text\))/.test(t) && !/stderr: (?!errT\.text|utf8Head\(errT\.text\))/.test(t);
   };
-  ok(scrubbedOnly(door), 'the run door hands the agent ONLY scrubbed text: each stream chunk enters its parts through createMasker\'s push (the end\'s tail too), the answer\'s stdout / stderr are those parts through secret-shapes — no other stdout / stderr field');
-  ok(!scrubbedOnly(door.replace('if (text) parts[k].push(masks[k].push(text));', 'if (text) parts[k].push(text);')), 'MUTANT: a stream chunk handed on without its scrubber ⇒ RED');
+  ok(scrubbedOnly(door), 'the run door hands the agent ONLY scrubbed text: each stream chunk enters its parts through the run\'s ONE scrubber (createRunMasker\'s push, the end\'s tail too — one place, handOn), the answer\'s stdout / stderr are those parts through secret-shapes — no other stdout / stderr field');
+  ok(!scrubbedOnly(door.replace('if (text) handOn(scrub.push(k, text));', 'if (text) parts[k].push(text);')) && !scrubbedOnly(door.replace('if (text) handOn(scrub.push(k, text));', "if (text) handOn({ out: k === 'out' ? text : '', err: k === 'err' ? text : '' });")),
+    'MUTANTS: a stream chunk handed on without the scrubber (straight into parts, or into handOn) ⇒ RED');
   ok(!/vaultReveal|valueOf\(/.test(routes.slice(routes.indexOf("'/api/agent/vault/runnable'"), routes.indexOf("'/api/agent/vault/runnable'") + 700)), 'runnable answers names — it never asks a store for a value');
   // lane vault-mint-put (q-043 §9): + MINT / PUT — CREATE-only doors in the session's OWN namespace; neither reads a value
   // back (there is no agent reveal door; the owner reveals in the Vault window), and both refuse a locked vault by name.
@@ -312,6 +326,279 @@ console.log('⑧ THE NAMED EXCEPTION — the per-instance relay token (design q-
   ok(!STORE_KEYS.some((k) => String(k).includes('relay')) && !/\.key$|-key$/.test(RT.FILE) && !VE.isSecretName('relay:token'), 'the relay token is no store key (no STORE_KEYS row, no key-file name) and no vault secret name (relay: is not a secret prefix)', STORE_KEYS);
   const frpSrc = read('src/plugins/frp.js');
   ok(!/secretPut\([^)]*relay|secretGet\([^)]*relay/i.test(frpSrc) && /replaceShredding\(relayFile\(\), RT\.serialize\(rec\)\)/.test(frpSrc), 'the frp plugin writes it to its file (0600, atomic, the old bytes overwritten) — never into the vault', null);
+}
+
+console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途，不给值」): no route, no CLI verb, no broadcast answers an entry\'s bytes to a BEARER');
+// THE CENSUS (a) every verb data/bin/vibespace-vault exposes, every `/api/agent/vault/*` route the tree registers and every
+// key of the engine — each CLASSIFIED below, a new one unclassified is RED: purpose-door (does a thing for the caller,
+// answers a receipt), receipt (facts, names, receipts), refusal (only refuses / notes a refusal), owner-only (a person's
+// cookie doors behind 验证是你), hub-only (answers bytes to the hub's OWN code — a store, the dial, the relay), and ONE
+// exception (the link-token door: a conversation's attach child gets ITS machine's link token). The sibling lanes' doors
+// (vault-mint-put, vault-run-door) are classified here before they land and COUNTED once they do (the integrator re-runs
+// it). (b) REACH: an agent route's handler (and the helpers of its file it names) reaches only receipt / purpose-door /
+// refusal engine keys — never owner-only or hub-only. (c) THE SENTINEL SWEEP: the REAL routes over a REAL engine holding a
+// sentinel in every entry (each store key, two machines' link tokens, the relay token, a sealed file key, an automation
+// key): every agent route × every bearer (a local session, a session on a machine, a job, an automation key, a body token,
+// none) × its methods, the CLI's every verb, every broadcast frame ⇒ 0 hits in any form (raw, hex, base64, base64url) —
+// but the exception's own answer, which is the positive control (the sweep sees a value when one is there).
+// (d) MUTANTS, each RED: a planted agent route answering a stored value (unclassified ⇒ a; classified ⇒ b and c), a
+// planted CLI verb printing the link token (⇒ a and c).
+{
+  const SIB = (lane) => ({ sibling: lane });
+  const CLI_VERBS = {
+    status: ['receipt', 'the vault\'s state in words and since when (GET /api/agent/vault/state)'],
+    lock: ['purpose-door', 'locks the vault for the caller (a suspected leak, the end of a task); the answer is the state'],
+    totp: ['receipt', 'the CURRENT two-step code of an entry the user granted this conversation (name, code, secondsLeft, period) — never the seed (the entry\'s bytes); the hub reads the seed and computes the code at its clock (design q-047 L1, lane vault-totp)'],
+    help: ['receipt', 'the usage text'], '-h': ['receipt', 'the usage text'], '--help': ['receipt', 'the usage text'],
+    mint: ['purpose-door', 'the hub makes and seals a random value; the answer is the entry name + its vault:// reference', SIB('vault-mint-put')],
+    put: ['purpose-door', 'seals a value the agent already has (a 0600 file or stdin, never argv); the answer is the name + reference', SIB('vault-mint-put')],
+    run: ['purpose-door', 'the hub runs a command with the entry injected and masks it in the output; the answer is the masked output + a receipt', SIB('vault-run-door')],    list: ['receipt', 'the entries open for this conversation\'s runs — a reference, a label and a kind each, never a value (GET /api/agent/vault/runnable)', SIB('vault-run-door')],
+    // lane vault-manual-and-lock (design D4): the agent ASKS the owner for an entry (a For-you question — no value moves) and
+    // reads its own grants, open requests and vault-use lines back (names, purposes, codes, receipts)
+    request: ['purpose-door', 'files ONE For-you question naming the agent, the entry and its purpose; the answer is the question\'s id (or that the entry is open already)'],
+    uses: ['receipt', 'this conversation\'s grants, open requests and own vault-use lines — references, purposes, times, outcomes, receipts (GET /api/agent/vault/uses)'],
+  };
+  const AGENT_ROUTES = {
+    'GET /api/agent/vault/state': ['receipt', 'the state, setUpAt, lockedSince and the key count — facts'],
+    'POST /api/agent/vault/lock': ['purpose-door', 'the lock act; the answer is the facts'],
+    'GET /api/agent/vault/totp/:name': ['receipt', 'the granted entry\'s current code + secondsLeft / period — named fields, never the seed (design q-047 L1, lane vault-totp)'],
+    'GET /api/agent/vault/link-token': ['exception', 'THE ONE NAMED EXCEPTION (int317): a remote conversation\'s attach child asks with its session token for ITS OWN machine\'s link token (memory only, never printed) — the device holds the same value; a session on no machine, a job or an unknown token is refused'],
+    'POST /api/agent/vault/mint': ['purpose-door', 'mint: name + reference, never the value', SIB('vault-mint-put')],
+    'POST /api/agent/vault/put': ['purpose-door', 'put: name + reference, never the value', SIB('vault-mint-put')],
+    'POST /api/agent/vault/run': ['purpose-door', 'run: the masked output + a receipt', SIB('vault-run-door')],
+    'GET /api/agent/vault/runnable': ['receipt', 'runnable: the entries a run may reference — names and references, never a value', SIB('vault-run-door')],
+    'POST /api/agent/vault/request': ['purpose-door', 'request: a For-you question to the owner — the answer is its id, never a value'],
+    'GET /api/agent/vault/uses': ['receipt', 'uses: this conversation\'s grants, requests and vault-use lines — names, codes, receipts'],
+  };
+  const ENGINE_KEYS = {
+    dataDir: 'receipt', file: 'receipt', state: 'receipt', facts: 'receipt', epoch: 'receipt', hasEntry: 'receipt', peek: 'receipt', lastUse: 'receipt', secretNames: 'receipt', blockedSummary: 'receipt',
+    lock: 'purpose-door', noteUse: 'purpose-door', agentMint: 'purpose-door', agentPut: 'purpose-door',
+    blocked: 'refusal',
+    setup: 'owner-only', unlock: 'owner-only', change: 'owner-only', confirm: 'owner-only', setIdleLock: 'owner-only', touch: 'owner-only',
+    keyFor: 'hub-only', secretGet: 'hub-only', secretPut: 'hub-only', secretDrop: 'hub-only', secretAdopt: 'hub-only', resumeSeal: 'hub-only', audit: 'hub-only', idleTick: 'hub-only', close: 'hub-only',
+    onUnlock: 'hub-only', onOpen: 'hub-only', onLock: 'hub-only', onBlocked: 'hub-only', onFailing: 'hub-only',
+    macOf: 'hub-only',
+    usesOf: 'receipt',   // lane vault-manual-and-lock: ONE conversation's own vault-use lines (closed fields — never a value)   // lane vault-run-door: a mark over the run door's own store under a DEK-derived key — the hub's code only
+  };
+  const SIBLING_KEYS = new Set(['agentMint', 'agentPut']);
+  const REACHABLE_OK = new Set(['receipt', 'purpose-door', 'refusal']);
+  const ROUTE_RE = /^\/api\/agent\/vault\//;
+  /** the statements names are defined by in a file (`const|let|var NAME =` … `;` at depth 0, `function NAME(` … its body),
+   *  each with its BLOCK depth (how many `{` hold it) → Map name → [{ range, depth }] */
+  const defsOf = (toks) => {
+    const out = new Map();
+    let block = 0;
+    for (let i = 0; i < toks.length; i++) {
+      const t = toks[i], l0 = t.type.label;
+      if (l0 === '{' || l0 === '${') block++;
+      if (l0 === '}') block--;
+      let start = -1;
+      if ((t.type.keyword === 'const' || t.type.keyword === 'let' || t.type.keyword === 'var') && isName(toks[i + 1]) && isPunc(toks[i + 2], '=')) start = i + 1;
+      else if (t.type.keyword === 'function' && isName(toks[i + 1])) start = i + 1;
+      if (start < 0) continue;
+      let depth = 0, j = start + 1, seenBody = false;
+      for (; j < toks.length; j++) {
+        const l = toks[j].type.label;
+        if (l === '(' || l === '[' || l === '{' || l === '${') { depth++; if (l === '{') seenBody = true; }
+        if (l === ')' || l === ']' || l === '}') { depth--; if (depth === 0 && t.type.keyword === 'function' && seenBody && l === '}') break; }
+        if (depth === 0 && l === ';') break;
+      }
+      const name = toks[start].value;
+      if (!out.has(name)) out.set(name, []);
+      out.get(name).push({ range: [start, j], depth: block });
+    }
+    return out;
+  };
+  const blockDepthAt = (toks, at) => { let b = 0; for (let i = 0; i < at; i++) { const l = toks[i].type.label; if (l === '{' || l === '${') b++; if (l === '}') b--; } return b; };
+  /** every `vault.<key>` a token range names, following the helpers of its file it names that are defined in a scope that
+   *  holds the route (block depth ≤ the route's — never a local of another function) — a fixpoint */
+  const reachOf = (toks, defs, range, maxDepth) => {
+    const keys = new Set(), seen = new Set(), todo = [range];
+    while (todo.length) {
+      const [a, b] = todo.pop();
+      for (let i = a; i < b && i < toks.length; i++) {
+        if (isName(toks[i], 'vault') && isPunc(toks[i + 1], '.') && isName(toks[i + 2])) keys.add(toks[i + 2].value);
+        if (!isName(toks[i]) || isPunc(toks[i - 1], '.') || seen.has(toks[i].value)) continue;
+        const d = (defs.get(toks[i].value) || []).find((x) => x.depth <= maxDepth && !(x.range[0] >= range[0] && x.range[0] < range[1]));
+        if (d) { seen.add(toks[i].value); todo.push(d.range); }
+      }
+    }
+    return keys;
+  };
+  /** THE CENSUS over a tree → { red, verbs, routes } (extra = rows a mutant adds to the tables) */
+  function useCensus(files, { engineKeys = null, extraRoutes = {}, extraVerbs = {} } = {}) {
+    const red = [], routes = new Map(), verbs = new Set();
+    const routeRows = { ...AGENT_ROUTES, ...extraRoutes }, verbRows = { ...CLI_VERBS, ...extraVerbs };
+    // the CLI's verbs: every string `cmd` is compared with, and its default
+    const cli = files.get('data/bin/vibespace-vault') || '';
+    const ct = tokensOf(cli).toks;
+    for (let i = 0; i < ct.length; i++) {
+      if (isName(ct[i], 'cmd') && (isPunc(ct[i + 1], '==/!=/===/!==') || ct[i + 1]?.value === '===') && ct[i + 2] && ct[i + 2].type.label === 'string') verbs.add(String(ct[i + 2].value));
+      if (isName(ct[i], 'cmd') && isPunc(ct[i + 1], '=') && ct[i + 2] && ct[i + 2].type.label === 'string') verbs.add(String(ct[i + 2].value));
+    }
+    for (const v of verbs) if (!verbRows[v]) red.push(`data/bin/vibespace-vault: the verb "${v}" is not classified (purpose-door / receipt / refusal / owner-only) — the use law's census`);
+    for (const [v, row] of Object.entries(verbRows)) if (!verbs.has(v) && !(row[2] && row[2].sibling)) red.push(`data/bin/vibespace-vault: a classified verb "${v}" is gone — retire its row`);
+    // every agent vault route the tree registers, wherever it lives
+    for (const [rel, text] of files) {
+      if (!rel.startsWith('src/') && rel !== 'server.js') continue;
+      if (!text.includes('/api/agent/vault/')) continue;
+      const { toks } = tokensOf(text);
+      let defs = null;
+      for (let i = 0; i + 4 < toks.length; i++) {
+        if (!(isPunc(toks[i + 1], '.') && isName(toks[i + 2]) && /^(get|post|put|delete|patch|all|use)$/.test(toks[i + 2].value) && isPunc(toks[i + 3], '(') && toks[i + 4].type.label === 'string' && ROUTE_RE.test(String(toks[i + 4].value)))) continue;
+        const key = `${toks[i + 2].value.toUpperCase()} ${toks[i + 4].value}`;
+        let depth = 0, j = i + 3;
+        for (; j < toks.length; j++) { const l = toks[j].type.label; if (l === '(' || l === '[' || l === '{' || l === '${') depth++; if (l === ')' || l === ']' || l === '}') { depth--; if (depth === 0) break; } }
+        defs = defs || defsOf(toks);
+        const reach = reachOf(toks, defs, [i + 4, j], blockDepthAt(toks, i));
+        routes.set(key, { rel, reach: [...reach] });
+        const row = routeRows[key];
+        if (!row) { red.push(`${rel}: the agent route ${key} is not classified (purpose-door / receipt / refusal / owner-only) — the use law's census`); continue; }
+        for (const k of reach) {
+          const c = (engineKeys || ENGINE_KEYS)[k];
+          if (!c) red.push(`${rel}: ${key} reaches vault.${k} — an engine key the census does not know`);
+          else if (!REACHABLE_OK.has(c) && row[0] !== 'exception') red.push(`${rel}: ${key} reaches vault.${k} (${c}) — an agent route never names an owner-only or a hub-only key`);
+        }
+      }
+    }
+    for (const [k, row] of Object.entries(routeRows)) if (!routes.has(k) && !(row[2] && row[2].sibling)) red.push(`a classified agent route ${k} is gone — retire its row`);
+    const exceptions = Object.entries(routeRows).filter(([, r]) => r[0] === 'exception').map(([k]) => k);
+    if (exceptions.join() !== 'GET /api/agent/vault/link-token') red.push(`THE exception is the link-token door alone — found: ${exceptions.join(', ') || 'none'}`);
+    return { red, verbs: [...verbs], routes };
+  }
+  // (a) + (b) over the shipped tree, and the engine's own keys
+  const VE8 = require(path.join(REPO, 'src/server/vault-engine.js'));
+  const ROOT8 = scratch('vault-law-use');
+  fs.rmSync(ROOT8, { recursive: true, force: true }); fs.mkdirSync(ROOT8, { recursive: true });
+  const quiet8 = { log() {}, warn() {}, error() {} };
+  const probeEng = VE8.create({ dataDir: path.join(ROOT8, 'keys'), log: quiet8, idleTimer: false, register: false });
+  const liveKeys = Object.keys(probeEng); probeEng.close();
+  const unclassified = liveKeys.filter((k) => !ENGINE_KEYS[k]), staleKeys = Object.keys(ENGINE_KEYS).filter((k) => !liveKeys.includes(k) && !SIBLING_KEYS.has(k));
+  const byClass = {}; for (const k of liveKeys) if (ENGINE_KEYS[k]) byClass[ENGINE_KEYS[k]] = (byClass[ENGINE_KEYS[k]] || 0) + 1;
+  ok(!unclassified.length && !staleKeys.length, `(a) every key of the engine (${liveKeys.length}) is classified — ${Object.entries(byClass).map(([c, n]) => `${c} ${n}`).join(', ')}`, { unclassified, stale: staleKeys });
+  const c0 = useCensus(tree);
+  ok(c0.red.length === 0, `(a) every verb of data/bin/vibespace-vault (${c0.verbs.join(', ')}) and every agent vault route (${[...c0.routes.keys()].join(', ')}) is classified; the link-token door is THE one exception`, c0.red);
+  const reachRows = [...c0.routes].map(([k, r]) => `${k} → ${r.reach.join('+') || '∅'}`);
+  ok(c0.routes.size >= 3 && [...c0.routes.values()].some((r) => r.reach.includes('facts')) && [...c0.routes.values()].some((r) => r.reach.includes('lock')), `(b) REACH: the agent routes name only receipt / purpose-door / refusal keys (${reachRows.join(' · ')})`, reachRows);
+
+  // (c) THE SENTINEL SWEEP — the real routes over a real engine with a sentinel in every entry
+  const express8 = require(path.join(REPO, 'node_modules/express'));
+  const HT8 = require(path.join(REPO, 'src/server/host-tokens.js'));
+  const d8 = path.join(ROOT8, 'data'); fs.mkdirSync(d8, { recursive: true });
+  const PW8 = 'the use law\'s second password';
+  const frames = [];
+  const eng8 = VE8.create({ dataDir: d8, kdf: { N: 1024, r: 8, p: 1 }, log: quiet8, idleTimer: false, bcast: (m) => frames.push(JSON.stringify(m)) });
+  await eng8.setup(PW8, {});
+  const sentinels = [];   // [label, Buffer]
+  for (const k of VE8.STORE_KEYS) { const r = eng8.keyFor(k.name, { keyFile: path.join(d8, k.name), raw: !!k.raw, hasCiphertext: () => false }); if (r.ok) sentinels.push([`store key ${k.store}`, Buffer.from(r.key)]); }
+  const ht8 = HT8.create({ dataDir: d8, nameOf: () => 'the law machine', log: quiet8 });
+  const OWN = ht8.tokenFor('dial-devA'), OTHER = ht8.tokenFor('host-0123abcd');
+  sentinels.push(['link token (own machine)', Buffer.from(OWN)], ['link token (another machine)', Buffer.from(OTHER)]);
+  for (const [entry, label] of [['frp:token', 'relay token'], ['file:law-pair', 'sealed file key'], ['apikey:ak-law', 'automation key']]) {
+    const v = `law-${label.replace(/\W/g, '')}-${crypto.randomBytes(12).toString('hex')}`;
+    ok(eng8.secretPut(entry, v).ok, `the sweep's sentinel sealed: ${label}`);
+    sentinels.push([label, Buffer.from(v)]);
+  }
+  ok(sentinels.length === VE8.STORE_KEYS.length + 5, `${sentinels.length} sentinels: every store key, two machines' link tokens, the relay token, a sealed file key, an automation key`);
+  const formsOf = (b) => [b.toString('hex'), b.toString('base64'), b.toString('base64url'), ...(/^[\x20-\x7e]+$/.test(b.toString('latin1')) ? [b.toString('latin1')] : [])].filter((x) => x.length >= 12);
+  const hitsOf = (text) => sentinels.filter(([, b]) => formsOf(b).some((f) => text.includes(f))).map(([l]) => l);
+  const T = (p) => p + crypto.randomBytes(16).toString('hex');
+  const TOK = { local: T('vsst_'), dial: T('vsst_'), job: T('jbt_') };
+  const sessions8 = new Map([
+    ['s-local', { name: 'Law local', agentToken: TOK.local, _webuiId: 'c-local' }],
+    ['s-dial', { name: 'Law on a machine', agentToken: TOK.dial, _webuiId: 'c-dial', _agentdSession: true, _dialDeviceId: 'devA' }],
+  ]);
+  const jobs8 = { ready: true, jobByToken: (t) => (t === TOK.job ? { id: 'j-law', name: 'Law job' } : null) };
+  const BEARERS = [
+    ['a local session (vsst_)', { authorization: 'Bearer ' + TOK.local }],
+    ['a session on a machine (vsst_)', { authorization: 'Bearer ' + TOK.dial }],
+    ['a job (jbt_)', { authorization: 'Bearer ' + TOK.job }],
+    ['an automation key', { authorization: 'Bearer ' + 'vsak_' + crypto.randomBytes(32).toString('base64url') }],
+    ['a body token', null, { token: TOK.dial }],
+    ['no bearer', {}],
+  ];
+  const listen = (app) => new Promise((res) => { const s = app.listen(0, '127.0.0.1', () => res(s)); });
+  const call = (port, method, p, headers, body) => new Promise((res) => {
+    const data = JSON.stringify(body || {});
+    const r = http.request({ host: '127.0.0.1', port, path: p, method, headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data), ...headers } }, (rs) => { let b = ''; rs.setEncoding('latin1'); rs.on('data', (c) => { b += c; }); rs.on('end', () => res({ status: rs.statusCode, body: b })); });
+    r.on('error', (e) => res({ status: 0, body: String(e.message) }));
+    r.end(data);
+  });
+  const runCli = (cliPath, args, port, token) => new Promise((res) => {
+    const p = spawn(process.execPath, [cliPath, ...args], { env: { PATH: process.env.PATH, HOME: ROOT8, VIBESPACE_API: `http://127.0.0.1:${port}`, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = ''; p.stdout.on('data', (c) => { out += c.toString('latin1'); }); p.stderr.on('data', (c) => { out += c.toString('latin1'); });
+    const k = setTimeout(() => p.kill('SIGKILL'), 15000);
+    p.on('close', (code) => { clearTimeout(k); res({ code, out }); });
+  });
+  /** ONE sweep: the routes `register` puts on a fresh app × every bearer × every method; the CLI's verbs (`cli`) → leaks */
+  async function sweep(register, { cli = path.join(REPO, 'data/bin/vibespace-vault'), verbs = null } = {}) {
+    const app = express8(); app.use(express8.json());
+    register(app, { vault: eng8, activeSessions: sessions8, getJobs: () => jobs8, linkTokenFor: (hostKey, who) => ht8.tokenFor(hostKey, who), auditLink: () => {} });
+    const srv = await listen(app); const port = srv.address().port;
+    const routes = app._router.stack.filter((l) => l.route && ROUTE_RE.test(l.route.path)).flatMap((l) => Object.keys(l.route.methods).map((m) => [m.toUpperCase(), l.route.path]));
+    const leaks = [], seen = { own: false, calls: 0 }, bodies = [];   // bodies: every answer, re-read below against what the sweep itself made
+    frames.length = 0;
+    for (const [method, p] of routes) for (const [who, headers, body] of BEARERS) {
+      if (eng8.state() !== 'unlocked') await eng8.unlock(PW8, {});
+      const r = await call(port, method, p, headers || {}, body || { name: 'law', id: 'secrets:frp:token#token', value: 'x' });
+      seen.calls++;
+      bodies.push([`${method} ${p} × ${who}`, r.body]);
+      const hits = hitsOf(r.body);
+      const own = `${method} ${p}` === 'GET /api/agent/vault/link-token' && /machine/.test(who) && hits.join() === 'link token (own machine)';
+      if (own) seen.own = true;
+      else if (hits.length) leaks.push(`${method} ${p} × ${who} ⇒ ${hits.join(', ')}`);
+    }
+    for (const f of frames) { const h = hitsOf(f); if (h.length) leaks.push(`a broadcast frame ⇒ ${h.join(', ')}`); }
+    const cliVerbs = verbs || useCensus(new Map([['data/bin/vibespace-vault', fs.readFileSync(cli, 'utf8')]])).verbs;
+    for (const v of [...cliVerbs, '']) {
+      if (eng8.state() !== 'unlocked') await eng8.unlock(PW8, {});
+      const r = await runCli(cli, v ? [v] : [], port, TOK.dial);
+      seen.calls++;
+      bodies.push([`vibespace-vault ${v || '(no verb)'}`, r.out]);
+      const h = hitsOf(r.out);
+      if (h.length) leaks.push(`vibespace-vault ${v || '(no verb)'} ⇒ ${h.join(', ')}`);
+    }
+    // a door that MADE a value during the sweep (a mint, when it lands) — its value is in no answer either
+    if (eng8.state() !== 'unlocked') await eng8.unlock(PW8, {});
+    const made = eng8.secretNames().filter((x) => /^agent:/.test(x.name)).map((x) => [x.name, eng8.secretGet(x.name).value]).filter(([, b]) => b && b.length >= 12);
+    for (const [where, text] of bodies) for (const [name, b] of made) if (formsOf(b).some((f) => text.includes(f))) leaks.push(`${where} ⇒ the value of ${name}, made during the sweep`);
+    seen.made = made.length;
+    await new Promise((res) => srv.close(res));
+    return { leaks, routes: routes.map((x) => x.join(' ')), ...seen };
+  }
+  const { registerVaultRoutes: reg8 } = require(path.join(REPO, 'src/routes/vault.js'));
+  const s0 = await sweep(reg8);
+  ok(s0.leaks.length === 0 && s0.calls >= 20, `(c) THE SWEEP: ${s0.routes.length} agent routes × ${BEARERS.length} bearers + the CLI's verbs + every broadcast frame (${s0.calls} answers) ⇒ no stored value in any form`, s0.leaks);
+  ok(s0.own, '(c) …the POSITIVE CONTROL: the exception\'s own answer (a session on a machine asking its link-token door) carries its own machine\'s token — the sweep sees a value when one is there');
+  const auditUse = fs.readFileSync(path.join(d8, VE8.AUDIT_FILE), 'utf8');
+  ok(/"event":"vault-use"[^\n]*"door":"link-token"[^\n]*"outcome":"ok"/.test(auditUse) && hitsOf(auditUse).length === 0, 'the link-token answers are USES in the audit (door link-token, outcome ok) — and the audit holds no stored value in any form', hitsOf(auditUse));
+
+  // (d) THE MUTANTS
+  const Module8 = require('module');
+  const loadAs = (rel, src) => { const abs = path.join(REPO, rel); const m = new Module8(abs, null); m.filename = abs; m.paths = Module8._nodeModulePaths(path.dirname(abs)); m._compile(src, abs); return m.exports; };
+  const RV = 'src/routes/vault.js';
+  const routesSrc = tree.get(RV);
+  const anchor8 = '  // ── agents: the state and the lock — never unlock ──\n';
+  const planted = routesSrc.replace(anchor8, "  app.get('/api/agent/vault/peek', (req, res) => { if (!agentOk(req)) return answer(res, { ok: false, code: 'unauthorized' }); const g = vault.secretGet('frp:token'); res.json({ ok: true, peek: g.ok && g.value ? g.value.toString('utf8') : null }); });\n" + anchor8);
+  ok(planted !== routesSrc, 'the mutant\'s anchor is in src/routes/vault.js');
+  const mt = new Map(tree); mt.set(RV, planted);
+  const m1 = useCensus(mt);
+  ok(m1.red.some((l) => /GET \/api\/agent\/vault\/peek is not classified/.test(l)), `MUTANT RED (a): a planted agent route that answers a stored value, unclassified ⇒ ${m1.red[0] || 'GREEN'}`);
+  const m2 = useCensus(mt, { extraRoutes: { 'GET /api/agent/vault/peek': ['receipt', 'a lie'] } });
+  ok(m2.red.some((l) => /reaches vault\.secretGet \(hub-only\)/.test(l)), `MUTANT RED (b): the same route classified as a receipt — its handler reaches a hub-only key ⇒ ${m2.red[0] || 'GREEN'}`);
+  const s1 = await sweep(loadAs(RV, planted).registerVaultRoutes);
+  ok(s1.leaks.some((l) => /peek[^\n]*relay token/.test(l)), `MUTANT RED (c): the sweep over the planted route finds the relay token in its answer ⇒ ${s1.leaks[0] || 'GREEN'}`);
+  const cliSrc = tree.get('data/bin/vibespace-vault');
+  const plantedCli = cliSrc.replace("  if (cmd === 'lock')", "  if (cmd === 'peek') { const d = await call('GET', '/api/agent/vault/link-token'); console.log(d.token); return; }\n  if (cmd === 'lock')");
+  ok(plantedCli !== cliSrc, 'the CLI mutant\'s anchor is in data/bin/vibespace-vault');
+  const mc = new Map(tree); mc.set('data/bin/vibespace-vault', plantedCli);
+  const m3 = useCensus(mc);
+  ok(m3.red.some((l) => /the verb "peek" is not classified/.test(l)), `MUTANT RED (a): a planted CLI verb, unclassified ⇒ ${m3.red[0] || 'GREEN'}`);
+  const cliCopy = path.join(ROOT8, 'vibespace-vault-peek'); fs.writeFileSync(cliCopy, plantedCli, { mode: 0o700 });
+  const s2 = await sweep(reg8, { cli: cliCopy });
+  ok(s2.leaks.some((l) => /vibespace-vault peek ⇒ link token \(own machine\)/.test(l)), `MUTANT RED (c): the planted verb run against the real doors prints the machine's link token ⇒ ${s2.leaks[0] || 'GREEN'}`);
+  eng8.close();
+  fs.rmSync(ROOT8, { recursive: true, force: true });
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

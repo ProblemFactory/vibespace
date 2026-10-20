@@ -22,6 +22,7 @@ const path = require('path');
 const { spawn, execFile, execFileSync } = require('child_process');
 const { pidCmdline, pidAlive } = require('./proc.js');
 const DNS = require('../tailscale-dns.js');
+const { serviceEnv } = require('../agent-env.js');
 
 const SOCKS_PORT = Number(process.env.VIBESPACE_TAILSCALE_SOCKS_PORT || 1055);
 
@@ -214,7 +215,9 @@ module.exports = {
         const useSudo = kernel && process.getuid?.() !== 0;
         const cmd = useSudo ? 'sudo' : daemon;
         const argv = useSudo ? ['-n', daemon, ...args] : args;
-        const child = spawn(cmd, argv, { detached: true, stdio: ['ignore', logFd, logFd] });
+        // tailscaled's env is BUILT (lane spawn-env-debts): its state + socket ride argv (--statedir / --socket); it dials
+        // the tailnet's control plane, so the egress door (the operator's proxy + trust roots) — never the hub's tokens
+        const child = spawn(cmd, argv, { env: serviceEnv(process.env, { egress: true }), detached: true, stdio: ['ignore', logFd, logFd] });
         child.unref();
         fs.writeFileSync(tsPidFile(), String(child.pid));
         const rec = h.rec();

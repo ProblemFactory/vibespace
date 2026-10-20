@@ -28,6 +28,9 @@
 //   ⑧  THE MIGRATION TABLE — a production-shaped data dir with every r2 secret planted in the clear, booted in the hub's
 //      order (auth load → strip → engine → setup → open sweeps): every planted value (raw / hex / base64) in NO file
 //      but the vault's ciphertext, every login still valid once, every host token readable through the vault
+//   ⑩  THE DAILY-FAILURE CARD (lane vault-use-law, design q-043 D7): the 20th failed use of an actor × entry in a day ⇒ ONE
+//      For-you item naming both (the owner resolves it, an unlock never; a day later the same row reopens); the lock's
+//      refusals never count; 20 wrong second passwords from one address ⇒ its urgent item
 // Run: node scripts/test-vault-secrets.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -360,9 +363,9 @@ console.log('④ THE ONE ROAD — GET /api/agent/vault/link-token + the REAL att
 console.log('⑤ THE CARDS — a secret the LOCKED vault keeps closed reads 「保险库已锁定——先解锁」, never "expired" / "re-authorize"');
 {
   const { pathToFileURL } = await import('node:url');
-  const VAULT_EN = 'The vault is locked — unlock it first';
+  const VAULT_EN = 'The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)';   // lane vault-manual-and-lock: + where, and that For you names what waits (test-vault-words)
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
-  ok(zh.includes(`  "${VAULT_EN}": "保险库已锁定——先解锁"`) && ja.includes(`  "${VAULT_EN}":`) && zh.includes('  "vault locked": "保险库已锁定"'), 'the sentence is 「保险库已锁定——先解锁」 in zh (and has ja); the short word 「保险库已锁定」');
+  ok(zh.includes(`  "${VAULT_EN}": "保险库已锁定——先解锁（`) && ja.includes(`  "${VAULT_EN}":`) && zh.includes('  "vault locked": "保险库已锁定"'), 'the sentence is 「保险库已锁定——先解锁」 in zh (and has ja); the short word 「保险库已锁定」');
   const caps = R('src/channel-caps.js');
   const CH = R('src/channels/index.js');
   const VM = R('src/voice-model.js');
@@ -628,6 +631,7 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
     ok(u.code === 'vault_locked' && !JSON.stringify(u).includes(SEEDP), 'LOCKED ⇒ the granted agent\'s code answers vault_locked', u);
     await v.unlock(PW, {});
     const READERS = new Map([
+      ['src/agent-output-belt.js', 'the OUTPUT BELT (q-043 P0-b, lane agent-output-sinks): the plaintext of the REVEALABLE secrets (maskableSecrets) read ONLY to blank an agent\'s OWN text where it lands in a store — never answered to anyone'],
       ['src/server/vault-totp.js', 'THE two-step module: a code (and a preview) from the record — never the seed in an answer'],
       ['src/server/vault-contents.js', 'the reveal door (secretSource): ONE value behind the second password — a totp entry as its otpauth link'],
       ['src/server/automation-engine.js', 'apikey:<id> only (A.entryOf)'], ['src/server/host-tokens.js', 'host:<id> only'], ['src/plugins/frp.js', 'frp:token only'], ['src/server/sealed-json.js', 'file:<name> only'],
@@ -781,6 +785,47 @@ console.log('\u2468 THE RESTART\u2019S FOR-YOU ITEM (lane vault-relock-door) \u2
     ok(pre.code === KF.VAULT_LOCKED && pre.items === 0, 'RED: the pre-fix engine — a store read refused vault_locked after a lock act files NO item (the owner is not told)', pre);
     ok(fixed.code === KF.VAULT_LOCKED && fixed.items === 1 && fixed.who && fixed.who.who === 'VibeSpace (the accounts store)', 'the shipped engine — the same refusal files ONE item naming it', fixed);
   }
+}
+
+console.log('⑩ THE DAILY-FAILURE CARD (lane vault-use-law — design q-043 D7): the 20th failed use of one actor × one entry in a day files ONE For-you item naming both; the owner resolves it (an unlock never does); a day later the same pair files again; the lock\'s own refusals never count; 20 wrong second passwords from one address are their own, urgent card');
+{
+  const { UserTodoManager } = R('src/user-todos.js');
+  const { VAULT_INBOX_KEY, FAILING_TEXT, FAILING_LINE, FAILING_PW_LINE, FAILING_DOOR, FAILING_ONCE, FAILING_PW_HINT } = R('src/server/vault-hooks.js');
+  const VU = R('src/vault-use.js');
+  const clock = { t: 1800000000000 };
+  const d = dirOf('failing');
+  const v = mkVault(d, { now: () => clock.t }); await v.setup(PW, {});
+  const t = new UserTodoManager({ dataDir: d, onChange: () => {}, expirySweepMs: 0, now: () => clock.t });
+  wireVaultHooks({ vault: v, userTodos: t, log: quiet });
+  const failing = () => t._state.items.filter((i) => i.sessionKey === VAULT_INBOX_KEY && String(i.text).startsWith(FAILING_TEXT));
+  const knock = (n, actor = 'Law lane', conv = 'c-law', entry = VU.VAULT_ENTRY, outcome = 'human_only', door = 'unlock') => { for (let i = 0; i < n; i++) { clock.t += 20e3; v.noteUse(entry, { by: 'agent', door, conv }, { outcome, actor, purpose: 'unlock the vault' }); } };
+  knock(19);
+  ok(failing().length === 0, '19 refused uses in a day ⇒ no item yet');
+  knock(1);
+  const [one] = failing();
+  ok(failing().length === 1 && one.origin === 'vault' && one.kind === 'notice' && one.urgency === 'high' && !one.action && one.status === 'open' && one.text === `${FAILING_TEXT} — Law lane: the second password`, 'the 20th ⇒ ONE item in the Vault bucket, no button (the owner resolves it), its text = the pair (one row per actor × entry)', one);
+  ok(one.i18n.text.key === FAILING_LINE && JSON.stringify(one.i18n.text.params) === JSON.stringify({ who: 'Law lane', what: 'the second password', n: VU.FAIL_PER_DAY }) && one.i18n.detail.map((l) => l.key).join('|') === [FAILING_DOOR, FAILING_ONCE].join('|') && one.i18n.detail[0].params.door === 'unlock' && one.i18n.detail[0].params.code === 'human_only', 'its words name the ACTOR and the ENTRY, the count, the door and the last answer (i18n: en/zh/ja)', one.i18n);
+  ok(/Through unlock; the last answer was human_only\./.test(one.detail), 'its plain detail says the same (an older page)', one.detail);
+  knock(30);
+  ok(failing().length === 1 && failing()[0].id === one.id && failing()[0].status === 'open', '30 more the same day ⇒ still ONE item (the count fires once a day)');
+  knock(40, 'Other lane', 'c-other', 'host:dial-mac01', 'vault_locked', 'link-token');
+  ok(failing().length === 1, 'the LOCK\'s own refusals (40 × vault_locked) file nothing here — the lock\'s item names those');
+  v.lock('door'); await v.unlock(PW, {});
+  ok(t.get(one.id).status === 'open', 'an unlock never resolves it (it is not the lock\'s)');
+  knock(20, 'Second lane', 'c-two');
+  ok(failing().length === 2 && failing().some((i) => i.i18n.text.params.who === 'Second lane'), 'another actor at the same door ⇒ its own item');
+  t.setStatus(one.id, 'done', 'user');
+  knock(25);
+  ok(t.get(one.id).status === 'done', 'the OWNER resolves it — the same day\'s further failures leave it resolved');
+  clock.t += VU.DAY_MS;
+  knock(20);
+  ok(t.get(one.id).status === 'open' && failing().filter((i) => i.i18n.text.params.who === 'Law lane').length === 1, 'a day later, 20 more ⇒ the SAME row reopens (one row per pair, ever)', t.get(one.id));
+  v.lock('door');
+  for (let i = 0; i < 20; i++) { clock.t += i % 5 === 0 ? 61e3 : 1e3; await v.unlock('not the second password', { ip: '203.0.113.5' }); }
+  const pw = failing().find((i) => i.i18n.text.key === FAILING_PW_LINE);
+  ok(pw && pw.urgency === 'urgent' && pw.i18n.text.params.who === 'someone at 203.0.113.5' && pw.i18n.text.params.n === VU.FAIL_PER_DAY && pw.i18n.detail.map((l) => l.key).join('|') === [FAILING_DOOR, FAILING_PW_HINT].join('|'), 'design §2 T7: 20 wrong second passwords from one address in a day ⇒ ONE URGENT item naming the address (lock the vault, change the sign-in password)', pw);
+  ok(!JSON.stringify(t._state.items).includes('not the second password') && !fs.readFileSync(path.join(d, 'vault-audit.jsonl'), 'utf8').includes('not the second password'), 'no password in any item or audit line');
+  t.stop();
 }
 
 for (const e of engines) { try { e.close(); } catch { } }

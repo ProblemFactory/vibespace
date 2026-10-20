@@ -24,6 +24,7 @@ const { vibespaceNoticeText, withoutNoticeHead } = require('../notification-send
 // a pending fork carries its PARENT's id, and the raw lookups below (rung 1.5, the charged identity; the since-removed
 // channel-socket rung 0 was the third) handed the parent's frame to the fork's wrapper and the parent's turn to the fork's credential slot
 const { addressableId } = require('../claude-lock-capture.js');
+const belt = require('../agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a stashed message a recipient / the disk sees never carries a credential in the clear
 const stashSummary = require('../stash-summary.js'); const { kindOf: stashKindOf } = stashSummary; // PURE: an entry's kind (a peer's by its sender's name, VibeSpace's own by its path)
 const { RESERVE_TTL_MS } = require('../spend-authorizer.js'); // the park re-judges a parked delivery's authorization once its hold's TTL has passed (lane notify-retry)
 
@@ -203,7 +204,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // `about` (lane channel-threads verify r3): the producer's own description of where the words came from — the
     // stash gate below judges it at every read (opaque here; bounded)
     const about = aboutOf(envelope.about);
-    const entry = { source: envelope.source || 'agent', ...(kind ? { kind } : {}), ...(envelope.ref ? { ref: String(envelope.ref).slice(0, 200) } : {}), ...(about ? { about } : {}), ...(envelope.held && typeof envelope.held === 'object' && envelope.held.kind ? { held: { ...envelope.held } } : {}), fromName: envelope.fromName || null, text: String(envelope.text || ''), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() };   // `held` (lane notify-retry): why the producer could not deliver it — the hand-over's words read it
+    const entry = { source: envelope.source || 'agent', ...(kind ? { kind } : {}), ...(envelope.ref ? { ref: String(envelope.ref).slice(0, 200) } : {}), ...(about ? { about } : {}), ...(envelope.held && typeof envelope.held === 'object' && envelope.held.kind ? { held: { ...envelope.held } } : {}), fromName: envelope.fromName || null, text: kind ? String(envelope.text || '') : belt.maskForSink(String(envelope.text || ''), { dataDir }), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() };   // `held` (lane notify-retry): why the producer could not deliver it — the hand-over's words read it
     // "Clear content…" (verify r4): the stores judge the entry BEFORE it is written — a frame handed back after the clear
     // (see judgeEntry) is held as the sentence, never as the words the clear already took
     if (judgeEntry(entry)) log(`[deliver] ${cid}: a held entry named a cleared record — stored as the cleared sentence`);

@@ -42,6 +42,17 @@
  * environ until it is next re-exec'd, so `spawnEnv()` sanitizes its BASE on
  * every child spawn regardless (belt and braces: each layer has its own
  * control in scripts/test-agentd-session.mjs).
+ *
+ * THE THIRD BUILDER, AN ALLOWLIST (lane spawn-env-census, 2026-10-20): a
+ * long-lived child that is NOT an agent — the Desktop's Xvnc and its session,
+ * the remote agentd ssh bridge (the relay client has its own allowlist,
+ * src/relay-token.js relayEnv, from 2.369.329) — gets `serviceEnv()`: a few
+ * names from `base` and NOTHING else, never the hub's config and secrets, an
+ * agent conversation's tokens, cloud keys or proxies. The family: agentEnv()
+ * for agents, daemonEnv() for the device agent (both a denylist over the
+ * server's env, as above), serviceEnv() for every other long-lived service.
+ * scripts/spawn-env-census.mjs (test-architecture §93) classifies every child
+ * the hub, the daemon and data/bin start by the env it passes.
  */
 
 /** Names an agent child may inherit from the server env. Everything the agent
@@ -97,4 +108,42 @@ function agentEnv(base, { keep = AGENT_ENV_KEEP, drop = [] } = {}) {
  *  spawn is merged over: the agent rule plus the daemon tier's own names. */
 function daemonEnv(base, { drop = [] } = {}) { return agentEnv(base, { keep: DAEMON_ENV_KEEP, drop }); }
 
-module.exports = { AGENT_ENV_KEEP, AGENT_ENV_DROP, DAEMON_ENV_KEEP, agentEnv, daemonEnv };
+/** What every service keeps from `base` (+ every LC_*). DISPLAY / XAUTHORITY / DBUS_SESSION_BUS_ADDRESS are NOT here:
+ *  the hub's own would point the child at another display or bus — the caller ADDS the ones its child needs. */
+const SERVICE_ENV_KEEP = Object.freeze(['PATH', 'HOME', 'LANG', 'TMPDIR', 'XDG_RUNTIME_DIR', 'TERM']);
+const SERVICE_ENV_LC = /^LC_[A-Z]+$/;
+/** What an EGRESS daemon (its job IS the network: rclone, tailscaled) reads to get out through the operator's network —
+ *  MEASURED on the pinned rclone 1.69.3, Go's net/http + crypto/x509 (lane spawn-env-debts): HTTP_PROXY / http_proxy for
+ *  http, HTTPS_PROXY / https_proxy for https, NO_PROXY / no_proxy (ALL_PROXY never), and the trust roots of a
+ *  TLS-inspecting egress, SSL_CERT_FILE / SSL_CERT_DIR. A proxy URL may carry credentials, so `keep` refuses it;
+ *  `egress: true` is the one door, opened by name at the spawn. */
+const EGRESS_ENV = Object.freeze(['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR']);
+/** What an rclone child reads beyond the service list + the egress door — MEASURED (lane spawn-env-debts): ssh-agent
+ *  for an sftp remote with no key file and no password (SSH_AUTH_SOCK: refused without it), its default cache / config
+ *  dirs (XDG_CACHE_HOME / XDG_CONFIG_HOME — the device mount's vfs cache is rclone's default). Its remote rides its own
+ *  RCLONE_CONFIG_* (`add`); the hub's RCLONE_* never. */
+const RCLONE_ENV_KEEP = Object.freeze(['SSH_AUTH_SOCK', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME']);
+/** a name a service must never take from the hub's env (a `keep` naming one is a programming error) */
+/** The ONE name an ssh child keeps beyond the service list (lane spawn-env-census, measured on a private sshd): a key held
+ *  in ssh-agent is refused without SSH_AUTH_SOCK; a key file logs in on an EMPTY env. Every ssh road passes BatchMode=yes,
+ *  so ssh never prompts — SSH_ASKPASS* / DISPLAY are never read (no road forwards X). HostManager.sshEnv() + the agentd
+ *  bridge build over it. */
+const SSH_ENV_KEEP = Object.freeze(['SSH_AUTH_SOCK']);
+const SECRET_SHAPE = /^(VIBESPACE_|CLAUDE_|ANTHROPIC_|OPENAI_|AWS_|GOOGLE_|AZURE_|NPM_)|TOKEN|SECRET|PASSW|CREDENTIAL|_KEY$|PROXY$/i;
+
+/**
+ * The env of a long-lived service that is not an agent: SERVICE_ENV_KEEP + LC_* from `base`, + `keep` (the names ONE
+ * child measurably needs — the ssh bridge's SSH_AUTH_SOCK), + EGRESS_ENV when `egress` (a child that dials the
+ * internet), then `add` (the caller's own names; null/undefined removes). Nothing else from `base`. Pure; never mutates
+ * `base`.
+ */
+function serviceEnv(base, { keep = [], add = {}, egress = false } = {}) {
+  for (const k of keep) if (SECRET_SHAPE.test(k)) throw new TypeError(`serviceEnv: '${k}' has a secret's shape — a service never keeps it from the hub's env`);
+  const names = new Set([...SERVICE_ENV_KEEP, ...keep, ...(egress ? EGRESS_ENV : [])]);
+  const out = {};
+  for (const [k, v] of Object.entries(base || {})) if (typeof v === 'string' && (names.has(k) || SERVICE_ENV_LC.test(k))) out[k] = v;
+  for (const [k, v] of Object.entries(add || {})) { if (v === undefined || v === null) delete out[k]; else out[k] = String(v); }
+  return out;
+}
+
+module.exports = { AGENT_ENV_KEEP, AGENT_ENV_DROP, DAEMON_ENV_KEEP, SERVICE_ENV_KEEP, SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP, agentEnv, daemonEnv, serviceEnv };

@@ -145,7 +145,7 @@ async function sweepWriters(hosts, hostId, rid, { shq, timeoutMs = 20000, connec
     if (!hostId || !execFileAsync) throw e;
     const h = hosts.get(hostId);
     if (h?.transport === 'dial') throw e;
-    const out = await execFileAsync('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script], { timeout: timeoutMs, encoding: 'utf-8' });
+    const out = await execFileAsync('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script], { env: hosts.sshEnv(), timeout: timeoutMs, encoding: 'utf-8' });
     return { swept: parseSwept(out), ...sayRefused(out, hostId), via: 'ssh' };
   }
 }

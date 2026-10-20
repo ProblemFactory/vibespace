@@ -31,7 +31,7 @@ const OAT_FILE_REFUSALS = Object.freeze(['cli-unmeasured', 'no-scopes', 'write-f
 function keyRefusal(reason, file) {
   const [kind, code] = String(reason).split(':');
   const words = code === 'vault_locked'
-    ? 'the vault is locked — the stored keys open after the owner unlocks it with the second password (nothing was written)'
+    ? 'the vault is locked — the stored keys open after the owner unlocks it with the second password on this instance\'s page; the owner has already been told (For you names what is waiting on it) — nothing was written'
     : kind === 'key-missing'
     ? 'the key file is missing but this store holds encrypted secrets — restore it from a backup (no new key was made: it could never decrypt them)'
     : `the key file could not be read (${code || 'error'}) — nothing was written and no new key was made`;

@@ -38,7 +38,7 @@ onVaultFacts((f) => { if (!f || f.state !== 'unlocked') forgetReveal(); });
 export function revealWords(r) {
   const c = r && r.code;
   if (c === 'reveal_needs_password') return t('Enter the second password again to see stored values');
-  if (c === 'vault_locked') return t('The vault is locked — unlock it first');
+  if (c === 'vault_locked') return t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)');
   if (c === 'vault_not_set_up') return t('Set a second password first — stored values are shown only behind it');
   if (c === 'paced' && r.retryInMs && !r.failedTries) return t('Too many values shown — try again in {n} s', { n: Math.max(1, Math.ceil(r.retryInMs / 1000)) });
   if (c === 'not_found') return t('That stored value is not there any more');

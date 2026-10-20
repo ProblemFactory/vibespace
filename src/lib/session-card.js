@@ -383,7 +383,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       // lane vault-e2e-password-fix-r2 (verify RED-2): the link WAITS for the vault — a state with its door, never "unreachable"
       rchip.classList.add('sess-vault-wait-chip');
       rchip.innerHTML = `<span class="chip-icon">${UI_ICONS.lock || ''}</span><span class="chip-text">${escHtml(tr('waiting for the vault to be unlocked'))}</span>`;
-      rchip.dataset.tip = tr('This session waits for the vault — unlock it with the second password; it reconnects by itself and nothing is lost.');
+      rchip.dataset.tip = tr('This session waits for the vault — unlock it with the second password (Unlock… at the top of the page; For you names what is waiting on it); it reconnects by itself and nothing is lost.');
       rchip.addEventListener('click', (e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); });
     } else {
       rchip.innerHTML = `<span class="chip-icon">⟳</span><span class="chip-text">${escHtml(tr('host unreachable'))}</span>`;

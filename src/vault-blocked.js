@@ -33,7 +33,7 @@ function actorName(name, fallback = 'a conversation') {
 /** THE WORDS TOWARD AN AGENT (every agent-facing `vault_locked` refusal — the automation door, the vault doors, a channel's
  *  sign-in, the CLIs and the manuals): the owner already knows; the agent never asks. The code stays `vault_locked`. */
 const TOLD = 'the user has already been told (their For you tray names what is waiting on it) — do not ask them to unlock it or for its password: wait, or do other work, and try again later';
-const AGENT_WORDS = `the vault is locked — ${TOLD}`;
+const AGENT_WORDS = `the vault is locked — a person unlocks it on this instance's page; ${TOLD}`;   // lane vault-manual-and-lock: where, too
 /** `what` = what waits (`every automation waits until the user unlocks it on this instance's page`). */
 const agentWords = (what) => (what ? `the vault is locked — ${what}; ${TOLD}` : AGENT_WORDS);
 

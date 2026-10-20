@@ -343,9 +343,12 @@ const STREAM_FACTS_PS = ["$ErrorActionPreference = 'Stop'",
 // Windows slows a BACKGROUND process (EcoQoS: lower clocks, the efficient cores) and the agent and its ffmpegs are hidden: the HDR
 // road's mapper took 250–700 ms a 4K frame (65 idle) and its encoder fell behind (1–5 fps); with execution-speed throttling OFF on
 // the agent and both ffmpegs (SetProcessInformation ProcessPowerThrottling, ControlMask EXECUTION_SPEED, StateMask 0 — a process
-// of the same user, no elevation) 79 ms and 13 fps. The SDR roads measured the same (3–6 → 19–22 fps) — NOT changed by this lane.
-/** The script that opts these processes out (one JSON line: { t: 'unthrottle', rows: [{ pid, ok, err }] }). */
-function unthrottlePs(pids) {
+// of the same user, no elevation) 79 ms and 13 fps. The SDR roads measured the same (3–6 → 19–22 fps). Lane stream-sdr-ecoqos
+// (B-0485, the owner 2026-10-20 「SDR 路也关」): every Windows road uses it now, ONLY while its stream runs — `restore` is the same
+// script with ControlMask 0 (the one character that differs: the system manages the process's throttling again, as before any
+// stream). A process's throttling and nothing else: never a display setting.
+/** The script that opts these processes out — or, `restore`, gives them back (one JSON line: { t: 'unthrottle', rows: [{ pid, ok, err }] }). */
+function unthrottlePs(pids, { restore = false } = {}) {
   const list = (Array.isArray(pids) ? pids : []).map(Number).filter((p) => Number.isInteger(p) && p > 0).slice(0, 8);
   return ["$ErrorActionPreference = 'Stop'",
     "Add-Type -TypeDefinition @'",
@@ -357,7 +360,7 @@ function unthrottlePs(pids) {
     '  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);',
     '  public static int Off(int pid) {',
     '    IntPtr h = OpenProcess(0x0200, false, pid); if (h == IntPtr.Zero) return Marshal.GetLastWin32Error();',
-    '    var s = new PPTS { Version = 1, ControlMask = 1, StateMask = 0 }; bool ok = SetProcessInformation(h, 4, ref s, Marshal.SizeOf(s)); int e = ok ? 0 : Marshal.GetLastWin32Error(); CloseHandle(h); return e;',
+    `    var s = new PPTS { Version = 1, ControlMask = ${restore ? 0 : 1}, StateMask = 0 }; bool ok = SetProcessInformation(h, 4, ref s, Marshal.SizeOf(s)); int e = ok ? 0 : Marshal.GetLastWin32Error(); CloseHandle(h); return e;`,
     '  }',
     '}',
     "'@",

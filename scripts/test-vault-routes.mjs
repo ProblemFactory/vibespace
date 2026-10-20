@@ -24,6 +24,8 @@
 //      not (401), a job token is refused (job_no_use); the switch (POST /api/vault/runnable) and the shape card's answer (POST
 //      /api/vault/run/asks/:askId) are a PERSON's (any bearer human_only), ON / «always» behind this page's 验证是你 window; the
 //      shape card answers and the run's output comes back scrubbed — no answer of the whole suite carries the value
+//   ⑬ THE USE LAW (lane vault-use-law): a bearer refused at a person's door = one vault-use line naming it (its session /
+//      job), the 20th in a day runs the owner's card once; the guess it sent is in no line
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -69,6 +71,7 @@ const PORT = srv.address().port, OWN = `http://127.0.0.1:${PORT}`;
 const COOKIE = `vs_token=${auth.issueToken('owner')}`;
 const PAGE = { cookie: COOKIE, 'sec-fetch-site': 'same-origin', origin: OWN };
 const ANSWERS = [];
+const REFUSED = [];   // lane vault-manual-and-lock: the refused answers alone (a run that RAN answers its receipt — design D1)
 function hit(p, { method = 'POST', headers = PAGE, body, port = PORT } = {}) {
   return new Promise((resolve, reject) => {
     const b = method === 'GET' ? null : JSON.stringify(body || {});
@@ -76,7 +79,7 @@ function hit(p, { method = 'POST', headers = PAGE, body, port = PORT } = {}) {
     if (b !== null) { h['content-type'] = 'application/json'; h['content-length'] = Buffer.byteLength(b); }
     const r = http.request({ host: '127.0.0.1', port, path: p, method, headers: h }, (x) => {
       let d = ''; x.on('data', (c) => d += c);
-      x.on('end', () => { ANSWERS.push(d); let j = null; try { j = JSON.parse(d); } catch { } resolve({ status: x.statusCode, json: j || {} }); });
+      x.on('end', () => { ANSWERS.push(d); if (x.statusCode >= 400) REFUSED.push(d); let j = null; try { j = JSON.parse(d); } catch { } resolve({ status: x.statusCode, json: j || {} }); });
     });
     r.on('error', reject); r.end(b === null ? undefined : b);
   });
@@ -441,6 +444,38 @@ const hit0 = hit, PAGE0 = PAGE;
   ok(al1.status === 200 && al1.json.outcome === 'always' && r2.status === 200 && r2.json.by === 'always' && r2.json.stdout === 'curl got [vault:mounts/m1/secretKey]\n', '…WITH it ⇒ 200 always, the run answers', [al1.json, r2.json.by]);
   const r3 = await hit('/api/agent/vault/run', { headers: B, body: { args: ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/y'], cwd: WORK } });
   ok(r3.status === 200 && r3.json.by === 'always' && !(userTodos.snapshot().open || []).some((x) => x.action && x.action.type === 'vault-run-ask'), 'the same shape (another positional) then runs without a card, on a cluster too', r3.json.by);
+  // lane vault-manual-and-lock (design D4): REQUEST — the bearer may, a cookie may not; the ask lands ONCE; a person answers;
+  // the grant row is honoured by the run verdict; USES reads this conversation's own lines back
+  const off = await hit('/api/vault/runnable', { body: { id: 'mounts:m1#secretKey', on: false } });
+  const closed = await hit('/api/agent/vault/run', { headers: B, body: { args: CURL, cwd: WORK } });
+  ok(off.status === 200 && off.json.open === false && closed.status === 403 && closed.json.code === 'entry_not_runnable' && /vibespace-vault request/.test(closed.json.error), 'the entry switched OFF (no 验证是你 needed to close) ⇒ the run is refused entry_not_runnable, naming `vibespace-vault request`', closed.json);
+  const REQ = { entry: 'vault://mounts/m1/secretKey', purpose: 'sync the bucket for the nightly report' };
+  const rqC = await hit('/api/agent/vault/request', { body: REQ });
+  const rqJ = await hit('/api/agent/vault/request', { headers: { authorization: 'Bearer jbt_live' }, body: REQ });
+  ok(rqC.status === 401 && rqC.json.code === 'unauthorized' && rqJ.status === 403 && rqJ.json.code === 'job_no_use', 'REQUEST: a COOKIE may not ask (401 — only a conversation\'s own token), a job token ⇒ 403 job_no_use', [rqC.json.code, rqJ.json.code]);
+  const asksOf = () => (userTodos.snapshot().open || []).filter((x) => x.action && x.action.type === 'vault-grant-ask');
+  const rq1 = await hit('/api/agent/vault/request', { headers: B, body: REQ });
+  const rq2 = await hit('/api/agent/vault/request', { headers: B, body: { ...REQ, purpose: 'please' } });
+  ok(rq1.status === 200 && rq1.json.ok && rq1.json.askId && rq2.status === 409 && rq2.json.code === 'request_pending' && asksOf().length === 1 && asksOf()[0].detail.includes(REQ.purpose) && asksOf()[0].text === 'Route Lane asks to use a stored secret',
+    'the BEARER may ask: the ask lands ONCE in For you (the agent, the entry, the purpose); a second request for the same entry while it is open ⇒ 409 request_pending', [rq1.json, rq2.json.code]);
+  const usC = await hit('/api/agent/vault/uses', { method: 'GET', headers: PAGE });
+  const us1 = await hit('/api/agent/vault/uses', { method: 'GET', headers: B });
+  ok(usC.status === 401 && us1.status === 200 && us1.json.requests.length === 1 && us1.json.requests[0].entry === REQ.entry && Array.isArray(us1.json.uses) && !us1.json.grants.length, 'USES: the bearer reads its open request back; a cookie gets nothing (401)', us1.json);
+  const ansB = await hit(`/api/vault/request/asks/${rq1.json.askId}`, { headers: { ...PAGE, ...B }, body: { answer: 'once' } });
+  ok(ansB.status === 403 && ansB.json.code === 'human_only', 'an agent never answers a request (human_only)', ansB.json);
+  const ans0 = await hit(`/api/vault/request/asks/${rq1.json.askId}`, { body: { answer: 'once' } });
+  ok(ans0.status === 403 && ans0.json.code === 'reveal_needs_password' && asksOf().length === 1, 'a person\'s Allow WITHOUT this page\'s 验证是你 ⇒ 403 reveal_needs_password, the ask stays (a grant opens the entry as the switch does — never a bare click a local process could forge)', ans0.json);
+  const ans = await hit(`/api/vault/request/asks/${rq1.json.askId}`, { body: { answer: 'once', page } });
+  ok(ans.status === 200 && ans.json.outcome === 'granted-once' && !asksOf().length, 'WITH it (Allow once) ⇒ the grant row; the ask resolved', ans.json);
+  const prG = hit('/api/agent/vault/run', { headers: B, body: { args: ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/z'], cwd: WORK } });
+  const cardG = await waitCard();
+  await hit(`/api/vault/run/asks/${cardG.action.askId}`, { body: { answer: 'once', page } });   // int331 seam: q-043 H1 (int330) — a sign-in-off hub's run-card «once» demands this page's 验证是你 window too (the grant opened the ENTRY; the shape card is still answered with the window)
+  const rG = await prG;
+  ok(rG.status === 200 && rG.json.ok && rG.json.stdout === 'curl got [vault:mounts/m1/secretKey]\n' && /^vr-[0-9a-f]{16}$/.test(rG.json.receipt), 'THE GRANT ROW IS HONOURED BY THE RUN VERDICT: the closed entry runs for that conversation (the cluster still shows the run card), scrubbed, with its receipt', rG.json);
+  const rG2 = await hit('/api/agent/vault/run', { headers: B, body: { args: CURL, cwd: WORK } });
+  const us2 = await hit('/api/agent/vault/uses', { method: 'GET', headers: B });
+  ok(rG2.status === 403 && rG2.json.code === 'entry_not_runnable' && us2.json.uses.some((u) => u.receipt === rG.json.receipt && u.purpose === REQ.purpose && u.outcome === 'ok' && u.door === 'run') && !JSON.stringify(us2.json).includes(RUNV),
+    'once was once (the next run is refused); USES reads the run back — the entry, its purpose, the outcome, the same receipt — never a value', us2.json.uses && us2.json.uses.slice(0, 2));
   ok(!ANSWERS.some((a) => a.includes(RUNV)), 'no answer of this whole suite carries the value (every route, every refusal, every run)');
   srv2.close(); vault2.close();
   try { fs.chmodSync(BIN, 0o755); } catch { }
@@ -512,6 +547,25 @@ console.log('⑫ agents: mint / put in their own namespace (q-043 §9, lane vaul
   const mq = await new Promise((resolve, reject) => { const rq = http.request({ host: '127.0.0.1', port: PM, path: '/api/agent/vault/put?value=SECRET-FROM-URL', method: 'POST', headers: { authorization: 'Bearer ' + TOK, 'content-type': 'application/json', 'content-length': Buffer.byteLength('{"name":"argv"}') } }, (x) => { let d = ''; x.on('data', (c) => d += c); x.on('end', () => { let j = null; try { j = JSON.parse(d); } catch { } resolve({ status: x.statusCode, json: j || {} }); }); }); rq.on('error', reject); rq.end('{"name":"argv"}'); });
   ok(rcut !== rsrc && pq.json.code === 'value_in_argv' && mq.status === 200 && v2.secretNames().some((x) => x.name === 'agent:conv-NINE/argv'), 'MUTANT (put reads the value from the URL) ⇒ ?value= is ACCEPTED and sealed — the real route refuses it value_in_argv (RED on the argv law)', mq.json);
   srvM.close(); srv2.close(); v2.close();
+}
+
+console.log('⑬ THE USE LAW (lane vault-use-law — design q-043 D1/D7): a BEARER at a person\'s door is a refused USE — one vault-use line naming it, and its count');
+{
+  const VU = require(path.join(REPO, 'src/vault-use.js'));
+  const linesOf = () => fs.readFileSync(path.join(dataDir, VE.AUDIT_FILE), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((l) => l.event === 'vault-use');
+  const l2 = linesOf();
+  ok(l2.length > 0 && l2.every((l) => l.outcome === 'human_only' && ['setup', 'unlock', 'change'].includes(l.door) && l.entry === VU.VAULT_ENTRY && Object.keys(l).join() === VU.LINE_KEYS.join()), `② left one vault-use line per bearer refused at setup / unlock / change (${l2.length}) — entry the second password, outcome human_only, the closed key set`, l2.slice(0, 3));
+  ok(l2.some((l) => l.by === 'agent' && l.conv === 's1' && l.actor === 'a conversation') && l2.some((l) => l.by === 'job' && l.conv === 'job-j1' && l.actor === 'a job'), 'the bearer is NAMED by its own token: a session (its conversation key) and a job (job-<id>) — a nameless one by its kind', l2.map((l) => `${l.by}:${l.conv}:${l.actor}`));
+  ok(!l2.some((l) => l.door === 'lock' || l.door === 'idle') && !REFUSED.join('').includes('vr-'), 'the lock / idle doors open no entry (no use); a receipt is the audit\'s, never in a refused answer');
+  const cards = []; vault.onFailing((c) => cards.push(c));
+  const before = l2.filter((l) => l.by === 'agent' && l.conv === 's1').length;
+  const calls0 = calls.length;
+  for (let i = before; i < VU.FAIL_PER_DAY + 5; i++) {
+    const r = await hit('/api/vault/unlock', { headers: { ...PAGE, authorization: 'Bearer ' + SESSION_TOKEN }, body: { password: 'a guess' } });
+    if (!(r.status === 403 && r.json.code === 'human_only')) ok(false, 'a bearer at the unlock door ⇒ 403 human_only', r);
+  }
+  ok(cards.length === 1 && cards[0].by === 'agent' && cards[0].key === 'agent:s1' && cards[0].entry === VU.VAULT_ENTRY && cards[0].door === 'unlock' && cards[0].n === VU.FAIL_PER_DAY, `the ${VU.FAIL_PER_DAY}th refused use of the session in a day runs the owner's card ONCE (${VU.FAIL_PER_DAY + 5 - before} more knocks)`, cards);
+  ok(!fs.readFileSync(path.join(dataDir, VE.AUDIT_FILE), 'utf8').includes('a guess') && calls.length === calls0, 'the guess a bearer sent is in no line, and the engine\'s unlock was never asked');
 }
 
 srv.close(); vault.close(); console.warn = warn0;

@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
 const { parseReceiptLines } = require('./harness-config'); // CFG| receipt lines from the shipped helper (design-harness-settings §6)
 const { execFile } = require('child_process');
+const { serviceEnv, SSH_ENV_KEEP } = require('./agent-env.js');
 const { claimJsonls, cwdToProjectDir } = require('./session-store');
 const { nameFromUserLine, interpretDiscoveryLines, synthesizeDiscoveryLines, isZstPath, isZstBuffer, ZSTD_MAGIC } = require('./discovery-facts');
 const { classifyPrivateKey } = require('./ssh-key-format');
@@ -631,6 +632,13 @@ class HostManager {
     return args;
   }
 
+  /** THE ENV OF EVERY SSH ROAD (lane spawn-env-debts, 2026-10-20), beside the argv: a multiplexed call's ssh FORKS the
+   *  ControlMaster (ControlPersist=600), and the master keeps the env of the call that forked it for ten minutes while
+   *  every later call rides it — so ONE road that inherited put the hub's whole env (its tokens) into the process every
+   *  road shares. Every ssh spawn (and rsync over sshCmd) hands `env: hosts.sshEnv()`; the agentd bridge builds the same
+   *  (src/agentd/client.js, SSH_ENV_KEEP). test-architecture §93 holds every road to it. */
+  sshEnv() { return serviceEnv(process.env, { keep: SSH_ENV_KEEP }); }
+
   /** ssh option STRING for tools that take a transport command (rsync -e):
    *  everything sshArgs adds except the destination. */
   sshCmd(h) {
@@ -821,7 +829,7 @@ class HostManager {
 
   _ssh(h, remoteCmd, { timeoutMs = 15000, maxBuffer = 4 * 1024 * 1024, encoding, fresh = false } = {}) {
     return new Promise((resolve, reject) => {
-      execFile('ssh', [...this.sshArgs(h, { multiplex: !fresh }), '--', remoteCmd], { timeout: timeoutMs, maxBuffer, ...(encoding !== undefined ? { encoding } : {}) }, (err, stdout, stderr) => {
+      execFile('ssh', [...this.sshArgs(h, { multiplex: !fresh }), '--', remoteCmd], { env: this.sshEnv(), timeout: timeoutMs, maxBuffer, ...(encoding !== undefined ? { encoding } : {}) }, (err, stdout, stderr) => {
         if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
         resolve(stdout);
       });
@@ -1090,7 +1098,7 @@ class HostManager {
         // key, returned with the install result. Shell-safe bare (base64).
         + (refused ? '' : `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${this._cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; `)
         + 'echo VS-INSTALLED'],
-        { timeout: 30000 }, (err, stdout, stderr) => {
+        { env: this.sshEnv(), timeout: 30000 }, (err, stdout, stderr) => {
           if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
           if (!String(stdout).includes('VS-INSTALLED')) return reject(new Error('unexpected response'));
           resolve({ installed: present, cliConfig: parseReceiptLines(String(stdout)), ...(refused ? { refused } : {}) });
@@ -1292,7 +1300,7 @@ class HostManager {
       const remote = installAgentdScript(ver, rel.signed);
       return new Promise((resolve, reject) => {
         const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--', remote],
-          { timeout: 30000 }, (err, stdout, stderr) => {
+          { env: this.sshEnv(), timeout: 30000 }, (err, stdout, stderr) => {
             try { fs.rmSync(stage, { recursive: true, force: true }); } catch {}
             if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
             const r = installAgentdAnswer(stdout);
@@ -2277,7 +2285,7 @@ class HostManager {
     return new Promise((resolve, reject) => {
       const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
         'umask 077; mkdir -p "$HOME/.vibespace/bin"; cat > "$HOME/.vibespace/bin/vibespace-usage-scan"; ' + REMOTE_PRELUDE + 'node "$HOME/.vibespace/bin/vibespace-usage-scan"'],
-        { timeout: 180000, maxBuffer: 128 * 1024 * 1024 }, (err, stdout, stderr) => {
+        { env: this.sshEnv(), timeout: 180000, maxBuffer: 128 * 1024 * 1024 }, (err, stdout, stderr) => {
           if (err) { this._usageHarvestAt.set(id, 0); return reject(new Error((stderr || err.message || '').toString().slice(0, 200))); }
           resolve(stdout.toString());
         });
@@ -2328,7 +2336,7 @@ class HostManager {
         'umask 077; mkdir -p "$HOME/.vibespace/bin"; printf %s ' + JSON.stringify(b64)
         + ' | base64 -d > "$HOME/.vibespace/bin/vibespace-opencode-op"; '
         + REMOTE_PRELUDE + 'node "$HOME/.vibespace/bin/vibespace-opencode-op"'],
-        { timeout: timeoutMs, maxBuffer: 96 * 1024 * 1024 }, (err, out, stderr) => {
+        { env: this.sshEnv(), timeout: timeoutMs, maxBuffer: 96 * 1024 * 1024 }, (err, out, stderr) => {
           if (err) return reject(new Error((stderr || err.message || '').toString().slice(0, 300) || 'ssh failed'));
           resolve(out.toString());
         });
@@ -2798,7 +2806,7 @@ HostManager.prototype.bootstrap = function (id, onEvent) {
   const { spawn } = require('child_process');
   return new Promise((resolve) => {
     const steps = Object.fromEntries(BOOTSTRAP_STEPS.map(s => [s.key, 'pending']));
-    const child = spawn('ssh', [...this.sshArgs(h), 'bash -s'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('ssh', [...this.sshArgs(h), 'bash -s'], { env: this.sshEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
     child.stdin.write(bootstrapScript());
     child.stdin.end();
     let buf = '';

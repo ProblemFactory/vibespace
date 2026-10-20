@@ -28,6 +28,7 @@ const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock
 const crypto = require('crypto');
 const { normalizeOptions, REPLY_MAX } = require('./inbox-reply.js'); // PURE: the option-chip rule the route, the CLI and the panel share (design-user-inbox-reply D3a)
 const { normalizeOrigin } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
+const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a For-you item's text / detail never carries a credential in the clear
 const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — what a clear replaces; this store holds the door (clearItems)
 
 /** `{text:{key,params}, detail?:[{key,params}…], source?:{key}}` → the same,
@@ -167,7 +168,7 @@ function normalizeOpen(x, plugin) {
   return out;
 }
 
-const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId', 'hub-act-ask': 'askId', 'automation-ask': 'askId', 'pool-cross-provider': 'askId', 'vault-run-ask': 'askId', 'browser-proposal': 'id', 'app-install': 'id', 'open-channel': 'key', 'channel-api-proposal': 'id', 'main-ask': 'requestId' }); // lane browser-propose: one item per proposal (each is a different switch); Layer 0 apps (verify-r1 F2): one item per app proposal — another proposal of the same words never re-points this one's Install; channel-names verify r1 F2: one item per CONVERSATION (two rooms of one name merged — the click opened the last filer's, deciding one retracted both)
+const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId', 'hub-act-ask': 'askId', 'automation-ask': 'askId', 'pool-cross-provider': 'askId', 'vault-run-ask': 'askId', 'vault-grant-ask': 'askId', 'browser-proposal': 'id', 'app-install': 'id', 'open-channel': 'key', 'channel-api-proposal': 'id', 'main-ask': 'requestId' }); // lane browser-propose: one item per proposal (each is a different switch); Layer 0 apps (verify-r1 F2): one item per app proposal — another proposal of the same words never re-points this one's Install; channel-names verify r1 F2: one item per CONVERSATION (two rooms of one name merged — the click opened the last filer's, deciding one retracted both)
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
@@ -442,7 +443,8 @@ class UserTodoManager {
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
   add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null } = {}) {
-    const rawText = typeof text === 'string' ? text.trim() : '';
+    const _dataDir = path.dirname(this._file);   // agent-output-sinks: the belt finds the vault from here
+    const rawText = typeof text === 'string' ? (origin === 'agent' ? belt.maskForSink(text.trim(), { dataDir: _dataDir }) : text.trim()) : '';   // agent-output-sinks: belt the AGENT's own ask (origin 'agent'), never a system producer's notice (vault / spend / channels / …)
     text = rawText.slice(0, TEXT_MAX);
     const textCut = rawText.length > TEXT_MAX ? TEXT_MAX : 0; // the cap it hit, named on the return
     // EXPIRY (2.369.152): optional; only a future ms epoch counts (validExpiry)
@@ -488,7 +490,7 @@ class UserTodoManager {
     // 'notice' = for their information only — its own section in the popup,
     // never in the red badge. A PRODUCER declares it; nothing infers it.
     if (kind != null && !KINDS.includes(kind)) throw new Error(`kind must be one of ${KINDS.join('/')}`);
-    const rawDetail = typeof detail === 'string' ? detail.trim() : '';
+    const rawDetail = typeof detail === 'string' ? (origin === 'agent' ? belt.maskForSink(detail.trim(), { dataDir: _dataDir }) : detail.trim()) : '';   // agent-output-sinks: AGENT asks only
     detail = rawDetail ? rawDetail.slice(0, DETAIL_MAX) : null;
     const detailCut = rawDetail.length > DETAIL_MAX ? DETAIL_MAX : 0;
     // the cut is named on the RETURNED record only (the ledger never carries it)

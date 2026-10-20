@@ -182,7 +182,7 @@ window.__mount = () => {
 // MUTANTS (lane dropline-connect-door): the same bundle with ONE door hidden, patched at bundle time — each anchor must
 // occur exactly once (else the control proves nothing); the door probes below must go RED on each
 const MUTANTS = {
-  m1: ['src/lib/plugins-ui.js', "chip = p.vaultLocked ? t('The vault is locked — unlock it first') : !p.configured ? t('Connect with Fish Audio') :", "chip = p.vaultLocked ? t('The vault is locked — unlock it first') : !p.configured ? t('no Dropline key yet') :"],   // the base's status chip (lane vault-e2e-password-fix-r2: the chip's line now asks the vault first)
+  m1: ['src/lib/plugins-ui.js', "chip = p.vaultLocked ? t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)') : !p.configured ? t('Connect with Fish Audio') :", "chip = p.vaultLocked ? t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)') : !p.configured ? t('no Dropline key yet') :"],   // the base's status chip (lane vault-e2e-password-fix-r2: the chip's line now asks the vault first)
   m2: ['src/lib/integrations-window.js', '  if (v.connect) {\n    const box = el(', '  if (false) {\n    const box = el('],                    // the card without its block
   m3: ['src/lib/user-todos-actions.js', "    if (item?.open?.kind === 'plugin-settings') { close(); app.openPluginDoor?.(item.open); return; }\n", ''],   // lane foryou-plugin-notices: the tray without the door
 };

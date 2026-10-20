@@ -313,6 +313,7 @@ const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   await until(() => r.src.stats().encodeMs != null, 2000);
   const st2 = r.src.stats();
   ok(st2.mode === 'videotoolbox' && st2.encoder === 'VideoToolbox' && st2.encodeMs === 9.5 && st2.captureMs === 1.2 && st2.captured >= 10 && st2.timing === 'helper' && st2.kind === 'display' && st2.display === '3' && st2.white === null && st2.rung === '1440p60', 'the numbers: the helper\'s encode / capture ms and counts (the strip shows VideoToolbox · encode ms)', st2);
+  ok(st2.ecoqos === 'n/a', 'lane stream-sdr-ecoqos: a Mac\'s numbers say ecoqos n/a — Windows\' power throttling is not a Mac\'s (nothing opted out, no details row)', st2.ecoqos);
   r.src.stop();
   await sleep(150);
   ok(logs().some((l) => l.ctl === 'quit') && r.ended === null, 'stop: `quit` on stdin, and no ending reported (asked)');

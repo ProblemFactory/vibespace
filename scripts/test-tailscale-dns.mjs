@@ -92,7 +92,7 @@ const LOG = path.join(tmp, 'log'), FAKEBIN = path.join(tmp, 'fakebin');
 const TSDIR = path.join(process.env.HOME, '.vibespace', 'plugins', 'tailscale');
 for (const d of [LOG, FAKEBIN, path.join(TSDIR, 'bin')]) fs.mkdirSync(d, { recursive: true });
 const exe = (f, body) => { fs.writeFileSync(f, body); fs.chmodSync(f, 0o755); };
-exe(path.join(TSDIR, 'bin', 'tailscaled'), `#!/bin/sh\necho "$*" >> "${LOG}/daemon.log"\nwhile :; do sleep 1; done\n`);
+exe(path.join(TSDIR, 'bin', 'tailscaled'), `#!/bin/sh\necho "$*" >> "${LOG}/daemon.log"\nenv > "${LOG}/daemon-env.$$"\nwhile :; do sleep 1; done\n`); // lane spawn-env-debts: + the env it was born with
 exe(path.join(TSDIR, 'bin', 'tailscale'), `#!/bin/sh
 echo "$*" >> "${LOG}/cli.log"
 for a in "$@"; do
@@ -107,6 +107,13 @@ exit 0
 exe(path.join(FAKEBIN, 'pgrep'), '#!/bin/sh\nexit 1\n'); // no system tailscaled on the scratch box (this one may run one)
 exe(path.join(FAKEBIN, 'sudo'), `#!/bin/sh\necho "$*" >> "${LOG}/sudo.log"\n[ "$1" = "-n" ] && shift\n[ "$1" = "true" ] && exit 0\nexec "$@"\n`);
 process.env.PATH = FAKEBIN + ':' + process.env.PATH;
+// lane spawn-env-debts: the hub's env PLANTED with runtime-built fakes (an agent conversation's tokens, a cloud key) beside
+// the egress names a tailscaled behind the operator's proxy needs — the fake daemon records the env it was born with
+const r8 = () => require('crypto').randomBytes(8).toString('hex');
+const PLANT = { VIBESPACE_SESSION_TOKEN: 'vs-sess-' + r8(), CLAUDE_CODE_MESSAGING_TOKEN: 'cc-msg-' + r8(), AWS_SECRET_ACCESS_KEY: 'aws-' + r8() };
+const EGRESS = { HTTPS_PROXY: 'http://127.0.0.1:9', SSL_CERT_FILE: path.join(tmp, 'roots.pem') };
+Object.assign(process.env, PLANT, EGRESS);
+const daemonEnv = (pid) => { try { return Object.fromEntries(fs.readFileSync(path.join(LOG, `daemon-env.${pid}`), 'utf8').split('\n').filter((l) => l.includes('=')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])); } catch { return null; } };
 fs.writeFileSync(path.join(LOG, 'status.json'), JSON.stringify({ BackendState: 'NeedsLogin', Self: { DNSName: 'pod-a.tail1a2b.ts.net.', TailscaleIPs: ['100.64.0.2'] }, Peer: { k1: { DNSName: 'mac-mini.tail1a2b.ts.net.', TailscaleIPs: ['100.64.0.3'] } } }));
 const plant = (name, text) => { const f = path.join(tmp, name); fs.writeFileSync(f, text); return f; };
 const NO_BACKUP = path.join(tmp, 'no-backup.conf');
@@ -166,6 +173,11 @@ let pmA;
   pmA = pm;
   ok('start: userspace daemon spawned (the fake tailscaled ran)', out?.starting === true && out.mode === 'userspace' && lines('daemon.log').length === 1 && /--tun=userspace-networking/.test(lines('daemon.log')[0]), { out, d: lines('daemon.log') });
   ok('start ⇒ ONE `tailscale --socket=<ours> set --accept-dns=false`', added.length === 1 && added[0] === `${SOCK} set --accept-dns=false`, added);
+  const de = daemonEnv(ourPid());
+  const { SERVICE_ENV_KEEP, EGRESS_ENV } = require(path.join(REPO, 'src/agent-env.js'));
+  const allowed = new Set([...SERVICE_ENV_KEEP, ...EGRESS_ENV, 'PWD', 'SHLVL', '_']);   // + the three /bin/sh sets itself
+  ok('start: tailscaled\'s env is BUILT (lane spawn-env-debts) — the service list + the egress door, no planted name or value', !!de && Object.keys(de).every((k) => allowed.has(k) || /^LC_[A-Z]+$/.test(k)) && !Object.values(PLANT).some((v) => Object.values(de).includes(v)), de && Object.keys(de).sort().join(' '));
+  ok('start: the egress door kept — the operator\'s proxy + trust roots reach tailscaled (it dials the control plane)', !!de && Object.entries(EGRESS).every(([k, v]) => de[k] === v));
   const { r, ups } = await (async () => {
     const S = pm._settings.read(); S[rowKey('upFlags')] = '--accept-dns=true --hostname=pod-a';
     return driveSetup(pm);
@@ -291,6 +303,12 @@ console.log('⑥ MUTANTS: copies of src/plugins/tailscale.js outside the tree');
   ok('CONTROL (d) a copy that settles on exit answers {done:true} for the same fake ⇒ RED', re.r?.done === true && !re.r?.authUrl, re.r);
   fs.writeFileSync(tsBin, tsSrc);
   await stopAll(pmD);
+  // (e) lane spawn-env-debts: the daemon spawned with NO env (the pre-fix shape) inherits every planted name
+  const e = cut('env: serviceEnv(process.env, { egress: true }), ', 'no-daemon-env');
+  const reE = await driveStart(e, 1200);
+  const deE = daemonEnv(ourPid());
+  ok('CONTROL (e) tailscaled spawned with no env ⇒ every planted name reaches it ⇒ RED', reE.out?.starting === true && !!deE && Object.entries(PLANT).every(([k, v]) => deE[k] === v), deE && Object.keys(deE).length);
+  await stopAll(reE.pm);
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: 'mutant-copy (tailscale-dns): ' })) ok(r.name, r.pass, r.detail);
 }
 

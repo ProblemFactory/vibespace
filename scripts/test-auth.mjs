@@ -292,11 +292,11 @@ for (const mode of ['password', 'clerk', 'open']) {
   ok(bearer.status === 200 && bearer.json && bearer.json.reached, `${mode}: a Bearer token is not the cookie's authority ⇒ the origin rule does not judge it (the route judges the token)`, bearer.status);
   // the doors: their own credential, never this rule (their refusals are their own)
   const doors = [];
-  for (const p of ['/hook/ci', '/api/agent/channels/proposals/p-1/withdraw', '/api/editor/open', '/api/telemetry/ingest', '/dav/x', '/svc/app/x', '/otel/v1/logs', '/p/pg0123456789', '/api/channels/webhook/ci/pair']) {
+  for (const p of ['/hook/ci', '/api/agent/channels/proposals/p-1/withdraw', '/api/editor/open', '/api/telemetry/ingest', '/dav/x', '/svc/app/x', '/otel/v1/logs', '/p/pg0123456789', '/api/channels/webhook/ci/pair', '/api/csp-report']) {
     const r = await hit(I, p, { headers: XS });
     doors.push(`${p} ${r.status}`);
   }
-  ok(doors.every((d) => / 200$/.test(d)), `${mode}: the doors (webhook, agent, editor bridge, telemetry, dav, svc, otel, published pages, pairing) are not the cookie's — a cross-site call reaches their own judge`, doors);
+  ok(doors.every((d) => / 200$/.test(d)), `${mode}: the doors (webhook, agent, editor bridge, telemetry, dav, svc, otel, published pages, pairing, CSP reports) are not the cookie's — a cross-site call reaches their own judge`, doors);
   // the auth routes stand behind it now
   const login = await hit(I, '/api/login', { headers: XS, body: { password: I.pw } });
   const logout = await hit(I, '/api/logout', { headers: { ...C, ...XS } });
@@ -452,6 +452,7 @@ const DOORS = [
   [/^\/otel\//, 'the local CLI\'s OTLP exporter: loopback + the persisted otel token'],
   [/^\/svc(\/|$)/, 'path-mounted services: per mount — a private one asks requestAuthed (the same verdict)'],
   [/^\/p\//, 'published pages: per page — a private one asks requestAuthed (the same verdict)'],
+  [/^\/api\/csp-report$/, 'the browser\'s CSP reports (lane app-page-csp): no cookie, and a sandboxed frame posts Origin null — the route judges its own: a report content type only, 32 KB, a per-address pace (src/server/csp-reports.js)'],
 ];
 const concrete = (p) => p.replace(/:[A-Za-z_]\w*(\([^)]*\))?\??/g, 'x').replace(/\*/g, 'x').replace(/\/+$/, '') || '/';
 async function census(authMod = fresh(AUTH)) {

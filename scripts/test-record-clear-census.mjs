@@ -445,6 +445,18 @@ const ROUTES = {
   // lane vault-mint-put (q-043 §9): mint / put seal a credential under the caller's OWN vault namespace; they reach the jobs
   // stash (like state/lock) ONLY to resolve a bearer token to its identity (the namespace + the audit actor) — no record of the five kinds is read or served
   'POST /api/agent/vault/mint': 'meta', 'POST /api/agent/vault/put': 'meta',
+  // lane vault-use-law: every person's vault door names the BEARER it refuses (bearerOf = jobByToken / a session's token — the use
+  // law's actor for its vault-use line and the daily count); the doors answer facts, a refusal, or ONE value to a person — no record of the five kinds
+  'POST /api/vault/setup': 'meta', 'POST /api/vault/unlock': 'meta', 'POST /api/vault/change': 'meta', 'POST /api/vault/lock': 'meta', 'POST /api/vault/idle': 'meta',
+  'POST /api/vault/active': 'meta', 'GET /api/vault/contents': 'meta', 'POST /api/vault/reveal-session': 'meta', 'POST /api/vault/reveal': 'meta', 'POST /api/vault/reveal-end': 'meta',
+  // design q-047 L1 (lane vault-totp): the person's two-step doors ride the same person() wrapper — a BEARER refused there is named
+  // the same way (use-law's bearerOf → jobByToken), so each reaches the jobs stash to name who it refused; no record of the five kinds
+  'GET /api/vault/totp': 'meta', 'POST /api/vault/totp': 'meta', 'GET /api/vault/totp/:name': 'meta', 'DELETE /api/vault/totp/:name': 'meta', 'POST /api/vault/totp/:name/grants': 'meta', 'DELETE /api/vault/totp/grants/:id': 'meta',
+  // the run door's two person doors (lane vault-run-door) ride the same person() wrapper — the bearer it refuses is named the same way
+  'POST /api/vault/runnable': 'meta', 'POST /api/vault/run/asks/:askId': 'meta',
+  // lane vault-manual-and-lock: an agent's REQUEST (the session resolved through the jobs stash like run), its USES (its own
+  // grants and the vault-use lines of ITS conversation — names, codes, receipts) and a person's answer — no record's words
+  'POST /api/agent/vault/request': 'meta', 'GET /api/agent/vault/uses': 'meta', 'POST /api/vault/request/asks/:askId': 'meta',
   'GET /api/agent/design/systems': 'meta', 'GET /api/agent/design/system': 'meta', // lane design-systems-home: the design systems' names (belted) + ONE system's tokens.css — registry rows and a folder's file, no record
   // ── the 2.369.202 integration: lane jobs-browser's job principal — agentFacts → jobAgentFacts / refuseAgentBearer ask the
   //    jobs store jobByToken (a jbt_ caller's identity, as the other agent routes do), never a record's text ──
@@ -594,6 +606,7 @@ const EXCEPTIONS = [
   // append-only bytes on disk (declared by the design; no route serves them — §A/§B/§C above)
   ['data/channels/msgs/groups/<gid>.ndjson', 'the group log is append-only (channel-store invariant 1): the ORIGINAL line stays; every reader folds the replacement record'],
   ['data/job-logs/<id>/<run>/current.log', 'a run\'s log is the process\'s own output, kept until the 14-day GC; every snapshot withholds it for a covered run and says so'],
+  ['data/vault-audit.jsonl', 'the vault\'s audit is append-only and names an ENTRY / a session key (an id) and the EVENT (set-up / unlock / lock / a vault-use) — never a value, never a record\'s words (lane agent-output-sinks, design q-043 D3 \u2463); deleting a session does NOT clear it: an audit of who opened a credential that forgets is not an audit, and it is out of the session-clear\'s reach by design'],
   // words already delivered
   ['agent transcripts / the CLI\'s stdin', 'what a turn was injected with, a wake delivered, a reply quoted — delivered words are the harness\'s record, out of the clear\'s reach by design — and SAID where the owner decides: the confirm dialog\'s .rc-copies line (verify r4)'],
   ['peer cards in a session window (`msg` frames)', 'emitted at delivery time from the delivery ladder; the chat view is a transcript surface'],
@@ -1886,6 +1899,7 @@ const I_RECV = {
   'src/server/channels-engine.js|p.choice.fromMount': ['mount', 'a storage mount\'s name'], 'src/server/channels-engine.js|p': ['outbox proposal', 'a proposal\'s reason'], 'src/server/channels-engine.js|rec': ['channel', 'an account / adapter label'],
   'src/server/channels-engine.js|row': ['integration', 'an integration row label'], 'src/server/channels-engine.js|r': ['outbox proposal', 'a decision reason'], 'src/server/channels-engine.js|src': ['mount', 'a storage label'],
   'src/server/memory-pressure-watch.js|it': ['words', 'the memory-pressure For-you item\'s own words (PURE src/memory-pressure.js pressureItem: percent, GB, who started each process group, /tmp usage) — the source of a new For-you record, never a copy of one (lane browser-resource-care)'],
+  'src/server/csp-reports.js|w': ['words', 'the CSP notice\'s own words (PURE src/app-csp.js noticeWords: a directive, what it would block — a keyword or an origin + 3 path segments, never a value — and where it was seen) — the source of a new For-you record, never a copy of one (lane app-page-csp)'],
   'src/server/tls.js|p': ['words', 'the https plan\'s own words (PURE src/tls-plan.js: the owner\'s step — the tailnet\'s HTTPS certificates, the operator right) — the source of a new For-you record, never a copy of one (lane https-tailscale)'],
   'src/server/mount-health-watch.js|it': ['words', 'the wedged-mount For-you item\'s own words (PURE src/mount-health.js canaryItem: the mountpoint, the strikes, who presses it, what the server paused) — the source of a new For-you record, never a copy of one (lane fuse-canary-notice)'],
   'src/server/hooks-late.js|item': ['words', 'the late-hooks For-you line\'s own words (PURE src/hooks-late.js forYouItem: VibeSpace\'s sentence + the names of the running sessions it lists) — the source of a new For-you record, never a copy of one (lane hooks-create)'], 'src/server/hooks-late.js|h': ['words', 'a harness descriptor\'s constant label (Claude Code / Codex) in the journal line — never a record (lane hooks-create)'],
@@ -1999,6 +2013,7 @@ const I_RECV = {
   'src/server/automation-engine.js|caller': ['host', 'the asking CONVERSATION\'s name on the first-use card and its log line — the session list\'s own name (the hub\'s record), never a record\'s text'],
   // ── lane vault-run-door (design q-043 §8 P0-f) ──
   'src/server/vault-run-door.js|caller': ['host', 'the asking CONVERSATION\'s name on the run card and its journal line — the session list\'s own name (the hub\'s record), never a record\'s text'],
+  'src/server/vault-run-door.js|q': ['run reference', 'an agent\'s REQUEST (lane vault-manual-and-lock): its detail = the entry\'s label + reference and the purpose in the agent\'s own words (secret-shapes\'d) — the request\'s own text, never a record\'s'],
   'src/server/vault-run-door.js|rec': ['host', 'a running conversation\'s name in the lock\'s journal line (the session list\'s own name, kept on the run) — never a record\'s text'],
   'src/server/vault-run-door.js|shape': ['run reference', 'the TOOL\'s name (the basename argv[0] resolved to) on the run card\'s action — the agent\'s own command, never a record\'s words'],
   'src/lib/vault-window.js|r': ['run switch', 'the «Usable by agent runs» answer\'s `open` — a boolean choosing one of two fixed sentences, never a record\'s words'],

@@ -5988,6 +5988,7 @@ export default {
   "running again": "已重新运行",
   "running again (resumed {time})": "已重新运行（{time} 恢复）",
   "Nothing runs until you answer. After 60 s it is refused.": "你回答之前什么都不会运行。60 秒后自动拒绝。",
+  "The output is scrubbed of the secret's common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.": "输出会抹去这个密钥的常见写法；会把它重新编码的命令仍可能把它显示出来——允许之前请读完整条命令。",
   "Allow \"{name}\" to run a command on {machine}?": "允许 \"{name}\" 在 {machine} 上运行命令？",
   // verify r6 (what you approve is what runs): the whole request, hidden characters, every Always-Allow update
   "{first} … (+{n} more lines)": "{first} …（另有 {n} 行）",
@@ -9327,15 +9328,20 @@ export default {
   "Only a person can do this": "只有人能做这件事", // lane vault-e2e-password
   "Could not reach the vault — {reason}": "无法访问保险库——{reason}", // lane vault-e2e-password
   "Vault locked": "保险库已锁定", // lane vault-e2e-password
-  "Vault locked — click to unlock": "保险库已锁定——点击解锁", // lane vault-e2e-password
+  "Vault locked — click to unlock (For you names what is waiting on it)": "保险库已锁定——点击解锁（「待你处理」里写明了在等它的事）", // lane vault-e2e-password
   "Unlock the vault": "解锁保险库", // lane vault-e2e-password
-  "The vault is locked — device links, the relay and account switching are waiting.": "保险库未解锁 — 设备链接、中继和账号切换在等", // lane vault-relock-door: the persistent lock strip
+  "The vault is locked — device links, the relay and account switching are waiting (For you names whatever it stops). Unlock… enters the second password.": "保险库未解锁 — 设备链接、中继和账号切换在等（它拦下的会写在「待你处理」里）。「解锁…」输入第二密码。", // lane vault-relock-door: the persistent lock strip
   "The vault locked after a restart — enter the second password to unlock. Device links, the relay and account switching are waiting.": "保险库在重启后已锁定 — 输入第二密码解锁；设备链接、中继与账号切换在等", // lane vault-relock-door: the restart For-you notice
-  "The vault is locked — {n} waiting on it (For you names them).": "保险库未解锁 — {n} 项在等它（「待你处理」里写明了是谁）", // lane vault-locked-refusal-notice: the strip's count
+  "The vault is locked — {n} waiting on it (For you names them). Unlock… enters the second password.": "保险库未解锁 — {n} 项在等它（「待你处理」里写明了是谁）。「解锁…」输入第二密码。", // lane vault-locked-refusal-notice: the strip's count
   "The vault is locked — waiting on it: {who}. Enter the second password to unlock.": "保险库未解锁 — 在等它的：{who}。输入第二密码解锁", // lane vault-locked-refusal-notice: the For-you item names who was blocked
   "Nothing has been refused yet — whatever the lock stops is named here as it happens.": "还没有操作被拒绝 — 锁定挡住的每一项都会随时列在这里", // lane vault-locked-refusal-notice: the item's detail before any refusal
   "{who} — {what}": "{who} — {what}", // lane vault-locked-refusal-notice: one blocked caller and what it was refused
   "…and {n} more, refused while it is locked": "……另有 {n} 项在锁定期间被拒绝", // lane vault-locked-refusal-notice: past the item's lines
+  "{who} was refused {what} {n} times in a day — the vault handed nothing out. Look at what it is doing.": "{who} 一天内 {n} 次被拒绝使用 {what} — 保险库什么都没有交出。看看它在做什么", // lane vault-use-law: the daily-failure card (design q-043 D7)
+  "{who} entered a wrong second password {n} times in a day.": "{who} 一天内输错第二密码 {n} 次", // lane vault-use-law: the daily-failure card (design q-043 D7)
+  "Through {door}; the last answer was {code}.": "经由 {door}；最后一次的回答是 {code}", // lane vault-use-law: the daily-failure card (design q-043 D7)
+  "Filed once a day for this caller and this entry — mark it done when you have looked.": "同一调用方与同一条目每天只提醒一次 — 看过后标记为完成", // lane vault-use-law: the daily-failure card (design q-043 D7)
+  "If it was not you: lock the vault and change the sign-in password.": "如果不是你：锁定保险库，并更改登录密码", // lane vault-use-law: the daily-failure card (design q-043 D7)
   "The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.": "VibeSpace 保存的凭据（账号、挂载、渠道、集成、应用登录、通行密钥、已配对机器的连接、中继与语音登录）在你输入第二密码之前一直锁着——每次重启、每次锁定之后都是。", // lane vault-e2e-password (r2: machines, relay, voice; every lock)
   "Second password": "第二密码", // lane vault-e2e-password
   "Unlock": "解锁", // lane vault-e2e-password
@@ -9378,7 +9384,7 @@ export default {
   "Set a second password first — stored values are shown only behind it": "请先设置第二密码——存储的值只在它之后显示", // lane vault-contents-window
   "That stored value could not be opened": "该存储值无法打开", // lane vault-contents-window
   "That stored value is not there any more": "该存储值已不存在", // lane vault-contents-window
-  "The vault is locked — unlock it to see what it holds.": "保险库已锁定——解锁后才能查看其中内容。", // lane vault-contents-window
+  "The vault is locked — Unlock… above shows what it holds (For you names what is waiting on it).": "保险库已锁定——点上方的「解锁…」后才能查看其中内容（「待你处理」里写明了在等它的事）。", // lane vault-contents-window
   "Token": "令牌", // lane vault-contents-window
   "Too many values shown — try again in {n} s": "查看次数过多——请 {n} 秒后再试", // lane vault-contents-window
   "Values hidden again — the 5 minutes are over": "5 分钟已到，值已重新隐藏", // lane vault-contents-window
@@ -9406,7 +9412,7 @@ export default {
   "Change the second password…": "修改第二密码…", // lane vault-one-door
   "since {when}": "自 {when} 起", // lane vault-one-door
   "Long-lived OAuth token": "长期 OAuth 令牌", // lane vault-one-door (the Vault window's kind word for an account's setup-token; the shared "OAuth token" stays)
-  "The vault is locked — unlock it first": "保险库已锁定——先解锁", // lane vault-e2e-password
+  "The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)": "保险库已锁定——先解锁（页面顶部的「解锁…」；「待你处理」里写明了在等它的事）", // lane vault-e2e-password
   "Lock the vault": "锁定保险库", // lane vault-e2e-password
   "Check whether the vault is locked": "查看保险库是否锁定", // lane vault-e2e-password
   "Activity…": "活动…", // lane device-act-audit
@@ -9487,7 +9493,7 @@ export default {
   "HDR": "HDR", // lane stream-hdr-passthrough
   "Passthrough · {transfer} {bits}-bit · {primaries}": "直通 · {transfer} {bits} 位 · {primaries}", // lane stream-hdr-passthrough
   "waiting for the vault to be unlocked": "等待保险库解锁", // lane vault-e2e-password-fix-r2
-  "This session waits for the vault — unlock it with the second password; it reconnects by itself and nothing is lost.": "这个会话在等保险库——用第二密码解锁后它会自己重连，什么也不会丢。", // lane vault-e2e-password-fix-r2
+  "This session waits for the vault — unlock it with the second password (Unlock… at the top of the page; For you names what is waiting on it); it reconnects by itself and nothing is lost.": "这个会话在等保险库——用第二密码解锁（页面顶部的「解锁…」；「待你处理」里写明了在等它的事）后它会自己重连，什么也不会丢。", // lane vault-e2e-password-fix-r2
   "vault locked": "保险库已锁定", // lane vault-e2e-password-fix-r2
   "{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.": "{machine}需要你的 Mac 用户名和密码。VibeSpace 会把它们封进保险库，保险库解锁时自动登录。", // lane desktop-vnc-remember
   "{machine} asks for its VNC password. VibeSpace seals it in the vault and signs in by itself while the vault is unlocked.": "{machine}需要它的 VNC 密码。VibeSpace 会把它封进保险库，保险库解锁时自动登录。", // lane desktop-vnc-remember
@@ -9831,4 +9837,19 @@ export default {
   "An agent may use it in vibespace-vault run without ever seeing it — each new command asks you first": "agent 可以在 vibespace-vault run 里使用它，却永远看不到它——每条新命令先问你", // lane vault-run-door
   "Agents may use it in a run now — each new command asks you first": "agent 现在可以在运行中使用它——每条新命令先问你", // lane vault-run-door
   "Agents can no longer use it in a run": "agent 不能再在运行中使用它", // lane vault-run-door
+  "The page security policy would block {directive}: {blocked}": "页面安全策略将拦截 {directive}：{blocked}", // lane app-page-csp
+  "Seen on {document}{where}. Nothing is blocked yet — this release only reports; the policy is enforced in a later release, so tell the developers if this is something you use.": "出现在 {document}{where}。目前还不拦截任何东西——这个版本只报告；策略会在之后的版本启用，如果这是你在用的东西，请告诉开发者。", // lane app-page-csp
+  "Page security policy (reports only): {app} on the app page · {frames} from frames the page made": "页面安全策略（仅报告）：应用页面 {app} 条 · 页面生成的框架 {frames} 条", // lane app-page-csp
+  "Lines in data/csp-reports.jsonl. A report from the app page also files a For-you notice; one from a frame the page made (a mail, a design) never does.": "data/csp-reports.jsonl 中的行数。来自应用页面的报告还会出现在「待你处理」里；来自页面生成的框架（邮件、设计）的报告不会。", // lane app-page-csp
+  "For 8 hours": "8 小时", // lane vault-manual-and-lock
+  "Every run of this conversation with this secret, for 8 hours — a new kind of command still shows its card; locking the vault ends it": "这个会话用这个密钥的每次运行，8 小时内都允许——新的一种命令仍先出卡片；锁上保险库即结束", // lane vault-manual-and-lock
+  "Granted for 8 hours — a lock ends it": "已授权 8 小时——锁库即结束", // lane vault-manual-and-lock
+  "Granted for its next run": "已授权它的下一次运行", // lane vault-manual-and-lock
+  "{who} asks to use a stored secret": "{who} 请求使用保险库里的一个密钥", // lane vault-manual-and-lock
+  "Secret: {label} — {ref}": "密钥：{label} — {ref}", // lane vault-manual-and-lock
+  "What for, in the agent's words: {purpose}": "用途（agent 的原话）：{purpose}", // lane vault-manual-and-lock
+  "Allow once: its next run with this secret (within 8 hours). For 8 hours: every run with it. Both ask for the second password, as «Usable by agent runs» does; a new kind of command still shows you its card first, and locking the vault ends the grant.": "允许一次：它用这个密钥的下一次运行（8 小时内）。8 小时：期间每次运行都允许。两者都要再输一次第二密码，和「可供 agent 运行使用」一样；新的一种命令仍会先给你看它的卡片；锁上保险库即结束授权。", // lane vault-manual-and-lock
+  "To let every conversation use it, turn on «Usable by agent runs» on its row in ⚙ System ▸ Vault….": "要让所有会话都能用它，请在 ⚙ 系统 ▸ 保险库… 里打开它那一行的「可供 agent 运行使用」。", // lane vault-manual-and-lock
+  "Unlock… at the top of the page; For you names what is waiting on it": "页面顶部的「解锁…」；「待你处理」里写明了在等它的事", // lane vault-manual-and-lock: the two facts beside the owner's own words
+  "Power throttling": "电源限制", // lane stream-sdr-ecoqos: the stream details' row (Windows' EcoQoS on the machine's stream processes)
 };

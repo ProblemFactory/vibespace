@@ -80,7 +80,8 @@ const D2 = { id: '\\\\.\\DISPLAY2', x: 1280, y: 360, w: 640, h: 360, primary: fa
 const PS_LOG = path.join(root, 'ps-lines.txt'), FACTS = path.join(root, 'stream-facts.json');
 fs.writeFileSync(FACTS, factsLine([D1, D2]));
 fs.writeFileSync(path.join(BIN, 'powershell.exe'), `#!${process.execPath}
-const fs = require('fs'); { const a = process.argv.slice(2); if (/'stream-facts'/.test(Buffer.from(a[a.length - 1] || '', 'base64').toString('utf16le'))) { process.stdout.write(fs.readFileSync(${JSON.stringify(FACTS)}, 'utf8') + '\\r\\n'); process.exit(0); } }
+const fs = require('fs'); { const a = process.argv.slice(2), sc = Buffer.from(a[a.length - 1] || '', 'base64').toString('utf16le'); if (/'stream-facts'/.test(sc)) { process.stdout.write(fs.readFileSync(${JSON.stringify(FACTS)}, 'utf8') + '\\r\\n'); process.exit(0); }
+  if (/VsQos/.test(sc)) { const ids = ((/foreach \\(\\$id in @\\(([\\d,]+)\\)\\)/.exec(sc) || [])[1] || '').split(',').map(Number); process.stdout.write(JSON.stringify({ t: 'unthrottle', rows: ids.map((pid) => ({ pid, ok: true, err: 0 })) }) + '\\r\\n'); process.exit(0); } } // lane stream-sdr-ecoqos: every road's power-throttling opt-out / give-back answered (else it waits on the resident script's stdin)
 process.stdout.write('ready\\r\\n');
 let buf = ''; process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); fs.appendFileSync(${JSON.stringify(PS_LOG)}, l + '\\n'); process.stdout.write('ok\\r\\n'); } });

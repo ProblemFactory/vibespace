@@ -50,7 +50,7 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   const pairNow = () => { try { const p = (tokens && tokens.read()) || null; pairLocked = false; return p; } catch (e) { pairLocked = !!(e && e.code === 'vault_locked'); return null; } };
   /** the vault keeps this instance's Dropline closed: the sealed pair, or the person's key in the locked integrations store */
   const vaultLocked = () => { const p = pairNow(); if (p) return false; const c = credentialOf(); return !c.key && (pairLocked || /the vault is locked/.test(String(c.why || ''))); };
-  const lockedError = () => new DroplineError('vault-locked', 'the vault is locked — the Dropline sign-in opens after the owner unlocks it on the page', { status: 423 });
+  const lockedError = () => new DroplineError('vault-locked', 'the vault is locked — the Dropline sign-in opens after the owner unlocks it on this instance\'s page; the owner has already been told (For you names what is waiting on it)', { status: 423 });
   const livePair = () => { const p = pairNow(); return p && p.access && p.state !== 'reconnect' ? p : null; };
   function pairOf(j, clientId, prev = null) {
     const t = now();

@@ -23,7 +23,9 @@
 //   · THE FRAME DOCUMENT: `frameSrcdoc` puts the picker FIRST in the artboard's head (before any of its scripts);
 //     `printSrcdoc` adds the print stylesheet (@page from the row's `print`: fixed = one page the artboard's size,
 //     flow = paginated) and the print call. Both find their insertion point by `indexOf` in a bounded head window —
-//     never a regex over the raw artboard (bound before parse).
+//     never a regex over the raw artboard (bound before parse). On the APP page every one of them is handed to the
+//     FRAME HOST (`FRAME_HOST`, lane design-frame-host: the frame navigates there and gets the hub's design policy, never
+//     the app page's — src/server/frame-host.js); the published page draws them as srcdoc (its own sandbox policy).
 //   · PRESENT + PRINT ALL (lane design-present, design 003 §2.6): `presentOrder` = one page's artboards in READING
 //     order (rows top to bottom, each row left to right), `presentView` = one artboard whole and fitted to the screen,
 //     `presentKey` / `presentGesture` / `presentStep` = what a key, a click or a swipe does; `printAllSrcdoc` = ONE print
@@ -389,6 +391,9 @@ function headEndAt(html) {
 /** A script element's text: `</script` and `<!--` can never end or comment it out. */
 const scriptText = (src) => String(src || '').replace(/<\/(script)/gi, '<\\/$1').replace(/<!--/g, '<\\!--');
 
+/** THE FRAME HOST's address for a design document (the canvas, Print, Print all on the app page): the hub's ONE host
+ *  document under the design policy (src/server/frame-host.js) — src/lib/frame-host.js writeFrame posts the document in. */
+export const FRAME_HOST = '/frame-host?kind=design';
 /** An artboard's frame document: the picker FIRST in its head (before any of the artboard's own scripts). */
 export function frameSrcdoc(html, pickerSrc = '') {
   const s = String(html == null ? '' : html);

@@ -21,7 +21,8 @@
  *   xOf(i, len, width) / indexAt(x, len, width)   THE WINDOW is a fixed 120 s: the newest second on the right edge
  *   readoutAt(rows, i, kind)           a hovered second's values (the chart's readout) — `gap: true` where nothing was read
  *   detailRows({page, agent, via, source})   the details table, in THE order: rtt · jitter · fps · decode · kbps · path · codec ·
- *                                      hdr (lane stream-hdr-passthrough: the machine sends PQ 10-bit) · encoder · display · size ·
+ *                                      hdr (lane stream-hdr-passthrough: the machine sends PQ 10-bit) · encoder · power (lane
+ *                                      stream-sdr-ecoqos: Windows power throttling 'off' | 'on' — a Mac's 'n/a' is no row) · display · size ·
  *                                      rate · loss — the first five always (— until read), the rest
  *                                      only when someone said them
  *   CORNERS / cornerOf / cornerFrom / cornerMemory / rememberCorner   the pinned panel's and the pill's place: a corner of their
@@ -152,6 +153,7 @@ function detailRows({ page = null, agent = null, via = null, source = null } = {
   if (typeof page.codec === 'string' && page.codec) rows.push({ k: 'codec', codec: page.codec.slice(0, 24) });
   if (sc && sc.hdr && typeof sc.hdr === 'object') rows.push({ k: 'hdr', bits: num(sc.hdr.bits), transfer: String(sc.hdr.transfer || '').slice(0, 12), primaries: String(sc.hdr.primaries || '').slice(0, 12) }); // lane stream-hdr-passthrough
   if (sc && sc.encoder) rows.push({ k: 'encoder', encoder: String(sc.encoder).slice(0, 40), ms: num(sc.encodeMs) });
+  if (sc && (sc.ecoqos === 'off' || sc.ecoqos === 'on')) rows.push({ k: 'power', ecoqos: sc.ecoqos }); // lane stream-sdr-ecoqos
   const did = sc && sc.display != null ? String(sc.display) : source && source.display != null ? String(source.display) : null;
   if (did) {
     const row = source && Array.isArray(source.displays) ? source.displays.find((x) => x && String(x.id) === did) : null;

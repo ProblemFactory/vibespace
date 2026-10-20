@@ -7,7 +7,7 @@
 // headless Chrome driving the REAL client over CDP, `vs-onboarded` pre-set.
 //   A — the contract, seen: ① the stub's `vibespace-design new` opens the window on the client showing that conversation
 //       (2 frames, sandbox="allow-scripts" only) · ② a write under the folder repaints ONE frame in place (the same iframe
-//       elements, the other frame's srcdoc untouched, pan / zoom kept — no sync, the hub's watch) · ③ a real click in
+//       elements, the other frame's document untouched, pan / zoom kept — no sync, the hub's watch) · ③ a real click in
 //       Comment mode → the composer quotes the exact line → Send ⇒ the stub's stdin receives exactly `[Design comment]
 //       <quote>: <text>`; the session killed ⇒ the comment is STASHED, the resumed conversation's strip says a design
 //       comment waits and its prompt-context carries the line · ④ Print = a transient frame sandboxed
@@ -356,8 +356,9 @@ try {
   const win = await until(() => ev(`const w = ${W}; return w ? { type: w.type, sid: w._design.sessionId, dir: w._design.dir, spec: w._openSpec || null } : null;`), 20000);
   evidence.window = win;
   ok(!!win && win.type === 'design' && win.sid === SIDW && win.dir === DIR, 'the Design window opened BY ITSELF (the design-open push) on the client showing that conversation', win);
-  const two = await until(() => ev(`const w = ${W}; const f = [...w.element.querySelectorAll('.dc-frame')]; const fr = f.map((x) => ({ file: x.dataset.file, iframe: !!x.querySelector('iframe'), sandbox: x.querySelector('iframe') && x.querySelector('iframe').getAttribute('sandbox'), len: (x.querySelector('iframe') && x.querySelector('iframe').getAttribute('srcdoc') || '').length })); return fr.length === 2 && fr.every((x) => x.len > 100) ? fr : null;`), 20000);
+  const two = await until(() => ev(`const w = ${W}; const f = [...w.element.querySelectorAll('.dc-frame')]; const fr = f.map((x) => ({ file: x.dataset.file, iframe: !!x.querySelector('iframe'), sandbox: x.querySelector('iframe') && x.querySelector('iframe').getAttribute('sandbox'), len: (x.querySelector('iframe') && x.querySelector('iframe').__frameDoc || '').length, src: x.querySelector('iframe') && x.querySelector('iframe').getAttribute('src'), srcdoc: !!x.querySelector('iframe[srcdoc]') })); return fr.length === 2 && fr.every((x) => x.len > 100) ? fr : null;`), 20000);
   ok(!!two && two.map((x) => x.file).sort().join(',') === 'About.html,Main.html' && two.every((x) => x.sandbox === 'allow-scripts'), 'two artboards drawn (Main.html, About.html), each an iframe sandboxed exactly "allow-scripts"', two);
+  ok(!!two && two.every((x) => x.src === '/frame-host?kind=design' && !x.srcdoc), 'lane design-frame-host: each artboard frame is NAVIGATED to the hub\'s frame host (its own design policy) — no srcdoc, which would run under the app page\'s policy', two);
 
   // ── A①b (lane design-window-placement): the fresh Design is PLACED as the right split, never focused ──
   const placed = await until(() => ev(`const w = ${W}; const c = ${chatWinE}; if (!w || !c) return null; const dr = w.element.getBoundingClientRect(); const cr = c.element.getBoundingClientRect(); const td = (w._tabChain ? app.wm.windows.get(w._tabChain.tabs[0]) : w); const tc = (c._tabChain ? app.wm.windows.get(c._tabChain.tabs[0]) : c); return { aw: app.wm.activeWindowId, chatId: c.id, designId: w.id, caret: document.activeElement === window.__composer, d: { l: Math.round(dr.left), r: Math.round(dr.right), w: Math.round(dr.width) }, c: { l: Math.round(cr.left), r: Math.round(cr.right), w: Math.round(cr.width) }, sameDesk: (td._desktopId || null) === (tc._desktopId || null), arrived: w.element.classList.contains('window-arrived'), vw: innerWidth };`), 10000);
@@ -393,15 +394,15 @@ try {
 
   // ── A② ──
   section('A② a file write under the folder repaints ONE frame in place (no sync: the hub\'s 2 s watch)');
-  await ev(`const w = ${W}; w._designCanvas.zoomBy(-1); w._designCanvas.setView({ x: 37, y: 51, z: w._designCanvas.view().z }); for (const i of w.element.querySelectorAll('.dc-frame iframe')) { i.__mark = i.closest('[data-file]').dataset.file; i.__src = i.getAttribute('srcdoc'); } return true;`);
+  await ev(`const w = ${W}; w._designCanvas.zoomBy(-1); w._designCanvas.setView({ x: 37, y: 51, z: w._designCanvas.view().z }); for (const i of w.element.querySelectorAll('.dc-frame iframe')) { i.__mark = i.closest('[data-file]').dataset.file; i.__src = i.__frameDoc; } return true;`);
   const viewBefore = await ev(`return ${W}._designCanvas.view();`);
   // the write lands RIGHT AFTER the window opened — before the watch's first 2 s sweep (run 0 on the pre-fix tree: never shown)
   const t0 = Date.now();
   fs.writeFileSync(path.join(DIR, 'Main.html'), MAIN2);
-  const rep = await until(() => ev(`const w = ${W}; const f = [...w.element.querySelectorAll('.dc-frame iframe')]; const m = f.find((i) => i.__mark === 'Main.html'), a = f.find((i) => i.__mark === 'About.html'); if (!m || !(m.getAttribute('srcdoc') || '').includes('REPAINT-MARK-1')) return null; return { count: f.length, mainKept: !!m, aboutKept: !!a, aboutSame: !!a && a.getAttribute('srcdoc') === a.__src, mainChanged: m.getAttribute('srcdoc') !== m.__src, view: w._designCanvas.view() };`), 15000, 100);
+  const rep = await until(() => ev(`const w = ${W}; const f = [...w.element.querySelectorAll('.dc-frame iframe')]; const m = f.find((i) => i.__mark === 'Main.html'), a = f.find((i) => i.__mark === 'About.html'); if (!m || !(m.__frameDoc || '').includes('REPAINT-MARK-1')) return null; return { count: f.length, mainKept: !!m, aboutKept: !!a, aboutSame: !!a && a.__frameDoc === a.__src, mainChanged: m.__frameDoc !== m.__src, view: w._designCanvas.view() };`), 15000, 100);
   evidence.repaint = { ...rep, ms: Date.now() - t0, viewBefore };
   if (!rep) evidence.repaintDiag = { acks: await ev('return window.__acks;'), fileChanged: msgs.filter((m) => m.type === 'file-changed'), server: (await (await fetch(base + '/api/design?dir=' + encodeURIComponent(DIR))).json()).frames?.map((f) => ({ file: f.file, mtime: f.mtime, mark: (f.html || '').includes('REPAINT-MARK-1') })) };
-  ok(!!rep && rep.count === 2 && rep.mainKept && rep.aboutKept && rep.mainChanged && rep.aboutSame, `writing Main.html repainted that ONE frame in ${Date.now() - t0} ms: the same iframe ELEMENTS (by reference), About.html's srcdoc byte-identical`, rep || evidence.repaintDiag);
+  ok(!!rep && rep.count === 2 && rep.mainKept && rep.aboutKept && rep.mainChanged && rep.aboutSame, `writing Main.html repainted that ONE frame in ${Date.now() - t0} ms: the same iframe ELEMENTS (by reference), About.html's document byte-identical`, rep || evidence.repaintDiag);
   ok(!!rep && rep.view.x === viewBefore.x && rep.view.y === viewBefore.y && rep.view.z === viewBefore.z && viewBefore.z < 1, 'pan and zoom kept across the repaint (a non-default view: zoomed out and panned)', { before: viewBefore, after: rep && rep.view });
 
   // ── A③ + B② ──
@@ -565,13 +566,13 @@ try {
   let printFrame = null;
   if (pBtn) {
     await click(pBtn);
-    printFrame = await until(() => ev(`const f = document.querySelector('iframe.design-print-frame'); if (!f) return null; const s = f.getAttribute('srcdoc') || ''; return { sandbox: f.getAttribute('sandbox'), page: /@page\\{size:1280px 800px;margin:0\\}/.test(s), prints: /print\\(\\)/.test(s), hidden: f.getAttribute('aria-hidden') };`), 5000);
+    printFrame = await until(() => ev(`const f = document.querySelector('iframe.design-print-frame'); if (!f) return null; const s = f.__frameDoc || ''; return { sandbox: f.getAttribute('sandbox'), page: /@page\\{size:1280px 800px;margin:0\\}/.test(s), prints: /print\\(\\)/.test(s), hidden: f.getAttribute('aria-hidden') };`), 5000);
   } else {
     // folded into ⋯ at this width: the row is the button's command
     const more = await rectOf('.design-more');
     await click(more); await sleep(300);
     const row = await ev(`const it = [...document.querySelectorAll('.context-menu-item, [role=menuitem], .ctx-item')].find((x) => /Print/.test(x.textContent)); if (!it) return null; const r = it.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
-    if (row) { await click(row); printFrame = await until(() => ev(`const f = document.querySelector('iframe.design-print-frame'); if (!f) return null; const s = f.getAttribute('srcdoc') || ''; return { sandbox: f.getAttribute('sandbox'), page: /@page\\{size:1280px 800px;margin:0\\}/.test(s), prints: /print\\(\\)/.test(s), hidden: f.getAttribute('aria-hidden') };`), 5000); }
+    if (row) { await click(row); printFrame = await until(() => ev(`const f = document.querySelector('iframe.design-print-frame'); if (!f) return null; const s = f.__frameDoc || ''; return { sandbox: f.getAttribute('sandbox'), page: /@page\\{size:1280px 800px;margin:0\\}/.test(s), prints: /print\\(\\)/.test(s), hidden: f.getAttribute('aria-hidden') };`), 5000); }
   }
   ok(!!printFrame && printFrame.sandbox === 'allow-scripts allow-modals' && printFrame.page && printFrame.prints && printFrame.hidden === 'true', 'Print = a transient frame sandboxed "allow-scripts allow-modals" (never allow-same-origin) carrying the row\'s @page (1280×800, fixed) and the print call', printFrame);
   const pctx = await until(() => frameCtxByText('setTimeout(function(){print()}'), 8000, 300);
@@ -580,7 +581,7 @@ try {
   evidence.print = { ...printFrame, witness: pw, top: printedTop };
   if (pw && pw.inj && pw.called > 0) ok(true, `print() was CALLED inside the sandboxed print frame (${pw.called}× in the frame, ${printedTop}× heard by the page) — the browser's print dialog is what follows; headless Chrome shows none`);
   else if (pw && pw.inj) SKIP('the print dialog itself', `headless Chrome shows no print dialog, and the frame's print() ran before the witness reached its target (the frame, its sandbox "allow-scripts allow-modals", its @page and the call are pinned above; witness ${S(pw)})`);
-  else if (pw) SKIP('the print dialog itself', 'the witness script does not run inside sandboxed srcdoc frames on this Chrome (the frame, its sandbox, its @page and the print call are pinned above)');
+  else if (pw) SKIP('the print dialog itself', 'the witness script did not run inside the sandboxed print frame on this Chrome (the frame, its sandbox, its @page and the print call are pinned above)');
   else ok(false, 'the print frame was reachable as a target', { pw, printedTop, ctx: !!pctx });
   await ev(`${W}._designCanvas.focus(null); return true;`);
 
@@ -628,7 +629,7 @@ try {
     await ev(`document.querySelectorAll('iframe.design-print-frame').forEach((f) => f.remove()); return true;`);
     const prB = (await rectOf('.design-btn-print')) || (await moreRow('/^Print$/'));
     if (prB) await click(prB);
-    const pa = await until(() => ev(`const f = document.querySelector('iframe.design-print-all'); if (!f) return null; const s = f.getAttribute('srcdoc') || ''; return { sandbox: f.getAttribute('sandbox'), frames: s.split('<iframe ').length - 1, pages: (s.match(/@page a\\d+\\{/g) || []).length, srcdoc: s };`), 5000);
+    const pa = await until(() => ev(`const f = document.querySelector('iframe.design-print-all'); if (!f) return null; const s = f.__frameDoc || ''; return { sandbox: f.getAttribute('sandbox'), frames: s.split('<iframe ').length - 1, pages: (s.match(/@page a\\d+\\{/g) || []).length, doc: s };`), 5000);
     ok(!!pa && pa.sandbox === 'allow-scripts allow-modals' && pa.frames === 2 && pa.pages === 2, 'Print with no artboard open on a page of two = PRINT ALL: one transient frame sandboxed "allow-scripts allow-modals" holding both artboards, a named page each', pa && { sandbox: pa.sandbox, frames: pa.frames, pages: pa.pages });
     const pactx = await until(() => frameCtxByText('function l(){if(--left<=0)go()}'), 10000, 300);
     const paw = pactx ? await until(async () => { const v = JSON.parse(await evalInCtx(pactx, 'JSON.stringify({ called: window.__vsPrintCalled || 0, left: typeof left === "number" ? left : null })').catch(() => '{}')); return v.called > 0 ? v : null; }, 15000, 300) : null;
@@ -653,7 +654,7 @@ try {
     };
     const near1 = (a, b) => Math.abs(a - b) <= 1;
     if (pa) {
-      const pdfA = await pdfOf(pa.srcdoc);
+      const pdfA = await pdfOf(pa.doc);
       evidence.printAllPdf = pdfA;
       ok(pdfA.loaded && pdfA.pages === 2 && pdfA.boxes.length === 2 && pdfA.boxes.every(([w, h]) => near1(w, 960) && near1(h, 600)) && pdfA.fonts, `Chrome's PDF of the print-all document: ${pdfA.pages} pages, each 1280×800 px (960×600 pt), the text as text (fonts embedded, ${pdfA.bytes} B)`, pdfA);
     }
@@ -769,7 +770,7 @@ try {
   const still = await evalInFrame('Evil.html', 'location.href + " " + document.getElementById("h").textContent');
   const targetsAfter = (await call('Target.getTargets')).targetInfos.filter((t) => t.type === 'page').length;
   ok(ro === 'null' && targetsAfter === targetsBefore, `window.open from the artboard: null, no new page target (${targetsBefore} → ${targetsAfter})`, { ro, targetsBefore, targetsAfter });
-  ok(rf === 'submitted' && still === 'about:srcdoc EVIL-MARK', 'a form POST from the artboard: the frame stays on its srcdoc (no allow-forms)', { rf, still });
+  ok(rf === 'submitted' && still === `${base}/frame-host?kind=design EVIL-MARK`, 'a form POST from the artboard: the frame stays on its document (no allow-forms) — at the frame host\'s address, the document the host wrote', { rf, still });
   ok(rt === 'clicked' && (await ev('return location.href;')) === hrefBefore, 'an <a target=_top> click from the artboard: the owner\'s page did not navigate (no allow-top-navigation)', { rt });
   evidence.evil = { rr, ro, rf, rt, still };
 
@@ -1139,8 +1140,8 @@ try {
     ok(!!disk, 'the hub wrote the value into user.json (THE USER\'S LAYER)', disk);
     const reread = await until(() => html(`--pad:${want} !important`), 10000);
     const l1 = await look();
-    const same = await ev(`const i = [...${W}.element.querySelectorAll('.dc-frame')].find((x) => x.dataset.file === 'About.html').querySelector('iframe'); return !(i.getAttribute('srcdoc') || '').includes(${S('--pad:' + want)});`);
-    ok(!!reread && l1.pad === want && l1.keep === 1 && same, `the write's file-changed re-read restyled the LIVE frame in place: padding ${want}, the frame's own document kept (no srcdoc reload)`, { l1, same });
+    const same = await ev(`const i = [...${W}.element.querySelectorAll('.dc-frame')].find((x) => x.dataset.file === 'About.html').querySelector('iframe'); return !(i.__frameDoc || '').includes(${S('--pad:' + want)});`);
+    ok(!!reread && l1.pad === want && l1.keep === 1 && same, `the write's file-changed re-read restyled the LIVE frame in place: padding ${want}, the frame's own document kept (no reload)`, { l1, same });
     // a choice (pills) and Reset
     const pill = await ev(`const b = [...${W}.element.querySelectorAll('.design-tweak-pill')].find((x) => x.textContent === 'compact'); b.scrollIntoView({ block: 'nearest' }); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, h: r.height };`);
     const hit = await until(() => ev(`const e = document.elementFromPoint(${pill.x}, ${pill.y}); return e && e.classList.contains('design-tweak-pill') ? true : null;`), 6000, 200);

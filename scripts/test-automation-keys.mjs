@@ -675,7 +675,7 @@ console.log('⑭ THE WINDOW + THE CLI (text pins) — the 「未设边界」 chi
   ok(CLI.limitsWords(LIM_OPEN) === `folders ${LROOT} · accounts any · permission modes default · models any · modes chat` && /refused until/.test(CLI.limitsWords(null)), 'the CLI words a key\'s limits (names only); a pre-limits key words the fail-closed state');
   ok(/\\n  this key's limits: \$\{limitsWords\(data\.limits\)\}/.test(read('data/bin/vibespace-api')), 'the CLI\'s refusal line carries "this key\'s limits: …" whenever the hub sent them');
   const apiCli = read('data/bin/vibespace-api');
-  ok(apiCli.includes("'the vault locked ⇒ every call answers vault_locked (exit 3): the user has already been told — never ask them to unlock; wait, or do other work',") && !/tell the user; never ask for the password/.test(apiCli),
+  ok(apiCli.includes("'the vault locked ⇒ every call answers vault_locked (exit 3): the user has already been told and a person unlocks it on this instance\\'s page — never ask them to unlock; wait, or do other work',") && !/tell the user; never ask for the password/.test(apiCli),
     'lane vault-locked-refusal-notice: the CLI\'s usage and header say the user was already told (never "tell the user")');
 }
 
@@ -691,6 +691,20 @@ console.log('⑩ wiring pins');
   const routes = read('src/routes/automation.js');
   ok(!/app\.(post|delete|put|patch)\('\/api\/agent\/automation\/[^']*grant/.test(routes) && (routes.match(/app\.(get|post|delete)\('\/api\/automation\//g) || []).length === 8 && (routes.match(/person\(/g) || []).length >= 8, 'NO agent route writes a grant; the eight owner doors (+ 边界…, 审计… — lane automation-open-limits) are person-only');
   ok(/name: 'test-automation-keys', tier: 'fast'/.test(read('scripts/ci.mjs')), 'this suite has its tier row');
+}
+
+// q-043 L1 (int331): BOOT IS A LOCK for once-grants — a once-grant no call spent, persisted, is SPENT at the next start (an unlock later never revives it)
+{
+  const wB = await mkWorld('boot-once');
+  const mb = wB.engine.mint({ name: 'd9', scopes: ['conversations.rename'], limits: OPEN_LIMITS, by: 'user' });
+  wB.engine.grant(mb.key.id, ['session:conv-9'], { by: 'user', mode: 'once' });
+  ok(wB.engine.list().keys[0].grants.some((g) => g.subject === 'session:conv-9' && g.mode === 'once' && !g.spentAt), 'a once-grant no call spent is written to the store, unspent');
+  const engine2 = ENG.create({ dataDir: wB.dir, vault: wB.vault, userTodos: wB.userTodos, now: wB.now, verbs: { 'conversations.rename': () => ({ ok: true }) } });
+  const pB = engine2.use({ caller: caller({ conversationId: 'conv-9', sessionKey: 'claude:conv-9', name: 'Worker nine' }), verb: 'conversations.rename', args: { name: 'x' } });
+  await new Promise((r) => setImmediate(r));
+  ok(cards(wB).length === 1, 'after a RESTART (boot is a lock) the persisted once-grant is SPENT — the use asks again on a new card, never running on the dead grant (q-043 L1)');
+  engine2.answer(cards(wB)[0].action.askId, { answer: 'deny' });
+  ok((await pB).code === 'ask_denied', '…Deny settles it; nothing ran on the boot-spent grant');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -64,6 +64,7 @@ const mkHosts = (dev, { hostRec = null } = {}) => ({
   async deviceBounded() { return dev; },
   get() { if (!hostRec) throw new Error('host not found'); return hostRec; },
   sshArgs() { return ['-p', '22', 'user@h']; },
+  sshEnv: require('../src/hosts.js').HostManager.prototype.sshEnv, // the REAL one (lane spawn-env-debts: every ssh road's env)
 });
 
 // ── 1. The script itself is machine-agnostic ──

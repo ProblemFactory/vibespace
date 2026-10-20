@@ -592,7 +592,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
       const icon = vwEl('div', 'vw-locked-icon');
       icon.append(glyph('lock', 28));
       const txt = vwEl('div', 'vw-locked-text');
-      txt.append(vwEl('div', null, t('The vault is locked — unlock it to see what it holds.')), vwEl('div', null, t('While it is locked every use answers «locked» — nothing fails in another way.')));
+      txt.append(vwEl('div', null, t('The vault is locked — Unlock… above shows what it holds (For you names what is waiting on it).')), vwEl('div', null, t('While it is locked every use answers «locked» — nothing fails in another way.')));
       const u = btnEl(t('Unlock…'), 'vw-unlock vw-primary');
       u.onclick = () => showUnlock();
       box.append(icon, txt, u);

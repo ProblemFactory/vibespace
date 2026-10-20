@@ -22,6 +22,9 @@
  * TIMING: a mapped frame's clock is its first byte's arrival (ts90k for RTP; encodeMs = that → its access unit out of the
  *   encoder: map + encode + both pipes). The direct road's capture and encode happen inside ffmpeg: no per-picture clock
  *   (encodeMs null, said in stats as `timing: 'in-ffmpeg'`).
+ * POWER THROTTLING (lane stream-sdr-ecoqos, B-0485): while a stream runs, this agent and its ffmpegs are out of Windows' power
+ *   throttling (EcoQoS — hidden processes are slowed: 3–6 fps at 4K, 19–22 opted out), every road; the agent's opt-out is held by
+ *   the streams and given back when the last one ends, a crash included (THE KEEPER in createWindowsScreen); `ecoqos` in the numbers.
  * KEYFRAMES: ffmpeg's CLI cannot force an IDR on a running encoder — the GOP (2 s) bounds a keyframe request; the wait is
  *   measured (`keyWaitMs`). BITRATE: likewise fixed per process — src/stream-plan.js THE RATE (lane stream-mac-rate: the rule
  *   of every road — rateFollower, RATE_RULE) judges the estimate against what was sent and restarts the ENCODER only on a held
@@ -53,6 +56,7 @@ const named = (code, error) => ({ ok: false, code, error });
 const median = (a) => (a.length ? [...a].sort((x, y) => x - y)[a.length >> 1] : null);
 const STILL_MS = 10000;     // one still's capture at most (a display that hands no frame: ddagrab waits for one)
 const STILL_PNG_MAX = 48 * 1024 * 1024;
+const QOS_BATCH_MS = 100;    // the power-throttling opt-outs asked this close together go in ONE PowerShell (a start's agent + ffmpegs)
 
 /** THE screen source of this machine — a Mac's is src/agentd/stream-mac.js (lane stream-p3m-build: its helper, the same
  *  `{ facts, source }` and source interface); every other platform's is the one below (Windows; elsewhere not_windows). */
@@ -67,6 +71,56 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       execFile(file, args, { env, windowsHide: true, timeout: RUN_MS, maxBuffer, encoding: 'utf8' }, (err, stdout, stderr) => resolve({ err, stdout: String(stdout || ''), stderr: String(stderr || '') }));
     } catch (e) { resolve({ err: e, stdout: '', stderr: '' }); }
   });
+
+  // lane stream-sdr-ecoqos (B-0485, the owner 2026-10-20 「SDR 路也关」): THE POWER-THROTTLING OPT-OUT'S LIFETIME, every Windows road's.
+  // A stream's processes leave Windows power throttling (EcoQoS) while it runs — src/stream-plan.js unthrottlePs, the HDR lane's ONE
+  // script (measured on the owner's box: the SDR mapped road 3–6 → 19–22 fps at 4K). An ffmpeg's opt-out ends with that ffmpeg;
+  // THIS agent's is process-wide and outlives a stream, so it is HELD: the first stream that starts opts the agent out, the last one
+  // that ends — stopped, or ended by name (an ffmpeg's crash: the source's one end, below) — gives it back (`restore`: the system
+  // manages it again, as before any stream). One queue: the pids asked within QOS_BATCH_MS go in one script, and each script runs
+  // after the one before (a give-back never overtakes the opt-out it undoes). A process's throttling only — never a display setting.
+  const qos = { holders: 0, want: [], timer: null, sent: false, gen: 0, agent: 'on', chain: Promise.resolve() };
+  function qosScript(pids, restore) {
+    const p = qos.chain.then(() => run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(SP.unthrottlePs(pids, { restore }), 'utf16le').toString('base64')])).then((r) => {
+      const rows = SP.parseUnthrottle(r.stdout) || [];
+      log(`[stream] screen source: Windows power throttling ${restore ? 'given back' : 'off'} for ${pids.join(', ')} — ${rows.length ? rows.map((x) => `${x.pid} ${x.ok ? 'ok' : `error ${x.err}`}`).join(', ') : 'no answer'}`);
+      return rows;
+    });
+    qos.chain = p.catch(() => []);
+    return p;
+  }
+  /** A pid to opt out, batched; `onRow({ pid, ok, err })` hears its answer. → false where there is nothing to opt out of. */
+  function qosAsk(pid, onRow) {
+    if (platform !== 'win32' || !(pid > 0)) return false;
+    qos.want.push({ pid, onRow });
+    if (!qos.timer) { qos.timer = setTimeout(qosFlush, QOS_BATCH_MS); qos.timer.unref?.(); }
+    return true;
+  }
+  function qosFlush() {
+    const asks = qos.want; qos.want = []; qos.timer = null;
+    if (!asks.length) return;
+    if (asks.some((a) => a.pid === process.pid)) qos.sent = true;
+    qosScript(asks.map((a) => a.pid), false).then((rows) => {
+      for (const a of asks) { try { a.onRow(rows.find((x) => x.pid === a.pid) || { pid: a.pid, ok: false, err: null }); } catch { /* the source's */ } }
+    });
+  }
+  /** A pid whose process ended before its batch went (a stream's ffmpeg at the stream's end): never opted out — a pid is reused. */
+  const qosForget = (pid) => { qos.want = qos.want.filter((a) => a.pid !== pid); };
+  /** A stream starts: the first one opts this agent out (`onRow` hears the agent's answer then). → held (false: not Windows). */
+  function qosHold(onRow) {
+    if (platform !== 'win32') return false;
+    if (qos.holders++ === 0) { const gen = qos.gen; qosAsk(process.pid, (row) => { if (gen === qos.gen) qos.agent = row.ok ? 'off' : 'on'; onRow(row); }); }
+    return true;
+  }
+  /** A stream ended: the last one gives this agent's opt-out back (none sent yet ⇒ none is sent — nothing to give back). */
+  function qosRelease() {
+    if (qos.holders <= 0 || --qos.holders > 0) return;
+    qos.gen++; qos.agent = 'on';
+    if (qos.want.some((a) => a.pid === process.pid)) { qosForget(process.pid); return; }
+    if (!qos.sent) return;
+    qos.sent = false;
+    qosScript([process.pid], true);
+  }
   async function findFfmpeg() {
     const looked = [], tried = new Set();
     // PATH = this process's own (Windows' is the real `Path` — spawnEnv's copy is colon-joined) and then the spawn env's (its
@@ -172,30 +226,29 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     const restartsAt = []; // GONE MEANS GONE: when the capture was started again in place
     const procs = new Set();
     const end = (c) => { if (c && c.exitCode == null && !c.killed) { try { c.kill(); } catch { /* gone */ } } };
-    // lane stream-hdr-passthrough: WINDOWS POWER THROTTLING (src/stream-plan.js unthrottlePs — measured: a hidden agent's mapper 250–700
-    // ms a 4K frame, 1–5 fps; opted out 79 ms, 13 fps): the HDR road opts this agent and each of its ffmpegs out, once each, the pids
-    // of one start batched into one PowerShell (a restarted encoder / a re-asked capture: its new pid). The SDR roads: unchanged
-    const qosDone = new Set();
-    let qosWant = [], qosTimer = null;
-    function unthrottle(pid) {
-      if (!hdrRoad || platform !== 'win32' || !(pid > 0) || qosDone.has(pid)) return;
-      qosDone.add(pid); qosWant.push(pid);
-      if (!qosTimer) { qosTimer = setTimeout(flushQos, 100); qosTimer.unref?.(); }
-    }
-    function flushQos() {
-      const list = qosWant; qosWant = []; qosTimer = null;
-      if (!list.length || stopped) return;
-      run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(SP.unthrottlePs(list), 'utf16le').toString('base64')]).then((r) => {
-        const rows = SP.parseUnthrottle(r.stdout) || [];
-        st.unthrottle = { asked: (st.unthrottle ? st.unthrottle.asked : 0) + list.length, ok: (st.unthrottle ? st.unthrottle.ok : 0) + rows.filter((x) => x.ok).length };
-        log(`[stream] screen source: Windows power throttling off for ${list.join(', ')} — ${rows.length ? rows.map((x) => `${x.pid} ${x.ok ? 'ok' : `error ${x.err}`}`).join(', ') : 'no answer'}`);
-      });
+    // WINDOWS POWER THROTTLING (lane stream-hdr-passthrough's opt-out — a hidden agent's mapper 250–700 ms a 4K frame, opted out 79 ms;
+    // lane stream-sdr-ecoqos: EVERY road, the agent held for the stream's life — THE KEEPER above): this agent and each of its ffmpegs
+    // out, once each (a restarted encoder / a re-asked capture: its new pid); `ecoqos` in the numbers: 'off' once every one answered ok
+    let held = false;
+    const mine = new Map(); // pid → its answer's ok (null: asked)
+    const answered = (row) => {
+      if (mine.has(row.pid)) mine.set(row.pid, row.ok);
+      st.unthrottle = { asked: (st.unthrottle ? st.unthrottle.asked : 0) + 1, ok: (st.unthrottle ? st.unthrottle.ok : 0) + (row.ok ? 1 : 0) };
+    };
+    function unthrottle(pid) { if (!stopped && pid > 0 && !mine.has(pid) && qosAsk(pid, answered)) mine.set(pid, null); }
+    const ecoqos = () => (platform !== 'win32' ? 'n/a' : held && qos.agent === 'off' && [...procs].every((c) => mine.get(c.pid) === true) ? 'off' : 'on');
+    /** THE ONE END of this source (stop() asked, or finish() by name): every ffmpeg ended, the mapper gone — and, in its finally, the
+     *  opt-out given back (lane stream-sdr-ecoqos: an ffmpeg's crash never leaves this agent opted out). */
+    function close(asked) {
+      try { for (const c of procs) { if (asked) c.asked = true; end(c); } teardownMapper(); } finally {
+        for (const pid of mine.keys()) qosForget(pid);
+        if (held) { held = false; qosRelease(); }
+      }
     }
     function finish(code, why) {
       if (stopped) return;
       stopped = true;
-      for (const c of procs) end(c);
-      teardownMapper(); clearTimeout(qosTimer);
+      close(false);
       log(`[stream] screen source ended: ${code}${why ? ` (${why})` : ''}`);
       try { onEnd && onEnd(code); } catch { /* the host's */ }
     }
@@ -205,7 +258,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       const tail = [];
       c.asked = false;
       procs.add(c);
-      unthrottle(c.pid); // lane stream-hdr-passthrough: the HDR road's ffmpegs (a no-op on every other road)
+      unthrottle(c.pid); // lane stream-hdr-passthrough → stream-sdr-ecoqos: every road's ffmpegs
       c.stderr.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l.trim().slice(0, 200)); if (tail.length > TAIL) tail.shift(); } });
       c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('capture_failed', `${role}: ${e && (e.code || e.message)}`); });
       c.on('exit', (code, sig) => {
@@ -361,12 +414,12 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       start(onAccessUnit, onEnded) {
         if (onAu || stopped) return;
         onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rate.begin(t0); st.startedAt = t0;
-        unthrottle(process.pid); // lane stream-hdr-passthrough: this agent (its mapper's worker thread is this process's)
+        held = qosHold(answered); // lane stream-sdr-ecoqos: this agent (its mapper's worker thread is this process's), held for the stream's life
         if (keyAskedAt == null) keyAskedAt = t0;
         try { if (mappedRoad) startMapped(); else startDirect(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); }
         log(`[stream] screen source: ${plan.mode}, ${plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps, ${plan.encoder.label} ${rate.kbps} kbps (floor ${rate.floor})${plan.white ? `, white ${plan.white}` : ''}${hdrRoad ? ', PQ 10-bit BT.2020 (passthrough)' : ''}`);
       },
-      stop() { if (stopped) return; stopped = true; for (const c of procs) { c.asked = true; end(c); } teardownMapper(); clearTimeout(qosTimer); },
+      stop() { if (stopped) return; stopped = true; close(true); },
       still: () => still(plan), // lane desktop-handover: ONE still of this display (desktop-grab)
       requestKeyframe() { if (keyAskedAt == null) keyAskedAt = now(); },
       setTargetKbps(target) {
@@ -383,6 +436,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
           encodeMs: mappedRoad ? median(st.encode) : null, timing: mappedRoad ? 'agent' : 'in-ffmpeg', mapMs: median(st.map), mapper: st.mapper,
           hdr: hdrRoad ? { codec: 'AV1', bits: 10, transfer: 'pq', primaries: 'bt2020' } : null, // lane stream-hdr-passthrough: the details' 「HDR」 row
           unthrottle: st.unthrottle || null, // lane stream-hdr-passthrough: { asked, ok } — Windows power throttling turned off
+          ecoqos: ecoqos(), // lane stream-sdr-ecoqos: 'off' (this agent + every live ffmpeg opted out, answered ok) | 'on' | 'n/a' (not Windows) — the details' row
           captured: st.frames, aus: st.aus, dropped: st.dropped, restarts: st.restarts, captureRetries: st.captureRetries || 0, captureRestarts: st.captureRestarts || 0, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered };
       },
     };

@@ -95,7 +95,7 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
     for (const s of live.values()) { try { N.redactGroupCards(s, keys, RCm.CLEARED_TEXT); } catch (e) { console.warn('[groups] a group card was not re-worded:', e && e.message); } }
   };
   const liveness = livenessReader({ liveSessions, readUserState, convIndex, metaDir: require('path').join(dataDir, 'session-meta') });
-  const groups = createGroups({ store: channels.store, deliver, broadcast: (msg) => bcastAll(msg), now, roster: liveSessions, groupSetting, onPending: onGroupsPending, onCleared: onGroupCardsCleared, liveness });
+  const groups = createGroups({ store: channels.store, dataDir, deliver, broadcast: (msg) => bcastAll(msg), now, roster: liveSessions, groupSetting, onPending: onGroupsPending, onCleared: onGroupCardsCleared, liveness });
   // the archive / boot door: ONE sweep at a time, a write during a sweep re-runs it once after
   let sweeping = null, sweepAgain = false;
   groups.noteUserState = () => {

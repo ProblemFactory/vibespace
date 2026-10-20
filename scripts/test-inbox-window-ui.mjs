@@ -54,7 +54,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, takeCspReports } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs'; // ⑳'s RED CONTROL: the patched copy lives outside the checkout
 import { buildPatchedBundle } from './pairing-ui-harness.mjs'; // …built into a client bundle the control page is served
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
@@ -604,6 +604,8 @@ try {
   console.log('⑫ negative control');
   const x12 = await evalJs(`new Promise((res) => { const d = document.createElement('div'); d.className = 'iw-title'; d.innerHTML = ${JSON.stringify(HOSTILE_TITLE)}; document.body.appendChild(d); setTimeout(() => { const v = window.__xss; d.remove(); window.__xss = undefined; res(v); }, 800); })`);
   check('the hostile title through a raw innerHTML copy DOES run (window.__xss === 1) — ② can go red', x12 === 1, x12);
+  // ⑫ is a NEGATIVE CONTROL: the raw-innerHTML copy ran `<img src=x onerror=…>` on the app page, so the report-only CSP (lane app-page-csp) noted ONE script-src-attr/inline — TAKE it (scratch.mjs), it is the policy doing its job, not a leak the teardown should fail on (int331 seam).
+  await takeCspReports((r) => r.directive === 'script-src-attr' && String(r.blocked) === 'inline', { want: 1 });
   check('no uncaught page exceptions on the desktop page', P1.errors.length === 0, P1.errors.slice(0, 3));
 
   // ── ⑪ the phone ──
@@ -639,6 +641,7 @@ try {
     const LANE = '    c.ta.disabled = false;', PRE = '    c.ta.disabled = !v.reply.enabled;';
     check('control: the lane\'s line is in the window module exactly once (the patched copy swaps it back to the pre-lane line)', wsrc.split(LANE).length === 2 && !wsrc.includes(PRE));
     check('vault-run-ask (the run card) renders VERBATIM, never markdown — its type is in the isCmd command list so a `*` or `#` in the command line shows as typed (SEAM int330, q-043 P0-f)', /const isCmd = [^;]*vault-run-ask/.test(wsrc), (wsrc.match(/const isCmd = [^;]*;/) || [])[0]);
+    check('vault-grant-ask (the agent\'s request card) renders VERBATIM, never markdown — its type is in the `plain` list so the entry ref and the agent\'s OWN words (a `*`, a `# y`, two lines) show as typed, escaped (SEAM int331, q-043 P0-c / vault-scrub-forms §8)', /const plain = [^;]*vault-grant-ask/.test(wsrc), (wsrc.match(/const plain = [^;]*;/) || [])[0]);
     const MUT = mutantCopies('inbox-window-ui-dead', repo);
     const bundleText = await buildPatchedBundle(MUT, 'src/lib/inbox-window.js', wsrc.split(LANE).join(PRE), 'pre-lane');
     for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: '⑳ ' })) check(row.name, row.pass, row.detail);

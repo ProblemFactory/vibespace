@@ -27,7 +27,7 @@ const USAGE = [
   '  vibespace-api groups invite <g-…|group name> <target>    into an agent group you are in (no wake)',
   '  <target> = a conversation id, <backend>:<id> or a session id (sess-…); a conversation the key opened is within its reach',
   'no grant yet ⇒ the call asks the user in For you (≤ 60 s) and waits; a refusal is final for 10 minutes. Full manual: vibespace-docs api',
-  'the vault locked ⇒ every call answers vault_locked (exit 3): the user has already been told — never ask them to unlock; wait, or do other work',
+  'the vault locked ⇒ every call answers vault_locked (exit 3): the user has already been told and a person unlocks it on this instance\'s page — never ask them to unlock; wait, or do other work',
   'an open stays inside its key\'s LIMITS (folders · accounts · permission modes · models · modes — `keys` prints them); outside ⇒ refused by name',
 ].join('\n');
 

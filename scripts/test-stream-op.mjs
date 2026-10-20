@@ -288,10 +288,15 @@ const factsFile = path.join(homeScr, 'facts.json'), psArgsS = path.join(homeScr,
 const setDisplays = (list) => fs.writeFileSync(factsFile, factsLine(list));
 setDisplays([D1, D2]);
 const qosLog = path.join(homeScr, 'qos.log'); // lane stream-hdr-passthrough: each power-throttling opt-out script's pids, one line a run
+// lane stream-sdr-ecoqos: … as `off <pids>` or `restore <pids>` (the give-back: ControlMask 0), each mode's last script kept verbatim;
+// every script the agent runs → psAll (facts / qos / other, + ` display` if it holds a display-setting call — never expected)
+const qosLast = path.join(homeScr, 'qos-last-'), psAll = path.join(homeScr, 'ps-all.log');
+const DISPLAY_SET = /ChangeDisplaySettings|SetDisplayConfig|DisplayConfigSetDeviceInfo|SetDeviceGammaRamp/;
 fs.writeFileSync(path.join(binS, 'powershell.exe'), `#!${process.execPath}
 const fs = require('fs'); const a = process.argv.slice(2); const script = Buffer.from(a[a.length - 1] || '', 'base64').toString('utf16le');
+fs.appendFileSync(${JSON.stringify(psAll)}, (/'stream-facts'/.test(script) ? 'facts' : /VsQos/.test(script) ? 'qos' : 'other') + (${DISPLAY_SET}.test(script) ? ' display' : '') + '\\n');
 if (/'stream-facts'/.test(script)) { fs.appendFileSync(${JSON.stringify(psRunsS)}, 'x'); try { const n = Number(fs.readFileSync(${JSON.stringify(psFailS)}, 'utf8')) || 0; if (n > 0) { fs.writeFileSync(${JSON.stringify(psFailS)}, String(n - 1)); process.stderr.write('DisplayConfig: a transient failure\\r\\n'); process.exit(1); } } catch { /* none asked */ } fs.writeFileSync(${JSON.stringify(psArgsS)}, JSON.stringify(a)); process.stdout.write(fs.readFileSync(${JSON.stringify(factsFile)}, 'utf8') + '\\r\\n'); process.exit(0); }
-if (/VsQos/.test(script)) { const ids = ((/foreach \\(\\$id in @\\(([\\d,]+)\\)\\)/.exec(script) || [])[1] || '').split(',').map(Number); fs.appendFileSync(${JSON.stringify(qosLog)}, ids.join(',') + '\\n'); process.stdout.write(JSON.stringify({ t: 'unthrottle', rows: ids.map((pid) => ({ pid, ok: true, err: 0 })) }) + '\\r\\n'); process.exit(0); }
+if (/VsQos/.test(script)) { const ids = ((/foreach \\(\\$id in @\\(([\\d,]+)\\)\\)/.exec(script) || [])[1] || '').split(',').map(Number); const mode = /ControlMask = 0,/.test(script) ? 'restore' : 'off'; fs.writeFileSync(${JSON.stringify(qosLast)} + mode, script); fs.appendFileSync(${JSON.stringify(qosLog)}, mode + ' ' + ids.join(',') + '\\n'); process.stdout.write(JSON.stringify({ t: 'unthrottle', rows: ids.map((pid) => ({ pid, ok: true, err: 0 })) }) + '\\r\\n'); process.exit(0); }
 process.stdout.write('ready\\r\\n'); process.stdin.on('data', () => process.stdout.write('ok\\r\\n'));
 `, { mode: 0o755 });
 const cal = calibrationFrame(1280, 720, SP.CALIBRATION.rows);
@@ -299,6 +304,9 @@ const rawFile = path.join(homeScr, 'cal.f16'), ffLog = path.join(homeScr, 'ffmpe
 fs.writeFileSync(rawFile, cal.buf);
 const FF = writeFakeFfmpeg(binS, { log: ffLog, fixture: FIXTURE, raw: rawFile, nv12: nv12File, dieCapture: dieCap, dieEncoder: dieEnc, dieCaptureTimes: dieN, version: '7.1', encoders: ['h264_nvenc', 'libx264'] });
 const psRuns = () => (fs.existsSync(psRunsS) ? fs.readFileSync(psRunsS, 'utf8').length : 0);
+// lane stream-sdr-ecoqos: the opt-out log as rows { mode: 'off' | 'restore', pids }; the daemon's own pid (its pid file)
+const qosRows = () => (fs.existsSync(qosLog) ? fs.readFileSync(qosLog, 'utf8').trim().split('\n').filter(Boolean) : []).map((l) => { const [mode, ids = ''] = l.split(' '); return { mode, pids: ids.split(',').map(Number).filter((x) => x > 0) }; });
+const agentPidS = () => { try { return Number(fs.readFileSync(path.join(rootOf(homeScr), 'state', 'agentd.pid'), 'utf8').trim()) || null; } catch { return null; } };
 const ffRuns = () => (fs.existsSync(ffLog) ? fs.readFileSync(ffLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 const dms = deviceOn(homeScr, scrBundle);
 const cs = await dms.connect();
@@ -492,7 +500,7 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   };
   const units = (rtp) => { const out = []; let cur = []; for (const p of rtp) { cur.push(p.payload); if (p.marker) { out.push(AV1.depacketize(cur)); cur = []; } } return out; };
   // A: a browser that takes AV1 (its answer lists it first)
-  const n0 = ffRuns().length, q0 = fs.existsSync(qosLog) ? fs.readFileSync(qosLog, 'utf8').trim().split('\n').filter(Boolean).length : 0;
+  const n0 = ffRuns().length, q0 = qosRows().length;
   const A = await hdrSession([SM.STREAM_CODEC_AV1, SM.STREAM_CODEC]);
   ok(A.off.ok && JSON.stringify(rtpmaps(A.off.offer.sdp)) === '["AV1","H264"]' && /a=fmtp:\d+ level-idx=5;profile=0;tier=0/.test(A.off.offer.sdp) && A.off.source.mode === 'hdr' && A.off.source.encoder === 'NVENC AV1' && JSON.stringify(A.off.source.hdr) === '{"can":true,"on":true,"why":null}' && JSON.stringify(A.off.codecs) === '["video/AV1","video/H264"]',
     'hdr asked of the HDR display with av1_nvenc: the offer lists AV1 FIRST (profile 0, the probe\'s fmtp) then H.264; the source says hdr, NVENC AV1', { maps: A.off.ok && rtpmaps(A.off.offer.sdp), src: A.off.source });
@@ -507,17 +515,19 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   const wantP = new Uint16Array(SP.p010Bytes(1280, 720) / 2); SP.p010FromHalf(new Uint16Array(cal.buf.buffer, cal.buf.byteOffset, cal.buf.length / 2), 1280, 720, SP.buildPqTables(), wantP);
   ok(p010 && p010.length === 1280 * 720 * 3 && Buffer.compare(p010, Buffer.from(wantP.buffer)) === 0, 'THE PQ GATE through the real daemon: the P010 its encoder got IS p010FromHalf of the owner\'s FP16 calibration frame, sample for sample (the worker\'s own tables = the function)', p010 && p010.length);
   const stA = A.off.ok ? await dms.streamStats(A.off.sid) : {};
-  const qos = await until(() => { const l = fs.existsSync(qosLog) ? fs.readFileSync(qosLog, 'utf8').trim().split('\n').filter(Boolean) : []; return l.length > q0; }, 4000);
-  const qLines = fs.readFileSync(qosLog, 'utf8').trim().split('\n').filter(Boolean).slice(q0), qPids = (qLines[0] || '').split(',').map(Number);
+  const qos = await until(() => qosRows().length > q0, 4000);
+  const qLines = qosRows().slice(q0), qPids = qLines[0] ? qLines[0].pids : [];
   const stA2 = A.off.ok ? await dms.streamStats(A.off.sid) : {};
   ok(stA.ok && stA.stats.codec === 'AV1' && stA.stats.screen.mode === 'hdr' && JSON.stringify(stA.stats.screen.hdr) === '{"codec":"AV1","bits":10,"transfer":"pq","primaries":"bt2020"}' && stA.stats.screen.mapper === 'worker' && stA.stats.screen.captured >= 40,
     'the numbers: the codec sent is AV1, the road hdr (PQ 10-bit BT.2020 — the details\' 「HDR」 row), mapped by the worker', stA.stats && { codec: stA.stats.codec, screen: stA.stats.screen });
-  ok(qos && qLines.length === 1 && qPids.length === 3 && qPids.every((p) => Number.isInteger(p) && p > 0) && new Set(qPids).size === 3 && stA2.stats.screen.unthrottle && stA2.stats.screen.unthrottle.asked === 3 && stA2.stats.screen.unthrottle.ok === 3,
-    'Windows POWER THROTTLING: ONE opt-out script for the agent and its two ffmpegs (three pids — the start batched), all three ok in the numbers', { qLines, un: stA2.stats && stA2.stats.screen.unthrottle });
+  ok(qos && qLines.length === 1 && qLines[0].mode === 'off' && qPids.length === 3 && qPids.every((p) => Number.isInteger(p) && p > 0) && new Set(qPids).size === 3 && qPids.includes(agentPidS()) && stA2.stats.screen.unthrottle && stA2.stats.screen.unthrottle.asked === 3 && stA2.stats.screen.unthrottle.ok === 3,
+    'Windows POWER THROTTLING: ONE opt-out script for the agent and its two ffmpegs (three pids — the start batched, the agent\'s own among them), all three ok in the numbers', { qLines, agent: agentPidS(), un: stA2.stats && stA2.stats.screen.unthrottle });
   if (A.off.ok) await dms.streamStop(A.off.sid);
   A.b.pc.close();
+  const backA = await until(() => qosRows().length > q0 + 1, 4000);
+  ok(backA && JSON.stringify(qosRows().slice(q0 + 1)) === JSON.stringify([{ mode: 'restore', pids: [agentPidS()] }]), 'stopped ⇒ the agent\'s opt-out is given back (lane stream-sdr-ecoqos: the HDR road\'s too — it used to stay opted out until the agent restarted)', qosRows().slice(q0));
   // B: a browser WITHOUT AV1 — the same hdr offer, answered H.264 ⇒ the mapped road (today's picture), no opt-out
-  const n1 = ffRuns().length, q1 = fs.readFileSync(qosLog, 'utf8').trim().split('\n').filter(Boolean).length;
+  const n1 = ffRuns().length, q1 = qosRows().length;
   const B = await hdrSession([SM.STREAM_CODEC]);
   const flowsB = await until(() => pictures(B.b.got.rtp).length >= 20, 12000);
   const picsB = pictures(B.b.got.rtp), kh = AUS.findIndex((a) => a.key);
@@ -528,7 +538,8 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   ok(B.off.ok && JSON.stringify(rtpmaps(B.off.offer.sdp)) === '["AV1","H264"]' && flowsB && sameB === 20 && stB.stats.codec === 'H264' && stB.stats.screen.mode === 'mapped' && stB.stats.screen.hdr === null && JSON.stringify(encB) === JSON.stringify(SP.encodeArgv(planB)),
     'a browser WITHOUT AV1 answers the same offer with H.264 ⇒ the agent runs today\'s mapped road (NV12 → NVENC H.264, the plan\'s argv byte for byte) and the H.264 fixture plays byte for byte', { sameB, codec: stB.stats && stB.stats.codec, mode: stB.stats && stB.stats.screen.mode, encB });
   await sleep(600);
-  ok(fs.readFileSync(qosLog, 'utf8').trim().split('\n').filter(Boolean).length === q1 && !stB.stats.screen.unthrottle, 'the SDR road opts nothing out (the power-throttling script is the HDR road\'s)');
+  const qB = qosRows().slice(q1), unB = ((await dms.streamStats(B.off.sid)).stats || {}).screen;
+  ok(qB.length === 1 && qB[0].mode === 'off' && qB[0].pids.length === 3 && qB[0].pids.includes(agentPidS()) && unB && unB.unthrottle && unB.unthrottle.ok === 3 && unB.ecoqos === 'off', 'lane stream-sdr-ecoqos: the SDR (mapped) road this browser got opts the agent and both ffmpegs out too — ONE script, ecoqos off (before: nothing opted out)', { qB, un: unB && unB.unthrottle, ecoqos: unB && unB.ecoqos });
   if (B.off.ok) await dms.streamStop(B.off.sid);
   B.b.pc.close();
   FF.set({ av1: null, p010: null, encoders: ['h264_nvenc', 'libx264'] }); await dms.streamFacts({ force: true });
@@ -570,6 +581,80 @@ const endedOf = (arr) => { const m = arr.find((x) => x.op === 'stream-stats' && 
   ok(ctlMs >= MDNS_TIMEOUT_MS * 0.9, `RED CONTROL: werift itself, handed that candidate before the answer, waited ${ctlMs} ms in setRemoteDescription (its multicast lookup's 10 s timeout — the page sat at 「连接中」)`, ctlMs);
   lite.close(); peer.pc.close();
 }
+{
+  // lane stream-sdr-ecoqos (B-0485, the owner 2026-10-20 「SDR 路也关」) — THE OPT-OUT'S LIFETIME on the SDR roads, through the real
+  // daemon: the agent + each ffmpeg opted out ONCE at the start (one script — the HDR lane's unthrottlePs, byte for byte) and the
+  // numbers say ecoqos off; given back at the stop and after an ffmpeg's crash (the agent's pid alone — its ffmpegs ended with the
+  // stream); two streams share the agent's (the first opts it out, the last gives it back); no script touches a display setting
+  setDisplays([D1, D2]); FF.set({ encoders: ['h264_nvenc', 'libx264'] }); await dms.streamFacts({ force: true });
+  const me = agentPidS(), psAt = () => (fs.existsSync(psAll) ? fs.readFileSync(psAll, 'utf8').trim().split('\n').filter(Boolean) : []);
+  const ps0 = psAt().length;
+  const settle = () => sleep(600); // a stray script would land within it (the keeper batches for 100 ms)
+  const rowsFrom = async (q, n) => { await until(() => qosRows().length >= q + n, 6000); await settle(); return qosRows().slice(q); };
+  const session = async (sourceId = null) => {
+    const b = standIn(), push = [];
+    const off = await dms.streamOffer({ sourceKind: 'screen', ...(sourceId ? { sourceId } : {}) }, { onPush: (m) => { push.push(m); if (m.op === 'stream-ice' && m.candidate) b.pc.addIceCandidate(m.candidate).catch(() => { }); } });
+    if (off.ok) { await b.pc.setRemoteDescription(off.offer); await b.pc.setLocalDescription(await b.pc.createAnswer()); await dms.streamAnswer(off.sid, { answer: { type: 'answer', sdp: b.pc.localDescription.sdp } }); }
+    await until(() => pictures(b.got.rtp).length >= 5, 10000);
+    return { off, b, push };
+  };
+  const screenOf = async (sid) => ((await dms.streamStats(sid)).stats || {}).screen || null;
+  const offOnce = (rows, n, agent = true) => rows.length === 1 && rows[0].mode === 'off' && rows[0].pids.length === n && new Set(rows[0].pids).size === n && rows[0].pids.includes(me) === agent;
+  const GIVE_BACK = JSON.stringify([{ mode: 'restore', pids: [me] }]);
+  // ① the MAPPED road (the HDR primary, H.264): the agent + the capture + the encoder
+  let q = qosRows().length;
+  const M = await session();
+  const offM = await rowsFrom(q, 1);
+  await until(async () => (await screenOf(M.off.sid))?.ecoqos === 'off', 4000);
+  const stM = await screenOf(M.off.sid);
+  ok(M.off.ok && M.off.source.mode === 'mapped' && me > 0 && offOnce(offM, 3) && fs.readFileSync(qosLast + 'off', 'utf8') === SP.unthrottlePs(offM[0].pids) && stM && stM.ecoqos === 'off' && stM.unthrottle && stM.unthrottle.ok === 3,
+    'the SDR MAPPED road (an HDR display, H.264): the agent and both ffmpegs opted out ONCE at the start, in one script (the HDR lane\'s unthrottlePs byte for byte), the agent\'s own pid among the three; the numbers say ecoqos off', { offM, me, ecoqos: stM && stM.ecoqos, un: stM && stM.unthrottle });
+  q = qosRows().length;
+  await dms.streamStop(M.off.sid); M.b.pc.close();
+  const backM = await rowsFrom(q, 1);
+  ok(JSON.stringify(backM) === GIVE_BACK && fs.readFileSync(qosLast + 'restore', 'utf8') === SP.unthrottlePs([me], { restore: true }), 'stopped ⇒ ONE give-back script, the agent\'s pid alone (its ffmpegs ended with the stream) — the same helper with ControlMask 0: the system manages it again', backM);
+  // ② the DIRECT road (the SDR display): the agent + its one ffmpeg
+  q = qosRows().length;
+  const Dr = await session(D2.id);
+  const offD = await rowsFrom(q, 1);
+  const stD = await screenOf(Dr.off.sid);
+  q = qosRows().length;
+  await dms.streamStop(Dr.off.sid); Dr.b.pc.close();
+  const backD = await rowsFrom(q, 1);
+  ok(Dr.off.ok && Dr.off.source.mode === 'direct' && offOnce(offD, 2) && stD && stD.ecoqos === 'off' && JSON.stringify(backD) === GIVE_BACK, 'the SDR DIRECT road (the SDR display): the agent and its one ffmpeg opted out once at the start (ecoqos off); stopped ⇒ the agent given back', { offD, ecoqos: stD && stD.ecoqos, backD });
+  // ③ an ffmpeg CRASHES: the encoder dies ⇒ the session ends encoder_exited — and the agent is given back with no stop asked
+  q = qosRows().length;
+  const C = await session();
+  const offC = await rowsFrom(q, 1);
+  q = qosRows().length;
+  fs.writeFileSync(dieEnc, '1');
+  await until(() => endedOf(C.push), 6000);
+  fs.rmSync(dieEnc, { force: true });
+  const backC = await rowsFrom(q, 1);
+  ok(offOnce(offC, 3) && endedOf(C.push) === 'encoder_exited' && JSON.stringify(backC) === GIVE_BACK, 'an ffmpeg CRASH (the encoder dies ⇒ encoder_exited, nobody asked a stop): the agent is given back in the end\'s finally — never left opted out', { offC, ended: endedOf(C.push), backC });
+  C.b.pc.close();
+  // ④ TWO streams at once share the agent's: the first opts it out, the second only its own ffmpeg; the first stopped gives nothing
+  // back (the second still runs at full speed), the last one does
+  q = qosRows().length;
+  const X = await session();
+  const offX = await rowsFrom(q, 1);
+  q = qosRows().length;
+  const Y = await session(D2.id);
+  const offY = await rowsFrom(q, 1);
+  const stY = await screenOf(Y.off.sid);
+  q = qosRows().length;
+  await dms.streamStop(X.off.sid); X.b.pc.close();
+  await settle();
+  const afterFirst = qosRows().slice(q), stY2 = await screenOf(Y.off.sid);
+  await dms.streamStop(Y.off.sid); Y.b.pc.close();
+  const afterLast = await rowsFrom(q, 1);
+  ok(offOnce(offX, 3) && offOnce(offY, 1, false) && stY && stY.ecoqos === 'off' && afterFirst.length === 0 && stY2 && stY2.ecoqos === 'off' && JSON.stringify(afterLast) === GIVE_BACK,
+    'TWO streams at once: the agent opted out ONCE (the second start asks only its own ffmpeg); the first stopped gives nothing back (the other still says ecoqos off); the last one stopped gives the agent back', { offX, offY, afterFirst, afterLast, ecoqos: [stY && stY.ecoqos, stY2 && stY2.ecoqos] });
+  // ⑤ display settings are never touched: every script the agent ran in these streams is the facts read or the opt-out
+  const kinds = psAt().slice(ps0);
+  ok(kinds.length > 0 && kinds.every((k) => k === 'facts' || k === 'qos') && !kinds.some((k) => /display/.test(k)) && !DISPLAY_SET.test(SP.unthrottlePs([1])) && !DISPLAY_SET.test(SP.unthrottlePs([1], { restore: true })) && !DISPLAY_SET.test(SP.STREAM_FACTS_PS),
+    'NEVER A DISPLAY SETTING: every PowerShell the agent ran around these streams was the facts read or the opt-out / give-back — none calls ChangeDisplaySettings / SetDisplayConfig / DisplayConfigSetDeviceInfo / SetDeviceGammaRamp', { kinds: [...new Set(kinds)], n: kinds.length });
+}
 dms.stop(); endDaemonsOf(rootOf(homeScr));
 
 console.log('§9 THE RATE on the screen road (lane stream-mac-rate): only a HELD shortfall restarts the encoder, never under the display\'s floor (in-process, the fake ffmpeg)');
@@ -607,6 +692,66 @@ console.log('§9 THE RATE on the screen road (lane stream-mac-rate): only a HELD
   ok(runs2.length === 3 && rateOf(runs2[2]) === '3100k' && src.stats().kbps === 3100 && src.stats().rate.why === 'recover', 'a quiet 20 s (no shortfall) ⇒ +25 % toward the cap: the encoder restarts at 3100k', { encs: runs2.length, rate: rateOf(runs2[2] || []), st: src.stats().rate });
   src.stop();
   await sleep(200);
+}
+
+console.log('§9b THE OPT-OUT\'S LIFETIME in-process (lane stream-sdr-ecoqos): never on another platform; MUTANTS that forget the give-back are RED');
+{
+  const SS = require(path.join(REPO, 'src/agentd/stream-screen.js'));
+  const { spawn: sp, execFile: ef } = require('child_process');
+  setDisplays([D1, D2]); FF.set({ encoders: ['h264_nvenc', 'libx264'] });
+  // every child a screen runs, read back: an opt-out script as { mode: 'off' | 'restore', pids }, anything else as { mode: 'other', file }
+  const recorder = () => {
+    const seen = [];
+    const exec = (file, args, opts, cb) => {
+      const sc = /powershell/i.test(file) ? Buffer.from(String(args[args.length - 1] || ''), 'base64').toString('utf16le') : '';
+      seen.push(/VsQos/.test(sc) ? { mode: /ControlMask = 0,/.test(sc) ? 'restore' : 'off', pids: ((/foreach \(\$id in @\(([\d,]+)\)\)/.exec(sc) || [])[1] || '').split(',').map(Number) } : { mode: 'other', file: path.basename(file) });
+      return ef(file, args, opts, cb);
+    };
+    return { seen, exec };
+  };
+  // NOT WINDOWS: the screen refuses before it runs anything — no PowerShell, so never an opt-out (a Mac's numbers say n/a: test-stream-mac)
+  const lin = recorder();
+  const rl = await SS.createScreen({ platform: 'linux', spawn: sp, execFile: lin.exec, env: { PATH: binS }, lookupEnv: { PATH: binS }, fs, makeWorker: null }).source({}, { maxKbps: 8000 });
+  ok(rl.ok === false && rl.code === 'not_windows' && lin.seen.length === 0, 'NOT WINDOWS: the screen refuses (not_windows) and runs nothing — no PowerShell, never an opt-out', { rl, seen: lin.seen });
+  /** A module's lifetime: a mapped stream started then STOPPED, then one whose encoder CRASHES → { stop, crash } each { off, eco, ended, after, back } */
+  async function lifetime(mod) {
+    const r = recorder();
+    const scr = mod.createScreen({ platform: 'win32', spawn: sp, execFile: r.exec, env: { PATH: binS }, lookupEnv: { PATH: binS }, fs, makeWorker: null });
+    const qosOf = () => r.seen.filter((x) => x.mode !== 'other');
+    const one = async (crash) => {
+      const src = await scr.source({}, { maxKbps: 8000 });
+      if (!src.ok) return { src };
+      const aus = []; let ended = null;
+      const n = qosOf().length;
+      src.start((au) => aus.push(au), (code) => { ended = code; });
+      await until(() => aus.length >= 3 && qosOf().length > n, 8000);
+      const eco = (await until(() => src.stats().ecoqos === 'off', 3000)) ? 'off' : src.stats().ecoqos;
+      const off = qosOf().slice(n);
+      if (crash) { fs.writeFileSync(dieEnc, '1'); await until(() => ended, 6000); fs.rmSync(dieEnc, { force: true }); } else src.stop();
+      await until(() => qosOf().length > n + 1, 3000); await sleep(400);
+      const after = qosOf().slice(n + 1);
+      return { off, eco, ended, after, back: after.length === 1 && after[0].mode === 'restore' && JSON.stringify(after[0].pids) === JSON.stringify([process.pid]) };
+    };
+    const stop = await one(false), crash = await one(true);
+    return { stop, crash };
+  }
+  const offOk = (x) => x.off && x.off.length === 1 && x.off[0].mode === 'off' && x.off[0].pids.length === 3 && x.off[0].pids.includes(process.pid) && x.eco === 'off';
+  const real = await lifetime(SS);
+  ok(offOk(real.stop) && real.stop.back && offOk(real.crash) && real.crash.ended === 'encoder_exited' && real.crash.back, 'THE MODULE: one opt-out at each start (this process + both ffmpegs, ecoqos off); given back at the stop AND after the encoder crashed (encoder_exited, no stop asked)', real);
+  // MUTANTS: a copy of the module with one line changed, required from the scratch dir (its own requires pointed at the tree)
+  const ssText = fs.readFileSync(path.join(REPO, 'src/agentd/stream-screen.js'), 'utf8');
+  const mutant = (name, from, to) => {
+    if (ssText.split(from).length !== 2) return null; // the anchor moved: the mutant is not made (and its row is RED)
+    const f = path.join(copyDir, `mut-${name}`, 'stream-screen.js'); fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, ssText.replace(from, to).replace("require('../stream-plan.js')", `require(${JSON.stringify(path.join(REPO, 'src/stream-plan.js'))})`).replace("require('../stream-av1.js')", `require(${JSON.stringify(path.join(REPO, 'src/stream-av1.js'))})`).replace("require('./stream-mac.js')", `require(${JSON.stringify(path.join(REPO, 'src/agentd/stream-mac.js'))})`));
+    return require(f);
+  };
+  const m1 = mutant('no-give-back', '    qosScript([process.pid], true);\n', '\n');
+  const r1 = m1 && await lifetime(m1);
+  ok(r1 && offOk(r1.stop) && !r1.stop.back && !r1.crash.back, 'MUTANT — the keeper forgets the give-back: this process stays opted out after the stop and after the crash ⇒ both lifetime rows are RED', r1 && { stop: r1.stop.after, crash: r1.crash.after });
+  const m2 = mutant('crash-keeps-it', '      stopped = true;\n      close(false);\n', '      stopped = true;\n      for (const c of procs) end(c); teardownMapper();\n');
+  const r2 = m2 && await lifetime(m2);
+  ok(r2 && r2.stop.back && r2.crash.ended === 'encoder_exited' && !r2.crash.back, 'MUTANT — an ending by name skips the give-back (only a stop gives it back): the crash row is RED — an encoder crash would leave the agent opted out for ever', r2 && { stop: r2.stop.after, crash: r2.crash.after });
 }
 
 console.log('§10 THE UDP LEG: the daemon\'s own datagrams to the hub relay — the picture past a slow device link');

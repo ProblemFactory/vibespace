@@ -67,7 +67,7 @@ function drawChip() {
     chip.id = id; chip.type = 'button';
     chip.innerHTML = UI_ICONS.lock || '';
     chip.appendChild(el('span', 'vault-chip-label', t('Vault locked')));
-    chip.title = t('Vault locked — click to unlock');
+    chip.title = t('Vault locked — click to unlock (For you names what is waiting on it)');
     chip.onclick = () => showUnlock();
     host.insertBefore(chip, document.getElementById(beforeId) || null);
   }
@@ -80,7 +80,7 @@ function drawChip() {
 // act), removed as soon as the vault is unlocked or not set up. lane vault-locked-refusal-notice: once the lock has stopped
 // someone (`facts.blocked` — the callers a vault_locked refusal noted this lock epoch) the strip says HOW MANY; the For-you
 // item names them. Re-worded in place on every facts change (the count grows; the unlock removes the strip). ──
-const stripWords = (n) => (n > 0 ? t('The vault is locked — {n} waiting on it (For you names them).', { n }) : t('The vault is locked — device links, the relay and account switching are waiting.'));
+const stripWords = (n) => (n > 0 ? t('The vault is locked — {n} waiting on it (For you names them). Unlock… enters the second password.', { n }) : t('The vault is locked — device links, the relay and account switching are waiting (For you names whatever it stops). Unlock… enters the second password.'));
 function drawLockStrip() {
   const locked = !!facts && facts.state === 'locked';
   let strip = document.getElementById('vault-lock-strip');

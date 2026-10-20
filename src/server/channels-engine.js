@@ -2540,7 +2540,7 @@ function create(deps = {}) {
   function settlementFor(act, failure, key, vaultClosed = false) {
     if (act.outcome === 'stopped') return { ok: false, code: 'stopped', error: 'the channels engine is stopping — refresh again after the restart' };
     // lane vault-e2e-password-fix-r2: a refresh of an account the LOCKED vault keeps closed hears the vault, never "not connected"
-    if (act.outcome === 'not-connected' && vaultClosed) return { ok: false, code: 'vault-locked', error: 'the vault is locked — this account\'s sign-in opens after the owner unlocks it on the page', polledAt: null };
+    if (act.outcome === 'not-connected' && vaultClosed) return { ok: false, code: 'vault-locked', error: 'the vault is locked — this account\'s sign-in opens after the owner unlocks it on this instance\'s page; the owner has already been told (For you names what is waiting on it)', polledAt: null };
     if (act.outcome === 'account-changed') return { ok: false, code: 'account-changed', error: 'the account changed while the refresh waited — refresh again' };
     if (act.outcome === 'not-connected') return { ok: false, code: 'not-connected', error: 'the refresh failed (not-connected)', polledAt: null };
     return failure ? { ...failure, polledAt: lastPollOf(key) } : { ok: false, code: String(act.code || 'failed'), error: `the refresh failed (${act.code || 'failed'})`, polledAt: lastPollOf(key) };
@@ -6718,7 +6718,7 @@ function create(deps = {}) {
     const perAccount = !!(mod && rowOf(mod) && rowOf(mod).bindsPerAccount);
     switch (code) {
       case 'auth-expired': return `Re-authorize ${rec.label || rec.id} from the Channels panel (rail → Channels → ${rec.label || rec.id} → Re-authorize).${perAccount ? ' If its OAuth client was withdrawn, pick another one in the same dialog — switching the client is a re-authorization.' : ''}`;
-      case 'vault-locked': return 'The vault is locked — this account\'s sign-in opens after the owner unlocks the vault on the page (an agent never asks for the password). Nothing needs re-authorizing.';   // lane vault-e2e-password-fix-r2
+      case 'vault-locked': return 'The vault is locked — this account\'s sign-in opens after the owner unlocks the vault on this instance\'s page; the owner has already been told (For you names what is waiting on it) — an agent never asks for the password. Nothing needs re-authorizing.';   // lane vault-e2e-password-fix-r2
       case 'rate-limited': return `The vendor is limiting how fast this account may read. VibeSpace paces its calls per second and per minute (Settings → Channels) and retries after a short wait — the vendor's own Retry-After when it sends one, else 5 s doubling to 60 s — never a 15-minute park. If this persists, lower the per-second setting, or check other clients reading the same account.`;
       case 'forbidden': return 'The vendor refuses this account access to these conversations. Check the app\'s granted scopes and the account\'s membership in them.';
       case 'transport': return 'The vendor could not be reached from this machine. Check egress / DNS; the loop retries with backoff.';

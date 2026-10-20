@@ -111,6 +111,10 @@ console.log('§6 THE TABLE');
   ok(by.fps.sent === 60 && by.kbps.sent === 5600 && by.path.via === 'udp' && by.encoder.ms === 9 && by.display.name === 'DELL U2723QE' && by.size.sw === 3840 && by.rate.floor === 2500 && by.rate.bwe === 7000 && by.loss.dropped === 2, 'each row\'s facts: sent fps / kbps beside received, the path, encode ms, the display\'s OWN name, the encoded size, the rate + floor + estimate, the totals', by);
   const bare = S.detailRows({ page: { rttMs: null } });
   ok(same(bare.map((r) => r.k), ['rtt', 'jitter', 'fps', 'decode', 'kbps']) && bare[0].ms === null && S.detailRows({}).length === 0, 'before the numbers: the five rows (— each), nothing nobody said; no read at all ⇒ no table', bare);
+  // lane stream-sdr-ecoqos: Windows power throttling — its row follows the encoder's; a Mac's 'n/a' (or anything else) is no row
+  const power = (ecoqos) => S.detailRows({ page, agent: { ...agent, screen: { ...agent.screen, ecoqos } }, via: 'udp', source });
+  ok(same(power('off').map((r) => r.k), ['rtt', 'jitter', 'fps', 'decode', 'kbps', 'path', 'codec', 'encoder', 'power', 'display', 'size', 'rate', 'loss']) && power('off').find((r) => r.k === 'power').ecoqos === 'off' && power('on').find((r) => r.k === 'power').ecoqos === 'on' && !power('n/a').some((r) => r.k === 'power') && !power('sideways').some((r) => r.k === 'power'),
+    'the power row (Windows power throttling, off | on) follows the encoder; n/a (a Mac) or an unknown word ⇒ no row');
   ok(S.detailRows({ page, via: 'sideways' }).every((r) => r.k !== 'path') && S.detailRows({ page, agent: { screen: { display: 'D9' } }, source }).find((r) => r.k === 'display').name === null, 'an unknown path is left out; a display the source does not list keeps its id, no name');
 }
 

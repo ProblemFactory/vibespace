@@ -1102,6 +1102,7 @@ console.log('\ncredential env: one derived list (src/harness-env.js), two doors'
     const m = /const \{([^}]*)\} = require\('[./]*agent-env\.js'\)/.exec(s);
     if (!m) return null;
     const aliases = m[1].split(',').map((x) => x.trim()).filter((x) => /^(agentEnv|daemonEnv)\b/.test(x)).map((x) => (x.split(':')[1] || x).trim());
+    if (!aliases.length) return null;   // serviceEnv alone (lane spawn-env-census): an ALLOWLIST — no credential name can pass, no drop to hand
     const calls = [];
     for (const a of aliases) {
       const re = new RegExp('(?<![\\w$])' + a + '\\(', 'g');

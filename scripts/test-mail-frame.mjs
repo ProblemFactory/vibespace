@@ -17,7 +17,7 @@
 //  ⑥ the parent's verdict: only THAT frame's window with THAT frame's token; a height clamped; a link opened
 //    only when http(s) / mailto
 //  ⑦ LAZY: at most LIVE_FRAME_CAP live frames, nearest first, nothing outside the keep zone (30 mails)
-//  ⑧ WIRING PINS: the DOM half is the ONE srcdoc site and calls the rules in order; DOMPurify's config is
+//  ⑧ WIRING PINS: the DOM half is the ONE frame-document site (the frame host — no srcdoc) and calls the rules in order; DOMPurify's config is
 //    the module's; sandbox is `allow-scripts` only; NEVER `allow-same-origin` in any channel file
 //  ⑨ CONTROLS (patched copies outside the tree): a sanitizer that keeps every attribute, and one that lets
 //    <script> through, each go RED on ①
@@ -210,6 +210,14 @@ console.log('④ the CSP and the frame document');
   ok(MF.cspFor({ nonce: 'abc' }) === "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; script-src 'nonce-abc'; base-uri 'none'; form-action 'none'; frame-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'", 'the CSP, exact (pictures off)', MF.cspFor({ nonce: 'abc' }));
   ok(MF.cspFor({ nonce: 'abc', pictures: true }) === "default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; font-src data:; script-src 'nonce-abc'; base-uri 'none'; form-action 'none'; frame-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'", 'the CSP, exact (Show pictures: + https: to img-src, that frame only)');
   ok(MF.cspFor({ nonce: "x' 'unsafe-inline" }).includes("'nonce-xunsafe-inline'"), 'a nonce is its own alphabet — a quote cannot widen the policy');
+  // lane design-frame-host: the HEADER's copy (src/server/frame-host.js) adds the host's own script by hash — that one
+  // token only, in that one shape; the document's meta never carries it
+  const H = "'sha256-" + 'A'.repeat(42) + "Q='";
+  ok(MF.cspFor({ nonce: 'abc', host: H }).includes(`script-src 'nonce-abc' ${H}; base-uri 'none'`) && MF.cspFor({ nonce: 'abc', host: H }).replace(` ${H}`, '') === MF.cspFor({ nonce: 'abc' }), 'the header\'s copy: the host\'s script hash joins script-src, nothing else moves');
+  const wide = ["'unsafe-inline'", "'sha256-x' *", H + ' *', "'nonce-abc'", 'https:', H.replace("'sha256-", "'sha384-")];
+  ok(wide.every((h) => MF.cspFor({ nonce: 'abc', host: h }) === MF.cspFor({ nonce: 'abc' })), 'anything but ONE sha256 source is dropped — the host slot cannot widen the policy', wide.map((h) => MF.cspFor({ nonce: 'abc', host: h }).slice(90, 140)).join(' | '));
+  ok(MF.frameHostSrc({ nonce: 'ab12' }) === '/frame-host?kind=mail&n=ab12' && MF.frameHostSrc({ nonce: 'ab12', pictures: true }) === '/frame-host?kind=mail&n=ab12&pictures=1', 'the frame host\'s address carries this frame\'s nonce (and the press)', MF.frameHostSrc({ nonce: 'ab12', pictures: true }));
+  ok(MF.frameHostSrc({ nonce: 'a&kind=design&n=x y' }) === '/frame-host?kind=mail&n=akinddesignnxy' && MF.frameHostSrc({ nonce: 'z'.repeat(99) }).length === '/frame-host?kind=mail&n='.length + 64, 'a nonce is URL-safe and bounded in the address (no second parameter rides in it)', MF.frameHostSrc({ nonce: 'a&kind=design&n=x y' }));
   const body = MF.sanitizeMailHtml(CORPUS.map((c) => c[1]).join('')).html;
   const doc = MF.composeSrcdoc({ body, nonce: 'n0nce', token: 'tok1', pictures: false });
   const cspAt = doc.indexOf('Content-Security-Policy'), bodyAt = doc.indexOf('<body>');
@@ -280,26 +288,27 @@ console.log('⑦ frames are lazy: nearest first, capped, only inside the keep zo
 }
 
 // ── ⑧ wiring pins ────────────────────────────────────────────────────────
-console.log('⑧ wiring: the ONE srcdoc site and its order');
+console.log('⑧ wiring: the ONE frame-document site (the frame host) and its order');
 {
   const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const dom = strip(fs.readFileSync(path.join(REPO, 'src/lib/channel-mail-frame.js'), 'utf-8'));
   const at = (re) => { const m = re.exec(dom); return m ? m.index : -1; };
-  const s1 = at(/MF\.sanitizeMailHtml\(/), s2 = at(/DOMPurify\.sanitize\(pure\.html, \{ \.\.\.MF\.DOMPURIFY_CONFIG/), s3 = at(/MF\.composeSrcdoc\(/), s4 = at(/f\.srcdoc = doc;/);
-  ok(s1 > 0 && s2 > s1 && s3 > s2 && s4 > s3, 'the DOM half runs step 1 (our sanitizer) → step 2 (DOMPurify with the module\'s config) → step 3 (composeSrcdoc) → the srcdoc', JSON.stringify({ s1, s2, s3, s4 }));
-  ok((dom.match(/\.srcdoc\s*=/g) || []).length === 1 && /f\.setAttribute\('sandbox', 'allow-scripts'\);/.test(dom) && !/allow-same-origin|allow-popups|allow-forms|allow-top-navigation|allow-modals/.test(dom), 'ONE srcdoc assignment; sandbox = "allow-scripts" and nothing else');
-  // THE FRAME'S ORDER (security verify r2, continued): sandbox flags bind at NAVIGATION and a srcdoc document inherits
-  // the PARENT's origin — so the flags must be on the element before the srcdoc is set and before it is inserted,
-  // else the mail's first document runs unsandboxed in VibeSpace's own origin. Created fresh per live frame.
+  const s1 = at(/MF\.sanitizeMailHtml\(/), s2 = at(/DOMPurify\.sanitize\(pure\.html, \{ \.\.\.MF\.DOMPURIFY_CONFIG/), s3 = at(/MF\.composeSrcdoc\(/), s4 = at(/writeFrame\(f, doc, MF\.frameHostSrc\(\{ nonce, pictures \}\)\);/);
+  ok(s1 > 0 && s2 > s1 && s3 > s2 && s4 > s3, 'the DOM half runs step 1 (our sanitizer) → step 2 (DOMPurify with the module\'s config) → step 3 (composeSrcdoc) → the frame host (writeFrame at this mail\'s own address)', JSON.stringify({ s1, s2, s3, s4 }));
+  ok((dom.match(/\.srcdoc\s*=|setAttribute\(\s*['"]srcdoc/g) || []).length === 0 && (dom.match(/writeFrame\(/g) || []).length === 1 && /import \{ writeFrame \} from '\.\/frame-host\.js';/.test(dom) && /f\.setAttribute\('sandbox', 'allow-scripts'\);/.test(dom) && !/allow-same-origin|allow-popups|allow-forms|allow-top-navigation|allow-modals/.test(dom), 'NO srcdoc (lane design-frame-host: a srcdoc frame runs under the app page\'s policy) — ONE writeFrame through the frame host; sandbox = "allow-scripts" and nothing else');
+  ok(/const nonce = rnd\(\);\n\s+const doc = MF\.composeSrcdoc\(\{ body: clean, nonce, token: s\.token,/.test(dom), 'ONE nonce per document, the same in its meta and in the host\'s address (the header) — a fresh one per frame');
+  // THE FRAME'S ORDER (security verify r2, continued): sandbox flags bind at NAVIGATION — so the flags must be on the
+  // element before its document is handed in (the host's src) and before it is inserted. Created fresh per live frame.
+  // (The host's header sandboxes it too since lane design-frame-host — a second wall, never the reason to relax this.)
   const orderOf = (code) => {
-    const i0 = code.indexOf("const f = document.createElement('iframe');"), i1 = code.indexOf("f.setAttribute('sandbox', 'allow-scripts');"), i2 = code.indexOf('f.srcdoc = doc;'), i3 = code.indexOf('s.box.replaceChildren(f);');
+    const i0 = code.indexOf("const f = document.createElement('iframe');"), i1 = code.indexOf("f.setAttribute('sandbox', 'allow-scripts');"), i2 = code.indexOf('writeFrame(f, doc, MF.frameHostSrc({ nonce, pictures }));'), i3 = code.indexOf('s.box.replaceChildren(f);');
     const between = i0 >= 0 && i3 > i0 ? code.slice(i0, i3) : '';
     return i0 >= 0 && i1 > i0 && i2 > i1 && i3 > i2 && !/appendChild\(f\)|replaceChildren\(f\)|insertBefore\(f|\.append\(f\)/.test(between) && (code.match(/document\.createElement\('iframe'\)/g) || []).length === 1;
   };
-  ok(orderOf(dom), 'the frame is CREATED fresh, sandboxed, THEN given its srcdoc, THEN inserted — never inserted or navigated before its flags');
+  ok(orderOf(dom), 'the frame is CREATED fresh, sandboxed, THEN handed its document (the host), THEN inserted — never inserted or navigated before its flags');
   const lateSandbox = dom.replace("    f.setAttribute('sandbox', 'allow-scripts');\n", '').replace('    s.box.replaceChildren(f);\n', "    s.box.replaceChildren(f);\n    f.setAttribute('sandbox', 'allow-scripts');\n");
-  const earlyInsert = dom.replace('    f.srcdoc = doc;\n', "    s.box.appendChild(f);\n    f.srcdoc = doc;\n");
-  ok(lateSandbox !== dom && earlyInsert !== dom && !orderOf(lateSandbox) && !orderOf(earlyInsert), 'NEGATIVE CONTROLS: the sandbox set after the insertion, or the frame inserted before its srcdoc, are both flagged');
+  const earlyInsert = dom.replace('    writeFrame(f, doc, MF.frameHostSrc({ nonce, pictures }));\n', "    s.box.appendChild(f);\n    writeFrame(f, doc, MF.frameHostSrc({ nonce, pictures }));\n");
+  ok(lateSandbox !== dom && earlyInsert !== dom && !orderOf(lateSandbox) && !orderOf(earlyInsert), 'NEGATIVE CONTROLS: the sandbox set after the insertion, or the frame inserted before its document, are both flagged');
   ok(/MF\.frameMessageVerdict\(\{ source: e\.source, frameWindow: s\.frame\.contentWindow, token: s\.token, data: e\.data \}\)/.test(dom) && /window\.open\(v\.href, '_blank', 'noopener,noreferrer'\)/.test(dom), 'the message listener asks the PURE verdict with the event\'s source and THAT frame\'s window; a link opens with no opener');
   ok(/MF\.liveFrames\(/.test(dom) && /new IntersectionObserver\(/.test(dom) && /signal: signal \|\| undefined/.test(dom), 'lazy frames: the PURE verdict over an IntersectionObserver; every listener on the window\'s controller');
   ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(dom), 'the DOM half writes no HTML anywhere else');
@@ -349,7 +358,7 @@ console.log('⑩ quoted history folded once (the outermost), a wide mail fitted'
   ok(/lastW=-1/.test(rs) && /if\(cw===lastW\)return;lastW=cw;b\.style\.zoom='1';var sw=b\.scrollWidth;b\.style\.zoom=sw>cw\+1\?String\(cw\/sw\):'1';/.test(rs) && /function h\(\)\{fit\(\);/.test(rs) && /b\.getBoundingClientRect\(\)\.height,b\.scrollHeight\*z/.test(rs) && /ro\.observe\(document\.body\)/.test(rs), 'the resizer fits a wide mail to the frame (zoom = frame ÷ the body\'s natural width), re-judged only when the frame\'s width CHANGES, before every height it posts — and the height is the body\'s ZOOMED box (a frame can shrink again), the body observed too');
   ok(/document\.querySelectorAll\('\[data-vs-quote\]'\)/.test(rs) && /classList\.toggle\('vs-open'\)/.test(rs) && /aria-expanded/.test(rs) && /el\.parentNode\.insertBefore\(b,el\)/.test(rs), 'one button per marked quote, inserted before it, toggling vs-open and saying so (aria-expanded), then the height is re-posted');
   const wire = fs.readFileSync(path.join(REPO, 'src/lib/channel-mail-frame.js'), 'utf-8');
-  ok(/composeSrcdoc\(\{ body: clean, nonce: rnd\(\), token: s\.token, pictures, quoteShow: t\('Show quoted text'\), quoteHide: t\('Hide quoted text'\) \}\)/.test(wire), 'WIRING: the DOM half hands the frame the device\'s words for the quote toggle');
+  ok(/composeSrcdoc\(\{ body: clean, nonce, token: s\.token, pictures, quoteShow: t\('Show quoted text'\), quoteHide: t\('Hide quoted text'\) \}\)/.test(wire), 'WIRING: the DOM half hands the frame the device\'s words for the quote toggle');
   const win = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8');
   ok(/if \(slot\) row\.insertBefore\(slot, body\);/.test(win) && !/row\.appendChild\(slot\)/.test(win), 'WIRING: the mail slot (bar + frame) is inserted BEFORE the text body — the bar never jumps under the text in Plain text');
   for (const [lang, show, hide] of [['zh', '显示引用内容', '收起引用内容'], ['ja', '引用を表示', '引用を隠す']]) {

@@ -182,7 +182,7 @@ const VOICE_WORDS = Object.freeze({
   denied: { words: 'The browser refused the microphone — allow it in the site permissions in the address bar', action: null },
   'no-mic': { words: 'No microphone was found on this device', action: null },
   'not-connected': { words: 'Connect your Dropline first', action: 'open-plugin' },
-  'vault-locked': { words: 'The vault is locked — unlock it first', action: 'unlock' },   // lane vault-e2e-password-fix-r2: the sealed sign-in
+  'vault-locked': { words: 'The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)', action: 'unlock' },   // lane vault-e2e-password-fix-r2: the sealed sign-in
   'plugin-off': { words: 'Voice input is turned off — turn it on in Plugins', action: 'open-plugin' },
   reconnect: { words: 'Your Dropline sign-in has expired — connect it again', action: 'open-plugin' },
   'rate-limited': { words: 'Dropline is rate limiting — try again in {n} s', action: null },

@@ -2,6 +2,36 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.331 — 2026-10-20
+
+### Added
+- An agent can ask you for a stored secret and say what it is for; you answer in For you (once, for 8 hours, or no), and it can list the receipts of its own uses.
+
+### Fixed
+- On Windows, the everyday screen stream is no longer slowed by the system's background power throttling while it runs (its details: Power throttling Off).
+- An instance deployed from a cluster publishes its own relay address after a restart, without the second password.
+- Publishing This VibeSpace to a public URL works again; it no longer says the relay is not configured when it is.
+
+### Security
+- The vault never hands an agent a secret's value — agents get a purpose and a receipt; only you see values, in the Vault window.
+- Repeated failed uses of the vault by one agent reach your For you tray, and so do repeated wrong second passwords from one address.
+- a secret an agent used never lands in a log, a buffer, a job's output or your tray — it is blanked where it is written
+- The app page now reports what a content-security policy would block, so it can be enforced soon without breaking anything; nothing is blocked yet.
+- System → Diagnostics report counts those reports; one from the page itself also appears in For you.
+- Designs (the canvas, print and print all) and formatted mail now load with their own security policy instead of the app page's; they look and work the same.
+- Locking the vault ends everything open at once: the window showing values, every question waiting, every grant and every command still running.
+- Every message about a locked vault now says that you were told and where to unlock it.
+- A command an agent runs with a stored secret now hides more spellings of it (UTF-16, base32, quoted-printable, escaped, coloured); its card says what it cannot.
+- The Desktop's display and session and the bridge to your remote machines no longer inherit VibeSpace's environment, only what they need.
+- Commands sent to your remote machines, storage mounts, the network helper and the clipboard helper no longer inherit VibeSpace's environment.
+- A storage mount's password no longer passes through a command line any local user could read.
+- A Background Work job's secrets and token no longer appear in the process list, and the helper that runs it no longer inherits VibeSpace's environment.
+- An HTML file's preview, an .eml mail's body and HTML inside a Word document now open in an isolated frame, never with your VibeSpace sign-in.
+- An .eml mail's remote pictures load only after you press Show pictures.
+
+### Maintenance
+- Test and release tooling only; nothing changes for you.
+
 ## 2.369.330 — 2026-10-20
 
 ### Added

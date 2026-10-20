@@ -273,6 +273,12 @@ console.log('§6 two things the real leg found (the owner\'s box, 2026-10-19)');
   ok(/SetProcessInformation\(h, 4, ref s/.test(ps) && /ControlMask = 1, StateMask = 0/.test(ps) && /OpenProcess\(0x0200, false, pid\)/.test(ps) && /foreach \(\$id in @\(12,56\)\)/.test(ps) && !/runas|Elevat/i.test(ps),
     'the power-throttling opt-out: ProcessPowerThrottling (4), EXECUTION_SPEED controlled (1) and off (0), PROCESS_SET_INFORMATION only (a process of the same user — no elevation); only whole positive pids reach the script');
   ok(SP.unthrottlePs(Array.from({ length: 20 }, (_, i) => i + 1)).includes('@(1,2,3,4,5,6,7,8)') && SP.unthrottlePs([]).includes('@(0)'), 'at most 8 pids a run; none ⇒ a script that touches nothing');
+  // lane stream-sdr-ecoqos: THE GIVE-BACK is the same helper — the same script with ONE character changed (ControlMask 1 → 0: the
+  // system manages the process's throttling again); neither touches a display setting
+  const back = SP.unthrottlePs([12, 56], { restore: true }), off = SP.unthrottlePs([12, 56]);
+  const diff = [...off].map((c, i) => (c !== back[i] ? [i, c, back[i]] : null)).filter(Boolean);
+  ok(back.length === off.length && diff.length === 1 && diff[0][1] === '1' && diff[0][2] === '0' && /ControlMask = 0, StateMask = 0/.test(back) && SP.unthrottlePs([12, 56], { restore: false }) === off && ![off, back].some((x) => /ChangeDisplaySettings|SetDisplayConfig|DisplayConfigSetDeviceInfo|SetDeviceGammaRamp/.test(x)),
+    'the give-back (`restore`) is the opt-out script with ONE character changed — ControlMask 1 → 0 (the system manages it again); neither touches a display setting', diff);
   ok(same(SP.parseUnthrottle('x\r\n{"t":"unthrottle","rows":{"pid":12,"ok":true,"err":0}}\r\n'), [{ pid: 12, ok: true, err: 0 }]) && same(SP.parseUnthrottle('{"t":"unthrottle","rows":[{"pid":1,"ok":true,"err":0},{"pid":2,"ok":false,"err":5}]}'), [{ pid: 1, ok: true, err: 0 }, { pid: 2, ok: false, err: 5 }]) && SP.parseUnthrottle('ready') === null,
     'its answer: PowerShell 5\'s lone row (an object) and a list read the same; an access-denied row keeps its error; no line ⇒ null');
 }

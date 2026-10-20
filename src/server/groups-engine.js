@@ -74,6 +74,7 @@ const GC = require('../group-card.js');
 const { makeRecord, inertFrames } = require('../channel-record.js');
 const { toAgentText: agentText } = require('../peer-text.js');   // verify r1 F3: a group's name on its way out (view)
 const DM = require('../dispatch-model.js');   // lane worker-dispatch verify r1 ②: the dispatch ledger's windows (PURE)
+const belt = require('../agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a group message a peer / the disk sees never carries a credential in the clear
 const msgAcl = require('../msg-acl.js');
 // "Clear content…" (2026-09-28): the replacement record, the fold every reader applies, the clear itself
 const RC = require('../record-clear.js');
@@ -107,6 +108,7 @@ function clipName(name) {
 
 function create({
   store,
+  dataDir = null,   // lane agent-output-sinks: the belt finds the vault from here (the hub's data dir, parent of channels/)
   deliver = null,
   broadcast = () => {},
   now = () => Date.now(),
@@ -374,6 +376,7 @@ function create({
     const prevLastAt = Number(g.lastAt) || 0;
     const at = Math.max(now(), prevLastAt + 1);
     const raw = typeof raw0 === 'function' ? raw0(at) : raw0;   // B-eba8: an await's `until` is reckoned from the record's own instant
+    if (raw && raw.kind === 'message') text = belt.maskForSink(String(text == null ? '' : text), { dataDir });   // agent-output-sinks: belt a MEMBER's message only — never a system event (create/invite/kick/leave/rename/archive/closed/ended)
     const rec = makeRecord({
       adapterId: A, convId: g.id, vendorId: `${raw.kind === 'message' ? 'gm' : 'gs'}-${at.toString(36)}-${(++seq).toString(36)}`, at,
       author: { id: author, name: displayName(g, author), isSelf: author === G.OWNER, isBot: false },

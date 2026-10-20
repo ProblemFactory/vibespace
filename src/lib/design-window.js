@@ -19,6 +19,9 @@
 //     never a greyed control.
 //   · PRINT: the focused artboard in a transient frame sandboxed `allow-scripts allow-modals` (print() needs
 //     allow-modals; still never allow-same-origin) with the row's @page.
+//   · THE FRAME HOST (lane design-frame-host): every frame this window makes — the canvas's artboards, Print, Print all
+//     — gets its document through src/lib/frame-host.js writeFrame at design-canvas-model.js FRAME_HOST (the hub's
+//     design policy), never as a srcdoc (which would run under the app page's policy).
 //   · PUBLISH…: the explorer's publish dialog twin (title + public) → `POST /api/design/publish {host, dir, title,
 //     public}`; the hub bundles server-side; the link dialog after.
 //   · The bar folds into ⋯ by priority (bar-fold.js — never wraps); a phone (≤ 768) keeps 44 px targets, Publish in ⋯,
@@ -31,7 +34,8 @@ import { createBarFold } from './bar-fold.js';
 import { onFileChanged, foldPath } from './file-changed.js';
 import { createDesignCanvas } from './design-canvas.js';
 import { pickerSource } from './design-pick.js';
-import { normalizeRead, quoteLine, printSrcdoc, zoomPercent } from './design-canvas-model.js';
+import { normalizeRead, quoteLine, printSrcdoc, zoomPercent, FRAME_HOST } from './design-canvas-model.js';
+import { writeFrame } from './frame-host.js';
 import { mountDesignAsk } from './design-ask.js';
 import { mountDesignChanges } from './design-changes.js';
 import { mountDesignPresent } from './design-present.js';
@@ -249,7 +253,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
   };
   let composer = null; // the open composer: { el|close, pick, ta }
   const canvas = createDesignCanvas(canvasHost, {
-    signal, counterZoom: COUNTER_ZOOM, pickerSrc: pickerSource(), words,
+    signal, counterZoom: COUNTER_ZOOM, pickerSrc: pickerSource(), writeFrame: (f, html) => writeFrame(f, html, FRAME_HOST), words,
     onPick: (msg) => openComposer(msg),
     onKey: (msg, frame) => frameEscape(frame),
     onActivate: (file) => { if (!canvas.pick()) canvas.focus(file); },
@@ -529,7 +533,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
     ifr.tabIndex = -1;
     ifr.style.width = f.w + 'px';
     ifr.style.height = f.h + 'px';
-    ifr.srcdoc = printSrcdoc(f.html, f);
+    writeFrame(ifr, printSrcdoc(f.html, f), FRAME_HOST);
     document.body.appendChild(ifr);
     printFrame = ifr;
     printTimer = setTimeout(dropPrint, PRINT_FRAME_MS);

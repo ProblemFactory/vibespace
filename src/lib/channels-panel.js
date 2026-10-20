@@ -212,7 +212,7 @@ function accountDot(a) {
 }
 /** lane vault-e2e-password-fix-r2: THE VAULT'S LINE — a sign-in the LOCKED vault keeps closed: its sentence and its one
  *  verb, the vault's door (src/lib/vault-unlock.js listens) — never "expired", never "Re-authorize". */
-const vaultLine = (a) => healthLine(a, t('The vault is locked — unlock it first'), { warn: true, verbs: [btn(t('Unlock'), () => window.dispatchEvent(new CustomEvent('vs-vault-door')), 'mounts-btn-primary')] });
+const vaultLine = (a) => healthLine(a, t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)'), { warn: true, verbs: [btn(t('Unlock'), () => window.dispatchEvent(new CustomEvent('vs-vault-door')), 'mounts-btn-primary')] });
 /** "{n} min ago" in the device's words (the keys the Usage window reads). */
 function agoText(ms, now = Date.now()) {
   const s = Math.max(0, (now - Number(ms)) / 1000);
@@ -821,7 +821,7 @@ function adapterNotes(app, a) {
       line(`${who} · ${t('re-authorize in {eta}', { eta })}`, { warn: Number(auth.expiresAt) - Date.now() <= 0 });
     }
   } else if (auth.state === 'vault-locked') {
-    line(t('The vault is locked — unlock it first'), { warn: true, verbs: [btn(t('Unlock'), () => window.dispatchEvent(new CustomEvent('vs-vault-door')))] });   // r2: the door
+    line(t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)'), { warn: true, verbs: [btn(t('Unlock'), () => window.dispatchEvent(new CustomEvent('vs-vault-door')))] });   // r2: the door
   } else if (auth.state === 'expired') {
     // `auth.why` is a CODE (token-expired / refresh-refused / …) — worded here (a3 i18n)
     line(t('needs re-authorization ({why})', { why: chanCaps.authWhyText(auth.why || 'token-expired', { t }) }), { warn: true });

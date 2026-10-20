@@ -208,7 +208,7 @@ async function graduateHostToDial(h, { serverUrl, viaRelay, by = 'system:graduat
   const sshRun = (script, timeout = 30000) => new Promise((resolve) => {
     const { execFile } = require('child_process');
     execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
-      { timeout, maxBuffer: 4 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || err?.message || '') }));
+      { env: hosts.sshEnv(), timeout, maxBuffer: 4 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || err?.message || '') }));
   });
     // ── install ──
     let base = String(serverUrl || '').replace(/\/$/, '') || String(instanceUrl?.url() || '').replace(/\/$/, '') || null; // ONE resolver (2.367.0): frp mapping layered over agentd.publicUrl.() — a free identifier since the split (2.343.2 audit)
@@ -246,7 +246,7 @@ async function graduateHostToDial(h, { serverUrl, viaRelay, by = 'system:graduat
     const inst = await new Promise((resolve) => {
       const { execFile } = require('child_process');
       const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', inv.remote],
-        { timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || '').slice(-3000), err: String(se || err?.message || '').slice(-1500) }));
+        { env: hosts.sshEnv(), timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || '').slice(-3000), err: String(se || err?.message || '').slice(-1500) }));
       child.stdin.on('error', () => { });
       child.stdin.end(inv.stdin);
     });
@@ -266,7 +266,7 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
     const sshRun = (script, timeout = 30000, input = null) => new Promise((resolve) => {
       const { execFile } = require('child_process');
       execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
-        { timeout, maxBuffer: 4 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || err?.message || '') }));
+        { env: hosts.sshEnv(), timeout, maxBuffer: 4 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || err?.message || '') }));
       });
     if (req.body?.remove) {
       // best-effort remote teardown, ALWAYS clear the record (dead host must
@@ -558,6 +558,7 @@ try { onMountsUpdated?.(); } catch (e) { console.warn('[mounts] boot ctx resync 
 mounts.pathGuard = (p) => mountTokens.list().some((t) => String(t.root || '').startsWith(p));
 setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', e.message)), 2000);
 vault.onUnlock(() => mounts.restore().catch((e) => console.error('[mounts] restore after the vault unlocked:', e.message))); // lane vault-e2e-password: a boot over a LOCKED vault could not open a mount's secret — the unlock re-mounts what is desired
+vault.onUnlock(() => { try { instanceUrl?.restore?.({ ifFailed: true }); } catch (e) { console.error('[instance-url] restore after the vault unlocked:', e.message); } }); // lane fleet-instance-publish: a desired instance URL whose restore FAILED tries again once the vault opens — one cycle per unlock
 // lane vault-e2e-password-fix-r2 — THE OPEN SWEEPS (seal what an older build left in the clear) and THE LOCK SIGNS EVERY LOGIN
 // OUT (the owner's decision ④): src/server/vault-hooks.js
 require('./vault-hooks.js').wireVaultHooks({ vault, auth, wss, hostTokens, plugins, sealed: [droplineTokens], integrations, userTodos, // lane vault-relock-door: the boot's SET-UP+LOCKED For-you notice (the tray says the vault is waiting)

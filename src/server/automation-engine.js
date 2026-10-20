@@ -15,7 +15,8 @@
  *     files ONE urgent For-you card per (key, subject) — 允许一次 / 一直 / 拒绝, 60 s, then refused; a refusal quiets the
  *     pair 10 minutes; the item and the ask are ONE state (hub-act-ask's discipline) — and the call waits for it.
  *   · THE VAULT LOCKED ⇒ every use answers 423 `vault_locked`, every use waiting on a card too (`onLock`); nothing is cached
- *     across a lock and `onOpen` warms nothing (a use never needs a value: the grant table decides).
+ *     across a lock and `onOpen` warms nothing (a use never needs a value: the grant table decides). A lock also spends every
+ *     once-grant no call spent (lane vault-manual-and-lock — the lock ends every one-time grant).
  *   · THE VERBS are the closed table's (PURE SCOPES); `verbs` maps the WIRED ones to their server-side doors (L1:
  *     conversations.rename — src/server/conversation-ops.js); every other verb answers 501 `verb_not_wired` (L2 wires them).
  *   · THE LIMITS (lane automation-open-limits — the q-048 verify's M2): a conversations.open is judged against its key's
@@ -279,8 +280,25 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     try { for (const it of (userTodos.snapshot?.() || {}).open || []) if (it && it.action && it.action.type === ACTION_TYPE && !asks.has(it.action.askId)) { try { userTodos.setStatus(it.id, 'done', 'ask-expired'); n++; } catch { } } } catch (e) { log(`automation ask reconcile failed: ${e.message}`); }
     return n;
   }
-  // THE LOCK: every call waiting on a card answers 423 now; nothing is cached (a use reads the store and the vault's state each time)
-  if (typeof vault.onLock === 'function') vault.onLock(() => { for (const q of [...asks.values()]) settle(q, 'vault_locked', { why: 'locked' }); });
+  // THE LOCK: every call waiting on a card answers 423 now; nothing is cached (a use reads the store and the vault's state each time).
+  // lane vault-manual-and-lock (decision ③ — a lock ends every ONE-TIME grant): an «Allow once» its call never spent (the call
+  // went away after the answer) is spent by the lock — the next use asks again; «Always» grants are the owner's and stay
+  let lockedAt = null;   // the last lock act: a once-grant made at or before it is SPENT whatever the store says (a write that failed below)
+  // q-043 L1 (int331 — BOOT IS A LOCK for once-grants): the vault is LOCKED after every start, so a once-grant PERSISTED from a
+  // previous run (present in the store at construction) is spent at boot — else an unlock in THIS run would revive it. Captured by
+  // identity (keyId·subject·at), so it survives db re-reads and never catches a grant made THIS run at the same (frozen-test) clock.
+  const gkey = (g) => `${g.keyId}\u0000${g.subject}\u0000${g.at}`;
+  const bootOnce = new Set(db.grants.filter((g) => g.mode === 'once' && !g.spentAt).map(gkey));
+  const liveGrants = () => db.grants.map((g) => (g.mode === 'once' && !g.spentAt && ((lockedAt != null && Number(g.at) <= lockedAt) || bootOnce.has(gkey(g))) ? { ...g, spentAt: lockedAt || g.at } : g));
+  if (typeof vault.onLock === 'function') vault.onLock(() => {
+    for (const q of [...asks.values()]) settle(q, 'vault_locked', { why: 'locked' });
+    const t = now(); lockedAt = t;
+    const open = db.grants.filter((g) => g.mode === 'once' && !g.spentAt);
+    if (!open.length || db.bad) return;
+    try { write({ keys: db.keys, grants: db.grants.map((g) => (g.mode === 'once' && !g.spentAt ? { ...g, spentAt: t } : g)) }); }
+    catch (e) { log(`the lock could not end ${open.length} unspent once-grant(s) (${e.code || e.message})`); return; }
+    for (const g of open) audit({ keyId: g.keyId, subject: g.subject, verb: 'key.grant', ok: false, code: 'vault_locked', by: 'lock', ask: 'once' });
+  });
 
   // ── THE LIMITS (lane automation-open-limits — the q-048 verify's M2) ──
   /** The EFFECTIVE open a call asks for — what the spawn would use: a value it does not name is the hub's default (the
@@ -330,7 +348,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     const pick = A.pickKey({ keys: db.keys, grants: db.grants, want, subject, subjectGroups: groups, verb });
     if (!pick.ok) return done({ ...named(pick.code, pick.code === 'key_ambiguous' ? `several keys hold ${verb} — name one with --key (${pick.names.join(', ')})` : null), args: v0.args });
     const key = pick.key;
-    let verdict = A.useVerdict({ key, grants: db.grants, subject, subjectGroups: groups, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
+    let verdict = A.useVerdict({ key, grants: liveGrants(), subject, subjectGroups: groups, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
     let asked = null;
     if (!verdict.ok && (verdict.code === 'not_granted' || verdict.code === 'once_spent')) {
       // lane automation-open-limits: an open its key may not make files no card — the owner is never asked about it
@@ -343,7 +361,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       if (r.outcome === 'unfiled') return done({ ...named('ask_unfiled', 'the question could not be filed in For you'), args: v0.args }, key.id, { ask: 'unfiled' });
       if (r.outcome !== 'allowed' && r.outcome !== 'always') return done({ ...named(r.outcome === 'expired' ? 'ask_expired' : 'ask_denied'), args: v0.args }, key.id, { ask: r.outcome });
       db = read();
-      verdict = A.useVerdict({ key: keyById(key.id), grants: db.grants, subject, subjectGroups: groups, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
+      verdict = A.useVerdict({ key: keyById(key.id), grants: liveGrants(), subject, subjectGroups: groups, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
       // once: the grant the answer wrote — spent by THIS call (a joined call finds it spent and asks again)
     }
     if (!verdict.ok) return done({ ...named(verdict.code), args: v0.args }, key.id, asked ? { ask: asked } : {});

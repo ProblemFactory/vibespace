@@ -915,7 +915,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     const vnc = (desktops.get(hostId) || {}).vnc || null;
     const auth = hubSpeaks(vnc) ? RS.rowAuthOf(vnc.type) : null;
     if (!auth) throw named('signin_unsupported', `the hub cannot sign in to ${hostName(hostId)}'s VNC server by itself (${vnc && vnc.ok ? `its sign-in type ${vnc.type}` : 'it was not reached yet'}) — nothing was stored`);
-    if (vaultLocked()) throw named('vault_locked', 'the vault is locked — unlock it first; nothing was stored');
+    if (vaultLocked()) throw named('vault_locked', 'the vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it); nothing was stored');
     const password = body && typeof body.password === 'string' ? body.password : '';
     const username = body && typeof body.username === 'string' ? body.username : '';
     if (!password) throw named('bad-request', 'a password is required — nothing was stored');

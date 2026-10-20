@@ -702,5 +702,57 @@ console.log('§ARD a sign-in handed to noVNC SAYS so: "Signing in…" at once; n
   }
 }
 
+// ── lane spawn-env-census: THE DESKTOP'S CHILDREN GET A SERVICE'S ENV, NEVER THE HUB'S (src/vnc.js → src/agent-env.js serviceEnv) ──
+// The hub's env PLANTED with runtime-built fakes (an agent conversation's session tokens, the cluster's relay token, a cloud
+// key) before the Desktop starts; the stand-in X server and the session's first binaries on a scratch PATH (a stand-in
+// dbus-launch + xfce4-session — no real bus, no display) record the NAMES of their env and the sha256 of every value.
+// CONTROL: the pre-fix vnc.js (a patched copy: Xvnc with no env, the session on `{ ...process.env, DISPLAY }`) hands
+// them every planted name.
+console.log('\nspawn-env-census: the Desktop\'s Xvnc and its session never see the hub\'s env (planted fakes)');
+{
+  const req = createRequire(import.meta.url);
+  const crypto = req('crypto'), net = req('net');
+  const { VncManager } = req('../src/vnc.js');
+  const { SERVICE_ENV_KEEP } = req('../src/agent-env.js');
+  const xdir = scratch('vncenv-x'), bin = path.join(xdir, 'bin'), saw = path.join(xdir, 'saw.jsonl');
+  fs.mkdirSync(bin, { recursive: true });
+  const rec = (role, body) => `#!${process.execPath}\nconst fs = require('fs'), crypto = require('crypto');\nconst sha = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');\nfs.appendFileSync(${JSON.stringify(saw)}, JSON.stringify({ role: ${JSON.stringify(role)}, pid: process.pid, keys: Object.keys(process.env).sort(), sha: Object.values(process.env).map(sha), display: process.env.DISPLAY || null }) + '\\n');\nprocess.on('SIGTERM', () => process.exit(0));\n${body}\n`;
+  fs.writeFileSync(path.join(xdir, 'fake-xserver'), rec('xvnc', "const a = process.argv.slice(2); require('net').createServer((c) => c.end()).listen(Number(a[a.indexOf('-rfbport') + 1]), '127.0.0.1', () => fs.writeSync(Number(a[a.indexOf('-displayfd') + 1]), '57\\n'));"), { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'dbus-launch'), rec('session', 'setInterval(() => {}, 1000);'), { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'xfce4-session'), rec('xfce4-session', ''), { mode: 0o755 });
+  const r8 = () => crypto.randomBytes(8).toString('hex');
+  const PLANT = { VIBESPACE_SESSION_TOKEN: 'vs-sess-' + r8(), VIBESPACE_FRPS_TOKEN: 'frps-' + r8(), CLAUDE_CODE_MESSAGING_TOKEN: 'cc-msg-' + r8(), AWS_SECRET_ACCESS_KEY: 'aws-' + r8() };
+  const before = { PATH: process.env.PATH, ...Object.fromEntries(Object.keys(PLANT).map((k) => [k, process.env[k]])) };
+  const freePort = () => new Promise((r) => { const sv = net.createServer().listen(0, '127.0.0.1', () => { const pt = sv.address().port; sv.close(() => r(pt)); }); });
+  const sawAll = () => { try { return fs.readFileSync(saw, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const shaOf = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
+  const leaked = (s) => (s ? Object.keys(PLANT).filter((k) => s.keys.includes(k) || s.sha.includes(shaOf(PLANT[k]))) : null);
+  const runOnce = async (M, tag) => {
+    fs.rmSync(saw, { force: true });
+    const dataDir = scratch('vncenv-data-' + tag); fs.mkdirSync(dataDir, { recursive: true });
+    const v = new M.VncManager({ dataDir, display: ':57', port: await freePort(), xvncBin: path.join(xdir, 'fake-xserver'), stopOnShutdown: true });
+    try { await v.ensureRunning(); } catch (e) { return { err: e.message }; }
+    for (let i = 0; i < 100 && sawAll().length < 2; i++) await sleep(30);
+    const all = sawAll();
+    for (const s of all) { try { process.kill(s.pid, 'SIGTERM'); } catch { } }
+    v.stop();
+    return { xvnc: all.find((s) => s.role === 'xvnc') || null, session: all.find((s) => s.role === 'session') || null, display: v.display };
+  };
+  try {
+    Object.assign(process.env, PLANT); process.env.PATH = bin + path.delimiter + before.PATH;
+    ok(Object.entries(PLANT).every(([k, v]) => process.env[k] === v), 'the planted names are in the hub\'s own env (the leg is not vacuous)', Object.keys(PLANT));
+    const now = await runOnce({ VncManager }, 'now');
+    ok(!!now.xvnc && leaked(now.xvnc).length === 0 && now.xvnc.keys.every((k) => SERVICE_ENV_KEEP.includes(k) || /^LC_[A-Z]+$/.test(k)), 'the Desktop\'s Xvnc holds a service\'s env (PATH HOME LANG TMPDIR XDG_RUNTIME_DIR TERM LC_*) — none of the planted names, none of their values', now.err || (now.xvnc && now.xvnc.keys));
+    ok(!!now.session && leaked(now.session).length === 0 && now.session.keys.every((k) => SERVICE_ENV_KEEP.includes(k) || ['USER', 'LOGNAME', 'SHELL', 'DISPLAY'].includes(k) || /^LC_[A-Z]+$/.test(k)) && now.session.display === now.display, 'its session (dbus-launch xfce4-session) holds that + USER LOGNAME SHELL and DISPLAY = the Desktop\'s display — none of the planted names or values', now.err || (now.session && { keys: now.session.keys, display: now.session.display }));
+    const pre = mutantCopies('vncenv', repo).load('src/vnc.js', read('src/vnc.js')
+      .replace(", env: serviceEnv(process.env) }); }", ' }); }')
+      .replace("const env = serviceEnv(process.env, { keep: ['USER', 'LOGNAME', 'SHELL'], add: { DISPLAY: this.display } });", 'const env = { ...process.env, DISPLAY: this.display }; delete env.XAUTHORITY;'), 'pre-service-env');
+    const old = await runOnce(pre, 'pre');
+    ok(!!old.xvnc && !!old.session && leaked(old.xvnc).length === 4 && leaked(old.session).length === 4, 'CONTROL: the pre-fix vnc.js (Xvnc with no env, the session on { ...process.env, DISPLAY }) hands both every planted name — RED as it must', old.err || { xvnc: old.xvnc && leaked(old.xvnc), session: old.session && leaked(old.session) });
+  } finally {
+    for (const [k, v] of Object.entries(before)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -869,7 +869,7 @@ export function installSidebarRail(Sidebar) {
       acts.className = 'ports-row-acts';
       const btn = (icon, tip, fn) => { const b = document.createElement('button'); b.className = 'mounts-icon-btn'; b.innerHTML = icon; b.dataset.tip = tip; b.onclick = fn; return b; };
       // lane vault-e2e-password-fix-r2: the relay's token is sealed and the vault is LOCKED — the vault's sentence, never "not configured"
-      const FRP_MSG = st.frpVaultLocked ? tr('The vault is locked — unlock it first') : tr('Public URLs need the frp relay — not configured on this instance');
+      const FRP_MSG = st.frpVaultLocked ? tr('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)') : tr('Public URLs need the frp relay — not configured on this instance');
       if (st.published) {
         acts.append(btn(PORT_ICONS.open, tr('Open'), () => this.app.openBrowser?.(st.url)));
         acts.append(btn(PORT_ICONS.copy, tr('Copy'), () => { copyText(st.url); showToast(tr('Copied')); }));
@@ -949,7 +949,7 @@ export function installSidebarRail(Sidebar) {
       try { hosts = ((await api('/api/hosts')) || {}).hosts || []; } catch { }
       // publish needs the frp relay — without it the button must SAY so, not no-op
       const frpOk = await pluginProvides('relay'); // the declared capability, never a plugin id
-      const FRP_MSG = !frpOk && (await pluginState('relay')).vaultLocked ? tr('The vault is locked — unlock it first') : tr('Public URLs need the frp relay — not configured on this instance');   // lane vault-e2e-password-fix-r2: the sealed relay token, LOCKED
+      const FRP_MSG = !frpOk && (await pluginState('relay')).vaultLocked ? tr('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)') : tr('Public URLs need the frp relay — not configured on this instance');   // lane vault-e2e-password-fix-r2: the sealed relay token, LOCKED
       const machines = [{ id: '__local__', name: tr('This machine'), online: true }, ...hosts.map((h) => ({ id: h.id, name: h.name || h.id, online: h.transport === 'dial' ? !!h.online : true }))];
       const nameOf = (hid) => (machines.find((m) => m.id === hid) || {}).name || hid;
 

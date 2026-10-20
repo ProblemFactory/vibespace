@@ -15,7 +15,8 @@
 //      it, the chat window shows the "Machines · <machine>" card with exit 0; the REAL vibespace-exit CLI + Deny ⇒ its
 //      output names the refusal; an ungranted stub ⇒ 403 + the card "may not run commands there"; a jbt_ token ⇒ 401
 //   · verify-r4 F4: an exit ask shows the WHOLE command byte for byte (the row's scrolling <pre>, the window verbatim —
-//     never markdown); CONTROL = a bundle rendering it as markdown again
+//     never markdown); CONTROL = a bundle rendering it as markdown again, DERIVED (lane mirror-330-reds): exit-run-ask taken
+//     out of the window's verbatim-command list wherever it sits — PURE legs first prove an added kind cannot break it
 //   · verify-r4 F5: an exit ask offers no typed Reply (row, For-you window) and the route refuses one — the ask keeps waiting
 //   · THE RECT CENSUS at 860 px and 360 px (radios ≥ 44 px, picker rows ≥ 40 px on the phone, no horizontal overflow)
 //   · lane hub-act-ask: THE THIRD LIST Hub 自动化 (从不 / 每次都问我 / 一直允许): not set on this LOCAL instance ⇒ 一直允许, said
@@ -26,11 +27,72 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { bootWorld, CHROME, sleep, rectCensusJs, REPO, labelRowCensusJs, LABEL_FIX_REVERT, swapStyleJs, machineRowCensusJs, ROW_FIX_REVERT, buildPatchedBundle } from './pairing-ui-harness.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { parse as acornParse } from 'acorn';
 
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const T0 = Date.now();
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+// ── THE F4 CONTROL'S PRE-FIX WINDOW, DERIVED (lane mirror-330-reds — the .330 mirror red: the control replaced the whole
+//    `const isCmd = …;` line by its literal text, and int330 put vault-run-ask beside exit-run-ask, so the patch stopped
+//    applying and the control could not build its red). Now the kind under test leaves the verbatim-command list WHEREVER
+//    it sits: acorn finds `isCmd`'s initializer (and any module-level list it reads by name) and only the kind's own string
+//    literal changes. A kind added beside it (int330's vault-run-ask, int331's vault-grant-ask), a chain turned into an
+//    array or a named Set — none moves the anchor. PURE, before the chrome.
+/** The string literals `isCmd` reads: its initializer's own, and those of any MODULE-LEVEL const it names (one hop). */
+function verbatimListOf(src, name = 'isCmd') {
+  const ast = acornParse(src, { ecmaVersion: 'latest', sourceType: 'module' });
+  const nodes = (n, out = [], parent = null, key = null) => {
+    if (!n || typeof n.type !== 'string') return out;
+    out.push({ n, parent, key });
+    for (const [k, v] of Object.entries(n)) {
+      if (Array.isArray(v)) for (const x of v) nodes(x, out, n, k);
+      else if (v && typeof v === 'object') nodes(v, out, n, k);
+    }
+    return out;
+  };
+  const all = nodes(ast);
+  const inits = all.filter(({ n }) => n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.id.name === name && n.init).map(({ n }) => n.init);
+  const top = new Map();
+  for (const st of ast.body) {
+    const d = st.type === 'ExportNamedDeclaration' ? st.declaration : st;
+    if (d && d.type === 'VariableDeclaration') for (const v of d.declarations) if (v.id.type === 'Identifier' && v.init) top.set(v.id.name, v.init);
+  }
+  const strings = (root) => nodes(root).filter(({ n }) => n.type === 'Literal' && typeof n.value === 'string').map(({ n }) => n);
+  const named = inits.flatMap((i) => nodes(i)).filter(({ n, parent, key }) => n.type === 'Identifier' && top.has(n.name)
+    && !(parent && parent.type === 'MemberExpression' && key === 'property' && !parent.computed)).map(({ n }) => top.get(n.name));
+  return { inits: inits.map((i) => src.slice(i.start, i.end)), literals: [...inits, ...new Set(named)].flatMap(strings) };
+}
+/** `src` with `kind` taken out of the verbatim-command list — `{ text, hits }`; hits 0 ⇒ the kind is not in the list. */
+function withoutVerbatimKind(src, kind) {
+  const hits = verbatimListOf(src).literals.filter((l) => l.value === kind).sort((a, b) => b.start - a.start);
+  let text = src;
+  for (const h of hits) text = text.slice(0, h.start) + JSON.stringify(`${kind} (pre-fix: not in the list)`) + text.slice(h.end);
+  return { text, hits: hits.length };
+}
+{
+  const KIND = 'exit-run-ask';
+  // the forms the list may take: today's chain, int331's (vault-grant-ask added), an array, a module-level Set by name
+  const FORMS = {
+    'the .330 chain': "const isCmd = !!(it.action && (it.action.type === 'exit-run-ask' || it.action.type === 'vault-run-ask'));",
+    'int331 (vault-grant-ask added)': "const isCmd = !!(it.action && (it.action.type === 'exit-run-ask' || it.action.type === 'vault-run-ask' || it.action.type === 'vault-grant-ask'));",
+    'an array': "const isCmd = !!(it.action && ['vault-grant-ask', 'exit-run-ask', 'vault-run-ask'].includes(it.action.type));",
+    'a named module-level Set': "const CMD_KINDS = new Set(['vault-run-ask', 'exit-run-ask', 'vault-grant-ask']);\nfunction f(it) { const isCmd = !!(it.action && CMD_KINDS.has(it.action.type)); return isCmd; }",
+  };
+  const isCmdOf = (text, type) => Function('it', /function f\(/.test(text) ? `${text}\nreturn f(it);` : `${text}\nreturn isCmd;`)({ action: { type } });
+  for (const [form, text] of Object.entries(FORMS)) {
+    const pre = withoutVerbatimKind(text, KIND);
+    const others = verbatimListOf(text).literals.map((l) => l.value).filter((v) => v !== KIND);
+    ok(pre.hits === 1 && isCmdOf(text, KIND) === true && isCmdOf(pre.text, KIND) === false && others.length >= 1 && others.every((k) => isCmdOf(pre.text, k) === true),
+      `CONTROL (F4, derived): ${form} — the pre-fix form drops ${KIND} only (verbatim before, markdown after; ${others.join(' / ')} stay verbatim)`, { hits: pre.hits, text: pre.text });
+  }
+  const winSrc = fs.readFileSync(path.join(REPO, 'src/lib/inbox-window.js'), 'utf8');
+  const live = verbatimListOf(winSrc), pre = withoutVerbatimKind(winSrc, KIND), after = verbatimListOf(pre.text);
+  const kept = live.literals.map((l) => l.value).filter((v) => v !== KIND);
+  ok(live.inits.length === 1 && pre.hits === 1 && !after.literals.some((l) => l.value === KIND) && kept.every((k) => after.literals.some((l) => l.value === k)),
+    `CONTROL (F4, derived): the window's own list today — ${KIND} found once in isCmd and taken out; ${kept.join(' / ') || '(no other kind)'} kept`, { inits: live.inits, hits: pre.hits });
+}
+
 const W = await bootWorld('exitui');
 const HOST = 'host-dial-exmac';
 const openRemote = async (P) => { await P.evalJs(`(() => { const s = app.sidebar; s.toggle?.(true); if (s._railEl) { if (s._activeTab !== 'mounts') s._railGo('mounts'); else s._render(); } else { s._activeTab = 'mounts'; s._updateTabs?.(); s._render(); } return true; })()`); return P.waitFor(`!!document.querySelector('.mounts-panel')?.offsetParent`, 15000); };
@@ -261,8 +323,8 @@ try {
     // CONTROL (F4, the window): a page whose bundle renders the detail as markdown again ⇒ the asterisks go, # is a heading
     const MUTW = mutantCopies('exitwin', REPO);
     const winSrc = fs.readFileSync(path.join(REPO, 'src/lib/inbox-window.js'), 'utf8');
-    const winPre = winSrc.replace("const isCmd = !!(it.action && it.action.type === 'exit-run-ask');", 'const isCmd = false;');
-    ok(winPre !== winSrc, 'CONTROL (F4 window): the patch applies');
+    const { text: winPre, hits: winHits } = withoutVerbatimKind(winSrc, 'exit-run-ask'); // DERIVED (mirror-330-reds): the kind leaves the list wherever it sits
+    ok(winHits >= 1 && winPre !== winSrc, `CONTROL (F4 window): the patch applies — exit-run-ask taken out of the verbatim-command list (${winHits} literal)`);
     const Q = await W.openPage({ width: 1280, height: 820, lang: 'zh', bundleText: await buildPatchedBundle(MUTW, 'src/lib/inbox-window.js', winPre, 'mdcmd') });
     await Q.evalJs(`app.openInbox({ itemId: ${JSON.stringify(r4.id)} }); true`);
     await Q.waitFor(`!!document.querySelector('.iw-detail')?.offsetParent`, 8000);

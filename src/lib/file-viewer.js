@@ -14,6 +14,7 @@ import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { fsErrorText } from './file-explorer-ops.js'; // verify-r2: a Files refusal in the reader's language
 import { wireFileDownload } from './file-download.js'; // lane viewer-download: every file window's Download
+import { writeFrame, hostAddress } from './frame-host.js'; // lane frame-host-preview: the .eml body's frame
 
 /** The viewer types renderInto draws itself (its if-chain, one entry each —
  *  scripts/test-window-binding-model.mjs pins the two lists equal); any other
@@ -520,8 +521,11 @@ class FileViewer {
   // ── PDF viewer via iframe/embed ──
   // ── .eml email viewer (2.134.0, Gmail mounts) — dependency-free MIME parse
   // (src/lib/eml.js) → header card + text/html toggle + attachment downloads.
-  // The HTML part renders in a FULLY sandboxed iframe (sandbox="" — no
-  // scripts, no same-origin, no navigation) via srcdoc.
+  // The HTML part renders in a sandboxed iframe NAVIGATED to the hub's frame
+  // host (lane frame-host-preview: `kind=eml` — NOTHING of the mail runs: the
+  // host's own line alone, by its response's nonce; no network; remote
+  // pictures only after "Show pictures", the mail frame's rule). A srcdoc
+  // frame ran under the APP page's policy instead.
   static async _renderEml(container, filePath, host = '') {
     const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const { parseEml } = await import('./eml.js');
@@ -547,13 +551,14 @@ class FileViewer {
       <div class="eml-atts"></div>`;
     const body = wrap.querySelector('.eml-body');
     const tools = wrap.querySelector('.eml-tools');
+    let pictures = false;
     const showHtml = () => {
       body.innerHTML = '';
       const frame = document.createElement('iframe');
       frame.className = 'eml-html-frame';
-      frame.setAttribute('sandbox', ''); // no scripts, no same-origin, no nav
-      frame.srcdoc = mail.htmlBody;
+      frame.setAttribute('sandbox', 'allow-scripts'); // the HOST's one line only — its header lets nothing of the mail run
       body.appendChild(frame);
+      writeFrame(frame, mail.htmlBody, hostAddress('eml', { pictures }));
     };
     const showText = () => {
       body.innerHTML = '';
@@ -573,6 +578,15 @@ class FileViewer {
         (mode === 'html' ? showHtml : showText)();
       };
       tools.appendChild(btn);
+    }
+    // remote pictures are blocked until the press (a tracking pixel is a read receipt) — the button only when there are any
+    if (mail.htmlBody && /(?:\bsrc\s*=\s*["']?|\burl\(\s*["']?|\bbackground\s*=\s*["']?)\s*(?:https?:)?\/\//i.test(mail.htmlBody)) {
+      const pics = document.createElement('button');
+      pics.className = 'tv-tool-btn eml-pictures';
+      pics.textContent = t('Show pictures');
+      pics.title = t('Remote pictures are blocked — loading them can tell the sender you read this');
+      pics.onclick = () => { pictures = true; pics.remove(); if (body.querySelector('.eml-html-frame')) showHtml(); };
+      tools.appendChild(pics);
     }
     if (mail.htmlBody) showHtml(); else showText();
     const atts = wrap.querySelector('.eml-atts');

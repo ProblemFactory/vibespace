@@ -268,7 +268,7 @@ const DV = fs.readFileSync(path.join(REPO, 'src/lib/docx-viewer.js'), 'utf8');
   }
   ok(/parseAsync\(buf, DOCX_RENDER_OPTIONS\)/.test(DV) && /renderDocument\(doc, bodyBox, styleBox, DOCX_RENDER_OPTIONS\)/.test(DV), 'parse and render both take DOCX_RENDER_OPTIONS');
   ok(/attachShadow\(\{ mode: 'open' \}\)/.test(DV), 'the document renders into a shadow root');
-  ok(/doc\.loadAltChunk = /.test(DV) && /setAttribute\('sandbox', ''\)/.test(DV), 'altChunk HTML is intercepted and re-hosted in a sandbox="" iframe');
+  ok(/doc\.loadAltChunk = /.test(DV) && /setAttribute\('sandbox', 'allow-scripts'\)/.test(DV) && /writeFrame\(f, ALTCHUNK_CSP \+ html, hostAddress\('docx'\)\)/.test(DV) && !/\.srcdoc\s*=/.test(DV), 'altChunk HTML is intercepted and re-hosted in a sandboxed iframe at the frame host\'s docx address (lane frame-host-preview: nothing of it runs — never srcdoc)');
   ok(/document\.fonts\.add\(face\)/.test(DV) && /document\.fonts\.delete\(face\)/.test(DV), 'embedded fonts are registered on document.fonts and removed on close');
   ok(/applyHeaderInheritance\(doc\);\s*applyStyleTabs\(doc\);\s*applySymbolBullets\(doc\);/.test(DV) && DV.indexOf('applySymbolBullets(doc);') < DV.indexOf('await renderDocument('), 'header inheritance, style tab stops and Symbol bullets are applied BEFORE render');
   ok(/localStorage\.(get|set)Item\(ZOOM_PREF_KEY/.test(DV), 'the zoom is remembered under ZOOM_PREF_KEY');

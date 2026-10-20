@@ -96,7 +96,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, takeCspReports } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -849,6 +849,10 @@ try {
   console.log('⑦ negative control');
   const x7 = await evalJs(`new Promise((res) => { const d = document.createElement('div'); d.className = 'ut-item'; d.innerHTML = '<div class="ut-text">' + ${JSON.stringify(HOSTILE_TITLE)} + '</div>'; document.body.appendChild(d); setTimeout(() => { const v = window.__xss; d.remove(); res(v); }, 800); })`);
   check('a patched renderer copy that assigns innerHTML = the raw title DOES run it (window.__xss === 1) — ① can go red', x7 === 1, x7);
+  // lane app-page-csp: the planted handler is what the app page's report-only policy exists for — it REPORTS it (the enforced
+  // policy will block it); the suite takes that one report, so its zero-report teardown (scripts/scratch.mjs) judges the rest
+  const planted = await takeCspReports((r) => r.directive === 'script-src-attr' && r.blocked === 'inline' && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(r.document));
+  check('…and the app page\'s report-only policy REPORTED the planted inline handler (script-src-attr inline — the enforced policy blocks it)', planted.length === 1, planted);
   check('no uncaught page exceptions on the desktop page', pageErrors.length === 0, pageErrors.slice(0, 3));
 
   // ── ⑳ THE FIRST SCREEN, MEASURED (lane foryou-folds, design q-044 decision 1) ──

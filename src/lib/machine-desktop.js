@@ -102,7 +102,7 @@ function askCredentials(m, types, auth, sign = null) {
     const user = wantUser ? field('text', t('User name')) : null;
     const pass = field('password', t('Password'));
     let keep = null;
-    if (s.locked) { const w = el('p', NOTE, t('The vault is locked — unlock it to sign in automatically')); w.className = 'machine-desktop-signin-locked'; form.append(w); }
+    if (s.locked) { const w = el('p', NOTE, `${t('The vault is locked — unlock it to sign in automatically')} — ${t('Unlock… at the top of the page; For you names what is waiting on it')}`); w.className = 'machine-desktop-signin-locked'; form.append(w); }
     else if (s.can) {
       const lab = el('label', 'margin:6px 0'); lab.className = 'dialog-check-row machine-desktop-signin-keep'; // the house checkbox row (the box beside its words)
       keep = document.createElement('input'); keep.type = 'checkbox'; keep.checked = !!s.refused; // a refused one was remembered before: the tick stays on
@@ -126,7 +126,7 @@ async function rememberSignin(m, creds) {
   const machine = nameOf(m);
   const r = await post('/api/desktop/machine-desktop/signin', { host: m.hostId, ...creds });
   if (r && !r.error) { showToast(t('{machine}’s sign-in remembered — sealed in the vault', { machine })); return; }
-  showToast(r && r.code === 'vault_locked' ? t('The vault is locked — unlock it to sign in automatically') : t('Could not remember the sign-in: {why}', { why: (r && r.error) || t('server unreachable') }), { type: 'error' });
+  showToast(r && r.code === 'vault_locked' ? `${t('The vault is locked — unlock it to sign in automatically')} — ${t('Unlock… at the top of the page; For you names what is waiting on it')}` : t('Could not remember the sign-in: {why}', { why: (r && r.error) || t('server unreachable') }), { type: 'error' });
 }
 
 /** THE WINDOW: the picture through the ONE bridge (VNC) or the machine's agent (the stream). `display` = the VNC picture's

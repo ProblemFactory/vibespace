@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execFileSync, spawn } = require('child_process');
+const { serviceEnv } = require('../agent-env.js');
 const multer = require('multer');
 
 const router = express.Router();
@@ -552,8 +553,10 @@ router.post('/api/paste-image', async (req, res) => {
         // the cookie out from under a long-running server (real incident).
         const attempt = (retriesLeft) => {
           const xEnv = req.app.locals.xEnv || {};
-          const clipEnv = { ...process.env, DISPLAY: xEnv.DISPLAY || process.env.DISPLAY || ':0' };
-          if (xEnv.XAUTHORITY) clipEnv.XAUTHORITY = xEnv.XAUTHORITY;
+          // xclip's env is BUILT (lane spawn-env-debts): it lives until another app takes the clipboard — the service list
+          // + the display it pastes to and its cookie, chosen exactly as before (the probed one, else the inherited one:
+          // detectXDisplay's '' cookie candidate IS the inherited XAUTHORITY), never the hub's tokens
+          const clipEnv = serviceEnv(process.env, { add: { DISPLAY: xEnv.DISPLAY || process.env.DISPLAY || ':0', XAUTHORITY: xEnv.XAUTHORITY || process.env.XAUTHORITY || null } });
           const cp = spawn('bash', ['-c', `cat "${tmpPath}" | xclip -selection clipboard -t ${mimeType}`], {
             env: clipEnv, detached: true, stdio: 'ignore',
           });
@@ -1050,7 +1053,7 @@ async function crossHostTransfer(req, res, { move }) {
           // earlier interrupted attempt (each file rewritten whole).
           // extract lands as <base>; rename remotely if the target name differs
           const post = destBase === base ? '' : ` && mv ${shq(destParent + '/' + base)} ${shq(destPath)}`;
-          destChild = spawn('ssh', [...inst.hosts.sshArgs(h), '--', `mkdir -p ${shq(destParent)} && tar -xf - -C ${shq(destParent)}${post}`]);
+          destChild = spawn('ssh', [...inst.hosts.sshArgs(h), '--', `mkdir -p ${shq(destParent)} && tar -xf - -C ${shq(destParent)}${post}`], { env: inst.hosts.sshEnv() });
         } else {
           // Staged extract (#22): untar into a marked temp sibling and mv into
           // place only when tar exits clean — a truncated stream (server death
@@ -1059,7 +1062,7 @@ async function crossHostTransfer(req, res, { move }) {
           // guarantees destPath is free, so the mv never collides.
           const stage = destParent + '/' + PARTIAL_SUFFIX + '-' + Date.now().toString(36);
           destChild = spawn('ssh', [...inst.hosts.sshArgs(h), '--',
-            `mkdir -p ${shq(stage)} && { tar -xf - -C ${shq(stage)} && mv ${shq(stage + '/' + base)} ${shq(destPath)} && rm -rf ${shq(stage)}; } || { rm -rf ${shq(stage)}; exit 1; }`]);
+            `mkdir -p ${shq(stage)} && { tar -xf - -C ${shq(stage)} && mv ${shq(stage + '/' + base)} ${shq(destPath)} && rm -rf ${shq(stage)}; } || { rm -rf ${shq(stage)}; exit 1; }`], { env: inst.hosts.sshEnv() });
         }
       } else {
         const dp = safePath(destPath), dParent = path.dirname(dp);
@@ -1121,7 +1124,7 @@ async function crossHostTransfer(req, res, { move }) {
       const part = destPath + PARTIAL_SUFFIX;
       const sizeGuard = srcSize != null ? ` && [ "$(wc -c < ${shq(part)})" -eq ${srcSize} ]` : '';
       const w = spawn('ssh', [...inst.hosts.sshArgs(h), '--',
-        `mkdir -p "$(dirname ${shq(destPath)})" && { cat > ${shq(part)}${sizeGuard} && mv -f ${shq(part)} ${shq(destPath)}; } || { rm -f ${shq(part)}; exit 1; }`]);
+        `mkdir -p "$(dirname ${shq(destPath)})" && { cat > ${shq(part)}${sizeGuard} && mv -f ${shq(part)} ${shq(destPath)}; } || { rm -f ${shq(part)}; exit 1; }`], { env: inst.hosts.sshEnv() });
       reader.pipe(w.stdin);
       await new Promise((resolve, reject) => { w.on('close', c => c === 0 ? resolve() : reject(new Error('remote write failed'))); reader.on('error', reject); });
     } else {

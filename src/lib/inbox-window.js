@@ -333,6 +333,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     'pool-always': () => actBtn('pool-always', UI_ICONS.check, t('Always for this pool'), t('Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time'), 'iw-act-exit'),
     // lane vault-run-door: a held run's «always» = this command SHAPE for this conversation, 30 days — the second password again first
     'shape-always': () => actBtn('shape-always', UI_ICONS.check, t('Always for this shape'), t('The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first'), 'iw-act-exit'),
+    // lane vault-manual-and-lock: an agent's request for a stored secret — For 8 hours = every run of that conversation with it for 8 hours (a lock ends it)
+    'grant-8h': () => actBtn('grant-8h', UI_ICONS.check, t('For 8 hours'), t('Every run of this conversation with this secret, for 8 hours — a new kind of command still shows its card; locking the vault ends it'), 'iw-act-exit'),
     // lane browser-propose: the agent's browser proposal — ONE primary Approve (runs exactly what the item says), a quiet Reject
     'proposal-approve': () => actBtn('proposal-approve', UI_ICONS.check, t('Approve'), t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit'),
     'proposal-reject': () => actBtn('proposal-reject', UI_ICONS.close, t('Reject'), t('Reject'), 'iw-act-exit'),
@@ -437,7 +439,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     const verbatim = isCmd || !!(it.action && it.action.type === 'helper-ask');
     // lane browser-propose: a browser proposal's detail is what its Approve runs, line for line — verbatim too, never markdown
     // lane parked-ask-inbox: a conversation's own ask carries its whole request too — verbatim, never markdown
-    const plain = verbatim || !!(it.action && (it.action.type === 'browser-proposal' || it.action.type === 'main-ask'));
+    const plain = verbatim || !!(it.action && (it.action.type === 'browser-proposal' || it.action.type === 'main-ask' || it.action.type === 'vault-grant-ask'));   // lane vault-manual-and-lock (int331 seam): a vault GRANT ask's detail = the entry ref + the agent's OWN words (the purpose) — shown verbatim, never markdown (a `*`/`#`/line-break the agent wrote must not re-render — the exit card's verify-r4 F4 trap)
     // design 009: an app install's ONE card — its lines, progress and Details fold (escaped; its buttons are the action row)
     const card = it.card && it.action && it.action.type === 'app-install' ? it.card : null;
     const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : (plain ? 'cmd\u0000' : 'md\u0000') + v.detail;
@@ -445,6 +447,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       if (card) { c.detail.innerHTML = appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false }); c.detail.style.display = ''; }
       else if (plain) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }
       else mdInto(c.detail, v.detail);
+      // lane vault-scrub-forms (q-043 verify M1): a RUN card says what the scrubbing does not promise — the owner reads the command
+      if (!card && it.action && it.action.type === 'vault-run-ask') c.detail.append(mk('div', 'iw-run-note', t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.')));
       if (!card) linkifyInto(c.detail); // lane foryou-attachments: text nodes only — the words stay as written
       if (!card) c.detail.style.display = v.detail ? '' : 'none';
       c.sig.detail = detailSig;
@@ -657,10 +661,10 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       if (await model.runAction(it, a === 'proposal-approve' ? 'approve' : 'reject')) advance(id);
       return;
     }
-      if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always' || a === 'pool-always' || a === 'shape-always') {
+      if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always' || a === 'pool-always' || a === 'shape-always' || a === 'grant-8h') {
       // lane hub-act-ask: the same arm as every Allow (a pane shown ARM_MS ago or less is not the one the user read)
       if (a !== 'hub-deny') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again')); return; } }
-        if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a.slice(4))) advance(id);
+        if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a === 'grant-8h' ? '8h' : a.slice(4))) advance(id);
       return;
     }
     if (a === 'exit-allow' || a === 'exit-deny') {

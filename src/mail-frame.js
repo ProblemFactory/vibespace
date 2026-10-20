@@ -9,7 +9,7 @@
  * whose MIME tree has a text/html part is shown FORMATTED — inside a FULLY
  * SANDBOXED iframe (`sandbox="allow-scripts"` ONLY: an opaque origin, no
  * same-origin, no forms, no popups, no top navigation; NEVER
- * `allow-same-origin`), its `srcdoc` built here in THIS order:
+ * `allow-same-origin`), its document built here in THIS order:
  *
  *   1. `sanitizeMailHtml()` — OUR allowlist re-serializer: the mail is
  *      TOKENIZED and written out AGAIN from the tokens, so nothing reaches the
@@ -27,6 +27,12 @@
  *      [https:]; style-src 'unsafe-inline'; font-src data:; script-src
  *      'nonce-…'` — then OUR resizer (the only script, carrying the nonce),
  *      then the sanitized body.
+ *   4. THE FRAME HOST (lane design-frame-host): the frame NAVIGATES to the
+ *      hub's host document (`frameHostSrc` — this nonce in the address) and
+ *      the document is posted in (src/lib/frame-host.js writeFrame): the hub
+ *      serves the host with THIS policy as a real header (`cspFor` + the
+ *      host's own script hash, src/server/frame-host.js). A srcdoc frame
+ *      inherited the APP page's policy instead (measured, lane app-page-csp).
  *
  * REMOTE PICTURES ARE BLOCKED until the person presses "Show pictures" on THAT
  * message (a mail client's rule — a tracking pixel is a read receipt); the
@@ -414,10 +420,12 @@ function cidRefs(html, max = MAX_CID_FETCH) {
 }
 
 // ── the frame's document (step 3) ────────────────────────────────────────
-/** THE CSP of one mail frame. `pictures` adds `https:` to img-src (that frame only). */
-function cspFor({ pictures = false, nonce = '' } = {}) {
+/** THE CSP of one mail frame. `pictures` adds `https:` to img-src (that frame only); `host` = the frame host's script
+ *  hash (`'sha256-…'` — the HEADER's copy carries it, src/server/frame-host.js; the document's meta never does). */
+function cspFor({ pictures = false, nonce = '', host = '' } = {}) {
   const n = String(nonce || '').replace(/[^A-Za-z0-9+/=_-]/g, '');
-  return `default-src 'none'; img-src data:${pictures ? ' https:' : ''}; style-src 'unsafe-inline'; font-src data:; script-src 'nonce-${n}'; base-uri 'none'; form-action 'none'; frame-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'`;
+  const h = /^'sha256-[A-Za-z0-9+/]{43}='$/.test(String(host)) ? ` ${host}` : '';
+  return `default-src 'none'; img-src data:${pictures ? ' https:' : ''}; style-src 'unsafe-inline'; font-src data:; script-src 'nonce-${n}'${h}; base-uri 'none'; form-action 'none'; frame-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'`;
 }
 /** OUR resizer — the only script in the frame: posts the content height (and a clicked link's href) to the
  *  parent with the frame's TOKEN; the parent trusts only the clamped height.
@@ -440,6 +448,11 @@ function resizerScript(token, { quoteShow = 'Show quoted text', quoteHide = 'Hid
     + `try{var ro=new ResizeObserver(h);ro.observe(document.documentElement);ro.observe(document.body);}catch(e){}addEventListener('load',h);q();h();`
     + `document.addEventListener('click',function(e){var a=e.target&&e.target.closest&&e.target.closest('a[href]');if(!a)return;e.preventDefault();parent.postMessage({vsMail:T,open:String(a.getAttribute('href')||'')},'*');},true);`
     + `document.addEventListener('submit',function(e){e.preventDefault();},true);})();`;
+}
+/** THE FRAME HOST's address for one mail frame: the hub serves its ONE host document there under THIS frame's policy
+ *  (`cspFor` with this nonce, `https:` pictures after the press) as a real header — the frame's own, never the app's. */
+function frameHostSrc({ nonce = '', pictures = false } = {}) {
+  return `/frame-host?kind=mail&n=${String(nonce || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64)}${pictures ? '&pictures=1' : ''}`;
 }
 /** The frame's WHOLE document: charset, the CSP meta FIRST, the base styles, the body, our nonce'd resizer. */
 function composeSrcdoc({ body = '', nonce = '', token = '', pictures = false, quoteShow, quoteHide } = {}) {
@@ -559,6 +572,6 @@ module.exports = {
   HEIGHT_SETTLE_MS, HEIGHT_MIN_GAP_MS, HEIGHT_FLIP_CAP, HEIGHT_FLIP_WINDOW_MS, heightBudget, heightVerdict, heightPending, cssKeyframes,
   ALLOWED_TAGS, DROP_TAGS, ALLOWED_ATTR, LINK_SCHEMES, DATA_IMAGE_RE, DOMPURIFY_CONFIG,
   decodeAttr, safeOpenHref, imageSrcVerdict, sanitizeCss, sanitizeMailHtml, cidRefs, isQuoteContainer,
-  cspFor, resizerScript, composeSrcdoc, clampHeight, frameMessageVerdict,
+  cspFor, resizerScript, composeSrcdoc, frameHostSrc, clampHeight, frameMessageVerdict,
   picturesState, picturesShown, showPictures, liveFrames, bodyAttachmentOf,
 };

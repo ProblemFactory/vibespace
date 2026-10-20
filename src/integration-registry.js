@@ -575,7 +575,7 @@ function credentialWhyText({ whyCode = null, whyParams = null, why = null } = {}
     case 'preset-gone': return t('the preset you chose ({key}) is no longer provided by the cluster', { key: p.key || '?' });
     case 'ambiguous': return t('the cluster provides {n} presets and none is the preferred one — choose one', { n: p.n || 0 });
     case 'undecryptable': return t('the stored keys ({fields}) cannot be decrypted with the current key file', { fields: Array.isArray(p.fields) ? p.fields.join(', ') : '' });
-    case 'vault-locked': return t('The vault is locked — unlock it first');   // lane vault-e2e-password-fix-r2: sealed, not lost
+    case 'vault-locked': return t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)');   // lane vault-e2e-password-fix-r2: sealed, not lost
     case 'store-unreadable': return t('the integrations store could not be read');
     case 'rebound': return t('the cluster default this row used ({from}) was re-keyed to {to} — the only default this instance offers', { from: p.from || '?', to: p.to || '?' });
     case 'no-store': return t('no integration store on this instance');

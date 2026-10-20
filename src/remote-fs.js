@@ -206,7 +206,7 @@ class RemoteFs {
       return Buffer.from(r.stdout || '', 'utf-8');
     }
     return new Promise((resolve, reject) => {
-      execFile('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', cmd], { timeout: timeoutMs, maxBuffer, encoding: 'buffer' },
+      execFile('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', cmd], { env: this.hosts.sshEnv(), timeout: timeoutMs, maxBuffer, encoding: 'buffer' },
         (err, stdout, stderr) => {
           if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 400)));
           resolve(stdout);
@@ -222,7 +222,7 @@ class RemoteFs {
   // Spawn a remote command and pipe its stdout to a stream (downloads).
   _spawn(id, cmd) {
     const h = this._host(id);
-    return spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', cmd]);
+    return spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', cmd], { env: this.hosts.sshEnv() });
   }
 
   async home(id) {
@@ -375,7 +375,7 @@ class RemoteFs {
     }
     const h = this._host(id);
     await new Promise((resolve, reject) => {
-      const child = spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', `mkdir -p "$(dirname ${shqp(filePath)})" && cat > ${shqp(filePath)}`]);
+      const child = spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', `mkdir -p "$(dirname ${shqp(filePath)})" && cat > ${shqp(filePath)}`], { env: this.hosts.sshEnv() });
       let err = '';
       child.stderr.on('data', d => { err += d; });
       child.on('close', (code) => code === 0 ? resolve() : reject(new Error(err.trim() || `write failed (${code})`)));

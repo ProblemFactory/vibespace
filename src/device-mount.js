@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
+const { serviceEnv, RCLONE_ENV_KEEP } = require('./agent-env.js');
 const { rcloneMountArgs } = require('./mount-argv.js');   // THE mount argv — the hub's builder (lane mount-argv-dir-cache)
 const { deviceCacheVerdict, NETWORK_FS_MAGIC } = require('./vfs-cache-place.js');   // lane vfs-cache-local: the device twin's cache verdict
 
@@ -267,12 +268,12 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   fs.mkdirSync(mountpoint, { recursive: true });
   // /proc fd links name the REAL path; resolve it before the mount covers it
   let realMp = mountpoint; try { realMp = await fs.promises.realpath(mountpoint); } catch { }
-  const env = {
-    ...process.env,
+  // the mount daemon's env is BUILT (lane spawn-env-debts): the rclone rule of src/mounts.js — never the hub's whole env
+  const env = serviceEnv(process.env, { keep: RCLONE_ENV_KEEP, egress: true, add: {
     RCLONE_CONFIG_VSDEV_TYPE: 'webdav',
     RCLONE_CONFIG_VSDEV_URL: `http://127.0.0.1:${bridgePort}`,
     RCLONE_CONFIG_VSDEV_VENDOR: 'other',
-  };
+  } });
   // The cache (lane vfs-cache-local, the STANDING SWEEP law): vfs-cache-mode minimal caches only files open for writing;
   // no caller passes vfsCacheDir, so rclone's own default ($XDG_CACHE_HOME/rclone, local home) applies. A passed dir on a
   // network filesystem is SAID, never moved — it may hold a write still uploading.

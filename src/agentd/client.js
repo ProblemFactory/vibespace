@@ -15,7 +15,7 @@ const net = require('net');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { Mux, PROTO_VERSION } = require('./mux.js');
-const { daemonEnv } = require('../agent-env.js');
+const { daemonEnv, serviceEnv, SSH_ENV_KEEP } = require('../agent-env.js');
 const DA = require('../device-acts.js'); // lane device-act-audit: the op layers + `by` + THE audit line (PURE)
 /** lane hub-act-ask: the ask's facts an act's audit line carries (`ask`, `answeredBy`) — none when nothing was asked. */
 const askFacts = (g) => (g && g.ask ? { ask: g.ask, ...(g.answeredBy ? { answeredBy: g.answeredBy } : {}) } : {});
@@ -344,8 +344,10 @@ class DeviceManager {
     if (this._transport.kind === 'ssh') {
       const t = this._transport;
       const remoteCmd = t.remoteCmd || `node ${JSON.stringify(t.remoteAgentd)} --stdio`;
+      // a service's env (lane spawn-env-census): ssh runs on an EMPTY env with a key file and needs SSH_AUTH_SOCK for an
+      // agent-held key (measured, a private sshd on loopback) — never the hub's secrets (the remote side's env is its sshd's)
       const child = spawn(t.sshBin || 'ssh', [...t.sshArgs, '--', remoteCmd], {
-        stdio: ['pipe', 'pipe', 'ignore'],
+        stdio: ['pipe', 'pipe', 'ignore'], env: serviceEnv(process.env, { keep: SSH_ENV_KEEP }), // = HostManager.sshEnv() (its argv comes from the transport)
       });
       // stdin/stdout errors arrive ASYNC as 'error' events on the pipe socket
       // itself — the write wrapper's try/catch only stops sync throws, so a

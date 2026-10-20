@@ -112,11 +112,14 @@ const HUB_ANSWERS = ['once', 'always', 'deny'];
 // design q-046 (lane automation-keys-core): a held AUTOMATION call answers the same three ways — 允许一次 / 一直（授权给这个会话） / 拒绝
   // lane vault-run-door (design q-043 §8.3): an agent's RUN held on its card — 允许一次 / 此形状总是 (not offered for a shell, an
   // interpreter or an unknown destination: `action.always` false) / 拒绝
-  const HELD_ASKS = ['hub-act-ask', 'automation-ask', 'pool-cross-provider', 'vault-run-ask']; // q-053 P0b (decision ①): a pool's move to ANOTHER provider waits for the owner — 允许一次 / 这个池一直允许 / 拒绝
-  const hubAnswerWord = (a, t, type = 'hub-act-ask') => (a === 'once' ? t('Allow once') : a === 'always' ? (type === 'automation-ask' ? t('Always for this conversation') : type === 'pool-cross-provider' ? t('Always for this pool') : type === 'vault-run-ask' ? t('Always for this shape') : t('Always on this machine')) : t('Deny'));
-  const heldAnswers = (i) => HUB_ANSWERS.filter((a) => a !== 'always' || !(i.action.type === 'vault-run-ask' && i.action.always === false));
+  const HELD_ASKS = ['hub-act-ask', 'automation-ask', 'pool-cross-provider', 'vault-run-ask', 'vault-grant-ask']; // q-053 P0b (decision ①): a pool's move to ANOTHER provider waits for the owner — 允许一次 / 这个池一直允许 / 拒绝
+  const GRANT_ANSWERS = ['once', '8h', 'deny']; // lane vault-manual-and-lock (design q-043 D4): 允许一次 (its next run) / 8 小时 (every run, 8 h) / 拒绝; it waits for nobody, never expires (a lock withdraws it)
+  const hubAnswerWord = (a, t, type = 'hub-act-ask') => (a === 'once' ? t('Allow once') : a === '8h' ? t('For 8 hours') : a === 'always' ? (type === 'automation-ask' ? t('Always for this conversation') : type === 'pool-cross-provider' ? t('Always for this pool') : type === 'vault-run-ask' ? t('Always for this shape') : t('Always on this machine')) : t('Deny'));
+  const heldAnswers = (i) => (i.action.type === 'vault-grant-ask' ? GRANT_ANSWERS : HUB_ANSWERS.filter((a) => a !== 'always' || !(i.action.type === 'vault-run-ask' && i.action.always === false)));
+// lane vault-scrub-forms (q-043 verify M1): a RUN card says what the scrubbing does not promise — the owner reads the command
 const hubAskHtml = (i, t, detail) => (i && i.action && HELD_ASKS.includes(i.action.type)
   ? `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
+    + (i.action.type === 'vault-run-ask' ? `<div class="ut-exit-note">${escHtml(t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.'))}</div>` : '')
     + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${heldAnswers(i).map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : '')
   : '');
 

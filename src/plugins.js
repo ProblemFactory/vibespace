@@ -314,6 +314,10 @@ class PluginManager {
   /** Sniff what a local service speaks so we pick the right relay proxy type
    *  (see module-level probeProto). */
   async _probeProto(port, opts) { return probeProto(port, opts); }
+  /** the relay's STATUS (configured · missing · vaultLocked · subDomainHost · selfDialSub …) through the SAME door as the verbs
+   *  below — whichever plugin declares 'relay' (lane fleet-instance-publish: instance-url resolved the provider itself through a
+   *  `providerId` the object server.js hands it never had ⇒ status(undefined) threw on every call, read as «not configured»). */
+  relayStatus() { return this._provider('relay', 'status', 'public URLs are not available')(); }
   async frpPublish(name, localPort, opts) { return this._provider('relay', 'publish', 'public URLs are not available')(name, localPort, opts); }
   setSelfDialSub(sub) { return this._provider('relay', 'setSelfDialSub', 'no relay')(sub); }
   async frpUnpublish(name) { return this._provider('relay', 'unpublish', 'no relay')(name); }

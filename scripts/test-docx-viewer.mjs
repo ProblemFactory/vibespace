@@ -24,7 +24,8 @@
 //     the browser; the choice survives a reload (vibespace.docx-zoom)
 //   ⑤ hostile.docx: the tag is text, no dialog, no script; javascript:/data:
 //     links have no href, the web link opens in a new tab, #bookmark scrolls;
-//     the altChunk HTML sits in a sandbox="" iframe; the style's CSS injection
+//     the altChunk HTML sits in a sandboxed iframe at the frame host's docx address
+//     (lane frame-host-preview — never srcdoc); the style's CSS injection
 //     never reaches the workspace + an innerHTML negative control (the payload
 //     IS live as HTML)
 //   ⑥ legacy .doc / an OLE .docx / garbage: the NAMED refusal; the .doc is
@@ -60,7 +61,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, takeCspReports } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 
 const T0 = Date.now();
@@ -343,14 +344,14 @@ try {
       pwned: window.__docxPwned ?? null,
       js: by('JS-LINK') && { href: by('JS-LINK').getAttribute('href'), title: by('JS-LINK').title }, data: by('DATA-LINK') && by('DATA-LINK').getAttribute('href'),
       web: by('WEB-LINK') && { href: by('WEB-LINK').getAttribute('href'), target: by('WEB-LINK').target, rel: by('WEB-LINK').rel },
-      frame: f && { sandbox: f.getAttribute('sandbox'), csp: /Content-Security-Policy/.test(f.srcdoc), text: /ALTCHUNK-TEXT/.test(f.srcdoc) }, frames: sr.querySelectorAll('iframe').length,
+      frame: f && { sandbox: f.getAttribute('sandbox'), src: f.getAttribute('src'), srcdoc: f.hasAttribute('srcdoc'), csp: /Content-Security-Policy/.test(f.__frameDoc || ''), text: /ALTCHUNK-TEXT/.test(f.__frameDoc || '') }, frames: sr.querySelectorAll('iframe').length,
       outline: getComputedStyle(document.body).outlineStyle, bodyOutlineColor: getComputedStyle(document.body).outlineColor,
       href: location.href }; })()`);
   ok(h.tagText && h.imgs === 0, 'the <img onerror> paragraph is TEXT — no <img> element was made from it', h);
   ok(h.pwned === null && dialogs.length === 0, 'no script ran: no dialog, window.__docxPwned untouched (the altChunk script, its onerror, the text payload)', { pwned: h.pwned, dialogs });
   ok(h.js && h.js.href === null && /javascript/.test(h.js.title) && h.data === null, 'the javascript: and data: links lost their href (the text stays, the title says why)', { js: h.js, data: h.data });
   ok(h.web && h.web.href === 'https://example.com/paper' && h.web.target === '_blank' && /noopener/.test(h.web.rel) && /noreferrer/.test(h.web.rel), 'the web link opens in a NEW tab, noopener noreferrer (it never navigates VibeSpace away)', h.web);
-  ok(h.frames === 1 && h.frame && h.frame.sandbox === '' && h.frame.csp && h.frame.text, 'the altChunk HTML is shown in a sandbox="" iframe with a no-network CSP', h.frame);
+  ok(h.frames === 1 && h.frame && h.frame.sandbox === 'allow-scripts' && h.frame.src === '/frame-host?kind=docx' && !h.frame.srcdoc && h.frame.csp && h.frame.text, 'the altChunk HTML is shown in a sandboxed iframe at the frame host\'s docx address (nothing of it runs — the host\'s line alone, by its response\'s nonce; lane frame-host-preview) with a no-network CSP meta as well — never srcdoc (the app page\'s policy)', h.frame);
   ok(h.outline === 'none', `the style's CSS injection never reaches the workspace (body outline ${h.outline})`);
   const jsAt = await evalJs(`(() => { const a = [...__dx.sr().querySelectorAll('a')].find((x) => x.textContent.includes('JS-LINK')); a.scrollIntoView({ block: 'center' }); return null; })()`);
   await sleep(200);
@@ -365,6 +366,10 @@ try {
   // innerHTML negative control: the SAME payload, parsed as HTML, runs
   const neg = await evalJs(`new Promise((res) => { const para = [...__dx.sr().querySelectorAll('p')].find((p) => p.textContent.includes('__docxPwned')); const d = document.createElement('div'); d.innerHTML = para.textContent; setTimeout(() => { const v = window.__docxPwned ?? null; delete window.__docxPwned; res(v); }, 600); })`);
   ok(neg === 1, `NEGATIVE CONTROL: the same paragraph text through innerHTML DOES run its onerror (window.__docxPwned = ${neg}) — the payload is live, the viewer made it text`);
+  // the control's handler ran on the APP page ⇒ the page's report-only policy reported it: the suite's own, taken (lane
+  // frame-host-preview — the teardown judges what is left: zero)
+  const negReports = await takeCspReports((r) => r.directive === 'script-src-attr' && r.blocked === 'inline' && r.document !== 'about', { ms: 3000 });
+  ok(negReports.length === 1, 'NEGATIVE CONTROL: …and the app page\'s policy reported that handler (taken — the suite\'s own)', negReports);
 
   // ── ⑥ refusals ──
   console.log('⑥ refusals');
@@ -513,6 +518,9 @@ try {
   ok(rc.pwned >= 1 && rc.sandbox === null, `CONTROL: the master render runs the altChunk's script in an unsandboxed same-origin iframe (window.__docxPwned = ${rc.pwned})`, rc);
   ok(/solid rgb\(255, 0, 255\)/.test(rc.outline), `CONTROL: …and the style's CSS injection restyles the WORKSPACE's <body> (${rc.outline})`, rc);
   ok(rc.js === 'javascript:alert(1)', 'CONTROL: …and keeps href="javascript:alert(1)"', rc);
+  // the library's same-origin srcdoc frame inherits the APP page's policy ⇒ its script and handler are reported: taken
+  const libReports = await takeCspReports((r) => r.document === 'about', { ms: 3000, want: Infinity });
+  ok(libReports.length >= 1, `CONTROL: …and the app page's policy reports the library's frame (${libReports.length} report(s), taken — the viewer's own frame is the host's, never reported)`, libReports);
   await cleanRaw();
   await rawRender('apa-title-page.docx', { ...MASTER_OPTS });
   const rh = await evalJs(`(() => { const pg = [...document.querySelectorAll('.__dxraw section.docx')]; return pg.map((p) => p.querySelector(':scope > header')?.textContent.trim() ?? null); })()`);

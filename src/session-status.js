@@ -20,7 +20,8 @@
 const fs = require('fs');
 const path = require('path');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
-const { applyClear, CLEARED_TEXT } = require('./record-clear'); // PURE: "Clear content…" (2026-09-28) — this store holds the door (clearHistory)
+const { applyClear, CLEARED_TEXT } = require('./record-clear');
+const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a status reason / detail a reader sees never carries a credential in the clear // PURE: "Clear content…" (2026-09-28) — this store holds the door (clearHistory)
 
 // A Task (= a session) has one of these states; `done` = this piece of work is
 // finished (the "岗位/Task Group" itself has no status — only archive).
@@ -152,6 +153,9 @@ class SessionStatusManager {
 
   setByAgent(key, fields) {
     const v = this._validate(fields);
+    const _dd = path.dirname(this._file);   // agent-output-sinks: belt the AGENT's own notice only (never setByUser, never a system NOTICE_RENDERERS queue item)
+    if (v.reason) v.reason = belt.maskForSink(v.reason, { dataDir: _dd });
+    if (v.detail) v.detail = belt.maskForSink(v.detail, { dataDir: _dd });
     if (!v.state && !v.urgency && !v.reason && !v.detail) return this.clear(key, 'agent');
     const prev = this._state.statuses[key];
     this._state.statuses[key] = {

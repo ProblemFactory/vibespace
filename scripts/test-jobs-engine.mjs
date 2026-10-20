@@ -518,6 +518,192 @@ try {
     for (const t of [...(F._timers || []), ...(G._timers || [])]) clearInterval(t);
     F.shutdown(); G.shutdown();
   }
+  // 12. lane job-spec-off-argv (2026-10-20): A SECRET NEVER RIDES ARGV — the spec (the job's secrets + its jbt_ token)
+  //     rides a 0600 file the wrapper reads ONCE and unlinks, the wrapper's own env is an allowlist, a spec without env is
+  //     refused. Measured on REAL processes: a hub child started from a shell carrying planted session tokens (fakes built
+  //     now) → its wrapper's /proc/<pid>/cmdline + environ and the job's own env (names → value hashes). A front script at
+  //     bin/job-wrapper.js stats the spec file BEFORE the real wrapper reads it. Three mutant copies must turn rows RED.
+  {
+    const crypto = require('crypto');
+    const { spawnSync } = require('child_process');
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const { WRAPPER_ENV_KEEP } = require('../src/jobs.js');
+    const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+    const sha = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
+    const rnd = () => crypto.randomBytes(12).toString('hex');
+    const SECRET = 'probe-' + rnd();
+    const PLANT = { VIBESPACE_SESSION_TOKEN: 'vs-sess-' + rnd(), CLAUDE_CODE_MESSAGING_TOKEN: 'cc-msg-' + rnd() };
+    const sdir = path.join(dir, 'spec');
+    fs.mkdirSync(sdir, { recursive: true });
+    const PROBE = path.join(sdir, 'probe.cjs'); // the job: its env as names → value hashes, then it waits for the release file
+    fs.writeFileSync(PROBE, `const fs = require('fs'), c = require('crypto'), h = (v) => c.createHash('sha256').update(String(v)).digest('hex');
+const env = {}; for (const [k, v] of Object.entries(process.env)) env[k] = h(v);
+fs.writeFileSync(process.argv[2] + '.tmp', JSON.stringify({ pid: process.pid, env })); fs.renameSync(process.argv[2] + '.tmp', process.argv[2]);
+const t0 = Date.now(); setInterval(() => { if (fs.existsSync(process.argv[3])) process.exit(0); if (Date.now() - t0 > 20000) process.exit(3); }, 30);
+`);
+    const FRONT = `const fs = require('fs'), path = require('path'), rec = {};
+try { const st = fs.lstatSync(process.argv[3]); rec.spec = { mode: st.mode & 0o777, file: st.isFile(), nlink: st.nlink }; } catch (e) { rec.spec = { err: e.code }; }
+try { rec.ctlMode = fs.statSync(process.argv[2]).mode & 0o777; } catch (e) { rec.ctlMode = e.code; }
+fs.writeFileSync(path.join(process.argv[2], 'front.json'), JSON.stringify(rec));
+require('./job-wrapper.real.js');
+`;
+    const HUB = path.join(sdir, 'hub.cjs'); // the fake hub: the engine (real, or a mutant copy) creates ONE job and says its id
+    fs.writeFileSync(HUB, `const fs = require('fs'), path = require('path'); const [jobsJs, dataDir, out, probe, dump, release] = process.argv.slice(2);
+const { JobManager } = require(jobsJs);
+const M = new JobManager({ dataDir, broadcast() { }, notifyUser() { }, log() { } }); M.init();
+const caller = { conversationId: 'conv-T', sessionId: 'sess-T', sessionCreatedAt: 1, groups: new Set(['T-g']) };
+const r = M.create({ kind: 'task', name: 'spec-probe', cmd: { argv: [process.execPath, probe, dump, release] }, envFrom: ['PROBE_SECRET'], restart: 'never', owner: ${JSON.stringify(owner)} }, caller);
+const j = r.job && M.jobs.get(r.job.id);
+fs.writeFileSync(out, JSON.stringify(j ? { id: j.id, tokenHash: j.tokenHash, ctl: path.dirname(j.runs[j.runs.length - 1].log) } : { error: r.error }));
+setInterval(() => { }, 1000);
+`);
+    const WRAP = fs.readFileSync(path.join(ROOT, 'data/bin/job-wrapper.js'), 'utf8'), JS = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+    async function measure(tag, { jobsJs = path.join(ROOT, 'src/jobs.js'), wrapperSrc = WRAP } = {}) {
+      const D = path.join(sdir, tag), dump = path.join(D, 'dump.json'), release = path.join(D, 'release'), out = path.join(D, 'out.json');
+      fs.mkdirSync(path.join(D, 'bin'), { recursive: true });
+      fs.writeFileSync(path.join(D, 'bin', 'job-wrapper.js'), FRONT);
+      fs.writeFileSync(path.join(D, 'bin', 'job-wrapper.real.js'), wrapperSrc);
+      fs.writeFileSync(path.join(D, 'job-secrets.json'), JSON.stringify({ PROBE_SECRET: SECRET }), { mode: 0o600 });
+      const err = fs.openSync(path.join(D, 'hub.err'), 'w');
+      const hub = spawn(process.execPath, [HUB, jobsJs, D, out, PROBE, dump, release], { env: { ...process.env, ...PLANT }, stdio: ['ignore', 'ignore', err] });
+      fs.closeSync(err);
+      const f = { tag };
+      try {
+        if (!(await until(() => fs.existsSync(out), 15000))) { f.error = 'the hub never answered: ' + fs.readFileSync(path.join(D, 'hub.err'), 'utf8').slice(0, 300); return f; }
+        const o = JSON.parse(fs.readFileSync(out, 'utf8'));
+        if (!o.id) { f.error = o.error || 'no job'; return f; }
+        Object.assign(f, o);
+        if (!(await until(() => fs.existsSync(path.join(o.ctl, 'pid.json')) && fs.existsSync(dump), 15000))) { f.error = 'the job never ran'; return f; }
+        const stamp = JSON.parse(fs.readFileSync(path.join(o.ctl, 'pid.json'), 'utf8'));
+        f.cmdline = fs.readFileSync(`/proc/${stamp.pid}/cmdline`); // the wrapper is alive: its job waits for the release file
+        f.environ = fs.readFileSync(`/proc/${stamp.pid}/environ`);
+        f.child = JSON.parse(fs.readFileSync(dump, 'utf8'));
+        try { f.front = JSON.parse(fs.readFileSync(path.join(o.ctl, 'front.json'), 'utf8')); } catch { f.front = null; }
+        f.ctlMode = fs.statSync(o.ctl).mode & 0o777;
+        f.specLeft = fs.readdirSync(o.ctl).filter((n) => /^spec\./.test(n));
+      } finally {
+        fs.writeFileSync(release, '');
+        if (f.ctl) { await until(() => fs.existsSync(path.join(f.ctl, 'exit.json')), 15000); try { f.exit = JSON.parse(fs.readFileSync(path.join(f.ctl, 'exit.json'), 'utf8')); } catch { } }
+        hub.kill('SIGKILL');
+      }
+      return f;
+    }
+    const argsOf = (buf) => buf.toString('latin1').split('\0').filter(Boolean);
+    const rides = (buf, n) => argsOf(buf).some((a) => a.includes(n) || Buffer.from(a, 'base64').toString('latin1').includes(n)); // raw OR base64 (the pre-fix spec rode base64)
+    const R = {
+      argv: 'wrapper argv = [node, wrapper, ctlDir, specPath] — the spec rides a FILE of the ctl dir',
+      secret: 'the wrapper\'s cmdline carries NO byte of the job\'s secret (raw or base64)',
+      jbt: 'the wrapper\'s cmdline carries no jbt_ token (raw or base64)',
+      wallow: 'the wrapper\'s env is the allowlist (PATH HOME LANG TMPDIR) + VIBESPACE_JOB_ID',
+      wplant: 'neither planted token reaches the wrapper',
+      wsecret: 'the wrapper\'s env carries neither the secret nor a jbt_ token',
+      cplant: 'neither planted token reaches the job',
+      csecret: 'the job still sees its secret',
+      ctoken: 'the job still sees ITS token — VIBESPACE_JOB_TOKEN hashes to the record\'s tokenHash (what jobByToken answers)',
+      mode: 'the spec file was 0600, one plain file, when the wrapper started; the ctl dir is 0700',
+      gone: 'the spec file is GONE once the wrapper read it',
+      exit: 'the job ran to its end (exit 0)',
+    };
+    function judgeRun(f) {
+      const rows = [], row = (k, good, why) => rows.push({ k, name: R[k], good: !!good, why });
+      if (f.error || !f.cmdline) { row('exit', false, f.error || 'no wrapper measured'); return rows; }
+      const args = argsOf(f.cmdline);
+      row('argv', args.length === 4 && args[2] === f.ctl && path.dirname(args[3]) === f.ctl && /^spec\.\d+\.json$/.test(path.basename(args[3])), JSON.stringify(args.slice(1).map((a) => a.slice(0, 48))));
+      row('secret', !rides(f.cmdline, SECRET));
+      row('jbt', !rides(f.cmdline, 'jbt_'));
+      const wenv = Object.fromEntries(argsOf(f.environ).map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]));
+      const allowed = new Set([...WRAPPER_ENV_KEEP, 'VIBESPACE_JOB_ID']);
+      row('wallow', Object.keys(wenv).every((k) => allowed.has(k)) && wenv.VIBESPACE_JOB_ID === f.id, Object.keys(wenv).filter((k) => !allowed.has(k)).length + ' more names');
+      row('wplant', Object.keys(PLANT).every((k) => !(k in wenv)) && !Object.values(PLANT).some((v) => f.environ.includes(v)));
+      row('wsecret', !f.environ.includes(SECRET) && !f.environ.includes('jbt_'));
+      const cenv = f.child.env, planted = Object.values(PLANT).map(sha);
+      row('cplant', Object.keys(PLANT).every((k) => !(k in cenv)) && !Object.values(cenv).some((h) => planted.includes(h)));
+      row('csecret', cenv.PROBE_SECRET === sha(SECRET));
+      row('ctoken', !!f.tokenHash && cenv.VIBESPACE_JOB_TOKEN === f.tokenHash);
+      row('mode', f.front && f.front.spec && f.front.spec.mode === 0o600 && f.front.spec.file && f.front.spec.nlink === 1 && f.front.ctlMode === 0o700 && f.ctlMode === 0o700, JSON.stringify(f.front));
+      row('gone', f.specLeft.length === 0, f.specLeft.join(' '));
+      row('exit', f.exit && f.exit.code === 0, JSON.stringify(f.exit));
+      return rows;
+    }
+    // the wrapper run BY HAND from a planted shell (what the pre-fix wrapper fell back to when a spec had no env)
+    function direct(tag, wrapperSrc, specObj, { outside = false } = {}) {
+      const D = path.join(sdir, 'direct-' + tag), ctl = path.join(D, 'ctl'), dump = path.join(D, 'dump.json'), release = path.join(D, 'release');
+      fs.mkdirSync(ctl, { recursive: true, mode: 0o700 }); fs.writeFileSync(release, '');
+      const wrapper = path.join(D, 'job-wrapper.js'); fs.writeFileSync(wrapper, wrapperSrc);
+      const specPath = path.join(outside ? D : ctl, 'spec.1.json');
+      fs.writeFileSync(specPath, JSON.stringify({ argv: [process.execPath, PROBE, dump, release], ...specObj }), { mode: 0o600 });
+      const r = spawnSync(process.execPath, [wrapper, ctl, specPath], { env: { PATH: process.env.PATH, ...PLANT }, encoding: 'utf8', timeout: 15000 });
+      const read = (p, j) => { try { const t = fs.readFileSync(p, 'utf8'); return j ? JSON.parse(t) : t; } catch { return j ? null : ''; } };
+      return { status: r.status, stderr: r.stderr || '', log: read(path.join(ctl, 'current.log')), exit: read(path.join(ctl, 'exit.json'), true), child: read(dump, true), specLeft: fs.existsSync(specPath) };
+    }
+    const NOENV = /\[job-wrapper\] refused: the spec carries no env/;
+    function judgeNoEnv(d) {
+      return [
+        { k: 'nz', name: 'a spec without env: the wrapper exits non-zero', good: d.status !== 0 && d.status !== null },
+        { k: 'line', name: 'with the named line on stderr AND in the job\'s log', good: NOENV.test(d.stderr) && NOENV.test(d.log) },
+        { k: 'exitjson', name: 'exit.json (code 2) ends the run where the engine reads it', good: !!d.exit && d.exit.code === 2 },
+        { k: 'noplant', name: 'the job never ran — the planted shell reached no job', good: d.child === null },
+        { k: 'gone', name: 'the spec file is gone', good: !d.specLeft },
+      ];
+    }
+    const swap = (src, from, to) => { if (src.split(from).length !== 2) throw new Error('spec-off-argv mutant: anchor not found once: ' + from.slice(0, 70)); return src.replace(from, to); };
+
+    // ── the build ──
+    const realRun = await measure('real');
+    if (realRun.cmdline) console.log('    wrapper cmdline (real): ' + argsOf(realRun.cmdline).map((a, i) => (i === 0 ? 'node' : a.replace(dir, '<tmp>'))).join(' '));
+    for (const r of judgeRun(realRun)) ok(r.good, 'spec-off-argv: ' + r.name, r.why);
+    for (const r of judgeNoEnv(direct('noenv', WRAP, {}))) ok(r.good, 'spec-off-argv: ' + r.name);
+    const out = direct('outside', WRAP, { env: { PATH: process.env.PATH } }, { outside: true });
+    ok(out.status === 2 && /refused: the spec path names no file of the ctl dir/.test(out.stderr) && out.specLeft && out.child === null, 'spec-off-argv: a spec path outside the ctl dir is neither read nor removed — refused, named', JSON.stringify({ status: out.status, stderr: out.stderr.slice(0, 120) }));
+
+    // O_EXCL: a name already at the next run's spec path (here a planted link) refuses the start — never written through
+    // (an open that followed it would write the job's token into whatever it names), never removed. The engine in-process,
+    // its clock held at T for the one start.
+    async function exclLeg(JM, tag) {
+      const E = path.join(sdir, 'excl-' + tag);
+      fs.mkdirSync(path.join(E, 'bin'), { recursive: true });
+      fs.writeFileSync(path.join(E, 'bin', 'job-wrapper.js'), WRAP);
+      const X = new JM({ ...deps, dataDir: E }); X.init();
+      const jx = X.jobs.get(X.create({ kind: 'task', name: 'excl', cmd: { argv: ['true'] }, restart: 'never', owner }, caller).job.id);
+      await until(() => fs.existsSync(path.join(path.dirname(jx.runs[jx.runs.length - 1].log), 'exit.json')), 15000);
+      await X._sweep();
+      const T = Date.now() + 5000, bait = path.join(E, 'bait'), planted = path.join(E, 'job-logs', jx.id, String(T), `spec.${T}.json`);
+      fs.writeFileSync(bait, 'not the spec');
+      fs.mkdirSync(path.dirname(planted), { recursive: true });
+      fs.symlinkSync(bait, planted);
+      const realNow = Date.now; Date.now = () => T;
+      let r; try { r = X.start(jx); } finally { Date.now = realNow; }
+      const f = { state: jx.state, error: (r && r.error) || '', bait: fs.readFileSync(bait, 'utf8'), link: (() => { try { return fs.lstatSync(planted).isSymbolicLink(); } catch { return false; } })() };
+      if (!f.error) await until(() => fs.existsSync(path.join(path.dirname(planted), 'exit.json')), 15000);
+      for (const t of X._timers || []) clearInterval(t);
+      X.shutdown();
+      return f;
+    }
+    const ex = await exclLeg(JobManager, 'real');
+    ok(/EEXIST/.test(ex.error) && ex.bait === 'not the spec' && ex.link, 'spec-off-argv: a name already at the spec path (a planted link) refuses the start — never written through, never removed', JSON.stringify(ex));
+
+    // ── RED controls: each mutant copy turns ITS rows red (and the build above held them green) ──
+    const MC = mutantCopies('jobs-spec', ROOT);
+    const reds = (rows) => rows.filter((r) => !r.good).map((r) => r.k);
+    // M1 — the spec rides argv again (the pre-fix transport): the engine passes it base64, the wrapper decodes argv[3]
+    const m1 = await measure('m1-argv', {
+      jobsJs: MC.write('src/jobs.js', swap(JS, '[wrapper, ctl, specPath]', "[wrapper, ctl, Buffer.from(JSON.stringify(spec)).toString('base64')]"), 'argv'),
+      wrapperSrc: swap(WRAP, "if (!specPath || path.dirname(path.resolve(specPath)) !== path.resolve(ctlDir)) refusal = 'the spec path names no file of the ctl dir';", "spec = JSON.parse(Buffer.from(specPath, 'base64').toString('utf-8')); if (true) refusal = '';"),
+    });
+    const m1r = reds(judgeRun(m1));
+    if (m1.cmdline) { const a = argsOf(m1.cmdline)[3] || ''; console.log(`    wrapper cmdline (M1): node <wrapper> <ctl> <${a.length} base64 chars> — decodes to a spec carrying ${['PROBE_SECRET', 'VIBESPACE_JOB_TOKEN'].filter((k) => Buffer.from(a, 'base64').toString('utf8').includes(k)).join(' + ')}; rows red: ${m1r.join(' ')}`); }
+    ok(['argv', 'secret', 'jbt'].every((k) => m1r.includes(k)), 'NEGATIVE CONTROL M1: the spec on argv again ⇒ the cmdline rows go RED (the secret and the jbt_ token read back out of /proc/<pid>/cmdline)', m1r.join(' ') || m1.error);
+    // M2 — the wrapper inherits the hub's env again (the spawn passes no env)
+    const m2r = reds(judgeRun(await measure('m2-inherit', { jobsJs: MC.write('src/jobs.js', swap(JS, ", env: wrapperEnv(job.id) }", ' }'), 'inherit') })));
+    ok(['wallow', 'wplant'].every((k) => m2r.includes(k)) && !m2r.includes('cplant'), 'NEGATIVE CONTROL M2: the wrapper spawned with no env ⇒ the planted tokens are in ITS /proc/<pid>/environ (the job stays clean: jobEnv strips them)', m2r.join(' '));
+    // M3 — the wrapper falls back to its own env again (the pre-fix `spec.env || process.env`, no refusal)
+    const m3 = direct('m3-fallback', swap(swap(WRAP, "if (!refusal && !(spec.env && typeof spec.env === 'object')) refusal = 'the spec carries no env (a job never runs on the wrapper\\'s own)';", ''), '  env: spec.env,', '  env: spec.env || process.env,'), {});
+    const m3r = reds(judgeNoEnv(m3));
+    ok(['nz', 'line', 'noplant'].every((k) => m3r.includes(k)) && !!(m3.child && Object.keys(PLANT).every((k) => k in m3.child.env)), 'NEGATIVE CONTROL M3: the fallback restored ⇒ a spec without env RUNS, and the job sees both planted tokens', m3r.join(' '));
+    // M4 — the spec opened with a plain 'w' (no O_EXCL): the planted link is followed and the job's token lands in its target
+    const m4 = await exclLeg(MC.load('src/jobs.js', swap(JS, 'fs.openSync(specPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600)', "fs.openSync(specPath, 'w', 0o600)"), 'no-excl').JobManager, 'm4');
+    ok(!m4.error && m4.bait.includes('jbt_'), 'NEGATIVE CONTROL M4: no O_EXCL ⇒ the start goes through the planted link and writes the job token into its target', JSON.stringify({ error: m4.error, bait: m4.bait.slice(0, 20) }));
+  }
 } finally {
   try { const all = JSON.parse(fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8')); } catch { }
   try { for (const d of fs.readdirSync(path.join(dir, 'job-logs'))) { } } catch { }

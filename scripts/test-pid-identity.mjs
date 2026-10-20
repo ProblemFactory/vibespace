@@ -205,7 +205,7 @@ ok(!!MT2 && !MT2.legacyStranger.lived, 'CONTROL: a keeper copy that signals an u
 {
   const WS = require(path.join(REPO, 'src/writer-sweep.js'));
   const wsSrc = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-  const tm = /execFile\('ssh', \[\.\.\.hosts\.sshArgs\(h\), '--',\n([\s\S]*?)\],\n\s*\{ timeout: 15000 \}/.exec(wsSrc);
+  const tm = /execFile\('ssh', \[\.\.\.hosts\.sshArgs\(h\), '--',\n([\s\S]*?)\],\n\s*\{ env: hosts\.sshEnv\(\), timeout: 15000 \}/.exec(wsSrc);   // lane spawn-env-debts: every ssh road hands hosts.sshEnv()
   const sshKill = tm ? new Function('PI', 'sshSidSafe', 'data', 'return ' + tm[1].trim())(PI, 'sid-x', { sessionId: 'sid-x' }) : '';
   const shCase = async (kind, startOf) => {
     const home = fs.mkdtempSync(path.join(tmp, 'home-')); const S = sleeper(); await new Promise((r) => setTimeout(r, 50));

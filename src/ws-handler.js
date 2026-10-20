@@ -213,9 +213,9 @@ const { attachWindowOpts } = require('./text-window.js');
  *  the parent) — only a new attach starts it over. */
 const seqStateOf = (prev) => (prev ? { caps: prev.caps || null, resumeArmed: !!prev.resumeArmed, lagged: prev.lagged || null } : {});
 
-function execFileAsync(cmd, args, { input, timeout = 20000, maxBuffer = 8 * 1024 * 1024, encoding = 'buffer' } = {}) {
+function execFileAsync(cmd, args, { input, timeout = 20000, maxBuffer = 8 * 1024 * 1024, encoding = 'buffer', env = process.env } = {}) {
   return new Promise((resolve, reject) => {
-    const cp = require('child_process').execFile(cmd, args, { timeout, maxBuffer, encoding },
+    const cp = require('child_process').execFile(cmd, args, { timeout, maxBuffer, encoding, env },
       (err, stdout) => (err ? reject(err) : resolve(stdout)));
     cp.stdin?.on('error', () => { });
     cp.stdout?.on('error', () => { });
@@ -435,7 +435,7 @@ function registerWsHandler(wss, ctx) {
               + `if [ -n "$P" ] && [ -n "$T" ] && ! vs_same_proc "$P" "$T"; then case "$VS_SAME_WHY" in pid-recycled|unknown) echo "REFUSED:$P:$VS_SAME_WHY";; esac; P=; fi; [ -n "$P" ] && [ -z "$T" ] && echo "LEGACY:$P"; [ -n "$P" ] && kill $P 2>/dev/null; `
               + `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${sshSidSafe} 2>/dev/null; `
               + `sleep 2; [ -n "$P" ] && { [ -z "$T" ] || vs_same_proc "$P" "$T"; } && kill -9 $P 2>/dev/null; true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
-              { timeout: 15000 }, (err, stdout) => {
+              { env: hosts.sshEnv(), timeout: 15000 }, (err, stdout) => {
                 try { hosts.invalidateDiscovery(session.host); } catch {}
                 try { sayKillWithheld(stdout, h.name, session); } catch {}
                 // ssh leg failed (host lag/down) — the remote claude may

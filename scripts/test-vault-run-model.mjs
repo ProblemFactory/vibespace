@@ -13,14 +13,22 @@
 //      known tool names; when «always» is offered
 //   ⑤ THE VERDICT — every store of the vault has a door or is runnable (an unknown store fails closed); runVerdict's
 //      9 216-cell grid vs a reference (lane vault-run-door: + the design's «shape seen?» — a local instance asks a NEW shape)
-//   ⑥ THE SCRUBBER — 7 values × 26 printings (Node's own encoders are the oracle) masked whole; every split point and three
-//      chunkings equal the one-shot; text without a value passes byte for byte; the sieve's NAMED holes pass (controls)
+//   ⑥ THE SCRUBBER — 7 values × 50 printings (Node's own encoders are the oracle; lane vault-scrub-forms: + UTF-16 LE/BE,
+//      base32, quoted-printable, \xNN / octal / \u{…} escapes, HTML entities, colour escapes, wrapped base64 — each a real
+//      producer's) masked whole; every split point and three chunkings equal the one-shot; text without a value passes byte
+//      for byte; FORMS is the one list (spelled + read); ONE run masker sees a value split between stdout and stderr; the
+//      sieve's NAMED holes and the floor pass (controls)
+//   ⑥b THE REAL PRODUCERS' TABLE (q-043 verify M1) — every printing × a 21-character value × start / middle / end of a chunk
+//      × the stream cut at EVERY point inside the printed value: masked whole, equal to the one-shot; the floor row
 //   ⑦ THE CLI's WORDS — parseRunArgs
 //   ⑧ MUTANTS — patched copies RED: the scrubber without base64; argv allowed by default; a print-class tool not refused;
-//      a value split across chunks escaping
+//      a value split across chunks escaping; lane vault-scrub-forms: each NEW form dropped (utf16, base32, qp, escape, entity,
+//      ansi, wrap), a view's held tail ignored, a backslash run held whole
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
+import { StringDecoder } from 'node:string_decoder';
 import { createRequire } from 'node:module';
 import { scratchDir } from './scratch.mjs';
 const require = createRequire(import.meta.url);
@@ -289,7 +297,7 @@ console.log('⑤ THE VERDICT — entry × conversation × shape × time');
   ok(dr.code === 'entry_has_its_own_door' && dr.ref === ACCT && /account pool/.test(dr.words), 'an own-door refusal names the reference and its door', dr);
 }
 
-console.log('⑥ THE SCRUBBER — a value and its five forms, over a chunk window');
+console.log('⑥ THE SCRUBBER — a value and its forms (FORMS: spelled and read), over ONE window per run');
 const LABEL = 'mounts/m1/secretKey', PH = `[vault:${LABEL}]`;
 const VALUES = [
   'planted-VALUE-0001',
@@ -303,6 +311,28 @@ const VALUES = [
 const b64 = (s) => Buffer.from(s).toString('base64');
 const enc = (v, keep, up = true) => [...Buffer.from(v)].map((b) => (b < 128 && keep.test(String.fromCharCode(b)) ? String.fromCharCode(b) : '%' + b.toString(16).padStart(2, '0')[up ? 'toUpperCase' : 'toLowerCase']())).join('');
 const pyAscii = (v) => JSON.stringify(v).replace(/[\u007f-\uffff]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+// lane vault-scrub-forms — how a REAL producer spells a value, built with Node's own codecs or written out from the spec (never
+// the module's code): the oracle the new forms are judged by
+const streamText = (buf) => { const d = new StringDecoder('utf8'); return d.write(buf) + d.end(); };   // what the door's decoder hands on
+const cps = (v) => [...v];
+const B32A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const b32 = (v) => { const bits = [...Buffer.from(v)].map((b) => b.toString(2).padStart(8, '0')).join(''); let s = ''; for (let i = 0; i < bits.length; i += 5) s += B32A[parseInt(bits.slice(i, i + 5).padEnd(5, '0'), 2)]; return s + '='.repeat((8 - (s.length % 8)) % 8); };
+// RFC 2045 §6.7: a printable byte as is (not '='), any other =XX; a soft line break lands wherever the 76th column falls — here INSIDE the value
+const qpOf = (v, { every = false, lower = false, soft = '=\r\n' } = {}) => { const p = [...Buffer.from(v)].map((b) => (!every && b >= 33 && b <= 126 && b !== 61 ? String.fromCharCode(b) : '=' + b.toString(16).padStart(2, '0')[lower ? 'toLowerCase' : 'toUpperCase']())), h = p.length >> 1; return p.slice(0, h).join('') + soft + p.slice(h).join(''); };
+// Python repr(bytes): printable ASCII as is (\\ and the quote escaped), \t \n \r, every other byte \xNN
+const pyBytes = (v) => "b'" + [...Buffer.from(v)].map((b) => (b === 92 ? '\\\\' : b === 39 ? "\\'" : b === 9 ? '\\t' : b === 10 ? '\\n' : b === 13 ? '\\r' : b >= 32 && b < 127 ? String.fromCharCode(b) : '\\x' + b.toString(16).padStart(2, '0'))).join('') + "'";
+// Python ascii(str): \xNN / \uXXXX / \UXXXXXXXX by CODE POINT
+const pyStr = (v) => "'" + cps(v).map((c) => { const p = c.codePointAt(0); return c === '\\' ? '\\\\' : c === "'" ? "\\'" : c === '\n' ? '\\n' : c === '\t' ? '\\t' : c === '\r' ? '\\r' : p >= 32 && p < 127 ? c : p < 0x100 ? '\\x' + p.toString(16).padStart(2, '0') : p < 0x10000 ? '\\u' + p.toString(16).padStart(4, '0') : '\\U' + p.toString(16).padStart(8, '0'); }).join('') + "'";
+const everyX = (v) => [...Buffer.from(v)].map((b) => '\\x' + b.toString(16).padStart(2, '0').toUpperCase()).join('');   // strace -xx, a C literal
+const rustU = (v) => cps(v).map((c) => '\\u{' + c.codePointAt(0).toString(16) + '}').join('');                      // Rust escape_unicode
+const octal = (v) => [...Buffer.from(v)].map((b) => (b >= 127 || b < 32 ? '\\' + b.toString(8).padStart(3, '0') : b === 92 ? '\\\\' : String.fromCharCode(b))).join('');   // git core.quotePath, bash $'…'
+const htmlEscape = (v) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');   // Python html.escape, Jinja
+const htmlEvery = (v) => cps(v).map((c) => `&#${c.codePointAt(0)};`).join('');
+const owasp = (v) => cps(v).map((c) => (/[A-Za-z0-9]/.test(c) ? c : `&#x${c.codePointAt(0).toString(16).toUpperCase()};`)).join('');
+const sgrEvery4 = (v) => cps(v).map((c, i) => (i && i % 4 === 0 ? '\x1b[0m' : '') + c).join('');   // escapes BETWEEN the characters
+const grepColor = (v) => { const a = cps(v), h = a.length >> 1; return a.slice(0, 3).join('') + '\x1b[01;31m\x1b[K' + a.slice(3, h).join('') + '\x1b[m\x1b[K' + a.slice(h).join(''); };
+const tputBold = (v) => { const a = cps(v), h = a.length >> 1; return a.slice(0, h).join('') + '\x1b[1m' + a.slice(h, h + 2).join('') + '\x1b(B\x1b[m' + a.slice(h + 2).join(''); };
+const wrapAt = (s, n) => s.match(new RegExp(`[\\s\\S]{1,${n}}`, 'g')).join('\n');
 // [name, value → { text, L, R }]: L / R = how many characters of the printing may stay beside the placeholder (the bytes
 // around the value + the ONE character that mixes a neighbour's bits with the value's + the padding)
 const around = (pre, post) => ({ L: Math.ceil((8 * pre) / 6), R: Math.ceil((8 * post) / 6) + 3 });
@@ -333,6 +363,27 @@ const PRINTS = [
   ['HEX', (v) => ({ text: Buffer.from(v).toString('hex').toUpperCase(), L: 0, R: 0 })],
   ['an Authorization header (curl -v)', (v) => ({ text: `> Authorization: Bearer ${v}\r\n`, L: 24, R: 2 })],
   ['twice on one line', (v) => ({ text: `${v} and ${v}`, L: 0, R: 5 + PH.length })],
+  // lane vault-scrub-forms (q-043 verify M1): what a REAL producer prints by itself — the label's head is the form
+  ['utf16: UTF-16LE (PowerShell 5 > / Out-File, reg export)', (v) => ({ text: streamText(Buffer.from(v, 'utf16le')), L: 0, R: 0 })],
+  ['utf16: UTF-16BE (Java writeChars)', (v) => ({ text: streamText(Buffer.from(v, 'utf16le').swap16()), L: 0, R: 0 })],
+  ['base32: RFC 4648 (oathtool -v)', (v) => ({ text: b32(v), L: 0, R: 0 })],
+  ['base32: no padding, lower-case (an otpauth secret)', (v) => ({ text: b32(v).replace(/=+$/, '').toLowerCase(), L: 0, R: 0 })],
+  ['qp: a quoted-printable mail body (=XX, a soft break inside)', (v) => ({ text: qpOf(v), L: 0, R: 0 })],
+  ['qp: every byte =xx, =\\n soft break', (v) => ({ text: qpOf(v, { every: true, lower: true, soft: '=\n' }), L: 0, R: 0 })],
+  ['escape: Python repr(bytes) b\'…\\xNN…\'', (v) => ({ text: pyBytes(v), L: 2, R: 1 })],
+  ['escape: Python ascii(str) \\xNN \\uXXXX \\U…', (v) => ({ text: pyStr(v), L: 1, R: 1 })],
+  ['escape: every byte \\xNN (strace -xx)', (v) => ({ text: everyX(v), L: 0, R: 0 })],
+  ['escape: a run of escaped backslashes, then every byte \\xNN (pairs read from the run\'s start)', (v) => ({ text: '\\\\'.repeat(5) + everyX(v), L: 10, R: 0 })],
+  ['escape: Rust escape_unicode \\u{…}', (v) => ({ text: rustU(v), L: 0, R: 0 })],
+  ['escape: git / bash octal \\NNN', (v) => ({ text: octal(v), L: 0, R: 0 })],
+  ['entity: html.escape (& < > " \' as entities)', (v) => ({ text: htmlEscape(v), L: 0, R: 0 })],
+  ['entity: every character &#NN;', (v) => ({ text: htmlEvery(v), L: 0, R: 0 })],
+  ['entity: non-alphanumerics &#xHH; (OWASP encoder)', (v) => ({ text: owasp(v), L: 0, R: 0 })],
+  ['ansi: an SGR escape every 4 characters', (v) => ({ text: sgrEvery4(v), L: 0, R: 0 })],
+  ['ansi: grep --color highlighting a part', (v) => ({ text: grepColor(v), L: 0, R: 0 })],
+  ['ansi: bold, then tput sgr0 (\\x1b(B\\x1b[m)', (v) => ({ text: tputBold(v), L: 0, R: 0 })],
+  ['wrap: base64 at 76 columns (a MIME body) — the value across a line break', (v) => ({ text: wrapAt(b64('x'.repeat(48) + v), 76), L: 64, R: 4 })],
+  ['wrap: openssl base64 (64 columns)', (v) => ({ text: wrapAt(b64(v), 64), L: 0, R: 0 })],
 ];
 const secretsOf = (v) => [{ label: LABEL, value: v }];
 /** null when the printing is scrubbed: before + (≤ L chars) + THE PLACEHOLDER + (≤ R chars) + after, and the raw value gone. */
@@ -343,11 +394,14 @@ function leakOf(Vm, v, p) {
   return !m || m[1].length > L || m[2].length > R || out.includes(v) ? out.slice(0, 300) : null;
 }
 function scrubLeaks(Vm) { const out = []; for (const v of VALUES) for (const [name, p] of PRINTS) { const l = leakOf(Vm, v, p); if (l !== null) out.push([v.slice(0, 24), name, l]); } return out; }
+// the shipped module's legs are run ONCE (the mutants below each compare against them — the suite's time budget)
+const SHIPPED = new Map(); const once = (key, f) => { if (!SHIPPED.has(key)) SHIPPED.set(key, f()); return SHIPPED.get(key); };
+const READ_ROWS = PRINTS.filter(([n]) => /^(qp|escape|entity|ansi|wrap): /.test(n));
 function chunked(Vm, text, v, sizes) { const m = Vm.createMasker(secretsOf(v)); let out = '', i = 0, k = 0; while (i < text.length) { const n = sizes[k++ % sizes.length]; out += m.push(text.slice(i, i + n)); i += n; } return out + m.end(); }
 /** every split point (values ≤ 64 bytes) and 1 / 3 / 7-character chunks; the long value at 211 and 4096 */
-function chunkEscapes(Vm) {
+function chunkEscapes(Vm, rows = PRINTS) {
   const out = [];
-  for (const v of VALUES) for (const [name, p] of PRINTS) {
+  for (const v of VALUES) for (const [name, p] of rows) {
     const text = `before ${p(v).text} after`, whole = Vm.maskText(text, secretsOf(v));
     const short = Buffer.byteLength(v) <= 64;
     if (short) for (let i = 0; i <= text.length; i++) { const got = chunked(Vm, text, v, [i, text.length]); if (got !== whole) { out.push([v.slice(0, 24), name, `split at ${i}`]); break; } }
@@ -357,11 +411,14 @@ function chunkEscapes(Vm) {
 }
 {
   const t0 = Date.now();
-  const leaks = scrubLeaks(V);
+  const leaks = once('scrub', () => scrubLeaks(V));
   ok(!leaks.length, `${VALUES.length} values × ${PRINTS.length} printings (Node's own encoders): each becomes ${PH} with at most the neighbours' characters beside it — raw, base64 (± padding, URL-safe, inside a longer run at all three byte alignments: Basic user:pass), percent (upper / lower, encodeURIComponent / RFC 3986 / Python / WHATWG form / every byte), JSON (\\/, ensure_ascii, HTML-safe, nested in a log line), hex`, leaks.slice(0, 4));
   const forms = new Set(V.formsOf('p/l+a=n t?e&d#9%~*"é').map((f) => f.form));
-  ok(eq([...forms].sort(), [...V.FORMS].sort()) && V.FORMS.length === 5, 'formsOf names the five forms: raw, base64, percent, json, hex');
-  const esc = chunkEscapes(V);
+  const spelled = V.FORM_ROWS.filter((r) => r.how === 'spelled').map((r) => r.form), read = V.FORM_ROWS.filter((r) => r.how === 'read').map((r) => r.form);
+  ok(eq([...forms].sort(), [...spelled].sort()) && eq(V.VIEWS.map((x) => x.form), read) && eq(V.FORMS, V.FORM_ROWS.map((r) => r.form)) && V.FORMS.length === 12
+    && V.FORM_ROWS.every((r) => typeof r.producer === 'string' && r.producer.length > 20) && new Set(PRINTS.map(([n]) => (/^(\w+): /.exec(n) || [])[1]).filter(Boolean)).size === 7,
+    `FORMS is THE ONE LIST (${V.FORMS.join(', ')}): the spelled ones are exactly what formsOf builds, the read ones exactly the VIEWS, each row names its real producer — and every NEW form has printings here`);
+  const esc = once('chunk', () => chunkEscapes(V));
   ok(!esc.length, `THE CHUNK WINDOW: the same ${VALUES.length * PRINTS.length} texts cut at EVERY split point (values ≤ 64 bytes) and fed 1 / 3 / 7+2 characters at a time (the 2 560-byte value at 211 and 4096+13) scrub exactly as the whole text does`, esc.slice(0, 4));
   const m = V.createMasker(secretsOf(VALUES[0])), W = m.window;
   const first = m.push('x'.repeat(100) + VALUES[0].slice(0, 5)), second = m.push(VALUES[0].slice(5) + ' ok'), last = m.end();
@@ -377,10 +434,70 @@ function chunkEscapes(Vm) {
   const v = VALUES[0], rev = [...v].reverse().join(''), sha = crypto.createHash('sha256').update(v).digest('hex');
   const so = V.createMasker(secretsOf(v)), se = V.createMasker(secretsOf(v));
   const split = so.push(v.slice(0, 9)) + so.end() + '|' + se.push(v.slice(9)) + se.end();
-  ok(V.maskText(rev, secretsOf(v)) === rev && V.maskText(sha, secretsOf(v)) === sha && V.maskText(v.slice(-4), secretsOf(v)) === v.slice(-4) && split === v.slice(0, 9) + '|' + v.slice(9), 'THE SIEVE\'S NAMED HOLES pass (controls): a reversal, a hash, the last four characters, a value split between stdout and stderr');
+  // ONE window per run (the desk's M1): the run's ONE masker is fed by both pipes in arrival order — the same split is masked,
+  // each character handed back to the stream it came on, the placeholder on the stream the value began on
+  const both = (feed) => { const m = V.createRunMasker(secretsOf(v)), acc = { out: '', err: '' }; const add = (o) => { acc.out += o.out; acc.err += o.err; }; for (const [k, c] of feed) add(m.push(k, c)); add(m.end()); return acc; };
+  const one = both([['out', 'a ' + v.slice(0, 9)], ['err', v.slice(9) + ' b'], ['out', ' c']]);
+  ok(one.out === 'a ' + PH + ' c' && one.err === PH + ' b' && split === v.slice(0, 9) + '|' + v.slice(9), 'ONE WINDOW PER RUN: a value split between stdout and stderr is masked by the run\'s one masker (stdout «a [vault:…] c», stderr «[vault:…] b» — each pipe shows where its part was) — two maskers, one per stream, let the same split by (the control)', [one, split.slice(0, 40)]);
+  // …and reading the pipes in arrival order never costs a value inside ONE pipe: the other pipe's chunk between its halves
+  const h = v.length >> 1, inter = both([['out', '<' + v.slice(0, h)], ['err', '<' + v.slice(0, h)], ['out', v.slice(h) + '>'], ['err', v.slice(h) + '>']]);
+  ok(inter.out === '<' + PH + '>' && inter.err === '<' + PH + '>', 'a value written to EACH pipe in two pieces, the other pipe\'s piece arriving between them, is masked on both (each pipe is read on its own too)', inter);
+  // a seeded fuzz over the two pipes: values whole on one pipe or split between them, other output around, every chunking
+  let seed = 7; const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  const fuzzBad = [];
+  for (let round = 0; round < 60; round++) {
+    const val = VALUES[rnd(4)], prints = PRINTS.filter(([n]) => !/twice/.test(n)), [pn, p] = prints[rnd(prints.length)], txt = p(val).text;
+    const feed = [];
+    for (let j = 0; j < 3; j++) feed.push([rnd(2) ? 'out' : 'err', 'noise ' + j + ' ']);
+    const k = rnd(2) ? 'out' : 'err', cutAt = rnd(txt.length - 1) + 1;
+    if (rnd(2)) feed.push([k, txt.slice(0, cutAt)], [k === 'out' ? 'err' : 'out', 'between '], [k, txt.slice(cutAt)]);   // one pipe, the other's chunk inside
+    else feed.push([k, txt.slice(0, cutAt)], [k === 'out' ? 'err' : 'out', txt.slice(cutAt)]);                       // split between the pipes
+    feed.push([rnd(2) ? 'out' : 'err', ' tail']);
+    for (const size of [1, 3, 1e9]) {
+      const fine = feed.flatMap(([s, c]) => { const o = []; for (let i = 0; i < c.length; i += size) o.push([s, c.slice(i, i + size)]); return o; });
+      const r = both(fine), joined = [r.out + r.err, r.err + r.out];
+      if (!r.out.includes(PH) && !r.err.includes(PH) || joined.some((j) => j.includes(val) || (Buffer.byteLength(val) <= 64 && j.includes(val.slice(0, 12))))) fuzzBad.push([pn, size, JSON.stringify(r).slice(0, 160)]);
+    }
+  }
+  ok(!fuzzBad.length, 'A SEEDED FUZZ over the two pipes (60 rounds × 3 chunkings — a value whole on one pipe with the other\'s chunk inside it, or split between the pipes; noise around): every round masked, no 12 characters of a value on either pipe or both joined', fuzzBad.slice(0, 3));
+  const bs = V.createMasker(secretsOf(v)), bsOut = bs.push('\\'.repeat(65536)).length;
+  ok(bsOut >= 65536 - 2 * bs.window - 12, `a 64 KiB run of backslashes is handed on as it comes (${bsOut} characters before the end — the escape view keeps back its window of pairs (2 × window) and one unfinished token from the run's last pair boundary, never the whole run)`, bsOut);
+  const swap = (s) => s[0] === s[0].toUpperCase() ? s[0].toLowerCase() + s.slice(1) : s[0].toUpperCase() + s.slice(1);
+  const gz = zlib.gzipSync(Buffer.from(v)).toString('base64'), spaced = cps(v).join(' '), apart = both([['out', v.slice(0, 9)], ['out', ' other output '], ['err', v.slice(9)]]);
+  ok(V.maskText(rev, secretsOf(v)) === rev && V.maskText(sha, secretsOf(v)) === sha && V.maskText(v.slice(-4), secretsOf(v)) === v.slice(-4) && V.maskText(gz, secretsOf(v)) === gz && V.maskText(spaced, secretsOf(v)) === spaced && V.maskText(swap(v), secretsOf(v)) === swap(v) && apart.out + apart.err === v.slice(0, 9) + ' other output ' + v.slice(9),
+    'THE SIEVE\'S NAMED HOLES pass (controls): a reversal, a hash, the last four characters, gzip + base64 (a compressed stream is not a spelling), the characters spaced, one case swapped, a value split between the pipes with other output between the halves — invented, never what a tool prints by itself');
   const head = fs.readFileSync(SRC, 'utf8').split('\nconst VI = ')[0];
-  ok(/THE SCRUBBER IS A SIEVE/.test(head) && /WRITE-THEN-CAT DEFEATS IT/.test(head) && /NOT isolation/.test(head) && /a tool can SEND the value somewhere/.test(head) && /refusal table is a belt, not a proof/.test(head), 'the module\'s header says so: the scrubber is a sieve, write-then-cat defeats it, same-uid is not isolation, a tool can send the value out, the refusal table is a belt');
+  ok(/THE SCRUBBER IS A SIEVE/.test(head) && /WRITE-THEN-CAT DEFEATS IT/.test(head) && /NOT isolation/.test(head) && /a tool can SEND the value somewhere/.test(head) && /refusal table is a belt, not a proof/.test(head) && /THE FLOOR/.test(head) && /ONE window per run/.test(head), 'the module\'s header says so: the scrubber is a sieve, write-then-cat defeats it, same-uid is not isolation, a tool can send the value out, the refusal table is a belt — and it states THE FLOOR and the one window per run');
   console.log(`  (the scrubber legs ran in ${Date.now() - t0} ms)`);
+}
+
+console.log('⑥b THE REAL PRODUCERS\' TABLE — every printing × a 21-character value × start / middle / end of a chunk × a cut inside it');
+{
+  const t0 = Date.now();
+  const V21 = 'sk-Live_9f=Q/2u+Zt7wX';
+  const POS = { start: (x) => [x + ' ' + 'y'.repeat(200), 0], middle: (x) => ['x'.repeat(100) + ' ' + x + ' ' + 'y'.repeat(100), 101], end: (x) => ['x'.repeat(200) + ' ' + x, 201] };
+  const bad = [];
+  let legs = 0;
+  for (const [name, p] of PRINTS) {
+    const { text, L, R } = p(V21);
+    for (const [pos, place] of Object.entries(POS)) {
+      const [chunk, at] = place(text);
+      const whole = V.maskText(chunk, secretsOf(V21));
+      const head = chunk.slice(0, at), tail = chunk.slice(at + text.length);
+      const i = whole.indexOf(PH);
+      const okWhole = whole.startsWith(head) && whole.endsWith(tail) && i >= head.length && i - head.length <= L && whole.length - tail.length - (i + PH.length) <= R && !whole.includes(V21) && !whole.includes(V21.slice(0, 10)) && !whole.includes(V21.slice(-10));
+      if (!okWhole) { bad.push([name, pos, 'whole', JSON.stringify(whole).slice(0, 160)]); continue; }
+      for (let c = at + 1; c < at + text.length; c++) {   // the stream cut at EVERY point inside the printed value
+        legs++;
+        const m = V.createMasker(secretsOf(V21)), got = m.push(chunk.slice(0, c)) + m.push(chunk.slice(c)) + m.end();
+        if (got !== whole) { bad.push([name, pos, `cut at ${c - at}`, JSON.stringify(got).slice(0, 160)]); break; }
+      }
+    }
+  }
+  ok(!bad.length, `${PRINTS.length} printings × the 21-character value × start / middle / end of a 200-character chunk: each masked WHOLE (the placeholder where the printing was, only its quotes / prefix beside it, 0 characters of the value), and the stream cut at every point inside the printed value (${legs} cuts) hands on exactly the one-shot`, bad.slice(0, 4));
+  const frag = V21.slice(0, 7), fragText = `a ${frag} b ${V21.slice(-4)} c`;
+  ok(V.maskText(fragText, secretsOf(V21)) === fragText && Buffer.byteLength(frag) === V.MIN_MASK_BYTES - 1, `THE FLOOR (by rule): a 7-byte fragment of a value (${V.MIN_MASK_BYTES - 1} bytes, under MIN_MASK_BYTES) and its last four characters are NOT masked — the scrubber masks a whole value in a spelling, never a part of one`);
+  console.log(`  (the producers' table ran in ${Date.now() - t0} ms)`);
 }
 
 console.log('⑦ THE CLI\'S WORDS — parseRunArgs');
@@ -406,10 +523,17 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
   const argvLeg = (Vm) => ['curl', 'gh', 'terraform'].filter((t) => Vm.planOf({ argv: [t, `--token=${M1}`] }).code !== 'argv_refused');
   const printLeg = (Vm) => ['cat', 'echo', 'printenv', 'head', 'tee'].filter((t) => Vm.planOf({ argv: [t, '$VAULT_FILE{mounts/m1/secretKey}'] }).code !== 'tool_prints_secrets');
   const LEGS = [
-    ['the scrubber without base64', '\n    ...base64Forms(bytes),\n', '\n    ...[],\n', (Vm) => scrubLeaks(Vm).filter(([, n]) => /base64|Basic/.test(n))],
+    ['the scrubber without base64', '\n    ...base64Forms(bytes),\n', '\n    ...[],\n', (Vm) => (Vm === V ? once('scrub', () => scrubLeaks(V)) : scrubLeaks(Vm)).filter(([, n]) => /base64|Basic/.test(n) && !/^wrap: /.test(n))],
     ['argv allowed by default', 'const argvOpen = !!allowArgv && !!(row && row.argvOnly);', 'const argvOpen = true;', argvLeg],
     ['a print-class tool not refused', 'const REFUSING = TOOL_ROWS;', "const REFUSING = TOOL_ROWS.filter((r) => r.cls !== 'print');", printLeg],
-    ['a value split across chunks escaping (no window)', '  const W = maxLen - 1;\n', '  const W = 0;\n', chunkEscapes],
+    ['a value split across chunks escaping (no window)', '  const W = maxLen - 1;\n', '  const W = 0;\n', (Vm) => (Vm === V ? once('chunk', () => chunkEscapes(V)) : chunkEscapes(Vm))],
+    // lane vault-scrub-forms: each NEW form dropped ⇒ its printings leak; a view's held tail ignored ⇒ a value cut inside its escapes leaks
+    ...[['utf16', ', ...utf16Forms(v)', ''], ['base32', ', ...base32Forms(bytes)', ''],
+      ['qp', "re: /=(?:\\r?\\n|[0-9A-Fa-f]{2})/g", 're: /(?!)/g'], ['escape', "re: /\\\\(?:x[0-9A-Fa-f]{2}", 're: /(?!)\\\\(?:x[0-9A-Fa-f]{2}'],
+      ['entity', "re: /&(?:#[0-9]{1,7};", 're: /(?!)&(?:#[0-9]{1,7};'], ['ansi', "re: /\\x1b(?:", 're: /(?!)\\x1b(?:'], ['wrap', 're: /[\\r\\n]/g', 're: /(?!)/g']]
+      .map(([form, from, to]) => [`the scrubber without the ${form} form`, from, to, (Vm) => (Vm === V ? once('scrub', () => scrubLeaks(V)) : scrubLeaks(Vm)).filter(([, n]) => n.startsWith(form + ': '))]),
+    ['a backslash run held whole', 'k = j + 2 * Math.floor((k - j) / 2);', 'k = j;', (Vm) => { const m = Vm.createMasker(secretsOf(VALUES[0])), n = m.push('\\'.repeat(65536)).length; return n >= 65536 - 2 * m.window - 12 ? [] : [['held', n]]; }],
+    ['a view\'s held tail ignored', 'if (!final) { const len = r ? r.sk.length : end, ss = len - W;', 'if (false) { const len = r ? r.sk.length : end, ss = len - W;', (Vm) => (Vm === V ? once('chunk', () => chunkEscapes(V)).filter(([, n]) => READ_ROWS.some(([r]) => r === n)) : chunkEscapes(Vm, READ_ROWS))],
   ];
   for (const [name, from, to, leg] of LEGS) {
     const { hit, M } = mutant(name.replace(/\W+/g, '-'), from, to);

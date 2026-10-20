@@ -47,6 +47,7 @@ const fs = require('fs');
 const path = require('path');
 const net = require('net');
 const { spawn, execFileSync } = require('child_process');
+const { serviceEnv } = require('./agent-env.js');
 
 const VNC_PORT = parseInt(process.env.VIBESPACE_VNC_PORT || '', 10) || 5901;
 const VNC_DISPLAY = process.env.VIBESPACE_VNC_DISPLAY || ':7'; // the PREFERRED display (B-956d) — held ⇒ -displayfd picks one
@@ -170,7 +171,8 @@ class VncManager {
       '-rfbport', String(this.port), '-geometry', VNC_GEOMETRY, '-depth', '24'];
     return new Promise((resolve) => {
       let x;
-      try { x = spawn(xvnc, xArgs, { detached: true, stdio: ['ignore', 'ignore', 'ignore', 'pipe'] }); }
+      // a service's env (src/agent-env.js serviceEnv): the X server never holds the hub's secrets (lane spawn-env-census)
+      try { x = spawn(xvnc, xArgs, { detached: true, stdio: ['ignore', 'ignore', 'ignore', 'pipe'], env: serviceEnv(process.env) }); }
       catch (e) { resolve({ child: null, display: null, why: e.message }); return; }
       let buf = '', done = false, timer = null;
       const finish = (v) => {
@@ -200,8 +202,10 @@ class VncManager {
 
   /** Desktop session on the VNC display: XFCE preferred, fallbacks probed. */
   _startSession() {
-    const env = { ...process.env, DISPLAY: this.display };
-    delete env.XAUTHORITY; // our Xvnc runs without an auth cookie file
+    // a service's env, not the hub's (lane spawn-env-census): the user's shell names (USER / LOGNAME / SHELL — the
+    // allowlist deploy/sysroot/vs-sysroot-enter hands a user's shell) + DISPLAY; no XAUTHORITY (our Xvnc runs without an
+    // auth cookie file) and no bus of the hub's (dbus-launch starts the session's own)
+    const env = serviceEnv(process.env, { keep: ['USER', 'LOGNAME', 'SHELL'], add: { DISPLAY: this.display } });
     const dbusLaunch = which('dbus-launch');
     const candidates = [
       ['xfce4-session', []],

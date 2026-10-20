@@ -61,7 +61,7 @@ function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   ENV_CMD, NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
   attachToDtach, setupSessionPty, readSessionMeta, writeSessionMeta,
   deleteSessionMeta, broadcastToSession, broadcastActiveSessions,
-  refreshWebuiPids, sbNoteServerOp, getHosts, getDialBridge, getExitProxy = () => null, note = () => { } }) {
+  refreshWebuiPids, sbNoteServerOp, getHosts, getDialBridge, getExitProxy = () => null, note = () => { }, agentEnv }) {
   const hosts = mk(getHosts);
   const dialBridge = mk(getDialBridge);
   const exitProxyRef = mk(getExitProxy); // B-92a4: a session the re-probe un-adopts ends its exit pairs + waiting asks like any ended one
@@ -764,7 +764,7 @@ async function readoptOrphanKeeperSessions() {
   const { execFile } = require('child_process');
   const sshOut = (h, script) => new Promise((resolve) => {
     execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
-      { timeout: 15000, maxBuffer: 256 * 1024 }, (err, out) => resolve(err ? null : String(out || '')));
+      { env: hosts.sshEnv(), timeout: 15000, maxBuffer: 256 * 1024 }, (err, out) => resolve(err ? null : String(out || '')));
   });
   let adopted = 0;
   for (const f of files) {
@@ -801,13 +801,19 @@ async function readoptOrphanKeeperSessions() {
     const sshArgs = [...hosts.sshArgs(h, rport ? { reverse: `${rport}:127.0.0.1:${PORT}` } : {}), '-T', '--', inner];
     let ptyProc;
     try {
+      // THE TRANSPORT'S ENV IS BUILT (lane spawn-env-debts, 2026-10-20): agentEnv() as ws-create's r6Env (the server's,
+      // with its credential drop), never the hub's whole env. The chat wrapper reads VIBESPACE_REMOTE_SID alone and hands
+      // the rest to ssh; a stray identity (agentEnv keeps VIBESPACE_SESSION_TOKEN / _API / _TASK_ID for a spawn that SETS
+      // them — this one sets none: the remote claude holds its own) and r6Env's ambient billing names never ride it.
+      const readoptEnv = { ...agentEnv(), TERM: 'xterm-256color', VIBESPACE_REMOTE_SID: id };
+      for (const k of ['VIBESPACE_SESSION_TOKEN', 'VIBESPACE_API', 'VIBESPACE_TASK_ID', 'ANTHROPIC_API_KEY', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR']) delete readoptEnv[k];
       ptyProc = pty.spawn(DTACH_CMD, ['-c', socketPath, '-E', '-r', 'none',
         NODE_CMD, CHAT_WRAPPER, bufFile, metaFileW,
         ENV_CMD, `CLAUDE_WEBUI_PORT=${PORT}`, `CLAUDE_WEBUI_SESSION_ID=${id}`,
         `TERM=xterm-256color`, 'ssh', ...sshArgs,
       ], {
         name: 'xterm-256color', cols: 190, rows: 45, cwd: os.homedir(),
-        env: { ...process.env, TERM: 'xterm-256color', VIBESPACE_REMOTE_SID: id },
+        env: readoptEnv,
       });
     } catch (e) { console.warn(`[readopt] spawn failed for ${meta.keeperSid}: ${e.message}`); continue; }
     const session = sessionFromMeta(meta, { // transport-only + per-path facts (win over the shared ones)

@@ -135,7 +135,8 @@ const ROWS = Object.freeze([
     // refusal says the user was already told (src/vault-blocked.js agentWords) — the summary says it too
     name: 'vibespace-vault', topic: 'vault', manual: 'vault-manual.md', gate: 'always', teach: null,
     // lane vault-run-door: + `run` (a command with a stored secret the agent never sees) and `list` (what it may reference)
-    summary: 'the vault\'s state, lock it now, run a command with a stored secret you never see (locked ⇒ the user is told; never ask them to unlock)',
+    // lane vault-manual-and-lock (design D4): + `request` (ask the user for an entry with its purpose) and `uses` (grants, requests, receipts)
+    summary: 'state, lock, mint/put, run with a secret you never see, request one, your uses (locked ⇒ the user is told; never ask them to unlock)',
   },
   {
     // design q-046 (lane automation-keys-core): VibeSpace's own automation API — INDEX-ONLY (a call with no grant asks the

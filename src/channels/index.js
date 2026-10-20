@@ -59,7 +59,7 @@ const vaultLockedWhy = (why) => why === 'vault-locked' || /the vault is locked/.
 /** THE "not connected" refusal of an adapter's token read (lane vault-e2e-password-fix-r2): a LOCKED vault is its own code
  *  (`vault-locked` — retryable, the card says 「保险库已锁定——先解锁」), never `auth-expired` ("the login expired"). */
 function notConnectedError(vendor, why) {
-  if (vaultLockedWhy(why)) return new ChannelError('vault-locked', `${vendor} cannot read its sign-in: ${VB.agentWords('it opens after a person unlocks the vault on the page')}`, { retryable: true });   // lane vault-locked-refusal-notice: the owner was told
+  if (vaultLockedWhy(why)) return new ChannelError('vault-locked', `${vendor} cannot read its sign-in: ${VB.agentWords('it opens after a person unlocks the vault on this instance\'s page')}`, { retryable: true });   // lane vault-locked-refusal-notice: the owner was told
   return new ChannelError('auth-expired', `${vendor} is not connected (${why || 'no token'})`, { retryable: false });
 }
 

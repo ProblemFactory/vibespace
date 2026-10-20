@@ -868,7 +868,7 @@ export class ChatStatusBar {
       chip('remote', 'chat-status-remote', t('This session was created before disconnect protection existed — a network drop can kill it. Terminate and Resume the session to rebuild it protected.'), `⚠ ${escHtml(t('no disconnect protection'))}`);
     } else if (this._remoteState && (this._remoteState.state === 'vault-locked' || /\(vault_locked\)|the vault is locked/.test(String(this._remoteState.lastError || '')))) {
       // lane vault-e2e-password-fix-r2 (verify RED-2): the link waits for the VAULT — a state, not a failure; the chip is its door
-      chip('remote', 'chat-status-remote chat-status-vault-wait chat-status-clickable', t('This session waits for the vault — unlock it with the second password; it reconnects by itself and nothing is lost.'), `${UI_ICONS.lock || ''} ${escHtml(t('waiting for the vault to be unlocked'))}`);
+      chip('remote', 'chat-status-remote chat-status-vault-wait chat-status-clickable', t('This session waits for the vault — unlock it with the second password (Unlock… at the top of the page; For you names what is waiting on it); it reconnects by itself and nothing is lost.'), `${UI_ICONS.lock || ''} ${escHtml(t('waiting for the vault to be unlocked'))}`);
     } else if (this._remoteState) {
       const n = this._remoteState.attempts || 0;
       // Name the concrete failure (2.228.1): "reconnecting (9)…" alone is

@@ -53,6 +53,7 @@ const ROW_WORDS = {
   codec: [() => t('Codec'), (r) => r.codec],
   hdr: [() => t('HDR'), (r) => t('Passthrough · {transfer} {bits}-bit · {primaries}', { transfer: r.transfer === 'pq' ? 'PQ' : r.transfer, bits: r.bits == null ? '—' : r.bits, primaries: r.primaries === 'bt2020' ? 'BT.2020' : r.primaries })], // lane stream-hdr-passthrough
   encoder: [() => t('Encoder'), (r) => (r.ms != null ? t('{encoder} · encode {ms} ms', { encoder: r.encoder, ms: r.ms }) : r.encoder)],
+  power: [() => t('Power throttling'), (r) => (r.ecoqos === 'off' ? t('Off') : t('On'))], // lane stream-sdr-ecoqos: Windows' EcoQoS on the machine's stream processes — 'off' = full speed
   display: [() => t('Screen'), (r) => (r.name ? `${r.name} · ${r.id}` : r.id)],
   size: [() => t('Picture'), (r) => `${r.w}×${r.h}` + (r.sw != null && r.sh != null && (r.sw !== r.w || r.sh !== r.h) ? ' · ' + t('encoded {w}×{h}', { w: r.sw, h: r.sh }) : '')],
   rate: [() => t('The machine’s rate'), (r) => [`${ms(r.kbps)} kbps`, r.floor != null ? t('floor {n} kbps', { n: r.floor }) : '', r.bwe != null ? t('estimate {n} kbps', { n: r.bwe }) : ''].filter(Boolean).join(' · ')],

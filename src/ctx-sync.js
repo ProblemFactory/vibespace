@@ -131,7 +131,7 @@ async function syncGroupCtxOverRsync({ hosts, host, group, remoteDir }) {
   const opts = ['-az', '--update', '--exclude', '.vibespace', '--timeout', '25', '-e', e];
   const rsync = (args) => new Promise((resolve, reject) => {
     const { execFile } = require('child_process');
-    execFile('rsync', args, { timeout: 60000 }, (err, so, se) => err ? reject(new Error(String(se || err.message).slice(0, 200))) : resolve());
+    execFile('rsync', args, { env: hosts.sshEnv(), timeout: 60000 }, (err, so, se) => err ? reject(new Error(String(se || err.message).slice(0, 200))) : resolve());
   });
   await rsync([...opts, local, remote]); // push newer local files
   await rsync([...opts, remote, local]); // pull newer remote artifacts back

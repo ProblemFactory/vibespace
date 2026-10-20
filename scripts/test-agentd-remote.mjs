@@ -60,7 +60,17 @@ const transport = {
 // which sh reads as $0 — adapt: use bash -c with -- ignored via a wrapper
 transport.sshArgs = [];
 transport.sshBin = path.join(tmp, 'fake-ssh');
-fs.writeFileSync(transport.sshBin, `#!/bin/sh\n# fake ssh: ignore leading --, exec the command string\nwhile [ "$1" = "--" ]; do shift; done\nexec sh -c "$1"\n`, { mode: 0o755 });
+fs.writeFileSync(transport.sshBin, `#!/bin/sh\n# fake ssh: record the env it was given (lane spawn-env-census), ignore leading --, exec the command string\nenv > ${JSON.stringify(path.join(tmp, 'ssh-env'))}.$$\nwhile [ "$1" = "--" ]; do shift; done\nexec sh -c "$1"\n`, { mode: 0o755 });
+
+// lane spawn-env-census: the hub's env PLANTED with runtime-built fakes before the first bridge — an agent conversation's
+// session tokens, the cluster's relay token, a cloud key — and an SSH_AUTH_SOCK (the one name the bridge KEEPS: ssh needs it
+// for an agent-held key, measured). The fake ssh records the env it was handed (src/agentd/client.js serviceEnv).
+const r8 = () => require('crypto').randomBytes(8).toString('hex');
+const PLANT = { VIBESPACE_SESSION_TOKEN: 'vs-sess-' + r8(), VIBESPACE_FRPS_TOKEN: 'frps-' + r8(), CLAUDE_CODE_MESSAGING_TOKEN: 'cc-msg-' + r8(), AWS_SECRET_ACCESS_KEY: 'aws-' + r8() };
+const AUTH_SOCK = path.join(tmp, 'agent.sock');
+Object.assign(process.env, PLANT, { SSH_AUTH_SOCK: AUTH_SOCK });
+const sshEnvs = () => fs.readdirSync(tmp).filter((f) => f.startsWith('ssh-env.')).map((f) => { const t = fs.readFileSync(path.join(tmp, f), 'utf8'); fs.rmSync(path.join(tmp, f)); return Object.fromEntries(t.split('\n').filter((l) => l.includes('=')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])); });
+const leakedIn = (e) => Object.keys(PLANT).filter((k) => k in e || Object.values(e).includes(PLANT[k]));
 
 console.log('— M2: stdio bridge reaches + spawns the standing daemon —');
 const dm = new DeviceManager({ dataDir, bundlePath: bundle, version, transport, log: () => {} });
@@ -69,6 +79,28 @@ check('handshake over the ssh-stdio bridge', !!conn?.info, '');
 check('daemon version + auth via provisioned host token', conn.info.daemonVersion === version, JSON.stringify(conn.info?.daemonVersion));
 const daemonPid = Number(fs.readFileSync(path.join(stateDir, 'agentd.pid'), 'utf8'));
 check('daemon is setsid-detached on the "remote"', daemonPid > 0, String(daemonPid));
+
+console.log('— spawn-env-census: the ssh bridge gets a service\'s env, never the hub\'s (planted fakes) —');
+{
+  const envs = sshEnvs();
+  check('the planted names are in the hub\'s own env (the leg is not vacuous)', Object.entries(PLANT).every(([k, v]) => process.env[k] === v), Object.keys(PLANT).join(' '));
+  check('the bridge\'s ssh got none of the planted names or values (and no VIBESPACE_* / CLAUDE_* / AWS_* at all)', envs.length >= 1 && envs.every((e) => leakedIn(e).length === 0 && !Object.keys(e).some((k) => /^(VIBESPACE_|CLAUDE_|AWS_)/.test(k))), JSON.stringify(envs.map((e) => Object.keys(e).sort())));
+  check('…and it KEPT SSH_AUTH_SOCK (ssh needs it for an agent-held key)', envs.length >= 1 && envs.every((e) => e.SSH_AUTH_SOCK === AUTH_SOCK), JSON.stringify(envs.map((e) => e.SSH_AUTH_SOCK || null)));
+  // CONTROL: the pre-fix client.js (the bridge spawned with no env) hands the fake ssh every planted name
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const src = fs.readFileSync(path.join(repo, 'src/agentd/client.js'), 'utf8');
+  const cut = src.replace(", env: serviceEnv(process.env, { keep: SSH_ENV_KEEP }),", ',');   // lane spawn-env-debts: the keep list is SSH_ENV_KEEP (src/agent-env.js)
+  const pre = cut !== src ? mutantCopies('agentd-remote-env', repo).load('src/agentd/client.js', cut, 'pre-service-env') : null;
+  let leakedPre = null;
+  if (pre) {
+    const t = new pre.DeviceManager({ dataDir, bundlePath: bundle, version, transport, log: () => {} })._openTransport();
+    for (let i = 0; i < 100 && !fs.readdirSync(tmp).some((f) => f.startsWith('ssh-env.')); i++) await sleep(20);
+    await sleep(50);
+    t.destroy();
+    leakedPre = sshEnvs().map(leakedIn);
+  }
+  check('CONTROL: the pre-fix bridge (no env) hands the fake ssh every planted name — RED as it must', !!leakedPre && leakedPre.length === 1 && leakedPre[0].length === Object.keys(PLANT).length, JSON.stringify(leakedPre));
+}
 
 console.log('— M2: persistent pipe session through the bridge —');
 const STUB = 'process.stdin.setEncoding("utf8");let b="";process.stdin.on("data",d=>{b+=d;let i;while((i=b.indexOf("\\n"))!==-1){const l=b.slice(0,i);b=b.slice(i+1);if(l==="quit")process.exit(7);console.log("echo:"+l)}});setInterval(()=>{},1e3);';

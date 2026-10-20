@@ -467,11 +467,12 @@ export function installSetupFlows(App) {
   },
 
     async _openDiagnostics() {
-    const [d, c, ci, bt] = await Promise.all([
+    const [d, c, ci, bt, csp] = await Promise.all([
       fetchJson('/api/telemetry/summary?days=14&drift=1'),
       fetchJson('/api/telemetry/central-summary?days=14'),
       fetchJson('/api/ci-heavy'),
       fetchJson('/api/boot-trace'),
+      fetchJson('/api/csp-reports'), // lane app-page-csp: the page security policy's count (the chip below the title)
     ]);
     if (!d) { showToast(t('Could not load diagnostics'), { type: 'error' }); return; }
     const esc = escHtml;
@@ -490,10 +491,12 @@ export function installSetupFlows(App) {
       .dim{color:#888} pre{background:#f6f8fa;padding:8px;border-radius:6px;white-space:pre-wrap;font-size:12px}
       details{margin:4px 0;border:1px solid #eee;border-radius:6px;padding:4px 8px} summary{cursor:pointer}
       .chart{display:flex;align-items:flex-end;gap:3px;height:84px;margin:8px 0}
+      .chip{display:inline-block;padding:1px 10px;border:1px solid #d0d7de;border-radius:12px;background:#f6f8fa;font-size:12px}
       .bar{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%} .bar i{display:block;width:16px;background:#54aeff;border-radius:2px 2px 0 0} .bar s{text-decoration:none;font-size:9px;color:#888;margin-top:2px}
     </style><body>
     <h1>${esc(t('VibeSpace diagnostics'))} <span class="dim" style="font-size:13px">— ${esc(t('last {n} days', { n: d.days }))} · ${esc(t('instance'))} ${esc(d.instance || '?')}</span></h1>
     <p class="dim">${esc(t('Local-only data from data/telemetry/. Total events: {n}.', { n: d.total }))}</p>
+    ${csp && csp.app ? `<p><span class="chip" title="${esc(t('Lines in data/csp-reports.jsonl. A report from the app page also files a For-you notice; one from a frame the page made (a mail, a design) never does.'))}">${esc(t('Page security policy (reports only): {app} on the app page · {frames} from frames the page made', { app: csp.app.lines, frames: csp.frames.lines }))}</span></p>` : ''}
     <h2>${esc(t('Errors'))}</h2>${errs}
     <h2>${esc(t('Performance metrics'))}</h2>${(() => {
       const m = d.metrics || {};
