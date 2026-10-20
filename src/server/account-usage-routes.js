@@ -19,7 +19,7 @@ const pivotsOnly = (a) => ({ pivots: a.pivots || {}, ...(a.asOf ? { asOf: a.asOf
 function create({ app, rootDir, HOST, CLAUDE_CMD, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth, engine,
   serverSetting, recordUsageAttribution, liveAccountIdSet, broadcastActiveSessions = () => { }, broadcastAll = () => { },
-  buildClaudeSubscriptionLoginCommand, getAccounts, getHosts, getMounts,
+  buildClaudeSubscriptionLoginCommand, getAccounts, getHosts, getMounts, getModels = () => ({}), refreshModels = () => { }, getIntegrations = () => null,
   getTelemetry, getUsageHistory, getLoginExpiryWatch }) {
   const { clearSealedOrders } = engine;
   // r4: a conversation whose cold restart is already in flight is never handed to
@@ -45,6 +45,16 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, NODE_CMD,
   // THE MANUAL RESET-CREDIT USE (design-reset-credits p2): the preview + the
   // POST, thin over the engine (src/routes/reset-credit.js)
   require('../routes/reset-credit.js').registerResetCreditRoutes(app, { engine });
+  // THE ACCOUNT'S MODELS (design q-053 r1 §3, lane provider-record): data/providers.json + the account dialog's model
+  // section's two routes (src/routes/account-models.js); a built-in provider's rows are its harness's catalog NOW
+  const providers = require('./provider-store.js').create({ dataDir: path.join(rootDir, 'data'), catalogOf: (h) => { const m = getModels(); return m && Array.isArray(m[h]) ? m[h] : null; } });
+  if (typeof accounts.setProviderLookup === 'function') accounts.setProviderLookup((acct) => providers.forAccount(acct)); // SEAM (int329): wire P0a's provider store into P0b/latents' pool decisions when the account manager supports it (a usage-only route stub passes getAccounts:()=>({})) — accounts.memberProviderOf then reads each account's provider record (q-053 P0b / q-055 M1-M2)
+  require('../routes/account-models.js').registerAccountModelRoutes(app, { accounts, providers });
+  // MODELS AT A SESSION (q-053 §3, lane models-at-session): a new / running conversation's menu = its account's provider's rows
+  // (GET /api/available-models?session= | ?backend=&account=), and the listed-provider refresh — a person's press, the vault
+  // open, once a minute, cached on the record (src/server/provider-models.js: THE one new vendor request)
+  const refresher = require('./provider-models.js').create({ providers, vaultState: () => { const v = require('../secret-box.js').vaultForDir(path.join(rootDir, 'data')); return v ? v.state() : 'not_set_up'; }, keyOf: require('./provider-models.js').vaultKeyOf({ getIntegrations }) });
+  require('../routes/provider-models.js').registerProviderModelRoutes(app, { accounts, providers, activeSessions, catalogOf: (h) => { const m = getModels(); return m && Array.isArray(m[h]) ? m[h] : null; }, refreshModels, refresher });
 // A SUCCESSFUL LOGIN is the one moment the login-expiry watch's picture is
 // stale by construction: the deadline it warned about no longer exists. Its
 // poll is 5 min, which is a long time to keep staring at a red chip and an
@@ -375,6 +385,9 @@ app.delete('/api/accounts/:id', (req, res) => {
       chooseDefault: (poolId, from) => (typeof engine.decideDefaultTarget === 'function' ? engine.decideDefaultTarget(poolId, from) : null) || (typeof engine.fallbackDefaultTarget === 'function' ? engine.fallbackDefaultTarget(poolId, from) : null),
       chooseLink: (poolId, from, sid) => (typeof engine.removalTargetFor === 'function' ? engine.removalTargetFor(poolId, from, sid) : null),
     }); // throws for unknown ids → only real (shape-safe) ids continue
+    // (lane pool-provider-latents, q-055 M2) a conversation the deletion left UNPLACED (nobody of its provider left) is decided
+    // NOW — onto its own provider when one can serve, else the owner's card — not at the pool's next tick
+    if (typeof engine.maybePoolAutoSwitchForPool === 'function') for (const pid of accounts.unplacedPools()) { try { engine.maybePoolAutoSwitchForPool(pid, { force: true }); } catch { } }
     // DISARM the device reflex for a deleted pool — a stale snapshot could
     // otherwise recreate the deleted pool's symlink in a server-down window
     if (_wasPool) clearSealedOrders(req.params.id);
@@ -439,7 +452,7 @@ app.patch('/api/accounts/pool/:id', (req, res) => {
     // MANUAL PRIORITY (2026-09-28): `priority` = the owner's order ([] = automatic),
     // validated by the store (members only, deduped, ≤ 40); `auto:false` is ignored —
     // the whole-pool manual switch is retired, so the device reflex stays armed
-    accounts.updatePool(id, { members: req.body?.members, auto: req.body?.auto, hot: req.body?.hot, priority: req.body?.priority }, { chooseMember: decide });
+    accounts.updatePool(id, { members: req.body?.members, auto: req.body?.auto, hot: req.body?.hot, priority: req.body?.priority, crossProvider: req.body?.crossProvider }, { chooseMember: decide });
     let membersAfter = [];
     try { membersAfter = accounts.poolMembership(id) || []; } catch { }
     const removedIds = membersBefore.filter((m) => !membersAfter.includes(m));
@@ -563,6 +576,18 @@ app.post('/api/accounts/pool/:id/gather', (req, res) => {
 // (active-sessions carries `poolPin` + auth.pinned). Codes: not_pooled · not_member ·
 // remote_session · no_session · not_on_pool · agent_forbidden; a pool that cannot re-point a
 // running conversation answers 200 with code codex_cold / cold_pool (applies at the next restart).
+// (q-053 P0b, decision ①) THE OWNER'S ANSWER to a pool's cross-provider card — once (this conversation, now) / always
+// (the pool's crossProvider = 'allow') / deny. A person's act only: an agent's bearer is refused; the engine re-judges
+// before anything moves and answers what it found ({ok, state, moved, why}) or a named refusal (ask_unknown, bad_args).
+app.post('/api/accounts/pool-cross/asks/:askId', (req, res) => {
+  try {
+    if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
+    if (typeof engine.answerCrossProviderAsk !== 'function') return res.status(503).json({ error: 'pool engine unavailable', code: 'no_engine' });
+    const r = engine.answerCrossProviderAsk(String(req.params.askId || ''), { answer: req.body && req.body.answer });
+    if (!r || !r.ok) return res.status((r && r.status) || 400).json({ ok: false, code: (r && r.code) || 'failed', error: (r && r.error) || 'nothing changed' });
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, code: 'failed', error: e.message }); }
+});
 app.post('/api/accounts/:poolId/pin', (req, res) => {
   try {
     if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });

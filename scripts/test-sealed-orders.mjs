@@ -20,8 +20,8 @@ process.env.VIBESPACE_AGENTD_ROOT = ROOT;
 process.env.HOME = path.join(tmp, 'home'); fs.mkdirSync(process.env.HOME, { recursive: true });
 const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 
-let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
+let failed = 0, passed = 0;
+const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // fake pool: link → dirA; ranked fallback = B
@@ -108,8 +108,66 @@ check('ack clears the execution log (no duplicate reports)', !fs.existsSync(path
   check('clearPool disarms ONLY that pool', !!stored2['pool-x'] && !stored2['pool-y'], Object.keys(stored2).join(','));
 }
 
+// ── THE PROVIDER (lane pool-provider-latents, design q-055 M1): a TWO-PROVIDER order — the default link on a Claude
+// subscription member, a per-session link on a DeepSeek member (a conversation the owner allowed onto it). Server down +
+// a limit banner from the DeepSeek conversation ⇒ the device NEVER moves it onto a Claude member (its reflex is a HOT
+// re-point; another provider is the hub's cold move or the owner's card), and says why; the Claude conversation still
+// falls back (the control that the daemon is armed). MUTANT: a bundle whose src/sealed-orders.js drops the provider
+// filter ⇒ the device moves the DeepSeek conversation onto the Claude member ⇒ RED.
+const PK = 'pv-claude-subscription', QK = 'pv-deepseek';
+async function twoProvider(bundlePath, tag, { control = true } = {}) {
+  const R2 = path.join(tmp, 'agentd-' + tag);
+  process.env.VIBESPACE_AGENTD_ROOT = R2; // its own daemon (the client reads the root at construction)
+  const D2 = path.join(tmp, 'data-' + tag); fs.mkdirSync(D2, { recursive: true });
+  const subs2 = path.join(tmp, 'subs-' + tag);
+  for (const s of ['sub-a', 'sub-c', 'sub-q']) { fs.mkdirSync(path.join(subs2, s), { recursive: true }); fs.writeFileSync(path.join(subs2, s, '.credentials.json'), '{}'); }
+  const def = path.join(subs2, 'pool-z'); fs.symlinkSync(path.join(subs2, 'sub-a'), def);
+  const linksDir = path.join(tmp, 'links-' + tag, 'pool-z'); fs.mkdirSync(linksDir, { recursive: true });
+  const lq = path.join(linksDir, 'sess-q'); fs.symlinkSync(path.join(subs2, 'sub-q'), lq);
+  const row = (id) => ({ id, dir: path.join(subs2, id), creds: path.join(subs2, id, '.credentials.json'), provider: PK });
+  const ord = { poolId: 'pool-z', linkPath: def, currentId: 'sub-a', ranked: [row('sub-a'), row('sub-c')], linkPaths: [], provider: PK,
+    links: [{ path: lq, provider: QK }], members: { 'sub-a': PK, 'sub-c': PK, 'sub-q': QK } };
+  const d = new DeviceManager({ dataDir: D2, bundlePath, version, log: () => {} }); d.installLocal();
+  await d.connect();
+  await d.poolOrders(ord, undefined, { by: 'system:test' });
+  const S2 = path.join(R2, 'state', 'sessions'); fs.mkdirSync(S2, { recursive: true });
+  const sess = (sid, lp) => { fs.writeFileSync(path.join(S2, sid + '.json'), JSON.stringify({ childPid: process.pid, startedAt: Date.now(), cmd: ['sh', '-lc', `exec env CLAUDE_SECURESTORAGE_CONFIG_DIR=${lp} claude`] })); fs.writeFileSync(path.join(S2, sid + '.out'), 'normal output line\n'); };
+  sess('sess-q', lq); sess('sess-p', def);
+  await sleep(3200); // the tailer registers the current sizes
+  await d.stop?.();
+  await sleep(2500);
+  fs.appendFileSync(path.join(S2, 'sess-q.out'), JSON.stringify({ type: 'user', text: "You've reached your 5-hour limit" }) + '\n');
+  let qNow = fs.readlinkSync(lq);
+  for (let i = 0; i < 16 && qNow.endsWith('sub-q'); i++) { await sleep(500); qNow = fs.readlinkSync(lq); }
+  let pMoved = null;
+  if (control) {
+    fs.appendFileSync(path.join(S2, 'sess-p.out'), JSON.stringify({ type: 'user', text: "You've hit your session limit · resets 3am" }) + '\n');
+    for (let i = 0; i < 24 && !pMoved; i++) { await sleep(500); if (fs.readlinkSync(def).endsWith('sub-c')) pMoved = fs.readlinkSync(def); }
+  }
+  let logTail = ''; try { logTail = fs.readFileSync(path.join(R2, 'state', 'agentd.log'), 'utf8').slice(-4000); } catch { }
+  return { qNow, pMoved, logTail };
+}
+{
+  const real = await twoProvider(bundle, 'two');
+  check('TWO-PROVIDER order, server down + a banner from the DeepSeek conversation ⇒ the device NEVER moves it onto a Claude member', real.qNow.endsWith('sub-q'), real.qNow);
+  check('…and its log says why (no fallback member of its own provider: pv-deepseek)', /no usable fallback member of its own provider \(no-same-provider: pv-deepseek\)/.test(real.logTail), real.logTail.slice(-600));
+  check('CONTROL: the Claude conversation\'s banner on the same daemon still falls back to the next Claude member (the reflex is armed)', !!real.pMoved && real.pMoved.endsWith('sub-c'), String(real.pMoved));
+  // MUTANT: the same daemon bundled with a src/sealed-orders.js whose provider filter is dropped (a copy outside the tree)
+  const esbuild = require('esbuild');
+  const soSrc = fs.readFileSync(path.join(repo, 'src/sealed-orders.js'), 'utf8');
+  const SOA = 'const next = ranked.find((m) => m.provider != null && String(m.provider) === provider) || null;';
+  check('mutant: the anchor (the device\'s provider filter) hits once', soSrc.split(SOA).length === 2);
+  const mutFile = path.join(tmp, 'sealed-orders-filter-dropped.js');
+  fs.writeFileSync(mutFile, soSrc.replace(SOA, 'const next = ranked[0] || null; // PATCHED: the provider filter dropped'));
+  const mutBundle = path.join(tmp, 'agentd-mut.js');
+  await esbuild.build({ entryPoints: [path.join(repo, 'src/agentd/agentd.js')], bundle: true, platform: 'node', outfile: mutBundle, logLevel: 'silent',
+    plugins: [{ name: 'sealed-orders-mutant', setup(b) { b.onResolve({ filter: /sealed-orders\.js$/ }, () => ({ path: mutFile })); } }] });
+  const mut = await twoProvider(mutBundle, 'mut', { control: false });
+  check('mutant RED: the filter dropped ⇒ the device moves the DeepSeek conversation onto the Claude member (the cross-provider reflex the order forbids)', mut.qNow.endsWith('sub-a'), mut.qNow);
+}
+
 if (failed) { try { console.error('--- daemon log ---\n' + fs.readFileSync(path.join(ROOT, 'state', 'agentd.log'), 'utf8').slice(-1200)); } catch { } }
 try { await dm2.stop?.(); } catch { }
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(failed ? `FAIL (${failed})` : 'ALL PASS (10)');
+console.log(failed ? `FAIL (${failed})` : `ALL PASS (${passed})`);
 process.exit(failed ? 1 : 0);

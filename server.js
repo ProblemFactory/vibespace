@@ -348,7 +348,7 @@ const { broadcastToSession } = require('./src/server/session-broadcast.js').crea
 const {
   _vsuPending, usageAnchors, usageEstimator,
   armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
-  markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped, memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, setConversationPin, gatherPlan,
+  markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped, memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, setConversationPin, gatherPlan, answerCrossProviderAsk,
   maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, onMemberLoginSuccess, autoCliReady, memberServeLapsed, lastMemberReadAt, projectionRereadFor, projectionBillingIndex, // …+ the new-member wake (2026-09-08) + its LOGIN half, handed to the account routes (2026-09-29: read there since 2026-09-08, never passed — dead until now)
   apiDerivedWindow, establishedWindows, repairIdentityAnchors, oatAnswer, oatIdentityAttach, oatRebind, // B-855a: the two identity witnesses handed to setupUsage — the panel probe may only write the account it proves — + c2's STANDING identity repair (boot + POST /api/usage/repair-identity)
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
@@ -1034,14 +1034,14 @@ app.get('/api/telemetry/summary', (req, res) => {
 require('./src/server/account-usage-routes.js').create({
   app, rootDir: __dirname, HOST, CLAUDE_CMD, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth,
-  engine: { oatAnswer, oatIdentityAttach, oatRebind, clearSealedOrders, establishedWindows, resetCreditPreview, consumeResetCreditFor, claimColdRestarts, refreshCodexForPerson, settleResetCreditByRead, memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, maybePoolAutoSwitchForPool, setConversationPin, gatherPlan, onMemberLoginSuccess }, // + the login re-check (2026-09-29: a member that signs in ⇒ ONE usage read + ONE pool re-decision) + the removed-member wall (2026-09-28: the members route evicts through the engine's ONE entry point, the default re-point by decision) // + claimColdRestarts (r4: the manual routes never double a restart in flight) + the manual reset-credit use (design-reset-credits p2, src/routes/reset-credit.js)
+  engine: { oatAnswer, oatIdentityAttach, oatRebind, clearSealedOrders, answerCrossProviderAsk, establishedWindows, resetCreditPreview, consumeResetCreditFor, claimColdRestarts, refreshCodexForPerson, settleResetCreditByRead, memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, maybePoolAutoSwitchForPool, setConversationPin, gatherPlan, onMemberLoginSuccess }, // + the login re-check (2026-09-29: a member that signs in ⇒ ONE usage read + ONE pool re-decision) + the removed-member wall (2026-09-28: the members route evicts through the engine's ONE entry point, the default re-point by decision) // + claimColdRestarts (r4: the manual routes never double a restart in flight) + the manual reset-credit use (design-reset-credits p2, src/routes/reset-credit.js)
   serverSetting: (...a) => serverSetting(...a),
   recordUsageAttribution: (...a) => recordUsageAttribution(...a),
   liveAccountIdSet: (...a) => liveAccountIdSet(...a),
   buildClaudeSubscriptionLoginCommand: (...a) => buildClaudeSubscriptionLoginCommand(...a),
   getAccounts: () => { try { return accounts; } catch { return null; } }, broadcastActiveSessions: () => broadcastActiveSessions(), // + the pin route's session-facts broadcast (2026-09-28)
   getHosts: () => { try { return hosts; } catch { return null; } },
-  getMounts: () => { try { return mounts; } catch { return null; } },
+  getMounts: () => { try { return mounts; } catch { return null; } }, getModels: () => AVAILABLE_MODELS, refreshModels: () => refreshHarnessModels(), getIntegrations: () => { try { return integrationsWiring.store; } catch { return null; } }, // + the harness catalogs a built-in model provider lists (lane provider-record); + their mtime-guarded re-read and the Integrations store a provider's key is read from (lane models-at-session)
   getTelemetry: () => { try { return telemetry; } catch { return null; } },
   getUsageHistory: () => { try { return usageHistory; } catch { return null; } }, broadcastAll: (m) => bcastAll(m), getLoginExpiryWatch: () => { try { return loginExpiryWatch; } catch { return null; } }, // ← constructed BELOW this stanza; lazy, like every other late singleton (拆分 P1). Sharing a line because server.js is AT the size ratchet — the wiring stanza may not grow.
 });

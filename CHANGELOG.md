@@ -2,6 +2,18 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.329 — 2026-10-20
+
+### Added
+- In Manage agents, ⋯ → Models… names the provider an account uses and the models it may use — listed by the provider or entered by you.
+- Each model you enter is checked before it is saved (the id the provider expects, its context, its capabilities), and Test runs one session with that model.
+- A new or running conversation's model menu follows the account's provider: the models it lists or that you entered. A provider with none says so, with a link.
+- A provider that lists its models (OpenRouter, an OpenAI-compatible server) can refresh that list from the account's Models…, once a minute, vault unlocked.
+- The account pool knows each account's provider and never moves a conversation to another provider without asking you first, unless you allow it for that pool.
+
+### Fixed
+- Deleting an account, or a device switching accounts on its own while the server is away, never moves a conversation to another provider without asking you.
+
 ## 2.369.328 — 2026-10-20
 
 ### Added

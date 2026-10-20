@@ -285,6 +285,18 @@ export function inboxModel(app) {
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone') : (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
     }
+    if (rec && rec.action && rec.action.type === 'pool-cross-provider') {
+      // q-053 P0b (decision ①): THE owner's answer to a pool's move to ANOTHER provider (cookie route; an agent's bearer is
+      // refused) — once (this conversation, now) / always (the pool's crossProvider = allow) / deny. The engine re-judges
+      // before anything moves and says what it found; the item is resolved server-side.
+      const r = await fetchJson(`/api/accounts/pool-cross/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) });
+      if (r && r.ok) {
+        showToast(r.state === 'denied' ? t('denied') : r.moved ? (r.state === 'always' ? t('Moved — this pool now moves a conversation to another provider by itself') : t('Moved — the conversation restarts on the other provider')) : r.why === 'gone' ? t('Nothing moved — the conversation is gone') : r.why === 'own-provider-again' ? t('Nothing moved — a member of its own provider can take it again') : r.why === 'no-client' ? t('Nothing moved — no open page could restart it; the pool asks again') : t('Nothing moved — that member cannot take it now'));
+        return true;
+      }
+      showToast(r && r.code === 'ask_unknown' ? t('That request is gone') : (r && r.error) || t('server unreachable'), { type: 'error' });
+      return false;
+    }
     if (rec && rec.action && rec.action.type === 'automation-ask') {
       // design q-046 (lane automation-keys-core): THE person's answer to an automation call held for a grant (cookie route;
       // any bearer is refused human_only) — once (this call) / always (the key granted to that conversation) / deny.

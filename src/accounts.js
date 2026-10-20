@@ -50,6 +50,16 @@ const LOGIN_UNKNOWN = () => ({ state: 'unknown', refreshExpiresAt: null, accessE
 // (spawn, engine, manual route, signed-out self-heal, account removal all go
 // through them), so no caller can create a hole by forgetting to record one.
 const { SlotTransitions } = require('./slot-transitions.js');
+// THE PROVIDER OF A POOL MEMBER (q-053 P0b, lane pool-provider-aware): every account answers ONE provider — the record
+// the provider store answers for it (the lookup that store registers: setProviderLookup(account → record)), else
+// its harness's FIRST-PARTY subscription, read off the harness's own creds row (`loginLabel` — "Claude subscription",
+// "ChatGPT subscription"; the CLI's own login, every pool member today). A LABEL on the member, never a member:
+// readings and rejections stay the credential SLOT's. `models` is absent on it: a member of the conversation's OWN
+// provider serves its model by construction (account-pool-auto, THE PROVIDER rule 1).
+// SEAM (P0a, lane provider-record, cbbbe0e6): the lookup = `(acct) => providers.forAccount(acct)` (src/server/provider-store.js
+// — accountProviderId + the rows filled from the harness's catalog); its presets then answer every account and this
+// fallback only covers a harness with no preset.
+const CROSS_PROVIDER_VALUES = Object.freeze(['never', 'allow']); // a pool's crossProvider (absent = 'never', the owner's default)
 // The long-lived-token lifetime has ONE definition (2026-09-07 r2): the panel
 // and the readings repair must date an oat's death exactly the way the spawn
 // resolver does, and they read it from src/login-state.js (no AccountManager
@@ -323,7 +333,7 @@ class AccountManager {
           // loginState on a pool = its MEMBERS' worst (a pool has no login of
           // its own); the row names the member that earned it so the user can
           // act without opening the pool's Members dialog.
-          return { ...base, pooled: true, loggedIn: !!info.loggedIn, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: !this._credsOf(backend).keychainSensitive || this.poolSupported(), loginState: this.poolLoginState(a.id) };
+          return { ...base, pooled: true, loggedIn: !!info.loggedIn, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: true, priority: Array.isArray(a.priority) ? a.priority.slice() : [], placement: Array.isArray(a.priority) && a.priority.length ? 'priority' : 'automatic', hot: !!a.hot, crossProvider: a.crossProvider === 'allow' ? 'allow' : 'never', currentProvider: cur ? this._providerBrief(this.memberProviderOf(cur)) : null, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: !this._credsOf(backend).keychainSensitive || this.poolSupported(), loginState: this.poolLoginState(a.id) };
         }
         if (type === 'subscription') {
           // ONE branch for every harness (S2): the descriptor's parseAuth reads
@@ -907,6 +917,10 @@ class AccountManager {
     const i = this._state.accounts.findIndex((x) => x.id === id);
     if (i < 0) throw new Error('account not found');
     const a = this._state.accounts[i];
+    // (lane pool-provider-latents, q-055 M2) the provider it served, read while the store still knows it: the heal below
+    // re-points its conversations only onto THAT provider, and the engine's removal verdicts name it (goneProviderOf)
+    let goneProvider = null; try { goneProvider = this.memberProviderOf(id); } catch { }
+    (this._gone || (this._gone = new Map())).set(id, { provider: goneProvider, name: a.name || null });
     this._state.accounts.splice(i, 1);
     if (this._state.defaultAccountId === id) this._state.defaultAccountId = null;
     if (this._state.defaultCodexAccountId === id) this._state.defaultCodexAccountId = null;
@@ -917,7 +931,7 @@ class AccountManager {
     // Deleting a member must leave every pool self-consistent NOW.
     if (capsOf(this._acctBackend(a)).oauthUsage && this._acctType(a) === 'subscription') {
       this._save(); // poolMembers below must not offer the removed account
-      this._healPoolsAfterRemoval(id, opts);
+      this._healPoolsAfterRemoval(id, { ...opts, removedProvider: goneProvider });
     }
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
     if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this._acctDir(this._acctBackend(a), id)); } catch { } try { fs.rmSync(this.poolLinksDir(id), { recursive: true, force: true }); } catch { } } // unlink ONLY — the target is a real account's dir; the links dir holds only symlinks (rm never follows)
@@ -930,9 +944,19 @@ class AccountManager {
    *  member lists, re-point the default link if it targeted the removed
    *  account, and re-point (or drop, when no member is left) per-session
    *  links that targeted it. Symlink re-points don't care that the old
-   *  target dir is about to be rm'd — order-independent of the wipe. */
-  _healPoolsAfterRemoval(removedId, { chooseDefault = null, chooseLink = null } = {}) {
+   *  target dir is about to be rm'd — order-independent of the wipe.
+   *  THE PROVIDER (lane pool-provider-latents, q-055 M2): every re-point here is HOT — the running CLI follows the link
+   *  by itself, its base URL and model env stay — so it lands only on a member of the deleted account's OWN provider
+   *  (`removedProvider`), which serves the conversation's model by construction (one provider, one list); the engine's
+   *  pick is taken only when it is one. Nobody of that provider left ⇒ the link is UNPLACED — unlinked and marked
+   *  (`unplacedOf`), never re-pointed to another provider: the engine decides it from the deleted member at its next
+   *  pass (a member of its provider when one can serve; under 'allow' the cold move with its line; otherwise the
+   *  owner's For-you card). The default the same way. No provider read ⇒ one provider (the old heal). */
+  _healPoolsAfterRemoval(removedId, { chooseDefault = null, chooseLink = null, removedProvider = null } = {}) {
     const readTarget = (p) => { try { return path.basename(fs.readlinkSync(p)); } catch { return null; } };
+    const goneKey = this._providerKeyOf(removedProvider);
+    const sameProv = (mid) => goneKey == null || this._providerKeyOf(this.memberProviderOf(mid)) === goneKey;
+    const provWord = (removedProvider && (removedProvider.label || removedProvider.kind || removedProvider.id)) || 'its provider';
     for (const pool of this._state.accounts.filter((x) => this._acctType(x) === 'pooled')) {
       try {
         if (Array.isArray(pool.members) && pool.members.includes(removedId)) {
@@ -947,17 +971,21 @@ class AccountManager {
         }
         if (Array.isArray(pool.priority)) pool.priority = pool.priority.filter((m) => m !== removedId); // a deleted account has no place in the manual order
         const alive = this.poolMembers(pool.id);
+        const aliveSame = alive.filter((m) => sameProv(m.id)); // (q-055 M2) the deleted member's OWN provider only
         if (readTarget(this.subDir(pool.id)) === removedId) {
-          if (alive.length) {
-            // the ENGINE's decision when it is wired (verify r2) — `alive[0]` only as the no-engine fallback
+          if (aliveSame.length) {
+            // the ENGINE's decision when it is wired (verify r2) — `aliveSame[0]` only as the no-engine fallback
             let pick = null;
-            try { const c = chooseDefault ? chooseDefault(pool.id, removedId) : null; if (alive.some((m) => m.id === c)) pick = c; } catch { }
-            const to = alive.find((m) => m.id === pick) || alive[0];
+            try { const c = chooseDefault ? chooseDefault(pool.id, removedId) : null; if (aliveSame.some((m) => m.id === c)) pick = c; } catch { }
+            const to = aliveSame.find((m) => m.id === pick) || aliveSame[0];
             this.setPoolTarget(pool.id, to.id, { why: 'member-removed' });
             console.warn(`[pool] "${pool.name}" target was the deleted account — re-pointed to ${to.name}${pick ? ' (decided)' : ''}`);
           } else {
             try { fs.unlinkSync(this.subDir(pool.id)); } catch { } // a dangling link reads as a phantom login path; absent = honestly signed-out
-            console.warn(`[pool] "${pool.name}" lost its only member to deletion — pool is unusable until a member logs in`);
+            if (alive.length) {
+              this._markUnplaced(pool, null, removedId, removedProvider);
+              console.warn(`[pool] "${pool.name}" target was the deleted account and no other ${provWord} member is left — the default is UNPLACED (never moved to another provider)`);
+            } else console.warn(`[pool] "${pool.name}" lost its only member to deletion — pool is unusable until a member logs in`);
           }
         }
         for (const l of this.sessionPoolLinks(pool.id)) {
@@ -965,13 +993,22 @@ class AccountManager {
           // each conversation to where the ENGINE decides for IT (its family view, its pin, its own recent walls —
           // verify r2), else the pool default as before (it had to leave: the account's dir is about to be wiped)
           let chosen = null;
-          try { const c = chooseLink ? chooseLink(pool.id, removedId, l.sessKey) : null; if (alive.some((m) => m.id === c)) chosen = c; } catch { }
-          const target = chosen || this.poolCurrent(pool.id);
+          try { const c = chooseLink ? chooseLink(pool.id, removedId, l.sessKey) : null; if (aliveSame.some((m) => m.id === c)) chosen = c; } catch { }
+          const def = this.poolCurrent(pool.id);
+          // (q-055 M2) never the default of ANOTHER provider: the default when it is the deleted member's provider, else that
+          // provider's first live member (the engine re-decides it within its provider next pass), else UNPLACED
+          const target = chosen || (def && sameProv(def) ? def : null) || (aliveSame[0] ? aliveSame[0].id : null);
           if (target) {
             require('./account-material.js').repointPoolSymlink(l.path, this.subDir(target), this.subCredsPath(target));
             this._noteSlot({ sessionId: l.sessKey, poolId: pool.id, from: removedId, to: target, why: 'member-removed' });
           }
-          else { try { fs.unlinkSync(l.path); } catch { } }
+          else {
+            try { fs.unlinkSync(l.path); } catch { }
+            if (alive.length) {
+              this._markUnplaced(pool, l.sessKey, removedId, removedProvider);
+              console.warn(`[pool] "${pool.name}": conversation ${l.sessKey} was on the deleted account and no ${provWord} member can take it — UNPLACED (never moved to another provider; the owner is asked)`);
+            }
+          }
         }
       } catch (e) { console.warn(`[pool] hygiene after removing ${removedId} failed for ${pool.id}:`, e.message); }
     }
@@ -1401,8 +1438,98 @@ class AccountManager {
     const all = this._state.accounts.filter((x) => this._acctBackend(x) === be && this._acctType(x) === 'subscription');
     const wanted = Array.isArray(a?.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;
     const loggedIn = (x) => this._placeable(be, x.id);
-    return wanted.filter(loggedIn).map((x) => ({ id: x.id, name: x.name }));
+    // (q-053 P0b) each member names its provider — {id, kind, label}; the whole record is memberProviderOf's
+    return wanted.filter(loggedIn).map((x) => ({ id: x.id, name: x.name, provider: this._providerBrief(this.memberProviderOf(x.id)) }));
   }
+  /** The provider store's lookup (P0a): `(account) → record | null`. Unset ⇒ every account answers its harness's own subscription. */
+  setProviderLookup(fn) { this._providerLookup = typeof fn === 'function' ? fn : null; }
+  _providerKeyOf(p) { return p && typeof p === 'object' ? (String(p.id || p.kind || '') || null) : (typeof p === 'string' && p ? p : null); }
+  /** (lane pool-provider-latents, q-055 M2) THE PROVIDER OF A DELETED ACCOUNT — what it served when it was removed (this
+   *  process remembers it; an UNPLACED mark carries it across a restart). null = never known here. */
+  goneProviderOf(id) {
+    const g = id && this._gone && this._gone.get(id);
+    if (g && g.provider) return g.provider;
+    const hit = this._unplacedRows().find((r) => r.member === id && r.provider);
+    return hit ? hit.provider : null;
+  }
+  goneNameOf(id) {
+    const g = id && this._gone && this._gone.get(id);
+    if (g && g.name) return g.name;
+    const hit = this._unplacedRows().find((r) => r.member === id && r.name);
+    return hit ? hit.name : null;
+  }
+  /** THE UNPLACED MARK (q-055 M2): a conversation (`sessKey`) or a pool's DEFAULT (`sessKey` null) whose member was deleted
+   *  with nobody of its provider left to take it — its link is gone and it bills nobody until the engine places it
+   *  (onto its own provider, the owner's Allow, a pin) — never onto another provider by itself. Persisted on the pool
+   *  record: {default?, links: {sessKey: {member, name, provider: {id, kind, label}, at}}}. A mark holds only while the
+   *  link is ABSENT: once a placement writes the link (or the default) again, the mark is cleared HERE, where it is read —
+   *  the slot writers (ensureSessionPoolLink / setPoolTarget) stay byte-identical (THE SLOT LAW, test-oat-materialize). */
+  unplacedOf(poolId, sessKey = null) {
+    const u = this.get(poolId)?.unplaced;
+    if (!u || typeof u !== 'object') return null;
+    const row = sessKey == null ? u.default : (u.links && u.links[String(sessKey)]);
+    if (!(row && typeof row === 'object' && row.member)) return null;
+    let placed = false;
+    if (sessKey == null) placed = !!this.poolCurrent(poolId);
+    else { try { fs.lstatSync(this.sessionPoolLinkPath(poolId, sessKey)); placed = true; } catch { } }
+    if (placed) { if (this._clearUnplaced(poolId, sessKey)) this._save(); return null; }
+    return row;
+  }
+  /** The pools holding an UNPLACED mark (the deletion route decides them at once). */
+  unplacedPools() { return this._state.accounts.filter((p) => p && p.unplaced && typeof p.unplaced === 'object' && (this.unplacedOf(p.id, null) || Object.keys(p.unplaced.links || {}).some((k) => this.unplacedOf(p.id, k)))).map((p) => p.id); }
+  _unplacedRows() {
+    const out = [];
+    for (const p of this._state.accounts) {
+      const u = p && p.unplaced;
+      if (!u || typeof u !== 'object') continue;
+      if (u.default) out.push(u.default);
+      for (const r of Object.values(u.links || {})) out.push(r);
+    }
+    return out;
+  }
+  _markUnplaced(pool, sessKey, memberId, provider) {
+    const u = pool.unplaced && typeof pool.unplaced === 'object' ? pool.unplaced : (pool.unplaced = {});
+    const row = { member: memberId, name: (this._gone && this._gone.get(memberId) && this._gone.get(memberId).name) || null, provider: this._providerBrief(provider), at: Date.now() };
+    if (sessKey == null) u.default = row;
+    else (u.links || (u.links = {}))[String(sessKey)] = row;
+  }
+  /** The owner was asked about an UNPLACED conversation (the engine's card with no move to offer): once, across a restart. */
+  noteUnplacedAsked(poolId, sessKey, todoId = null) {
+    const row = this.unplacedOf(poolId, sessKey);
+    if (!row || row.asked) return;
+    row.asked = Date.now(); if (todoId) row.todoId = String(todoId);
+    this._save();
+  }
+  /** Clear a mark (a placement made: the link written again, the default set). → true when one was cleared (the caller saves). */
+  _clearUnplaced(poolId, sessKey = null) {
+    const p = this.get(poolId);
+    const u = p && p.unplaced;
+    if (!u || typeof u !== 'object') return false;
+    let hit = false;
+    if (sessKey == null) { if (u.default) { delete u.default; hit = true; } }
+    else if (u.links && u.links[String(sessKey)]) { delete u.links[String(sessKey)]; hit = true; }
+    if (u.links && !Object.keys(u.links).length) delete u.links;
+    if (!Object.keys(u).length) delete p.unplaced;
+    return hit;
+  }
+  /** THE PROVIDER of an account (q-053 P0b) — the whole record (models, aliases, fallbackOnly) the pool decisions read:
+   *  the provider store's answer for the account when it has one, else its harness's own subscription. Never null for a
+   *  known account (a provider is a LABEL every member wears); null for an unknown id. */
+  memberProviderOf(id) {
+    const x = this.get(id);
+    if (!x) return null;
+    if (this._providerLookup) {
+      try { const p = this._providerLookup(x); if (p && typeof p === 'object' && (p.id || p.kind)) return p; } catch { }
+    }
+    return this.firstPartyProviderOf(this._acctBackend(x) || 'claude');
+  }
+  /** A harness's OWN subscription as a provider (its creds row's `loginLabel`) — what every same-backend subscription
+   *  member answers, and what the engine reads for a member the store no longer knows (a deleted pool member was one). */
+  firstPartyProviderOf(be) {
+    let label = null; try { label = (this._credsOf(be) || {}).loginLabel || null; } catch { }
+    return { id: 'pv-' + be + '-subscription', kind: 'subscription', label: (label || be) + ' subscription', firstParty: true, harness: be };
+  }
+  _providerBrief(p) { return p ? { id: String(p.id || p.kind || ''), kind: p.kind || null, label: String(p.label || p.kind || p.id || '') } : null; }
   /** May a NEW placement land on this member (pool-oat-materialize verify r1 F5)? Its file holds a
    *  login — or OUR long-lived-token file while the hub's CLI is not a KNOWN unmeasured one: on an
    *  unmeasured CLI the sessions already linked to it keep running (the file stays — the running
@@ -1554,14 +1681,17 @@ class AccountManager {
   }
   /** The real account THIS session bills to: its own link's target, else the
    *  pool default. The link IS the state at both granularities. */
-  poolCurrentFor(poolId, sessKey) {
+  poolCurrentFor(poolId, sessKey, { withProvider = false } = {}) {
+    // (q-053 P0b) `withProvider` ⇒ {memberId, provider:{id, kind, label}} — the member AND the provider it bills through;
+    // the plain answer (an id) is unchanged for every existing caller
+    const answer = (id) => (withProvider ? (id ? { memberId: id, provider: this._providerBrief(this.memberProviderOf(id)) } : null) : id);
     if (sessKey) {
       try {
         const sub = path.basename(fs.readlinkSync(this.sessionPoolLinkPath(poolId, sessKey)));
-        if (this.get(sub)) return sub;
-      } catch { }
+        if (this.get(sub)) return answer(sub);
+      } catch { if (this.unplacedOf(poolId, sessKey)) return answer(null); } // (q-055 M2) UNPLACED: it bills nobody — never "the default"
     }
-    return this.poolCurrent(poolId);
+    return answer(this.poolCurrent(poolId));
   }
   /** THE member a pool SESSION's process speaks as (design-reset-credits r3 —
    *  ONE rule for the engine's credit/reading/wall/fire resolution, the ledger's
@@ -1627,7 +1757,7 @@ class AccountManager {
     }
     return { id: link(), held: false, origin: 'unknown' };
   }
-  dropSessionPoolLink(poolId, sessKey) { try { fs.unlinkSync(this.sessionPoolLinkPath(poolId, sessKey)); } catch { } }
+  dropSessionPoolLink(poolId, sessKey) { try { fs.unlinkSync(this.sessionPoolLinkPath(poolId, sessKey)); } catch { } if (this._clearUnplaced(poolId, sessKey)) this._save(); }
   /** Boot reconciliation: unlink per-session links whose session no longer
    *  exists — a leaked link is a billing pointer nobody can see or move. */
   sweepSessionPoolLinks(liveKeys) {
@@ -1641,6 +1771,10 @@ class AccountManager {
         try { if (!fs.readdirSync(dir).length) fs.rmdirSync(dir); } catch { }
       }
     } catch { }
+    // (q-055 M2) an UNPLACED mark of a conversation that no longer exists goes with it
+    let cleared = false;
+    for (const p of this._state.accounts) for (const k of Object.keys((p && p.unplaced && p.unplaced.links) || {})) if (!liveKeys.has(k)) cleared = this._clearUnplaced(p.id, k) || cleared;
+    if (cleared) this._save();
     return dropped;
   }
   /** Every live link path of a pool (sealed orders carry these so the daemon
@@ -1733,9 +1867,15 @@ class AccountManager {
   // membership narrows. `auto` is ALWAYS true now: a pool is placed automatically
   // or by its priority, never pinned by hand as a whole — `auto:false` is ignored
   // (said once in the journal; the record keeps `auto` for old clients).
-  updatePool(id, { members, auto, hot, priority } = {}, { chooseMember = null } = {}) {
+  updatePool(id, { members, auto, hot, priority, crossProvider } = {}, { chooseMember = null } = {}) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'pooled') throw new Error('not a pooled account');
+    // (q-053 P0b) the owner's per-pool rule for a move to ANOTHER provider: 'never' (the default — a card asks first) or
+    // 'allow' (a cold switch + one line in the conversation); anything else is refused by name
+    if (crossProvider !== undefined) {
+      if (!CROSS_PROVIDER_VALUES.includes(crossProvider)) throw new Error("crossProvider must be 'never' or 'allow'");
+      a.crossProvider = crossProvider;
+    }
     if (members !== undefined) a.members = Array.isArray(members) && members.length ? members.slice(0, 40) : null;
     if (auto === false && !AccountManager._autoOffSaid) { AccountManager._autoOffSaid = true; console.log('[pool] auto:false ignored — a pool is placed automatically or by its manual priority (the whole-pool manual switch is retired, 2026-09-28)'); }
     a.auto = true;
@@ -1808,6 +1948,7 @@ class AccountManager {
       // the entire point of a pool — a dead target must re-point, not throw.
       // poolMembers() is already filtered to still-valid logins.
       const liveTarget = (x) => !!x && this._placeable('claude', x); // a member a NEW placement may land on (F5)
+      let startOff = null; // (q-055 M2) a NEW conversation's first member while the pool's default stays UNPLACED
       if (!cur || !this.readSubCreds(id).loggedIn || !liveTarget(cur)) {
         const alive = this.poolMembers(id).map((m) => m.id);
         if (!alive.length) {
@@ -1827,16 +1968,28 @@ class AccountManager {
         // A STABLE ordering, never a filter — every member being expired must
         // still start the session (and then say so) rather than throw here.
         alive.sort((x, y) => loginRank(this.loginStateOf(x, Date.now(), { slot: true })) - loginRank(this.loginStateOf(y, Date.now(), { slot: true })));
-        let pick = null;
-        // (the chooser is TOLD which pool it decides for — the one this spawn resolved — and that this is the POOL's
-        // default it is placing, not one conversation: a conversation's pin must never become the pool default, verify r2)
-        try { const c = opts.chooseMember?.(id, { forDefault: true }); if (alive.includes(c)) pick = c; } catch { }
-        pick = pick || alive[0];
-        const was = cur;
-        this.setPoolTarget(id, pick);
-        cur = pick;
-        console.warn(`[pool] "${a.name}" target ${was || '(none)'} is signed out — re-pointed to ${this.get(pick)?.name || pick} so the session can start; re-login the dead account in Manage Agents`);
-        try { global.__vsEvent?.('pool-target-signed-out', { detail: `${was || 'none'}→${pick}` }); } catch { }
+        // (lane pool-provider-latents, q-055 M2) a default a deletion left UNPLACED is set again only onto a member of ITS
+        // provider: a conversation with no link of its own reads the default link, and another provider's member under it
+        // would move that conversation silently. With none, a conversation that gets its own link (below) starts without
+        // the default; one that would read the default is refused by name.
+        const ud = this.unplacedOf(id, null);
+        const udKey = ud ? this._providerKeyOf(ud.provider) : null;
+        const healable = udKey ? alive.filter((x) => this._providerKeyOf(this.memberProviderOf(x)) === udKey) : alive;
+        if (!healable.length) {
+          if (!opts.sessionKey) throw Object.assign(new Error(`pool "${a.name}" sat on "${ud.name || ud.member}" (${(ud.provider && ud.provider.label) || 'its provider'}), which was deleted, and no other member of that provider is left — its conversations wait in For you; add or sign in one`), { code: 'default_unplaced' });
+          startOff = alive[0];
+        } else {
+          let pick = null;
+          // (the chooser is TOLD which pool it decides for — the one this spawn resolved — and that this is the POOL's
+          // default it is placing, not one conversation: a conversation's pin must never become the pool default, verify r2)
+          try { const c = opts.chooseMember?.(id, { forDefault: true }); if (healable.includes(c)) pick = c; } catch { }
+          pick = pick || healable[0];
+          const was = cur;
+          this.setPoolTarget(id, pick);
+          cur = pick;
+          console.warn(`[pool] "${a.name}" target ${was || '(none)'} is signed out — re-pointed to ${this.get(pick)?.name || pick} so the session can start; re-login the dead account in Manage Agents`);
+          try { global.__vsEvent?.('pool-target-signed-out', { detail: `${was || 'none'}→${pick}` }); } catch { }
+        }
       }
       // A LAPSED SUBSCRIPTION (verify r2 ①, the dead-login twin): a member whose `serve` record says lapsed is never
       // the member a conversation STARTS on — the default is re-pointed off it like a signed-out target, and when no
@@ -1877,7 +2030,7 @@ class AccountManager {
           if (member) console.warn(`[pool] chooser picked ${lapsed(member) ? 'lapsed' : 'signed-out'} member ${member} — falling back to the live target`);
           member = null;
         }
-        member = member || cur;
+        member = member || cur || startOff;
         // THE OWNER'S 全B (2026-09-28): a conversation never STARTS on a member the pool no longer lists — the
         // default can still name one (a removal the engine has not acted on yet, a boot before its first sweep):
         // then the pool's own choice for its default, else the first signed-in member it lists; with none at all

@@ -220,5 +220,43 @@ console.log('§r1 the pin\'s resume carrier (the real setSessionConfig)');
   ok(writers.length >= 8 && writers.every(carries), `CENSUS: every setSessionConfig writer in src/lib (${writers.length}) writes OVER the saved config`, writers.filter((w) => !carries(w)).map((w) => `${w.f}:${w.n} ${w.l}`));
 }
 
+console.log('§P THE PROVIDER: the owner\'s card for a move to ANOTHER provider (q-053 P0b, decision ①)');
+{
+  const L = await import('../src/lib/inbox-window-layout.js');
+  const card = { id: 'ut-x', text: 'Moving "Fix the build" to DeepSeek row (DeepSeek) needs your OK — it restarts the conversation and its model becomes deepseek-chat', detail: 'd', status: 'open', kind: 'action', urgency: 'high',
+    action: { type: 'pool-cross-provider', askId: 'q1', poolId: 'pool-1', memberId: 'acct-b' } };
+  const v = L.itemView(card, { t: tEn });
+  ok(JSON.stringify(v.actions.slice(0, 3)) === '["hub-once","pool-always","hub-deny"]' && v.hubAsk && v.hubAsk.type === 'pool-cross-provider' && v.hubAsk.askId === 'q1',
+    'the card answers the three held-ask ways, FIRST: Allow once · Always for this pool · Deny (never a typed reply)', v.actions);
+  ok(!L.itemView({ ...card, status: 'done' }, { t: tEn }).actions.includes('hub-once'), 'a resolved card has no answer buttons');
+  const TEXT = 'Moving "{title}" to {member} ({provider}) needs your OK — it restarts the conversation and its model becomes {model}';
+  const LINE = 'Switched from {from} ({fromProvider}) to {to} ({toProvider}) — model {model} → {toModel}';
+  const p = { title: 'Fix the build', member: 'DeepSeek row', provider: 'DeepSeek', model: 'deepseek-chat' };
+  ok(tZh(TEXT, p) === '把「Fix the build」切到 DeepSeek row（DeepSeek）需要你同意——会重启对话，模型改为 deepseek-chat' && tJa(TEXT, p).includes('deepseek-chat') && tJa(TEXT, p) !== TEXT, 'the card\'s words in zh / ja (names, provider and the new model kept)', [tZh(TEXT, p), tJa(TEXT, p)]);
+  const lp = { from: 'Member A', fromProvider: 'Anthropic subscription', to: 'Member B', toProvider: 'DeepSeek', model: 'sonnet', toModel: 'deepseek-chat' };
+  ok(tZh(LINE, lp) === '已从 Member A（Anthropic subscription）切到 Member B（DeepSeek）——模型 sonnet → deepseek-chat' && tJa(LINE, lp) !== LINE, 'the line in the conversation, zh / ja', [tZh(LINE, lp), tJa(LINE, lp)]);
+  ok(tZh('Always for this pool') === '一直（这个池）' && tJa('Always for this pool') === '常に（このプール）', 'the Always word names the POOL (the setting it writes), zh / ja');
+}
+
+console.log('§U A DELETED ACCOUNT\'s conversation, UNPLACED (lane pool-provider-latents, q-055 M2): the owner\'s card');
+{
+  const L = await import('../src/lib/inbox-window-layout.js');
+  const TEXT = 'Account deleted — "{title}" needs you to pick a {provider} account';
+  const OFFER = '{member} ({provider}) was deleted and no other {provider} account in pool "{pool}" can take this conversation, so nothing moved it. Allow once moves it to {offer} ({offerProvider}) — it restarts and its model becomes {model}. Always for this pool lets the pool move a conversation to another provider by itself from now on, with a line in the conversation each time. Deny leaves it where it is — add or sign in a {provider} account and it moves there.';
+  const NONE = '{member} ({provider}) was deleted and no other {provider} account in pool "{pool}" can take this conversation, so nothing moved it — and no other provider in the pool serves its model. Add or sign in a {provider} account and it moves there.';
+  const p = { title: 'Fix the build', provider: 'DeepSeek', member: 'DS key 1', pool: 'Main', offer: 'Router', offerProvider: 'OpenRouter', model: 'deepseek-chat' };
+  ok(tZh(TEXT, p) === '账号已删，「Fix the build」需要你选一个 DeepSeek 账号', 'the card\'s line in zh is the owner\'s own sentence 「账号已删，<对话> 需要你选一个 <provider> 账号」', tZh(TEXT, p));
+  ok(tJa(TEXT, p) !== TEXT && tJa(TEXT, p).includes('Fix the build') && tJa(TEXT, p).includes('DeepSeek') && tEn(TEXT, p) === 'Account deleted — "Fix the build" needs you to pick a DeepSeek account', 'the line in ja / en (the conversation and its provider kept)', [tJa(TEXT, p), tEn(TEXT, p)]);
+  for (const [k, n] of [[OFFER, 'with a move to offer'], [NONE, 'with none']]) {
+    const z = tZh(k, p), j = tJa(k, p);
+    ok(z !== k && j !== k && ['DS key 1', 'DeepSeek', 'Main'].every((x) => z.includes(x) && j.includes(x)) && (k !== OFFER || ['Router', 'OpenRouter', 'deepseek-chat'].every((x) => z.includes(x) && j.includes(x))), `the detail ${n}: zh / ja name the deleted account, its provider, the pool${k === OFFER ? ', the offer and the model' : ''}`, [z, j]);
+  }
+  const offerCard = { id: 'ut-u', text: tEn(TEXT, p), detail: tEn(OFFER, p), status: 'open', kind: 'action', urgency: 'high', action: { type: 'pool-cross-provider', askId: 'q9', poolId: 'pool-1', memberId: 'acct-r' } };
+  const v = L.itemView(offerCard, { t: tEn });
+  ok(JSON.stringify(v.actions.slice(0, 3)) === '["hub-once","pool-always","hub-deny"]' && v.hubAsk && v.hubAsk.askId === 'q9', 'with a move to offer it is the EXHAUSTED CASE\'S card: Allow once · Always for this pool · Deny, first', v.actions);
+  const v2 = L.itemView({ ...offerCard, id: 'ut-v', detail: tEn(NONE, p), action: null }, { t: tEn });
+  ok(!v2.actions.includes('hub-once') && !v2.actions.includes('pool-always') && !v2.hubAsk, 'with none it carries no answer that could move it (the words alone)', v2.actions);
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

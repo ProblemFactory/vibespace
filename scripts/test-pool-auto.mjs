@@ -1594,7 +1594,7 @@ await (async () => {
     const soft = ask(pure, { readCache: (id) => ({ a: bucket(0.1), b: bucket(0.93), c: bucket(0.1) })[id] });
     ck('r1 wall (PURE): the SOFT band (5h 7%: under the hot bar, over the hard one) is no wall — owed at the stop', soft.to === null && soft.reason === 'pin-hold', JSON.stringify(soft));
     const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
-    const clause = "if (escape) return { to: pinId, toName: pinnedName, fromRemaining, toRemaining: r.remaining, reason: 'pin-return', band: 'hard', escape, ...base };";
+    const clause = "if (escape) return { to: pinId, toName: pinnedName, fromRemaining, toRemaining: r.remaining, reason: 'pin-return', band: 'hard', escape, ...pinCross, ...base };";
     ck('r1 wall control: the patch (the escape clause removed) hits', src.split(clause).length === 2);
     const noEscape = MW.load('src/account-pool-auto.js', src.replace(clause, ''), 'noescape');
     ck('r1 wall control: without it the pinned conversation is HELD mid-turn on the spent member (what verify r1 reproduced)', ask(noEscape, { readCache: (id) => ({ a: bucket(0.1), b: bucket(0.99), c: bucket(0.1) })[id] }).reason === 'pin-hold');
@@ -2261,6 +2261,420 @@ await (async () => {
     && L.soonestUsableMember({ members, readCache: (id) => fbCaches[id], nowSec: NOW, readLogin: lapsedOf('a', 'b', 'c') }) === null);
   ck('LAPSED: CONTROL — without readLogin the same call picks the lapsed member (its cache is the soonest usable)', L.soonestUsableMember({ members, readCache: (id) => fbCaches[id], nowSec: NOW }) === 'a');
   ck('LAPSED: memberLapsed reads only `serve.state` — a login state can never imply a lapse', L.memberLapsed({ state: 'expired' }) === false && L.memberLapsed({ state: 'live', serve: lapse }) === true && L.memberLapsed(null) === false);
+}
+
+// ── THE PROVIDER (q-053 P0b, lane pool-provider-aware; owner 2026-10-20 「号池的部分要重新设计一下，区分不同 provider，切换账号
+// 本身也会影响 provider」 + decision ①: a move to ANOTHER provider never happens by itself by default — the card asks first).
+// THE TABLE: same provider / other provider × never / allow × the conversation's model servable or not × the member's
+// readings present or absent (absent on another provider = a third-party API row: fallbackOnly) — every cell a row.
+// Then: a one-provider pool decides EXACTLY as before (a sweep), the PURE pieces, two RED mutants, the real engine.
+{
+  const fsx = require('node:fs');
+  const L = require(path.resolve('src/account-pool-auto.js'));
+  const J = (x) => JSON.stringify(x).slice(0, 400);
+  const P = { id: 'pv-anthropic-subscription', kind: 'anthropic-subscription', label: 'Anthropic subscription' };
+  const Q = { id: 'pv-deepseek', kind: 'openai-chat', label: 'DeepSeek', models: [{ id: 'deepseek-chat' }, { id: 'deepseek-reasoner' }], aliases: { sonnet: 'deepseek-chat', opus: 'deepseek-reasoner' } };
+  const QFB = { ...Q, id: 'pv-deepseek-api', label: 'DeepSeek API', fallbackOnly: true };
+  const liveC = { fetchedAt: (NOW - 60) * 1000, fiveHour: { utilization: 0.1, resetsAt: NOW + 2 * H }, sevenDay: { utilization: 0.3, resetsAt: NOW + 3 * D } };
+  const spentC = { fetchedAt: (NOW - 60) * 1000, fiveHour: { utilization: 1, resetsAt: NOW + 2 * H }, sevenDay: { utilization: 0.5, resetsAt: NOW + 3 * D } };
+  const softC = { fetchedAt: (NOW - 60) * 1000, fiveHour: { utilization: 0.93, resetsAt: NOW + 2 * H }, sevenDay: { utilization: 0.5, resetsAt: NOW + 3 * D } };
+  const mem = [{ id: 'c', name: 'Cur' }, { id: 'm', name: 'Mem' }];
+  const cellOpts = (c) => {
+    const mp = c.prov === 'same' ? P : (c.readings ? Q : QFB);
+    return { currentId: 'c', members: mem, readCache: (id) => (id === 'c' ? spentC : (c.readings ? liveC : null)), nowSec: NOW, hot: true, explain: true,
+      providerOf: (id) => (id === 'c' ? P : mp), conversationModel: c.servable ? 'sonnet' : 'gemini-3-pro-preview', crossProvider: c.mode };
+  };
+  const expectCell = (c, d) => (c.prov === 'same' ? !!d && d.to === 'm' && !d.cross && !d.crossOffer
+    : !c.servable ? !!d && d.to === null && !d.crossOffer && !d.cross && (d.modelBlocked || []).some((x) => x.id === 'm' && x.model === 'gemini-3-pro-preview')
+    : c.mode === 'never' ? !!d && d.to === null && !d.cross && d.crossOffer && d.crossOffer.id === 'm' && d.crossOffer.toModel === 'deepseek-chat' && d.crossOffer.to === (c.readings ? 'DeepSeek' : 'DeepSeek API')
+    : !!d && d.to === 'm' && d.switchMode === 'cold' && d.cross && d.cross.toModel === 'deepseek-chat' && d.cross.from === 'Anthropic subscription' && d.cross.to === (c.readings ? 'DeepSeek' : 'DeepSeek API') && d.band === 'hard');
+  const CELLS = [];
+  for (const prov of ['same', 'other']) for (const mode of ['never', 'allow']) for (const servable of [true, false]) for (const readings of [true, false]) CELLS.push({ prov, mode, servable, readings });
+  const cellName = (c) => `${c.prov} provider × ${c.mode} × model ${c.servable ? 'servable' : 'NOT servable'} × readings ${c.readings ? 'present' : 'absent'}`;
+  const cellWant = (c) => (c.prov === 'same' ? 'moves to it (own provider: serves by construction), no cross'
+    : !c.servable ? 'nothing moves, it is named in modelBlocked' : c.mode === 'never' ? 'nothing moves — the OFFER (crossOffer, the model re-resolved: deepseek-chat)' : 'the COLD move (switchMode cold, cross.toModel deepseek-chat)');
+  for (const c of CELLS) { const d = L.decidePoolSwitch(cellOpts(c)); ck(`PROVIDER table: ${cellName(c)} ⇒ ${cellWant(c)}`, expectCell(c, d), J(d)); }
+
+  // A ONE-PROVIDER POOL DECIDES EXACTLY AS BEFORE (the sweep): every shape below, with and without the provider inputs
+  const caches = { dead: spentC, soft: softC, live: liveC, none: null, late: { ...liveC, sevenDay: { utilization: 0.3, resetsAt: NOW + 1 * D } } };
+  const kinds = Object.keys(caches);
+  let same = 0, diff = [];
+  for (const kc of kinds) for (const kb of kinds) for (const hot of [true, false]) for (const proactive of [false, true]) for (const placing of [false, true]) {
+    const base = { currentId: 'a', members: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'k', name: 'K' }], readCache: (id) => (id === 'a' ? caches[kc] : id === 'b' ? caches[kb] : caches.late), nowSec: NOW, hot, proactive, placing, explain: true };
+    const was = J(L.decidePoolSwitch(base));
+    for (const mode of ['never', 'allow']) {
+      const now = J(L.decidePoolSwitch({ ...base, providerOf: () => P, conversationModel: 'opus', crossProvider: mode }));
+      if (now === was) same++; else diff.push(`${kc}/${kb}/${hot}/${proactive}/${placing}/${mode}`);
+    }
+  }
+  ck(`PROVIDER: a ONE-provider pool decides byte-identically with the provider inputs (${same} verdicts, both settings)`, diff.length === 0, diff.slice(0, 6).join(' '));
+  const rk = (o) => J(L.rankPoolMembers({ members: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], readCache: (id) => (id === 'a' ? liveC : caches.late), nowSec: NOW, ...o }));
+  ck('PROVIDER: …rankPoolMembers too (one provider ⇒ the same snapshot)', rk({}) === rk({ providerOf: () => P, fromProvider: P }));
+
+  const noOffer = L.decidePoolSwitch({ ...cellOpts({ prov: 'other', mode: 'never', servable: true, readings: true }), offer: false });
+  ck('PROVIDER: offer:false (the pool DEFAULT — no conversation to ask about) ⇒ the same blocked verdict, no crossOffer', noOffer.to === null && !noOffer.crossOffer && noOffer.reason === 'no-members', J(noOffer));
+  // THE PURE PIECES
+  const R = (p, m) => L.resolveModel(p, m);
+  ck('resolveModel: the id itself / without its [1m] suffix / an alias to a LISTED id / a dated id by its undated prefix',
+    R(Q, 'deepseek-chat') === 'deepseek-chat' && R(Q, 'deepseek-chat[1m]') === 'deepseek-chat' && R(Q, 'sonnet') === 'deepseek-chat' && R(Q, 'opus[1m]') === 'deepseek-reasoner'
+    && R({ models: [{ id: 'claude-sonnet-4-5-20250929' }] }, 'claude-sonnet-4-5') === 'claude-sonnet-4-5-20250929');
+  ck('resolveModel: no list / modelsSource none / an alias to an UNLISTED id / an unknown id / a non-dated prefix ⇒ null (it cannot serve it)',
+    R(P, 'opus') === null && R({ ...Q, modelsSource: 'none' }, 'deepseek-chat') === null && R({ ...Q, aliases: { haiku: 'deepseek-v9' } }, 'haiku') === null
+    && R(Q, 'gpt-5') === null && R({ models: [{ id: 'gpt-4-turbo' }] }, 'gpt-4') === null && R(null, 'x') === null);
+  ck('resolveModel: no model asked ⇒ the provider\'s LISTED defaultModel, else null', R({ ...Q, defaultModel: 'deepseek-chat' }, '') === 'deepseek-chat' && R({ ...Q, defaultModel: 'nope' }, null) === null && R(Q, '') === null);
+  ck('hotSwitchFor: one provider ⇒ the pool\'s own rule; another ⇒ cold', L.hotSwitchFor(P, { ...P }, 'verified') === 'verified' && L.hotSwitchFor(P, Q, 'verified') === 'cold');
+  ck('crossProviderMode: only "allow" allows (absent / junk ⇒ never)', L.crossProviderMode('allow') === 'allow' && L.crossProviderMode(undefined) === 'never' && L.crossProviderMode('yes') === 'never');
+  // own provider first, always
+  const three = [{ id: 'c', name: 'Cur' }, { id: 's', name: 'Same' }, { id: 'm', name: 'Mem' }];
+  const pv3 = (id) => (id === 'm' ? Q : P);
+  const own = L.decidePoolSwitch({ currentId: 'c', members: three, readCache: (id) => (id === 'c' ? spentC : liveC), nowSec: NOW, hot: true, explain: true, providerOf: pv3, conversationModel: 'sonnet', crossProvider: 'allow' });
+  ck('PROVIDER: a member of the OWN provider takes it even under allow — another provider only when none can', own.to === 's' && !own.cross, J(own));
+  const order2 = L.decidePoolSwitch({ currentId: 'c', members: [{ id: 'c', name: 'Cur' }, { id: 'f', name: 'Fb' }, { id: 'm', name: 'Mem' }], readCache: (id) => (id === 'c' ? spentC : id === 'm' ? { ...liveC, sevenDay: { utilization: 0.9, resetsAt: NOW + 3 * D } } : null), nowSec: NOW, hot: true, explain: true, providerOf: (id) => (id === 'c' ? P : id === 'f' ? QFB : Q), conversationModel: 'sonnet', crossProvider: 'allow' });
+  ck('PROVIDER: under allow a member WITH readings goes before a fallback-only one (whatever its remaining)', order2.to === 'm' && order2.cross && !order2.cross.fallbackOnly, J(order2));
+  const soft = L.decidePoolSwitch({ currentId: 'c', members: mem, readCache: (id) => (id === 'c' ? softC : liveC), nowSec: NOW, hot: true, explain: true, providerOf: (id) => (id === 'c' ? P : Q), conversationModel: 'sonnet', crossProvider: 'allow' });
+  ck('PROVIDER: the SOFT band (still usable) never moves to another provider, even under allow — nor offers it', soft.to === null && !soft.crossOffer, J(soft));
+  const edf = L.decidePoolSwitch({ currentId: 'c', members: mem, readCache: (id) => (id === 'c' ? liveC : caches.late), nowSec: NOW, hot: true, proactive: true, explain: true, providerOf: (id) => (id === 'c' ? P : Q), conversationModel: 'sonnet', crossProvider: 'allow' });
+  ck('PROVIDER: a PROACTIVE move (EDF: a sooner deadline elsewhere) never crosses providers', edf.to === null && !edf.cross, J(edf));
+  const plc = L.decidePoolSwitch({ ...cellOpts({ prov: 'other', mode: 'allow', servable: true, readings: true }), placing: true });
+  ck('PROVIDER: a SPAWN (placing) never starts on another provider, and files no offer', plc.to === null && !plc.cross && !plc.crossOffer, J(plc));
+  // the hot snapshot, the parking pick, the pin
+  const snap = L.rankPoolMembers({ members: [{ id: 'a', name: 'A' }, { id: 'm', name: 'M' }, { id: 'f', name: 'F' }], readCache: () => liveC, nowSec: NOW, providerOf: (id) => (id === 'm' ? Q : id === 'f' ? { ...P, fallbackOnly: true } : P), fromProvider: P });
+  ck('rankPoolMembers: the device\'s HOT snapshot never holds another provider or a fallback-only member', snap.map((r) => r.id).join() === 'a', J(snap));
+  const park = (mode, model = 'sonnet') => L.soonestUsableMember({ members: [{ id: 'm', name: 'M' }, { id: 's', name: 'S' }], readCache: (id) => (id === 's' ? spentC : liveC), nowSec: NOW, providerOf: (id) => (id === 'm' ? Q : P), fromProvider: P, conversationModel: model, crossProvider: mode });
+  ck('soonestUsableMember: never ⇒ only its own provider (even spent); allow ⇒ another provider that SERVES the model, after its own', park('never') === 's' && park('allow') === 's'
+    && L.soonestUsableMember({ members: [{ id: 'm', name: 'M' }], readCache: () => liveC, nowSec: NOW, providerOf: () => Q, fromProvider: P, conversationModel: 'sonnet', crossProvider: 'allow' }) === 'm'
+    && L.soonestUsableMember({ members: [{ id: 'm', name: 'M' }], readCache: () => liveC, nowSec: NOW, providerOf: () => Q, fromProvider: P, conversationModel: 'gpt-5', crossProvider: 'allow' }) === null
+    && L.soonestUsableMember({ members: [{ id: 'm', name: 'M' }], readCache: () => liveC, nowSec: NOW, providerOf: () => Q, fromProvider: P, conversationModel: 'sonnet', crossProvider: 'never' }) === null);
+  const pinA = (model, explicit = true) => L.decidePinnedPlacement({ pin: 'm', currentId: 'c', members: mem, readCache: (id) => (id === 'c' ? liveC : liveC), nowSec: NOW, hot: true, explicit, providerOf: (id) => (id === 'c' ? P : Q), conversationModel: model });
+  const pinNo = pinA('gpt-5'), pinYes = pinA('opus');
+  ck('pin: a pin of another provider that has NO model for this conversation ⇒ refused by name (pin-model-not-served), the automatic rules keep it', pinNo.pinWhy === 'pin-model-not-served' && pinNo.reason === 'pin-exhausted', J(pinNo));
+  ck('pin: …one that serves it ⇒ the owner\'s move, COLD, the model re-resolved (opus → deepseek-reasoner)', pinYes.to === 'm' && pinYes.reason === 'pin' && pinYes.switchMode === 'cold' && pinYes.cross && pinYes.cross.toModel === 'deepseek-reasoner', J(pinYes));
+  // the words
+  const offerD = L.decidePoolSwitch(cellOpts({ prov: 'other', mode: 'never', servable: true, readings: true }));
+  const words = L.poolBlockedNotice(offerD, { poolName: 'P', currentName: 'Cur' });
+  ck('poolBlockedNotice: the OFFER is said — who, which provider, as which model, that it restarts and waits for the owner in For you',
+    words.includes('Mem (DeepSeek) can take it as deepseek-chat — a move to another provider restarts the conversation and waits for your OK in For you.'), words);
+  const mbD = L.decidePoolSwitch(cellOpts({ prov: 'other', mode: 'never', servable: false, readings: true }));
+  const mbWords = L.poolBlockedNotice(mbD, { poolName: 'P', currentName: 'Cur' });
+  ck('poolBlockedNotice: a member that cannot serve the model is NAMED with its provider (never a silently short list)', mbWords.includes('Cannot serve gemini-3-pro-preview: Mem (DeepSeek) — their provider has no such model.'), mbWords);
+
+  // RED MUTANTS (patched copies in a scratch dir — never the tree): each rule is what makes its cells pass
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const MP = mutantCopies('pool-provider', path.resolve('.'));
+  const src = fsx.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
+  const A1 = "if (provOf && hardDead && !placing && xMode === 'allow' && crossRows.length) {";
+  const A2 = 'if (other && toModel == null) { modelBlocked.push(';
+  ck('mutant ①: the anchor (the allow gate of the cold move) hits once', src.split(A1).length === 2);
+  ck('mutant ②: the anchor (the model gate) hits once', src.split(A2).length === 2);
+  if (src.split(A1).length === 2) {
+    const m1 = MP.load('src/account-pool-auto.js', src.replace(A1, "if (provOf && hardDead && !placing && crossRows.length) { // PATCHED: never ignored"), 'never-ignored');
+    const bad = CELLS.filter((c) => c.prov === 'other' && c.mode === 'never' && c.servable).map((c) => m1.decidePoolSwitch(cellOpts(c)));
+    ck('mutant ① RED: a member of ANOTHER provider chosen under never ⇒ the never-cells fail (the copy moves the conversation)', bad.length === 2 && bad.every((d) => d.to === 'm' && !expectCell({ prov: 'other', mode: 'never', servable: true, readings: true }, d)), J(bad));
+  }
+  if (src.split(A2).length === 2) {
+    const m2 = MP.load('src/account-pool-auto.js', src.replace(A2, 'if (false && other && toModel == null) { modelBlocked.push('), 'model-ignored');
+    const bad = CELLS.filter((c) => c.prov === 'other' && !c.servable).map((c) => [c, m2.decidePoolSwitch(cellOpts(c))]);
+    ck('mutant ② RED: a member that CANNOT serve the model enters the candidates ⇒ every not-servable cell fails (moved or offered, model null)', bad.length === 4 && bad.every(([c, d]) => !expectCell(c, d) && (d.to === 'm' || (d.crossOffer && d.crossOffer.id === 'm'))), J(bad.map((x) => x[1])));
+  }
+  for (const r of copiesCensus(MP.files, MP.dir, path.resolve('.'), { minCopies: 2, label: 'provider mutants: ' })) ck(r.name, r.pass);
+
+  // THE REAL ENGINE: a pool of A (its Claude subscription) + B (a DeepSeek row), the conversation on A, A spent
+  const { AccountManager } = require(path.resolve('src/accounts.js'));
+  const { ClaudeCodeAdapter } = require(path.resolve('src/adapters/claude-code.js'));
+  const { scratch } = await import('./scratch.mjs');
+  const scr = scratch('poolprov'); fsx.rmSync(scr, { recursive: true, force: true }); fsx.mkdirSync(scr, { recursive: true });
+  const CREDS = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } });
+  const pworld = ({ cross = null } = {}) => {
+    const root = fsx.mkdtempSync(path.join(scr, 'w-'));
+    const dataDir = path.join(root, 'data');
+    const am = new AccountManager({ dataDir });
+    if (!am.poolSupported()) return null;
+    const A = am.createSubscription({ name: 'Member A' }).id, B = am.createSubscription({ name: 'Member B' }).id;
+    for (const x of [A, B]) fsx.writeFileSync(path.join(am.subDir(x), '.credentials.json'), CREDS(x), { mode: 0o600 });
+    am.setProviderLookup((acct) => (acct.id === B ? Q : null)); // the provider store's answer per ACCOUNT (P0a: providers.forAccount)
+    const Pl = am.createPool({ name: 'Pool' }).id;
+    am.setPoolTarget(Pl, A); am.updatePool(Pl, { auto: true, hot: true, ...(cross ? { crossProvider: cross } : {}) });
+    const cacheDir = path.join(dataDir, 'usage-cache'); fsx.mkdirSync(cacheDir, { recursive: true });
+    const nowS = Math.floor(Date.now() / 1000), wk = nowS + 3 * 86400;
+    fsx.writeFileSync(path.join(cacheDir, A + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60000, source: 'on-demand', fiveHour: { utilization: 1, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.5, resetsAt: wk } }));
+    fsx.writeFileSync(path.join(cacheDir, B + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60000, source: 'on-demand', fiveHour: { utilization: 0.1, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: wk } }));
+    const sessions = new Map(), notices = [], sent = [], items = [];
+    const clients = new Set();
+    const todos = {
+      add(key, it) { const id = 'ut-' + (items.length + 1); items.push({ ...it, id, key, status: 'open' }); return { id }; },
+      setStatus(id, status, by) { const it = items.find((x) => x.id === id); if (it) { it.status = status; it.by = by; } return it; },
+      openItems() { return items.filter((x) => x.status === 'open'); }, onStatus() { },
+    };
+    const eng = require(path.resolve('src/server/usage-pool-engine.js')).create({
+      app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
+      wss: { clients }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t, o) => notices.push({ t, o }), serverSetting: () => undefined, getAccounts: () => am,
+      getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
+      getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
+      getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
+      getQuotaProbe: () => null, getSessionMetaStore: () => null, getUserTodos: () => todos,
+    });
+    eng.usageEstimator.burnFor = () => ({});
+    const mk = (sid, cid = 'cid-' + sid) => {
+      const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: cid, _accountId: Pl, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
+        _spawnModel: 'sonnet', _pickedModel: 'sonnet', _pickedModelAt: Date.now(), _lastPtyDataAt: Date.now() - 20 * 60e3, _isStreaming: false, _turnState: 'idle' };
+      sessions.set(sid, s); am.ensureSessionPoolLink(Pl, sid, A, { why: 'spawn' });
+      return s;
+    };
+    const on = (sid) => (am.poolCurrentFor(Pl, sid) === A ? 'A' : am.poolCurrentFor(Pl, sid) === B ? 'B' : String(am.poolCurrentFor(Pl, sid)));
+    const pass = () => { const o = console.log, w2 = console.warn, lines = []; console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' ')); try { eng._poolAutoLast.clear(); eng._poolSwitchAt.clear(); eng.maybePoolAutoSwitchForPool(Pl, { force: true }); } finally { console.log = o; console.warn = w2; } return lines; };
+    const client = () => clients.add({ readyState: 1, send: (p) => sent.push(JSON.parse(p)) });
+    return { am, eng, A, B, Pl, sessions, notices, sent, items, mk, on, pass, client, quiet: (f) => { const o = console.log; console.log = () => { }; try { return f(); } finally { console.log = o; } } };
+  };
+  const wn = pworld();
+  if (!wn) ck('PROVIDER engine SKIP — pools unsupported on this platform', true);
+  else {
+    const mA = wn.am.poolMembers(wn.Pl);
+    ck('engine: poolMembers names each member\'s provider ({id, kind, label}) — A the first-party Claude subscription, B the DeepSeek row',
+      mA.find((m) => m.id === wn.A)?.provider?.label === 'Claude subscription' && mA.find((m) => m.id === wn.B)?.provider?.id === 'pv-deepseek', J(mA));
+    wn.mk('s1');
+    const pcf = wn.am.poolCurrentFor(wn.Pl, 's1', { withProvider: true });
+    ck('engine: poolCurrentFor answers the provider ({memberId, provider}); the plain answer is still the id', pcf && pcf.memberId === wn.A && pcf.provider.label === 'Claude subscription' && wn.am.poolCurrentFor(wn.Pl, 's1') === wn.A, J(pcf));
+    const l1 = wn.pass();
+    ck('engine, never (the default): A spent and only DeepSeek could take it ⇒ NOTHING moves (no silent cross-provider move)', wn.on('s1') === 'A' && !wn.sent.length, wn.on('s1') + ' ' + l1.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 300));
+    const card = wn.items.find((x) => x.action && x.action.type === 'pool-cross-provider');
+    ck('engine, never: ONE For-you card asks — «Moving "s1" to Member B (DeepSeek) needs your OK — it restarts the conversation and its model becomes deepseek-chat»',
+      wn.items.length === 1 && card && card.text === 'Moving "s1" to Member B (DeepSeek) needs your OK — it restarts the conversation and its model becomes deepseek-chat' && card.kind === 'action' && card.action.memberId === wn.B && card.i18n && card.i18n.text.params.model === 'deepseek-chat', J(wn.items));
+    wn.pass();
+    ck('engine, never: the next pass files no second card (one per conversation and member)', wn.items.length === 1, J(wn.items.map((x) => x.id)));
+    const none = wn.eng.answerCrossProviderAsk(card.action.askId, { answer: 'once' });
+    ck('engine: Allow once with NO open page to restart it ⇒ nothing moves (a re-point alone would switch provider silently) — said: no-client', none.ok && none.moved === false && none.why === 'no-client' && wn.on('s1') === 'A', J(none));
+    wn.client(); wn.pass();
+    const card2 = wn.items.filter((x) => x.action && x.action.type === 'pool-cross-provider' && x.status === 'open');
+    ck('engine: …the card is asked again on the next pass', card2.length === 1, J(wn.items));
+    const ok1 = wn.quiet(() => wn.eng.answerCrossProviderAsk(card2[0].action.askId, { answer: 'once' }));
+    ck('engine: Allow once ⇒ the COLD move: the link → B, ONE restart request naming the re-resolved model (deepseek-chat), the item resolved',
+      ok1.ok && ok1.moved === true && wn.on('s1') === 'B' && wn.sent.length === 1 && wn.sent[0].type === 'pool-auto-switched' && wn.sent[0].affected[0].model === 'deepseek-chat' && card2[0].status === 'done', J({ ok1, sent: wn.sent }));
+    ck('engine: …the toast says who, both providers and both models', wn.notices.some((n) => n.t === 'Pool "Pool": conversation "s1" — switched from Member A (Claude subscription) to Member B (DeepSeek), model sonnet → deepseek-chat. Restarting the conversation to apply it.'), J(wn.notices.map((n) => n.t)));
+    ck('engine: …the pool setting is untouched by Allow once (still never)', wn.am.get(wn.Pl).crossProvider === undefined);
+    ck('engine: …ONE line is owed to the RESUMED conversation (the restart rebuilds the chat)', wn.eng._crossLinesOwed.get('cid-s1')?.text === 'Switched from Member A (Claude subscription) to Member B (DeepSeek) — model sonnet → deepseek-chat', J([...wn.eng._crossLinesOwed]));
+    wn.sessions.delete('s1'); const rs = wn.mk('s1b', 'cid-s1'); wn.am.ensureSessionPoolLink(wn.Pl, 's1b', wn.B, { why: 'spawn' });
+    wn.pass();
+    ck('engine: …and it is fed once into the resumed conversation (same backend id, a new server id)', !wn.eng._crossLinesOwed.has('cid-s1') && !!rs, J([...wn.eng._crossLinesOwed]));
+    // Deny: nothing moves, not asked again
+    const wd = pworld(); wd.client(); wd.mk('s2'); wd.pass();
+    const c3 = wd.items.find((x) => x.action && x.action.type === 'pool-cross-provider');
+    const dn = wd.eng.answerCrossProviderAsk(c3.action.askId, { answer: 'deny' });
+    wd.pass(); wd.pass();
+    ck('engine: Deny ⇒ nothing moves, the item resolved, no new card on the next passes (quiet 6 h)', dn.ok && dn.state === 'denied' && wd.on('s2') === 'A' && wd.items.length === 1 && c3.status === 'done' && !wd.sent.length, J(wd.items));
+    ck('engine: an answer to a request that is gone ⇒ ask_unknown; a bad answer ⇒ bad_args', wd.eng.answerCrossProviderAsk('nope', { answer: 'once' }).code === 'ask_unknown');
+    // Always ⇒ the pool's setting, and later walls move by themselves
+    const wa = pworld(); wa.client(); wa.mk('s3'); wa.pass();
+    const c4 = wa.items.find((x) => x.action && x.action.type === 'pool-cross-provider');
+    const al = wa.quiet(() => wa.eng.answerCrossProviderAsk(c4.action.askId, { answer: 'always' }));
+    ck('engine: Always for this pool ⇒ the pool\'s crossProvider = allow AND this conversation moves (cold, deepseek-chat)', al.ok && al.state === 'always' && al.moved && wa.am.get(wa.Pl).crossProvider === 'allow' && wa.on('s3') === 'B' && wa.sent[0].affected[0].model === 'deepseek-chat', J(al));
+    // allow from the start: the pass itself makes the cold move, no card
+    const wl = pworld({ cross: 'allow' }); wl.client(); wl.mk('s4'); wl.quiet(() => wl.pass());
+    ck('engine, allow: the pass makes the COLD move itself — no card; the restart names deepseek-chat; the line is owed', wl.on('s4') === 'B' && !wl.items.length && wl.sent.length === 1 && wl.sent[0].affected[0].model === 'deepseek-chat' && wl.eng._crossLinesOwed.has('cid-s4'), J({ on: wl.on('s4'), items: wl.items, sent: wl.sent }));
+    ck('engine: list() names the setting and the current member\'s provider', (() => { const row = wl.am.list().accounts.find((x) => x.id === wl.Pl); return row && row.crossProvider === 'allow' && row.currentProvider && row.currentProvider.label === 'Claude subscription'; })());
+    // a model the other provider cannot serve: refused by name, no card
+    const wm = pworld({ cross: 'allow' }); wm.client(); const sm = wm.mk('s5'); sm._pickedModel = 'gemini-3-pro-preview'; sm._spawnModel = 'gemini-3-pro-preview';
+    wm.quiet(() => wm.pass());
+    ck('engine, allow: a conversation whose model DeepSeek cannot serve stays (nothing moves, no card)', wm.on('s5') === 'A' && !wm.items.length && !wm.sent.length, J({ on: wm.on('s5'), items: wm.items }));
+    // THE DOORS THAT RE-POINT A LINK HOT never cross providers (a cross move is the cold one, its line, its restart)
+    const wr = pworld({ cross: 'allow' }); wr.client(); wr.mk('s6'); const s7 = wr.mk('s7'); s7._poolPin = { memberId: wr.B, at: Date.now(), by: 'user' };
+    ck('engine: a REMOVAL\'s verdict (it re-points links hot) never names another provider — even under allow (the pass\'s cold move does that)', wr.eng.removalTargetFor(wr.Pl, wr.A, 's6') === null, String(wr.eng.removalTargetFor(wr.Pl, wr.A, 's6')));
+    ck('engine: …nor follows a PIN onto another provider (the pin is the owner\'s, its move the cold one)', wr.eng.removalTargetFor(wr.Pl, wr.A, 's7') === null, String(wr.eng.removalTargetFor(wr.Pl, wr.A, 's7')));
+    const gp = wr.eng.gatherPlan(wr.Pl, wr.B);
+    ck('engine: "Move every conversation here" onto a member of another provider moves NONE of them (they stay: other-provider; the pinned one: pinned)', gp.move.length === 0 && gp.skip.some((x) => x.sid === 's6' && x.why === 'other-provider') && gp.skip.some((x) => x.sid === 's7' && x.why === 'pinned'), J(gp));
+    // a member the store no longer knows answers the pool's own provider — never "unknown" (which agrees with any)
+    wr.am._state.accounts = wr.am._state.accounts.filter((x) => x.id !== wr.A);
+    ck('engine: a DELETED member\'s conversations are judged as the pool\'s own provider: its verdict never names DeepSeek through the unknown door', wr.eng.removalTargetFor(wr.Pl, wr.A, 's6') === null, String(wr.eng.removalTargetFor(wr.Pl, wr.A, 's6')));
+    let threw = null; try { wm.am.updatePool(wm.Pl, { crossProvider: 'sometimes' }); } catch (e) { threw = e.message; }
+    ck('engine: the setting refuses anything but never / allow, by name', threw === "crossProvider must be 'never' or 'allow'", threw);
+  }
+
+  // ── q-055 (lane pool-provider-latents, design q-055-pool-provider-verify M1 + M2): the two LATENT cross-provider moves
+  // the verify found in P0b, closed before the provider store's lookup is wired (today every pool is one provider).
+  // M1 — THE DEVICE'S SEALED ORDERS: the order names each path's provider and each conversation's; the device's LOCAL
+  //   fallback moves a link only onto a member of the provider it points at NOW (src/sealed-orders.js — the daemon obeys
+  //   the same file), under never and allow alike; an older hub's order walks as before; an older daemon only ever sees
+  //   the links of the ranked list's provider.
+  // M2 — ACCOUNT DELETION: the store's heal re-points a deleted member's conversations and the default only onto ITS
+  //   provider; nobody of it left ⇒ UNPLACED (never the default of another provider), and the engine decides it from the
+  //   deleted member: its own provider, the pool's 'allow', or the owner's card 「账号已删，<对话> 需要你选一个 <provider> 账号」.
+  {
+    const SO = require(path.resolve('src/sealed-orders.js'));
+    const PK = 'pv-claude-subscription', QK = 'pv-deepseek';
+    const ranked = [{ id: 'a', dir: '/s/a', creds: '/s/a/c', provider: PK }, { id: 'c', dir: '/s/c', creds: '/s/c/c', provider: PK }];
+    const order = { poolId: 'p', linkPath: '/s/p', ranked, currentId: 'a', provider: PK, linkPaths: ['/l/p/s1'], links: [{ path: '/l/p/s1', provider: PK }, { path: '/l/p/s2', provider: QK }], members: { a: PK, b: QK, c: PK } };
+    const pickIn = (S, o, link, cur) => S.deviceFallback({ orders: o, link, currentDir: cur ? '/s/' + cur : null, currentId: cur });
+    const pick = (o, link, cur) => pickIn(SO, o, link, cur);
+    const legacy = { poolId: 'p', linkPath: '/s/p', ranked: [{ id: 'a', dir: '/s/a' }, { id: 'b', dir: '/s/b' }], linkPaths: ['/l/p/s2'] };
+    ck('M1 device: an order from an OLDER hub (no provider field) walks exactly as before — the first ranked member it is not on', pick(legacy, '/l/p/s2', 'a').next?.id === 'b' && pick(legacy, '/s/p', 'b').next?.id === 'a' && pick({ ...legacy, ranked: [{ id: 'a', dir: '/s/a' }] }, '/s/p', 'a').why === 'no-fallback');
+    const q2 = pick(order, '/l/p/s2', 'b');
+    ck('M1 device: a TWO-PROVIDER order under never — the DeepSeek conversation\'s link is NEVER moved onto a Claude member (no-same-provider, named)', q2.next === null && q2.why === 'no-same-provider' && q2.provider === QK, J(q2));
+    ck('M1 device: …under allow the same (the device\'s move is HOT: another provider is the hub\'s cold move or the owner\'s card) — the rule reads no setting', pick({ ...order, crossProvider: 'allow' }, '/l/p/s2', 'b').next === null);
+    ck('M1 device: a conversation of the ranked list\'s provider still falls back — onto its own provider\'s next member', pick(order, '/l/p/s1', 'a').next?.id === 'c' && pick(order, '/s/p', 'a').next?.id === 'c');
+    const ms = pick(order, '/l/p/s1', 'b');
+    ck('M1 device: a link that points NOW at another provider\'s member than the order recorded (moved after the push) ⇒ nothing (moved-since): only the hub decides', ms.next === null && ms.why === 'moved-since', J(ms));
+    ck('M1 device: a provider the order cannot name (a link it never listed, a member it does not know) ⇒ nothing (provider-unknown) — never a guess', pick(order, '/l/p/s9', 'zz').why === 'provider-unknown' && pick(order, '/l/p/s9', 'zz').next === null);
+    ck('M1 device: a ranked row WITHOUT a provider in an order that has them never matches (a missing field never widens)', pick({ ...order, ranked: [{ id: 'x', dir: '/s/x' }] }, '/l/p/s1', 'a').next === null);
+    const pf = SO.orderProviderFields({ ranked: [{ id: 'a', dir: '/s/a' }], links: [{ path: '/l/1', member: 'a' }, { path: '/l/2', member: 'b' }, { path: '/l/3', member: null }], memberIds: ['a', 'b'], defaultMember: 'a', providerKeyOf: (id) => (id === 'b' ? QK : PK) });
+    ck('M1 hub: orderProviderFields — every ranked path and every link names its provider, the members table covers each link\'s target, and linkPaths (all an OLDER daemon reads) holds only the ranked provider\'s links',
+      pf.provider === PK && pf.ranked[0].provider === PK && J(pf.links) === J([{ path: '/l/1', provider: PK }, { path: '/l/2', provider: QK }, { path: '/l/3', provider: PK }]) && pf.members.b === QK && J(pf.linkPaths) === J(['/l/1', '/l/3']), J(pf));
+    // RED MUTANT: the device rule without its provider filter (the old ranked[0] walk on a provider-aware order)
+    const ML = MP; // the provider section's scratch copies (one exit hook per suite section)
+    const soSrc = fsx.readFileSync(path.resolve('src/sealed-orders.js'), 'utf8');
+    const SOA = "const next = ranked.find((m) => m.provider != null && String(m.provider) === provider) || null;";
+    ck('M1 mutant: the anchor (the device\'s provider filter) hits once', soSrc.split(SOA).length === 2);
+    if (soSrc.split(SOA).length === 2) {
+      const SOm = ML.load('src/sealed-orders.js', soSrc.replace(SOA, 'const next = ranked[0] || null; // PATCHED: the provider filter dropped'), 'filter-dropped');
+      const bad = pickIn(SOm, order, '/l/p/s2', 'b');
+      ck('M1 mutant RED: the filter dropped ⇒ the device moves the DeepSeek conversation onto the Claude member (the cross-provider reflex the order forbids)', bad.next && bad.next.id === 'a' && q2.next === null, J(bad));
+    }
+
+    // THE REAL ENGINE + STORE: a world of members with their providers (the provider store's lookup per ACCOUNT)
+    const R = { id: 'pv-openrouter', kind: 'openrouter', label: 'OpenRouter', models: [{ id: 'deepseek-chat' }] };
+    const live = (fetched = Date.now() - 60000) => { const nowS = Math.floor(Date.now() / 1000); return { fetchedAt: fetched, source: 'on-demand', fiveHour: { utilization: 0.1, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 3 * 86400 } }; };
+    const lworld = ({ members, def = 0, cross = null, AM = AccountManager }) => {
+      const root = fsx.mkdtempSync(path.join(scr, 'l-'));
+      const dataDir = path.join(root, 'data');
+      const am = new AM({ dataDir });
+      if (!am.poolSupported()) return null;
+      const ids = members.map(([name]) => am.createSubscription({ name }).id);
+      for (const x of ids) fsx.writeFileSync(path.join(am.subDir(x), '.credentials.json'), CREDS(x), { mode: 0o600 });
+      const provs = new Map(ids.map((id, i) => [id, members[i][1]]));
+      am.setProviderLookup((acct) => provs.get(acct.id) || null);
+      const Pl = am.createPool({ name: 'Pool' }).id;
+      am.setPoolTarget(Pl, ids[def]); am.updatePool(Pl, { auto: true, hot: true, ...(cross ? { crossProvider: cross } : {}) });
+      const cacheDir = path.join(dataDir, 'usage-cache'); fsx.mkdirSync(cacheDir, { recursive: true });
+      for (const x of ids) fsx.writeFileSync(path.join(cacheDir, x + '.json'), JSON.stringify(live()));
+      const sessions = new Map(), notices = [], sent = [], items = [], orders = [];
+      const clients = new Set();
+      const todos = {
+        add(key, it) { const id = 'ut-' + (items.length + 1); items.push({ ...it, id, key, status: 'open' }); return { id }; },
+        setStatus(id, status, by) { const it = items.find((x) => x.id === id); if (it) { it.status = status; it.by = by; } return it; },
+        openItems() { return items.filter((x) => x.status === 'open'); }, onStatus() { },
+      };
+      const eng = require(path.resolve('src/server/usage-pool-engine.js')).create({
+        app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
+        wss: { clients }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t, o) => notices.push({ t, o }), serverSetting: () => undefined, getAccounts: () => am,
+        getHosts: () => ({ device: async () => ({ poolOrders: async (o) => { orders.push(JSON.parse(JSON.stringify(o))); }, ackPoolOrdersLog() { } }) }),
+        getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
+        getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
+        getQuotaProbe: () => null, getSessionMetaStore: () => null, getUserTodos: () => todos,
+      });
+      eng.usageEstimator.burnFor = () => ({});
+      const mk = (sid, member, model = 'sonnet') => {
+        const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: Pl, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
+          _spawnModel: model, _pickedModel: model, _pickedModelAt: Date.now(), _lastPtyDataAt: Date.now() - 20 * 60e3, _isStreaming: false, _turnState: 'idle' };
+        sessions.set(sid, s); am.ensureSessionPoolLink(Pl, sid, member, { why: 'spawn' });
+        return s;
+      };
+      const name = (id) => (id == null ? 'none' : (ids.indexOf(id) >= 0 ? 'ABCDEFG'[ids.indexOf(id)] : String(id)));
+      const on = (sid) => name(am.poolCurrentFor(Pl, sid));
+      // THE DELETE ROUTE's own wiring (account-usage-routes: the engine decides, then the unplaced pools are decided at once)
+      const del = (id) => { am.remove(id, { chooseDefault: (p, f) => eng.decideDefaultTarget(p, f) || eng.fallbackDefaultTarget(p, f), chooseLink: (p, f, sid) => eng.removalTargetFor(p, f, sid) }); };
+      const quietly = (f) => { const o = console.log, w2 = console.warn, lines = []; console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' ')); try { f(); } finally { console.log = o; console.warn = w2; } return lines; };
+      const pass = () => quietly(() => { eng._poolAutoLast.clear(); eng._poolSwitchAt.clear(); eng.maybePoolAutoSwitchForPool(Pl, { force: true }); });
+      const client = () => clients.add({ readyState: 1, send: (p) => sent.push(JSON.parse(p)) });
+      return { am, eng, ids, Pl, sessions, notices, sent, items, orders, mk, on, name, del, pass, client, quietly, cacheDir, dataDir };
+    };
+    const tick = () => new Promise((r) => setImmediate(r));
+    const w1 = lworld({ members: [['Member A', null], ['Member B', Q], ['Member C', null]] });
+    if (!w1) ck('M1/M2 engine SKIP — pools unsupported on this platform', true);
+    else {
+      // M1 — the hub's order: s on A (Claude), t on B (DeepSeek — a conversation the owner allowed onto it)
+      const [A1, B1, C1] = w1.ids;
+      w1.mk('s', A1); w1.mk('t', B1);
+      await w1.eng.pushSealedOrders(w1.Pl); await tick();
+      const o1 = w1.orders[w1.orders.length - 1] || {};
+      const lt = w1.am.sessionPoolLinkPath(w1.Pl, 't'), ls = w1.am.sessionPoolLinkPath(w1.Pl, 's');
+      ck('M1 hub: the pushed order names its providers — ranked = the default\'s provider only (A, C), each path tagged; the members table names B DeepSeek',
+        (o1.ranked || []).length === 2 && o1.ranked.every((r) => r.provider === 'pv-claude-subscription') && o1.members && o1.members[B1] === 'pv-deepseek' && o1.provider === 'pv-claude-subscription', J(o1));
+      ck('M1 hub: …every link with its conversation\'s provider, and linkPaths (an OLDER daemon\'s only field) WITHOUT the DeepSeek conversation\'s link — an older daemon can never match it',
+        (o1.links || []).some((l) => l.path === lt && l.provider === 'pv-deepseek') && (o1.links || []).some((l) => l.path === ls && l.provider === 'pv-claude-subscription') && o1.linkPaths.includes(ls) && !o1.linkPaths.includes(lt), J({ links: o1.links, linkPaths: o1.linkPaths }));
+      const dv = SO.deviceFallback({ orders: o1, link: lt, currentDir: w1.am.subDir(B1), currentId: B1 });
+      const ds2 = SO.deviceFallback({ orders: o1, link: ls, currentDir: w1.am.subDir(A1), currentId: A1 });
+      ck('M1 hub → device: the pushed order, judged by the device\'s rule — the DeepSeek conversation stays (no-same-provider), the Claude one falls back to C', dv.next === null && dv.why === 'no-same-provider' && ds2.next && ds2.next.id === C1, J({ dv, ds2 }));
+      // the one-provider pool's order: linkPaths = every link, as before
+      const w0 = lworld({ members: [['Member A', null], ['Member B', null]] });
+      w0.mk('s', w0.ids[0]); w0.mk('t', w0.ids[1]);
+      await w0.eng.pushSealedOrders(w0.Pl); await tick();
+      const o0 = w0.orders[w0.orders.length - 1] || {};
+      ck('M1 hub: a ONE-provider pool\'s order keeps every link in linkPaths (as before) and the old ranked rows (+ the provider tag)', o0.linkPaths && o0.linkPaths.length === 2 && o0.ranked.length === 2 && o0.ranked.every((r) => r.id && r.dir && r.creds && r.provider === 'pv-claude-subscription'), J(o0));
+      // the cold cross move pushes the order at once (the moved link leaves linkPaths before a server-down window opens)
+      const wx = lworld({ members: [['Member A', null], ['Member B', Q]], cross: 'allow' });
+      fsx.writeFileSync(path.join(wx.cacheDir, wx.ids[0] + '.json'), JSON.stringify({ ...live(), fiveHour: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 7200 } }));
+      wx.client(); wx.mk('x', wx.ids[0]); wx.pass(); await tick(); await tick();
+      const lx = wx.am.sessionPoolLinkPath(wx.Pl, 'x'), ox = wx.orders[wx.orders.length - 1] || {};
+      ck('M1 hub: a COLD cross move (allow) re-pushes the order at once — its link now named DeepSeek and gone from linkPaths', wx.on('x') === 'B' && wx.orders.length >= 2 && (ox.links || []).some((l) => l.path === lx && l.provider === 'pv-deepseek') && !(ox.linkPaths || []).includes(lx), J({ on: wx.on('x'), n: wx.orders.length, ox }));
+
+      // M2 — deletion. A = DeepSeek (the deleted one), B = OpenRouter (serves deepseek-chat), C = Claude (the default)
+      const w2 = lworld({ members: [['Member A', Q], ['Member B', R], ['Member C', null]], def: 2 });
+      const [A2, B2, C2] = w2.ids;
+      w2.mk('t', A2, 'deepseek-chat'); w2.mk('u', C2, 'sonnet');
+      w2.quietly(() => w2.del(A2));
+      ck('M2 store: the deleted DeepSeek member\'s conversation is UNPLACED — its link gone, it bills NOBODY (never the Claude default, never OpenRouter)',
+        w2.on('t') === 'none' && !fsx.existsSync(w2.am.sessionPoolLinkPath(w2.Pl, 't')) && w2.am.unplacedOf(w2.Pl, 't')?.member === A2 && w2.am.unplacedOf(w2.Pl, 't')?.provider?.label === 'DeepSeek', J({ on: w2.on('t'), mark: w2.am.unplacedOf(w2.Pl, 't') }));
+      ck('M2 store: …the other conversation and the default untouched', w2.on('u') === 'C' && w2.am.poolCurrent(w2.Pl) === C2);
+      ck('M2 engine: a deleted member answers the provider it SERVED (goneProviderOf): the removal verdict for its conversation names nobody (no DeepSeek left), never C', w2.eng.removalTargetFor(w2.Pl, A2, 't') === null && w2.am.goneProviderOf(A2)?.label === 'DeepSeek', String(w2.eng.removalTargetFor(w2.Pl, A2, 't')));
+      const l2 = w2.pass();
+      const card = w2.items.find((x) => x.action && x.action.type === 'pool-cross-provider');
+      ck('M2 engine, never: the pass moves NOTHING and ONE For-you card asks — «Account deleted — "t" needs you to pick a DeepSeek account» (the exhausted case\'s card: Allow once / Always / Deny, offering OpenRouter as deepseek-chat)',
+        w2.on('t') === 'none' && w2.items.length === 1 && card && card.text === 'Account deleted — "t" needs you to pick a DeepSeek account' && card.kind === 'action' && card.urgency === 'high' && card.action.memberId === B2 && card.i18n.text.key === 'Account deleted — "{title}" needs you to pick a {provider} account' && /Allow once moves it to Member B \(OpenRouter\) — it restarts and its model becomes deepseek-chat/.test(card.detail), J({ items: w2.items, log: l2.filter((l) => /unplaced|pool/.test(l)).slice(0, 4) }));
+      w2.pass();
+      ck('M2 engine: the next pass files no second card', w2.items.length === 1, J(w2.items.map((x) => x.id)));
+      w2.client();
+      const yes = w2.quietly(() => { w2._ans = w2.eng.answerCrossProviderAsk(card.action.askId, { answer: 'once' }); });
+      const ans = w2._ans;
+      ck('M2 engine: Allow once ⇒ the COLD move onto OpenRouter (link → B, ONE restart request naming deepseek-chat), the mark cleared, the line owed naming the deleted member and both providers',
+        ans && ans.moved === true && w2.on('t') === 'B' && w2.sent.length === 1 && w2.sent[0].affected[0].model === 'deepseek-chat' && !w2.am.unplacedOf(w2.Pl, 't') && w2.eng._crossLinesOwed.get('cid-t')?.text === 'Switched from Member A (DeepSeek) to Member B (OpenRouter) — model deepseek-chat → deepseek-chat', J({ ans, sent: w2.sent, owed: [...w2.eng._crossLinesOwed], yes: yes.slice(0, 3) }));
+      // no other provider serves its model: the card says so, without answers — ONCE (the mark keeps it across a restart)
+      const w3 = lworld({ members: [['Member A', Q], ['Member B', { ...R, models: [{ id: 'other/model' }] }], ['Member C', null]], def: 2 });
+      const [A3] = w3.ids;
+      w3.mk('t', A3, 'deepseek-chat');
+      w3.quietly(() => w3.del(A3)); w3.pass(); w3.pass();
+      const c3 = w3.items[0];
+      ck('M2 engine: nobody can serve its model ⇒ ONE card with the words alone (no answer to move it), asked ONCE — the mark remembers it',
+        w3.items.length === 1 && c3 && !c3.action && c3.kind === 'action' && c3.text === 'Account deleted — "t" needs you to pick a DeepSeek account' && /no other provider in the pool serves its model/.test(c3.detail) && w3.on('t') === 'none' && !!w3.am.unplacedOf(w3.Pl, 't')?.asked, J(w3.items));
+      const reread = new AccountManager({ dataDir: w3.dataDir });
+      ck('M2 store: the mark is PERSISTED (a restart keeps the conversation unplaced, its provider and that it was asked)', reread.unplacedOf(w3.Pl, 't')?.provider?.label === 'DeepSeek' && !!reread.unplacedOf(w3.Pl, 't')?.asked && reread.goneProviderOf(A3)?.label === 'DeepSeek' && reread.goneNameOf(A3) === 'Member A');
+      // a member of ITS provider appears ⇒ the pass places it there (a same-provider move), the mark cleared
+      const D3 = w3.am.createSubscription({ name: 'Member D' }).id; fsx.writeFileSync(path.join(w3.am.subDir(D3), '.credentials.json'), CREDS(D3), { mode: 0o600 }); fsx.writeFileSync(path.join(w3.cacheDir, D3 + '.json'), JSON.stringify(live()));
+      w3.am.setProviderLookup((acct) => (acct.id === D3 ? Q : acct.name === 'Member B' ? { ...R, models: [{ id: 'other/model' }] } : null));
+      w3.pass();
+      ck('M2 engine: a DeepSeek account signed in later ⇒ the pass places the conversation on it (its own provider), the mark cleared, the removal\'s words', w3.am.poolCurrentFor(w3.Pl, 't') === D3 && !w3.am.unplacedOf(w3.Pl, 't') && w3.notices.some((n) => /Member A was removed from the pool — conversation "t" moved to Member D/.test(n.t)), J({ on: w3.am.poolCurrentFor(w3.Pl, 't'), n: w3.notices.map((n) => n.t) }));
+      // the pool's allow: the cold move itself, no card
+      const w4 = lworld({ members: [['Member A', Q], ['Member B', R], ['Member C', null]], def: 2, cross: 'allow' });
+      w4.client(); w4.mk('t', w4.ids[0], 'deepseek-chat');
+      w4.quietly(() => w4.del(w4.ids[0])); w4.pass();
+      ck('M2 engine, allow: the pass makes the COLD move onto OpenRouter itself (deepseek-chat, its line) — no card', w4.on('t') === 'B' && !w4.items.length && w4.sent.length === 1 && w4.sent[0].affected[0].model === 'deepseek-chat' && w4.eng._crossLinesOwed.has('cid-t'), J({ on: w4.on('t'), items: w4.items }));
+      // THE DEFAULT on the deleted DeepSeek member: UNPLACED too, never re-pointed onto Claude; the pool keeps deciding
+      const w5 = lworld({ members: [['Member A', Q], ['Member C', null]], def: 0 });
+      const [A5, C5] = w5.ids;
+      w5.mk('u', C5);
+      w5.quietly(() => w5.del(A5));
+      ck('M2 store: the DEFAULT on the deleted DeepSeek member is UNPLACED — unlinked, marked, never re-pointed onto the Claude member', w5.am.poolCurrent(w5.Pl) === null && w5.am.unplacedOf(w5.Pl, null)?.member === A5, J({ cur: w5.am.poolCurrent(w5.Pl), mark: w5.am.unplacedOf(w5.Pl, null) }));
+      fsx.writeFileSync(path.join(w5.cacheDir, C5 + '.json'), JSON.stringify({ ...live(), fiveHour: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 7200 } }));
+      const n5 = w5.orders.length; const l5 = w5.pass(); await tick(); await tick();
+      const o5 = w5.orders[w5.orders.length - 1] || {};
+      ck('M2 engine: …the pool tick still runs (it decides the default FROM the deleted member — its own provider only) and leaves the default unplaced', w5.am.poolCurrent(w5.Pl) === null && !!w5.am.unplacedOf(w5.Pl, null) && w5.orders.length > n5, J({ n5, n: w5.orders.length, l5: l5.slice(0, 4) }));
+      const d5 = SO.deviceFallback({ orders: o5, link: o5.linkPath, currentDir: null, currentId: null });
+      ck('M1 × M2: the device\'s order names the UNPLACED default\'s own provider (DeepSeek) — the reflex never re-creates the default on the Claude member', o5.provider === 'pv-deepseek' && !(o5.ranked || []).length && d5.next === null && !(o5.linkPaths || []).includes(w5.am.sessionPoolLinkPath(w5.Pl, 'u')), J({ o5, d5 }));
+      let nr = null; try { w5.quietly(() => { nr = w5.am.resolveForSpawn(w5.Pl, 'claude', { sessionKey: 'n1' }); }); } catch (e) { nr = { err: e.message }; }
+      ck('M2 store: a NEW conversation still starts (its own link) while the default stays unplaced — the self-heal never sets it onto another provider', nr && nr.sessionLink && nr.poolTarget === C5 && w5.am.poolCurrent(w5.Pl) === null && !!w5.am.unplacedOf(w5.Pl, null), J(nr));
+      let nd = null; try { w5.am.resolveForSpawn(w5.Pl, 'claude', {}); } catch (e) { nd = e; }
+      ck('M2 store: …a spawn that would READ the default is refused by name (default_unplaced) — never a silent move onto Claude', nd && nd.code === 'default_unplaced' && /was deleted/.test(nd.message), nd && nd.message);
+      // RED MUTANT: the store's heal without the provider filter (the old re-point: the engine's pick / the default, ANY provider)
+      const amSrc = fsx.readFileSync(path.resolve('src/accounts.js'), 'utf8');
+      const AMA = "const sameProv = (mid) => goneKey == null || this._providerKeyOf(this.memberProviderOf(mid)) === goneKey;";
+      ck('M2 mutant: the anchor (the heal\'s provider filter) hits once', amSrc.split(AMA).length === 2);
+      if (amSrc.split(AMA).length === 2) {
+        const { AccountManager: Old } = ML.load('src/accounts.js', amSrc.replace(AMA, 'const sameProv = () => true; // PATCHED: the old re-point (any provider)'), 'old-repoint');
+        const wm = lworld({ members: [['Member A', Q], ['Member B', R], ['Member C', null]], def: 2, AM: Old });
+        wm.mk('t', wm.ids[0], 'deepseek-chat');
+        wm.quietly(() => wm.del(wm.ids[0]));
+        ck('M2 mutant RED: the old re-point lands the deleted DeepSeek member\'s conversation on the CLAUDE default — hot, no card (the silent cross-provider move)', wm.on('t') === 'C' && !wm.am.unplacedOf(wm.Pl, 't'), J({ on: wm.on('t') }));
+      }
+      for (const r of copiesCensus(ML.files, ML.dir, path.resolve('.'), { minCopies: 4, label: 'latents mutants: ' })) ck(r.name, r.pass);
+    }
+  }
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);

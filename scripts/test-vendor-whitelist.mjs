@@ -42,7 +42,9 @@ const VENDOR = /api\.anthropic\.com|platform\.claude\.com|console\.anthropic\.co
 // builds (any base URL), so the census counts the source marker DECISION_ENDPOINT beside the request, not a host
 // lane rule-learning (q-037 P0): + the chat completions marker TEXT_ENDPOINT — the ONE text-model caller fetches a URL it builds
 // from its base (a test hands in a loopback base), so the census counts the source marker beside the request, like DECISION_ENDPOINT
-const CONSTRUCT_HOSTS = new RegExp(VENDOR.source + '|chatgpt\\.com|openai\\.com|fish\\.audio|openrouter\\.ai|DECISION_ENDPOINT|TEXT_ENDPOINT'); // + Dropline voice input (q-029): api.dropline.fish.audio | api.fish.audio | fish.audio
+// lane models-at-session (q-053 P0c): + the listed-provider refresh's marker PROVIDER_MODELS — the ONE /models caller fetches a URL
+// the PURE record builds from a provider's base (any base: OpenRouter's, an OpenAI-compatible one; a suite hands in a loopback)
+const CONSTRUCT_HOSTS = new RegExp(VENDOR.source + '|chatgpt\\.com|openai\\.com|fish\\.audio|openrouter\\.ai|DECISION_ENDPOINT|TEXT_ENDPOINT|PROVIDER_MODELS'); // + Dropline voice input (q-029): api.dropline.fish.audio | api.fish.audio | fish.audio
 const REQUESTY = /https?\.request\s*\(|\bfetch\s*\(|axios|got\s*\(/;
 
 // ── collect every server-side JS file (the browser bundle never holds tokens) ──
@@ -102,6 +104,10 @@ const ALLOW = {
   // plugin's daily budget + the use's own cap), the plugin's switch, the Language model row's key, and the zero-data-retention
   // routing as LITERALS (no endpoint ⇒ the named refusal no-zdr, never a request without them)
   'src/server/text-model-client.js': { max: 1, oneShot: true, gates: ['budgetVerdict', 'pluginOn', 'resolveIntegration(ROW_ID)', 'TEXT_ENDPOINT', 'zdr: true', "data_collection: 'deny'"] },
+  // lane models-at-session (design q-053 r1 §3): THE LISTED-PROVIDER REFRESH — a GET of a third-party provider's /models
+  // (OpenRouter, an OpenAI-compatible base) — ONE request, behind a person's press (the one door; `by: 'human'`), the vault
+  // open, once a minute per provider (the PURE refreshVerdict), the answer CACHED on the record (setListed); §15 pins each
+  'src/server/provider-models.js': { max: 1, gates: ['PROVIDER_MODELS', "if (by !== 'human')", 'MP.refreshVerdict(', 'vault: vaultState()', 'providers.setListed('] },
 };
 for (const [rel, n] of Object.entries(constructions)) {
   const a = ALLOW[rel];
@@ -1416,6 +1422,100 @@ console.log('§14 the Channels raw API: ONE fetch site, the host table, the gran
   ];
   const r = ctl.map(([n, s, re]) => ({ n, red: !!s && census14(s).some((x) => re.test(x)) }));
   ok(r.every((x) => x.red), `§14 CONTROLS: ${r.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(', ')}`);
+}
+
+// §15 THE LISTED-PROVIDER REFRESH (lane models-at-session, design q-053 r1 §3 — the owner 2026-10-20: a provider's model list,
+// fetched where the provider lists them): ONE new vendor request — a GET of a third-party provider's /models (OpenRouter, an
+// OpenAI-compatible base) in src/server/provider-models.js (the ALLOW row above, its marker PROVIDER_MODELS beside the one
+// request). Its THREE gates, each pinned here as a function of the source or of the running module (each control RED):
+//   (a) A PERSON'S PRESS — `refreshListedModels(` is called from exactly ONE place in the server tree: the POST door
+//       /api/providers/:id/models/refresh (src/routes/provider-models.js), whose handler asks personVerdict(req) before it and
+//       says `by: 'human'`; the module refuses a call that does not; no timer anywhere near it (the module and the door's file
+//       hold none). CONTROLS: a copy calling it from a setInterval in the wiring (a TIMER-DRIVEN refresh), a copy calling it
+//       from an /api/agent/ route (an AGENT's door), the door without its personVerdict, a timer planted in the module
+//   (b) THE VAULT OPEN — the REAL module, a locked vault: the loopback fake is never asked (CONTROL: a copy of the verdict that
+//       skips the vault asks it)
+//   (c) ONCE A MINUTE per provider — the REAL module: two presses inside the minute ⇒ ONE request (CONTROL: a copy of the
+//       verdict without its cooldown — an UNTHROTTLED refresh — asks twice); and (d) the answer CACHED on the record
+//       (providers.setListed, fetchedAt) — never asked at a menu, a spawn or a boot
+console.log('§15 the listed-provider refresh: a person\'s press · the vault · once a minute · cached');
+{
+  const MOD = 'src/server/provider-models.js', DOOR = 'src/routes/provider-models.js', WIRE = 'src/server/account-usage-routes.js';
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
+  const TIMER = /\b(?:setTimeout|setInterval|setImmediate|cron|schedule)\s*\(/;
+  const texts0 = Object.fromEntries(files.map((f) => { try { return [path.relative(REPO, f), fs.readFileSync(f, 'utf-8')]; } catch { return [path.relative(REPO, f), '']; } }));
+  // → the census's findings (an empty list = green)
+  const census15 = (texts) => {
+    const bad = [];
+    const callers = Object.entries(texts).flatMap(([rel, t]) => (strip(t).match(/\brefreshListedModels\s*\(/g) || []).map(() => rel));
+    const mod = strip(texts[MOD] || ''), door = strip(texts[DOOR] || '');
+    if (!/async function refreshListedModels\s*\(/.test(mod)) bad.push('the module defines refreshListedModels');
+    const outside = callers.filter((rel) => rel !== MOD && rel !== DOOR);
+    if (outside.length) bad.push(`ONE CALLER: refreshListedModels( called outside the door (${outside.join(', ')})`);
+    if (callers.filter((rel) => rel === DOOR).length !== 1) bad.push(`ONE CALLER: the door's file calls it ${callers.filter((rel) => rel === DOOR).length} time(s) (exactly 1)`);
+    if (callers.filter((rel) => rel === MOD).length !== 1) bad.push('ONE CALLER: the module calls itself');
+    const at = door.indexOf("app.post('/api/providers/:id/models/refresh'"), call = door.indexOf('refreshListedModels(');
+    const handler = at >= 0 ? door.slice(at, door.indexOf('\n  });', at)) : '';
+    if (at < 0 || !(call > at && call < at + handler.length)) bad.push('THE DOOR: the call lies inside POST /api/providers/:id/models/refresh');
+    if (!/const who = personVerdict\(req\);\s*\n\s*if \(!who\.ok\) return res\.status\(403\)/.test(handler) || handler.indexOf('personVerdict(req)') > handler.indexOf('refreshListedModels(')) bad.push('A PERSON: the door asks personVerdict(req) (an agent\'s token / another site ⇒ 403) BEFORE the call');
+    if (!/refreshListedModels\(String\(req\.params\.id\), \{ by: 'human' \}\)/.test(handler)) bad.push('A PERSON: the door says by: \'human\'');
+    if (/['"`]\/api\/agent\//.test(door)) bad.push('A PERSON: the door\'s file registers no /api/agent/ route');
+    if (!mod.includes("if (by !== 'human') return { ok: false, code: 'human_only' };")) bad.push('A PERSON: the module refuses a call that does not say a person pressed');
+    for (const rel of [MOD, DOOR]) if (TIMER.test(strip(texts[rel] || ''))) bad.push(`NO TIMER: ${rel} holds a timer`);
+    for (const rel of [...new Set(callers)]) if (rel !== MOD && rel !== DOOR && TIMER.test(strip(texts[rel]))) bad.push(`NO TIMER: ${rel} calls it beside a timer`);
+    const verdict = mod.indexOf('MP.refreshVerdict('), key = mod.indexOf('keyOf(provider.keyRef)'), req = mod.indexOf('await fetch(');
+    if (!(verdict > 0 && key > verdict && req > key) || !/vault: vaultState\(\)/.test(mod)) bad.push('THE VAULT + THE MINUTE: the PURE verdict (vault, cooldown, in flight) is asked BEFORE the key is read and the request sent');
+    if (!/providers\.setListed\(provider\.id, parsed\.rows, now\(\)\)/.test(mod)) bad.push('THE CACHE: the answer is kept on the record (setListed, fetchedAt)');
+    return bad;
+  };
+  const found = census15(texts0);
+  ok(found.length === 0, '§15 the census on the tree: ONE caller (the door), a person\'s press, no timer, the verdict before the key and the request, the cache', found.join('; '));
+  ok(constructions[MOD] === 1 && ALLOW[MOD] && ALLOW[MOD].max === 1, `§15 ${MOD}: exactly ONE vendor request construction (the PROVIDER_MODELS marker beside it: ${constructions[MOD]})`);
+  const plant = (rel, from, to) => { const t = texts0[rel] || ''; const n = t.split(from).length - 1; return n === 1 ? { ...texts0, [rel]: t.replace(from, to) } : null; };
+  const WIRE_AT = "  require('../routes/provider-models.js').registerProviderModelRoutes(";
+  const DOOR_AT = "  app.post('/api/providers/:id/models/refresh',";
+  const MOD_AT = '  return { refreshListedModels };';
+  const controls = [
+    ['a TIMER-DRIVEN refresh (a setInterval in the wiring)', plant(WIRE, WIRE_AT, "  setInterval(() => refresher.refreshListedModels('pv-openrouter', { by: 'human' }), 3600e3);\n" + WIRE_AT), /ONE CALLER|NO TIMER/],
+    ['a refresh from an AGENT route', plant(DOOR, DOOR_AT, "  app.post('/api/agent/provider-models', async (req, res) => res.json(await refresher.refreshListedModels(String(req.body.id), { by: 'human' })));\n" + DOOR_AT), /ONE CALLER|A PERSON/],
+    ['the door without its personVerdict', plant(DOOR, "    const who = personVerdict(req);\n    if (!who.ok) return res.status(403).json({ error: 'only a person on this page can refresh a provider’s list', code: who.code });\n", ''), /A PERSON/],
+    ['a timer inside the module', plant(MOD, MOD_AT, "  setInterval(() => refreshListedModels('pv-openrouter', { by: 'human' }), 60e3);\n" + MOD_AT), /NO TIMER|ONE CALLER/],
+    ['the module that takes any caller', plant(MOD, "    if (by !== 'human') return { ok: false, code: 'human_only' };\n", ''), /A PERSON/],
+  ];
+  const r15 = controls.map(([n, t, re]) => ({ n, red: !!t && census15(t).some((x) => re.test(x)) }));
+  ok(r15.every((x) => x.red), `§15 CONTROLS: ${r15.map((x) => `${x.n} (${x.red ? 'RED' : 'missed'})`).join(' · ')}`);
+
+  // (b) + (c): the RUNNING module against a loopback fake of a provider's list — the hit count is the witness
+  const http = await import('node:http');
+  const Mod = (await import('node:module')).default;
+  let hits = 0;
+  const fakeSrv = http.createServer((req, res) => { hits++; res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ data: [{ id: 'vendor/model-a' }] })); });
+  await new Promise((r) => fakeSrv.listen(0, '127.0.0.1', r));
+  const scratch15 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-vw15-'));
+  try {
+    const MPsrc = fs.readFileSync(path.join(REPO, 'src/model-providers.js'), 'utf-8'), PMsrc = fs.readFileSync(path.join(REPO, MOD), 'utf-8');
+    const compile = (src, file, swap = null) => { const m = new Mod(file); m.filename = file; m.paths = Mod._nodeModulePaths(path.dirname(file)); if (swap) m.require = (id) => (id === '../model-providers.js' ? swap : require(id.startsWith('.') ? path.resolve(path.dirname(file), id) : id)); m._compile(src, file); return m.exports; };
+    const mpOf = (from, to) => { if (from && MPsrc.split(from).length !== 2) throw new Error('§15 anchor missing: ' + from); return compile(from ? MPsrc.replace(from, to) : MPsrc, path.join(REPO, 'src/model-providers.js')); };
+    const run = async (MP, { vault = 'unlocked', presses = 2 } = {}) => {
+      const dataDir = fs.mkdtempSync(path.join(scratch15, 'd-'));
+      const PS = compile(fs.readFileSync(path.join(REPO, 'src/server/provider-store.js'), 'utf-8'), path.join(REPO, 'src/server/provider-store.js'), MP);
+      const store = PS.create({ dataDir, log: () => { } });
+      store.put({ id: 'pv-openrouter', kind: 'openrouter', label: 'OpenRouter', baseUrl: `http://127.0.0.1:${fakeSrv.address().port}/api/v1`, modelsSource: 'listed', listedBy: 'provider-api' });
+      const PM = compile(PMsrc, path.join(REPO, MOD), MP);
+      const r = PM.create({ providers: store, vaultState: () => vault, now: () => 1792494000000, log: () => { } });
+      hits = 0;
+      const out = [];
+      for (let i = 0; i < presses; i++) out.push(await r.refreshListedModels('pv-openrouter', { by: 'human' }));
+      return { hits, out, kept: store.get('pv-openrouter') };
+    };
+    const real = await run(mpOf());
+    ok(real.hits === 1 && real.out[0].ok && real.out[1].code === 'cooldown' && real.kept.fetchedAt === 1792494000000 && real.kept.models[0].id === 'vendor/model-a', '§15 (c)+(d) THE REAL MODULE: two presses inside the minute ⇒ ONE request; the second refused (cooldown); the answer kept with fetchedAt', { hits: real.hits, out: real.out.map((o) => o.code || 'ok') });
+    const loose = await run(mpOf('  if (wait > 0) return { ok: false, code: \'cooldown\', retryAfterMs: wait };\n', ''));
+    ok(loose.hits === 2, '§15 CONTROL: an UNTHROTTLED refresh (the verdict\'s cooldown taken out) asks the provider TWICE inside the minute (RED: > 1)', loose.hits);
+    const locked = await run(mpOf(), { vault: 'locked', presses: 1 });
+    const open = await run(mpOf("  if (vault !== 'unlocked') return { ok: false, code: vault === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked' };\n", ''), { vault: 'locked', presses: 1 });
+    ok(locked.hits === 0 && locked.out[0].code === 'vault_locked' && open.hits === 1, '§15 (b) THE VAULT: locked ⇒ the provider never asked (vault_locked); CONTROL: a verdict that skips the vault asks it (RED)', { locked: locked.hits, open: open.hits });
+  } finally { fakeSrv.close(); fs.rmSync(scratch15, { recursive: true, force: true }); }
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

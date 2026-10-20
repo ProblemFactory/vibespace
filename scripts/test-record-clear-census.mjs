@@ -1847,6 +1847,7 @@ const I_RECV = {
   'src/lib/channel-webhook.js|ck': ['channel author', 'the other VibeSpace\'s name its pairing code carries (its owner\'s reply name), worded in the join box\'s done toast'], 'src/routes/webhook.js|cv': ['channel author', 'the other VibeSpace\'s name its pairing code carries, named in the join\'s refusal sentence'], // lane webhook-pair-join
   'src/lib/channels-panel.js|r': ['count', 'a refresh answer\'s pending flag'], 'src/lib/channel-window.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-window.js|a': ['channel author', 'lane lark-threads: an author\'s vendor name / id in the "Set a name…" dialog\'s title (the vendor\'s, never a record\'s words)'], 'src/lib/channel-window.js|r2.proposal': ['outbox proposal', 'the channel\'s refusal of a send'],
   'src/lib/chat-view.js|msg.page': ['published page', 'a page\'s name'], 'src/lib/chat-view.js|r': ['codex sub-agent', 'an unresolved sub-agent\'s reason code'],
+  'src/lib/chat-status-bar.js|p': ['account', 'the conversation\'s model provider\'s label (the owner named it), in the model badge\'s "does not serve" toast — lane models-at-session'],
   'src/lib/desktop-app-launcher.js|end': ['desktop app', 'an app label'], 'src/lib/desktop-manager.js|desk': ['desktop', 'a desktop\'s name'], 'src/lib/file-explorer.js|bk': ['bookmark', 'a bookmark label'],
   'src/lib/integrations-window.js|v': ['integration', 'a key label'],
   'src/lib/manage-agents.js|a': ['account', 'an account'], 'src/lib/manage-agents.js|c.account': ['account', 'an account'], 'src/lib/manage-agents.js|fin.account': ['account', 'an account'],
@@ -1904,6 +1905,8 @@ const I_RECV = {
   // ── verify r8 ③: the journal's receivers (every server console / log line rides the incident ring) ──
   'data/bin/codex-chat-wrapper.js|r': ['harness', 'an app-server answer\'s reason / detail (an RPC refusal)'], 'data/bin/codex-chat-wrapper.js|st': ['harness', 'a steer answer\'s reason / detail (an RPC refusal)'],
   'src/accounts.js|to': ['account', 'a pool member (the deleted default\'s re-point target — lane pool-pin)'], 'src/accounts.js|pool': ['account', 'a pool'],
+  // lane pool-provider-latents (q-055 M2): a pool default a deletion left UNPLACED — its deleted member's name and provider label (the store's own refusal of a spawn that would read it)
+  'src/accounts.js|ud': ['account', 'a pool default\'s UNPLACED mark (the deleted member\'s name)'], 'src/accounts.js|ud.provider': ['account', 'the UNPLACED mark\'s provider (its label)'],
   // lane vault-e2e-password: a key file the vault seals — its NAME is a STORE_KEYS constant (.accounts-key …), never a record's words
   'src/server/vault-engine.js|it': ['migration', 'a key file the vault seals (its constant name)'], 'src/server/vault-engine.js|k': ['migration', 'a STORE_KEYS row (a key file\'s constant name)'],
   'src/migration-runner.js|m': ['migration', 'a migration\'s own note'], 'src/normalizers.js|session': ['session', 'a session\'s name'],
@@ -1951,6 +1954,7 @@ const I_RECV = {
   'src/lib/manage-agents.js|said': ['pool verdict', 'the gather route\'s answer worded by PURE gatherWords (members and counts) — lane pool-pin'],
   'src/lib/session-lifecycle.js|r': ['account', 'a pool member row (the conversation\'s pin menu) — lane pool-pin'],
   'src/server/usage-pool-engine.js|wake': ['pool verdict', 'a member wake\'s own reason (the engine\'s verdict words)'],
+  'src/server/usage-pool-engine.js|owed': ['account', 'the line a cross-provider switch owes the resumed conversation (q-053 P0b): the members\' and providers\' names and two model ids — the engine\'s own words'],
   'src/server/usage-pool-engine.js|out': ['pool verdict', 'a pin\'s placement reason (the engine\'s verdict words)'],
   'src/server/usage-pool-engine.js|ds': ['pool verdict', 'a per-session switch decision (member ids and numbers)'],
   'src/server/usage-pool-engine.js|s': ['session', 'the conversation a removed member held (its own name on the For-you item) — lane pool-pin'],

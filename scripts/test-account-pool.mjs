@@ -197,6 +197,104 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   await amT.syncOatFiles();
   ck('…and the last link gone, the next sweep takes the file back', !fs.existsSync(path.join(amT.subDir(T), '.credentials.json')));
 }
+// THE PROVIDER OF A POOL MEMBER (q-053 P0b): every member names its provider (a LABEL — readings stay the slot's); the
+// pool's crossProvider setting (never by default, the owner's decision ①) is validated and listed.
+{
+  const D2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-poolprov-'));
+  const amP = new AccountManager({ dataDir: D2 });
+  if (amP.poolSupported()) {
+    const CR = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } });
+    const a1 = amP.createSubscription({ name: 'One' }).id, a2 = amP.createSubscription({ name: 'Two' }).id;
+    for (const x of [a1, a2]) fs.writeFileSync(path.join(amP.subDir(x), '.credentials.json'), CR(x), { mode: 0o600 });
+    const pp = amP.createPool({ name: 'Prov' }).id;
+    const ms = amP.poolMembers(pp);
+    ck('provider: every member names its provider — a claude subscription = the first-party subscription read off its harness\'s creds row — Claude subscription {id, kind, label}', ms.length === 2 && ms.every((m) => m.provider && m.provider.kind === 'subscription' && m.provider.label === 'Claude subscription' && m.provider.id === 'pv-claude-subscription'));
+    ck('provider: with no provider store wired every account answers its harness\'s own subscription — never null for a known account', amP.memberProviderOf(a2).label === 'Claude subscription' && amP.memberProviderOf('nope') === null);
+    amP.setProviderLookup((acct) => (acct.id === a2 ? { id: 'pv-other', kind: 'openrouter', label: 'OpenRouter', models: [{ id: 'x/y' }] } : null));
+    ck('provider: …with the provider store\'s lookup it is that record (models included — the decisions read them)', amP.memberProviderOf(a2).label === 'OpenRouter' && amP.memberProviderOf(a2).models.length === 1 && amP.poolMembers(pp).find((m) => m.id === a2).provider.label === 'OpenRouter');
+    const cur = amP.poolCurrentFor(pp, null, { withProvider: true });
+    ck('provider: poolCurrentFor answers {memberId, provider} on ask; its plain answer is the id as before', cur && cur.memberId === amP.poolCurrent(pp) && cur.provider.label && amP.poolCurrentFor(pp, null) === amP.poolCurrent(pp));
+    const row0 = amP.list().accounts.find((x) => x.id === pp);
+    ck('provider: a pool lists crossProvider "never" by default (the owner\'s decision ①) and the current member\'s provider', row0.crossProvider === 'never' && row0.currentProvider && row0.currentProvider.kind);
+    amP.updatePool(pp, { crossProvider: 'allow' });
+    ck('provider: updatePool sets it (allow) and the list says so', amP.list().accounts.find((x) => x.id === pp).crossProvider === 'allow' && amP.get(pp).crossProvider === 'allow');
+    let err = null; try { amP.updatePool(pp, { crossProvider: true }); } catch (e) { err = e.message; }
+    ck('provider: anything but never / allow is refused by name — the setting unchanged', err === "crossProvider must be 'never' or 'allow'" && amP.get(pp).crossProvider === 'allow');
+    amP.updatePool(pp, { hot: true });
+    ck('provider: an update that does not name it leaves it alone', amP.get(pp).crossProvider === 'allow');
+  } else ck('provider SKIP — pools unsupported on this platform', true);
+  fs.rmSync(D2, { recursive: true, force: true });
+}
+// A DELETED MEMBER'S CONVERSATIONS NEVER LAND ON ANOTHER PROVIDER (lane pool-provider-latents, design q-055 M2): the
+// store's heal is a HOT re-point — onto a member of the deleted account's OWN provider only (the engine's pick only when
+// it is one); nobody of that provider left ⇒ UNPLACED: the link unlinked, a persisted mark, billing nobody (never the
+// default). MUTANT: the old re-point (the engine's pick / the default of ANY provider) ⇒ RED.
+{
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const MU = mutantCopies('pool-unplaced', path.resolve('.'));
+  const DS = { id: 'pv-deepseek', kind: 'openai-chat', label: 'DeepSeek', models: [{ id: 'deepseek-chat' }] };
+  const CR = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } });
+  // One, Two = DeepSeek; Three = the Claude subscription. The default on Three, conversation sa on One, sb on Three.
+  const GONE = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-poolgone-'));
+  const world = (AM = AccountManager, { defOn = 'three' } = {}) => {
+    const D3 = fs.mkdtempSync(path.join(GONE, 'w-'));
+    const am3 = new AM({ dataDir: D3 });
+    const one = am3.createSubscription({ name: 'One' }).id, two = am3.createSubscription({ name: 'Two' }).id, three = am3.createSubscription({ name: 'Three' }).id;
+    for (const x of [one, two, three]) fs.writeFileSync(path.join(am3.subDir(x), '.credentials.json'), CR(x), { mode: 0o600 });
+    am3.setProviderLookup((acct) => (acct.id === one || acct.id === two ? DS : null));
+    const pp = am3.createPool({ name: 'Mixed' }).id;
+    am3.setPoolTarget(pp, defOn === 'one' ? one : three);
+    am3.ensureSessionPoolLink(pp, 'sa', one, { why: 'spawn' }); am3.ensureSessionPoolLink(pp, 'sb', three, { why: 'spawn' });
+    const engineSays = (to) => ({ chooseDefault: () => to, chooseLink: () => to }); // an engine pick of ANOTHER provider (never taken)
+    return { D3, am: am3, one, two, three, pp, engineSays };
+  };
+  const ww = world();
+  if (!ww.am.poolSupported()) ck('unplaced SKIP — pools unsupported on this platform', true);
+  else {
+    const { am: m, one, two, three, pp } = ww;
+    const quiet = (f) => { const w0 = console.warn; console.warn = () => { }; try { return f(); } finally { console.warn = w0; } };
+    quiet(() => m.remove(one, ww.engineSays(three)));
+    ck('unplaced: a DeepSeek member deleted while another DeepSeek member is left ⇒ its conversation moves to THAT one — the engine\'s pick of the Claude member is refused', m.poolCurrentFor(pp, 'sa') === two);
+    ck('unplaced: …nothing is marked, the Claude conversation and the default untouched', !m.unplacedOf(pp, 'sa') && m.poolCurrentFor(pp, 'sb') === three && m.poolCurrent(pp) === three);
+    ck('unplaced: the deleted member\'s provider and name are remembered (goneProviderOf / goneNameOf — the engine\'s verdicts name it)', m.goneProviderOf(one)?.label === 'DeepSeek' && m.goneNameOf(one) === 'One' && m.memberProviderOf(one) === null);
+    quiet(() => m.remove(two, ww.engineSays(three)));
+    const mark = m.unplacedOf(pp, 'sa');
+    ck('unplaced: the LAST DeepSeek member deleted ⇒ the conversation is UNPLACED — its link gone, it bills nobody (never the Claude default)', m.poolCurrentFor(pp, 'sa') === null && !fs.existsSync(m.sessionPoolLinkPath(pp, 'sa')) && mark && mark.member === two && mark.name === 'Two' && mark.provider.label === 'DeepSeek', JSON.stringify(mark));
+    ck('unplaced: …listed among the pools the delete route decides at once; the Claude conversation untouched', m.unplacedPools().includes(pp) && m.poolCurrentFor(pp, 'sb') === three);
+    const re = new AccountManager({ dataDir: ww.D3 });
+    ck('unplaced: the mark is PERSISTED — a restart reads the conversation unplaced, its provider and member (goneProviderOf from the mark)', re.unplacedOf(pp, 'sa')?.member === two && re.goneProviderOf(two)?.label === 'DeepSeek' && re.poolCurrentFor(pp, 'sa') === null);
+    m.noteUnplacedAsked(pp, 'sa', 'ut-9');
+    ck('unplaced: noteUnplacedAsked keeps that the owner was asked (once, persisted)', !!m.unplacedOf(pp, 'sa').asked && m.unplacedOf(pp, 'sa').todoId === 'ut-9' && !!new AccountManager({ dataDir: ww.D3 }).unplacedOf(pp, 'sa').asked);
+    m.ensureSessionPoolLink(pp, 'sa', three, { why: 'cross-provider' });
+    ck('unplaced: a placement (the owner\'s Allow, a pin, its own provider) writes the link again and CLEARS the mark', m.poolCurrentFor(pp, 'sa') === three && !m.unplacedOf(pp, 'sa') && !m.unplacedPools().includes(pp));
+    // the DEFAULT, and the sweep
+    const wd = world(AccountManager, { defOn: 'one' });
+    quiet(() => { wd.am.remove(wd.two, wd.engineSays(wd.three)); wd.am.remove(wd.one, wd.engineSays(wd.three)); });
+    ck('unplaced: the DEFAULT on the last DeepSeek member ⇒ UNPLACED too (unlinked + marked) — never re-pointed onto the Claude member', wd.am.poolCurrent(wd.pp) === null && wd.am.unplacedOf(wd.pp, null)?.member === wd.one && wd.am.unplacedOf(wd.pp, 'sa')?.member === wd.one);
+    wd.am.setPoolTarget(wd.pp, wd.three);
+    ck('unplaced: …setting the default again clears ITS mark (the conversation\'s stays)', !wd.am.unplacedOf(wd.pp, null) && !!wd.am.unplacedOf(wd.pp, 'sa'));
+    wd.am.sweepSessionPoolLinks(new Set(['sb']));
+    ck('unplaced: the boot sweep drops the mark of a conversation that no longer exists', !wd.am.unplacedOf(wd.pp, 'sa'));
+    // ONE PROVIDER: the heal is the old one (the engine's pick, else the default)
+    const w1p = (() => { const D4 = fs.mkdtempSync(path.join(GONE, 'one-')); const a4 = new AccountManager({ dataDir: D4 }); const x = a4.createSubscription({ name: 'X' }).id, y = a4.createSubscription({ name: 'Y' }).id; for (const q of [x, y]) fs.writeFileSync(path.join(a4.subDir(q), '.credentials.json'), CR(q), { mode: 0o600 }); const p4 = a4.createPool({ name: 'One provider' }).id; a4.setPoolTarget(p4, x); a4.ensureSessionPoolLink(p4, 'sx', x, { why: 'spawn' }); quiet(() => a4.remove(x, {})); return { a4, p4, y, D4 }; })();
+    ck('unplaced: a ONE-provider pool heals exactly as before — the default and the link onto the member left, nothing marked', w1p.a4.poolCurrent(w1p.p4) === w1p.y && w1p.a4.poolCurrentFor(w1p.p4, 'sx') === w1p.y && !w1p.a4.unplacedPools().length);
+    // RED MUTANT: the heal without its provider filter (the old re-point)
+    const src = fs.readFileSync(path.resolve('src/accounts.js'), 'utf8');
+    const ANCH = "const sameProv = (mid) => goneKey == null || this._providerKeyOf(this.memberProviderOf(mid)) === goneKey;";
+    ck('unplaced mutant: the anchor (the heal\'s provider filter) hits once', src.split(ANCH).length === 2);
+    if (src.split(ANCH).length === 2) {
+      const { AccountManager: Old } = MU.load('src/accounts.js', src.replace(ANCH, 'const sameProv = () => true; // PATCHED: the old re-point'), 'old-repoint');
+      const wm = world(Old);
+      quiet(() => { wm.am.remove(wm.one, wm.engineSays(wm.three)); });
+      ck('unplaced mutant RED: the old re-point follows the engine\'s pick onto the CLAUDE member — the DeepSeek conversation moved hot, no mark (the silent cross-provider move)', wm.am.poolCurrentFor(wm.pp, 'sa') === wm.three && !wm.am.unplacedOf(wm.pp, 'sa'));
+      const wm2 = world(Old);
+      quiet(() => { wm2.am.remove(wm2.two, {}); wm2.am.remove(wm2.one, {}); });
+      ck('unplaced mutant RED: …and with no engine at all, onto the Claude DEFAULT', wm2.am.poolCurrentFor(wm2.pp, 'sa') === wm2.three);
+    }
+    for (const r of copiesCensus(MU.files, MU.dir, path.resolve('.'), { minCopies: 1, label: 'unplaced: ' })) ck(r.name, r.pass);
+  }
+  fs.rmSync(GONE, { recursive: true, force: true });
+}
 fs.rmSync(DATA, { recursive: true, force: true });
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);

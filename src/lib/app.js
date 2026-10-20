@@ -20,6 +20,8 @@ import { Resizer } from './resizer.js';
 import { anchorFixedPopup, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, announceModal } from './utils.js';
 import { t, tc, resolveLang } from './i18n.js';
 import { installManageAgents } from './manage-agents.js';
+import { openAccountModelsDialog } from './account-models.js'; // q-053 §3 (lane models-at-session): a provider with no models — the door to its account's models
+import { MENU_EMPTY } from '../model-providers.js'; // PURE: the one line an empty menu says
 import { installPluginsUI } from './plugins-ui.js';
 import { installUsageMeter } from './usage-meter.js';
 import { installSessionLifecycle } from './session-lifecycle.js';
@@ -1526,6 +1528,8 @@ class App {
         this.hideDialogs();
         return;
       }
+      // q-053 §3: the account's provider serves no model — the row says so with its door; Create says it too, never spawns
+      if (document.querySelector('#row-model .ns-models-none:not(.hidden)')) { showToast(t('This account’s provider has no models — set them up first'), { type: 'error' }); return; }
       this.createSession({
         backend,
         hostId,
@@ -1684,6 +1688,71 @@ class App {
     effortSel.value = cfg.efforts.some((opt) => opt.value === effortValue) ? effortValue : '';
 
     if (extraArgsInput && applyDefaults) extraArgsInput.value = defaults.extraArgs || '';
+    this._refreshModelMenu(); // the harness's list above is the seed; the chosen account's provider answers the menu
+  }
+
+  // MODELS AT A NEW SESSION (design q-053 r1 §3, lane models-at-session): the model menu is the chosen ACCOUNT'S PROVIDER'S
+  // list — the harness's own for a first-party login (as before), exactly the entered or provider-listed rows for a
+  // third-party one (GET /api/available-models?backend=&account=). Redrawn whenever the harness, the machine or the account
+  // changes (one answer wins: the newest ask). A provider with none is ONE line that says so and opens its account's models.
+  _refreshModelMenu() {
+    clearTimeout(this._modelMenuTimer);
+    this._modelMenuTimer = setTimeout(async () => { // after the account row has followed the same change
+      const dlg = document.getElementById('dialog-new-session');
+      const be = document.getElementById('input-backend')?.value || 'claude';
+      if (!dlg || dlg.classList.contains('hidden') || terminalOnly(be)) return;
+      const acctSel = document.getElementById('input-account');
+      const rowShown = !!acctSel && document.getElementById('row-account')?.style.display !== 'none';
+      const picked = rowShown ? acctSel.value : '';
+      const id = picked === 'subscription' ? '' : (picked || (rowShown ? this._accounts?.[billingRow(be).defaultIdField] || '' : ''));
+      const seq = (this._modelMenuSeq = (this._modelMenuSeq || 0) + 1);
+      const ans = await fetchJson(`/api/available-models?backend=${encodeURIComponent(be)}&account=${encodeURIComponent(id)}`);
+      if (seq !== this._modelMenuSeq || !ans || !Array.isArray(ans.models)) return; // a newer ask, or an older server: the harness's list stays
+      if ((document.getElementById('input-backend')?.value || 'claude') !== ans.backend) return;
+      this._drawModelMenu(be, ans);
+    }, 0);
+  }
+
+  _drawModelMenu(be, ans) {
+    const sel = document.getElementById('input-model');
+    const row = document.getElementById('row-model');
+    const customRow = document.getElementById('custom-model-row');
+    if (!sel || !row) return;
+    row.dataset.provider = ans.provider?.id || '';
+    row.title = ans.provider ? t('Models of {provider}', { provider: t(ans.provider.label) }) : '';
+    let none = row.querySelector('.ns-models-none');
+    if (ans.empty) {
+      sel.innerHTML = '';
+      sel.classList.add('hidden');
+      customRow?.classList.add('hidden');
+      if (!none) { none = document.createElement('button'); none.type = 'button'; none.className = 'ns-models-none'; row.appendChild(none); }
+      none.textContent = t(MENU_EMPTY);
+      none.classList.remove('hidden');
+      none.onclick = (e) => { e.preventDefault(); openAccountModelsDialog({ accountId: ans.account?.id || '', name: ans.account?.name || '', onClose: () => this._refreshModelMenu() }); };
+      return;
+    }
+    none?.classList.add('hidden');
+    sel.classList.remove('hidden');
+    const prev = sel.value;
+    const ids = [];
+    sel.innerHTML = '';
+    for (const m of ans.models) {
+      const o = document.createElement('option');
+      o.value = m.id;
+      o.textContent = m.id === '' ? t('Default') : (m.label || m.id);
+      sel.appendChild(o);
+      ids.push(m.id);
+    }
+    if (ans.open) { // the harness judges its own spellings — Custom… stays; a closed provider offers exactly its rows
+      const o = document.createElement('option');
+      o.value = '__custom__';
+      o.textContent = t('Custom…');
+      sel.appendChild(o);
+    }
+    const want = this._getBackendSessionDefaults(be).model;
+    sel.value = ids.includes(prev) || (prev === '__custom__' && ans.open) ? prev
+      : ans.open ? (ids.includes(want) ? want : '') : (ans.defaultId && ids.includes(ans.defaultId) ? ans.defaultId : ids[0]);
+    if (sel.value !== '__custom__') customRow?.classList.add('hidden');
   }
 
   _setupCwdAutocomplete() {
@@ -1973,7 +2042,8 @@ class App {
       // stored freshest updater.
       this._acctListenersWired = true;
       document.getElementById('input-backend')?.addEventListener('change', () => { this._updateAcctRow?.(); this._fillBrowserProfileRow?.(document.getElementById('input-task')?.value || ''); });
-      document.getElementById('input-host')?.addEventListener('change', () => { this._updateAcctRow?.(); this._fillBrowserProfileRow?.(document.getElementById('input-task')?.value || ''); }); // identity r3: a host pick hides the profile row
+      document.getElementById('input-host')?.addEventListener('change', () => { this._updateAcctRow?.(); this._fillBrowserProfileRow?.(document.getElementById('input-task')?.value || ''); this._refreshModelMenu?.(); }); // identity r3: a host pick hides the profile row
+      document.getElementById('input-account')?.addEventListener('change', () => this._refreshModelMenu?.()); // q-053 §3: the menu follows the account's provider
     }
     // Host dropdown (remote sessions run over ssh + remote dtach; terminal only until P3)
     const hostSel = document.getElementById('input-host');

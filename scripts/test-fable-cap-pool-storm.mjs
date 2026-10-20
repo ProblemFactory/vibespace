@@ -844,7 +844,11 @@ const MASTER_SERVED_PATCH = [
       // 6 since the pin (same day): setConversationPin judges the pin on the conversation's family through it too;
       // 7 since verify r1: memberVerdictFor — the ONE site "Move every conversation here now" (gatherPlan) and the
       //   held branch of memberRemoved judge a member on the conversation's family through
-      sites.length === 7 && unruled.length === 0 && sites.filter((x) => x.spawnChooser).length === 1,
+      // 8 since q-053 P0b (lane pool-provider-aware): crossMoveNow — the owner's answer to a cross-provider card
+      //   re-judges the conversation on its family through it before anything moves
+      // 9 since q-055 M2 (lane pool-provider-latents): placeUnplaced — a deleted member's UNPLACED conversation is decided
+      //   from that member on its family through it
+      sites.length === 9 && unruled.length === 0 && sites.filter((x) => x.spawnChooser).length === 1,
       JSON.stringify(sites));
   }
   ok('§5b …while `laneByEvidence` deliberately still asks the REQUEST-model family',

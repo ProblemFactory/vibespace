@@ -1,0 +1,20 @@
+{
+  "_why": "lane models-at-session (q-053 P0c): what a provider's own model list answers — the loopback fake of the refresh door serves these (no vendor call anywhere). `openrouter` = the OpenRouter /api/v1/models shape (name, context_length, architecture.input_modalities, supported_parameters); `openai` = the OpenAI-compatible /v1/models shape ({ data: [{ id, object, owned_by }] }, nothing else). Rows 4–6 of openrouter are the parser's refusals: an empty id, a spaced id, a repeat.",
+  "openrouter": {
+    "data": [
+      { "id": "deepseek/deepseek-chat-v3.1", "name": "DeepSeek: DeepSeek V3.1", "context_length": 163840, "architecture": { "input_modalities": ["text"] }, "supported_parameters": ["tools", "temperature"] },
+      { "id": "anthropic/claude-sonnet-4.5", "name": "Anthropic: Claude Sonnet 4.5", "context_length": 1000000, "architecture": { "input_modalities": ["text", "image"] }, "supported_parameters": ["tools", "reasoning"] },
+      { "id": "qwen/qwen3-coder:free", "name": "Qwen: Qwen3 Coder (free)", "context_length": 262144, "architecture": { "input_modalities": ["text"] }, "supported_parameters": ["tools"] },
+      { "id": "", "name": "no id" },
+      { "id": "spaced id/x", "name": "spaced" },
+      { "id": "qwen/qwen3-coder:free", "name": "a repeat" }
+    ]
+  },
+  "openai": {
+    "object": "list",
+    "data": [
+      { "id": "gpt-5.5", "object": "model", "owned_by": "openai" },
+      { "id": "gpt-5.5-mini", "object": "model", "owned_by": "openai" }
+    ]
+  }
+}

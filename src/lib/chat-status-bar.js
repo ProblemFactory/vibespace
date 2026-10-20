@@ -14,6 +14,8 @@ import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PUR
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { enterSubmits } from './chat-enter-keys.js';
+import { MENU_EMPTY, resolvePick, sourceOf } from '../model-providers.js'; // PURE (q-053 §3, lane models-at-session): the badge's list is THIS conversation's provider's
+import { openAccountModelsDialog } from './account-models.js';
 
 /** Alias-tolerant model identity ('fable' vs 'claude-fable-5', a [1m] suffix) — the mismatch and the refusal chip (B-c643) ask the same. */
 const modelCore = (v) => String(v || '').replace(/\[1m\]$/, '').trim().replace(/^claude-/, '');
@@ -1861,23 +1863,51 @@ export class ChatStatusBar {
         this._statusModel = model;
         this.render();
       };
-      const addModelItems = (models) => {
+      const addModelItems = (models, via = pick) => {
         for (const m of models) {
           const item = document.createElement('div');
           item.className = 'chat-status-dropdown-item' + (m.id === this._statusModel ? ' active' : '');
           item.textContent = m.label || m.id;
-          item.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); pick(m.id); };
+          item.dataset.model = m.id;
+          item.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); via(m.id); };
           dropdown.appendChild(item);
         }
         const custom = document.createElement('div');
-        custom.className = 'chat-status-dropdown-item';
+        custom.className = 'chat-status-dropdown-item chat-status-model-custom';
         custom.textContent = t('Custom\u2026');
         custom.onclick = async (ev) => {
           ev.stopPropagation(); dropdown.remove();
           const v = await showInputDialog({ title: t('Set model'), label: t('Model ID or alias'), confirmText: t('Set') });
-          if (v && v.trim()) pick(v.trim());
+          if (v && v.trim()) via(v.trim());
         };
         dropdown.appendChild(custom);
+      };
+      // q-053 §3 (lane models-at-session): THIS conversation's provider's list — its account's (a pooled one: the member it
+      // bills now). The head names the provider and where its rows come from; a pick is RE-RESOLVED against that provider
+      // (an alias lands on its row's id; an id it does not serve is refused by name, never sent); none ⇒ ONE line + its door.
+      const providerItems = (data) => {
+        const p = data.provider;
+        if (p) {
+          const src = sourceOf(p);
+          const head = document.createElement('div');
+          head.className = 'chat-status-dropdown-item chat-status-dim chat-status-provider';
+          head.dataset.provider = p.id;
+          head.textContent = `${t(p.label)} \u00b7 ${t(src.key, { ...src.params, harness: src.params.harness ? (getBackendMeta(src.params.harness)?.label || src.params.harness) : '' })}`;
+          dropdown.appendChild(head);
+        }
+        if (data.empty) {
+          const none = document.createElement('div');
+          none.className = 'chat-status-dropdown-item chat-status-models-none';
+          none.textContent = t(MENU_EMPTY);
+          none.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); if (data.account) openAccountModelsDialog({ accountId: data.account.id, name: data.account.name }); };
+          dropdown.appendChild(none);
+          return;
+        }
+        addModelItems(data.models.filter(m => m.id), (want) => {
+          const r = resolvePick(p, want);
+          if (!r.ok) { showToast(t('{provider} does not serve the model “{model}”', { provider: t(p.label), model: want }), { type: 'error' }); return; }
+          pick(r.model);
+        });
       };
       // #6 model LOCK v2: record a TARGET model — the server re-pins it at
       // every turn end where the served model drifted, so a safety-reroute
@@ -1912,9 +1942,12 @@ export class ChatStatusBar {
       loading.className = 'chat-status-dropdown-item chat-status-dim';
       loading.textContent = t('Loading\u2026');
       dropdown.appendChild(loading);
-      fetch('/api/available-models').then(r => r.json()).then(data => {
+      fetch(`/api/available-models?session=${encodeURIComponent(this._sessionId || '')}`).then(r => r.json()).then(async data => {
+        // not a running conversation of this hub (or an older one): the harness's whole list, as before
+        if (!Array.isArray(data?.models)) data = await fetch('/api/available-models').then(r => r.json());
         if (!dropdown.isConnected) return;
         loading.remove();
+        if (Array.isArray(data?.models)) return providerItems(data);
         addModelItems((data?.[backend] || []).filter(m => m.id));
       }).catch(() => {
         if (!dropdown.isConnected) return;

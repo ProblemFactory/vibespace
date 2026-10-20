@@ -27,6 +27,7 @@ import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
 import { permissionRulesCaps, resetCreditCapable, billingRow, getBackendMeta } from './agent-meta.js';
 import { rosterResetOffer } from '../reset-credit.js'; // PURE (design-reset-credits p2): what a row says about stored reset credits
+import { openAccountModelsDialog } from './account-models.js'; // lane provider-record (q-053 §3): ⋯ → 模型… — the account's provider and the models it may use
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one confirm dialog (three entry points: this roster, the chat wall card, the For-you item)
 // The oracle registry + its measured PROOFS and the measured-and-REJECTED
 // candidates are PURE and shared with the server (CJS pulled into the bundle
@@ -1103,7 +1104,7 @@ export function installManageAgents(App, ctx = {}) {
     const live = (this.sidebar?._allSessions || []).find((x) => x.webuiId === sess.serverId);
     const name = this.sidebar?.getCustomName?.({ backend: sess.backend, backendSessionId: sess.backendSessionId }) || live?.name || sess.name || '';
     const mode = live?.webuiMode || 'chat';
-    const finish = () => this.resumeSession(sess.backendSessionId, sess.cwd || live?.cwd || '', name, { mode, backend: sess.backend, backendSessionId: sess.backendSessionId, accountId: poolId, hostId: sess.host || undefined, excludeWebuiId: sess.serverId });
+    const finish = () => this.resumeSession(sess.backendSessionId, sess.cwd || live?.cwd || '', name, { mode, backend: sess.backend, backendSessionId: sess.backendSessionId, accountId: poolId, hostId: sess.host || undefined, excludeWebuiId: sess.serverId, ...(sess.model ? { model: sess.model } : {}) }); // (q-053 P0b) a move to another provider names the model its list serves
     let done = false;
     const go = () => { if (done) return; done = true; this.ws.offGlobal(onExit); finish(); };
     const onExit = (msg) => { if (msg.type === 'exited' && msg.sessionId === sess.serverId) setTimeout(go, 400); }; // let the CLI flush its transcript
@@ -1714,7 +1715,7 @@ export function installManageAgents(App, ctx = {}) {
           refresh();
         }
       };
-      const doTest = () => {
+      const doTest = (model = '') => { // model: a 模型… row's id (the dialog's 「测试」); the menu's Test passes none
         if (!a?.loggedIn) { showToast(t('This account isn’t signed in yet — use “Add ChatGPT account…” to finish the login first.'), { type: 'error' }); return; }
         if (keyRow.dataset.blocked) {
           showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000 });
@@ -1723,7 +1724,7 @@ export function installManageAgents(App, ctx = {}) {
         done();
         // With a remote host selected the test runs ON that host (auth.json
         // ships to it) — proving the full remote path.
-        this.createSession({ backend: 'codex', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined });
+        this.createSession({ backend: 'codex', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined, ...(model ? { model } : {}) });
       };
       const doRename = async () => {
         const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
@@ -1760,6 +1761,7 @@ export function installManageAgents(App, ctx = {}) {
         // the Anthropic roster uses (2.369.18)
         if (a?.pooled && !selectedHost) items.splice(0, 1, ...this._poolMenuItems(id, a, refresh));
         if (!a?.pooled && a?.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
+        items.push({ label: t('Models…'), title: t('The model provider of this account and the models it may use'), action: () => openAccountModelsDialog({ accountId: id, name: a?.name || '', onTest: (model) => doTest(model) }) });
         if (!selectedHost) items.push(...this._excludeFromPoolItems(a, codexAccts, refresh)); // one click off a pool (B-ad05)
         items.push(...this._rulesAndChecksItems('codex', { accountId: id, accountName: a?.name || '', selectedHost }));
         items.push({ separator: true }, { label: t('Remove account'), action: doDelete });
@@ -3014,7 +3016,7 @@ export function installManageAgents(App, ctx = {}) {
       }
       const a = claudeAccts.find(x => x.id === id);
       const isSub = a?.type === 'subscription';
-      const doTest = () => {
+      const doTest = (model = '') => { // model: a 模型… row's id (the dialog's 「测试」); the menu's Test passes none
         // LINKED account (2.237.3, userN's report "Test says not signed in"):
         // this account's email IS the selected host's own login, so on that
         // host it needs NO local creds and NO shipped dir — the correct spawn
@@ -3054,7 +3056,7 @@ export function installManageAgents(App, ctx = {}) {
         // facts (email-linked → host login; host-held dir → that dir), so the
         // test shows the account it claims to test. §ban-safety unaffected —
         // both server paths ship zero creds.
-        this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined });
+        this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined, ...(model ? { model } : {}) });
         // /status DISPLAY caveat (2.244.2, verified forensically on Novita:
         // the spawn refreshed the HELD dir's token — billing correct — while
         // /status Organization/Email showed the MACHINE login): the CLI reads
@@ -3190,6 +3192,7 @@ export function installManageAgents(App, ctx = {}) {
         if (isSub && !a?.pooled) items.push({ label: a?.oat ? (a.oatDaysLeft <= 0 ? t('Long-lived token (expired)…') : t('Long-lived token (active)…')) : t('Long-lived token…'), action: () => this._oatDialog(id, a, refresh) });
         if (isSub && a.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
         items.push({ label: a?.note ? t('Edit note…') : t('Set note…'), action: doNote });
+        items.push({ label: t('Models…'), title: t('The model provider of this account and the models it may use'), action: () => openAccountModelsDialog({ accountId: id, name: a?.name || '', onTest: (model) => doTest(model) }) });
         // Reveal the key value (API keys only) — the store holds the MASTER
         // copy and the Console can never re-show it; users need a way to
         // save it elsewhere (real incident: removed key ≈ lost key). A POOLED

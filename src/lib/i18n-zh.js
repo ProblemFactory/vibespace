@@ -9706,4 +9706,92 @@ export default {
   "On Windows the device agent runs as administrator by default — Windows asks you to confirm once when you run the command. Agents can then type into windows you opened as administrator (you choose which, in the allow list below).": "在 Windows 上，设备代理默认以管理员权限运行 — 你运行命令时 Windows 会请你确认一次。之后代理能向你以管理员身份打开的窗口输入（允许哪些由下面的允许清单选）。", // lane win-input-elevated
   "Install with normal rights (no administrator)": "以普通权限安装（非管理员）", // lane win-input-elevated
   "administrator": "管理员", // lane win-input-elevated
+  "Models — {name}": "模型 — {name}", // lane provider-record
+  "This account’s harness has no model provider": "这个账号的 harness 没有模型提供方", // lane provider-record
+  "Could not read the models — {reason}": "读不到模型列表 — {reason}", // lane provider-record
+  "Test this account with this model (one terminal session)": "用这个模型测试此账号（开一个终端会话）", // lane provider-record
+  "Model id": "模型 id", // lane provider-record
+  "Same as the id": "与 id 相同", // lane provider-record
+  "Display name": "显示名", // lane provider-record
+  "Context window": "上下文", // lane provider-record
+  "Capabilities": "能力", // lane provider-record
+  "Remove this model": "删除这个模型", // lane provider-record
+  "Enter the models this account may use, with the id the provider expects. New sessions on this account offer exactly these.": "填写这个账号可用的模型，id 要和提供方要求的一致。用这个账号的新对话只提供这些模型。", // lane provider-record
+  "The provider lists these — new sessions on this account offer them. They are not entered here.": "这些由提供方列出——用这个账号的新对话会提供它们，不在这里填写。", // lane provider-record
+  "Model provider": "模型提供方", // lane provider-record
+  "No models configured for this provider": "此提供方未配置模型", // lane provider-record
+  "add the ones this account may use": "添加这个账号可用的模型", // lane provider-record
+  "Aliases": "别名", // lane provider-record
+  "Remove alias {name}": "删除别名 {name}", // lane provider-record
+  "Add a model": "添加模型", // lane provider-record
+  "An Anthropic model id starts with claude- (e.g. claude-sonnet-5-5)": "Anthropic 的模型 id 以 claude- 开头（例如 claude-sonnet-5-5）", // lane provider-record
+  "Lower-case letters, digits, dots and dashes (e.g. gpt-5.5)": "小写字母、数字、点和连字符（例如 gpt-5.5）", // lane provider-record
+  "A Gemini model id starts with gemini- (e.g. gemini-3-pro-preview)": "Gemini 的模型 id 以 gemini- 开头（例如 gemini-3-pro-preview）", // lane provider-record
+  "The vendor, a slash, then the model (e.g. deepseek/deepseek-chat)": "厂商、斜杠、再接模型（例如 deepseek/deepseek-chat）", // lane provider-record
+  "Letters, digits and . _ : / @ - (e.g. Qwen/Qwen3-32B or llama3.1:8b)": "字母、数字和 . _ : / @ -（例如 Qwen/Qwen3-32B 或 llama3.1:8b）", // lane provider-record
+  "Anthropic subscription": "Anthropic 订阅", // lane provider-record
+  "Anthropic API": "Anthropic API", // lane provider-record
+  "OpenAI · Responses API": "OpenAI · Responses 接口", // lane provider-record
+  "OpenAI-compatible · Chat Completions": "OpenAI 兼容 · Chat Completions 接口", // lane provider-record
+  "Google AI subscription": "Google AI 订阅", // lane provider-record
+  "Google Gemini API": "Google Gemini API", // lane provider-record
+  "OpenRouter": "OpenRouter", // lane provider-record
+  "Self-hosted or other": "自建或其他", // lane provider-record
+  "Image input": "图片输入", // lane provider-record
+  "Reasoning": "推理", // lane provider-record
+  "1M context": "1M 上下文", // lane provider-record
+  "Anthropic API (Console key)": "Anthropic API（Console 密钥）", // lane provider-record
+  "ChatGPT subscription": "ChatGPT 订阅", // lane provider-record
+  "Entered by you": "你填写的", // lane provider-record
+  "Listed by {harness}": "由 {harness} 列出", // lane provider-record
+  "Listed by the provider": "由提供方列出", // lane provider-record
+  "Unknown provider kind": "未知的提供方类型", // lane provider-record
+  "Not a model id this provider accepts": "这不是此提供方接受的模型 id", // lane provider-record
+  "At most 128 characters": "最多 128 个字符", // lane provider-record
+  "This id is already in the list": "列表里已有这个 id", // lane provider-record
+  "At most 60 characters": "最多 60 个字符", // lane provider-record
+  "A token count from 1 to 10M (e.g. 200k)": "token 数，1 到 10M（例如 200k）", // lane provider-record
+  "Unknown capability": "未知的能力", // lane provider-record
+  "Not a usable alias name": "不能用作别名", // lane provider-record
+  "An alias points at a model that is not in the list": "有别名指向不在列表里的模型", // lane provider-record
+  "The default model is not in the list": "默认模型不在列表里", // lane provider-record
+  "At most 200 models": "最多 200 个模型", // lane provider-record
+  "Models…": "模型…", // lane provider-record
+  "The model provider of this account and the models it may use": "这个账号的模型提供方，以及它可用的模型", // lane provider-record
+  "Fetched {time}": "获取于 {time}", // lane models-at-session
+  "Not fetched yet": "尚未获取", // lane models-at-session
+  "Ask the provider for its model list now (at most once a minute)": "现在向提供方获取它的模型列表（每分钟最多一次）", // lane models-at-session
+  "Refresh the list": "刷新列表", // lane models-at-session
+  "The provider listed {n} model(s)": "提供方列出了 {n} 个模型", // lane models-at-session
+  "No models configured for this provider — set up": "此提供方未配置模型 — 去设置", // lane models-at-session
+  "Unknown provider": "未知的提供方", // lane models-at-session
+  "This provider does not list its models — enter them instead": "此提供方不提供模型列表 — 请手动填写", // lane models-at-session
+  "Unlock the vault first — the provider’s key is kept there": "请先解锁保险库 — 提供方的密钥存放在那里", // lane models-at-session
+  "Set up the vault first — the provider’s key is kept there": "请先设置保险库 — 提供方的密钥存放在那里", // lane models-at-session
+  "This provider’s list is being refreshed already": "此提供方的列表正在刷新", // lane models-at-session
+  "Refreshed a moment ago — try again in {s} s": "刚刚刷新过 — 请 {s} 秒后再试", // lane models-at-session
+  "The provider’s key could not be read from the vault": "无法从保险库读取提供方的密钥", // lane models-at-session
+  "The provider did not answer": "提供方没有回应", // lane models-at-session
+  "The provider answered {status}": "提供方返回了 {status}", // lane models-at-session
+  "The provider’s list is larger than 1 MB — nothing was kept": "提供方的列表超过 1 MB — 未保存任何内容", // lane models-at-session
+  "The provider’s answer is not a model list": "提供方的回应不是模型列表", // lane models-at-session
+  "Only a person on this page can refresh the list": "只有在此页面上的人才能刷新列表", // lane models-at-session
+  "This account’s provider has no models — set them up first": "此账号的提供方没有模型 — 请先设置", // lane models-at-session
+  "Models of {provider}": "{provider} 的模型", // lane models-at-session
+  "{provider} does not serve the model “{model}”": "{provider} 不提供模型「{model}」", // lane models-at-session
+  "Always for this pool": "一直（这个池）",
+  "Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time": "从现在起，这个池可以自己把对话切到另一个提供方，每次都会在对话里留一行",
+  "Moved — this pool now moves a conversation to another provider by itself": "已切换——这个池以后会自己把对话切到另一个提供方",
+  "Moved — the conversation restarts on the other provider": "已切换——对话会在另一个提供方上重启",
+  "Nothing moved — the conversation is gone": "没有切换——对话已不在",
+  "Nothing moved — a member of its own provider can take it again": "没有切换——同一提供方的成员又能接手了",
+  "Nothing moved — no open page could restart it; the pool asks again": "没有切换——没有打开的页面能重启它；号池会再问一次",
+  "Nothing moved — that member cannot take it now": "没有切换——那个成员现在接不了",
+  "Switched from {from} ({fromProvider}) to {to} ({toProvider}) — model {model} → {toModel}": "已从 {from}（{fromProvider}）切到 {to}（{toProvider}）——模型 {model} → {toModel}",
+  "Pool \"{pool}\": conversation \"{title}\" — switched from {from} ({fromProvider}) to {to} ({toProvider}), model {model} → {toModel}.": "号池「{pool}」：对话「{title}」已从 {from}（{fromProvider}）切到 {to}（{toProvider}），模型 {model} → {toModel}。",
+  "Moving \"{title}\" to {member} ({provider}) needs your OK — it restarts the conversation and its model becomes {model}": "把「{title}」切到 {member}（{provider}）需要你同意——会重启对话，模型改为 {model}",
+  "{from} ({fromProvider}) cannot serve it any more, and no member of that provider can take it. Allow once moves this conversation now. Always for this pool lets the pool move a conversation to another provider by itself from now on, with a line in the conversation each time. Deny keeps it where it is — nothing moves, and you are not asked again about it for 6 hours.": "{from}（{fromProvider}）已经接不了它，同一提供方也没有成员能接手。「允许一次」现在就切换这个对话；「一直（这个池）」让号池以后自己把对话切到另一个提供方，每次都在对话里留一行；「拒绝」保持原样——不切换，6 小时内不再为此问你。",
+  "Account deleted — \"{title}\" needs you to pick a {provider} account": "账号已删，「{title}」需要你选一个 {provider} 账号", // lane pool-provider-latents (q-055 M2): a deleted account's conversation, UNPLACED
+  "{member} ({provider}) was deleted and no other {provider} account in pool \"{pool}\" can take this conversation, so nothing moved it. Allow once moves it to {offer} ({offerProvider}) — it restarts and its model becomes {model}. Always for this pool lets the pool move a conversation to another provider by itself from now on, with a line in the conversation each time. Deny leaves it where it is — add or sign in a {provider} account and it moves there.": "{member}（{provider}）已被删除，号池「{pool}」里没有别的 {provider} 账号能接手这个对话，所以没有把它切走。「允许一次」把它切到 {offer}（{offerProvider}）——会重启对话，模型改为 {model}；「一直（这个池）」让号池以后自己把对话切到另一个提供方，每次都在对话里留一行；「拒绝」保持原样——添加或登录一个 {provider} 账号后，它会切过去。",
+  "{member} ({provider}) was deleted and no other {provider} account in pool \"{pool}\" can take this conversation, so nothing moved it — and no other provider in the pool serves its model. Add or sign in a {provider} account and it moves there.": "{member}（{provider}）已被删除，号池「{pool}」里没有别的 {provider} 账号能接手这个对话，所以没有把它切走——号池里也没有别的提供方能用它的模型。添加或登录一个 {provider} 账号后，它会切过去。",
 };

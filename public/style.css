@@ -4885,6 +4885,50 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .pool-mem-row input { margin-top: 2px; flex-shrink: 0; }
 .pool-mem-all { border-bottom: 1px solid var(--border); margin-bottom: 4px; padding-bottom: 8px; }
 .pool-mem-sub { font-size: 10px; color: var(--text-dim); }
+/* THE ACCOUNT DIALOG'S MODEL SECTION (lane provider-record, design q-053 §3 — src/lib/account-models.js): the provider line,
+   the rows (id · label · context · caps · 测试), each refusal under its field; a phone stacks each row */
+.am-body { display: flex; flex-direction: column; gap: 8px; }
+.am-prov { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.am-kind { font-weight: 600; color: var(--text); }
+.am-kind-of { font-weight: 400; font-size: 11px; color: var(--text-dim); }
+.am-source { font-size: 11px; color: var(--text-secondary); padding: 1px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.am-source[data-source="none"] { color: var(--yellow); }
+.am-table { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.am-head, .am-row { display: grid; grid-template-columns: minmax(140px, 1.6fr) minmax(100px, 1.2fr) 70px minmax(140px, 1.6fr) 60px; gap: 6px 8px; align-items: center; padding: 6px 8px; }
+.am-editable .am-head, .am-editable .am-row { grid-template-columns: minmax(140px, 1.6fr) minmax(100px, 1.2fr) 70px minmax(140px, 1.6fr) 96px; }
+.am-head { font-size: 10px; color: var(--text-dim); background: var(--hover-overlay); }
+.am-row + .am-row { border-top: 1px solid var(--border); }
+.am-row code.am-id { font-size: 11px; word-break: break-all; }
+.am-row input { width: 100%; min-width: 0; box-sizing: border-box; font-size: 12px; padding: 4px 6px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.am-row input[aria-invalid="true"] { border-color: var(--red); }
+.am-caps { display: flex; flex-wrap: wrap; gap: 4px; }
+.am-cap { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: none; color: var(--text-secondary); }
+button.am-cap { cursor: pointer; }
+.am-cap[aria-pressed="true"] { background: var(--accent-dim); border-color: var(--accent); color: var(--text); }
+.am-acts { display: flex; gap: 4px; justify-content: flex-end; }
+.am-err, .am-form-err { font-size: 11px; color: var(--red); }
+.am-err { grid-column: 1 / -1; }
+.am-err:empty, .am-form-err:empty { display: none; }
+.am-aliases { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11px; }
+.am-aliases-h { color: var(--text-dim); }
+.am-alias { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.am-alias-del { background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 0 2px; }
+/* MODELS AT A SESSION (lane models-at-session, design q-053 §3): a provider-listed record's refresh door + when it answered;
+   the New Session row and the running badge say an empty provider in ONE line that opens its account's models */
+.am-fetched { font-size: 11px; color: var(--text-dim); }
+.am-refresh { margin-left: auto; }
+#row-model .ns-models-none { flex: 1; text-align: left; font-size: 12px; padding: 6px 8px; background: none; border: 1px dashed var(--yellow); border-radius: var(--radius-sm); color: var(--yellow); cursor: pointer; }
+#row-model .ns-models-none:hover { background: var(--hover-overlay); }
+#row-model select.hidden, #row-model .ns-models-none.hidden { display: none; } /* no global .hidden in this project */
+.chat-status-provider { font-size: 11px; border-bottom: 1px solid var(--border); }
+.chat-status-models-none { color: var(--yellow); cursor: pointer; }
+@media (max-width: 600px) { #row-model .ns-models-none, .am-refresh { min-height: 36px; } }
+@media (max-width: 600px) {
+  .am-head { display: none; }
+  .am-row, .am-editable .am-row { grid-template-columns: 1fr 1fr; }
+  .am-row .am-id, .am-caps, .am-acts { grid-column: 1 / -1; }
+  .am-row button, .am-body .dialog-buttons button { min-height: 36px; }
+}
 .pool-mem-list { max-height: 300px; overflow-y: auto; }
 /* Manual priority (2026-09-28): the Placement choice + ordered rows. A member's state
    is WORDS on the row (never a greyed row); the ⋯ menu offers only what applies. */

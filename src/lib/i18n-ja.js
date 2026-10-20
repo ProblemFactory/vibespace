@@ -9705,4 +9705,92 @@ export default {
   "On Windows the device agent runs as administrator by default — Windows asks you to confirm once when you run the command. Agents can then type into windows you opened as administrator (you choose which, in the allow list below).": "Windows ではデバイスエージェントは既定で管理者として動作します — コマンドを実行すると Windows が一度だけ確認を求めます。その後、エージェントはあなたが管理者として開いたウィンドウに入力できます（どれを許可するかは下の許可リストで選びます）。", // lane win-input-elevated
   "Install with normal rights (no administrator)": "通常の権限でインストール（管理者なし）", // lane win-input-elevated
   "administrator": "管理者", // lane win-input-elevated
+  "Models — {name}": "モデル — {name}", // lane provider-record
+  "This account’s harness has no model provider": "このアカウントの harness にはモデル提供元がありません", // lane provider-record
+  "Could not read the models — {reason}": "モデル一覧を読めませんでした — {reason}", // lane provider-record
+  "Test this account with this model (one terminal session)": "このモデルでこのアカウントをテスト（ターミナルセッションを 1 つ開く）", // lane provider-record
+  "Model id": "モデル ID", // lane provider-record
+  "Same as the id": "ID と同じ", // lane provider-record
+  "Display name": "表示名", // lane provider-record
+  "Context window": "コンテキスト", // lane provider-record
+  "Capabilities": "機能", // lane provider-record
+  "Remove this model": "このモデルを削除", // lane provider-record
+  "Enter the models this account may use, with the id the provider expects. New sessions on this account offer exactly these.": "このアカウントで使えるモデルを、提供元が求める ID で入力してください。このアカウントの新しい会話ではここにあるモデルだけが選べます。", // lane provider-record
+  "The provider lists these — new sessions on this account offer them. They are not entered here.": "これらは提供元が一覧にしたもので、このアカウントの新しい会話で選べます。ここでは入力しません。", // lane provider-record
+  "Model provider": "モデル提供元", // lane provider-record
+  "No models configured for this provider": "この提供元にはモデルが設定されていません", // lane provider-record
+  "add the ones this account may use": "このアカウントで使うモデルを追加してください", // lane provider-record
+  "Aliases": "エイリアス", // lane provider-record
+  "Remove alias {name}": "エイリアス {name} を削除", // lane provider-record
+  "Add a model": "モデルを追加", // lane provider-record
+  "An Anthropic model id starts with claude- (e.g. claude-sonnet-5-5)": "Anthropic のモデル ID は claude- で始まります（例：claude-sonnet-5-5）", // lane provider-record
+  "Lower-case letters, digits, dots and dashes (e.g. gpt-5.5)": "小文字の英字・数字・ドット・ハイフン（例：gpt-5.5）", // lane provider-record
+  "A Gemini model id starts with gemini- (e.g. gemini-3-pro-preview)": "Gemini のモデル ID は gemini- で始まります（例：gemini-3-pro-preview）", // lane provider-record
+  "The vendor, a slash, then the model (e.g. deepseek/deepseek-chat)": "ベンダー名、スラッシュ、モデル名（例：deepseek/deepseek-chat）", // lane provider-record
+  "Letters, digits and . _ : / @ - (e.g. Qwen/Qwen3-32B or llama3.1:8b)": "英字・数字と . _ : / @ -（例：Qwen/Qwen3-32B、llama3.1:8b）", // lane provider-record
+  "Anthropic subscription": "Anthropic サブスクリプション", // lane provider-record
+  "Anthropic API": "Anthropic API", // lane provider-record
+  "OpenAI · Responses API": "OpenAI · Responses API", // lane provider-record
+  "OpenAI-compatible · Chat Completions": "OpenAI 互換 · Chat Completions", // lane provider-record
+  "Google AI subscription": "Google AI サブスクリプション", // lane provider-record
+  "Google Gemini API": "Google Gemini API", // lane provider-record
+  "OpenRouter": "OpenRouter", // lane provider-record
+  "Self-hosted or other": "セルフホスト・その他", // lane provider-record
+  "Image input": "画像入力", // lane provider-record
+  "Reasoning": "推論", // lane provider-record
+  "1M context": "1M コンテキスト", // lane provider-record
+  "Anthropic API (Console key)": "Anthropic API（Console キー）", // lane provider-record
+  "ChatGPT subscription": "ChatGPT サブスクリプション", // lane provider-record
+  "Entered by you": "あなたが入力", // lane provider-record
+  "Listed by {harness}": "{harness} の一覧", // lane provider-record
+  "Listed by the provider": "提供元の一覧", // lane provider-record
+  "Unknown provider kind": "不明な提供元の種類", // lane provider-record
+  "Not a model id this provider accepts": "この提供元が受け付けるモデル ID ではありません", // lane provider-record
+  "At most 128 characters": "128 文字まで", // lane provider-record
+  "This id is already in the list": "この ID はすでに一覧にあります", // lane provider-record
+  "At most 60 characters": "60 文字まで", // lane provider-record
+  "A token count from 1 to 10M (e.g. 200k)": "1〜10M のトークン数（例：200k）", // lane provider-record
+  "Unknown capability": "不明な機能", // lane provider-record
+  "Not a usable alias name": "エイリアス名として使えません", // lane provider-record
+  "An alias points at a model that is not in the list": "一覧にないモデルを指すエイリアスがあります", // lane provider-record
+  "The default model is not in the list": "既定のモデルが一覧にありません", // lane provider-record
+  "At most 200 models": "モデルは 200 個まで", // lane provider-record
+  "Models…": "モデル…", // lane provider-record
+  "The model provider of this account and the models it may use": "このアカウントのモデル提供元と、使えるモデル", // lane provider-record
+  "Fetched {time}": "取得 {time}", // lane models-at-session
+  "Not fetched yet": "まだ取得していません", // lane models-at-session
+  "Ask the provider for its model list now (at most once a minute)": "提供元のモデル一覧を今すぐ取得します（1 分に 1 回まで）", // lane models-at-session
+  "Refresh the list": "一覧を更新", // lane models-at-session
+  "The provider listed {n} model(s)": "提供元が {n} 個のモデルを返しました", // lane models-at-session
+  "No models configured for this provider — set up": "この提供元にはモデルが設定されていません — 設定する", // lane models-at-session
+  "Unknown provider": "不明な提供元", // lane models-at-session
+  "This provider does not list its models — enter them instead": "この提供元はモデル一覧を返しません — 手で入力してください", // lane models-at-session
+  "Unlock the vault first — the provider’s key is kept there": "先に保管庫のロックを解除してください — 提供元のキーはそこにあります", // lane models-at-session
+  "Set up the vault first — the provider’s key is kept there": "先に保管庫を設定してください — 提供元のキーはそこに保管されます", // lane models-at-session
+  "This provider’s list is being refreshed already": "この提供元の一覧はすでに更新中です", // lane models-at-session
+  "Refreshed a moment ago — try again in {s} s": "さきほど更新しました — {s} 秒後にもう一度お試しください", // lane models-at-session
+  "The provider’s key could not be read from the vault": "保管庫から提供元のキーを読み取れませんでした", // lane models-at-session
+  "The provider did not answer": "提供元から応答がありません", // lane models-at-session
+  "The provider answered {status}": "提供元の応答は {status} でした", // lane models-at-session
+  "The provider’s list is larger than 1 MB — nothing was kept": "提供元の一覧が 1 MB を超えています — 何も保存していません", // lane models-at-session
+  "The provider’s answer is not a model list": "提供元の応答はモデル一覧ではありません", // lane models-at-session
+  "Only a person on this page can refresh the list": "一覧を更新できるのは、このページを開いている人だけです", // lane models-at-session
+  "This account’s provider has no models — set them up first": "このアカウントの提供元にはモデルがありません — 先に設定してください", // lane models-at-session
+  "Models of {provider}": "{provider} のモデル", // lane models-at-session
+  "{provider} does not serve the model “{model}”": "{provider} はモデル「{model}」を提供していません", // lane models-at-session
+  "Always for this pool": "常に（このプール）",
+  "Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time": "今後このプールは会話を別のプロバイダーへ自動で移し、そのたびに会話に 1 行残します",
+  "Moved — this pool now moves a conversation to another provider by itself": "移しました — 今後このプールは会話を別のプロバイダーへ自動で移します",
+  "Moved — the conversation restarts on the other provider": "移しました — 会話は別のプロバイダーで再起動します",
+  "Nothing moved — the conversation is gone": "移していません — 会話はもうありません",
+  "Nothing moved — a member of its own provider can take it again": "移していません — 同じプロバイダーのメンバーがまた引き受けられます",
+  "Nothing moved — no open page could restart it; the pool asks again": "移していません — 再起動できる開いたページがありません。プールがもう一度尋ねます",
+  "Nothing moved — that member cannot take it now": "移していません — そのメンバーは今は引き受けられません",
+  "Switched from {from} ({fromProvider}) to {to} ({toProvider}) — model {model} → {toModel}": "{from}（{fromProvider}）から {to}（{toProvider}）へ切り替えました — モデル {model} → {toModel}",
+  "Pool \"{pool}\": conversation \"{title}\" — switched from {from} ({fromProvider}) to {to} ({toProvider}), model {model} → {toModel}.": "プール「{pool}」：会話「{title}」を {from}（{fromProvider}）から {to}（{toProvider}）へ切り替えました。モデル {model} → {toModel}。",
+  "Moving \"{title}\" to {member} ({provider}) needs your OK — it restarts the conversation and its model becomes {model}": "「{title}」を {member}（{provider}）へ移すにはあなたの許可が必要です — 会話は再起動し、モデルは {model} になります",
+  "{from} ({fromProvider}) cannot serve it any more, and no member of that provider can take it. Allow once moves this conversation now. Always for this pool lets the pool move a conversation to another provider by itself from now on, with a line in the conversation each time. Deny keeps it where it is — nothing moves, and you are not asked again about it for 6 hours.": "{from}（{fromProvider}）はもう応答できず、同じプロバイダーに引き受けられるメンバーもいません。「1 回だけ許可」でこの会話を今すぐ移します。「常に（このプール）」なら今後このプールは会話を別のプロバイダーへ自動で移し、そのたびに会話に 1 行残します。「拒否」ならそのまま — 何も移さず、6 時間はこの件で尋ねません。",
+  "Account deleted — \"{title}\" needs you to pick a {provider} account": "アカウントが削除されました —「{title}」には {provider} のアカウントを選ぶ必要があります", // lane pool-provider-latents (q-055 M2): a deleted account's conversation, UNPLACED
+  "{member} ({provider}) was deleted and no other {provider} account in pool \"{pool}\" can take this conversation, so nothing moved it. Allow once moves it to {offer} ({offerProvider}) — it restarts and its model becomes {model}. Always for this pool lets the pool move a conversation to another provider by itself from now on, with a line in the conversation each time. Deny leaves it where it is — add or sign in a {provider} account and it moves there.": "{member}（{provider}）は削除され、プール「{pool}」にはこの会話を引き継げる {provider} のアカウントが他にないため、何も移していません。「1 回だけ許可」で {offer}（{offerProvider}）へ移します — 会話は再起動し、モデルは {model} になります。「常に（このプール）」なら今後このプールは会話を別のプロバイダーへ自動で移し、そのたびに会話に 1 行残します。「拒否」ならそのまま — {provider} のアカウントを追加またはサインインすると、そこへ移ります。",
+  "{member} ({provider}) was deleted and no other {provider} account in pool \"{pool}\" can take this conversation, so nothing moved it — and no other provider in the pool serves its model. Add or sign in a {provider} account and it moves there.": "{member}（{provider}）は削除され、プール「{pool}」にはこの会話を引き継げる {provider} のアカウントが他にないため、何も移していません — プール内の他のプロバイダーもこのモデルを扱えません。{provider} のアカウントを追加またはサインインすると、そこへ移ります。",
 };

@@ -1,0 +1,38 @@
+{
+  "_why": "lane provider-record (q-053 P0a): the LISTED rows the suites fill a listed provider with — no vendor call. `harness` = what each harness's own catalog answers (AVAILABLE_MODELS[harness], the shape cli-env and the descriptors' models() hand the hub: claude = its alias table + CLAUDE_KNOWN_MODELS, codex = its models cache, gemini = the static table P0d keeps in its descriptor). `providerApi` = rows a provider's /models listing would give (P0c's refresh door, whitelisted there — here only rows).",
+  "harness": {
+    "claude": [
+      { "id": "", "label": "Default" },
+      { "id": "fable", "label": "fable (latest, 200k)" },
+      { "id": "fable[1m]", "label": "fable[1m] (latest, 1M context)" },
+      { "id": "opus", "label": "opus (latest, 200k)" },
+      { "id": "opus[1m]", "label": "opus[1m] (latest, 1M context)" },
+      { "id": "sonnet", "label": "sonnet (latest)" },
+      { "id": "sonnet[1m]", "label": "sonnet[1m] (latest, 1M context)" },
+      { "id": "haiku", "label": "haiku (latest)" },
+      { "id": "claude-fable-5", "label": "Fable 5" },
+      { "id": "claude-opus-5", "label": "Opus 5" },
+      { "id": "claude-sonnet-5", "label": "Sonnet 5" },
+      { "id": "claude-haiku-4-5-20251001", "label": "Haiku 4.5" }
+    ],
+    "codex": [
+      { "id": "", "label": "Default" },
+      { "id": "gpt-5.5", "label": "gpt-5.5" },
+      { "id": "gpt-5.5-codex", "label": "gpt-5.5-codex" },
+      { "id": "gpt-5.5-mini", "label": "gpt-5.5-mini" }
+    ],
+    "gemini": [
+      { "id": "", "label": "Default" },
+      { "id": "gemini-3-pro-preview", "label": "Gemini 3 Pro (preview)" },
+      { "id": "gemini-3-flash-preview", "label": "Gemini 3 Flash (preview)" },
+      { "id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro" }
+    ]
+  },
+  "providerApi": {
+    "openrouter": [
+      { "id": "anthropic/claude-sonnet-4.5", "label": "Anthropic: Claude Sonnet 4.5", "context": 1000000, "caps": ["tools", "vision", "1m"] },
+      { "id": "deepseek/deepseek-chat-v3.1", "label": "DeepSeek: DeepSeek V3.1", "context": 163840, "caps": ["tools"] },
+      { "id": "qwen/qwen3-coder:free", "label": "Qwen: Qwen3 Coder (free)", "context": 262144, "caps": ["tools"] }
+    ]
+  }
+}

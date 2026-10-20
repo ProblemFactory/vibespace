@@ -62,7 +62,8 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // hot=off → also ask ONE connected client to cold-restart the affected
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
-const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { orderProviderFields } = require('../sealed-orders.js'); // (lane pool-provider-latents, q-055 M1) the sealed order's provider fields — the device obeys the same file
+const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
 const codexResetHelper = require('../codex-reset-helper.js'); // lane reset-path: ONE bounded app-server child carries a PERSON's press when no conversation can
@@ -377,6 +378,9 @@ async function pushSealedOrders(poolId) {
   const a = accounts.get(poolId);
   if (!a || a.type !== 'pooled') return;
   const members = accounts.poolMembers(poolId);
+  const pv = poolProviderOf(a); // (q-053 P0b / q-055 M1) THE provider reader of this pool's decisions — the order names it per path
+  // (q-055 M2) a default a deletion left UNPLACED keeps ITS provider here too: the reflex never re-creates it on another one
+  const defMember = accounts.poolCurrent(poolId) || accounts.unplacedOf(poolId, null)?.member || null;
   const ranked = rankPoolMembers({
     members,
     readCache: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } },
@@ -388,13 +392,21 @@ async function pushSealedOrders(poolId) {
     readLogin: poolReadLogin(),
     creditsIds: creditsMemberIds(members), // usage-credits members walk LAST (B-ad05)
     priority: poolPriorityOf(a), // the owner's manual order walks first (2026-09-28)
+    providerOf: pv, fromProvider: pv(defMember), // (q-053 P0b) a reflex is a HOT re-point: never another provider
   }).map((m) => ({ id: m.id, dir: accounts.subDir(m.id), creds: accounts.subCredsPath(m.id) }));
-  const orders = { poolId, linkPath: accounts.subDir(poolId), ranked, currentId: accounts.poolCurrent(poolId) || null,
+  // THE ORDER'S PROVIDERS (lane pool-provider-latents, q-055 M1 — src/sealed-orders.js): each ranked path's provider, each
+  // per-session link's conversation provider, the provider of every member a link may point at. The device moves a link
+  // only onto a member of the provider it points at NOW (a conversation the owner allowed onto another provider is never
+  // re-pointed back by the reflex); `linkPaths` — all an OLDER daemon reads — holds only the links of the ranked list's
+  // provider, so an older daemon can never match, and never re-point, a conversation of another provider.
+  const linkRows = (() => { try { return accounts.sessionPoolLinks(poolId).map((l) => { let member = null; try { member = path.basename(fs.readlinkSync(l.path)); } catch { } return { path: l.path, member }; }); } catch { return []; } })();
+  const pf = orderProviderFields({ ranked, links: linkRows, memberIds: members.map((m) => m.id), defaultMember: defMember, providerKeyOf: (id) => providerKey(pv(id)) });
+  const orders = { poolId, linkPath: accounts.subDir(poolId), ranked: pf.ranked, currentId: accounts.poolCurrent(poolId) || null,
     // Plan C: per-session links are additional MATCH+ACT targets — the daemon
     // re-points exactly the link the banner session spawned against. Old
     // daemons ignore this field and keep matching only the default link:
     // reduced coverage on skew, never a wrong re-point.
-    linkPaths: (() => { try { return accounts.sessionPoolLinks(poolId).map((l) => l.path); } catch { return []; } })() };
+    linkPaths: pf.linkPaths, provider: pf.provider, links: pf.links, members: pf.members };
   const j = JSON.stringify(orders);
   if (_sealedOrdersSent.get(poolId) === j) return;
   const dm = await hosts.device(null); // device #0 — pools are local-only
@@ -622,10 +634,15 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false } = {})
     // that cannot serve starts it where the automatic rules would (the pin kept on the session)
     if (pin) {
       const pm = healthyPoolMembers(poolId);
-      const dp = decidePinnedPlacement({ explicit: true, pin, currentId: cur, members: pm, readCache, nowSec: Date.now() / 1000, hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm) });
-      if (dp && dp.reason === 'pin') return pin;
-      if (dp && dp.to) return dp.to;
-      return memberServeLapsed(cur) ? fallbackDefaultTarget(poolId, cur) : cur; // never a LAPSED default (verify r2 ①)
+      const dp = decidePinnedPlacement({ explicit: true, pin, currentId: cur, members: pm, ...providerIn(a, null, model), readCache, nowSec: Date.now() / 1000, hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm) });
+      // (q-053 P0b) a pin of ANOTHER provider is never where a spawn starts: its model is the request's, the pin's provider
+      // would serve it under another id — it applies through the conversation's cold switch (the pin kept), so the spawn
+      // is placed by the automatic rules below
+      if (!(dp && dp.cross)) {
+        if (dp && dp.reason === 'pin') return pin;
+        if (dp && dp.to) return dp.to;
+        return memberServeLapsed(cur) ? fallbackDefaultTarget(poolId, cur) : cur; // never a LAPSED default (verify r2 ①)
+      }
     }
     // (a default that names a member the pool NO LONGER LISTS — a boot before the first stale-link
     // sweep, a narrowing made while nobody else was signed in — is no place to START a conversation:
@@ -645,7 +662,7 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false } = {})
     // a Fable conversation hinted as Opus would be placed on the member whose Fable is spent.
     const { decidePoolSwitch } = require('../account-pool-auto.js');
     const mem = healthyPoolMembers(poolId);
-    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: Date.now() / 1000, hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
+    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: Date.now() / 1000, ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
     // (nobody can serve a conversation started here AND the default names a removed member — a boot before the
     // first sweep: the engine's fallback, a member the pool lists, verify r2)
     // …and 全B: the verdict's own parking member when nobody can serve (`holdTo`) — a new conversation meets that
@@ -1491,7 +1508,7 @@ function usageCacheKeyFor(session) {
 // witness ring and the ⟳ control rung for sessions that were billing exactly
 // the member their link named, and filled the journal with "observed on X
 // while linked to Y" lines that read as proof of the opposite of the truth.
-const nameOf = (id) => { try { return (id && accounts.get(id)?.name) || id || '?'; } catch { return id || '?'; } };
+const nameOf = (id) => { try { return (id && (accounts.get(id)?.name || accounts.goneNameOf?.(id))) || id || '?'; } catch { return id || '?'; } }; // (q-055 M2) a deleted member keeps its name in the words
 // REFUTED AND REMOVED (2026-09-07): `sessionReadingMember` — "the observed
 // member when the OTel truth names one, else its link". There is no longer a
 // reading member DIFFERENT from the billing member: both questions have the
@@ -3892,7 +3909,7 @@ function poolAlternativeFor(session, now = Date.now()) {
     // and spend a credit the switch rung did not need.
     const rc = poolReadCache(poolId);
     const readCache = (id) => (id === currentId ? { fetchedAt: now, sevenDay: { utilization: 1, resetsAt: 0 } } : rc(id));
-    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
+    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], ...providerIn(a, session), readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
     return !!(d && d.to && !d.toCredits);
   } catch { return null; }
 }
@@ -5958,14 +5975,15 @@ function notePoolAuthFailure(session, sid, info = {}) {
     const memberName = accounts.get(memberId)?.name || memberId;
     // same rule as healthyPoolMembers: an evicted session may not be moved onto
     // credentials that cannot authorize a request (2026-09-07)
-    const alive = healthyPoolMembers(poolId).filter((m) => m.id !== memberId);
+    // (q-053 P0b) …and never onto another provider: an eviction re-points a link — a cross-provider move is the owner's card
+    const alive = healthyPoolMembers(poolId).filter((m) => m.id !== memberId && sameProvider(poolProviderOf(a)(memberId), poolProviderOf(a)(m.id)));
     if (!alive.length) {
       if (lapsed) { console.log(`[pool] auth-failure ${poolId}/${sid}: ${memberId} lapsed and no other member can take over`); return; } // the episode's For-you item already said it
       serverNotice(`pool-authfail-stuck-${memberId}-${Math.floor(now / 3600000)}`,
         `Pool "${a.name}": account ${memberName} ${loginDead ? why : `is failing authentication (${why})`} and no other member can take over — re-login or replace it in Manage Agents.`, { level: 'warn' });
       return;
     }
-    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: now / 1000, readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive), priority: poolPriorityOf(a) });
+    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: now / 1000, readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive), priority: poolPriorityOf(a), providerOf: poolProviderOf(a), fromProvider: poolProviderOf(a)(memberId) });
     const to = (ranked[0] && ranked[0].id) || alive[0].id;
     const toName = accounts.get(to)?.name || to;
     const hasOwnLink = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } })();
@@ -6002,7 +6020,10 @@ function notePoolAuthFailure(session, sid, info = {}) {
 // moves exactly the ones that do not — the warm-cache hold and the default
 // switch's `affected` list ask the SAME question through this one predicate.
 function hasOwnPoolLink(poolId, sid) {
-  try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; }
+  try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { }
+  // (lane pool-provider-latents, q-055 M2) an UNPLACED conversation (its member deleted, nobody of its provider left) has
+  // its own placement — none: it is never a follower the default's moves restart or carry onto another provider
+  try { return !!accounts.unplacedOf(poolId, sid); } catch { return false; }
 }
 
 // ── A MEMBER REMOVED FROM THE POOL STOPS SERVING AT ONCE (2026-09-28, owner:
@@ -6033,6 +6054,238 @@ function poolMembershipOf(poolId) { try { const m = accounts.poolMembership(pool
  *  pass, the default, the spawn chooser, the removal and the credit's alternative)
  *  and the sealed-orders snapshot is ranked by it — ONE reader, no second order. */
 function poolPriorityOf(a) { return a && Array.isArray(a.priority) && a.priority.length ? a.priority : null; }
+// ── THE PROVIDER (q-053 P0b, lane pool-provider-aware; the PURE rules: account-pool-auto «THE PROVIDER») ───────────
+// A member carries its provider (accounts.memberProviderOf — a LABEL: readings and rejections stay the credential SLOT's).
+// `providerIn(a, session)` = the three inputs EVERY decision that can move a conversation takes (the spawn chooser, the
+// per-session pass, the default, removal, the pin route, auto-resume's alternative); the sealed orders, the auth-failure
+// eviction and the default's parking keep to the member's own provider by construction (a hot re-point / no card).
+function memberProvider(id) { try { return id ? accounts.memberProviderOf(id) : null; } catch { return null; } }
+/** THE provider reader of ONE pool's decisions: a member the store no longer knows (a deleted account) answers the
+ *  provider it served when it was deleted (accounts.goneProviderOf — lane pool-provider-latents, q-055 M2: a DeepSeek
+ *  member's conversations are DeepSeek conversations after its deletion too), else the pool's own first-party provider —
+ *  never "unknown" (an unknown provider agrees with ANY in the PURE rules — a conversation on a deleted member must not
+ *  reach another provider through that door). */
+function goneProvider(id) { try { return id ? accounts.goneProviderOf(id) : null; } catch { return null; } }
+function poolProviderOf(a) {
+  const own = () => { try { return accounts.firstPartyProviderOf((a && a.backend) || 'claude'); } catch { return null; } };
+  return (id) => memberProvider(id) || goneProvider(id) || own();
+}
+function poolCrossProvider(a) { return crossProviderMode(a && a.crossProvider); }
+/** `session` null = the pool DEFAULT / a spawn: never a move to another provider by itself (a cross move restarts a
+ *  conversation under a new model — the owner's card and setting are per conversation), so 'never'; `model` = the
+ *  spawn's requested model (the chooser), else the conversation's own (sessionModelFor). */
+function providerIn(a, session = null, model = null) {
+  return { providerOf: poolProviderOf(a), conversationModel: session ? (sessionModelFor(session) || null) : (model || null), crossProvider: session ? poolCrossProvider(a) : 'never' };
+}
+/** Does the pool hold members of more than one provider? Its notices then name each member's provider. */
+function poolMixesProviders(poolId) {
+  try { return new Set((accounts.poolMembers(poolId) || []).map((m) => (m.provider && m.provider.id) || '')).size > 1; } catch { return false; }
+}
+/** A member as a pool notice names it: its name, + its provider when the pool mixes providers (`force`: always — a move
+ *  ACROSS providers). A one-provider pool's words are unchanged: its provider is the pool's own. */
+function memberWord(poolId, id, force = false) {
+  const n = nameOf(id);
+  return force || poolMixesProviders(poolId) ? `${n} (${providerLabel(memberProvider(id))})` : n;
+}
+// THE COLD MOVE TO ANOTHER PROVIDER (rule 2: the pool's 'allow', the owner's Allow once / Always, or the owner's pin).
+// ONE act: the conversation's link → the member, its process restarted by a client (sendColdRestart, the re-resolved
+// model riding the request: the client resumes it on that model), ONE line in the conversation («Switched from A (P) to
+// B (Q) — model m → n», fed to the RESUMED conversation: the restart rebuilds the chat) + a toast. With NO client
+// connected nothing moves: a re-point the running CLI followed by itself would be the silent cross-provider move the
+// owner ruled out (it waits; the next pass asks again). → {moved, why}
+const _crossLinesOwed = new Map(); // backend session id → {text, i18n, at}: the line owed to the resumed conversation
+function applyCrossMove(poolId, sid, s2, fromId, d, now = Date.now(), { why = 'cross-provider' } = {}) {
+  const x = d && d.cross;
+  if (!x || !d.to || !s2) return { moved: false, why: 'no-move' };
+  const open = (() => { try { for (const c of wss.clients) if (c.readyState === WS_OPEN) return true; } catch { } return false; })();
+  if (!open) { console.log(`[pool] cross-provider ${poolId}/${sid}: ${fromId || '?'} → ${d.to} waits — no connected client to restart it (a re-point alone would switch provider silently)`); return { moved: false, why: 'no-client' }; }
+  const bsid = s2.claudeSessionId || s2.backendSessionId || null;
+  try { accounts.ensureSessionPoolLink(poolId, sid, d.to, { why: why === 'pin' ? 'pin' : 'cross-provider' }); }
+  catch (e) { console.warn(`[pool] cross-provider ${poolId}/${sid}: re-point failed:`, e.message); return { moved: false, why: 'repoint-failed' }; }
+  _poolSwitchAt.set(poolId + ':' + sid, now);
+  for (const k of [poolId + ':' + sid, poolId + ':' + sid + ':soft', poolId + ':' + sid + ':prio', poolId + ':' + sid + ':pin']) _warmHoldLogAt.delete(k);
+  try { recordUsageAttribution({ claudeSessionId: bsid, accountId: poolId }); } catch { }
+  const params = { pool: accounts.get(poolId)?.name || poolId, title: convName(s2, sid), from: nameOf(fromId), fromProvider: x.from, to: nameOf(d.to), toProvider: x.to, model: x.model || '—', toModel: x.toModel };
+  const fill = (tpl) => tpl.replace(/\{(\w+)\}/g, (m0, k) => (params[k] !== undefined ? String(params[k]) : m0));
+  const LINE = i18nKey('Switched from {from} ({fromProvider}) to {to} ({toProvider}) — model {model} → {toModel}');
+  const NOTE = i18nKey('Pool "{pool}": conversation "{title}" — switched from {from} ({fromProvider}) to {to} ({toProvider}), model {model} → {toModel}.');
+  const text = fill(LINE);
+  if (bsid) _crossLinesOwed.set(String(bsid), { text, i18n: { key: LINE, params }, at: now, fromSid: sid });
+  serverNotice(`pool-cross-${poolId}-${sid}-${now}`, fill(NOTE) + ' Restarting the conversation to apply it.', { level: 1, i18n: { key: NOTE, params, then: { key: PIN_RESTART_KEY } } });
+  console.log(`[pool] cross-provider switch ${poolId}/${sid}: ${fromId || '?'} (${x.fromId}) → ${d.to} (${x.toId}), model ${x.model || '?'} → ${x.toModel} (${why})`);
+  sendColdRestart(poolId, [{ serverId: sid, backend: s2.backend || 'claude', backendSessionId: bsid, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null, model: x.toModel }], now);
+  closeCrossAsksFor(poolId, sid, 'moved');
+  // (lane pool-provider-latents, q-055 M1) the device's sealed orders follow NOW, not at the next tick: the moved link leaves
+  // the old provider's `linkPaths` — the only field an older daemon reads — before a server-down window can open
+  try { if (capsOf((accounts.get(poolId) || {}).backend).sealedOrders) pushSealedOrders(poolId).catch(() => { }); } catch { }
+  return { moved: true, why: null };
+}
+/** The owed line, once, into the conversation resumed under the same backend id (any server id but the one it left). */
+function feedOwedCrossLine(sid, s2) {
+  if (!_crossLinesOwed.size || !s2) return;
+  const bsid = s2.claudeSessionId || s2.backendSessionId;
+  const owed = bsid ? _crossLinesOwed.get(String(bsid)) : null;
+  if (!owed) return;
+  if (Date.now() - owed.at > 30 * 60e3) { _crossLinesOwed.delete(String(bsid)); return; } // a restart that never came owes nothing
+  if (sid === owed.fromSid) return; // still the process being restarted — the line belongs to the RESUMED one
+  _crossLinesOwed.delete(String(bsid));
+  try { feedPeerCard(s2, { fromName: 'VibeSpace', kind: 'notification', text: owed.text }); } catch { }
+}
+// THE OWNER'S CARD (decision ①, 2026-10-20 — 「切到 X 需要你同意」). Under the pool's crossProvider 'never' a conversation
+// whose member cannot serve any more and that only ANOTHER provider could take is never moved by itself: ONE For-you item
+// per (pool, conversation, member) asks — Allow once (this conversation, now) · Always for this pool (crossProvider
+// 'allow': later walls move by themselves, each with its line) · Deny (nothing moves; not asked again for this
+// conversation and member for CROSS_ASK_QUIET_MS). An answer RE-JUDGES before anything moves (the member may be spent
+// by then, or the conversation gone): what it finds is said by name, nothing moves on a stale offer.
+const CROSS_ASK_TYPE = 'pool-cross-provider';
+const CROSS_ASK_QUIET_MS = 6 * 3600e3;
+const _crossAsks = new Map();     // askId → {askId, key, poolId, sid, memberId, at, todoId}
+const _crossAskByKey = new Map(); // `${poolId}:${sid}:${memberId}` → askId
+const _crossAskQuiet = new Map(); // the same key → until (a Deny)
+function fileCrossProviderAsk(poolId, sid, s, fromId, d, now = Date.now(), { removed = null } = {}) {
+  const xo = d && d.crossOffer;
+  if (!xo || !xo.id || !s) return null;
+  const key = `${poolId}:${sid}:${xo.id}`;
+  if ((_crossAskQuiet.get(key) || 0) > now) return null;
+  const open = _crossAskByKey.get(key);
+  if (open && _crossAsks.has(open)) return open;
+  let todos = null; try { todos = getUserTodos(); } catch { }
+  if (!todos || typeof todos.add !== 'function') return null;
+  const askId = crypto.randomBytes(12).toString('hex');
+  const title = convName(s, sid);
+  const params = { title, member: xo.name || nameOf(xo.id), provider: xo.to, model: xo.toModel, from: nameOf(fromId), fromProvider: xo.from }; // (re-worded below for a deleted account)
+  let TEXT = i18nKey('Moving "{title}" to {member} ({provider}) needs your OK — it restarts the conversation and its model becomes {model}');
+  let DETAIL = i18nKey('{from} ({fromProvider}) cannot serve it any more, and no member of that provider can take it. Allow once moves this conversation now. Always for this pool lets the pool move a conversation to another provider by itself from now on, with a line in the conversation each time. Deny keeps it where it is — nothing moves, and you are not asked again about it for 6 hours.');
+  // (lane pool-provider-latents, q-055 M2) the same card when the conversation's account was DELETED: it names the provider
+  // the owner may pick an account of, and the move the answers make
+  if (removed) {
+    TEXT = UNPLACED_TEXT; DETAIL = UNPLACED_DETAIL_OFFER;
+    Object.assign(params, { member: nameOf(removed.member), provider: providerLabel(removed.provider), pool: accounts.get(poolId)?.name || poolId, offer: xo.name || nameOf(xo.id), offerProvider: xo.to, model: xo.toModel });
+  }
+  const fill = (tpl) => tpl.replace(/\{(\w+)\}/g, (m0, k) => (params[k] !== undefined ? String(params[k]) : m0));
+  const bsid = s.claudeSessionId || s.backendSessionId;
+  try {
+    const it = todos.add(bsid ? `${s.backend || 'claude'}:${bsid}` : `webui:${sid}`, {
+      origin: 'pool', kind: 'action', urgency: 'high', sessionName: title,
+      text: fill(TEXT), detail: fill(DETAIL),
+      i18n: { text: { key: TEXT, params }, detail: [{ key: DETAIL, params }] },
+      action: { type: 'pool-cross-provider', askId, poolId, memberId: xo.id }, // = CROSS_ASK_TYPE (a literal: the approval census reads it)
+    });
+    const q = { askId, key, poolId, sid, memberId: xo.id, at: now, todoId: it && it.id ? String(it.id) : null };
+    _crossAsks.set(askId, q); _crossAskByKey.set(key, askId);
+    console.log(`[pool] cross-provider ${poolId}/${sid}: ${fromId || '?'} cannot serve; only ${xo.id} (${xo.toId}) could, as ${xo.toModel} — asked the owner (For you)`);
+    return askId;
+  } catch (e) { console.warn('[pool] cross-provider: the For-you card could not be filed:', e.message); return null; }
+}
+function settleCrossAsk(q, status = 'done', by = 'answered') {
+  _crossAsks.delete(q.askId);
+  if (_crossAskByKey.get(q.key) === q.askId) _crossAskByKey.delete(q.key);
+  if (q.todoId) { try { const t = getUserTodos(); if (t && typeof t.setStatus === 'function') t.setStatus(q.todoId, status, by); } catch { } }
+}
+function closeCrossAsksFor(poolId, sid, by) { for (const q of [..._crossAsks.values()]) if (q.poolId === poolId && q.sid === sid) settleCrossAsk(q, 'done', by); }
+/** THE PERSON's answer (the cookie route): once / always / deny → {ok, state, moved, why} | a named refusal. */
+function answerCrossProviderAsk(askId, { answer, now = Date.now() } = {}) {
+  const q = _crossAsks.get(String(askId || ''));
+  if (!q) return { ok: false, status: 404, code: 'ask_unknown', error: 'that request is gone' };
+  if (!['once', 'always', 'deny'].includes(answer)) return { ok: false, status: 400, code: 'bad_args', error: 'the answer is once, always or deny' };
+  if (answer === 'deny') { _crossAskQuiet.set(q.key, now + CROSS_ASK_QUIET_MS); settleCrossAsk(q, 'done', 'denied'); console.log(`[pool] cross-provider ${q.poolId}/${q.sid}: denied — nothing moves (not asked again for 6 h)`); return { ok: true, state: 'denied', moved: false }; }
+  if (answer === 'always') { try { accounts.updatePool(q.poolId, { crossProvider: 'allow' }); } catch (e) { return { ok: false, status: 400, code: 'pool_gone', error: e.message }; } }
+  const r = crossMoveNow(q.poolId, q.sid, q.memberId, now);
+  settleCrossAsk(q, 'done', answer === 'always' ? 'always' : 'allowed');
+  return { ok: true, state: answer === 'always' ? 'always' : 'allowed', moved: r.moved, why: r.why };
+}
+/** The answer's ONE re-judgement: the conversation's own verdict under 'allow' — it moves only to the member it offered. */
+function crossMoveNow(poolId, sid, memberId, now = Date.now()) {
+  const s2 = activeSessions.get(sid);
+  const a = accounts.get(poolId);
+  if (!s2 || !a || s2._accountId !== poolId) return { moved: false, why: 'gone' };
+  let curFor = null; try { curFor = accounts.unplacedOf(poolId, sid)?.member || sessionBillingMember(s2, poolId).id || accounts.poolCurrentFor(poolId, sid); } catch { } // (q-055 M2) UNPLACED ⇒ from its deleted member
+  const hot = !!a.hot && capsOf(a.backend).hotSwitch === 'verified';
+  const base = poolReadCache(poolId);
+  const fam = projectionFamilyFor(s2, sessionModelFor(s2));
+  const readCache = (id) => projectCacheForFamily(base(id), fam);
+  const members = switchCandidates(poolId);
+  const d = decidePoolSwitch({ ...providerIn(a, s2), crossProvider: 'allow', currentId: curFor, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
+  if (!d || !d.to) return { moved: false, why: (d && d.reason) || 'hold' };
+  if (!d.cross || d.to !== memberId) return { moved: false, why: d.cross ? 'another-member' : 'own-provider-again' };
+  return applyCrossMove(poolId, sid, s2, curFor, d, now);
+}
+// a card a previous process filed can never be answered (its ask died with it): closed once, at the first pass
+let _crossReconciled = false;
+function reconcileCrossAsks() {
+  if (_crossReconciled) return;
+  let t = null; try { t = getUserTodos(); } catch { }
+  if (!t || typeof t.openItems !== 'function') return;
+  _crossReconciled = true;
+  try { for (const it of t.openItems() || []) if (it && it.action && it.action.type === CROSS_ASK_TYPE && !_crossAsks.has(String(it.action.askId || ''))) t.setStatus(it.id, 'done', 'ask-over'); } catch { }
+  // the item leaving 'open' by another door (dismissed in the tray) settles its ask as a Deny
+  try {
+    if (typeof t.onStatus === 'function') t.onStatus((it, { status } = {}) => {
+      if (!it || !it.action || it.action.type !== CROSS_ASK_TYPE || status === 'open') return;
+      const q = _crossAsks.get(String(it.action.askId || ''));
+      if (q && q.todoId === String(it.id)) { _crossAsks.delete(q.askId); _crossAskByKey.delete(q.key); _crossAskQuiet.set(q.key, Date.now() + CROSS_ASK_QUIET_MS); }
+    });
+  } catch { }
+}
+// ── UNPLACED BY A DELETION (lane pool-provider-latents, design q-055 M2) ─────────────────────────────────────────────
+// A conversation whose account was DELETED with nobody of its provider left to take it is UNPLACED by the store (its
+// link gone, a mark kept — accounts.unplacedOf): the store's heal is a HOT re-point and never lands on another provider.
+// Each pass decides it FROM the deleted member (its provider remembered — goneProviderOf), through the same verdict as
+// every conversation: a member of its own provider that can serve ⇒ its link is written again (the removal's words;
+// restarted when the pool is cold); its provider's members all walled ⇒ parked like 全B (holdRemoved); under the pool's
+// 'allow' a member of another provider that serves its model ⇒ the cold move with its line (applyCrossMove); otherwise
+// the owner's For-you card 「账号已删，<对话> 需要你选一个 <provider> 账号」 — the exhausted case's card (Allow once /
+// Always for this pool / Deny) when another provider's member could take it, the words alone when none can (asked ONCE:
+// the mark keeps it across a restart). Nothing here starts a turn.
+const UNPLACED_TEXT = i18nKey('Account deleted — "{title}" needs you to pick a {provider} account');
+const UNPLACED_DETAIL_OFFER = i18nKey('{member} ({provider}) was deleted and no other {provider} account in pool "{pool}" can take this conversation, so nothing moved it. Allow once moves it to {offer} ({offerProvider}) — it restarts and its model becomes {model}. Always for this pool lets the pool move a conversation to another provider by itself from now on, with a line in the conversation each time. Deny leaves it where it is — add or sign in a {provider} account and it moves there.');
+const UNPLACED_DETAIL_NONE = i18nKey('{member} ({provider}) was deleted and no other {provider} account in pool "{pool}" can take this conversation, so nothing moved it — and no other provider in the pool serves its model. Add or sign in a {provider} account and it moves there.');
+function fileUnplacedAsk(poolId, sid, s, unp, d, now = Date.now()) {
+  if (d && d.crossOffer) return fileCrossProviderAsk(poolId, sid, s, unp.member, d, now, { removed: unp });
+  if (unp.asked) return null; // asked once — the mark keeps it across a restart
+  let todos = null; try { todos = getUserTodos(); } catch { }
+  if (!todos || typeof todos.add !== 'function') return null;
+  const params = { title: convName(s, sid), member: nameOf(unp.member), provider: providerLabel(unp.provider), pool: accounts.get(poolId)?.name || poolId };
+  const fill = (tpl) => tpl.replace(/\{(\w+)\}/g, (m0, k) => (params[k] !== undefined ? String(params[k]) : m0));
+  const bsid = s.claudeSessionId || s.backendSessionId;
+  try {
+    const it = todos.add(bsid ? `${s.backend || 'claude'}:${bsid}` : `webui:${sid}`, {
+      origin: 'pool', kind: 'action', urgency: 'high', sessionName: params.title,
+      text: fill(UNPLACED_TEXT), detail: fill(UNPLACED_DETAIL_NONE),
+      i18n: { text: { key: UNPLACED_TEXT, params }, detail: [{ key: UNPLACED_DETAIL_NONE, params }] },
+    });
+    try { accounts.noteUnplacedAsked(poolId, sid, it && it.id ? String(it.id) : null); } catch { }
+    console.log(`[pool] unplaced ${poolId}/${sid}: ${unp.member} (${params.provider}) was deleted and nothing can take it — asked the owner (For you)`);
+    return it && it.id ? String(it.id) : null;
+  } catch (e) { console.warn('[pool] unplaced: the For-you card could not be filed:', e.message); return null; }
+}
+/** ONE decision for an UNPLACED conversation (above) → {placed, why}. */
+function placeUnplaced(poolId, sid, s2, unp, { now = Date.now(), hot = false, members = null, readLogin = null, creditsIds = null, membership = null, priority = null } = {}) {
+  const a = accounts.get(poolId);
+  if (!a || !s2) return { placed: false, why: 'gone' };
+  const mem = members || switchCandidates(poolId);
+  const base = poolReadCache(poolId);
+  const fam = projectionFamilyFor(s2, sessionModelFor(s2));
+  const readCache = (id) => projectCacheForFamily(base(id), fam);
+  const d = decidePoolSwitch({ currentId: unp.member, members: mem, readCache, nowSec: now / 1000, proactive: false, hot, ...providerIn(a, s2), pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: readLogin || poolReadLogin(), membership: membership || poolMembershipOf(poolId), priority: priority || poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsIds || creditsMemberIds(mem), explain: true });
+  if (d && d.to && d.cross) { const r = applyCrossMove(poolId, sid, s2, unp.member, d, now); return { placed: !!r.moved, why: r.why }; } // the pool's 'allow': cold, with its line
+  if (d && d.to) {
+    try { accounts.ensureSessionPoolLink(poolId, sid, d.to, { why: 'removed-from-pool' }); } catch (e) { console.warn(`[pool] unplaced ${poolId}/${sid}: re-place failed:`, e.message); return { placed: false, why: 'repoint-failed' }; }
+    _poolSwitchAt.set(poolId + ':' + sid, now);
+    try { recordUsageAttribution({ claudeSessionId: s2.claudeSessionId || s2.backendSessionId, accountId: poolId }); } catch { }
+    removedMemberNotice(poolId, sid, s2, unp.member, d.to, !hot);
+    if (!hot) sendColdRestart(poolId, [{ serverId: sid, backend: s2.backend || 'claude', backendSessionId: s2.claudeSessionId || s2.backendSessionId || null, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null }], now);
+    console.log(`[pool] unplaced ${poolId}/${sid}: ${unp.member} (deleted) → ${d.to} — a member of its own provider took it`);
+    return { placed: true, why: null };
+  }
+  if (d && d.reason === 'removed-hold' && d.holdTo) {
+    if (d.crossOffer) fileCrossProviderAsk(poolId, sid, s2, unp.member, d, now); // its provider is only walled: the exhausted case's own card
+    const h = holdRemoved(poolId, sid, s2, unp.member, d, now);
+    return { placed: !!h.held, why: h.held ? 'parked' : 'deferred' };
+  }
+  fileUnplacedAsk(poolId, sid, s2, unp, d, now);
+  return { placed: false, why: (d && d.reason) || 'nowhere' };
+}
 /** THE words a conversation moved off a removed member is told (the per-session
  *  pass says the same when IT is the one that sees the removal first). */
 function removedMemberNotice(poolId, sid, s, fromId, toId, cold) {
@@ -6143,8 +6396,13 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
   const base = poolReadCache(poolId);
   const fam = projectionFamilyFor(s, sessionModelFor(s));
   const readCache = (id) => projectCacheForFamily(base(id), fam);
-  const d = decidePinnedPlacement({ explicit: true, pin: memberId, currentId: current, members, readCache, nowSec: now / 1000, proactive: false, hot: true, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members) });
-  if (d && d.reason === 'pin' && d.to) {
+  const d = decidePinnedPlacement({ explicit: true, pin: memberId, currentId: current, members, readCache, nowSec: now / 1000, proactive: false, hot: true, ...providerIn(a, s), pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members) });
+  if (d && d.reason === 'pin' && d.to && d.cross) {
+    // (q-053 P0b) the owner pinned a member of ANOTHER provider: the owner's own act (never silent) — a COLD move, the model
+    // re-resolved, the line in the conversation (applyCrossMove); no client to restart it ⇒ it waits, the pin kept
+    const r = applyCrossMove(poolId, sid, s, current, d, now, { why: 'pin' });
+    out.placed = !!r.moved; out.reason = r.moved ? 'pin' : r.why; if (r.moved) out.current = d.to;
+  } else if (d && d.reason === 'pin' && d.to) {
     try {
       accounts.ensureSessionPoolLink(poolId, sid, d.to, { why: 'pin' });
       _poolSwitchAt.set(poolId + ':' + sid, now);
@@ -6153,7 +6411,11 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
       out.placed = true; out.reason = 'pin'; out.current = d.to;
     } catch (e) { out.reason = 'repoint-failed'; console.warn(`[pool] pin ${poolId}/${sid}: re-point failed:`, e.message); }
   } else if (d && d.reason === 'pin') { out.placed = true; out.reason = 'pin'; }
-  else { out.reason = (d && d.pinWhy) || 'pin-exhausted'; }
+  else {
+    out.reason = (d && d.pinWhy) || 'pin-exhausted';
+    // (q-053 P0b) refused BY NAME: the pinned member's provider has no model this conversation runs on
+    if (out.reason === 'pin-model-not-served') out.code = 'model_not_served:' + (providerKey(memberProvider(memberId)) || '?');
+  }
   console.log(`[pool] pin ${poolId}/${sid}: → ${memberId} (${out.placed ? `placed${current !== out.current ? `, from ${current || '?'}` : ', already there'}` : `waits — ${out.reason}`})`);
   pinNotice(poolId, sid, s, out.placed ? 'pinned' : 'pinned-waiting', { member: memberId });
   return out;
@@ -6193,6 +6455,10 @@ function gatherPlan(poolId, memberId, now = Date.now()) {
     for (const [sid, s] of activeSessions) {
       if (s._accountId !== poolId || s.host) continue;
       if (poolPinOf(s, poolId)) { out.skip.push({ sid, name: convName(s, sid), why: 'pinned' }); continue; }
+      // (q-053 P0b) a conversation on ANOTHER provider than the target stays: this act re-points links (a HOT move) — a
+      // move to another provider is the cold one, per conversation (its pin, or the pool's card / setting)
+      let onNow = null; try { onNow = sessionBillingMember(s, poolId).id || accounts.poolCurrentFor(poolId, sid); } catch { }
+      if (onNow && !sameProvider(poolProviderOf(a)(onNow), poolProviderOf(a)(memberId))) { out.skip.push({ sid, name: convName(s, sid), why: 'other-provider' }); continue; }
       const v = memberVerdictFor(poolId, memberId, s, sid, now);
       if (v.ok) out.move.push(sid);
       else out.skip.push({ sid, name: convName(s, sid), why: v.why });
@@ -6315,13 +6581,15 @@ function removalVerdict(poolId, fromId, session = null, sid = null, now = Date.n
   const readCache = (id) => projectCacheForFamily(base(id), fam);
   // a PINNED conversation leaving a removed member goes to its pin when the pin can serve
   // (explicit: nothing to settle — it is leaving anyway), else where the automatic rules put it
+  // (q-053 P0b) a removal re-points links (the store's act, a HOT move): it decides with 'never' — a move to another
+  // provider is the per-session pass's cold move (or the owner's card) at its next tick
   const pinRec = session ? poolPinOf(session, poolId) : null;
   if (pinRec) {
-    const dp = decidePinnedPlacement({ explicit: true, pin: pinRec.memberId, currentId: fromId, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId) });
-    if (dp && dp.reason === 'pin' && dp.to) return dp;
+    const dp = decidePinnedPlacement({ explicit: true, pin: pinRec.memberId, currentId: fromId, members, readCache, nowSec: now / 1000, proactive: false, hot, ...providerIn(a, session), crossProvider: 'never', pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId) });
+    if (dp && dp.reason === 'pin' && dp.to && !dp.cross) return dp; // (q-053 P0b) never a pin on another provider here: this re-point is hot
     if (dp && dp.reason === 'pin-exhausted') return { ...dp, reason: dp.autoReason };
   }
-  return decidePoolSwitch({ currentId: fromId, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId), explain: true });
+  return decidePoolSwitch({ currentId: fromId, members, readCache, nowSec: now / 1000, proactive: false, hot, ...providerIn(a, session), crossProvider: 'never', pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId), explain: true });
 }
 /** Where the pool DEFAULT goes when the member it sits on left the pool — a
  *  DECISION (never the first member in the list). null = nobody can take it. */
@@ -6348,7 +6616,9 @@ function fallbackDefaultTarget(poolId, fromId = null) {
     if (!a || a.type !== 'pooled') return null;
     const membership = poolMembershipOf(poolId) || [];
     const members = switchCandidates(poolId).filter((m) => m && m.id !== fromId && membership.includes(m.id));
-    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: Date.now() / 1000, priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members), readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)
+    // (q-053 P0b) parking never lands on another provider: the default's own (a deleted member's = the pool's own)
+    const pv = poolProviderOf(a), fromProv = pv(fromId || accounts.poolCurrent(poolId));
+    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: Date.now() / 1000, priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members), providerOf: pv, fromProvider: fromProv, readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)
   } catch (e) { console.warn('[pool] default fallback failed:', e.message); return null; }
 }
 /** THE ONE ENTRY POINT: members `removedIds` no longer belong to `poolId` — move
@@ -6394,6 +6664,7 @@ function memberRemoved(poolId, removedIds, { why = 'removed-from-pool' } = {}) {
     };
     for (const [sid, s] of activeSessions) {
       if (s._accountId !== poolId || s.host) continue;
+      if (accounts.unplacedOf(poolId, sid)) continue; // (q-055 M2) UNPLACED: the per-session pass decides it from its deleted member
       const held = heldPoolMemberFor(s, poolId);
       const own = !held && hasOwnPoolLink(poolId, sid);
       let linkCur = null;
@@ -6584,7 +6855,9 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     // belt below is deliberately NOT forced, so an evaluation forced here can
     // no more oscillate than any other one.
     if (!force && (now - (_poolAutoLast.get(poolId) || 0)) < 10000) return; // event-driven kicks need a tight gate; anti-flap = MIN_GAIN, not cadence
-    const currentId = accounts.poolCurrent(poolId);
+    // (lane pool-provider-latents, q-055 M2) a default a deletion left UNPLACED decides FROM its deleted member: its own
+    // provider only (the default never crosses one) — and the per-session pass below still runs for every conversation
+    const currentId = accounts.poolCurrent(poolId) || accounts.unplacedOf(poolId, null)?.member || null;
     if (!currentId) return;
     // a reset credit just re-opened this member and its post-reset reading is
     // still on the way (r3): the cache's spent mark is the WALL's, not a fact
@@ -6643,13 +6916,19 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     const burnOf = projectionBurnMemo(now); // ONE burn read per member for this whole tick (B-f69c ③)
     const membership = poolMembershipOf(poolId); // the removed-member wall (2026-09-28): a member the pool no longer LISTS is a hard wall for every decision below
     const priority = poolPriorityOf(a); // MANUAL PRIORITY (2026-09-28): the owner's order — null = automatic (EDF + the warm hold)
+    reconcileCrossAsks();
     for (const [sid, s2] of activeSessions) {
+      feedOwedCrossLine(sid, s2); // (q-053 P0b) the line a cross-provider switch owes the RESUMED conversation
       if (!poolCaps.planC) break; // plan-C per-session links need the backend's material path
       if (capsOf(s2.backend || 'claude').hotSwitch === 'impossible') continue; // it holds its member for life — no per-session link
       if (s2._accountId !== poolId || s2.host) continue;
       let linkCur = null;
       try { linkCur = accounts.poolCurrentFor(poolId, sid); } catch { }
       const hasOwnLink = hasOwnPoolLink(poolId, sid);
+      // (lane pool-provider-latents, q-055 M2) UNPLACED by a deletion: decided from its deleted member — its own provider, the
+      // pool's 'allow', or the owner's card; never the default, never another provider by itself
+      const unp = !linkCur && hasOwnLink ? accounts.unplacedOf(poolId, sid) : null;
+      if (unp) { placeUnplaced(poolId, sid, s2, unp, { now, hot, members, readLogin, creditsIds, membership, priority }); continue; }
       if (!hasOwnLink || !linkCur) continue;
       // Decide FROM the member whose credentials this session's CLI reads —
       // its token slot (2026-09-07, reversing B-2c9b plan B for DECISIONS):
@@ -6695,9 +6974,12 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // rejection (verdict-level twin of the same fact)
       const rejected = [...sessionWalledMembers(sid, now)];
       const pinRec = poolPinOf(s2, poolId);
-      const dp = pinRec ? decidePinnedPlacement({ pin: pinRec.memberId, currentId: curFor, members, readCache: projected, autoReadCache: viewFor, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm }) : null;
-      const ds = dp ? (dp.reason === 'pin-exhausted' ? { ...dp, reason: dp.autoReason, pinExhausted: true } : dp) : decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true });
+      const dp = pinRec ? decidePinnedPlacement({ pin: pinRec.memberId, currentId: curFor, members, readCache: projected, autoReadCache: viewFor, ...providerIn(a, s2), nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm }) : null;
+      const ds = dp ? (dp.reason === 'pin-exhausted' ? { ...dp, reason: dp.autoReason, pinExhausted: true } : dp) : decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, ...providerIn(a, s2), nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true });
       if (!ds || !ds.to) {
+        // (q-053 P0b, decision ①) only ANOTHER provider could take it and the pool's setting is 'never': ONE For-you card asks
+        // the owner (nothing moves); the blocked outcome below still speaks as today
+        if (ds && ds.crossOffer) fileCrossProviderAsk(poolId, sid, s2, curFor, ds, now);
         // 全B (2026-09-28): the member it runs on left the pool and nobody can take it over ⇒ it stops after this turn
         // and waits (parked on the member usable soonest; armed if it was running) — the ONE act, holdRemoved
         if (ds && ds.reason === 'removed-hold') { holdRemoved(poolId, sid, s2, curFor, ds, now); continue; }
@@ -6736,7 +7018,10 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // it to its pin — the pin applies at its next restart/resume (the spawn chooser honours it)
       // (an ESCAPE off a member that cannot serve is no return of convenience — it moves and restarts
       // like every wall, verify r1)
-      if (ds.reason === 'pin-return' && !a.hot && !ds.escape) continue;
+      if (ds.reason === 'pin-return' && !a.hot && !ds.escape && !ds.cross) continue;
+      // (q-053 P0b) a move to ANOTHER provider is COLD whatever the pool's hot rule (the model re-resolved, the conversation
+      // restarted, one line in it) — the pool's 'allow', or the owner's pin; never a re-point the running CLI follows
+      if (ds.cross && !sameProvider(poolProviderOf(a)(curFor), poolProviderOf(a)(ds.to))) { applyCrossMove(poolId, sid, s2, curFor, ds, now); continue; }
       const dwellKey = poolId + ':' + sid;
       const lastS = _poolSwitchAt.get(dwellKey) || 0;
       // A DEAD LOGIN is hard death, so it is exempt from the dwell belt exactly
@@ -6757,7 +7042,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
         _warmHoldLogAt.delete(poolId + ':' + sid + ':prio'); // …and its priority-return episode
         _warmHoldLogAt.delete(poolId + ':' + sid + ':pin'); // …and its pin-return episode
         try { recordUsageAttribution({ claudeSessionId: s2.claudeSessionId || s2.backendSessionId, accountId: poolId }); } catch { }
-        const toName = accounts.get(ds.to)?.name || ds.to;
+        const toName = memberWord(poolId, ds.to); // (q-053 P0b) with its provider when the pool mixes providers
         // a same-target re-point (observed ≠ linked, the link was already on
         // the chosen member) is not a user-visible switch: journal + the
         // creds-mtime bump that makes the CLI re-read the link, no notice
@@ -6818,7 +7103,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     // decision on the estimate of NOW (a projection alone never moves a warm
     // conversation).
     const defaultView = defaultWarm ? readCache : (id) => projectCacheAhead(readCache(id), burnOf(id), now / 1000, PROJECTION_LEAD_SEC);
-    const d = decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true });
+    const d = decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: now / 1000, proactive: hot, hot, ...providerIn(a, null), offer: false, pessimism: darkTaintedAccounts(), readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true });
     if (!d) return;
     if (!d.to) {
       if (d.reason === 'removed-hold') {
@@ -6984,6 +7269,8 @@ function maybeStopOnFallback(session, id, from, to) {
     _vsuPending, usageAnchors, usageEstimator,
     armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
     markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped,
+    providerIn, memberProvider, memberWord, applyCrossMove, fileCrossProviderAsk, answerCrossProviderAsk, crossMoveNow, _crossAsks, _crossLinesOwed, CROSS_ASK_TYPE, // THE PROVIDER (q-053 P0b): the inputs, the cold cross move, the owner's card
+    placeUnplaced, fileUnplacedAsk, pushSealedOrders, // (lane pool-provider-latents, q-055 M2 / M1) an UNPLACED conversation's one decision + card; the device's orders
     setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
     gatherPlan, // "Move every conversation here now", judged per conversation before anything moves (verify r1)
     memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, sweepNonMemberLinks, holdRemoved, _removedHoldOwed, // THE REMOVED-MEMBER WALL (2026-09-28): the one entry point, the default's decision (updatePool's chooser), the stale-link sweep every pool tick runs first

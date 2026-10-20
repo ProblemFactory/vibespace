@@ -175,6 +175,7 @@ const machineProbes = require('./../machine-probes.js');
 const PI = require('./../proc-identity.js'); // B-1cc6: a pid is never an identity
 const { ClaudeCodeAdapter: { parseLimitBanner } } = require('./../adapters/claude-code.js');
 const { repointPoolSymlink } = require('./../account-material.js');
+const SO = require('./../sealed-orders.js'); // (lane pool-provider-latents, q-055 M1) the order's provider rule — the hub writes it, this reflex obeys it
 // R3: the SHARED transcript service, constructed lazily on first use — the
 // parse stack (session-store/normalizers/adapters) is heavy and most daemons
 // never serve transcript ops until the switchover. No live-session overlay
@@ -1093,7 +1094,9 @@ const sealedOrders = {
         // LONGEST match wins: every per-session link contains the pool dir
         // name as a substring of its parent, but the reverse can never hold,
         // so default-link sessions still resolve to the default.
-        const cands = [o0?.linkPath, ...((o0?.linkPaths) || [])].filter(Boolean);
+        // (q-055 M1) `links` names EVERY per-session link with its conversation's provider — a link of another provider than
+        // the ranked list's is matched to ITS session (and refused below by name), never mistaken for nobody's
+        const cands = [o0?.linkPath, ...((o0?.linkPaths) || []), ...(Array.isArray(o0?.links) ? o0.links.map((l) => l && l.path) : [])].filter(Boolean);
         const matched = cands.filter((lp) => spawn.indexOf(lp) >= 0).sort((x, y) => y.length - x.length)[0] || null;
         if (!o0 || !matched) {
           log(`sealed-orders: limit banner in ${sid} but its spawn does not reference any pool credential link — ignoring (not this pool's session)`);
@@ -1114,8 +1117,13 @@ const sealedOrders = {
       const o2 = this.pools.values().next().value;
       const actLink = matchedLink || o2.linkPath; // plan C: act on the LINK THE BANNER SESSION USES
       let currentDir = null; try { currentDir = fs.readlinkSync(actLink); } catch { }
-      const next = (o2.ranked || []).find((m) => m.dir && m.dir !== currentDir);
-      if (!next) { log('sealed-orders: banner seen but no usable fallback member'); return; }
+      // THE PROVIDER (lane pool-provider-latents, q-055 M1): this reflex is a HOT re-point the running CLI follows by itself —
+      // never onto another provider's member, whatever the pool's crossProvider says (that move is cold: the hub's, with a
+      // client and a line, or the owner's card). The conversation's provider = the member its link points at NOW; an order
+      // with no provider fields (an older hub) is one provider — the old walk; a provider the order cannot name never widens.
+      const pick = SO.deviceFallback({ orders: o2, link: actLink, currentDir, currentId: currentDir ? path.basename(currentDir) : null });
+      const next = pick.next;
+      if (!next) { log(`sealed-orders: banner seen but no usable fallback member${pick.why && pick.why !== 'no-fallback' ? ` of its own provider (${pick.why}${pick.provider ? ': ' + pick.provider : ''}) — another provider is never this reflex's move` : ''}`); return; }
       repointPoolSymlink(actLink, next.dir, next.creds || null);
       this._lastActAt = Date.now();
       const ev = { ts: Date.now(), poolId: o2.poolId, sid, banner: banner.kind, from: currentDir, to: next.id, link: actLink };

@@ -290,6 +290,59 @@ function spareLaneOf(cache, nowSec) {
 }
 function spareLaneRemaining(cache, nowSec) { const l = spareLaneOf(cache, nowSec); return l ? l.remaining : null; }
 
+// ── THE PROVIDER (q-053 P0b, lane pool-provider-aware; owner 2026-10-20 「号池的部分要重新设计一下，区分不同 provider，切换账号
+// 本身也会影响 provider」 + decision ①: a move to ANOTHER provider is never automatic by default — 「切到 X 需要你同意」). A pool
+// member carries its PROVIDER — a LABEL on the member, never a member itself: readings and rejections stay the credential
+// SLOT's (CLAUDE.md «Pool/billing decisions»). Three rules, each OPTIONAL by input (`providerOf` absent ⇒ every verdict
+// below is byte-identical — the readLogin rule):
+//   1. A candidate must SERVE the conversation's model. A member of the conversation's OWN provider serves it by
+//      construction (the conversation runs on that provider now: one provider, one list); a member of another provider
+//      must RESOLVE the model in its own list (resolveModel) — none ⇒ not a candidate, named in `modelBlocked`.
+//   2. A move across providers is COLD (hotSwitchFor: a re-point swaps the credential file, never a base URL or a model
+//      env) and is never a voluntary move: only off a current member that cannot serve at all (the hard wall). Under the
+//      pool's `crossProvider: 'never'` (the default) it is an OFFER — `crossOffer` on the blocked verdict, the engine's
+//      For-you card; under `'allow'` it is the cold move itself (`cross`, `switchMode: 'cold'`).
+//   3. The conversation's model is re-resolved against the new provider's list (`cross.toModel`); no match ⇒ rule 1.
+// A provider WITHOUT readings (`fallbackOnly: true`, a third-party API row) never takes a voluntary move either: it is
+// chosen only under `'allow'`, after every member that has readings (a same-provider one included).
+// SEAM (P0a, lane provider-record): `resolveModel` follows design q-053 §1's record shape ({id, kind, label, models:[{id}],
+// aliases, defaultModel, modelsSource}); once src/model-providers.js lands, these two delegate to its servesModel / resolveModel.
+const CROSS_PROVIDER_MODES = Object.freeze(['never', 'allow']);
+function crossProviderMode(v) { return CROSS_PROVIDER_MODES.includes(v) ? v : 'never'; }
+function providerKey(p) {
+  if (p && typeof p === 'object') return String(p.id || p.kind || '') || null;
+  return typeof p === 'string' && p ? p : null;
+}
+function providerLabel(p) {
+  if (p && typeof p === 'object') return String(p.label || p.kind || p.id || '') || 'an unnamed provider';
+  return typeof p === 'string' && p ? p : 'an unnamed provider';
+}
+/** Two members are ONE provider when their keys agree. An UNKNOWN provider (a member the store no longer knows — a deleted
+ *  account, a decision with no provider input) is no claim either way: it agrees with any (the readLogin rule). */
+function sameProvider(a, b) { const x = providerKey(a), y = providerKey(b); return x == null || y == null || x === y; }
+function fallbackOnlyOf(p) { return !!(p && typeof p === 'object' && p.fallbackOnly === true); }
+/** resolveModel(provider, model) → the provider's OWN model id for `model`, or null (it cannot serve it). No list
+ *  (`modelsSource: 'none'`, or no rows) ⇒ null. No model asked ⇒ its `defaultModel` when it lists it. Otherwise, in
+ *  order: the id itself; the id without a `[1m]`-style context suffix; the `aliases` table (opus / sonnet / haiku → an
+ *  id that must be LISTED); a dated id the list names by its undated prefix (`claude-sonnet-4-5` → `…-20250929`). */
+function resolveModel(provider, model) {
+  if (!provider || typeof provider !== 'object' || provider.modelsSource === 'none') return null;
+  const ids = (Array.isArray(provider.models) ? provider.models : []).map((r) => String((r && (typeof r === 'string' ? r : r.id)) || '').trim()).filter(Boolean);
+  if (!ids.length) return null;
+  const want = String(model || '').trim();
+  if (!want) return provider.defaultModel && ids.includes(String(provider.defaultModel)) ? String(provider.defaultModel) : null;
+  if (ids.includes(want)) return want;
+  const bare = want.replace(/\s*\[[^\]]*\]$/, '');
+  if (ids.includes(bare)) return bare;
+  const al = provider.aliases && typeof provider.aliases === 'object' ? provider.aliases[bare.toLowerCase()] : null;
+  if (typeof al === 'string' && ids.includes(al)) return al;
+  return ids.find((id) => id.startsWith(bare + '-') && /^-\d{8}$/.test(id.slice(bare.length))) || null;
+}
+function servesModel(provider, model) { return resolveModel(provider, model) != null; }
+/** How a move between two members is made: the pool's own hot rule between members of ONE provider, else 'cold' (the
+ *  conversation restarts — a hot re-point swaps credential files, never a base URL or a model env). */
+function hotSwitchFor(fromProvider, toProvider, hot) { return sameProvider(fromProvider, toProvider) ? hot : 'cold'; }
+
 // Decide a switch for a pool. members = [{id, name}] (already login-filtered),
 // readCache(id) → parsed cache entry or null. proactive/hot = hot pools:
 // re-points are free, so they soft-exhaust at the RAISED per-kind thresholds
@@ -358,8 +411,12 @@ function priorityOrder(priority, base = edfCompare) {
  *  usable members in EDF order — the device executes a LOCAL fallback switch
  *  down this list only when it both sees a hard limit banner AND cannot
  *  reach the orchestrator. */
-function rankPoolMembers({ members, readCache, nowSec, readLogin = null, creditsIds = null, priority = null }) {
+function rankPoolMembers({ members, readCache, nowSec, readLogin = null, creditsIds = null, priority = null, providerOf = null, fromProvider = null }) {
   const out = [];
+  // THE PROVIDER (q-053 P0b): the snapshot is a list of HOT re-points the device makes by itself — a member of another
+  // provider is a COLD move (hotSwitchFor) the owner must allow, and a fallback-only member is never a reflex target, so
+  // neither is ever in it, whatever the pool's crossProvider says. `providerOf` absent ⇒ byte-identical.
+  const provOf = typeof providerOf === 'function' ? providerOf : null;
   // USAGE CREDITS (B-ad05): a member whose org bills pay-per-use past 100 %
   // ranks after EVERY member with quota left — the daemon's reflex walks this
   // list top-down, so it may only reach a credits member with nothing else.
@@ -371,6 +428,7 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
     // this server is unreachable, possibly hours later) — so the NEAR window
     // applies here too: never hand anyone a login that is about to die.
     if (readLogin && (!loginSwitchTarget(readLogin(m.id)) || memberLapsed(readLogin(m.id)))) continue; // a lapsed subscription is never ranked (its stale cache would win)
+    if (provOf && (!sameProvider(fromProvider, provOf(m.id)) || fallbackOnlyOf(provOf(m.id)))) continue;
     const c = readCache(m.id);
     const r = accountRemaining(c, nowSec);
     const br = bucketRems(c, nowSec);
@@ -452,7 +510,7 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
 // a usable default is left for a settleable member with less SPARE lane (`reason:
 // 'spare-lane'`, see THE SPARE LANE). Omit it ⇒ byte-identical. A HOT pool's proactive pass
 // moves an idle running conversation the same way, past SPARE_MOVE_MARGIN_PCT (S5).
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, membership = null, priority = null, placing = false, pinned = false, explain = false }) {
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, membership = null, priority = null, placing = false, pinned = false, providerOf = null, conversationModel = null, crossProvider = 'never', offer = true, explain = false }) {
   const prioRank = priorityRankOf(priority);
   const order = priorityOrder(priority);
   const excluded = exclude && exclude.length ? new Set(exclude) : null;
@@ -560,9 +618,25 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const overage = overageIds && (typeof overageIds.has === 'function' ? overageIds : new Set(overageIds));
   const credits = creditsIds && (typeof creditsIds.has === 'function' ? creditsIds : new Set(creditsIds));
   const curCredits = !!(credits && credits.has(currentId));
+  // THE PROVIDER (q-053 P0b, the three rules above resolveModel). `crossRows` = members held APART from every ranking:
+  // another provider's (a cold move, the model re-resolved) and fallback-only ones (no readings) — chosen only off a
+  // hard wall, and then only under 'allow'; under 'never' the best other-provider one is the OFFER (`crossOffer`).
+  const provOf = typeof providerOf === 'function' ? providerOf : null;
+  const curProv = provOf ? provOf(currentId) : null;
+  const xMode = crossProviderMode(crossProvider);
+  const modelBlocked = []; // [{id, name, provider, providerId, model}] — cannot serve this conversation's model (rule 1)
+  const crossRows = [];
   for (const m of members) {
     if (m.id === currentId) continue;
     if (excluded && excluded.has(m.id)) { excludedN++; continue; } // just rejected this session — not a candidate
+    let xRow = null;
+    if (provOf) {
+      const p = provOf(m.id);
+      const other = !sameProvider(curProv, p);
+      const toModel = other ? resolveModel(p, conversationModel) : null;
+      if (other && toModel == null) { modelBlocked.push({ id: m.id, name: m.name, provider: providerLabel(p), providerId: providerKey(p), model: conversationModel || null }); continue; }
+      if (other || fallbackOnlyOf(p)) xRow = { cross: other, provider: providerLabel(p), providerId: providerKey(p), toModel, fallbackOnly: fallbackOnlyOf(p) };
+    }
     // LOGIN GATE (2026-09-07). Two different refusals, ORDERED so each member
     // is attributed to the wall that actually stops it:
     //   dead login  — it cannot serve anything, for anyone: out, now
@@ -577,6 +651,13 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     const r = dockRem(m.id, accountRemaining(c, nowSec));
     const br = dock(m.id, bucketRems(c, nowSec));
     const eff = r.known ? r.remaining : UNKNOWN_REMAINING_PCT;
+    if (xRow) {
+      // held APART (THE PROVIDER): never a voluntary or a scraps target; a spent one or a login about to die is no target at all
+      if (r.known && br.some(dead)) { quotaBlockedN++; continue; }
+      if (readLogin && !loginSwitchTarget(li)) { loginBlocked.push({ id: m.id, name: m.name, state: li.state, msLeft: li.msLeft ?? null }); continue; }
+      crossRows.push({ id: m.id, name: m.name, eff, known: r.known, remaining: r.known ? r.remaining : null, deadline: weeklyDeadline(c, nowSec), loginPenalty: loginRank(li), spare: spareLaneRemaining(c, nowSec), ...xRow });
+      continue;
+    }
     // USAGE CREDITS (B-ad05): the hard floor does not gate this member — it
     // serves past its quota, billed — so it is kept OUT of every ranking and
     // held as the last resort, quota-holding rows first (a credits member
@@ -607,8 +688,20 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     ...(overageBlocked.length ? { overageBlocked } : {}),
     ...(creditsHeld.length ? { creditsHeld } : {}),
     ...(lapsedBlocked.length ? { lapsedBlocked } : {}),
+    ...(modelBlocked.length ? { modelBlocked } : {}),
   });
   ranked.sort(order);
+  // members with readings first, then the fallback-only ones; the pool's own order inside each
+  crossRows.sort((x, y) => ((x.fallbackOnly ? 1 : 0) - (y.fallbackOnly ? 1 : 0)) || order(x, y));
+  const crossOf = (r) => ({ id: r.id, name: r.name, from: providerLabel(curProv), fromId: providerKey(curProv), to: r.provider, toId: r.providerId, model: conversationModel || null, toModel: r.toModel, fallbackOnly: !!r.fallbackOnly });
+  // UNDER 'never' THE OWNER'S CARD (rule 2): the current member cannot serve at all and only another provider can —
+  // the blocked verdict below names the best one (readings first) as the offer; nothing moves
+  // (`offer: false` — a decision with no conversation behind it, the pool DEFAULT: there is nobody to ask about)
+  const offerRow = provOf && offer && hardDead && !placing && xMode !== 'allow' ? crossRows.find((r) => r.cross) : null;
+  const crossDetail = () => (provOf ? {
+    ...(offerRow ? { crossOffer: crossOf(offerRow) } : {}),
+    ...(crossRows.length ? { crossHeld: crossRows.map((r) => ({ id: r.id, name: r.name, provider: r.provider, providerId: r.providerId, toModel: r.toModel, fallbackOnly: !!r.fallbackOnly, cross: !!r.cross })) } : {}),
+  } : {});
   nearRanked.sort(order);
   creditsRanked.sort((x, y) => ((x.dead ? 1 : 0) - (y.dead ? 1 : 0)) || order(x, y));
   // ESCAPE SCRAPS (round-2 verifier, reproduced: current hard-dead on 5h, the
@@ -642,6 +735,12 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // proactive scan that found nowhere better — `no-better`, which the engine
     // renders as nothing at all.
     if (!exhausted) return none('no-better', { fromRemaining: cur.known ? cur.remaining : null, noBetter: true, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
+    // THE PROVIDER, 'allow' (rule 2): nothing of this provider can take it and the current member cannot serve at all —
+    // the COLD move to the held-apart member (another provider's: the model re-resolved; a fallback-only one: last)
+    if (provOf && hardDead && !placing && xMode === 'allow' && crossRows.length) {
+      const best = crossRows[0];
+      return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: notMember ? 'not-a-member' : curLapsed ? 'subscription-lapsed' : curLoginDead ? 'login-expired' : 'exhausted', band: 'hard', ...(best.cross ? { switchMode: 'cold' } : {}), cross: crossOf(best), ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(best.id) < priority.length ? prioRank(best.id) + 1 : null } : {}) };
+    }
     // SPEAK which wall we hit. 'all-logins-expired' is its own reason because
     // it points at a completely different action from 'no-members' (re-login
     // now vs wait for a quota window) — the 2.313.0 named-bucket rule. It may
@@ -664,10 +763,10 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // serve it), `blockedWhy` keeps the sentence's own reason (all-rejected / all-logins-expired / …).
     if (notMember) {
       const listed = membership == null ? null : (typeof membership.has === 'function' ? membership : new Set(membership));
-      const holdTo = soonestUsableMember({ members: (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id))), readCache, nowSec, priority, creditsIds: credits, readLogin });
-      return none('removed-hold', { holdTo, blockedWhy: why, fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
+      const holdTo = soonestUsableMember({ members: (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id))), readCache, nowSec, priority, creditsIds: credits, readLogin, providerOf: provOf, fromProvider: curProv, conversationModel, crossProvider: xMode });
+      return none('removed-hold', { holdTo, blockedWhy: why, fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr), ...crossDetail() });
     }
-    return none(why, { fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...(why === 'on-credits' ? { onCredits: { id: currentId }, billing: hardDead } : {}), ...barDetail(), ...bucketDetail(curBr) });
+    return none(why, { fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...(why === 'on-credits' ? { onCredits: { id: currentId }, billing: hardDead } : {}), ...barDetail(), ...bucketDetail(curBr), ...crossDetail() });
   }
 
   // What we are moving ONTO, when the only thing left was a dying login — the
@@ -836,11 +935,19 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
  * + `pinnedName`.
  */
 function decidePinnedPlacement(opts = {}) {
-  const { pin, currentId, members = [], readCache, nowSec, warm = null, readLogin = null, exclude = null, pessimism = {}, membership = null, explicit = false, autoReadCache = null } = opts;
+  const { pin, currentId, members = [], readCache, nowSec, warm = null, readLogin = null, exclude = null, pessimism = {}, membership = null, explicit = false, autoReadCache = null, providerOf = null, conversationModel = null } = opts;
   const pinId = typeof pin === 'string' ? pin : (pin && typeof pin === 'object' && typeof pin.memberId === 'string' ? pin.memberId : null);
   if (!pinId) return null;
   const m = (members || []).find((x) => x && x.id === pinId) || null;
   const pinnedName = m ? m.name : pinId;
+  // THE PROVIDER (q-053 P0b): a pin of ANOTHER provider than the member the conversation runs on is the owner's own
+  // choice (never a silent move) — but a COLD one, and only when that provider serves the conversation's model
+  // (re-resolved; none ⇒ 'pin-model-not-served', named, and the automatic rules keep it)
+  const provOf = typeof providerOf === 'function' ? providerOf : null;
+  const pinProv = provOf ? provOf(pinId) : null;
+  const pinOther = !!provOf && !!currentId && !sameProvider(provOf(currentId), pinProv);
+  const pinModel = pinOther ? resolveModel(pinProv, conversationModel) : null;
+  const pinCross = pinOther && pinModel != null ? { cross: { id: pinId, name: m ? m.name : pinId, from: providerLabel(provOf(currentId)), fromId: providerKey(provOf(currentId)), to: providerLabel(pinProv), toId: providerKey(pinProv), model: conversationModel || null, toModel: pinModel, fallbackOnly: fallbackOnlyOf(pinProv) }, switchMode: 'cold' } : {};
   const base = { pinned: pinId, pinnedName };
   const inMembership = membership == null || (typeof membership.has === 'function' ? membership.has(pinId) : membership.includes(pinId));
   const li = readLogin ? (readLogin(pinId) || { state: 'unknown' }) : { state: 'unknown' };
@@ -856,9 +963,10 @@ function decidePinnedPlacement(opts = {}) {
   else if (readLogin && memberLapsed(li)) why = 'pin-lapsed';
   else if (readLogin && !loginUsable(li)) why = 'pin-login-dead';
   else if (r.known && br.some((b) => b.remaining < THRESH[b.kind].hard)) why = 'pin-exhausted';
+  else if (pinOther && pinModel == null) why = 'pin-model-not-served';
   if (!why) {
     if (currentId === pinId) return { to: null, reason: 'pin', held: true, ...base };
-    if (explicit) return { to: pinId, toName: pinnedName, fromRemaining: null, toRemaining: r.known ? r.remaining : null, reason: 'pin', ...base };
+    if (explicit) return { to: pinId, toName: pinnedName, fromRemaining: null, toRemaining: r.known ? r.remaining : null, reason: 'pin', ...pinCross, ...base };
     const settled = r.known && br.length > 0 && br.every((b) => b.remaining >= THRESH[b.kind].hot + MIN_GAIN_PCT) && (!readLogin || loginSwitchTarget(li));
     if (settled) {
       // `fromRemaining` = what the member the conversation RUNS ON has left (verify r1): the
@@ -880,9 +988,9 @@ function decidePinnedPlacement(opts = {}) {
       const curLoginDead = !!currentId && !!readLogin && !loginUsable(readLogin(currentId) || { state: 'unknown' });
       const curSpent = !!currentId && fr.known && bucketRems(fc, nowSec).some((b) => Math.max(0, b.remaining - dockCur) < THRESH[b.kind].hard);
       const escape = curGone ? 'not-a-member' : curLapsed ? 'subscription-lapsed' : curLoginDead ? 'login-expired' : curSpent ? 'exhausted' : null;
-      if (escape) return { to: pinId, toName: pinnedName, fromRemaining, toRemaining: r.remaining, reason: 'pin-return', band: 'hard', escape, ...base };
+      if (escape) return { to: pinId, toName: pinnedName, fromRemaining, toRemaining: r.remaining, reason: 'pin-return', band: 'hard', escape, ...pinCross, ...base };
       if (warm && warm.inTurn) return { to: null, reason: 'pin-hold', why: 'pin-mid-turn', wouldTo: pinId, wouldToName: pinnedName, ...base };
-      return { to: pinId, toName: pinnedName, fromRemaining, toRemaining: r.remaining, reason: 'pin-return', ...base };
+      return { to: pinId, toName: pinnedName, fromRemaining, toRemaining: r.remaining, reason: 'pin-return', ...pinCross, ...base };
     }
     why = 'pin-recovering'; // can serve, but has not recovered enough to be RETURNED to — the automatic rules keep it for now (named apart from 'pin-exhausted': it is NOT out of quota, verify r2)
   }
@@ -903,8 +1011,21 @@ function decidePinnedPlacement(opts = {}) {
  * (pay-per-use past its quota, B-ad05) only after every other. `members` = the caller's candidates
  * (logged-in members the pool lists, the member being left excluded). → id | null
  */
-function soonestUsableMember({ members, readCache, nowSec, priority = null, creditsIds = null, readLogin = null } = {}) {
+function soonestUsableMember({ members, readCache, nowSec, priority = null, creditsIds = null, readLogin = null, providerOf = null, fromProvider = null, conversationModel = null, crossProvider = 'never' } = {}) {
   const rank = priorityRankOf(priority);
+  // THE PROVIDER (q-053 P0b): parking is a placement too — under 'never' never on another provider or a fallback-only
+  // member; under 'allow' only one that serves the conversation's model, after every member of the same provider
+  // (fallback-only last). `providerOf` absent ⇒ byte-identical.
+  const provOf = typeof providerOf === 'function' ? providerOf : null;
+  const xMode = crossProviderMode(crossProvider);
+  const apart = (id) => {
+    if (!provOf) return 0;
+    const p = provOf(id);
+    const other = !sameProvider(fromProvider, p);
+    if ((other || fallbackOnlyOf(p)) && xMode !== 'allow') return -1;
+    if (other && resolveModel(p, conversationModel) == null) return -1;
+    return fallbackOnlyOf(p) ? 2 : other ? 1 : 0;
+  };
   // a LAPSED subscription (verify r1 ④, r2 ①) is NEVER a pick — removing the default must never park the pool (and every
   // NEW conversation) on it; every candidate lapsed ⇒ null, exactly like a pool whose candidates are all signed out
   const lapsed = (id) => !!(readLogin && memberLapsed(readLogin(id)));
@@ -912,11 +1033,13 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
   const rows = [];
   (members || []).forEach((m, i) => {
     if (!m || typeof m.id !== 'string' || lapsed(m.id)) return;
+    const ap = apart(m.id);
+    if (ap < 0) return;
     const v = quotaVerdict(readCache(m.id), nowSec, { tier: 'hard' });
     const at = v.usable === false ? (v.blockedUntil || Infinity) : 0;
-    rows.push({ id: m.id, at, credits: !!(credits && credits.has(m.id)), rank: rank ? rank(m.id) : 0, i });
+    rows.push({ id: m.id, at, credits: !!(credits && credits.has(m.id)), rank: rank ? rank(m.id) : 0, i, ap });
   });
-  rows.sort((x, y) => ((x.credits ? 1 : 0) - (y.credits ? 1 : 0)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
+  rows.sort((x, y) => (x.ap - y.ap) || ((x.credits ? 1 : 0) - (y.credits ? 1 : 0)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
   return rows.length ? rows[0].id : null;
 }
 
@@ -965,6 +1088,11 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
   const lapsedNames = (d?.lapsedBlocked || []).map((m) => m.name || m.id).join(', ');
   const lapsedWall = d?.reason === 'all-lapsed';
   const lapsedNote = lapsedNames && !lapsedWall ? ` Skipped because their subscription is inactive: ${lapsedNames}.` : '';
+  // THE PROVIDER (q-053 P0b): a member that cannot serve this conversation's model, and the OFFER the owner's card makes
+  const modelNames = (d?.modelBlocked || []).map((m) => `${m.name || m.id} (${m.provider})`).join(', ');
+  const modelNote = modelNames ? ` Cannot serve ${(d.modelBlocked[0] && d.modelBlocked[0].model) || 'its model'}: ${modelNames} — their provider has no such model.` : '';
+  const xo = d?.crossOffer;
+  const crossNote = xo ? ` ${xo.name || xo.id} (${xo.to}) can take it as ${xo.toModel} — a move to another provider restarts the conversation and waits for your OK in For you.` : '';
   const creditsNote = creditsNames ? ` Held back because they bill pay-per-use past their quota (usage credits): ${creditsNames} — the pool falls back to them only once ${currentName} is fully spent.` : '';
   // A bar is only the WHOLE story when nothing else emptied the list — the
   // same rule 'all-logins-expired' earned in round 2: a quota-emptied list
@@ -1000,7 +1128,7 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
       : `every other member is out of quota${loginNames ? ` or needs a re-login (${loginNames})` : ''}`;
     // (the owner's 全B, 2026-09-28: nothing keeps serving on the removed member — its conversations stop after
     // their current turn and wait; the sentence says so instead of "keeps running")
-    return `Pool "${poolName}": ${currentName} is no longer a member of the pool and no member can take over its conversations — ${others}.${heldNote}${payNote}${creditsNote} Its conversations stop after their current turn and wait until a member can serve them — add a member to continue sooner.`;
+    return `Pool "${poolName}": ${currentName} is no longer a member of the pool and no member can take over its conversations — ${others}.${heldNote}${payNote}${creditsNote}${modelNote}${crossNote} Its conversations stop after their current turn and wait until a member can serve them — add a member to continue sooner.`;
   }
   const loginWall = d?.reason === 'all-logins-expired'; // the OTHER members
   const curLapsedWall = !d?.fromLogin && !!d?.fromLapsed; // the CURRENT member's subscription is inactive
@@ -1044,7 +1172,7 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
     : barsOnly
     ? ' Adjust them in Settings → Spending, or add a member.'
     : ' Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.';
-  return `Pool "${poolName}": ${why}.${alt}${also}${heldNote}${payNote}${lapsedNote}${creditsNote}${fix}`;
+  return `Pool "${poolName}": ${why}.${alt}${also}${heldNote}${payNote}${lapsedNote}${creditsNote}${modelNote}${crossNote}${fix}`;
 }
 
 /**
@@ -1370,4 +1498,5 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 
 module.exports = {
   quotaVerdict, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
+  CROSS_PROVIDER_MODES, crossProviderMode, providerKey, providerLabel, sameProvider, fallbackOnlyOf, resolveModel, servesModel, hotSwitchFor,
   classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };

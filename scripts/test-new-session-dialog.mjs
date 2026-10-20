@@ -29,6 +29,14 @@
 //     C4 `close --all; sleep 3; pgrep …` stays a Bash card that says what it
 //        does, names pgrep and states the close --all scope
 //     C5 CONTROL: `git status` is a plain Bash card, its Always Allow unwidened
+//   D  THE MODEL MENU FOLLOWS THE ACCOUNT'S PROVIDER (lane models-at-session, design q-053 r1 §3 / §6 P0c): the machine's
+//      login ⇒ claude's own list; an ACCOUNT SWITCH to a third-party account (providerId) ⇒ the menu REDRAWN to exactly its
+//      entered rows, its default picked; a provider with NONE ⇒ ONE line (CONTROL: no menu under it), Create says why and
+//      spawns nothing, one real click opens the account's models; back to Default ⇒ claude's list
+//   E  THE RUNNING BADGE PER SESSION (the §6 chrome leg): three live conversations — the machine's login lists claude's
+//      models, the DeepSeek one exactly its rows ("DeepSeek · Entered by you"), the Empty one ONE line + its door; a pick is
+//      RE-RESOLVED against the provider: Custom… "fast" (its alias) ⇒ the CLI gets set_model deepseek-chat; "gpt-9" ⇒
+//      refused by name, nothing sent
 // Requires google-chrome + dtach (SKIP without). Run: node scripts/test-new-session-dialog.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -115,6 +123,23 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(`${wt}/${f}`)} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
+// lane models-at-session (D / E): two claude API keys that NAME a third-party provider (`providerId` — the field Train 2's wizard
+// writes and the pool's member lookup reads) + the records they name (data/providers.json): DeepSeek (entered rows, an alias)
+// and Empty (none). The keys are sealed the way the store seals them (data/.accounts-key, aes-256-gcm iv:tag:data).
+{
+  const D = path.join(wt, 'data'), crypto = require('node:crypto'), k = crypto.randomBytes(32);
+  fs.writeFileSync(path.join(D, '.accounts-key'), k.toString('hex'), { mode: 0o600 });
+  const seal = (text) => { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', k, iv), e = Buffer.concat([c.update(text, 'utf-8'), c.final()]); return `${iv.toString('hex')}:${c.getAuthTag().toString('hex')}:${e.toString('hex')}`; };
+  const k1 = 'sk-ant-api03-' + 'd'.repeat(40), k2 = 'sk-ant-api03-' + 'e'.repeat(40);
+  fs.writeFileSync(path.join(D, 'accounts.json'), JSON.stringify({ version: 1, accounts: [
+    { id: 'acct-lane-ds', name: 'DeepSeek key', type: 'api', backend: 'claude', keyEnc: seal(k1), tail: k1.slice(-8), providerId: 'pv-lane-ds' },
+    { id: 'acct-lane-empty', name: 'Empty provider', type: 'api', backend: 'claude', keyEnc: seal(k2), tail: k2.slice(-8), providerId: 'pv-lane-empty' },
+  ] }), { mode: 0o600 });
+  fs.writeFileSync(path.join(D, 'providers.json'), JSON.stringify({ v: 1, providers: [
+    { id: 'pv-lane-ds', kind: 'self-hosted', label: 'DeepSeek', auth: 'x-api-key', modelsSource: 'configured', models: [{ id: 'deepseek-chat', label: 'DeepSeek Chat', context: 128000, caps: ['tools'] }, { id: 'deepseek-reasoner', label: 'deepseek-reasoner', context: null, caps: ['reasoning'] }], aliases: { fast: 'deepseek-chat' }, defaultModel: 'deepseek-reasoner' },
+    { id: 'pv-lane-empty', kind: 'self-hosted', label: 'Empty', modelsSource: 'none' },
+  ] }), { mode: 0o600 });
+}
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
@@ -420,6 +445,87 @@ try {
   const got4 = await (async () => { for (let i = 0; i < 50; i++) { const r = responsesFor('req-lane-3'); if (r.length) return r; await sleep(100); } return responsesFor('req-lane-3'); })();
   check('C5 its Always Allow sends the CLI\'s rule as-is', JSON.stringify(got4[0]?.response?.response?.updatedPermissions?.[0]?.rules) === JSON.stringify([{ toolName: 'Bash', ruleContent: 'git status *' }]), got4);
   check('the run finishes (the stub\'s final "done")', await waitFor(`[...document.querySelectorAll('.chat-msg')].some((m) => m.textContent.trim().endsWith('done'))`, 8000));
+  // ═══ D the model menu follows the account's provider (lane models-at-session, design q-053 r1 §3 + §6 P0c) ═══════
+  // the seeded accounts (before the boot, below the stub): two claude API keys that NAME a third-party provider
+  // (`providerId`) — DeepSeek (entered rows + an alias) and Empty (none)
+  console.log('D the New Session model menu follows the account\'s provider');
+  const menu = `(() => { const s = document.getElementById('input-model'); const none = document.querySelector('#row-model .ns-models-none'); return { provider: document.getElementById('row-model').dataset.provider || '', ids: [...s.options].map((o) => o.value), labels: [...s.options].map((o) => o.textContent), value: s.value, selectShown: s.offsetParent !== null && s.getBoundingClientRect().height > 0, line: none && none.offsetParent !== null && none.getBoundingClientRect().height > 0 ? none.textContent : null }; })()`; // judged by LAYOUT, never by a class (this project has no global .hidden — a class alone hides nothing)
+  const pickAcct = (id) => evalJs(`(() => { const a = document.getElementById('input-account'); a.value = ${JSON.stringify(id)}; a.dispatchEvent(new Event('change')); return a.value; })()`);
+  const shot = async (name) => { if (!process.env.NSD_PNG_DIR) return; const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.NSD_PNG_DIR, name + '.png'), Buffer.from(r.data, 'base64')); }; // optional evidence (NSD_PNG_DIR)
+  {
+    await evalJs(`app.hideDialogs(); app.showNewSessionDialog(); document.getElementById('input-backend').value = 'claude'; document.getElementById('input-backend').dispatchEvent(new Event('change')); true`);
+    await waitFor(dialogVisible, 5000);
+    check('D the account row lists the two third-party accounts', await waitFor(`['acct-lane-ds', 'acct-lane-empty'].every((v) => [...document.querySelectorAll('#input-account option')].some((o) => o.value === v))`, 8000));
+    check('D1 on the machine\'s login the menu is claude\'s own list under Anthropic subscription (Default first, Custom… stays)', await waitFor(`(() => { const m = ${menu}; return m.provider === 'pv-anthropic-subscription' && m.ids[0] === '' && m.ids.includes('opus') && m.ids.includes('__custom__') && m.selectShown && m.line === null; })()`, 8000), await evalJs(menu));
+    await pickAcct('acct-lane-ds');
+    check('D2 THE SWITCH: picking the DeepSeek account REDRAWS the menu to exactly its entered rows (no claude alias, no Custom…), its default selected', await waitFor(`(() => { const m = ${menu}; return m.provider === 'pv-lane-ds' && JSON.stringify(m.ids) === JSON.stringify(['deepseek-chat', 'deepseek-reasoner']) && m.value === 'deepseek-reasoner' && m.selectShown && m.line === null; })()`, 8000), await evalJs(menu));
+    check('D2 …each row by the label it was entered with ("DeepSeek Chat")', (await evalJs(menu)).labels[0] === 'DeepSeek Chat', await evalJs(menu));
+    await shot('d2-configured');
+    await pickAcct('acct-lane-empty');
+    check('D3 NONE ⇒ THE ONE LINE: the select is gone and ONE line says "No models configured for this provider — set up"', await waitFor(`(() => { const m = ${menu}; return m.provider === 'pv-lane-empty' && m.line === 'No models configured for this provider — set up' && !m.selectShown; })()`, 8000), await evalJs(menu));
+    check('D3 CONTROL: …and there is no menu under the line (the select holds no model at all — never a silent empty menu)', (await evalJs(menu)).ids.length === 0, await evalJs(menu));
+    await shot('d3-none-line');
+    const argvBeforeD = argvFiles().length;
+    await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-mode').value = 'chat'; true`);
+    await realClick('#dialog-new-session .btn-create');
+    await sleep(900);
+    const toasts = await evalJs(`[...document.querySelectorAll('#global-toasts .global-toast')].map((x) => x.textContent).join(' | ')`);
+    check('D3 Create says why and spawns nothing (the dialog stays open)', argvFiles().length === argvBeforeD && (await evalJs(dialogVisible)) && /provider has no models/.test(toasts), { toasts, argv: argvFiles().length - argvBeforeD });
+    check('D4 ONE real click on the line opens that account\'s models (its provider\'s section)', (await realClick('#row-model .ns-models-none')) && await waitFor(`!!document.getElementById('account-models-dialog') && /Models — Empty provider/.test(document.getElementById('account-models-dialog').textContent) && /No models configured for this provider/.test(document.getElementById('account-models-dialog').textContent)`, 6000));
+    await evalJs(`document.querySelector('#account-models-dialog .dialog-close').click(); true`);
+    check('D4 closing it comes back to the New Session dialog (the menu asked again: still the line — nothing was entered)', await waitFor(`!document.getElementById('account-models-dialog') && (${menu}).line !== null`, 6000) && (await evalJs(dialogVisible)));
+    await pickAcct('');
+    check('D5 back to Default ⇒ claude\'s list again, the line gone', await waitFor(`(() => { const m = ${menu}; return m.provider === 'pv-anthropic-subscription' && m.ids.includes('opus') && m.selectShown && m.line === null; })()`, 8000), await evalJs(menu));
+    await evalJs(`app.hideDialogs(); true`);
+  }
+
+  // ═══ E the running badge: THIS conversation's provider's list, per session (the chrome leg of §6 P0c) ═══════════
+  console.log('E the mid-session model badge lists the conversation\'s own provider');
+  {
+    const createOn = async (reqId, accountId) => {
+      const before = frames.filter((m) => m?.type === 'created').length;
+      liveWs.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: CWD, reqId, ...(accountId ? { accountId } : {}) }));
+      for (let i = 0; i < 80; i++) { const made = frames.filter((m) => m?.type === 'created'); if (made.length > before) return made[made.length - 1].sessionId; await sleep(250); }
+      return null;
+    };
+    const sA = await createOn('lane-badge-a', null), sB = await createOn('lane-badge-b', 'acct-lane-ds'), sC = await createOn('lane-badge-c', 'acct-lane-empty');
+    check('E three conversations: the machine\'s login, the DeepSeek account, the Empty one', !!sA && !!sB && !!sC, { sA, sB, sC });
+    const openBadge = async (sid, label) => {
+      await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); app.attachSession(${JSON.stringify(sid)}, ${JSON.stringify(label)}, ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
+      await waitFor(`!!document.querySelector('.window-active .chat-view .chat-status-model')`, 20000);
+      await evalJs(`document.querySelector('.window-active .chat-view .chat-status-model').click(); true`);
+      await waitFor(`(() => { const d = document.querySelector('.window-active .chat-status-dropdown'); return !!d && !/Loading/.test(d.textContent) && d.children.length > 1; })()`, 8000);
+      return evalJs(`(() => { const d = document.querySelector('.window-active .chat-status-dropdown'); const h = d.querySelector('.chat-status-provider'); return { head: h ? h.textContent : '', provider: h ? h.dataset.provider : '', models: [...d.querySelectorAll('[data-model]')].map((x) => x.dataset.model), custom: !!d.querySelector('.chat-status-model-custom'), none: d.querySelector('.chat-status-models-none')?.textContent || null }; })()`);
+    };
+    const a = await openBadge(sA, 'lane badge A');
+    check('E1 on the machine\'s login: the badge names Anthropic subscription and lists claude\'s models (+ Custom…)', a.provider === 'pv-anthropic-subscription' && a.models.includes('opus') && a.models.includes('claude-fable-5') && a.custom && a.none === null, a);
+    const b = await openBadge(sB, 'lane badge B');
+    check('E2 PER SESSION: the DeepSeek conversation\'s badge lists exactly ITS provider\'s rows, under "DeepSeek · Entered by you"', b.provider === 'pv-lane-ds' && JSON.stringify(b.models) === JSON.stringify(['deepseek-chat', 'deepseek-reasoner']) && /^DeepSeek · Entered by you$/.test(b.head) && b.custom, b);
+    await shot('e2-badge-deepseek');
+    // the pick RE-RESOLVED against the provider: an alias lands on its row; an id it does not serve is refused by name
+    const setModels = () => stdinFrames().filter((m) => m.type === 'control_request' && m.request?.subtype === 'set_model').map((m) => m.request.model);
+    const customPick = async (text) => {
+      await realClick('.window-active .chat-status-model-custom');
+      await waitFor(`!!document.activeElement && document.activeElement.tagName === 'INPUT' && !!document.activeElement.closest('.dialog-overlay')`, 4000);
+      await cdp('Input.insertText', { text });
+      await key('Enter', 'Enter', 13);
+    };
+    await customPick('fast');
+    const sentFast = await (async () => { for (let i = 0; i < 60; i++) { if (setModels().includes('deepseek-chat')) return true; await sleep(150); } return false; })();
+    check('E3 Custom… "fast" (the provider\'s alias) ⇒ the CLI is told the ROW\'S id: set_model deepseek-chat', sentFast && !setModels().includes('fast'), setModels());
+    await openBadge(sB, 'lane badge B');
+    await customPick('gpt-9');
+    await sleep(900);
+    const t2 = await evalJs(`[...document.querySelectorAll('#global-toasts .global-toast')].map((x) => x.textContent).join(' | ')`);
+    check('E4 Custom… "gpt-9" (not served by DeepSeek) ⇒ refused by name, NOTHING sent to the CLI', /DeepSeek does not serve the model “gpt-9”/.test(t2) && !setModels().includes('gpt-9'), { t2, sent: setModels() });
+    const c = await openBadge(sC, 'lane badge C');
+    check('E5 the Empty conversation\'s badge: ONE line that says so (no model row, never a silent empty list)', c.provider === 'pv-lane-empty' && c.models.length === 0 && c.none === 'No models configured for this provider — set up' && !c.custom, c);
+    await shot('e5-badge-none');
+    await realClick('.window-active .chat-status-models-none');
+    check('E5 …and the line opens that account\'s models', await waitFor(`!!document.getElementById('account-models-dialog') && /Models — Empty provider/.test(document.getElementById('account-models-dialog').textContent)`, 6000));
+    await evalJs(`document.querySelector('#account-models-dialog .dialog-close')?.click(); true`);
+    for (const s of [sA, sB, sC]) if (s) liveWs.send(JSON.stringify({ type: 'kill', sessionId: s }));
+  }
   check('no page error during the run', pageErrors.length === 0, pageErrors);
   try { liveWs.send(JSON.stringify({ type: 'kill', sessionId: sid })); liveWs.close(); } catch {}
 } catch (e) {

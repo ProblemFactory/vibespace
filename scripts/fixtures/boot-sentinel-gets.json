@@ -24,6 +24,7 @@
  "smoke": [
   "/api/accounts",
   "/api/accounts/:id/key",
+  "/api/accounts/:id/models",
   "/api/accounts/:id/oat/mint",
   "/api/accounts/:id/oat/mint/:mid",
   "/api/accounts/:id/reset-credit",
