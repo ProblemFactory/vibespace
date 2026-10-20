@@ -340,6 +340,13 @@ try {
 
   // ── A① ──
   section('A① the stub\'s `vibespace-design new` opens the window on the client showing that conversation');
+  // lane design-window-placement (B-9674, owner 2026-10-20 「design 那个窗口会自动弹出到前台，而不是在开始 design 的对话的右侧分屏」):
+  // the conversation's composer holds the caret FIRST — a fresh agent-opened Design must be PLACED, never take the focus.
+  const chatWinE = `[...app.wm.windows.values()].find((x) => x.element && x.element.querySelector('.chat-view'))`;
+  const focusComposer = `const c = ${chatWinE}; const ta = c && c.element.querySelector('textarea.chat-input'); if (ta) { app.wm.focusWindow(c.id); ta.focus(); window.__composer = ta; } return !!ta;`;
+  ok(await ev(focusComposer), 'the conversation has a composer and it holds the caret');
+  const place0 = await ev(`return { aw: app.wm.activeWindowId, caret: document.activeElement === window.__composer, chatId: (${chatWinE}).id };`);
+  ok(place0.caret === true && place0.aw === place0.chatId, 'before the agent opens the Design: the composer is the active window and holds the caret');
   const rNew = await stub({ kind: 'sh', cmd: 'vibespace-design', args: ['new', 'dw', '--title', 'Design window'], cwd: PROJ });
   ok(rNew.status === 0 && /designs\/dw/.test(rNew.stdout || ''), 'vibespace-design new dw — exit 0, the folder printed first', rNew);
   DIR = path.join(fs.realpathSync(PROJ), 'designs', 'dw');
@@ -351,6 +358,38 @@ try {
   ok(!!win && win.type === 'design' && win.sid === SIDW && win.dir === DIR, 'the Design window opened BY ITSELF (the design-open push) on the client showing that conversation', win);
   const two = await until(() => ev(`const w = ${W}; const f = [...w.element.querySelectorAll('.dc-frame')]; const fr = f.map((x) => ({ file: x.dataset.file, iframe: !!x.querySelector('iframe'), sandbox: x.querySelector('iframe') && x.querySelector('iframe').getAttribute('sandbox'), len: (x.querySelector('iframe') && x.querySelector('iframe').getAttribute('srcdoc') || '').length })); return fr.length === 2 && fr.every((x) => x.len > 100) ? fr : null;`), 20000);
   ok(!!two && two.map((x) => x.file).sort().join(',') === 'About.html,Main.html' && two.every((x) => x.sandbox === 'allow-scripts'), 'two artboards drawn (Main.html, About.html), each an iframe sandboxed exactly "allow-scripts"', two);
+
+  // ── A①b (lane design-window-placement): the fresh Design is PLACED as the right split, never focused ──
+  const placed = await until(() => ev(`const w = ${W}; const c = ${chatWinE}; if (!w || !c) return null; const dr = w.element.getBoundingClientRect(); const cr = c.element.getBoundingClientRect(); const td = (w._tabChain ? app.wm.windows.get(w._tabChain.tabs[0]) : w); const tc = (c._tabChain ? app.wm.windows.get(c._tabChain.tabs[0]) : c); return { aw: app.wm.activeWindowId, chatId: c.id, designId: w.id, caret: document.activeElement === window.__composer, d: { l: Math.round(dr.left), r: Math.round(dr.right), w: Math.round(dr.width) }, c: { l: Math.round(cr.left), r: Math.round(cr.right), w: Math.round(cr.width) }, sameDesk: (td._desktopId || null) === (tc._desktopId || null), arrived: w.element.classList.contains('window-arrived'), vw: innerWidth };`), 10000);
+  evidence.placed = placed;
+  ok(!!placed && placed.caret === true && placed.aw === place0.aw && placed.aw === placed.chatId, 'the fresh Design did NOT take the caret or the active window — the conversation composer keeps both (an agent places, never focuses)', placed);
+  ok(!!placed && placed.c.l < placed.d.l && placed.c.r <= placed.d.l + 12 && placed.d.w < placed.vw * 0.6 && placed.c.w < placed.vw * 0.6 && placed.sameDesk, 'it is the RIGHT SPLIT: the conversation on the LEFT half, the Design on the RIGHT, both on the same desktop', placed);
+  ok(!!placed && placed.arrived, 'its taskbar entry pulses (the arrived mark) — the quiet "it is there", no toast, no desktop switch');
+
+  // the agent's RE-OPEN of the already-open design never raises it (markArrived + its tab, raise:false)
+  ok(await ev(focusComposer), 're-focus the composer for the re-open leg');
+  const awBeforeSync = await ev('return app.wm.activeWindowId;');
+  const rSync = await stub({ kind: 'sh', cmd: 'vibespace-design', args: ['open', DIR], cwd: DIR });
+  await sleep(900);
+  const afterSync = await ev(`return { aw: app.wm.activeWindowId, caret: document.activeElement === window.__composer };`);
+  ok(rSync.status === 0 && afterSync.aw === awBeforeSync && afterSync.caret === true, 'a second `vibespace-design open` of the SAME design does not raise it — the composer keeps the caret and the active window', { rSync: rSync.status, afterSync });
+
+  // THE CONTROL: with "Agent-opened windows come to the front" ON, the agent's open brings it to the front
+  await ev(`app.settings.set('desktop.agentWindowsFront', true); return true;`);
+  await until(() => ev(`return app.settings.get('desktop.agentWindowsFront') === true ? true : null;`), 3000);
+  ok(await ev(focusComposer), 're-focus the composer for the setting-ON control');
+  const rFront = await stub({ kind: 'sh', cmd: 'vibespace-design', args: ['open', DIR], cwd: DIR });
+  const frontOn = await until(() => ev(`return app.wm.activeWindowId === ${W}.id ? true : null;`), 6000);
+  ok(rFront.status === 0 && frontOn === true, 'the control: with the front setting ON, the agent\'s open brings the Design to the front', { rFront: rFront.status, frontOn });
+  await ev(`app.settings.set('desktop.agentWindowsFront', false); return true;`);
+
+  // RED CONTROL: the PRE-FIX handler called openDesign(app, {…}) directly (= a person's own door today) — it DOES raise + focus,
+  // so the quiet-placement asserts above are not vacuous. (No tree patch: app.openDesign is exactly the pre-fix handler's body.)
+  ok(await ev(focusComposer), 're-focus the composer for the RED control');
+  const redBefore = await ev('return app.wm.activeWindowId;');
+  await ev(`app.openDesign({ host: '', dir: ${S(DIR)}, sessionId: ${S(SIDW)} }); return true;`);
+  const redAfter = await until(() => ev(`return app.wm.activeWindowId === ${W}.id ? true : null;`), 4000);
+  ok(redBefore === place0.chatId && redAfter === true, 'RED CONTROL: openDesign called directly (the pre-fix handler / a person\'s own door) raises the Design to the ACTIVE window — so the "active window unchanged" assert above has teeth (the WM never moves the DOM caret on a raise, so the composer keeps it either way)');
 
   // ── A② ──
   section('A② a file write under the folder repaints ONE frame in place (no sync: the hub\'s 2 s watch)');

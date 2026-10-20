@@ -132,19 +132,22 @@ export function openDesignPublishDialog(app, { host = '', dir = '', title = '' }
 }
 
 /** Open (or reveal) the Design window for one design folder. */
-export function openDesign(app, { host = '', dir = '', sessionId = '', syncId } = {}) {
+export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, quiet = false } = {}) {
   const h = hostKey(host);
   const d = String(dir || '');
   if (!d) return openDesignHome(app, { syncId }); // no folder = the home: every design and design system (lane design-systems-home)
   const existing = [...app.wm.windows.values()].find((w) => w._design && w._design.host === h && foldPath(w._design.dir) === foldPath(d));
   if (existing) {
     if (sessionId && !existing._design.sessionId) { existing._design.sessionId = sessionId; if (existing._openSpec) existing._openSpec.sessionId = sessionId; }
-    app.wm.revealWindow(existing.id, { replay: !!syncId });
+    // lane design-window-placement (agent-window-no-steal): an agent's re-open / sync NEVER raises an open window — its
+    // taskbar entry pulses and its tab is chosen without changing the active window; a person's door still reveals it.
+    if (quiet) { app.wm.markArrived(existing.id); app.wm.revealWindow(existing.id, { raise: false }); }
+    else app.wm.revealWindow(existing.id, { replay: !!syncId });
     existing._designRewatch?.(); // accept-fixes F3: the agent's open / new re-asserts THIS window's watch (the hub counts it for sync)
     return existing;
   }
   const openSpec = { action: 'openDesign', host: h, dir: d, sessionId: sessionId || '' };
-  const winInfo = app.wm.createWindow({ title: baseName(d) || t('Design'), type: 'design', syncId, openSpec, width: 1000, height: 680 });
+  const winInfo = app.wm.createWindow({ title: baseName(d) || t('Design'), type: 'design', syncId, openSpec, width: 1000, height: 680, ...(quiet ? { quiet: true } : {}) });
   winInfo._design = { host: h, dir: d, sessionId: sessionId || '' };
   const signal = winInfo._listenerCtl.signal;
   const L = { signal };
@@ -554,9 +557,17 @@ export function installDesignWindow(app) {
     const spec = m.openSpec;
     if (!spec || spec.action !== 'openDesign' || typeof spec.dir !== 'string' || !spec.dir) return;
     const sid = String(m.sessionId || spec.sessionId || '');
-    const shows = sid && [...(app.sessions?.values?.() || [])].some((s) => s && s.sessionId === sid);
-    if (!shows) return;
-    openDesign(app, { host: spec.host || '', dir: spec.dir, sessionId: sid });
+    // lane design-window-placement: the agent's open goes through the SAME agent-window-no-steal verdict as its browser
+    // (app.placeAgentWindow -> PURE agentWindowPlacement). A FRESH window is born quiet (never focused) and SNAPPED to the
+    // right half beside its chat (which snaps to the left) -- the Design canvas, a size-fit canvas, renders as a free half
+    // window where a hidden tab-chain guest would not; an EXISTING one re-pulses without raising.
+    // `shows` is the verdict's job now: no chat window on this client ⇒ act 'none', nothing opens (D3 unchanged).
+    const h = hostKey(spec.host || '');
+    const existed = [...app.wm.windows.values()].some((w) => w._design && w._design.host === h && foldPath(w._design.dir) === foldPath(spec.dir));
+    app.placeAgentWindow(m, (p, { focus }) => ({
+      win: openDesign(app, { host: spec.host || '', dir: spec.dir, sessionId: sid, quiet: !focus }),
+      fresh: !existed,
+    }));
   });
 }
 

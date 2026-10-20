@@ -37,6 +37,7 @@ try {
 
   fs.writeFileSync(ENTRY, `
 import { installSidebarMounts } from ${JSON.stringify(path.join(ROOT, 'src/lib/sidebar-mounts.js'))};
+import { createModalShell } from ${JSON.stringify(path.join(ROOT, 'src/lib/utils.js'))};
 const ENC=${ENC}, PLAIN=${PLAIN};
 const out=[]; const ok=(n,c,x="")=>out.push((c?"ok   ":"FAIL ")+n+(c?"":" -- "+x));
 function S(){} installSidebarMounts(S); const s=new S();
@@ -89,6 +90,27 @@ const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
   ok("armor-stripped body hinted too", /BEGIN/.test(statusEl().textContent), statusEl().textContent);
   $("#mounts-dialog-overlay .dialog-close").click(); await p;
   ok("no overlay left behind", !$("#mounts-dialog-overlay"));
+  // lane race-sweep (B-6b74, test-desktop-webrtc-chrome ⑪): createModalShell's ESCAPE WHILE NOTHING HOLDS THE FOCUS — a control
+  // that replaced itself (the window picker's 「停止」 swaps its row) left the focus on <body>; Escape must still close the modal
+  const esc = (t) => t.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  const m1 = createModalShell({ title: "esc", escapeToClose: true }); const b1 = document.createElement("button"); m1.body.appendChild(b1); b1.focus();
+  ok("ESC setup: a control inside the modal holds the focus", document.activeElement === b1);
+  b1.remove();
+  ok("ESC setup: …it replaced itself — the focus fell to <body>", document.activeElement === document.body, String(document.activeElement && document.activeElement.tagName));
+  esc(document.body);
+  ok("ESC: Escape with nothing focused closes the modal (the picker after 「停止」)", !m1.overlay.isConnected);
+  const lo = createModalShell({ title: "low", escapeToClose: true }), hi = createModalShell({ title: "high", escapeToClose: true });
+  document.body.focus(); esc(document.body);
+  ok("ESC: …only the TOPMOST one", !hi.overlay.isConnected && lo.overlay.isConnected);
+  const inp = document.createElement("input"); document.body.appendChild(inp); inp.focus(); esc(inp);
+  ok("ESC: an Escape that something else holds (an input outside the modal) is not the modal's", lo.overlay.isConnected);
+  inp.remove(); lo.close();
+  const pv = document.createElement("div"); pv.dataset.popover = "1"; document.body.appendChild(pv);
+  const m3 = createModalShell({ title: "pv", escapeToClose: true });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.querySelector("[data-popover]")) { document.querySelectorAll("[data-popover]").forEach((x) => x.remove()); e.preventDefault(); } }, { once: true, capture: true });
+  esc(document.body);
+  ok("ESC: a popover the app's handler closed first (default prevented) leaves the modal open", m3.overlay.isConnected && !document.querySelector("[data-popover]"));
+  m3.close();
  }catch(e){ out.push("FAIL threw: "+e.message+" | "+e.stack); }
  const pre=document.createElement("pre"); pre.id="res"; pre.textContent=out.join("\\n"); document.body.appendChild(pre);
 })();
@@ -109,6 +131,25 @@ const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
   console.log(txt);
   const lines = txt.split('\n').filter(Boolean);
+  // CONTROL (lane race-sweep): the same Escape on the PRE-FIX createModalShell (a bundle with the idle-Escape listener never
+  // bound — utils.js patched at bundle time, never in the tree) leaves the modal open: the ESC leg above is the fix
+  const { build } = await import(path.join(ROOT, 'node_modules/esbuild/lib/main.js'));
+  const UTILS = path.join(ROOT, 'src/lib/utils.js');
+  const BIND = "    document.addEventListener('keydown', onIdleEscape);\n";
+  const usrc = fs.readFileSync(UTILS, 'utf8');
+  const ctlEntry = `import { createModalShell } from ${JSON.stringify(UTILS)};
+const m = createModalShell({ title: "esc", escapeToClose: true }); const b = document.createElement("button"); m.body.appendChild(b); b.focus(); b.remove();
+document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+const pre = document.createElement("pre"); pre.id = "res"; pre.textContent = (document.activeElement === document.body ? "body " : "focus-elsewhere ") + (m.overlay.isConnected ? "STAYS" : "closed"); document.body.appendChild(pre);`;
+  await build({ stdin: { contents: ctlEntry, resolveDir: ROOT, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(D, 'c.js'), loader: { '.css': 'empty' }, logLevel: 'error',
+    plugins: [{ name: 'pre-fix', setup(b) { b.onLoad({ filter: /utils\.js$/ }, (a) => (a.path === UTILS ? { contents: usrc.replace(BIND, ''), loader: 'js', resolveDir: path.dirname(a.path) } : undefined)); } }] });
+  fs.writeFileSync(path.join(D, 'c.html'), `<!doctype html><html><head><meta charset="utf-8"></head><body><script src="file://${path.join(D, 'c.js')}"></script></body></html>`);
+  const ctl = (await execFileP(CHROME, ['--headless', '--disable-gpu', '--no-sandbox', '--virtual-time-budget=4000', '--dump-dom', `file://${path.join(D, 'c.html')}`], { maxBuffer: 1 << 26 })).stdout;
+  const cm = /<pre id="res">([\s\S]*?)<\/pre>/.exec(ctl);
+  const ctlLine = usrc.split(BIND).length === 2 && cm && cm[1] === 'body STAYS'
+    ? 'ok   CONTROL: the pre-fix createModalShell (its idle-Escape listener never bound) leaves the modal OPEN after the same Escape (body STAYS) — the ESC leg is the fix'
+    : `FAIL CONTROL: the pre-fix bundle — anchor ${usrc.split(BIND).length === 2 ? 'once' : 'NOT once'}, got ${cm ? cm[1] : 'no result'}`;
+  console.log(ctlLine); lines.push(ctlLine);
   const failed = lines.filter((l) => l.startsWith('FAIL'));
   console.log(`\n${failed.length ? 'FAIL' : 'PASS'} — ${lines.length - failed.length} passed, ${failed.length} failed`);
   cleanup();

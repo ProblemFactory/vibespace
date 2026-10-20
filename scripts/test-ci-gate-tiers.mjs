@@ -173,7 +173,9 @@ console.log('\n§6 machine-global fixtures + no-verdict honesty');
     let aout = '';
     child.stdout.on('data', (d) => { aout += d; });
     child.stderr.on('data', (d) => { aout += d; });
-    await new Promise((res) => child.on('exit', (code) => res({ status: code })));
+    // lane race-sweep (B-2d49): the LAST EFFECT is the pipes' close — 'exit' may fire while the closing line is still in
+    // flight to this process (node: "stdio streams might still be open"); the closing-line leg read it once under 4 lanes
+    await new Promise((res) => child.on('close', (code) => res({ status: code })));
     ok(/--dirty-ok: this tree is dirty/.test(aout), 'the run announces the dirty tree as soon as it captures it');
     ok(/NO VERDICT will be written/i.test(aout), '--dirty-ok says NO VERDICT at the START of the run');
     ok(/NO VERDICT WRITTEN/.test(aout) && !/HEAVY GATE GREEN/.test(aout),

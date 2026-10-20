@@ -8613,7 +8613,7 @@ export default {
   "A Flatpak or Snap app, and a browser, asks a desktop portal for its file dialogs; VibeSpace starts one on the app's own display, so the dialog opens inside its window, not on your main desktop (3 more processes per app, gone with it). Every app: GTK apps too. Off: as before. Applies to apps started after the change.": "Flatpak、Snap 应用和浏览器通过桌面门户打开文件对话框；VibeSpace 在应用自己的显示上启动一个门户，对话框就开在它的窗口里，而不是你的主桌面（每个应用多 3 个进程，随应用结束）。所有应用：GTK 应用也一样。关闭：同以前。对更改之后启动的应用生效。",
   "file dialogs in this window (3 processes)": "文件对话框在本窗口内（3 个进程）",
   "file dialogs on your main desktop — {why}": "文件对话框在你的主桌面 — {why}",
-  "OFF (the default): a window an agent opens — its own browser, an app it starts, a second window of that app, its live view — is placed beside the agent's chat (or on that chat's desktop), behind what you are doing, and its taskbar entry pulses; it never takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.": "关闭（默认）：agent 打开的窗口——它自己的浏览器、它启动的应用、该应用的第二个窗口、它的实况窗口——放在该 agent 的对话旁边（或那个对话所在的桌面），在你正在做的事情后面，任务栏条目闪一下；它从不夺走你的焦点，也不切换你的桌面。开启：像以前一样切到前台并获得焦点。",
+  "OFF (the default): a window an agent opens — its own browser, an app it starts, a second window of that app, its live view, a Design it opens — is placed beside the agent's chat (or on that chat's desktop), behind what you are doing, and its taskbar entry pulses; it never takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.": "关闭（默认）：agent 打开的窗口——它自己的浏览器、它启动的应用、该应用的第二个窗口、它的实况窗口、它打开的设计——放在该 agent 的对话旁边（或那个对话所在的桌面），在你正在做的事情后面，任务栏条目闪一下；它从不夺走你的焦点，也不切换你的桌面。开启：像以前一样切到前台并获得焦点。",
   "This page is not https, so the browser gives it no microphone — open it over https, or on this computer at {url}": "这个页面不是 https，浏览器不给麦克风——用 https 打开，或在这台电脑上打开 {url}",
   "The browser refused the microphone — allow it in the site permissions in the address bar": "浏览器拒绝了麦克风——在地址栏的站点权限里允许",
   "No microphone was found on this device": "这台设备上没有找到麦克风",
@@ -9557,4 +9557,5 @@ export default {
   "Granted — the key is listed with this conversation in the Vault window": "已授权——保险库窗口里这把 key 下列着这个会话", // design q-046 (lane automation-keys-core)
   "Use an automation key you granted it": "用一把你授权给它的自动化 key", // design q-046 (lane automation-keys-core)
   "List its automation keys or their audit": "列出它的自动化 key 或审计记录", // design q-046 (lane automation-keys-core)
+  "{n} with a conversation link": "{n} 条带会话入口", // lane run-fold-channel-compact
 };

@@ -256,11 +256,14 @@ async function attach(wsUrl, w = 1280, h = 860) {
   const until = async (expr, ms = 10000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(80); } return false; };
   const mouse = (type, x, y) => cdp('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: type === 'mouseMoved' ? 0 : 1 });
   const clickSel = async (sel) => {
-    const r = await ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`);
+    // a toast can sit over the target (bottom of the page): wait until the point reaches the element itself — and the point is
+    // READ AGAIN at each look (lane race-sweep, B-f220: ⑨'s mic moved when the sheet's teach section rendered above the composer;
+    // a point computed once hit the proposal's text 8 s later, 7/34 on 2 cpus), the press going where the element is now
+    const at = () => ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); const x = b.left + b.width / 2, y = b.top + b.height / 2; const h = document.elementFromPoint(x, y); return { x, y, hit: !!h && (e === h || e.contains(h) || h.contains(e)) }; })()`);
+    let r = await at();
     if (!r) throw new Error('no element ' + sel);
-    // a toast can sit over the target (bottom of the page): wait until the point reaches the element itself
-    await until(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); const h = document.elementFromPoint(${r[0]}, ${r[1]}); return !!e && !!h && (e === h || e.contains(h) || h.contains(e)); })()`, 8000);
-    await mouse('mouseMoved', r[0], r[1]); await mouse('mousePressed', r[0], r[1]); await mouse('mouseReleased', r[0], r[1]);
+    for (const t0 = Date.now(); !r.hit && Date.now() - t0 < 8000;) { await sleep(80); r = (await at()) || r; }
+    await mouse('mouseMoved', r.x, r.y); await mouse('mousePressed', r.x, r.y); await mouse('mouseReleased', r.x, r.y);
   };
   const shot = async (file, sel = '#card') => {
     fs.mkdirSync(SHOTS, { recursive: true });
@@ -277,6 +280,9 @@ async function page(w, h, b = '') {
   p.targetId = tg.id;
   await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); } catch {} window.__errs = []; addEventListener('error', (e) => window.__errs.push(String(e.message))); addEventListener('unhandledrejection', (e) => window.__errs.push(String(e.reason && e.reason.stack || e.reason))); ${FAKE_MIC}` });
+  // lane race-sweep (B-f220): a dictation that never records says where its press went — every pointerdown / click (target,
+  // point, ms), the mic's point at the press, the status fetch — printed in dictate's throw
+  await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `window.__micT = { clicks: 0 }; (() => { const now = () => Math.round(performance.now()); const f = window.fetch; window.fetch = (u, o) => { const st = String(u).includes('/api/voice/status'); if (st) __micT.statusAsk = now(); const r = f(u, o); if (st) r.then(() => { __micT.statusGot = now(); }, () => { __micT.statusErr = now(); }); return r; }; addEventListener('click', (e) => { if (e.target && e.target.closest && e.target.closest('.chat-voice-btn')) { __micT.clicks++; __micT.clickAt = now(); } }, true); const tag = (e) => { const t = e.target; const c = t && (t.className && (t.className.baseVal != null ? t.className.baseVal : t.className)); return { x: Math.round(e.clientX), y: Math.round(e.clientY), t: now(), on: String(c || (t && t.tagName) || '') }; }; __micT.downs = []; __micT.anyClicks = []; addEventListener('pointerdown', (e) => { if (__micT.downs.length < 8) __micT.downs.push(tag(e)); }, true); addEventListener('click', (e) => { if (__micT.anyClicks.length < 8) __micT.anyClicks.push(tag(e)); }, true); })();` });
   await p.cdp('Emulation.setFocusEmulationEnabled', { enabled: true });
   await p.cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: w < 600 });
   await p.cdp('Page.navigate', { url: `${HUB}/${b ? '?b=' + b : ''}` });
@@ -285,14 +291,21 @@ async function page(w, h, b = '') {
   return p;
 }
 const MIC = '#frame .chat-voice-btn';
+// the sheet renders in two answers (renderVoiceSheet: /api/voice/status fills the account box and, connected, appends the teach
+// section; that section's /api/voice/teach then fills it): settled = the account box filled AND no teach section still waiting
+const SHEET_SETTLED = '(() => { const a = document.querySelector("#card .voice-account-box"); if (!a) return true; if (!a.childNodes.length) return false; const s = document.querySelector("#card .voice-teach"); return !s || !!s.querySelector(".voice-teach-head, .plugin-cfg-warn"); })()';
 const TA = `document.querySelector('#frame textarea')`;
 const writes = () => calls.filter((c) => c.p === '/v1/terms' || c.p === '/v1/context');
 async function dictate(p, conv, messages = null) {
   await p.ev(`(() => { window.__facts.conv = ${JSON.stringify(conv)}; ${messages ? `window.__facts.messages = ${JSON.stringify(messages)};` : ''} ${TA}.value = ''; ${TA}.focus(); return true; })()`);
   const n = calls.filter((c) => c.p === '/v1/dictate').length;
   await p.until(`document.querySelector(${JSON.stringify(MIC)}).offsetWidth > 0`, 5000); // lane voice-everywhere: the mic shows once /api/voice/status said on
+  // lane race-sweep (B-f220): the LAST EFFECT of the page's render — the sheet's teach section answered (its own fetch; until then
+  // its proposals can still land above the composer and move the mic)
+  await p.until(SHEET_SETTLED, 10000);
+  await p.ev(`(() => { const b = document.querySelector(${JSON.stringify(MIC)}).getBoundingClientRect(); window.__micT.pressAt = Math.round(performance.now()); window.__micT.micAt = [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; window.__micT.scrollY = Math.round(scrollY); return true; })()`);
   await p.clickSel(MIC);
-  if (!(await p.until(`document.querySelector(${JSON.stringify(MIC)}).classList.contains('recording')`))) throw new Error('the mic did not record: ' + JSON.stringify(await p.ev(`({ cls: document.querySelector(${JSON.stringify(MIC)}).className, chip: (document.querySelector('#frame .voice-chip')||{}).textContent, errs: window.__errs, top: (() => { const b = document.querySelector(${JSON.stringify(MIC)}).getBoundingClientRect(); const h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return h && (h.className || h.tagName); })() })`)));
+  if (!(await p.until(`document.querySelector(${JSON.stringify(MIC)}).classList.contains('recording')`))) throw new Error('the mic did not record: ' + JSON.stringify(await p.ev(`({ micT: window.__micT, paints: performance.getEntriesByType('paint').map((e) => [e.name, Math.round(e.startTime)]), nowMs: Math.round(performance.now()), vis: document.visibilityState, focus: document.hasFocus(), cls: document.querySelector(${JSON.stringify(MIC)}).className, chip: (document.querySelector('#frame .voice-chip')||{}).textContent, errs: window.__errs, top: (() => { const b = document.querySelector(${JSON.stringify(MIC)}).getBoundingClientRect(); const h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return h && (h.className || h.tagName); })() })`)));
   await sleep(300);
   await p.clickSel(`${MIC} .voice-time`);
   const inserted = await p.until(`${TA}.value.includes('DICTATED')`);

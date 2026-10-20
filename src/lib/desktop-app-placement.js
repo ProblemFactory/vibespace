@@ -27,12 +27,24 @@ export function agentBrowserPlacement({ msg = null, chats = [], phone = false, v
 // desktop model like any off-desk window) | 'own' (a free window behind the active one; on a phone never the shown one) |
 // 'none'; focus; deskSwitch (always false); behind (stack it under the active window); minimize (the person is mid-act: it
 // waits on the taskbar); badge (the taskbar entry pulses once — no toast, no For-you: a browser an agent opens is routine).
+// THE TWO BROADCASTS THAT PLACE A WINDOW (an agent's doing, told apart by shape — no door a PERSON drives reaches here):
+//   · `desktop-app-opened` {origin≠'user', appId, sessionId} — the agent's desktop-app browser / app (lane e2a)
+//   · `design-open` {openSpec.action:'openDesign', dir, sessionId} — the agent's `vibespace-design new|open|add|sync`
+//     (design-window.js installDesignWindow; a chat card / the home / the gear / a layout replay call openDesign direct)
+// Returns the chat's sessionId to place beside, or null when the broadcast is neither (D3: a person's origin opens nothing).
+export function agentPlacedSession(msg) {
+  if (!msg) return null;
+  if (msg.type === 'desktop-app-opened') return msg.origin && msg.origin !== 'user' && msg.appId && msg.sessionId ? String(msg.sessionId) : null;
+  if (msg.type === 'design-open') { const s = msg.openSpec; const sid = msg.sessionId || (s && s.sessionId); return s && s.action === 'openDesign' && s.dir && sid ? String(sid) : null; }
+  return null;
+}
 export function agentWindowPlacement({ msg = null, chats = [], active = null, desk = null, phone = false, visible = true, interacting = false, front = false } = {}) {
   const base = { focus: false, deskSwitch: false, behind: false, minimize: false, badge: false };
-  if (!msg || msg.type !== 'desktop-app-opened' || !msg.origin || msg.origin === 'user' || !msg.appId || !msg.sessionId) return { ...base, act: 'none', why: 'not-agent' };
-  if (front) { const old = agentBrowserPlacement({ msg: { ...msg, origin: AGENT_BROWSER_ORIGIN }, chats, phone, visible }); return { ...base, ...old, focus: old.act !== 'none', why: old.why + '+front' }; }
+  const sid = agentPlacedSession(msg);
+  if (!sid) return { ...base, act: 'none', why: 'not-agent' };
+  if (front) { const old = agentBrowserPlacement({ msg: { ...msg, type: 'desktop-app-opened', origin: AGENT_BROWSER_ORIGIN, appId: msg.appId || 'design', sessionId: sid }, chats, phone, visible }); return { ...base, ...old, focus: old.act !== 'none', why: old.why + '+front' }; }
   if (!visible) return { ...base, act: 'none', why: 'hidden' };
-  const chat = (Array.isArray(chats) ? chats : []).find((c) => c && c.sessionId === msg.sessionId);
+  const chat = (Array.isArray(chats) ? chats : []).find((c) => c && c.sessionId === sid);
   if (!chat) return { ...base, act: 'none', why: 'not-here' }; // D3: a client without that chat opens nothing
   const shown = !chat.minimized && !chat.hidden;
   if (phone) return shown ? { ...base, act: 'own', fromWin: chat.winId, badge: true, why: 'phone-quiet' } : { ...base, act: 'none', why: 'phone-not-showing' };

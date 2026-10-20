@@ -19,7 +19,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const MUT = mutantCopies('apps-witness', ROOT);   // lane race-sweep §4b: the pre-fix re-list rule, a patched copy outside the tree
 const W = require('../src/app-witness.js');
 const M = require('../src/desktop-apps.js');
 const AS = require('../src/app-serve.js');
@@ -133,6 +137,48 @@ fs.mkdirSync(path.join(tmp, 'data'), { recursive: true });
   const r = await AS.runAppOp({ ...apps, plan: async () => ({}), recordUserKind: async () => ({ entry: { id: 'x' } }), refreshWitness: async (o) => { calls.push(`refresh:${o.reason}`); return apps.refreshWitness(o); } }, 'app-install', { kind: 'uv-tool', name: 'x', why: 'w', by: 'user' });
   await new Promise((r2) => setTimeout(r2, 5));
   ok(r.ok && calls.includes('refresh:install'), 'an install through the door re-lists what is installed (runAppOp)', r);
+}
+
+// lane race-sweep (B-0c04, the .278 mirror's test-app-register F1 → F4 cascade): a Forget re-listed by JOINING the listing the
+// adopt before it had started — that listing read the index first, so the forgotten program stayed hidden. Made deterministic:
+// listing #1 is held in its dpkg -S (after it read the entries and the index), the change lands, the re-list is asked, #1 goes on
+console.log('§4b a FORCED re-list asked while a listing runs lists AGAIN — never the answer of a listing that began before it');
+{
+  const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-witness-b-'));
+  const dB = { user: path.join(tmpB, 'home/.local/share/applications'), system: path.join(tmpB, 'usr/share/applications'), flatpakUser: path.join(tmpB, 'home/.local/share/flatpak/app'), flatpakSystem: path.join(tmpB, 'var/lib/flatpak/app') };
+  for (const d of Object.values(dB)) fs.mkdirSync(d, { recursive: true });
+  fs.mkdirSync(path.join(tmpB, 'data'), { recursive: true });
+  fs.writeFileSync(path.join(dB.system, 'calc.desktop'), de({ Name: 'Calculator', Exec: 'gnome-calculator' }));   // a system entry: each listing asks dpkg -S ONCE, after it read everything
+  const lists = [];
+  let hold = null, reached = null;
+  const runnerB = async (cmd, args) => {
+    if (cmd === 'flatpak') { if (args.includes('--user')) lists.push('listing'); return { code: 0, stdout: '', stderr: '' }; }
+    if (cmd === 'dpkg' && hold) { const h = hold; hold = null; reached(); await h; }
+    return { code: 1, stdout: '', stderr: '' };
+  };
+  const judge = async (S, tag) => {
+    const a = S.create({ home: path.join(tmpB, 'home'), stateDir: path.join(tmpB, 'data-' + tag), env: { PATH: '/usr/bin:/bin', HOME: path.join(tmpB, 'home') }, log: { warn() { }, info() { } }, runner: runnerB, now: () => clock, witnessDirs: dB, markerDir: path.join(tmpB, 'no-base') });
+    fs.mkdirSync(path.join(tmpB, 'data-' + tag), { recursive: true });
+    try { fs.unlinkSync(path.join(dB.user, 'fresh.desktop')); } catch { /* first arm */ }
+    lists.length = 0;
+    let release; hold = new Promise((r) => { release = r; }); const at = new Promise((r) => { reached = r; });
+    const first = a.refreshWitness({ reason: 'install' });                                       // listing #1 …
+    await at;                                                                                     // … has read the entries: it waits in dpkg -S
+    fs.writeFileSync(path.join(dB.user, 'fresh.desktop'), de({ Name: 'Fresh', Exec: '/opt/fresh/fresh' }));   // the change
+    const again = a.refreshWitness({ reason: 'recheck' });                                       // asked AFTER it, while #1 still runs
+    release();
+    await first; await again;
+    return { fresh: a.witnessRows().some((r) => r.label === 'Fresh'), lists: lists.length };
+  };
+  const fx = await judge(AS, 'fix');
+  ok(fx.fresh && fx.lists === 2, `the re-list asked while listing #1 ran waited for it, then listed AGAIN (${fx.lists} listings) — the change made after #1 read the entries is in the answer`, fx);
+  const SRC = fs.readFileSync(path.join(ROOT, 'src/app-serve.js'), 'utf8');
+  const needle = "    if (o.refresh && witnessFlight && reason !== 'open') await within(witnessFlight);\n";
+  ok(SRC.split(needle).length === 2, 'ANCHOR: the forced re-list waits for a running listing, once');
+  const pre = MUT.load('src/app-serve.js', SRC.replace(needle, '').replace("{ refresh: v.due, wait: true }", '{ refresh: v.due && !witnessFlight, wait: true }'), 'join-flight');
+  const px = await judge(pre, 'pre');
+  ok(!px.fresh && px.lists === 1, `CONTROL: the pre-fix rule (one listing in flight; a re-list JOINS it) answers listing #1's rows — the change is missing (${px.lists} listing) — the mirror's F1`, px);
+  fs.rmSync(tmpB, { recursive: true, force: true });
 }
 
 console.log('§5 the registry and the launch door');
@@ -254,6 +300,7 @@ console.log('§7 lane apps-dialog-fast — the open never waits; "outside the do
   fs.rmSync(t7, { recursive: true, force: true });
 }
 
+for (const r of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${fail ? '✗' : '✓'} test-apps-witness: ${pass} passed, ${fail} failed (${Date.now() - T0} ms)`);
 process.exit(fail ? 1 : 0);

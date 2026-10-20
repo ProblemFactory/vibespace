@@ -433,7 +433,10 @@ console.log('⑦ relay-only ⑧ no source');
   await p.ev(`window.__open(${JSON.stringify(M)})`);
   const up = await playing(p);
   const via = await p.until(`/经 hub 中转 · UDP$/.test(${NUM})`, 10000);
-  const f = relayOnly.facts('win-a')[0] || {};
+  // lane race-sweep (B-6b74, 1/4 at box load ~38): the numbers the VIEWER shows and the hub record's `path` are two effects — the
+  // path lands when the viewer reports it (notePath) — so the record is read once IT says so, never right after the numbers
+  const recordPath = async (hub) => { for (const t0 = Date.now(); Date.now() - t0 < 10000; await sleep(100)) { const r = hub.facts('win-a')[0]; if (r && r.path) return r; } return hub.facts('win-a')[0] || {}; };
+  const f = await recordPath(relayOnly);
   ok(up && via && f.path === 'relay' && f.relay && f.relay.via === 'udp' && f.relay.leg.down > 0, '⑦ relay-only: the daemon\'s own UDP leg carries it — the numbers say 经 hub 中转 · UDP, the record says path relay, via udp', { up, via, path: f.path, relay: f.relay });
   const fw = await fwCopyAt(p);
   ok(fw.up && /^机器防火墙挡住直连，经 hub 中转/.test(fw.sf.fw || '') && fw.sf.fwCopy === '复制管理员命令' && fw.sf.fwTitle === FW_RULE && fw.reach.ahead === 0 && fw.reach.inView && fw.reach.hit && fw.copied === FW_RULE && /已复制，请粘贴到 WIN-DESK1 上以管理员身份打开的 PowerShell/.test(fw.toast), '⑦ the machine\'s firewall blocks the direct path: the strip says 机器防火墙挡住直连，经 hub 中转 (nothing long ahead of it — the numbers left the strip), its 复制管理员命令 in view (no sideways scroll), and it copies the netsh rule for its node.exe (the toast says where to paste it — VibeSpace never runs it)', fw);
@@ -459,8 +462,8 @@ console.log('⑦ relay-only ⑧ no source');
   await pl.ev(`window.__open(${JSON.stringify(M)})`);
   const upL = await playing(pl);
   const viaL = await pl.until(`/经设备链路$/.test(${NUM})`, 10000);
-  const fl = linkOnly.facts('win-a')[0] || {};
-  ok(upL && viaL && fl.path === 'relay' && fl.relay && fl.relay.via === 'link' && fl.relay.leg === null, '⑦ a hub that offers no leg: the relay over the device link — the numbers say 经设备链路, the record via link', { upL, viaL, relay: fl.relay });
+  const fl = await recordPath(linkOnly);
+  ok(upL && viaL && fl.path === 'relay' && fl.relay && fl.relay.via === 'link' && fl.relay.leg === null, '⑦ a hub that offers no leg: the relay over the device link — the numbers say 经设备链路, the record via link', { upL, viaL, path: fl.path, relay: fl.relay });
   await pl.shot('relay-link.png', WIN);
   await pl.close();
   linkOnly.shutdown();
@@ -731,12 +734,25 @@ console.log('⑪ ONE WINDOW as the stream: the stats row, 「还原它」 only w
   ok(said2 && rowBack && pid2 !== pid1 && await untilN(() => !alive(pid2), 4000) && winHub.facts('win-a').length === 0 && /window source ended: stopped_in_list/.test(agentLog()), '⑪ the picker\'s 「停止」 ends that window\'s stream on the machine (stopped_in_list); the open window says 已停止串流, the row offers 串流这个窗口 again', { said2, rowBack, pid2 });
   await p.key('Escape', 'Escape', 27);
   // the window's ×
-  const ag2 = await centreOf(`${WWIN} .machine-app-say button`);
+  // lane race-sweep (B-6b74, 3/3 on 2 cpus): the press on 「重新串流」 went to the picker the Escape was still closing — the
+  // stream never came back (replays false) and the × had nothing to end. The press waits for ITS place: the button's centre
+  // is the button (the Escape's last effect for this press), then it is pressed
+  const SAY = `${WWIN} .machine-app-say button`;
+  const sayReached = await p.until(`(() => { const e = document.querySelector(${JSON.stringify(SAY)}); if (!e) return false; const b = e.getBoundingClientRect(); const h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!h && (h === e || e.contains(h)); })()`, 10000);
+  const sayCover = sayReached ? null : await p.ev(`(() => { const e = document.querySelector(${JSON.stringify(SAY)}); if (!e) return { say: 'gone' }; const b = e.getBoundingClientRect(); const h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); const c = (x) => x && String((x.className && (x.className.baseVal != null ? x.className.baseVal : x.className)) || x.tagName); return { at: [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)], w: Math.round(b.width), cover: c(h), coverUp: c(h && h.parentElement), picker: !!document.querySelector('.machine-window-picker'), active: c(document.activeElement) }; })()`);
+  const ag2 = await centreOf(SAY);
   await p.click(ag2[0], ag2[1]);
-  await plays();
+  const replays = await plays();
   const pid3 = helperPid();
+  const ended0 = (agentLog().match(/window source ended: [^\n]*/g) || []).length;
   await p.ev('window.__closeAll()');
-  ok(await untilN(() => winHub.facts('win-a').length === 0, 3000) && await untilN(() => !alive(pid3), 4000) && await untilN(() => /window source ended: closed — helper exit 0/.test(agentLog()), 3000), '⑪ the window\'s × ends the session and the helper on the machine (closed, in the agent\'s log)', { pid3 });
+  // lane race-sweep (B-6b74, 1/10 on 2 cpus): ONE wait, for the LAST EFFECT — the agent's "window source ended" line, written
+  // only after every child's exit — then its causes read at once; the old three round waits (3 s / 4 s / 3 s, the same 10 s in
+  // all) raced each step, and kill(pid, 0) still answers for a zombie
+  const endedLine = () => (agentLog().match(/window source ended: [^\n]*/g) || []).slice(ended0)[0] || null;
+  await untilN(() => !!endedLine(), 10000);
+  const xState = { sayReached, sayCover, replays, pid3, ended: endedLine(), facts: winHub.facts('win-a').length, alive: alive(pid3) };
+  ok(xState.replays && /^window source ended: closed — helper exit 0/.test(xState.ended || '') && xState.facts === 0 && !xState.alive, '⑪ the window\'s × ends the session and the helper on the machine (closed, in the agent\'s log)', xState);
   await p.close();
   // a viewer that vanishes: its tab gone, not a word — the closed long poll ⇒ stopped within 5 s
   const vanish = async (hub) => {

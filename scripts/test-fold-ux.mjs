@@ -18,13 +18,22 @@
 //     viewport top); the footer collapses and lands the header the same way;
 //     the footer exists only while expanded; the bar hides while the header
 //     is on screen (negative control) and "jump to top" keeps the run open.
+//   lane run-fold-channel-compact (the owner, 2026-10-20: 「这个地方展开和收起是完全一样的，这是对的吗」 — a run of
+//     channel-search Bash cards drew the same open and closed): the owner's shape (5 Bash, 4 with conversation rows
+//     from the channel witness + 1 plain failed grep) ⇒ closed: the 4 are ONE line each (head + the command's first
+//     words + their rows as chips, the bodies hidden, < 1/3 of their open height), the plain one hidden, the header
+//     says 「· 4 条带会话入口」; open ⇒ whole; closed again ⇒ the SAME row elements, a REAL click on one still jumps;
+//     a run of ONLY touched cards gets no header (whole); RED CONTROL: the pre-lane rule on a patched bundle
+//     (pairing-ui-harness buildPatchedBundle) ⇒ closed height == open height.
 // Run: node scripts/test-fold-ux.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs'; // lane run-fold-channel-compact: the RED CONTROL's patched copy lives outside the checkout
+import { buildPatchedBundle } from './pairing-ui-harness.mjs'; // …built into a client bundle the control page is served
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -75,6 +84,21 @@ check('countKinds zero-fills every kind and still counts an unlisted one (never 
   return S.RUN_KINDS.every((k) => Number.isFinite(c[k])) && c.lookup === 1 && c.bash === 2 && c.brandnew === 1 && c.mcp === 0;
 })());
 check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKinds(['read', 'read']), files: ['a.js', 'b.js', 'c.js', 'd.js', 'e.js'], running: true }, t) === '2 file reads — a.js, b.js, c.js, d.js, +1 · running…');
+// lane run-fold-channel-compact: the members a closed fold keeps on screen are SAID ("· N with a conversation link"),
+// and a compact card's one-line head names the first words of its command
+{
+  const ZH = (await import(path.join(repo, 'src/lib/i18n-zh.js'))).default, JA = (await import(path.join(repo, 'src/lib/i18n-ja.js'))).default;
+  const tr = (d) => (k, p) => t(d[k] || k, p);
+  const owner = { byKind: S.countKinds(['bash', 'bash', 'bash', 'bash', 'bash']), mcpServers: new Set(), nErr: 1, linked: 4 };
+  const words = [S.runSummaryLabel(owner, t), S.runSummaryLabel(owner, tr(ZH)), S.runSummaryLabel(owner, tr(JA))];
+  check('linked part: the owner\'s run reads "5 Bash · 1 ✗ · 4 with a conversation link" / 「5 条 Bash · 1 ✗ · 4 条带会话入口」 / 「Bash 5 件 · 1 ✗ · 会話リンク付き 4 件」',
+    JSON.stringify(words) === JSON.stringify(['5 Bash · 1 ✗ · 4 with a conversation link', '5 条 Bash · 1 ✗ · 4 条带会话入口', 'Bash 5 件 · 1 ✗ · 会話リンク付き 4 件']), words);
+  check('…no linked member ⇒ no part (every other run\'s label byte-identical)', S.runSummaryLabel({ ...owner, linked: 0 }, t) === '5 Bash · 1 ✗' && S.runSummaryLabel({ ...owner, linked: undefined }, t) === '5 Bash · 1 ✗');
+  check('commandHeadWords: the first non-blank line, whitespace folded, capped at HEAD_WORDS_MAX code points with "…"; "" for no command',
+    S.commandHeadWords('\n  vibespace-channels   search "季度"\t--all\nsecond line') === 'vibespace-channels search "季度" --all'
+    && [...S.commandHeadWords('词'.repeat(300))].length === S.HEAD_WORDS_MAX && S.commandHeadWords('词'.repeat(300)).endsWith('…')
+    && S.commandHeadWords('ls -la') === 'ls -la' && S.commandHeadWords('') === '' && S.commandHeadWords(undefined) === '' && S.commandHeadWords('\n \n') === '');
+}
 check('mcpParts splits mcp__server__tool and rejects the rest', JSON.stringify(S.mcpParts('mcp__a__b_c')) === '{"server":"a","tool":"b_c"}' && S.mcpParts('Bash') === null && S.mcpParts('') === null);
 check('the pure module imports nothing but PURE rules (DOM-free by construction; B-40f8: src/assistant-note.js; lane exit-calls-in-history: src/exit-call.js)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/(?:assistant-note|exit-call)\.js';/.test(l)));
 
@@ -125,6 +149,13 @@ check('memberKind delegates to messageKind; folding gates on foldToggleFor', /me
 check('chat-renderers re-exports the ONE mcpParts from the pure module', /import \{ mcpParts \} from '\.\/chat-run-summary\.js';/.test(read('src/lib/chat-renderers.js')) && /export \{ mcpParts \};/.test(read('src/lib/chat-renderers.js')));
 // legibility affordances
 check('expanded members carry the rail classes; collapsed runs carry none (one _setRunOpen writer)', /el\.classList\.toggle\('chat-run-member', run\.open\);/.test(cv) && /el\.classList\.toggle\('chat-run-first', run\.open && i === 0\);/.test(cv) && /el\.classList\.toggle\('chat-run-last', run\.open && i === n - 1\);/.test(cv));
+check('lane run-fold-channel-compact WIRING: a LINKED member (channel rows — never a peer card, a machine card or an image) is compact exactly while its run is closed; every pass strips the class first; a swap carries it (fold-neutral, inc-mudv05ja); the all-exempt run still returns BEFORE any header is built (the dead-control law)',
+  /const cc = !run\.open && !!run\.linked\?\.has\(el\);\n\s*if \(cc\) this\._compactHead\(el\);\n\s*el\.classList\.toggle\('chat-channel-compact', cc\);/.test(cv)
+  && /list\.querySelectorAll\(':scope > \.chat-channel-compact'\)\.forEach\(\(el\) => el\.classList\.remove\('chat-channel-compact'\)\);/.test(cv)
+  && /else if \(mc\) inline\.delete\(el\); \}\);\n\s*if \(inline\.size === members\.length\) \{ run = \[\]; runKind = null; return; \}\n[\s\S]{0,1400}?const linked = new Set\(members\.filter\(\(el, i\) => inline\.has\(el\) && el\.classList\.contains\('chat-channel-touched'\)\n\s*&& !el\.classList\.contains\('chat-peer-folded'\) && !machineCards\[i\] && memberKind\(el\) !== 'image'\)\);\n\s*if \(members\.length >= /.test(cv)
+  && /linked: linked\.size,/.test(cv) && /\n\s*rec\.linked = linked;/.test(cv)
+  && /const RUN_CLASSES = \['chat-run-collapsed', 'chat-channel-compact',/.test(cv) && /if \(run\.linked\?\.has\(oldEl\)\) \{ run\.linked\.delete\(oldEl\); run\.linked\.add\(newEl\); \}/.test(cv)
+  && /_compactHead\(el\) \{[\s\S]{0,300}if \(!head \|\| head\.querySelector\(':scope > \.chat-channel-compact-cmd'\)\) return;[\s\S]{0,400}s\.textContent = words;/.test(cv));
 check('the footer is a non-.chat-msg list child removed by every runs pass with the headers', /querySelectorAll\(':scope > \.chat-run-header, :scope > \.chat-run-footer'\)\.forEach\(\(h\) => h\.remove\(\)\);/.test(cv) && /f\.className = 'chat-run-footer';/.test(cv));
 check('trims still count .chat-msg only (header/footer invisible to the window accounting) — ONE trim (_trimEdge, inc-mubvu3a4-x8sb) that both edges route through, selecting direct .chat-msg children', /querySelectorAll\(':scope > \.chat-msg:not\(\.chat-gap-msg\)'\)/.test(cv) && /_trimBottom\(\) \{ return this\._trimEdge\('bottom'\); \}/.test(cv) && /_trimTop\(\) \{ return this\._trimEdge\('top'\); \}/.test(cv));
 check('the floating bar lives on the .chat-view container, never in the list', /bar\.className = 'chat-run-bar hidden';[\s\S]{0,900}this\._container\.appendChild\(bar\);/.test(cv) && !/_messageList\.appendChild\(bar\)/.test(cv));
@@ -171,6 +202,9 @@ check('_withViewportAnchor + the seek gap anchor skip run chrome (header/footer 
   && /chat-run-header'\) \|\| gapA\.classList\?\.contains\('chat-run-footer'\)/.test(read('src/lib/chat-view-seek.js')));
 check('no Esc binding for the run chrome (data-popover owns Esc)', !/Escape/.test(barBody) && !/key === 'Escape'[\s\S]{0,200}chat-run/.test(cv));
 const css = read('public/chat.css');
+check('chat.css (lane run-fold-channel-compact): a compact card hides every body but its head, its rows and an API card (a raw call awaiting the person is never folded away); the command words draw only while compact',
+  /\.chat-msg\.chat-channel-compact \.chat-tool-use > :not\(\.chat-tool-label\):not\(\.chat-channel-touches\):not\(\.chat-api-cards\) \{ display: none; \}/.test(css)
+  && /\.chat-channel-compact-cmd \{ display: none; \}/.test(css) && /\.chat-msg\.chat-channel-compact \.chat-channel-compact-cmd \{ display: inline;/.test(css));
 check('chat.css: rail on members in BOTH role-indicator families, footer + bar styled with theme vars only', /\.chat-msg\.chat-run-member \{/.test(css) && /\[data-role-indicator="border"\] \.chat-msg\.chat-run-member \{/.test(css)
   && /\.chat-run-footer \{/.test(css) && /\.chat-run-bar \{/.test(css) && /\.chat-run-bar\.hidden \{ display: none; \}/.test(css)
   && !/chat-run-(member|footer|bar)[^}]*#[0-9a-f]{3,6}/i.test(css.slice(css.indexOf('Expanded-run legibility'))));
@@ -196,6 +230,8 @@ const fakeHome = `${wt}-home`;
 const CWD = `${wt}-cwd`;
 const SID = 'f01d0000-0000-4000-8000-00000000ffee';
 const IMG_SID = 'f01d0000-0000-4000-8000-00000000f11e';
+const CH_SID = 'f01d0000-0000-4000-8000-00000000c0c7'; // lane run-fold-channel-compact: the owner's run of channel searches
+const CH_PLAIN = 2; // the plain (failed) card of that run — the one card without conversation rows
 const IMG_PATH = `${CWD}/shot.png`;
 // a real 8×8 opaque PNG — the thumbnail must actually decode (naturalWidth > 0)
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGMwnnkGK2IYWhIAtNFmAVCW3mYAAAAASUVORK5CYII=';
@@ -268,6 +304,31 @@ const NBASH = 28, NTAIL = 8, NMCP = 2;
   }
   ipush({ type: 'assistant', message: { id: `imsg_${m}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Looks right.' }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: `iaf-${m++}`, timestamp: its() });
   fs.writeFileSync(path.join(proj, `${IMG_SID}.jsonl`), il.join('\n') + '\n');
+
+  // ── lane run-fold-channel-compact: THE OWNER'S RUN — 5 Bash, four of them `vibespace-channels search` (the channel
+  // witness binds conversation rows to those cards) and one plain grep that failed (「5 条 Bash · 1 ✕」); a text turn;
+  // then a run of ONLY two searches (every member exempt ⇒ no header); a text turn closes it
+  const cl = [];
+  let cts0 = Date.now() - 1200e3;
+  const cts = () => new Date((cts0 += 5e3)).toISOString();
+  let q = 0;
+  const cpush = (o) => cl.push(JSON.stringify(o));
+  const HITS = 'oc_7f3a Orrin · 2026-10-19 ·「季度汇报的数字我放在表里了」\n'.repeat(10);
+  const bash = (k, command, out, isErr) => {
+    cpush({ type: 'assistant', message: { id: `cmsg_${q}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: `toolu_c${k}`, name: 'Bash', input: { command, description: 'search the chats' } }], usage: {} }, uuid: `ctu-${q++}`, timestamp: cts() });
+    cpush({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_c${k}`, is_error: !!isErr, content: out }] }, uuid: `ctr-${q++}`, timestamp: cts() });
+  };
+  const say = (text) => cpush({ type: 'assistant', message: { id: `cmsg_${q}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: `ca-${q++}`, timestamp: cts() });
+  cpush({ type: 'user', message: { role: 'user', content: 'find the quarterly report thread' }, uuid: `cu-${q++}`, timestamp: cts() });
+  say('Searching the chats.');
+  for (let k = 0; k < 5; k++) {
+    if (k === CH_PLAIN) bash(k, 'grep -c 季度 notes.txt', 'grep: notes.txt: No such file or directory\n', true);
+    else bash(k, `vibespace-channels search "季度汇报 ${k}" --adapter lark --limit 20`, `4 conversations\n${HITS}`);
+  }
+  say("Found it in Orrin's chat.");
+  for (const k of [5, 6]) bash(k, `vibespace-channels search "季度汇报 ${k}" --adapter lark`, `1 conversation\n${HITS}`);
+  say('Both checked.');
+  fs.writeFileSync(path.join(proj, `${CH_SID}.jsonl`), cl.join('\n') + '\n');
 }
 // ── F5 fixture (2026-09-26): workflow RUN DIRS in the real files' KEY shapes (values synthetic) under
 // the view's own session — the owner's shape: 5 phases (1/7/1/1/1), 11 started, 10 results, no
@@ -307,6 +368,7 @@ const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_P
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
   try { srv.kill('SIGKILL'); } catch {}
+  for (const r of [wt, fakeHome, CWD, `${wt}-chrome`]) { try { endRootedProcesses(r); } catch {} } // §57b: whatever the server started (its detached device daemon) ends with it
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
   for (const d of [`${wt}-chrome`, fakeHome, CWD]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
@@ -926,6 +988,183 @@ check(`F5 (lane Q verify): the stalled run WRITES AGAIN ⇒ its card is back to 
   f5back?.back?.text === '⟳ 运行中' && !/\bwarn\b/.test(f5back.back.cls) && f5back.backMs <= 22000 && f5back.tracked === true && f5back.stalledFlag === false && f5back.inRunning === true, JSON.stringify(f5back));
 check('CONTROL (the pre-fix drop, done by hand on the twin run): its files were written at the same instant, but untracked it still reads 已中断 after the same wait — the leg sees the defect',
   f5back?.twin?.text === '已中断' && /\bwarn\b/.test(f5back.twin.cls) && f5back.twinTracked === false, JSON.stringify(f5back));
+// ── lane run-fold-channel-compact (the owner, 2026-10-20 01:4xZ, two screenshots of one run 「▸ 5 条 Bash · 1 ✕」 closed
+// and 「▾」 open — identical: 「这个地方展开和收起是完全一样的，这是对的吗」). The run's channel-search cards carry
+// conversation rows, the §26 exemption kept them WHOLE inside the fold, and the fold hid one small card. The witness's
+// touches arrive through the view's OWN door (the channel-touch view's onTouch — the 'channel-touch' ws frame's
+// receiver) and bind to the cards by time like every real touch. The page is zh here (the F5 legs).
+const CH_KIT = `(() => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const findCv = () => [...window.app.sessions.values()].find((s) => s && s._messageList && s._messageList.querySelector(':scope > .chat-msg[data-tool-id="toolu_c0"]'));
+  const NAMES = { A: 'Orrin', B: 'Quella', C: '季度汇报群', D: 'Ops room' };
+  window.__ch = {
+    async open() {
+      let cv = findCv();
+      if (!cv) window.app.viewSession(${JSON.stringify(CH_SID)}, ${JSON.stringify(CWD)}, 'channel fold');
+      for (let i = 0; i < 80 && !(cv = findCv()); i++) await sleep(250);
+      if (!cv) return { err: 'no channel ChatView', ids: [...window.app.sessions.values()].map((s) => s && s.sessionId).slice(0, 8) };
+      this.cv = cv; this.list = cv._messageList;
+      for (let i = 0; i < 40 && !(this.card(0) && this.card(6)); i++) await sleep(150);
+      await sleep(600);
+      const touches = [];
+      const T = (k, c, op, extra) => touches.push({ id: 'tch-' + k + c + op, op, adapterId: 'lark', convId: 'oc_' + c, title: NAMES[c], account: '飞书', kind: 'p2p', count: op === 'read' ? 400 : 1, at: Number(this.card(k).dataset.ts) + 2000, ...(extra || {}) });
+      T(0, 'A', 'read'); T(0, 'A', 'search', { query: '季度汇报 0' });
+      T(1, 'B', 'read');
+      for (const c of 'ABCD') T(3, c, 'read');   // four conversations ⇒ three rows + "+1 more"
+      T(4, 'C', 'read'); T(4, 'C', 'search', { query: '季度汇报 4' });
+      T(5, 'A', 'read'); T(6, 'B', 'read');
+      cv._channelTouches.onTouch({ sessionId: cv.sessionId, touches });
+      const want = [0, 1, 3, 4, 5, 6];
+      for (let i = 0; i < 60 && !want.every((k) => this.card(k).classList.contains('chat-channel-touched')); i++) await sleep(100);
+      await sleep(500);
+      return { ok: want.every((k) => this.card(k).classList.contains('chat-channel-touched')), plainTouched: this.card(${CH_PLAIN}).classList.contains('chat-channel-touched') };
+    },
+    card(k) { return this.list && this.list.querySelector(':scope > .chat-msg[data-tool-id="toolu_c' + k + '"]'); },
+    run(k) { return (this.cv._runs || []).find((r) => r.members.includes(this.card(k))) || null; },
+    async toggle() { this.run(0).header.click(); await sleep(450); return this.state(); },
+    state() {
+      const vis = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+      const r1 = this.run(0);
+      const cards = [0, 1, 2, 3, 4, 5, 6].map((k) => {
+        const el = this.card(k);
+        const head = el.querySelector('.chat-tool-use > .chat-tool-label');
+        const box = el.querySelector('.chat-channel-touches');
+        const rows = [...el.querySelectorAll('.chat-channel-touch')];
+        const hr = head && head.getBoundingClientRect(), br = box && box.getBoundingClientRect();
+        const shown = rows.filter(vis);
+        const cmd = el.querySelector('.chat-channel-compact-cmd');
+        return { k, h: Math.round(el.getBoundingClientRect().height * 10) / 10, display: getComputedStyle(el).display,
+          compact: el.classList.contains('chat-channel-compact'), collapsed: el.classList.contains('chat-run-collapsed'),
+          headVis: vis(head), cmd: vis(cmd) ? cmd.textContent : '', rows: rows.length, rowsVis: shown.length,
+          rowsClipped: br ? shown.filter((r) => { const rr = r.getBoundingClientRect(); return rr.right > br.right + 1 || rr.width < 24; }).length : -1,
+          oneLine: !!hr && shown.length > 0 && shown.every((r) => { const rr = r.getBoundingClientRect(); const mid = (rr.top + rr.bottom) / 2; return mid > hr.top - 4 && mid < hr.bottom + 4; }),
+          more: vis(el.querySelector('.chat-channel-touches-more')),
+          bodies: el.querySelectorAll('.chat-tool-use > details').length, bodiesVis: [...el.querySelectorAll('.chat-tool-use > details')].filter(vis).length,
+          overflowX: Math.round(el.scrollWidth - el.clientWidth) };
+      });
+      const top = r1 && r1.header ? r1.header.getBoundingClientRect().top : 0;
+      const lastEl = r1 ? (r1.footer && r1.footer.isConnected ? r1.footer : r1.members[r1.members.length - 1]) : null;
+      return { heads: this.list.querySelectorAll(':scope > .chat-run-header').length, header: !!(r1 && r1.header), open: !!(r1 && r1.open),
+        label: (r1 && r1.header ? r1.header.querySelector('.chat-run-label').textContent : '').trim(), run2: !!this.run(5),
+        runH: lastEl ? Math.round(lastEl.getBoundingClientRect().bottom - top) : 0, cards };
+    },
+  };
+  return true;
+})()`;
+const TOUCHED = [0, 1, 3, 4];
+// VS_SHOT_DIR=<dir> saves the owner's run closed / open (and closed on the pre-lane control page)
+const chShot = async (call, ev, name) => {
+  if (!process.env.VS_SHOT_DIR) return;
+  await ev(`(() => { window.__ch.run(0).header.scrollIntoView({ block: 'start' }); return true; })()`); await sleep(250);
+  const r = await call('Page.captureScreenshot', { format: 'png' });
+  fs.mkdirSync(process.env.VS_SHOT_DIR, { recursive: true }); fs.writeFileSync(path.join(process.env.VS_SHOT_DIR, name), Buffer.from(r.result.data, 'base64'));
+};
+await evaljs(CH_KIT);
+const ch0 = await evaljs(`window.__ch.open()`);
+check('channel run fixture: the witness bound conversation rows to the 4 searches + the 2 of the second run (through the view\'s own onTouch door), never to the plain grep', ch0?.ok && ch0.plainTouched === false, JSON.stringify(ch0));
+const chC = await evaljs(`window.__ch.state()`);
+await chShot(cdp, evaljs, 'channel-run-closed.png');
+const cardsOf = (st, ks) => ks.map((k) => st?.cards?.[k]).filter(Boolean);
+check(`CLOSED (the default): ONE header over the owner's run, and it says what stays — 「${chC?.label}」 names 「4 条带会话入口」 beside 「5 条 Bash · 1 ✗」`,
+  chC?.header && !chC.open && chC.label === '5 条 Bash · 1 ✗ · 4 条带会话入口', JSON.stringify({ label: chC?.label, header: chC?.header, open: chC?.open }));
+check('CLOSED: the 4 touched cards are COMPACT and on screen — the head drawn with the first words of the command, every row visible and inside its card, the input/output bodies hidden',
+  cardsOf(chC, TOUCHED).length === 4 && cardsOf(chC, TOUCHED).every((c) => c.compact && !c.collapsed && c.display !== 'none' && c.headVis && /^vibespace-channels search "季度汇报 \d" --adapter lark/.test(c.cmd)
+    && c.rows > 0 && c.rowsVis === c.rows && c.rowsClipped === 0 && c.bodies === 2 && c.bodiesVis === 0),
+  JSON.stringify(cardsOf(chC, TOUCHED)));
+check('CLOSED: each compact card is ONE line (its rows ride the head\'s line; the card with four conversations keeps its "+1 more"), never wider than its card',
+  cardsOf(chC, TOUCHED).every((c) => c.oneLine && c.overflowX <= 1) && chC.cards[3].rows === 3 && chC.cards[3].more, JSON.stringify(cardsOf(chC, TOUCHED).map((c) => ({ k: c.k, oneLine: c.oneLine, ox: c.overflowX, rows: c.rows, more: c.more }))));
+check('CLOSED: the plain card (no conversation rows) is folded away (display:none)', chC?.cards?.[CH_PLAIN]?.collapsed && chC.cards[CH_PLAIN].display === 'none', JSON.stringify(chC?.cards?.[CH_PLAIN]));
+check('a run of ONLY touched cards gets NO header — the dead-control law, pinned (its two cards whole: not compact, bodies drawn)',
+  chC?.heads === 1 && !chC.run2 && cardsOf(chC, [5, 6]).every((c) => !c.compact && !c.collapsed && c.display !== 'none' && c.bodiesVis === 2 && c.cmd === ''), JSON.stringify({ heads: chC?.heads, run2: chC?.run2, c: cardsOf(chC, [5, 6]) }));
+const chO = await evaljs(`(async () => { window.__chRows = [...window.__ch.list.querySelectorAll(':scope > .chat-msg .chat-channel-touch')]; return window.__ch.toggle(); })()`);
+check('OPEN: all five whole — no card compact or folded, every body drawn, the command words gone from the head',
+  chO?.open && cardsOf(chO, [0, 1, 2, 3, 4]).every((c) => !c.compact && !c.collapsed && c.display !== 'none' && c.bodiesVis === 2 && c.cmd === ''), JSON.stringify(cardsOf(chO, [0, 1, 2, 3, 4])));
+await chShot(cdp, evaljs, 'channel-run-open.png');
+const ratio = TOUCHED.map((k) => (chO?.cards?.[k]?.h ? chC.cards[k].h / chO.cards[k].h : 1));
+check(`the fold changes the height it governs: each touched card closed < 1/3 of its open height (${TOUCHED.map((k, i) => `${chC?.cards?.[k]?.h}/${chO?.cards?.[k]?.h}=${ratio[i].toFixed(2)}`).join(', ')})`,
+  ratio.every((r) => r < 1 / 3), JSON.stringify(ratio));
+console.log(`    the owner's run (5 Bash · 4 touched): ${chC?.runH} px closed vs ${chO?.runH} px open (header → last member / footer)`);
+const chC2 = await evaljs(`(async () => { const st = await window.__ch.toggle(); const now = [...window.__ch.list.querySelectorAll(':scope > .chat-msg .chat-channel-touch')];
+  return { ...st, same: now.length === window.__chRows.length && now.every((e, i) => e === window.__chRows[i]) }; })()`);
+check('CLOSED AGAIN: compact again with the SAME row elements (CSS only — nothing re-rendered, the rows keep their listeners)',
+  !chC2?.open && chC2.same && cardsOf(chC2, TOUCHED).every((c) => c.compact && c.rowsVis === c.rows) && TOUCHED.every((k) => Math.abs(chC2.cards[k].h - chC.cards[k].h) <= 1), JSON.stringify({ same: chC2?.same, open: chC2?.open }));
+// THE JUMP from a compact row: a REAL press at the row's centre (what is under the pointer is that row) reaches the
+// row's own door — a read row opens the conversation, a search row the search; the run stays closed
+const jumpAt = async (k) => {
+  const at = await evaljs(`(async () => {
+    const app = window.__ch.cv.app || window.app;
+    if (!window.__chDoors) { window.__chDoors = [app.openChannel, app.openChannelSearch]; window.__jumps = [];
+      app.openChannel = (a, c) => { window.__jumps.push(['channel', a, c]); }; app.openChannelSearch = (o) => { window.__jumps.push(['search', o.adapterIds && o.adapterIds[0], o.convId, o.q]); }; }
+    const row = window.__ch.card(${k}).querySelector('.chat-channel-touch');
+    row.scrollIntoView({ block: 'center' }); await new Promise((r) => setTimeout(r, 250));
+    const b = row.getBoundingClientRect(); const x = b.left + Math.min(40, b.width / 2), y = b.top + b.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    return { x, y, hit: !!hit && row.contains(hit) };
+  })()`);
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: 'left', clickCount: 1 });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'left', clickCount: 1 });
+  await sleep(250);
+  return at;
+};
+const hit1 = await jumpAt(1), hit0 = await jumpAt(0);
+const jumped = await evaljs(`(() => { const app = window.__ch.cv.app || window.app; [app.openChannel, app.openChannelSearch] = window.__chDoors; delete window.__chDoors;
+  return { jumps: window.__jumps, st: window.__ch.state() }; })()`);
+check('a REAL press on a compact row still jumps — the read row opens its conversation (lark · oc_B), the search row the search (lark · oc_A · 「季度汇报 0」); the run stays closed and the cards compact',
+  hit1.hit && hit0.hit && JSON.stringify(jumped?.jumps) === JSON.stringify([['channel', 'lark', 'oc_B'], ['search', 'lark', 'oc_A', '季度汇报 0']]) && !jumped.st.open && cardsOf(jumped.st, TOUCHED).every((c) => c.compact),
+  JSON.stringify({ hit1, hit0, jumps: jumped?.jumps, open: jumped?.st?.open }));
+
+// RED CONTROL: the pre-lane rule — the same chat-view.js WITHOUT the compact toggle (exempt cards stay whole inside a
+// closed run), built into a bundle served to a second page; the same fixture, the same touches, the same probe ⇒
+// closed height == open height on every touched card (the owner's screenshots), so the leg above can go red
+{
+  const CVSRC = read('src/lib/chat-view.js');
+  const LANE = `      // lane run-fold-channel-compact: …and a LINKED inline member (channel rows) is one line while the run is closed
+      const cc = !run.open && !!run.linked?.has(el);
+      if (cc) this._compactHead(el);
+      el.classList.toggle('chat-channel-compact', cc);
+`;
+  check('control: the lane\'s toggle is in chat-view.js exactly once (the patched copy drops it — the pre-lane rule)', CVSRC.split(LANE).length === 2);
+  const MUT = mutantCopies('fold-ux-channel-compact', repo);
+  const bundleText = await buildPatchedBundle(MUT, 'src/lib/chat-view.js', CVSRC.split(LANE).join(''), 'pre-lane');
+  for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: 'channel-compact ' })) check(row.name, row.pass, row.detail);
+  const t2 = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+  const s2 = new WebSocket(t2.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+  await new Promise((r) => s2.on('open', r));
+  let seq2 = 0, served = 0; const pend2 = new Map(); const body = Buffer.from(bundleText).toString('base64');
+  const cdp2 = (method, params = {}) => new Promise((res) => { const id = ++seq2; pend2.set(id, res); s2.send(JSON.stringify({ id, method, params })); });
+  s2.on('message', (d) => {
+    const m = JSON.parse(d);
+    if (m.id && pend2.has(m.id)) { pend2.get(m.id)(m); pend2.delete(m.id); }
+    if (m.method === 'Runtime.exceptionThrown') { try { pageErrors.push('[control] ' + (m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown')); } catch {} }
+    if (m.method !== 'Fetch.requestPaused') return;
+    const id = m.params.requestId;
+    if (/\/bundle\.js(\?|$)/.test(m.params.request.url)) { served++; cdp2('Fetch.fulfillRequest', { requestId: id, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }], body }); }
+    else cdp2('Fetch.continueRequest', { requestId: id });
+  });
+  const eval2 = async (expr) => { const r = await cdp2('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
+  await cdp2('Runtime.enable'); await cdp2('Page.enable');
+  await cdp2('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }] });
+  await cdp2('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp2('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+  for (let i = 0; i < 100; i++) { if (await eval2('!!(window.app && window.app.ready && window.app.wm)').catch(() => false)) break; await sleep(300); }
+  await eval2('window.app.ready.then(() => true)').catch(() => {});
+  await sleep(900);
+  await eval2(CH_KIT);
+  const k0 = await eval2(`window.__ch.open()`);
+  const kC = await eval2(`window.__ch.state()`);
+  await chShot(cdp2, eval2, 'channel-run-closed-pre-lane.png');
+  const kO = await eval2(`window.__ch.toggle()`);
+  const same = TOUCHED.map((k) => (kC?.cards?.[k] && kO?.cards?.[k] ? Math.round(kC.cards[k].h - kO.cards[k].h) : null));
+  check(`RED CONTROL: the page served the PATCHED bundle (${served}×) — the same closed run keeps the 4 touched cards WHOLE: closed height == open height on every one (${TOUCHED.map((k) => `${kC?.cards?.[k]?.h}/${kO?.cards?.[k]?.h}`).join(', ')}), so the < 1/3 predicate reads RED there`,
+    served > 0 && k0?.ok && same.every((d) => d !== null && Math.abs(d) <= 1) && !TOUCHED.every((k) => kC.cards[k].h < kO.cards[k].h / 3), JSON.stringify({ served, k0, same }));
+  check('…and the probe is not vacuous there: the closed run has its header, the plain card is folded, every touched card shows its rows (the pre-lane form)',
+    kC?.header && !kC.open && kC.cards[CH_PLAIN].display === 'none' && cardsOf(kC, TOUCHED).every((c) => c.rowsVis === c.rows && c.rows > 0 && c.bodiesVis === 2 && !c.compact), JSON.stringify({ header: kC?.header, plain: kC?.cards?.[CH_PLAIN]?.display }));
+  console.log(`    pre-lane (patched bundle): the owner's run ${kC?.runH} px closed vs ${kO?.runH} px open`);
+  try { s2.close(); } catch {}
+  try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t2.id}`); } catch {}
+  try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/activate/${target.id}`); } catch {}
+  await sleep(300);
+}
 await evaljs(`localStorage.removeItem('vibespace.lang'); true`);
 
 check('zero uncaught page exceptions during the whole flow', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));

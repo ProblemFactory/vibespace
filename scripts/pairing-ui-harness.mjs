@@ -114,8 +114,12 @@ process.stdin.on('end', () => process.exit(0));
     };
     const type = async (s) => { await cdp('Input.insertText', { text: s }); await sleep(120); };
     /** A REAL click on `sel`: scrolled into view, the point PROVEN to hit it (a toast over it is cleared once). */
-    const realClick = async (sel) => {
-      for (let k = 0; k < 2; k++) {
+    // lane race-sweep (B-6b74 — test-pair-dialog-ui F7's control, 1/10 on 2 cpus): a press WAITS FOR ITS PLACE — the target's
+    // point is read again at each look until it is the target itself (≤ ms; a toast over it is removed); the old two quick looks
+    // returned false on a dialog still laying out and the press never happened (no command, then a TypeError three lines on)
+    const realClick = async (sel, ms = 8000) => {
+      for (const t0 = Date.now(); ; await sleep(100)) {
+        if (Date.now() - t0 > ms) return false;
         const r = await evalJs(`(() => { const e = (${sel.startsWith('(') ? sel : `document.querySelector(${JSON.stringify(sel)})`}); if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const q = e.getBoundingClientRect(); const x = q.left + Math.min(q.width / 2, 40), y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, hits: !!hit && (hit === e || e.contains(hit)) }; })()`);
         if (!r) return false;
         if (!r.hits) { await evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => el.remove()); true`); continue; }
@@ -125,7 +129,6 @@ process.stdin.on('end', () => process.exit(0));
         await sleep(150);
         return true;
       }
-      return false;
     };
     return { sock, cdp, evalJs, waitFor, waitApp, key, type, realClick, errors, requests, on: (fn) => listeners.push(fn) };
   }

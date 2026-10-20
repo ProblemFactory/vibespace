@@ -47,12 +47,28 @@ export function createModalShell({ id, title = '', dialogClass = '', bodyClass =
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
   announceModal(overlay); // lane dialog-keys: in the opening act's own task, before the caller focuses anything in it
-  const close = () => { overlay.remove(); onClose?.(); };
+  let unbindEscape = null;
+  const close = () => { unbindEscape?.(); overlay.remove(); onClose?.(); };
   closeBtn.onclick = close;
   if (closeOnBackdrop) overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
   if (escapeToClose) {
     overlay.tabIndex = -1;
     overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+    // lane race-sweep (B-6b74, test-desktop-webrtc-chrome ⑪ 5/5 on 2 busy cpus): the overlay hears Escape only from a focus
+    // INSIDE it — a control that disables / replaces itself (the window picker's 「停止」 swaps its row) drops the focus to
+    // <body>, and Escape closed nothing: the picker stayed over the window. While NOTHING holds the focus, Escape is the
+    // topmost such modal's (after the app's own handler: a popover or the static dialog first — they prevent the default)
+    overlay._escapeToClose = true;
+    const onIdleEscape = (e) => {
+      if (!overlay.isConnected) { unbindEscape(); return; }
+      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
+      if (e.target !== document.body && e.target !== document.documentElement) return;   // something holds the keyboard
+      const open = [...document.querySelectorAll('.dialog-overlay')].filter((o) => o._escapeToClose);
+      if (open[open.length - 1] !== overlay) return;   // the topmost one only
+      e.preventDefault(); close();
+    };
+    document.addEventListener('keydown', onIdleEscape);
+    unbindEscape = () => document.removeEventListener('keydown', onIdleEscape);
     setTimeout(() => overlay.focus(), 0);
   }
   return { overlay, dialog, body, closeBtn, close };

@@ -53,6 +53,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { spawn, spawnSync } from 'node:child_process';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -128,7 +129,25 @@ const stubDisplay = (bins) => ({
 });
 
 const recFile = path.join(root, 'fake-rdp.jsonl');
-const fakeSaw = (pid) => fs.existsSync(recFile) ? fs.readFileSync(recFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.pid === pid) : [];
+// lane race-sweep (B-6b74): ONE reader of the fake's record, and it never throws. Only COMPLETE lines count (the tail after
+// the last newline may be a write still in flight); a line that is not one JSON object is kept as TORN and §R names it — the
+// pre-fix fake wrote `"at":000` when the keeper's stop killed its `date` child mid-record, and every later section threw
+// "Unexpected number in JSON" instead (3/10 under a 2-cpu load); a `clock_unknown` line (at 0) is the fixed fake's shape
+const readRecord = (file) => {
+  const rows = [], torn = [], clockless = [];
+  const parts = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n') : [];
+  parts.pop();
+  for (const l of parts.filter(Boolean)) {
+    let r = null; try { r = JSON.parse(l); } catch { /* torn: named below */ }
+    if (!r || typeof r !== 'object' || Array.isArray(r)) { torn.push(l); continue; }
+    if (r.clock_unknown) clockless.push(l);
+    rows.push(r);
+  }
+  return { rows, torn, clockless };
+};
+const recSeen = { torn: new Set(), clockless: new Set() };
+const recRows = () => { const x = readRecord(recFile); for (const l of x.torn) recSeen.torn.add(l); for (const l of x.clockless) recSeen.clockless.add(l); return x.rows; };
+const fakeSaw = (pid) => recRows().filter((r) => r.pid === pid);
 const baseEnv = (extra = {}) => () => ({ PATH: `${path.dirname(FAKE)}:/usr/bin:/bin`, HOME: home, VS_FAKE_RDP_RECORD: recFile, VS_FAKE_RDP_WINDOW: '0', VS_FAKE_RDP_SERVER_FP: FP, VS_FAKE_RDP_PASSWORD_SHA256: sha(PW), ...extra });
 
 let setupCalls = 0;
@@ -402,7 +421,7 @@ const answers = [];
 const postS = async (url, body, headers) => { const r = await post(url, body, headers); answers.push(r.text); return { ...r, json: (() => { try { return JSON.parse(r.text); } catch { return null; } })() }; };
 const getS = async (url, headers = {}) => { const r = await fetch(base + url, { headers }); const text = await r.text(); answers.push(text); return { status: r.status, text, json: (() => { try { return JSON.parse(text); } catch { return null; } })() }; };
 const startOf = (pid) => (fakeSaw(pid).find((x) => x.phase === 'start') || {});
-const lastTrustRun = () => { const all = fs.readFileSync(recFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); const st = all.filter((x) => x.phase === 'start' && x.argv.includes('/auth-only')).pop(); return st ? all.filter((x) => x.pid === st.pid) : []; };
+const lastTrustRun = () => { const all = recRows(); const st = all.filter((x) => x.phase === 'start' && x.argv.includes('/auth-only')).pop(); return st ? all.filter((x) => x.pid === st.pid) : []; };
 let sealedRec = null;
 const settleS = (id, ms = 10000) => until(() => { const r = keeperS.get(id); return r && r.state !== 'launching' ? r : null; }, ms);
 const endedS = (id, ms = 10000) => until(() => { const r = keeperS.get(id); return r && !['launching', 'ready'].includes(r.state) ? r : null; }, ms);
@@ -558,6 +577,47 @@ await section('§9 THE SINKS of the sealed chain — the password only in the se
   await until(() => fs.existsSync(logN) && fs.readFileSync(logN, 'utf8').includes('password='), 4000);
   await dsn.stop(vn.id).catch(() => { }); await until(() => { const x = dsn.get(vn.id); return x && !['launching', 'ready'].includes(x.state); }); await until(() => accN.forwards().length === 0, 5000);
   ok(fs.existsSync(logN) && holds(fs.readFileSync(logN)), 'CONTROL: without the teardown scrub the printed password stays in app.log (§8\'s app.log sink would be red)', fs.existsSync(logN) ? fs.readFileSync(logN, 'utf8').slice(-300) : 'no log at ' + logN);
+});
+
+await section('§R the fake\'s record — every line ONE JSON object, even when a stop kills its clock mid-line (lane race-sweep)', async () => {
+  recRows();
+  ok(recSeen.torn.size === 0, `every record line the fake wrote in §1–§9 is ONE JSON object (${recSeen.torn.size} torn)`, [...recSeen.torn].slice(0, 3));
+  if (recSeen.clockless.size) console.log(`  · the fake's clock failed ${recSeen.clockless.size}× (a stop's SIGTERM met its date child) — those lines say at 0: ${[...recSeen.clockless].map((l) => l.slice(0, 90)).join(' | ')}`);
+  // the moment, made deterministic: a `date` that dies of SIGTERM before it prints (what the keeper's group stop does to it)
+  const bin = path.join(root, 'clock-dies'); fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'date'), '#!/bin/sh\nkill -TERM $$\n', { mode: 0o755 });
+  const runFake = (exe, file) => spawnSync(exe, ['/v:127.0.0.1:9', '/d:x', '/from-stdin'], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, VS_FAKE_RDP_RECORD: file, VS_FAKE_RDP_WINDOW: '0' }, input: '', encoding: 'utf8', timeout: 10000 });
+  const fixedFile = path.join(root, 'clock-dies-fixed.jsonl');
+  runFake(FAKE, fixedFile);
+  const fx = readRecord(fixedFile);
+  ok(fx.rows.length >= 2 && fx.torn.length === 0 && fx.rows.every((r) => r.at === 0 && r.clock_unknown === 'date exit 143'), `the fake with a clock killed by SIGTERM: ${fx.rows.length} lines, every one JSON — at 0 + clock_unknown "date exit 143" (phases ${fx.rows.map((r) => r.phase).join(' · ')})`, fx);
+  const fakeSrc = fs.readFileSync(FAKE, 'utf8');
+  const pre = fakeSrc.replace(/^record\(\) \{\n[\s\S]*?\n\}\n/m, () => 'record() { [ -z "$REC" ] || printf \'{"pid":%s,"at":%s000,%s}\\n\' "$$" "$(date +%s)" "$1" >>"$REC"; }\n');   // a function: `$$` in a replacement STRING is one `$`
+  ok(pre !== fakeSrc && pre.includes('"at":%s000,%s}\\n\' "$$" "$(date +%s)"') && !/^record\(\) \{$/m.test(pre), 'PATCH LANDED: the control fake writes the record line the pre-fix way (`"at":$(date +%s)000`)');
+  const preExe = path.join(root, 'xfreerdp-pre-race-sweep'); fs.writeFileSync(preExe, pre, { mode: 0o755 });
+  const preFile = path.join(root, 'clock-dies-pre.jsonl');
+  runFake(preExe, preFile);
+  const px = readRecord(preFile);
+  ok(px.torn.length >= 2 && px.torn.every((l) => /"at":000,/.test(l)) && px.rows.length === 0, `CONTROL: the pre-fix fake under the same dying clock writes ${px.torn.length} TORN lines (\`"at":000\` — invalid JSON) and the reader names them, never throws (the pre-fix suite threw "Unexpected number in JSON" in every later section)`, px);
+  // THE MEASURED MOMENT, made deterministic: the keeper's stop SIGTERMs the fake's whole group (sid == pid) while record()
+  // waits on its clock — a `date` that blocks until that signal (the first call only; a later one is the real date)
+  const slow = path.join(root, 'clock-blocks'); fs.mkdirSync(slow, { recursive: true });
+  fs.writeFileSync(path.join(slow, 'date'), '#!/bin/sh\nif [ -e "$VS_RS_CLOCK_MARK" ]; then exec /usr/bin/date "$@"; fi\n: > "$VS_RS_CLOCK_MARK"\nexec sleep 30\n', { mode: 0o755 });
+  const stopMidClock = async (exe, tag) => {
+    const file = path.join(root, `stop-mid-clock-${tag}.jsonl`), mark = path.join(root, `stop-mid-clock-${tag}.mark`);
+    const ch = spawn(exe, ['/v:127.0.0.1:9', '/d:x', '/from-stdin'], { detached: true, stdio: ['pipe', 'ignore', 'ignore'], env: { PATH: `${slow}:/usr/bin:/bin`, HOME: home, VS_FAKE_RDP_RECORD: file, VS_FAKE_RDP_WINDOW: '0', VS_RS_CLOCK_MARK: mark } });
+    const exited = new Promise((r) => ch.on('exit', (code, sig) => r({ code, sig })));
+    const inClock = await until(() => fs.existsSync(mark), 10000, 5);   // its first record is waiting on the clock NOW
+    if (inClock) process.kill(-ch.pid, 'SIGTERM');                        // the keeper's stop: the group first
+    const how = await Promise.race([exited, sleep(10000).then(() => ({ code: 'no exit' }))]);
+    try { process.kill(-ch.pid, 'SIGKILL'); } catch { /* gone */ }
+    return { inClock: !!inClock, ...how, ...readRecord(file) };
+  };
+  const mf = await stopMidClock(FAKE, 'fixed');
+  ok(mf.inClock && mf.code === 145 && mf.torn.length === 0 && mf.rows.length >= 1 && mf.rows[mf.rows.length - 1].phase === 'signal',
+    `THE MOMENT (the stop's group SIGTERM while record() waits on its clock): the fixed fake writes NO torn line — its TERM trap runs before the line, it ends on its "signal" line (exit ${mf.code}; phases ${mf.rows.map((r) => r.phase).join(' · ') || 'none'})`, mf);
+  const mp = await stopMidClock(preExe, 'pre');
+  ok(mp.inClock && mp.torn.length === 1 && /^\{"pid":\d+,"at":000,"phase":"start"/.test(mp.torn[0] || ''), `CONTROL: the pre-fix fake at the same moment writes the TORN line the runner saw (${(mp.torn[0] || 'none').slice(0, 40)}…) — the date died inside the printf that wrote it`, { inClock: mp.inClock, code: mp.code, torn: mp.torn.map((l) => l.slice(0, 80)), phases: mp.rows.map((r) => r.phase) });
 });
 
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 7 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);

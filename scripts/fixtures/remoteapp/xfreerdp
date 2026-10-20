@@ -41,7 +41,20 @@ jn() { if [ -n "$1" ]; then js "$1"; else printf null; fi; }
 sha() { if command -v sha256sum >/dev/null 2>&1; then printf '%s' "$1" | sha256sum; else printf '%s' "$1" | shasum -a 256; fi | { read -r h _; printf '%s' "$h"; }; }
 lc() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
 REC=${VS_FAKE_RDP_RECORD-}
-record() { [ -z "$REC" ] || printf '{"pid":%s,"at":%s000,%s}\n' "$$" "$(date +%s)" "$1" >>"$REC"; }
+# A record line is ONE JSON object (lane race-sweep, B-6b74): the keeper's stop SIGTERMs this fake's whole session (the
+# group, then each member), and the pre-fix record() took its clock INSIDE the printf that wrote the line — a stop landing
+# there killed the date child, the substitution came back EMPTY and the line read `"at":000` (invalid JSON; 4/10 loaded
+# runs). The clock is now its OWN command: a stop there runs the TERM trap before the line (the fake ends on its "signal"
+# line, as if stopped just before it); a clock that fails on its own writes `"at":0,"clock_unknown":"date exit <status>"`.
+# test-remoteapp-token-sinks §R names both shapes and drives the moment itself.
+record() {
+  [ -n "$REC" ] || return 0
+  _now=$(date +%s 2>/dev/null); _rc=$?
+  case $_now in
+    ''|*[!0-9]*) printf '{"pid":%s,"at":0,"clock_unknown":"date exit %s",%s}\n' "$$" "$_rc" "$1" >>"$REC" ;;
+    *) printf '{"pid":%s,"at":%s000,%s}\n' "$$" "$_now" "$1" >>"$REC" ;;
+  esac
+}
 say() { printf '[00:00:00:000] [%s:00000000] [%s][%s] - [%s]: %s\n' "$$" "$1" "$2" "$3" "$4" >&2; }
 opt() { _n=$1; shift; for _a in "$@"; do case $_a in "/$_n:"*) printf '%s' "${_a#"/$_n:"}"; return 0 ;; "/$_n") return 0 ;; esac; done; return 1; }
 

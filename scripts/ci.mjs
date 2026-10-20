@@ -3823,6 +3823,16 @@ export function listAffected({ range, shard = null, dir, root = repo, changed, w
   return { names: picked.map((s) => s.name).sort((x, y) => ((timings[y] ?? -1) - (timings[x] ?? -1)) || (idx.get(y) - idx.get(x))), summary };
 }
 
+
+/** EXIT ONCE THE OUTPUT HAS LEFT (lane race-sweep, B-8b81 — every exit of main() goes through here). `process.exit` drops
+ *  what stdout / stderr still queue for a PIPE whose reader lags (a loaded parent, a pager): on 2 busy cpus the scratch
+ *  reaper's `--reap --dry-run` lost its verdicts and its closing line (test-scratch-reaper §6, 1/10 loaded); a 4 KB pipe
+ *  read 2 s late kept 4 066 of 16 200 bytes and the run still said exit 0. An empty write's callback runs after every
+ *  earlier write on that stream (a closed reader calls it with an error — it exits all the same). */
+export function exitFlushed(code) {
+  process.exitCode = code;
+  process.stdout.write('', () => process.stderr.write('', () => process.exit(code)));
+}
 function main(argv) {
   const arg = (name) => { const hit = argv.find((a) => a === '--' + name || a.startsWith('--' + name + '=')); return hit === undefined ? undefined : (hit.includes('=') ? hit.slice(hit.indexOf('=') + 1) : true); };
   const str = (name) => (typeof arg(name) === 'string' ? arg(name) : null);
@@ -3845,34 +3855,34 @@ function main(argv) {
   // --shard=<i>/<n> (or --shard <i>/<n>): ONE slice of the heavy tier (SHARDS); a bad spec is a loud exit 2
   const shardArg = str('shard') !== null ? str('shard') : (argv.includes('--shard') ? (argv[argv.indexOf('--shard') + 1] || '') : null);
   const shard = shardArg === null ? null : parseShard(shardArg);
-  if (shardArg !== null && !shard) { console.error(`✗ --shard wants <i>/<n> with 1 ≤ i ≤ n (got '${shardArg}')`); process.exit(2); }
-  if (arg('reap')) { process.exit(reapByHand({ dryRun: !!arg('dry-run') })); }
+  if (shardArg !== null && !shard) { console.error(`✗ --shard wants <i>/<n> with 1 ≤ i ≤ n (got '${shardArg}')`); return exitFlushed(2); }
+  if (arg('reap')) return exitFlushed(reapByHand({ dryRun: !!arg('dry-run') }));
   // --host=<desktop|binary|hosted|self>: the suites ONE runner runs (HOSTS); a bad name is a loud exit 2
   const host = str('host');
-  if (arg('host') !== undefined && !HOST_ARG.includes(host)) { console.error(`✗ --host wants ${HOST_ARG.join(' | ')} (got '${host === null ? '' : host}')`); process.exit(2); }
+  if (arg('host') !== undefined && !HOST_ARG.includes(host)) { console.error(`✗ --host wants ${HOST_ARG.join(' | ')} (got '${host === null ? '' : host}')`); return exitFlushed(2); }
   const overlapArg = str('serial-overlap');
   const serialOverlap = overlapArg === null ? null : Number(overlapArg);
-  if (overlapArg !== null && !(Number.isInteger(serialOverlap) && serialOverlap >= 0)) { console.error(`✗ --serial-overlap wants an integer ≥ 0 (got '${overlapArg}')`); process.exit(2); }
-  if (arg('census')) process.exit(census());
-  if (arg('hosts')) process.exit(hostsReport());
-  if (arg('shard-timings') !== undefined) process.exit(writeShardTimings(argv.filter((a) => !a.startsWith('--'))));
-  if (arg('list-affected')) { const l = listAffected({ range: rangeArg || null, shard, dir, why: !!arg('why'), host }); console.error(l.summary); console.log(l.names.join(',')); process.exit(0); }
-  if (arg('status')) process.exit(status({ dir, head }));
-  if (arg('check-heavy')) process.exit(checkHeavy({ dir, head }));
-  if (arg('heavy-launch') !== undefined) process.exit(heavyLaunch(str('heavy-launch') || argv[argv.indexOf('--heavy-launch') + 1], { dir, only, lock, lockWaitMs, range: rangeArg || undefined }));
+  if (overlapArg !== null && !(Number.isInteger(serialOverlap) && serialOverlap >= 0)) { console.error(`✗ --serial-overlap wants an integer ≥ 0 (got '${overlapArg}')`); return exitFlushed(2); }
+  if (arg('census')) return exitFlushed(census());
+  if (arg('hosts')) return exitFlushed(hostsReport());
+  if (arg('shard-timings') !== undefined) return exitFlushed(writeShardTimings(argv.filter((a) => !a.startsWith('--'))));
+  if (arg('list-affected')) { const l = listAffected({ range: rangeArg || null, shard, dir, why: !!arg('why'), host }); console.error(l.summary); console.log(l.names.join(',')); return exitFlushed(0); }
+  if (arg('status')) return exitFlushed(status({ dir, head }));
+  if (arg('check-heavy')) return exitFlushed(checkHeavy({ dir, head }));
+  if (arg('heavy-launch') !== undefined) return exitFlushed(heavyLaunch(str('heavy-launch') || argv[argv.indexOf('--heavy-launch') + 1], { dir, only, lock, lockWaitMs, range: rangeArg || undefined }));
   if (arg('heavy') || arg('heavy-affected')) {
     const affected = !!arg('affected') || !!arg('heavy-affected');
-    if (affected && !rangeArg) { console.error('✗ --affected needs --range=<old>..<new> (or --range=<sha> for its whole unpublished range)'); process.exit(2); }
-    if (shard && (only || affected)) { console.error('✗ --shard slices the FULL tier — it does not combine with --only or --affected'); process.exit(2); }
-    if (shard && arg('dry-run')) process.exit(shardDryRun(shard, { host }));
+    if (affected && !rangeArg) { console.error('✗ --affected needs --range=<old>..<new> (or --range=<sha> for its whole unpublished range)'); return exitFlushed(2); }
+    if (shard && (only || affected)) { console.error('✗ --shard slices the FULL tier — it does not combine with --only or --affected'); return exitFlushed(2); }
+    if (shard && arg('dry-run')) return exitFlushed(shardDryRun(shard, { host }));
     heavyGate({ sha: str('sha'), isolate: !!arg('isolate'), dir, only, dirtyOk: !!arg('dirty-ok'), lock, lockWaitMs, pidFile: str('pid-file') || undefined, range: affected ? rangeArg : undefined, shard, why: !!arg('why'), host, allowHubFull: !!arg('allow-hub-full'), serialOverlap })
-      .then((code) => process.exit(code), (e) => { console.error('[ci:heavy] crashed: ' + (e && e.stack || e)); process.exit(1); });
+      .then((code) => exitFlushed(code), (e) => { console.error('[ci:heavy] crashed: ' + (e && e.stack || e)); exitFlushed(1); });
     return;
   }
   // `--isolate [--sha=<x>]` gates the COMMIT rather than this working tree —
   // the hook uses it when a pushed ref's tip is not HEAD.
   fastGate({ sha: str('sha'), isolate: !!arg('isolate') })
-    .then((code) => process.exit(code), (e) => { console.error('[ci] crashed: ' + (e && e.stack || e)); process.exit(1); });
+    .then((code) => exitFlushed(code), (e) => { console.error('[ci] crashed: ' + (e && e.stack || e)); exitFlushed(1); });
 }
 
 // Only run when EXECUTED — test-architecture imports the tier table.

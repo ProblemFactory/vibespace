@@ -270,7 +270,7 @@ export function runSummaryParts(byKind, mcpServers, t, notes = []) {
  *   notes = the `what` of every note member (assistantNoteOf), in render order
  *   files = display names in render order (writes already prefixed '✎ '), deduped by the caller
  */
-export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, running = false, collabPart = '', notes = [], machinePart = '', machineTime = '' }, t) {
+export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, running = false, collabPart = '', notes = [], machinePart = '', machineTime = '', linked = 0 }, t) {
   const kindParts = runSummaryParts(byKind, mcpServers, t, notes);
   if (machinePart) kindParts.unshift(machinePart); // lane machine-card-fold: the machine part (machineRunPart) leads — it names what the run is
   if (collabPart) kindParts.push(collabPart);
@@ -284,10 +284,24 @@ export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, runn
   // silent fold — grep-exit-1 class errors are common and folding them is
   // fine, but the header says they exist)
   if (nErr) label += ` · ${nErr} ✗`;
+  // lane run-fold-channel-compact: the members a closed fold keeps on screen (one line each — their conversation rows)
+  // are SAID, so the fold's effect is legible: "5 条 Bash · 1 ✗ · 4 条带会话入口"
+  if (linked) label += ' · ' + t('{n} with a conversation link', { n: linked });
   // live state on the fold: a running member shows through the header
   if (running && !machinePart) label += ' · ' + t('running…'); // a machine part already says "still running"
   if (machineTime) label += ' · ' + machineTime; // lane machine-card-compact: a machine run's time span closes the label
   return label;
+}
+
+/** lane run-fold-channel-compact: the first words of a call's command for a COMPACT card's one-line head — its first
+ *  non-blank line, whitespace folded to single spaces, cut at HEAD_WORDS_MAX code points with "…" (the head's CSS
+ *  ellipsis then cuts it to the width). '' when the call carries no command. PURE. */
+export const HEAD_WORDS_MAX = 120;
+export function commandHeadWords(cmd) {
+  const s = String(cmd || '').slice(0, 2048); // a 10 KB heredoc is never split whole for 120 code points
+  const line = s.split('\n').find((l) => l.trim()) || '';
+  const w = [...line.replace(/\s+/g, ' ').trim()];
+  return w.length > HEAD_WORDS_MAX ? w.slice(0, HEAD_WORDS_MAX - 1).join('') + '…' : w.join('');
 }
 
 /** WHEN THE FOLD PASS RUNS (inc-mudv05ja-n5rv): the runs MutationObserver hands

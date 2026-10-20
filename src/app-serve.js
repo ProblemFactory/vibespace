@@ -545,15 +545,20 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   async function refreshWitness({ reason = 'open' } = {}) {
     const w0 = await readWitness();
     const v = W.refreshVerdict({ listedAt: w0.listedAt, sig: w0.sig, sigNow: reason === 'open' ? await witnessSig() : null, now: now(), reason });
-    const o = reason === 'open' ? W.openAnswer({ cache: w0, due: v.due, inFlight: !!witnessFlight }) : { refresh: v.due && !witnessFlight, wait: true };
-    if (o.refresh) {
+    const o = reason === 'open' ? W.openAnswer({ cache: w0, due: v.due, inFlight: !!witnessFlight }) : { refresh: v.due, wait: true };
+    // lane race-sweep (B-0c04): a FORCED re-list (an install, a Forget, Check again) asked while a listing runs never takes THAT
+    // listing's answer — it began before the change this re-list is for (the mirror: a Forget's program stayed hidden, the adopt's
+    // background listing had read the index before the Forget wrote it). It waits for that one (≤ the budget), then lists again.
+    const within = async (p) => { let t; await Promise.race([p, new Promise((r) => { t = setTimeout(r, W.WITNESS_BUDGET_MS); })]); clearTimeout(t); };
+    if (o.refresh && witnessFlight && reason !== 'open') await within(witnessFlight);
+    if (o.refresh && !witnessFlight) {
       witnessFlight = listWitness().catch((e) => { log.warn?.(`[apps] the installed-apps witness failed (${e.message}) — the last list is served`); return witness; }).finally(() => {
         witnessFlight = null;
         const view = { ...witnessView(), changed: !!(witness && witness.changed) };
         for (const fn of witnessListeners) { try { fn(view); } catch (e) { log.warn?.(`[apps] a witness listener failed: ${e.message}`); } }
       });
     }
-    if (witnessFlight && o.wait) { let t; await Promise.race([witnessFlight, new Promise((r) => { t = setTimeout(r, W.WITNESS_BUDGET_MS); })]); clearTimeout(t); }
+    if (witnessFlight && o.wait) await within(witnessFlight);
     return witnessView();
   }
   /** `listing` = a listing is running (the group says "listing…"); `count` = the rows the group lists, `hidden` = the distro's. */

@@ -698,7 +698,13 @@ e2e: {
     /** fill the server's table with ws connections until it refuses one; returns the open sockets */
     const fill = async (pid) => {
       const open = [];
+      // lane race-sweep (B-6b74, 1/10 at box load ~35: the probe POST answered 0): the status write rides the ONE keep-alive
+      // connection warmed before the fill (a full table accepts no new one) — and node closes an idle keep-alive socket after
+      // its keepAliveTimeout (5 s, the server sets none); a fill slower than that dropped it. The fill keeps it in use every
+      // keepAliveTimeout / 5 (the mechanism's constant, slack 5)
+      const KEEPALIVE_MS = 5000; let lastUse = Date.now();
       for (let i = 0; i < LIM + 50; i++) {
+        if (Date.now() - lastUse > KEEPALIVE_MS / 5) { await req('GET', '/api/session-status'); lastUse = Date.now(); }
         const w = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
         const r = await new Promise((res) => { const t = setTimeout(() => res('timeout'), 3000); w.once('open', () => { clearTimeout(t); res('open'); }); w.once('error', () => { clearTimeout(t); res('error'); }); w.once('close', () => { clearTimeout(t); res('close'); }); });
         if (r !== 'open') break;
@@ -713,16 +719,26 @@ e2e: {
       const r = http.request({ host: '127.0.0.1', port: PORT, path: p, method, agent: keep, headers: { 'Content-Type': 'application/json' } }, (resp) => { let d = ''; resp.on('data', (c) => { d += c; }); resp.on('end', () => res({ status: resp.statusCode, body: d })); });
       r.on('error', (e) => res({ status: 0, body: String(e.message) })); r.end(body ? JSON.stringify(body) : undefined);
     });
-    const streams = async (label) => {
+    // lane race-sweep (B-6b74 — 主开发 on the .322 chain at load 45–55, 1 of 80): 12 s from the SEND raced the server's own backlog
+    // (583 close handlers, the debounced writers, then the attach). Each wait is now for its LAST EFFECT: the attach's own
+    // `attached` answer — bounded by an in-run control, a request sent right AFTER the attach (the server answering that one but
+    // not the attach is the red) — then a VSTICK within the fixture's tick (TICK_MS) × 25; the state is printed either way
+    const TICK_MS = 400;   // tickSh: `while :; do echo VSTICK; sleep 0.4; done`
+    const streams = async (label, { beforeSend = null } = {}) => {
       const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
       const up = await new Promise((r) => { ws.once('open', () => r(true)); ws.once('error', () => r(false)); });
-      if (!up) return false;
+      if (!up) return { ok: false, label, why: 'the WebSocket did not open' };
       ws.on('error', () => { });
-      const got = []; ws.on('message', (d) => { try { const m = JSON.parse(d); if (m.type === 'output' && m.sessionId === sid && /VSTICK/.test(m.data || '')) got.push(m); } catch { } });
+      const got = [], types = new Set(); let ackAt = null;
+      ws.on('message', (d) => { try { const m = JSON.parse(d); types.add(m.type); if (m.type === 'attached' && m.sessionId === sid && ackAt == null) ackAt = Date.now(); if (m.type === 'output' && m.sessionId === sid && /VSTICK/.test(m.data || '')) got.push(m); } catch { } });
+      if (beforeSend) await beforeSend();
+      const t0 = Date.now();
       ws.send(JSON.stringify({ type: 'attach', sessionId: sid, cols: 80, rows: 24 }));
-      const t0 = Date.now(); while (Date.now() - t0 < 12000 && !got.length) await sleep(200);
+      const after = await Promise.race([req('GET', '/api/session-status').then((r) => ({ status: r.status, at: Date.now() })), sleep(60000).then(() => ({ status: 'no answer in 60 s', at: Date.now() }))]);
+      while (ackAt == null && Date.now() - after.at < TICK_MS * 25) await sleep(50);
+      if (ackAt != null) while (!got.length && Date.now() - ackAt < TICK_MS * 25) await sleep(50);
       ws.close();
-      return got.length > 0;
+      return { ok: got.length > 0, label, attachedMs: ackAt == null ? null : ackAt - t0, laterRequest: { status: after.status, ms: after.at - t0 }, frames: got.length, types: [...types] };
     };
 
     // (a) the FIXED store under a full table
@@ -738,19 +754,41 @@ e2e: {
     // HOLD the table full for a minute: every debounced writer that fires meanwhile meets the EMFILE (measured: the
     // session-status write, the channels index, port-forwards, the usage cursors, the fd gauge itself) — none may end the server
     for (let k = 0; k < 12 && srv.exitCode === null; k++) await sleep(5000);
-    ok(r1.status === 200 && srv.exitCode === null, `FIX e2e ⑤ a minute at a FULL table, the status write included, did NOT kill the server (POST ${r1.status}, exit ${srv.exitCode})`,
+    ok(r1.status === 200 && srv.exitCode === null, `FIX e2e ⑤ a minute at a FULL table, the status write included, did NOT kill the server (POST ${r1.status}${r1.status ? '' : ` — ${String(r1.body).slice(0, 80)}`}, exit ${srv.exitCode})`,
       jrn().split('\n').filter((l) => /EMFILE|Error|\[fd\]|\[channels\]/.test(l)).slice(-12).join('\n'));
     const failLine = (jrn().match(/\[fd\] a background write failed \(EMFILE[^\n]*/) || [''])[0];
     ok(/This server ran out of file handles \(EMFILE\)/.test(failLine) && new RegExp(`holds ${LIM} of ${LIM}`).test(failLine), `FIX e2e ⑤ …and it said WHO ran out: ${JSON.stringify(failLine.slice(0, 220))}`);
     for (const w of conns) { try { w.terminate(); } catch { } }
     const landed = await (async () => { const t0 = Date.now(); while (Date.now() - t0 < 70000) { try { if (/emfile-probe/.test(fs.readFileSync(path.join(wt, 'data/session-status.json'), 'utf8'))) return true; } catch { } await sleep(500); } return false; })();
     ok(landed, 'FIX e2e ⑤ the pressure gone, the retry LANDED (data/session-status.json carries the write)');
-    ok(await streams('after-pressure'), 'FIX e2e ⑤ the session still streams to a new client after the pressure');
+    const sAfter = await streams('after-pressure');
+    ok(sAfter.ok, 'FIX e2e ⑤ the session still streams to a new client after the pressure', JSON.stringify(sAfter));
     srv.kill('SIGKILL'); servers.delete(srv);
     await sleep(800);
     installStale();
     srv = boot(); jrn = journal(srv); await waitReady(srv);
-    ok(await streams('restored'), 'FIX e2e ⑤ after a kill at the end of the EMFILE episode the restored session streams with ZERO input');
+    const sRest = await streams('restored');
+    ok(sRest.ok, 'FIX e2e ⑤ after a kill at the end of the EMFILE episode the restored session streams with ZERO input', JSON.stringify(sRest));
+    // lane race-sweep: THE RED CONTROL for streams()'s wait — a server that reaches the attach LATE (SIGSTOPped 13 s right after
+    // the send: the .322 chain's backlog, made deterministic). The pre-fix wait (12 s from the send) calls the session dead; the
+    // wait for the attach's own answer streams it
+    if (sRest.ok) {
+      // both clients connected FIRST, then the server stopped, then both attaches sent — the server reaches them 13 s later
+      let opened = 0, stopped = null; const bothOpen = () => { if (++opened === 2) { process.kill(srv.pid, 'SIGSTOP'); stopped = sleep(13000).then(() => process.kill(srv.pid, 'SIGCONT')); } return new Promise((r) => { const t = setInterval(() => { if (stopped) { clearInterval(t); r(); } }, 20); }); };
+      const preFix = (async () => {
+        const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+        await new Promise((r) => { ws.once('open', r); ws.once('error', r); }); ws.on('error', () => { });
+        const got = []; ws.on('message', (d) => { try { const m = JSON.parse(d); if (m.type === 'output' && m.sessionId === sid && /VSTICK/.test(m.data || '')) got.push(m); } catch { } });
+        await bothOpen();
+        ws.send(JSON.stringify({ type: 'attach', sessionId: sid, cols: 80, rows: 24 }));
+        const t0 = Date.now(); while (Date.now() - t0 < 12000 && !got.length) await sleep(200);
+        ws.close(); return got.length > 0;
+      })();
+      const fixed = streams('stalled-server', { beforeSend: bothOpen });
+      const [pre, fix] = await Promise.all([preFix, fixed]);
+      await stopped;
+      ok(!pre && fix.ok, `CONTROL: a server that reaches the attach 13 s late — the pre-fix wait (12 s from the send) says the session is dead (${pre}); the wait for the attach's answer streams it (attached ${fix.attachedMs} ms after the send)`, JSON.stringify({ pre, fix }));
+    }
     srv.kill('SIGKILL'); servers.delete(srv);
     await sleep(800);
 
@@ -776,7 +814,8 @@ e2e: {
     fs.writeFileSync(ssFile, ssFixed);
     installStale();
     srv = boot(); jrn = journal(srv); await waitReady(srv);
-    ok(await streams('restored-after-crash'), 'e2e ⑤ after the EMFILE crash the restored session streams with ZERO input');
+    const sCrash = await streams('restored-after-crash');
+    ok(sCrash.ok, 'e2e ⑤ after the EMFILE crash the restored session streams with ZERO input', JSON.stringify(sCrash));
     srv.kill('SIGKILL'); servers.delete(srv);
   }
 }   // the worktree is removed by cleanup() — see `worktrees` above
@@ -807,8 +846,12 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
   const id = 'sess-healer-' + Date.now();
   const session = { mode: 'terminal', backend: 'shell', clients: new Map(), buffer: '', socketPath: sock, cwd: ROOT };
   activeSessions.set(id, session);
+  // lane race-sweep (B-6b74, 1/10 at box load ~20): the attach's LAST EFFECT — its first byte — never a 400 ms nap; how long
+  // it took is this run's own measure of the box (the heal's bound below scales with it)
+  const tAttach = Date.now();
   eng.attachToDtach(id, sock, session);
-  await sleep(400);
+  while (!Number(session._lastPtyDataAt) && Date.now() - tAttach < BUDGET_MS) await sleep(20);
+  const attachMs = Date.now() - tAttach;
   const before = session.pty;
   ok(eng.ptyQuietSince(session, Date.now()) === true, 'ptyQuietSince: no byte since NOW (the reader is not vacuously true)');
   ok(eng.ptyQuietSince(session, 0) === false, 'ptyQuietSince: a byte HAS arrived since epoch (the stamp is really written)');
@@ -827,9 +870,12 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
   eng.writeSessionInput(session, 'echo VSHEALED');
   const healed = eng.reattachLocalPty(id, session, 'test heal');
   ok(healed === true && session.pty !== dead && session.pty !== before, 'reattachLocalPty replaces the pty and reports it');
-  const t0 = Date.now();
-  while (Date.now() - t0 < 5000 && !frames.some((f) => /VSHEALED/.test(f.data || ''))) await sleep(150);
-  ok(frames.some((f) => /VSHEALED/.test(f.data || '')), 'reattachLocalPty RESENDS the input the never-spoke bridge was holding');
+  // the replay through the NEW attach is another attach + an echo: bounded by the healer's own budget or 20 × this run's
+  // first attach, whichever is larger (the old 5 s literal read red once on 2 busy cpus), its state printed
+  const t0 = Date.now(), healBound = Math.max(BUDGET_MS, attachMs * 20);
+  while (Date.now() - t0 < healBound && !frames.some((f) => /VSHEALED/.test(f.data || ''))) await sleep(50);
+  ok(frames.some((f) => /VSHEALED/.test(f.data || '')), 'reattachLocalPty RESENDS the input the never-spoke bridge was holding',
+    JSON.stringify({ attachMs, healBound, waitedMs: Date.now() - t0, frames: frames.length, tail: frames.slice(-3).map((f) => String(f.data || '').slice(-60)) }));
   try { session.pty?.kill?.(); } catch { }
 }
 

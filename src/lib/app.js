@@ -2219,6 +2219,34 @@ class App {
   }
 
   openWorkflowDetail(runId, opts) { return openWorkflowDetailFn(this, runId, opts); }
+  /** lane design-window-placement — PLACE a window a non-human opened (today the `design-open` push), the agent-window-no-steal
+   *  rule: an agent's action may PLACE a window, only a person's may FOCUS one. The PURE verdict (the same the agent browser
+   *  asks) decides; then `open(p, { focus })` MAKES (or, for an already-open design, re-pulses) the window and returns
+   *  `{ win, fresh }`. A FRESH window is positioned here — beside its chat (snapped: the conversation to the left half, the
+   *  Design to the right), on the chat's desktop (no switch), or behind the active window — and its taskbar entry pulses; an
+   *  EXISTING one placed itself (markArrived + its tab, never raised), so it is left where the person put it. The front
+   *  setting restores the old front + focus. (The desktop-app-opened handler keeps its own inline mechanics above — its
+   *  already-open case restacks rather than re-pulses — so this serves the Design window; both read ONE verdict.) */
+  placeAgentWindow(msg, open) {
+    const dm = this.desktopManager;
+    const chats = [...(this.sessions?.entries?.() || [])].map(([winId, v]) => { const w = this.wm.windows.get(winId); const top = w && w._tabChain ? this.wm.windows.get(w._tabChain.tabs[0]) || w : w; return { winId, sessionId: v?.sessionId, minimized: !top || !!top.isMinimized, hidden: !top || !!top._hiddenByDesktop, deskId: top?._desktopId || null }; });
+    const ae = document.activeElement;
+    const interacting = !!document.querySelector('.window.dragging, .window.resizing') || !!(ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)));
+    const p = agentWindowPlacement({ msg, chats, active: this.wm.activeWindowId || null, desk: dm?.activeDesktopId || null, phone: !!this.isMobile, visible: document.visibilityState !== 'hidden', interacting, front: this.settings?.get('desktop.agentWindowsFront') === true });
+    if (p.act === 'none') return null;
+    const r = open(p, { focus: !!p.focus }) || {};
+    const w = r.win;
+    if (!w || p.focus) return w || null; // the front setting (or a person's door inside `open`) already focused it
+    if (r.fresh) { // an EXISTING window placed itself (never raised); only a FRESH one is positioned + pulsed here
+      const host = p.fromWin && this.wm.windows.get(p.fromWin);
+      if (p.act === 'beside' && host) { this.wm.snapToHalf(p.fromWin, 'left'); this.wm.snapToHalf(w.id, 'right'); } // the owner's picture: the conversation LEFT, the Design RIGHT, same desktop — a geometry change, never a focus change
+      else if (p.act === 'desk') dm?.moveWindowToDesktop(w.id, p.deskId); // created on the chat's desktop: hidden there, no switch
+      else if (!w._tabChain) this.wm.placeBehind(w.id); // a free window goes under the active one
+      if (p.minimize) this.wm.minimize(w.id); // the person is mid-act: it waits on the taskbar
+      if (p.badge) this.wm.markArrived(w.id);
+    }
+    return w;
+  }
   /** The Design window for one design folder ({host, dir, sessionId}) — the chip's Open, the hub's push, layout replay. */
   openDesign(opts) { return openDesignFn(this, opts || {}); }
   /** The design publish dialog (the window's Publish… and the chip's). */

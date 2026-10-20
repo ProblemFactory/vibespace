@@ -19,7 +19,7 @@ import { registerCommand, registerKeybinding, runCommand, hasCommand } from './c
 // wrapper-files.js). Imported, never re-typed: the two ends disagreeing about
 // "no list" is the bug this constant now prevents.
 import { LEGACY_QUEUE_VERBS, worktreeLatchWrite } from '../backend-caps.js';
-import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode, machineCardOf, machineRunPart, splitRuns, machineCompact } from './chat-run-summary.js';
+import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode, machineCardOf, machineRunPart, splitRuns, machineCompact, commandHeadWords } from './chat-run-summary.js';
 import { assistantNoteOf } from './chat-run-summary.js'; // lane S3: a run's note members say which note they were
 import { turnPreviewOf } from '../assistant-note.js'; // PURE (B-40f8): THE preview of a user turn — the server's turnMap builders read the same rule
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
@@ -28,6 +28,7 @@ import { attachSlab } from './view-visibility.js'; // perf r1: which slab an att
 import { heldText } from './jobs-layout.js';
 import { resumeAccountBar } from './resume-account-bar.js'; // lane resume-account-door: the pinned account cannot serve ⇒ the bar says so, with its two doors
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE words of THE browser fact (the chip prints them, never its own)
+import { toolCommandText } from '../browser-trace.js'; // lane run-fold-channel-compact: a compact card's head names its command
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
 import { createChannelTouchView, openTouchRow } from './channel-touch-view.js'; // §26 (B-099e): the conversations an agent read / drafted, as rows on the tool card + the status-bar chip
 import { serviceHref, serviceOpenSpec, publishArtifacts } from './artifact-card.js'; // lane artifacts-services(-url): a service row's link (the server's ladder: published forward, else this instance's proxy)
@@ -4857,13 +4858,14 @@ class ChatView {
     // every run record that named the old element names the new one (a folded
     // member stays display:none with no pass needed). ② A RENDERED card is laid
     // out at its real height in its first frame (the fresh-slab reservation).
-    const RUN_CLASSES = ['chat-run-collapsed', 'chat-run-member', 'chat-run-first', 'chat-run-last', 'chat-machine-compact']; // + lane machine-card-compact
+    const RUN_CLASSES = ['chat-run-collapsed', 'chat-channel-compact', 'chat-run-member', 'chat-run-first', 'chat-run-last', 'chat-machine-compact']; // + lane machine-card-compact, lane run-fold-channel-compact
     for (const c of RUN_CLASSES) if (oldEl.classList?.contains(c)) newEl.classList.add(c);
     if (this._runs?.length) {
       for (const run of this._runs) {
         const i = run.members ? run.members.indexOf(oldEl) : -1;
         if (i >= 0) run.members[i] = newEl;
         if (run.inline?.has(oldEl)) { run.inline.delete(oldEl); run.inline.add(newEl); }
+        if (run.linked?.has(oldEl)) { run.linked.delete(oldEl); run.linked.add(newEl); }
       }
     }
     const wasRendered = oldEl.offsetParent != null;   // loose: a detached / display:none / non-DOM node reads null or undefined
@@ -6683,6 +6685,7 @@ class ChatView {
       list.querySelectorAll(':scope > .chat-run-header, :scope > .chat-run-footer').forEach((h) => h.remove());
       list.querySelectorAll(':scope > .chat-run-collapsed, :scope > .chat-run-member').forEach((el) => el.classList.remove('chat-run-collapsed', 'chat-run-member', 'chat-run-first', 'chat-run-last'));
       list.querySelectorAll(':scope > .chat-machine-compact').forEach((el) => el.classList.remove('chat-machine-compact')); // lane machine-card-compact: re-decided every pass (a card that left its group is whole again)
+      list.querySelectorAll(':scope > .chat-channel-compact').forEach((el) => el.classList.remove('chat-channel-compact')); // lane run-fold-channel-compact: likewise (a card whose run left is whole again)
       // run bookkeeping (headers ↔ members ↔ footer) — rebuilt every pass; the
       // floating run bar (_updateRunBar) reads it, never the DOM tree
       this._runs = [];
@@ -6781,6 +6784,15 @@ class ChatView {
         const machineCards = members.map((el) => machineCardOf(el._rawMsg));
         members.forEach((el, i) => { const mc = machineCards[i]; if (mc && mc.failed) inline.add(el); else if (mc) inline.delete(el); });
         if (inline.size === members.length) { run = []; runKind = null; return; }
+        // lane run-fold-channel-compact (the owner, 2026-10-20: 「这个地方展开和收起是完全一样的，这是对的吗」 — a run of
+        // channel-search Bash cards drew the same open and closed, every card kept WHOLE by the §26 exemption above): a
+        // touched member stays on screen but COMPACT while the run is closed — ONE line, its head (the tool + the first
+        // words of its command) and its conversation rows as chips (the SAME row buttons, so the jump is one press away),
+        // the bodies hidden (_setRunOpen draws .chat-channel-compact; CSS only, nothing re-renders). A fold always changes
+        // the height it governs. A folded peer card (already one line), a failed machine card (a failure is never shrunk)
+        // and an image (the picture IS the content) keep their forms.
+        const linked = new Set(members.filter((el, i) => inline.has(el) && el.classList.contains('chat-channel-touched')
+          && !el.classList.contains('chat-peer-folded') && !machineCards[i] && memberKind(el) !== 'image'));
         if (members.length >= (hasTool ? 1 : 2)) {
           const header = document.createElement('div');
           header.className = 'chat-run-header';
@@ -6846,6 +6858,7 @@ class ChatView {
           members.forEach((el, i) => { if (machineCards[i]) el.classList.toggle('chat-machine-compact', compact || machineCards[i].verb === 'info'); }); // lane exit-calls-in-history: a lookup (list / runs / use / url) is always the one row
           const mkLabel = ({ now = Date.now(), live = false, time = true } = {}) => runSummaryLabel({
             byKind, mcpServers, files, nErr, running, notes, machinePart: machinePart ? machinePart.text : '',
+            linked: linked.size, // lane run-fold-channel-compact: "· 4 条带会话入口" — what the closed fold keeps on screen
             machineTime: time && machinePart ? machinePart.time : '', // lane machine-card-compact: the span closes the label (the head draws it apart)
             collabPart: collabRunPart(collabStats, { now, live, t }),
           }, t);
@@ -6887,6 +6900,7 @@ class ChatView {
           }
           const rec = { header, members, inline, footer: null, label, open: false, mkLabel, collabStats, _collabWasLive: collabLive };
           rec.headTime = headTime; // lane machine-card-compact: the live label refresh keeps the head's time in its own span
+          rec.linked = linked; // lane run-fold-channel-compact: _setRunOpen draws these one line while the run is closed
           // Rebuilds happen on every list mutation — remember runs the user
           // opened so a new message doesn't re-collapse what they're reading.
           // Keyed by ANY member, not just the first: scroll-up pagination
@@ -6985,6 +6999,20 @@ class ChatView {
     if (run) this._setRunOpen(run, true);
   }
 
+  /** lane run-fold-channel-compact: a compact card's one-line head names what ran — "Bash" alone never said which search.
+   *  ONE muted span appended to the card's own head, once per card element (textContent: the command is the agent's
+   *  text), drawn only while the card is compact (chat.css); a re-rendered card is a new element and gets its own. */
+  _compactHead(el) {
+    const head = el.querySelector('.chat-tool-use > .chat-tool-label');
+    if (!head || head.querySelector(':scope > .chat-channel-compact-cmd')) return;
+    const words = commandHeadWords(toolCommandText(el._rawMsg?.content?.[0]?.input));
+    if (!words) return;
+    const s = document.createElement('span');
+    s.className = 'chat-channel-compact-cmd';
+    s.textContent = words;
+    head.appendChild(s);
+  }
+
   _setRunOpen(run, open) {
     if (!run?.header) return;
     run.open = !!open;
@@ -6997,6 +7025,10 @@ class ChatView {
       // see the picture without a click, and display:none also means its
       // loading="lazy" thumbnail never fetches
       el.classList.toggle('chat-run-collapsed', !run.open && !run.inline?.has(el));
+      // lane run-fold-channel-compact: …and a LINKED inline member (channel rows) is one line while the run is closed
+      const cc = !run.open && !!run.linked?.has(el);
+      if (cc) this._compactHead(el);
+      el.classList.toggle('chat-channel-compact', cc);
       el.classList.toggle('chat-run-member', run.open);
       el.classList.toggle('chat-run-first', run.open && i === 0);
       el.classList.toggle('chat-run-last', run.open && i === n - 1);

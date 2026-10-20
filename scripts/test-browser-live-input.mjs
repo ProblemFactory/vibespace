@@ -198,8 +198,8 @@ const innerPage = (n, hostile = false) => `<!doctype html><meta charset=utf-8><t
 #s{position:absolute;left:20px;top:220px;margin:0;font-size:22px;white-space:nowrap}
 #p{position:absolute;left:20px;top:270px;width:200px;height:30px}</style>
 <input id=a autocomplete=off><textarea id=b></textarea><p id=s>SELECT-ME selectable 可选文字 text</p><input id=p type=password value=secret>
-<script>const N=${JSON.stringify(n)};const ku=[],kd=[];document.addEventListener('keyup',(e)=>{ku.push(e.key);if(ku.length>40)ku.shift();},true);document.addEventListener('keydown',(e)=>{kd.push(e.key+(e.ctrlKey?'^C':'')+(e.metaKey?'^M':''));if(kd.length>40)kd.shift();},true);
-const b=document.getElementById('b'),a=document.getElementById('a');setInterval(()=>fetch('/st',{method:'POST',body:JSON.stringify({n:N,a:a.value,b:b.value,act:document.activeElement&&document.activeElement.id,sel:String(getSelection()),ss:b.selectionStart,se:b.selectionEnd,ku,kd}),keepalive:true}).catch(()=>{}),120);
+<script>const N=${JSON.stringify(n)};const ku=[],kd=[];let pd=null;document.addEventListener('pointerdown',(e)=>{pd={x:Math.round(e.clientX),y:Math.round(e.clientY),id:(e.target&&(e.target.id||e.target.tagName))||'',vw:innerWidth,vh:innerHeight};},true);document.addEventListener('keyup',(e)=>{ku.push(e.key);if(ku.length>40)ku.shift();},true);document.addEventListener('keydown',(e)=>{kd.push(e.key+(e.ctrlKey?'^C':'')+(e.metaKey?'^M':''));if(kd.length>40)kd.shift();},true);
+const b=document.getElementById('b'),a=document.getElementById('a');setInterval(()=>fetch('/st',{method:'POST',body:JSON.stringify({n:N,a:a.value,b:b.value,act:document.activeElement&&document.activeElement.id,sel:String(getSelection()),ss:b.selectionStart,se:b.selectionEnd,ku,kd,pd,bx:(()=>{const q=b.getBoundingClientRect();return [Math.round(q.left),Math.round(q.top),Math.round(q.width),Math.round(q.height)];})()}),keepalive:true}).catch(()=>{}),120);
 ${hostile ? HOSTILE : ''}</script>`;
 
 async function makeWorld(name, { patches = [] } = {}) {
@@ -364,9 +364,13 @@ async function makeWorld(name, { patches = [] } = {}) {
 async function inputLegs(W, P, sid, n, label, { control = false } = {}) {
   const out = {};
   const view = () => P.q(sid, 'const s = L.state(); return { echo: s.echo, receipts: s.receipts, copyChip: s.copyChip, sink: document.activeElement === L.kbd(), owns: L.ownsKeyboard() };');
+  // lane race-sweep (B-b8c6's sibling, 1/3 loaded): where the press LANDED is part of the state — the page's last pointerdown,
+  // its textarea's box and viewport, and the picture's mapping the press used
+  out.clickGeo = await P.pointOf(sid, 200, 140);
   await P.click(sid, 200, 140); // a REAL click into the picture: the textarea
   out.focus = await W.innerUntil(n, (r) => r.act === 'b', 5000);
   out.sinkAfterClick = await P.q(sid, 'return document.activeElement === L.kbd();');
+  if (!out.focus) { const r = W.inner(n) || {}; out.clickMiss = { pd: r.pd, box: r.bx, act: r.act, at: out.clickGeo, ageMs: r.at ? Date.now() - r.at : null }; }
   const typed = async (pasteText, how) => { const before = (W.inner(n) || {}).b || ''; ok(await W.setClipboard(pasteText), `${label}: the clipboard holds the text (another app filled it)`, JSON.stringify(W.clipLog.slice(-2))); if (how === 'meta') await P.chord('v', { meta: true, commands: ['paste'] }); else await P.chord('v'); const want = before + pasteText.replace(/\r\n?/g, '\n'); const r = await W.innerUntil(n, (x) => x.b === want, 15000); return { ok: !!r, got: ((W.inner(n) || {}).b || '').slice(before.length) }; };
   out.p11 = await typed('hello world', 'ctrl');
   out.pCjk = await typed('你好世界 😀😀', 'meta');
@@ -437,7 +441,7 @@ for (const k of kinds) {
   ok(await E.takeover(k.S.sessionId), `${k.label}: take over — this view owns the keyboard`);
   const r = await inputLegs(wd, E, k.S.sessionId, k.n, k.label);
   results[k.n] = r;
-  ok(r.focus && r.sinkAfterClick, `${k.label}: a real click into the picture focuses the page's field AND the view's keyboard sink keeps the focus`, JSON.stringify({ focus: !!r.focus, sink: r.sinkAfterClick }));
+  ok(r.focus && r.sinkAfterClick, `${k.label}: a real click into the picture focuses the page's field AND the view's keyboard sink keeps the focus`, JSON.stringify({ focus: !!r.focus, sink: r.sinkAfterClick, miss: r.clickMiss }));
   ok(r.p11.ok, `${k.label}: Ctrl+V of "hello world" (11 units) lands`, JSON.stringify(r.p11));
   ok(r.pCjk.ok, `${k.label}: ⌘V (the Mac's paste command) of "你好世界 😀😀" lands`, JSON.stringify(r.pCjk));
   ok(r.pLong.ok, `${k.label}: a 12-line paste with tabs, CJK and emoji lands EXACTLY in the textarea`, JSON.stringify(r.pLong).slice(0, 300));
@@ -776,7 +780,7 @@ async function standaloneLegs(W, { S, pid, tag }) {
   const C = `const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(sid)}); const cv = cw && window.app.sessions.get(cw.id); const ta = cv && cv._chatInput && cv._chatInput._textarea;`;
   const LQ = `const w = [...window.app.wm.windows.values()].filter((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === ${JSON.stringify(sid)})[0]; const L = w && w._browserLive;`;
   const q = (js) => P.ev(`(() => { ${C} ${LQ} ${js} })()`).catch((e) => ({ error: String(e && e.message) }));
-  const view = () => q('const s = L.state(); const line = cw.element.querySelector(".chat-kbd-yield"); const chip = L.el().querySelector(".browser-live-kbd-chip"); const a = document.activeElement; return { mode: s.mode, mine: s.mine, owns: L.ownsKeyboard(), yielded: s.kbdYielded, active: a === ta ? "composer" : a === L.kbd() ? "sink" : String((a && a.className) || (a && a.tagName)), line: line && !line.hidden && line.offsetParent ? line.textContent : null, chip: chip && chip.style.display !== "none" ? chip.textContent : null, caretMoves: s.caretMoves, strayKeys: s.strayKeys, composer: ta.value };');
+  const view = () => q('const s = L.state(); const line = cw.element.querySelector(".chat-kbd-yield"); const chip = L.el().querySelector(".browser-live-kbd-chip"); const a = document.activeElement; return { mode: s.mode, mine: s.mine, owns: L.ownsKeyboard(), yielded: s.kbdYielded, reclaims: s.reclaims, active: a === ta ? "composer" : a === L.kbd() ? "sink" : String((a && a.className) || (a && a.tagName)), line: line && !line.hidden && line.offsetParent ? line.textContent : null, chip: chip && chip.style.display !== "none" ? chip.textContent : null, caretMoves: s.caretMoves, strayKeys: s.strayKeys, composer: ta.value };');
   await P.ev(`(() => { window.app.attachSession(${JSON.stringify(sid)}, ${JSON.stringify(tag + '-chat')}, ${JSON.stringify(S.cwd)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
   o.chat = !!(await until(() => q('return !!ta || null;'), 30000, 200));
   await q(`window.app.openBrowserLive({ sessionId: ${JSON.stringify(sid)}, profileId: ${JSON.stringify(pid)} }); return true;`);
@@ -867,12 +871,19 @@ async function standaloneLegs(W, { S, pid, tag }) {
   o.deskUp = !!(await until(() => q(`${DQ} return dcv && dcv.width > 10 ? true : null;`), 40000, 300));
   if (o.deskUp) {
     await q(`${DQ} return ${place('dw', 960, 740, 900, 340)};`); await sleep(800);
-    await P.click(sid, 200, 140); await sleep(300);
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns ? true : null), 10000, 50);   // the page holds the keyboard again
     const bd = (W.inner(tag) || {}).b || '';
-    o.deskPress = await P.clickEl(`${DQ} return dcv;`); await sleep(300);
-    o.deskAfter = { view: await view(), active: await q(`${DQ} return document.activeElement === dcv;`) };
-    await P.type('vn'); await sleep(700);
-    o.deskTyped = { view: await view(), page: (W.inner(tag) || {}).b, b: bd };
+    // lane race-sweep (B-b8c6, red in the .299 chain at load ~4): each wait is for the LAST EFFECT, never 300 / 700 ms — the press
+    // either YIELDED to the canvas or was taken back (a reclaim: the pre-fix control); the typing either reached the canvas (both
+    // keydowns, counted in the capture phase) or the agent's page
+    const rd0 = (await view()).reclaims;
+    o.deskPress = await P.clickEl(`${DQ} return dcv;`);
+    const deskNow = async () => ({ view: await view(), active: await q(`${DQ} return document.activeElement === dcv;`) });
+    o.deskAfter = await until(async () => { const a = await deskNow(); return a.view.yielded || a.view.reclaims > rd0 ? a : null; }, 10000, 50) || await deskNow();
+    await q(`${DQ} window.__dcvKeys = 0; window.addEventListener('keydown', (e) => { if (e.target === dcv) window.__dcvKeys++; }, true); return 1;`);
+    await P.type('vn');
+    await until(async () => ((await q('return window.__dcvKeys || 0;')) >= 2 || ((W.inner(tag) || {}).b || '').endsWith('vn') ? true : null), 10000, 50);
+    o.deskTyped = { view: await view(), page: (W.inner(tag) || {}).b, b: bd, canvasKeys: await q('return window.__dcvKeys || 0;') };
   }
   await q(`${DQ} if (dw) window.app.wm.closeWindow(dw.id); return 1;`); await sleep(400); // ALWAYS: a Desktop that never came up must not stay over the picture (every later press would land on it)
   const typedFile = path.join(W.D, `xterm-${tag}.txt`);
@@ -885,16 +896,25 @@ async function standaloneLegs(W, { S, pid, tag }) {
     // seat first ("Active on another client — Resume here", no picture here) — the user's own act is a press on Resume
     // here (measured: 3 of 7 runs raced it and waited 40 s on a blocked pane)
     const seat = await until(() => q(`${XQ} const rb = xw && xw.element.querySelector('.desktop-app-resume'); return xc && xc.width > 10 ? 'up' : rb && rb.offsetParent ? 'blocked' : null;`), 40000, 300);
+    const tSeat = Date.now();
     if (seat === 'blocked') { o.appResume = await P.clickEl(`${XQ} return xw.element.querySelector('.desktop-app-resume');`); await sleep(500); }
     o.appUp = !!(await until(() => q(`${XQ} return xc && xc.width > 10 ? true : null;`), 30000, 300));
+    // lane race-sweep: the seat's live state when the picture never came (both arms on 2 cpus: "Starting… 34 s", another client)
+    if (!o.appUp) o.appSeat = { seat, resumed: o.appResume || null, waitedMs: Date.now() - tSeat, now: await q(`${XQ} const v = xw && xw._desktopAppView; const rb = xw && xw.element.querySelector('.desktop-app-resume'); return { seats: xw && xw._desktopSeats, view: v && { state: v.state, wanted: v.wanted }, resumeShown: !!(rb && rb.offsetParent), blocked: !!(xw && xw.element.querySelector('.desktop-app-is-blocked')) };`) };
     if (o.appUp) {
       await q(`${XQ} return ${place('xw', 960, 740, 800, 340)};`); await sleep(1500);
-      await P.click(sid, 200, 140); await sleep(300);
+      await P.click(sid, 200, 140); await until(async () => ((await view()).owns ? true : null), 10000, 50);   // the page holds the keyboard again
       const bx = (W.inner(tag) || {}).b || '';
-      o.appPress = await P.clickEl(`${XQ} return xc;`); await sleep(300);
-      o.appAfter = { view: await view(), active: await q(`${XQ} return String(document.activeElement && document.activeElement.className);`) };
-      await P.type('xp'); await P.key('Enter', { code: 'Enter', vk: 13, text: '\r' }); await sleep(1500);
-      let got = null; try { got = fs.readFileSync(typedFile, 'utf8'); } catch (e) { got = null; }
+      // lane race-sweep (B-b8c6): the press's LAST EFFECT (yielded to the IME, or taken back), then the typing's (the app's shell
+      // wrote "xp", or the agent's page got it) — never 300 / 1500 ms
+      const ra0 = (await view()).reclaims;
+      o.appPress = await P.clickEl(`${XQ} return xc;`);
+      const appNow = async () => ({ view: await view(), active: await q(`${XQ} return String(document.activeElement && document.activeElement.className);`) });
+      o.appAfter = await until(async () => { const a = await appNow(); return a.view.yielded || a.view.reclaims > ra0 ? a : null; }, 10000, 50) || await appNow();
+      await P.type('xp'); await P.key('Enter', { code: 'Enter', vk: 13, text: '\r' });
+      const readTyped = () => { try { return fs.readFileSync(typedFile, 'utf8'); } catch (e) { return null; } };
+      await until(async () => (/xp\n/.test(readTyped() || '') || ((W.inner(tag) || {}).b || '').endsWith('xp') ? true : null), 10000, 50);
+      const got = readTyped();
       o.appTyped = { view: await view(), page: (W.inner(tag) || {}).b, b: bx, app: got };
       await q(`${XQ} window.app.wm.closeWindow(xw.id); return 1;`); await sleep(400);
     } else {
@@ -1211,7 +1231,7 @@ if (want('split')) {
   ok(t.deskUp && t.deskPress && t.deskPress.ok && t.deskAfter.active === true && t.deskAfter.view.yielded && !t.deskAfter.view.owns && t.deskAfter.view.chip === 'Keyboard is outside the browser — click the picture to keep using the page' && t.deskTyped.page === t.deskTyped.b,
     `verify r2 (N1): the DESKTOP (a real noVNC over this world's Xvnc) — a real press on its picture while you drive YIELDS to its canvas ("${t.deskAfter && t.deskAfter.view.chip}"), "vn" never reaches the page (${JSON.stringify(t.deskTyped && t.deskTyped.page)})`, JSON.stringify({ up: t.deskUp, press: t.deskPress, after: t.deskAfter, typed: t.deskTyped }));
   ok(t.appId && t.appUp && t.appPress && t.appPress.ok && /xpra-ime/.test(String(t.appAfter.active)) && t.appAfter.view.yielded && !t.appAfter.view.owns && t.appTyped.app === 'xp\n' && t.appTyped.page === t.appTyped.b,
-    `verify r2 (N1): a DESKTOP APP (a real xterm under xpra) — a real press on its picture yields to its IME; "xp" + Enter reach the APP (its shell wrote ${JSON.stringify(t.appTyped && t.appTyped.app)}), nothing reaches the page`, JSON.stringify({ id: t.appId, up: t.appUp, press: t.appPress, after: t.appAfter, typed: t.appTyped, diag: t.appDiag }));
+    `verify r2 (N1): a DESKTOP APP (a real xterm under xpra) — a real press on its picture yields to its IME; "xp" + Enter reach the APP (its shell wrote ${JSON.stringify(t.appTyped && t.appTyped.app)}), nothing reaches the page`, JSON.stringify({ id: t.appId, up: t.appUp, seat: t.appSeat, press: t.appPress, after: t.appAfter, typed: t.appTyped, diag: t.appDiag }));
   ok(t.heldHide.down && t.heldHide.ku === 'Shift' && Array.isArray(t.heldHide.pressed) && t.heldHide.pressed.length === 0 && t.hand.ok && t.handed && t.heldHandback.down && t.heldHandback.ku === 'Shift',
     `verify r2 (H3): Shift HELD in the page when the window is minimized, and across a real press on Hand back, is let go IN THE PAGE (keydown / keyup: ${JSON.stringify(t.heldHide)} · ${JSON.stringify(t.heldHandback)}) — before, the page kept it down`, JSON.stringify({ hide: t.heldHide, hand: t.hand, handed: t.handed, handback: t.heldHandback }));
   ok(t.scriptFocus === true && t.restoredB.owns && t.restoredB.active === 'sink' && t.restoredB.caretMoves >= 1 && /^Typing (goes|is sent) to the browser$/.test(String(t.restoredB.chip)) && t.restoredB.line === null

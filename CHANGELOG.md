@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.324 — 2026-10-20
+
+### Fixed
+- Esc closes a dialog again after a button in it went away — for example the window picker right after you press Stop.
+- An app you Forget shows up again under Installed outside VibeSpace at once, not at the next listing.
+- Folding a run of tool cards now shrinks the cards that keep a conversation link to one line each, so the fold always changes what you see.
+- A Design window an agent opens now appears as a split to the right of its conversation, and no longer comes to the front or takes your focus.
+
 ## 2.369.323 — 2026-10-20
 
 ### Added

@@ -8612,7 +8612,7 @@ export default {
   "A Flatpak or Snap app, and a browser, asks a desktop portal for its file dialogs; VibeSpace starts one on the app's own display, so the dialog opens inside its window, not on your main desktop (3 more processes per app, gone with it). Every app: GTK apps too. Off: as before. Applies to apps started after the change.": "Flatpak や Snap のアプリとブラウザはファイルダイアログをデスクトップポータルに頼みます。VibeSpace はアプリ自身のディスプレイにポータルを起動するので、ダイアログはメインデスクトップではなくそのウィンドウ内に開きます（アプリごとに 3 プロセス、アプリと一緒に終了）。すべてのアプリ：GTK アプリも。オフ：従来どおり。変更後に起動したアプリに適用されます。",
   "file dialogs in this window (3 processes)": "ファイルダイアログはこのウィンドウ内（3 プロセス）",
   "file dialogs on your main desktop — {why}": "ファイルダイアログはメインデスクトップに — {why}",
-  "OFF (the default): a window an agent opens — its own browser, an app it starts, a second window of that app, its live view — is placed beside the agent's chat (or on that chat's desktop), behind what you are doing, and its taskbar entry pulses; it never takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.": "オフ（既定）：agent が開くウィンドウ（自分のブラウザ、起動したアプリ、そのアプリの 2 つ目のウィンドウ、ライブビュー）は、その agent のチャットの横（またはそのチャットのデスクトップ）に、作業中のウィンドウの後ろに置かれ、タスクバーの項目が点滅します。フォーカスを奪うこともデスクトップを切り替えることもありません。オン：以前どおり前面に出てフォーカスを取ります。",
+  "OFF (the default): a window an agent opens — its own browser, an app it starts, a second window of that app, its live view, a Design it opens — is placed beside the agent's chat (or on that chat's desktop), behind what you are doing, and its taskbar entry pulses; it never takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.": "オフ（既定）：agent が開くウィンドウ（自分のブラウザ、起動したアプリ、そのアプリの 2 つ目のウィンドウ、ライブビュー、開いたデザイン）は、その agent のチャットの横（またはそのチャットのデスクトップ）に、作業中のウィンドウの後ろに置かれ、タスクバーの項目が点滅します。フォーカスを奪うこともデスクトップを切り替えることもありません。オン：以前どおり前面に出てフォーカスを取ります。",
   "This page is not https, so the browser gives it no microphone — open it over https, or on this computer at {url}": "このページは https ではないため、ブラウザーがマイクを渡しません——https で開くか、このコンピューターで {url} を開いてください",
   "The browser refused the microphone — allow it in the site permissions in the address bar": "ブラウザーがマイクを拒否しました——アドレスバーのサイトの権限で許可してください",
   "No microphone was found on this device": "このデバイスにマイクが見つかりません",
@@ -9556,4 +9556,5 @@ export default {
   "Granted — the key is listed with this conversation in the Vault window": "付与しました — 保管庫ウィンドウでこの会話とともに表示されます", // design q-046 (lane automation-keys-core)
   "Use an automation key you granted it": "あなたが付与した自動化キーを使う", // design q-046 (lane automation-keys-core)
   "List its automation keys or their audit": "自動化キーまたは監査記録を一覧する", // design q-046 (lane automation-keys-core)
+  "{n} with a conversation link": "会話リンク付き {n} 件", // lane run-fold-channel-compact
 };

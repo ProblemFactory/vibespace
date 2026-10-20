@@ -219,6 +219,8 @@ try {
     let on = false; for (let i = 0; i < 80 && !on; i++) { on = !!(await W.hostRow('uimac'))?.online; if (!on) await sleep(250); }
     ok(on, 'a device holding the current command is dialed in (online)');
     await openRemote(E);
+    // lane race-sweep (B-6619's shape, again): the SERVER row said online — the sheet opens from the CLIENT's cache, so it waits for it
+    await cachedRow(E, 'host-dial-uimac', '(h) => !!h.online');
     await E.evalJs(`app.sidebar._showDevicePairDialog((app.sidebar._hostsData?.hosts || []).find((h) => h.id === 'host-dial-uimac')); true`);
     await E.waitFor(`document.querySelectorAll('#device-pair-dialog .dap-row').length > 1`, 8000);
     const keep = await E.evalJs(`(() => { const b = document.querySelector('#device-pair-dialog .device-pair-keep input'); return b ? { checked: b.checked, text: b.parentElement.textContent } : null; })()`);
@@ -259,6 +261,9 @@ try {
     // presses Generate — refused by name, NOTHING minted (pre-fix: a plain rotation — the device he chose to keep was cut)
     {
       let back = false; for (let i = 0; i < 80 && !back; i++) { back = !!(await W.hostRow('uimac'))?.online; if (!back) await sleep(250); }
+      // lane race-sweep (B-6619's shape in verify-r6 P1, 1/10 on 2 cpus: the sheet opened on the cached OFFLINE row — no keep box, then
+      // a TypeError ticking it): the client's cache carries the device online before the sheet opens
+      await cachedRow(E, 'host-dial-uimac', '(h) => !!h.online');
       await E.evalJs(`app.sidebar._showDevicePairDialog((app.sidebar._hostsData?.hosts || []).find((h) => h.id === 'host-dial-uimac')); true`);
       await E.waitFor(`!!document.querySelector('#device-pair-dialog .device-pair-keep input') && document.querySelectorAll('#device-pair-dialog .dap-row').length > 1`, 8000);
       const gen0 = (await W.hostRow('uimac'))?.dial?.generation;
@@ -472,9 +477,10 @@ try {
       await openRemote(Q);
       await Q.evalJs(`app.sidebar._showDevicePairDialog((app.sidebar._hostsData?.hosts || []).find((h) => h.id === 'host-dial-osdev')); true`);
       await Q.waitFor(`!!document.querySelector('#device-pair-dialog .dap-row input:checked')`, 8000);
-      await Q.realClick('#device-pair-dialog .device-pair-go');
-      await Q.waitFor(`!!document.querySelector('#device-pair-dialog .device-pair-cmd')`, 10000);
-      const r = await Q.evalJs(`({ nav: navigator.platform, chip: [...document.querySelectorAll('#device-pair-dialog .device-pair-os button')].find((b) => b.className === 'btn-create')?.textContent || '', cmd: document.querySelector('#device-pair-dialog .device-pair-cmd').value.slice(0, 14) })`);
+      // lane race-sweep (B-6b74): the press's own answer is part of the state — a press that never happened was a TypeError here
+      const clicked = await Q.realClick('#device-pair-dialog .device-pair-go');
+      const cmdUp = await Q.waitFor(`!!document.querySelector('#device-pair-dialog .device-pair-cmd')`, 10000);
+      const r = { clicked, cmdUp, ...(await Q.evalJs(`({ nav: navigator.platform, chip: [...document.querySelectorAll('#device-pair-dialog .device-pair-os button')].find((b) => b.className === 'btn-create')?.textContent || '', cmd: (document.querySelector('#device-pair-dialog .device-pair-cmd') || { value: '' }).value.slice(0, 14), dialog: (document.querySelector('#device-pair-dialog') || { textContent: 'no dialog' }).textContent.slice(0, 160) })`)) };
       await Q.evalJs(`document.querySelector('#device-pair-dialog .dialog-close')?.click(); true`);
       return r;
     };

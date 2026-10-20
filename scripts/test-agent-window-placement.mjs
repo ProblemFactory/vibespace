@@ -62,6 +62,31 @@ console.log('① the PURE verdict table');
   ok(P.agentWindowPlacement({ msg: { type: 'desktop-app-opened', sessionId: 'w-A', appId: 'da-1', origin: 'agent-browser' }, chats: STATES.here, visible: false }).act === 'none', 'a hidden page opens nothing');
 }
 
+console.log('①d the design-open push rides the SAME verdict (lane design-window-placement)');
+{
+  const P = await import(pathToFileURL(path.join(REPO, REL)).href);
+  const dmsg = (sid = 'w-A') => ({ type: 'design-open', sessionId: sid, openSpec: { action: 'openDesign', host: null, dir: '/proj/designs/x', sessionId: sid } });
+  const drows = [];
+  for (const [state, chats] of Object.entries(STATES)) for (const active of ACTIVES) for (const interacting of [false, true]) for (const phone of [false, true]) for (const front of [false, true]) {
+    drows.push({ row: { state, active, interacting, phone, front }, out: P.agentWindowPlacement({ msg: dmsg(), chats, active, desk: 'd1', phone, interacting, front }) });
+  }
+  ok(drows.length === 4 * 3 * 2 * 2 * 2, `${drows.length} design-open rows`);
+  ok(drows.filter((o) => o.out.deskSwitch !== false || (!o.row.front && o.out.focus !== false)).length === 0, 'design-open: setting OFF ⇒ focus:false on every row; deskSwitch:false on every row (ON too)');
+  const off = drows.filter((o) => !o.row.front && !o.row.phone);
+  ok(off.filter((o) => o.row.state === 'here').every((o) => o.out.act === 'beside' && o.out.fromWin === 'win-chat' && o.out.badge && !o.out.minimize && o.out.behind === (o.row.active === 'win-editor')), 'a Design opened beside a SHOWN chat ⇒ beside it (its split), quiet, the taskbar pulses, behind another active window');
+  ok(off.filter((o) => o.row.state === 'otherDesk').every((o) => o.out.act === 'desk' && o.out.deskId === 'd2' && o.out.badge), 'chat on ANOTHER desk ⇒ the Design is created there (hidden by the desktop model), no switch');
+  ok(off.filter((o) => o.row.state === 'minimized').every((o) => o.out.act === 'own' && o.out.behind === !!o.row.active && o.out.minimize === o.row.interacting && o.out.badge), 'chat minimized ⇒ its own window behind the active one; minimized while the person is mid-act');
+  ok(off.filter((o) => o.row.state === 'none').every((o) => o.out.act === 'none' && o.out.why === 'not-here'), 'no window of that chat here ⇒ nothing (D3)');
+  const ph = drows.filter((o) => !o.row.front && o.row.phone);
+  ok(ph.filter((o) => o.row.state === 'here').every((o) => o.out.act === 'own' && !o.out.focus && o.out.badge), 'phone showing the chat ⇒ its own window, never the shown one, the title badge says it is there');
+  ok(ph.filter((o) => o.row.state !== 'here').every((o) => o.out.act === 'none'), 'phone not showing the chat ⇒ nothing');
+  const on = drows.filter((o) => o.row.front);
+  ok(on.filter((o) => o.row.state === 'here' && !o.row.phone).every((o) => o.out.act === 'beside' && o.out.focus === true), 'setting ON ⇒ the Design comes to the FRONT (beside + focus) — the control');
+  ok(on.filter((o) => o.row.state === 'none').every((o) => o.out.act === 'none'), 'setting ON + no chat here ⇒ still nothing');
+  ok(P.agentPlacedSession(dmsg('w-Z')) === 'w-Z' && P.agentPlacedSession({ type: 'desktop-app-opened', origin: 'self-open', appId: 'a', sessionId: 'w-Q' }) === 'w-Q', 'agentPlacedSession reads the session id of BOTH pushes');
+  ok([{ type: 'design-open', sessionId: 'w-A', openSpec: { action: 'openDesign', dir: '' } }, { type: 'design-open', sessionId: '', openSpec: { action: 'openDesign', dir: '/d' } }, { type: 'design-open', sessionId: 'w-A', openSpec: { action: 'other', dir: '/d' } }, { type: 'design-open', sessionId: 'w-A' }].every((m) => P.agentWindowPlacement({ msg: m, chats: STATES.here }).act === 'none' && P.agentPlacedSession(m) === null), 'a design-open with no folder / no session / a non-openDesign action / no openSpec ⇒ nothing opens (a person’s door never rides this push)');
+}
+
 console.log('② satelliteFocus — a second top-level of a running app (rule 3)');
 {
   const { satelliteFocus: S, agentOpenedRecord: A } = await import(pathToFileURL(path.join(REPO, REL)).href);
@@ -108,6 +133,12 @@ console.log('④ the doors read the verdict');
   ok(/#mobile-nav-title\.arrived/.test(read('public/style.css')) && /classList\.toggle\('arrived'/.test(read('src/lib/mobile-nav.js')), 'the phone\'s title carries it (the shown window is never replaced)');
   const bl = read('src/lib/browser-live-window.js');
   ok(/const quiet = app\.settings\?\.get\('desktop\.agentWindowsFront'\) !== true;/.test(bl) && /syncId, intoChain, quiet \}\);/.test(bl), 'the live view the agent\'s browser start auto-opens follows the same rule (quiet beside the chat)');
+  // lane design-window-placement: the Design window's door reads the SAME verdict, through app.placeAgentWindow
+  const dw = read('src/lib/design-window.js');
+  ok(/app\.placeAgentWindow\(m, \(p, \{ focus \}\) => \(\{/.test(dw) && /win: openDesign\(app, \{ host: spec\.host \|\| '', dir: spec\.dir, sessionId: sid, quiet: !focus \}\)/.test(dw), 'installDesignWindow routes the design-open push through app.placeAgentWindow (quiet unless the front setting focuses it)');
+  ok(/if \(quiet\) \{ app\.wm\.markArrived\(existing\.id\); app\.wm\.revealWindow\(existing\.id, \{ raise: false \}\); \}/.test(dw), 'openDesign: an agent\'s re-open of an OPEN design pulses + shows its tab, never raised (raise:false)');
+  ok(/placeAgentWindow\(msg, open\) \{/.test(app) && /const p = agentWindowPlacement\(\{ msg, chats, active: this\.wm\.activeWindowId \|\| null, desk: dm\?\.activeDesktopId \|\| null, phone: !!this\.isMobile, visible: document\.visibilityState !== 'hidden', interacting, front: this\.settings\?\.get\('desktop\.agentWindowsFront'\) === true \}\)/.test(app), 'app.placeAgentWindow asks the SAME verdict as the desktop-app door');
+  ok(/const r = open\(p, \{ focus: !!p\.focus \}\) \|\| \{\};/.test(app) && /if \(r\.fresh\) \{/.test(app) && /if \(p\.act === 'beside' && host\) \{ this\.wm\.snapToHalf\(p\.fromWin, 'left'\); this\.wm\.snapToHalf\(w\.id, 'right'\); \}/.test(app), 'app.placeAgentWindow positions ONLY a FRESH window: beside = snap (chat left, Design right), else desk / behind; an existing one placed itself');
 }
 
 console.log('⑤ the setting');
@@ -118,6 +149,8 @@ console.log('⑤ the setting');
   ok(i > 0 && /type: 'boolean', default: false/.test(row) && /category: t\('Desktop apps'\)/.test(row), 'Settings → Desktop apps → a boolean, default OFF');
   ok(/OFF \(the default\)/.test(row) && /ON: it comes to the front/.test(row), 'its description says the default and the old behaviour');
   for (const lang of ['zh', 'ja']) { const L = read(`src/lib/i18n-${lang}.js`); ok(L.includes('"Agent-opened windows come to the front":') && L.includes('"OFF (the default): a window an agent opens'), `${lang}: the label and the description are translated`); }
+  ok(/a Design it opens/.test(row), 'the description names a Design beside the desktop apps (lane design-window-placement)');
+  for (const lang of ['zh', 'ja']) { const L = read(`src/lib/i18n-${lang}.js`); ok(L.includes(', a Design it opens — is placed beside'), `${lang}: the new design clause is in the translated key`); }
 }
 
 console.log(failed ? `\nFAIL (${failed} failed, ${passed} passed)` : `\nALL PASS (${passed})`);

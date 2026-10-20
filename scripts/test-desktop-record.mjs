@@ -1228,6 +1228,7 @@ const GEOM_PRIMS = ['toggleMaximize', 'minimize', 'restore', 'snapToHalf', 'snap
 const GEOM_SELF = ['snapToHalf', 'snapActiveToCell', 'applyLayout', 'startMoveMode', 'revealWindow', 'loadPreset'];
 const GEOM_MACHINE = [
   ['app.js', 'constructor', "lane agent-window-no-steal: an AGENT-opened window waits minimized on the taskbar while the person is mid-act (agentWindowPlacement `minimize`) — the agent's placement, never a user act, so it stamps no geometry witness"],
+  ['app.js', 'placeAgentWindow', "lane design-window-placement: the Design window's agent-window-no-steal door minimizes an AGENT-placed window while the person is mid-act (agentWindowPlacement `minimize`) — the agent's placement, never a user act, so it stamps no geometry witness (the design-open twin of the desktop-app-opened path above)"],
   ['layout.js', '_applyRemoteState', "the apply of a record — a witness here would hold another client's act for a minute (r3 ①)"],
   ['layout.js', '_createRemoteWindow', 'the apply creating a window the record lists, at its recorded state'],
   ['layout.js', 'restoreState', 'the boot / a replay restoring a record'],

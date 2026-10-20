@@ -578,7 +578,46 @@ const isOrphan = (pid) => { const st = procStat(pid); const pp = st && procStat(
   const cli = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--reap', '--dry-run'], { encoding: 'utf8', cwd: REPO, env: QUIET_ENV, timeout: 60000, maxBuffer: 256 << 20 }); // B-60d2: the dry run also lists every reapable dir (2.2 MB on the dev box) — the 1 MB default died ENOBUFS
   const cl = (cli.stdout || '').split('\n');
   ok(cli.status === 0 && cl.some((l) => l.startsWith(`[ci]   spare pid ${pA} `) && l.includes('owner is alive')) && cl.some((l) => l.startsWith(`[ci]   not a root: pid ${pB} `) && l.includes('a file, not a directory')) && cl.some((l) => /^\[ci\] --dry-run: /.test(l)),
-    '`node scripts/ci.mjs --reap --dry-run` prints both verdicts with their evidence and signals nothing', cl.filter((l) => l.includes(String(pA)) || l.includes(String(pB)) || /--dry-run/.test(l)));
+    '`node scripts/ci.mjs --reap --dry-run` prints both verdicts with their evidence and signals nothing', { status: cli.status, signal: cli.signal, error: cli.error && cli.error.code, bytes: (cli.stdout || '').length, lines: cl.length, last: cl.slice(-3), stderr: (cli.stderr || '').slice(-300), hits: cl.filter((l) => l.includes(String(pA)) || l.includes(String(pB)) || /--dry-run/.test(l)) });
+}
+
+// ── §6b THE CLI'S REPORT REACHES A READER THAT LAGS (lane race-sweep, B-8b81) ──────────────────────────────────────────
+// §6's dry run missed its "not a root" line on 2 saturated cpus: `process.exit(reapByHand(…))` dropped what stdout still
+// queued for the pipe (the suite's spawnSync reading it late) — the verdicts after the first ~64 KB and the closing line.
+// Made deterministic: a report far past any pipe (a fake table of 2000 shells naming one long-named scratch FILE), its
+// reader PAUSED until the child says it reached its exit; the pre-fix exit loses the tail, exitFlushed waits for the reader.
+console.log('\n§6b the CLI\'s report reaches a reader that lags (B-8b81: process.exit dropped the queued tail)');
+{
+  const P = fakeProc('flush');
+  const LONG = sib('flush-' + 'x'.repeat(200) + '.log'); fs.writeFileSync(LONG, 'a log\n'); made.push(LONG);
+  for (let k = 0; k < 2000; k++) P.mk(50000 + k, { name: 'sh', argv: ['sh', LONG], born: OLD });
+  const CIURL = pathToFileURL(path.join(REPO, 'scripts', 'ci.mjs')).href;
+  const lagged = async (how) => {
+    const code = `const m = await import(${JSON.stringify(CIURL)}); const r = m.reapByHand({ dryRun: true, procRoot: ${JSON.stringify(P.root)} }); process.stderr.write('AT-EXIT\\n'); ${how === 'pre' ? 'process.exit(r)' : 'm.exitFlushed(r)'};`;
+    const ch = spawn(process.execPath, ['--input-type=module', '-e', code], { cwd: QUIET_CWD, env: QUIET_ENV, stdio: ['ignore', 'pipe', 'pipe'] });
+    ch.stdout.pause();                                                            // the reader that lags: nothing read yet
+    let err = ''; ch.stderr.on('data', (b) => { err += b; });
+    const exited = new Promise((r) => ch.on('exit', (c) => r(c)));
+    const net = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r('net'), ms))]);
+    const atExit = await net(new Promise((r) => { const t = setInterval(() => { if (err.includes('AT-EXIT') || ch.exitCode !== null) { clearInterval(t); r(true); } }, 5); }), 30000);
+    // pre: it exits with its queue unread (it always does — wait for it); fix: it does NOT while nobody reads (1 s look)
+    const exitedUnread = how === 'pre' ? (await net(exited, 30000)) !== 'net' : (await net(exited, 1000)) !== 'net';
+    const out = []; ch.stdout.on('data', (b) => out.push(b)); ch.stdout.resume();
+    const closed = await net(new Promise((r) => ch.stdout.on('close', () => r(true))), 30000);
+    const code2 = await net(exited, 30000);
+    const lines = Buffer.concat(out).toString('utf8').split('\n').filter(Boolean);
+    return { atExit, exitedUnread, closed, code: code2, bytes: Buffer.concat(out).length, lines: lines.length, ignored: lines.filter((l) => l.startsWith('[ci]   not a root: ')).length, last: lines[lines.length - 1] || '', err: err.slice(-200) };
+  };
+  const F = await lagged('fix');
+  ok(F.atExit === true && F.exitedUnread === false && F.code === 0 && F.ignored === 2000 && F.last === '[ci] --dry-run: nothing to reap (0 spared, 2000 naming no scratch root), none signalled',
+    `exitFlushed: the child at its exit WAITS for its reader (no exit while unread), then all ${F.lines} lines arrive (${F.bytes} bytes, 2000 "not a root") and the closing line last`, { ...F, last: F.last.slice(0, 160) });
+  const C = await lagged('pre');
+  ok(C.atExit === true && C.exitedUnread === true && C.ignored < 2000 && !/^\[ci\] --dry-run: /.test(C.last),
+    `CONTROL: the pre-fix \`process.exit(reapByHand(…))\` exits with its queue unread — the reader then gets ${C.ignored} of 2000 "not a root" lines (${C.bytes} bytes), no closing line (§6's red, on purpose)`, { ...C, last: C.last.slice(0, 120) });
+  const CISRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf8');
+  const mainBody = CISRC.slice(CISRC.indexOf('\nfunction main(argv) {'), CISRC.indexOf('\n// Only run when EXECUTED'));
+  ok(/if \(arg\('reap'\)\) return exitFlushed\(reapByHand\(\{ dryRun: !!arg\('dry-run'\) \}\)\);/.test(mainBody) && mainBody.length > 1000 && !/process\.exit\(/.test(mainBody) && (mainBody.match(/exitFlushed\(/g) || []).length >= 15,
+    `WIRING PIN: every exit of ci.mjs's main() goes through exitFlushed — --reap among them; no bare process.exit( left in main (${(mainBody.match(/exitFlushed\(/g) || []).length} sites)`);
 }
 
 // verify r2 (R4): the kernel's marker, FOR REAL — a child of this suite whose cwd was a scratch root that is then unlinked

@@ -327,7 +327,11 @@ sec('⑩ rel254-verify-fixes: the OWNER routes over the real router (adopt-prefi
   const row0 = (await appsR.refreshCatalog()).find((r) => r.id === 'app.tool');
   ok(row0 && row0.removable === false, 'a registered row without a recipe offers Forget (removable false)');
   const fg = await J('POST', '/api/desktop/apps/app.tool/forget', {});
-  ok(fg.status === 200 && fg.j.ok && !(await appsR.readManifest()).manifest.entries.some((e) => e.id === 'tool') && fs.existsSync(path.join(h, 'opt/tool')) && appsR.witnessRows().some((r) => r.label === 'Tool'), 'F1: POST …/forget — the entry leaves, the program stays and is listed outside VibeSpace again');
+  // lane race-sweep (B-0c04): the .278 mirror's red here (then F4's cascade) — the Forget's re-list had JOINED the adopt's
+  // background listing, which read the index before the Forget wrote it (src/app-serve.js refreshWitness; test-apps-witness §4b)
+  const fgIndexed = (await appsR.readManifest()).manifest.entries.some((e) => e.id === 'tool');
+  ok(fg.status === 200 && fg.j.ok && !fgIndexed && fs.existsSync(path.join(h, 'opt/tool')) && appsR.witnessRows().some((r) => r.label === 'Tool'), 'F1: POST …/forget — the entry leaves, the program stays and is listed outside VibeSpace again',
+    { fg: fg.j, indexed: fgIndexed, witness: appsR.witnessRows().map((r) => r.label), listedAt: appsR.witnessView().listedAt });
   // a failing recipe: {ok:false, code:'failed', output}
   await J('POST', '/api/desktop/apps/adopt', { seenId: (appsR.witnessRows().find((r) => r.label === 'Tool') || {}).id, label: 'Tool', remove: { exec: 'bad-uninstall' } });
   const fr = await J('POST', '/api/desktop/apps/app.tool/remove', {});

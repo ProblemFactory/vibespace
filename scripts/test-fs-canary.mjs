@@ -12,7 +12,9 @@
 //      reads as a slow mount; the copies census
 //   §6 pins: server.js runs the canary through createFsCanary and no main-thread stat remains; the probe is the pool's
 // Run: node scripts/test-fs-canary.mjs
-if (!process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = '2'; // before the first pool use: §3 saturates it
+// before the first pool use: §3 saturates a pool of TWO — PINNED, never inherited (lane race-sweep, B-2d49: a VibeSpace agent
+// session's env carries UV_THREADPOOL_SIZE=32, the 12-job saturation then never queued the stat — fs 0 ms, 3 FAILED)
+process.env.UV_THREADPOOL_SIZE = '2';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
