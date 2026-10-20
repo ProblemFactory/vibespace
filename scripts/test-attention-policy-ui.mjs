@@ -246,7 +246,12 @@ await d.ev(`(document.querySelector('.chan-view-btn[data-view="all"]').click(), 
 rows = await until(d, (rs) => has(rs, 'im/c6'));
 ok(has(rows, 'im/c6'), 'under 全部 the direct chat is still there', rows.map((r) => r.key));
 await d.ev(`(document.querySelector('.chan-view-btn[data-view="focus"]').click(), true)`);
-await d.ev(`(${DOOR}.click(), true)`);
+// lane attention-policy-ui-red: the door's popover is still open here. A real outside press (pointerdown) would
+// close it on the view switch above, but a synthetic .click() fires no pointerdown, so onOutsidePress never saw one;
+// on .332 createPopover's anchor-toggle (B-5bd5) would then TOGGLE the open door SHUT on a second press. Open it only
+// if it is closed -- a door already open under the hand is not pressed again (in the product the view-switch press
+// would have closed it first, and this press reopens it).
+if (!((await d.ev(BLOCK)) || {}).inPop) await d.ev(`(${DOOR}.click(), true)`);
 await waitFor(d, BLOCK, (s) => s && s.rows.length === 12);
 await flip(d, DIRECT);
 rows = await until(d, (rs) => has(rs, 'im/c6', 'direct'));
