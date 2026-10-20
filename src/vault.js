@@ -178,6 +178,7 @@ const SECRETS_AT_REST = Object.freeze([
   { what: 'the attach configs', where: 'data/agentd/session-<id>.json', holds: 'no token — the attach child asks GET /api/agent/vault/link-token at every (re)start' },
   { what: 'the frp relay token (the owner\'s override)', where: 'data/plugins.json frp.config', entry: 'frp:token' },
   { what: 'the voice sign-in pair', where: 'data/dropline-oauth.json', entry: 'file:dropline-oauth.json (the sealed file\'s key)' },
+  { what: 'VibeSpace\'s own automation keys (vsak_, design q-046)', where: 'data/automation-keys.json holds each key\'s sha256 digest + its grants', entry: 'apikey:<key id>' },
   { what: 'the login tokens', where: 'data/auth.json tokens', holds: 'sha256 digests only' },
   { what: 'the pairing / agentd / mount tokens', where: 'data/hosts.json dialTokenHash · agentd-tokens.json · mount-tokens.json', holds: 'sha256 digests only' },
   { what: 'the TLS private key', where: 'data/tls/*.key', exception: 'the sign-in door needs it before any unlock' },

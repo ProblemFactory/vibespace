@@ -144,7 +144,7 @@ console.log('§2 replyVerdict');
   const exitItem = { ...item, action: { type: 'exit-run-ask', askId: 'a'.repeat(32), hostId: 'host-dial-mac', machine: 'mac', cmd: 'id' } };
   const e1 = v(liveChat, exitItem), e2 = v({ ...liveChat, turn: 'running' }, exitItem), e3 = v(null, exitItem);
   ok(e1.code === 'exit_ask' && e1.why === 'Answer it with Allow or Deny — a typed reply does not answer it' && e2.code === 'exit_ask' && e3.code === 'exit_ask', 'F5: an exit ask ⇒ exit_ask on a live, a mid-turn and a dead session alike (Allow / Deny is the answer, never a typed reply)', [e1, e2, e3]);
-  ok(R.REPLY_HIDDEN_CODES.includes('exit_ask') && R.ANSWER_ACTION_TYPES.includes('exit-run-ask') && R.ANSWER_ACTION_TYPES.includes('hub-act-ask') && R.ANSWER_ACTION_TYPES.length === 2, 'F5: exit_ask is HIDDEN (no Reply button, no option chips); the answer-by-buttons kinds are exit-run-ask and (lane hub-act-ask) a held hub act');
+  ok(R.REPLY_HIDDEN_CODES.includes('exit_ask') && R.ANSWER_ACTION_TYPES.includes('exit-run-ask') && R.ANSWER_ACTION_TYPES.includes('hub-act-ask') && R.ANSWER_ACTION_TYPES.includes('automation-ask') && R.ANSWER_ACTION_TYPES.length === 3 /* design q-046: a held automation call */, 'F5: exit_ask is HIDDEN (no Reply button, no option chips); the answer-by-buttons kinds are exit-run-ask and (lane hub-act-ask) a held hub act');
   const hubItem = { ...item, action: { type: 'hub-act-ask', askId: 'b'.repeat(32), hostId: 'host-dial-mac', machine: 'mac', kind: 'run' } };
   ok(v(liveChat, hubItem).code === 'exit_ask' && v(null, hubItem).code === 'exit_ask', 'lane hub-act-ask: a held hub act\'s card is answered by its buttons too — a typed reply never answers it');
 }
@@ -689,6 +689,7 @@ console.log('§8b the ROUTE with a reopen dep');
 console.log('§8c the ORCH reopener over a recording create');
 {
   const IR = require(path.join(REPO, 'src/server/inbox-reopen.js'));
+  const OPS = require(path.join(REPO, 'src/server/conversation-ops.js')); // int322: the reopen goes through THE conversation seam
   const mk = ({ answer = 'created', discovered = { cwd: '/home/u/proj', name: 'disc' }, us = {}, getHandle = true, delay = 0, located = null } = {}) => {
     const activeSessions = new Map();
     const creates = [];
@@ -702,10 +703,12 @@ console.log('§8c the ORCH reopener over a recording create');
     };
     const logs = [];
     const locates = [];
-    const R2 = IR.create({ getHandleCreate: () => (getHandle ? handleCreate : null), activeSessions, discover: async (key) => (discovered ? { ...discovered, sessionKey: key } : null), readUserState: () => us,
+    const ops = OPS.forDeps({ handleCreate, activeSessions });
+    const opens = [];
+    const R2 = IR.create({ getOpenConversation: () => (getHandle ? (spec, by, o) => { opens.push({ spec, by, o }); return ops.openConversation(spec, by, o); } : null), activeSessions, discover: async (key) => (discovered ? { ...discovered, sessionKey: key } : null), readUserState: () => us,
       locate: (b, id, cwd) => { locates.push([b, id, cwd]); return located; },
       defaultsFor: (b) => ({ permission: b === 'claude' ? 'default' : '', extraArgs: '' }), taskFor: (key) => (key === 'claude:c-1' ? 'T-7' : null), log: (l) => logs.push(l) });
-    return { R2, creates, activeSessions, logs, locates };
+    return { R2, creates, activeSessions, logs, locates, opens };
   };
   const us = { sessionConfigs: { 'claude:c-1': { model: 'claude-opus-4', account: 'acct-9' } }, customNames: { 'c-1': 'Named by the owner' } };
   const A = mk({ us });
@@ -715,6 +718,8 @@ console.log('§8c the ORCH reopener over a recording create');
   ok(sent && sent.data.resume === true && sent.data.resumeId === 'c-1' && sent.data.mode === 'chat' && sent.data.cwd === '/home/u/proj' && sent.data.model === 'claude-opus-4' && sent.data.accountId === 'acct-9' && sent.data.permissionMode === 'default' && sent.data.taskId === 'T-7' && sent.data.sessionName === 'Named by the owner' && /^reopen-/.test(sent.data.reqId),
     'the create = the resume of c-1 with the conversation\'s user-state config, the owner\'s custom name (a legacy bare-id key), its Task Group, the harness default permission', sent && sent.data);
   ok(sent && sent.ws._headless === true && sent.ws._actBy === 'human:me' && sent.ws.readyState === 1 && sent.attached instanceof Set, 'the creator is a HEADLESS socket naming who pressed (its own attached set)', sent && { h: sent.ws._headless, by: sent.ws._actBy });
+  ok(A.opens.length === 1 && A.opens[0].by.kind === 'human' && A.opens[0].by.actBy === 'human:me' && A.opens[0].o.ws === sent.ws && A.opens[0].o.attachedSessions === sent.attached && A.opens[0].spec === sent.data,
+    'int322: the reopen goes through THE SEAM (conversation-ops openConversation, by: human, its creator socket) and the seam ran the create case with the very message and socket — byte-identical', A.opens[0] && A.opens[0].by);
   ok(!A.activeSessions.get('w-new').clients.has(sent.ws) && A.activeSessions.get('w-new').clients.size === 0, '…and it LEFT the session\'s clients the moment the create answered (the window the page opens attaches like any other)');
   ok(r.conversation && r.conversation.name === 'Resumed name' && r.conversation.backendSessionId === 'c-1' && r.conversation.cwd === '/home/u/proj', 'the answer names the conversation (the create\'s own name for it)', r.conversation);
   const E = mk({ answer: 'error' });
@@ -753,8 +758,8 @@ console.log('§8c the ORCH reopener over a recording create');
 console.log('§8d wiring pins + RED CONTROL');
 {
   const srv = read('server.js'), wsh = read('src/ws-handler.js'), rsrc = read('src/routes/user-todos-reply.js');
-  ok(/const wsApi = registerWsHandler\(wss, \{/.test(srv) && /\n  return \{ handleCreate \};\n\}\n/.test(wsh), 'ws-handler hands its create case back (return { handleCreate }) and server.js keeps it (wsApi)');
-  ok(/const inboxReopen = require\('\.\/src\/server\/inbox-reopen\.js'\)\.create\(\{ getHandleCreate: \(\) => wsApi && wsApi\.handleCreate, activeSessions, readUserState: \(\) => persistenceRouter\.readUserState\(\), discover: async \(key\) => .*warmSessions\(\).*sessionKey === key/.test(srv), 'server.js builds the reopener over the create case, user-state and the discovery sweep the sidebar lists');
+  ok(/const wsApi = registerWsHandler\(wss, \{/.test(srv) && /\n  return \{ convOps \}; \/\/ [^\n]*\n\}\n/.test(wsh), 'ws-handler hands its conversation seams back (return { convOps } — int322: never the raw create case) and server.js keeps them (wsApi)');
+  ok(/const inboxReopen = require\('\.\/src\/server\/inbox-reopen\.js'\)\.create\(\{ getOpenConversation: \(\) => wsApi && wsApi\.convOps && wsApi\.convOps\.openConversation, activeSessions, readUserState: \(\) => persistenceRouter\.readUserState\(\), discover: async \(key\) => .*warmSessions\(\).*sessionKey === key/.test(srv), 'server.js builds the reopener over the conversation seam (int322), user-state and the discovery sweep the sidebar lists');
   ok(/if \(!v\.ok && v\.code === 'no_live_session' && typeof reopen === 'function'\) return reopenAndSend\(req, res, item, t\.text\);\n      if \(!v\.ok\) return fail\(res, v\.code, v\.why\);/.test(rsrc), 'the route reopens ONLY on no_live_session, right before the refusal it replaces');
   ok(/NOT AN UNATTENDED SPEND: this first turn is the PERSON's/.test(rsrc) && (rsrc.match(/\bsendUserInput\s*\(/g) || []).length === 2, 'the reopened first turn is commented at its call as the PERSON\'s typed turn, and rides THE typing path (the file\'s 2 sendUserInput calls — the spend census\'s typed-send ALLOW row)');
   ok(!/formatChatInput|deliverToConversation|authorizeSpend|sendToSession/.test(read('src/server/inbox-reopen.js')) && !/formatChatInput|deliverToConversation|authorizeSpend|sendToSession|sendUserInput/.test(read('src/inbox-reopen.js')), 'the reopener sends nothing into a conversation (no frame, no ladder, no typing) — a resume bills no turn');

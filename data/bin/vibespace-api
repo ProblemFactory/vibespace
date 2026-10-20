@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+// vibespace-api — VibeSpace's OWN automation API, for an agent (design q-046, lane automation-keys-core). The user mints
+// automation keys in the Vault window and GRANTS one to a conversation or a Task Group; this conversation then calls a verb
+// with its OWN session token — the hub judges every call (the grant × the verb × the vault), runs it, and writes one audit
+// line. You never see, hold or pass a key's value: there is no verb that returns one. While the vault is locked every call
+// answers `vault_locked` (tell the user; never ask for the password). Scoped by the per-session token in the env.
+const API = process.env.VIBESPACE_API;
+const TOKEN = process.env.VIBESPACE_SESSION_TOKEN;
+if (require.main === module && (!API || !TOKEN)) { // (a suite may require the module for its argv table)
+  console.error(process.env.VIBESPACE_JOB_TOKEN ? 'vibespace-api: only a conversation uses automation keys (a background job does not, yet)' : 'vibespace-api: not running inside a VibeSpace session (missing env)');
+  process.exit(2);
+}
+
+const USAGE = [
+  'usage — VibeSpace\'s own automation API (keys the user GRANTED this conversation; you never see a key\'s value):',
+  '  vibespace-api keys                                the keys this conversation may use: name · verbs · how it holds each',
+  '  vibespace-api call <verb> [--key <name|id>] [--json \'{…}\'] [--<arg> <value>]…',
+  '                                                    call one verb — e.g. vibespace-api call conversations.rename --name "Lane X"',
+  '  vibespace-api audit [--key <name|id>] [--since <ISO time>] [--limit N]   this conversation\'s own audit lines',
+  'the typed verbs (each prints the hub\'s answer as JSON; --key <name|id> picks a key):',
+  '  vibespace-api conversations open --cwd <absolute path> [--name "…"] [--backend claude] [--mode chat|terminal]',
+  '                [--model opus] [--effort xhigh] [--permission bypassPermissions] [--task <T-…>] [--pool <pool-…>]',
+  '      a billed open (the spend ceiling decides first); answers sessionId + the conversation id, or pending',
+  '  vibespace-api conversations status <target>              its ids (pending until its CLI reported one)',
+  '  vibespace-api conversations rename <target> "<name>"     ·  bind <target> <T-…>  ·  end <target>',
+  '  vibespace-api groups invite <g-…|group name> <target>    into an agent group you are in (no wake)',
+  '  <target> = a conversation id, <backend>:<id> or a session id (sess-…); a conversation the key opened is within its reach',
+  'no grant yet ⇒ the call asks the user in For you (≤ 60 s) and waits; a refusal is final for 10 minutes. Full manual: vibespace-docs api',
+].join('\n');
+
+async function call(method, route, body) {
+  const res = await fetch(API + route, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) { console.error('vibespace-api: ' + (data.error || 'HTTP ' + res.status) + (data.code ? ` (${data.code})` : '')); process.exit(data.code === 'vault_locked' ? 3 : 1); }
+  return data;
+}
+/** --flag value pairs → { flags, rest }. */
+function parse(args) {
+  const flags = {}, rest = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith('--')) { const k = a.slice(2); const v = args[i + 1]; if (v === undefined || v.startsWith('--')) { console.error(`vibespace-api: --${k} needs a value\n` + USAGE); process.exit(2); } flags[k] = v; i++; }
+    else rest.push(a);
+  }
+  return { flags, rest };
+}
+const q = (o) => { const s = new URLSearchParams(Object.entries(o).filter(([, v]) => v != null && v !== '')).toString(); return s ? '?' + s : ''; };
+
+/** THE TYPED VERBS (lane automation-verbs): argv → {verb, args, key} | {error}. Positionals in order, flags ONE value each. */
+const TYPED = {
+  'conversations open': { verb: 'conversations.open', pos: [], flags: ['cwd', 'name', 'backend', 'mode', 'model', 'effort', 'permission', 'task', 'pool'], need: ['cwd'] },
+  'conversations status': { verb: 'conversations.status', pos: ['target'], flags: [] },
+  'conversations rename': { verb: 'conversations.rename', pos: ['target', 'name'], flags: [] },
+  'conversations bind': { verb: 'conversations.bind', pos: ['target', 'task'], flags: [] },
+  'conversations end': { verb: 'conversations.end', pos: ['target'], flags: [] },
+  'groups invite': { verb: 'groups.invite', pos: ['group', 'target'], flags: [] },
+};
+function typed(argv) {
+  const [g, sub, ...rest] = argv;
+  const row = TYPED[`${g} ${sub}`];
+  if (!row) return { error: `unknown verb "${[g, sub].filter(Boolean).join(' ')}"` };
+  const pos = [], args = {};
+  let key = null;
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (!a.startsWith('--')) { pos.push(a); continue; }
+    const k = a.slice(2), v = rest[i + 1];
+    if (k !== 'key' && !row.flags.includes(k)) return { error: `--${k} is not a flag of ${g} ${sub}` };
+    if (v === undefined || v.startsWith('--')) return { error: `--${k} needs a value` };
+    if (k === 'key') key = v; else if (k in args) return { error: `--${k} given twice` }; else args[k] = v;
+    i++;
+  }
+  if (pos.length !== row.pos.length) return { error: `${g} ${sub} takes ${row.pos.length ? row.pos.map((p) => '<' + p + '>').join(' ') : 'flags only'}${pos.length > row.pos.length ? ` — stray word "${pos[row.pos.length]}" (quote a name)` : ''}` };
+  row.pos.forEach((p, k) => { args[p] = pos[k]; });
+  for (const n of row.need || []) if (args[n] == null) return { error: `${g} ${sub} needs --${n}` };
+  return { verb: row.verb, args, key };
+}
+
+async function main() {
+  const [cmd, ...more] = process.argv.slice(2);
+  if (cmd === 'conversations' || cmd === 'groups') {
+    const t = typed([cmd, ...more]);
+    if (t.error) { console.error(`vibespace-api: ${t.error} — nothing was sent\n` + USAGE); process.exit(2); }
+    const d = await call('POST', `/api/agent/automation/${encodeURIComponent(t.verb)}` + q({ key: t.key }), t.args);
+    console.log(JSON.stringify({ verb: d.verb, key: d.key, ...(d.result || {}) }, null, 2));
+    return;
+  }
+  if (!cmd || cmd === 'help' || cmd === '-h' || cmd === '--help') { console.log(USAGE); return; }
+  if (cmd === 'keys') {
+    if (more.length) { console.error(USAGE); process.exit(2); }
+    const d = await call('GET', '/api/agent/automation/keys');
+    if (!d.keys.length) { console.log('no key is granted to this conversation yet — calling a verb asks the user (For you), or they grant one in the Vault window'); return; }
+    for (const k of d.keys) console.log(`${k.name} (${k.id}) — ${k.scopes.join(', ')} — via ${k.via.map((v) => `${v.subject}${v.mode === 'once' ? ' (once)' : ''}`).join(', ')}`);
+    return;
+  }
+  if (cmd === 'audit') {
+    const { flags, rest } = parse(more);
+    if (rest.length || Object.keys(flags).some((k) => !['key', 'since', 'limit'].includes(k))) { console.error(USAGE); process.exit(2); }
+    const d = await call('GET', '/api/agent/automation/audit' + q({ key: flags.key, since: flags.since, limit: flags.limit }));
+    if (!d.lines.length) { console.log('no audit line for this conversation yet'); return; }
+    for (const l of d.lines) console.log(`${l.at} ${l.ok ? 'ok ' : 'NO '} ${l.verb}${l.key ? ' key ' + l.key : ''}${l.code ? ' — ' + l.code : ''}${l.ask ? ' (asked: ' + l.ask + ')' : ''} ${JSON.stringify(l.args || {})}`);
+    return;
+  }
+  if (cmd === 'call') {
+    const [verb, ...rest0] = more;
+    if (!verb || verb.startsWith('--')) { console.error('vibespace-api: call needs a verb\n' + USAGE); process.exit(2); }
+    const { flags, rest } = parse(rest0);
+    if (rest.length) { console.error(`vibespace-api: unexpected "${rest[0]}" — arguments are --name value pairs or --json\n` + USAGE); process.exit(2); }
+    const { key = null, json = null, ...named } = flags;
+    let args = {};
+    if (json != null) { try { args = JSON.parse(json); } catch (e) { console.error('vibespace-api: --json is not JSON: ' + e.message); process.exit(2); } }
+    Object.assign(args, named);
+    const d = await call('POST', `/api/agent/automation/${encodeURIComponent(verb)}` + q({ key }), args);
+    console.log(`ok — ${d.verb} with key "${d.key}"${d.result && d.result.name ? `: now "${d.result.name}"` : ''}`);
+    return;
+  }
+  console.error('vibespace-api: unknown command "' + cmd + '"\n' + USAGE);
+  process.exit(2);
+}
+if (require.main === module) main().catch((e) => { console.error('vibespace-api:', e.message); process.exit(1); });
+module.exports = { typed, TYPED, USAGE };

@@ -743,8 +743,9 @@ app.delete('/api/tasks/:id', (req, res) => {
 });
 // Granular tag ops (atomic server-side — concurrent clients can't clobber
 // each other's read-modify-write of the sessions array)
+const convOps = require('./src/server/conversation-ops.js'); convOps.provide({ tasks, spendGuard }); // lane automation-verbs: the conversation verbs' seams reach the task store + THE spend guard (an automation open is charged there)
 app.post('/api/tasks/:id/bind', (req, res) => {
-  try { res.json({ success: true, task: tasks.bind(req.params.id, req.body?.sessionKey) }); }
+  try { res.json({ success: true, task: convOps.bindConversation({ sessionKey: req.body?.sessionKey }, req.params.id, { kind: 'human', actBy: require('./src/device-audit.js').byOfReq(req) }) }); }
   catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
 });
 app.post('/api/tasks/:id/unbind', (req, res) => {
@@ -1513,7 +1514,7 @@ const wsApi = registerWsHandler(wss, {
   getExitProxy: () => { try { return exitProxy; } catch { return null; } }, // verify-r2 A3-r2 / ask-a: the kill path ends a dead conversation's pairs + asks
   USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, sendUserInput, getDesign: () => designEngine, setCustomName: (k, n) => persistenceRouter.setCustomName(k, n), /* lane peer-card-sender: rename-session → customNames */ // getDesign = the Design window's watch (design-watch / design-unwatch); telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1); sendUserInput = THE typing path (src/server/user-input.js), shared with the For-you reply route
 });
-const inboxReopen = require('./src/server/inbox-reopen.js').create({ getHandleCreate: () => wsApi && wsApi.handleCreate, activeSessions, readUserState: () => persistenceRouter.readUserState(), discover: async (key) => (((await require('./src/routes/sessions').warmSessions()) || {}).sessions || []).find((s) => s && s.sessionKey === key) || null, locate: (b, id, cwd) => { const h = require('./src/harnesses').get(b); return h && h.store && typeof h.store.locate === 'function' ? h.store.locate(id, cwd) : null; }, defaultsFor: (b) => ({ permission: harnessDeclares(b, 'defaultPermissionMode') ? String(harnessSetting(b, 'defaultPermissionMode') ?? '') : '', extraArgs: harnessDeclares(b, 'defaultExtraArgs') ? String(harnessSetting(b, 'defaultExtraArgs') ?? '') : '' }), taskFor: (key) => (tasks.list().find((g) => (g.sessions || []).includes(key)) || {}).id || null }); // a For-you reply to an ENDED conversation reopens it by the resume road (the ws create case, a headless creator) — lane inbox-reply-dead-session
+const inboxReopen = require('./src/server/inbox-reopen.js').create({ getOpenConversation: () => wsApi && wsApi.convOps && wsApi.convOps.openConversation, activeSessions, readUserState: () => persistenceRouter.readUserState(), discover: async (key) => (((await require('./src/routes/sessions').warmSessions()) || {}).sessions || []).find((s) => s && s.sessionKey === key) || null, locate: (b, id, cwd) => { const h = require('./src/harnesses').get(b); return h && h.store && typeof h.store.locate === 'function' ? h.store.locate(id, cwd) : null; }, defaultsFor: (b) => ({ permission: harnessDeclares(b, 'defaultPermissionMode') ? String(harnessSetting(b, 'defaultPermissionMode') ?? '') : '', extraArgs: harnessDeclares(b, 'defaultExtraArgs') ? String(harnessSetting(b, 'defaultExtraArgs') ?? '') : '' }), taskFor: (key) => (tasks.list().find((g) => (g.sessions || []).includes(key)) || {}).id || null }); // a For-you reply to an ENDED conversation reopens it by the resume road (the ws create case, a headless creator) — lane inbox-reply-dead-session
 
 // Billing identity for the card badge. Precedence: env-key spawn (definite) →
 // the CLI's OWN init statement (apiKeySource: 'none'=subscription OAuth,

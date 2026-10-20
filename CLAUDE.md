@@ -64,6 +64,7 @@ The 2026-08 campaign (docs/design-three-tier.md, R0–R6 + session-brain + closu
 | **A server cache a client also caches** | The invalidation entry point must NOTIFY (the 2.309.0 rule) — hook on the ONE entry point, never per call site | test-remote-discovery-dirty's drift guard pattern |
 | **A VOICE / dictation feature** | PURE src/voice-model.js + ONE vendor module src/server/dropline-client.js + the plugin (src/plugins/voice-input.js) | test-voice-model / -proxy / -chrome + the vendor census ⇒ kb-features «Voice input» |
 | **A SECRET AT REST** (a store key, a token — anything that opens a credential) | The vault: a new store key = a STORE_KEYS row in src/server/vault-engine.js, read through secret-box `lawfulKey` (never a file, never an env var); a locked vault refuses `vault_locked` by name | test-vault-law, test-vault-engine, test-key-file-law |
+| **An automation verb / a key** (VibeSpace's own API, design q-046) | PURE `src/automation-keys.js` (the closed verb table, the GRANT verdict) + ORCH `src/server/automation-engine.js`; the value = vault entry apikey:<id>, never an agent's ⇒ kb-design-lessons | test-automation-keys |
 
 **ACTIVATION SWITCHES (code complete, soak-gated — flip deliberately, in order):** ① watch `sb-parity-hit/miss` in Diagnostics (step-2/3 live parity) → ② `agentd.localDiscovery` on (after `local-disc-snap-ms` looks sane on YOUR storage) → ③ `agentd.localPipeSessions` on (R6 — only after ①② soak; the design's sequencing law). Rollback = flip off; every path falls back structurally.
 

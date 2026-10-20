@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.323 — 2026-10-20
+
+### Added
+- VibeSpace has its own automation keys, kept in the vault: mint one in the Vault window and grant it to a conversation or a task group.
+- A conversation uses a granted key without ever seeing its value; its first use asks you in For you: Allow once, Always, or Deny.
+- Everything a key does stops while the vault is locked, and every use is logged; Show reveals a key only to hand it to an outside party.
+- With a granted key, a conversation can open, name and end other conversations, add one to a task group or invite it to a group; each open counts as spend.
+- Each thing a conversation asks to do with a key gets its own card; if the conversation stops waiting, its card closes and answering it runs nothing.
+
 ## 2.369.322 — 2026-10-20
 
 ### Maintenance

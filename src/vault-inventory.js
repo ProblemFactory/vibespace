@@ -44,7 +44,9 @@ const STORES = Object.freeze([
 const STORE_IDS = Object.freeze(STORES.map((s) => s.store));
 /** The window's groups: the six stores + «Hub secrets» (int317) — the engine's OWN secret entries (`host:<id>` a machine's
  *  link token, `frp:token` the relay token, `file:<name>` a sealed file's key; lane vault-e2e-password-fix-r2), no store key. */
-const GROUPS = Object.freeze([...STORES, Object.freeze({ store: 'secrets', label: 'Hub secrets' })]);
+// design q-046 (lane automation-keys-core): «Automation keys» — VibeSpace's own keys (`apikey:<id>` entries, listed by
+// src/server/automation-engine.js): revealable, one per reveal, ONLY to hand to an outside party (the row says so)
+const GROUPS = Object.freeze([...STORES, Object.freeze({ store: 'automation', label: 'Automation keys' }), Object.freeze({ store: 'secrets', label: 'Hub secrets' })]);
 const GROUP_IDS = Object.freeze(GROUPS.map((s) => s.store));
 const storeOf = (id) => GROUPS.find((s) => s.store === id) || null;
 /** NEVER SHOWN (int317): a machine's link token runs commands on that machine (an RCE credential) and a sealed file's key is

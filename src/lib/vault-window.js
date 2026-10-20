@@ -21,11 +21,12 @@ import { revealLeftMs, revealHeaders, onRevealChange, noteRevealLeft, forgetReve
 import { removeAccount, showReauthAccountDialog } from './channel-account-dialogs.js';
 import { passkeyDeleteWords } from './browser-panel-model.js';
 import { GROUPS, KIND_WORDS, searchRows, sortRows, countdownText, CLIPBOARD_CLEAR_MS } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
+import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
 
 const ICON = svgIcon16('<rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/><circle cx="8" cy="10.5" r="1"/>');
 const MASK = '••••••••';
 const vwEl = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-const STORE_WORDS = { accounts: () => t('Accounts'), integrations: () => t('Integrations'), channels: () => t('Channels'), mounts: () => t('Storage'), 'app-secrets': () => t('App logins'), passkeys: () => t('Passkeys'), secrets: () => t('Hub secrets') };
+const STORE_WORDS = { accounts: () => t('Accounts'), integrations: () => t('Integrations'), channels: () => t('Channels'), mounts: () => t('Storage'), 'app-secrets': () => t('App logins'), passkeys: () => t('Passkeys'), automation: () => t('Automation keys'), secrets: () => t('Hub secrets') };
 const SIZE_WORDS = { short: () => t('short'), medium: () => t('medium'), long: () => t('long'), 'very long': () => t('very long'), unknown: () => t('unknown length') };
 const kindWord = (k) => t(KIND_WORDS[k] || 'Secret');
 const whenText = (ms) => (ms ? new Date(ms).toLocaleString() : '');
@@ -99,7 +100,7 @@ export function openVaultWindow(app, { syncId } = {}) {
   const sig = winInfo._listenerCtl?.signal;
   // THE STATE: rows (masked) and the row elements (a value lives only in its row's <input> — nothing here holds one); the
   // reveal window is the page's (src/lib/vault-reveal.js)
-  const st = { data: null, q: '', sort: 'name', closed: false, wasOpen: false };
+  const st = { data: null, q: '', sort: 'name', closed: false, wasOpen: false, auto: null };   // auto: design q-046 — the keys, their grants, the picker's subjects
   const rowEls = new Map(), headEls = new Map();
 
   const root = vwEl('div', 'vw');
@@ -212,7 +213,7 @@ export function openVaultWindow(app, { syncId } = {}) {
     main.append(vwEl('div', 'vw-label', labelWord(row)));
     const meta = [kindWord(row.kind)];
     if (!(row.store === 'secrets' && row.size === 'unknown')) meta.push(t('length: {size}', { size: (SIZE_WORDS[row.size] || SIZE_WORDS.unknown)() }));   // a hub secret: names and dates only
-    if (row.detail) meta.unshift(WORDED.has(row.store) ? t(row.detail) : row.detail);   // an integration's field label is an English key (the registry's)
+    if (row.detail && row.store !== 'automation') meta.unshift(WORDED.has(row.store) ? t(row.detail) : row.detail);   // an integration's field label is an English key (the registry's); an automation key says its why beside 显示
     if (row.createdAt) meta.push(t('saved {when}', { when: whenText(row.createdAt) }));
     if (row.lastUsed) meta.push(row.lastUsed.by === 'human' ? t('last opened {when} by you', { when: whenText(row.lastUsed.at) }) : t('key last used {when} by VibeSpace', { when: whenText(row.lastUsed.at) }));
     main.append(vwEl('div', 'vw-meta', meta.join(' · ')));
@@ -228,7 +229,10 @@ export function openVaultWindow(app, { syncId } = {}) {
     copy.hidden = true;
     if (row.revealable === false) show.hidden = true;   // int317: a machine's link token / a sealed file's key — never shown (the hub refuses it by name)
     val.append(mask, show, copy);
+    // design q-046: an automation key's value is shown ONLY to hand to an outside party — said beside 显示, every time
+    if (row.store === 'automation') val.append(vwEl('span', 'vw-ak-why', t('Only to hand to an outside party')));
     const doors = vwEl('div', 'vw-doors');
+    if (row.store === 'automation' && st.auto) { const ex = automationExtras(row, st.auto, { refresh }); main.append(ex.box); doors.append(...ex.doors); }
     const x = { row, el: e, mask, show, copy, plain: null };
     if (row.doors && row.doors.rotate) { const b = vwEl('button', 'vw-btn vw-renew', t('Renew…')); b.type = 'button'; b.onclick = () => doRenew(row); doors.append(b); }
     if (row.doors && row.doors.delete) { const b = vwEl('button', 'vw-btn vw-del', t('Delete')); b.type = 'button'; b.onclick = () => doDelete(row); doors.append(b); }
@@ -249,6 +253,8 @@ export function openVaultWindow(app, { syncId } = {}) {
       h.dataset.store = s.store;
       h.append(vwEl('span', 'vw-group-name', (STORE_WORDS[s.store] || (() => s.label))()), vwEl('span', 'vw-group-n', String(info.count || 0)));
       if (info.error) h.append(vwEl('span', 'vw-group-err', t('could not be read ({code})', { code: info.error })));
+      // design q-046: 铸造… on the «Automation keys» head — the vault unlocked only (a key's value is sealed at once)
+      if (s.store === 'automation' && d.state === 'unlocked') { const m = vwEl('button', 'vw-btn vw-ak-mint', t('Mint…')); m.type = 'button'; m.onclick = () => showMintDialog({ refresh }); h.append(m); }
       headEls.set(s.store, h);
     }
     for (const row of d.rows) rowEls.set(row.id, rowFor(row));
@@ -285,6 +291,8 @@ export function openVaultWindow(app, { syncId } = {}) {
     if (st.closed) return;
     if (!r || r.ok === false) { st.data = null; drawHead(); list.textContent = ''; note.textContent = revealWords(r || {}); return; }
     st.data = { state: r.state, stores: r.stores || [], rows: r.rows || [] };
+    st.auto = r.state === 'unlocked' ? await loadAutomation() : null;   // design q-046: the keys' grants + the picker's subjects (never a value)
+    if (st.closed) return;
     if (r.reveal && r.reveal.open) noteRevealLeft(r.reveal.leftMs); else forgetReveal();
     drawTimer();
     build(); drawHead(); place();

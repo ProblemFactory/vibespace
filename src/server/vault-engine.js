@@ -49,8 +49,10 @@ const PACE_AFTER = 5;
 const PACE_MS = 60e3;
 const IDLE_MAX_HOURS = 720;
 /** A SECRET's entry name (r2): `host:<host id>` (a device's link token) · `frp:token` · `file:<name>` (a sealed JSON file's
- *  key — src/server/sealed-json.js) — never a key file's name (STORE_KEYS names start with `.` or `browser-`). */
-const SECRET_RE = /^(?:host|frp|file):[\w.-]{1,160}$/;
+ *  key — src/server/sealed-json.js) · `apikey:<key id>` (design q-046: VibeSpace's own automation key — its value, minted by
+ *  src/server/automation-engine.js; the store keeps its digest only) — never a key file's name (STORE_KEYS names start with
+ *  `.` or `browser-`). */
+const SECRET_RE = /^(?:host|frp|file|apikey):[\w.-]{1,160}$/;
 const isSecretName = (name) => SECRET_RE.test(String(name || ''));
 
 let SIGNALS_ARMED = false;

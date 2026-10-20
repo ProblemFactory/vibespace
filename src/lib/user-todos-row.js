@@ -109,10 +109,12 @@ const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
  *  Allow once / Always on this machine / Deny; its words (what it would do, who asked, what each answer does) shown whole
  *  ABOVE them, never folded below (the exit-ask lesson). Allow once / Always are armed like every Allow (press-arm). */
 const HUB_ANSWERS = ['once', 'always', 'deny'];
-const hubAnswerWord = (a, t) => (a === 'once' ? t('Allow once') : a === 'always' ? t('Always on this machine') : t('Deny'));
-const hubAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'hub-act-ask'
+// design q-046 (lane automation-keys-core): a held AUTOMATION call answers the same three ways — 允许一次 / 一直（授权给这个会话） / 拒绝
+const HELD_ASKS = ['hub-act-ask', 'automation-ask'];
+const hubAnswerWord = (a, t, type = 'hub-act-ask') => (a === 'once' ? t('Allow once') : a === 'always' ? (type === 'automation-ask' ? t('Always for this conversation') : t('Always on this machine')) : t('Deny'));
+const hubAskHtml = (i, t, detail) => (i && i.action && HELD_ASKS.includes(i.action.type)
   ? `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
-    + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${HUB_ANSWERS.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t))}</button>`).join('')}</div>` : '')
+    + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${HUB_ANSWERS.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : '')
   : '');
 
 /** lane browser-propose (2026-09-30): the agent's PROPOSAL, answered where it appears — its words (the card's, line for
@@ -194,7 +196,7 @@ function partsOf(entry, ctx) {
   // (an exit ask's detail IS its command — shown whole above its Allow / Deny, never again folded below them)
   const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${linkedHtml(detail, { escape: escHtml })}</div></details>` : '';
   // lane browser-propose: an open proposal's words are shown whole ABOVE its Approve (proposalAskHtml) — never folded again below
-  const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal' || i.action.type === 'hub-act-ask') && !resolved ? '' : detailHtml; // lane hub-act-ask: shown whole above its answers
+  const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal' || HELD_ASKS.includes(i.action.type)) && !resolved ? '' : detailHtml; // lane hub-act-ask: shown whole above its answers (design q-046: an automation ask too)
   // OPTION CHIPS (design-user-inbox-reply D3a): one click = a reply whose text
   // IS the label. Addressed by INDEX — the label never rides an attribute.
   const opts = !resolved && rs.show && Array.isArray(i.options) && i.options.length

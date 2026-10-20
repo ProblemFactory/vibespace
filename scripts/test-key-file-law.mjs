@@ -121,6 +121,7 @@ const IO_SITES = [
 // randomBytes(32) per file: a new one is RED until classified here
 const RANDOM32 = new Map([
   ['src/secret-box.js', [1, 'mintKeyFile: THE mint']],
+  ['src/automation-keys.js', [1, 'mintPlan: an automation key\'s VALUE (design q-046) — sealed at once as the vault entry apikey:<id> by the engine, never a key file; the store keeps its sha256']],
   ['src/vault.js', [1, 'setup: THE vault DEK — wrapped under the second password\'s KEK, in memory only (lane vault-e2e-password)']],
   ['src/server/vault-engine.js', [1, 'keyFor: a store\'s FIRST key minted INTO the vault (an entry, never a file — lane vault-e2e-password)']],
   ['src/server/dropline-oauth.js', [2, 'a PKCE verifier + this boot\'s state key (memory only)']],

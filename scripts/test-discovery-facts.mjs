@@ -148,8 +148,8 @@ ok(bundle.includes('pidLooksClaude') || bundle.includes('PID-reuse guard'), 'bui
   fs.rmSync(tdir, { recursive: true, force: true });
 
   console.log('lane peer-card-sender ③ ws rename-session → customNames, on every client');
-  const wh = read('src/ws-handler.js');
-  ok(/if \(trimmedName\) \{ session\._nameExplicit = true; const key = getSessionKey\(session\); if \(key && typeof setCustomName === 'function'\) \{ try \{ setCustomName\(key, trimmedName\);/.test(wh), 'rename-session: the name is explicit AND stored as the custom name of `<backend>:<id>` (the sidebar rename\'s key)');
+  const wh = read('src/ws-handler.js'), ops = read('src/server/conversation-ops.js');   // design q-046: the ws rename case's body lives in conversation-ops.js (the automation door renames through it too)
+  ok(/ConversationOps\.renameSession\(/.test(wh) && /if \(trimmedName\) \{ session\._nameExplicit = true; const key = getSessionKey\(session\); if \(key && typeof setCustomName === 'function'\) \{ try \{ setCustomName\(key, trimmedName\);/.test(ops), 'rename-session: the name is explicit AND stored as the custom name of `<backend>:<id>` (the sidebar rename\'s key)');
   ok(/'setCustomName', \/\/ lane peer-card-sender/.test(wh) && /getDesign = \(\) => null, setCustomName = null,\n  \} = ctx;/.test(wh) && /setCustomName: \(k, n\) => persistenceRouter\.setCustomName\(k, n\)/.test(srv), '…through the ws ctx contract (list ⇄ destructure ⇄ server.js) to the persistence door');
   // the door itself, for real: a scratch data dir, a fake wss that records the broadcast
   const sent = [];

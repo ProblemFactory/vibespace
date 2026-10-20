@@ -11,7 +11,8 @@ const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir, findSessionJsonlPath } = require('./session-store');
 const { get: harnessOf, spawnOf, list: harnessList } = require('./harnesses'); // S3: store.warmTranscript per harness (claude parse-cache warm / codex thread/read fallback)
-const { capsOf } = require('./backend-caps');      // inputModes.queueVerbs / review / renameWriteback gates (never a backend-id branch)
+const { capsOf } = require('./backend-caps');
+const ConversationOps = require('./server/conversation-ops.js'); // design q-046: the conversations' server-side ops (the ws case and the automation door share them)      // inputModes.queueVerbs / review / renameWriteback gates (never a backend-id branch)
 const { reconcileAttachStreaming } = require('./turn-state'); // §2.5: ONE attach-time streaming decision, shared with the live consumer
 const { pidsMatchingCmdline } = require('./cli-identity'); // THE process reader: the kill path's `pgrep -f` without the fork
 const PI = require('./proc-identity'); // the ssh kill compares the meta's recorded birth (vs_same_proc, B-5ee1)
@@ -292,6 +293,186 @@ function registerWsHandler(wss, ctx) {
     pickCodexThreadCandidate, getSessionKey, normalizeComparablePath,
   });
 
+  // THE CONVERSATION VERBS' BODIES (design q-046): the kill body, moved VERBATIM out of the switch into a named function (lane
+  // automation-verbs — the only edits: the case-level `break` gone, the requester's socket became `reply` (its `killed`
+  // answer) and `actBy` (the subject its device teardown audits)); the rename body lives in src/server/conversation-ops.js
+  // (`renameSession`, moved there whole by lane automation-keys-core). Both are handed with the create handler to the
+  // seams: the ws cases below, the routes and an automation key all go through them — a seam answers without a socket,
+  // and names who asked.
+  const endSessionBody = async (data, { reply, actBy } = {}) => {
+    // Stale-serverId robustness (2.179.0): after a server restart the
+    // client can hold an OLD webui id — a kill that silently no-ops
+    // leaves the session alive, and the follow-up resume (billing
+    // switch) then double-writes the same claude id (userW's duplicate
+    // incident). Fall back to resolving by the conversation id.
+    // The requester matches replies on the id IT sent (review-caught:
+    // replying with the remapped id left every stale-id kill unanswered).
+    const requestedKillId = data.sessionId;
+    if (!activeSessions.has(data.sessionId) && data.backendSessionId) {
+      for (const [eid, es] of activeSessions) {
+        if ((es.claudeSessionId || es.backendSessionId) === data.backendSessionId) { data.sessionId = eid; break; }
+      }
+    }
+    { const ks = activeSessions.get(data.sessionId); if (ks && ks._bridgePort) { try { dialBridge?.close(data.sessionId); } catch { } if (ks._dialDeviceId && ks._dialReversePort) { hosts.device(ks.host).then((dm) => dm.reverseUnforward(ks._dialReversePort)).catch(() => {}); } } }
+    const session = activeSessions.get(data.sessionId);
+    // Reply to the REQUESTER either way (2.369.16): 'exited' only
+    // reaches attached clients, so a sidebar Terminate of an unattached
+    // (or already-gone) session had no acknowledgement — and the client
+    // now re-sends an unacknowledged kill across reconnects (a kill
+    // written to a socket the server later terminated was simply lost).
+    if (!session) { try { reply({ type: 'killed', sessionId: requestedKillId, resolvedId: data.sessionId, ok: false, reason: 'not-found' }); } catch {} }
+    if (session) {
+      console.log(`[session] killed ${data.sessionId} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}`);
+      global.__vsEvent?.('session-killed', `${session.mode}/${session.backend || 'claude'}`);
+      session._exitAsked = { by: 'terminate', at: Date.now() }; // B-f698: the record names the actor (this case deletes the session before onExit — the belt)
+      // Cancel any pending delayed-SIGINT from a recent interrupt — after
+      // kill, the childPid may be reused by an unrelated process
+      if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
+      // Kill the dtach session process (which kills claude as its child)
+      // The dtach process is the parent of our attach PTY's target
+      if (session.socketPath) {
+        try {
+          // Find the dtach process by socket path and kill it. THE
+          // PROCESS READER answers this — `pgrep -f` is a fork, and a
+          // fork is paid by THIS process in proportion to its own RSS
+          // (measured: 2.0 ms of blocked loop at 58 MB, 69.4 ms at
+          // 1,564 MB, plus `pgrep`'s own ~85 ms walk of a 3,400-process
+          // /proc). This is the kill path, i.e. the incident's own
+          // trigger, so where /proc exists it starts no child at all:
+          // 23.6 ms flat, and 155 ms of latency down to 24.
+          for (const dpid of await pidsMatchingCmdline(session.socketPath)) {
+            if (dpid && dpid !== session.pty?.pid) {
+              try { process.kill(dpid, 'SIGTERM'); } catch {}
+            }
+          }
+        } catch {}
+        try { fs.unlinkSync(session.socketPath); } catch {}
+      }
+      if (session.pty) session.pty.kill();
+      if (session.sockName) deleteSessionMeta(session.sockName);
+      // Clean up wrapper buffer files
+      try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.json')); } catch {}
+      try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.buf')); } catch {}
+      // Per-session agentd attach cfg (0600 — vsht_ host token + full
+      // spawn command) accumulated forever (audit #16/#53). The path is
+      // derivable, so a restart-restored session (in-memory field lost)
+      // still gets its cfg removed.
+      {
+        const cfgF = session._agentdCfgFile
+          || (agentdRemote && path.join(agentdRemote.agentdDir, 'session-' + data.sessionId + '.json'));
+        if (cfgF) { try { fs.unlinkSync(cfgF); } catch {} }
+      }
+      // Tell every attached client the session ended (windows flip to the
+      // read-only view). This must happen HERE, deterministically: we
+      // delete the session from activeSessions right below, and the pty's
+      // async onExit starts with `if (!activeSessions.has(id)) return`
+      // (the 46de4ec stale-PTY guard) — so relying on onExit to emit
+      // Teardown watchers/normalizers HERE: onExit early-returns once
+      // the session leaves activeSessions (stale-PTY guard), so killed
+      // sessions leaked every subagent fs.watch + retry timer +
+      // normalizer + buffered subagent messages (audit round-2, high).
+      if (session.subagentWatchers) {
+        for (const [, entry] of session.subagentWatchers) {
+          try { entry.watcher?.close(); } catch {}
+          if (entry.retry) clearTimeout(entry.retry);
+        }
+        session.subagentWatchers.clear();
+      }
+      session._subNormalizers?.clear?.();
+      if (session._normalizer) session._normalizer.listeners.length = 0;
+      session.subagentBuffers = null;
+      session.subagentEmittedUuids = null;
+      // Remote CHAT sessions (2.124.0): claude runs DETACHED on the host
+      // under vibespace-remote-keeper — killing the local pipeline no
+      // longer kills it. Stop it remotely (best-effort, async) and bust
+      // the host's discovery cache so the sidebar updates on next poll.
+      if (session.host && hosts) {
+        try {
+          const h = hosts.get(session.host);
+          if (h.transport === 'dial') {
+            // Dial device: the ssh teardown below throws for dial (no ssh
+            // fields) and used to be SWALLOWED — the device-side claude
+            // survived every terminate and a later resume raced it
+            // (double JSONL writers, the B-4058 class). Kill the daemon
+            // pipe session + drop the agent token over the device link.
+            if (session.mode === 'chat') {
+              // the pipe sid ≠ webui id for attach-adopted sessions
+              const sidSafe = String(session.keeperSid || data.sessionId).replace(/[^\w-]/g, '');
+              // BOUNDED + CONFIRMED (2.271.0 T1-3): an unbounded
+              // device() could hang the teardown forever, and BOTH legs
+              // were swallowed — an unconfirmed kill left the device-side
+              // claude alive while the UI said "terminated" (the
+              // double-writer precursor). Tell the user when we could not
+              // confirm; the sidebar re-discovery then shows the truth.
+              hosts.deviceBounded(session.host, 8000).then(async (dm) => {
+                let killed = false;
+                try { await dm.killPipeSession(sidSafe); killed = true; } catch (e) { console.warn('[dial] kill-pipe-session failed:', e.message); }
+                try { await dm.runCmd('sh', ['-c', `rm -f "$HOME/.vibespace/bin/.tok-${sidSafe}"`], { timeoutMs: 10000, by: actBy || 'system:session-end' }); } catch {}
+                try { hosts.invalidateDiscovery(session.host); } catch {}
+                if (!killed) notifyKillUnconfirmed(h.name);
+              }).catch((e) => { console.warn('[dial] terminate teardown unreachable:', e.message); notifyKillUnconfirmed(h.name); });
+            } else {
+              setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
+            }
+          } else if (session.mode === 'chat') {
+            // Mechanism-agnostic teardown (2.219.0): _agentdSession used
+            // to pick ONE branch, but the flag wasn't restored across
+            // restarts — a restored agentd session's keeper-stop was a
+            // silent no-op and the remote claude ran on (double-writer
+            // class). Both shapes no-op harmlessly when inapplicable.
+            // agentd-ADOPTED sessions run under the pipe sid = keeperSid,
+            // NOT the webui id — the state-file leg used to read
+            // sessions/<webui-id>.json (never exists for adopted) and the
+            // remote claude survived every Terminate (B-b87b; mirrors the
+            // dial branch's sidSafe above). The keeper leg is a harmless
+            // no-op for agentd sids, kept for legacy keeper sessions.
+            const sshSidSafe = String(session.keeperSid || data.sessionId).replace(/[^\w-]/g, '');
+            // B-5ee1: the meta's childPid is signalled only while its recorded birth (agentd's startTime) names
+            // it — vs_same_proc, the sh twin; a mismatch prints REFUSED:<pid>:<why> and kills nothing (the keeper
+            // stop prints its own); a birth-less meta prints LEGACY:<pid> and keeps today's rung
+            execFile('ssh', [...hosts.sshArgs(h), '--',
+              `${PI.procIdentityShellFns()}\nM="$HOME/.vibespace/agentd/state/sessions/${sshSidSafe}.json"; P=$(grep -o '"childPid":[0-9]*' "$M" 2>/dev/null | cut -d: -f2); T=$(sed -n 's/.*"startTime":"\\([^"]*\\)".*/\\1/p' "$M" 2>/dev/null | head -1); `
+              + `if [ -n "$P" ] && [ -n "$T" ] && ! vs_same_proc "$P" "$T"; then case "$VS_SAME_WHY" in pid-recycled|unknown) echo "REFUSED:$P:$VS_SAME_WHY";; esac; P=; fi; [ -n "$P" ] && [ -z "$T" ] && echo "LEGACY:$P"; [ -n "$P" ] && kill $P 2>/dev/null; `
+              + `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${sshSidSafe} 2>/dev/null; `
+              + `sleep 2; [ -n "$P" ] && { [ -z "$T" ] || vs_same_proc "$P" "$T"; } && kill -9 $P 2>/dev/null; true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
+              { timeout: 15000 }, (err, stdout) => {
+                try { hosts.invalidateDiscovery(session.host); } catch {}
+                try { sayKillWithheld(stdout, h.name, session); } catch {}
+                // ssh leg failed (host lag/down) — the remote claude may
+                // still be running; say so instead of silently claiming
+                // the terminate worked (2.271.0 T1-3).
+                if (err) { console.warn('[remote] terminate teardown failed:', err.message); notifyKillUnconfirmed(h.name); }
+              });
+          } else {
+            setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
+          }
+        } catch {}
+      }
+      // 'exited' silently broke terminate-from-sidebar.
+      broadcastToSession(session, data.sessionId, { type: 'exited', sessionId: data.sessionId, reason: 'terminated' });
+      try { reply({ type: 'killed', sessionId: requestedKillId, resolvedId: data.sessionId, ok: true }); } catch {}
+      try { if (session._accountId && accounts?.get?.(session._accountId)?.type === 'pooled') accounts.dropSessionPoolLink(session._accountId, data.sessionId); } catch { }
+      // R6: a LOCAL daemon pipe session has no dtach socket — kill the
+      // daemon-side child explicitly (mirrors the dial branch's shape)
+      if (!session.host && session.agentdSession && session.keeperSid) {
+        try { hosts.device(null).then((dm) => dm.killPipeSession(session.keeperSid)).catch(() => { }); } catch { }
+      }
+      try { require('./server/helper-asks').forget(session); } catch { } // lane S1 verify r1: a killed parent's helper asks wait for nobody — timers cleared, For-you items resolved
+      try { require('./server/main-asks').forget(session); } catch { } // lane parked-ask-inbox: a killed conversation's own asks — items resolved
+      try { getExitProxy()?.onSessionEnd?.(session, data.sessionId); } catch { } // verify-r2: its exit pairs are dropped with their connections, its waiting asks settled
+      activeSessions.delete(data.sessionId);
+      refreshWebuiPids();
+      broadcastActiveSessions();
+    }
+  };
+  const byOfWs = (ws) => ({ kind: 'human', actBy: ws && typeof ws._actBy === 'string' ? ws._actBy : null }); // a browser sign-in's subject (device-audit byOfReq)
+  const convOpsOwn = {
+    handleCreate, endSession: endSessionBody, activeSessions, getSessionKey, WS_OPEN,
+    rename: (data) => ConversationOps.renameSession({ activeSessions, setCustomName, writeSessionMeta, readSessionMeta, broadcastActiveSessions, getSessionKey }, data),
+  };
+  ConversationOps.provide(convOpsOwn); // the routes' and the automation engine's seams reach THIS server's create / rename / end
+  const convOps = ConversationOps.forDeps(convOpsOwn);
+
   // Shared by the dial + ssh terminate legs: a kill we could not confirm on
   // the machine must reach the USER (静默失败零容忍), not just the log.
   /** A WITHHELD signal reaches the user where the kill was asked (B-5ee1, the no-silent-failures law): the remote
@@ -364,7 +545,7 @@ function registerWsHandler(wss, ctx) {
     async function handleMessage(data) {
       switch (data.type) {
         case 'create': {
-          await handleCreate(ws, data, attachedSessions);
+          await convOps.openConversation(data, byOfWs(ws), { ws, attachedSessions }); // lane automation-verbs: THE seam — a ws caller runs its own create, byte-identical
           break;
         }
         case 'set-permission-mode': {
@@ -792,57 +973,7 @@ function registerWsHandler(wss, ctx) {
         }
 
         case 'rename-session': {
-          const trimmedName = typeof data.name === 'string' ? data.name.trim() : '';
-          let targetId = data.webuiId && activeSessions.has(data.webuiId) ? data.webuiId : null;
-          if (!targetId) {
-            for (const [sessionId, session] of activeSessions) {
-              if (data.sessionKey && getSessionKey(session) === data.sessionKey) {
-                targetId = sessionId;
-                break;
-              }
-              if (data.backendSessionId && (session.backendSessionId || session.claudeSessionId) === data.backendSessionId) {
-                targetId = sessionId;
-                break;
-              }
-            }
-          }
-          if (!targetId) break;
-
-          const session = activeSessions.get(targetId);
-          if (!session) break;
-
-          if (trimmedName) session.name = trimmedName;
-          // lane peer-card-sender (③): an outside rename (an agent, a script) lands where the sidebar's own rename does —
-          // user-state `customNames[<backend>:<id>]`, broadcast to every client — and the name is explicit (②)
-          if (trimmedName) { session._nameExplicit = true; const key = getSessionKey(session); if (key && typeof setCustomName === 'function') { try { setCustomName(key, trimmedName); } catch (e) { console.warn('[rename] custom name not stored:', e && e.message); } } }
-          // Write the new name back into the AGENT's own store when the
-          // harness has somewhere to write it (caps.renameWriteback — codex's
-          // thread name; claude's JSONL has no title field). Never a backend id.
-          if (capsOf(session.backend).renameWriteback && session.mode === 'chat' && session.pty && trimmedName) {
-            session.pty.write(JSON.stringify({ type: 'set-thread-name', name: trimmedName }) + '\n');
-          }
-          if (session.sockName) {
-            writeSessionMeta(session.sockName, {
-              ...(readSessionMeta(session.sockName) || {}), // preserve keys not re-listed (agentToken/taskId/accountId)
-              name: session.name,
-              nameExplicit: session._nameExplicit || undefined,
-              cwd: session.cwd,
-              backend: session.backend,
-              backendSessionId: session.backendSessionId,
-              claudeSessionId: session.claudeSessionId || null,
-              sourceKind: session.sourceKind || null,
-              agentKind: session.agentKind || 'primary',
-              agentRole: session.agentRole || '',
-              agentNickname: session.agentNickname || '',
-              parentThreadId: session.parentThreadId || null,
-              permissionMode: session._permissionMode || null,
-              effort: session._effort || null,
-              createdAt: session.createdAt,
-              webuiSessionId: targetId,
-              mode: session.mode || 'terminal',
-            });
-          }
-          broadcastActiveSessions();
+          convOps.renameConversation(data, data.name, byOfWs(ws)); // the seam — the body is conversation-ops' renameSession (L1 moved it there whole)
           break;
         }
 
@@ -1337,170 +1468,7 @@ function registerWsHandler(wss, ctx) {
         // pipeline is gone either way, but the remote claude may live on, so
         // never let the UI imply a clean kill (2.271.0 T1-3).
         case 'kill': {
-          // Stale-serverId robustness (2.179.0): after a server restart the
-          // client can hold an OLD webui id — a kill that silently no-ops
-          // leaves the session alive, and the follow-up resume (billing
-          // switch) then double-writes the same claude id (userW's duplicate
-          // incident). Fall back to resolving by the conversation id.
-          // The requester matches replies on the id IT sent (review-caught:
-          // replying with the remapped id left every stale-id kill unanswered).
-          const requestedKillId = data.sessionId;
-          if (!activeSessions.has(data.sessionId) && data.backendSessionId) {
-            for (const [eid, es] of activeSessions) {
-              if ((es.claudeSessionId || es.backendSessionId) === data.backendSessionId) { data.sessionId = eid; break; }
-            }
-          }
-          { const ks = activeSessions.get(data.sessionId); if (ks && ks._bridgePort) { try { dialBridge?.close(data.sessionId); } catch { } if (ks._dialDeviceId && ks._dialReversePort) { hosts.device(ks.host).then((dm) => dm.reverseUnforward(ks._dialReversePort)).catch(() => {}); } } }
-          const session = activeSessions.get(data.sessionId);
-          // Reply to the REQUESTER either way (2.369.16): 'exited' only
-          // reaches attached clients, so a sidebar Terminate of an unattached
-          // (or already-gone) session had no acknowledgement — and the client
-          // now re-sends an unacknowledged kill across reconnects (a kill
-          // written to a socket the server later terminated was simply lost).
-          if (!session) { try { ws.send(JSON.stringify({ type: 'killed', sessionId: requestedKillId, resolvedId: data.sessionId, ok: false, reason: 'not-found' })); } catch {} }
-          if (session) {
-            console.log(`[session] killed ${data.sessionId} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}`);
-            global.__vsEvent?.('session-killed', `${session.mode}/${session.backend || 'claude'}`);
-            session._exitAsked = { by: 'terminate', at: Date.now() }; // B-f698: the record names the actor (this case deletes the session before onExit — the belt)
-            // Cancel any pending delayed-SIGINT from a recent interrupt — after
-            // kill, the childPid may be reused by an unrelated process
-            if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
-            // Kill the dtach session process (which kills claude as its child)
-            // The dtach process is the parent of our attach PTY's target
-            if (session.socketPath) {
-              try {
-                // Find the dtach process by socket path and kill it. THE
-                // PROCESS READER answers this — `pgrep -f` is a fork, and a
-                // fork is paid by THIS process in proportion to its own RSS
-                // (measured: 2.0 ms of blocked loop at 58 MB, 69.4 ms at
-                // 1,564 MB, plus `pgrep`'s own ~85 ms walk of a 3,400-process
-                // /proc). This is the kill path, i.e. the incident's own
-                // trigger, so where /proc exists it starts no child at all:
-                // 23.6 ms flat, and 155 ms of latency down to 24.
-                for (const dpid of await pidsMatchingCmdline(session.socketPath)) {
-                  if (dpid && dpid !== session.pty?.pid) {
-                    try { process.kill(dpid, 'SIGTERM'); } catch {}
-                  }
-                }
-              } catch {}
-              try { fs.unlinkSync(session.socketPath); } catch {}
-            }
-            if (session.pty) session.pty.kill();
-            if (session.sockName) deleteSessionMeta(session.sockName);
-            // Clean up wrapper buffer files
-            try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.json')); } catch {}
-            try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.buf')); } catch {}
-            // Per-session agentd attach cfg (0600 — vsht_ host token + full
-            // spawn command) accumulated forever (audit #16/#53). The path is
-            // derivable, so a restart-restored session (in-memory field lost)
-            // still gets its cfg removed.
-            {
-              const cfgF = session._agentdCfgFile
-                || (agentdRemote && path.join(agentdRemote.agentdDir, 'session-' + data.sessionId + '.json'));
-              if (cfgF) { try { fs.unlinkSync(cfgF); } catch {} }
-            }
-            // Tell every attached client the session ended (windows flip to the
-            // read-only view). This must happen HERE, deterministically: we
-            // delete the session from activeSessions right below, and the pty's
-            // async onExit starts with `if (!activeSessions.has(id)) return`
-            // (the 46de4ec stale-PTY guard) — so relying on onExit to emit
-            // Teardown watchers/normalizers HERE: onExit early-returns once
-            // the session leaves activeSessions (stale-PTY guard), so killed
-            // sessions leaked every subagent fs.watch + retry timer +
-            // normalizer + buffered subagent messages (audit round-2, high).
-            if (session.subagentWatchers) {
-              for (const [, entry] of session.subagentWatchers) {
-                try { entry.watcher?.close(); } catch {}
-                if (entry.retry) clearTimeout(entry.retry);
-              }
-              session.subagentWatchers.clear();
-            }
-            session._subNormalizers?.clear?.();
-            if (session._normalizer) session._normalizer.listeners.length = 0;
-            session.subagentBuffers = null;
-            session.subagentEmittedUuids = null;
-            // Remote CHAT sessions (2.124.0): claude runs DETACHED on the host
-            // under vibespace-remote-keeper — killing the local pipeline no
-            // longer kills it. Stop it remotely (best-effort, async) and bust
-            // the host's discovery cache so the sidebar updates on next poll.
-            if (session.host && hosts) {
-              try {
-                const h = hosts.get(session.host);
-                if (h.transport === 'dial') {
-                  // Dial device: the ssh teardown below throws for dial (no ssh
-                  // fields) and used to be SWALLOWED — the device-side claude
-                  // survived every terminate and a later resume raced it
-                  // (double JSONL writers, the B-4058 class). Kill the daemon
-                  // pipe session + drop the agent token over the device link.
-                  if (session.mode === 'chat') {
-                    // the pipe sid ≠ webui id for attach-adopted sessions
-                    const sidSafe = String(session.keeperSid || data.sessionId).replace(/[^\w-]/g, '');
-                    // BOUNDED + CONFIRMED (2.271.0 T1-3): an unbounded
-                    // device() could hang the teardown forever, and BOTH legs
-                    // were swallowed — an unconfirmed kill left the device-side
-                    // claude alive while the UI said "terminated" (the
-                    // double-writer precursor). Tell the user when we could not
-                    // confirm; the sidebar re-discovery then shows the truth.
-                    hosts.deviceBounded(session.host, 8000).then(async (dm) => {
-                      let killed = false;
-                      try { await dm.killPipeSession(sidSafe); killed = true; } catch (e) { console.warn('[dial] kill-pipe-session failed:', e.message); }
-                      try { await dm.runCmd('sh', ['-c', `rm -f "$HOME/.vibespace/bin/.tok-${sidSafe}"`], { timeoutMs: 10000, by: ws._actBy || 'system:session-end' }); } catch {}
-                      try { hosts.invalidateDiscovery(session.host); } catch {}
-                      if (!killed) notifyKillUnconfirmed(h.name);
-                    }).catch((e) => { console.warn('[dial] terminate teardown unreachable:', e.message); notifyKillUnconfirmed(h.name); });
-                  } else {
-                    setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
-                  }
-                } else if (session.mode === 'chat') {
-                  // Mechanism-agnostic teardown (2.219.0): _agentdSession used
-                  // to pick ONE branch, but the flag wasn't restored across
-                  // restarts — a restored agentd session's keeper-stop was a
-                  // silent no-op and the remote claude ran on (double-writer
-                  // class). Both shapes no-op harmlessly when inapplicable.
-                  // agentd-ADOPTED sessions run under the pipe sid = keeperSid,
-                  // NOT the webui id — the state-file leg used to read
-                  // sessions/<webui-id>.json (never exists for adopted) and the
-                  // remote claude survived every Terminate (B-b87b; mirrors the
-                  // dial branch's sidSafe above). The keeper leg is a harmless
-                  // no-op for agentd sids, kept for legacy keeper sessions.
-                  const sshSidSafe = String(session.keeperSid || data.sessionId).replace(/[^\w-]/g, '');
-                  // B-5ee1: the meta's childPid is signalled only while its recorded birth (agentd's startTime) names
-                  // it — vs_same_proc, the sh twin; a mismatch prints REFUSED:<pid>:<why> and kills nothing (the keeper
-                  // stop prints its own); a birth-less meta prints LEGACY:<pid> and keeps today's rung
-                  execFile('ssh', [...hosts.sshArgs(h), '--',
-                    `${PI.procIdentityShellFns()}\nM="$HOME/.vibespace/agentd/state/sessions/${sshSidSafe}.json"; P=$(grep -o '"childPid":[0-9]*' "$M" 2>/dev/null | cut -d: -f2); T=$(sed -n 's/.*"startTime":"\\([^"]*\\)".*/\\1/p' "$M" 2>/dev/null | head -1); `
-                    + `if [ -n "$P" ] && [ -n "$T" ] && ! vs_same_proc "$P" "$T"; then case "$VS_SAME_WHY" in pid-recycled|unknown) echo "REFUSED:$P:$VS_SAME_WHY";; esac; P=; fi; [ -n "$P" ] && [ -z "$T" ] && echo "LEGACY:$P"; [ -n "$P" ] && kill $P 2>/dev/null; `
-                    + `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${sshSidSafe} 2>/dev/null; `
-                    + `sleep 2; [ -n "$P" ] && { [ -z "$T" ] || vs_same_proc "$P" "$T"; } && kill -9 $P 2>/dev/null; true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
-                    { timeout: 15000 }, (err, stdout) => {
-                      try { hosts.invalidateDiscovery(session.host); } catch {}
-                      try { sayKillWithheld(stdout, h.name, session); } catch {}
-                      // ssh leg failed (host lag/down) — the remote claude may
-                      // still be running; say so instead of silently claiming
-                      // the terminate worked (2.271.0 T1-3).
-                      if (err) { console.warn('[remote] terminate teardown failed:', err.message); notifyKillUnconfirmed(h.name); }
-                    });
-                } else {
-                  setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
-                }
-              } catch {}
-            }
-            // 'exited' silently broke terminate-from-sidebar.
-            broadcastToSession(session, data.sessionId, { type: 'exited', sessionId: data.sessionId, reason: 'terminated' });
-            try { ws.send(JSON.stringify({ type: 'killed', sessionId: requestedKillId, resolvedId: data.sessionId, ok: true })); } catch {}
-            try { if (session._accountId && accounts?.get?.(session._accountId)?.type === 'pooled') accounts.dropSessionPoolLink(session._accountId, data.sessionId); } catch { }
-            // R6: a LOCAL daemon pipe session has no dtach socket — kill the
-            // daemon-side child explicitly (mirrors the dial branch's shape)
-            if (!session.host && session.agentdSession && session.keeperSid) {
-              try { hosts.device(null).then((dm) => dm.killPipeSession(session.keeperSid)).catch(() => { }); } catch { }
-            }
-            try { require('./server/helper-asks').forget(session); } catch { } // lane S1 verify r1: a killed parent's helper asks wait for nobody — timers cleared, For-you items resolved
-            try { require('./server/main-asks').forget(session); } catch { } // lane parked-ask-inbox: a killed conversation's own asks — items resolved
-            try { getExitProxy()?.onSessionEnd?.(session, data.sessionId); } catch { } // verify-r2: its exit pairs are dropped with their connections, its waiting asks settled
-            activeSessions.delete(data.sessionId);
-            refreshWebuiPids();
-            broadcastActiveSessions();
-          }
+          await convOps.endConversation(data, byOfWs(ws), { reply: (m) => ws.send(JSON.stringify(m)) }); // lane automation-verbs: THE seam — the body is endSessionBody (above)
           break;
         }
 
@@ -1764,7 +1732,7 @@ function registerWsHandler(wss, ctx) {
   });
   // the create case for a creator that is not a socket: a For-you reply reopening an ended conversation
   // (src/server/inbox-reopen.js hands it a headless creator — lane inbox-reply-dead-session)
-  return { handleCreate };
+  return { convOps }; // THIS server's conversation seams — the one create door handed out (the inbox reopener opens through it; int322)
 }
 
 // pickCodexThreadCandidate also serves restoreSessions' id recapture (a

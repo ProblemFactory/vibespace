@@ -7594,6 +7594,23 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .vw-mask { flex: 1; letter-spacing: 2px; color: var(--text-secondary); }
 .vw-plain { flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid var(--border-active); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font-family: var(--font-mono, monospace); font-size: 12px; }
 .vw-doors { display: flex; gap: 6px; }
+/* design q-046 (lane automation-keys-core): «Automation keys» — the verbs, the grants (chips, ✕ takes one back), last used, 铸造… /
+   授权给… / 撤销; the value only behind 显示, ONLY to hand to an outside party (said beside it) */
+.vw-ak { margin-top: 3px; display: flex; flex-direction: column; gap: 3px; color: var(--text-secondary); }
+.vw-ak-scopes { color: var(--text-secondary); }
+.vw-ak-grants { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.vw-ak-to, .vw-ak-none, .vw-ak-used { color: var(--text-dim); }
+.vw-ak-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 8px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); }
+.vw-ak-x { border: 0; background: none; color: var(--text-dim); cursor: pointer; padding: 0 4px; font: inherit; }
+.vw-ak-x:hover { color: var(--bad-text); }
+.vw-ak-why { color: var(--warn-text); font-size: 11px; white-space: nowrap; }
+.vw-ak-mint { margin-left: auto; font-weight: normal; }
+.vw-ak-dialog .dialog-body { display: flex; flex-direction: column; gap: 6px; min-width: 320px; max-height: 60vh; overflow: auto; }
+.vw-ak-dialog label.vw-ak-pick, .vw-ak-pick { flex-direction: row; display: flex; align-items: center; gap: 8px; }
+.vw-ak-sec { margin-top: 6px; font-weight: 600; color: var(--text); }
+.vw-ak-hint { color: var(--text-dim); font-size: 11px; }
+.vw-ak-name { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
+@media (max-width: 600px) { .vw-ak-x { min-width: 36px; min-height: 36px; } .vw-ak-pick { min-height: 36px; } }
 .sys-vault-line { border-top: 1px solid var(--border); }
 @media (max-width: 600px) {
   .vw-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }

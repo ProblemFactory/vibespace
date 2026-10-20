@@ -51,6 +51,10 @@ const SPEND_REASONS = Object.freeze({
   // wake that follows it (the lane's r0 probe was hold-free: the compaction spent tokens the census never saw)
   'peer-compact': { turn: true, what: "a worker's compaction asked for by another session" },
   'codex-reset-credit': { turn: false, what: 'a stored Codex rate-limit reset credit' },
+  // lane automation-verbs (design q-046 L2, decision 5): a conversation an AUTOMATION KEY opened (`conversations.open` —
+  // the coordinator's worker dispatch, through src/server/conversation-ops.js's headless create). A conversation nobody
+  // typed into, charged to the key (the identity `automation:<keyId>`); a refusal answers `spend_refused` and nothing spawns.
+  'automation-open': { turn: true, what: 'a conversation an automation key opened' },
   // Channels P2 (design-communication-panel §7.4): an assigned conversation's
   // matched message waking an agent through the delivery ladder. Declared in
   // the SAME commit as its producer (src/server/channels-engine.js) — the set

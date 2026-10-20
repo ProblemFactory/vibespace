@@ -327,6 +327,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     'hub-once': () => actBtn('hub-once', UI_ICONS.check, t('Allow once'), t('Allow once'), 'iw-act-primary iw-act-exit'),
     'hub-always': () => actBtn('hub-always', UI_ICONS.check, t('Always on this machine'), t('Sets Hub automation of this machine to Always allow — every kind, no more asks'), 'iw-act-exit'),
     'hub-deny': () => actBtn('hub-deny', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit'),
+    // design q-046 (lane automation-keys-core): a held automation call's Always grants the key to THAT conversation
+    'auto-always': () => actBtn('auto-always', UI_ICONS.check, t('Always for this conversation'), t('Grants the key to this conversation — the Vault window lists it; take it back there'), 'iw-act-exit'),
     // lane browser-propose: the agent's browser proposal — ONE primary Approve (runs exactly what the item says), a quiet Reject
     'proposal-approve': () => actBtn('proposal-approve', UI_ICONS.check, t('Approve'), t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit'),
     'proposal-reject': () => actBtn('proposal-reject', UI_ICONS.close, t('Reject'), t('Reject'), 'iw-act-exit'),
@@ -651,10 +653,10 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       if (await model.runAction(it, a === 'proposal-approve' ? 'approve' : 'reject')) advance(id);
       return;
     }
-    if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny') {
+    if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always') {
       // lane hub-act-ask: the same arm as every Allow (a pane shown ARM_MS ago or less is not the one the user read)
       if (a !== 'hub-deny') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again')); return; } }
-      if (await model.runAction(it, a.slice(4))) advance(id);
+      if (await model.runAction(it, a === 'auto-always' ? 'always' : a.slice(4))) advance(id);
       return;
     }
     if (a === 'exit-allow' || a === 'exit-deny') {

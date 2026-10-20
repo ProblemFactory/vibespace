@@ -78,11 +78,23 @@ const vaultContents = require('./vault-contents.js').create({ vault, sources: {
   accounts: () => getAccounts(), integrations: () => (integrations ? { vaultRows: () => integrations.vaultRows({ machineName: vaultMachineName }), vaultReveal: (e, f) => integrations.vaultReveal(e, f) } : null), channels: () => getChannels(), mounts: () => mounts, 'app-secrets': () => appSecretsDoor,
   secrets: () => require('./vault-contents.js').secretSource({ vault, machineName: vaultMachineName }),
   passkeys: () => (browserDialogs && typeof browserDialogs.passkeyVaultRows === 'function' ? { vaultRows: () => browserDialogs.passkeyVaultRows(), vaultReveal: (e, f) => browserDialogs.passkeyVaultReveal(e, f) } : null),
+  automation: () => automation,   // design q-046: the automation keys (their values, one per reveal — to hand to an outside party)
 } });
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req),
   linkTokenFor: (hostKey) => hostTokens.tokenFor(hostKey), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
   // int317 (RED-3): the door's audit row → the device audit (the machine card's Activity…) — the session, its host key, the status
   auditLink: ({ sid, hostKey, status }) => { const h = vaultHostOf(hostKey); if (hosts && hosts.deviceAudit) hosts.deviceAudit.append(require('../device-acts.js').linkTokenLine({ at: Date.now(), sid, hostKey, hostId: h ? h.id : null, machine: h ? (h.name || h.id) : null, status })); } });
+// design q-046 (lane automation-keys-core): VIBESPACE'S OWN AUTOMATION KEYS — a key's value is the vault entry `apikey:<id>`
+// (never in an agent's hands); a conversation / a Task Group is GRANTED a key by a person; a use is judged on the hub
+// (src/server/automation-engine.js over PURE src/automation-keys.js), audited, and stops while the vault is locked
+const automationGroupsOf = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return []; try { return tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id); } catch { return []; } };
+const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, log: (m) => console.log('[automation]', m),
+  verbs: require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf }) });
+require('../routes/automation.js').registerAutomationRoutes(app, { engine: automation, who: (req) => require('../auth.js').Auth.signInHandle(req),
+  // the caller = the vsst_'s conversation; the live list IS the running conversations (an ended one's token is unknown ⇒ 401)
+  callerOf: (token) => { for (const [id, s] of activeSessions) if (s && sameToken(token, s.agentToken)) { const cid = s.backendSessionId || s.claudeSessionId || null; return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, name: s.name || s.webuiName || null, live: !s.isTmuxView, groups: automationGroupsOf(s, id) }; } return null; },
+  subjects: () => { const tasks = getTasks && getTasks(); const sessions = []; for (const s of activeSessions.values()) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude' }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; } });
+setTimeout(() => { try { const n = automation.reconcile(); if (n) console.log(`[automation] ${n} first-use card(s) from before the restart resolved expired`); } catch { } }, 3000).unref?.();
 // r2 (verify r1): THE GATE the credential doors registered before this line ask (the account key, the mount config, the export)
 app.locals.vaultGate = require('../routes/vault.js').vaultGate({ vault, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req) });
 // THE DECISION ENGINE (lane decision-core): the ONE decisions-API caller — the plugin row attaches its switches, the

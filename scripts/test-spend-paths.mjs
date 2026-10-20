@@ -379,6 +379,10 @@ const PRIMITIVES = [
   // worker (src/server/worker-dispatch.js) must be GATED at its own site — it asks the authorizer WITH a hold (reason
   // peer-compact, verify r1 ⑤: the compaction is a counted model call) before the compaction; the wake is the ladder's.
   { id: 'typed-send', re: /\bsendUserInput\s*\(/g, why: "types a frame into a live session through THE typing path (src/server/user-input.js) — anything but the owner's own keyboard / click is a turn nobody typed" },
+  // lane automation-verbs (design q-046 L2): an automation key's conversations.open — src/server/conversation-ops.js runs
+  // the owner's create handler against a headless socket for a caller with no window; every call site is a conversation
+  // nobody typed into and must ask the authorizer first (reason automation-open)
+  { id: 'headless-open', re: /\bcreateHeadless\s*\(/g, why: 'opens a conversation for an AUTOMATION (no window, nobody typing) — the headless create of src/server/conversation-ops.js' },
 ];
 // GATED = the file ASKS THE GATE. It must be a CALL, never a mention: r2 found
 // `src/server/usage-pool-engine.js` reported GATED because it CONSTRUCTS the
@@ -623,6 +627,22 @@ function trackedServerSource() {
           && /deliver\.stashFor\(cid, \{ source: 'design-comment', kind: 'peer', fromName: DESIGN_COMMENT_FROM, text: line \}\)/.test(dsrc)
           && hits.filter((h) => h.file === 'src/server/design-engine.js' || h.file === 'src/routes/design.js').every((h) => h.file === 'src/server/design-engine.js' && h.prim === 'typed-send' && ALLOW.some((a) => a.file === h.file && a.prim === h.prim)),
         JSON.stringify(hits.filter((h) => /design/.test(h.file))));
+    }
+
+    // lane automation-verbs (design q-046 L2, decision 5): an automation key's conversations.open is a conversation nobody
+    // typed into — conversation-ops' ONE headless create sits under the authorizer (reason automation-open, the key its
+    // identity, asked BEFORE the spawn), and a MUTANT copy without the call reads UNWIRED
+    {
+      const csrc = read('src/server/conversation-ops.js');
+      const co = hits.filter((h) => h.file === 'src/server/conversation-ops.js');
+      ok('§2 LANE AUTOMATION-VERBS: conversation-ops.js holds exactly ONE headless-open site and it is GATED (spendGuard.authorize, reason automation-open, before the spawn)',
+        co.length === 1 && co[0].prim === 'headless-open' && co[0].gated === true && /spendGuard\.authorize\(\{ reason: 'automation-open', identity/.test(csrc), JSON.stringify(co));
+      const from = "const g = spendGuard.authorize({ reason: 'automation-open', identity, sessionName: v.spec.name || null });";
+      const mutDir = tmpdir('vs-spend-convops-');
+      fs.mkdirSync(path.join(mutDir, 'src', 'server'), { recursive: true });
+      fs.writeFileSync(path.join(mutDir, 'src/server/conversation-ops.js'), csrc.replace(from, 'const g = { ok: true, hold: null };'));
+      const mh = censusOver(mutDir, ['src/server/conversation-ops.js']);
+      ok('§2 …MUTANT: the same file without the authorizer call reads its headless open UNWIRED', csrc.includes(from) && mh.length === 1 && mh[0].gated === false, JSON.stringify(mh));
     }
 
     // NEGATIVE CONTROL: a synthetic producer in a scratch tree.

@@ -49,7 +49,7 @@
  * legacy rung, `originOf` in src/lib/user-todos-layout.js — no migration.
  */
 
-const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'apps', 'plugin', 'agent', 'server']);
+const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'vault', 'apps', 'plugin', 'agent', 'server']);
 
 // The group / chip words — English t() keys (the panel words them per device;
 // i18nKey is the extraction marker scripts/i18n-extract.mjs reads).
@@ -62,6 +62,7 @@ const ORIGIN_LABELS = Object.freeze({
   channels: i18nKey('Channels'),
   browser: i18nKey('Agent browser'), // the agent-browser face's name (2.369.168 faces rename — the bare word is retired)
   machines: i18nKey('Machines'), // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (src/exit-proxy.js)
+  vault: i18nKey('Vault'), // design q-046: "<conversation> wants to use the automation key <name>" — Allow once / Always / Deny (src/server/automation-engine.js)
   apps: i18nKey('Apps'), // Layer 0 apps: "<conversation> wants to install <app>?" — Install / Not now (src/server/apps-engine.js)
   plugin: i18nKey('Plugins'), // lane foryou-plugin-notices: a plugin's reminder (Dropline's dictionary suggestion), pinned under urgent
   agent: i18nKey('Agents'),

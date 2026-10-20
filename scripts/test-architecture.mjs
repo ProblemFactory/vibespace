@@ -65,6 +65,7 @@ const PURE = new Set(['src/agentd-signature.js' /* lane device-bundle-signing (d
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
   'src/browser-profiles.js', 'src/keeper-limits.js',
+  'src/conversation-spec.js', // lane automation-verbs (design q-046 L2): an automation's open spec (closed fields, each refusal named), the caller's `by`, its audit subject and spend identity
   'src/cli-caps.js', // lane pool-oat-measure (q-035): oatInFile(version, fixture) — a measured CLI version gates a long-lived token in a pool member's creds file
   // lane dc-browser-backends: every browser backend file (and the folder's registration list) is PURE — the folder is
   // read, so a new backend adds no line here
@@ -307,6 +308,7 @@ const PURE = new Set(['src/agentd-signature.js' /* lane device-bundle-signing (d
   // lane hub-act-ask (design q-042 D4): THE HUB-ACT VERDICT — read / session never ask, a person never asks, else the machine's
   // Hub automation list (or the instance's default); imports nothing; exit-reach re-exports its modes, the bundle carries it
   'src/hub-act-policy.js',
+  'src/automation-keys.js', // design q-046 (lane automation-keys-core): VibeSpace's own automation keys — the record, the closed verb table, the grant × verb × vault verdict, the mint plan (crypto injected: the Vault window bundles it)
   // verify r1 F1 (2026-10-01): THE SECRET SHAPES a stored command head never keeps — imports only browser-trace's
   // CREDENTIAL_WORDS (PURE); exit-reach's outputHeads calls it once; the bundle carries it with exit-reach
   'src/secret-shapes.js',

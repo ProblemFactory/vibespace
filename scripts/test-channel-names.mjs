@@ -79,6 +79,7 @@ const JUDGED = [
   ['src/task-groups.js', 'raw.title || raw.id', 'not a channel (a task group)'],
   ['src/task-groups.js', 'existing?.title || id', 'not a channel (a task group)'],
   ['src/lib/tab-group.js', 'this.windows.get(id)?.title || id', 'not a channel (a window\'s own title)'],
+  ['src/server/mounts-plugins-wiring.js', 'name: s.name || s.webuiName || cid', 'not a channel (design q-046: a live CONVERSATION\'s name in the automation key\'s grant picker — its id when it has none)'],
 ];
 function censusOf(readFn) {
   const hits = [];

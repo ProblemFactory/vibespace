@@ -286,6 +286,9 @@ const ROUTE_RE = /^\s*(?:app|router)\.(get|post|patch|put|delete)\(\s*(['"`])([^
  *  stash; fifteen route-registering files were outside the census's sight). */
 const routeFilesOf = (src) => [...src].filter(([rel, text]) => rel.endsWith('.js') && text.split('\n').some((l) => ROUTE_RE.test(l))).map(([rel]) => rel);
 const STORE_TOKENS = [/\btasks\.(?!filter\b|map\b|length\b|some\b|find\b)/, /\buserTodos\./, /\bsessionStatus\./, /\bjm\./, /\ba\.jm\b/, /\bgroupsEngine\(\)/, /\bge\./, /\bgetJobs\b/, /\brecordClear\./, /\bgroupReply\(/, /\bgetTasks\b/, /\bclearAsAgent\(/, /\bgetRecordClear\b/,
+  // lane automation-verbs: the conversation verbs' seams (src/server/conversation-ops.js) — a route that binds or invites
+  // through them reaches the task store / the groups engine exactly as its old inline call did
+  /\bconvOps\.(?:bindConversation|inviteToGroup)\(/,
   // the two stashes' accessors (the jobs store's held notifications, the ladder's held entries) — a route that reaches
   // them through a helper is a reader of held words (the hand-over route)
   /\b(peekNotifs|drainNotifs|claimNotifs|spillNotifs|restoreNotifs|stashEntries|drainStash|claimStash|restoreStash|stashPeek)\(/];
@@ -1921,6 +1924,7 @@ const I_RECV = {
   'src/server/conversation-deliver.js|attempt': ['delivery', 'a parked delivery\'s attempt record: the primitive\'s reason (timeout / a socket error code) + phase, never a record\'s words'],
   'src/jobs.js|r': ['delivery', 'the ladder\'s answer to a notification (a rung\'s refusal reason; the parked reason + phase)'], 'src/server/desktop-access.js|plan': ['desktop app', 'an install plan\'s label'],
   'src/server/desktop-app-keeper.js|rec': ['desktop app', 'an app label'], 'src/server/incident-wiring.js|req.body': ['caller', 'the owner\'s own incident note'],
+  'src/server/conversation-ops.js|g': ['quota', 'a spend verdict\'s detail (the authorizer\'s own sentence on the key\'s identity) in an automation\'s refusal (lane automation-verbs)'], 'src/server/conversation-ops.js|v.spec': ['session', 'the opened conversation\'s name (an automation\'s judged spec) in the open\'s journal line'],
   'src/server/session-stdout.js|session': ['session', 'a session\'s name'], 'src/server/spend-guard.js|v': ['quota', 'a spend verdict\'s detail'],
   'src/server/stdout/acp-events.js|msg': ['harness', 'an ACP frame\'s reason'], 'src/server/stdout/codex-events.js|msg.payload': ['harness', 'a codex event\'s reason'],
   'src/server/usage-pool-engine.js|b': ['quota', 'a bucket\'s label'], 'src/server/usage-pool-engine.js|dest': ['account', 'a pool member'], 'src/server/usage-pool-engine.js|lane': ['quota', 'a lane\'s name'],
@@ -1969,6 +1973,11 @@ const I_RECV = {
   // ── lane hub-act-ask (design q-042 D4) ──
   'src/server/hub-act-ask.js|w': ['host', 'the held hub act\'s card words (P.cardOf) — who asked (a conversation\'s name or a `by`), a machine name, the act\'s summary the hub built itself (device-acts summaryOf, bounded and redacted): the hub\'s own act, never a record\'s text'],
   'src/server/hub-act-ask.js|v': ['host', 'the verdict\'s reason / kind (PURE hub-act-policy askVerdict: a closed word) in the refusal sentence — the machine\'s own list'],
+  // ── design q-046 (lane automation-keys-core) ──
+  'src/lib/vault-automation.js|key': ['host', 'an automation key\'s NAME (the owner\'s own words, typed in 铸造…) in a dialog\'s title — the key\'s own record, never a record\'s text'],
+  'src/server/automation-engine.js|plan.record': ['host', 'a key\'s NAME in the mint refusal sentence (a second live key of that name) — the owner\'s own words'],
+  'src/server/automation-engine.js|key': ['host', 'an automation key\'s NAME on its first-use card and its log line — the owner\'s own words, never a record\'s text'],
+  'src/server/automation-engine.js|caller': ['host', 'the asking CONVERSATION\'s name on the first-use card and its log line — the session list\'s own name (the hub\'s record), never a record\'s text'],
   'src/server/dial-health-watch.js|w': ['host', 'the second-dialer item\'s words — a machine name, an address, a time (itemOf), the machine\'s own record'],
   'src/server/dial-health-watch.js|v': ['host', 'the verdict\'s refusing address (secondDialerVerdict) in the journal line — the machine\'s own dial record'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──

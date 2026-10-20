@@ -347,7 +347,7 @@ const blockOf = (src, marker, lines) => {
 };
 const SITES = [
   ['src/ws-handler.js', "case 'review-start': {", 12, 'ws review-start'],
-  ['src/ws-handler.js', 'if (trimmedName) session.name = trimmedName;', 8, 'ws rename writeback'],
+  ['src/server/conversation-ops.js', 'if (trimmedName) session.name = trimmedName;', 8, 'ws rename writeback'], // design q-046: the ws case's body moved whole to the conversations' ops (the automation door renames through it too)
   ['src/lib/chat-view.js', '_syncReviewAvailability() {', 8, 'client review availability'],
   ['src/lib/chat-view.js', '_startReadOnlyPolling() {', 8, 'client detached-review poll'],
   ['src/lib/chat-renderers.js', 'addForkBtn(el, msg) {', 8, 'per-message fork button'],

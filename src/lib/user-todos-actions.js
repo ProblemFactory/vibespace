@@ -281,6 +281,15 @@ export function inboxModel(app) {
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone') : (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
     }
+    if (rec && rec.action && rec.action.type === 'automation-ask') {
+      // design q-046 (lane automation-keys-core): THE person's answer to an automation call held for a grant (cookie route;
+      // any bearer is refused human_only) — once (this call) / always (the key granted to that conversation) / deny.
+      const r = await fetchJson(`/api/automation/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) });
+      if (r && r.ok) { showToast(r.state === 'always' ? t('Granted — the key is listed with this conversation in the Vault window') : r.state === 'allowed' ? t('allowed') : t('denied')); return true; }
+      const code = r && r.code;
+      showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone') : (r && r.error) || t('server unreachable'), { type: 'error' });
+      return false;
+    }
     if (rec && rec.action && rec.action.type === 'channel-watch-request') {
       // lane channel-agent-watch W1: an agent asked to be WOKEN by a conversation — Approve writes exactly what the item
       // says, through the access request's own decide route (the one door; never a second approval surface)

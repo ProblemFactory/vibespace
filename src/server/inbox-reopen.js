@@ -6,7 +6,9 @@
  *
  * `create(deps).reopen(item, {by})` → Promise<{ok:true, sessionId, conversation, already?} | {ok:false, why}>.
  * THE RESUME ROAD is the ws `create {resume:true, resumeId}` case itself (src/ws-create.js handleCreate — what every
- * Resume press, sidebar card and resume bar sends), handed the message the page's own resume road would build
+ * Resume press, sidebar card and resume bar sends), reached through THE conversation seam — this server's own
+ * conversation-ops `openConversation(spec, {kind: 'human'}, {ws})` (int322: every create caller goes through it), handed
+ * the message the page's own resume road would build
  * (reopenCreate over the same facts: the discovery row, user-state's per-conversation config, the harness defaults,
  * the conversation's first Task Group) and a HEADLESS creator — a socket stand-in that keeps the frames the create
  * answers ('created' / an 'error' by name) and leaves the session's clients the moment it answered; the window the
@@ -37,15 +39,15 @@ const stateOf = (map, key) => {
   return id && Object.hasOwn(map, id) ? map[id] : null;
 };
 
-function create({ getHandleCreate, activeSessions, discover = async () => null, locate = () => null, readUserState = () => ({}), defaultsFor = () => ({}),
+function create({ getOpenConversation, activeSessions, discover = async () => null, locate = () => null, readUserState = () => ({}), defaultsFor = () => ({}),
   taskFor = () => null, log = console.log } = {}) {
   const inflight = new Map(); // conversation key → the reopen in flight
 
   async function run(item, by) {
     const key = String(item.sessionKey || '');
     if (!conversationOfKey(key)) return reopenCreate({ key }); // the PURE refusal by name
-    const handleCreate = typeof getHandleCreate === 'function' ? getHandleCreate() : null;
-    if (typeof handleCreate !== 'function') return { ok: false, why: 'this server cannot start conversations yet (still booting) — try again in a moment' };
+    const open = typeof getOpenConversation === 'function' ? getOpenConversation() : null;
+    if (typeof open !== 'function') return { ok: false, why: 'this server cannot start conversations yet (still booting) — try again in a moment' };
     const conv = conversationOfKey(key);
     let entry = null;
     try { entry = await discover(key); } catch (e) { log(`[inbox-reopen] ${key}: discovery failed (${e.message}) — asking the harness's own store`); }
@@ -67,7 +69,9 @@ function create({ getHandleCreate, activeSessions, discover = async () => null, 
     const spec = reopenCreate({ key, entry, item, cfg: stateOf(us.sessionConfigs, key), defaults, name, taskId, reqId });
     if (!spec.ok) return spec;
     const sock = headlessCreator(by);
-    try { await handleCreate(sock, spec.data, new Set()); }
+    // THE SEAM (src/server/conversation-ops.js openConversation): with a socket it runs the ws create case itself,
+    // byte-identical — a person's reopen, so no spend gate and no spec judging (those are an automation's)
+    try { await open(spec.data, { kind: 'human', actBy: typeof by === 'string' ? by : null }, { ws: sock, attachedSessions: new Set() }); }
     catch (e) { return { ok: false, why: 'the conversation did not start: ' + e.message }; }
     const made = sock.frames.find((f) => f && f.type === 'created' && f.sessionId);
     const err = sock.frames.find((f) => f && f.type === 'error');

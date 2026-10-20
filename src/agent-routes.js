@@ -35,6 +35,7 @@ const { stopNudgeVerdict, turnStartOf } = require('./stop-nudge.js'); // B-a8f0:
 const { artifactsIntroLine } = require('./harnesses/artifacts-of.js'); // PURE: the one Artifacts sentence (lane artifacts-prompt-hint)
 const { renderReminderLine, AGENT_DOC_TOPICS, CHANNELS_REMINDER_SEG } = require('./agent-cli-registry.js'); // PURE: THE agent CLI registry — the reminder's segments, the docs topics (lane cli-registry)
 const { liveForkPending, addressableId } = require('./claude-lock-capture.js'); // verify r3 (lane channel-withdraw): a pending fork carries its PARENT's conversation id — never an owner of a channel draft
+const convOps = require('./server/conversation-ops.js'); // lane automation-verbs (design q-046 L2): the conversation verbs' seams (the manager's bind, an agent's group invite; the automation door)
 const stashSummary = require('./stash-summary.js'); // the stash's kinds, spelled once (a reaction digest is not a channel message)
 const { VIBESPACE_NOTICE_HEAD, stashKindOf, withoutNoticeHead } = require('./notification-senders.js'); // lane S3: a stashed VibeSpace notification drains under the head that names VibeSpace as its speaker — decided by the entry's PATH (`kind`), never its sender's name (S3 verify F3)
 // lane peer-census (2026-09-29): THE belt on peer text toward an agent (src/peer-text.js) — a PEER entry of the stash
@@ -1454,7 +1455,7 @@ app.post('/api/agent/group-admin', (req, res) => {
     }
     if (bind && bind.id) {
       const sk = String(bind.sessionKey || key);
-      tasks.bind(bind.id, sk);
+      convOps.forDeps({ tasks }).bindConversation({ sessionKey: sk }, bind.id, { kind: 'agent', cid: s.claudeSessionId || s.backendSessionId || null }); // lane automation-verbs: THE seam, over the task store these routes were handed (an in-process hub has its own); the audit line below stays the manager's
       audit(bind.id, `[group-admin] session ${sk} bound by manager agent`);
       return res.json({ success: true, group: brief(tasks.get(bind.id)) });
     }
@@ -1595,6 +1596,7 @@ app.get('/api/agent/msg/peers', (req, res) => {
   res.json({ peers });
 });
 const groupsEngine = () => { try { const g = getGroups(); return g && typeof g.post === 'function' ? g : null; } catch { return null; } };
+convOps.provide({ groupsEngine }); // an automation's groups.invite reaches the same engine (the route hands its own `ge`)
 /** A refusal from the groups engine as an HTTP answer (its codes are the
  *  closed set in src/channel-groups.js + the engine's `unreachable`). */
 const groupAnswer = (res, r) => {
@@ -1837,7 +1839,7 @@ app.post('/api/agent/msg/group', async (req, res) => {
   try {
     switch (b.op) {
       case 'create': r = await c.ge.create({ by: c.cid, name: b.name, members, context: b.context || '', quiet: b.quiet === true, mayWake: wakeFloorFor(c.cid), consent: agentConsent(b.yes) }); break;
-      case 'invite': r = await c.ge.invite({ by: c.cid, group: b.group, members, context: b.context || '', quiet: b.quiet === true, mayWake: wakeFloorFor(c.cid), consent: agentConsent(b.yes) }); break;
+      case 'invite': r = await convOps.inviteToGroup(b.group, members, { kind: 'agent', cid: c.cid }, { ge: c.ge, context: b.context || '', quiet: b.quiet === true, mayWake: wakeFloorFor(c.cid), consent: agentConsent(b.yes) }); break; // lane automation-verbs: THE seam
       case 'leave': r = await c.ge.leave({ by: c.cid, group: b.group }); break;
       case 'kick': r = await c.ge.kick({ by: c.cid, group: b.group, member: b.member }); break;
       case 'rename': r = await c.ge.rename({ by: c.cid, group: b.group, name: b.name }); break;

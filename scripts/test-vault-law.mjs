@@ -221,5 +221,53 @@ console.log('⑥ THE REAL STORES across the states');
   fs.rmSync(ROOT, { recursive: true, force: true });
 }
 
+console.log('⑦ THE AUTOMATION KEYS (design q-046) — a key\'s value never reaches an agent; everything stops while the vault is locked');
+{
+  const routes = tree.get('src/routes/automation.js') || '', engine = tree.get('src/server/automation-engine.js') || '';
+  const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-api'), 'utf8');
+  // THE CENSUS: no agent door, no CLI verb, no engine answer reaches a value — the ONE reader of `apikey:<id>` is the
+  // engine's vaultReveal, and only the Vault window's reveal (src/server/vault-contents.js, people-only) calls it
+  const census = (rt, en, cl) => {
+    const bad = [];
+    const agentPart = rt.slice(rt.indexOf('// ── agents'));
+    if (!agentPart || /secretGet|vaultReveal|revealValue|\/api\/vault\/reveal/.test(agentPart)) bad.push('an agent door reads a value');
+    if (/\/api\/automation\/|\/api\/vault\/reveal|secret/i.test(cl.replace(/^\s*\/\/.*$/gm, '').replace(/\/\/[^\n]*$/gm, ''))) bad.push('the CLI reaches an owner door or a secret');
+    const gets = [...en.matchAll(/vault\.secretGet\(/g)].length;
+    if (gets !== 1 || !/function vaultReveal\(entry\) \{[\s\S]{0,260}vault\.secretGet\(/.test(en)) bad.push(`the engine reads a value outside vaultReveal (${gets} reads)`);
+    if (/value:\s*plan\.value|\{\s*ok:\s*true,\s*value/.test(en)) bad.push('an engine answer carries a value');
+    return bad;
+  };
+  ok(routes && engine && cli && census(routes, engine, cli).length === 0, 'THE CENSUS: the agent doors and vibespace-api never reach a value; the engine reads `apikey:<id>` ONLY in vaultReveal (the Vault window\'s people-only reveal)', census(routes, engine, cli));
+  const plant = routes.replace("res.json({ ok: true, keys: engine.keysFor(caller),", "res.json({ ok: true, value: engine.vaultReveal(caller.want), keys: engine.keysFor(caller),");
+  ok(plant !== routes && census(plant, engine, cli).includes('an agent door reads a value'), 'MUTANT RED: an agent door that answers a key\'s value (vaultReveal in /api/agent/automation/keys) is caught by the census');
+  const plant2 = engine.replace("return { ok: true, key: A.publicKey(plan.record) };", "return { ok: true, key: A.publicKey(plan.record), value: plan.value };");
+  ok(plant2 !== engine && census(routes, plant2, cli).includes('an engine answer carries a value'), 'MUTANT RED: a mint that answers its value is caught by the census');
+  // THE REAL ENGINE across the states: nothing cached across a lock, a restart is locked, the unlock resumes
+  const ROOT = scratch('vault-law-ak');
+  fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
+  const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
+  const AE = require(path.join(REPO, 'src/server/automation-engine.js'));
+  const quiet = { log() {}, warn() {}, error() {} };
+  const PW = 'the law\'s second password';
+  const mk = () => VE.create({ dataDir: ROOT, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, register: false });
+  let v = mk();
+  await v.setup(PW, {});
+  const verbs = { 'conversations.rename': () => ({ ok: true }) };
+  let e = AE.create({ dataDir: ROOT, vault: v, verbs });
+  const k = e.mint({ name: 'law key', scopes: ['conversations.rename'] });
+  e.grant(k.key.id, ['session:c-law']);
+  const caller = { conversationId: 'c-law', sessionKey: 'claude:c-law', name: 'law', live: true, groups: [] };
+  const ok1 = await e.use({ caller, verb: 'conversations.rename', args: { name: 'x' } });
+  v.lock('door');
+  const locked = await e.use({ caller, verb: 'conversations.rename', args: { name: 'x' } });
+  v.close(); v = mk(); e = AE.create({ dataDir: ROOT, vault: v, verbs });
+  const restarted = await e.use({ caller, verb: 'conversations.rename', args: { name: 'x' } });
+  await v.unlock(PW, {});
+  const again = await e.use({ caller, verb: 'conversations.rename', args: { name: 'x' } });
+  ok(ok1.ok && locked.code === 'vault_locked' && restarted.code === 'vault_locked' && v.state() === 'unlocked' && again.ok, 'granted ⇒ runs · LOCKED ⇒ vault_locked · a RESTART (a new engine) ⇒ locked, vault_locked · the person\'s unlock ⇒ it runs again (no key value was ever needed)', { ok1: ok1.ok, locked: locked.code, restarted: restarted.code, again: again.ok || again.code });
+  v.close();
+  fs.rmSync(ROOT, { recursive: true, force: true });
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

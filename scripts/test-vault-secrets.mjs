@@ -596,6 +596,21 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
   ];
   for (const [what, was, now2, good] of TABLE) ok(good, `${what}: ${was} → ${now2}`);
   ok(before >= 9 && after.length === 0, `every planted value (${planted.length}: 2 host tokens + their 2 copies, 3 logins, the relay token, the voice pair) — raw / hex / base64 — is in NO file under data/ now (it was in ${before})`, after);
+  // design q-046 (lane automation-keys-core): an AUTOMATION KEY minted on the same data dir — its value is the vault entry
+  // apikey:<id> only (the store keeps its sha256): in NO file under data/ (raw / hex / base64), and LOCKED ⇒ every use 423
+  {
+    const AE = R('src/server/automation-engine.js').create({ dataDir: D, vault: v, verbs: { 'conversations.rename': () => ({ ok: true }) } });
+    const mk = AE.mint({ name: 'plant key', scopes: ['conversations.rename'] });
+    const akv = v.secretGet(`apikey:${mk.key.id}`).value.toString();
+    const store = fs.readFileSync(path.join(D, 'automation-keys.json'), 'utf8');
+    ok(mk.ok && /^vsak_/.test(akv) && store.includes(crypto.createHash('sha256').update(akv).digest('hex')) && hitsIn(D, [akv], { skip: (f) => f === authLink }).length === 0,
+      'an automation key: the vault entry apikey:<id> holds its value, data/automation-keys.json its sha256 only — the value is in NO file under data/ (raw / hex / base64)');
+    AE.grant(mk.key.id, ['session:c-plant']);
+    v.lock('door');
+    const r = await AE.use({ caller: { conversationId: 'c-plant', sessionKey: 'claude:c-plant', live: true, groups: [] }, verb: 'conversations.rename', args: { name: 'x' } });
+    ok(r.code === 'vault_locked', 'LOCKED ⇒ the automation key\'s use answers vault_locked (423 at the door)', r);
+    await v.unlock(PW, {});
+  }
   // the boundary, stated by the census: what stays a file (TLS key, vendor CLI files, …) is the exception list — none of it is planted here
   const VAULT_SRC = fs.readFileSync(path.join(REPO, 'src/vault.js'), 'utf8');
   ok(/SECRETS_AT_REST/.test(VAULT_SRC) && R('src/vault.js').SECRETS_AT_REST.filter((r) => r.exception).map((r) => r.what).join(' · ').length > 0, 'the exceptions are a NAMED list (src/vault.js SECRETS_AT_REST): ' + R('src/vault.js').SECRETS_AT_REST.filter((r) => r.exception).map((r) => r.what).join(' · '));

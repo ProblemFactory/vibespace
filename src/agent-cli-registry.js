@@ -136,6 +136,12 @@ const ROWS = Object.freeze([
     summary: 'the vault that seals every stored credential: its state, and lock it now (unlocking is the user\'s, never yours)',
   },
   {
+    // design q-046 (lane automation-keys-core): VibeSpace's own automation API — INDEX-ONLY (a call with no grant asks the
+    // user by itself; every refusal names its code), so no injected surface pays for it
+    name: 'vibespace-api', topic: 'api', manual: 'automation-manual.md', gate: 'always', teach: null,
+    summary: 'VibeSpace\'s own automation verbs (rename a conversation, …) through keys the user GRANTED this conversation — never a key\'s value',
+  },
+  {
     name: 'vibespace-docs', topic: 'index', manual: 'index-manual.md', gate: 'always',
     summary: 'this list; `vibespace-docs <topic>` prints one tool\'s full manual, always matching the running server',
     teach: {

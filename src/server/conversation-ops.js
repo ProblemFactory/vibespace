@@ -1,0 +1,393 @@
+'use strict';
+/**
+ * THE CONVERSATION VERBS AS SERVER-SIDE SEAMS (lane automation-verbs, design q-046 §2 「动词实现」 / §4 L2) — ORCH.
+ * The owner's directive (2026-10-19 22:1xZ): VibeSpace's own API for what the coordinator does — open a worker
+ * conversation, name it, bind it to a Task Group, end it, invite it to a group — so a granted automation key (L1,
+ * src/server/automation-engine.js) reaches the SAME code the owner's own window does. Every caller goes through here:
+ *   · the owner's ws frames (src/ws-handler.js `create` / `rename-session` / `kill`) — byte-identical behaviour: a ws
+ *     caller hands its socket and the very handler / body runs as before;
+ *   · the routes — server.js POST /api/tasks/:id/bind, src/agent-routes.js group-admin bind and POST
+ *     /api/agent/msg/group `invite`;
+ *   · L1's automation engine (the second half of this lane) — no socket: the verdicts below run first.
+ *
+ *   openConversation(spec, by, {ws, attachedSessions})
+ *       with a ws: ws-create's handler, untouched. Without one (an AUTOMATION — the only caller with no window): the spec
+ *       is judged (PURE src/conversation-spec.js, closed fields), the spend guard is asked FIRST (reason
+ *       `automation-open`, the KEY its identity — design §1 summary 7; a refusal answers `spend_refused` naming the
+ *       bucket and nothing spawns), then the same handler runs against a HEADLESS sink socket that is detached from the
+ *       new session the moment the handler answers → {ok, sessionId, claudeSessionId, sessionKey, pending, …}
+ *   renameConversation(target, name, by)    the rename-session body (renameSession below — the explicit name → customNames)
+ *   bindConversation(target, taskId, by, {note, noteSession})   the task store's bind (+ the caller's activity line)
+ *   endConversation(target, by, {reply})    ws-handler's kill body; `by` → the subject its device teardown audits
+ *   inviteToGroup(group, members, by, opts) the agent-groups engine's invite (`by.cid` = the inviter)
+ *   conversationStatus(target)              the ids a caller polls after an open (read-only, nothing spends)
+ * `by` (src/conversation-spec.js byVerdict): {kind: 'human', actBy} · {kind: 'agent', cid} · {kind: 'automation', key,
+ * keyName, subject, cid, sessionKey}; actByOf(by) is what every device act and audit line of the verb names.
+ * THE DEPENDENCIES ARE PROVIDED by their owners (`provide`): ws-handler the create handler, the rename / end bodies,
+ * activeSessions and getSessionKey; server.js the task store and the spend guard; agent-routes the groups engine. This
+ * module requires none of them — no require cycle, and a gate's minimal ctx constructs nothing here. The verbs are built
+ * over a deps getter (`opsOver`): the module's own exports read the PROVIDED parts (the routes, the automation engine);
+ * ws-handler binds its OWN instance (`forDeps`) so a second in-process server's sockets never reach another's handler.
+ * L1 (lane automation-keys-core) brought RENAME here first: `renameSession(deps, data)` is the ws `rename-session` case's
+ * body, moved WHOLE (its text pins — test-discovery-facts, test-harness-contract, test-msg-cli-groups — read it here), the
+ * ws handler hands it over bound to its ctx as `rename`, `callOp(op, …)` calls a provided op, and `automationVerbs()` are
+ * the engine's wired verbs (src/server/automation-engine.js `verbs`).
+ * Gates: scripts/test-conversation-ops.mjs (the seams over fake deps, the headless sink, the gate's order, the wiring
+ * pins), scripts/test-spend-paths.mjs (the `headless-open` primitive must sit under the authorizer — a MUTANT without it
+ * is UNWIRED), the ws suites unchanged (test-ws-contract, test-session-schema, test-agentd-session, test-restore-liveness).
+ */
+const crypto = require('crypto');
+const { capsOf } = require('../backend-caps');
+const SPEC = require('../conversation-spec.js');
+
+const OPEN_REASON = 'automation-open';
+const OPEN_TIMEOUT_MS = 90 * 1000;       // the coordinator's old road waited 90 s for `created` (mkworker.mjs)
+
+let shared = {};
+/** An owner module hands over the parts it owns (merged; a later call replaces a key); `provide(null)` takes every part back
+ *  (a gate's reset — L1's `not_ready` leg). */
+function provide(part) { if (part === null) shared = {}; else if (part && typeof part === 'object') shared = { ...shared, ...part }; return shared; }
+/** Call a provided op (`rename`). → its answer | {ok: false, code: 'not_ready'} before the ws handler registered. */
+function callOp(op, ...args) {
+  const fn = shared[op];
+  return typeof fn === 'function' ? fn(...args) : { ok: false, code: 'not_ready', why: 'the server is still starting — try again in a moment' };
+}
+const refusal = (code, why, extra = {}) => ({ ok: false, code, why, ...extra });
+
+/** RENAME — the ws `rename-session` case's body, unchanged (it moved here so the automation door renames through it too). */
+function renameSession(deps, data) {
+  const { activeSessions, setCustomName, writeSessionMeta, readSessionMeta, broadcastActiveSessions, getSessionKey } = deps;
+  const trimmedName = typeof data.name === 'string' ? data.name.trim() : '';
+  let targetId = data.webuiId && activeSessions.has(data.webuiId) ? data.webuiId : null;
+  if (!targetId) {
+    for (const [sessionId, session] of activeSessions) {
+      if (data.sessionKey && getSessionKey(session) === data.sessionKey) {
+        targetId = sessionId;
+        break;
+      }
+      if (data.backendSessionId && (session.backendSessionId || session.claudeSessionId) === data.backendSessionId) {
+        targetId = sessionId;
+        break;
+      }
+    }
+  }
+  if (!targetId) return { ok: false, code: 'not_found' };
+
+  const session = activeSessions.get(targetId);
+  if (!session) return { ok: false, code: 'not_found' };
+
+  if (trimmedName) session.name = trimmedName;
+  // lane peer-card-sender (③): an outside rename (an agent, a script) lands where the sidebar's own rename does —
+  // user-state `customNames[<backend>:<id>]`, broadcast to every client — and the name is explicit (②)
+  if (trimmedName) { session._nameExplicit = true; const key = getSessionKey(session); if (key && typeof setCustomName === 'function') { try { setCustomName(key, trimmedName); } catch (e) { console.warn('[rename] custom name not stored:', e && e.message); } } }
+  // Write the new name back into the AGENT's own store when the
+  // harness has somewhere to write it (caps.renameWriteback — codex's
+  // thread name; claude's JSONL has no title field). Never a backend id.
+  if (capsOf(session.backend).renameWriteback && session.mode === 'chat' && session.pty && trimmedName) {
+    session.pty.write(JSON.stringify({ type: 'set-thread-name', name: trimmedName }) + '\n');
+  }
+  if (session.sockName) {
+    writeSessionMeta(session.sockName, {
+      ...(readSessionMeta(session.sockName) || {}), // preserve keys not re-listed (agentToken/taskId/accountId)
+      name: session.name,
+      nameExplicit: session._nameExplicit || undefined,
+      cwd: session.cwd,
+      backend: session.backend,
+      backendSessionId: session.backendSessionId,
+      claudeSessionId: session.claudeSessionId || null,
+      sourceKind: session.sourceKind || null,
+      agentKind: session.agentKind || 'primary',
+      agentRole: session.agentRole || '',
+      agentNickname: session.agentNickname || '',
+      parentThreadId: session.parentThreadId || null,
+      permissionMode: session._permissionMode || null,
+      effort: session._effort || null,
+      createdAt: session.createdAt,
+      webuiSessionId: targetId,
+      mode: session.mode || 'terminal',
+    });
+  }
+  broadcastActiveSessions();
+  return { ok: true, targetId, name: session.name };
+}
+
+
+/** The harness registry + its spawn rows, as the open spec's tables (src/conversation-spec.js openSpecVerdict). */
+function specTables() {
+  let ids = [], chat = null, HS = null;
+  try { const H = require('../harnesses'); ids = H.ids(); chat = typeof H.chatHarnessIds === 'function' ? H.chatHarnessIds() : null; } catch { ids = []; }
+  try { HS = require('../harness-settings'); } catch { HS = null; }
+  const byBackend = {};
+  for (const id of ids) {
+    const table = HS && HS.HARNESS_SETTINGS ? HS.HARNESS_SETTINGS[id] : null;
+    const rows = table && HS ? HS.rowsOfKind(table, 'spawn') : [];
+    const via = (v) => rows.find((r) => r && r.apply && r.apply.via === v) || null;
+    const vals = (r) => (r && Array.isArray(r.options) ? r.options.map((o) => o && o.value).filter((x) => typeof x === 'string' && x) : []);
+    const m = via('model'), e = via('effort'), p = via('permissionMode');
+    byBackend[id] = { models: vals(m), modelFree: !m || !!m.combobox, efforts: vals(e), effortFree: !!(e && e.combobox), permissionModes: vals(p) };
+  }
+  return { backends: ids, chatBackends: Array.isArray(chat) ? chat : null, byBackend };
+}
+
+/** The five verbs (+ the status read) over a deps getter — `D()` below is that getter's answer at each call. */
+function opsOver(getDeps) {
+  const D = () => getDeps() || {};
+
+  /** The live session a target names (null = none live). */
+  function liveOf(target) {
+    const act = D().activeSessions;
+    if (!act || !target) return null;
+    if (target.webuiId) { const s = act.get(target.webuiId); return s ? { id: target.webuiId, session: s } : null; }
+    if (target.sessionKey && typeof D().getSessionKey === 'function') {
+      for (const [id, s] of act) { try { if (D().getSessionKey(s) === target.sessionKey) return { id, session: s }; } catch { } }
+    }
+    return null;
+  }
+  /** What a caller polls for after an open: the webui id, the conversation's own id once its CLI reported it. */
+  function conversationStatus(target) {
+    const t = SPEC.targetVerdict(target);
+    if (!t.ok) return t;
+    const hit = liveOf(t.target);
+    if (!hit) return refusal('not_found', 'no live conversation by that id');
+    const s = hit.session;
+    let key = null;
+    try { key = typeof D().getSessionKey === 'function' ? D().getSessionKey(s) || null : null; } catch { key = null; }
+    const conv = s.claudeSessionId || s.backendSessionId || null;
+    return { ok: true, sessionId: hit.id, name: s.name || null, cwd: s.cwd || null, mode: s.mode || null, backend: s.backend || 'claude', claudeSessionId: s.claudeSessionId || null, backendSessionId: s.backendSessionId || null, sessionKey: conv ? key : null, pending: !conv };
+  }
+
+  /** THE HEADLESS CREATE: ws-create's handler against a sink socket. The FIRST `created` / `error` frame is the answer (the
+   *  handler's very first refusal carries no reqId); the sink leaves the new session's clients the moment it answers, so
+   *  nothing the session prints is ever queued for it. Defined as an arrow (`= async (`) so the spend census counts its
+   *  ONE call site (below, under the authorizer), never its definition. */
+  const createHeadless = async (spec, by) => {
+    const reqId = 'auto-' + crypto.randomBytes(6).toString('hex');
+    let answer = null, settle = null;
+    const answered = new Promise((res) => { settle = res; });
+    const sink = {
+      readyState: D().WS_OPEN === undefined ? 1 : D().WS_OPEN,
+      _actBy: SPEC.actByOf(by), _headless: true,
+      send(frame) {
+        if (answer) return;
+        let m = null;
+        try { m = JSON.parse(String(frame)); } catch { return; }
+        if (!m || (m.type !== 'created' && m.type !== 'error') || (m.reqId && m.reqId !== reqId)) return;
+        answer = m;
+        if (m.type === 'created' && m.sessionId) {   // detach NOW: the creator socket is the session's first client
+          const s = D().activeSessions && D().activeSessions.get(m.sessionId);
+          try { if (s && s.clients && typeof s.clients.delete === 'function') s.clients.delete(sink); } catch { }
+        }
+        settle(m);
+      },
+      on() { }, once() { }, off() { }, removeListener() { }, close() { }, terminate() { }, ping() { },
+    };
+    const frame = { type: 'create', ...SPEC.wireOf(spec), cols: 120, rows: 30, reqId };
+    let timer = null;
+    const ran = Promise.resolve()
+      .then(() => D().handleCreate(sink, frame, new Set()))
+      .then(() => answer || { type: 'error', code: 'no_answer', message: 'the create path ended without an answer' },
+        (e) => answer || { type: 'error', code: 'create_threw', message: e && e.message ? e.message : String(e) });
+    const late = new Promise((res) => { timer = setTimeout(() => res(answer || { type: 'error', code: 'open_timeout', message: `no answer from the create path in ${OPEN_TIMEOUT_MS / 1000} s` }), OPEN_TIMEOUT_MS); });
+    const m = await Promise.race([answered, ran, late]);
+    clearTimeout(timer);
+    if (m.type !== 'created') return refusal(m.code || 'create_failed', String(m.message || 'the conversation could not be opened'));
+    const st = conversationStatus({ webuiId: m.sessionId });
+    return { ok: true, sessionId: m.sessionId, name: m.name || null, cwd: m.cwd || null, mode: m.mode || null, billing: m.billing || null, claudeSessionId: st.ok ? st.claudeSessionId : null, sessionKey: st.ok ? st.sessionKey : null, pending: st.ok ? st.pending : true };
+  };
+
+  /** OPEN A CONVERSATION. A ws caller: its own create, byte-identical. No ws: only an automation (a person opens from a
+   *  window), its spec judged, the spend guard asked before anything spawns. */
+  async function openConversation(spec, by, { ws = null, attachedSessions = null } = {}) {
+    if (ws) return D().handleCreate(ws, spec, attachedSessions);
+    const b = SPEC.byVerdict(by);
+    if (!b.ok) return b;
+    if (b.by.kind !== 'automation') return refusal('needs_a_window', 'a person or an agent opens a conversation from a window (the New session dialog); this door is an automation key\'s');
+    const v = SPEC.openSpecVerdict(spec, typeof D().specTables === 'function' ? D().specTables() : specTables()); // a provider may hand its own tables (the gate's fakes)
+    if (!v.ok) return v;
+    if (typeof D().handleCreate !== 'function') return refusal('not_ready', 'the server has not wired its create path yet');
+    const identity = SPEC.spendIdentityOf(b.by);
+    const spendGuard = D().spendGuard;
+    if (!spendGuard || typeof spendGuard.authorize !== 'function') return refusal('spend_refused', 'the spend guard is not wired — an automation spends nothing unguarded', { bucket: 'no-guard' });
+    // A CONVERSATION NOBODY TYPED INTO (CLAUDE.md "A turn nobody typed"): the gate decides BEFORE the spawn
+    const g = spendGuard.authorize({ reason: 'automation-open', identity, sessionName: v.spec.name || null });
+    if (!g || !g.ok) return refusal('spend_refused', (g && g.detail) || 'the spend guard refused', { bucket: (g && g.why) || 'unknown', retryAfter: (g && g.retryAfter) || 0 });
+    let r;
+    try { r = await createHeadless(v.spec, b.by); }
+    catch (e) { try { spendGuard.release({ hold: g.hold }); } catch { } throw e; }
+    try {
+      if (r.ok) spendGuard.note({ reason: OPEN_REASON, identity, hold: g.hold });
+      else spendGuard.release({ hold: g.hold });
+    } catch { }
+    if (r.ok) console.log(`[automation] opened ${r.sessionId} "${v.spec.name || ''}" ${v.spec.mode}/${v.spec.backend} for ${b.by.subject} (key ${b.by.key})`);
+    return r;
+  }
+
+  /** RENAME. The ws case hands its frame (byte-identical: the body reads webuiId / sessionKey / backendSessionId / name);
+   *  an automation's target and name are judged first and a target that is not live is named. */
+  function renameConversation(target, name, by) {
+    if (typeof D().rename !== 'function') return refusal('not_ready', 'the rename path is not wired yet');
+    if (by && by.kind === 'automation') {
+      const t = SPEC.targetVerdict(target); if (!t.ok) return t;
+      const n = SPEC.nameVerdict(name); if (!n.ok) return n;
+      if (!liveOf(t.target)) return refusal('not_found', 'no live conversation by that id');
+      const r = D().rename({ ...t.target, name: n.name });
+      return r && r.ok ? { ok: true, sessionId: r.targetId, name: r.name } : refusal('not_found', 'no live conversation by that id');
+    }
+    const r = D().rename(target && target.name === name ? target : { ...(target || {}), name });
+    return r && r.ok ? { ok: true, sessionId: r.targetId, name: r.name } : refusal('not_found', 'no live conversation by that id');
+  }
+
+  /** The key a bind writes: a sessionKey as given (the owner's route passes the request's own, even an empty one — the
+   *  store's refusal is the answer), a webui id resolved to its live conversation's key. */
+  function bindKeyOf(target) {
+    if (target && Object.prototype.hasOwnProperty.call(target, 'sessionKey')) return target.sessionKey;
+    const hit = target && target.webuiId ? liveOf({ webuiId: target.webuiId }) : null;
+    if (!hit) { const e = new Error('session not found'); e.code = 'not_found'; throw e; }
+    let k = null;
+    try { k = D().getSessionKey(hit.session) || null; } catch { k = null; }
+    if (!k || !(hit.session.claudeSessionId || hit.session.backendSessionId)) { const e = new Error('the conversation has not reported its id yet — poll its status, then bind'); e.code = 'pending'; throw e; }
+    return k;
+  }
+  /** BIND TO A TASK GROUP — the task store's own bind, which throws its own refusals ('task not found', a bad key): the
+   *  routes keep their mapping. `note` = the caller's activity line (the manager agent's, an automation's). */
+  function bindConversation(target, taskId, by, { note = null, noteSession = null } = {}) {
+    const tasks = D().tasks;
+    if (!tasks || typeof tasks.bind !== 'function') { const e = new Error('the task store is not wired yet'); e.code = 'not_ready'; throw e; }
+    const key = bindKeyOf(target);
+    const task = tasks.bind(taskId, key);
+    if (note) { try { tasks.addProgress(taskId, { note, session: noteSession }); } catch { } }
+    return task;
+  }
+
+  /** END. The ws case hands its frame and its reply (`killed`); without a reply the answer is returned. */
+  async function endConversation(target, by, { reply = null } = {}) {
+    if (typeof D().endSession !== 'function') return refusal('not_ready', 'the end path is not wired yet');
+    if (by && by.kind === 'automation') {
+      const t = SPEC.targetVerdict(target); if (!t.ok) return t;
+      const hit = liveOf(t.target);
+      if (!hit) return refusal('not_found', 'no live conversation by that id');
+      const answers = [];
+      await D().endSession({ sessionId: hit.id }, { reply: (m) => answers.push(m), actBy: SPEC.actByOf(by) });
+      const a = answers[answers.length - 1] || null;
+      return a && a.ok ? { ok: true, sessionId: hit.id } : refusal('not_found', 'no live conversation by that id');
+    }
+    return D().endSession(target, { reply: reply || (() => { }), actBy: SPEC.actByOf(by) });
+  }
+
+  /** INVITE INTO AN AGENT GROUP — the groups engine's invite, the inviter `by.cid` (a member of the group, as for its own
+   *  `vibespace-msg group invite`). The route hands its own engine and options (byte-identical). */
+  async function inviteToGroup(group, members, by, { ge = null, context = '', quiet = false, mayWake = null, consent = null } = {}) {
+    const eng = ge || (typeof D().groupsEngine === 'function' ? D().groupsEngine() : null);
+    if (!eng || typeof eng.invite !== 'function') return refusal('groups_off', 'agent groups are not available on this instance');
+    if (by && by.kind === 'automation') {
+      const g = SPEC.groupVerdict(group); if (!g.ok) return g;
+      const m = SPEC.membersVerdict(members); if (!m.ok) return m;
+      if (!by.cid) return refusal('bad_by', 'an invite is made by a conversation of the group — this key\'s subject has none');
+      return eng.invite({ by: by.cid, group: g.group, members: m.members, context, quiet, mayWake, consent });
+    }
+    return eng.invite({ by: by && by.cid, group, members, context, quiet, mayWake, consent });
+  }
+
+  return { conversationStatus, openConversation, renameConversation, bindConversation, endConversation, inviteToGroup };
+}
+const sharedOps = opsOver(() => shared);
+/** ws-handler's own instance: its parts first, the provided ones (the task store, the spend guard…) behind them. */
+function forDeps(own) { return opsOver(() => ({ ...shared, ...(own || {}) })); }
+
+/**
+ * THE WIRED AUTOMATION VERBS (src/server/automation-engine.js `verbs`). Each resolves its TARGET conversation and asks the
+ * engine's `reach` (the same key granted to that conversation or one of its Task Groups — or the caller itself) before it
+ * acts. `groupsOf(session, id)` = the Task Group ids a live session belongs to. L1 wired conversations.rename; lane
+ * automation-verbs (L2) wires the rest through THE seams above, the caller named as `by` = {kind: 'automation', key,
+ * subject: session:<caller>, cid, sessionKey}:
+ *   conversations.open    the judged spec → openConversation (the spend guard first, charged to the key), then the ids:
+ *                         it waits up to OPEN_ID_WAIT_MS for the conversation's own id, else answers `pending`
+ *   conversations.status  the ids of a conversation the key reaches (`pending` until its CLI reported one)
+ *   conversations.bind    bindConversation into a Task Group the CALLER belongs to
+ *   conversations.end     endConversation (its device teardown names the calling conversation)
+ *   groups.invite         inviteToGroup — the caller invites, quietly (no wake: a wake is a billed turn of its own)
+ * A conversation THIS KEY OPENED is within its reach (`openedBy`, in memory — the worker the coordinator just opened has no
+ * grant of its own); everything else needs the owner's grant.
+ */
+const OPEN_ID_WAIT_MS = 20 * 1000;     // a claude CLI reports its conversation id within seconds of the spawn
+function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, waitMs = OPEN_ID_WAIT_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  const O = () => ops || sharedOps;
+  const idOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
+  /** A target as the caller names it: a conversation id, a session key (`<backend>:<id>`) or a webui id. */
+  function findSession(target) {
+    const t = String(target || '');
+    if (!t) return null;
+    if (activeSessions.has(t)) return [activeSessions.get(t), t];
+    for (const [id, s] of activeSessions) { const cid = idOf(s); if (cid && (cid === t || `${s.backend || 'claude'}:${cid}` === t)) return [s, id]; }
+    return null;
+  }
+  const openedBy = new Map();   // webui id → the key that opened it
+  const byOf = (caller, keyId) => ({ kind: 'automation', key: keyId, subject: `session:${caller.conversationId}`, cid: caller.conversationId, sessionKey: caller.sessionKey || `claude:${caller.conversationId}` });
+  /** The target, if the key reaches it → [s, id] | a named refusal. */
+  function reached(target, { caller, keyId, reach }) {
+    const hit = findSession(target || caller.conversationId);
+    if (!hit) return { ok: false, code: 'not_found', why: 'no live conversation by that id' };
+    const [s, id] = hit;
+    const opener = openedBy.get(id);
+    if (opener && opener === keyId) return { ok: true, s, id }; // a conversation THIS key opened
+    let groups = [];
+    try { groups = groupsOf(s, id) || []; } catch { groups = []; }
+    if (!reach(idOf(s), groups)) return { ok: false, code: 'not_granted', why: 'the key is not granted to that conversation (nor to one of its Task Groups)' };
+    return { ok: true, s, id };
+  }
+  return {
+    'conversations.open': async (args, { caller, keyId }) => {
+      const spec = { cwd: args.cwd };
+      for (const [from, to] of [['backend', 'backend'], ['mode', 'mode'], ['name', 'name'], ['model', 'model'], ['effort', 'effort'], ['permission', 'permissionMode'], ['task', 'taskId'], ['pool', 'accountId']]) if (args[from] != null) spec[to] = args[from];
+      const r = await O().openConversation(spec, byOf(caller, keyId));
+      if (!r || !r.ok) return r;
+      openedBy.set(r.sessionId, keyId);
+      let st = O().conversationStatus({ webuiId: r.sessionId });
+      for (let t = 0; st.ok && st.pending && t < waitMs; t += 250) { await sleep(250); st = O().conversationStatus({ webuiId: r.sessionId }); }
+      return { ...r, ...(st.ok ? { claudeSessionId: st.claudeSessionId, sessionKey: st.sessionKey, pending: st.pending } : {}) };
+    },
+    'conversations.status': (args, ctx) => {
+      const t = reached(args.target, ctx);
+      return t.ok ? O().conversationStatus({ webuiId: t.id }) : t;
+    },
+    'conversations.rename': (args, ctx) => {
+      const t = reached(args.target, ctx);
+      if (!t.ok) return t;
+      const r = callOp('rename', { webuiId: t.id, name: args.name });
+      return r && r.ok ? { ok: true, target: idOf(t.s) || t.id, name: r.name } : r;
+    },
+    'conversations.bind': (args, ctx) => {
+      const t = reached(args.target, ctx);
+      if (!t.ok) return t;
+      const { caller, keyId } = ctx;
+      // the Task Group is one the CALLER belongs to (a key granted to a group is used by that group's own conversations)
+      if (!(caller.groups || []).includes(args.task)) return { ok: false, code: 'not_granted', why: 'the calling conversation is not in that Task Group' };
+      try {
+        O().bindConversation({ webuiId: t.id }, args.task, byOf(caller, keyId), { note: `[automation] session ${idOf(t.s) || t.id} bound by ${caller.name || caller.sessionKey || caller.conversationId} (key ${keyId})`, noteSession: caller.sessionKey || null });
+        return { ok: true, target: idOf(t.s) || t.id, task: args.task };
+      } catch (e) {
+        return { ok: false, code: e.code || (e.message === 'task not found' ? 'not_found' : 'bad_args'), why: e.message };
+      }
+    },
+    'conversations.end': async (args, ctx) => {
+      const t = reached(args.target, ctx);
+      if (!t.ok) return t;
+      const r = await O().endConversation({ webuiId: t.id }, byOf(ctx.caller, ctx.keyId));
+      if (r && r.ok) openedBy.delete(t.id);
+      return r && r.ok ? { ok: true, target: idOf(t.s) || t.id } : r;
+    },
+    'groups.invite': async (args, ctx) => {
+      const t = reached(args.target, ctx);
+      if (!t.ok) return t;
+      const cid = idOf(t.s);
+      if (!cid) return { ok: false, code: 'pending', why: 'the conversation has not reported its id yet — poll conversations.status, then invite' };
+      const r = await O().inviteToGroup(args.group, [cid], byOf(ctx.caller, ctx.keyId), { quiet: true });
+      return r && r.ok ? { ok: true, target: cid, group: args.group } : { ok: false, code: (r && r.code) || 'failed', why: (r && (r.error || r.why)) || null }; // ids only — the engine's added / already lists are members' display names (a peer's words)
+    },
+  };
+}
+
+module.exports = {
+  OPEN_REASON, OPEN_TIMEOUT_MS,
+  OPEN_ID_WAIT_MS, provide, callOp, renameSession, automationVerbs, forDeps, opsOver, specTables, ...sharedOps,
+};

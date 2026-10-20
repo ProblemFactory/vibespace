@@ -157,7 +157,13 @@ passkeys.write(PS.withRow(PS.normalizeStore(null), 'bp-1', PS.normalizeRow({ cre
 const BD = require(path.join(REPO, 'src/server/browser-dialogs.js'));
 const D = BD.create({ keeper: { profile: () => ({ id: 'bp-1' }), cdpEndpointFor: async () => ({ ok: false }), onLease: () => () => {} }, log: quiet, now: () => clock, passkeys, forYou: { add: () => null, resolve() {} } });
 
+// design q-046 (lane automation-keys-core): «Automation keys» — the REAL engine over this vault, one key minted (its value
+// lives in the vault only — the inventory lists its name and date)
+const AE = require(path.join(REPO, 'src/server/automation-engine.js')).create({ dataDir: d, vault: eng, now: () => clock });
+const akMint = AE.mint({ name: 'Lane dispatch', scopes: ['conversations.rename'] });
+const akValue = eng.secretGet(`apikey:${akMint.key.id}`).value.toString();
 const sources = {
+  automation: () => AE,
   accounts: () => acc, integrations: () => ({ vaultRows: () => is.vaultRows({ machineName }), vaultReveal: (e, f) => is.vaultReveal(e, f) }), channels: () => ce, mounts: () => mm,
   secrets: () => VC.secretSource({ vault: eng, machineName }),   // int317: «Hub secrets» as the wiring hands it
   'app-secrets': () => ({ vaultRows: () => AS.appSecretRows({ dataDir: d }), vaultReveal: (e, f) => AS.appSecretReveal({ dataDir: d }, e, f) }),
@@ -169,7 +175,13 @@ const vc = VC.create({ vault: eng, sources, now: () => clock, mono: () => mono }
 const inv = vc.list();
 const text = JSON.stringify(inv);
 const byStore = (s) => inv.rows.filter((r) => r.store === s);
-ok(inv.ok && inv.state === 'unlocked' && inv.stores.length === 7 && inv.stores.every((s) => !s.error && !s.missing), 'the inventory reads all six stores + Hub secrets (none missing, none unreadable)', inv.stores);
+ok(inv.ok && inv.state === 'unlocked' && inv.stores.length === 8 && inv.stores.every((s) => !s.error && !s.missing), 'the inventory reads all six stores + Automation keys + Hub secrets (none missing, none unreadable)', inv.stores);
+{ // design q-046: «Automation keys» — one row per live key: its NAME, revealable (only to hand to an outside party), never its value
+  const ak = inv.rows.filter((r) => r.store === 'automation');
+  ok(akMint.ok && ak.length === 1 && ak[0].entry === `apikey:${akMint.key.id}` && ak[0].label === 'Lane dispatch' && ak[0].kind === 'api-key' && ak[0].revealable === true && ak[0].detail === 'Only to hand to an outside party' && !ak[0].doors.delete,
+    'Automation keys: the key\'s name, revealable (the row says why: only to hand to an outside party), no store door (the section\'s own 撤销)', ak);
+  ok(!inv.rows.some((r) => r.store === 'secrets' && /apikey:/.test(r.entry)) && !text.includes(akValue), 'its entry is not a «Hub secrets» row, and its value is nowhere in the inventory');
+}
 ok(byStore('accounts').map((r) => r.field).sort().join() === 'key,oat', 'accounts: the API key and the long-lived token', byStore('accounts'));
 { const oat = byStore('accounts').find((r) => r.field === 'oat') || {};   // lane vault-one-door (the owner: 「最好标记一下是 long term oauth 防止误会」)
   ok(oat.kind === 'long-lived-oauth-token' && VI.KIND_WORDS[oat.kind] === 'Long-lived OAuth token' && /setup-token/.test(oat.detail || '') && VI.KIND_WORDS['oauth-token'] === 'OAuth token', 'an account\'s setup-token row is a LONG-LIVED OAuth token in words (its detail names setup-token); a mount\'s / a channel\'s OAuth sign-in keeps "OAuth token"', oat); }
