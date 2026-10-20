@@ -380,12 +380,18 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
         oracleOk('§4d no GHOST row: every list-backed row is in the binary\'s lists and every literal row is spelled in the bundle (the WebFetch deadline, the conversation-ended and streaming-fallback results)', ghosts.length === 0, 'GHOST: ' + ghosts.join(', '));
         oracleOk('§4d the census names the installed build it was read from (PERMISSION_OUTCOME_CLI_VERSION = SCHEMA_CLI_VERSION)', PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION, PO.PERMISSION_OUTCOME_CLI_VERSION);
         // NEGATIVE CONTROLS on the real census: one planted sentence is named; one row removed is named
+        // the .320 mirror: on a DRIFTED build (newer than every pinned dump) the base census is not clean (new sentences, moved
+        // names), so a control that adds or removes ONE row has no clean arithmetic to stand on — it proves nothing. The two
+        // negative controls run only on a clean base; elsewhere they SKIP with the drift as the evidence (and on the mirror
+        // they are informational like the census itself)
+        const cleanBase = unclassified.length === 0 && ghosts.length === 0;
+        const ctl = cleanBase ? oracleOk : (n, c, e) => skip(n, 'the base census is not clean on this build — a control over a drifted census proves nothing: ' + JSON.stringify({ unclassified, ghosts }).slice(0, 300));
         const planted = cen.sentences.concat([{ name: 'zz9', from: 'Gd', text: '[Tool call refused: the safety classifier declined it after your approval — a sentence a future build invented]' }]);
         const pv = outcomeCensus(planted, PO.PERMISSION_OUTCOME_ROWS, text);
-        ok('…NEGATIVE CONTROL: the real lists plus ONE planted sentence fail the classification leg naming exactly it', pv.unclassified.length === unclassified.length + 1 && pv.unclassified.some((x) => /^zz9 = .*safety classifier declined it/.test(x)) && pv.ghosts.length === ghosts.length, pv);
+        ctl('…NEGATIVE CONTROL: the real lists plus ONE planted sentence fail the classification leg naming exactly it', pv.unclassified.length === unclassified.length + 1 && pv.unclassified.some((x) => /^zz9 = .*safety classifier declined it/.test(x)) && pv.ghosts.length === ghosts.length, pv);
         const fewer = PO.PERMISSION_OUTCOME_ROWS.filter((r) => r.id !== 'hL');
         const fv = outcomeCensus(cen.sentences, fewer, text);
-        ok('…NEGATIVE CONTROL: the table without the SUBAGENT\'s denial row (the r5 finding) fails the same leg naming that sentence', fv.unclassified.length === unclassified.length + 1 && fv.unclassified.some((x) => /Permission for this tool use was denied/.test(x)), fv);
+        ctl('…NEGATIVE CONTROL: the table without the SUBAGENT\'s denial row (the r5 finding) fails the same leg naming that sentence', fv.unclassified.length === unclassified.length + 1 && fv.unclassified.some((x) => /Permission for this tool use was denied/.test(x)), fv);
         // the extractor's own controls: a synthetic bundle in the 2.1.281 spelling, a reused name elsewhere, a missing anchor / list
         const mini = 'var Jw="[Request interrupted by user]",Ud="[Request interrupted by user for tool use]",ok="[Tool call did not complete: the turn was ended.]",pb="The user doesn\'t want to take this action right now.",u4e=`\nNote: a suffix`;\nvar ok="tengu_worker_owner_rows_killswitch_reused_name";\nvar ww="The user doesn\'t want to proceed with this tool use. Rejected.",Dx=`The user doesn\'t want to proceed with this tool use. The user said:\nfeedback`;\nvar If=new Set([Jw,Ud]);function Gd(){return[ww,Dx,pb,Ud,ok]}function Hd(e){return Gd().some((r)=>n.startsWith(r))}\nvar IS=new Set([Jw,Ud,ok,pb,pb+u4e,ww,ww+u4e]);';
         const mc = extractPermissionSentences(mini);

@@ -6,6 +6,9 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.321 — 2026-10-20
 
+### 主开发 — the .320 Actions mirror (fast): test-record-shape §4d's two NEGATIVE CONTROLS red on the runner's newer claude build
+- The census itself is informational on a drifted mirror build (`oracleOk`), but its two controls (one planted sentence / one row removed ⇒ the leg names it) used plain `ok` and did their arithmetic on a base census that was NOT clean on that build (a new sentence `Pz`, a moved name `Dx (Gd)`), so they went red while the hub (pinned 2.1.296) stayed green. The controls now run only on a clean base and SKIP with the drift as evidence elsewhere; on the mirror they are informational like the census. The drift itself = the CLI updated on the runner ⇒ register the next version (the dump recipe, lane cli-records) — a backlog item.
+
 ### lane inbox-reply-dead-session — a For-you reply to a conversation that ENDED reopens it (userW inc-mvfuzlom-nwav, 2026-10-19 23:01Z on 2.369.318: 「在 inbox 里面回复 session 的时候, 如果那个 session 已经挂了, 就回不了了.」; FIX, base e23b1bee = 2.369.319)
 - BEFORE: the action ring held ten pointer presses on `textarea.iw-reply-input` in 30 s and no typing.
   - The For-you window disabled the box of an item whose conversation was not running (`c.ta.disabled = !v.reply.enabled`, src/lib/inbox-window.js:367). The reason, "Agent not running — open the session, then reply", was only a hover title.
