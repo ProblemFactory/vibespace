@@ -30,8 +30,10 @@ const T = require('../totp.js');
  * @param {Object<string, () => ({ vaultRows: () => object[], vaultReveal: (entry: string, field: string) => (string|null) } | null)>} o.sources
  *        per store id (src/vault-inventory.js STORES): a GETTER — a store this instance does not run answers null
  * @param {() => number} [o.mono]  a monotonic clock (ms) — suites pass their own
+ * @param {(row: object) => ({can: boolean, open: boolean} | null)} [o.runFacts]  lane vault-run-door: a row's «Usable by agent
+ *        runs» (may it be opened, is it open — src/server/vault-run-door.js rowFacts); null = no run door on this hub
  */
-function create({ vault, sources = {}, now = () => Date.now(), mono = () => performance.now() } = {}) {
+function create({ vault, sources = {}, now = () => Date.now(), mono = () => performance.now(), runFacts = null } = {}) {
   if (!vault) throw new TypeError('vault-contents: the vault engine is required');
   const windows = new Map();   // keyOf(who, page) → { who, startedAt, until, epoch, startedMono }
   const paced = new Map();     // who → the instants of its reveals answered in the last minute
@@ -66,7 +68,9 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
       catch (e) { listed.push({ store: s.store, rows: [], error: codeOf(e) }); }
       uses[s.store] = typeof vault.lastUse === 'function' ? vault.lastUse(s.store) : null;
     }
-    return { ok: true, state, ...VI.inventoryOf(listed, { uses }) };
+    const inv = VI.inventoryOf(listed, { uses });
+    if (typeof runFacts === 'function') inv.rows = inv.rows.map((r) => { let run = null; try { run = runFacts(r); } catch { run = null; } return run ? { ...r, run } : r; });   // lane vault-run-door: the row's switch
+    return { ok: true, state, ...inv };
   }
 
   /** 「验证是你」: the second password again ⇒ a 5-minute window for THIS page (its secret is in the answer, once). */

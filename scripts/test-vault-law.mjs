@@ -10,7 +10,9 @@
 //   ③ NO STORE KEY OUTSIDE THE VAULT: the key-file law's legacy branch (loadOrMintKey / mintKeyFile) runs only inside
 //      secret-box's lawfulKey AFTER it asked the dir's vault; a box never caches a vault-held key; every store key name
 //      in src/ is a vault STORE_KEYS row (and the reverse)
-//   ④ the agent CLI has no unlock / setup / change door; the agent routes have none either
+//   ④ the agent CLI has no unlock / setup / change door; the agent routes have none either; lane vault-run-door: the agent's
+//      `run` door answers ONLY scrubbed text (every byte of stdout / stderr went through the scrubber, then secret-shapes) and
+//      `runnable` names entries, never a value — pinned, with a mutant (a stream handed on raw ⇒ RED)
 //   ⑤ MUTANTS (each judged by the same census ⇒ RED): an env-var auto-unlock in the engine, a password file read at boot,
 //      a route feeding unlock from process.env, a cluster-preset unlock, a store reading its key file directly, a box
 //      caching a vault key, lawfulKey going legacy before asking the vault
@@ -142,12 +144,31 @@ console.log('④ the agent side has no unlock');
   const agentDoors = [...routes.matchAll(/app\.(get|post)\('(\/api\/agent\/vault\/[^']+)'/g)].map((m) => m[2]);
   // lane vault-e2e-password-fix-r2: + the LINK TOKEN door — a remote session's attach child asks for ITS machine's device
   // token (its own session token names the session; the engine is never asked to unlock: LOCKED ⇒ 423 vault_locked)
+  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/mint,/api/agent/vault/put,/api/agent/vault/link-token,/api/agent/vault/run,/api/agent/vault/runnable', `the agent doors are the two-step code, state, lock, mint, put, the session's own link token, run and runnable only (${agentDoors.join(', ')})`);
   // design q-047 L1 (lane vault-totp): + the TWO-STEP CODE door — a GET answering a granted entry's CURRENT code (never the
   // seed: its answer is built from named fields only — test-vault-routes ⑨ plants a seed and ⑩'s mutant leaks it ⇒ RED)
-  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/link-token', `the agent doors are the two-step code, state, lock and the session's own link token only (${agentDoors.join(', ')})`);
   const codeDoor = (() => { const i = routes.indexOf("app.get('/api/agent/vault/totp/:name'"); const j = routes.indexOf('\n    });', i); return i > 0 && j > i ? routes.slice(i, j) : ''; })();
   ok(/res\.json\(\{ ok: true, name: r\.name, code: r\.code, secondsLeft: r\.secondsLeft, period: r\.period \}\)/.test(codeDoor) && !/seed|secretGet|reveal|unlock/.test(codeDoor) && /callerOf\(token\)/.test(codeDoor),
     'the two-step code door answers NAMED fields only (name, code, secondsLeft, period) — no seed, no secretGet, no reveal, no unlock; its caller is the session token\'s conversation');
+  // lane vault-run-door: + RUN (the hub spawns the command with the value injected; the answer is the SCRUBBED output) and
+  // RUNNABLE (the entries a run may reference — names, never a value)
+  const cliRuns = /\/api\/agent\/vault\/run'/.test(cli) && /\/api\/agent\/vault\/runnable'/.test(cli);
+  ok(cliRuns, 'data/bin/vibespace-vault calls run and runnable (lane vault-run-door) — and still no unlock / setup / change (above)');
+  // THE RUN DOOR'S ANSWER (lane vault-run-door): every chunk of the child's stdout / stderr reaches `parts` only through its
+  // stream's scrubber, the tail at the end too; the answer's two streams are those parts through secret-shapes — nothing else
+  const door = tree.get('src/server/vault-run-door.js') || '';
+  const scrubbedOnly = (t) => {
+    const pushes = [...t.matchAll(/parts\[k\]\.push\(([^;]*)\);/g)].map((m) => m[1]);
+    return pushes.length === 2 && pushes.every((a) => /^masks\[k\]\.push\(/.test(a))
+      && /const outT = redactLong\(parts\.out\.join\(''\)\), errT = redactLong\(parts\.err\.join\(''\)\);/.test(t)
+      && /stdout: outT\.text, stderr: errT\.text/.test(t) && !/stdout: (?!outT\.text|utf8Head\(outT\.text\))/.test(t) && !/stderr: (?!errT\.text|utf8Head\(errT\.text\))/.test(t);
+  };
+  ok(scrubbedOnly(door), 'the run door hands the agent ONLY scrubbed text: each stream chunk enters its parts through createMasker\'s push (the end\'s tail too), the answer\'s stdout / stderr are those parts through secret-shapes — no other stdout / stderr field');
+  ok(!scrubbedOnly(door.replace('if (text) parts[k].push(masks[k].push(text));', 'if (text) parts[k].push(text);')), 'MUTANT: a stream chunk handed on without its scrubber ⇒ RED');
+  ok(!/vaultReveal|valueOf\(/.test(routes.slice(routes.indexOf("'/api/agent/vault/runnable'"), routes.indexOf("'/api/agent/vault/runnable'") + 700)), 'runnable answers names — it never asks a store for a value');
+  // lane vault-mint-put (q-043 §9): + MINT / PUT — CREATE-only doors in the session's OWN namespace; neither reads a value
+  // back (there is no agent reveal door; the owner reveals in the Vault window), and both refuse a locked vault by name.
+  ok(!/app\.get\('\/api\/agent\/vault\/(mint|put)'/.test(routes) && !/res\.json\(\{[^}]*\bvalue\s*:/.test(routes.slice(routes.indexOf("'/api/agent/vault/mint'"), routes.indexOf("'/api/agent/vault/link-token'"))), 'mint / put are POST-only and their answer carries no `value:` field (create, never read — the q-043 ① law)');
   const lt = routes.slice(routes.indexOf("'/api/agent/vault/link-token'"));
   ok(lt.length > 0 && !/vault\.(unlock|setup|change)\(/.test(lt.slice(0, lt.indexOf('\n  });'))) && /vsst_/.test(lt.slice(0, 900)) && /_agentdSession/.test(lt.slice(0, 900)),
     'the link-token door answers a session token (vsst_) of a session on a paired machine only, and never unlocks / sets up / changes');

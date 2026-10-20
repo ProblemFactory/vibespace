@@ -9793,4 +9793,41 @@ export default {
   "Account deleted — \"{title}\" needs you to pick a {provider} account": "アカウントが削除されました —「{title}」には {provider} のアカウントを選ぶ必要があります", // lane pool-provider-latents (q-055 M2): a deleted account's conversation, UNPLACED
   "{member} ({provider}) was deleted and no other {provider} account in pool \"{pool}\" can take this conversation, so nothing moved it. Allow once moves it to {offer} ({offerProvider}) — it restarts and its model becomes {model}. Always for this pool lets the pool move a conversation to another provider by itself from now on, with a line in the conversation each time. Deny leaves it where it is — add or sign in a {provider} account and it moves there.": "{member}（{provider}）は削除され、プール「{pool}」にはこの会話を引き継げる {provider} のアカウントが他にないため、何も移していません。「1 回だけ許可」で {offer}（{offerProvider}）へ移します — 会話は再起動し、モデルは {model} になります。「常に（このプール）」なら今後このプールは会話を別のプロバイダーへ自動で移し、そのたびに会話に 1 行残します。「拒否」ならそのまま — {provider} のアカウントを追加またはサインインすると、そこへ移ります。",
   "{member} ({provider}) was deleted and no other {provider} account in pool \"{pool}\" can take this conversation, so nothing moved it — and no other provider in the pool serves its model. Add or sign in a {provider} account and it moves there.": "{member}（{provider}）は削除され、プール「{pool}」にはこの会話を引き継げる {provider} のアカウントが他にないため、何も移していません — プール内の他のプロバイダーもこのモデルを扱えません。{provider} のアカウントを追加またはサインインすると、そこへ移ります。",
+  // lane antigravity-harness commit 2: the Google account roster / add + sign-in-again flow, its billing words
+  "Add {login} account": "{login} アカウントを追加",
+  "Name this account (e.g. Work, Personal)": "このアカウントの名前（例：仕事、個人）",
+  "e.g. Personal": "例：個人",
+  "A terminal opened — {cli} shows a sign-in link: open it, sign in with the account you want to add, and paste the code back. Your other logins are untouched; VibeSpace captures it automatically.": "ターミナルを開きました——{cli} がサインインのリンクを表示します。開いて追加したいアカウントでサインインし、コードを貼り付けて戻してください。ほかのログインはそのままです。VibeSpace が自動で取り込みます。",
+  "A terminal opened — {cli} shows a sign-in link: open it, sign in with this account, and paste the code back. VibeSpace captures it automatically.": "ターミナルを開きました——{cli} がサインインのリンクを表示します。開いてこのアカウントでサインインし、コードを貼り付けて戻してください。VibeSpace が自動で取り込みます。",
+  "✓ Signed in as {name}": "✓ {name} としてサインイン済み",
+  "This machine’s own login": "このマシン自身のログイン",
+  "{login} account — runs on this machine": "{login} アカウント——このマシンで実行",
+  "Each {cli} session can pick its {login} (New Session dialog / card ⚙). Each account is its own isolated login on this machine, switchable per session.": "{cli} の各セッションは使う {login} を選べます（新規セッション ダイアログ / カードの ⚙）。各アカウントはこのマシン上で分離されたログインで、セッションごとに切り替えられます。",
+  "{login} accounts": "{login} アカウント",
+  "Add {login} account…": "{login} アカウントを追加…",
+  "Sign in another {login} account for the {cli} — stored in VibeSpace, switchable per session": "{cli} 用に別の {login} アカウントでサインイン——VibeSpace に保存され、セッションごとに切り替えられます",
+  "Still not signed in — open “Add {login} account…” to finish the login.": "まだサインインしていません——「{login} アカウントを追加…」を開いてログインを完了してください。",
+  "Sign in again": "再サインイン",
+  "{login} — {name}": "{login}——{name}",
+  "{login} (the machine’s own)": "{login}（このマシン自身の）",
+  "Google login": "Google ログイン",
+  "Google login (Antigravity CLI)": "Google ログイン（Antigravity CLI）",
+  "Google login (on the host)": "Google ログイン（リモートホスト上）",
+  "Google account": "Google アカウント",
+  // lane antigravity-harness: the Antigravity CLI harness (its settings section and permission words)
+  "Antigravity CLI": "Antigravity CLI",
+  "The model slug new Antigravity sessions start on (empty keeps Antigravity's own choice). `agy models` lists what your login may use; an unknown slug is refused by name.": "新しい Antigravity セッションが最初に使うモデルの slug（空欄 = Antigravity 自身の選択）。`agy models` でログインが使えるモデルを一覧できます。不明な slug は名前を挙げて拒否されます。",
+  "Default effort": "既定の推論レベル",
+  "Reasoning effort for new Antigravity sessions (--effort).": "新しい Antigravity セッションの推論レベル（--effort）。",
+  "How a new Antigravity session handles tools that need approval. In a chat, Antigravity cannot ask — a tool it would ask about is skipped and said in the chat; “Never ask” runs everything.": "新しい Antigravity セッションが承認の必要なツールをどう扱うか。チャットでは Antigravity は確認できないため、確認が必要なツールはスキップされ、チャットにその旨が表示されます。「確認しない」はすべて実行します。",
+  "Extra Antigravity CLI args appended when starting an Antigravity session.": "Antigravity セッションの起動時に追加する Antigravity CLI 引数。",
+  "Default (Antigravity’s own setting)": "既定（Antigravity 自身の設定）",
+  "{who} wants to run a command with a stored secret": "{who} が保管庫のシークレットを使ってコマンドを実行しようとしています", // lane vault-run-door
+  "Always for this shape": "この形は常に許可", // lane vault-run-door
+  "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同じツール・フラグ・ホスト・シークレットなら 30 日間確認せずに実行します — 先に第二パスワードを確認します", // lane vault-run-door
+  "Allowed for this shape for 30 days": "この形を 30 日間許可しました", // lane vault-run-door
+  "Usable by agent runs": "エージェントの実行で使用可", // lane vault-run-door
+  "An agent may use it in vibespace-vault run without ever seeing it — each new command asks you first": "エージェントは値を見ることなく vibespace-vault run でこれを使えます — 新しいコマンドごとに先に確認します", // lane vault-run-door
+  "Agents may use it in a run now — each new command asks you first": "エージェントが実行でこれを使えるようになりました — 新しいコマンドごとに先に確認します", // lane vault-run-door
+  "Agents can no longer use it in a run": "エージェントは実行でこれを使えなくなりました", // lane vault-run-door
 };

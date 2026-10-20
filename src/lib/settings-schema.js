@@ -1769,6 +1769,7 @@ const SETTINGS_CATEGORIES = [
   t('Claude'),
   t('Codex'),
   t('OpenCode'),
+  t('Antigravity CLI'),
   t('Sidebar'),
   t('Session Card'),
   t('Mobile'),
@@ -1843,7 +1844,7 @@ export function unregisterPluginSettings(pluginId) {
 const SETTINGS_GROUPS = [
   { id: 'appearance', label: t('Appearance & layout'), categories: [t('Toolbar & Layout'), t('Window'), t('Sidebar'), t('Session Card'), t('Mobile')] },
   { id: 'sessions', label: t('Sessions & chat'), categories: [t('Session'), t('Chat'), t('Terminal')] },
-  { id: 'harness', label: t('Harnesses'), categories: [t('Claude'), t('Codex'), t('OpenCode')] },
+  { id: 'harness', label: t('Harnesses'), categories: [t('Claude'), t('Codex'), t('OpenCode'), t('Antigravity CLI')] },
   { id: 'services', label: t('Services'), categories: [t('Integration'), t('Channels'), t('Background Work'), t('Agent browser'), t('Desktop apps')] }, // Agent browser (agent browser v2, 2.369.134; the category was 'Browser' before the direction-B rename) is a service the instance runs — profiles, keeper, proxy
   { id: 'spending', label: t('Spending'), categories: [t('Spending')] },
   { id: 'plugins', label: t('Plugins'), categories: [] },

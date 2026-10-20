@@ -1962,6 +1962,8 @@ class WindowManager {
         el.innerHTML = glyph(CROWN_SVG) + `<span class="wab-name">${escHtml(label)}</span><span class="wab-short">${escHtml(words.short)}</span>`;
         tip = words.full + ' · ' + (auth.source === 'codex-subscription' ? t('ChatGPT account') + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '')
           : auth.source === 'codex-cli' ? machineTip
+          : auth.source === 'login-account' ? t(auth.label || 'Subscription account') + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '')
+          : auth.source === 'login-cli' ? machineTip
           : auth.name ? t('Subscription account') + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '') : machineTip)
           + (auth.guessed ? ' · ' + t('estimated from the login state at spawn') : '');
       }

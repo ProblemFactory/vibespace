@@ -141,8 +141,10 @@ const FS_MOD_RE = /^(node:)?fs(\/promises)?$/;
 // randomBytes(<not a literal>) per file: RED until classified (a same-file `const N = 32` counts as randomBytes(32))
 const RANDOM_EXPR = new Map([
   ['src/pairing-token.js', [1, 'randomBytes(k.bytes): a pairing token of its KINDS row — the token itself, never a key file']],
+  ['src/vault.js', [1, 'randomSecret: the value `mint` seals for an agent, its length the caller\'s choice (8–256) — sealed through the vault engine (a vault entry), never a key file (lane vault-mint-put)']],
   ['src/server/vault-engine.js', [1, 'shred: random bytes the length of a key file being destroyed (overwritten before the unlink) — never a key']],
   ['src/server/rfb-signin.js', [1, 'the ARD Diffie-Hellman private exponent, the length of the machine\'s prime — ephemeral for ONE sign-in, never persisted']], // lane desktop-vnc-remember
+  ['src/server/vault-run-door.js', [1, 'shredFile: random bytes the length of a run file being destroyed (the 0600 file a vibespace-vault run child read) — never a key']], // lane vault-run-door
 ]);
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => d.isDirectory() ? walk(path.join(dir, d.name)) : d.name.endsWith('.js') ? [path.join(dir, d.name)] : []);
 const SRC = new Map(walk(path.join(REPO, 'src')).map((f) => [path.relative(REPO, f), fs.readFileSync(f, 'utf-8')]));

@@ -68,5 +68,37 @@ check('VIBESPACE_APP_SYSTEM stripped from agent + daemon child envs', !('VIBESPA
 const layered = { ...agentEnv(fake), NODE_ENV: 'test' };
 check('explicitly-set per-session value wins over the strip', layered.NODE_ENV === 'test');
 
+// lane antigravity-harness: the Antigravity descriptor's creds join BOTH env doors with no edit in either — the three
+// names agy reads as a login (GEMINI_API_KEY / AGY_ADC_AUTH / GOOGLE_GEMINI_BASE_URL, its binary + docs) are stripped
+// from agents AND jobs; HOME is NEVER declared (a named account's root rides creds.spawnEnv, set after the strip).
+{
+  const HE = require('../src/harness-env.js');
+  const AE = require('../src/agent-env.js');
+  const { jobEnv } = require('../src/jobs.js');
+  const H = require('../src/harnesses/index.js');
+  const KEYS = ['GEMINI_API_KEY', 'AGY_ADC_AUTH', 'GOOGLE_GEMINI_BASE_URL'];
+  const base = { PATH: '/bin', HOME: '/home/u', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus', SOME_FUTURE_TOOL_TOKEN: 'ft', ...Object.fromEntries(KEYS.map((k) => [k, 'ambient-' + k])) };
+  const c = H.get('antigravity').creds;
+  check('antigravity: the descriptor declares its three key names (creds.keyEnvVars) and no homeEnvVar / spawnEnvVar',
+    KEYS.every((k) => c.keyEnvVars.includes(k)) && c.homeEnvVar === undefined && c.spawnEnvVar === undefined && typeof c.spawnEnv === 'function');
+  const a = agentEnv(base);
+  check('antigravity: the agent door strips GEMINI_API_KEY / AGY_ADC_AUTH / GOOGLE_GEMINI_BASE_URL', KEYS.every((k) => !(k in a)), KEYS.filter((k) => k in a).join(','));
+  check('antigravity: …and keeps HOME, the session bus and bystanders (the machine-login spawn rides them)', a.HOME === '/home/u' && a.DBUS_SESSION_BUS_ADDRESS === base.DBUS_SESSION_BUS_ADDRESS && a.SOME_FUTURE_TOOL_TOKEN === 'ft');
+  const j = jobEnv({}, base);
+  check('antigravity: the job door strips the three names and keeps HOME', KEYS.every((k) => !(k in j)) && j.HOME === '/home/u' && j.SOME_FUTURE_TOOL_TOKEN === 'ft', Object.keys(j).join(','));
+  // spawnEnv SEEDS the root (its farm of the machine's HOME): a scratch root, and a scratch machine HOME for the farm
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-agyenv-')), root = path.join(tmp, 'agy-1'), prevHome = process.env.HOME;
+  process.env.HOME = path.join(tmp, 'machine-home'); fs.mkdirSync(process.env.HOME);
+  let acct; try { acct = { ...agentEnv(base), ...c.spawnEnv(root) }; } finally { process.env.HOME = prevHome; }
+  check('antigravity: a named account\'s spawn env wins over the base (set-after layer): its root as HOME, the bus disabled',
+    acct.HOME === root && acct.DBUS_SESSION_BUS_ADDRESS === 'disabled:');
+  fs.rmSync(tmp, { recursive: true, force: true });
+  // RED CONTROL: a descriptor whose keyEnvVars forgot AGY_ADC_AUTH lets the ambient one reach agents
+  const mutList = H.list().map((h) => (h.id === 'antigravity' ? { ...h, creds: { ...h.creds, keyEnvVars: h.creds.keyEnvVars.filter((k) => k !== 'AGY_ADC_AUTH') } } : h));
+  const leaked = AE.agentEnv(base, { drop: HE.agentCredentialEnvNames(mutList) });
+  check('antigravity RED control: a descriptor missing AGY_ADC_AUTH ⇒ the agent door leaks it (the leg above can go red)', leaked.AGY_ADC_AUTH === 'ambient-AGY_ADC_AUTH' && !('GEMINI_API_KEY' in leaked));
+}
+
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
 process.exit(failed ? 1 : 0);

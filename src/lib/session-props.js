@@ -266,6 +266,9 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       : a.source === 'pooled' ? t('Pooled account — {name}', { name: a.name || t('Pool') }) + (a.poolTarget ? ' → ' + a.poolTarget : ' · ' + t('no target')) + (placementNote(a, t) ? ` (${placementNote(a, t)})` : '') // 2026-09-28: which rule placed it
       : a.source === 'codex-subscription' ? t('ChatGPT account — {name}', { name: a.name || 'ChatGPT' })
       : a.source === 'codex-cli' ? t('ChatGPT login (the machine’s own)')
+      // the descriptor's own words (antigravity: 'Google account' / 'Google login'), never an id branch
+      : a.source === 'login-account' ? t('{login} — {name}', { login: t(a.label || 'Subscription'), name: a.name || '' })
+      : a.source === 'login-cli' ? t('{login} (the machine’s own)', { login: t(a.label || 'CLI login') })
       : t('Unknown (started before tracking)');
     // remote session: the login is the HOST's — name the machine (2.188.0)
     const authLabelHost = a?.hostName ? authLabel + ' · @ ' + a.hostName : authLabel;

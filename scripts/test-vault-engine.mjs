@@ -429,6 +429,70 @@ console.log('N  the two-step entry totp:<name> (design q-047 L1, lane vault-totp
   e.close();
 }
 
+// ── O  AGENT-OWNED SECRETS (design q-043 §9, lane vault-mint-put): mint = the HUB's randomness, sealed, NEVER returned
+//      (the owner can reveal it); put = a value the agent hands; both under agent:<scope>/<name>; a namespace escape and a
+//      mint that echoes the value are each caught by a MUTANT.
+console.log('O  agent mint / put (q-043 §9)');
+{
+  // the PURE pieces
+  ok(V.agentEntryName('conv-7', 'db-pw').name === 'agent:conv-7/db-pw', 'agentEntryName builds agent:<scope>/<name> from a SERVER scope');
+  ok(V.agentEntryName('conv-7', 'other/evil').code === 'bad_name' && V.agentEntryName('conv-7', 'agent:x/y').code === 'bad_name' && V.agentEntryName('a/b', 'x').code === 'bad_scope',
+    'a name with / or : is refused (no namespace escape); a bad scope is refused');
+  ok(V.mintVerdict({}).length === 24 && V.mintVerdict({}).charset === 'ascii-printable' && V.mintVerdict({ length: 4 }).code === 'bad_length' && V.mintVerdict({ charset: 'hex' }).code === 'bad_charset',
+    'mintVerdict: defaults 24 / ascii-printable; a short length or an unknown charset refused');
+  for (const cs of ['ascii-printable', 'alnum', 'digits']) { const str = V.randomSecret(64, cs).toString('utf8'); ok(str.length === 64 && [...str].every((c) => V.MINT_CHARSETS[cs].includes(c)), `randomSecret(${cs}) is 64 chars, every one in the alphabet`); }
+  ok(new Set([...V.randomSecret(300, 'digits').toString('utf8')]).size === 10, 'randomSecret(digits, 300) draws all ten digits (uniform — no symbol starved by a modulo bias)');
+
+  const { dir } = world();
+  const e = mk(dir);
+  await e.setup(PW, {});
+  // MINT: the hub makes it, seals it, returns name + ref — NEVER the value
+  const m = e.agentMint('agent:conv-7/signup-pw', { length: 20, charset: 'alnum', actor: 'My Chat' });
+  ok(m.ok && m.name === 'agent:conv-7/signup-pw' && m.ref === 'vault://agent:conv-7/signup-pw' && !('value' in m), 'agentMint ⇒ { ok, name, ref } with NO value field (the agent never sees it)');
+  const g = e.secretGet('agent:conv-7/signup-pw');
+  const minted = g.ok && g.value ? g.value.toString('utf8') : null;
+  ok(minted && minted.length === 20 && [...minted].every((c) => V.MINT_CHARSETS.alnum.includes(c)), 'the owner CAN reveal the minted value (20 alnum chars) — it is sealed, not lost');
+  if (g.value) g.value.fill(0);
+  const audit = fs.readFileSync(path.join(dir, VE.AUDIT_FILE), 'utf8');
+  ok(!audit.includes(minted) && !fs.readFileSync(path.join(dir, 'vault.json'), 'utf8').includes(minted) && !JSON.stringify(m).includes(minted), 'the minted value is in NO return, audit line or record byte (only the entry name + who)');
+  ok(/"event":"vault-agent-mint"/.test(audit) && /"by":"agent"/.test(audit) && /"actor":"My Chat"/.test(audit), 'the mint is audited by name + actor (never the value)');
+  // PUT
+  const p = e.agentPut('agent:conv-7/vendor-key', 'sk-PLANTED-UNIQUE-55', { actor: 'My Chat' });
+  ok(p.ok && p.name === 'agent:conv-7/vendor-key' && !('value' in p), 'agentPut ⇒ { ok, name, ref }, no value echoed back');
+  const g2 = e.secretGet('agent:conv-7/vendor-key');
+  ok(g2.ok && g2.value.toString('utf8') === 'sk-PLANTED-UNIQUE-55', 'the put value is sealed and reveals back to the very bytes'); if (g2.value) g2.value.fill(0);
+  const sn = e.secretNames().filter((x) => x.name.startsWith('agent:'));
+  ok(sn.length === 2 && sn.find((x) => x.name.endsWith('/signup-pw')).prov === 'minted' && sn.find((x) => x.name.endsWith('/vendor-key')).prov === 'stored' && sn.every((x) => x.actor === 'My Chat'),
+    'secretNames() carries prov (minted / stored) + actor for agent entries');
+  ok(VE.isSecretName('agent:conv-7/x') === true && VE.isSecretName('agent:conv-7/a/b') === false && VE.isSecretName('host:dev9') === true, 'isSecretName: an agent entry with ONE slash is a secret; a second slash is not; host still is');
+  ok(e.agentMint('host:dev9', {}).code === 'bad-name' && e.agentMint('agent:conv-7/x', { length: 4 }).code === 'bad_length' && e.agentMint('agent:conv-7/x', { charset: 'hex' }).code === 'bad_charset', 'agentMint refuses a non-agent name, a short length, an unknown charset');
+  ok(e.agentPut('agent:conv-7/x', '').code === 'value_required', 'agentPut refuses an empty value');
+  // LOCKED ⇒ refused by name, nothing read, nothing minted
+  const before = JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8'));
+  e.lock('test');
+  ok(e.agentMint('agent:conv-7/y', {}).code === KF.VAULT_LOCKED && e.agentPut('agent:conv-7/y', 'v').code === KF.VAULT_LOCKED, 'a LOCKED vault refuses mint and put by name (vault_locked)');
+  await e.unlock(PW);
+  const after = JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8'));
+  ok(!after.entries['agent:conv-7/y'] && Object.keys(before.entries).length === Object.keys(after.entries).length, 'nothing was minted or stored while locked');
+  e.close();
+
+  // MUTANT 1 — agentMint that ECHOES the value ⇒ caught (the real return has no value; the mutant's does)
+  const Mod = require('module');
+  const ef = path.join(REPO, 'src/server/vault-engine.js');
+  const esrc = fs.readFileSync(ef, 'utf8');
+  const ecut = esrc.replace('ref: V.vaultRefOf(name) };\n    } finally { V.zero(value); }', "ref: V.vaultRefOf(name), value: value.toString('utf8') };\n    } finally { V.zero(value); }");
+  const em = new Mod(ef); em.filename = ef; em.paths = Mod._nodeModulePaths(path.dirname(ef)); em._compile(ecut, ef);
+  { const { dir: d2 } = world(); const me = em.exports.create({ dataDir: d2, kdf: CHEAP, log: quiet, idleTimer: false, register: false }); await me.setup(PW, {}); const mm = me.agentMint('agent:c/z', {}); ok(ecut !== esrc && 'value' in mm, 'MUTANT (agentMint echoes the value) ⇒ the value IS in the return — the real engine never puts it there (would RED a mint-never-returns assert)'); me.close(); }
+
+  // MUTANT 2 — a vault.js whose name regex allows a / ⇒ a namespace escape slips through
+  const vf = path.join(REPO, 'src/vault.js');
+  const vsrc = fs.readFileSync(vf, 'utf8');
+  const vcut = vsrc.replace('const AGENT_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;', 'const AGENT_NAME_RE = /^[A-Za-z0-9._\\/-]{1,64}$/;');
+  const vm = new Mod(vf); vm.filename = vf; vm.paths = Mod._nodeModulePaths(path.dirname(vf)); vm._compile(vcut, vf);
+  ok(vcut !== vsrc && V.agentEntryName('conv-7', 'other/evil').code === 'bad_name' && vm.exports.agentEntryName('conv-7', 'other/evil').name === 'agent:conv-7/other/evil',
+    'MUTANT (the name regex allows /) ⇒ agent:conv-7/other/evil is BUILT — the real agentEntryName refuses it (would RED the namespace-escape assert)');
+}
+
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

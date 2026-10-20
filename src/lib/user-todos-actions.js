@@ -27,6 +27,7 @@ import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one res
 import { showReauthAccountDialog } from './channel-account-dialogs.js'; // lane channel-names-readable: a `channel-reauth` item's verb = THE account's Re-authorize dialog
 import { askArtifactRow, askArtifactProbe, linkTarget } from './foryou-links.js'; // PURE (lane foryou-attachments): an ask's chip → its artifact row + the open-time probe; a link in the words → its target
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
+import { revealLeftMs, revealHeaders, askRevealPassword, forgetReveal } from './vault-reveal.js'; // lane vault-run-door: a held run's «always» asks 验证是你 FIRST, in the press's own task
 import { replyBoxView } from '../inbox-reply.js'; // PURE (lane inbox-reply-dead-session): THE reply box both surfaces draw — never disabled
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 
@@ -304,6 +305,19 @@ export function inboxModel(app) {
       if (r && r.ok) { showToast(r.state === 'always' ? t('Granted — the key is listed with this conversation in the Vault window') : r.state === 'allowed' ? t('allowed') : t('denied')); return true; }
       const code = r && r.code;
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone') : (r && r.error) || t('server unreachable'), { type: 'error' });
+      return false;
+    }
+    if (rec && rec.action && rec.action.type === 'vault-run-ask') {
+      // lane vault-run-door (design q-043 §8.3): THE person's answer to an agent's run held on its card (cookie route; any
+      // bearer is refused human_only) — once (this run) / always (this command SHAPE for this conversation, 30 days: the
+      // second password again — 验证是你 opens FIRST, in the press's own task, never a round trip late) / deny.
+      if (answer === 'always' && !revealLeftMs() && !(await askRevealPassword())) return false;
+      const r = await fetchJson(`/api/vault/run/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(answer === 'always' ? revealHeaders() : {}) }, body: JSON.stringify({ answer }) });
+      if (r && r.ok) { showToast(r.outcome === 'always' ? t('Allowed for this shape for 30 days') : r.outcome === 'allowed' ? t('allowed') : t('denied')); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer)
+      const code = r && r.code;
+      if (code === 'reveal_needs_password') forgetReveal();
+      showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone')
+        : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
     }
     if (rec && rec.action && rec.action.type === 'channel-watch-request') {

@@ -1,0 +1,110 @@
+#!/usr/bin/env node
+'use strict';
+// THE FAKE agy (lane antigravity-harness): stands in for the Antigravity CLI in the suites, speaking the headless
+// stream-json contract recorded in scripts/fixtures/antigravity-cli-1.4.3.json (provenance there: 'binary' for what the
+// real 1.4.3 did offline, 'docs' for the stream shapes). Every argv and stdin line is appended to $AGY_STUB_LOG.
+//   --version / --help            → the recorded version / help (stderr, like the real one)
+//   -p /usage                     → see $AGY_STUB_USAGE below (the reading's judge + the capture script)
+//   not signed in: $AGY_STUB_AUTH=none = the MEASURED stream start on a pipe (refused at once, result ERROR);
+//                  $AGY_STUB_AUTH=wait = the MEASURED start on a character-device stdin (the OAuth URL on stderr, then it
+//                  WAITS reading a pasted code on stdin, up to $AGY_STUB_AUTH_WAIT_MS, and answers a result ERROR)
+//   --input-format stream-json    → init once (conversation_id = --conversation or a fresh uuid), then per stdin line:
+//       not JSON / no `event`     → result ERROR, exit 1        · an unknown event → a stderr warning, skipped
+//       control_request/_response → result ERROR, exit 2        · a `user` whose text starts with "/" → result ERROR, exit 2
+//       a non-text content block  → result ERROR, exit 1
+//       text naming `tool`        → a run_command tool step (ACTIVE, then DONE with output)
+//       text naming `deny`        → a soft-deny notice on stderr (the run continues); under --dangerously-skip-permissions
+//                                   the tool runs instead (a run_command step)
+//       text naming `fail`        → result ERROR + an AGY_ERROR line on stderr · `slow` → the turn takes $AGY_STUB_SLOW_MS
+//       otherwise                 → agent_response deltas "Antigravity (<model>, <mode>): <text>", a checkpoint, result SUCCESS
+//     stdin EOF → exit 0 ($AGY_STUB_EXIT_DELAY_MS: after that long, SIGTERM ignored — a slow restart, made deterministic).  The --model / --effort / --mode / --dangerously-skip-permissions it was started with are echoed.
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const FX = JSON.parse(fs.readFileSync(path.join(__dirname, 'antigravity-cli-1.4.3.json'), 'utf8'));
+const argv = process.argv.slice(2);
+const LOG = process.env.AGY_STUB_LOG || '';
+const logLine = (o) => { if (LOG) { try { fs.appendFileSync(LOG, JSON.stringify(o) + '\n'); } catch { } } };
+logLine({ argv, home: process.env.HOME || null, bus: process.env.DBUS_SESSION_BUS_ADDRESS || null });
+const flag = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
+if (argv.includes('--version')) { process.stdout.write(FX.version + '\n'); process.exit(0); }
+if (argv.includes('--help')) { process.stderr.write('Usage of agy:\n' + Object.entries(FX.help.flags).map(([k, v]) => `  ${k.padEnd(32)}${v}`).join('\n') + '\n'); process.exit(0); }
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\n');
+const usage = (n) => ({ input_tokens: 100 * n, output_tokens: 7 * n, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 107 * n });
+
+// `-p /usage` (the reading the CLI answers itself): $AGY_STUB_USAGE = auth (default — the MEASURED unauthenticated
+// envelope) | ok (a SUCCESS with no turn — a stand-in payload, its shape NOT agy's: no signed-in capture yet) | turn
+// (a SUCCESS that started a turn — what the judge must call turn-started)
+if (flag('-p') === '/usage' || flag('--print') === '/usage') {
+  const mode = process.env.AGY_STUB_USAGE || 'auth';
+  if (mode === 'turn') { out({ conversation_id: crypto.randomUUID(), status: 'SUCCESS', response: 'stand-in', duration_seconds: 1.2, num_turns: 1, usage: usage(1) }); process.exit(0); }
+  if (mode === 'ok') { out({ conversation_id: '', status: 'SUCCESS', response: 'stand-in model\t80%\towner@example.com', duration_seconds: 0, num_turns: 0, usage: usage(0) }); process.exit(0); }
+  process.stderr.write("Error: authentication required. Run 'agy' to log in, then retry.\nerror: authentication failed or timed out\n");
+  out(FX.unauthenticated.usageStdout);
+  process.exit(1);
+}
+if (process.env.AGY_STUB_AUTH === 'none') { // the MEASURED stream start on a pipe: an immediate refusal
+  process.stderr.write("Error: authentication required. Run 'agy' to log in, then retry.\nerror: authentication failed or timed out\n");
+  out(FX.unauthenticated.streamPipe.stdout);
+  process.exit(1);
+}
+if (process.env.AGY_STUB_AUTH === 'wait') { // the MEASURED start on a character-device stdin: the URL, then a 60 s wait for a code
+  process.stderr.write('Authentication required. Please visit the URL to log in:\n  https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=stub&response_type=code&state=stub\n\nWaiting for authentication (timeout 60s)...\nOr, paste the authorization code here and press Enter:\n');
+  const t = setTimeout(() => { process.stderr.write('Error: authentication interrupted.\nerror: authentication failed or timed out\n'); out({ event: 'result', result: { conversation_id: '', status: 'ERROR', response: '', error: 'authentication failed or timed out', duration_seconds: 0, num_turns: 0, usage: usage(0) } }); process.exit(1); }, Number(process.env.AGY_STUB_AUTH_WAIT_MS || 60000));
+  process.stdin.on('data', (d) => { logLine({ authCodeLine: String(d).slice(0, 200) }); });
+  process.stdin.on('end', () => { clearTimeout(t); process.exit(1); });
+  return;
+}
+if (flag('--input-format') !== 'stream-json') { process.stderr.write('stub: only --input-format stream-json is implemented\n'); process.exit(2); }
+const cid = flag('--conversation') || crypto.randomUUID();
+const model = flag('--model') || 'default', effort = flag('--effort') || '', mode = argv.includes('--dangerously-skip-permissions') ? 'always-proceed' : (flag('--mode') || 'request-review');
+out({ event: 'init', conversation_id: cid, init: { cwd: process.cwd(), tools: ['ask_permission', 'run_command', 'write_to_file'], permission_mode: mode === 'always-proceed' ? 'always-proceed' : 'request-review', ...(flag('--model') ? { model } : {}) } });
+let step = 0, turns = 0, busy = Promise.resolve();
+const fail = (error, code) => { out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error, duration_seconds: 0, num_turns: turns, usage: usage(turns) } }); process.exit(code); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function turn(text) {
+  turns++;
+  out({ event: 'step_update', step_update: { conversation_id: cid, step_index: step++, state: 'DONE', step_type: 'user_input' } });
+  if (/\btool\b/.test(text)) {
+    const i = step++;
+    out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'echo hello_headless_demo' } } } });
+    await sleep(10);
+    out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'tool', tool_name: 'run_command', duration_seconds: 0.07, tool_info: { name: 'run_command', parameters: { CommandLine: 'echo hello_headless_demo' }, output: 'hello_headless_demo\r\n' } } });
+  }
+  if (/\bdeny\b/.test(text) && mode === 'always-proceed') {
+    const i = step++;
+    out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'rm -rf build' }, output: '' } } });
+  } else if (/\bdeny\b/.test(text)) process.stderr.write('Tool run_command(rm -rf build) requires approval and was skipped. Allow it with a "command(rm)" rule under permissions.allow in ~/.gemini/antigravity-cli/settings.json, or run with --dangerously-skip-permissions.\n');
+  if (/\bslow\b/.test(text)) await sleep(Number(process.env.AGY_STUB_SLOW_MS || 1500));
+  if (/\bfail\b/.test(text)) { process.stderr.write('AGY_ERROR: {"short_error":"model unavailable","status":"UNAVAILABLE","code":503,"retryable":true}\n'); out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); return; }
+  const reply = `Antigravity (${model}${effort ? ', ' + effort : ''}, ${mode}): ${text}`;
+  const i = step++;
+  out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'agent_response', text_delta: reply.slice(0, 12) } });
+  await sleep(5);
+  out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'agent_response', text_delta: reply.slice(12), duration_seconds: 0.2, usage: usage(1) } });
+  out({ event: 'step_update', step_update: { conversation_id: cid, step_index: step++, state: 'DONE', step_type: 'checkpoint', duration_seconds: 0.01, usage: usage(turns) } });
+  out({ event: 'result', result: { conversation_id: cid, status: 'SUCCESS', response: reply, duration_seconds: 0.3, num_turns: turns, usage: usage(turns) } });
+}
+let buf = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (d) => {
+  buf += d; let i;
+  while ((i = buf.indexOf('\n')) !== -1) {
+    const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+    if (!line) continue;
+    logLine({ stdin: line });
+    let m = null; try { m = JSON.parse(line); } catch { fail('invalid JSON line', 1); }
+    if (!m || typeof m.event !== 'string') fail('message missing the event field', 1);
+    if (m.event === 'control_request' || m.event === 'control_response') fail(`${m.event} is not supported in a stream`, 2);
+    if (m.event !== 'user') { process.stderr.write(`warning: ignoring unsupported stream input message event "${m.event}"\n`); continue; }
+    const c = m.message && m.message.content;
+    const blocks = Array.isArray(c) ? c : [{ type: 'text', text: String(c || '') }];
+    if (blocks.some((b) => !b || b.type !== 'text')) fail('content block type other than text', 1);
+    const text = blocks.map((b) => b.text).join('');
+    if (/^\s*\//.test(text)) fail(`${text.trim().split(/\s/)[0]} is answered by the CLI itself and is unavailable with --input-format stream-json; run it as its own --print ${text.trim().split(/\s/)[0]} invocation`, 2);
+    busy = busy.then(() => turn(text));
+  }
+});
+const EXIT_DELAY = Number(process.env.AGY_STUB_EXIT_DELAY_MS || 0);
+if (EXIT_DELAY) process.on('SIGTERM', () => { });
+process.stdin.on('end', () => { busy.then(() => setTimeout(() => process.exit(0), EXIT_DELAY)); });

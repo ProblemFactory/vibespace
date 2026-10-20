@@ -336,6 +336,7 @@ const CLASSIFIED = {
   quickExitNoticeText: 'a keeper\'s own words (src/desktop-apps.js, lane app-launch-singleton) to the person\'s server notice — the app label, the display and who started it; never an agent\'s input',
   revertNoticeText: 'the OpenCode serve\'s own sentence (src/opencode-serve.js)',
   renderRuleTree: 'the permission-rules tree for the USER (src/permission-rules.js, DOM-free renderer)',
+  renderTemplate: 'src/vault-run.js (lane vault-run-model): a `--file NAME=@template` with its $VAULT{…} values filled in — the content of the 0600 file a `vibespace-vault run` CHILD reads (op inject); it never reaches an agent (the child\'s output comes back through the scrubber)',
   renderRule: 'one row of that tree',
   renderResult: 'a web-search result card for the USER\'s chat (src/search-card.js) — the agent already holds the result',
   renderSearchOutput: 'the same card',
@@ -438,6 +439,7 @@ const DECLARED_CLIS = {
   'data/bin/vibespace-app': 'prints package names (Debian\'s name rule), apt\'s own summaries / a .desktop Name / apt\'s error line (package-written — the agent routes belt each through toAgentText, src/routes/apps.js `pkgWords`), the agent\'s OWN proposals and their outcome (apps-engine `outcomeText`, its pieces belted — its stash row here), fixed sentences; never another conversation\'s words (an entry another agent proposed prints `[proposed by an agent]` — no name, no why)',
   'data/bin/codex-chat-wrapper.js': 'a harness WRAPPER: its stdout is the server\'s stream-json feed, never an agent\'s Bash result',
   'data/bin/acp-wrapper.js': 'the same for an ACP harness',
+  'data/bin/agy-wrapper.js': 'the same for the Antigravity harness (agy\'s stream-json written as the ACP journal)',
 };
 function cliRoster(readFile, files) {
   const agentClis = files.filter((f) => f.startsWith('data/bin/') && AGENT_CLI_RE.test(readFile(f)));

@@ -73,8 +73,9 @@ const visibleJobs = (all, caller) => all.filter((j) => canView(j, caller));
 // bypassing it). The list: every harness descriptor's credential facts (creds.subsDirName under data/: subs, codex-subs;
 // creds.authFile in its home: .credentials.json, codex's auth.json; creds.spawnEnvVar) — scripts/test-job-model's census reds
 // when a descriptor gains one this list misses — plus the macOS keychain item, OpenCode's own login file, the OAuth token
-// variable and pasted access/refresh tokens.
-const VENDOR_PATTERNS = [/\.credentials\.json/i, /\.claude\/\.cred/i, /data\/subs\b/, /data\/codex-subs\b/, /\.codex\/auth\.json/i, /CODEX_HOME\}?\/auth\.json/, /opencode\/auth\.json/i, Object.assign(/Claude[\s\\"',]{0,6}Code-credentials/i, { word: 'Claude Code-credentials' }), /CLAUDE_SECURESTORAGE_CONFIG_DIR/, /CLAUDE_CODE_OAUTH/i, /sk-ant-oat/i, /sk-ant-ort/i];
+// variable and pasted access/refresh tokens. Antigravity (lane antigravity-harness): data/agy-subs (the accounts' HOME roots)
+// + agy's login file `antigravity-oauth-token` (in a root or the machine's ~/.gemini/antigravity-cli — one name covers both).
+const VENDOR_PATTERNS = [/\.credentials\.json/i, /\.claude\/\.cred/i, /data\/subs\b/, /data\/codex-subs\b/, /\.codex\/auth\.json/i, /CODEX_HOME\}?\/auth\.json/, /opencode\/auth\.json/i, /data\/agy-subs\b/, /antigravity-oauth-token/i, Object.assign(/Claude[\s\\"',]{0,6}Code-credentials/i, { word: 'Claude Code-credentials' }), /CLAUDE_SECURESTORAGE_CONFIG_DIR/, /CLAUDE_CODE_OAUTH/i, /sk-ant-oat/i, /sk-ant-ort/i];
 // B-f8c7 (lane job-vendor-ban): THE CENSUS of what a job can RUN — the vet judged spec.cmd's argv/env alone, but a cron's
 // child is `{ ...action.task }` and the CLI's --every/--cron/--at shape carries its command ONLY there: `curl
 // api.anthropic.com` on a timer was created and fired while the same plain task was refused. Every command-bearing piece:

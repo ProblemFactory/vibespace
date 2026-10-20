@@ -62,7 +62,7 @@ const IDLE_MAX_HOURS = 720;
  *  two-step code's seed + its settings, one JSON line — src/totp.js, src/server/vault-totp.js) — never a key file's name
  *  (STORE_KEYS names start with `.` or `browser-`). */
 const SECRET_RE = /^(?:host|frp|file|apikey|totp):[\w.-]{1,160}$/;
-const isSecretName = (name) => SECRET_RE.test(String(name || ''));
+const isSecretName = (name) => { const s = String(name || ''); return SECRET_RE.test(s) || V.AGENT_NS_RE.test(s); };   // lane vault-mint-put: `agent:<scope>/<name>` too
 
 let SIGNALS_ARMED = false;
 const LIVE = new Set();   // every engine of this process — a signal locks them all
@@ -257,19 +257,50 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     return v ? { ok: true, value: v } : { ok: false, code: 'key-malformed' };
   }
   /** Seal `value` under `name` (unlocked only — locked ⇒ refused by name, nothing written). */
-  function secretPut(name, value) {
+  function secretPut(name, value, { prov = null, actor = null } = {}) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); return { ok: false, code: lockedCode() }; }
     const plain = Buffer.isBuffer(value) ? Buffer.from(value) : Buffer.from(String(value == null ? '' : value), 'utf8');
     try {
-      const next = { ...record, entries: { ...record.entries, [name]: { ...V.wrapEntry(dek, name, plain), at: now() } } };   // int317: `at` = when it was sealed (the Vault window's «saved»)
+      const box = { ...V.wrapEntry(dek, name, plain), at: now() };   // int317: `at` = when it was sealed (the Vault window's «saved»)
+      if (prov) box.prov = prov;        // lane vault-mint-put: 'minted' | 'stored' — the Vault window's provenance chip (never a value)
+      if (actor) box.actor = String(actor).slice(0, 128);   // which conversation / group owns it (a name/id, never a value)
+      const next = { ...record, entries: { ...record.entries, [name]: box } };
       writeRecord(next); record = next;
       return { ok: true };
     } catch (e) { return { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; } finally { V.zero(plain); }
   }
-  /** int317: the secret entries' NAMES and the instants they were sealed (null before this build) — never a box, never a
-   *  value; the Vault window's «Hub secrets» rows (src/server/vault-contents.js secretSource). */
-  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => ({ name, at: Number(record.entries[name].at) || null })) : []);
+  // ── AGENT-OWNED SECRETS (design q-043 §9, lane vault-mint-put): mint / put under the caller's own `agent:<scope>/<name>`.
+  //    The ROUTE builds the name from the SESSION's scope (src/routes/vault.js); the engine seals and NEVER returns a value.
+  /** MINT: the HUB makes the random value (V.randomSecret) and seals it — the caller is handed the entry name + its
+   *  `vault://` reference, never the value. → { ok, name, ref } | { ok:false, code } (a bad length/charset, or a locked
+   *  vault refused by name). */
+  function agentMint(name, { length, charset, actor = null } = {}) {
+    if (!V.AGENT_NS_RE.test(String(name || ''))) return { ok: false, code: 'bad-name' };
+    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); return { ok: false, code: lockedCode() }; }
+    const mv = V.mintVerdict({ length, charset });
+    if (!mv.ok) return mv;
+    const value = V.randomSecret(mv.length, mv.charset);
+    try {
+      const r = secretPut(name, value, { prov: 'minted', actor });
+      if (!r.ok) return r;
+      audit('vault-agent-mint', { why: name, actor: actor ? String(actor).slice(0, 128) : null, by: 'agent' });   // the name + who — NEVER the value
+      return { ok: true, name, ref: V.vaultRefOf(name) };
+    } finally { V.zero(value); }
+  }
+  /** PUT: the caller hands a value it already has (a vendor key) — sealed, provenance 'stored'. Same shape; no value back. */
+  function agentPut(name, value, { actor = null } = {}) {
+    if (!V.AGENT_NS_RE.test(String(name || ''))) return { ok: false, code: 'bad-name' };
+    if (value == null || String(value) === '') return { ok: false, code: 'value_required' };
+    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); return { ok: false, code: lockedCode() }; }
+    const r = secretPut(name, value, { prov: 'stored', actor });
+    if (!r.ok) return r;
+    audit('vault-agent-put', { why: name, actor: actor ? String(actor).slice(0, 128) : null, by: 'agent' });
+    return { ok: true, name, ref: V.vaultRefOf(name) };
+  }
+  /** int317 + lane vault-mint-put: the secret entries' NAMES, their seal instants, and (agent entries) `prov`/`actor` —
+   *  never a box, never a value; the Vault window's «Hub secrets» rows (src/server/vault-contents.js secretSource). */
+  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null }; }) : []);
   /** Forget an entry (an unpaired device, a cleared relay token) — needs no DEK, so a locked vault forgets too. */
   function secretDrop(name) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
@@ -308,7 +339,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   // ── A REFUSAL IS THE SIGNAL (lane vault-locked-refusal-notice) ──
   const storeVerb = (name) => { const k = STORE_KEYS.find((x) => x.name === name); return k ? `the ${k.store} store` : name; };
-  const secretVerb = (name) => { const n = String(name), kind = n.split(':')[0]; return kind === 'host' ? 'a device link token' : kind === 'apikey' ? 'an automation key' : kind === 'file' ? `the sealed file ${n.slice(5)}` : `the stored secret ${n}`; };   // a machine's / a key's id is never the words
+  const secretVerb = (name) => { const n = String(name), kind = n.split(':')[0]; return kind === 'host' ? 'a device link token' : kind === 'apikey' ? 'an automation key' : kind === 'file' ? `the sealed file ${n.slice(5)}` : kind === 'agent' ? 'an agent secret' : `the stored secret ${n}`; };   // a machine's / a key's id (and an agent entry's scope) is never the words
   /** THE ONE HELPER a door calls when it refuses `vault_locked`: `actor` = WHO it stopped (a NAME a person reads — the door
    *  passes the conversation's / the machine's / the account's name, never an id), `verb` = WHAT. Only while LOCKED (a
    *  not-set-up vault refuses nothing by this code). A note that changes what the owner reads re-announces the facts and
@@ -519,6 +550,15 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     record = next; announce();
     return { ok: true, idleLockHours: h };
   }
+  /** lane vault-run-door: A MARK the vault vouches for — HMAC-SHA256 of `text` under a key DERIVED from the DEK for `label`
+   *  (never the DEK itself; a derived key is zeroed at once). A store the vault does not hold but whose INTEGRITY it answers
+   *  for (the run door's switches and remembered «always» shapes, data/vault-run.json): an agent shares the hub's uid and can
+   *  write that file, never a mark that verifies. → hex | null (not unlocked: nothing to mark with). */
+  function macOf(label, text) {
+    if (!dek) return null;
+    const k = crypto.createHmac('sha256', dek).update('vibespace-vault-mark:' + String(label)).digest();
+    try { return crypto.createHmac('sha256', k).update(String(text)).digest('hex'); } finally { k.fill(0); }
+  }
   const touch = () => { lastActivity = now(); };
   function idleTick() {
     const h = record ? Number(record.idleLockHours) || 0 : 0;
@@ -543,7 +583,8 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     /** lane vault-locked-refusal-notice: THE ONE HELPER (above) + the epoch's list + `fn(summary)` after a note that changed it. */
     blocked, blockedSummary: () => blockedList.summary(),
     onBlocked(fn) { if (typeof fn === 'function') blockedHooks.push(fn); },
-    secretGet, secretPut, secretDrop, secretAdopt, secretNames,
+    secretGet, secretPut, secretDrop, secretAdopt, secretNames, agentMint, agentPut,   // lane vault-mint-put
+    macOf,   // lane vault-run-door: a mark under a DEK-derived key (the run door's store) — null unless unlocked
     epoch: () => epoch, resumeSeal,
     close() { if (timer) clearInterval(timer); lock('close', { quiet: true }); unregister(); LIVE.delete(engine); },
   };

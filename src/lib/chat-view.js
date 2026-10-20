@@ -2190,6 +2190,9 @@ class ChatView {
       if (a.source === 'pooled') return (a.name || t('Pool')) + (a.poolTarget ? ' → ' + a.poolTarget : '') + onHost;
       if (a.source === 'codex-subscription') return (a.name || 'ChatGPT') + onHost;
       if (a.source === 'codex-cli') return t('ChatGPT login') + onHost;
+      // a named isolated-home login / the machine's own (antigravity): the descriptor names its words (a.label)
+      if (a.source === 'login-account') return (a.name || t(a.label || 'Subscription')) + onHost;
+      if (a.source === 'login-cli') return t(a.label || 'CLI login') + onHost;
       if (a.source === 'subscription') return (a.name || t('CLI login')) + onHost;
       if (a.source === 'api-console') return t('Console login') + onHost;
       if (a.source === 'api-key' || a.source === 'api-other') return (a.name ? a.name + (a.tail ? ' (…' + a.tail + ')' : '') : (a.detail || t('API key'))) + onHost;

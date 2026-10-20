@@ -438,6 +438,13 @@ const ROUTES = {
   'POST /api/agent/feedback': 'meta', 'GET /api/agent/feedback/mine': 'meta',
   // lane vault-e2e-password: the vault's state (a state word, three times and a key COUNT) and its lock — no record of the five kinds
   'GET /api/agent/vault/state': 'meta', 'POST /api/agent/vault/lock': 'meta',
+  // lane vault-run-door: the link token (identity: a token, never a record) — its handler now reads up to the run doors'
+  // registration (a job token is told apart through getJobs there); RUN answers a child's SCRUBBED output, RUNNABLE the
+  // entries' names — none of the five stores' words
+  'GET /api/agent/vault/link-token': 'meta', 'POST /api/agent/vault/run': 'meta', 'GET /api/agent/vault/runnable': 'meta',
+  // lane vault-mint-put (q-043 §9): mint / put seal a credential under the caller's OWN vault namespace; they reach the jobs
+  // stash (like state/lock) ONLY to resolve a bearer token to its identity (the namespace + the audit actor) — no record of the five kinds is read or served
+  'POST /api/agent/vault/mint': 'meta', 'POST /api/agent/vault/put': 'meta',
   'GET /api/agent/design/systems': 'meta', 'GET /api/agent/design/system': 'meta', // lane design-systems-home: the design systems' names (belted) + ONE system's tokens.css — registry rows and a folder's file, no record
   // ── the 2.369.202 integration: lane jobs-browser's job principal — agentFacts → jobAgentFacts / refuseAgentBearer ask the
   //    jobs store jobByToken (a jbt_ caller's identity, as the other agent routes do), never a record's text ──
@@ -1909,6 +1916,7 @@ const I_RECV = {
   'src/accounts.js|ud': ['account', 'a pool default\'s UNPLACED mark (the deleted member\'s name)'], 'src/accounts.js|ud.provider': ['account', 'the UNPLACED mark\'s provider (its label)'],
   // lane vault-e2e-password: a key file the vault seals — its NAME is a STORE_KEYS constant (.accounts-key …), never a record's words
   'src/server/vault-engine.js|it': ['migration', 'a key file the vault seals (its constant name)'], 'src/server/vault-engine.js|k': ['migration', 'a STORE_KEYS row (a key file\'s constant name)'],
+  'src/vault-run.js|x': ['run reference', 'lane vault-run-model: a reference scanRefs found in a run\'s command — `x.name` is the `--file NAME` the agent typed (an env variable\'s name), never a record\'s words'],
   'src/migration-runner.js|m': ['migration', 'a migration\'s own note'], 'src/normalizers.js|session': ['session', 'a session\'s name'],
   'src/normalizers.js|e': ['chat card', 'a rebuild queue entry — its `card` is a chat card the transcript already holds (peer / browser / group / proposal), never a For-you item\'s card (design 009 named that field `card` too)'],
   'src/port-forward.js|h': ['host', 'a machine name'], 'src/server/auto-cli-loop.js|it.pj': ['quota', 'a projection\'s label'],
@@ -1989,6 +1997,11 @@ const I_RECV = {
   // ── lane vault-window-v2 (design q-047 §3.4) ──
   'src/server/vault-hooks.js|words': ['host', 'the Vault window\'s two For-you cards\' words (PURE vault-inventory useFailCard / rotateCard): an entry\'s NAME (an automation key\'s, an agent-stored value\'s — the owner\'s or the store\'s own words), the asking conversation\'s name, counts — the source of a new For-you record, never a copy of one'],
   'src/server/automation-engine.js|caller': ['host', 'the asking CONVERSATION\'s name on the first-use card and its log line — the session list\'s own name (the hub\'s record), never a record\'s text'],
+  // ── lane vault-run-door (design q-043 §8 P0-f) ──
+  'src/server/vault-run-door.js|caller': ['host', 'the asking CONVERSATION\'s name on the run card and its journal line — the session list\'s own name (the hub\'s record), never a record\'s text'],
+  'src/server/vault-run-door.js|rec': ['host', 'a running conversation\'s name in the lock\'s journal line (the session list\'s own name, kept on the run) — never a record\'s text'],
+  'src/server/vault-run-door.js|shape': ['run reference', 'the TOOL\'s name (the basename argv[0] resolved to) on the run card\'s action — the agent\'s own command, never a record\'s words'],
+  'src/lib/vault-window.js|r': ['run switch', 'the «Usable by agent runs» answer\'s `open` — a boolean choosing one of two fixed sentences, never a record\'s words'],
   'src/server/dial-health-watch.js|w': ['host', 'the second-dialer item\'s words — a machine name, an address, a time (itemOf), the machine\'s own record'],
   'src/server/dial-health-watch.js|v': ['host', 'the verdict\'s refusing address (secondDialerVerdict) in the journal line — the machine\'s own dial record'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──

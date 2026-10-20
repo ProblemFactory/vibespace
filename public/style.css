@@ -253,6 +253,9 @@ html, body {
 .backend-icon-opencode {
   --backend-icon-color: #4ade80;
 }
+.backend-icon-antigravity {
+  --backend-icon-color: #4285F4;
+}
 .backend-icon-generic {
   color: var(--text-dim);
 }
@@ -596,6 +599,7 @@ html, body {
 .badge-backend-claude { background: color-mix(in srgb, var(--accent, #6366f1) 18%, transparent); color: var(--accent-hover); }
 .badge-backend-codex { background: color-mix(in srgb, var(--blue, #61afef) 18%, transparent); color: var(--blue); }
 .badge-backend-opencode { background: color-mix(in srgb, var(--green, #3fb950) 18%, transparent); color: var(--green); }
+.badge-backend-antigravity { background: color-mix(in srgb, var(--blue, #61afef) 18%, transparent); color: var(--blue); }
 .badge-backend-generic { background: rgba(148,163,184,0.15); color: var(--text-dim); }
 .badge-agent-kind { background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); color: var(--yellow); letter-spacing: 0.35px; padding: 1px 4px; }
 .badge-agent-role { background: color-mix(in srgb, var(--green, #3fb950) 14%, transparent); color: var(--green); letter-spacing: 0.35px; padding: 1px 4px; }
@@ -7655,6 +7659,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .vw-label { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vw-meta { color: var(--text-dim); margin-top: 2px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vw-tech { grid-column: 1 / -1; color: var(--text-dim); font-size: 11px; }
+.vw-run { display: flex; align-items: center; gap: 6px; margin-top: 4px; width: max-content; cursor: pointer; color: var(--text-dim); } /* lane vault-run-door: «Usable by agent runs» */
 .vw-tech summary { cursor: pointer; width: max-content; }
 .vw-tech-body { font-family: var(--font-mono, monospace); overflow-wrap: anywhere; }
 .vw-value { display: flex; align-items: center; gap: 6px; min-width: 0; }

@@ -19,6 +19,9 @@
 //      f a fleet pod: the cluster's token (env) + its own name — no record minted; the card's doors refused by name
 //      census: the instance tokens in data/relay-token.json alone, the shared one in no file in the clear, no journal line
 //      g MUTANTS ⇒ RED: the token written into frpc.toml · the old locked-vault rule at start · the knock retired early
+//   ①p the SAME hub launched from a POLLUTED env (lane frp-spawn-env-allowlist — planted now, whatever env the suite runs from:
+//      an agent conversation's session tokens, the cluster's shared token, a cloud key, proxies): frpc's env holds the kept
+//      names + the two relay variables only, none of the planted names or values — MUTANT the pre-fix copy of process.env ⇒ RED
 //   ② LIVE against the REAL frps relay (needs VIBESPACE_FRPS_* or VIBESPACE_FRP_SECRETS → a private frps-secrets.env):
 //      installs frpc, publishes a local echo server, verifies the public URL round-trips. Skips if no relay config.
 import fs from 'node:fs';
@@ -51,15 +54,29 @@ const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 if (process.argv.includes('--hub')) { await hubLegs(); process.exit(failed ? 1 : 0); }
-{
-  console.log('① THE INSTANCE\'S RELAY IDENTITY (a child: scratch HOME, its own frpc admin port, a fake frpc)');
-  const root = scratch('frp-hub');
+/** one hub child: scratch HOME, its own frpc admin port, the launching env minus the relay's own names (+ `plant`) */
+async function hubChild(tag, args = [], plant = {}) {
+  const root = scratch(tag);
   fs.mkdirSync(path.join(root, 'home'), { recursive: true });
   const port = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^VIBESPACE_(FRPS_|FRP_|RELAY_|INSTANCE_NAME$)/.test(k)));
-  const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--hub'], { stdio: 'inherit', env: { ...env, HOME: path.join(root, 'home'), FRP_HUB_ROOT: root, VIBESPACE_FRP_ADMIN_PORT: String(port), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, timeout: 300e3 });
-  check('① the relay-identity legs passed (the child exited 0)', r.status === 0, `exit ${r.status}${r.signal ? ' ' + r.signal : ''}`);
+  const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--hub', ...args], { stdio: 'inherit', env: { ...env, ...plant, HOME: path.join(root, 'home'), FRP_HUB_ROOT: root, VIBESPACE_FRP_ADMIN_PORT: String(port), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, timeout: 300e3 });
   try { fs.rmSync(root, { recursive: true, force: true }); } catch { }
+  return r;
+}
+{
+  console.log('① THE INSTANCE\'S RELAY IDENTITY (a child: scratch HOME, its own frpc admin port, a fake frpc)');
+  const r = await hubChild('frp-hub');
+  check('① the relay-identity legs passed (the child exited 0)', r.status === 0, `exit ${r.status}${r.signal ? ' ' + r.signal : ''}`);
+}
+{
+  // the launching shell an agent conversation leaves behind, PLANTED (values built now): the leg «frpc's env carries the instance
+  // token and the knock» went RED only when the suite ran from such a shell — this child proves it from any env
+  console.log('①p THE SAME HUB LAUNCHED FROM A POLLUTED ENV (planted: an agent conversation\'s session tokens, the cluster\'s shared token, a cloud key, proxies)');
+  const rnd = () => crypto.randomBytes(8).toString('hex');
+  const plant = { VIBESPACE_SESSION_TOKEN: 'vs-sess-' + rnd(), CLAUDE_CODE_MESSAGING_TOKEN: 'cc-msg-' + rnd(), VIBESPACE_FRPS_TOKEN: 'frps-shared-' + rnd(), AWS_SECRET_ACCESS_KEY: 'aws-' + rnd(), HTTPS_PROXY: 'http://u:' + rnd() + '@127.0.0.1:9' };
+  const r = await hubChild('frp-hub-p', ['--polluted'], { ...plant, http_proxy: 'http://127.0.0.1:9', FRP_HUB_PLANTED: Object.keys(plant).join(',') });
+  check('①p the polluted-env legs passed (the child exited 0)', r.status === 0, `exit ${r.status}${r.signal ? ' ' + r.signal : ''}`);
 }
 
 /** THE FAKE frpc: records what it was given (sha256s of the env tokens, never a value), logs a login the way frpc does, and
@@ -77,7 +94,7 @@ const knockSent = /^auth\\.token = /m.test(text) && !!knock;
 const mode = () => { try { return JSON.parse(fs.readFileSync(${JSON.stringify(MODE)}, 'utf8')); } catch { return {}; } };
 const m0 = mode();
 const loggedIn = !(m0.askKnock && !knockSent);
-fs.appendFileSync(${JSON.stringify(SAW)}, JSON.stringify({ pid: process.pid, argv: process.argv.slice(1), knockSha: sha(knock), relaySha: sha(relay), user, conf: text, tokenEnv: Object.keys(process.env).filter((k) => /TOKEN/.test(k)).sort() }) + '\\n');
+fs.appendFileSync(${JSON.stringify(SAW)}, JSON.stringify({ pid: process.pid, argv: process.argv.slice(1), knockSha: sha(knock), relaySha: sha(relay), user, conf: text, tokenEnv: Object.keys(process.env).filter((k) => /TOKEN/.test(k)).sort(), envKeys: Object.keys(process.env).sort(), envSha: Object.values(process.env).map(sha).filter(Boolean) }) + '\\n');
 fs.appendFileSync(log, loggedIn ? '2026-10-20 08:00:00.000 [I] [client/service.go:310] login to server success, get run id [fake]\\n' : "2026-10-20 08:00:00.000 [W] [client/service.go:301] connect to server error: token in login doesn't match token from configuration\\n");
 const proxies = () => { if (!inc) return []; const out = []; for (const f of fs.readdirSync(inc).filter((x) => x.endsWith('.toml'))) { const t = fs.readFileSync(path.join(inc, f), 'utf8'); out.push({ name: (t.match(/^name = "(.*)"$/m) || [])[1], type: (t.match(/^type = "(.*)"$/m) || [])[1], sub: (t.match(/^subdomain = "(.*)"$/m) || [])[1] }); } return out; };
 const srv = http.createServer((q, s) => {
@@ -187,6 +204,27 @@ async function hubLegs() {
   const ut = new UserTodoManager({ dataDir: path.join(ROOT, 'todos'), expirySweepMs: 0 });
   fs.mkdirSync(path.join(ROOT, 'todos'), { recursive: true });
   try {
+    if (process.argv.includes('--polluted')) {
+      console.log('  p — frpc\'s env is BUILT: nothing the launching shell planted reaches it');
+      const planted = String(process.env.FRP_HUB_PLANTED || '').split(',').filter(Boolean);
+      const KEEP = ['LANG', 'PATH', 'TMPDIR', 'VIBESPACE_FRP_AUTH_TOKEN', 'VIBESPACE_RELAY_TOKEN', 'http_proxy'];
+      const verdict = (s) => (s && s.envKeys ? { extra: s.envKeys.filter((k) => !KEEP.includes(k)), names: planted.filter((k) => s.envKeys.includes(k)), values: planted.filter((k) => s.envSha.includes(sha(process.env[k]))) } : null);
+      const clean = (v) => !!v && !v.extra.length && !v.names.length && !v.values.length;
+      check('the planted names reached the hub (its process.env holds each one) — the leg is not vacuous', planted.length >= 5 && planted.every((k) => typeof process.env[k] === 'string' && process.env[k].length >= 16), planted);
+      const P = await firstBoot('polluted');
+      const vP = verdict(P.saw);
+      check('frpc\'s env holds the kept names + the two relay variables ONLY — nothing else the hub carried', !!vP && !vP.extra.length, P.saw && P.saw.envKeys);
+      check(`none of the planted names, none of their values (sha256) reached frpc: ${planted.join(' · ')}`, clean(vP), vP);
+      check('the instance token + the knock DID (their sha256s), and `http_proxy` — the one proxy name frpc dials through — rode along', !!P.saw && !!P.rec && P.saw.relaySha === sha(P.rec.token) && P.saw.knockSha === sha(KNOCK) && P.saw.envKeys.includes('http_proxy'), P.saw && P.saw.envKeys);
+      check('a publish still runs', !!P.pub, P.pubErr ? P.pubErr.message : P.pub);
+      await killFrpc(); try { P.v.close(); } catch { }
+      const MP = mutantDef((s) => s.replace("const env = RT.relayEnv(process.env, { token: cfg.ident.token || '', knock });", "const env = { ...process.env, [FRP_TOKEN_ENV]: knock, [RT.TOKEN_ENV]: cfg.ident.token || '' }; delete env.VIBESPACE_FRPS_TOKEN; delete env[RT.CLUSTER_TOKEN_ENV];"));
+      const mp = MP ? await firstBoot('polluted-m', { def: MP }) : null;
+      const vM = mp && verdict(mp.saw);
+      check('MUTANT the pre-fix spawn env (a copy of process.env minus two names) ⇒ the planted session tokens reach frpc: RED', !!vM && vM.names.includes('VIBESPACE_SESSION_TOKEN') && vM.names.includes('CLAUDE_CODE_MESSAGING_TOKEN') && !clean(vM), vM || 'the mutant did not apply');
+      if (mp) { await killFrpc(); try { mp.v.close(); } catch { } }
+      return;
+    }
     console.log('  a — the first start mints; the tokens ride frpc\'s env only');
     const A = await firstBoot('hub', { ut });
     const rec = A.rec;

@@ -69,6 +69,7 @@ const EXCLUDED = Object.freeze({
   'editor/code': 'Claude Code\'s EDITOR stand-in (Ctrl+G) — EDITOR= names it, the PATH never does (B-b87b)',
   'code': 'the pre-B-b87b EDITOR stand-in, unlinked at every boot',
   'acp-wrapper.js': 'a wrapper the server spawns an ACP harness through',
+  'agy-wrapper.js': 'a wrapper the server spawns an Antigravity (agy) chat session through',
   'chat-wrapper.js': 'a wrapper the server spawns a chat session through',
   'codex-chat-wrapper.js': 'a wrapper the server spawns a codex chat session through',
   'job-wrapper.js': 'the wrapper the server spawns a Background Work job through',

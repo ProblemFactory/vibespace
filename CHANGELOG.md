@@ -2,6 +2,22 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.330 — 2026-10-20
+
+### Added
+- Google's Antigravity CLI is a conversation backend: chat and terminal sessions on this machine's own Antigravity login.
+- A tool Antigravity skipped for lack of approval shows a card: **Allow and retry** runs one turn with every tool approved, then your mode is back.
+- Antigravity can use more than one Google account: add them in **Agents**, each signed in on this machine, and pick one per session.
+- An agent can run a command with a stored secret it never sees: you allow each kind of command once or always, and the secret comes back blanked.
+- In the Vault window, «Usable by agent runs» lets agents' commands use a storage secret or an app login; it stays off until you turn it on.
+
+### Security
+- An agent can mint a random secret straight into the vault without ever seeing it, or store one it was given — the vault says which.
+- The Public URLs relay client no longer receives VibeSpace's environment: it gets only its own relay tokens and the few settings it needs.
+
+### Maintenance
+- Test and release tooling only; nothing changes for you.
+
 ## 2.369.329 — 2026-10-20
 
 ### Added

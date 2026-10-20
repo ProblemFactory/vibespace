@@ -693,6 +693,61 @@ export function installManageAgents(App, ctx = {}) {
     }, 3000);
   },
 
+  // Add an ISOLATED-HOME login of a harness whose descriptor declares one (lane antigravity-harness: a Google
+  // account for the Antigravity CLI). The server seeds the dir and answers the CLI's OWN login command
+  // (creds.loginCommand); the terminal runs it, and finalize is polled until the login file appears.
+  async _addHomeSubscription(be) {
+    const bill = billingRow(be);
+    const label = getBackendMeta(be).label;
+    const name = await showInputDialog({
+      title: t('Add {login} account', { login: t(bill.accountLogin || bill.globalLogin) }), // the ACCOUNT word (antigravity: 'Google')
+      label: t('Name this account (e.g. Work, Personal)'),
+      placeholder: t('e.g. Personal'),
+      confirmText: t('Continue'),
+    });
+    if (name === null) return; // cancelled
+    let created;
+    try {
+      created = await fetchJson('/api/accounts/home-subscription', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backend: be, name: (name || '').trim() }) });
+    } catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
+    if (!created?.loginCmd) { showToast(created?.error || t('Could not start'), { type: 'error' }); return; }
+    this.openShellTerminal(undefined, { initialCommand: created.loginCmd });
+    showToast(t('A terminal opened — {cli} shows a sign-in link: open it, sign in with the account you want to add, and paste the code back. Your other logins are untouched; VibeSpace captures it automatically.', { cli: label }), { duration: 8000 });
+    this._watchHomeLogin(created.id);
+  },
+
+  // "Sign in again" on an existing isolated-home account (a lapsed or unfinished login): the server refreshes its
+  // dir and answers the CLI's own login command on it; the same terminal + finalize loop as adding one.
+  async _signInHomeAccount(be, id) {
+    let r;
+    try { r = await fetchJson(`/api/accounts/home-subscription/${encodeURIComponent(id)}/login`, { method: 'POST' }); }
+    catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
+    if (!r?.loginCmd) { showToast(r?.error || t('Could not start'), { type: 'error' }); return; }
+    this.openShellTerminal(undefined, { initialCommand: r.loginCmd });
+    showToast(t('A terminal opened — {cli} shows a sign-in link: open it, sign in with this account, and paste the code back. VibeSpace captures it automatically.', { cli: getBackendMeta(be).label }), { duration: 8000 });
+    this._watchHomeLogin(id, { again: true });
+  },
+
+  // Poll an isolated-home login's finalize until the CLI wrote its login (5 min), then SAY the outcome.
+  _watchHomeLogin(id, { again = false } = {}) {
+    const said = (name) => showToast(again ? t('✓ Signed in as {name}', { name: name || '' }) : t('✓ Added {name}', { name: name || t('account') }));
+    const fin = () => fetchJson(`/api/accounts/home-subscription/${encodeURIComponent(id)}/finalize`, { method: 'POST' });
+    let tries = 0;
+    const iv = setInterval(async () => {
+      if (++tries > 100) { // one final finalize attempt, then SAY we stopped
+        clearInterval(iv);
+        const last = await fin();
+        if (last?.loggedIn) { said(last.name); return; }
+        showToast(t('Stopped watching for the login after 5 min. If you completed it, press Re-check in Manage agents to finish capturing it.'), { type: 'error', duration: 10000 });
+        return;
+      }
+      try {
+        const r = await fin();
+        if (r?.loggedIn) { clearInterval(iv); said(r.name); }
+      } catch { /* keep polling */ }
+    }, 3000);
+  },
+
   // Watch a "Log in on <host>…" flow land (2.195.0, real report: after an
   // on-host login the dialog showed another machine + the old identity).
   // Polls the host's live login state — a read-only ssh probe, NO API calls
@@ -1771,6 +1826,97 @@ export function installManageAgents(App, ctx = {}) {
   },
 
 
+  // ── THE ROSTER OF A HARNESS WITH ISOLATED-HOME LOGINS AND NO POOL (lane antigravity-harness: the Antigravity CLI's
+  // Google accounts). This machine only — no usage cell (no quota reading yet), no pool button (caps.pool
+  // false); the words come from the descriptor's billing row, so nothing here names the harness.
+  async _renderHomeAccounts(ctx, be) {
+    const { body, selectedHost, done, refresh } = ctx;
+    if (selectedHost) return; // the roster lives under “This machine” (a remote run of these logins is not wired)
+    let accts;
+    try { accts = await this.refreshAccounts(); } catch { return; }
+    if (ctx.stale?.() || !body.isConnected) return;
+    const bill = billingRow(be);
+    const label = getBackendMeta(be).label;
+    const login = t(bill.accountLogin || bill.globalLogin); // the ACCOUNT word (antigravity: 'Google'); the machine row says globalLogin
+    const machineLogin = t(bill.globalLogin);
+    const list = (accts.accounts || []).filter((a) => a.backend === be).sort(rosterSort);
+    const defId = accts[bill.defaultIdField] || null;
+    const st = ctx.st?.[be] || {};
+    const { CROWN, GLOBE, STAR_F, STAR_O, DOTS } = ROSTER_ICONS;
+    const row = document.createElement('div'); row.className = 'ob-backend acct-section acct-roster';
+    const left = document.createElement('div'); left.style.flex = '1';
+    const globalRow = `<div class="acct-key-row${!defId ? ' is-default' : ''}" data-id="__home_global__">
+      <span class="acct-type-icon" title="${escHtml(t('This machine’s own login'))}">${GLOBE}</span>
+      <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(machineLogin)}</span><span class="acct-key-tail">${st.loggedIn ? escHtml(st.email || t('logged in')) : `<span class="ob-warn">${t('not logged in')}</span>`}</span></span></span>
+      <span class="acct-usage-cell"></span>
+      <span class="acct-key-actions"><button class="acct-icon acct-def ${!defId ? 'on' : ''}" title="${!defId ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${!defId ? STAR_F : STAR_O}</button></span></div>`;
+    const lines = list.map((a) => {
+      const isDef = defId === a.id;
+      const ident = a.loggedIn ? escHtml(a.email || t('logged in')) : `<span class="ob-warn">${t('not logged in')}</span>`;
+      return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}">
+        <span class="acct-type-icon" title="${escHtml(t('{login} account — runs on this machine', { login }))}">${CROWN}</span>
+        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span></span>
+        <span class="acct-usage-cell"></span>
+        <span class="acct-key-actions">
+          <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
+          <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>
+        </span></div>`;
+    }).join('');
+    left.innerHTML = `<div class="acct-list">${globalRow}${lines}</div>
+      <div class="agents-note">${escHtml(t('Each {cli} session can pick its {login} (New Session dialog / card ⚙). Each account is its own isolated login on this machine, switchable per session.', { cli: label, login }))}</div>`;
+    const head = document.createElement('div'); head.className = 'acct-roster-head';
+    const title = document.createElement('b'); title.textContent = t('{login} accounts', { login });
+    const addBtn = document.createElement('button'); addBtn.className = 'agent-btn acct-add' + (list.length ? '' : ' primary'); addBtn.textContent = '+ ' + t('Add {login} account…', { login });
+    addBtn.title = t('Sign in another {login} account for the {cli} — stored in VibeSpace, switchable per session', { login, cli: label });
+    addBtn.onclick = () => { done(); this._addHomeSubscription(be); };
+    head.append(title, addBtn);
+    if (ctx.stale?.()) return;
+    row.append(head, left);
+    body.appendChild(row);
+    const setDefault = async (id) => {
+      try { await api('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, backend: be }) }); }
+      catch (err) { showToast(t('Could not change the default account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
+      refresh();
+    };
+    left.onclick = async (e) => {
+      const keyRow = e.target.closest?.('.acct-key-row');
+      if (!keyRow) return;
+      const id = keyRow.dataset.id;
+      if (id === '__home_global__') { if (e.target.closest('.acct-def')) await setDefault(null); return; }
+      const a = list.find((x) => x.id === id);
+      if (e.target.closest('.acct-def')) { await setDefault(defId === id ? null : id); return; }
+      if (!e.target.closest('.acct-menu')) return;
+      const doRecheck = async () => {
+        let r = null;
+        try { r = await fetchJson(`/api/accounts/home-subscription/${encodeURIComponent(id)}/finalize`, { method: 'POST' }); } catch { r = null; }
+        showToast(r?.loggedIn ? t('✓ Signed in as {name}', { name: r.email || r.name || '' }) : t('Still not signed in — open “Add {login} account…” to finish the login.', { login }), { type: r?.loggedIn ? undefined : 'error' });
+        refresh();
+      };
+      const doRename = async () => {
+        const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
+        if (name && name.trim() && name.trim() !== a?.name) {
+          try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); }
+          catch (err) { showToast(t('Rename failed — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
+          refresh();
+        }
+      };
+      const doDelete = async () => {
+        if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: a?.name }) }))) return;
+        try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(t('Removed “{name}”', { name: a?.name || '' })); }
+        catch (err) { showToast(t('Could not remove the account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
+        refresh();
+      };
+      const r = e.target.closest('.acct-menu').getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, [
+        { label: t('Sign in again'), action: () => { done(); this._signInHomeAccount(be, id); } },
+        { label: t('Re-check'), action: doRecheck },
+        { label: t('Rename account'), action: doRename },
+        { separator: true }, { label: t('Remove account'), action: doDelete },
+      ]);
+    };
+  },
+
+
   _showAgentsDialog({ container, forceModal, onClose } = {}) {
     // rail mode: render into the sidebar panel instead of a modal (one source).
     // Skip _railGo when the agents panel is ALREADY active — its re-click
@@ -1806,6 +1952,10 @@ export function installManageAgents(App, ctx = {}) {
       // user's own machine). Device auth prints a URL + one-time code instead
       // and works everywhere, including this dev box.
       { key: 'codex', label: 'Codex', loginCmd: 'codex login --device-auth', updateCmd: 'npm install -g @openai/codex@latest', installCmd: 'npm install -g @openai/codex@latest' },
+      // Antigravity CLI (lane antigravity-harness): this machine only (no remote probe reports it; a named account's login
+      // never leaves it). The machine login = agy's own sign-in in its TUI (a link + a pasted code); `agy update` is its
+      // own updater (it also updates itself in the background); the installer is Google's documented one (user-local).
+      { key: 'antigravity', label: 'Antigravity CLI', cliName: 'agy', localOnly: true, homeRoster: true, loginCmd: 'agy', updateCmd: 'agy update', installCmd: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' },
     ];
     // Machine-sectioned overview (2.245.0): no host selector anymore — the
     // surface stacks "This machine" plus one section per configured host,
@@ -1851,6 +2001,7 @@ export function installManageAgents(App, ctx = {}) {
       const renderRoster = async (which) => {
         try {
           if (which === 'claude') await this._renderClaudeAccounts(actx);
+          else if (BACKENDS.find((x) => x.key === which)?.homeRoster) await this._renderHomeAccounts(actx, which); // the row DECLARES an isolated-home roster (antigravity)
           else await this._renderCodexAccounts(actx);
         } catch (err) {
           try { track('error', 'agents-roster-render-failed', `${which}: ${err?.message || err}`, err?.stack); } catch { }
@@ -1866,6 +2017,7 @@ export function installManageAgents(App, ctx = {}) {
       // machine that is simply unreachable (honest-state rule).
       const unreachable = !!selectedHost && (!!st?.error || (!st?.claude && !st?.codex));
       for (const b of BACKENDS) {
+        if (b.localOnly && selectedHost) continue; // a CLI no remote probe reports (antigravity) — its row and roster live under “This machine”
         if (unreachable) {
           const row = document.createElement('div'); row.className = 'ob-backend';
           const left = document.createElement('div'); left.className = 'ob-backend-id';
@@ -1920,7 +2072,7 @@ export function installManageAgents(App, ctx = {}) {
         // remote hosts keep the bare name (their path layout is unknown here).
         const absCmd = (cmd) => {
           if (selectedHost || !info.cmdPath) return cmd;
-          const name = b.key === 'claude' ? 'claude' : 'codex';
+          const name = b.cliName || (b.key === 'claude' ? 'claude' : 'codex');
           return cmd.startsWith(name + ' ') || cmd === name ? `"${info.cmdPath}"` + cmd.slice(name.length) : cmd;
         };
         // With named/pooled accounts carrying the sessions, a PRIMARY "Log in"

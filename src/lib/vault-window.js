@@ -28,7 +28,7 @@ import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { showUnlock, showSetup, showChange, vaultFacts, onVaultFacts, refreshVaultFacts, lockNow, setIdleHours, stateIconEl } from './vault-unlock.js';
-import { revealLeftMs, revealHeaders, onRevealChange, noteRevealLeft, forgetReveal, endReveal, revealValue, revealWords } from './vault-reveal.js'; // r2: THE PAGE's window (its secret in page memory)
+import { revealLeftMs, revealHeaders, onRevealChange, noteRevealLeft, forgetReveal, endReveal, revealValue, revealWords, askRevealPassword } from './vault-reveal.js'; // r2: THE PAGE's window (its secret in page memory)
 import { removeAccount, showReauthAccountDialog } from './channel-account-dialogs.js';
 import { passkeyDeleteWords } from './browser-panel-model.js';
 import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PROVENANCES, provenanceOf, PROVENANCE_FILTERS, stateChipsOf, viewOf, bandItemsOf, bandDoorsOf } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
@@ -318,6 +318,22 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   const sigOf = (row) => JSON.stringify([{ ...row, lastUsed: null }, autoOf(row), row.store === 'automation' ? !!st.auto : 0]);
   const usedText = (row) => (row.lastUsed ? (row.lastUsed.by === 'human' ? t('{when} · you', { when: whenShort(row.lastUsed.at) }) : t('{when} · VibeSpace', { when: whenShort(row.lastUsed.at) })) : '');
   const usedHelp = (row) => (row.lastUsed ? (row.lastUsed.by === 'human' ? t('last opened {when} by you', { when: whenText(row.lastUsed.at) }) : t('key last used {when} by VibeSpace', { when: whenText(row.lastUsed.at) })) : '');
+  /** lane vault-run-door (design q-043 decision ⑤): «Usable by agent runs» — OFF by default; ON asks 验证是你 FIRST (in the
+   *  press's own task), OFF never asks. The hub refuses a row with its own door by name whatever the page sends. */
+  async function setRun(row, box) {
+    if (box._vwBusy) return;   // SEAM (int330): re-entry guard, no 'disabled' — vault-window-v2 forbids a greyed control (test-vault-inventory)
+    const on = box.checked;
+    box._vwBusy = true;
+    try {
+      if (on && !revealLeftMs() && !(await askRevealPassword())) { box.checked = false; return; }
+      const r = await fetchJson('/api/vault/runnable', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(on ? revealHeaders() : {}) }, body: JSON.stringify({ id: row.id, on }) });
+      if (r && r.ok) { row.run = { ...(row.run || {}), open: !!r.open }; box.checked = !!r.open; showToast(r.open ? t('Agents may use it in a run now — each new command asks you first') : t('Agents can no longer use it in a run')); return; }
+      box.checked = !on;
+      if (r && r.code === 'reveal_needs_password') forgetReveal();
+      showToast(revealWords(r || {}), { type: 'error' });
+    } finally { box._vwBusy = false; }
+  }
+
   function rowFor(row) {
     const e = vwEl('div', 'vw-row');
     const purpose = purposeOf(row) || 'other', prov = provenanceOf(row) || 'me';
@@ -340,6 +356,15 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     for (const c of stateChipsOf(row, Date.now())) { const s = vwEl('span', 'vw-chip vw-chip-state'); s.dataset.state = c.id; s.append(glyph('warn', 11), document.createTextNode(stateWord(c))); chips.append(s); }
     const used = vwEl('div', 'vw-used', usedText(row));
     used.title = usedHelp(row);
+    if (row.run && row.run.can) {   // lane vault-run-door: a storage secret / an app login — the owner opens it for runs, one by one
+      const lab = vwEl('label', 'vw-run');
+      const box = vwEl('input', 'vw-run-box');
+      box.type = 'checkbox'; box.checked = !!row.run.open;
+      lab.title = t('An agent may use it in vibespace-vault run without ever seeing it — each new command asks you first');
+      lab.append(box, vwEl('span', null, t('Usable by agent runs')));
+      box.onchange = () => setRun(row, box);
+      main.append(lab);
+    }
     // THE VALUE + THE DOORS (by kind — a door the row has not is not drawn; design q-047 §3.3)
     const val = vwEl('div', 'vw-value');
     const mask = vwEl('span', 'vw-mask', MASK);

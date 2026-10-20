@@ -7,6 +7,13 @@
 // vault-locked-refusal-notice: For you names every caller it stopped) — an agent never asks them to unlock. Scoped by the
 // per-session token in the env. `totp <name>` (design q-047 L1, lane vault-totp) prints a two-step code's CURRENT code —
 // when the user granted that code to this conversation — never its seed.
+// lane vault-run-door (design q-043 §8): `run` — a command that needs a stored secret runs WITHOUT the agent seeing it: the
+// HUB resolves each `vault://…` reference, injects the value (env / a 0600 file / stdin — never the command line), spawns
+// the command and answers its output with every value and its encoded forms blanked to `[vault:…]`; the user opens each
+// entry for runs and allows each new command shape once or always. `list` names what this conversation may reference.
+// Nothing here ever prints a value: the hub never sends one.
+  // lane vault-mint-put (design q-043 §9): `mint` — the HUB makes a random secret in its OWN namespace `agent:<this conversation>/<name>` and seals it (the agent never sees the value); `put` — seal a value the agent already has (a 0600 file / stdin, never argv). An agent can CREATE in its namespace but can never READ a stored value back — the user reveals it.
+const fs = require('fs');
 const API = process.env.VIBESPACE_API;
 const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
 if (!API || !TOKEN) { console.error('vibespace-vault: not running inside a VibeSpace session (missing env)'); process.exit(2); }
@@ -17,6 +24,25 @@ const USAGE = [
   '  vibespace-vault lock       lock it now — every stored credential stays sealed until the user unlocks it again',
   '  vibespace-vault totp <name> [--json]   the CURRENT two-step code of <name> + the seconds it has left — when the user',
   '                             granted it to this conversation (Vault window ▸ 用于…); never the seed',
+  '  vibespace-vault list       the stored secrets the user opened for runs — a reference each, never a value',
+  '  vibespace-vault run [--env NAME=vault://<store>/<row>/<field>]… [--file NAME=vault://…|@<template>]… [--stdin vault://…] [--timeout <s>] -- <command…>',
+  '                             run a command that needs a stored secret WITHOUT seeing it: the hub injects it (env / a 0600 file /',
+  '                             stdin — never the command line), the user allows each new command shape (once, or always), and the',
+  '                             output comes back with the secret blanked to [vault:<store>/<row>/<field>]. In the command,',
+  '                             $VAULT_FILE{NAME} or $VAULT_FILE{<store>/<row>/<field>} is the PATH of a 0600 file holding it; a',
+  '                             template file names a value as $VAULT{<store>/<row>/<field>}. Refused by name: tools that print,',
+  '                             transform, pack or copy what they read (cat, echo, base64, cp …), wrappers (sudo, xargs …), a value',
+  '                             on the command line. vibespace-docs vault = the manual.',
+  '',
+  '  vibespace-vault mint <name> [--length 24] [--charset ascii-printable|alnum|digits] [--for <host/service>]',
+  '      the HUB makes a random secret and seals it under agent:<this conversation>/<name>; you get the name + a',
+  '      vault:// reference and NEVER the value (the user can reveal it in ⚙ System ▸ Vault…). For registering an',
+  '      account, setting a service password, generating a token — a secret you do not need to read.',
+  '  vibespace-vault put <name> --from-file <0600 file> | --stdin',
+  '      seal a value you ALREADY have (a key a vendor page gave you) under agent:<this conversation>/<name>. The value',
+  '      rides a 0600 file or stdin — NEVER the command line (argv is readable). The vault records that you saw the',
+  '      plaintext; rotate it when you can (the transcript\'s copy is not protected).',
+  '',
   '  (unlock, set up and change are the user\'s, from the page: ⚙ System ▸ Vault… — never ask for the password)',
 ].join('\n');
 
@@ -26,16 +52,107 @@ const SAYS = {
   not_set_up: 'not set up — the user sets the second password in ⚙ System ▸ Vault…',
 };
 
-async function call(method, route) {
-  const res = await fetch(API + route, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN } });
+async function call(method, route, body) {
+  const headers = { Authorization: 'Bearer ' + TOKEN };
+  let payload;
+  if (body !== undefined) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
+  const res = await fetch(API + route, { method, headers, body: payload });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { console.error('vibespace-vault: ' + (data.error || 'HTTP ' + res.status)); process.exit(1); }
   return data;
+}
+// a POST whose answer may be minutes away (the user's card ≤ 60 s + the run ≤ 600 s): plain http(s).request, which sets no
+// deadline — global fetch gives up on an answer's headers after 300 s (vibespace-exit's postLong, the same reason)
+function postLong(route, body) {
+  const u = new URL(API + route), raw = Buffer.from(JSON.stringify(body));
+  return new Promise((resolve, reject) => {
+    const req = require(u.protocol === 'https:' ? 'https' : 'http').request(u, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': raw.length, Authorization: 'Bearer ' + TOKEN } }, (res) => {
+      const chunks = [];
+      res.on('data', (d) => chunks.push(d));
+      res.on('end', () => { let data = {}; try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { } resolve({ status: res.statusCode, data }); });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.end(raw);
+  });
 }
 const when = (at) => { try { return new Date(at).toISOString().slice(0, 16).replace('T', ' ') + 'Z'; } catch { return '?'; } };
 function print(d) {
   console.log('vault: ' + (SAYS[d.state] || d.state));
   if (d.state === 'locked' && d.lockedSince) console.log('  locked since ' + when(d.lockedSince));
+}
+
+async function runCmd(rest) {
+  // the hub parses the words (the CLI ships to other hosts — one spelling of the flags, src/vault-run.js parseRunArgs)
+  const note = setTimeout(() => console.error('# vibespace-vault run: still waiting — a new command shape waits for the user\'s answer in For you (up to 60 s), or the command is still running'), 3000);
+  let r;
+  try { r = await postLong('/api/agent/vault/run', { args: rest, cwd: process.cwd() }); } finally { clearTimeout(note); }
+  const d = r.data || {};
+  if (r.status >= 400 || !d.ok) { console.error('vibespace-vault run: ' + (d.error || 'HTTP ' + r.status) + (d.code ? ` (${d.code})` : '')); process.exit(r.status === 400 && d.code === 'bad_flag' ? 2 : 1); }
+  if (d.stdout) process.stdout.write(d.stdout);
+  if (d.stderr) process.stderr.write(d.stderr);
+  const said = [];
+  if (d.scrubbed && d.scrubbed.hits) said.push(`${d.scrubbed.hits} occurrence(s) of a stored secret blanked`);
+  if (d.truncated) said.push('the output was cut at 2 MiB');
+  if (d.timedOut) said.push('stopped at its timeout');
+  if (said.length) console.error(`# vibespace-vault run: ${said.join(' · ')}`);
+  if (d.receipt) console.error(`# vibespace-vault run: receipt ${d.receipt}`);   // the audit line the user sees carries the same one
+  const signals = require('os').constants.signals || {};
+  process.exit(d.timedOut ? 124 : Number.isInteger(d.exit) ? d.exit : d.signal && signals[d.signal] ? 128 + signals[d.signal] : 1);
+}
+
+/** Split `rest` into flags and positionals. `specs`: { '--flag': 'value' | 'bool' }. An unknown flag exits 2. */
+function parseFlags(rest, specs) {
+  const out = {}, positional = [];
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (a === '--') { positional.push(...rest.slice(i + 1)); break; }
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('='), key = eq >= 0 ? a.slice(0, eq) : a;
+      if (!(key in specs)) { console.error('vibespace-vault: unknown option ' + key + '\n' + USAGE); process.exit(2); }
+      if (specs[key] === 'bool') out[key] = true;
+      else { const v = eq >= 0 ? a.slice(eq + 1) : rest[++i]; if (v === undefined) { console.error('vibespace-vault: ' + key + ' needs a value'); process.exit(2); } out[key] = v; }
+    } else positional.push(a);
+  }
+  return { out, positional };
+}
+
+async function mint(rest) {
+  const { out, positional } = parseFlags(rest, { '--length': 'value', '--charset': 'value', '--for': 'value' });
+  if (positional.length !== 1) { console.error('vibespace-vault: mint <name> [--length 24] [--charset ascii-printable|alnum|digits] [--for <host/service>]'); process.exit(2); }
+  const body = { name: positional[0] };
+  if (out['--length'] !== undefined) body.length = Number(out['--length']);
+  if (out['--charset'] !== undefined) body.charset = out['--charset'];
+  if (out['--for'] !== undefined) body.for = out['--for'];
+  const d = await call('POST', '/api/agent/vault/mint', body);
+  console.log('minted ' + d.name);
+  console.log('  reference: ' + d.ref);
+  console.log('  ' + (d.provenance || 'agent minted · never shown to the agent') + ' — the value is sealed; you never see it.');
+  console.log('  The user can reveal it in ⚙ System ▸ Vault… behind the second password (it is meant to be typed somewhere).');
+}
+
+async function put(rest) {
+  const { out, positional } = parseFlags(rest, { '--from-file': 'value', '--stdin': 'bool' });
+  if (positional.length !== 1) { console.error('vibespace-vault: put <name> --from-file <0600 file> | --stdin\n  (the value NEVER rides the command line — it is readable there; use a 0600 file or stdin)'); process.exit(2); }
+  const name = positional[0];
+  const hasFile = out['--from-file'] !== undefined, hasStdin = !!out['--stdin'];
+  if (hasFile === hasStdin) { console.error('vibespace-vault: put needs exactly one of --from-file <0600 file> or --stdin (never the value on the command line)'); process.exit(2); }
+  let value;
+  if (hasFile) {
+    const file = out['--from-file'];
+    let st; try { st = fs.statSync(file); } catch (e) { console.error('vibespace-vault: cannot read ' + file + ' (' + (e && e.code) + ')'); process.exit(1); }
+    if (st.mode & 0o077) { console.error('vibespace-vault: ' + file + ' is readable by others (mode ' + (st.mode & 0o777).toString(8) + ') — the plaintext must be private; run: chmod 600 ' + file); process.exit(1); }
+    value = fs.readFileSync(file, 'utf8');
+  } else {
+    value = fs.readFileSync(0, 'utf8');   // stdin
+  }
+  value = value.replace(/\r?\n$/, '');   // drop ONE trailing newline a file / echo adds — the value itself is kept
+  if (!value) { console.error('vibespace-vault: the value is empty'); process.exit(1); }
+  const d = await call('POST', '/api/agent/vault/put', { name, value });
+  console.log('stored ' + d.name);
+  console.log('  reference: ' + d.ref);
+  console.log('  ' + (d.provenance || 'agent stored · the agent saw the plaintext'));
+  if (d.hint) console.log('  ' + d.hint);
 }
 
 async function main() {
@@ -49,9 +166,19 @@ async function main() {
     else console.log(`${d.code} (${d.secondsLeft} s left)`);
     return;
   }
-  if (args.length > 1 || cmd === 'help' || cmd === '-h' || cmd === '--help') { console.log(USAGE); if (args.length > 1) process.exit(2); return; }
+  if (cmd === 'help' || cmd === '-h' || cmd === '--help') { console.log(USAGE); return; }
+  if (cmd === 'run') return runCmd(args.slice(1));
+  if (cmd === 'mint') return mint(args.slice(1));
+  if (cmd === 'put') return put(args.slice(1));
+  if (args.length > 1) { console.log(USAGE); process.exit(2); }
   if (cmd === 'status') return print(await call('GET', '/api/agent/vault/state'));
   if (cmd === 'lock') { const d = await call('POST', '/api/agent/vault/lock'); print(d); return; }
+  if (cmd === 'list') {
+    const d = await call('GET', '/api/agent/vault/runnable');
+    if (!d.entries || !d.entries.length) { console.log('no stored secret is open for runs — the user opens one in ⚙ System ▸ Vault… (the row\'s «Usable by agent runs»); ask them in the chat'); return; }
+    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})`);
+    return;
+  }
   console.error('vibespace-vault: unknown command "' + cmd + '"\n' + USAGE);
   process.exit(2);
 }

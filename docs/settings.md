@@ -501,6 +501,17 @@ now fails the build if a category ever goes unlisted again.
 | `mobile.backGuard` | boolean | `true` | **Back closes the open panel first; press again to exit** — On a phone, back first closes what is open (a menu, a dialog, the window on show, which takes you back to the session list). At the list it asks you to press back once more within 2 seconds to leave VibeSpace. Off: back leaves the page at once, like any web page. |
 <!-- /settings-table -->
 
+### Antigravity CLI
+
+<!-- settings-table: Antigravity CLI -->
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `antigravity.defaultModel` | enum | `''` | **Default model** — The model slug new Antigravity sessions start on (empty keeps Antigravity's own choice). `agy models` lists what your login may use; an unknown slug is refused by name. |
+| `antigravity.defaultEffort` | enum | `''` | **Default effort** — Reasoning effort for new Antigravity sessions (--effort). |
+| `antigravity.defaultPermissionMode` | enum | `''` | **Default permission mode** — How a new Antigravity session handles tools that need approval. In a chat, Antigravity cannot ask — a tool it would ask about is skipped and said in the chat; “Never ask” runs everything. |
+| `antigravity.defaultExtraArgs` | text | `''` | **Default extra args** — Extra Antigravity CLI args appended when starting an Antigravity session. |
+<!-- /settings-table -->
+
 <!-- settings-reference:end -->
 
 ## Storage Details

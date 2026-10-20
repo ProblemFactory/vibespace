@@ -88,6 +88,19 @@ for (const id of harnessIds()) {
   if (h.kind === 'chat') ok(Array.isArray(meta.fallbackModels) && (meta.fallbackModels.length > 0 || meta.modelsFromAgent === true) && meta.caps, `${id}: client META carries fallbackModels (or modelsFromAgent) + feature caps`);
 }
 ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META row has a server harness (no client-only backend)');
+// lane antigravity-harness (its RED row): a descriptor that drops ONE required row is refused — by the registry's own
+// validate() (what loading a built-in runs) AND by this suite's per-harness check above.
+{
+  const { validate } = require(path.join(REPO, 'src/harnesses/index.js'));
+  const g = HARNESSES.antigravity;
+  for (const k of REQUIRED_DESCRIPTOR_KEYS) {
+    const copy = { ...g }; delete copy[k];
+    let msg = ''; try { validate(copy); } catch (e) { msg = e.message; }
+    ok(!REQUIRED_DESCRIPTOR_KEYS.every((r) => r in copy) && /is missing|lowercase slug/.test(msg), `RED control: antigravity without its "${k}" row is refused (${msg.slice(0, 90)})`);
+  }
+  let whole = ''; try { validate({ ...g }); } catch (e) { whole = e.message; }
+  ok(!whole, 'POSITIVE control: the whole antigravity descriptor validates', whole);
+}
 // ── the caps MIRROR (design-harness-features §6 landing discipline): a caps row
 // the client also carries must be BYTE-IDENTICAL to the server's, and a row the
 // client carries ALONE is how §2.13's `review` drifted (client had it, server
@@ -163,7 +176,7 @@ for (const id of chatHarnessIds()) {
   ok(wrapperCaps(d, 'sess-missing', '/x').queueResync === false, '…and an unreadable sidecar (a REMOTE wrapper: its file is on ITS machine) is FALSE — unknown is never "yes"');
   fs.rmSync(d, { recursive: true, force: true });
 }
-ok(chatHarnessIds().join(',') === 'claude,codex,opencode', `chat-capable harnesses: ${chatHarnessIds().join(',')}`);
+ok(chatHarnessIds().join(',') === 'claude,codex,opencode,antigravity', `chat-capable harnesses: ${chatHarnessIds().join(',')}`);
 
 // ── HARNESS SETTINGS TABLES (docs/design-harness-settings.zh.md §8, 2026-09-20) ──
 // The table is DATA joined to the descriptor by identity; what makes it TRUE
@@ -226,10 +239,21 @@ for (const id of chatHarnessIds()) { const b = HARNESSES[id].ui?.billing, c = HA
 for (const id of chatHarnessIds()) {
   const c = HARNESSES[id].creds;
   if (!c) { ok(BACKEND_META[id].caps?.accounts === false && HARNESSES[id].caps.pool === false, `${id}: no credential mechanics ⇒ client META caps.accounts false + no pool (the agent holds its own login)`); continue; }
-  ok(c && typeof c.subsDirName === 'string' && typeof c.authFile === 'string' && typeof c.spawnEnvVar === 'string' && typeof c.loginLabel === 'string' && typeof c.defaultIdField === 'string' && typeof c.keychainSensitive === 'boolean' && typeof c.parseAuth === 'function', `${id}: creds descriptor complete (${c?.subsDirName}, ${c?.spawnEnvVar})`);
+  // the spawn form: ONE env var pointed at the account dir (codex CODEX_HOME), or a spawnEnv(dir) answer (antigravity:
+  // HOME = the account's root + the bus disabled — a name no *EnvVar field may carry, see THE EVERY-PROCESS CENSUS)
+  ok(c && typeof c.subsDirName === 'string' && typeof c.authFile === 'string' && (typeof c.spawnEnvVar === 'string' || typeof c.spawnEnv === 'function') && typeof c.loginLabel === 'string' && typeof c.defaultIdField === 'string' && typeof c.keychainSensitive === 'boolean' && typeof c.parseAuth === 'function', `${id}: creds descriptor complete (${c?.subsDirName}, ${c?.spawnEnvVar || (typeof c?.spawnEnv === 'function' ? 'spawnEnv()' : undefined)})`);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-creds-'));
   ok(c.parseAuth(tmp).loggedIn === false, `${id}: parseAuth on an empty dir = not logged in (never throws)`);
   if (id === 'claude') { fs.writeFileSync(path.join(tmp, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok', subscriptionType: 'max', expiresAt: Date.now() + 3600000 } })); fs.writeFileSync(path.join(tmp, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'a@b.c', organizationName: 'Org' } })); const r = c.parseAuth(tmp); ok(r.loggedIn && r.subscriptionType === 'max' && r.email === 'a@b.c' && r.org === 'Org' && r.accessToken === 'tok', 'claude parseAuth reads creds + identity from the dir'); }
+  if (id === 'antigravity') {
+    // the login is a SECRET AT REST we never read: "signed in" is a STAT — an unreadable file still answers
+    const H8 = require(path.join(REPO, 'src/harnesses/antigravity.js'));
+    const f = path.join(tmp, H8.TOKEN_REL); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, 'opaque'); fs.chmodSync(f, 0o000);
+    ok(c.parseAuth(tmp).loggedIn === true && c.parseAuth(tmp).email === null, `${id}: parseAuth = a stat of ${H8.TOKEN_REL} (mode 000 — never opened), no identity claimed`);
+    const env = c.spawnEnv(tmp);
+    ok(env.HOME === tmp && env.DBUS_SESSION_BUS_ADDRESS === 'disabled:' && Object.keys(env).length === 2, `${id}: spawnEnv = HOME the account root + the bus disabled (agy dials any findable bus — measured)`, env);
+    fs.chmodSync(f, 0o600);
+  }
   if (id === 'codex') { const claims = Buffer.from(JSON.stringify({ email: 'x@y.z', 'https://api.openai.com/auth': { chatgpt_plan_type: 'pro' } })).toString('base64url'); fs.writeFileSync(path.join(tmp, 'auth.json'), JSON.stringify({ tokens: { access_token: 'a', id_token: `h.${claims}.s` } })); const r = c.parseAuth(tmp); ok(r.loggedIn && r.email === 'x@y.z' && r.plan === 'pro' && r.subscriptionType === 'pro' && r.authMode === 'chatgpt', 'codex parseAuth reads identity from the id_token (subscriptionType mirrors plan)'); }
   fs.rmSync(tmp, { recursive: true, force: true });
 }
@@ -238,10 +262,14 @@ const acc = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
 for (const id of chatHarnessIds()) {
   const c = HARNESSES[id].creds;
   if (!c) continue;
-  ok(Array.isArray(c.files) && c.files.includes(c.authFile) && typeof c.hostFactsKey === 'string' && typeof c.longLivedToken === 'boolean' && typeof c.supportsApiKeys === 'boolean' && typeof c.seedDir === 'function' && c.probe && typeof c.probe.file === 'string' && typeof c.probe.marker === 'string' && ('bumpFile' in c) && typeof c.remoteSymlinks === 'object' && Array.isArray(c.ensureTargets), `${id}: creds remainder complete (files ${c.files?.join('+')}, hostFactsKey ${c.hostFactsKey}, bumpFile ${c.bumpFile})`);
+  // a shipped login lists its file + the remote probe; a localOnly row (antigravity) ships NOTHING and probes nothing
+  const ships = c.localOnly === true ? (c.files.length === 0 && c.probe == null) : (c.files.includes(c.authFile) && c.probe && typeof c.probe.file === 'string' && typeof c.probe.marker === 'string');
+  ok(Array.isArray(c.files) && ships && typeof c.hostFactsKey === 'string' && typeof c.longLivedToken === 'boolean' && typeof c.supportsApiKeys === 'boolean' && typeof c.seedDir === 'function' && ('bumpFile' in c) && typeof c.remoteSymlinks === 'object' && Array.isArray(c.ensureTargets), `${id}: creds remainder complete (files ${c.files?.join('+')}, hostFactsKey ${c.hostFactsKey}, bumpFile ${c.bumpFile})`);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-seed-'));
   const prevHome = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(tmp, 'shared'); // keep the codex seeder off the real ~/.codex
-  try { c.seedDir(tmp); ok(fs.readdirSync(tmp).length >= 1, `${id}: seedDir populates a fresh account dir (${fs.readdirSync(tmp).join(',')})`); } finally { if (prevHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevHome; }
+  const prevH = process.env.HOME; process.env.HOME = path.join(tmp, 'machine-home'); fs.mkdirSync(process.env.HOME); // …and the antigravity farm off the real HOME
+  const acctDir = path.join(tmp, 'acct'); fs.mkdirSync(acctDir);
+  try { c.seedDir(acctDir); ok(fs.readdirSync(acctDir).length >= 1, `${id}: seedDir populates a fresh account dir (${fs.readdirSync(acctDir).join(',')})`); } finally { if (prevHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevHome; process.env.HOME = prevH; }
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 ok((acc.match(/this\._remoteCreds\(/g) || []).length >= 2 && !/CODEX_SUB_FILES|CLAUDE_SUB_FILES/.test(acc) && !/hostFacts\.codex\?\.email/.test(acc) && !/const isCodex = rec\.backend === 'codex'/.test(acc) && !/_seedCodexDir\(dir\) \{\n    const shared/.test(acc) && !/localEnv: \{ CODEX_HOME:/.test(acc) && !/localEnv: \{ CLAUDE_SECURESTORAGE_CONFIG_DIR:/.test(acc), 'accounts.js export/import/delete/verdict/spawn-env/remote-creds read the descriptor (S2 remainder)');
@@ -993,11 +1021,19 @@ console.log('\ncredential env: one derived list (src/harness-env.js), two doors'
   for (const id of chatHarnessIds()) {
     const c = HARNESSES[id].creds;
     if (!c) continue;
-    ok(typeof c.homeEnvVar === 'string' && Array.isArray(c.keyEnvVars) && c.keyEnvVars.every((k) => typeof k === 'string'), `${id}: creds declares homeEnvVar + keyEnvVars (${c.homeEnvVar}; [${(c.keyEnvVars || []).join(', ')}])`);
+    // a spawnEnv row's home is HOME itself — everyone's — so it declares no homeEnvVar (THE EVERY-PROCESS CENSUS below)
+    ok((typeof c.homeEnvVar === 'string' || (typeof c.spawnEnv === 'function' && c.homeEnvVar === undefined)) && Array.isArray(c.keyEnvVars) && c.keyEnvVars.every((k) => typeof k === 'string'), `${id}: creds declares homeEnvVar + keyEnvVars (${c.homeEnvVar ?? (typeof c.spawnEnv === 'function' ? 'HOME via spawnEnv' : undefined)}; [${(c.keyEnvVars || []).join(', ')}])`);
     const declared = [...new Set(HE.declaredEnvOf(HARNESSES[id]).map((x) => x.name))];
     const missing = declared.filter((n) => !all().includes(n));
     ok(declared.length >= 1 && !missing.length, `${id}: every creds.*EnvVar(s) is in the one list (${declared.join(', ')})`, missing.join(','));
   }
+  // THE EVERY-PROCESS CENSUS (lane antigravity-harness): a creds.*EnvVar(s) name joins BOTH strip lists, so a name
+  // every process needs there would strip it from every agent and every job — antigravity's HOME root therefore rides
+  // creds.spawnEnv, never spawnEnvVar. RED control: a planted spawnEnvVar 'HOME' reaches both lists.
+  const EVERY_PROCESS = ['HOME', 'PATH', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG', 'TERM', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS'];
+  ok(!all().some((n) => EVERY_PROCESS.includes(n)), `no creds.*EnvVar(s) names an env every process needs (${EVERY_PROCESS.length} names) — the strip lists never take one`, all().filter((n) => EVERY_PROCESS.includes(n)));
+  { const planted = live().map((d) => (d.id === 'antigravity' ? { ...d, creds: { ...d.creds, spawnEnvVar: 'HOME' } } : d));
+    ok(HE.credentialEnvNames(planted).includes('HOME') && HE.agentCredentialEnvNames(planted).includes('HOME'), 'RED control: a planted creds.spawnEnvVar HOME lands in BOTH strip lists (every agent and job would lose HOME) — the census above can go red'); }
   ok(HE.VENDOR_CREDENTIAL_ENV.every((n) => all().includes(n)) && ['CODEX_HOME', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'CLAUDE_CONFIG_DIR'].every((n) => all().includes(n)), `the one list = vendor names ∪ descriptor names (${all().length}: ${all().join(' ')})`);
   // 2. the judges — a door over a base env holding every name of the list + bystanders
   const baseOf = (names) => ({ PATH: '/usr/bin', HOME: '/home/u', SOME_FUTURE_TOOL_TOKEN: 'ft', ...Object.fromEntries(names.map((n) => [n, 'ambient-' + n])) });

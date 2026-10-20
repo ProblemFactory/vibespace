@@ -472,6 +472,27 @@ const BACKEND_CAPS = {
     terminalOnly: false, oauthUsage: false, globalUsageKey: null,
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
   },
+  // Antigravity CLI (`agy`, lane antigravity-harness): NOT an ACP agent, but its chat wrapper
+  // (data/bin/agy-wrapper.js) journals the SAME 'acp-events' records, so the protocol rows are
+  // opencode's for the same reasons: the wrapper owns the queue (agy runs one turn per stdin line and
+  // has no steer), a turn ends on agy's own `result` event (authoritative), no persona verb, no
+  // per-session worktree flag. No pool / quota probe in commit 1 (the machine login only; the
+  // `-p /usage` reading and the per-account HOME root follow). hotSwitch 'unverified' = cold.
+  antigravity: {
+    pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
+    streamProtocol: 'acp-events',
+    peerDelivery: 'stash-only',
+    compactEnd: null,
+    frameFile: true,
+    inputModes: { queue: true, queueVerbs: ['remove', 'reorder', 'edit'] },
+    turnState: 'authoritative',
+    inProgressTools: false,
+    responseStyle: { live: false, closed: true, values: [] },
+    worktree: NO_WORKTREE,
+    permissionRules: { source: null, session: false, instance: false, liveVerb: false },
+    terminalOnly: false, oauthUsage: false, globalUsageKey: null,
+    autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
+  },
 };
 
 // The verb tables above are DECLARATIONS; the booleans every existing consumer

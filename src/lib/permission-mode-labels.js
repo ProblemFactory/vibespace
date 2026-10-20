@@ -28,6 +28,16 @@ export function permissionModeWords(backend, value, t) {
       default: return null;
     }
   }
+  if (backend === 'antigravity') { // agy 1.4.3: --mode accept-edits|auto|plan, bypass = --dangerously-skip-permissions
+    switch (v) {
+      case '': return t('Default (Antigravity’s own setting)');
+      case 'accept-edits': return t('Edit files freely, ask before commands');
+      case 'auto': return t('Auto — a safety check decides');
+      case 'plan': return t('Plan only — read and propose, change nothing');
+      case 'bypassPermissions': return t('Never ask (full access)');
+      default: return null;
+    }
+  }
   switch (v) { // claude
     case '': return t('Default (Claude Code’s own setting)');
     case 'default': case 'manual': return t('Ask before acting'); // 2.1.281's --help lists `manual`, which the CLI maps to `default`

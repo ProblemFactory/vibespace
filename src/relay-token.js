@@ -11,6 +11,8 @@
 //   the proof    frpc.toml `user = "<instanceId>"` + `metadatas.token = "{{ .Envs.VIBESPACE_RELAY_TOKEN }}"` — frps hands
 //                `user` + `metas` to the plugin on Login AND on NewProxy (names are judged per proxy); the VALUE rides the frpc
 //                child's env only (never argv, never a file but the record, never a log line / status JSON / For-you text)
+//   the env      frpc's env is BUILT (relayEnv: a few kept names + the two relay variables), never the hub's inherited — the
+//                hub's env holds whatever launched it (lane frp-spawn-env-allowlist)
 //   the line     the registration the relay admin runs: `relay-admin add <id> <sha256(token)> "<label>"` — the hash only
 //   the cluster  a fleet pod holds no record: the cluster injects VIBESPACE_RELAY_CLUSTER_TOKEN and the pod logs in as its
 //                own name (VIBESPACE_INSTANCE_NAME) — ONE cluster row at the relay binds the names by pod name (owner Q2)
@@ -18,6 +20,11 @@ const V = 1;
 const FILE = 'relay-token.json';
 const TOKEN_ENV = 'VIBESPACE_RELAY_TOKEN';                  // the frpc child's env name — the hub's own env never holds it
 const CLUSTER_TOKEN_ENV = 'VIBESPACE_RELAY_CLUSTER_TOKEN';  // a fleet pod's: the cluster's ONE token (the chart's secret)
+const KNOCK_ENV = 'VIBESPACE_FRP_AUTH_TOKEN';               // the shared token's (the KNOCK — the grace only) frpc env name
+/** the names frpc's env keeps from the hub's (lane frp-spawn-env-allowlist). Measured on frpc 0.70.0: it runs on an EMPTY env
+ *  (HOME is never read — not kept); of the proxy names it reads lowercase `http_proxy` alone (its dial to frps goes through
+ *  it; HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / no_proxy are ignored) — kept, or a hub behind an egress proxy loses its relay */
+const RELAY_ENV_KEEP = Object.freeze(['PATH', 'LANG', 'TMPDIR', 'http_proxy']);
 const TOKEN_PREFIX = 'vsrt_';
 const ID_RE = /^vi-[0-9a-f]{12}$/;
 const TOKEN_RE = /^vsrt_[A-Za-z0-9_-]{43}$/;
@@ -109,6 +116,16 @@ function frpcLines(ident) {
   if (!ident || !ident.user || !ident.token) return [];
   return [`user = "${ident.user}"`, `metadatas.token = "{{ .Envs.${TOKEN_ENV} }}"`];
 }
+/** THE frpc CHILD'S ENV — built from scratch, never inherited: the kept names from `base` (the hub's process.env, which may
+ *  carry an agent conversation's session tokens, the cluster's shared token, cloud keys) + this instance's token + the knock
+ *  (during the grace only). An empty value is left out; a relay variable already in `base` is never taken from it. */
+function relayEnv(base, { token = '', knock = '' } = {}) {
+  const env = {};
+  for (const k of RELAY_ENV_KEEP) if (base && Object.prototype.hasOwnProperty.call(base, k) && isStr(base[k]) && base[k]) env[k] = base[k];
+  if (isStr(token) && token) env[TOKEN_ENV] = token;
+  if (isStr(knock) && knock) env[KNOCK_ENV] = knock;
+  return env;
+}
 /** frps registers a proxy as `<user>.<name>` — the name without that prefix */
 function strippedName(proxyName, user) {
   const n = String(proxyName || '');
@@ -164,6 +181,6 @@ function alertOf(ref, { name = '' } = {}) {
 }
 
 module.exports = {
-  V, FILE, TOKEN_ENV, CLUSTER_TOKEN_ENV, TOKEN_PREFIX, ID_RE, TOKEN_RE, HASH_RE, LABEL_RE, SUB_RE, CLUSTER_USER_RE, PREFIXES, SUBS_MAX, REASONS, ALERTS,
-  labelOf, clusterUserOf, mint, rotate, revoke, withSub, parse, serialize, identityOf, registrationLine, frpcLines, strippedName, nameVerdict, refusalOf, loginOf, alertOf,
+  V, FILE, TOKEN_ENV, CLUSTER_TOKEN_ENV, KNOCK_ENV, RELAY_ENV_KEEP, TOKEN_PREFIX, ID_RE, TOKEN_RE, HASH_RE, LABEL_RE, SUB_RE, CLUSTER_USER_RE, PREFIXES, SUBS_MAX, REASONS, ALERTS,
+  labelOf, clusterUserOf, mint, rotate, revoke, withSub, parse, serialize, identityOf, registrationLine, frpcLines, relayEnv, strippedName, nameVerdict, refusalOf, loginOf, alertOf,
 };

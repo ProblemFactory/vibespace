@@ -74,6 +74,7 @@
   "/api/agent/task",
   "/api/agent/task-context",
   "/api/agent/vault/link-token",
+  "/api/agent/vault/runnable",
   "/api/agent/vault/state",
   "/api/agent/vault/totp/:name",
   "/api/agent/window/screenshot",

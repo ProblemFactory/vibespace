@@ -21,7 +21,7 @@ server. `vibespace-docs <topic>` prints it.
 | `window` | `vibespace-window` | a NATIVE app window the user shared with you (or you opened) as a target: accessibility tree + @refs, or pixels | `vibespace-docs window` |
 | `browser` | `vibespace-browser` | THE browser tool: open / snapshot / click @ref / fill in THIS conversation's own browser, shown live to the user | `vibespace-docs browser` |
 | `apps` | `vibespace-app` | apps that survive the machine's rebuild: search, then PROPOSE an install or a removal (the user installs) | `vibespace-docs apps` |
-| `vault` | `vibespace-vault` | the vault that seals every stored credential: its state, lock it now (locked ⇒ the user is told; never ask them to unlock) | `vibespace-docs vault` |
+| `vault` | `vibespace-vault` | the vault's state, lock it now, run a command with a stored secret you never see (locked ⇒ the user is told; never ask them to unlock) | `vibespace-docs vault` |
 | `api` | `vibespace-api` | VibeSpace's own automation verbs (rename a conversation, …) through keys the user GRANTED this conversation — never a key's value | `vibespace-docs api` |
 | `index` | `vibespace-docs` | this list; `vibespace-docs <topic>` prints one tool's full manual, always matching the running server | `vibespace-docs` |
 

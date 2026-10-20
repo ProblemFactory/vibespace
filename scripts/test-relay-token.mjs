@@ -8,11 +8,15 @@
 //   ④ the label is shell-safe (the line is pasted on the relay host): metacharacters never survive
 //   ⑤ identityOf: the cluster's env > the record > none; revoked ⇒ no token; a pod name never takes an instance id's shape
 //   ⑥ frpcLines name the identity with frp's env TEMPLATE — never the value
+//   ⑥b relayEnv BUILDS frpc's env (lane frp-spawn-env-allowlist): the kept names + the two relay variables, none of the hub's
+//      session tokens / cloud keys / the cluster's shared token / other proxies / HOME — MUTANTS (a spread, the pre-fix copy
+//      minus two names) ⇒ RED
 //   ⑦ the name rule (nameVerdict / strippedName) — the plugin answers the same table (test-frps-plugin's parity leg)
 //   ⑧ refusalOf / loginOf read the relay's words out of frpc's (a proxy's start error, frpc.log); alertOf files ONE item per
 //      name, never the token
-//   ⑨ CENSUS: the env name VIBESPACE_RELAY_TOKEN is spelled in src/relay-token.js only, used by src/plugins/frp.js only (the
-//      frpc child's env + the toml template); src/relay-token.js requires nothing
+//   ⑨ CENSUS: the env names VIBESPACE_RELAY_TOKEN / VIBESPACE_FRP_AUTH_TOKEN are spelled in src/relay-token.js only; the ONE
+//      frpc spawn env is RT.relayEnv(process.env, …) in src/plugins/frp.js, which copies process.env nowhere; src/relay-token.js
+//      requires nothing
 // Run: node scripts/test-relay-token.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -94,6 +98,46 @@ const fl = RT.frpcLines(ia);
 ok(fl[0] === `user = "${a.instanceId}"` && fl[1] === 'metadatas.token = "{{ .Envs.VIBESPACE_RELAY_TOKEN }}"' && !leaks(fl.join('\n'), a.token), 'user = <id> + metadatas.token = {{ .Envs.VIBESPACE_RELAY_TOKEN }}', fl);
 ok(RT.frpcLines(RT.identityOf({ rec: null, env: env0 })).length === 0 && RT.frpcLines(RT.identityOf({ rec: v, env: env0 })).length === 0, 'none / revoked ⇒ no identity lines');
 
+console.log('⑥b relayEnv — frpc\'s env is BUILT, never the hub\'s inherited');
+{
+  const rnd = () => crypto.randomBytes(8).toString('hex');
+  // the hub's env as an agent conversation's shell leaves it (values built now): session tokens, the cluster's shared token,
+  // cloud keys, proxies, a loader hook — and stale relay variables (never taken from it)
+  const KEPT = { PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8', TMPDIR: '/tmp/x', http_proxy: 'http://proxy.example.invalid:3128' };
+  const DROPPED = {
+    HOME: '/home/someone', USER: 'someone', CLAUDE_CODE_MESSAGING_TOKEN: 'cc-msg-' + rnd(), CLAUDE_CODE_OAUTH_TOKEN: 'cc-oauth-' + rnd(), CLAUDE_CODE_ENTRYPOINT: 'cli',
+    VIBESPACE_SESSION_TOKEN: 'vs-sess-' + rnd(), VIBESPACE_FRPS_TOKEN: 'frps-' + rnd(), [RT.CLUSTER_TOKEN_ENV]: 'cluster-' + rnd(), VIBESPACE_INSTANCE_NAME: 'pod-a',
+    AWS_ACCESS_KEY_ID: 'AKIA' + rnd(), AWS_SECRET_ACCESS_KEY: 'aws-' + rnd(), AWS_SESSION_TOKEN: 'aws-sess-' + rnd(), ANTHROPIC_API_KEY: 'sk-ant-' + rnd(),
+    HTTP_PROXY: 'http://u:' + rnd() + '@proxy.example.invalid:3128', HTTPS_PROXY: 'http://u:' + rnd() + '@proxy.example.invalid:3128', ALL_PROXY: 'socks5://proxy.example.invalid:1080', no_proxy: 'localhost',
+    NODE_OPTIONS: '--require /tmp/hook.js', LD_PRELOAD: '/tmp/hook.so', SSH_AUTH_SOCK: '/tmp/agent.sock',
+    [RT.TOKEN_ENV]: 'vsrt_stale-' + rnd(), [RT.KNOCK_ENV]: 'stale-knock-' + rnd(),
+  };
+  const base = { ...KEPT, ...DROPPED };
+  const TOK = RT.mint({ randomBytes: crypto.randomBytes, now: NOW, label: 'x' }).token, KN = 'knock-' + rnd();
+  const keys = (e) => Object.keys(e || {}).sort();
+  /** the table every implementation is judged by → the rows it fails */
+  const judge = (fn) => {
+    const bad = [], row = (n, c) => { if (!c) bad.push(n); };
+    let e1, e2, e3, e4;
+    try { e1 = fn(base, { token: TOK, knock: KN }); e2 = fn(base, { token: TOK, knock: '' }); e3 = fn(base, {}); e4 = fn(null, { token: TOK }); } catch (e) { return ['threw: ' + e.message]; }
+    row('the grace: exactly the kept names + the instance token + the knock', JSON.stringify(keys(e1)) === JSON.stringify([...Object.keys(KEPT), RT.TOKEN_ENV, RT.KNOCK_ENV].sort()));
+    row('the kept values as the hub had them, the tokens as handed in (never the stale ones in its env)', Object.entries(KEPT).every(([k, v]) => e1[k] === v) && e1[RT.TOKEN_ENV] === TOK && e1[RT.KNOCK_ENV] === KN);
+    row('no dropped name, no dropped value', !Object.keys(DROPPED).some((k) => k in e1 && k !== RT.TOKEN_ENV && k !== RT.KNOCK_ENV) && !Object.values(DROPPED).some((v) => Object.values(e1).includes(v)));
+    row('past the grace (no knock): no knock name at all', JSON.stringify(keys(e2)) === JSON.stringify([...Object.keys(KEPT), RT.TOKEN_ENV].sort()));
+    row('no token handed in ⇒ no relay variable (the stale ones stay behind)', JSON.stringify(keys(e3)) === JSON.stringify(Object.keys(KEPT).sort()));
+    row('no base ⇒ the token alone (a kept name is never invented)', JSON.stringify(keys(e4)) === JSON.stringify([RT.TOKEN_ENV]));
+    row('a NEW object (the hub\'s env untouched)', e1 !== base && base[RT.TOKEN_ENV] === DROPPED[RT.TOKEN_ENV] && keys(base).length === keys(KEPT).length + keys(DROPPED).length);
+    return bad;
+  };
+  const real = judge(RT.relayEnv);
+  ok(real.length === 0, 'relayEnv passes the table: the kept names (PATH LANG TMPDIR http_proxy) + the instance token + the knock — none of the hub\'s session tokens, cloud keys, the cluster\'s shared token, other proxies, HOME, a loader hook', real);
+  ok(JSON.stringify(RT.RELAY_ENV_KEEP) === JSON.stringify(['PATH', 'LANG', 'TMPDIR', 'http_proxy']) && Object.isFrozen(RT.RELAY_ENV_KEEP), 'the kept list is pinned (measured on frpc 0.70.0: it runs on an empty env, never reads HOME, dials through `http_proxy` — the one proxy name it reads)', RT.RELAY_ENV_KEEP);
+  const spread = judge((b, o) => ({ ...b, ...RT.relayEnv(b, o) }));
+  ok(spread.includes('no dropped name, no dropped value'), 'MUTANT spreads process.env under the built names ⇒ RED', spread);
+  const preFix = judge((b, { token = '', knock = '' } = {}) => { const e = { ...b, [RT.KNOCK_ENV]: knock, [RT.TOKEN_ENV]: token }; delete e.VIBESPACE_FRPS_TOKEN; delete e[RT.CLUSTER_TOKEN_ENV]; return e; });
+  ok(preFix.includes('no dropped name, no dropped value'), 'MUTANT the pre-fix spawn env (a copy of process.env minus two names) ⇒ RED', preFix);
+}
+
 console.log('⑦ THE NAME RULE');
 const pre = { prefixes: RT.PREFIXES, user: a.instanceId };
 const NAME_TABLE = [
@@ -135,9 +179,13 @@ const src = walk(path.join(REPO, 'src')).map((f) => [path.relative(REPO, f), fs.
 src.push(['server.js', fs.readFileSync(path.join(REPO, 'server.js'), 'utf8')]);
 const spelled = src.filter(([, t]) => t.includes('VIBESPACE_RELAY_TOKEN')).map(([f]) => f);
 ok(JSON.stringify(spelled) === JSON.stringify(['src/relay-token.js']), 'the env name VIBESPACE_RELAY_TOKEN is spelled in src/relay-token.js only', spelled);
+const spelledK = src.filter(([, t]) => t.includes('VIBESPACE_FRP_AUTH_TOKEN')).map(([f]) => f);
+ok(JSON.stringify(spelledK) === JSON.stringify(['src/relay-token.js']), 'so is the knock\'s VIBESPACE_FRP_AUTH_TOKEN (RT.KNOCK_ENV)', spelledK);
 const users = src.filter(([, t]) => /\bRT\.TOKEN_ENV\b|\.TOKEN_ENV\]/.test(t)).map(([f]) => f);
 const frpSrc = fs.readFileSync(path.join(REPO, 'src/plugins/frp.js'), 'utf8');
-ok(JSON.stringify(users) === JSON.stringify(['src/plugins/frp.js']) && (frpSrc.match(/RT\.TOKEN_ENV/g) || []).length === 1 && /\[RT\.TOKEN_ENV\]: cfg\.ident\.token \|\| ''/.test(frpSrc), 'its one use: the frpc child\'s spawn env in src/plugins/frp.js (the toml names it through RT.frpcLines\' template)', users);
+const builders = src.filter(([, t]) => /\bRT\.relayEnv\(/.test(t)).map(([f]) => f);
+ok(users.length === 0 && JSON.stringify(builders) === JSON.stringify(['src/plugins/frp.js']) && (frpSrc.match(/\bRT\.relayEnv\(/g) || []).length === 1 && /const env = RT\.relayEnv\(process\.env, \{ token: cfg\.ident\.token \|\| '', knock \}\);/.test(frpSrc), 'nobody outside src/relay-token.js puts the token under its name: the ONE frpc spawn env is RT.relayEnv(process.env, …) in src/plugins/frp.js (the toml names it through RT.frpcLines\' template)', { users, builders });
+ok(!/\.\.\.process\.env\b/.test(frpSrc) && !/Object\.assign\(\s*\{\s*\}\s*,\s*process\.env/.test(frpSrc) && (frpSrc.match(/\bspawn\(/g) || []).length === 1 && /spawn\(bin, \['-c', frpConf\(\)\], \{[^}]*\benv \}\)/.test(frpSrc), 'src/plugins/frp.js copies process.env nowhere — its one long-lived child (frpc) is spawned with the built env', (frpSrc.match(/.*\bspawn\(.*/g) || []).join(' | '));
 const rtSrc = fs.readFileSync(path.join(REPO, 'src/relay-token.js'), 'utf8');
 ok(!/\brequire\s*\(/.test(rtSrc.replace(/\/\/.*$/gm, '')) && !/\bimport\b/.test(rtSrc.replace(/\/\/.*$/gm, '')), 'src/relay-token.js requires nothing (PURE — crypto handed in)');
 ok(/'src\/relay-token\.js'/.test(fs.readFileSync(path.join(REPO, 'scripts/test-architecture.mjs'), 'utf8')), 'it is in test-architecture\'s PURE set');

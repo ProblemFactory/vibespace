@@ -331,6 +331,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     'auto-always': () => actBtn('auto-always', UI_ICONS.check, t('Always for this conversation'), t('Grants the key to this conversation — the Vault window lists it; take it back there'), 'iw-act-exit'),
     // q-053 P0b (decision ①): a pool's move to another provider — Always lets THIS pool make such a move by itself from now on
     'pool-always': () => actBtn('pool-always', UI_ICONS.check, t('Always for this pool'), t('Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time'), 'iw-act-exit'),
+    // lane vault-run-door: a held run's «always» = this command SHAPE for this conversation, 30 days — the second password again first
+    'shape-always': () => actBtn('shape-always', UI_ICONS.check, t('Always for this shape'), t('The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first'), 'iw-act-exit'),
     // lane browser-propose: the agent's browser proposal — ONE primary Approve (runs exactly what the item says), a quiet Reject
     'proposal-approve': () => actBtn('proposal-approve', UI_ICONS.check, t('Approve'), t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit'),
     'proposal-reject': () => actBtn('proposal-reject', UI_ICONS.close, t('Reject'), t('Reject'), 'iw-act-exit'),
@@ -429,7 +431,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     // verify-r4 F4: an exit ask's detail IS the command it asks to run — shown VERBATIM (textContent in a <pre>), never as
     // markdown: `echo "*important*"` rendered as "echo "important"" (the asterisks gone) and a `# clean up` line as a
     // heading, the line breaks folded — the user allowed a command the pane did not show (reproduced)
-    const isCmd = !!(it.action && it.action.type === 'exit-run-ask'); // open or answered: a command is never markdown
+    const isCmd = !!(it.action && (it.action.type === 'exit-run-ask' || it.action.type === 'vault-run-ask')); // open or answered: a command is never markdown (lane vault-run-door: the run card's command line shows VERBATIM — a `*` or `#` must not be eaten by markdown; SEAM int330)
     // verify r6 F3: a helper's ask carries its WHOLE request in the detail — verbatim too (markdown would eat a `*`,
     // fold its lines and make a `# …` line a heading: the same trap as F4 of r4)
     const verbatim = isCmd || !!(it.action && it.action.type === 'helper-ask');
@@ -655,10 +657,10 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       if (await model.runAction(it, a === 'proposal-approve' ? 'approve' : 'reject')) advance(id);
       return;
     }
-    if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always' || a === 'pool-always') {
+      if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always' || a === 'pool-always' || a === 'shape-always') {
       // lane hub-act-ask: the same arm as every Allow (a pane shown ARM_MS ago or less is not the one the user read)
       if (a !== 'hub-deny') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again')); return; } }
-      if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' ? 'always' : a.slice(4))) advance(id);
+        if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a.slice(4))) advance(id);
       return;
     }
     if (a === 'exit-allow' || a === 'exit-deny') {

@@ -897,5 +897,29 @@ app.post('/api/accounts/codex-subscription/:id/finalize', (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// ── Isolated-home logins of ANY harness whose descriptor declares one (lane antigravity-harness: «Add Google
+// account (Antigravity)»). The descriptor names the dir form, the id prefix and the login command
+// (creds.loginCommand — antigravity: HOME=<the account root> DBUS_SESSION_BUS_ADDRESS=disabled: agy, the CLI's own
+// sign-in in its TUI with a link + a pasted code); the client opens it in a terminal and polls finalize.
+app.post('/api/accounts/home-subscription', (req, res) => {
+  try {
+    const b = req.body || {};
+    const { id, dir, loginCmd } = accounts.createHomeSubscription(String(b.backend || ''), { name: b.name });
+    res.json({ success: true, id, dir, loginCmd });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// "Sign in again" on an existing one (a lapsed or unfinished login): the same terminal + finalize loop
+app.post('/api/accounts/home-subscription/:id/login', (req, res) => {
+  try { res.json({ success: true, ...accounts.homeLoginCommand(req.params.id) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/accounts/home-subscription/:id/finalize', (req, res) => {
+  try {
+    // no login-expiry sweep / pool wake here: the login declares no deadline (creds.loginState absent) and there
+    // is no pool yet — the quota commit wakes its own reader
+    res.json({ success: true, ...accounts.finalizeHomeSubscription(req.params.id) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 }
 module.exports = { create };

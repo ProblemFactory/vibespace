@@ -75,12 +75,23 @@ const appSecretsDoor = { vaultRows: () => require('../app-secrets.js').appSecret
 // hosts know none; «Hub secrets» = the engine's own entries (r2), names and dates only
 const vaultHostOf = (k) => { try { const s = String(k || ''); return s ? (s.startsWith('dial-') ? hosts.findByDeviceId(s.slice(5)) : hosts.get(s)) || null : null; } catch { return null; } };
 const vaultMachineName = (k) => { const h = vaultHostOf(k); return String((h && (h.name || h.id)) || k); };
-const vaultContents = require('./vault-contents.js').create({ vault, sources: {
+const vaultSources = {
   accounts: () => getAccounts(), integrations: () => (integrations ? { vaultRows: () => integrations.vaultRows({ machineName: vaultMachineName }), vaultReveal: (e, f) => integrations.vaultReveal(e, f) } : null), channels: () => getChannels(), mounts: () => mounts, 'app-secrets': () => appSecretsDoor,
   secrets: () => require('./vault-contents.js').secretSource({ vault, machineName: vaultMachineName }),
   passkeys: () => (browserDialogs && typeof browserDialogs.passkeyVaultRows === 'function' ? { vaultRows: () => browserDialogs.passkeyVaultRows(), vaultReveal: (e, f) => browserDialogs.passkeyVaultReveal(e, f) } : null),
   automation: () => automation,   // design q-046: the automation keys (their values, one per reveal — to hand to an outside party)
-} });
+};
+const vaultContents = require('./vault-contents.js').create({ vault, sources: vaultSources, runFacts: (row) => vaultRun.rowFacts(row) });   // lane vault-run-door: each row's «Usable by agent runs»
+// lane vault-run-door (design q-043 §8 P0-f): `vibespace-vault run` — the HUB spawns an agent's command with a stored value
+// injected (env / a 0600 file / stdin — never argv) and answers its output SCRUBBED; the owner opens each entry for runs and
+// answers each new command shape (src/server/vault-run-door.js over PURE src/vault-run.js); a lock stops every run
+const vaultRun = require('./vault-run-door.js').create({ dataDir: path.join(rootDir, 'data'), vault, sources: vaultSources, userTodos, log: (m) => console.log('[vault-run]', m),
+  agentEnv: () => require('../agent-env.js').agentEnv(process.env, { drop: require('../harness-env.js').agentCredentialEnvNames(require('../harnesses').list()) }),
+  instanceKind: () => require('../hub-act-policy.js').instanceKindOf(process.env, { presetsDir: (() => { try { return require('./cluster-presets.js').sharedPresets().dir || null; } catch { return null; } })() }),
+  liveOf: (cid) => { for (const s of activeSessions.values()) if (s && cid && (s.backendSessionId || s.claudeSessionId) === cid) return true; return false; } });
+try { const n = vaultRun.sweep(); if (n) console.log(`[vault-run] ${n} run folder(s) a previous process left were shredded`); } catch { }
+process.once('exit', () => { try { vaultRun.closeAll(); } catch { } });
+setTimeout(() => { try { const n = vaultRun.reconcile(); if (n) console.log(`[vault-run] ${n} run card(s) from before the restart resolved expired`); } catch { } }, 3000).unref?.();
 // design q-047 L1 (lane vault-totp): TWO-STEP CODES — the vault's `totp:<name>` entries (src/server/vault-totp.js over PURE
 // src/totp.js): a person sees the CODE (no 「验证是你」, audited); a conversation — THIS RUN of it (its token's digest) — or a
 // Task Group a person granted gets it; the seed only behind the reveal door, never to an agent
@@ -89,7 +100,7 @@ const vaultTotp = require('./vault-totp.js').create({ dataDir: path.join(rootDir
 // test-msg-cli-groups §2c); a use by such a fork presents another token, so the parent's run-bound grant never covers it
 const totpSessionOf = (cid) => [...activeSessions.values()].find((s) => s && !s.isTmuxView && require('../claude-lock-capture.js').addressableId(s) === cid) || null;
 const totpRunOf = (cid) => { const s = totpSessionOf(cid); return s ? require('./vault-totp.js').runOfToken(s.agentToken) : null; };   // THIS run of a running conversation (its token's digest)
-require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req),
+require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
   linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
   // int317 (RED-3): the door's audit row → the device audit (the machine card's Activity…) — the session, its host key, the status

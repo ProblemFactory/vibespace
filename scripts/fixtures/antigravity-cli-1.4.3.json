@@ -1,0 +1,359 @@
+{
+  "_comment": "Antigravity CLI (agy) as MEASURED for the antigravity harness (lane antigravity-harness, 2026-10-20). provenance 'binary' = the real agy run OFFLINE (bwrap --unshare-net, a scratch HOME, no D-Bus session bus, strace) with no sign-in and no prompt reaching anyone; provenance 'docs' = https://antigravity.google/docs/cli/headless/ (fetched, text kept in the lane log) until a signed-in capture replaces it; provenance 'changelog' = the release notes the binary itself prints (`agy changelog`).",
+  "cli": "agy",
+  "version": "1.4.3",
+  "measuredAt": "2026-10-20",
+  "install": {
+    "provenance": "binary",
+    "script": "https://antigravity.google/cli/install.sh (read, not run: it would also run `agy install`)",
+    "manifest": "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json",
+    "manifestVersion": "1.4.3",
+    "package": "cli_linux_x64.tar.gz → antigravity (a 222 MB stripped Go ELF), sha512 verified",
+    "selfUpdate": "the CLI updates itself in the background during regular runs (installer notice) — record `agy --version` per spawn"
+  },
+  "help": {
+    "provenance": "binary",
+    "flags": {
+      "--add-dir": "Add a directory to the workspace (repeatable) (default [])",
+      "--agent": "Agent for the current CLI session",
+      "-c": "Short alias for --continue",
+      "--continue": "Continue the most recent conversation",
+      "--conversation": "Resume a previous conversation by ID",
+      "--dangerously-skip-permissions": "Auto-approve all tool permission requests without prompting",
+      "--disable-slash-commands": "Disable slash command and skill expansion in print mode",
+      "--effort": "Reasoning effort for the current CLI session (low|medium|high|xhigh|max)",
+      "-i": "Short alias for --prompt-interactive",
+      "--input-format": "Input format for print mode (text, stream-json). stream-json reads one NDJSON message per line from stdin and runs a turn for each; it requires --output-format stream-json (default text)",
+      "--json-schema": "Optional JSON schema string or path to a schema file to enforce structured output (for stream-json, only applicable to the final result)",
+      "--log-file": "Override CLI log file path",
+      "--mode": "Set the agent execution mode for this session (accept-edits, auto, plan)",
+      "--model": "Model for the current CLI session",
+      "--new-project": "Create a new project for this session",
+      "--output-format": "Output format for print mode (text, json, stream-json) (default text)",
+      "-p": "Short alias for --print",
+      "--print": "Run a single prompt non-interactively and print the response",
+      "--print-timeout": "Optional time limit for print mode; 0 waits until the turn completes (default 0s)",
+      "--project": "Project ID or project name for the current CLI session",
+      "--prompt": "Alias for --print",
+      "--prompt-interactive": "Run an initial prompt interactively and continue the session",
+      "--remote-control": "Create a remote connection for the CLI session on start up",
+      "--sandbox": "Run in a sandbox with terminal restrictions enabled"
+    },
+    "subcommands": [
+      "agent",
+      "agents",
+      "changelog",
+      "help",
+      "install",
+      "mcp",
+      "mic-serve",
+      "models",
+      "plugin",
+      "plugins",
+      "remote-control",
+      "update"
+    ]
+  },
+  "flagsVsDocs": {
+    "effort": "binary: low|medium|high|xhigh|max (docs: low|medium|high)",
+    "mode": "binary: --mode accept-edits|auto|plan (not in the headless docs)",
+    "printTimeout": "binary: default 0s = wait until the turn completes (docs page: 5m; the changelog: changed to unlimited)",
+    "extra": [
+      "--disable-slash-commands",
+      "--json-schema",
+      "--log-file",
+      "--new-project",
+      "--project",
+      "--prompt-interactive/-i",
+      "--remote-control",
+      "--add-dir",
+      "--sandbox"
+    ]
+  },
+  "unauthenticated": {
+    "provenance": "binary",
+    "argv": [
+      "-p",
+      "hello",
+      "--output-format",
+      "stream-json"
+    ],
+    "stdout": {
+      "event": "result",
+      "result": {
+        "conversation_id": "",
+        "status": "ERROR",
+        "response": "",
+        "error": "authentication failed or timed out",
+        "duration_seconds": 0,
+        "num_turns": 0,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "thinking_tokens": 0,
+          "cache_read_tokens": 0,
+          "total_tokens": 0
+        }
+      }
+    },
+    "stderr": [
+      "Authentication required. Please visit the URL to log in:",
+      "https://accounts.google.com/o/oauth2/auth?<redacted: client_id, PKCE challenge, state>",
+      "Waiting for authentication (timeout 60s)...",
+      "Or, paste the authorization code here and press Enter:",
+      "Error: authentication interrupted.",
+      "error: authentication failed or timed out"
+    ],
+    "behaviour": "with stdin a CHARACTER DEVICE (/dev/null, /dev/zero — measured for -p and for the stream mode) it prints the OAuth URL (accounts.google.com, redirect https://antigravity.google/oauth-callback, scopes cloud-platform/userinfo/cclog/experimentsandconfigs/aicode) and WAITS up to 60 s reading a pasted authorization code on STDIN, then answers result status ERROR 'authentication failed or timed out'; with stdin a PIPE it refuses at once (streamPipe)",
+    "usageArgv": [
+      "-p",
+      "/usage",
+      "--output-format",
+      "json"
+    ],
+    "usageStdout": {
+      "conversation_id": "",
+      "status": "ERROR",
+      "response": "",
+      "error": "authentication failed or timed out",
+      "duration_seconds": 0,
+      "num_turns": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "thinking_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 0
+      }
+    },
+    "models": "agy models (offline, no login): exit 1, stderr 'Please sign in to view available models. Launch the CLI without arguments to sign in.'",
+    "streamPipe": {
+      "provenance": "binary",
+      "argv": [
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json"
+      ],
+      "stdin": "a pipe (how the wrapper runs it)",
+      "stderr": [
+        "Error: authentication required. Run 'agy' to log in, then retry.",
+        "error: authentication failed or timed out"
+      ],
+      "stdout": {
+        "event": "result",
+        "result": {
+          "conversation_id": "",
+          "status": "ERROR",
+          "response": "",
+          "error": "authentication failed or timed out",
+          "duration_seconds": 0,
+          "num_turns": 0,
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 0
+          }
+        }
+      },
+      "behaviour": "refuses AT ONCE (no URL, no wait) — the docs' 'exits with an authentication required error instead of hanging' holds for a PIPE; with stdin a character device (/dev/null, /dev/zero) it prints the URL and waits 60 s for a pasted code (the `stderr` above)"
+    }
+  },
+  "dials": {
+    "provenance": "binary",
+    "offline": "--version/--help: no inet connect (nscd only); models / agents / -p: DNS lookups to the resolver (127.0.0.53:53), all refused in the sandbox"
+  },
+  "files": {
+    "provenance": "binary",
+    "home": "everything under $HOME (XDG_CONFIG_HOME is NOT honoured: measured)",
+    "appData": "~/.gemini/antigravity-cli/ (installation_id, conversation_summaries.db sqlite, cache/projects, log/cli-<ts>.log, builtin/skills, settings.json)",
+    "config": "~/.gemini/config/ (mcp_config.json, projects/, rules, skills, plugins)",
+    "secretsFile": "~/.config/antigravity/plugin-secrets.json (file-based secret storage, logged at start)",
+    "keyring": "zalando/go-keyring; with NO D-Bus session bus the CLI bypasses the keyring and keeps the login in a file under HOME (changelog + the binary's shouldBypassKeyring)"
+  },
+  "env": {
+    "provenance": "binary",
+    "names": [
+      "GEMINI_API_KEY",
+      "GOOGLE_API_KEY",
+      "GOOGLE_GEMINI_BASE_URL",
+      "AGY_ADC_AUTH",
+      "AGY_ACCOUNT",
+      "GOOGLE_GENAI_USE_ENTERPRISE",
+      "ANTIGRAVITY_PROJECT_ID",
+      "ANTIGRAVITY_LS_ADDRESS"
+    ]
+  },
+  "stream": {
+    "provenance": "docs",
+    "input": {
+      "user": {
+        "event": "user",
+        "message": {
+          "content": "<text>"
+        }
+      },
+      "userBlocks": {
+        "event": "user",
+        "message": {
+          "content": [
+            {
+              "type": "text",
+              "text": "<text>"
+            }
+          ]
+        }
+      },
+      "requires": "--output-format stream-json; a prompt on -p is dropped",
+      "end": "close stdin (exit 0)"
+    },
+    "init": {
+      "event": "init",
+      "conversation_id": "c3b66b04-872b-4fbe-a3a4-058a026ef20a",
+      "init": {
+        "cwd": "/home/user/project",
+        "tools": [
+          "ask_permission",
+          "run_command",
+          "write_to_file"
+        ],
+        "permission_mode": "request-review"
+      }
+    },
+    "stepUser": {
+      "event": "step_update",
+      "step_update": {
+        "conversation_id": "c3b66b04-872b-4fbe-a3a4-058a026ef20a",
+        "step_index": 0,
+        "state": "DONE",
+        "step_type": "user_input"
+      }
+    },
+    "stepText": {
+      "event": "step_update",
+      "step_update": {
+        "conversation_id": "9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f",
+        "step_index": 2,
+        "state": "ACTIVE",
+        "step_type": "agent_response",
+        "text_delta": "apple"
+      }
+    },
+    "stepTool": {
+      "event": "step_update",
+      "step_update": {
+        "conversation_id": "edb1c8c1-50ba-4f3f-87eb-412d0e9d47c3",
+        "step_index": 4,
+        "state": "DONE",
+        "step_type": "tool",
+        "tool_name": "run_command",
+        "duration_seconds": 0.07,
+        "tool_info": {
+          "name": "run_command",
+          "parameters": {
+            "CommandLine": "echo hello_headless_demo"
+          },
+          "output": "hello_headless_demo\r\n"
+        }
+      }
+    },
+    "result": {
+      "event": "result",
+      "result": {
+        "conversation_id": "9ec58bfd-4d67-4f5e-83a5-9d907e9c6b1f",
+        "status": "SUCCESS",
+        "response": "apple\n",
+        "duration_seconds": 1.427806958,
+        "num_turns": 1,
+        "usage": {
+          "input_tokens": 30384,
+          "output_tokens": 4,
+          "thinking_tokens": 0,
+          "cache_read_tokens": 0,
+          "total_tokens": 30388
+        }
+      }
+    },
+    "statuses": [
+      "SUCCESS",
+      "ERROR",
+      "CANCELED",
+      "INTERRUPTED",
+      "INVALID",
+      "WAITING",
+      "RUNNING"
+    ],
+    "inputErrors": [
+      {
+        "input": "unrecognized event name",
+        "result": "skipped, a stderr warning"
+      },
+      {
+        "input": "control_request / control_response",
+        "result": "ERROR, session ends",
+        "exit": 2
+      },
+      {
+        "input": "a slash command the CLI handles (/model, /usage)",
+        "result": "ERROR '/model is answered by the CLI itself and is unavailable with --input-format stream-json; run it as its own --print /model invocation'",
+        "exit": 2
+      },
+      {
+        "input": "message missing the event field",
+        "exit": 1
+      },
+      {
+        "input": "invalid JSON line",
+        "exit": 1
+      },
+      {
+        "input": "content block other than text",
+        "exit": 1
+      }
+    ],
+    "softDeny": "a tool needing approval is soft-denied: the run continues, exits 0, a stderr notice names the tool and how to allow it (permissions.allow in ~/.gemini/antigravity-cli/settings.json, or --dangerously-skip-permissions)",
+    "agyError": "a turn ending on an agent / model API failure prints `AGY_ERROR: {...}` (short_error, status, code, retryability) on stderr (changelog: exit 3 for -p)"
+  },
+  "slashInPrint": {
+    "provenance": "changelog",
+    "answeredWithoutATurn": [
+      "/usage",
+      "/quota",
+      "/credits",
+      "/model",
+      "/effort",
+      "/skills",
+      "/permissions",
+      "/hooks",
+      "/help",
+      "/changelog",
+      "/config"
+    ],
+    "words": "-p \"/usage\" … emit one tab-separated record per line — or a structured payload under --output-format json and stream-json — without starting an agent turn, spending quota, or leaving a conversation behind"
+  },
+  "models": {
+    "provenance": "docs",
+    "slugs": [
+      "gemini-4-argon-high",
+      "gemini-4-argon-medium",
+      "gemini-3.8-flash-high",
+      "gemini-3.8-flash-medium",
+      "gemini-3.7-flash-high",
+      "gemini-3.7-flash-medium",
+      "gemini-3.6-flash-high",
+      "gemini-3.6-flash-medium",
+      "gemini-3.1-pro-high"
+    ],
+    "unknown": "headless --model with an unknown slug exits 1 with an ERROR envelope (no fallback)"
+  },
+  "usage": {
+    "provenance": "changelog + docs + binary",
+    "claim": "agy's release notes (the binary's own `agy changelog`): `-p \"/usage\"`, `/quota`, `/credits`, `/model`, `/effort`, `/skills` emit one tab-separated record per line — or a structured payload under --output-format json and stream-json — \"without starting an agent turn, spending quota, or leaving a conversation behind\"",
+    "docs": "the /usage page (antigravity.google/docs/cli/commands/usage/) describes the TUI panel only: per-model usage limits and remaining requests/tokens, refreshed from the backend when opened — no print-mode schema",
+    "binary": "RPC names RetrieveUserQuota / FetchQuotaStatus and quota_info / remaining_fraction / reset_time tags — not the print format (Go string tables are deduplicated: no struct can be read off them)",
+    "shape": "UNKNOWN until a signed-in capture — scripts/agy-usage-capture.mjs writes scripts/fixtures/antigravity-usage-<version>.json",
+    "unauthenticated": "measured: the json envelope ERROR \"authentication failed or timed out\", num_turns 0, every usage counter 0 (unauthenticated.usageStdout)"
+  }
+}

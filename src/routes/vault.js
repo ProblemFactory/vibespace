@@ -6,10 +6,17 @@
 // (5 ⇒ the next minute refused, `paced`) and audits every failure with the caller's address. TWO-STEP CODES (design q-047
 // L1, lane vault-totp — src/server/vault-totp.js): a person adds, views the code of, deletes and grants an entry; an agent
 // gets a granted entry's CURRENT CODE (never the seed) — a seed arrives in a request body and is taken off it like a password.
+// lane vault-run-door (design q-043 §8, P0-f): `vibespace-vault run` — POST /api/agent/vault/run (a conversation's own vsst_
+// bearer; a job token is refused job_no_use, a cookie unauthorized) hands the CLI's words to the HUB's run door
+// (src/server/vault-run-door.js), which spawns the child with the values injected and answers its output SCRUBBED — never a
+// value; GET /api/agent/vault/runnable = the entries a run may reference (names, never a value). A PERSON opens an entry for
+// runs (POST /api/vault/runnable) and answers the run card (POST /api/vault/run/asks/:askId — 允许一次 / 此形状总是 / 拒绝);
+// switching ON and «always» need this page's 验证是你 window (the second password again, in the press's own task).
 const { ownOriginOf, pageVerdict } = require('../write-origin.js');   // THE origin rule (its strict form: a person on this page)
 const { sameToken } = require('../pairing-token.js');
 const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
 const { runOfToken } = require('../server/vault-totp.js');
+const V = require('../vault.js');   // PURE: the agent-secret namespace builder + mint verdict (lane vault-mint-put)
 
 const STATUS = Object.freeze({
   wrong_password: 403, corrupt: 500, paced: 429, vault_not_set_up: 409, already_set_up: 409, busy: 409, migration_failed: 500,
@@ -20,6 +27,10 @@ const STATUS = Object.freeze({
   // design q-047 L1 (lane vault-totp): the two-step doors
   exists: 409, bad_seed: 400, seed_too_short: 400, bad_uri: 400, hotp_unsupported: 400, bad_digits: 400, bad_period: 400, bad_algorithm: 400, bad_text: 400, bad_name: 400,
   bad_args: 400, not_granted: 403, not_running: 409, failed: 500,
+  // lane vault-run-door: the switch and the run card's answer (people's doors)
+  entry_has_its_own_door: 403, entry_unknown: 404, ask_settled: 409, ask_unknown: 404, ask_expired: 410, ask_changed: 409, bad_answer: 400,
+  always_not_offered: 400, conversation_gone: 410,
+  bad_scope: 400, bad_length: 400, bad_charset: 400, value_required: 400, value_in_argv: 400, // lane vault-mint-put
 });
 const WORDS = Object.freeze({
   wrong_password: 'that is not the second password',
@@ -56,7 +67,17 @@ const WORDS = Object.freeze({
   bad_args: 'name a running conversation or a task group',
   not_granted: 'this conversation may not use that two-step code — the owner grants it in the Vault window (用于…); never ask for the seed',
   not_running: 'that conversation is not running — a code is granted to a running conversation',
-  failed: 'the two-step door failed — nothing changed',
+  entry_has_its_own_door: 'that stored value is never used by an agent\'s run — it has its own door',
+  entry_unknown: 'that stored value is not there any more',
+  ask_settled: 'already answered', ask_unknown: 'that request is gone', ask_expired: 'too late — it was refused after 60 s',
+  ask_changed: 'the request changed after it was shown — nothing ran', bad_answer: 'the answer is once, always or deny (always: 8h, 30d or forever)',
+  always_not_offered: '«always» is not offered for this command', conversation_gone: 'the conversation that asked has ended — nothing to run it for',
+  failed: 'the vault door failed — nothing changed',
+  bad_scope: 'this session has no conversation to own a vault entry',
+  bad_length: 'the length is a whole number from 8 to 256',
+  bad_charset: 'the charset is ascii-printable, alnum or digits',
+  value_required: 'put needs a value — pass --from-file or --stdin (the value rides the request body, never the command line)',
+  value_in_argv: 'the value must not ride the URL (it is logged like a command line) — put it in the request body via --from-file or --stdin',
 });
 const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
 const ipOf = (req) => String(req.ip || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '') || null;
@@ -70,7 +91,7 @@ function personVerdict(req) {
   return v.ok ? { ok: true } : { ok: false, code: 'cross_site' };
 }
 
-function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {},
+function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null,
   totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }) }) {
   const answer = (res, r) => {
     if (r && r.ok) return res.json({ ...r, ...vault.facts() });
@@ -155,6 +176,43 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     const r = vault.lock('agent', { ip: ipOf(req) });
     return r.ok ? res.json({ ...r, ...agentFacts() }) : answer(res, r);
   });
+  // ── agents: MINT / PUT a secret in THEIR OWN namespace (design q-043 §9, lane vault-mint-put). The SCOPE is the
+  //    authenticated principal's conversation / job (never the agent's to choose); the engine seals and NEVER returns a
+  //    value. A bearer may only CREATE here — it can never READ one back (there is no agent reveal door; the owner reveals
+  //    in the Vault window behind 「验证是你」). An agent error says only the code + its words (never the vault's facts). ──
+  const agentErr = (res, r) => { const code = (r && r.code) || 'error'; res.status(STATUS[code] || 400).json({ ok: false, code, error: WORDS[code] || code }); };
+  const norm = (r) => { if (!r || r.ok) return r; let code = r.code; if (typeof code === 'string') { if (code.indexOf('vault_locked') >= 0) code = 'vault_locked'; else if (code === 'bad-name') code = 'bad_name'; } return { ...r, code }; };
+  /** The calling principal → { scope, actor } | null. A vsst_ session: its conversation id; a live jbt_ job: `job-<id>`. */
+  function agentPrincipal(req) {
+    const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
+    if (token.startsWith('jbt_')) { const jm = getJobs && getJobs(); const j = jm && jm.ready !== false && typeof jm.jobByToken === 'function' ? jm.jobByToken(token) : null; return j ? { scope: `job-${j.id}`, actor: j.name || `job ${j.id}` } : null; }
+    if (!token.startsWith('vsst_')) return null;
+    for (const [k, s] of activeSessions) if (s && sameToken(token, s.agentToken)) return { scope: String(s._webuiId || k), actor: s.name || s.webuiName || String(s._webuiId || k) };
+    return null;
+  }
+  app.post('/api/agent/vault/mint', (req, res) => {
+    const p = agentPrincipal(req);
+    if (!p) return agentErr(res, { code: 'unauthorized' });
+    const b = req.body && typeof req.body === 'object' ? req.body : {};
+    const en = V.agentEntryName(p.scope, b.name);
+    if (!en.ok) return agentErr(res, en);
+    const r = vault.agentMint(en.name, { length: b.length, charset: b.charset, actor: p.actor });
+    if (!r.ok) return agentErr(res, norm(r));
+    res.json({ ok: true, name: r.name, ref: r.ref, provenance: 'agent minted · never shown to the agent', for: typeof b.for === 'string' ? b.for.slice(0, 200) : null });
+  });
+  app.post('/api/agent/vault/put', (req, res) => {
+    const p = agentPrincipal(req);
+    const b = req.body && typeof req.body === 'object' ? req.body : {};
+    const value = b.value; if (b && typeof b === 'object') delete b.value;   // taken OFF the request — no later reader sees it
+    if (!p) return agentErr(res, { code: 'unauthorized' });
+    if (req.query && typeof req.query.value !== 'undefined') return agentErr(res, { code: 'value_in_argv' });   // never the URL (argv-readable)
+    const en = V.agentEntryName(p.scope, b.name);
+    if (!en.ok) return agentErr(res, en);
+    if (typeof value !== 'string' || value === '') return agentErr(res, { code: 'value_required' });
+    const r = vault.agentPut(en.name, value, { actor: p.actor });
+    if (!r.ok) return agentErr(res, norm(r));
+    res.json({ ok: true, name: r.name, ref: r.ref, provenance: 'agent stored · the agent saw the plaintext', hint: 'the transcript\'s copy is not protected — rotate this value when you can' });
+  });
   // ── THE LINK TOKEN (lane vault-e2e-password-fix-r2) — THE ONE ROAD a device token reaches a session: a remote session's
   //    attach child (src/agentd/attach-cli.js) asks here at every (re)start, its own session token naming the session, and
   //    holds the answer in memory; no attach config, argv or env carries it. A local session, a job token, an unknown
@@ -182,6 +240,67 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
       return answerLink(code === 'vault_locked' ? STATUS.vault_locked : 500, { ok: false, code, error: (e && e.message) || WORDS.vault_locked }, { again });
     }
   });
+  if (run) registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take });
+}
+
+/**
+ * lane vault-run-door — `vibespace-vault run` (design q-043 §8 P0-f). AN AGENT: POST /api/agent/vault/run {args, cwd} with
+ * its conversation's own vsst_ bearer — the door judges, may hold the call on the owner's card (≤ 60 s), spawns the child on
+ * the hub and answers {exit, stdout, stderr, …} SCRUBBED (the values and their five forms are placeholders); a job token ⇒
+ * 403 job_no_use; no bearer (a cookie) ⇒ 401. GET /api/agent/vault/runnable → {entries: [{ref, store, label, kind, field}]}.
+ * A PERSON (this page — any bearer human_only): POST /api/vault/runnable {id, on, page} (ON needs this page's 验证是你 window) ·
+ * POST /api/vault/run/asks/:askId {answer: once | always | deny, ttl, page} («always» needs the window too).
+ * THE THREE HOLES this door does NOT close (design §8.6 — said here, in the door's own header and on the manual): ① the child
+ * runs under the agent's uid — /proc/<child>/environ and the 0600 file are readable to it while the child lives (hygiene and
+ * audit, not isolation; q-040 closes it); ② a tool can send the value elsewhere — the card shows the hosts and the whole
+ * command, the egress fence is P1; ③ THE SCRUBBER IS A SIEVE — it reads stdout and stderr only: a value WRITTEN TO A FILE
+ * and then `cat`-ed by the agent's own shell never meets it (write-then-cat is accepted and audited, not closed).
+ */
+function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take }) {
+  const DOOR = require('../server/vault-run-door.js');
+  const bearerOf = (req) => String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
+  /** The vsst_'s conversation, as the door reads a caller — or { job } / null. */
+  function runCallerOf(req) {
+    const token = bearerOf(req);
+    if (token.startsWith('jbt_')) { const jm = getJobs && getJobs(); const j = jm && jm.ready !== false && typeof jm.jobByToken === 'function' ? jm.jobByToken(token) : null; return j ? { job: true, name: j.name || null } : null; }
+    if (!token.startsWith('vsst_')) return null;
+    for (const [k, s] of activeSessions) {
+      if (!s || !sameToken(token, s.agentToken)) continue;
+      const cid = s.backendSessionId || s.claudeSessionId || null;
+      return { conversationId: cid, scope: String(s._webuiId || k), sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, name: s.name || s.webuiName || null, cwd: typeof s.cwd === 'string' ? s.cwd : null,
+        remote: !!(s._dialDeviceId || (s.host && s.host !== 'local')), live: !s.isTmuxView };
+    }
+    return null;
+  }
+  const refusal = (res, r) => res.status(DOOR.statusOf(r.code)).json({ ok: false, code: r.code, error: r.words || r.code, ...Object.fromEntries(['ref', 'door', 'tool', 'template', 'name', 'flag', 'why', 'killed'].filter((k) => r[k] != null).map((k) => [k, r[k]])) });
+  app.post('/api/agent/vault/run', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const caller = runCallerOf(req);
+    if (!caller) return refusal(res, { code: 'unauthorized', words: DOOR.MORE_WORDS.unauthorized });
+    const b = req.body && typeof req.body === 'object' ? req.body : {};
+    const args = Array.isArray(b.args) && b.args.length <= 512 && b.args.every((x) => typeof x === 'string') ? b.args : null;
+    if (!args) return refusal(res, { code: 'bad_flag', words: require('../vault-run.js').WORDS.bad_flag });
+    // the CLI's call gave up (its own timeout, Ctrl-C, the conversation stopped): a card waiting settles, a child running stops
+    const ac = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+    let r;
+    try { r = await run.run({ caller, args, cwd: typeof b.cwd === 'string' ? b.cwd : null, signal: ac.signal }); }
+    catch (e) { return refusal(res, { code: 'failed', words: DOOR.MORE_WORDS.failed }); }
+    if (!r || !r.ok) return refusal(res, r || { code: 'failed' });
+    return res.json(r);
+  });
+  app.get('/api/agent/vault/runnable', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const caller = runCallerOf(req);
+    if (!caller || caller.job) return refusal(res, caller ? { code: 'job_no_use', words: require('../vault-run.js').WORDS.job_no_use } : { code: 'unauthorized', words: DOOR.MORE_WORDS.unauthorized });
+    const r = run.runnableFor();
+    return r.ok ? res.json(r) : refusal(res, r);
+  });
+  // ── people: the switch and the card's answer — ON / «always» need THIS page's 验证是你 window (the page secret, the body or X-Vault-Page) ──
+  const whoOf = (req) => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } };
+  const reauthedOf = (req, page) => !!(contents && contents.windowFacts(whoOf(req), typeof page === 'string' ? page : pageHeader(req)).open);
+  app.post('/api/vault/runnable', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.setRunnable({ id: b.id, on: b.on === true, reauthed: b.on === true && reauthedOf(req, page), by: 'user' }); }));
+  app.post('/api/vault/run/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; if (b.answer === 'once' && whoOf(req) === 'sign-in-off' && !reauthedOf(req, page)) return { ok: false, code: 'reveal_needs_password' }; return run.answer(String(req.params.askId), { answer: b.answer, ttl: b.ttl || undefined, reauthed: b.answer === 'always' && reauthedOf(req, page), by: 'user' }); }));
 }
 
 /** A page's reveal secret off a GET (X-Vault-Page) — the POST doors take it off the body. */

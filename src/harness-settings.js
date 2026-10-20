@@ -417,6 +417,69 @@ const HARNESS_SETTINGS = {
     },
     ],
   },
+  // Antigravity CLI (`agy`, lane antigravity-harness). The flags are agy 1.4.3's own (--help, measured): --model takes
+  // a slug (`agy models` lists them once signed in; an unknown one is refused, never swapped), --effort
+  // low|medium|high|xhigh|max, --mode accept-edits|auto|plan, --dangerously-skip-permissions. A change on a running
+  // chat restarts agy on the same conversation (its stream has no switch verb).
+  antigravity: {
+    prefix: 'antigravity',
+    category: t('Antigravity CLI'),
+    when: { harness: 'antigravity' }, // the whole section only where that CLI is installed (settings-view.js)
+    files: {},
+    rows: [
+    {
+      key: "defaultModel",
+      type: "enum", default: "", combobox: true,
+      options: [
+        { value: "", label: t("Default") },
+        { value: "gemini-4-argon-high", label: "gemini-4-argon-high" },
+        { value: "gemini-4-argon-medium", label: "gemini-4-argon-medium" },
+        { value: "gemini-3.8-flash-high", label: "gemini-3.8-flash-high" },
+        { value: "gemini-3.8-flash-medium", label: "gemini-3.8-flash-medium" },
+      ],
+      label: t("Default model"),
+      description: t("The model slug new Antigravity sessions start on (empty keeps Antigravity's own choice). `agy models` lists what your login may use; an unknown slug is refused by name."),
+      apply: { kind: 'spawn', how: '--model', via: 'model' },
+    },
+    {
+      key: "defaultEffort",
+      type: "enum", default: "",
+      options: [
+        { value: "", label: t("Default") },
+        { value: "low", label: "low" },
+        { value: "medium", label: "medium" },
+        { value: "high", label: "high" },
+        { value: "xhigh", label: "xhigh" },
+        { value: "max", label: "max" },
+      ],
+      label: t("Default effort"),
+      description: t("Reasoning effort for new Antigravity sessions (--effort)."),
+      apply: { kind: 'spawn', how: '--effort', via: 'effort' },
+    },
+    {
+      key: "defaultPermissionMode",
+      type: "enum", default: "",
+      options: [
+        { value: "", label: t("Default") },
+        { value: "accept-edits", label: t("Edit files freely, ask before commands") },
+        { value: "auto", label: t("Auto — a safety check decides") },
+        { value: "plan", label: t("Plan only — read and propose, change nothing") },
+        { value: "bypassPermissions", label: t("Never ask (full access)") },
+      ],
+      label: t("Default permission mode"),
+      description: t("How a new Antigravity session handles tools that need approval. In a chat, Antigravity cannot ask — a tool it would ask about is skipped and said in the chat; “Never ask” runs everything."),
+      apply: { kind: 'spawn', how: '--mode · --dangerously-skip-permissions', via: 'permissionMode' },
+    },
+    {
+      key: "defaultExtraArgs",
+      type: "text", default: "",
+      label: t("Default extra args"),
+      description: t("Extra Antigravity CLI args appended when starting an Antigravity session."),
+      tier: 'advanced',
+      apply: { kind: 'spawn', how: 'appended argv', via: 'extraArgs' },
+    },
+    ],
+  },
 };
 
 const BUILTIN_PREFIXES = Object.freeze(Object.keys(HARNESS_SETTINGS));

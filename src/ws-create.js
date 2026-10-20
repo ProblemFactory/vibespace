@@ -765,7 +765,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             console.log(`[session] explicit account pick ${String(data.accountId).slice(0, 12)} — skipping keeper adopt of ${data.keeperSid} (respawn applies the pick)`);
             delete data.keeperSid; delete data.keeperKind;
           }
-          if (capsOf(backend).pool && harness && harness.creds && accounts) { // the DECLARED pool row (caps.pool) on a harness whose credentials VibeSpace manages
+          // the DECLARED pool row (caps.pool) on a harness whose credentials VibeSpace manages — or a harness whose creds
+          // declare how a named account spawns (creds.spawnForm) without a pool: antigravity's per-session Google accounts
+          if (harness && harness.creds && accounts && (capsOf(backend).pool || !!harness.creds.spawnForm)) {
             try {
               // Plan C (2.315.0): a LOCAL pooled session gets its own link,
               // chosen by the session's declared model (deps.poolChooser reads
@@ -785,7 +787,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               const rp = resumePoolPin(data, accounts, backend);
               data._poolPin = rp ? rp.pin : null;
               data._poolPinPool = rp ? rp.poolId : null;
-              spawnAccount = accounts.resolveForSpawn(data.accountId, backend, data.hostId ? {} : {
+              // a REMOTE spawn says so (`remote`): a localOnly creds row (antigravity) refuses it by name
+              spawnAccount = accounts.resolveForSpawn(data.accountId, backend, data.hostId ? { remote: true } : {
                 ...(capsOf(backend).planC ? { sessionKey: id } : {}), // a per-session pool link only where the harness DECLARES plan C (caps.planC — claude)
                 // the store hands the chooser THE POOL IT RESOLVED for this spawn (per backend: a codex conversation on
                 // the default bills the CODEX default) — the caller never re-derives it (verify r2: a re-derivation here

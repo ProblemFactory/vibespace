@@ -9794,4 +9794,41 @@ export default {
   "Account deleted — \"{title}\" needs you to pick a {provider} account": "账号已删，「{title}」需要你选一个 {provider} 账号", // lane pool-provider-latents (q-055 M2): a deleted account's conversation, UNPLACED
   "{member} ({provider}) was deleted and no other {provider} account in pool \"{pool}\" can take this conversation, so nothing moved it. Allow once moves it to {offer} ({offerProvider}) — it restarts and its model becomes {model}. Always for this pool lets the pool move a conversation to another provider by itself from now on, with a line in the conversation each time. Deny leaves it where it is — add or sign in a {provider} account and it moves there.": "{member}（{provider}）已被删除，号池「{pool}」里没有别的 {provider} 账号能接手这个对话，所以没有把它切走。「允许一次」把它切到 {offer}（{offerProvider}）——会重启对话，模型改为 {model}；「一直（这个池）」让号池以后自己把对话切到另一个提供方，每次都在对话里留一行；「拒绝」保持原样——添加或登录一个 {provider} 账号后，它会切过去。",
   "{member} ({provider}) was deleted and no other {provider} account in pool \"{pool}\" can take this conversation, so nothing moved it — and no other provider in the pool serves its model. Add or sign in a {provider} account and it moves there.": "{member}（{provider}）已被删除，号池「{pool}」里没有别的 {provider} 账号能接手这个对话，所以没有把它切走——号池里也没有别的提供方能用它的模型。添加或登录一个 {provider} 账号后，它会切过去。",
+  // lane antigravity-harness commit 2: the Google account roster / add + sign-in-again flow, its billing words
+  "Add {login} account": "添加 {login} 账号",
+  "Name this account (e.g. Work, Personal)": "给这个账号起个名字（如：工作、个人）",
+  "e.g. Personal": "如：个人",
+  "A terminal opened — {cli} shows a sign-in link: open it, sign in with the account you want to add, and paste the code back. Your other logins are untouched; VibeSpace captures it automatically.": "终端已打开——{cli} 会显示一个登录链接：打开它，用你要添加的账号登录，再把代码粘贴回来。你的其他登录不受影响；VibeSpace 会自动接收。",
+  "A terminal opened — {cli} shows a sign-in link: open it, sign in with this account, and paste the code back. VibeSpace captures it automatically.": "终端已打开——{cli} 会显示一个登录链接：打开它，用这个账号登录，再把代码粘贴回来。VibeSpace 会自动接收。",
+  "✓ Signed in as {name}": "✓ 已登录为 {name}",
+  "This machine’s own login": "本机自己的登录",
+  "{login} account — runs on this machine": "{login} 账号——在本机运行",
+  "Each {cli} session can pick its {login} (New Session dialog / card ⚙). Each account is its own isolated login on this machine, switchable per session.": "每个 {cli} 会话都可以选择自己的 {login}（新建会话对话框 / 卡片 ⚙）。每个账号都是本机上独立隔离的登录，可按会话切换。",
+  "{login} accounts": "{login} 账号",
+  "Add {login} account…": "添加 {login} 账号…",
+  "Sign in another {login} account for the {cli} — stored in VibeSpace, switchable per session": "为 {cli} 再登录一个 {login} 账号——保存在 VibeSpace 里，可按会话切换",
+  "Still not signed in — open “Add {login} account…” to finish the login.": "仍未登录——请打开“添加 {login} 账号…”完成登录。",
+  "Sign in again": "重新登录",
+  "{login} — {name}": "{login}——{name}",
+  "{login} (the machine’s own)": "{login}（本机自己的）",
+  "Google login": "Google 登录",
+  "Google login (Antigravity CLI)": "Google 登录（Antigravity CLI）",
+  "Google login (on the host)": "Google 登录（在远程主机上）",
+  "Google account": "Google 账号",
+  // lane antigravity-harness: the Antigravity CLI harness (its settings section and permission words)
+  "Antigravity CLI": "Antigravity CLI",
+  "The model slug new Antigravity sessions start on (empty keeps Antigravity's own choice). `agy models` lists what your login may use; an unknown slug is refused by name.": "新的 Antigravity 会话起步用的模型 slug（留空 = 沿用 Antigravity 自己的选择）。`agy models` 会列出你的登录可用的模型；未知的 slug 会被点名拒绝。",
+  "Default effort": "默认推理强度",
+  "Reasoning effort for new Antigravity sessions (--effort).": "新 Antigravity 会话的推理强度（--effort）。",
+  "How a new Antigravity session handles tools that need approval. In a chat, Antigravity cannot ask — a tool it would ask about is skipped and said in the chat; “Never ask” runs everything.": "新的 Antigravity 会话如何处理需要批准的工具。聊天里 Antigravity 无法询问——它本要询问的工具会被跳过，并在聊天里说明；“从不询问”则全部执行。",
+  "Extra Antigravity CLI args appended when starting an Antigravity session.": "启动 Antigravity 会话时追加的 Antigravity CLI 参数。",
+  "Default (Antigravity’s own setting)": "默认（Antigravity 自己的设置）",
+  "{who} wants to run a command with a stored secret": "{who} 想用保险库里的密钥运行一条命令", // lane vault-run-door
+  "Always for this shape": "此形状总是", // lane vault-run-door
+  "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同一工具、旗标、主机与密钥 30 天内不再问——先要再输一次第二密码", // lane vault-run-door
+  "Allowed for this shape for 30 days": "此形状 30 天内总是允许", // lane vault-run-door
+  "Usable by agent runs": "可供 agent 运行使用", // lane vault-run-door
+  "An agent may use it in vibespace-vault run without ever seeing it — each new command asks you first": "agent 可以在 vibespace-vault run 里使用它，却永远看不到它——每条新命令先问你", // lane vault-run-door
+  "Agents may use it in a run now — each new command asks you first": "agent 现在可以在运行中使用它——每条新命令先问你", // lane vault-run-door
+  "Agents can no longer use it in a run": "agent 不能再在运行中使用它", // lane vault-run-door
 };

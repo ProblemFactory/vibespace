@@ -15,7 +15,7 @@
  * implementation, no socket transit). Orchestrator-only composition (env-key
  * overlay, named-account counts) layers on after.
  */
-function create({ app, machineProbes, accounts, claudeCmd, codexCmd } = {}) {
+function create({ app, machineProbes, accounts, claudeCmd, codexCmd, cliCmds = null } = {}) {
   if (!app) throw new Error('backend-status-route: app is required');
 
   app.get('/api/backend-status', async (req, res) => {
@@ -30,6 +30,15 @@ function create({ app, machineProbes, accounts, claudeCmd, codexCmd } = {}) {
       out.claude.namedLoggedIn = (l.accounts || []).filter((a) =>
         (a.backend || 'claude') === 'claude' && (a.loggedIn || (!a.pooled && a.type !== 'subscription' && a.tail))).length;
       if (out.codex) out.codex.namedLoggedIn = (l.accounts || []).filter((a) => a.backend === 'codex' && a.loggedIn).length; // onboarding readiness per backend (2.369.21)
+    } catch {}
+    // A harness whose DESCRIPTOR answers its own machine facts (creds.machineStatus — antigravity, lane
+    // antigravity-harness): a stat only, never a spawn; its named-login count rides the same row.
+    try {
+      const l = accounts.list();
+      for (const h of require('../harnesses').list()) {
+        if (!h.creds || typeof h.creds.machineStatus !== 'function' || out[h.id]) continue;
+        out[h.id] = { ...h.creds.machineStatus({ cmd: cliCmds?.current?.(h.id) ?? null }), namedLoggedIn: (l.accounts || []).filter((a) => a.backend === h.id && a.loggedIn).length };
+      }
     } catch {}
     res.json(out);
   });

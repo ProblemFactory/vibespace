@@ -111,6 +111,13 @@ const BACKEND_SESSION_OPTIONS = {
     permissions: permissionModeOptions('opencode', ['', 'build', 'plan'], t),
     efforts: [{ value: '', label: t('Auto (model default)') }],
   },
+  // Antigravity CLI (lane antigravity-harness): the docs' model slugs arrive through /api/available-models;
+  // "permission" = agy's --mode (or bypass); effort rides the Settings default (no ladder row yet)
+  antigravity: {
+    models: [{ id: '', label: t('Default') }],
+    permissions: permissionModeOptions('antigravity', ['', 'accept-edits', 'auto', 'plan', 'bypassPermissions'], t),
+    efforts: [{ value: '', label: t('Auto (model default)') }],
+  },
 };
 
 // Fetch available models from server (Claude from bootstrap/v1/models API, Codex from cache)

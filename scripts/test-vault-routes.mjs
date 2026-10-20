@@ -20,6 +20,10 @@
 //      new seed under the old name is never covered); the seed in no answer but the reveal's, no audit, no log, no grants file
 //   ⑩ MUTANTS (the same checks ⇒ RED): the agent door answers the SEED · no grant check · a grant outliving its run · a view
 //      with no audit · the view pace forgotten · 看码 open to an agent token · a deleted entry's grants outliving it
+//   ⑪ THE RUN DOORS (lane vault-run-door, design q-043 §8 P0-f): the BEARER may run (POST /api/agent/vault/run), a COOKIE may
+//      not (401), a job token is refused (job_no_use); the switch (POST /api/vault/runnable) and the shape card's answer (POST
+//      /api/vault/run/asks/:askId) are a PERSON's (any bearer human_only), ON / «always» behind this page's 验证是你 window; the
+//      shape card answers and the run's output comes back scrubbed — no answer of the whole suite carries the value
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -32,6 +36,9 @@ const express = require(path.join(REPO, 'node_modules/express'));
 const { Auth } = require(path.join(REPO, 'src/auth.js'));
 const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
 const { registerVaultRoutes, personVerdict } = require(path.join(REPO, 'src/routes/vault.js'));
+const VC = require(path.join(REPO, 'src/server/vault-contents.js'));   // lane vault-run-door: the page's 验证是你 window (the switch, «always»)
+const DOOR = require(path.join(REPO, 'src/server/vault-run-door.js'));
+const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const ROOT = scratch('vault-routes');
@@ -62,12 +69,12 @@ const PORT = srv.address().port, OWN = `http://127.0.0.1:${PORT}`;
 const COOKIE = `vs_token=${auth.issueToken('owner')}`;
 const PAGE = { cookie: COOKIE, 'sec-fetch-site': 'same-origin', origin: OWN };
 const ANSWERS = [];
-function hit(p, { method = 'POST', headers = PAGE, body } = {}) {
+function hit(p, { method = 'POST', headers = PAGE, body, port = PORT } = {}) {
   return new Promise((resolve, reject) => {
     const b = method === 'GET' ? null : JSON.stringify(body || {});
     const h = { ...headers };
     if (b !== null) { h['content-type'] = 'application/json'; h['content-length'] = Buffer.byteLength(b); }
-    const r = http.request({ host: '127.0.0.1', port: PORT, path: p, method, headers: h }, (x) => {
+    const r = http.request({ host: '127.0.0.1', port, path: p, method, headers: h }, (x) => {
       let d = ''; x.on('data', (c) => d += c);
       x.on('end', () => { ANSWERS.push(d); let j = null; try { j = JSON.parse(d); } catch { } resolve({ status: x.statusCode, json: j || {} }); });
     });
@@ -357,6 +364,154 @@ console.log('⑩ MUTANTS — each RED');
     H.close();
     ok(applied && red.length > 0, `RED: ${name} (${applied ? red[0] || 'NOT CAUGHT' : 'the mutant did not apply'})`);
   }
+}
+
+console.log('⑪ the run doors — the bearer may run, a cookie may not; the shape card answers (lane vault-run-door)');
+const hit0 = hit, PAGE0 = PAGE;
+{
+  // ITS OWN WORLD: a fresh engine (the legs above leave theirs paced, its password changed), the For-you store, a storage row,
+  // the Vault window's contents (the page's 验证是你 window), the run door on a CLUSTER instance (every run asks), a fake curl
+  // first on the child's PATH — behind the same sign-in gate, on its own port
+  const dataDir2 = path.join(ROOT, 'data2'), WORK = path.join(ROOT, 'work'), RUNROOT = path.join(ROOT, 'run'), BIN = path.join(ROOT, 'bin');
+  for (const d of [dataDir2, WORK, RUNROOT, BIN]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(BIN, 'curl'), `#!/usr/bin/env node\nprocess.stdout.write('curl got ' + process.env.T + '\\n');\n`, { mode: 0o555 });
+  fs.chmodSync(BIN, 0o555);   // a program no agent could have written («always» is offered only for one) — given back at the end
+  const RUNV = 'route-run-value-0123456789';
+  const mountsSrc = { vaultRows: () => [{ entry: 'm1', field: 'secretKey', label: 'bucket', cipher: 'x'.repeat(60) }], vaultReveal: (e, f) => (e === 'm1' && f === 'secretKey' ? RUNV : null) };
+  const vault2 = VE.create({ dataDir: dataDir2, kdf: { N: 1024, r: 8, p: 1 }, log, idleTimer: false, register: false, signInPassword: (p) => auth.verifyPassword(p) });
+  const userTodos = new UserTodoManager({ dataDir: dataDir2, expirySweepMs: 3600e3 });
+  const contents = VC.create({ vault: vault2, sources: { mounts: () => mountsSrc }, runFacts: (row) => runDoor.rowFacts(row) });
+  const runDoor = DOOR.create({ dataDir: dataDir2, vault: vault2, sources: { mounts: () => mountsSrc }, userTodos, instanceKind: () => 'cluster', runRoot: () => RUNROOT, agentEnv: () => ({ ...process.env, PATH: BIN + ':' + process.env.PATH }), log: (m) => LOGS.push(String(m)) });
+  const sessions2 = new Map([['s1', { agentToken: SESSION_TOKEN, backendSessionId: 'conv-r1', name: 'Route Lane', cwd: WORK }]]);
+  const app2 = express();
+  app2.use(auth.middleware());
+  app2.use(express.json());
+  registerVaultRoutes(app2, { vault: vault2, activeSessions: sessions2, getJobs: () => ({ jobByToken: (t) => (t === 'jbt_live' ? { id: 'j1' } : null) }), contents, run: runDoor });
+  const srv2 = await new Promise((r) => { const x = app2.listen(0, '127.0.0.1', () => r(x)); });
+  const P2 = srv2.address().port, OWN2 = `http://127.0.0.1:${P2}`;
+  const PAGE2 = { ...PAGE0, origin: OWN2 };
+  const hit = (p, o = {}) => hit0(p, { headers: PAGE2, ...o, port: P2 });
+  const PAGE = PAGE2;
+  const B = { authorization: 'Bearer ' + SESSION_TOKEN };
+  const su = await hit('/api/vault/setup', { body: { password: PW } });
+  ok(su.status === 200 && vault2.state() === 'unlocked', 'a person sets this world\'s vault up (the run legs)', su.json);
+  const ARGS = ['--env', 'T=vault://mounts/m1/secretKey', '--', process.execPath, '-e', 'console.log("got " + process.env.T)'];
+  const ck = await hit('/api/agent/vault/run', { body: { args: ARGS, cwd: WORK } });
+  ok(ck.status === 401 && ck.json.code === 'unauthorized', 'a COOKIE may not run — no bearer ⇒ 401 (only a conversation\'s own session token runs)', ck.json);
+  const jb = await hit('/api/agent/vault/run', { headers: { authorization: 'Bearer jbt_live' }, body: { args: ARGS, cwd: WORK } });
+  ok(jb.status === 403 && jb.json.code === 'job_no_use', 'a Background Work job token ⇒ 403 job_no_use', jb.json);
+  const bad = await hit('/api/agent/vault/run', { headers: { authorization: 'Bearer vsst_' + 'f'.repeat(32) }, body: { args: ARGS, cwd: WORK } });
+  ok(bad.status === 401, 'an unknown session token ⇒ 401');
+  const no = await hit('/api/agent/vault/run', { headers: B, body: { args: ARGS, cwd: WORK } });
+  ok(no.status === 403 && no.json.code === 'entry_not_runnable' && /Usable by agent runs/.test(no.json.error), 'the BEARER may run — an entry the owner has not opened ⇒ 403 entry_not_runnable, by name', no.json);
+  const swB = await hit('/api/vault/runnable', { headers: { ...PAGE, ...B }, body: { id: 'mounts:m1#secretKey', on: true } });
+  ok(swB.status === 403 && swB.json.code === 'human_only', 'an agent never opens an entry for runs (human_only)', swB.json);
+  const sw0 = await hit('/api/vault/runnable', { body: { id: 'mounts:m1#secretKey', on: true } });
+  ok(sw0.status === 403 && sw0.json.code === 'reveal_needs_password', 'a person switching ON without this page\'s 验证是你 window ⇒ 403 reveal_needs_password', sw0.json);
+  const rs = await hit('/api/vault/reveal-session', { body: { password: PW } });
+  const page = rs.json.page;
+  const sw1 = await hit('/api/vault/runnable', { body: { id: 'mounts:m1#secretKey', on: true, page } });
+  ok(rs.status === 200 && sw1.status === 200 && sw1.json.open === true, '验证是你 (the second password again) ⇒ ON', sw1.json);
+  const cont = await hit('/api/vault/contents', { method: 'GET', headers: PAGE });
+  const row = (cont.json.rows || []).find((x) => x.id === 'mounts:m1#secretKey');
+  ok(row && row.run && row.run.can === true && row.run.open === true, 'the Vault window\'s row says so (run: can, open)', row);
+  const list = await hit('/api/agent/vault/runnable', { method: 'GET', headers: B });
+  ok(list.status === 200 && list.json.entries.length === 1 && list.json.entries[0].ref === 'vault://mounts/m1/secretKey' && !JSON.stringify(list.json).includes(RUNV), 'GET /api/agent/vault/runnable names the opened entry (a reference, a label) — never its value', list.json);
+  const listCk = await hit('/api/agent/vault/runnable', { method: 'GET', headers: PAGE });
+  ok(listCk.status === 401, '…and a cookie gets nothing (401)');
+  const waitCard = async () => { for (let i = 0; i < 300; i++) { const c = (userTodos.snapshot().open || []).find((x) => x.action && x.action.type === 'vault-run-ask'); if (c) return c; await new Promise((r) => setTimeout(r, 10)); } return null; };
+  const pr = hit('/api/agent/vault/run', { headers: B, body: { args: ARGS, cwd: WORK } });
+  const card = await waitCard();
+  const byAgent = await hit(`/api/vault/run/asks/${card.action.askId}`, { headers: { ...PAGE, ...B }, body: { answer: 'once' } });
+  ok(byAgent.status === 403 && byAgent.json.code === 'human_only', 'an agent never answers the shape card (human_only)', byAgent.json);
+  const onceNoWin = await hit(`/api/vault/run/asks/${card.action.askId}`, { body: { answer: 'once' } });
+  ok(onceNoWin.status === 403 && onceNoWin.json.code === 'reveal_needs_password', 'q-043 H1 (sign-in-off): 允许一次 WITHOUT this page\'s 验证是你 window ⇒ 403 reveal_needs_password — a local shell cannot forge its OWN card\'s Allow once (the card stays up)', onceNoWin.json);
+  const once = await hit(`/api/vault/run/asks/${card.action.askId}`, { body: { answer: 'once', page } });
+  const r = await pr;
+  ok(once.status === 200 && once.json.outcome === 'allowed' && r.status === 200 && r.json.ok === true && r.json.stdout === 'got [vault:mounts/m1/secretKey]\n', 'the shape card answers: a PERSON\'s 允许一次 ⇒ the bearer\'s run answers 200, its output SCRUBBED', [once.json.outcome, r.json]);
+  const again = await hit(`/api/vault/run/asks/${card.action.askId}`, { body: { answer: 'once', page } });
+  ok(again.status === 409 && again.json.code === 'ask_settled', 'a second answer ⇒ 409 ask_settled', again.json);
+  const CURL = ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/x'];
+  const pr2 = hit('/api/agent/vault/run', { headers: B, body: { args: CURL, cwd: WORK } });
+  const card2 = await waitCard();
+  const al0 = await hit(`/api/vault/run/asks/${card2.action.askId}`, { body: { answer: 'always' } });
+  ok(al0.status === 403 && al0.json.code === 'reveal_needs_password', '此形状总是 WITHOUT this page\'s 验证是你 window ⇒ 403 reveal_needs_password (the card stays up)', al0.json);
+  const al1 = await hit(`/api/vault/run/asks/${card2.action.askId}`, { body: { answer: 'always', page } });
+  const r2 = await pr2;
+  ok(al1.status === 200 && al1.json.outcome === 'always' && r2.status === 200 && r2.json.by === 'always' && r2.json.stdout === 'curl got [vault:mounts/m1/secretKey]\n', '…WITH it ⇒ 200 always, the run answers', [al1.json, r2.json.by]);
+  const r3 = await hit('/api/agent/vault/run', { headers: B, body: { args: ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/y'], cwd: WORK } });
+  ok(r3.status === 200 && r3.json.by === 'always' && !(userTodos.snapshot().open || []).some((x) => x.action && x.action.type === 'vault-run-ask'), 'the same shape (another positional) then runs without a card, on a cluster too', r3.json.by);
+  ok(!ANSWERS.some((a) => a.includes(RUNV)), 'no answer of this whole suite carries the value (every route, every refusal, every run)');
+  srv2.close(); vault2.close();
+  try { fs.chmodSync(BIN, 0o755); } catch { }
+}
+
+
+console.log('⑫ agents: mint / put in their own namespace (q-043 §9, lane vault-mint-put)');
+{
+  const Mod = require('module');
+  const d2 = path.join(ROOT, 'data9'); fs.mkdirSync(d2);
+  fs.writeFileSync(path.join(d2, '.accounts-key'), crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
+  const auth2 = new Auth(d2, {}); auth2.setPassword('sign-in-nine-9');
+  const v2 = VE.create({ dataDir: d2, kdf: { N: 1024, r: 8, p: 1 }, log, idleTimer: false, register: false, signInPassword: (p) => auth2.verifyPassword(p) });
+  await v2.setup('second password nine');
+  const TOK = 'vsst_' + crypto.randomBytes(16).toString('hex');
+  const JTOK = 'jbt_nine';
+  const sessions2 = new Map([['conv-NINE', { agentToken: TOK, _webuiId: 'conv-NINE', name: 'Chat Nine' }]]);
+  const getJobs2 = () => ({ jobByToken: (t) => (t === JTOK ? { id: 'j9', name: 'Job Nine' } : null) });
+  const VC = require(path.join(REPO, 'src/server/vault-contents.js'));
+  const contents2 = VC.create({ vault: v2, sources: { secrets: () => VC.secretSource({ vault: v2 }) } });
+  const app2 = express(); app2.use(auth2.middleware()); auth2.registerRoutes(app2); app2.use(express.json());
+  registerVaultRoutes(app2, { vault: v2, activeSessions: sessions2, getJobs: getJobs2, contents: contents2, who: () => 'owner' });
+  const srv2 = await new Promise((r) => { const sv = app2.listen(0, '127.0.0.1', () => r(sv)); });
+  const P2 = srv2.address().port;
+  const H = (p, { method = 'POST', bearer = TOK, body, query = '', cookie = null, sfs = null } = {}) => new Promise((resolve, reject) => {
+    const b = method === 'GET' ? null : JSON.stringify(body || {});
+    const h = {}; if (bearer) h.authorization = 'Bearer ' + bearer; if (cookie) h.cookie = cookie; if (sfs) h['sec-fetch-site'] = sfs; if (b !== null) { h['content-type'] = 'application/json'; h['content-length'] = Buffer.byteLength(b); }
+    const rq = http.request({ host: '127.0.0.1', port: P2, path: p + query, method, headers: h }, (x) => { let d = ''; x.on('data', (c) => d += c); x.on('end', () => { let j = null; try { j = JSON.parse(d); } catch { } resolve({ status: x.statusCode, json: j || {} }); }); });
+    rq.on('error', reject); rq.end(b === null ? undefined : b);
+  });
+  const mi = await H('/api/agent/vault/mint', { body: { name: 'signup-pw', length: 20, charset: 'alnum' } });
+  ok(mi.status === 200 && mi.json.name === 'agent:conv-NINE/signup-pw' && mi.json.ref === 'vault://agent:conv-NINE/signup-pw' && !('value' in mi.json), 'a session bearer MINTS under agent:<its conversation>/<name> — name + ref, never a value', mi.json);
+  const esc1 = await H('/api/agent/vault/mint', { body: { name: 'agent:other/evil' } });
+  const esc2 = await H('/api/agent/vault/mint', { body: { name: '../other/x' } });
+  ok(esc1.status === 400 && esc1.json.code === 'bad_name' && esc2.status === 400 && esc2.json.code === 'bad_name', 'a name that tries to escape the namespace (agent:other/… or ../) ⇒ 400 bad_name — the scope is the SESSION\'s, never the agent\'s', [esc1.json.code, esc2.json.code]);
+  const pb = await H('/api/agent/vault/put', { body: { name: 'vendor', value: 'sk-BODY-PUT-9' } });
+  ok(pb.status === 200 && pb.json.name === 'agent:conv-NINE/vendor' && !('value' in pb.json), 'a session bearer PUTs a value from the BODY ⇒ ok, no value echoed', pb.json);
+  const pq = await H('/api/agent/vault/put', { query: '?value=LEAKED', body: { name: 'k' } });
+  ok(pq.status === 400 && pq.json.code === 'value_in_argv', 'put with the value in the URL (argv-readable) ⇒ 400 value_in_argv', pq.json);
+  const pe = await H('/api/agent/vault/put', { body: { name: 'k' } });
+  ok(pe.status === 400 && pe.json.code === 'value_required', 'put with no value ⇒ 400 value_required');
+  const jm = await H('/api/agent/vault/mint', { bearer: JTOK, body: { name: 'token' } });
+  ok(jm.status === 200 && jm.json.name === 'agent:job-j9/token', 'a live job token mints under agent:job-<id>/<name>', jm.json);
+  const un = await H('/api/agent/vault/mint', { bearer: 'vsst_' + 'f'.repeat(32), body: { name: 'x' } });
+  ok(un.status === 401, 'an unknown session token ⇒ 401 (no mint)');
+  // THE q-043 ① LAW: a bearer can NEVER read a value back
+  const noGet = await H('/api/agent/vault/mint', { method: 'GET' });
+  ok(noGet.status === 404, 'there is no GET agent mint door (404) — a bearer reads no value by any agent route');
+  const rvBearer = await H('/api/vault/reveal', { bearer: TOK, cookie: 'vs_token=' + auth2.issueToken('owner'), sfs: 'same-origin', body: { id: 'secrets:agent:conv-NINE/signup-pw#secret' } });
+  ok(rvBearer.status === 403 && rvBearer.json.code === 'human_only', 'the person reveal door refuses a bearer even past the sign-in gate (human_only) — only the owner reveals a value', rvBearer);
+  const names = v2.secretNames().map((x) => x.name).sort();
+  ok(JSON.stringify(names) === JSON.stringify(['agent:conv-NINE/signup-pw', 'agent:conv-NINE/vendor', 'agent:job-j9/token']), 'every entry landed under the caller\'s OWN scope (conv-NINE / job-j9) — the agent chose none of them', names);
+  v2.lock('test');
+  const ml = await H('/api/agent/vault/mint', { body: { name: 'z' } });
+  const pl = await H('/api/agent/vault/put', { body: { name: 'z', value: 'v' } });
+  ok(ml.status === 423 && ml.json.code === 'vault_locked' && pl.status === 423 && pl.json.code === 'vault_locked', 'a LOCKED vault ⇒ mint and put refused 423 vault_locked (nothing read, nothing minted)', [ml.json.code, pl.json.code]);
+  await v2.unlock('second password nine');
+  // MUTANT: a put route that reads the value from the QUERY (argv) ⇒ it ACCEPTS ?value= — the real route refuses it
+  const rf = path.join(REPO, 'src/routes/vault.js');
+  const rsrc = fs.readFileSync(rf, 'utf8');
+  const rcut = rsrc
+    .replace("const value = b.value; if (b && typeof b === 'object') delete b.value;   // taken OFF the request — no later reader sees it", "const value = (b.value != null ? b.value : (req.query && req.query.value)); if (b && typeof b === 'object') delete b.value;")
+    .replace("if (req.query && typeof req.query.value !== 'undefined') return agentErr(res, { code: 'value_in_argv' });   // never the URL (argv-readable)", "/* mutant: the argv guard removed */");
+  const rm = new Mod(rf); rm.filename = rf; rm.paths = Mod._nodeModulePaths(path.dirname(rf)); rm._compile(rcut, rf);
+  const appM = express(); appM.use(auth2.middleware()); auth2.registerRoutes(appM); appM.use(express.json());
+  rm.exports.registerVaultRoutes(appM, { vault: v2, activeSessions: sessions2, getJobs: getJobs2 });
+  const srvM = await new Promise((r) => { const sv = appM.listen(0, '127.0.0.1', () => r(sv)); });
+  const PM = srvM.address().port;
+  const mq = await new Promise((resolve, reject) => { const rq = http.request({ host: '127.0.0.1', port: PM, path: '/api/agent/vault/put?value=SECRET-FROM-URL', method: 'POST', headers: { authorization: 'Bearer ' + TOK, 'content-type': 'application/json', 'content-length': Buffer.byteLength('{"name":"argv"}') } }, (x) => { let d = ''; x.on('data', (c) => d += c); x.on('end', () => { let j = null; try { j = JSON.parse(d); } catch { } resolve({ status: x.statusCode, json: j || {} }); }); }); rq.on('error', reject); rq.end('{"name":"argv"}'); });
+  ok(rcut !== rsrc && pq.json.code === 'value_in_argv' && mq.status === 200 && v2.secretNames().some((x) => x.name === 'agent:conv-NINE/argv'), 'MUTANT (put reads the value from the URL) ⇒ ?value= is ACCEPTED and sealed — the real route refuses it value_in_argv (RED on the argv law)', mq.json);
+  srvM.close(); srv2.close(); v2.close();
 }
 
 srv.close(); vault.close(); console.warn = warn0;

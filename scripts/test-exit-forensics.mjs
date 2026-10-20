@@ -1279,6 +1279,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
   const KILL_CALL = /\b(?:process\.kill|\.kill)\s*\((?:[^()]|\([^()]*\))*\)/g;   // a liveness probe `kill(pid, 0)` is no door
   const KILL_DOORS = {
     'src/ws-handler.js': [2, 'actor terminate: the ws kill case — every client door is App.killSession'],
+    'src/server/vault-run-door.js': [3, 'vibespace-vault run (lane vault-run-door; declared by lane vault-manual-and-lock): its OWN child\'s process group (SIGTERM, SIGKILL after the grace — a timeout, a lock, the caller gone, the run\'s end) with the child handle as its fallback, and a stray carrying the run\'s mark found by a fresh /proc scan — never a pid read from a file'],
     'src/adapters/claude-code.js': [1, "actor interrupt: the Stop's SIGINT fallback"],
     'src/server/sysinfo-wiring.js': [1, 'actor user-signal: the System panel'],
     'src/routes/sessions.js': [1, 'actor user-kill: /api/kill-pid'],

@@ -42,11 +42,15 @@
 /** What the vendor CLIs read from the environment as a login, MEASURED in the
  *  binaries (2026-10-14: claude 2.1.296, codex-rs linux-x64 — its own words:
  *  "auth.json, OPENAI_API_KEY, CODEX_API_KEY, CODEX_ACCESS_TOKEN, no Codex
- *  credentials were found"). Job door only. */
+ *  credentials were found"; 2026-10-20: agy 1.4.3). Job door only. */
 const VENDOR_CREDENTIAL_ENV = Object.freeze([
   'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
   'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR', 'CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR',
   'OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN',
+  // the Antigravity CLI (agy 1.4.3, the names in its binary + its docs): the Gemini API-key mode, ADC sign-in, a custom
+  // base URL — a job never holds an agent login (lane antigravity-harness; the agent door strips them too, through
+  // the antigravity descriptor's creds.keyEnvVars)
+  'GEMINI_API_KEY', 'AGY_ADC_AUTH', 'GOOGLE_GEMINI_BASE_URL',
 ]);
 
 /** A creds key that names environment variables: `fooEnvVar` (one name) or `fooEnvVars` (a list). */

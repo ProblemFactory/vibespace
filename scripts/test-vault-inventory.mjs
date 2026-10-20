@@ -39,7 +39,7 @@ console.log('① PURE — src/vault-inventory.js');
 {
   const raw = { entry: 'acct-1', field: 'key', kind: 'api-key', label: 'Work', detail: 'claude', createdAt: 5, cipher: 'aaaabbbbccccdddd:eeeeffffgggghhhhiiiijj==.QUJD', value: 'PLANTED-VALUE', plain: 'PLANTED', secret: 'PLANTED', token: 'PLANTED', bytes: undefined };
   const row = VI.rowOf('accounts', raw, { lastUsed: { at: 9, by: 'human' } });
-  ok(JSON.stringify(Object.keys(row)) === JSON.stringify(['id', 'store', 'entry', 'field', 'kind', 'label', 'detail', 'createdAt', 'rotatedAt', 'lastUsed', 'size', 'doors', 'revealable', 'origin', 'expiresAt']), 'rowOf: the row is exactly its NAMED fields (never a spread)', Object.keys(row));
+  ok(JSON.stringify(Object.keys(row)) === JSON.stringify(['id', 'store', 'entry', 'field', 'kind', 'label', 'detail', 'createdAt', 'rotatedAt', 'lastUsed', 'size', 'doors', 'revealable', 'origin', 'expiresAt', 'provenance']), 'rowOf: the row is exactly its NAMED fields (never a spread; + origin/expiresAt (v2) and provenance for an agent entry, null otherwise)', Object.keys(row));
   ok(!/PLANTED|QUJD|aaaabbbb/.test(JSON.stringify(row)), 'rowOf: a raw row\'s value, plaintext, secret, token and ciphertext leave nothing in the row', row);
   ok(VI.STORE_IDS.join() === require(path.join(REPO, 'src/server/vault-engine.js')).STORE_KEYS.map((k) => k.store).sort((a, b) => VI.STORE_IDS.indexOf(a) - VI.STORE_IDS.indexOf(b)).join() && VI.STORE_IDS.length === 6, 'the stores are the vault engine\'s six (one key each)');
   ok(row.id === 'accounts:acct-1#key' && row.lastUsed.by === 'human' && row.lastUsed.at === 9, 'the id is <store>:<entry>#<field>; lastUsed { at, by }');
@@ -446,6 +446,42 @@ console.log('⑧ THE PURPOSES AND THE PROVENANCE (lane vault-window-v2, design q
   const lost = onceIn(m1, inv.rows), twice = onceIn(m2, inv.rows);
   ok(noPurpose !== srcI && lost.length >= 3 && lost.every(([id, n]) => id.startsWith('channels:') && n === 0), 'MUTANT (a row of NO purpose — channels answer none) ⇒ RED: its rows land nowhere', lost);
   ok(twoPurposes !== srcI && twice.length === byStore('mounts').length && twice.every(([, n]) => n === 2), 'MUTANT (a row in TWO purposes) ⇒ RED: each mount counted twice', twice);
+}
+
+console.log('⑨ AGENT-OWNED SECRETS — provenance rows (q-043 §9, lane vault-mint-put)');
+{
+  const da = path.join(ROOT, 'agentprov'); fs.mkdirSync(da, { recursive: true });
+  let ac = Date.parse('2026-10-19T15:00:00Z');
+  const ea = VE.create({ dataDir: da, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, register: false, now: () => ac });
+  await ea.setup(PW, {});
+  ea.agentMint('agent:conv-INV/signup-pw', { length: 24, charset: 'ascii-printable', actor: 'Build chat' });
+  ea.agentPut('agent:conv-INV/vendor-key', 'sk-INVENTORY-PLANT-9911', { actor: 'Build chat' });
+  const va = VC.create({ vault: ea, sources: { secrets: () => VC.secretSource({ vault: ea }) }, now: () => ac, mono: () => 5000 });
+  const inv2 = va.list();
+  const ar = inv2.rows.filter((r) => r.store === 'secrets' && r.entry.startsWith('agent:'));
+  const at2 = (id) => ar.find((r) => r.id === id);
+  ok(ar.length === 2 && at2('secrets:agent:conv-INV/signup-pw#secret') && at2('secrets:agent:conv-INV/vendor-key#secret'), 'each agent entry is ONE «Hub secrets» row keyed <scope>/<name>#secret', ar.map((r) => r.id));
+  const mintRow = at2('secrets:agent:conv-INV/signup-pw#secret'), putRow = at2('secrets:agent:conv-INV/vendor-key#secret');
+  ok(mintRow.label === 'Agent secret · signup-pw' && mintRow.provenance && mintRow.provenance.prov === 'minted' && mintRow.provenance.sawPlaintext === false && mintRow.provenance.actor === 'Build chat' && mintRow.detail === 'Agent minted · never shown to the agent',
+    'the MINTED row: provenance minted, the agent never saw it, the owning conversation named', mintRow);
+  ok(putRow.provenance.prov === 'stored' && putRow.provenance.sawPlaintext === true && putRow.detail === 'Agent stored · the agent saw the plaintext',
+    'the STORED row: provenance stored, the agent saw the plaintext (the rotate hint belongs to it)', putRow);
+  ok(mintRow.revealable === true && putRow.revealable === true && mintRow.size === 'unknown', 'an agent secret may be revealed by the owner (names + dates only — no length class)', [mintRow.revealable, mintRow.size]);
+  ok(VI.AGENT_PROV.minted.sawPlaintext === false && VI.AGENT_PROV.stored.sawPlaintext === true, 'AGENT_PROV: minted never seen, stored seen (the v2 window\'s provenance chip reads row.provenance)');
+  ok(!JSON.stringify(inv2.rows).includes('sk-INVENTORY-PLANT-9911'), 'the masked inventory carries no agent value');
+  const wA = await va.startReveal('meA', PW);
+  const rvMint = va.reveal('meA', wA.page, 'secrets:agent:conv-INV/signup-pw#secret');
+  const rvPut = va.reveal('meA', wA.page, 'secrets:agent:conv-INV/vendor-key#secret');
+  ok(rvMint.ok && rvMint.value.length === 24 && rvPut.ok && rvPut.value === 'sk-INVENTORY-PLANT-9911', 'the owner reveals the minted value (24 ch) AND the stored value through the window', [rvMint.ok, rvPut.ok]);
+  // MUTANT: rowOf that drops provenance ⇒ the v2 chip would have nothing to show
+  const src = fs.readFileSync(path.join(REPO, 'src/vault-inventory.js'), 'utf8');
+  const cut = src.replace("provenance: raw.provenance || null,   // lane vault-mint-put: agent entries carry it; the v2 window's chip reads it", 'provenance: null,');
+  const Mod = require('module'), mf = path.join(REPO, 'src/vault-inventory.js');
+  const mm = new Mod(mf); mm.filename = mf; mm.paths = Mod._nodeModulePaths(path.dirname(mf)); mm._compile(cut, mf);
+  const mraw = mm.exports.secretRowOf({ name: 'agent:c/x', at: ac, prov: 'minted', actor: 'A' });
+  const mrow = mm.exports.rowOf('secrets', mraw);
+  ok(cut !== src && mraw.provenance && mrow.provenance === null, 'MUTANT (rowOf drops provenance) ⇒ the agent row loses its provenance — the v2 chip would show nothing (RED on the provenance-row assert)');
+  ea.close();
 }
 
 try { ce.stop(); ce.store.close(); } catch { }

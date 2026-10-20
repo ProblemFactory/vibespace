@@ -143,7 +143,7 @@ module.exports = {
     };
     // lane vault-e2e-password-fix-r2: the TOKEN never lands in frpc.toml — the file names an environment variable (frp's
     // `{{ .Envs.X }}` config template) and start() hands the value to the frpc child's env (memory only)
-    const FRP_TOKEN_ENV = 'VIBESPACE_FRP_AUTH_TOKEN';
+    const FRP_TOKEN_ENV = RT.KNOCK_ENV;
     const frpWriteConf = (cfg = frpCfg(), knock = !!cfg.token) => {
       const pw = frpAdminPw();
       fs.mkdirSync(frpProxiesDir(), { recursive: true, mode: 0o700 });
@@ -462,8 +462,9 @@ module.exports = {
         frpWriteConf(cfg, !!knock);
         const logFrom = logSize();
         const logFd = fs.openSync(path.join(frpDir(), 'frpc.out'), 'a');
-        const env = { ...process.env, [FRP_TOKEN_ENV]: knock, [RT.TOKEN_ENV]: cfg.ident.token || '' };   // the tokens: the child's env only
-        delete env.VIBESPACE_FRPS_TOKEN; delete env[RT.CLUSTER_TOKEN_ENV];   // each rides under its frpc name above, never twice
+        // the tokens: the child's env only — BUILT, never the hub's inherited (an agent conversation's session tokens, the cluster's
+        // shared token, cloud keys never reach frpc): the kept names + this instance's token + the knock (lane frp-spawn-env-allowlist)
+        const env = RT.relayEnv(process.env, { token: cfg.ident.token || '', knock });
         const child = spawn(bin, ['-c', frpConf()], { detached: true, stdio: ['ignore', logFd, logFd], env });
         child.unref();
         fs.writeFileSync(frpPidFile(), String(child.pid));

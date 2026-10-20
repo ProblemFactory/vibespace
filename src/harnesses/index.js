@@ -145,7 +145,8 @@ const REGISTRY = new Map();
 const BUILTIN = new Set();
 // opencode = the first ACP v1 harness (S8): acpHarness({...}) in ./opencode.js —
 // the generic wrapper/adapter/normalizer are shared by every ACP agent.
-for (const h of [require('./claude'), require('./codex'), require('./shell'), require('./opencode')]) {
+// antigravity (lane antigravity-harness) is NOT ACP: its own chat wrapper journals the same 'acp-events' records.
+for (const h of [require('./claude'), require('./codex'), require('./shell'), require('./opencode'), require('./antigravity')]) {
   REGISTRY.set(validate(h).id, h);
   BUILTIN.add(h.id);
 }
@@ -198,5 +199,5 @@ function resumeVerb(id) {
   try { return get(id).resume || null; } catch { return null; }
 }
 
-module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, QUOTA_PROBE_RUNGS, NULL_QUOTA,
+module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, validate, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, QUOTA_PROBE_RUNGS, NULL_QUOTA,
   hasLimitSignal, assertResumeContract, resumeVerb, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };

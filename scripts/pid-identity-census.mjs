@@ -52,6 +52,8 @@ export const ROWS = [
   ['src/browser-serve.js', "try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }", 'starttime', 'same\\(\\)', 'a daemon with no browser the hub named by pid+starttime (end-daemon)', 8],
   ['src/browser-serve.js', "if (same()) { try { process.kill(pid, 'SIGKILL')", 'starttime', 'same\\(\\)', 'the same, 5 s later'],
   ['src/codex-reset-helper.js', 'process.kill(-child.pid, sig)', 'handle', '-child.pid', 'its own reset child\'s group'],
+  ['src/server/vault-run-door.js', 'process.kill(-child.pid, sig)', 'handle', '-child.pid', 'its own vibespace-vault run child\'s group (spawned detached): its timeout, a vault lock, the caller gone, the hub\'s exit'],
+  ['src/server/vault-run-door.js', "process.kill(Number(d), 'SIGKILL')", 'scan', 'environ\\.includes\\(needle\\)', 'a process still carrying a vibespace-vault run\'s MARK in its environ (a stray that left the run\'s group) — its pid read off a FRESH /proc scan in the same call, the environ read the proof'],
   ['src/desktop-display.js', 'function pidAlive(pid) {', 'probe', 'the existence half of desktop-display.sameProcess (pid+starttime)', 'nothing'],
   ['src/desktop-serve.js', 'const signalAll = (pids, sig) => { for (const p of pids) { try { process.kill(p, sig)', 'starttime', 'partIsOurs|display\\.sameProcess', 'a desktop session\'s proven parts', 16],
   ['src/desktop-serve.js', "if (leaderPid) { try { process.kill(-leaderPid, 'SIGTERM')", 'starttime', 'partIsOurs|leaderPid = ', 'the proven leader\'s group', 24],

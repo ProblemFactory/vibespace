@@ -134,7 +134,8 @@ const ROWS = Object.freeze([
     // itself in every refusal (`vault_locked`), so no injected surface pays for it; lane vault-locked-refusal-notice: and that
     // refusal says the user was already told (src/vault-blocked.js agentWords) — the summary says it too
     name: 'vibespace-vault', topic: 'vault', manual: 'vault-manual.md', gate: 'always', teach: null,
-    summary: 'the vault that seals every stored credential: its state, lock it now (locked ⇒ the user is told; never ask them to unlock)',
+    // lane vault-run-door: + `run` (a command with a stored secret the agent never sees) and `list` (what it may reference)
+    summary: 'the vault\'s state, lock it now, run a command with a stored secret you never see (locked ⇒ the user is told; never ask them to unlock)',
   },
   {
     // design q-046 (lane automation-keys-core): VibeSpace's own automation API — INDEX-ONLY (a call with no grant asks the

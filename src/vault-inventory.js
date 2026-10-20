@@ -71,10 +71,25 @@ const SECRET_ROWS = Object.freeze([   // the entry name's shape → its row's fi
   // settings are the entry's VALUE: shown with the seed, behind 显示 — owner decision ① as amended); the code is its own door
   { re: /^totp:([\w.-]{1,120})$/, field: 'seed', kind: 'totp', label: (rest) => rest, detail: '' },
 ]);
+/** lane vault-mint-put (design q-043 §9): an `agent:<scope>/<name>` entry's provenance — the Vault window v2's provenance
+ *  chip renders `row.provenance` (SEAM: the integrator wires the chip onto the v2 window, lane vault-window-v2; this base
+ *  carries the data and shows `detail` as a meta line). `minted` = the hub made the value, the agent never saw it;
+ *  `stored` = the agent handed a value it had already seen (the transcript's copy is unprotected — the window says so). */
+const AGENT_PROV = Object.freeze({
+  minted: { label: 'Agent minted · never shown to the agent', sawPlaintext: false },
+  stored: { label: 'Agent stored · the agent saw the plaintext', sawPlaintext: true },
+});
+const AGENT_ENTRY_RE = /^agent:(.+)\/([^/]+)$/;
 function secretRowOf(s, { machineName = (k) => k } = {}) {
   const name = String((s && s.name) || ''), at = s && s.at;
   const nameOf = (k) => { try { return String(machineName(k) || k); } catch { return k; } };
   for (const r of SECRET_ROWS) { const m = r.re.exec(name); if (m) return { entry: name, field: r.field, kind: r.kind, label: r.label(m[1], nameOf), detail: r.detail, createdAt: at }; }
+  const am = AGENT_ENTRY_RE.exec(name);
+  if (am) {
+    const prov = AGENT_PROV[s && s.prov] ? s.prov : 'stored';   // default-safe: an unknown provenance is treated as 'the agent saw it'
+    const p = AGENT_PROV[prov];
+    return { entry: name, field: 'secret', kind: prov === 'minted' ? 'password' : 'secret', label: `Agent secret · ${am[2]}`, detail: p.label, createdAt: at, provenance: { by: 'agent', prov, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null } };
+  }
   return null;
 }
 
@@ -181,6 +196,7 @@ function rowOf(store, raw, { lastUsed = null } = {}) {
     size: bytes == null ? 'unknown' : sizeClassOf(bytes), doors: doorsOf({ store, entry: raw.entry, field: raw.field }),
     revealable: revealableOf(store, raw.entry),
     origin: ORIGINS.includes(raw.origin) ? raw.origin : null, expiresAt: when(raw.expiresAt),   // lane vault-window-v2
+    provenance: raw.provenance || null,   // lane vault-mint-put: agent entries carry it; the v2 window's chip reads it
   };
 }
 
@@ -423,7 +439,7 @@ function countdownText(ms) {
 }
 
 module.exports = {
-  STORES, STORE_IDS, GROUPS, GROUP_IDS, revealableOf, secretRowOf, storeOf, KINDS, KIND_WORDS, kindOfField, SIZE_CLASSES, sizeClassOf, plainBytesOf, refOf, parseRef, doorsOf, rowOf,
+  STORES, STORE_IDS, GROUPS, GROUP_IDS, revealableOf, secretRowOf, AGENT_PROV, storeOf, KINDS, KIND_WORDS, kindOfField, SIZE_CLASSES, sizeClassOf, plainBytesOf, refOf, parseRef, doorsOf, rowOf,
   inventoryOf, searchRows, SORTS, sortRows, REVEAL_MS, REVEAL_PACE_MAX, REVEAL_PACE_CEILING, REVEAL_PACE_MS, CLIPBOARD_CLEAR_MS, PAGE_RE, revealVerdict, paceVerdict, countdownText,
   // lane vault-window-v2 (design q-047 §3): the purposes, the provenance, the state chips, the window's view, the band, the two producers' rules
   ORIGINS, PURPOSES, PURPOSE_IDS, purposeOf, groupByPurpose, PROVENANCES, PROVENANCE_IDS, PROVENANCE_FILTERS, provenanceOf, provenanceFilterOf, EXPIRY_WARN_MS, stateChipsOf, viewOf,

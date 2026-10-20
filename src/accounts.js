@@ -15,7 +15,7 @@
  * how the CLI's own trust list (customApiKeyResponses) fingerprints keys.
  */
 const fs = require('fs');
-const { get: harnessOf } = require('./harnesses'); // S2: per-harness credential mechanics live on the descriptor (creds)
+const { get: harnessOf, list: listHarnesses } = require('./harnesses'); // S2: per-harness credential mechanics live on the descriptor (creds)
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
@@ -118,6 +118,20 @@ class AccountManager {
   _credsOf(be) { return harnessOf(be || 'claude').creds; }
   _acctDir(be, id) { return path.join(this._dataDir, this._credsOf(be).subsDirName, id); }
   _readAuthFor(be, id) { return this._credsOf(be).parseAuth(this._acctDir(be, id)); }
+  /** An isolated-home account's spawn env: the descriptor's `creds.spawnEnv(dir)` when it declares one (antigravity:
+   *  HOME = the account's root + the bus disabled — a name no `*EnvVar` field may carry, those are stripped from
+   *  every agent), else its one `spawnEnvVar` pointed at the dir (codex's CODEX_HOME). */
+  _homeSpawnEnv(be, dir) {
+    const c = this._credsOf(be);
+    return typeof c.spawnEnv === 'function' ? c.spawnEnv(dir) : { [c.spawnEnvVar]: dir };
+  }
+  /** Every harness's default-account field (creds.defaultIdField — claude's, codex's, antigravity's …): the store's
+   *  list / remove / export / import walk THESE, so a harness with a roster needs no edit here (lane antigravity-harness). */
+  _defaultIdFields() {
+    const out = [];
+    for (const h of listHarnesses()) { const f = h.creds && h.creds.defaultIdField; if (typeof f === 'string' && f && !out.includes(f)) out.push(f); }
+    return out;
+  }
   /** LOGIN LIFETIME of an account (2026-09-07, src/login-expiry.js): when does
    *  the LOGIN SESSION itself end, as opposed to "is there a token right now".
    *  The verdict comes from the harness descriptor's optional creds.loginState
@@ -312,8 +326,7 @@ class AccountManager {
   // read-only identity probe (email/plan/loggedIn) from their creds dir.
   list() {
     return {
-      defaultAccountId: this._state.defaultAccountId || null,
-      defaultCodexAccountId: this._state.defaultCodexAccountId || null,
+      ...Object.fromEntries(this._defaultIdFields().map((f) => [f, this._state[f] || null])), // defaultAccountId, defaultCodexAccountId, defaultAntigravityAccountId …
       accounts: this._state.accounts.map((a) => {
         const type = this._acctType(a);
         const backend = this._acctBackend(a);
@@ -471,6 +484,47 @@ class AccountManager {
     return { id, dir: this.codexSubDir(id) };
   }
 
+  // ── Isolated-home logins of any harness that declares one (lane antigravity-harness): creds.spawnForm
+  // 'isolated-home' + creds.idPrefix + creds.loginCommand(dir) — antigravity's Google accounts. The CLI's OWN
+  // login runs in a terminal against the account's dir; the store never sees a token. (codex keeps the
+  // createCodexSubscription pair above, which predates this.)
+  createHomeSubscription(backend, { name } = {}) {
+    const c = this._credsOf(backend);
+    if (!c || c.spawnForm !== 'isolated-home' || typeof c.loginCommand !== 'function' || !/^[a-z]{2,6}$/.test(c.idPrefix || '')) throw new Error(`${harnessOf(backend).label} has no login VibeSpace can run here`);
+    const id = c.idPrefix + '-' + crypto.randomBytes(6).toString('hex');
+    const dir = this._acctDir(backend, id);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    c.seedDir(dir);
+    const a = { id, name: String(name || '').trim().slice(0, 60) || c.loginLabel, type: 'subscription', backend, source: 'login', createdAt: Date.now() };
+    this._state.accounts.push(a);
+    this._save();
+    this._notify();
+    return { id, dir, loginCmd: c.loginCommand(dir) };
+  }
+
+  /** "Sign in again" on an existing isolated-home account (its login lapsed, or never landed): the dir is refreshed
+   *  (creds.seedDir — idempotent) and the CLI's own login command on it is answered; finalize then re-checks. */
+  homeLoginCommand(id) {
+    const a = this.get(id);
+    const be = a ? this._acctBackend(a) : null;
+    const c = be ? this._credsOf(be) : null;
+    if (!a || this._acctType(a) !== 'subscription' || c?.spawnForm !== 'isolated-home' || typeof c.loginCommand !== 'function') throw new Error('not an account VibeSpace can sign in here');
+    const dir = this._acctDir(be, id);
+    c.seedDir(dir);
+    return { id, loginCmd: c.loginCommand(dir) };
+  }
+
+  /** After the login terminal wrote the account's creds: identity → the name (when the user set none). */
+  finalizeHomeSubscription(id) {
+    const a = this.get(id);
+    const be = a ? this._acctBackend(a) : null;
+    if (!a || this._acctType(a) !== 'subscription' || this._credsOf(be)?.spawnForm !== 'isolated-home') throw new Error('not an isolated-login account');
+    const info = this._readAuthFor(be, id);
+    if (info.loggedIn && info.email && (!a.name || a.name === this._credsOf(be).loginLabel)) { a.name = String(info.email).slice(0, 60); this._save(); }
+    this._notify();
+    return { id, ...info, name: a.name };
+  }
+
   // Decode a JWT payload without verifying (identity display only — never trust
   // for auth). Returns {} on any malformation.
   _jwtPayload(tok) {
@@ -543,8 +597,7 @@ class AccountManager {
     });
     return {
       version: 1,
-      defaultAccountId: this._state.defaultAccountId || null,
-      defaultCodexAccountId: this._state.defaultCodexAccountId || null,
+      ...Object.fromEntries(this._defaultIdFields().map((f) => [f, this._state[f] || null])),
       accounts,
     };
   }
@@ -554,7 +607,7 @@ class AccountManager {
     const FILE_OK = /^[.\w][\w.-]*$/; // whitelist shape — no separators, no traversal
     let imported = 0, skipped = 0;
     for (const rec of bundle.accounts) {
-      if (!rec || typeof rec.id !== 'string' || !/^(acct|sub|cxs)-[a-f0-9]{6,}$/.test(rec.id)) { skipped++; continue; }
+      if (!rec || typeof rec.id !== 'string' || !/^(acct|sub|cxs|agy)-[a-f0-9]{6,}$/.test(rec.id)) { skipped++; continue; }
       if (this._state.accounts.some((a) => a.id === rec.id)) { skipped++; continue; } // never clobber an existing account
       const a = {
         id: rec.id,
@@ -589,7 +642,7 @@ class AccountManager {
     }
     // Defaults only when the referenced account actually landed and none is set
     // locally — an import must not silently re-route existing sessions' billing.
-    for (const [k, v] of [['defaultAccountId', bundle.defaultAccountId], ['defaultCodexAccountId', bundle.defaultCodexAccountId]]) {
+    for (const [k, v] of this._defaultIdFields().map((f) => [f, bundle[f]])) {
       if (v && !this._state[k] && this._state.accounts.some((a) => a.id === v)) this._state[k] = v;
     }
     if (imported) { this._save(); this._notify(); }
@@ -922,8 +975,7 @@ class AccountManager {
     let goneProvider = null; try { goneProvider = this.memberProviderOf(id); } catch { }
     (this._gone || (this._gone = new Map())).set(id, { provider: goneProvider, name: a.name || null });
     this._state.accounts.splice(i, 1);
-    if (this._state.defaultAccountId === id) this._state.defaultAccountId = null;
-    if (this._state.defaultCodexAccountId === id) this._state.defaultCodexAccountId = null;
+    for (const f of this._defaultIdFields()) if (this._state[f] === id) this._state[f] = null; // every harness's default field
     // POOL HYGIENE (2.335.0, real report: deleting the account a pool was
     // sitting on left the pool's default symlink AND per-session links
     // dangling — the whole pool showed signed-out and running sessions read
@@ -2115,6 +2167,8 @@ class AccountManager {
     if (!id) return null;
     const a = this.get(id);
     if (!a) throw new Error('unknown account: ' + id);
+    // a localOnly row (antigravity — the login is a secret file we never read, so never ship) runs on THIS machine
+    if (opts.remote && this._credsOf(backend).localOnly) throw new Error(`${harnessOf(backend).label} accounts run on this machine only — "${a.name}" cannot start on another machine; pick that machine's own login`);
     // codex POOL (P2, cold-switch v1): CODEX_HOME = the pool's symlink among
     // the member CODEX_HOME dirs — a spawn resolves through it to whichever
     // member the engine currently targets; switches restart the session
@@ -2135,19 +2189,20 @@ class AccountManager {
       // a logged-in member of this pool; else the pool's member, as before (the pin kept)
       let pinned = null;
       try { const m = opts.pinned && opts.chooseMember ? opts.chooseMember(id) : null; if (m && m !== cur && this.poolMembers(id).some((x) => x.id === m) && this._readAuthFor(backend, m).loggedIn) pinned = m; } catch { pinned = null; }
-      if (pinned) return { id: a.id, name: a.name, kind: backend + '-pooled', pinnedMember: pinned, localEnv: { [this._credsOf(backend).spawnEnvVar]: this._acctDir(backend, pinned) }, secret: null, remoteCreds: null };
-      return { id: a.id, name: a.name, kind: backend + '-pooled', localEnv: { [this._credsOf(backend).spawnEnvVar]: this._acctDir(backend, id) }, secret: null, remoteCreds: null };
+      if (pinned) return { id: a.id, name: a.name, kind: backend + '-pooled', pinnedMember: pinned, localEnv: this._homeSpawnEnv(backend, this._acctDir(backend, pinned)), secret: null, remoteCreds: null };
+      return { id: a.id, name: a.name, kind: backend + '-pooled', localEnv: this._homeSpawnEnv(backend, this._acctDir(backend, id)), secret: null, remoteCreds: null };
     }
     if (this._acctBackend(a) !== backend) throw new Error('not a ' + harnessOf(backend).label + ' account: ' + a.name);
     const info = this._readAuthFor(backend, id);
     if (!info.loggedIn) throw new Error(backend + ' account not logged in: ' + a.name);
     return {
       id: a.id, name: a.name, kind: backend + '-subscription',
-      localEnv: { [this._credsOf(backend).spawnEnvVar]: this._acctDir(backend, id) }, secret: null,
+      localEnv: this._homeSpawnEnv(backend, this._acctDir(backend, id)), secret: null,
       // REMOTE: ship auth.json to the host's CODEX_HOME copy; sessions/config
       // symlink the host's own ~/.codex (targets ensured first) so threads +
-      // settings stay shared on the host, auth isolated per account.
-      remoteCreds: this._remoteCreds(backend, id, a),
+      // settings stay shared on the host, auth isolated per account. A localOnly
+      // row (antigravity: a login we never read) ships nothing — refused above.
+      remoteCreds: this._credsOf(backend).localOnly ? null : this._remoteCreds(backend, id, a),
     };
   }
 

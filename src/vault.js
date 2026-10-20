@@ -166,6 +166,55 @@ function keyVerdict({ state, hasEntry = false, legacyFile = false, holdsCipherte
   return holdsCiphertext ? 'key-missing' : 'mint';
 }
 
+// ── AGENT-OWNED SECRETS (design q-043 §9, lane vault-mint-put): an agent mints or stores a secret under ITS OWN namespace
+//    `agent:<scope>/<name>` (the scope = this conversation or group) — the SCOPE is the authenticated session's (never the
+//    `<name>` is the agent's short label and holds NO `/` and NO `:`, so a name can never carry a scope of its own (a
+//    namespace escape is refused before any entry is touched). `mint` = the HUB makes the random value and seals it; the
+//    agent is handed only the entry name + its `vault://` reference, never the value. `put` = the agent hands a value it
+//    already has (a vendor key). Both land as engine secret entries (src/server/vault-engine.js secretGet/-Put). ──
+const AGENT_SCOPE_RE = /^[A-Za-z0-9._:-]{1,128}$/;   // a conversation / group id (the shape desktop-handover's `agent:<id>` uses)
+const AGENT_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;      // the agent's short label — NO `/`, NO `:`
+const AGENT_NS_RE = /^agent:[A-Za-z0-9._:-]{1,128}\/[A-Za-z0-9._-]{1,64}$/;   // the full entry name
+/** Build `agent:<scope>/<name>` from a SERVER-DERIVED scope + the agent's short name.
+ *  → { ok, name } | { ok:false, code:'bad_scope'|'bad_name' }. */
+function agentEntryName(scope, name) {
+  if (!AGENT_SCOPE_RE.test(String(scope == null ? '' : scope))) return { ok: false, code: 'bad_scope' };
+  if (!AGENT_NAME_RE.test(String(name == null ? '' : name))) return { ok: false, code: 'bad_name' };
+  return { ok: true, name: `agent:${scope}/${name}` };
+}
+/** The `vault://` reference the agent is handed (it never sees the value — this only names where it lives). */
+const vaultRefOf = (name) => `vault://${name}`;
+
+// ── MINT = the hub's own randomness (design q-043 §9). The charset + length an agent picks for the target site; the value
+//    is chars drawn UNIFORMLY from the alphabet (rejection sampling — never a modulo bias). ──
+const MINT_CHARSETS = Object.freeze({
+  'ascii-printable': '!"#$%&\'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~',
+  alnum: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
+  digits: '0123456789',
+});
+const MINT_LEN_MIN = 8, MINT_LEN_MAX = 256, MINT_LEN_DEFAULT = 24, MINT_CHARSET_DEFAULT = 'ascii-printable';
+/** → { ok, length, charset } | { ok:false, code:'bad_length'|'bad_charset' }. */
+function mintVerdict({ length, charset } = {}) {
+  const len = length == null || length === '' ? MINT_LEN_DEFAULT : Number(length);
+  if (!Number.isInteger(len) || len < MINT_LEN_MIN || len > MINT_LEN_MAX) return { ok: false, code: 'bad_length' };
+  const cs = charset == null || charset === '' ? MINT_CHARSET_DEFAULT : String(charset);
+  if (!MINT_CHARSETS[cs]) return { ok: false, code: 'bad_charset' };
+  return { ok: true, length: len, charset: cs };
+}
+/** A random secret of `length` chars from `charset`'s alphabet → a Buffer (the caller's to seal, then zero). Uniform: a
+ *  byte ≥ floor(256/A)*A is rejected (no modulo bias), so the A symbols are equiprobable. `rand(n)` ⇒ n random bytes. */
+function randomSecret(length, charset, rand = (n) => crypto.randomBytes(n)) {
+  const alpha = MINT_CHARSETS[charset];
+  if (!alpha || !Number.isInteger(length) || length <= 0) throw new TypeError('randomSecret: bad length or charset');
+  const A = alpha.length, limit = Math.floor(256 / A) * A, out = Buffer.alloc(length);
+  let i = 0;
+  while (i < length) {
+    const bytes = rand(Math.max(16, (length - i) * 2));
+    for (let j = 0; j < bytes.length && i < length; j++) { const b = bytes[j]; if (b < limit) out[i++] = alpha.charCodeAt(b % A); }
+  }
+  return out;
+}
+
 /**
  * THE VAULT LAW, EXTENDED (lane vault-e2e-password-fix-r2 — docs/kb-design-lessons.md): EVERY SECRET AT REST NAMES ITS VAULT
  * ENTRY — or a hash stands in its place, or it is an EXCEPTION named here with its reason. A new secret written to disk is
@@ -185,6 +234,7 @@ const SECRETS_AT_REST = Object.freeze([
   { what: 'the pairing / agentd / mount tokens', where: 'data/hosts.json dialTokenHash · agentd-tokens.json · mount-tokens.json', holds: 'sha256 digests only' },
   { what: 'the TLS private key', where: 'data/tls/*.key', exception: 'the sign-in door needs it before any unlock' },
   { what: 'the vendor CLIs\' own credentials', where: 'data/subs/*/.credentials.json · data/codex-subs/*/auth.json', exception: 'the vendor CLI reads its own file (q-040)' },
+  { what: 'an Antigravity account\'s Google login', where: 'data/agy-subs/<id>/.gemini/antigravity-cli/antigravity-oauth-token (a 0700 HOME root)', exception: 'agy reads its own file (the keyring is off for a named account, so the login is this file — measured); VibeSpace only stat()s it, never reads it' },
   { what: 'the ssh private keys', where: 'data/ssh/*.key · a host\'s keyPath', exception: 'ssh(1) reads the file — a hub-owned ssh-agent is design q-042 D6' },
   { what: 'the session agent tokens (vsst_)', where: 'data/session-meta/*.json agentToken', exception: 'the running agent\'s own credential (in its env for its life) — sealing the meta is design q-042 D1\'s next step' },
   { what: 'the device side of a pairing', where: 'a device\'s state/token + state/dial.json · the hub\'s own ~/.vibespace/agentd/state/token', exception: 'the device holds its own key (design q-042 D3 retires it)' },
@@ -197,4 +247,6 @@ module.exports = {
   SECRETS_AT_REST,
   VAULT_V, VAULT_FILE, KDF, KDF_FLOOR_MS, STATES, CODES, PASSWORD_MIN, PASSWORD_MAX, CHECK_TEXT, VERIFY_TEXT,
   zero, passwordOf, deriveKek, recordShapeOk, setup, unlock, changePassword, wrapEntry, unwrapEntry, stateOf, keyVerdict,
+  AGENT_SCOPE_RE, AGENT_NAME_RE, AGENT_NS_RE, agentEntryName, vaultRefOf,
+  MINT_CHARSETS, MINT_LEN_MIN, MINT_LEN_MAX, MINT_LEN_DEFAULT, MINT_CHARSET_DEFAULT, mintVerdict, randomSecret,
 };

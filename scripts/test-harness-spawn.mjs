@@ -35,12 +35,12 @@ class AcmeAdapter extends BackendAdapter {
     return { cmd: 'acme-cli', args: ['--acme', ...(o.resumeId ? ['--resume', o.resumeId] : [])], env: { ACME_HOME: '/acme-home' }, wrapper: this.config.ptyWrapper, mode: 'terminal' };
   }
 }
-const acme = (id, { pool }) => ({
+const acme = (id, { pool, spawnForm }) => ({
   id, label: 'Acme', kind: 'terminal',
   caps: { pool },                                            // the DECLARED pool row the create's pool gate reads
   Adapter: AcmeAdapter, adapterConfig: (cfg) => ({ ptyWrapper: cfg.ptyWrapper }),
   wrapper: null, Normalizer: null, store: null, quota: NULL_QUOTA, resume: null,
-  creds: { defaultIdField: 'defaultAcmeAccountId' },
+  creds: { defaultIdField: 'defaultAcmeAccountId', ...(spawnForm ? { spawnForm } : {}) },
   spawn: {
     authAtSpawn: ({ hostId }) => (hostId ? 'acme-remote' : 'acme-global'),
     resumeMayFork: true,
@@ -51,6 +51,7 @@ const acme = (id, { pool }) => ({
 console.log('— ① the ONE registration line');
 H.register(acme('acme', { pool: true }));
 H.register(acme('acme-nopool', { pool: false }));
+H.register(acme('acme-perseat', { pool: false, spawnForm: 'isolated-home' })); // lane antigravity-harness: named accounts, no pool
 ok(H.has('acme') && !H.isBuiltin('acme'), 'register() is the whole wiring: acme is a contributed harness');
 ok(capsOf('acme').pool === true && capsOf('acme-nopool').pool === false && capsOf('acme').fork === false,
   'capsOf answers the DECLARED row of a contributed harness (missing keys read the all-false row)');
@@ -115,6 +116,8 @@ ok(!!sp && sp.args.includes('--acme-status') && sp.args.includes('/stub/vibespac
 ok(r.resolved.join() === 'acme', 'caps.pool:true + managed creds ⇒ the pool/billing gate asks resolveForSpawn for acme', r.resolved);
 const rn = await drive(wsCreate, { backend: 'acme-nopool' });
 ok(rn.sent.some((m) => m.type === 'created') && rn.resolved.length === 0, '…and caps.pool:false skips it (the gate is the ROW, not the id)', rn.resolved);
+const rps = await drive(wsCreate, { backend: 'acme-perseat' });
+ok(rps.sent.some((m) => m.type === 'created') && rps.resolved.join() === 'acme-perseat', '…but caps.pool:false WITH a declared creds.spawnForm (per-session named accounts — antigravity) still asks resolveForSpawn', rps.resolved);
 const rr = await drive(wsCreate, { backend: 'acme', resume: true, resumeId: 'acme-conv-1', ignoreNoConvo: true });
 ok(rr.session && rr.session._resumeSpawn === true && rr.spawned[0]?.args.includes('acme-conv-1'), 'a resume carries the DECLARED spawn.resumeMayFork marker', rr.session && rr.session._resumeSpawn);
 
@@ -126,7 +129,7 @@ const CONTROLS = [
   ['authAtSpawn', "              : typeof SP.authAtSpawn === 'function' ? SP.authAtSpawn({ hostId: data.hostId, accounts }) : null,",
     "              : backend !== 'claude' ? null : data.hostId ? 'remote-global' : 'subscription',",
     (x) => x.session && x.session._authAtSpawn === 'acme-global'],
-  ['pool gate', "          if (capsOf(backend).pool && harness && harness.creds && accounts) {",
+  ['pool gate', "          if (harness && harness.creds && accounts && (capsOf(backend).pool || !!harness.creds.spawnForm)) {",
     "          if ((backend === 'claude' || backend === 'codex') && accounts) {",
     (x) => x.resolved.join() === 'acme'],
   ['statusline', "          if (typeof SP.statusline === 'function' && sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {",
@@ -207,7 +210,7 @@ console.log('— ④ the spawn-ladder seam: a fake transport through ONE registr
   delete globalThis.__acmeLinkCalls;
 }
 
-H.unregister('acme'); H.unregister('acme-nopool');
+H.unregister('acme'); H.unregister('acme-nopool'); H.unregister('acme-perseat');
 for (const d of [SOCK, BUF, CWD]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 ok(capsOf('acme').pool === false && !H.has('acme'), 'unregister() takes the contributed caps row with it');
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass} passed)`);

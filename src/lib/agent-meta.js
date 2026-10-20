@@ -166,6 +166,29 @@ export const BACKEND_META = {
     // client META mirrors it key for key (test-harness-contract deep-compares).
     ui: { billing: null, effortReport: null, effortLevels: null, modelLock: true, legacyIds: false, resumeResend: false },
   },
+  // Antigravity CLI (`agy`, lane antigravity-harness): not ACP, but its chat wrapper journals the ACP records, so the
+  // protocol rows mirror opencode's. An account roster (commit 2: Google accounts, each its own HOME root), no effort
+  // chip yet (agy's --effort is set by the Settings default; the status bar's ladder is another harness's), the model
+  // list = the slugs the headless docs list until `agy models` can be read. Permission modes = our words over agy's
+  // --mode values + bypass = --dangerously-skip-permissions.
+  antigravity: {
+    id: 'antigravity',
+    label: 'Antigravity CLI',
+    shortLabel: 'AGY',
+    badgeClass: 'badge-backend-antigravity',
+    color: 'var(--blue)',
+    icon: '▲',
+    iconSrc: '/brand/antigravity.svg',
+    iconClass: 'backend-icon-antigravity',
+    brandColor: '#4285F4',
+    fallbackModels: ['gemini-4-argon-high', 'gemini-3.8-flash-medium'],
+    modelsFromAgent: true,
+    caps: { fork: false, forkAtMessage: false, review: false, renameWriteback: false, effort: false, autoResume: { signal: false, resume: 'prompt', supported: false }, accounts: true, peerDelivery: 'stash-only', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'reorder', 'edit'] }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: null, session: false, instance: false, liveVerb: false } },
+    settingsPrefix: 'antigravity',
+    permissionModes: ['accept-edits', 'auto', 'plan', 'bypassPermissions'],
+    // THE DECLARED UI ROW — mirrors src/harnesses/antigravity.js key for key (test-harness-contract deep-compares).
+    ui: { billing: { globalLogin: 'Google login', cliLogin: 'Google login', pickLogin: 'Google login (Antigravity CLI)', pickLoginHost: 'Google login (on the host)', planSuffix: '', switchLogin: 'Google login', accountLogin: 'Google', defaultIdField: 'defaultAntigravityAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: null, globalUsageKey: null, estimates: false }, effortReport: null, effortLevels: null, modelLock: true, legacyIds: false, resumeResend: false },
+  },
 };
 
 /** Settings key family for a backend (S7): `<prefix>.defaultModel` etc. An
