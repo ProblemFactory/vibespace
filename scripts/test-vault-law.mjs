@@ -16,6 +16,9 @@
 //      caching a vault key, lawfulKey going legacy before asking the vault
 //   ⑥ THE REAL STORES (accounts, mounts, integrations, app-secrets) across the states: a secret sealed before setup;
 //      setup; read; lock ⇒ vault_locked (the row says it); unlock ⇒ read; a restart (a new engine) ⇒ locked
+//   ⑧ THE NAMED EXCEPTION the owner decided (design q-051, 2026-10-20): the per-instance relay token is NOT a vault entry —
+//      SECRETS_AT_REST names it with the decision, its date and its reason; it is no store key (no STORE_KEYS row, no
+//      key-file name); the shared relay token stays the vault's `frp:token` until it retires (the row says when)
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -267,6 +270,22 @@ console.log('⑦ THE AUTOMATION KEYS (design q-046) — a key\'s value never rea
   ok(ok1.ok && locked.code === 'vault_locked' && restarted.code === 'vault_locked' && v.state() === 'unlocked' && again.ok, 'granted ⇒ runs · LOCKED ⇒ vault_locked · a RESTART (a new engine) ⇒ locked, vault_locked · the person\'s unlock ⇒ it runs again (no key value was ever needed)', { ok1: ok1.ok, locked: locked.code, restarted: restarted.code, again: again.ok || again.code });
   v.close();
   fs.rmSync(ROOT, { recursive: true, force: true });
+}
+
+console.log('⑧ THE NAMED EXCEPTION — the per-instance relay token (design q-051, the owner\'s decision 2026-10-20)');
+{
+  const V = require(path.join(REPO, 'src/vault.js'));
+  const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
+  const RT = require(path.join(REPO, 'src/relay-token.js'));
+  const row = V.SECRETS_AT_REST.find((r) => r.where === 'data/' + RT.FILE);
+  ok(!!row && !row.entry && typeof row.exception === 'string' && /q-051/.test(row.exception) && /owner/.test(row.exception) && /2026-10-20/.test(row.exception) && /without the second password/.test(row.exception) && /public names only/.test(row.exception) && /never the hub/.test(row.exception) && /revocable/.test(row.exception),
+    'SECRETS_AT_REST names data/relay-token.json as an EXCEPTION: the owner\'s decision (q-051, 2026-10-20), why (a restart re-publishes without the second password), its blast radius (that instance\'s public names, never the hub), revocable', row);
+  const frpRow = V.SECRETS_AT_REST.find((r) => r.entry === 'frp:token');
+  ok(!!frpRow && /grace/.test(frpRow.what) && /2026-10-relay-token-per-instance/.test(frpRow.retires || ''), 'the shared relay token stays the vault\'s frp:token — the knock during the relay\'s grace — and its row says when it retires', frpRow);
+  const STORE_KEYS = Object.keys(VE.STORE_KEYS || {}).concat(Array.isArray(VE.STORE_KEYS) ? VE.STORE_KEYS.map((k) => k.name || k) : []);
+  ok(!STORE_KEYS.some((k) => String(k).includes('relay')) && !/\.key$|-key$/.test(RT.FILE) && !VE.isSecretName('relay:token'), 'the relay token is no store key (no STORE_KEYS row, no key-file name) and no vault secret name (relay: is not a secret prefix)', STORE_KEYS);
+  const frpSrc = read('src/plugins/frp.js');
+  ok(!/secretPut\([^)]*relay|secretGet\([^)]*relay/i.test(frpSrc) && /replaceShredding\(relayFile\(\), RT\.serialize\(rec\)\)/.test(frpSrc), 'the frp plugin writes it to its file (0600, atomic, the old bytes overwritten) — never into the vault', null);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

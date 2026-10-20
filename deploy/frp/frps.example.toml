@@ -44,3 +44,12 @@ webServer.password = "<DASHBOARD_PASSWORD — random>"
 log.to = "/var/log/frps.log"
 log.level = "info"
 log.maxDays = 7
+
+# ── per-instance relay tokens (VibeSpace ≥ 2.369.326 — tools/frps-login-plugin/README.md) ──
+# Every instance logs in with its OWN token, bound to its own public names. Install the plugin service first
+# (it answers on loopback), then uncomment and restart frps. Keep auth.token above during the grace.
+# [[httpPlugins]]
+# name = "vibespace-relay"
+# addr = "127.0.0.1:7001"
+# path = "/handler"
+# ops = ["Login", "NewProxy", "CloseProxy"]

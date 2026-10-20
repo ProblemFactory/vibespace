@@ -159,7 +159,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { streamUrl } from './vnc-view.js';
 import { viewOf, STATUS_KIND } from './stream-views.js'; // rv-desktop-apps F-B4: the view of each stream kind — one line per kind there
 import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from './window-live-mode.js';
-import { paneState } from '../desktop-viewers.js';
+import { paneState, paneSeated, RESUME_WAIT_MS } from '../desktop-viewers.js';
 import { exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS, scaleKnobs, scaleMenuModel, renderOf, relaunchPaneCss, relaunchVerdict } from '../desktop-fit.js';
 import { memoryText } from '../runaway-guard.js';
 import { launchDpr, launchUiScale, explicitScaleLabel, stopDesktopApp, confirmDiscard, agentBrowserText } from './desktop-app-launcher.js';
@@ -596,16 +596,28 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     // a pane the bridge cut (another client resumed) reconnects at once as a blocked viewer — it must stay seated to be re-elected
     if (rec && rec.state === 'ready' && !gone && view.wanted && view.state !== 'connected' && view.state !== 'connecting' && view.state !== 'starting') view.connect();
   }
+  // lane live-input-under-load: Resume here names THIS pane's socket (its viewer id) — asked only once that socket is SEATED
+  // (the viewers broadcast lists the pane: PURE paneSeated). A press that beat the pane's own socket was refused no_viewer
+  // and the pane then joined as a blocked viewer and stayed so (measured: three other clients attached first, 2-cpu load).
+  let seatWaits = [];
+  const whenSeated = (ms) => (paneSeated(seats, paneKey) ? Promise.resolve(true) : new Promise((resolve) => {
+    const w = { resolve, timer: setTimeout(() => { seatWaits = seatWaits.filter((x) => x !== w); resolve(false); }, Math.max(0, ms)) };
+    seatWaits.push(w);
+  }));
   const applyViewers = (v) => {
     if (!v || v.id !== id) return;
     seats = { known: true, active: v.active == null ? null : String(v.active), viewers: Array.isArray(v.viewers) ? v.viewers : [] };
     winInfo._desktopSeats = seats; // the raw handle the heavy suite reads (never the DOM)
     renderSeat();
+    if (seatWaits.length && paneSeated(seats, paneKey)) for (const w of seatWaits.splice(0)) { clearTimeout(w.timer); w.resolve(true); }
   };
   resumeBtn.onclick = async () => {
-    optimistic = { state: 'active', until: Date.now() + 8000 };
+    const until = Date.now() + RESUME_WAIT_MS;
+    optimistic = { state: 'active', until };
     renderSeat(); // the overlay goes NOW — the takeover never waits for the broadcast echo
-    if (view && view.state !== 'connected' && view.state !== 'connecting' && view.state !== 'starting') { view.connect(); await new Promise((r) => setTimeout(r, 600)); }
+    if (view && view.state !== 'connected' && view.state !== 'connecting' && view.state !== 'starting') view.connect();
+    await whenSeated(until - Date.now()); // the pane's own socket seated (a socket still opening — or reopened just now — is not yet a viewer)
+    if (closed) return;
     const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/viewers/takeover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewerId }) });
     optimistic = null;
     if (!r || r.error) { showToast(r?.error || t('Could not resume here'), { type: 'error' }); renderSeat(); return; }

@@ -127,6 +127,15 @@ const lark = W('src/channels/lark.js');
 const gmail = W('src/channels/gmail.js');
 const NOW = Date.now();
 const MIN = 60e3;
+// lane channel-window-render-10h: THE CLOCK PIN. The fake world sits at NOW − k minutes and the product draws a day
+// separator where the LOCAL day turns: a run between 00:18 and 01:00 local gave the seven room (NOW − 60…−18 min) a
+// second separator, and since 2.369.197's reactions note took 33 px of the maximized pane the seven no longer fit —
+// ⑩h's CONTROL FIXTURE went red on the base after every local midnight (2026-10-03, 10-12, 10-20). The suite, its server
+// and its Chrome (both inherit process.env at spawn) run in a whole-hour zone where NOW is 20:xx: every seeded room
+// (the oldest, oc_bat, 14 h back) is one local day, and no run reaches midnight.
+const PIN_HOUR = 20;
+const clockPinZone = (ms) => { const o = (((PIN_HOUR - new Date(ms).getUTCHours()) % 24) + 24) % 24, off = o > 14 ? o - 24 : o; return off === 0 ? 'Etc/GMT' : `Etc/GMT${off > 0 ? '-' : '+'}${Math.abs(off)}`; };
+process.env.TZ = clockPinZone(NOW);
 const larkItem = (id, at, msg_type, content, extra = {}) => ({ message_id: id, msg_type, create_time: String(at), chat_id: 'oc_x', sender: { id: 'ou_ada', sender_type: 'user' }, body: { content: JSON.stringify(content) }, ...extra });
 const names = new Map([['ou_ada', 'Ada'], ['ou_brook', 'Brook']]);
 const HOSTILE_LABEL = '<img src=x onerror="window.__pwned=1">';
@@ -409,6 +418,9 @@ async function newPage() {
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 const p1 = await newPage();
 ok(await p1.load(), 'the page loaded the app (zh)');
+// the clock pin reached the page (Chrome reads the zone when it starts): NOW is PIN_HOUR:xx on the page's own clock
+const CLK = await p1.evaljs(`({ zone: Intl.DateTimeFormat().resolvedOptions().timeZone, hour: new Date(${NOW}).getHours() })`);
+ok(CLK.hour === PIN_HOUR, `CLOCK PIN: NOW is ${PIN_HOUR}:xx on the page's clock (${process.env.TZ}) — every seeded room one local day, no run reaches midnight`, J(CLK));
 
 /** Open a conversation window and wait until `ready` (a page expression over `w`) holds. */
 const OPEN = (a, c, ready) => `(async () => {
@@ -1729,12 +1741,12 @@ console.log('⑩h CONTROL: a product that pages on a clamp POSTs /older on a max
       window.app.wm.toggleMaximize(w.id);
       for (let i = 0; i < 120 && !(spy.older > at.older0); i++) await sleep(25);
       await sleep(600);
-      const out = { ...at, scrolls, fits: list.scrollHeight <= list.clientHeight, older: spy.older, before: spy.before };
+      const out = { ...at, scrolls, fits: list.scrollHeight <= list.clientHeight, older: spy.older, before: spy.before, days: list.querySelectorAll(':scope > .chanmsg-day').length, under: Math.round(list.getBoundingClientRect().bottom - Math.max(...[...list.children].map((c) => c.getBoundingClientRect().bottom))) };
       window.app.wm.toggleMaximize(w.id);
       window.fetch = f0;
       return out;
     })()`);
-    ok(CTL.tall && CTL.st > 4 && CTL.rows === 7 && CTL.fits && CTL.scrolls.includes(0) && CTL.older0 === 0, 'CONTROL FIXTURE (⑩h): the seven-message room at its bottom, the maximize let it fit and the clamp to 0 dispatched a scroll event (⑩d\'s shape)', J(CTL));
+    ok(CTL.tall && CTL.st > 4 && CTL.rows === 7 && CTL.days === 1 && CTL.fits && CTL.scrolls.includes(0) && CTL.older0 === 0, 'CONTROL FIXTURE (⑩h): the seven-message room (one local day: ONE day separator — the clock pin) at its bottom, the maximize let it fit and the clamp to 0 dispatched a scroll event (⑩d\'s shape)', J(CTL));
     ok(CTL.before >= 1 && CTL.older >= 1, `CONTROL (⑩h): the patched product (a scroll event needs no evidence) read \`?before=\` ${CTL.before}× and POSTed /older ${CTL.older}× on the maximize's clamp — the battery's maximize leg and ⑩d read 0 on the shipped bundle`, J(CTL));
   }
 }

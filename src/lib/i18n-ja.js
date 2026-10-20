@@ -9593,4 +9593,40 @@ export default {
   "Limits…": "制限…", // lane automation-open-limits
   "Audit…": "監査ログ…", // lane automation-open-limits
   "What the conversations it opens may use": "開く会話が使えるもの", // lane automation-open-limits
+  "waiting for the relay admin to register it": "リレー管理者の登録待ち", // lane relay-token-per-instance
+  "the relay holds another token — send the registration line again": "リレーには別のトークンが登録されています — 登録行をもう一度送ってください", // lane relay-token-per-instance
+  "the relay revoked it — mint a new token": "リレーが取り消しました — 新しいトークンを発行してください", // lane relay-token-per-instance
+  "the relay refused the shared token": "リレーが共有トークンを拒否しました", // lane relay-token-per-instance
+  "the relay no longer takes the shared token": "リレーはもう共有トークンを受け付けません", // lane relay-token-per-instance
+  "Logs in with the cluster's relay token as {user}": "クラスターのリレートークンで {user} としてログイン", // lane relay-token-per-instance
+  "The cluster's relay token is set but this pod has no name (VIBESPACE_INSTANCE_NAME)": "クラスターのリレートークンは設定済みですが、この pod には名前がありません（VIBESPACE_INSTANCE_NAME）", // lane relay-token-per-instance
+  "the relay knows it": "リレーに登録済み", // lane relay-token-per-instance
+  "the shared token waits for the vault": "共有トークンは保管庫のロック解除待ち", // lane relay-token-per-instance
+  "Relay identity": "リレーの ID", // lane relay-token-per-instance
+  "no longer sent — it left this instance": "もう送りません — このインスタンスから外れました", // lane relay-token-per-instance
+  "sent while the relay's grace lasts": "リレーの猶予期間中は送ります", // lane relay-token-per-instance
+  "waits for the vault (sent once it is unlocked)": "保管庫待ち（ロック解除後に送ります）", // lane relay-token-per-instance
+  "no longer sent — the relay takes this instance's own token alone": "もう送りません — リレーはこのインスタンス自身のトークンだけで受け付けます", // lane relay-token-per-instance
+  "This instance logs in to the relay with its own token, bound to its own public names. The token is kept on this instance (not in the vault), so a restart re-publishes without the second password; a stolen token reaches these public names only.": "このインスタンスは自分のトークンでリレーにログインし、トークンは自分の公開名だけに紐づきます。トークンはこのインスタンスに保存され（保管庫には入りません）、再起動後も第二パスワードなしで再公開できます。盗まれたトークンが届くのはこれらの公開名だけです。", // lane relay-token-per-instance
+  "Instance": "インスタンス", // lane relay-token-per-instance
+  "none yet": "まだなし", // lane relay-token-per-instance
+  "Public names": "公開名", // lane relay-token-per-instance
+  "Shared relay token": "共有リレートークン", // lane relay-token-per-instance
+  "Send this line to the relay admin: it carries a fingerprint (sha256) of the token, never the token.": "この行をリレー管理者に送ってください：含まれるのはトークンの指紋（sha256）だけで、トークンそのものは含みません。", // lane relay-token-per-instance
+  "Mint a new token": "新しいトークンを発行", // lane relay-token-per-instance
+  "Relay token minted — send its line to the relay admin": "リレートークンを発行しました — 登録行をリレー管理者に送ってください", // lane relay-token-per-instance
+  "Relay token rotated — send its line to the relay admin": "リレートークンをローテーションしました — 登録行をリレー管理者に送ってください", // lane relay-token-per-instance
+  "Revoke the relay token?": "リレートークンを取り消しますか？", // lane relay-token-per-instance
+  "This instance stops using its relay token at once and its public URLs stop until you mint a new one. Send the revoke line to the relay admin so the relay refuses the old token too.": "このインスタンスはリレートークンの使用をすぐに止め、新しいトークンを発行するまで公開 URL は止まります。取り消しの行をリレー管理者に送り、リレー側でも古いトークンを拒否させてください。", // lane relay-token-per-instance
+  "Relay token revoked": "リレートークンを取り消しました", // lane relay-token-per-instance
+  "The relay no longer asks the shared token": "リレーはもう共有トークンを求めません", // lane relay-token-per-instance
+  "The shared relay token is no longer sent": "共有リレートークンはもう送りません", // lane relay-token-per-instance
+  "Send the shared token again": "共有トークンを再び送る", // lane relay-token-per-instance
+  "The shared relay token is sent again": "共有リレートークンを再び送ります", // lane relay-token-per-instance
+  "The public name {name} is held by “{owner}” on the relay": "公開名 {name} はリレーで「{owner}」が使用中です", // lane relay-token-per-instance
+  "The relay refused it for this instance. Either this instance's relay token leaked and another login took the name, or a copy of data/ runs elsewhere. If neither is expected: Rotate the relay token in Plugins › Public URLs and send the new registration line to the relay admin.": "リレーはこのインスタンスへの割り当てを拒否しました。このインスタンスのリレートークンが漏れて別のログインが名前を取ったか、data/ のコピーが別の場所で動いています。どちらも想定外なら：プラグイン › 公開 URL でリレートークンをローテーションし、新しい登録行をリレー管理者に送ってください。", // lane relay-token-per-instance
+  "The relay refused the public name {name} for this instance": "リレーは公開名 {name} をこのインスタンスに割り当てませんでした", // lane relay-token-per-instance
+  "The relay holds a different name list for this instance — its record here or at the relay was changed. Rotate the relay token in Plugins › Public URLs and send the new registration line to the relay admin.": "リレーに登録されたこのインスタンスの名前一覧が違います — こちらかリレー側の記録が変更されています。プラグイン › 公開 URL でリレートークンをローテーションし、新しい登録行をリレー管理者に送ってください。", // lane relay-token-per-instance
+  "Relay token revoked — mint a new one": "リレートークンは取り消されました — 新しく発行してください", // lane relay-token-per-instance
+  "Own relay token": "自分のリレートークン", // lane relay-token-per-instance
 };

@@ -4428,6 +4428,8 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .plugin-detail code { color: var(--text-secondary); }
 .plugin-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .plugin-auth-url { display: flex; align-items: center; gap: 6px; font-size: 11px; overflow-wrap: anywhere; padding: 6px 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: var(--radius-sm); }
+.plugin-auth-url > .mounts-btn { flex: none; }   /* lane relay-token-per-instance: a long registration line never squeezes its Copy button */
+.plugin-relay-doors { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
 /* ── The Plugins LIST (lane plugin-settings-p0, the VS Code plugin model): one row per plugin — dot · name +
    description · status chip · switch · [install] · ⚙; configuration lives in All Settings ── */

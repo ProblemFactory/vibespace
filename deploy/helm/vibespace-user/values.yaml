@@ -151,7 +151,9 @@ telemetry:
 frp:
   addr: ""            # relay host, e.g. relay.example.com or an IP
   port: 7000
-  token: ""           # shared secret (stored in the release Secret)
+  token: ""           # shared secret (stored in the release Secret) — the relay's KNOCK during its grace only
+  clusterToken: ""    # the fleet's ONE per-cluster relay token (tools/frps-login-plugin `relay-admin new-token` + `add-cluster`):
+                      # each pod logs in to the relay as its own name with it (VIBESPACE_RELAY_CLUSTER_TOKEN; the release Secret)
   subdomainHost: ""   # e.g. preview.example.com → https://<random>.preview.example.com
 
 # Agent-container egress lockdown (needs a NetworkPolicy-enforcing CNI). OFF by

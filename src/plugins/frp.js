@@ -7,6 +7,9 @@ const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const { pidCmdline, pidAlive } = require('./proc.js');
 const { replaceShredding } = require('../secret-file.js');   // lane vault-e2e-password-fix-r2: an older frpc.toml held the token
+const os = require('os');
+const crypto = require('crypto');
+const RT = require('../relay-token.js');   // lane relay-token-per-instance (design q-051): THE instance's own relay token (PURE)
 
 // frp (B-0b60 public port exposure): the frps RELAY server is shared fleet
 // infra — its address/port/token are INJECTED via env (helm/deploy), never in
@@ -24,7 +27,7 @@ module.exports = {
   id: 'frp',
   label: 'Public URLs (frp)',
   description: 'Expose a machine’s dev server on the public internet via the frp relay — share a preview link. Off by default; needs the relay configured.',
-  provides: ['relay'],
+  provides: ['relay', 'reminders'],   // reminders: a public name the relay refused is ONE For-you item (lane relay-token-per-instance)
   create(h) {
     const frpDir = () => h.dir;
     const frpBin = () => {
@@ -43,6 +46,33 @@ module.exports = {
       fs.writeFileSync(f, pw, { mode: 0o600 });
       return pw;
     };
+    // THE INSTANCE'S RELAY TOKEN (lane relay-token-per-instance, design q-051 — the owner's decision 2026-10-20): this
+    // instance's OWN token bound to its OWN public names (PURE src/relay-token.js), kept in data/relay-token.json (0600,
+    // atomic, the old bytes overwritten) — NOT the vault: a restart re-publishes without the second password (src/vault.js
+    // SECRETS_AT_REST names the exception). frpc logs in as `user = <instance id>` with `metadatas.token` = frp's env
+    // template; the value rides the frpc child's env only. A fleet pod logs in as its own name with its cluster's token
+    // (VIBESPACE_RELAY_CLUSTER_TOKEN, env). The shared token below (`tokenState`) is only the KNOCK frps still asks during
+    // the relay's grace; it leaves this instance once a frpc started without it ran a proxy (RETIRE_ID — never before).
+    const RETIRE_ID = '2026-10-relay-token-per-instance';
+    const relayFile = () => (h.dataDir ? path.join(h.dataDir, RT.FILE) : null);
+    const relayRead = () => {
+      const f = relayFile();
+      if (!f) return { rec: null, state: 'no-data-dir' };
+      let raw;
+      try { raw = fs.readFileSync(f, 'utf-8'); } catch (e) { return { rec: null, state: e && e.code === 'ENOENT' ? 'none' : 'unreadable' }; }
+      const rec = RT.parse(raw);
+      return rec ? { rec, state: 'ok' } : { rec: null, state: 'unreadable' };
+    };
+    const relayWrite = (rec) => replaceShredding(relayFile(), RT.serialize(rec));   // 0600, atomic, the old token's bytes overwritten
+    const sha256 = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+    const identity = () => RT.identityOf({ rec: relayRead().rec, env: process.env });
+    const mintRecord = () => {
+      const rec = RT.mint({ randomBytes: crypto.randomBytes, now: Date.now(), label: process.env.VIBESPACE_INSTANCE_NAME || os.hostname() });
+      relayWrite(rec);
+      console.log(`[plugins] frp: this instance's relay identity ${rec.instanceId} was minted — the relay admin registers it with the line on Plugins › Public URLs`);
+      return rec;
+    };
+    const revokedWords = 'this instance\'s relay token was revoked — mint a new one (Plugins › Public URLs) and send its registration line to the relay admin';
     // THE RELAY TOKEN (lane vault-e2e-password-fix-r2): the owner's override is the vault's entry `frp:token` once the vault
     // is set up — data/plugins.json keeps only `config.tokenSealed: true`; before the setup, `config.token` as before (the
     // open hook `sealSecrets` moves it in at the setup / every unlock). LOCKED with a sealed override ⇒ no token: the relay
@@ -65,25 +95,37 @@ module.exports = {
     const lockedWords = 'the vault is locked — the relay token opens after the owner unlocks it with the second password (the relay does not start until then)';
     // lane vault-locked-refusal-notice: the refusal, NOTED (the vault's ONE helper) — «the relay» and what it was refused
     const lockedRefusal = (verb) => { const v = vaultOf(); try { if (v && typeof v.blocked === 'function') v.blocked('the relay', verb); } catch { } return Object.assign(new Error(lockedWords), { code: 'vault_locked' }); };
+    /** THE KNOCK (lane relay-token-per-instance): the shared token frpc still sends as frps's own auth.token — until this
+     *  relay proved it no longer asks (a frpc started without it logged in / ran a proxy) or the owner said so
+     *  (「中继已升级」). An instance with no identity of its own always knocks (the old relay). */
+    const knockOf = (ident) => {
+      const p = h.peek();
+      if (ident.token && (p.relayUpgradedAt || p.relayKnocklessAt)) return { token: '', locked: false, off: true };
+      return { ...tokenState(), off: false };
+    };
     // Effective relay config: USER override wins over the cluster-injected ENV defaults (user directive: the fleet
     // auto-injects VIBESPACE_FRPS_* as defaults + enables the plugin; the user can change any of it). The address /
     // port / subdomain host are SETTINGS rows (All Settings › Plugins › Public URLs — lane plugin-settings-p0); the
     // relay token is a secret the plugin holds itself (the vault's `frp:token` — above), never a setting.
     const frpCfg = () => {
       const v = h.settings();
-      const tk = tokenState();
+      const ident = identity();
+      const tk = knockOf(ident);
       return {
         serverAddr: v.serverAddr || FRPS_ADDR,
         serverPort: Number(v.serverPort || FRPS_PORT),
-        token: tk.token,
-        vaultLocked: tk.locked,
+        token: tk.token,                           // THE KNOCK (the shared token) — '' once retired, while LOCKED, or none
+        ident,                                     // this instance's own identity (RT.identityOf) — its token in memory only
+        vaultLocked: tk.locked && !ident.token,    // no identity of its own: the sealed shared token is the relay's only key (the door)
+        knockLocked: tk.locked && !!ident.token,   // an identity of its own: frpc starts without the knock (the grace may refuse it)
+        knockOff: tk.off,
         subDomainHost: v.subDomainHost || process.env.VIBESPACE_FRPS_SUBDOMAIN_HOST || '',
         portMin: Number(FRP_PORT_MIN),
         portMax: Number(FRP_PORT_MAX),
-        fromEnv: !!(FRPS_ADDR && FRPS_TOKEN),   // was the RELAY provided by the cluster?
+        fromEnv: !!(FRPS_ADDR && (FRPS_TOKEN || process.env[RT.CLUSTER_TOKEN_ENV])),   // was the RELAY provided by the cluster?
       };
     };
-    const frpConfigured = () => { const c = frpCfg(); return !!(c.serverAddr && c.token); };
+    const frpConfigured = () => { const c = frpCfg(); return !!(c.serverAddr && (c.token || c.ident.token)); };
     // Default-enabled when the cluster injects the relay env AND the user hasn't
     // explicitly turned it off (rec.enabled === false). Undefined = follow env.
     const frpEffectiveEnabled = () => {
@@ -102,15 +144,15 @@ module.exports = {
     // lane vault-e2e-password-fix-r2: the TOKEN never lands in frpc.toml — the file names an environment variable (frp's
     // `{{ .Envs.X }}` config template) and start() hands the value to the frpc child's env (memory only)
     const FRP_TOKEN_ENV = 'VIBESPACE_FRP_AUTH_TOKEN';
-    const frpWriteConf = () => {
+    const frpWriteConf = (cfg = frpCfg(), knock = !!cfg.token) => {
       const pw = frpAdminPw();
-      const cfg = frpCfg();
       fs.mkdirSync(frpProxiesDir(), { recursive: true, mode: 0o700 });
       const toml = [
         `serverAddr = "${cfg.serverAddr}"`,
         `serverPort = ${cfg.serverPort}`,
+        ...RT.frpcLines(cfg.ident),   // user = "<instance id>" + metadatas.token = frp's env template, never the value (lane relay-token-per-instance)
         `auth.method = "token"`,
-        `auth.token = "{{ .Envs.${FRP_TOKEN_ENV} }}"`,
+        ...(knock ? [`auth.token = "{{ .Envs.${FRP_TOKEN_ENV} }}"`] : []),   // the knock — none once the relay no longer asks
         `webServer.addr = "127.0.0.1"`,
         `webServer.port = ${FRP_ADMIN_PORT}`,
         `webServer.user = "vibespace"`,
@@ -158,6 +200,150 @@ module.exports = {
       const s = await frpAdmin('/api/status', 'GET');
       return (s && s[kind]) || [];
     };
+    /** the newest login event the RUNNING frpc wrote (its frpc.log since this start, ≤ 16 KB) → RT.loginOf's answer */
+    const loginState = () => {
+      let fd = null;
+      try {
+        fd = fs.openSync(path.join(frpDir(), 'frpc.log'), 'r');
+        const size = fs.fstatSync(fd).size, from = Math.max(Number(h.peek().frpcLogFrom) || 0, size - 16384);
+        if (from >= size) return null;
+        const b = Buffer.alloc(size - from);
+        fs.readSync(fd, b, 0, b.length, from);
+        return RT.loginOf(b.toString('utf8'));
+      } catch { return null; } finally { if (fd !== null) try { fs.closeSync(fd); } catch { } }
+    };
+    const logSize = () => { try { return fs.statSync(path.join(frpDir(), 'frpc.log')).size; } catch { return 0; } };
+    const forYou = () => { try { return h.opts && typeof h.opts.forYou === 'function' ? h.opts.forYou() : null; } catch { return null; } };
+    /** a public name the relay refused (name_in_use / name_not_yours) ⇒ ONE For-you item per name — never the token */
+    const relayAlert = (ref, name) => {
+      const a = RT.alertOf(ref, { name });
+      if (!a) return;
+      const ut = forYou();
+      if (!ut || typeof ut.add !== 'function') { console.warn(`[plugins] frp: the relay refused the public name ${name} (${ref.code}) — no For-you store is wired, so only this journal says so`); return; }
+      try { ut.add('frp', { origin: 'plugin', plugin: 'frp', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Public URLs (frp)', text: a.text, detail: a.detail, i18n: a.i18n }); } catch (e) { console.warn('[plugins] frp: the relay name alert was not filed:', e.message); }
+    };
+    /** THE KNOCK'S RETIREMENT (design q-051 §3 ②, RETIRE_ID): once this instance's own token published (a proxy ran) AND a
+     *  frpc started WITHOUT the shared token logged in (the relay no longer asks — never before: the relay is never lost),
+     *  the shared token leaves this instance — the vault's `frp:token` entry dropped (at the next unlock when LOCKED now),
+     *  a plaintext override too. The cluster's env token is the cluster's (it is simply no longer sent). */
+    const retireLegacy = () => {
+      const p = h.peek();
+      if (!p.relayKnocklessAt || !p.relayPublishedAt || p.legacyRetired) return false;
+      const c = p.config || {};
+      if (c.tokenSealed) {
+        const v = vaultOf();
+        if (!v || v.state() !== 'unlocked') return false;   // the vault's open hook (sealSecrets) retries
+        const r = v.secretDrop(FRP_ENTRY);
+        if (!r.ok) { console.warn(`[plugins] frp: the shared relay token was not dropped from the vault (${r.code}) — the next unlock retries`); return false; }
+      }
+      const w = h.rec();
+      if (w.config) { delete w.config.token; delete w.config.tokenSealed; if (!Object.keys(w.config).length) delete w.config; }
+      w.legacyRetired = { id: RETIRE_ID, at: Date.now() };
+      h.save(); h.notify();
+      console.log(`[plugins] frp: the shared relay token left this instance (${RETIRE_ID}) — it logs in with its own token only`);
+      return true;
+    };
+    /** what the running frpc's login says, acted on: a login without the knock ⇒ the relay no longer asks (recorded); the
+     *  relay refusing the knock while this instance holds its own token ⇒ ONE restart without it (≤ 1 per 10 min) */
+    const observe = () => {
+      const p = h.peek();
+      if (!frpDaemonPid() || !['instance', 'cluster'].includes(p.frpcIdentity)) return null;
+      const ls = loginState();
+      if (ls && ls.ok && p.frpcKnock === false && !p.relayKnocklessAt) {
+        const w = h.rec(); w.relayKnocklessAt = Date.now(); h.save();
+        console.log('[plugins] frp: the relay took a login without the shared token — it no longer asks for it');
+        retireLegacy();
+      } else if (ls && !ls.ok && ls.code === 'knock_refused' && p.frpcKnock === true && !(Date.now() - (p.knockTrialAt || 0) < 600e3)) {
+        const w = h.rec(); w.knockTrialAt = Date.now(); h.save();
+        console.log('[plugins] frp: the relay refused the shared token — restarting frpc with this instance\'s own token only');
+        restartSoon({ knock: false }, 'without the shared token');
+      }
+      return ls;
+    };
+    /** a restart that waits for the old frpc to leave (its admin port) — never blocking the loop */
+    let restarting = null;
+    const restartSoon = (opts = {}, why = 'a relay change') => {
+      if (restarting) return restarting;
+      const pid = frpDaemonPid();
+      try { verbs.stop(); } catch { }
+      restarting = (async () => {
+        for (let i = 0; pid && i < 60 && pidAlive(pid) && pidCmdline(pid).includes('frpc'); i++) await new Promise((r) => setTimeout(r, 50));
+        verbs.start(opts);
+      })().catch((e) => console.warn(`[plugins] frp: the relay did not restart (${why}):`, e.message)).finally(() => { restarting = null; });
+      return restarting;
+    };
+    let watch = null;
+    const watchLogin = (on) => {
+      if (watch) { clearInterval(watch); watch = null; }
+      if (on) { watch = setInterval(() => { try { observe(); } catch { } }, 60e3); watch.unref?.(); }
+    };
+    /** a proxy RAN: the identity it ran under is recorded (the retirement's first proof), its subdomain kept for the card */
+    const relayPublished = (sub) => {
+      const p = h.peek();
+      if (!['instance', 'cluster'].includes(p.frpcIdentity)) return;
+      const w = h.rec();
+      let dirty = false;
+      if (!w.relayPublishedAt) { w.relayPublishedAt = Date.now(); dirty = true; }
+      if (w.frpcKnock === false && !w.relayKnocklessAt) { w.relayKnocklessAt = Date.now(); dirty = true; }
+      if (dirty) h.save();
+      if (sub && p.frpcIdentity === 'instance') { const r = relayRead().rec; if (r && r.token && !r.subdomains.includes(sub)) { try { relayWrite(RT.withSub(r, sub)); } catch (e) { console.warn('[plugins] frp: the relay record kept no subdomain:', e.message); } } }
+      retireLegacy();
+    };
+    const restartIfRunning = (why) => { if (frpDaemonPid()) restartSoon({}, why); };
+    /** the boot replay / an unlock: an instance configured the shared way mints its own identity, and a frpc an OLDER build
+     *  started (it survives a hub upgrade, detached) — or one started before the identity — is restarted onto it, once */
+    const relayAdopt = () => {
+      if (!frpEffectiveEnabled()) return false;
+      let cfg = frpCfg();
+      if (cfg.ident.kind === 'none' && cfg.token && cfg.serverAddr && relayRead().state === 'none') { mintRecord(); cfg = frpCfg(); }
+      if (frpDaemonPid() && cfg.ident.token && h.peek().frpcIdentity !== cfg.ident.kind) { restartSoon({}, 'onto its own relay token'); return true; }
+      return false;
+    };
+    /** the Relay card's doors (config({ relay: op })): mint · rotate · revoke · upgraded (stop knocking) · knock (again) */
+    const relayOp = (op) => {
+      const ident = identity();
+      if (ident.kind === 'cluster' || ident.kind === 'cluster-unnamed') throw Object.assign(new Error(`this instance logs in to the relay with its cluster's token (${RT.CLUSTER_TOKEN_ENV}) — its identity is the cluster's, nothing to ${op} here`), { code: 'relay_cluster' });
+      const r = relayRead();
+      if (['mint', 'rotate', 'revoke'].includes(op)) {
+        if (!relayFile()) throw new Error('this plugin was built without a data dir — no relay identity');
+        if (r.state === 'unreadable') throw Object.assign(new Error(`data/${RT.FILE} is unreadable — move it aside first (a new one would lose this instance's id and its public names)`), { code: 'relay_unreadable' });
+      }
+      const now = Date.now();
+      if (op === 'mint' || op === 'rotate') {
+        if (op === 'mint' && r.rec && r.rec.token) return;
+        if (op === 'rotate' && !r.rec) throw Object.assign(new Error('this instance has no relay identity yet — mint one first'), { code: 'relay_none' });
+        if (r.rec) relayWrite(RT.rotate(r.rec, { randomBytes: crypto.randomBytes, now })); else mintRecord();
+        console.log(`[plugins] frp: relay token ${r.rec ? 'rotated' : 'minted'} — the old one is no longer used`);
+        restartIfRunning();
+      } else if (op === 'revoke') {
+        if (!r.rec || !r.rec.token) throw Object.assign(new Error('there is no relay token to revoke'), { code: 'relay_none' });
+        relayWrite(RT.revoke(r.rec, { now }));
+        console.log(`[plugins] frp: relay token of ${r.rec.instanceId} revoked — the relay admin runs \`relay-admin revoke ${r.rec.instanceId}\``);
+        try { verbs.stop(); } catch { }
+      } else if (op === 'upgraded') {
+        if (!ident.token) throw Object.assign(new Error('this instance has no relay token of its own yet — the shared one is its only key'), { code: 'relay_none' });
+        const w = h.rec(); w.relayUpgradedAt = now; h.save();
+        restartIfRunning();
+      } else if (op === 'knock') {
+        const p = h.peek();
+        if (p.legacyRetired) throw Object.assign(new Error('the shared relay token already left this instance — set it again in the relay settings to knock with it'), { code: 'relay_retired' });
+        const w = h.rec(); delete w.relayUpgradedAt; delete w.relayKnocklessAt; h.save();
+        restartIfRunning();
+      } else throw Object.assign(new Error(`unknown relay op ${String(op).slice(0, 20)} (mint / rotate / revoke / upgraded / knock)`), { code: 'bad_op' });
+    };
+    /** the Relay card's facts — never the token (the registration line carries its sha256 only) */
+    const relayStatus = (c) => {
+      const r = relayRead(), rec = r.rec, ident = c.ident, p = h.peek();
+      const lines = !rec ? [] : rec.revokedAt ? [RT.registrationLine(rec, sha256, 'revoke')] : [RT.registrationLine(rec, sha256, 'add'), ...(rec.rotatedAt ? [RT.registrationLine(rec, sha256, 'rotate')] : [])];
+      return {
+        kind: ident.kind, file: r.state, user: ident.user || null, instanceId: rec ? rec.instanceId : null, label: rec ? rec.label : null,
+        prefixes: ident.prefixes, subdomains: rec ? rec.subdomains : [], mintedAt: rec ? rec.mintedAt : null, rotatedAt: rec ? rec.rotatedAt : null, revokedAt: rec ? rec.revokedAt : null,
+        lines: ident.kind === 'instance' || ident.kind === 'revoked' ? lines.filter(Boolean) : [],
+        login: frpDaemonPid() ? loginState() : null,
+        knock: c.knockOff ? 'off' : c.knockLocked ? 'locked' : c.token ? 'on' : 'none',
+        upgradedAt: p.relayUpgradedAt || p.relayKnocklessAt || null, publishedAt: p.relayPublishedAt || null, retired: p.legacyRetired || null,
+      };
+    };
 
     const verbs = {
       config(patch) {
@@ -180,8 +366,10 @@ module.exports = {
             if (s) c.tokenSealed = true; else delete c.tokenSealed;
           } else if (s) c.token = s; else { delete c.token; delete c.tokenSealed; }
           if (!Object.keys(c).length) delete rec.config;
+          if (s) { delete rec.legacyRetired; delete rec.relayKnocklessAt; delete rec.relayUpgradedAt; }   // lane relay-token-per-instance: a shared token set again is knocked with again
           h.save();
         }
+        if (patch.relay !== undefined) relayOp(String(patch.relay));   // lane relay-token-per-instance: the Relay card's doors
         const w = {};
         for (const k of ['serverAddr', 'subDomainHost']) if (patch[k] !== undefined) w[k] = String(patch[k]).trim().slice(0, 200);
         if (patch.serverPort !== undefined) { const n = Number(patch.serverPort); w.serverPort = n > 0 && n < 65536 ? n : 0; }
@@ -205,6 +393,14 @@ module.exports = {
           delete w.token; w.tokenSealed = true;
           h.save(); sealed = true;
         }
+        // lane relay-token-per-instance: the knock's retirement waits for an unlock when the vault holds it; a frpc the LOCK
+        // started without the knock (its own token only) gets it back now — unless the relay already took a login without it
+        try { retireLegacy(); } catch (e) { console.warn('[plugins] frp: the shared relay token was not retired:', e.message); }
+        const p = h.peek();
+        if (frpDaemonPid() && p.frpcKnock === false && !p.relayKnocklessAt && !p.relayUpgradedAt && frpCfg().token && !(observe() || {}).ok) {
+          restartSoon({}, 'with the shared token');
+          return sealed;
+        }
         try { verbs.bootReplay(); } catch { }
         return sealed;
       },
@@ -217,7 +413,10 @@ module.exports = {
       // whenever effective-enabled + configured (no prior desiredUp needed — a
       // fresh pod has no state yet). It auto-installs frpc if missing.
       bootReplay() {
+        if (restarting) return;   // a relay restart in flight starts it
         try { frpScrubConf(); } catch (e) { console.warn('[plugins] frp: the config scrub failed:', e.message); }
+        try { if (relayAdopt()) return; } catch (e) { console.warn('[plugins] frp: the relay identity was not adopted:', e.message); }
+        if (frpDaemonPid()) watchLogin(true);   // a frpc a previous life started: its login is watched again
         if (!frpEffectiveEnabled() || !frpConfigured()) return;   // a LOCKED vault with a sealed override reads as unconfigured here — the unlock's sealSecrets replays it
         (async () => {
           try {
@@ -249,25 +448,36 @@ module.exports = {
         return { installed: true, version: FRP_VERSION };
       },
 
-      start() {
-        if (frpCfg().vaultLocked) throw lockedRefusal('start');
+      start({ knock: withKnock = true } = {}) {
+        let cfg = frpCfg();
+        if (cfg.vaultLocked) throw lockedRefusal('start');
+        if (cfg.ident.kind === 'revoked') throw Object.assign(new Error(revokedWords), { code: 'relay_revoked' });   // fail closed: never the shared token in its place
+        // the first start of a relay configured the shared way mints this instance's own identity (design q-051 §3)
+        if (cfg.ident.kind === 'none' && cfg.token && cfg.serverAddr && relayRead().state === 'none') { mintRecord(); cfg = frpCfg(); }
         if (!frpConfigured()) throw new Error('the frp relay is not configured on this instance (set VIBESPACE_FRPS_ADDR/TOKEN)');
         const bin = frpBin();
         if (!bin) throw new Error('frpc not installed — run install first');
         if (frpDaemonPid()) return { running: true };
-        const cfg = frpWriteConf();
+        const knock = withKnock ? cfg.token : '';
+        frpWriteConf(cfg, !!knock);
+        const logFrom = logSize();
         const logFd = fs.openSync(path.join(frpDir(), 'frpc.out'), 'a');
-        const child = spawn(bin, ['-c', frpConf()], { detached: true, stdio: ['ignore', logFd, logFd], env: { ...process.env, [FRP_TOKEN_ENV]: cfg.token } });   // the token: the child's env only
+        const env = { ...process.env, [FRP_TOKEN_ENV]: knock, [RT.TOKEN_ENV]: cfg.ident.token || '' };   // the tokens: the child's env only
+        delete env.VIBESPACE_FRPS_TOKEN; delete env[RT.CLUSTER_TOKEN_ENV];   // each rides under its frpc name above, never twice
+        const child = spawn(bin, ['-c', frpConf()], { detached: true, stdio: ['ignore', logFd, logFd], env });
         child.unref();
         fs.writeFileSync(frpPidFile(), String(child.pid));
         const rec = h.rec();
         rec.desiredUp = true;
+        rec.frpcKnock = !!knock; rec.frpcIdentity = cfg.ident.token ? cfg.ident.kind : 'none'; rec.frpcLogFrom = logFrom;   // what THIS frpc logs in with
         h.save();
+        watchLogin(true);
         setTimeout(() => h.notify(), 1200);
         return { starting: true };
       },
 
       stop() {
+        watchLogin(false);
         const pid = frpDaemonPid();
         if (pid) { try { process.kill(pid, 'SIGTERM'); } catch { } }
         try { fs.unlinkSync(frpPidFile()); } catch { }
@@ -287,7 +497,7 @@ module.exports = {
           // WHICH field is missing (2.227.10, him188: he filled the address+port,
           // the token stayed empty, and the UI only said "relay not configured" —
           // an unactionable dead end. Name the gap; never make the user guess).
-          missing: [!c.serverAddr && 'serverAddr', !c.token && !c.vaultLocked && 'token'].filter(Boolean),
+          missing: [!c.serverAddr && 'serverAddr', !c.token && !c.ident.token && !c.vaultLocked && !c.knockLocked && 'token'].filter(Boolean),
           vaultLocked: !!c.vaultLocked,   // lane vault-e2e-password-fix-r2: the sealed relay token while the vault is LOCKED — the door
           tokenSealed: !!(h.peek().config || {}).tokenSealed,
           server: frpConfigured() ? `${c.serverAddr}:${c.serverPort}` : null,
@@ -302,6 +512,7 @@ module.exports = {
           portRange: [c.portMin, c.portMax],
           // echo the CURRENT effective config so the UI can prefill editable fields
           config: { serverAddr: c.serverAddr, serverPort: c.serverPort, hasToken: !!c.token, subDomainHost: c.subDomainHost },
+          relay: relayStatus(c),   // lane relay-token-per-instance: this instance's own identity (never its token)
         };
       },
 
@@ -310,12 +521,20 @@ module.exports = {
        *  (the SNI broker); else a TCP port map `http://<relay>:<port>/` (retrying
        *  on collision — the relay is fleet-shared). name = a stable proxy name. */
       async publish(name, localPort, { preferPort = 0, preferSub = '', proto: protoHint = '' } = {}) {
-        if (frpCfg().vaultLocked) throw lockedRefusal('publish a public URL');
+        const cfg0 = frpCfg();
+        if (cfg0.vaultLocked) throw lockedRefusal('publish a public URL');
+        if (cfg0.ident.kind === 'revoked') throw Object.assign(new Error(revokedWords), { code: 'relay_revoked' });
         if (!frpConfigured()) throw new Error('public URLs are not available — the frp relay is not configured on this instance');
         if (!frpDaemonPid()) { verbs.start(); await new Promise((r) => setTimeout(r, 1500)); }
+        try { observe(); } catch { }
         const cfg = frpCfg();
         const safe = String(name).replace(/[^\w-]/g, '_').slice(0, 60);
         const file = path.join(frpProxiesDir(), safe + '.toml');
+        // THE NAME RULE before the relay judges it (its plugin answers the same per proxy — lane relay-token-per-instance)
+        const user = h.peek().frpcIdentity && h.peek().frpcIdentity !== 'none' ? cfg.ident.user : null;
+        if (user && !RT.nameVerdict({ prefixes: cfg.ident.prefixes, user }, { proxyName: safe }).ok) throw Object.assign(new Error(`the relay would refuse the proxy name ${safe} (name_not_yours) — this instance's names start with ${cfg.ident.prefixes.join(' / ')}`), { code: 'name_not_yours' });
+        const own = (x) => x.name === safe || (!!user && x.name === `${user}.${safe}`);   // frps registers `<user>.<name>`
+        const refusal = (p, pub) => { const ref = RT.refusalOf(p && p.err); if (ref) relayAlert(ref, pub); return ref ? `${RT.REASONS[ref.code]}${ref.owner ? ` (${ref.owner})` : ''}` : ''; };
 
         // Detect the backend protocol: HTTP/HTTPS can ride a routed subdomain; a
         // raw-TCP service (DB/VNC/SSH — no Host/SNI) can ONLY be an IP:port, so it
@@ -334,17 +553,19 @@ module.exports = {
         if (cfg.subDomainHost && proto === 'http') {
           const sub = /^[a-z0-9][a-z0-9-]{1,62}$/.test(preferSub) ? preferSub
             : 'vs' + require('crypto').randomBytes(5).toString('hex'); // e.g. vs3f9a1c2b4d
+          let refused = '';
           const toml = `[[proxies]]\nname = "${safe}"\ntype = "http"\nsubdomain = "${sub}"\nlocalIP = "127.0.0.1"\nlocalPort = ${localPort}\nhostHeaderRewrite = "127.0.0.1"\n`;
           fs.writeFileSync(file, toml, { mode: 0o600 });
           try { await frpReload(); } catch (e) { throw new Error('frpc reload failed: ' + e.message); }
           for (let t = 0; t < 12; t++) {
             await new Promise((r) => setTimeout(r, 400));
             let st = []; try { st = await frpProxyStatus('http'); } catch { }
-            const p = st.find((x) => x.name === safe);
-            if (p && p.status === 'running') { h.notify(); return { name: safe, subdomain: sub, proto, url: `https://${sub}.${cfg.subDomainHost}/`, publicHost: `${sub}.${cfg.subDomainHost}` }; }
-            if (p && (p.status === 'error' || p.status === 'closed')) break;
+            const p = st.find(own);
+            if (p && p.status === 'running') { relayPublished(sub); h.notify(); return { name: safe, subdomain: sub, proto, url: `https://${sub}.${cfg.subDomainHost}/`, publicHost: `${sub}.${cfg.subDomainHost}` }; }
+            if (p && (p.status === 'error' || p.status === 'closed' || p.status === 'start error')) { refused = refusal(p, sub); break; }
           }
           try { fs.unlinkSync(file); await frpReload(); } catch { }
+          if (refused) throw Object.assign(new Error(`the relay refused ${sub}: ${refused}`), { code: 'relay_refused' });
           throw new Error('could not publish the subdomain on the relay (is the domain / DNS set up?)');
         }
 
@@ -364,8 +585,9 @@ module.exports = {
           for (let t = 0; t < 12; t++) {
             await new Promise((r) => setTimeout(r, 400));
             let st = []; try { st = await frpProxyStatus(); } catch { }
-            const p = st.find((x) => x.name === safe);
+            const p = st.find(own);
             if (p && p.status === 'running') {
+              relayPublished(null);
               h.notify();
               // scheme reflects what the backend speaks: https:// keeps its own
               // cert (passthrough), http:// for plaintext web, tcp:// for a raw
@@ -374,7 +596,7 @@ module.exports = {
               const url = proto === 'tcp' ? `tcp://${cfg.serverAddr}:${remotePort}` : `${scheme}://${cfg.serverAddr}:${remotePort}/`;
               return { name: safe, remotePort, proto, url, publicHost: cfg.serverAddr };
             }
-            if (p && (p.status === 'error' || p.status === 'closed')) { lastErr = p.err || 'port unavailable'; break; }
+            if (p && (p.status === 'error' || p.status === 'closed' || p.status === 'start error')) { const why = refusal(p, safe); lastErr = why || p.err || 'port unavailable'; break; }
           }
         }
         try { fs.unlinkSync(file); await frpReload(); } catch { }

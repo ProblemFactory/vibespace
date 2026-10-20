@@ -308,6 +308,7 @@ const PURE = new Set(['src/vault-blocked.js' /* lane vault-locked-refusal-notice
   // lane hub-act-ask (design q-042 D4): THE HUB-ACT VERDICT — read / session never ask, a person never asks, else the machine's
   // Hub automation list (or the instance's default); imports nothing; exit-reach re-exports its modes, the bundle carries it
   'src/hub-act-policy.js',
+  'src/relay-token.js', // lane relay-token-per-instance (design q-051): the instance's OWN relay token — the record, mint / rotate / revoke, the identity, the registration line (the hash only), the frpc lines, the name rule, the relay's refusal words; crypto handed in
   'src/automation-keys.js', // design q-046 (lane automation-keys-core): VibeSpace's own automation keys — the record, the closed verb table, the grant × verb × vault verdict, the mint plan (crypto injected: the Vault window bundles it)
   // verify r1 F1 (2026-10-01): THE SECRET SHAPES a stored command head never keeps — imports only browser-trace's
   // CREDENTIAL_WORDS (PURE); exit-reach's outputHeads calls it once; the bundle carries it with exit-reach

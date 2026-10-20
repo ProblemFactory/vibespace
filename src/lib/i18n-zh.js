@@ -9594,4 +9594,40 @@ export default {
   "Limits…": "边界…", // lane automation-open-limits
   "Audit…": "审计…", // lane automation-open-limits
   "What the conversations it opens may use": "它开的对话能用什么", // lane automation-open-limits
+  "waiting for the relay admin to register it": "等待中继管理员登记", // lane relay-token-per-instance
+  "the relay holds another token — send the registration line again": "中继上登记的是另一个 token——把登记行再发给管理员", // lane relay-token-per-instance
+  "the relay revoked it — mint a new token": "中继已吊销它——铸造一个新 token", // lane relay-token-per-instance
+  "the relay refused the shared token": "中继拒绝了共享 token", // lane relay-token-per-instance
+  "the relay no longer takes the shared token": "中继不再接受共享 token", // lane relay-token-per-instance
+  "Logs in with the cluster's relay token as {user}": "以 {user} 的身份用集群的中继 token 登录", // lane relay-token-per-instance
+  "The cluster's relay token is set but this pod has no name (VIBESPACE_INSTANCE_NAME)": "已设置集群的中继 token，但这个 pod 没有名字（VIBESPACE_INSTANCE_NAME）", // lane relay-token-per-instance
+  "the relay knows it": "中继已认可", // lane relay-token-per-instance
+  "the shared token waits for the vault": "共享 token 等待保险库解锁", // lane relay-token-per-instance
+  "Relay identity": "中继身份", // lane relay-token-per-instance
+  "no longer sent — it left this instance": "不再发送——它已离开这台实例", // lane relay-token-per-instance
+  "sent while the relay's grace lasts": "在中继的宽限期内照常发送", // lane relay-token-per-instance
+  "waits for the vault (sent once it is unlocked)": "等待保险库（解锁后发送）", // lane relay-token-per-instance
+  "no longer sent — the relay takes this instance's own token alone": "不再发送——中继只认本实例自己的 token", // lane relay-token-per-instance
+  "This instance logs in to the relay with its own token, bound to its own public names. The token is kept on this instance (not in the vault), so a restart re-publishes without the second password; a stolen token reaches these public names only.": "这台实例用自己的 token 登录中继，token 只绑定本实例的公网名。token 存在本实例上（不进保险库），所以重启后无需第二密码即可重新发布；被盗的 token 只能碰到这些公网名。", // lane relay-token-per-instance
+  "Instance": "实例", // lane relay-token-per-instance
+  "none yet": "尚无", // lane relay-token-per-instance
+  "Public names": "公网名", // lane relay-token-per-instance
+  "Shared relay token": "共享中继 token", // lane relay-token-per-instance
+  "Send this line to the relay admin: it carries a fingerprint (sha256) of the token, never the token.": "把这一行发给中继管理员：它只带 token 的指纹（sha256），从不带 token 本身。", // lane relay-token-per-instance
+  "Mint a new token": "铸造新 token", // lane relay-token-per-instance
+  "Relay token minted — send its line to the relay admin": "中继 token 已铸造——把它的登记行发给中继管理员", // lane relay-token-per-instance
+  "Relay token rotated — send its line to the relay admin": "中继 token 已轮换——把新登记行发给中继管理员", // lane relay-token-per-instance
+  "Revoke the relay token?": "吊销中继 token？", // lane relay-token-per-instance
+  "This instance stops using its relay token at once and its public URLs stop until you mint a new one. Send the revoke line to the relay admin so the relay refuses the old token too.": "这台实例立即停用它的中继 token，公网 URL 停止，直到你铸造新 token。把吊销行发给中继管理员，让中继也拒绝旧 token。", // lane relay-token-per-instance
+  "Relay token revoked": "中继 token 已吊销", // lane relay-token-per-instance
+  "The relay no longer asks the shared token": "中继已升级（不再需要共享 token）", // lane relay-token-per-instance
+  "The shared relay token is no longer sent": "共享中继 token 不再发送", // lane relay-token-per-instance
+  "Send the shared token again": "重新发送共享 token", // lane relay-token-per-instance
+  "The shared relay token is sent again": "共享中继 token 已恢复发送", // lane relay-token-per-instance
+  "The public name {name} is held by “{owner}” on the relay": "公网名 {name} 在中继上被「{owner}」占用", // lane relay-token-per-instance
+  "The relay refused it for this instance. Either this instance's relay token leaked and another login took the name, or a copy of data/ runs elsewhere. If neither is expected: Rotate the relay token in Plugins › Public URLs and send the new registration line to the relay admin.": "中继拒绝把它给这台实例。要么这台实例的中继 token 泄露、别的登录占了这个名字，要么别处在运行一份 data/ 的副本。如果都不是预期的：在 插件 › 公网 URL 里轮换中继 token，并把新登记行发给中继管理员。", // lane relay-token-per-instance
+  "The relay refused the public name {name} for this instance": "中继拒绝把公网名 {name} 给这台实例", // lane relay-token-per-instance
+  "The relay holds a different name list for this instance — its record here or at the relay was changed. Rotate the relay token in Plugins › Public URLs and send the new registration line to the relay admin.": "中继为这台实例登记的名字列表不同——本地或中继上的记录被改过。在 插件 › 公网 URL 里轮换中继 token，并把新登记行发给中继管理员。", // lane relay-token-per-instance
+  "Relay token revoked — mint a new one": "中继 token 已吊销——铸造一个新的", // lane relay-token-per-instance
+  "Own relay token": "本实例的中继 token", // lane relay-token-per-instance
 };

@@ -2,6 +2,23 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.327 — 2026-10-20
+
+### Added
+- Plugins › Public URLs shows this instance's relay identity: the line to send to the relay admin, Rotate and Revoke.
+- If the relay gives one of your public names to another instance, For you tells you.
+
+### Fixed
+- Pressing Resume here on a desktop app another of your tabs or devices is using now takes it over, even right as the window opens.
+- An app window's title no longer goes missing from the title bar when the app opens under heavy load.
+
+### Security
+- Each instance now holds its own relay token, bound to its own public names: a stolen token cannot take another instance's public URLs.
+- A restart re-publishes your public URLs without the second password: the relay token is kept on the instance, not in the vault.
+
+### Maintenance
+- Test and release tooling only; nothing changes for you.
+
 ## 2.369.326 — 2026-10-20
 
 ### Added

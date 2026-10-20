@@ -46,6 +46,24 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const S = require('../src/browser-stream.js');
 const VP = require('../src/server/browser-viewport.js');
 const F = require('../src/browser-facts.js');
+const DV = require('../src/desktop-viewers.js');
+/** lane live-input-under-load (a): how long a desktop-app pane may take to be seated / elected — the product's own patience
+ *  for Resume here (RESUME_WAIT_MS: it holds the pane active that long before the answer), × 2 for the 2-cpu runner. */
+const SEAT_MS = 2 * DV.RESUME_WAIT_MS;
+/** …and a desktop app's bring-up: the recipe's own ceiling (SETTLE_BRINGUP_MS — the picture server's banner deadline), × 2. */
+const BRINGUP_MS = 2 * require('../src/desktop-serve.js').SETTLE_BRINGUP_MS;
+const FIT = require('../src/browser-fit.js');
+/** lane live-input-under-load: the agent's test page reports itself (values, selection, keys, pointer, viewport) this often. */
+const INNER_EVERY_MS = 120;
+/** lane live-input-under-load (b): how long a layout's effect may take to reach a view — the view's report debounce, the
+ *  bridge's debounce and the product's own patience for a size it asked for (FIT_STALE_ASK_MS: a late frame of a set this
+ *  recent is still that set's answer), × 2 for the 2-cpu runner. A bound, never a wait: the wait is for the effect. */
+const FIT_SETTLE_MS = 2 * (FIT.FIT_REPORT_MS + FIT.FIT_DEBOUNCE_MS + FIT.FIT_STALE_ASK_MS);
+/** lane live-input-under-load (c): how long an input may take to reach the page — the product's own deadline for an input's
+ *  answer (INPUT_RECEIPT_MS: a record not answered in it is NOT DELIVERED) and one report of the page, × 2 for the runner. */
+const LANDED_MS = 2 * (S.INPUT_RECEIPT_MS + INNER_EVERY_MS);
+/** lane live-input-under-load: every viewer page's boot (ms, by world) — printed at the end; a boot past its bound says its state. */
+const BOOTS = [];
 const { WebSocket } = require('ws');
 
 let pass = 0, fail = 0, skipped = 0;
@@ -198,8 +216,8 @@ const innerPage = (n, hostile = false) => `<!doctype html><meta charset=utf-8><t
 #s{position:absolute;left:20px;top:220px;margin:0;font-size:22px;white-space:nowrap}
 #p{position:absolute;left:20px;top:270px;width:200px;height:30px}</style>
 <input id=a autocomplete=off><textarea id=b></textarea><p id=s>SELECT-ME selectable 可选文字 text</p><input id=p type=password value=secret>
-<script>const N=${JSON.stringify(n)};const ku=[],kd=[];let pd=null;document.addEventListener('pointerdown',(e)=>{pd={x:Math.round(e.clientX),y:Math.round(e.clientY),id:(e.target&&(e.target.id||e.target.tagName))||'',vw:innerWidth,vh:innerHeight};},true);document.addEventListener('keyup',(e)=>{ku.push(e.key);if(ku.length>40)ku.shift();},true);document.addEventListener('keydown',(e)=>{kd.push(e.key+(e.ctrlKey?'^C':'')+(e.metaKey?'^M':''));if(kd.length>40)kd.shift();},true);
-const b=document.getElementById('b'),a=document.getElementById('a');setInterval(()=>fetch('/st',{method:'POST',body:JSON.stringify({n:N,a:a.value,b:b.value,act:document.activeElement&&document.activeElement.id,sel:String(getSelection()),ss:b.selectionStart,se:b.selectionEnd,ku,kd,pd,bx:(()=>{const q=b.getBoundingClientRect();return [Math.round(q.left),Math.round(q.top),Math.round(q.width),Math.round(q.height)];})()}),keepalive:true}).catch(()=>{}),120);
+<script>const N=${JSON.stringify(n)};const ku=[],kd=[];let pd=null;document.addEventListener('pointerdown',(e)=>{pd={x:Math.round(e.clientX),y:Math.round(e.clientY),id:(e.target&&(e.target.id||e.target.tagName))||'',vw:innerWidth,vh:innerHeight};},true);let pu=null;document.addEventListener('pointerup',(e)=>{pu={x:Math.round(e.clientX),y:Math.round(e.clientY),n:(pu?pu.n:0)+1};},true);document.addEventListener('keyup',(e)=>{ku.push(e.key);if(ku.length>40)ku.shift();},true);document.addEventListener('keydown',(e)=>{kd.push(e.key+(e.ctrlKey?'^C':'')+(e.metaKey?'^M':''));if(kd.length>40)kd.shift();},true);
+const b=document.getElementById('b'),a=document.getElementById('a');setInterval(()=>fetch('/st',{method:'POST',body:JSON.stringify({n:N,a:a.value,b:b.value,act:document.activeElement&&document.activeElement.id,sel:String(getSelection()),ss:b.selectionStart,se:b.selectionEnd,ku,kd,pd,pu,vw:innerWidth,vh:innerHeight,bx:(()=>{const q=b.getBoundingClientRect();return [Math.round(q.left),Math.round(q.top),Math.round(q.width),Math.round(q.height)];})()}),keepalive:true}).catch(()=>{}),${INNER_EVERY_MS});
 ${hostile ? HOSTILE : ''}</script>`;
 
 async function makeWorld(name, { patches = [] } = {}) {
@@ -297,22 +315,56 @@ async function makeWorld(name, { patches = [] } = {}) {
     if (uiScale) await P.call('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.uiScale', ${JSON.stringify(String(uiScale))}); } catch {}` }); // lane takeover-keyboard: userW's UI scale (0.9)
     await P.call('Emulation.setDeviceMetricsOverride', { width: size[0], height: size[1], deviceScaleFactor: 1, mobile: false });
     await P.call('Page.navigate', { url: app });
+    const tBoot = Date.now();
     P.ready = await until(async () => { try { return await P.ev('!!(window.app && window.app.wm && window.app.sidebar)'); } catch { return false; } }, 60000, 250);
+    BOOTS.push(`${name}:${Date.now() - tBoot}`);
+    if (!P.ready) { const t1 = Date.now(); const ver = await Promise.race([fetch(`http://127.0.0.1:${PORT}/api/version`).then((r) => r.status, (e) => String(e && e.message)), sleep(5000).then(() => 'no answer in 5 s')]); console.log(`  · a viewer page of world ${name} not booted after ${t1 - tBoot} ms: ${JSON.stringify({ page: await P.ev('({ href: location.href, state: document.readyState, app: typeof window.app, wm: !!(window.app && window.app.wm), sidebar: !!(window.app && window.app.sidebar), scripts: [...document.scripts].map((x) => x.src.split("/").pop()).slice(0, 6), body: String(document.body && document.body.innerText || "").slice(0, 160) })').catch((e) => String(e && e.message)), threw: P.events.filter((m) => m.method === 'Runtime.exceptionThrown' || (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error')).slice(-3).map((m) => JSON.stringify(m.params.exceptionDetails || m.params.args).slice(0, 300)), server: { version: ver, ms: Date.now() - t1 }, journal: journal.split('\n').slice(-6) })}`); }
     if (P.ready) await P.ev('window.app.ready');
     P.facts = P.ready ? await P.ev('({ secure: isSecureContext, clipboard: !!navigator.clipboard, platform: navigator.platform, uad: navigator.userAgentData ? navigator.userAgentData.platform : null })') : null;
     /** Run `js` with `w` = the n-th live-view window of `sid` and `L` = its controller. */
-    P.q = (sid, js, nth = 0) => P.ev(`(() => { const w = [...window.app.wm.windows.values()].filter((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === ${JSON.stringify(sid)})[${nth}]; const L = w && w._browserLive; ${js} })()`);
+    /** …`nth` = the n-th such window, or (lane live-input-under-load) a window id: the layout sync puts COPIES of another tab's
+     *  live windows into this page, so "the first window of sid" may be a copy — a page's own window is addressed by its id. */
+    P.q = (sid, js, nth = 0) => P.ev(`(() => { const ws = [...window.app.wm.windows.values()].filter((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === ${JSON.stringify(sid)}); const w = ${typeof nth === 'string' ? `ws.find((x) => x.id === ${JSON.stringify(nth)})` : `ws[${nth}]`}; const L = w && w._browserLive; ${js} })()`);
+    P.opened = {};
     P.openLive = async (sid, { profileId = null, popOut = false, box = [24, 12, 1400, 900], nth = 0 } = {}) => {
-      await P.ev(`(() => { const w = window.app.openBrowserLive({ sessionId: ${JSON.stringify(sid)}, profileId: ${JSON.stringify(profileId)}, popOut: ${popOut} }); if (w) w.gridBounds = null; return true; })()`);
+      const id = await P.ev(`(() => { const w = window.app.openBrowserLive({ sessionId: ${JSON.stringify(sid)}, profileId: ${JSON.stringify(profileId)}, popOut: ${popOut} }); if (w) w.gridBounds = null; return (w && w.id) || null; })()`);
+      if (id && !popOut) P.opened[sid] = id;
+      if (id && nth === 0) nth = id; // the window THIS call opened (never a synced copy that happens to come first)
       const live = await until(() => P.q(sid, 'return L && L.state().frames >= 1 && L.img().naturalWidth > 0 ? true : null;', nth).catch(() => null), 40000, 200);
       await P.layout(sid, box, nth);
       return !!live;
     };
-    P.layout = async (sid, [x, y, wd, ht], nth = 0) => { await P.q(sid, `const el = w.element; w.gridBounds = null; window.app.wm.focusWindow?.(w.id); el.style.left = '${x}px'; el.style.top = '${y}px'; el.style.width = '${wd}px'; el.style.height = '${ht}px'; w.onResize && w.onResize(); return true;`, nth); await sleep(400); };
+    /** lane live-input-under-load (b): the agent's page this view shows — every one here is W.innerUrl(n), reporting itself. */
+    const shownPage = (url) => { try { return reports.get(new URL(url).searchParams.get('n')) || null; } catch { return null; } };
+    /** lane live-input-under-load (b) — race-sweep's B-b8c6 residue: a press is AIMED through the view's geometry (pointOf)
+     *  and CONVERTED through it again when it lands. Measured on the base under the 2-cpu simulation: the aim read the old
+     *  picture (666×720, mapped 1:1) while the page was already 1398×794; the new frame and its viewport reading landed
+     *  between the aim and the press, which reached (552,154) on <html>. Settled = the view's geometry IS the page's own
+     *  viewport (it reports innerWidth × innerHeight), after the view reported its pane and heard a ruling — and while this
+     *  view's pane rules the page's size, it is the size the bridge's rule gives that pane (FIT.paneViewport): a layout's
+     *  LAST effect, never 400 ms. → the settled reading, or null. */
+    P.fitted = async (sid, nth = 0) => {
+      const v = await P.q(sid, 'const s = L.state(); const g = L.geometry(); return { g: g && { cssW: g.cssW, cssH: g.cssH, source: g.source }, url: s.url, fit: s.fit, sent: s.fitSent, pane: s.pane, you: s.you };', nth).catch(() => null);
+      const r = v && shownPage(v.url);
+      P.lastFitted = v && { g: v.g, fit: v.fit && { state: v.fit.state, w: v.fit.width, h: v.fit.height, mine: v.fit.viewerId === v.you, floor: v.fit.floor }, sent: v.sent, pane: v.pane, page: r && { vw: r.vw, vh: r.vh, n: r.n } };
+      if (!v || !v.g || !v.fit || !r || !(r.vw > 0)) return null;
+      const reported = !v.sent || !v.sent.visible || (v.sent.width === v.pane.width && v.sent.height === v.pane.height);
+      const ruled = v.fit.state !== 'fitted' ? null : v.fit.viewerId === v.you ? (v.sent ? FIT.paneViewport({ width: v.sent.width, height: v.sent.height, floorW: v.fit.floor || FIT.FIT_MIN_W }) : null) : { width: v.fit.width, height: v.fit.height };
+      const same = Math.abs(r.vw - v.g.cssW) <= 1 && Math.abs(r.vh - v.g.cssH) <= 1 && (!ruled || (r.vw === ruled.width && r.vh === ruled.height));
+      return reported && same ? { vw: r.vw, vh: r.vh, source: v.g.source, fit: v.fit.state } : null;
+    };
+    P.settle = async (sid, nth = 0) => {
+      const t0 = Date.now(); const v = await until(() => P.fitted(sid, nth), FIT_SETTLE_MS, 50);
+      P.lastSettle = v ? { ...v, ms: Date.now() - t0 } : { unsettled: Date.now() - t0, last: P.lastFitted };
+      if (!v) console.log(`  · a press aimed without a settled fit after ${Date.now() - t0} ms: ${JSON.stringify(P.lastFitted).slice(0, 400)}`);
+      return v;
+    };
+    P.layout = async (sid, [x, y, wd, ht], nth = 0) => { await P.q(sid, `const el = w.element; w.gridBounds = null; window.app.wm.focusWindow?.(w.id); el.style.left = '${x}px'; el.style.top = '${y}px'; el.style.width = '${wd}px'; el.style.height = '${ht}px'; w.onResize && w.onResize(); return true;`, nth); return P.settle(sid, nth); };
     P.takeover = async (sid, nth = 0) => { await P.q(sid, 'L.send({ type: "takeover" }); return true;', nth); return until(() => P.q(sid, 'return L.state().mode === "takeover" && L.state().mine && L.ownsKeyboard() ? true : null;', nth), 8000, 100); };
     P.handback = async (sid, nth = 0) => { await P.q(sid, 'L.send({ type: "handback" }); return true;', nth); return until(() => P.q(sid, 'return L.state().mode !== "takeover" ? true : null;', nth), 8000, 100); };
     /** Where page point (px, py) of the agent's page is drawn in this viewer page. */
     P.pointOf = async (sid, px, py, nth = 0) => {
+      await P.settle(sid, nth); // (b): aimed through the geometry the press will be converted through
       const g = await P.q(sid, 'const r = L.img().getBoundingClientRect(); const op = getComputedStyle(L.img()).objectPosition; const G = L.geometry(); return { left: r.left, top: r.top, width: r.width, height: r.height, natW: L.img().naturalWidth, natH: L.img().naturalHeight, op, cssW: G.cssW, cssH: G.cssH };', nth);
       const k = Math.min(g.width / g.natW, g.height / g.natH); const dw = g.natW * k, dh = g.natH * k;
       const frac = (v, room) => (/%$/.test(v) ? parseFloat(v) / 100 : room ? parseFloat(v) / room : 0.5);
@@ -320,16 +372,24 @@ async function makeWorld(name, { patches = [] } = {}) {
       return { x: g.left + (g.width - dw) * frac(opx, g.width - dw) + px * dw / g.cssW, y: g.top + (g.height - dh) * frac(opy, g.height - dh) + py * dh / g.cssH };
     };
     const I = (params) => P.call('Input.dispatchMouseEvent', params);
+    /** lane live-input-under-load: a click is a click — a new press within the view's multi-click rule of this page's last one
+     *  (S.MULTI_CLICK_PX, S.MULTI_CLICK_MS: the view counts it up — 2 selects a word) waits the rule out first. The legs' reads
+     *  now wait for effects, not sleeps, so two presses on (200,140) came 200 ms apart: a DOUBLE click selected "dk" and an
+     *  Enter replaced it ("\n"). */
+    let lastPress = null;
+    const pressGap = async (x, y) => { if (lastPress && Math.abs(x - lastPress.x) <= S.MULTI_CLICK_PX && Math.abs(y - lastPress.y) <= S.MULTI_CLICK_PX) { const gap = Date.now() - lastPress.at; if (gap <= S.MULTI_CLICK_MS) await sleep(S.MULTI_CLICK_MS + 1 - gap); } };
+    const pressed = (x, y) => { lastPress = { x, y, at: Date.now() }; };
     /** lane takeover-keyboard: a REAL press on an app element — `js` returns it; the point is its rect's centre, proven to
      *  hit it (elementFromPoint) before the press (B-b122: an input is sent only onto the surface that will take it). */
     P.clickEl = async (js) => {
-      const at = await P.ev(`(() => { const el = (() => { ${js} })(); if (!el) return null; const r = el.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + Math.min(r.height / 2, 14); const hit = document.elementFromPoint(x, y); return { x, y, hit: !!hit && (hit === el || el.contains(hit)), hitCls: hit ? String(hit.className || hit.tagName) : null }; })()`);
+      const at = await P.ev(`(async () => { const pick = () => { const e = (() => { ${js} })(); if (!e) return null; const q = e.getBoundingClientRect(); return { e, q, k: [q.left, q.top, q.width, q.height].map(Math.round).join(',') }; }; const frame = () => new Promise((res) => { let d = false; requestAnimationFrame(() => requestAnimationFrame(() => { d = true; res(); })); setTimeout(() => { if (!d) res(); }, 100); }); let a = pick(); const t0 = performance.now(); while (a && performance.now() - t0 < ${LANDED_MS}) { await frame(); const b = pick(); const same = b && b.k === a.k; a = b; if (same) break; } if (!a) return null; const el = a.e, r = a.q; const x = r.left + r.width / 2, y = r.top + Math.min(r.height / 2, 14); const hit = document.elementFromPoint(x, y); return { x, y, hit: !!hit && (hit === el || el.contains(hit)), hitCls: hit ? String(hit.className || hit.tagName) : null }; })()`);
       if (!at || !at.hit) return { ok: false, at };
-      await I({ type: 'mouseMoved', x: at.x, y: at.y }); await I({ type: 'mousePressed', x: at.x, y: at.y, button: 'left', clickCount: 1 }); await I({ type: 'mouseReleased', x: at.x, y: at.y, button: 'left', clickCount: 1 });
+      await pressGap(at.x, at.y);
+      await I({ type: 'mouseMoved', x: at.x, y: at.y }); await I({ type: 'mousePressed', x: at.x, y: at.y, button: 'left', clickCount: 1 }); await I({ type: 'mouseReleased', x: at.x, y: at.y, button: 'left', clickCount: 1 }); pressed(at.x, at.y);
       return { ok: true, at };
     };
-    P.click = async (sid, px, py, { count = 1 } = {}) => { const p = await P.pointOf(sid, px, py); await I({ type: 'mouseMoved', x: p.x, y: p.y }); for (let c = 1; c <= count; c++) { await I({ type: 'mousePressed', x: p.x, y: p.y, button: 'left', clickCount: c }); await I({ type: 'mouseReleased', x: p.x, y: p.y, button: 'left', clickCount: c }); } return p; };
-    P.drag = async (sid, [ax, ay], [bx, by], steps = 10) => { const a = await P.pointOf(sid, ax, ay), b = await P.pointOf(sid, bx, by); await I({ type: 'mouseMoved', x: a.x, y: a.y }); await sleep(60); await I({ type: 'mousePressed', x: a.x, y: a.y, button: 'left', clickCount: 1 }); for (let i = 1; i <= steps; i++) { await I({ type: 'mouseMoved', x: a.x + (b.x - a.x) * i / steps, y: a.y + (b.y - a.y) * i / steps, button: 'left', buttons: 1 }); await sleep(45); } await I({ type: 'mouseReleased', x: b.x, y: b.y, button: 'left', clickCount: 1 }); };
+    P.click = async (sid, px, py, { count = 1 } = {}) => { const p = await P.pointOf(sid, px, py); await pressGap(p.x, p.y); await I({ type: 'mouseMoved', x: p.x, y: p.y }); for (let c = 1; c <= count; c++) { await I({ type: 'mousePressed', x: p.x, y: p.y, button: 'left', clickCount: c }); await I({ type: 'mouseReleased', x: p.x, y: p.y, button: 'left', clickCount: c }); } pressed(p.x, p.y); return p; };
+    P.drag = async (sid, [ax, ay], [bx, by], steps = 10) => { const a = await P.pointOf(sid, ax, ay), b = await P.pointOf(sid, bx, by); await pressGap(a.x, a.y); await I({ type: 'mouseMoved', x: a.x, y: a.y }); await sleep(60); await I({ type: 'mousePressed', x: a.x, y: a.y, button: 'left', clickCount: 1 }); for (let i = 1; i <= steps; i++) { await I({ type: 'mouseMoved', x: a.x + (b.x - a.x) * i / steps, y: a.y + (b.y - a.y) * i / steps, button: 'left', buttons: 1 }); await sleep(45); } await I({ type: 'mouseReleased', x: b.x, y: b.y, button: 'left', clickCount: 1 }); pressed(b.x, b.y); };
     const K = (params) => P.call('Input.dispatchKeyEvent', params);
     P.key = async (key, { code, vk, mods = 0, text, commands } = {}) => {
       const up = key.length === 1 ? key.toUpperCase() : key; const c = code || (key.length === 1 ? 'Key' + up : key); const v = vk || (key.length === 1 ? up.charCodeAt(0) : 0);
@@ -370,7 +430,7 @@ async function inputLegs(W, P, sid, n, label, { control = false } = {}) {
   await P.click(sid, 200, 140); // a REAL click into the picture: the textarea
   out.focus = await W.innerUntil(n, (r) => r.act === 'b', 5000);
   out.sinkAfterClick = await P.q(sid, 'return document.activeElement === L.kbd();');
-  if (!out.focus) { const r = W.inner(n) || {}; out.clickMiss = { pd: r.pd, box: r.bx, act: r.act, at: out.clickGeo, ageMs: r.at ? Date.now() - r.at : null }; }
+  if (!out.focus) { const r = W.inner(n) || {}; out.clickMiss = { pd: r.pd, box: r.bx, act: r.act, at: out.clickGeo, settled: P.lastSettle, ageMs: r.at ? Date.now() - r.at : null }; }
   const typed = async (pasteText, how) => { const before = (W.inner(n) || {}).b || ''; ok(await W.setClipboard(pasteText), `${label}: the clipboard holds the text (another app filled it)`, JSON.stringify(W.clipLog.slice(-2))); if (how === 'meta') await P.chord('v', { meta: true, commands: ['paste'] }); else await P.chord('v'); const want = before + pasteText.replace(/\r\n?/g, '\n'); const r = await W.innerUntil(n, (x) => x.b === want, 15000); return { ok: !!r, got: ((W.inner(n) || {}).b || '').slice(before.length) }; };
   out.p11 = await typed('hello world', 'ctrl');
   out.pCjk = await typed('你好世界 😀😀', 'meta');
@@ -389,8 +449,14 @@ async function inputLegs(W, P, sid, n, label, { control = false } = {}) {
   out.dbl = (await W.innerUntil(n, (x) => x.sel && x.sel.length > 0, 3000) || {}).sel || '';
   await P.click(sid, 200, 140); await W.innerUntil(n, (x) => !x.sel, 3000); // collapse the word first (a press ON a selection would start a drag-and-drop of it)
   await P.call('Network.enable'); const evMark = P.events.length;
+  // lane live-input-under-load (c): read at the drag's LAST effect — the page's own pointerup, which it sees after every move
+  // (in order); measured under the 2-cpu simulation: the first report with a dozen characters selected was mid-drag
+  // ("SELECT-ME selectabl", the mediated rung — its moves answered one by one)
+  const pu0 = ((W.inner(n) || {}).pu || {}).n || 0;
   await P.drag(sid, [22, 232], [330, 232]);
-  out.drag = (await W.innerUntil(n, (x) => x.sel && x.sel.length > 12, 3000) || {}).sel || '';
+  const dragUp = await W.innerUntil(n, (x) => x.pu && x.pu.n > pu0, LANDED_MS);
+  out.drag = (dragUp || {}).sel || '';
+  out.dragEnd = dragUp ? { pu: dragUp.pu, at: dragUp.at } : { none: true, last: ((W.inner(n) || {}).sel || '').slice(0, 40) };
   out.dragFrames = P.events.slice(evMark).filter((m) => m.method === 'Network.webSocketFrameSent' && /input_mouse/.test(m.params.response.payloadData)).map((m) => m.params.response.payloadData.replace(/"type":"input_mouse",/, '').slice(0, 110));
   await P.call('Network.disable');
   await W.setClipboard('(before the copy)');
@@ -448,7 +514,7 @@ for (const k of kinds) {
   ok(r.ime, `${k.label}: a real composition (keyCode 229 → the IME's commit of 12 characters) lands`);
   ok(r.enterKeyUp === 0, `${k.label}: the commit key's keyup never reaches the page alone (${r.enterKeyUp} Enter keyups seen)`);
   ok(/^SELECT/.test(r.dbl), `${k.label}: a double click selects a word ("${r.dbl}")`);
-  ok(/SELECT-ME selectable/.test(r.drag), `${k.label}: a drag selects across the paragraph ("${r.drag}")`, JSON.stringify(r.dragFrames));
+  ok(/SELECT-ME selectable/.test(r.drag), `${k.label}: a drag selects across the paragraph ("${r.drag}")`, JSON.stringify({ end: r.dragEnd, frames: r.dragFrames }));
   ok(r.clip && /SELECT-ME selectable/.test(r.clip), `${k.label}: Ctrl+C puts the page's selection on the VIEWER's clipboard (plain http: inside the key's moment, no click) — "${r.clip}"`, JSON.stringify(r.copyView));
   ok(r.cut.emptied && r.cut.clip && r.cut.clip.includes('hello world') && r.cut.clip.includes('我想买这个东西然后付款吧'), `${k.label}: Ctrl+A + Ctrl+X cuts the whole textarea to the viewer's clipboard`, JSON.stringify(r.cut).slice(0, 300));
   ok(r.view && r.view.receipts && r.view.receipts.failed === 0 && !r.view.receipts.failing, `${k.label}: every receipt came back delivered (${r.view && r.view.receipts && r.view.receipts.delivered} delivered, 0 failed)`, JSON.stringify(r.view));
@@ -575,7 +641,7 @@ if (want('mac')) {
   ok(m.clip && m.clip.includes('mac text 苹果'), `⌘C copies the selection to the viewer's clipboard ("${String(m.clip).slice(-20)}")`);
   ok(m.cut && m.undo && m.redo, `⌘X cuts, ⌘Z undoes, ⌘⇧Z redoes (${JSON.stringify({ cut: m.cut, undo: m.undo, redo: m.redo })})`);
   await Mp.q(S1.sessionId, 'window.app.wm.closeWindow?.(w.id); return true;');
-  Mp.close();
+  await wd.closePage(Mp); // lane live-input-under-load (a): END the page — a loaded one stays a live client of the app
 }
 
 // ═══ ④ THE FIT CHIP ═══════════════════════════════════════════════════════════
@@ -599,21 +665,31 @@ if (want('fit')) {
   const shotEn = await shootBar(E, S1.sessionId, 1, 'live-bar-en-other-window.png');
   const Z = await wd.page({ lang: 'zh' });
   await Z.openLive(S1.sessionId, { profileId: profId, box: [24, 12, 960, 480] });
-  const zChip = await until(() => chipOf(Z, 0), 12000, 200);
+  // lane live-input-under-load: the zh tab's OWN window, by its id — the layout sync also puts copies of the en page's live
+  // windows into this tab (seen under load: the claim landed on the wrong one, the page followed a 1398×835 pane)
+  const zw = Z.opened[S1.sessionId];
+  const zChip = await until(() => chipOf(Z, zw), 12000, 200);
   ok(zChip && zChip.text === '网页大小跟随你的另一个标签页 · 点此适配本窗口' && /另一个标签页或窗口/.test(zChip.title) && /缩小显示/.test(zChip.title) && /适配这个窗口/.test(zChip.title), `a window in another tab, in Chinese: "${zChip && zChip.text}" — "${zChip && zChip.title}"`);
-  const shotZh = await shootBar(Z, S1.sessionId, 0, 'live-bar-zh-other-tab.png');
+  const shotZh = await shootBar(Z, S1.sessionId, zw, 'live-bar-zh-other-tab.png');
   // the click: the page follows the zh window
-  await Z.q(S1.sessionId, 'L.el().querySelector(".browser-live-fit").click(); return true;');
-  const followed = await until(async () => { const s = await Z.q(S1.sessionId, 'const s = L.state(); return s.fit && s.fit.state === "fitted" && s.fit.viewerId === s.you ? s.fit : null;').catch(() => null); return s; }, 12000, 200);
+  await Z.q(S1.sessionId, 'L.el().querySelector(".browser-live-fit").click(); return true;', zw);
+  // lane live-input-under-load: the ruling that answers THIS claim — fitted for this view at FIT.paneViewport of the pane it
+  // reported (seen under load: the answer to the zh view's PRE-layout pane, 1398×835 — a slow set still in flight — came after
+  // the claim and was taken for it)
+  const followed = await until(async () => { const s = await Z.q(S1.sessionId, 'const s = L.state(); return s.fit && s.fit.state === "fitted" && s.fit.viewerId === s.you ? { fit: s.fit, sent: s.fitSent } : null;', zw).catch(() => null); if (!s || !s.sent) return null; const want = FIT.paneViewport({ width: s.sent.width, height: s.sent.height, floorW: s.fit.floor || FIT.FIT_MIN_W }); return want && s.fit.width === want.width && s.fit.height === want.height ? s.fit : null; }, 12000, 200);
   ok(!!followed, `a click makes the page follow THIS window (fitted ${followed && followed.width}×${followed && followed.height} for the zh window)`, JSON.stringify(followed));
-  const zGone = await until(async () => !(await chipOf(Z, 0)), 5000, 200);
-  const bigChip = await until(() => chipOf(E, 0), 8000, 200);
+  { const zw = await Z.ev(`[...window.app.wm.windows.values()].filter((x) => x.type === 'browser-live').map((x) => { const s = x._browserLive.state(); const r = x.element.getBoundingClientRect(); return { id: x.id, sid: s.sessionId === ${JSON.stringify(S1.sessionId)}, pane: s.pane, sent: s.fitSent, box: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)], spec: x._openSpec ? x._openSpec.action || true : null }; })`).catch((e) => String(e && e.message));
+    if (!followed || !Array.isArray(zw) || !zw.some((w) => w.sid && w.pane && w.pane.width === followed.width)) console.log(`  · ④ the zh page's live windows at the claim: ${JSON.stringify({ followed: followed && { w: followed.width, h: followed.height }, zw, layout: Z.lastSettle })}`); }
+  const zGone = await until(async () => !(await chipOf(Z, zw)), 5000, 200);
+  // lane live-input-under-load: the big window's chip once ITS view holds the ruling the zh window's click made (seen under load:
+  // the chip of the ruling before it — "shown smaller" — read first)
+  const bigChip = await until(async () => { const c = await chipOf(E, 0); const f = await E.q(S1.sessionId, 'const s = L.state(); return s.fit ? { w: s.fit.width, h: s.fit.height } : null;').catch(() => null); return c && f && followed && f.w === followed.width && f.h === followed.height ? c : null; }, 8000, 200);
   ok(zGone && bigChip && bigChip.text === 'Sized for your other tab · Fit here' && /shown larger/.test(bigChip.title), `the zh window's chip is gone; the big en window now says "${bigChip && bigChip.text}" (${bigChip && bigChip.title})`);
   const shotEnBig = await shootBar(E, S1.sessionId, 0, 'live-bar-en-other-tab.png');
   const recTitle = await E.q(S1.sessionId, 'const r = L.el().querySelector(".browser-live-rec"); return { text: r.textContent, title: r.title };');
   ok(recTitle && recTitle.text === 'Video off' && /Actions/.test(recTitle.title), `the recording chip in words: "${recTitle && recTitle.text}" — "${recTitle && recTitle.title}"`);
   if (SHOTS) console.log(`  (shots: ${[shotEn, shotZh, shotEnBig].filter(Boolean).join(', ')})`);
-  Z.close();
+  await wd.closePage(Z); // lane live-input-under-load (a): END the page (see ③)
 }
 
 // ═══ ⑥ THE SPLIT LAYOUT — userW inc-mum339id-1zsb (lane takeover-keyboard, 2026-09-28) ═══════════════════════
@@ -656,17 +732,20 @@ async function splitLegs(W, { tag = 'split', upTo = null } = {}) {
     const keyLog = () => { const r = W.inner(tag) || {}; return { kd: (r.kd || []).slice(), ku: (r.ku || []).slice() }; };
     const n = (arr, k) => arr.filter((x) => x === k).length;
     // K4: modifiers HELD in the page across a real press on the composer (non-printing: the page's field is not touched)
-    await sleep(700); // past the multi-click window: this press is a single click (a double one would select the page's word)
-    await P.click(sid, 200, 140); await sleep(250);
+    // lane live-input-under-load (seen under the 2-cpu simulation: the modifiers pressed 250 ms after the press on the picture
+    // went to the composer — the press had not given the page the keys yet): each act's LAST effect, tree-neutral; the click
+    // stays a single click by pressGap (the view's multi-click rule)
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns ? true : null), LANDED_MS, 50);
     const k0 = keyLog();
     await K({ type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 8 });
     await K({ type: 'rawKeyDown', key: 'Alt', code: 'AltLeft', windowsVirtualKeyCode: 18, modifiers: 9 });
-    await sleep(250);
+    await W.innerUntil(tag, (r) => n(r.kd || [], 'Shift') > n(k0.kd, 'Shift') && n(r.kd || [], 'Alt') > n(k0.kd, 'Alt'), LANDED_MS);
+    const rk0 = (await view()).reclaims;
     o.heldPress = await P.clickEl(`${C} return ta;`);
-    await sleep(250);
+    await until(async () => { const v = await view(); return v.active === 'composer' || v.reclaims > rk0 ? true : null; }, LANDED_MS, 50);
     await K({ type: 'keyUp', key: 'Alt', code: 'AltLeft', windowsVirtualKeyCode: 18, modifiers: 8 });
     await K({ type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 0 });
-    await sleep(700);
+    await W.innerUntil(tag, (r) => n(r.ku || [], 'Shift') > n(k0.ku, 'Shift') && n(r.ku || [], 'Alt') > n(k0.ku, 'Alt'), LANDED_MS);
     const k1 = keyLog();
     o.held = { press: o.heldPress.ok, view: await view(), kdTail: k1.kd.slice(-4), kuTail: k1.ku.slice(-4), shiftDown: n(k1.kd, 'Shift') - n(k0.kd, 'Shift'), altDown: n(k1.kd, 'Alt') - n(k0.kd, 'Alt'), shiftUp: n(k1.ku, 'Shift') - n(k0.ku, 'Shift'), altUp: n(k1.ku, 'Alt') - n(k0.ku, 'Alt') };
     // the yielded chip's WORDS against what is really behind them (every translucent layer composited), in all six themes
@@ -685,7 +764,7 @@ async function splitLegs(W, { tag = 'split', upTo = null } = {}) {
     await P.type('kk');
     o.tabPage = !!(await W.innerUntil(tag, (r) => r.b === b0 + 'kk', 5000));
     o.afterTabTyped = { view: await settled(view), page: (W.inner(tag) || {}).b, b0 };
-    await P.click(sid, 200, 140); await sleep(250); // the keys back to the page for the legs that follow
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50); // the keys back to the page for the legs that follow
   };
   // ── Take over: a real press on the bar's button ──
   o.take = await P.clickEl(`${LQ} return L && L.el().querySelector('.browser-live-mode-btn');`);
@@ -755,7 +834,7 @@ async function splitLegs(W, { tag = 'split', upTo = null } = {}) {
     o.termGot = !!(await until(() => q(`${TQ} const b = ts.terminal.buffer.active; let s = ''; for (let i = 0; i < b.length; i++) { const l = b.getLine(i); if (l) s += l.translateToString(true) + '\\n'; } return s.includes('echo tkbdtyped') ? true : null;`), 8000, 150));
     o.termBuf = await q(`${TQ} const b = ts.terminal.buffer.active; let s = ''; for (let i = 0; i < b.length; i++) { const l = b.getLine(i); if (l) s += l.translateToString(true) + '\\n'; } return { buf: s.replace(/\\n+$/, '').slice(-400), sid: ts.sessionId || null, title: tw.title || null };`);
     o.pageAfterTerm = await settled(() => (W.inner(tag) || {}).b);
-    await P.click(sid, 200, 140); await sleep(150);
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50); // (lane live-input-under-load: the press's last effect — the view owns the keys, the page's field holds the caret)
     o.afterTermPicture = await view();
     await q(`${TQ} window.app.wm.closeWindow?.(tw.id); return true;`);
   }
@@ -772,7 +851,53 @@ async function splitLegs(W, { tag = 'split', upTo = null } = {}) {
 /** verify r2 (H1b') CONTROL PREDICATE, shared (verify r4, attack 6): "back on the view's desktop the yield outlives its home — the caret
  *  not in the sink, k2 nowhere, the chip still a yielded wording" — true on the patched tree, FALSE on the fixed one (asserted both ways) */
 const h1bPreFix = (back, typed) => !!(back && back.yielded && !back.owns && back.active !== 'sink' && typed && typed.page === typed.b && /^Keyboard is (in the chat box|not in a text box) — /.test(String(back.chip)));
-async function standaloneLegs(W, { S, pid, tag }) {
+/** lane live-input-under-load: a typing's LAST effect, whichever tree is under test — its last key landed in the agent's page
+ *  (past `before`) or in the element that holds the caret here (a composer, an editor; never the view's own keyboard sink);
+ *  bounded by the bridge's answer to a record. A typing that goes nowhere (a pre-fix tree's) is read at the bound. */
+const typedLanded = (P, W, tag, text, before) => until(async () => {
+  const pg = (W.inner(tag) || {}).b || '';
+  const here = await P.ev('(() => { const a = document.activeElement; if (!a || a.classList.contains("browser-live-kbd")) return ""; return String(a.value != null ? a.value : a.textContent || ""); })()').catch(() => '');
+  return (pg.length > before.length && pg.endsWith(text)) || here.endsWith(text) ? true : null;
+}, LANDED_MS, 50);
+/** lane live-input-under-load (a) — race-sweep's B-b8c6 residue: RESUME HERE BEFORE THIS PANE'S SOCKET IS SEATED. Measured
+ *  under the 2-cpu simulation on the base: three other viewer pages of the world got the app window through the layout
+ *  sync and one attached first; the press on Resume here beat this pane's OWN socket, the bridge answered 409 no_viewer and
+ *  the pane joined a moment later as a blocked viewer — "connecting" 30 s. Made deterministic: THIS page opens the app while
+ *  its app socket is HELD (its xpra worker's open of this app's stream waits); ANOTHER device's pane — a named viewer socket
+ *  straight to the app's stream — attaches first and holds the seat; a real press on Resume here; the hold released at the
+ *  press's own effect (the overlay gone, and the takeover — when one was asked — answered).
+ *  → { atDoor, other, blocked, press, asked (the takeovers asked before the release), after: { joined, mine, overlay, … } } */
+async function seatRaceLeg(W, P, appId) {
+  const o = {};
+  const XQ = `const xw = [...window.app.wm.windows.values()].find((x) => x.type === 'desktop-app' && x._desktopAppId === ${JSON.stringify(appId)}); const sx = xw && xw._desktopSeats; const me = xw && xw._desktopPaneKey; const rb = xw && xw.element.querySelector('.desktop-app-resume');`;
+  const qp = (js) => P.ev(`(() => { ${XQ} ${js} })()`).catch((e) => ({ error: String(e && e.message) }));
+  await P.ev(`(() => { const h = window.__seatHold = { held: true, queue: [], asked: [] }; const W0 = window.Worker; window.Worker = function (u, opts) { const w = new W0(u, opts); const post = w.postMessage.bind(w); w.postMessage = (m, ...r) => { if (h.held && m && m.c === 'o' && String(m.u).includes(${JSON.stringify(`/api/desktop/${appId}/stream`)})) { h.queue.push(() => post(m, ...r)); return undefined; } return post(m, ...r); }; return w; }; const f0 = window.fetch; window.fetch = function (u) { const p = f0.apply(this, arguments); if (/\\/viewers\\/takeover$/.test(String(u))) { const a = { at: Date.now() }; h.asked.push(a); p.then((r) => r.clone().json().then((j) => { a.status = r.status; a.code = (j && j.code) || null; }), (e) => { a.error = String(e && e.message); }); } return p; }; window.__seatRelease = () => { h.held = false; window.Worker = W0; for (const f of h.queue.splice(0)) f(); return true; }; return 1; })()`);
+  await P.ev(`(() => { window.app.openDesktopApp(${JSON.stringify(appId)}); return 1; })()`);
+  // THIS pane's socket is at the door (held): its view asked to open the stream — only once the app's record is ready
+  o.atDoor = !!(await until(() => qp('return window.__seatHold.queue.length > 0 ? true : null;'), BRINGUP_MS, 100));
+  // ANOTHER device's pane: a named viewer socket straight to the app's stream — the bridge elects it (the first attach)
+  const tag = crypto.randomBytes(6).toString('hex'), otherPane = `pn-seat-${tag}`;
+  const other = new WebSocket(`ws://127.0.0.1:${W.PORT}/api/desktop/${encodeURIComponent(appId)}/stream?viewer=wl-seat-${tag}&pane=${otherPane}`);
+  other.on('message', () => { }); other.on('error', () => { });
+  o.other = await new Promise((r) => { other.once('open', () => r('open')); other.once('error', (e) => r(`error ${e && e.message}`)); other.once('close', (c) => r(`closed ${c}`)); });
+  // THIS pane is blocked behind Resume here — the other pane active — and not yet seated (its socket is held)
+  o.blocked = await until(() => qp(`return xw && sx && sx.known && sx.active === ${JSON.stringify(otherPane)} && rb && rb.offsetParent && !sx.viewers.some((v) => v.id === me) ? { active: sx.active, me, viewers: sx.viewers.length } : null;`), SEAT_MS, 100);
+  if (o.blocked) {
+    o.press = await P.clickEl(`${XQ} return rb;`);
+    // the press's own effect: the overlay goes at once (the optimistic seat); a takeover asked meanwhile has its answer
+    const pressed = await until(() => qp('const h = window.__seatHold; return !(rb && rb.offsetParent) && h.asked.every((a) => a.status || a.error) ? h.asked.map((a) => ({ ...a })) : null;'), SEAT_MS, 50);
+    o.asked = pressed || (await qp('return window.__seatHold.asked;'));
+  }
+  await P.ev('window.__seatRelease()').catch(() => null);
+  // THIS pane's socket joins; the verdict once the seat settles: this pane elected (the fix) or blocked behind the other
+  const joined = await until(() => qp('return sx && sx.viewers.some((v) => v.id === me) ? true : null;'), SEAT_MS, 100);
+  const settled = await until(() => qp('const h = window.__seatHold; return sx && h.asked.every((a) => a.status || a.error) && (sx.active === me || (rb && rb.offsetParent && h.asked.length)) ? true : null;'), SEAT_MS, 100);
+  o.after = await qp('const h = window.__seatHold; const v = xw && xw._desktopAppView; return { joined: !!(sx && sx.viewers.some((x) => x.id === me)), mine: !!(sx && sx.active === me), overlay: !!(rb && rb.offsetParent), asked: h.asked, viewers: sx && sx.viewers.length, active: sx && sx.active, me, view: v && v.state, wins: [...window.app.wm.windows.values()].filter((x) => x.type === \'desktop-app\').length, status: xw && (xw.element.querySelector(\'.desktop-status\') || {}).textContent || null };');
+  o.after.waited = { joined: !!joined, settled: !!settled };
+  try { other.close(); } catch { }
+  return o;
+}
+async function standaloneLegs(W, { S, pid, tag, seatRace = false }) {
   const o = {};
   const sid = S.sessionId;
   const P = await W.page({ lang: 'en', size: [2000, 1100] });
@@ -791,7 +916,7 @@ async function standaloneLegs(W, { S, pid, tag }) {
   o.alone = await q('const r = (x) => x.element.querySelector(".window-title").getBoundingClientRect(); return !(w._tabChain && Array.isArray(w._tabChain.tabs) && w._tabChain.tabs.length > 1) && !(cw._tabChain && Array.isArray(cw._tabChain.tabs) && cw._tabChain.tabs.length > 1) && r(w).width > 0 && r(cw).width > 0;');
   o.take = await P.clickEl(`${LQ} return L && L.el().querySelector('.browser-live-mode-btn');`);
   o.took = !!(await until(() => q('return L.state().mode === "takeover" && L.state().mine && L.ownsKeyboard() ? true : null;'), 8000, 100));
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   // K3: yielded to the composer, then a real press on the live window's OWN TITLE BAR — the keys are the page's again
   await q('ta.value = ""; ta.dispatchEvent(new Event("input", { bubbles: true })); return 1;'); // (the draft syncs across clients)
   o.pressComposer = await P.clickEl(`${C} return ta;`); await sleep(250);
@@ -806,21 +931,21 @@ async function standaloneLegs(W, { S, pid, tag }) {
   // verify r2 (Q1): a BUTTON of the user's that focuses the composer (its expand button) — measured on cd867c05: reclaimed,
   // "qq" to the page, nothing said. Still reclaimed (binding it would let a message arriving within ANY press's window take
   // the keys), now SAID once (rate-limited) with advice that works — and following it (a press on the box itself) yields.
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   const cues0 = await q('return L.state().cues;');
   o.expandPress = await P.clickEl(`${C} return cw.element.querySelector('.chat-expand-btn');`); await sleep(400);
   o.q1 = { view: await view(), cues: (await q('return L.state().cues;')) - cues0, toast: await P.ev(`[...document.querySelectorAll('#global-toasts .global-toast')].map((x) => x.textContent).join(' | ')`) };
   o.q1Press = await P.clickEl(`${C} return ta;`); await sleep(250);
   await P.type('ok'); await sleep(400);
   o.q1Typed = await view();
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   await P.clickEl(`${C} return cw.element.querySelector('.chat-expand-btn');`); await sleep(300); // (the composer back to its size)
   // verify r2 (H1) — THE REVERSE DIRECTION: the view starts owning again while the caret sits in the composer.
   // H1a: the live window MINIMIZED, a real press on the composer, "c1" typed, the window RESTORED — measured on cd867c05:
   // the view owned again with the caret left in the composer, said nothing (no chip, no line) and "c2" went to the PAGE.
   // The press made while the takeover is his yields: back on screen the keys stay in the composer, said at once.
   await q('ta.value = ""; ta.dispatchEvent(new Event("input", { bubbles: true })); return 1;');
-  await P.click(sid, 200, 140); await sleep(300); // from the OWNER state on both trees (the pre-fix tree kept the title-bar leg's yield)
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50); // from the OWNER state on both trees (the pre-fix tree kept the title-bar leg's yield)
   await q('window.app.wm.minimize(w.id); return 1;'); await sleep(500);
   o.pressHidden = await P.clickEl(`${C} return ta;`); await sleep(250);
   await P.type('c1'); await sleep(300);
@@ -828,12 +953,12 @@ async function standaloneLegs(W, { S, pid, tag }) {
   await q('window.app.wm.restore(w.id); return 1;'); await sleep(600);
   o.restored = await view(); // BEFORE any key
   o.b1 = (W.inner(tag) || {}).b || '';
-  await P.type('c2'); await sleep(700);
+  await P.type('c2'); await typedLanded(P, W, tag, 'c2', o.b1); // lane live-input-under-load: the typing's last effect, never 700 ms
   o.restoredTyped = { view: await view(), page: (W.inner(tag) || {}).b };
   // H1b: the PASSWORD GUARD across the same return — a SCRIPT puts the caret in the composer while the window is minimized
   // (no press), "d1" typed there; restored: the view takes the keys AND the caret (moved to the sink at once, before any
   // key — never only the keys routed past a caret the user still sees in the composer)
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   await q('ta.value = ""; ta.dispatchEvent(new Event("input", { bubbles: true })); return 1;');
   await q('window.app.wm.minimize(w.id); return 1;'); await sleep(500);
   o.scriptFocus = await q('ta.focus(); return document.activeElement === ta;');
@@ -841,13 +966,13 @@ async function standaloneLegs(W, { S, pid, tag }) {
   await q('window.app.wm.restore(w.id); return 1;'); await sleep(600);
   o.restoredB = await view(); // BEFORE any key
   o.b2 = (W.inner(tag) || {}).b || '';
-  await P.type('d2'); await sleep(700);
+  await P.type('d2'); await typedLanded(P, W, tag, 'd2', o.b2); // (base: "d2" read 700 ms after, still on its way)
   o.restoredBTyped = { view: await view(), page: (W.inner(tag) || {}).b };
   await q('ta.value = ""; ta.dispatchEvent(new Event("input", { bubbles: true })); return 1;');
   // verify r2 (H1b'): the chat on ANOTHER desktop — pressed there while the view is off screen (a yield), back on the view's
   // desktop the chat box is hidden: measured on 51a2c699 — the caret fell to <body>, "k2" went nowhere and the chip said
   // "Keyboard is in the chat box". A yield whose home is gone ends: the caret to the sink, the keys to the page.
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   await q('ta.value = ""; ta.dispatchEvent(new Event("input", { bubbles: true })); return 1;');
   o.desks = await q(`const dm = window.app.desktopManager; const d1 = dm._activeId; const d2 = dm.createDesktop('D2 ' + ${JSON.stringify(tag)}); dm.moveWindowToDesktop(cw.id, d2); return { d1, d2 };`);
   await sleep(600);
@@ -858,7 +983,7 @@ async function standaloneLegs(W, { S, pid, tag }) {
   await q(`window.app.desktopManager.switchTo(${JSON.stringify(o.desks.d1)}); return 1;`); await sleep(1200);
   o.deskBack = await view(); // BEFORE any key
   const bk = (W.inner(tag) || {}).b || '';
-  await P.type('k2'); await sleep(700);
+  await P.type('k2'); await typedLanded(P, W, tag, 'k2', bk);
   o.deskBackTyped = { view: await view(), page: (W.inner(tag) || {}).b, b: bk };
   await q(`window.app.desktopManager.moveWindowToDesktop(cw.id, ${JSON.stringify(o.desks.d1)}); return 1;`); await sleep(600); // the chat back beside the view
   // verify r2 (N1): a DESKTOP APP and the DESKTOP while you drive — measured on cd867c05: a real press on the Desktop's noVNC
@@ -869,6 +994,7 @@ async function standaloneLegs(W, { S, pid, tag }) {
   const DQ = `const dw = [...window.app.wm.windows.values()].find((x) => x.type === 'desktop'); const dcv = dw && dw.element.querySelector('.picture-shell canvas');`;
   await q('window.app.openDesktop(); return 1;');
   o.deskUp = !!(await until(() => q(`${DQ} return dcv && dcv.width > 10 ? true : null;`), 40000, 300));
+  if (!o.deskUp) o.deskDiag = { win: await q(`${DQ} return dw ? { text: String(dw.element.textContent || '').slice(0, 240), canvas: dcv ? [dcv.width, dcv.height] : null } : null;`), journal: W.journal().split('\n').filter((l) => /desktop-singleton|Xvnc|\[vnc|\[desktop\]/i.test(l)).slice(-10) };
   if (o.deskUp) {
     await q(`${DQ} return ${place('dw', 960, 740, 900, 340)};`); await sleep(800);
     await P.click(sid, 200, 140); await until(async () => ((await view()).owns ? true : null), 10000, 50);   // the page holds the keyboard again
@@ -891,13 +1017,15 @@ async function standaloneLegs(W, { S, pid, tag }) {
   o.appId = launch && launch.id || null;
   const XQ = `const xw = [...window.app.wm.windows.values()].find((x) => x.type === 'desktop-app'); const xc = xw && xw.element.querySelector('.xpra-pane canvas');`;
   if (o.appId) {
-    await P.ev(`app.openDesktopApp(${JSON.stringify(o.appId)}); true`);
-    // x5 ONE ACTIVE VIEWER per app window: another client of this world (the ② viewer page is still loaded) may take the
-    // seat first ("Active on another client — Resume here", no picture here) — the user's own act is a press on Resume
-    // here (measured: 3 of 7 runs raced it and waited 40 s on a blocked pane)
+    // lane live-input-under-load (a): THE SEAT RACE made deterministic (seatRaceLeg — another client holds the app while
+    // this pane's socket is held, a real press on Resume here); the legs below run on this pane, the active one
+    if (seatRace) o.seatRace = await seatRaceLeg(W, P, o.appId);
+    else await P.ev(`app.openDesktopApp(${JSON.stringify(o.appId)}); true`);
+    // x5 ONE ACTIVE VIEWER per app window: a pane opened while another client holds the app is blocked ("Active on another
+    // client — Resume here", no picture here) — the user's own act is a press on Resume here
     const seat = await until(() => q(`${XQ} const rb = xw && xw.element.querySelector('.desktop-app-resume'); return xc && xc.width > 10 ? 'up' : rb && rb.offsetParent ? 'blocked' : null;`), 40000, 300);
     const tSeat = Date.now();
-    if (seat === 'blocked') { o.appResume = await P.clickEl(`${XQ} return xw.element.querySelector('.desktop-app-resume');`); await sleep(500); }
+    if (seat === 'blocked') o.appResume = await P.clickEl(`${XQ} return xw.element.querySelector('.desktop-app-resume');`);
     o.appUp = !!(await until(() => q(`${XQ} return xc && xc.width > 10 ? true : null;`), 30000, 300));
     // lane race-sweep: the seat's live state when the picture never came (both arms on 2 cpus: "Starting… 34 s", another client)
     if (!o.appUp) o.appSeat = { seat, resumed: o.appResume || null, waitedMs: Date.now() - tSeat, now: await q(`${XQ} const v = xw && xw._desktopAppView; const rb = xw && xw.element.querySelector('.desktop-app-resume'); return { seats: xw && xw._desktopSeats, view: v && { state: v.state, wanted: v.wanted }, resumeShown: !!(rb && rb.offsetParent), blocked: !!(xw && xw.element.querySelector('.desktop-app-is-blocked')) };`) };
@@ -913,7 +1041,7 @@ async function standaloneLegs(W, { S, pid, tag }) {
       o.appAfter = await until(async () => { const a = await appNow(); return a.view.yielded || a.view.reclaims > ra0 ? a : null; }, 10000, 50) || await appNow();
       await P.type('xp'); await P.key('Enter', { code: 'Enter', vk: 13, text: '\r' });
       const readTyped = () => { try { return fs.readFileSync(typedFile, 'utf8'); } catch (e) { return null; } };
-      await until(async () => (/xp\n/.test(readTyped() || '') || ((W.inner(tag) || {}).b || '').endsWith('xp') ? true : null), 10000, 50);
+      await until(async () => (/xp\n/.test(readTyped() || '') || ((W.inner(tag) || {}).b || '').endsWith('xp\n') ? true : null), 10000, 50); // lane live-input-under-load: the Enter is the typing's LAST key — its effect, never "xp" alone
       const got = readTyped();
       o.appTyped = { view: await view(), page: (W.inner(tag) || {}).b, b: bx, app: got };
       await q(`${XQ} window.app.wm.closeWindow(xw.id); return 1;`); await sleep(400);
@@ -926,18 +1054,18 @@ async function standaloneLegs(W, { S, pid, tag }) {
   // is the frame's document's press (nothing here can tell it from the frame's own script) — taken back as before, and now
   // SAID with the one way that works; the typing still reaches the agent's page (measured on cd867c05: "wv" to the page,
   // nothing said)
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   const WQ = `const bw = [...window.app.wm.windows.values()].find((x) => x.type === 'browser'); const bf = bw && bw.element.querySelector('iframe');`;
   // (a same-origin page — the Web view hides a cross-origin one as "blocked"; a blob: page is what an HTML code block's Preview opens)
   await q(`window.app.openBrowser(URL.createObjectURL(new Blob(['<input id=i style="width:90%;height:80px">'], { type: 'text/html' }))); return 1;`);
   o.wvUp = !!(await until(() => q(`${WQ} return bf && bf.getBoundingClientRect().width > 50 && bf.contentDocument && bf.contentDocument.getElementById('i') ? true : null;`), 15000, 200));
   if (o.wvUp) {
     await q(`${WQ} return ${place('bw', 960, 740, 700, 300)};`); await sleep(1200);
-    await P.click(sid, 200, 140); await sleep(300);
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
     const fr0 = await q('return L.state().frameReclaims;'); const bw0 = (W.inner(tag) || {}).b || '';
-    o.wvPress = await P.clickEl(`${WQ} return bf;`); await sleep(500);
+    o.wvPress = await P.clickEl(`${WQ} return bf;`); await until(async () => ((await q('return L.state().frameReclaims;')) > fr0 ? true : null), LANDED_MS, 50);
     o.wv = { view: await view(), frames: (await q('return L.state().frameReclaims;')) - fr0, toast: await P.ev(`[...document.querySelectorAll('#global-toasts .global-toast')].map((x) => x.textContent).join(' | ')`) };
-    await P.type('wv'); await sleep(700);
+    await P.type('wv'); await typedLanded(P, W, tag, 'wv', bw0);
     o.wvTyped = { page: (W.inner(tag) || {}).b, b: bw0, field: await q(`${WQ} return bf.contentDocument.getElementById('i').value;`) };
     await q(`${WQ} window.app.wm.closeWindow(bw.id); return 1;`); await sleep(300);
   }
@@ -947,7 +1075,7 @@ async function standaloneLegs(W, { S, pid, tag }) {
   // (the page logs its last 40 keys: a marker key first, then the LAST keydown / keyup say what reached it — a count over a
   // full sliding window can stay put while a key is added)
   const lastKeys = () => { const r = W.inner(tag) || {}; return { kd: (r.kd || []).at(-1) || null, ku: (r.ku || []).at(-1) || null }; };
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   await P.type('m'); await W.innerUntil(tag, (r) => (r.ku || []).at(-1) === 'm', 4000);
   await K({ type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 8 });
   const downA = !!(await W.innerUntil(tag, (r) => (r.kd || []).at(-1) === 'Shift', 4000));
@@ -955,7 +1083,7 @@ async function standaloneLegs(W, { S, pid, tag }) {
   await K({ type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 0 }); await sleep(700);
   o.heldHide = { down: downA, ...lastKeys(), pressed: (await q('return L.state().pressed;')) };
   await q('window.app.wm.restore(w.id); return 1;'); await sleep(600);
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   await P.type('n'); await W.innerUntil(tag, (r) => (r.ku || []).at(-1) === 'n', 4000);
   await K({ type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 8 });
   const downB = !!(await W.innerUntil(tag, (r) => (r.kd || []).at(-1) === 'Shift', 4000));
@@ -999,7 +1127,7 @@ async function r3Legs(W, { S, pid, tag }) {
   await q(`${place('w', 20, 20, 900, 700)}; ${place('cw', 960, 20, 900, 700)}; return 1;`); await sleep(800);
   o.take = await P.clickEl(`${LQ} return L && L.el().querySelector('.browser-live-mode-btn');`);
   o.took = !!(await until(() => q('return L.state().mode === "takeover" && L.state().mine && L.ownsKeyboard() ? true : null;'), 8000, 100));
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   // ── the census: THE CODE EDITOR (CodeMirror) — a real press on a line yields to .cm-content, the typing lands in the doc ──
   const fp = path.join(S.cwd, `r3-${tag}.js`); fs.writeFileSync(fp, 'line one\nline two\nline three\n');
   const EQ = `const ew = [...window.app.wm.windows.values()].find((x) => x.type === 'editor'); const doc = () => [...ew.element.querySelectorAll('.cm-line')].map((l) => l.textContent).join('/');`;
@@ -1008,15 +1136,19 @@ async function r3Legs(W, { S, pid, tag }) {
   if (o.cmUp) {
     await q(`${EQ} return ${place('ew', 960, 740, 900, 330)};`); await sleep(800);
     o.cmOpened = await view(); // its own focus() while you drive: stood down / taken back
-    await P.click(sid, 200, 140); await sleep(300);
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
     const b0 = page();
     o.cmPress = await P.clickEl(`${EQ} return ew.element.querySelectorAll('.cm-line')[1];`); await sleep(300);
     o.cm = await view();
-    await P.type('zz'); await sleep(600);
+    await P.type('zz'); await typedLanded(P, W, tag, 'zz', b0);
     o.cmTyped = { doc: await q(`${EQ} return doc();`), page: page(), b0 };
     // F1: the language <select> — a real press opens its list; while you drive the list stays open (before: closed at once)
-    await P.click(sid, 200, 140); await sleep(300);
-    o.selPress = await P.clickEl(`${EQ} return ew.element.querySelector('select');`); await sleep(150);
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
+    o.selPress = await P.clickEl(`${EQ} return ew.element.querySelector('select');`);
+    // the press's LAST effect is the view's verdict on the focus it moved: the sink's blur handler takes it on a zero-delay
+    // timer (keep a <select>, take anything else back) — a zero-delay timer queued AFTER the press runs after it; then read
+    // (a wait for "focused" alone read the pre-fix tree before its take-back: the control went red, once alone)
+    await P.ev('new Promise((r) => setTimeout(() => setTimeout(r, 0), 0))');
     o.sel = await q(`${EQ} const s = ew.element.querySelector('select'); let open = null; try { open = s.matches(':open'); } catch (e) { open = 'n/a'; } return { focused: document.activeElement === s, open, owns: L.ownsKeyboard() };`);
     await q(`${EQ} window.app.wm.closeWindow(ew.id); return 1;`); await sleep(400); // (its list goes with it)
   }
@@ -1028,7 +1160,7 @@ async function r3Legs(W, { S, pid, tag }) {
   const menuOn = async (name) => { const rp = await q(`${XQ} const it = [...fw.element.querySelectorAll('.file-item')].find((x) => x.textContent.includes(${JSON.stringify(name)})); if (!it) return null; const r = it.getBoundingClientRect(); return { x: r.left + 40, y: r.top + r.height / 2 };`); if (!rp || rp.error) return false; await I({ type: 'mouseMoved', x: rp.x, y: rp.y }); await I({ type: 'mousePressed', x: rp.x, y: rp.y, button: 'right', clickCount: 1 }); await I({ type: 'mouseReleased', x: rp.x, y: rp.y, button: 'right', clickCount: 1 }); await sleep(400); return true; };
   if (o.exUp) {
     await q(`${XQ} return ${place('fw', 960, 740, 800, 330)};`); await sleep(800);
-    await P.click(sid, 200, 140); await sleep(300);
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
     const v0 = await view();
     await menuOn(`copyme-${tag}`);
     o.copyPress = await P.clickEl(`return [...document.querySelectorAll('.context-menu-item')].find((x) => x.textContent.trim() === 'Copy Path');`); await sleep(600);
@@ -1037,29 +1169,38 @@ async function r3Legs(W, { S, pid, tag }) {
     // ── lane dialog-keys (the owner's rule; before: verify r3 F4 — taken back, said, its Enter the page's): Delete → the confirm
     // dialog — HIS real press opened it: it TAKES the keys (its OK focused, the chip says so, the view owns none); a real Enter
     // CONFIRMS it (the file goes) and the page's textarea gets NO line break; the close gives the keys back to the page ("dk") ──
-    await P.click(sid, 200, 140); await sleep(300);
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
     const d0 = await view(); const bd = page();
     await menuOn(`delme-${tag}`);
-    o.delPress = await P.clickEl(`return [...document.querySelectorAll('.context-menu-item')].find((x) => x.textContent.trim() === 'Delete');`); await sleep(600);
+    // lane live-input-under-load: each act's LAST effect, tree-neutral, never 600 / 500 / 1300 / 700 ms — the dialog up and the view's
+    // answer to it (taken or said), the dialog gone with the keys back (or still up: a pre-fix tree), the Enter landed (seen under
+    // load: «dk» without its line break, the Enter still on its way)
+    const dlgOpen = () => q("return !!document.querySelector('.dialog-overlay:not(.hidden) .btn-cancel');");
+    o.delPress = await P.clickEl(`return [...document.querySelectorAll('.context-menu-item')].find((x) => x.textContent.trim() === 'Delete');`);
+    await until(async () => { const v = await view(); const inDlg = await q("const a = document.activeElement; return !!(a && a.closest && a.closest('.dialog-overlay:not(.hidden)'));"); return (await dlgOpen()) && ((v.dialogTakes > d0.dialogTakes && inDlg) || (v.dialogCues > d0.dialogCues && v.owns)) ? true : null; }, LANDED_MS, 50);
     const d1 = await view();
     o.dialog = { open: await q(`return !!document.querySelector('.dialog-overlay:not(.hidden) .btn-cancel');`), cues: d1.dialogCues - d0.dialogCues, takes: d1.dialogTakes - d0.dialogTakes, held: d1.dialogHeld, why: d1.dialogWhy, toasts: d1.toasts, active: d1.active, owns: d1.owns, chip: d1.chip, mode: d1.mode, mine: d1.mine };
     await P.key('Enter', { code: 'Enter', vk: 13, text: '\r' });
-    const gone = !!(await until(() => (!fs.existsSync(path.join(S.cwd, `delme-${tag}.txt`)) ? true : null), 5000, 100)); await sleep(500);
+    const gone = !!(await until(() => (!fs.existsSync(path.join(S.cwd, `delme-${tag}.txt`)) ? true : null), 5000, 100));
+    await until(async () => { const v = await view(); return !(await dlgOpen()) && v.dialogReturns > d0.dialogReturns ? true : null; }, LANDED_MS, 50);
     const d2 = await view();
     o.dialogEnter = { page: page(), b: bd, stillOpen: await q(`return !!document.querySelector('.dialog-overlay:not(.hidden) .btn-cancel');`), gone, active: d2.active, owns: d2.owns, chip: d2.chip, held: d2.dialogHeld, returns: d2.dialogReturns - d0.dialogReturns };
     if (o.dialogEnter.stillOpen) { o.cancelPress = await P.clickEl(`return [...document.querySelectorAll('.dialog-overlay:not(.hidden) .btn-cancel')].pop();`); await sleep(500); } // (the pre-fix tree: its Enter went to the page, the dialog is still up)
-    await P.click(sid, 200, 140); await sleep(300); const bk = page();
-    await P.type('dk'); await sleep(700);
+    // lane live-input-under-load (base 2/10 loaded: "dk" read 700 ms after the typing, still on its way): the press's effect (the
+    // page's field focused), then the typing's (its last key in the page) — never a sleep
+    await P.click(sid, 200, 140); await W.innerUntil(tag, (r) => r.act === 'b', LANDED_MS); const bk = page();
+    await P.type('dk'); await W.innerUntil(tag, (r) => r.b === bk + 'dk', LANDED_MS);
     o.dialogAfter = { page: page(), b: bk, owns: (await view()).owns };
     // ── the password guard, in chrome: a dialog that opens BY ITSELF (a script's timer, 400 ms after nothing he pressed in the
     // app — the static New-session dialog, which focuses its own field) while the page has the keys: TAKEN BACK and SAID once;
     // its Enter is the page's ──
-    await P.click(sid, 200, 140); await sleep(300);
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
     const s0 = await view(); const bs = page();
-    await q('setTimeout(() => window.app.showNewSessionDialog(), 400); return 1;'); await sleep(1300);
+    await q('setTimeout(() => window.app.showNewSessionDialog(), 400); return 1;');
+    await until(async () => { const v = await view(); return (await q("return !document.getElementById('dialog-overlay').classList.contains('hidden');")) && (v.dialogCues > s0.dialogCues || v.dialogTakes > s0.dialogTakes) ? true : null; }, LANDED_MS, 50);
     const s1 = await view();
     o.selfDialog = { open: await q("return !document.getElementById('dialog-overlay').classList.contains('hidden');"), cues: s1.dialogCues - s0.dialogCues, takes: s1.dialogTakes - s0.dialogTakes, why: s1.dialogWhy, active: s1.active, owns: s1.owns, toasts: s1.toasts };
-    await P.key('Enter', { code: 'Enter', vk: 13, text: '\r' }); await sleep(700);
+    await P.key('Enter', { code: 'Enter', vk: 13, text: '\r' }); await until(async () => (page() === bs + '\n' || !(await q("return !document.getElementById('dialog-overlay').classList.contains('hidden');")) ? true : null), LANDED_MS, 50);
     o.selfEnter = { page: page(), b: bs, open: await q("return !document.getElementById('dialog-overlay').classList.contains('hidden');") };
     await q('window.app.hideDialogs(); return 1;'); await sleep(300);
     await q(`${XQ} window.app.wm.closeWindow(fw.id); return 1;`); await sleep(300);
@@ -1071,25 +1212,25 @@ async function r3Legs(W, { S, pid, tag }) {
   o.chanUp = !!(await until(() => q(`${HQ} return cta ? true : null;`), 20000, 200));
   if (o.chanUp) {
     await q(`${HQ} return ${place('hw', 960, 740, 900, 330)};`); await sleep(800);
-    await P.click(sid, 200, 140); await sleep(300);
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
     const b0 = page();
     o.chanPress = await P.clickEl(`${HQ} return cta;`); await sleep(300);
     o.chan = { view: await view(), active: await q(`${HQ} return document.activeElement === cta;`) };
-    await P.type('ch'); await sleep(600);
+    await P.type('ch'); await typedLanded(P, W, tag, 'ch', b0);
     o.chanTyped = { value: await q(`${HQ} return cta.value;`), page: page(), b0 };
     await q(`${HQ} cta.value = ''; window.app.wm.closeWindow(hw.id); return 1;`); await sleep(300);
   }
   // ── r2's held: yielded to the chat composer, a real press on its MESSAGE LIST — the chip says where the keys are now ──
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   await q('ta.value = ""; ta.dispatchEvent(new Event("input", { bubbles: true })); return 1;');
   o.listComposer = await P.clickEl(`${C} return ta;`); await sleep(250);
   await P.type('l1'); await sleep(300);
   o.listYielded = await view();
   o.listPress = await P.clickEl(`${C} return cw.element.querySelector('.chat-message-list');`); await sleep(400);
   o.list = await view();
-  const bl = page(); await P.type('nn'); await sleep(600);
+  const bl = page(); await P.type('nn'); await typedLanded(P, W, tag, 'nn', bl);
   o.listTyped = { view: await view(), page: page(), b: bl };
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   o.handPress = await P.clickEl(`${LQ} return L && L.el().querySelector('.browser-live-handback');`);
   o.handed = !!(await until(() => q('return L.state().mode !== "takeover" ? true : null;'), 8000, 100));
   await q('window.app.wm.closeWindow(w.id); window.app.wm.closeWindow(cw.id); return 1;'); await sleep(400);
@@ -1124,7 +1265,7 @@ async function r4Legs(W, { S, pid, tag, only = null } = {}) {
   await q(`${place('w', 20, 20, 900, 700)}; ${place('cw', 960, 20, 900, 700)}; return 1;`); await sleep(800);
   o.take = await P.clickEl(`${LQ} return L && L.el().querySelector('.browser-live-mode-btn');`);
   o.took = !!(await until(() => q('return L.state().mode === "takeover" && L.state().mine && L.ownsKeyboard() ? true : null;'), 8000, 100));
-  await P.click(sid, 200, 140); await sleep(300);
+  await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   // (e)'s second browser is started NOW so it is up by the time (a)–(d) are done: under the full run five chromiums already run and a
   // fresh profile's launch took over 40 s (measured: `two: null` in the full run, up at once alone)
   // …and the machine-wide ceiling (keeper-limits CONCURRENT_CAP 6) is freed first: under the full run the ② kinds' and ⑥'s browsers are
@@ -1146,10 +1287,10 @@ async function r4Legs(W, { S, pid, tag, only = null } = {}) {
     o.selKeysToPage = kd().length - kd0; o.selPageB = page();
     o.selPress2 = await P.clickEl(el('r4sel')); await sleep(200); o.selOpen2 = await st('r4sel'); await P.type('d'); await sleep(300); o.selType = await st('r4sel'); await K('Escape', 'Escape', 27); await sleep(300); o.selEsc = await st('r4sel');
     o.selKeysToPage2 = kd().length - kd0 - o.selKeysToPage;
-    await P.click(sid, 200, 140); await sleep(300);
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
     // (b) the colour input
     o.colorPress = await P.clickEl(el('r4color')); await sleep(80); o.color80 = await st('r4color'); await sleep(250); o.color330 = await st('r4color'); await K('Escape', 'Escape', 27); await sleep(200);
-    await P.click(sid, 200, 140); await sleep(300);
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
   }
   // (c) the storm
   o.composerPress = await P.clickEl(`${C} return ta;`); await sleep(250); o.yielded = await view();
@@ -1159,11 +1300,14 @@ async function r4Legs(W, { S, pid, tag, only = null } = {}) {
   // (d) the socket closes while yielded
   await q('ta.value = ""; ta.dispatchEvent(new Event("input", { bubbles: true })); return 1;'); // (the composer keeps a draft from the r3 legs)
   await P.type('y1'); await sleep(200);
-  await q('L.ws().close(); return 1;'); await sleep(400); o.afterClose = await view();
+  // lane live-input-under-load: each read waits for its act's LAST effect (seen alone at load ~30: the view still driving 400 ms
+  // after the close) — the close noted by the view (its onclose drops the takeover and the yield in one turn), the
+  // reconnect's hello (the mode it says), the typing in the page; each bounded by the bridge's answer to a record (LANDED_MS)
+  await q('L.ws().close(); return 1;'); await until(() => q('const s = L.state(); return !s.connected || s.mode !== "takeover" ? true : null;'), LANDED_MS, 50); o.afterClose = await view();
   await P.type('y2'); await sleep(200); o.closeTyped = await view();
-  o.reconnected = !!(await until(() => q('return L.state().connected ? true : null;'), 20000, 200)); await sleep(800); o.afterReconnect = await view();
+  o.reconnected = !!(await until(() => q('return L.state().connected ? true : null;'), 20000, 200)); await until(() => q('const s = L.state(); return s.connected && s.mode === "watch" && !L.ownsKeyboard() ? true : null;'), LANDED_MS, 50); o.afterReconnect = await view();
   o.take2 = await P.clickEl(`${LQ} return L && L.el().querySelector('.browser-live-mode-btn');`); o.took2 = !!(await until(() => q('return L.state().mode === "takeover" && L.state().mine && L.ownsKeyboard() ? true : null;'), 8000, 100));
-  await P.click(sid, 200, 140); await sleep(300); const b0 = page(); await P.type('zz'); await sleep(500); o.retake = { b0, b: page() };
+  await P.click(sid, 200, 140); await W.innerUntil(tag, (r) => r.act === 'b', LANDED_MS); const b0 = page(); await P.type('zz'); await W.innerUntil(tag, (r) => r.b === b0 + 'zz', LANDED_MS); o.retake = { b0, b: page() };
   // (e) two views driving: the second profile (started above), popped out
   o.secondUp = !!(await W.innerUntil(tag + 'b', () => true, 60000));
   await q(`window.app.openBrowserLive({ sessionId: ${JSON.stringify(sid)}, profileId: ${JSON.stringify(pid2)}, popOut: true }); return true;`);
@@ -1181,6 +1325,10 @@ async function r4Legs(W, { S, pid, tag, only = null } = {}) {
   await q2('window.app.wm.closeWindow(w2.id); window.app.wm.closeWindow(w.id); window.app.wm.closeWindow(cw.id); return 1;'); await sleep(400);
   return o;
 }
+// lane live-input-under-load (a): the ② viewer ENDS here — every later leg opens its own client; a loaded page stays a live
+// client of the app (measured: it, ③'s and ④'s pages got the desktop app's window through the layout sync and one of them
+// attached first — the N1 leg's seat was another client's)
+await wd.closePage(E);
 if (want('split')) {
   console.log('— ⑥ the split layout (userW inc-mum339id-1zsb): your OWN press on the chat composer gets the keyboard while you drive; a script\'s focus never does');
   const s = await splitLegs(wd);
@@ -1214,7 +1362,7 @@ if (want('split')) {
   ok(s.handPress.ok && s.handed && s.afterHandback.chip === null && s.afterHandback.line === null && !s.afterHandback.owns, `a real press on Hand back ends the takeover; the bar and the composer say nothing any more (${JSON.stringify(s.afterHandback)})`);
   await wd.closePage(s.P); // verify r2: END the page — a loaded one stays a live client (it took the desktop app's one active seat)
   // verify r1: the standalone windows on another client
-  const t = await standaloneLegs(wd, { S: s.S, pid: s.pid, tag: 'split' });
+  const t = await standaloneLegs(wd, { S: s.S, pid: s.pid, tag: 'split', seatRace: true });
   ok(t.ready && t.chat && t.live && t.alone === true && t.took && t.pressComposer.ok && t.yielded.active === 'composer' && !t.yielded.owns, `verify r1 standalone world: another client, the chat and the live view as two windows (no group), a real Take over, a real press on the composer yields (${JSON.stringify({ ready: t.ready, chat: t.chat, live: t.live, alone: t.alone, took: t.took, press: t.pressComposer, yielded: t.yielded })})`);
   ok(t.titlePress.ok && t.afterTitle.owns && t.afterTitle.active === 'sink' && t.titlePage && t.afterTitleTyped.view.composer === '' && t.handed,
     `verify r1 (K3): yielded, a real press on the live window's OWN TITLE BAR takes the keys back — the sink holds the caret (${t.afterTitle && t.afterTitle.active}), "tt" reaches the PAGE, the composer stays empty`, JSON.stringify({ press: t.titlePress, after: t.afterTitle, typed: t.afterTitleTyped }));
@@ -1229,7 +1377,10 @@ if (want('split')) {
   ok(t.wvUp && t.wvPress && t.wvPress.ok && t.wv.view.active === 'sink' && t.wv.view.owns && t.wv.frames >= 1 && /Typing still goes to the browser — to type in another page, hand back first/.test(t.wv.toast) && t.wvTyped.page === t.wvTyped.b + 'wv' && t.wvTyped.field === '',
     `verify r2 (H5): a real press INTO a Web view page's field while you drive is taken back (the frame's press is indistinguishable from its own script) and SAID ("${t.wv && t.wv.toast}"); "wv" reaches the agent's page as the chip says`, JSON.stringify({ up: t.wvUp, press: t.wvPress, wv: t.wv, typed: t.wvTyped }));
   ok(t.deskUp && t.deskPress && t.deskPress.ok && t.deskAfter.active === true && t.deskAfter.view.yielded && !t.deskAfter.view.owns && t.deskAfter.view.chip === 'Keyboard is outside the browser — click the picture to keep using the page' && t.deskTyped.page === t.deskTyped.b,
-    `verify r2 (N1): the DESKTOP (a real noVNC over this world's Xvnc) — a real press on its picture while you drive YIELDS to its canvas ("${t.deskAfter && t.deskAfter.view.chip}"), "vn" never reaches the page (${JSON.stringify(t.deskTyped && t.deskTyped.page)})`, JSON.stringify({ up: t.deskUp, press: t.deskPress, after: t.deskAfter, typed: t.deskTyped }));
+    `verify r2 (N1): the DESKTOP (a real noVNC over this world's Xvnc) — a real press on its picture while you drive YIELDS to its canvas ("${t.deskAfter && t.deskAfter.view.chip}"), "vn" never reaches the page (${JSON.stringify(t.deskTyped && t.deskTyped.page)})`, JSON.stringify({ up: t.deskUp, diag: t.deskDiag, press: t.deskPress, after: t.deskAfter, typed: t.deskTyped }));
+  { const sr = t.seatRace || {}; const a = (sr.after && sr.after.asked) || [];
+    ok(sr.blocked && sr.press && sr.press.ok && Array.isArray(sr.asked) && sr.asked.length === 0 && sr.after.joined && sr.after.mine && a.length === 1 && a[0].status === 200,
+      `lane live-input-under-load (a): Resume here pressed while THIS pane's socket is not yet seated (another client holds the app) asks nothing until the socket joins — then the takeover (${a.map((x) => x.status).join(',')}): this pane is ACTIVE`, JSON.stringify(sr)); }
   ok(t.appId && t.appUp && t.appPress && t.appPress.ok && /xpra-ime/.test(String(t.appAfter.active)) && t.appAfter.view.yielded && !t.appAfter.view.owns && t.appTyped.app === 'xp\n' && t.appTyped.page === t.appTyped.b,
     `verify r2 (N1): a DESKTOP APP (a real xterm under xpra) — a real press on its picture yields to its IME; "xp" + Enter reach the APP (its shell wrote ${JSON.stringify(t.appTyped && t.appTyped.app)}), nothing reaches the page`, JSON.stringify({ id: t.appId, up: t.appUp, seat: t.appSeat, press: t.appPress, after: t.appAfter, typed: t.appTyped, diag: t.appDiag }));
   ok(t.heldHide.down && t.heldHide.ku === 'Shift' && Array.isArray(t.heldHide.pressed) && t.heldHide.pressed.length === 0 && t.hand.ok && t.handed && t.heldHandback.down && t.heldHandback.ku === 'Shift',
@@ -1293,6 +1444,7 @@ if (want('controls')) {
     P('a drag without its button', 'src/lib/browser-live-window.js', "modifiers: modifiersOf(e), held: st.buttonsDown ? st.heldButton : null });", "modifiers: modifiersOf(e) });"),
     P('no copy-out door', 'src/server/browser-stream.js', '    const g = T.copyDeliverVerdict(relay.copyArm, t);', "    const g = { deliver: true, gesture: 'chord', arm: null };"),
     P('no copy-out door (the viewer\'s half)', 'src/lib/browser-live-window.js', '    const chordAge = st.copyAt ? Date.now() - st.copyAt : null;', '    const chordAge = 100;'),
+    P('Resume here pre-fix: the takeover asked at once (before the pane is seated)', 'src/lib/desktop-app-window.js', '    await whenSeated(until - Date.now());', '    void until;'), // lane live-input-under-load (a)
   ];
   const wc = await makeWorld('c', { patches });
   ok(wc.rebuilt === true && wc.booted, `the control tree: ${patches.length} patches, its bundle rebuilt, its server booted`, String(wc.rebuilt));
@@ -1334,6 +1486,15 @@ if (want('controls')) {
     const hij = await wc.readClipboard();
     ok(/^HIJACK-\d+$/.test(String(hij)), `NEGATIVE CONTROL (no copy-out door): the page's own synthetic copy is written to the viewer's clipboard after one plain click — ${JSON.stringify(hij)} (the real-stack hijack the door closes)`);
     await Ec.handback(C1.sessionId);
+    // lane live-input-under-load (a): the pre-fix Resume here in the same deterministic seat race — this world's other viewer
+    // pages ENDED first, as on the fixed tree's N1 world (the race's two clients are the leg's own)
+    await wc.closePage(Mc); await wc.closePage(Ec);
+    const Pc = await wc.page({ lang: 'en', size: [2000, 1100] });
+    const appC = await Pc.ev(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify({ exec: '/usr/bin/xterm', args: ['-T', 'vs-seat-ctl', '-geometry', '80x24', '-e', 'sh', '-c', `cat > ${path.join(wc.D, 'xterm-seat-ctl.txt')}`], label: 'vs-seat-ctl' }))} }).then((r) => r.json())`).catch(() => null);
+    const sc = appC && appC.id ? await seatRaceLeg(wc, Pc, appC.id) : null;
+    ok(sc && sc.blocked && sc.press && sc.press.ok && Array.isArray(sc.asked) && sc.asked.length === 1 && sc.asked[0].status === 409 && sc.asked[0].code === 'no_viewer' && sc.after.joined && !sc.after.mine && sc.after.overlay,
+      `NEGATIVE CONTROL (a, Resume here pre-fix): the press asks the takeover before this pane's socket is seated — ${sc && sc.asked && sc.asked[0] ? `${sc.asked[0].status} ${sc.asked[0].code}` : 'nothing'} — and the pane joins a moment later BLOCKED behind the other client (race-sweep's "connecting 30 s")`, JSON.stringify({ app: appC && (appC.id || appC.error), sc }) + ' · journal: ' + wc.journal().split('\n').filter((l) => /\[desktop/.test(l)).slice(-10).join(' | '));
+    await wc.closePage(Pc);
   }
   await wc.close();
 }
@@ -1455,4 +1616,5 @@ if (want('r3')) {
   await w3.close();
 }
 for (const c of copiesCensus(M.files.filter((f) => f.startsWith(M.dir + path.sep)), M.dir, REPO, { minCopies: 1, label: 'live-input heavy controls: ' })) ok(c.pass, c.name, c.detail);
+console.log(`  · viewer page boots (world:ms): ${BOOTS.join(' ')}`);
 await done();

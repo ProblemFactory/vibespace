@@ -29,6 +29,9 @@ stringData:
   {{- if and .Values.frp .Values.frp.token }}
   frpsToken: {{ .Values.frp.token | quote }}
   {{- end }}
+  {{- if and .Values.frp .Values.frp.clusterToken }}
+  relayClusterToken: {{ .Values.frp.clusterToken | quote }}
+  {{- end }}
   {{- if and .Values.cephMint .Values.cephMint.token }}
   cephMintToken: {{ .Values.cephMint.token | quote }}
   {{- end }}
@@ -239,18 +242,27 @@ spec:
             # A user-set agentd.publicUrl in Settings overrides it.
             - name: VIBESPACE_PUBLIC_URL
               value: {{ printf "https://%s" $host | quote }}
-            {{- if and .Values.frp .Values.frp.addr .Values.frp.token }}
+            {{- if and .Values.frp .Values.frp.addr (or .Values.frp.token .Values.frp.clusterToken) }}
             # frp relay defaults (B-0b60 public URLs) — the plugin reads these
             # as DEFAULTS; a user can override any of them in ⚙ → Plugins. When
             # present the plugin is default-enabled (auto-connects on boot).
-            # Gated on addr AND token: the Secret's frpsToken key only renders
-            # with a token, and a dangling secretKeyRef fails the whole pod.
+            # Gated on addr AND a token: each secretKeyRef below renders only with
+            # its own Secret key (a dangling secretKeyRef fails the whole pod).
+            # clusterToken (lane relay-token-per-instance): the fleet's ONE relay
+            # token — each pod logs in as its own name (VIBESPACE_INSTANCE_NAME);
+            # token stays the shared KNOCK while the relay's grace lasts.
             - name: VIBESPACE_FRPS_ADDR
               value: {{ .Values.frp.addr | quote }}
             - name: VIBESPACE_FRPS_PORT
               value: {{ .Values.frp.port | default 7000 | quote }}
+            {{- if .Values.frp.token }}
             - name: VIBESPACE_FRPS_TOKEN
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: frpsToken } }
+            {{- end }}
+            {{- if .Values.frp.clusterToken }}
+            - name: VIBESPACE_RELAY_CLUSTER_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $name }}, key: relayClusterToken } }
+            {{- end }}
             {{- with .Values.frp.subdomainHost }}
             - name: VIBESPACE_FRPS_SUBDOMAIN_HOST
               value: {{ . | quote }}

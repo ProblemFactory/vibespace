@@ -140,6 +140,12 @@ export function defaultDecode(bytes, mime) {
 export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, cover = false, slots = false, pin = null, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, imeGapMs = IME_GAP_MS, mac = false, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS, refreshDelaysMs = REFRESH_DELAYS_MS } = {}) {
   const emit = (name, ...args) => { try { on[name]?.(...args); } catch (e) { log?.warn?.(`[xpra] on.${name} threw: ${e && e.message}`); } };
   const windows = new Map();
+  // lane xpra-title-election: facts (a fresh title, metadata) that reach us for a window NOT in `windows` yet — a
+  // reused wid re-announced under load while its new-window is still in flight — are kept here (bounded, keyed by
+  // wid) and merged by newWindow BEFORE its first emit, so a title update is never lost at window-metadata's `if
+  // (!win)`. Cleared when the window is (re)created or lost. Never a timer.
+  const pending = new Map();
+  const PENDING_MAX = 64;
   const ime = new P.ImeKeymap();
   const wheel = new P.WheelAccumulator();
   let worker = null, state = 'idle', closedReason = null;
@@ -267,16 +273,23 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     sentDisplay = d;
     send(P.displayPacket(packetTypes, { width: d.width, height: d.height, dpi }));
   }
+  // lane xpra-title-election — THE ONE PLACE A WINDOW IS ANNOUNCED AS THE MAIN (newWindow at creation, pickMain at a
+  // re-election): set mainWid, emit 'main' (the view resizes a premap main inside this call), then 'title' with the
+  // record's CURRENT title ('' allowed, never undefined — a later window-metadata announces any fresh one), then the
+  // constraints. Callers do their own slot / fit / fixed work around it. Never a timer, never a retry.
+  const setMain = (win) => {
+    mainWid = win ? win.wid : 0;
+    if (win) unslot(win.wid); // a slot adopted as the main leaves the slots — mainWid is set FIRST so its satellite hears 'adopted', not 'released'; a no-op for a window never slotted (a fresh main at creation)
+    emit('main', win || null);
+    emit('title', win && win.title != null ? win.title : '');
+    announceConstraints();
+  };
   const pickMain = () => {
     if (mainWid && windows.has(mainWid)) return;
     const next = [...windows.values()].find((w) => w.kind === 'main') || null;
-    mainWid = next ? next.wid : 0;
-    if (next) unslot(next.wid); // S2: the next main is ADOPTED by the main pane — its slot (and satellite) goes
-    if (next) { emit('title', next.title); refit(next); }
-    else { emit('title', ''); syncDisplay(); } // no main: the display is the pane again (or contains a lone fixed dialog)
-    announceConstraints();
+    setMain(next); // lane xpra-title-election: mainWid (+ unslot: S2 the next main is ADOPTED by the main pane) + 'main' + the record's CURRENT title + constraints, in ONE place
+    if (next) refit(next); else syncDisplay(); // no main: the display is the pane again (or contains a lone fixed dialog)
     announceFixed();
-    emit('main', next);
   };
   /** The main window follows the pane: a new fit ⇒ configure-window (the server confirms with window-move-resize / window-resized). */
   const refit = (win) => {
@@ -353,6 +366,8 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const wid = p[1];
     if (windows.has(wid)) { log?.warn?.(`[xpra] window ${wid} announced twice`); return; }
     const meta = p[6] && typeof p[6] === 'object' ? p[6] : {};
+    const held = pending.get(wid); // lane xpra-title-election: facts that reached us before this record existed
+    if (held) { pending.delete(wid); Object.assign(meta, held); } // the later facts (a fresh title / type) win over the new-window snapshot
     const kind = P.windowKind(meta, overrideRedirect);
     let g = { x: p[2], y: p[3], w: Math.max(1, p[4]), h: Math.max(1, p[5]) };
     const isMain = kind === 'main' && !(mainWid && windows.has(mainWid));
@@ -365,7 +380,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     // re-fitted ~160 ms later, and the app snapped back to its mapped size ~760 ms after that (measured on every CSD
     // connect: a 65 CSS px band of background twice). The constraints follow the main (the window's minimum is
     // measured around the folded chrome). refit / belt skip a `premap` window — its own map is the fit.
-    if (isMain) { mainWid = wid; emit('title', win.title); emit('main', win); announceConstraints(); }
+    if (isMain) setMain(win); // lane xpra-title-election: the ONE announce door (was mainWid + title + main + constraints inline)
     if (watch) { /* x5 Watch: drawn where the server has it — the geometry is the active viewer's */ }
     else if (isMain) g = P.fitGeometry(fitTarget(), P.sizeHintsOf(meta));
     else if (win === loneFixed()) g = { x: 0, y: 0, w: g.w, h: g.h }; // the app's FIXED lone dialog (Inkscape's welcome) IS the picture: at 0,0, never where X centred it
@@ -384,6 +399,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const win = windows.get(wid);
     if (!win) return;
     windows.delete(wid);
+    pending.delete(wid); // lane xpra-title-election: a window gone drops any facts stashed for its wid
     clearTimeout(win.belt && win.belt.timer);
     for (const t of win.refreshTimers || []) clearTimeout(t);
     emit('window', 'lost', win);
@@ -496,7 +512,13 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
       case 'window-metadata': {
         const win = windows.get(p[1]);
         const meta = p[2] && typeof p[2] === 'object' ? p[2] : {};
-        if (!win) return;
+        if (!win) { // lane xpra-title-election: a fact for a window not yet (re)created — STASH it (bounded); newWindow merges it before its first emit, so a title that raced ahead of new-window is never dropped
+          const slot = pending.get(p[1]) || {};
+          Object.assign(slot, meta);
+          pending.set(p[1], slot);
+          if (pending.size > PENDING_MAX) pending.delete(pending.keys().next().value); // FIFO bound
+          return;
+        }
         Object.assign(win.meta, meta);
         if ('title' in meta) { win.title = winTitle(meta); if (win.wid === mainWid) emit('title', win.title); }
         if ('size-constraints' in meta || 'size-hints' in meta) { resetBelt(win); refit(win); announceConstraints(); announceFixed(); if (win === loneFixed()) { syncDisplay(); belt(win, 'the fixed window'); } if (slotPanes.has(win.wid)) { syncDisplay(); beltOthers('size hints'); } }

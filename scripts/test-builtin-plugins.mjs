@@ -88,7 +88,7 @@ console.log('① the contract is checked at registration, refusals BY NAME');
   const builtins = ['tailscale', 'frp', 'opencode-serve'].map((f) => require(path.join(REPO, `src/plugins/${f}.js`)));
   const real = new PluginManager({ dataDir, opencodeServe: FAKE_SERVE, plugins: builtins });
   const d = real.defs();
-  ok('the three built-ins declare their capability (tunnel / relay / serve)', d.tailscale?.provides?.join() === 'tunnel' && d.frp?.provides?.join() === 'relay' && d['opencode-serve']?.provides?.join() === 'serve', d);
+  ok('the three built-ins declare their capability (tunnel / relay + reminders / serve)', d.tailscale?.provides?.join() === 'tunnel' && d.frp?.provides?.join() === 'relay,reminders' && d['opencode-serve']?.provides?.join() === 'serve', d);
 }
 
 // ② the drive: every verb of the fake through the generic manager

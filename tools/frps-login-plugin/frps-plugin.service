@@ -1,0 +1,30 @@
+# systemd unit for the VibeSpace relay login plugin (tools/frps-login-plugin — per-instance relay tokens, design q-051).
+# It runs BESIDE frps on the relay host and answers frps's [[httpPlugins]] calls on loopback. Install (README.md here):
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin frps-plugin
+#   sudo mkdir -p /opt/frps-login-plugin && sudo cp plugin.js relay-admin.js table.js /opt/frps-login-plugin/
+#   sudo cp frps-plugin.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now frps-plugin
+# frps refuses every NEW login while this is down (live logins stay) — hence Restart=always + GET /healthz in the monitor.
+[Unit]
+Description=VibeSpace relay login plugin for frps (per-instance relay tokens)
+After=network.target
+Before=frps.service
+
+[Service]
+Type=simple
+User=frps-plugin
+Group=frps-plugin
+ExecStart=/usr/bin/node /opt/frps-login-plugin/plugin.js --table /var/lib/frps-plugin/relay-instances.json --listen 127.0.0.1:7001 --audit /var/log/frps-plugin/audit.jsonl
+Restart=always
+RestartSec=2
+StateDirectory=frps-plugin
+StateDirectoryMode=0700
+LogsDirectory=frps-plugin
+LogsDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

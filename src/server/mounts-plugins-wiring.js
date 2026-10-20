@@ -120,6 +120,7 @@ const plugins = new PluginManager({
   dataDir: path.join(rootDir, 'data'), integrations: () => integrations,
   // lane plugin-settings-p0: THE settings store — every plugin configuration row is read / written here (one truth)
   settings: { read: () => (persistenceRouter && persistenceRouter.readSettings ? persistenceRouter.readSettings() : {}), patch: (p) => persistenceRouter.patchSettings(p) },
+  forYou: () => userTodos,   // lane relay-token-per-instance: frp files ONE For-you item per public name the relay refused (it declares 'reminders')
   voiceBind: (v) => { voicePlugin = v; }, droplineConnected: () => !!(dropline && dropline.connected()), droplineLocked: () => !!(dropline && dropline.locked && dropline.locked()), decisionEngine,
   broadcast: (msg) => {
     const json = JSON.stringify(msg);

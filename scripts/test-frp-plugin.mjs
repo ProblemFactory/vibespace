@@ -1,16 +1,37 @@
 #!/usr/bin/env node
-// LIVE test for the frp plugin (B-0b60 public exposure) against the REAL frps
-// relay. Needs the relay env: set VIBESPACE_FRPS_* directly, or point
-// VIBESPACE_FRP_SECRETS at a private frps-secrets.env file. Installs
-// frpc into ~/.vibespace/plugins/frp, publishes a local echo server, and
-// verifies the public URL round-trips. Skips (exit 0) if no relay config.
+// test-frp-plugin — the frp plugin (B-0b60 public exposure) in TWO parts:
+//   ① THE INSTANCE'S RELAY IDENTITY (lane relay-token-per-instance, design q-051 — the owner's decision 2026-10-20), always:
+//      a child process with a clean env (scratch HOME, its own frpc admin port — never the box's frpc), the REAL
+//      PluginManager / vault engine / For-you store over scratch data dirs, a FAKE frpc that records what it was given
+//      (sha256s only) and answers the admin API like a relay that asks — or no longer asks — the shared token:
+//      a  the first start MINTS data/relay-token.json (0600); frpc.toml names `user` + `metadatas.token` / `auth.token` as
+//         env templates; the tokens ride the frpc child's env only — no argv, no other file, no log line, no status JSON;
+//         a publish runs (frps's `<user>.` name form matched); the hub's name rule refuses a name not its own
+//      b RESTART with the vault LOCKED while the relay still asks the shared token: frpc starts on the instance's own
+//         token (the knock waits), the refusal is read (`knock_refused`), the vault entry is KEPT (the relay is never
+//         lost) and the unlock restarts frpc with the knock
+//      c RESTART with the vault LOCKED once the relay no longer asks it (its grace over, or its plugin vouching): the
+//         public URL is re-published WITHOUT the second password; the knock retires at the next unlock (frp:token
+//         dropped, RETIRE_ID recorded) and frpc never sends it again
+//      d a name the relay refuses (`name_in_use:<label>`) ⇒ ONE For-you item per name, never the token
+//      e revoke ⇒ the record keeps its id, no token, frpc stops, start / publish refused by name; mint again ⇒ same id,
+//         new token; rotate while running ⇒ frpc restarted on the next token
+//      f a fleet pod: the cluster's token (env) + its own name — no record minted; the card's doors refused by name
+//      census: the instance tokens in data/relay-token.json alone, the shared one in no file in the clear, no journal line
+//      g MUTANTS ⇒ RED: the token written into frpc.toml · the old locked-vault rule at start · the knock retired early
+//   ② LIVE against the REAL frps relay (needs VIBESPACE_FRPS_* or VIBESPACE_FRP_SECRETS → a private frps-secrets.env):
+//      installs frpc, publishes a local echo server, verifies the public URL round-trips. Skips if no relay config.
 import fs from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
-import { createRequire } from 'node:module';
+import crypto from 'node:crypto';
+import Module, { createRequire } from 'node:module';
+import { spawn as spawnChild, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 // pull relay config from the private secrets file if not in env
 if (!process.env.VIBESPACE_FRPS_ADDR) {
@@ -24,15 +45,317 @@ if (!process.env.VIBESPACE_FRPS_ADDR) {
     }
   } catch {}
 }
-if (!process.env.VIBESPACE_FRPS_ADDR || !process.env.VIBESPACE_FRPS_TOKEN) {
-  console.log('SKIP: no frp relay configured (set VIBESPACE_FRPS_ADDR/TOKEN)');
-  process.exit(0);
+
+let failed = 0;
+const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n      ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1500) : ''}`); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+if (process.argv.includes('--hub')) { await hubLegs(); process.exit(failed ? 1 : 0); }
+{
+  console.log('① THE INSTANCE\'S RELAY IDENTITY (a child: scratch HOME, its own frpc admin port, a fake frpc)');
+  const root = scratch('frp-hub');
+  fs.mkdirSync(path.join(root, 'home'), { recursive: true });
+  const port = await new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^VIBESPACE_(FRPS_|FRP_|RELAY_|INSTANCE_NAME$)/.test(k)));
+  const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--hub'], { stdio: 'inherit', env: { ...env, HOME: path.join(root, 'home'), FRP_HUB_ROOT: root, VIBESPACE_FRP_ADMIN_PORT: String(port), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, timeout: 300e3 });
+  check('① the relay-identity legs passed (the child exited 0)', r.status === 0, `exit ${r.status}${r.signal ? ' ' + r.signal : ''}`);
+  try { fs.rmSync(root, { recursive: true, force: true }); } catch { }
 }
 
+/** THE FAKE frpc: records what it was given (sha256s of the env tokens, never a value), logs a login the way frpc does, and
+ *  answers the admin API (reload / status) like a relay that asks — or no longer asks — the shared token (relay-mode.json) */
+function fakeFrpc(MODE, SAW) {
+  return `#!${process.execPath}
+const fs = require('fs'), http = require('http'), path = require('path'), crypto = require('crypto');
+const a = process.argv.slice(2), conf = a[a.indexOf('-c') + 1], text = fs.readFileSync(conf, 'utf8');
+const get = (k) => { const m = text.match(new RegExp('^' + k.replace(/\\./g, '\\\\.') + ' = (.*)$', 'm')); return m ? m[1].replace(/^"|"$/g, '') : null; };
+const sha = (v) => (v ? crypto.createHash('sha256').update(v).digest('hex') : null);
+const knock = process.env.VIBESPACE_FRP_AUTH_TOKEN || '', relay = process.env.VIBESPACE_RELAY_TOKEN || '';
+const user = get('user'), port = Number(get('webServer.port')), log = get('log.to');
+const inc = (text.match(/^includes = \\["(.*)\\/\\*\\.toml"\\]$/m) || [])[1];
+const knockSent = /^auth\\.token = /m.test(text) && !!knock;
+const mode = () => { try { return JSON.parse(fs.readFileSync(${JSON.stringify(MODE)}, 'utf8')); } catch { return {}; } };
+const m0 = mode();
+const loggedIn = !(m0.askKnock && !knockSent);
+fs.appendFileSync(${JSON.stringify(SAW)}, JSON.stringify({ pid: process.pid, argv: process.argv.slice(1), knockSha: sha(knock), relaySha: sha(relay), user, conf: text, tokenEnv: Object.keys(process.env).filter((k) => /TOKEN/.test(k)).sort() }) + '\\n');
+fs.appendFileSync(log, loggedIn ? '2026-10-20 08:00:00.000 [I] [client/service.go:310] login to server success, get run id [fake]\\n' : "2026-10-20 08:00:00.000 [W] [client/service.go:301] connect to server error: token in login doesn't match token from configuration\\n");
+const proxies = () => { if (!inc) return []; const out = []; for (const f of fs.readdirSync(inc).filter((x) => x.endsWith('.toml'))) { const t = fs.readFileSync(path.join(inc, f), 'utf8'); out.push({ name: (t.match(/^name = "(.*)"$/m) || [])[1], type: (t.match(/^type = "(.*)"$/m) || [])[1], sub: (t.match(/^subdomain = "(.*)"$/m) || [])[1] }); } return out; };
+const srv = http.createServer((q, s) => {
+  const m = mode();
+  if (q.url.startsWith('/api/reload')) { s.end(''); return; }
+  if (q.url.startsWith('/api/status')) {
+    const st = { tcp: [], http: [] };
+    for (const p of proxies()) {
+      const shown = m.prefix !== false && user ? user + '.' + p.name : p.name;
+      const row = !loggedIn ? { name: shown, type: p.type, status: 'wait start', err: '' }
+        : p.sub && m.taken && m.taken[p.sub] ? { name: shown, type: p.type, status: 'start error', err: 'new proxy [' + shown + '] error: name_in_use:' + m.taken[p.sub] }
+          : { name: shown, type: p.type, status: 'running', err: '' };
+      (st[p.type] = st[p.type] || []).push(row);
+    }
+    s.setHeader('content-type', 'application/json'); s.end(JSON.stringify(st)); return;
+  }
+  s.statusCode = 404; s.end();
+});
+srv.on('error', (e) => { if (e.code === 'EADDRINUSE') setTimeout(() => srv.listen(port, '127.0.0.1'), 50); else throw e; });
+srv.listen(port, '127.0.0.1');
+process.on('SIGTERM', () => process.exit(0));
+`;
+}
+
+async function hubLegs() {
+  const ROOT = process.env.FRP_HUB_ROOT;
+  const R = (rel) => require(path.join(REPO, rel));
+  const PM = R('src/plugins.js');
+  const VE = R('src/server/vault-engine.js');
+  const { wireVaultHooks } = R('src/server/vault-hooks.js');
+  const RT = R('src/relay-token.js');
+  const { UserTodoManager } = R('src/user-todos.js');
+  const FRP_PATH = path.join(REPO, 'src/plugins/frp.js');
+  const CHEAP = { N: 1024, r: 8, p: 1 };
+  const PW = 'correct horse battery staple';
+  const quiet = { log() {}, warn() {}, error() {} };
+  const sha = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+  const ADMIN = Number(process.env.VIBESPACE_FRP_ADMIN_PORT);
+  const PDIR = path.join(process.env.HOME, '.vibespace', 'plugins', 'frp');
+  fs.mkdirSync(path.join(PDIR, 'bin'), { recursive: true });
+  const MODE = path.join(ROOT, 'relay-mode.json'), SAW = path.join(ROOT, 'frpc-saw.jsonl');
+  const setMode = (m) => fs.writeFileSync(MODE, JSON.stringify(m));
+  fs.writeFileSync(path.join(PDIR, 'bin', 'frpc'), fakeFrpc(MODE, SAW), { mode: 0o755 });
+  const KNOCK = 'frp-shared-knock-' + crypto.randomBytes(8).toString('hex');
+  const sawAll = () => { try { return fs.readFileSync(SAW, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const portUp = () => new Promise((res) => { const c = net.connect(ADMIN, '127.0.0.1', () => { c.destroy(); res(true); }); c.on('error', () => res(false)); });
+  const nextSaw = async (n, ms = 6000) => { for (let i = 0; i < ms / 25; i++) { const all = sawAll(); if (all.length > n) { for (let j = 0; j < 200 && !(await portUp()); j++) await sleep(20); return all[all.length - 1]; } await sleep(25); } return null; };
+  const pidOf = () => { try { return Number(fs.readFileSync(path.join(PDIR, 'frpc.pid'), 'utf8')); } catch { return 0; } };
+  const alive = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('frpc'); } catch { return false; } };
+  /** "the machine went down": frpc killed under the hub (no stop verb), the port free again */
+  const killFrpc = async () => { for (const s of sawAll()) if (alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch { } } for (let i = 0; i < 200 && ((await portUp()) || sawAll().some((s) => alive(s.pid))); i++) await sleep(20); };
+  const settingsStore = (() => { let mem = {}; return { read: () => mem, patch: (p) => { mem = { ...mem, ...p }; for (const [k, v] of Object.entries(mem)) if (v === null) delete mem[k]; } }; })();
+  // every journal line the plugin writes while the legs run (the token census reads them)
+  const logs = [];
+  const keep = { log: console.log, warn: console.warn };
+  for (const k of ['log', 'warn']) console[k] = (...a) => { const t = a.map((x) => (x instanceof Error ? x.message : String(x))).join(' '); logs.push(t); if (!/^\[(plugins|vault|migrate)\]/.test(t)) keep[k](...a); };
+  const forms = (v) => { const b = Buffer.from(String(v)); return [String(v), b.toString('hex'), b.toString('base64'), b.toString('base64url')].filter((x) => x.length >= 8); };
+  const leaks = (text, vals) => vals.filter(Boolean).some((v) => forms(v).some((f) => String(text).includes(f)));
+  const walk = (d, out = []) => { let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return out; } for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p, out); else if (e.isFile()) out.push(p); } return out; };
+  const filesHolding = (vals) => walk(ROOT).filter((f) => { let t = ''; try { t = fs.readFileSync(f, 'latin1'); } catch { return false; } return leaks(t, vals); }).map((f) => path.relative(ROOT, f));
+  const boot = ({ dataDir, def = null, ut = null }) => {
+    const v = VE.create({ dataDir, kdf: CHEAP, log: quiet, idleTimer: false });
+    const pm = new PM.PluginManager({ dataDir, settings: settingsStore, forYou: () => ut, ...(def ? { plugins: [def] } : {}) });
+    if (ut) ut.setPluginGate((id) => !!((pm.defs()[id] || {}).provides || []).includes('reminders'));
+    wireVaultHooks({ vault: v, plugins: pm, log: quiet });
+    return { v, pm };
+  };
+  const mutantDef = (mutate) => {
+    const src = fs.readFileSync(FRP_PATH, 'utf8'), out = mutate(src);
+    if (out === src) return null;
+    const m = new Module(FRP_PATH, null); m.filename = FRP_PATH; m.paths = Module._nodeModulePaths(path.dirname(FRP_PATH));
+    m._compile(out, FRP_PATH);
+    return m.exports;
+  };
+  const recOf = (D) => { try { return RT.parse(fs.readFileSync(path.join(D, RT.FILE), 'utf8')); } catch { return null; } };
+  const pjOf = (D) => { try { return JSON.parse(fs.readFileSync(path.join(D, 'plugins.json'), 'utf8')).plugins.frp || {}; } catch { return {}; } };
+  /** a hub's FIRST boot: the vault set up, the shared token sealed (the owner's override), the relay started, one publish */
+  async function firstBoot(tag, { def = null, ut = null } = {}) {
+    const D = path.join(ROOT, tag, 'data'); fs.mkdirSync(D, { recursive: true });
+    const { v, pm } = boot({ dataDir: D, def, ut });
+    await v.setup(PW, {});
+    pm.setConfig('frp', { serverAddr: 'relay.example.invalid', subDomainHost: 'relay.example.invalid' });
+    pm.setConfig('frp', { token: KNOCK });
+    pm.setEnabled('frp', true);
+    setMode({ askKnock: true, prefix: true });
+    const n = sawAll().length;
+    pm.start('frp');
+    const saw = await nextSaw(n);
+    let pub = null, pubErr = null;
+    try { pub = await pm.frpPublish('vibespace-instance', 3456, { proto: 'http' }); } catch (e) { pubErr = e; }
+    return { D, v, pm, saw, rec: recOf(D), pub, pubErr, sub: pub && pub.subdomain };
+  }
+  /** the hub RESTARTS (a new engine — LOCKED — and a new manager over the same data dir) after frpc died with the machine */
+  async function restart(prev, { askKnock, def = null, ut = null }) {
+    await killFrpc();
+    try { prev.v.close(); } catch { }
+    setMode({ askKnock, prefix: true });
+    const { v, pm } = boot({ dataDir: prev.D, def, ut });
+    const st0 = pm.status('frp');
+    const n = sawAll().length;
+    pm.bootReplay();
+    const saw = await nextSaw(n, 4000);
+    let pub = null, pubErr = null;
+    if (saw) { try { pub = await pm.frpPublish('vibespace-instance', 3456, { proto: 'http', preferSub: prev.sub || '' }); } catch (e) { pubErr = e; } }
+    return { D: prev.D, v, pm, st0, saw, pub, pubErr, sub: prev.sub };
+  }
+  const ut = new UserTodoManager({ dataDir: path.join(ROOT, 'todos'), expirySweepMs: 0 });
+  fs.mkdirSync(path.join(ROOT, 'todos'), { recursive: true });
+  try {
+    console.log('  a — the first start mints; the tokens ride frpc\'s env only');
+    const A = await firstBoot('hub', { ut });
+    const rec = A.rec;
+    const st = A.pm.status('frp');
+    check('the first start of a relay configured the shared way MINTS data/relay-token.json (0600, a parsed record)', !!rec && rec.token && (fs.statSync(path.join(A.D, RT.FILE)).mode & 0o777) === 0o600 && RT.ID_RE.test(rec.instanceId), rec && rec.instanceId);
+    check('frpc.toml: `user = "<instance id>"` + `metadatas.token` + `auth.token` as frp env TEMPLATES', !!A.saw && A.saw.conf.includes(`user = "${rec.instanceId}"`) && A.saw.conf.includes('metadatas.token = "{{ .Envs.VIBESPACE_RELAY_TOKEN }}"') && A.saw.conf.includes('auth.token = "{{ .Envs.VIBESPACE_FRP_AUTH_TOKEN }}"'), A.saw && A.saw.conf);
+    check('frpc\'s env carries the instance token and the knock (their sha256s as the fake saw them) — never VIBESPACE_FRPS_TOKEN beside them', !!A.saw && A.saw.relaySha === sha(rec.token) && A.saw.knockSha === sha(KNOCK) && JSON.stringify(A.saw.tokenEnv) === JSON.stringify(['VIBESPACE_FRP_AUTH_TOKEN', 'VIBESPACE_RELAY_TOKEN']), A.saw && A.saw.tokenEnv);
+    check('no token on frpc\'s argv, none in its config', !!A.saw && !leaks(A.saw.argv.join(' '), [rec.token, KNOCK]) && !leaks(A.saw.conf, [rec.token, KNOCK]));
+    check('a publish RUNS (frps\'s `<user>.<name>` form matched) — https://<sub>.<host>/', !!A.pub && /^https:\/\/vs[0-9a-f]{10}\.relay\.example\.invalid\/$/.test(A.pub.url), A.pubErr ? A.pubErr.message : A.pub);
+    const pj = pjOf(A.D);
+    check('the proxy ran under the instance\'s own identity (relayPublishedAt) while the knock was sent: no knockless proof yet, the vault entry KEPT', !!pj.relayPublishedAt && !pj.relayKnocklessAt && !pj.legacyRetired && A.v.secretGet('frp:token').value.toString() === KNOCK);
+    check('the record keeps the subdomain the relay accepted (the card\'s names)', !!A.sub && (recOf(A.D).subdomains || []).includes(A.sub));
+    const line = `relay-admin add ${rec.instanceId} ${sha(rec.token)} ${rec.label}`;
+    check('the card: kind instance, the registration line = `relay-admin add <id> <sha256> <label>`, knock on, login ok', st.relay.kind === 'instance' && st.relay.lines[0] === line && st.relay.knock === 'on' && st.relay.login && st.relay.login.ok === true, st.relay);
+    check('the status JSON — and the plugins list an agent could read — hold no form of either token', !leaks(JSON.stringify(A.pm.status('frp')), [rec.token, KNOCK]) && !leaks(JSON.stringify(A.pm.list()), [rec.token, KNOCK]));
+    let ne = null; try { await A.pm.frpPublish('canary-fwd', 4001, { proto: 'tcp' }); } catch (e) { ne = e; }
+    check('the hub\'s name rule refuses a proxy name that is not its own BEFORE the relay sees it (name_not_yours)', !!ne && ne.code === 'name_not_yours', ne && ne.message);
+    const tcp = await A.pm.frpPublish('pf-local-4000', 4000, { proto: 'tcp' }).catch((e) => e);
+    check('a TCP publish runs as well (pf-<host>-<port>)', tcp && /^tcp:\/\/relay\.example\.invalid:\d+$/.test(tcp.url || ''), tcp && (tcp.message || tcp));
+
+    console.log('  b — restart, vault LOCKED, the relay still asks the shared token');
+    const B = await restart(A, { askKnock: true, ut });
+    check('LOCKED + an identity of its own: not the old vault door — configured, the knock waits (`knock: locked`)', B.st0.configured && !B.st0.vaultLocked && B.st0.relay.knock === 'locked' && B.st0.relay.kind === 'instance', { configured: B.st0.configured, vaultLocked: B.st0.vaultLocked, knock: B.st0.relay.knock });
+    check('the boot replay STARTS frpc with the vault locked — its own token in its env, no knock, no auth.token line', !!B.saw && B.saw.relaySha === sha(rec.token) && B.saw.knockSha === null && !/^auth\.token/m.test(B.saw.conf), B.saw && { knock: B.saw.knockSha, conf: B.saw.conf });
+    const loginB = B.pm.status('frp').relay.login;
+    check('the relay still asking: the publish fails and the card reads the refusal (`knock_refused`)', !!B.pubErr && loginB && loginB.ok === false && loginB.code === 'knock_refused', { err: B.pubErr && B.pubErr.message, loginB });
+    const n2 = sawAll().length;
+    await B.v.unlock(PW, {});
+    const sawB2 = await nextSaw(n2);
+    check('the vault entry is KEPT (never retired before a knockless login) and the unlock restarts frpc WITH the knock', B.v.secretGet('frp:token').value.toString() === KNOCK && !!sawB2 && sawB2.knockSha === sha(KNOCK) && /^auth\.token/m.test(sawB2.conf), sawB2 && sawB2.knockSha);
+    const pubB2 = await B.pm.frpPublish('vibespace-instance', 3456, { proto: 'http', preferSub: A.sub }).catch((e) => e);
+    check('…and the public URL is back, the SAME subdomain', pubB2 && pubB2.url === A.pub.url, pubB2 && (pubB2.message || pubB2.url));
+
+    console.log('  c — restart, vault LOCKED, the relay no longer asks the shared token');
+    const C = await restart(B, { askKnock: false, ut });
+    check('THE OWNER\'S PROPERTY: a restart with the vault LOCKED re-publishes the public URL — no second password', !!C.pub && C.pub.url === A.pub.url && C.v.state() !== 'unlocked', C.pubErr ? C.pubErr.message : C.pub);
+    const pjC = pjOf(C.D);
+    check('the knockless login is recorded (the relay no longer asks); the retirement waits for the vault (still sealed)', !!pjC.relayKnocklessAt && !pjC.legacyRetired && pjC.config && pjC.config.tokenSealed === true, pjC);
+    await C.v.unlock(PW, {});
+    await sleep(100);
+    const pjC2 = pjOf(C.D);
+    check('the next unlock RETIRES the knock: the vault\'s frp:token dropped, tokenSealed gone, RETIRE_ID recorded', !C.v.secretGet('frp:token').value && !(pjC2.config || {}).tokenSealed && pjC2.legacyRetired && pjC2.legacyRetired.id === '2026-10-relay-token-per-instance', pjC2);
+    check('the card says knock off + the retirement; frpc stayed up (no restart for a relay that already took it)', C.pm.status('frp').relay.knock === 'off' && !!C.pm.status('frp').relay.retired && C.pm.status('frp').running, C.pm.status('frp').relay);
+    const n3 = sawAll().length;
+    C.pm.stop('frp'); await sleep(150); C.pm.start('frp');
+    const sawC3 = await nextSaw(n3);
+    check('from then on frpc.toml holds no auth.token line and its env no knock', !!sawC3 && !/^auth\.token/m.test(sawC3.conf) && sawC3.knockSha === null, sawC3 && sawC3.conf);
+
+    console.log('  d — a name the relay refuses ⇒ ONE For-you item');
+    setMode({ askKnock: false, prefix: true, taken: { vsheldbyother: 'other-hub' } });
+    const e1 = await C.pm.frpPublish('pf-local-5000', 5000, { proto: 'http', preferSub: 'vsheldbyother' }).catch((e) => e);
+    const e2 = await C.pm.frpPublish('pf-local-5000', 5000, { proto: 'http', preferSub: 'vsheldbyother' }).catch((e) => e);
+    const items = ut.snapshot().open.filter((i) => i.origin === 'plugin' && i.plugin === 'frp');
+    check('the publish fails BY NAME (relay_refused, the holder named)', e1 && e1.code === 'relay_refused' && /other-hub/.test(e1.message) && e2 && e2.code === 'relay_refused', e1 && e1.message);
+    check('ONE For-you item for the name (twice refused = the same item): origin plugin · frp · notice · high', items.length === 1 && items[0].text === 'The public name vsheldbyother is held by “other-hub” on the relay' && items[0].kind === 'notice' && items[0].urgency === 'high', items.map((i) => i.text));
+    check('the item never holds a token', !leaks(JSON.stringify(ut.snapshot()), [recOf(C.D).token, KNOCK]));
+    setMode({ askKnock: false, prefix: true });
+
+    console.log('  e — revoke / mint again');
+    const id0 = recOf(C.D).instanceId, tok0 = recOf(C.D).token;
+    C.pm.setConfig('frp', { relay: 'revoke' });
+    await sleep(150);
+    const rv = recOf(C.D), stR = C.pm.status('frp');
+    check('revoke: the record keeps its id, holds no token (revokedAt), frpc stopped', rv && rv.instanceId === id0 && rv.token === null && rv.revokedAt && !stR.running && !alive(pidOf()), { rv, running: stR.running });
+    check('the card: kind revoked, the line `relay-admin revoke <id>`', stR.relay.kind === 'revoked' && JSON.stringify(stR.relay.lines) === JSON.stringify([`relay-admin revoke ${id0}`]), stR.relay);
+    let se = null; try { C.pm.start('frp'); } catch (e) { se = e; }
+    const pe = await C.pm.frpPublish('vibespace-instance', 3456, { proto: 'http' }).catch((e) => e);
+    check('a revoked identity: start AND publish refused by name — never the shared token in its place (fail closed)', se && se.code === 'relay_revoked' && pe && pe.code === 'relay_revoked', se && se.message);
+    C.pm.setConfig('frp', { relay: 'mint' });
+    const rm = recOf(C.D), stM = C.pm.status('frp');
+    check('mint again: the SAME id (owner Q3 — its names follow it), a new token; the card shows the add + rotate lines', rm && rm.instanceId === id0 && rm.token && rm.token !== tok0 && rm.revokedAt === null && stM.relay.lines.length === 2 && stM.relay.lines[1] === `relay-admin rotate ${id0} ${sha(rm.token)}`, stM.relay.lines);
+    const n4 = sawAll().length;
+    C.pm.start('frp');
+    const sawE = await nextSaw(n4);
+    check('frpc runs on the new token', !!sawE && sawE.relaySha === sha(rm.token));
+    const n5 = sawAll().length;
+    C.pm.setConfig('frp', { relay: 'rotate' });
+    const sawE2 = await nextSaw(n5);
+    check('rotate while running: frpc restarted (after the old one left) on the next token — the old one no longer used', !!sawE2 && sawE2.relaySha === sha(recOf(C.D).token) && sawE2.relaySha !== sha(rm.token));
+
+    console.log('  f — a fleet pod: the cluster\'s token + its own name');
+    await killFrpc();
+    const CT = RT.mint({ randomBytes: crypto.randomBytes, now: Date.now(), label: 'c' }).token;
+    process.env[RT.CLUSTER_TOKEN_ENV] = CT; process.env.VIBESPACE_INSTANCE_NAME = 'Pod-Alice';
+    const DP = path.join(ROOT, 'pod', 'data'); fs.mkdirSync(DP, { recursive: true });
+    const P = boot({ dataDir: DP });
+    P.pm.setEnabled('frp', true);
+    const n6 = sawAll().length;
+    P.pm.start('frp');
+    const sawP = await nextSaw(n6);
+    check('the pod logs in as its own name with the cluster\'s token (env) — no record minted', !!sawP && sawP.user === 'pod-alice' && sawP.relaySha === sha(CT) && !fs.existsSync(path.join(DP, RT.FILE)) && P.pm.status('frp').relay.kind === 'cluster', sawP && sawP.user);
+    let ce = null; try { P.pm.setConfig('frp', { relay: 'rotate' }); } catch (e) { ce = e; }
+    check('the card\'s doors are refused by name on a pod (its identity is the cluster\'s)', ce && ce.code === 'relay_cluster', ce && ce.message);
+    delete process.env[RT.CLUSTER_TOKEN_ENV]; delete process.env.VIBESPACE_INSTANCE_NAME;
+    await killFrpc();
+    try { P.v.close(); } catch { }
+
+    console.log('  f2 — an OLDER build\'s frpc survives the hub upgrade: the boot replay mints and restarts it onto the identity');
+    {
+      const DO = path.join(ROOT, 'upgrade', 'data'); fs.mkdirSync(DO, { recursive: true });
+      const O = boot({ dataDir: DO });
+      await O.v.setup(PW, {});
+      O.pm.setConfig('frp', { serverAddr: 'relay.example.invalid', subDomainHost: 'relay.example.invalid' });
+      O.pm.setConfig('frp', { token: KNOCK });
+      O.pm.setEnabled('frp', true);
+      setMode({ askKnock: true, prefix: true });
+      // what 2.369.324 left running: a frpc on the shared token alone (no user, no metadatas), its pid file, no frpcIdentity
+      const legacyConf = path.join(ROOT, 'upgrade', 'frpc-old.toml');
+      fs.writeFileSync(legacyConf, `serverAddr = "relay.example.invalid"\nserverPort = 7000\nauth.method = "token"\nauth.token = "{{ .Envs.VIBESPACE_FRP_AUTH_TOKEN }}"\nwebServer.addr = "127.0.0.1"\nwebServer.port = ${ADMIN}\nlog.to = "${path.join(PDIR, 'frpc.log')}"\nincludes = ["${path.join(PDIR, 'proxies')}/*.toml"]\n`);
+      const n0 = sawAll().length;
+      const old = spawnChild(path.join(PDIR, 'bin', 'frpc'), ['-c', legacyConf], { detached: true, stdio: 'ignore', env: { ...process.env, VIBESPACE_FRP_AUTH_TOKEN: KNOCK } });
+      old.unref(); fs.writeFileSync(path.join(PDIR, 'frpc.pid'), String(old.pid));
+      const sawOld = await nextSaw(n0);
+      O.v.close();
+      const O2 = boot({ dataDir: DO });   // the upgraded hub: its vault LOCKED, the old frpc still running
+      const n1 = sawAll().length;
+      O2.pm.bootReplay();
+      const recO = recOf(DO);
+      check('the locked vault keeps the shared token closed: nothing is minted yet, the old frpc keeps running', !!sawOld && !sawOld.user && !recO && alive(old.pid), { minted: !!recO });
+      await O2.v.unlock(PW, {});
+      const sawNew = await nextSaw(n1);
+      const recO2 = recOf(DO);
+      check('the unlock MINTS and restarts the old frpc onto the identity (user + its own token), the knock still sent', !!recO2 && !!sawNew && sawNew.user === recO2.instanceId && sawNew.relaySha === sha(recO2.token) && sawNew.knockSha === sha(KNOCK) && !alive(old.pid), sawNew && { user: sawNew.user });
+      const n2 = sawAll().length;
+      O2.pm.bootReplay();
+      await sleep(400);
+      check('a second boot replay restarts nothing (once)', sawAll().length === n2);
+      await killFrpc();
+      try { O2.v.close(); } catch { }
+    }
+
+    console.log('  census — where the tokens are');
+    const hold = filesHolding([recOf(C.D).token, rm.token, tok0, CT]);
+    check('the instance tokens sit in data/relay-token.json alone — no other file under the scratch tree (frpc.toml, plugins.json, the vault, the For-you file, frpc.log)', JSON.stringify(hold) === JSON.stringify(['hub/data/relay-token.json']), hold);
+    check('the shared token is in NO file in the clear (the vault holds its ciphertext, then nothing)', filesHolding([KNOCK]).length === 0, filesHolding([KNOCK]));
+    check(`no journal line (${logs.length}) carries a token`, logs.length > 0 && !leaks(logs.join('\n'), [rec.token, rm.token, tok0, CT, KNOCK]), logs.filter((l) => leaks(l, [rec.token, KNOCK])).slice(0, 3));
+    await killFrpc();
+    try { C.v.close(); } catch { }
+
+    console.log('  g — MUTANTS ⇒ RED');
+    const M1 = mutantDef((s) => s.replace('...RT.frpcLines(cfg.ident),', '...RT.frpcLines(cfg.ident).map((l) => l.replace(/\\{\\{ \\.Envs\\.\\w+ \\}\\}/, cfg.ident.token || "")),'));
+    const m1 = M1 ? await firstBoot('m1', { def: M1 }) : null;
+    check('MUTANT the token written into frpc.toml ⇒ the config census goes RED', !!m1 && !!m1.saw && leaks(m1.saw.conf, [m1.rec.token]), m1 ? 'mutant applied' : 'the mutant did not apply');
+    if (m1) { await killFrpc(); try { m1.v.close(); } catch { } }
+    const M2 = mutantDef((s) => s.replace('if (cfg.vaultLocked) throw lockedRefusal(', 'if (cfg.vaultLocked || cfg.knockLocked) throw lockedRefusal(')); // int327: start()'s vault-locked throw routes through lockedRefusal (base .326 vault-locked-refusal-notice) after the frp.js merge
+    const m2a = M2 ? await firstBoot('m2', { def: M2 }) : null;
+    const m2 = m2a ? await restart(m2a, { askKnock: false, def: M2 }) : null;
+    check('MUTANT the old locked-vault rule at start (the knock\'s lock blocks the relay) ⇒ the locked restart publishes nothing: RED', !!m2 && !m2.pub, m2 ? { started: !!m2.saw } : 'the mutant did not apply');
+    if (m2) { await killFrpc(); try { m2.v.close(); } catch { } }
+    const M3 = mutantDef((s) => s.replace('if (!p.relayKnocklessAt || !p.relayPublishedAt || p.legacyRetired) return false;', 'if (!p.relayPublishedAt || p.legacyRetired) return false;'));
+    const m3 = M3 ? await firstBoot('m3', { def: M3 }) : null;
+    check('MUTANT the knock retired once the own token published (no knockless proof) ⇒ the vault entry is gone while the relay still asks it — the relay would be lost at the next locked restart: RED', !!m3 && !!m3.pub && !m3.v.secretGet('frp:token').value, m3 ? { pub: !!m3.pub, entry: !!m3.v.secretGet('frp:token').value } : 'the mutant did not apply');
+    if (m3) { await killFrpc(); try { m3.v.close(); } catch { } }
+  } catch (e) {
+    check('the legs threw', false, e && e.stack);
+  } finally {
+    await killFrpc();
+    try { ut.stop(); } catch { }
+    console.log = keep.log; console.warn = keep.warn;
+  }
+}
+
+if (!process.env.VIBESPACE_FRPS_ADDR || !process.env.VIBESPACE_FRPS_TOKEN) {
+  console.log('② SKIP: no frp relay configured (set VIBESPACE_FRPS_ADDR/TOKEN)');
+  console.log(failed ? `\n${failed} FAILED` : '\nfrp plugin test passed (① only)');
+  process.exit(failed ? 1 : 0);
+}
+console.log('② LIVE against the real relay');
 const { PluginManager } = require('../src/plugins.js');
-let failed = 0;
-const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n      ' + e : ''}`); } };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const pm = new PluginManager({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-frp-')), broadcast: () => {} });
 let echoSrv, published;
@@ -68,7 +391,7 @@ try {
     echoSrv.listen(0, '127.0.0.1', () => res(echoSrv.address().port));
   });
 
-  published = await pm.frpPublish('vstest-fwd', echoPort);
+  published = await pm.frpPublish('pf-canary-fwd', echoPort);   // a pf- name: the hub's name rule refuses any other once frpc logs in as its own identity
   // a raw-TCP echo backend is detected as tcp → IP:port mode (tcp:// scheme),
   // even with subDomainHost set (only HTTP backends get a routed subdomain)
   check('frpPublish returns a public URL', /^(?:tcp|https?):\/\/.+:\d+/.test(published.url || ''), JSON.stringify(published));
@@ -87,7 +410,7 @@ try {
   }
   check('bytes round-trip PUBLICLY through the relay', reply.includes('PUB:hi'), JSON.stringify(reply));
 
-  await pm.frpUnpublish('vstest-fwd');
+  await pm.frpUnpublish('pf-canary-fwd');
   await sleep(1500);
   // after unpublish the public port must STOP working
   const gone = await new Promise((res) => {
@@ -100,7 +423,7 @@ try {
   failed++; console.error('  ✗ threw:', e.stack || e.message);
 } finally {
   try { echoSrv?.close(); } catch {}
-  try { await pm.frpUnpublish('vstest-fwd'); } catch {}
+  try { await pm.frpUnpublish('pf-canary-fwd'); } catch {}
   try { pm.stop('frp'); } catch {}
 }
 // ── protocol detection (http / https / tcp) — decides subdomain vs IP:port ──

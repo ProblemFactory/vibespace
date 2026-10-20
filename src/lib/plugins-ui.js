@@ -22,6 +22,65 @@ const DECISION_STOP_WORDS = Object.freeze({
 // [install / uninstall] · ⚙ (opens All Settings at the plugin's section). Every configuration row lives in All
 // Settings (src/plugin-settings.js); keys stay in Services › Integrations. A chip that has something waiting (Voice
 // proposals, a Tailscale sign-in, a manifest plugin's windows) opens it — an action door, never settings.
+// lane relay-token-per-instance (design q-051, the owner's decision 2026-10-20): THE RELAY IDENTITY — the instance logs in
+// to the relay with its OWN token (data/relay-token.json, not the vault), bound to its own public names. The row's readout
+// says which identity and what the relay answered; its chip opens the doors (mint / rotate / revoke / the shared token).
+// The status never carries the token: the registration line holds its sha256 only.
+const RELAY_LOGIN_WORDS = Object.freeze({
+  unknown_instance: () => t('waiting for the relay admin to register it'),
+  bad_token: () => t('the relay holds another token — send the registration line again'),
+  revoked: () => t('the relay revoked it — mint a new token'),
+  knock_refused: () => t('the relay refused the shared token'),
+  legacy_token_retired: () => t('the relay no longer takes the shared token'),
+});
+/** the relay row's readout line (null = nothing to say) */
+function relayFactWords(r) {
+  if (!r) return null;
+  if (r.kind === 'cluster') return t('Logs in with the cluster\'s relay token as {user}', { user: r.user || '' });
+  if (r.kind === 'cluster-unnamed') return t('The cluster\'s relay token is set but this pod has no name (VIBESPACE_INSTANCE_NAME)');
+  if (r.kind === 'revoked') return t('Relay token revoked — mint a new one');
+  if (r.kind !== 'instance') return null;
+  const parts = [t('Own relay token')];   // its id is the sheet's (the row is narrow)
+  if (r.login && r.login.ok) parts.push(t('the relay knows it'));
+  else if (r.login && RELAY_LOGIN_WORDS[r.login.code]) parts.push(RELAY_LOGIN_WORDS[r.login.code]());
+  if (r.knock === 'locked') parts.push(t('the shared token waits for the vault'));
+  return parts.join(' · ');
+}
+function relayFact(r) {
+  const w = relayFactWords(r);
+  return w ? Object.assign(document.createElement('div'), { className: 'plugin-row-fact', textContent: w }) : null;
+}
+/** the relay chip's sheet: the identity, its names, the line(s) for the relay admin, the doors */
+function relaySheet(p, api, rerender) {
+  const r = p.relay || {};
+  const { body, close } = createModalShell({ id: 'relay-identity', title: t('Relay identity'), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+  const knockWords = r.retired ? t('no longer sent — it left this instance') : { on: t('sent while the relay\'s grace lasts'), locked: t('waits for the vault (sent once it is unlocked)'), off: t('no longer sent — the relay takes this instance\'s own token alone'), none: t('none') }[r.knock] || '';
+  const names = [...(r.prefixes || []).map((x) => x + '…'), ...(r.subdomains || [])].join(' · ');
+  const lines = Array.isArray(r.lines) ? r.lines : [];
+  body.innerHTML = `<div class="mounts-field-hint">${escHtml(t('This instance logs in to the relay with its own token, bound to its own public names. The token is kept on this instance (not in the vault), so a restart re-publishes without the second password; a stolen token reaches these public names only.'))}</div>
+    ${r.kind === 'cluster' || r.kind === 'cluster-unnamed' ? `<div class="mounts-field-hint">${escHtml(relayFactWords(r) || '')}</div>` : `
+    <div class="mounts-field-hint">${escHtml(t('Instance'))}: <code>${escHtml(r.instanceId || t('none yet'))}</code>${r.label ? ' · ' + escHtml(r.label) : ''}</div>
+    <div class="mounts-field-hint">${escHtml(t('Public names'))}: ${escHtml(names || '—')}</div>
+    <div class="mounts-field-hint">${escHtml(t('Shared relay token'))}: ${escHtml(knockWords)}</div>
+    ${lines.map((l, i) => `<div class="plugin-auth-url"><code>${escHtml(l)}</code> <button class="mounts-btn" data-copy="${i}">${escHtml(t('Copy'))}</button></div>`).join('')}
+    ${lines.length ? `<div class="mounts-field-hint">${escHtml(t('Send this line to the relay admin: it carries a fingerprint (sha256) of the token, never the token.'))}</div>` : ''}
+    <div class="plugin-relay-doors"></div>`}`;
+  body.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(lines[Number(b.dataset.copy)]).then(() => showToast(t('Copied'))); });
+  const doors = body.querySelector('.plugin-relay-doors');
+  if (!doors) return;
+  const go = (op, done) => api('config', { body: JSON.stringify({ relay: op }) }).then(() => { showToast(done); close(); rerender(); }).catch((e) => showToast(e.message || t('Failed'), { type: 'error' }));
+  const door = (label, fn, danger = false) => { const b = document.createElement('button'); b.className = 'mounts-btn' + (danger ? ' mounts-btn-danger' : ''); b.textContent = label; b.onclick = fn; doors.append(b); };
+  if (r.kind === 'none' || r.kind === 'revoked') door(r.kind === 'revoked' ? t('Mint a new token') : t('Mint'), () => go('mint', t('Relay token minted — send its line to the relay admin')));
+  if (r.kind === 'instance') {
+    door(t('Rotate'), () => go('rotate', t('Relay token rotated — send its line to the relay admin')));
+    door(t('Revoke…'), async () => {
+      const ok = await showConfirmDialog({ title: t('Revoke the relay token?'), message: t('This instance stops using its relay token at once and its public URLs stop until you mint a new one. Send the revoke line to the relay admin so the relay refuses the old token too.'), confirmText: t('Revoke'), danger: true });
+      if (ok) go('revoke', t('Relay token revoked'));
+    }, true);
+    if (!r.retired && (r.knock === 'on' || r.knock === 'locked')) door(t('The relay no longer asks the shared token'), () => go('upgraded', t('The shared relay token is no longer sent')));
+    if (!r.retired && r.knock === 'off') door(t('Send the shared token again'), () => go('knock', t('The shared relay token is sent again')));
+  }
+}
 /** the on/off switch (role=switch over a checkbox): the row's one toggle */
 function makeSwitch(on, { disabled = false, label, onChange }) {
   const l = document.createElement('label');
@@ -162,6 +221,7 @@ export function installPluginsUI(App) {
             chipTitle = miss.length ? t('Missing: {fields} — set it in the plugin\'s settings (⚙), or set VIBESPACE_FRPS_ADDR/_PORT/_TOKEN.', { fields: miss.join(', ') }) : t('Set VIBESPACE_FRPS_ADDR / _PORT / _TOKEN (the shared relay) to enable public URLs.');
             onChip = () => this._openPluginSettings(p.id);
           } else if (isRelay && p.configured) chipTitle = t('publishes forwarded ports to {host}', { host: p.publicHost || '' });
+          if (isRelay && p.relay && !p.vaultLocked && (p.configured || p.relay.kind !== 'none')) { onChip = () => relaySheet(p, api, render); fact = relayFact(p.relay); }   // lane relay-token-per-instance
           if (loginNeeded) onChip = () => this._tailscaleLogin(p, api, render);
           if (p.self?.ips?.length) chipTitle = `${t('Tailnet address')}: ${p.self.ips[0]}`;
           if (isTunnel && running && p.dns) fact = Object.assign(document.createElement('div'), { className: 'plugin-row-fact', textContent: tunnelDnsWords(p.dns) });

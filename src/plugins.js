@@ -25,7 +25,8 @@
 //   h (the host handle) = { id, dir: ~/.vibespace/plugins/<id>, rec() (the persistent record, created),
 //     peek() (the record or {}), save(), notify() (broadcast plugins-updated), opts (the constructor's extra
 //     options, e.g. opencodeServe), probeProto(port, opts), vault() (the data dir's vault engine or null — a secret a
-//     plugin holds is its entry: lane vault-e2e-password-fix-r2), sealedDir() (that vault is set up) }.
+//     plugin holds is its entry: lane vault-e2e-password-fix-r2), sealedDir() (that vault is set up), dataDir (the instance's
+//     data dir — frp's own relay token data/relay-token.json, lane relay-token-per-instance) }.
 // The MANIFEST plugin-loader (src/server/plugin-loader.js — third-party sandboxed plugins, /api/plugins/manifests)
 // is a different family and stays separate; the two meet only in the ⚙ → Plugins panel (src/lib/plugins-ui.js
 // renders these rows, then renderManifestPlugins).
@@ -83,7 +84,7 @@ class PluginManager {
       if (this._defs.has(def.id)) throw new Error('built-in plugin ' + def.id + ': registered twice');
       const id = def.id;
       const h = {
-        id, dir: path.join(PLUGIN_ROOT, id), opts,
+        id, dir: path.join(PLUGIN_ROOT, id), opts, dataDir,
         rec: () => this._rec(id), peek: () => this._state.plugins[id] || {},
         save: () => this._save(), notify: () => this._notify(),
         probeProto: (port, o) => this._probeProto(port, o),

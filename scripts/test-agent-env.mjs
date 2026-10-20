@@ -37,6 +37,7 @@ const fake = {
   VIBESPACE_PASSWORD: 'hunter2', VIBESPACE_S3_SECRET_KEY: 'sk', VIBESPACE_FRPS_TOKEN: 'tok',
   VIBESPACE_CEPHFS_SECRET: 'cs', VIBESPACE_CLERK_PUBLISHABLE_KEY: 'pk',
   VIBESPACE_TELEMETRY_FORWARD_TOKEN: 'tt', VIBESPACE_GDRIVE_CLIENT_SECRET: 'gs',
+  VIBESPACE_RELAY_CLUSTER_TOKEN: 'rct', VIBESPACE_RELAY_TOKEN: 'rt', // lane relay-token-per-instance: the fleet's relay token (chart) + the frpc child's name (never the hub's env — a leak would be caught here)
   // server-only config — must be stripped
   VIBESPACE_OPSLOG_DIR: '/var/opslog', VIBESPACE_METRICS_PORT: '3457',
   // agent-needed allowlist — must survive
@@ -54,7 +55,7 @@ check('HOST/NODE_OPTIONS stripped', !('HOST' in out) && !('NODE_OPTIONS' in out)
 check('npm_* stripped', !Object.keys(out).some((k) => k.startsWith('npm_')));
 const secrets = ['VIBESPACE_PASSWORD', 'VIBESPACE_S3_SECRET_KEY', 'VIBESPACE_FRPS_TOKEN',
   'VIBESPACE_CEPHFS_SECRET', 'VIBESPACE_CLERK_PUBLISHABLE_KEY',
-  'VIBESPACE_TELEMETRY_FORWARD_TOKEN', 'VIBESPACE_GDRIVE_CLIENT_SECRET'];
+  'VIBESPACE_TELEMETRY_FORWARD_TOKEN', 'VIBESPACE_GDRIVE_CLIENT_SECRET', 'VIBESPACE_RELAY_CLUSTER_TOKEN', 'VIBESPACE_RELAY_TOKEN'];
 check('ALL instance secrets stripped', !secrets.some((k) => k in out), secrets.filter((k) => k in out).join(','));
 check('server-only VIBESPACE config stripped', !('VIBESPACE_OPSLOG_DIR' in out) && !('VIBESPACE_METRICS_PORT' in out));
 check('agent-needed allowlist survives', out.VIBESPACE_API && out.VIBESPACE_SESSION_TOKEN && out.VIBESPACE_INSTANCE_NAME === 'him188');

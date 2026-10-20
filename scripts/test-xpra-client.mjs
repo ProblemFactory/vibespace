@@ -1357,7 +1357,7 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
   ok(!A.types.includes('configure-window') && A.c.windows.get(5).premap === false, `no re-fit follows the map (${A.types.join(' → ')}) — refit / belt skip a window being announced; the flag is gone once it is mapped`);
   // CONTROL: the pre-lane-D order (fitted first, named after 'new') maps at the pane of BEFORE the fold and re-fits
   const srcC = read('src/lib/xpra-client.js');
-  const f1 = "    if (isMain) { mainWid = wid; emit('title', win.title); emit('main', win); announceConstraints(); }", f2 = "    emit('window', 'new', win);\n    if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }";
+  const f1 = "    if (isMain) setMain(win); // lane xpra-title-election: the ONE announce door (was mainWid + title + main + constraints inline)", f2 = "    emit('window', 'new', win);\n    if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }";
   ok(srcC.split(f1).length === 2 && srcC.split(f2).length === 2, 'the F3 order is spelled once (the control patches exactly it)');
   const f3Mut = MUTXC.write('src/lib/xpra-client.js', srcC.replace(f1, "    if (isMain) { mainWid = wid; emit('title', win.title); }").replace(f2, "    emit('window', 'new', win);\n    if (isMain) { announceConstraints(); emit('main', win); } // pre-lane-D order\n    if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }"), 'f3');
   const B = await runF3(await import(fileUrl(f3Mut)));
@@ -1961,6 +1961,78 @@ console.log('§late — a worker message delivered after close() is ignored (the
   const unCfg = wk.sent('configure-window').slice(-1)[0];
   ok(client.pin === null && same(unCfg.slice(1, 6), [1, 0, 0, 900, 300]) && same(wk.sent('display-configure').slice(-1)[0][1]['desktop-size'], [900, 300]), 'e2b: unpinned (auto) ⇒ re-fit to the pane (900×300)', unCfg);
   client.close();
+}
+
+// ── §T lane xpra-title-election: a window's title is a fact of its RECORD — it reaches the pane whichever packet
+// came first (the title or the window), and a title that races AHEAD of new-window (a reused wid re-announced under
+// load, its new-window still in flight) is kept, never dropped at window-metadata's `if (!win)`. B-a566's chromium
+// title: X held the page title while the bar kept "Untitled - Google Chrome" (red 3/10 under a 2-cpu load). ──
+console.log('§T lane xpra-title-election — the main-window title reaches the pane whichever packet came first');
+{
+  const titleRun = async (Cmod, feeds) => {
+    FakeWorker.instances.length = 0;
+    const ev = { titles: [], mains: [] };
+    const cl = Cmod.createXpraClient({ url: 'ws://x/t', workerUrl: '/w', screen: { width: 900, height: 600 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, on: { title: (x) => ev.titles.push(x), main: (w) => ev.mains.push(w ? w.wid : null) } });
+    cl.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello')[0]);
+    w.feed(['hello', { version: '6.5.3', 'packet-types': ['display-configure'] }]);
+    for (const p of feeds) w.feed(p);
+    const win = cl.windows.get(cl.mainWid);
+    const out = { titles: ev.titles.slice(), mains: ev.mains.slice(), mainWid: cl.mainWid, rec: win ? win.title : null };
+    cl.close();
+    return out;
+  };
+
+  // (a) a title that FOLLOWS new-window reaches the pane (self-heal — the common order)
+  const ra = await titleRun(C, [['new-window', 1, 0, 0, 300, 200, { title: 'A', 'window-type': ['NORMAL'] }], ['window-metadata', 1, { title: 'B' }]]);
+  ok(same(ra.titles, ['A', 'B']) && ra.rec === 'B' && ra.mainWid === 1, '(a) a title that follows new-window reaches the pane: titles [A, B], the record holds B', ra);
+
+  // (b) a title that RACES AHEAD of new-window (metadata for a wid the record does not exist for yet)
+  const rb = await titleRun(C, [['window-metadata', 7, { title: 'B' }], ['new-window', 7, 0, 0, 300, 200, { title: 'A', 'window-type': ['NORMAL'] }]]);
+  ok(rb.rec === 'B' && rb.titles.slice(-1)[0] === 'B' && rb.mainWid === 7, '(b) a title that RACED AHEAD of new-window is applied at creation — the record holds B, the pane shows B, never the stale A from the new-window snapshot', rb);
+
+  // (c) THE RACE: a reused wid re-announced under load, the title update landing between lost-window and the re-announce
+  const rc = await titleRun(C, [
+    ['new-window', 9, 0, 0, 300, 200, { title: 'Untitled', 'window-type': ['NORMAL'] }],
+    ['lost-window', 9],
+    ['window-metadata', 9, { title: 'Page' }],
+    ['new-window', 9, 0, 0, 300, 200, { title: 'Untitled', 'window-type': ['NORMAL'] }],
+  ]);
+  ok(rc.rec === 'Page' && rc.titles.slice(-1)[0] === 'Page' && rc.mainWid === 9, '(c) THE RACE — a title update that lands between lost-window and a reused-wid re-announce is kept: the pane ends on Page, never the stale Untitled', rc);
+
+  // (d) a main lost ⇒ the next main is announced through the ONE setMain door with its CURRENT stored title
+  const rd = await titleRun(C, [
+    ['new-window', 1, 0, 0, 300, 200, { title: 'Main1', 'window-type': ['NORMAL'] }],
+    ['new-window', 2, 0, 0, 300, 200, { title: '', 'window-type': ['NORMAL'] }],
+    ['window-metadata', 2, { title: 'Main2' }],
+    ['lost-window', 1],
+  ]);
+  ok(rd.mainWid === 2 && rd.rec === 'Main2' && rd.titles.slice(-1)[0] === 'Main2', '(d) a main lost ⇒ the re-elected main is announced (setMain) with the title it stored while it was not the main (Main2)', rd);
+
+  // (e) the pending map is BOUNDED (FIFO): 80 unmatched titles ⇒ the oldest wid is evicted, so its window keeps its own title
+  const re2 = await titleRun(C, [
+    ...Array.from({ length: 80 }, (_, i) => ['window-metadata', 1000 + i, { title: 'stash' + i }]),
+    ['new-window', 1000, 0, 0, 300, 200, { title: 'own', 'window-type': ['NORMAL'] }],
+  ]);
+  ok(re2.rec === 'own' && re2.mainWid === 1000, '(e) the pending map is BOUNDED (FIFO, 64): after 80 unmatched title packets the oldest (wid 1000) is evicted, so its window keeps its own title, never a stale stash', re2);
+
+  // (f) RED CONTROL: a copy of the client with the stash reverted to the pre-fix `if (!win) return;` DROPS the raced title
+  const csrc = read('src/lib/xpra-client.js');
+  const stashRe = /if \(!win\) \{ \/\/ lane xpra-title-election[\s\S]*?\n {8}\}/;
+  ok(stashRe.test(csrc), 'CONTROL anchor: the window-metadata stash block is present (the control reverts exactly it)');
+  const dropSrc = csrc.replace(stashRe, 'if (!win) return;');
+  ok(dropSrc.includes('if (!win) return;') && dropSrc !== csrc && !/STASH it \(bounded\)/.test(dropSrc), 'CONTROL: the copy reverts the stash to the pre-fix `if (!win) return;`');
+  const preMut = await import(fileUrl(MUTXC.write('src/lib/xpra-client.js', dropSrc, 'titledrop')));
+  const mb = await titleRun(preMut, [['window-metadata', 7, { title: 'B' }], ['new-window', 7, 0, 0, 300, 200, { title: 'A', 'window-type': ['NORMAL'] }]]);
+  ok(mb.rec === 'A' && mb.rec !== 'B' && mb.titles.slice(-1)[0] === 'A', '(f) RED CONTROL (b): the pre-fix `if (!win) return;` DROPS the raced-ahead title — the record holds the stale A, never B', mb);
+  const mc = await titleRun(preMut, [
+    ['new-window', 9, 0, 0, 300, 200, { title: 'Untitled', 'window-type': ['NORMAL'] }],
+    ['lost-window', 9],
+    ['window-metadata', 9, { title: 'Page' }],
+    ['new-window', 9, 0, 0, 300, 200, { title: 'Untitled', 'window-type': ['NORMAL'] }],
+  ]);
+  ok(mc.rec === 'Untitled' && mc.rec !== 'Page', '(f) RED CONTROL (c): on the pre-fix handler the reused-wid race ends on the stale Untitled — the real B-a566 bug', mc);
 }
 
 for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 10 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));

@@ -131,6 +131,25 @@ function paneState({ lease = null, myTag = null, active = null, myPane = null, k
   return myPane != null && String(active) === String(myPane) ? 'active' : 'blocked';
 }
 
+/**
+ * Is `pane` SEATED — has one of its sockets joined the election? The bridge
+ * registers a socket as a live viewer BEFORE the keeper's join publishes the
+ * broadcast, so a pane the broadcast lists can be named by its socket's viewer
+ * id. "Resume here" asks the takeover only then (lane live-input-under-load,
+ * race-sweep's B-b8c6 residue — measured under a 2-cpu load: three other
+ * clients' panes attached first, the press beat THIS pane's own socket, the
+ * bridge answered no_viewer, and the pane joined a moment later as a blocked
+ * viewer and stayed so). `seats` = the client's reading of the last
+ * `desktop-app-viewers` broadcast ({ viewers: [{ id: pane }] }).
+ */
+function paneSeated(seats, pane) {
+  if (!seats || !Array.isArray(seats.viewers) || pane == null) return false;
+  return seats.viewers.some((v) => v && v.id != null && String(v.id) === String(pane));
+}
+/** Resume here holds its pane ACTIVE this long before the answer (the optimistic window) — and so waits at most this long
+ *  for the pane's seat; past it the takeover is asked anyway and the bridge answers in its own words (no_viewer). */
+const RESUME_WAIT_MS = 8000;
+
 /** "Chrome · Linux" from a User-Agent — the viewer list's label (no version, no device id). */
 function viewerLabel(ua) {
   const s = String(ua || '');
@@ -139,4 +158,4 @@ function viewerLabel(ua) {
   return os ? `${browser} · ${os}` : browser;
 }
 
-module.exports = { RELAY_RULES, viewerState, nextActive, activeAfterJoin, viewersView, paneState, viewerLabel };
+module.exports = { RELAY_RULES, viewerState, nextActive, activeAfterJoin, viewersView, paneState, viewerLabel, paneSeated, RESUME_WAIT_MS };

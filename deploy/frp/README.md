@@ -70,3 +70,38 @@ the Pair-a-device dialog to relay a device that's also behind NAT.
 
 The Helm chart wires `frp.addr` / `frp.port` / `frp.token` / `frp.subdomainHost`
 values into these env vars — see `deploy/helm/vibespace-user/values.yaml`.
+
+## Per-instance relay tokens (the login plugin)
+
+With only `auth.token`, anyone holding that ONE shared token can log in and claim
+any public name. VibeSpace ≥ 2.369.326 gives every instance **its own relay
+token, bound to its own public names, revocable** — the relay side is the frps
+server plugin in [`tools/frps-login-plugin/`](../../tools/frps-login-plugin/README.md)
+(Node ≥ 20, no dependencies, loopback only):
+
+    [[httpPlugins]]
+    name = "vibespace-relay"
+    addr = "127.0.0.1:7001"
+    path = "/handler"
+    ops = ["Login", "NewProxy", "CloseProxy"]
+
+- Each instance mints its token on its first relay start (or **Plugins › Public
+  URLs › Mint**), keeps it in `data/relay-token.json` (0600 — not in the vault,
+  so a restart re-publishes without the second password) and logs in as
+  `user = <instance id>` with `metadatas.token` (the value in frpc's environment
+  only). Its card shows the line the relay admin runs here:
+  `relay-admin add vi-<id> <sha256 of the token> <label>`.
+- The plugin accepts a registered token, binds the proxy names to their prefixes
+  (`pf-…`, `vibespace-instance`), gives a subdomain to its first claimer for good
+  and refuses everyone else by name (`bad_token`, `revoked`, `name_not_yours`,
+  `name_in_use:<holder>`); the instance files a For-you item for a name refusal.
+- **The grace:** keep `auth.token` while older instances still log in with it —
+  each such login is one `legacy` audit line. `relay-admin grace 7d` sets the
+  end; after it the shared token is refused (`legacy_token_retired`). End it
+  early once `relay-admin legacy` shows no use for 24 h, then (after emptying the
+  plugin's knock file, if it vouches) set `auth.token = ""`. The plugin's `--knock-file` lets registered instances in
+  without the shared token even during the grace (see its README).
+- **Fleet pods** share one cluster token (`relay-admin new-token` → the chart's
+  secret as `VIBESPACE_RELAY_CLUSTER_TOKEN`; `relay-admin add-cluster fleet
+  <sha256> '^[a-z0-9][a-z0-9-]{0,39}$'`); each pod logs in as its own name.
+- **Rollback:** remove the `[[httpPlugins]]` block and restart frps.
