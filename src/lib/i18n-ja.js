@@ -9321,6 +9321,8 @@ export default {
   "Vault locked": "保管庫はロック中", // lane vault-e2e-password
   "Vault locked — click to unlock": "保管庫はロック中 — クリックして解除", // lane vault-e2e-password
   "Unlock the vault": "保管庫のロックを解除", // lane vault-e2e-password
+  "The vault is locked — device links, the relay and account switching are waiting.": "保管庫はロック中 — デバイス連携・中継・アカウント切り替えが待機中です", // lane vault-relock-door: the persistent lock strip
+  "The vault locked after a restart — enter the second password to unlock. Device links, the relay and account switching are waiting.": "再起動後に保管庫がロックされました — 第二パスワードを入力して解除してください。デバイス連携・中継・アカウント切り替えが待機中です", // lane vault-relock-door: the restart For-you notice
   "The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.": "VibeSpace が保存している認証情報（アカウント、マウント、チャンネル、連携、アプリのログイン、パスキー、ペアリング済みマシンの接続、リレーと音声のサインイン）は、第二パスワードを入力するまでロックされたままです — 再起動とロックのたびに。", // lane vault-e2e-password (r2: machines, relay, voice; every lock)
   "Second password": "第二パスワード", // lane vault-e2e-password
   "Unlock": "ロック解除", // lane vault-e2e-password
@@ -9557,4 +9559,26 @@ export default {
   "Use an automation key you granted it": "あなたが付与した自動化キーを使う", // design q-046 (lane automation-keys-core)
   "List its automation keys or their audit": "自動化キーまたは監査記録を一覧する", // design q-046 (lane automation-keys-core)
   "{n} with a conversation link": "会話リンク付き {n} 件", // lane run-fold-channel-compact
+  "any": "任意", // lane automation-open-limits
+  "The CLI's own login": "CLI 自身のログイン", // lane automation-open-limits
+  "Permission modes": "権限モード", // lane automation-open-limits
+  "Models": "モデル", // lane automation-open-limits
+  "Modes": "モード", // lane automation-open-limits
+  "No folder yet": "まだフォルダーがありません", // lane automation-open-limits
+  "Parent folder": "親フォルダー", // lane automation-open-limits
+  "Add this folder": "このフォルダーを追加", // lane automation-open-limits
+  "A folder is an absolute path": "フォルダーは絶対パスで指定します", // lane automation-open-limits
+  "Any account": "任意のアカウント", // lane automation-open-limits
+  "Any model": "任意のモデル", // lane automation-open-limits
+  "Another model id": "別のモデル ID", // lane automation-open-limits
+  "Limits of \"{name}\"": "「{name}」の制限", // lane automation-open-limits
+  "This key has no folders yet — what you save here becomes its bounds. Until you set at least one folder, every conversation it would open is refused.": "このキーにはまだフォルダーがありません——ここで保存した内容が制限になります。フォルダーを 1 つ以上設定するまで、このキーで開こうとする会話はすべて拒否されます。", // lane automation-open-limits (q-049 M1)
+  "Audit of \"{name}\"": "「{name}」の監査ログ", // lane automation-open-limits
+  "No audit line for this key yet": "このキーの監査ログはまだありません", // lane automation-open-limits
+  "Limits not set": "制限未設定", // lane automation-open-limits (q-049 M1)
+  "The CLI's own setting": "CLI 自身の設定", // lane automation-open-limits (q-049 M2)
+  "No folders are set — every conversation it would open is refused until you set them with Limits…": "フォルダーが未設定です——「制限…」で設定するまで、このキーで開こうとする会話はすべて拒否されます", // lane automation-open-limits (q-049 M1)
+  "Limits…": "制限…", // lane automation-open-limits
+  "Audit…": "監査ログ…", // lane automation-open-limits
+  "What the conversations it opens may use": "開く会話が使えるもの", // lane automation-open-limits
 };

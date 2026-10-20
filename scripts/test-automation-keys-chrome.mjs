@@ -13,6 +13,11 @@
 //   ⑦ 显示 ⇒ 验证是你 ⇒ the value (vsak_…) in ITS row only, 「只为交给外界」 beside it; the vault's audit has the reveal
 //   ⑧ THE LOCK ⇒ the door answers 423 vault_locked and the CLI exits 3 saying so; the unlock ⇒ it works again
 //   ⑨ 撤销 ⇒ the row goes, the CLI's `keys` says nothing is granted · ⑩ the words in Japanese (自動化キー / 発行…)
+//   ⑨b THE LIMITS (lane automation-open-limits — the q-048 verify's M2): 铸造… with 开一个对话 ticked shows the limits (absent
+//      until then): a folder picked in the hub's file tree (type a path, open a subfolder, ↑, 加入这个文件夹), the CLI's own
+//      login, 跳过确认 beside CLI 自己的设置 ⇒ the row's limits line and the hub's record; 边界… edits them (another folder, 终端);
+//      a key minted before limits reads as folderless 「未设边界」 (refuses every open) and its first 边界… sets them; the CLI's open outside ⇒ refused naming the
+//      limits; 审计… lists that refused open with its code
 // Run: node scripts/test-automation-keys-chrome.mjs   (AK_SHOTS=<dir> keeps the 1280×800 screenshots; SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -83,6 +88,7 @@ const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expre
 const until = async (expr, ms = 15000) => { const t0 = Date.now(); let v = null; while (Date.now() - t0 < ms) { try { v = await evalJs(expr); } catch { v = null; } if (v) return v; await sleep(150); } return v; };
 const visible = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; })()`;
 const click = (sel) => evalJs(`(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) return false; b.click(); return true; })()`);
+const clickWait = (sel, ms = 10000) => until(`(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) return false; b.click(); return true; })()`, ms); // poll until the target exists, then click (the dialog renders late under load)
 const typeInto = (sel, text) => evalJs(`(() => { const i = document.querySelector(${JSON.stringify(sel)}); if (!i) return false; i.focus(); i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
 const textOf = (sel) => evalJs(`(document.querySelector(${JSON.stringify(sel)}) || {}).textContent || ''`);
 const api = (method, p, body) => evalJs(`fetch(${JSON.stringify(p)}, { method: ${JSON.stringify(method)}, headers: { 'Content-Type': 'application/json' }${body ? `, body: ${JSON.stringify(JSON.stringify(body))}` : ''} }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }))`);
@@ -132,7 +138,7 @@ try {
   console.log('③ the Vault window: 铸造… an automation key');
   check('the window opens on «自动化 key» (a group head with 铸造…)', !!(await openWindow()) && (await textOf('.vw-group[data-store="automation"] .vw-group-name')) === '自动化 key' && (await textOf('.vw-ak-mint')) === '铸造…');
   await click('.vw-ak-mint');
-  check('铸造… opens its dialog: a name and the closed table of verbs (开一个对话 says it bills)', !!(await until(visible('#vault-ak-mint'), 5000)) && /（会开始一个计费回合）/.test(await textOf('#vault-ak-mint')) && (await evalJs(`document.querySelectorAll('#vault-ak-mint .vw-ak-pick input[type=checkbox]').length`)) === 6); // lane automation-verbs: + conversations.status (a read)
+  check('铸造… opens its dialog: a name and the closed table of verbs (开一个对话 says it bills)', !!(await until(visible('#vault-ak-mint'), 5000)) && /（会开始一个计费回合）/.test(await textOf('#vault-ak-mint')) && (await evalJs(`document.querySelectorAll('#vault-ak-mint .vw-ak-verbs .vw-ak-pick input[type=checkbox]').length`)) === 6 && !(await evalJs(visible('#vault-ak-mint .vw-ak-limwrap')))); // lane automation-verbs: + conversations.status (a read)
   await typeInto('#vault-ak-mint .vw-ak-name', 'Lane dispatch');
   await evalJs(`(() => { const c = document.querySelector('#vault-ak-mint input[value="conversations.rename"]'); c.checked = true; return true; })()`);
   await click('.vw-ak-mint-go');
@@ -218,11 +224,92 @@ try {
   const gone = await cli(['call', 'conversations.rename', '--name', 'x'], { token });
   check('the CLI\'s keys says nothing is granted; a call is refused (not_granted)', /no key is granted/.test(ks2.out) && gone.code === 1 && /not_granted/.test(gone.err), { ks2, gone });
 
+  console.log('⑨b THE LIMITS — mint with limits, 边界…, 「未设边界」 (q-049 M1 fail closed), the refused open in 审计…');
+  const SUB = path.join(CWD, 'lane-sub');
+  fs.mkdirSync(SUB, { recursive: true });
+  await closeWindows(); await openWindow();
+  await click('.vw-ak-mint');
+  await until(visible('#vault-ak-mint'), 5000);
+  await typeInto('#vault-ak-mint .vw-ak-name', 'Opener');
+  await evalJs(`document.querySelector('#vault-ak-mint input[value="conversations.open"]').click()`);
+  check('ticking 开一个对话 shows the limits (folders · accounts · permission modes · models · modes) — absent before',
+    !!(await until(visible('#vault-ak-mint .vw-ak-limwrap'), 3000)) && (await textOf('#vault-ak-mint .vw-ak-limwrap')).includes('它开的对话能用什么') && (await evalJs(`[...document.querySelectorAll('#vault-ak-mint .vw-ak-limits .vw-ak-sec')].map((e) => e.textContent).join('|')`)) === '文件夹|账号|权限模式|模型|模式');
+  // the folder picker over the hub's file tree: type a path ⇒ its subfolders; open one; ↑ back; 加入这个文件夹
+  await evalJs(`(() => { const i = document.querySelector('#vault-ak-mint .vw-ak-path'); i.value = ${JSON.stringify(CWD)}; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true; })()`);
+  const subBtn = `#vault-ak-mint .vw-ak-dir[data-path="${SUB}"]`;
+  check('a typed path lists its subfolders (the hub\'s file tree)', !!(await until(visible(subBtn), 8000)));
+  await click(subBtn);
+  check('a subfolder opens', (await until(`document.querySelector('#vault-ak-mint .vw-ak-path').value === ${JSON.stringify(SUB)}`, 8000)) === true);
+  await click('#vault-ak-mint .vw-ak-up');
+  check('↑ goes back up', (await until(`document.querySelector('#vault-ak-mint .vw-ak-path').value === ${JSON.stringify(CWD)}`, 8000)) === true);
+  await click('#vault-ak-mint .vw-ak-add-root');
+  check('加入这个文件夹 ⇒ a folder chip', !!(await until(`!!document.querySelector('#vault-ak-mint .vw-ak-root[data-root="${CWD}"]')`, 3000)));
+  check('a fresh key: no account picked, 默认 the only permission mode, any model, chat',
+    (await evalJs(`(() => { const d = document.querySelector('#vault-ak-mint'); const on = (sel) => [...d.querySelectorAll(sel)].filter((c) => c.checked).map((c) => c.value).join(); return [on('.vw-ak-accts input'), d.querySelector('.vw-ak-acct-any input').checked, on('.vw-ak-perms input'), d.querySelector('.vw-ak-model-any input').checked, on('.vw-ak-modes input')].join('|'); })()`)) === '|false|default|true|chat');
+  await evalJs(`document.querySelector('#vault-ak-mint .vw-ak-accts input[value="subscription"]').click()`);
+  await evalJs(`document.querySelector('#vault-ak-mint .vw-ak-perms input[value="bypassPermissions"]').click()`);
+  await evalJs(`(() => { const b = document.querySelector('#vault-ak-mint .vw-ak-dialog .dialog-body, #vault-ak-mint .dialog-body'); if (b) b.scrollTop = 0; return true; })()`);
+  await shot('ak-6-mint-limits.png');
+  await evalJs(`(() => { const b = document.querySelector('#vault-ak-mint .dialog-body'); if (b) b.scrollTop = b.scrollHeight; return true; })()`);
+  await shot('ak-6b-mint-limits-lower.png');
+  await click('.vw-ak-mint-go');
+  const OPENER = `${ROW}:has(.vw-ak-limits-edit)`;
+  const line = await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => x.querySelector('.vw-label').textContent === 'Opener'); return r && r.querySelector('.vw-ak-limits-line') ? [...r.querySelectorAll('.vw-ak-limits-line .vw-ak-lim')].map((e) => e.textContent).join(' · ') : null; })()`, 10000);
+  check('the row says what its conversations may use (one line per field): the folder, the CLI\'s own login, CLI 自己的设置 + 跳过确认, any model, chat', line === `文件夹: ${CWD} · 账号: CLI 自己的登录 · 权限模式: CLI 自己的设置, 跳过确认 · 模型: 任何 · 模式: 聊天`, line);
+  const keysNow = async () => ((await api('GET', '/api/automation/keys')).json || {}).keys || [];
+  const opener = (await keysNow()).find((k) => k.name === 'Opener');
+  check('…and the hub\'s record holds exactly that pick', opener && JSON.stringify(opener.limits) === JSON.stringify({ cwdRoots: [CWD], accounts: ['subscription'], permissionModes: ['default', 'bypassPermissions'], models: 'any', modes: ['chat'] }), opener && opener.limits);
+  await until(`(() => { const r = document.querySelector(${JSON.stringify(OPENER)}); if (!r) return false; r.scrollIntoView({ block: 'center' }); return true; })()`);
+  await shot('ak-7-row-limits.png');
+  // 边界… — another folder, terminal too
+  await click(OPENER + ' .vw-ak-limits-edit');
+  check('边界… opens on the key\'s own limits (its folder chip, its checks)', !!(await until(`!!document.querySelector('#vault-ak-limits .vw-ak-root[data-root="${CWD}"]') && document.querySelector('#vault-ak-limits .vw-ak-perms input[value="bypassPermissions"]').checked`, 5000)));
+  await clickWait(`#vault-ak-limits .vw-ak-root[data-root="${CWD}"] .vw-ak-x`); await until(`!document.querySelector('#vault-ak-limits .vw-ak-root[data-root="${CWD}"]')`);
+  await evalJs(`(() => { const i = document.querySelector('#vault-ak-limits .vw-ak-path'); i.value = ${JSON.stringify(SUB)}; return true; })()`);
+  await clickWait('#vault-ak-limits .vw-ak-add-root'); await until(`!!document.querySelector('#vault-ak-limits .vw-ak-root[data-root="${SUB}"]')`);
+  await clickWait('#vault-ak-limits .vw-ak-modes input[value="terminal"]');
+  await clickWait('.vw-ak-limits-save');
+  const edited = await (async () => { for (let i = 0; i < 40; i++) { const k = (await keysNow()).find((x) => x.name === 'Opener'); if (k && k.limits && k.limits.cwdRoots[0] === SUB) return k.limits; await sleep(250); } return null; })();
+  check('保存 ⇒ the hub holds the edit (the other folder, chat + terminal)', edited && edited.cwdRoots.join() === SUB && edited.modes.join() === 'chat,terminal', edited);
+  // q-049 M1: a key minted BEFORE limits (record has no `limits` field) reads as folderless ⇒ 「未设边界」 (refuses every open); its first 边界… sets them
+  const legacy = await api('POST', '/api/automation/keys', { name: 'Legacy', scopes: ['conversations.open'], limits: { cwdRoots: [CWD], accounts: 'any' } });
+  const store = path.join(wt, 'data', 'automation-keys.json');
+  const st = JSON.parse(fs.readFileSync(store, 'utf8'));
+  delete st.keys.find((k) => k.id === legacy.json.key.id).limits;   // the shape 2.369.323 wrote
+  fs.writeFileSync(store, JSON.stringify(st), { mode: 0o600 });
+  await closeWindows(); await openWindow();
+  const chip = await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => x.querySelector('.vw-label').textContent === 'Legacy'); const c = r && r.querySelector('.vw-ak-unbounded'); return c ? { text: c.textContent, title: c.title, line: !!r.querySelector('.vw-ak-limits-line .vw-ak-lim') } : null; })()`, 10000);
+  check('a key minted before limits shows 「未设边界」 (its title says every open is refused) and no limits line', chip && chip.text === '未设边界' && /会被拒/.test(chip.title) && !chip.line, chip);
+  // the window re-renders on store broadcasts — re-find the ROW each poll and act only once it exists (wait for the EFFECT, never a sleep; the pre-fix bare .find().scrollIntoView() was RED under 4-lane load, int325 heavy)
+  await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => (x.querySelector('.vw-label') || {}).textContent === 'Legacy'); if (!r) return false; r.scrollIntoView({ block: 'center' }); return true; })()`);
+  await shot('ak-8-unbounded.png');
+  await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => (x.querySelector('.vw-label') || {}).textContent === 'Legacy'); const b = r && r.querySelector('.vw-ak-limits-edit'); if (!b) return false; b.click(); return true; })()`);
+  const legacyLim = ((await keysNow()).find((k) => k.name === 'Legacy') || {}).limits;
+  check('its 边界… says these will be its FIRST limits (nothing changes until 保存)', !!(await until(visible('#vault-ak-limits .vw-ak-first'), 5000)) && legacyLim && legacyLim.cwdRoots.length === 0);
+  await evalJs(`(() => { const i = document.querySelector('#vault-ak-limits .vw-ak-path'); i.value = ${JSON.stringify(CWD)}; return true; })()`);
+  await clickWait('#vault-ak-limits .vw-ak-add-root'); await until(`!!document.querySelector('#vault-ak-limits .vw-ak-root[data-root="${CWD}"]')`);
+  await clickWait('#vault-ak-limits .vw-ak-acct-any input');
+  await clickWait('.vw-ak-limits-save');
+  const firstSet = await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => x.querySelector('.vw-label').textContent === 'Legacy'); return r && !r.querySelector('.vw-ak-unbounded') && r.querySelector('.vw-ak-limits-line') ? [...r.querySelectorAll('.vw-ak-limits-line .vw-ak-lim')].map((e) => e.textContent).join(' · ') : null; })()`, 10000);
+  check('…its first 保存 sets them: the chip gives way to the limits line', firstSet === `文件夹: ${CWD} · 账号: 任何 · 权限模式: CLI 自己的设置 · 模型: 任何 · 模式: 聊天`, firstSet);
+  // the CLI's open outside the limits ⇒ refused naming them; 审计… lists it with its code
+  await api('POST', `/api/automation/keys/${opener.id}/grants`, { subjects: [`session:${LIVE_SID}`] });
+  const outside = await cli(['conversations', 'open', '--key', 'Opener', '--cwd', '/etc', '--name', 'nope'], { token });
+  check('the conversation\'s open outside the key\'s folder ⇒ exit 1, cwd_outside_roots, the key\'s limits printed by name', outside.code === 1 && /\(cwd_outside_roots\)/.test(outside.err) && outside.err.includes(`this key's limits: folders ${SUB} · accounts subscription · permission modes default, bypassPermissions · models any · modes chat, terminal`), outside);
+  await closeWindows(); await openWindow();
+  await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => (x.querySelector('.vw-label') || {}).textContent === 'Opener'); const b = r && r.querySelector('.vw-ak-audit'); if (!b) return false; b.click(); return true; })()`);
+  const refusedLine = await until(`(() => { const l = document.querySelector('#vault-ak-audit .vw-ak-audit-line.vw-ak-refused[data-code="cwd_outside_roots"]'); return l ? { outcome: l.querySelector('.vw-ak-outcome').textContent, verb: l.querySelector('.vw-ak-verb').textContent, arg: (l.querySelector('.vw-ak-arg') || {}).textContent } : null; })()`, 8000);
+  check('审计… lists the refused open: 开一个对话 · cwd_outside_roots · /etc', refusedLine && refusedLine.outcome === 'cwd_outside_roots' && refusedLine.verb === '开一个对话' && refusedLine.arg === '/etc', refusedLine);
+  await shot('ak-9-audit.png');
+  await evalJs(`(() => { const b = document.querySelector('#vault-ak-audit .btn-cancel'); if (b) b.click(); return true; })()`);
+  check('no greyed control anywhere in the automation section or its dialogs', (await evalJs(`document.querySelectorAll('.vw-row[data-store="automation"] [disabled], .vw-ak [disabled], .vw-ak-dialog [disabled]').length`)) === 0);
+
   console.log('⑩ the words in Japanese');
   await evalJs(`(() => { localStorage.setItem('vibespace.lang', 'ja'); return true; })()`);
   await load();
   await openWindow();
   check('「自動化キー」 + 「発行…」', (await textOf('.vw-group[data-store="automation"] .vw-group-name')) === '自動化キー' && (await textOf('.vw-ak-mint')) === '発行…');
+  check('「制限…」 + 「監査ログ…」 on a key that opens (lane automation-open-limits)', !!(await until(`[...document.querySelectorAll('.vw-ak-limits-edit')].some((b) => b.textContent === '制限…') && [...document.querySelectorAll('.vw-ak-audit')].some((b) => b.textContent === '監査ログ…')`, 8000)));
   await shot('ak-5-ja.png');
 } catch (e) {
   failed++;

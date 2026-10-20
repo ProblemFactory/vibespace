@@ -11,7 +11,8 @@
 //   ⑤ 5 MINUTES (the hub's clock and the page's both moved on) ⇒ every value masked again, the chip gone, the hub answers
 //      reveal_needs_password, and 「显示」 asks for the password again
 //   ⑥ a LOCK anywhere ⇒ the open values vanish and the window says locked
-//   ⑥b Manage Agents' Show key… (r2): a fresh page ⇒ 验证是你 first, then the key; a second Show key… inside the window asks nothing
+//   ⑥b Manage Agents' Show key… (r2): a fresh page ⇒ 验证是你 first — in the click's own task, before any key request (lane
+//      takeover-surface-census) — then the key on ONE request; a second Show key… inside the window asks nothing
 //   ⑦ a phone viewport: the rows fit, 「显示」 is reachable (on top, ≥ 36 px)
 //   ⑧ the words in Chinese: 「验证是你」, 「显示」; no value or password in the server log; the audit has the reveals
 //   THE HEADER (lane vault-one-door — the old ⚙ System ▸ Vault… dialog is the window's header now): ⓪ not set up ⇒ only
@@ -246,13 +247,16 @@ await evalJs(`app._showAgentsDialog()`);
 const menuSel = `.acct-key-row[data-id="${accId}"] .acct-menu`;
 check('Manage Agents lists the API-key account', !!(await until(visible(menuSel), { timeout: 15000 })));
 const showKey = async () => { await click(menuSel); await until(`[...document.querySelectorAll('.context-menu-item')].some((e) => /Show key/.test(e.textContent))`, { timeout: 5000 }); return evalJs(`(() => { const e = [...document.querySelectorAll('.context-menu-item')].find((x) => /Show key/.test(x.textContent)); if (!e) return false; e.click(); return true; })()`); };
+// lane takeover-surface-census: the ask opens in the click's own task, before any key request (asked after the hub's refusal it
+// opened a round trip late — a driven agent browser kept the keys, and the second password went to its page)
+await evalJs(`(() => { if (window.__vsKeyGets == null) { window.__vsKeyGets = 0; const f0 = window.fetch; window.fetch = (u, o) => { const p = String(u); if (p.startsWith('/api/accounts/') && p.endsWith('/key')) window.__vsKeyGets++; return f0(u, o); }; } return true; })()`);
 check('⋯ ▸ Show key…', await showKey());
-check('a fresh page ⇒ 验证是你 first (the hub refused the key without this page\'s window)', !!(await until(visible('#vault-reveal-dialog'), { timeout: 8000 })));
+check('a fresh page ⇒ 验证是你 first — in the click\'s own task, before any key request', !!(await until(visible('#vault-reveal-dialog'), { timeout: 8000 })) && (await evalJs('window.__vsKeyGets')) === 0, await evalJs('window.__vsKeyGets'));
 check('the 验证是你 text says a second tab asks again', /Another tab or window asks again/.test(await evalJs(`document.querySelector('#vault-reveal-dialog .vault-text')?.textContent || ''`)));
 const keyShown = `[...document.querySelectorAll('.dialog-overlay input')].some((i) => i.value === ${JSON.stringify(PLANT_KEY)})`;
 check('no key on the page before the password', !(await evalJs(keyShown)));
 await typeInto('#vault-reveal-pw', SECOND); await click('.vault-reveal-go');
-check('the right second password ⇒ the key in Show key…\'s dialog', !!(await until(keyShown, { timeout: 10000 })));
+check('the right second password ⇒ the key in Show key…\'s dialog (ONE key request, inside the window)', !!(await until(keyShown, { timeout: 10000 })) && (await evalJs('window.__vsKeyGets')) === 1, await evalJs('window.__vsKeyGets'));
 await shot('vw-8-showkey.png');
 await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => { if ([...o.querySelectorAll('input')].some((i) => i.value)) o.remove(); })`);
 check('⋯ ▸ Show key… again', await showKey());

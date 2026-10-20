@@ -26,12 +26,23 @@ const USAGE = [
   '  vibespace-api groups invite <g-…|group name> <target>    into an agent group you are in (no wake)',
   '  <target> = a conversation id, <backend>:<id> or a session id (sess-…); a conversation the key opened is within its reach',
   'no grant yet ⇒ the call asks the user in For you (≤ 60 s) and waits; a refusal is final for 10 minutes. Full manual: vibespace-docs api',
+  'an open stays inside its key\'s LIMITS (folders · accounts · permission modes · models · modes — `keys` prints them); outside ⇒ refused by name',
 ].join('\n');
 
+/** A key's limits in words (lane automation-open-limits) — names only; no object = no bounds set (q-049 M1: fail closed). */
+function limitsWords(l) {
+  if (!l || typeof l !== 'object') return 'none set — every open is refused until the user sets them in the Vault window';
+  const any = (v) => (v === 'any' ? 'any' : Array.isArray(v) && v.length ? v.join(', ') : 'none');
+  return `folders ${any(l.cwdRoots)} · accounts ${any(l.accounts)} · permission modes ${any(l.permissionModes)} · models ${any(l.models)} · modes ${any(l.modes)}`;
+}
 async function call(method, route, body) {
   const res = await fetch(API + route, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || data.ok === false) { console.error('vibespace-api: ' + (data.error || 'HTTP ' + res.status) + (data.code ? ` (${data.code})` : '')); process.exit(data.code === 'vault_locked' ? 3 : 1); }
+  if (!res.ok || data.ok === false) {
+    // an open outside its key's limits: the refusal by name + what the key allows (ask inside them, or ask the user to widen them)
+    console.error('vibespace-api: ' + (data.error || 'HTTP ' + res.status) + (data.code ? ` (${data.code})` : '') + (Object.prototype.hasOwnProperty.call(data, 'limits') ? `\n  this key's limits: ${limitsWords(data.limits)}` : ''));
+    process.exit(data.code === 'vault_locked' ? 3 : 1);
+  }
   return data;
 }
 /** --flag value pairs → { flags, rest }. */
@@ -90,7 +101,7 @@ async function main() {
     if (more.length) { console.error(USAGE); process.exit(2); }
     const d = await call('GET', '/api/agent/automation/keys');
     if (!d.keys.length) { console.log('no key is granted to this conversation yet — calling a verb asks the user (For you), or they grant one in the Vault window'); return; }
-    for (const k of d.keys) console.log(`${k.name} (${k.id}) — ${k.scopes.join(', ')} — via ${k.via.map((v) => `${v.subject}${v.mode === 'once' ? ' (once)' : ''}`).join(', ')}`);
+    for (const k of d.keys) console.log(`${k.name} (${k.id}) — ${k.scopes.join(', ')} — via ${k.via.map((v) => `${v.subject}${v.mode === 'once' ? ' (once)' : ''}`).join(', ')}${k.scopes.includes('conversations.open') ? `\n  limits: ${limitsWords(k.limits)}` : ''}`);
     return;
   }
   if (cmd === 'audit') {
@@ -118,4 +129,4 @@ async function main() {
   process.exit(2);
 }
 if (require.main === module) main().catch((e) => { console.error('vibespace-api:', e.message); process.exit(1); });
-module.exports = { typed, TYPED, USAGE };
+module.exports = { typed, TYPED, USAGE, limitsWords };

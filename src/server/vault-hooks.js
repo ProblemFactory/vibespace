@@ -14,7 +14,14 @@
  */
 const SIGNED_OUT_CODE = 4401;
 
-function wireVaultHooks({ vault, auth = null, wss = null, hostTokens = null, plugins = null, sealed = [], integrations = null, redial = null, log = console }) {
+// lane vault-relock-door (owner 2026-10-20 「为啥我有的时候更新后需要重新输入二次密码有时候不用」): the restart's For-you item. The
+// vault locks at every restart by law; the open tab re-asks and a persistent strip warns (src/lib/vault-unlock.js), but a
+// client that was not open would see nothing. So at boot the hub files ONE tray item when the vault is SET UP and LOCKED.
+const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words it with t() (zh + ja in src/lib/i18n-*.js)
+const VAULT_INBOX_KEY = 'vault'; // the For-you bucket (not a session), as login-expiry uses 'accounts' and apps uses 'apps'
+const RELOCK_TEXT = i18nKey('The vault locked after a restart — enter the second password to unlock. Device links, the relay and account switching are waiting.');
+
+function wireVaultHooks({ vault, auth = null, wss = null, hostTokens = null, plugins = null, sealed = [], integrations = null, redial = null, userTodos = null, log = console }) {
   const rederive = () => {
     if (integrations && typeof integrations.vaultChanged === 'function') { try { integrations.vaultChanged(); } catch (e) { log.warn?.(`[vault] the integrations rows were not re-derived: ${(e && e.message) || e}`); } }
   };
@@ -33,6 +40,19 @@ function wireVaultHooks({ vault, auth = null, wss = null, hostTokens = null, plu
     rederive();
     if (plugins && typeof plugins.vaultChanged === 'function') plugins.vaultChanged();
   });
+
+  // THE RESTART'S FOR-YOU ITEM (lane vault-relock-door): at boot, a SET UP + LOCKED vault files ONE tray notice so the owner
+  // is told the vault is waiting even on a client that was not open; its door (`vault-unlock`) opens the unlock dialog
+  // (src/lib/user-todos-actions.js). A SECOND boot while still locked re-files the SAME row (the store dedupes by
+  // sessionKey + text + action — never a duplicate); a vault that is NOT set up files nothing; `onUnlock` resolves it (a
+  // person's unlock on any device, through the store's broadcast, clears it everywhere).
+  if (userTodos && vault.state() === 'locked') {
+    try { userTodos.add(VAULT_INBOX_KEY, { origin: 'vault', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Vault', text: RELOCK_TEXT, i18n: { text: { key: RELOCK_TEXT } }, action: { type: 'vault-unlock' } }); }
+    catch (e) { log.warn?.(`[vault] the restart notice was not filed: ${(e && e.message) || e}`); }
+  }
+  if (userTodos) vault.onUnlock(() => {
+    try { for (const it of userTodos.forSession(VAULT_INBOX_KEY)) if (it.action && it.action.type === 'vault-unlock') userTodos.setStatus(it.id, 'done', 'vault'); } catch { /* the item is already gone */ }
+  });
 }
 
-module.exports = { wireVaultHooks, SIGNED_OUT_CODE };
+module.exports = { wireVaultHooks, SIGNED_OUT_CODE, VAULT_INBOX_KEY, RELOCK_TEXT };

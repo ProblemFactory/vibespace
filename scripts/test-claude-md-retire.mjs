@@ -108,14 +108,14 @@ const fxS = JSON.parse(read(FIXTURE));
 const a = ['file-index', 'bugfix-index'].map((n) => v(fxS, n));
 ok(a.every((j) => j.ok && j.census.retired === 1 && j.census.lost === 0 && (md ? j.census.shaOk === true : j.census.shaOk === null)),
   `(a) removed WITH a retirement ⇒ green — ${a[0].line}`);
-const sFl = homeLines(blk('file-index', fxS), S), gone = sFl.findIndex((l, i) => i > sFl.length / 2 && l.startsWith('src/'));
+const sFl = homeLines(blk('file-index', fxS), S), gone = sFl.findIndex((l, i) => i > sFl.length / 2 && l.startsWith('src/') && fil.heads.includes(cut(l, K)));
 const goneRow = fil.heads.findIndex((t) => t === cut(sFl[gone], K));
 const b = v(fxS, 'file-index', sFl.filter((_, i) => i !== gone));
 ok(!b.ok && b.census.lost === 1 && b.said.includes(`lost: file-index row ${goneRow + 1}: "${fil.heads[goneRow]}"`), `(b) removed WITHOUT ⇒ red, in words: ${b.said[0]}`);
 const withRet = (name, extra) => ({ ...fxS, blocks: fxS.blocks.map((x) => (x.name === name ? { ...x, retired: [...x.retired, ...extra] } : x)) });
 // a row LONGER than its head (K): an edit at its end keeps the head, so it reads `edited` — a bare `src/` heading row would
 // read LOST (lane automation-verbs: its INDEX lines moved the middle so the next `src/` row after `gone` was that heading)
-const live = sFl.findIndex((l, i) => i > gone && l.startsWith('src/') && l.length > K), liveHead = fil.rows[fil.heads.findIndex((t) => t === cut(sFl[live], K))].split(':')[0];
+const live = sFl.findIndex((l, i) => i > gone && l.startsWith('src/') && l.length > K && fil.heads.includes(cut(l, K))), liveHead = fil.rows[fil.heads.findIndex((t) => t === cut(sFl[live], K))].split(':')[0];
 const c = v(withRet('file-index', [{ head: liveHead, why: 'a control: this line was not removed', at: '2026-10-08' }]), 'file-index');
 ok(!c.ok && c.said.some((x) => x.startsWith('dead retirement: file-index row ')), `(c) a retirement whose line still exists ⇒ red: ${c.said.find((x) => x.startsWith('dead'))}`);
 const d = v(withRet('file-index', [{ head: fil.rows[gone > -1 ? fil.heads.findIndex((t) => t === cut(sFl[gone], K)) : 0].split(':')[0], why: 'short', at: '2026-10-08' }]), 'file-index', sFl.filter((_, i) => i !== gone));

@@ -617,6 +617,44 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
   for (const [what, , , good] of TABLE) void what, void good;
 }
 
+console.log('\u2468 THE RESTART\u2019S FOR-YOU ITEM (lane vault-relock-door) \u2014 a boot over a SET UP + LOCKED vault files ONE tray notice; a second boot keeps ONE; unlock resolves it; not set up files nothing');
+{
+  const { UserTodoManager } = R('src/user-todos.js');
+  const { VAULT_INBOX_KEY, RELOCK_TEXT } = R('src/server/vault-hooks.js');
+  const mkTodos = (d) => new UserTodoManager({ dataDir: d, onChange: () => {}, expirySweepMs: 0 });
+  const relocks = (t) => t.forSession(VAULT_INBOX_KEY).filter((i) => i.action && i.action.type === 'vault-unlock');
+  // NOT SET UP \u21d2 nothing (the migration window asks at page load, never a tray row)
+  {
+    const d = dirOf('relock-unset'); const v = mkVault(d); const t = mkTodos(d);
+    wireVaultHooks({ vault: v, userTodos: t, log: quiet });
+    ok(v.state() === 'not_set_up' && relocks(t).length === 0, 'not set up \u21d2 no restart item'); t.stop();
+  }
+  // SET UP + UNLOCKED at boot \u21d2 nothing (it is not locked)
+  {
+    const d = dirOf('relock-open'); const v = mkVault(d); await v.setup(PW, {}); const t = mkTodos(d);
+    wireVaultHooks({ vault: v, userTodos: t, log: quiet });
+    ok(v.state() === 'unlocked' && relocks(t).length === 0, 'set up but unlocked at boot \u21d2 no restart item'); t.stop();
+  }
+  // SET UP + LOCKED \u21d2 ONE; a second boot (a fresh store re-reading the file) \u21d2 still ONE (the SAME row); unlock \u21d2 resolved
+  {
+    const d = dirOf('relock-locked');
+    const v0 = mkVault(d); await v0.setup(PW, {}); v0.lock('close', { quiet: true }); // the shutdown leaves it set-up + locked
+    const v1 = mkVault(d); const t1 = mkTodos(d);
+    ok(v1.state() === 'locked', 'a boot over a set-up dir starts LOCKED by law');
+    wireVaultHooks({ vault: v1, userTodos: t1, log: quiet });
+    const one = relocks(t1);
+    ok(one.length === 1 && one[0].kind === 'notice' && one[0].origin === 'vault' && one[0].action.type === 'vault-unlock' && one[0].text === RELOCK_TEXT, 'set up + locked boot \u21d2 ONE For-you notice (origin vault, the vault-unlock door, the restart text)', one.map((i) => ({ kind: i.kind, origin: i.origin, type: i.action && i.action.type })));
+    t1.flush(); t1.stop();
+    const v2 = mkVault(d); const t2 = mkTodos(d); // boot 2: the persisted item re-read
+    wireVaultHooks({ vault: v2, userTodos: t2, log: quiet });
+    const two = relocks(t2);
+    ok(two.length === 1 && two[0].id === one[0].id, 'a second boot while still locked \u21d2 no duplicate (dedupe by key + text + action keeps the SAME row)', { ids: two.map((i) => i.id), first: one[0].id });
+    await v2.unlock(PW, {});
+    ok(relocks(t2).length === 0 && t2.get(one[0].id) && t2.get(one[0].id).status === 'done' && t2.get(one[0].id).resolvedBy === 'vault', 'a person\u2019s unlock resolves the item (onUnlock)', t2.get(one[0].id));
+    t2.stop();
+  }
+}
+
 for (const e of engines) { try { e.close(); } catch { } }
 process.env.HOME = HOME0;
 try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }

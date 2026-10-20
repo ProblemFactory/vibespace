@@ -329,6 +329,25 @@ console.log('K  signals, broadcast, audit');
   for (const sig of ['SIGTERM', 'SIGINT']) for (const l of process.listeners(sig)) process.removeListener(sig, l);
 }
 
+console.log('L  startedAt names the boot (lane vault-relock-door) \u2014 the open tab tells a RESTART from a lock act by it');
+{
+  const { dir } = world();
+  let clock = 1700000000000;
+  const e = mk(dir, { now: () => clock });
+  const at0 = e.facts().startedAt;
+  ok(typeof at0 === 'number' && at0 === 1700000000000, 'facts().startedAt = the engine\'s construction time (ms)', String(at0));
+  clock += 5000; await e.setup(PW, {});
+  ok(e.state() === 'unlocked' && e.facts().startedAt === at0, 'a setup does not change startedAt (the same boot)');
+  clock += 5000; e.lock('test');
+  ok(e.state() === 'locked' && e.facts().startedAt === at0, 'a lock does not change startedAt (a lock act is not a restart)');
+  clock += 5000; await e.unlock(PW);
+  ok(e.state() === 'unlocked' && e.facts().startedAt === at0, 'an unlock does not change startedAt');
+  clock += 9000;
+  const e2 = mk(dir, { now: () => clock });
+  ok(e2.facts().startedAt === clock && e2.facts().startedAt !== at0, 'a NEW engine over the same dir (a restart) \u21d2 a new startedAt (same bundle, a different process \u2014 the open tab re-asks)', JSON.stringify({ at0, at1: e2.facts().startedAt }));
+  e2.close();
+}
+
 fs.rmSync(ROOT, { recursive: true, force: true });
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

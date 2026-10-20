@@ -129,6 +129,40 @@ function specTables() {
   return { backends: ids, chatBackends: Array.isArray(chat) ? chat : null, byBackend };
 }
 
+/** LANE AUTOMATION-OPEN-LIMITS (the q-048 verify's M2) — what an open that names NONE would use, so a key's limits judge
+ *  the EFFECTIVE open (src/server/automation-engine.js `openFacts.defaults`): the default account THIS backend bills (the
+ *  store's `creds.defaultIdField`, as src/ws-create.js resolves an open with no account) and the instance's default model
+ *  (`<prefix>.defaultModel` — the new-session rung of ws-create's ladder). null = none (the CLI's own login / model). */
+function openDefaults(backend, { accounts = null, harnessSetting = null, harnessDeclares = null } = {}) {
+  let h = null;
+  try { h = require('../harnesses').harnessOf(backend); } catch { h = null; }
+  const field = h && h.creds ? h.creds.defaultIdField : null;
+  const st = accounts && accounts._state ? accounts._state : {};
+  let model = null;
+  try { model = typeof harnessDeclares === 'function' && harnessDeclares(backend, 'defaultModel') ? String(harnessSetting(backend, 'defaultModel') ?? '') || null : null; } catch { model = null; }
+  return { accountId: (field && typeof st[field] === 'string' && st[field]) || null, model };
+}
+/** The Vault window's limit pickers (lane automation-open-limits): every registered harness's permission modes and models
+ *  from its spawn rows (`default` = the row's empty option: the harness's own — the open names none), and the accounts
+ *  (ids + names + backend + type — accounts.list() is the sanitized roster, never key material). */
+function limitChoices({ accounts = null } = {}) {
+  let ids = [], HS = null;
+  try { ids = require('../harnesses').ids(); } catch { ids = []; }
+  try { HS = require('../harness-settings'); } catch { HS = null; }
+  const permissionModes = [], models = [];
+  for (const id of ids) {
+    const table = HS && HS.HARNESS_SETTINGS ? HS.HARNESS_SETTINGS[id] : null;
+    const rows = table && HS ? HS.rowsOfKind(table, 'spawn') : [];
+    const via = (v) => rows.find((r) => r && r.apply && r.apply.via === v) || null;
+    for (const [row, out] of [[via('permissionMode'), permissionModes], [via('model'), models]]) {
+      for (const o of (row && Array.isArray(row.options) ? row.options : [])) if (o && typeof o.value === 'string') out.push({ backend: id, value: o.value || 'default', label: String(o.label || o.value || 'default') });
+    }
+  }
+  let list = [];
+  try { const l = accounts && typeof accounts.list === 'function' ? accounts.list() : null; list = ((l && l.accounts) || []).map((a) => ({ id: a.id, name: a.name || a.id, backend: a.backend || 'claude', type: a.type || null })); } catch { list = []; }
+  return { accounts: list, permissionModes, models };
+}
+
 /** The five verbs (+ the status read) over a deps getter — `D()` below is that getter's answer at each call. */
 function opsOver(getDeps) {
   const D = () => getDeps() || {};
@@ -389,5 +423,5 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
 
 module.exports = {
   OPEN_REASON, OPEN_TIMEOUT_MS,
-  OPEN_ID_WAIT_MS, provide, callOp, renameSession, automationVerbs, forDeps, opsOver, specTables, ...sharedOps,
+  OPEN_ID_WAIT_MS, provide, callOp, renameSession, automationVerbs, forDeps, opsOver, specTables, openDefaults, limitChoices, ...sharedOps,
 };

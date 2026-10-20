@@ -1994,7 +1994,7 @@ app.get('/api/agent/channels/attachment', async (req, res) => {
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', 'attachment');
     res.setHeader('Content-Length', String(size));
-    res.setHeader('X-VibeSpace-Attachment', encodeURIComponent(JSON.stringify({ mime: r.mime || null, bytes: size, from: r.from || null, conversation: r.conversation || null })));
+    res.setHeader('X-VibeSpace-Attachment', encodeURIComponent(JSON.stringify({ mime: r.mime || null, bytes: size, from: r.from || null, conversation: r.conversation || null, source: r.source === 'vendor' ? 'vendor' : 'archive' })));
     const st = fh.createReadStream();
     fh = null;   // the stream owns (and closes) it now
     st.on('error', () => res.destroy());

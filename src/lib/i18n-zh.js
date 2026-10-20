@@ -9322,6 +9322,8 @@ export default {
   "Vault locked": "保险库已锁定", // lane vault-e2e-password
   "Vault locked — click to unlock": "保险库已锁定——点击解锁", // lane vault-e2e-password
   "Unlock the vault": "解锁保险库", // lane vault-e2e-password
+  "The vault is locked — device links, the relay and account switching are waiting.": "保险库未解锁 — 设备链接、中继和账号切换在等", // lane vault-relock-door: the persistent lock strip
+  "The vault locked after a restart — enter the second password to unlock. Device links, the relay and account switching are waiting.": "保险库在重启后已锁定 — 输入第二密码解锁；设备链接、中继与账号切换在等", // lane vault-relock-door: the restart For-you notice
   "The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.": "VibeSpace 保存的凭据（账号、挂载、渠道、集成、应用登录、通行密钥、已配对机器的连接、中继与语音登录）在你输入第二密码之前一直锁着——每次重启、每次锁定之后都是。", // lane vault-e2e-password (r2: machines, relay, voice; every lock)
   "Second password": "第二密码", // lane vault-e2e-password
   "Unlock": "解锁", // lane vault-e2e-password
@@ -9558,4 +9560,26 @@ export default {
   "Use an automation key you granted it": "用一把你授权给它的自动化 key", // design q-046 (lane automation-keys-core)
   "List its automation keys or their audit": "列出它的自动化 key 或审计记录", // design q-046 (lane automation-keys-core)
   "{n} with a conversation link": "{n} 条带会话入口", // lane run-fold-channel-compact
+  "any": "任何", // lane automation-open-limits
+  "The CLI's own login": "CLI 自己的登录", // lane automation-open-limits
+  "Permission modes": "权限模式", // lane automation-open-limits
+  "Models": "模型", // lane automation-open-limits
+  "Modes": "模式", // lane automation-open-limits
+  "No folder yet": "还没有文件夹", // lane automation-open-limits
+  "Parent folder": "上一级文件夹", // lane automation-open-limits
+  "Add this folder": "加入这个文件夹", // lane automation-open-limits
+  "A folder is an absolute path": "文件夹要写绝对路径", // lane automation-open-limits
+  "Any account": "任何账号", // lane automation-open-limits
+  "Any model": "任何模型", // lane automation-open-limits
+  "Another model id": "另一个模型 id", // lane automation-open-limits
+  "Limits of \"{name}\"": "「{name}」的边界", // lane automation-open-limits
+  "This key has no folders yet — what you save here becomes its bounds. Until you set at least one folder, every conversation it would open is refused.": "这把 key 还没有文件夹——你在这里保存的就是它的边界。在你至少设定一个文件夹之前，它想开的每个对话都会被拒。", // lane automation-open-limits (q-049 M1)
+  "Audit of \"{name}\"": "「{name}」的审计记录", // lane automation-open-limits
+  "No audit line for this key yet": "这把 key 还没有审计记录", // lane automation-open-limits
+  "Limits not set": "未设边界", // lane automation-open-limits (q-049 M1)
+  "The CLI's own setting": "CLI 自己的设置", // lane automation-open-limits (q-049 M2)
+  "No folders are set — every conversation it would open is refused until you set them with Limits…": "未设边界：它想开的每个对话都会被拒，直到你用「边界…」设定", // lane automation-open-limits (q-049 M1)
+  "Limits…": "边界…", // lane automation-open-limits
+  "Audit…": "审计…", // lane automation-open-limits
+  "What the conversations it opens may use": "它开的对话能用什么", // lane automation-open-limits
 };

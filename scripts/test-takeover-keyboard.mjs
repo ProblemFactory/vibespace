@@ -26,6 +26,9 @@
 //      one row per (file, construct), each classified (yields on the user's own press / taken back / declared, with where the
 //      focus lands); every class proven by its legs above and reddened by the §2 copy that removes its rule; the census's own
 //      controls (a row dropped, a construct added, a construct gone, an unknown class, a surface named only in a comment).
+//      Lane takeover-surface-census (the .323 base red: eleven surfaces of the .313–.323 lanes, none classed the day it landed):
+//      their rows, and the representatives no leg had proved — a password box, a read-only field, a role=button chip, the
+//      vault's 「验证是你」 opened in the press's own task and a round trip late; vault-reveal.js's ask-first pinned.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -712,6 +715,40 @@ async function scenarios(KY) {
     r.ok = r.focus === 'sink' && r.page === 'pw' && !r.yielded && !r.surface;
     return r;
   });
+  // lane takeover-surface-census (the .323 base red — eleven surfaces of the .313–.323 lanes unclassified): the class
+  // representatives those rows brought that no leg above proved. A PASSWORD box (the vault's second password: the unlock /
+  // setup / change modals, 「验证是你」): <input type=password> is a text box — the user's own press yields, "s3" lands in it
+  out.textPassword = await world(async ({ V: [A], D, press, type, at }) => {
+    A.takeover(); await flush();
+    const box = new D.El('input', { cls: 'vault-pw', type: 'password' }); D.body.append(box);
+    await press(box); const focus = at(); type('s3');
+    const r = { focus, val: box.value, page: A.st.page, yielded: A.ky.yielded };
+    r.ok = r.focus === 'vault-pw' && r.val === 's3' && r.page === '' && r.yielded;
+    return r;
+  });
+  // a READ-ONLY field (the Vault window's shown value, `.vw-plain`; its Copy button copies): it takes no typing — the sink takes
+  // the focus back, the keys stay the page's, the value is untouched, nothing said
+  out.controlReadonly = await world(async ({ V: [A], D, press, type, at }) => {
+    A.takeover(); await flush();
+    const f = new D.El('input', { cls: 'vw-plain', type: 'text' }); f.readOnly = true; f.value = 'v4lue'; D.body.append(f);
+    await press(f); await flush(); const focus = at(); type('pw');
+    const r = { focus, val: f.value, page: A.st.page, yielded: A.ky.yielded, cues: A.st.cues };
+    r.ok = r.focus === 'sink' && r.val === 'v4lue' && r.page === 'pw' && !r.yielded && r.cues === 0;
+    return r;
+  });
+  // a role=button CHIP (tabindex 0 — one window's stream stats chip, a scale chip): the press works it (its click), the sink takes
+  // the focus back, its Enter stays the page's
+  out.controlChip = await world(async ({ V: [A], D, press, type, at }) => {
+    A.takeover(); await flush();
+    let clicks = 0, keys = 0;
+    const chip = new D.El('span', { cls: 'machine-window-chip', tabindex: 0 }); D.body.append(chip);
+    chip.addEventListener('pointerup', () => { clicks++; }); // (the mini's click = the release)
+    chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); keys++; } });
+    await press(chip); await flush(); const focus = at(); type('\n');
+    const r = { focus, clicks, keys, page: A.st.page, yielded: A.ky.yielded };
+    r.ok = r.focus === 'sink' && r.clicks === 1 && r.keys === 0 && r.page === '\n' && !r.yielded;
+    return r;
+  });
   // verify r3 (r2's held): YIELDED, then a press on something that takes no keys (the chat's message list focuses its
   // container, tabindex -1) — the yield stays (a press on the chat never sends keys to the page) and the chip says where the
   // keys are NOW: nowhere ("not in a text box"); a press back on the composer says "chat" again
@@ -792,6 +829,25 @@ async function scenarios(KY) {
     r.ok = r.f === 'sink' && r.page === '\n' && r.cues === 1 && r.open && !r.held && r.why === 'stale press';
     return r;
   });
+  // (5b) lane takeover-surface-census: THE VAULT'S 「验证是你」 (src/lib/vault-reveal.js — a password box in a createModalShell
+  // dialog) from a menu row while you drive. Opened in the press's own task (the Vault window's 「显示」; Manage Agents' Show key…
+  // since this lane) it is his act: it TAKES the keys — the second password lands in its box, the page gets nothing. Opened a hub
+  // round trip late (Show key… before: the key asked for first, refused, THEN the ask) it is a stale press — taken back and said,
+  // and the typing is the agent's PAGE's. Hence revealAccountKey asks FIRST while this page holds no window (pinned in §3)
+  const passwordAsk = (late) => world(async ({ V: [A], D, press, type, at, clock, modal }) => {
+    A.takeover(); await flush();
+    let m = null; const ask = () => { m = modal({ input: true }); m.box.type = 'password'; };
+    const item = menuItem(D, () => { if (!late) ask(); });
+    await press(item);
+    if (late) { clock.advance(T.USER_PRESS_MS + 150); ask(); }
+    await flush(); await flush();
+    const focus = at(); type('s3cret');
+    return { focus, box: m.box.value, page: A.st.page, cues: A.st.dialogCues, why: A.ky.dialogWhy, held: A.ky.dialogHolds };
+  });
+  { const fresh = await passwordAsk(false), late = await passwordAsk(true);
+    out.dialogPassword = { fresh, late,
+      ok: fresh.focus === 'dialog-input' && fresh.box === 's3cret' && fresh.page === '' && fresh.cues === 0 && fresh.why === 'pressed' && fresh.held
+        && late.focus === 'sink' && late.box === '' && late.page === 's3cret' && late.cues === 1 && late.why === 'stale press' && !late.held }; }
   // (6) YIELDED to the chat composer ("hi"), a press on a chat button opens an INPUT dialog — his act: it takes the keys ("nm" +
   // Enter answer it), and its close gives them back to the COMPOSER (the yield's home — not the button he pressed): "!" lands
   // there, the line above the composer is on, the chip says the chat again; the page gets nothing
@@ -1173,7 +1229,7 @@ console.log('§2 patched-copy controls: each rule removed turns exactly its scen
 const M = mutantCopies('tkbd', REPO);
 const KYSRC = fs.readFileSync(path.join(REPO, 'src/lib/keyboard-yield.js'), 'utf8');
 const CONTROLS = [
-  { tag: 'no-press', why: 'the yield ignores the press (every focus reclaimed — userW\'s bug)', from: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = u.byUserPress;', to: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = false;', red: ['userW', 'picture', 'bar', 'terminal', 'touch', 'twoViews', 'handback', 'follow', 'ownTab', 'hiddenTab', 'h1PressHidden', 'h1Reconnect', 'n1Xpra', 'n1Vnc', 'n1Stream', 'q1Cue', 'homeGone', 'widgetYielded', 'textSearch', 'textCm', 'labelPress', 'focusStorm', 'twoViewsEnd', 'socketWhileYielded', 'streamWhileYielded', 'dialogYielded', 'dialogConfirmOverYieldHidden'] }, // (verify r4: every scenario that needs the yield; lane dialog-keys: a dialog opened FROM a yield)
+  { tag: 'no-press', why: 'the yield ignores the press (every focus reclaimed — userW\'s bug)', from: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = u.byUserPress;', to: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = false;', red: ['userW', 'picture', 'bar', 'terminal', 'touch', 'twoViews', 'handback', 'follow', 'ownTab', 'hiddenTab', 'h1PressHidden', 'h1Reconnect', 'n1Xpra', 'n1Vnc', 'n1Stream', 'q1Cue', 'homeGone', 'widgetYielded', 'textSearch', 'textCm', 'labelPress', 'focusStorm', 'twoViewsEnd', 'socketWhileYielded', 'streamWhileYielded', 'dialogYielded', 'dialogConfirmOverYieldHidden', 'textPassword'] }, // (verify r4: every scenario that needs the yield; lane dialog-keys: a dialog opened FROM a yield)
   { tag: 'any-input', why: 'a same-input check that matches anything (the password guard gone)', from: 'export function sameInput(pressed, focused) {\n  if (!pressed || !focused) return false;', to: 'export function sameInput(pressed, focused) {\n  return true;', red: ['elsewhereThenScript', 'alreadyFocusedGuard', 'q1Cue', 'helperCopy', 'cueRecreated'] }, // (verify r3: the copy fallback's scratch box would take the keys too; lane dialog-keys: a dialog is judged at its OPEN by the opener, never by the same-input rule — no dialog leg here) (a press INSIDE the view is never remembered — pictureThenScript stays green by that rule, not this one)
   { tag: 'no-restamp', why: 'the touch tap\'s release does not re-stamp the press', from: '      if (s.press && e.target === s.press.target && e.isTrusted === true) s.press.at = now();\n', to: '', red: ['touch'] },
   { tag: 'trust-any', why: 'a synthetic press counts as the user\'s', from: 's.press = { target: e.target, at: now(), trusted: e.isTrusted === true };', to: 's.press = { target: e.target, at: now(), trusted: true };', red: ['synthetic', 'alreadyFocusedGuard'] },
@@ -1197,22 +1253,25 @@ const CONTROLS = [
   { tag: 'no-xterm-host', why: 'verify r3: a terminal\'s screen is not one input with its helper textarea', from: "const INPUT_HOSTS = '.xterm, .picture-shell';", to: "const INPUT_HOSTS = '.picture-shell';", red: ['terminal'] },
   { tag: 'no-contenteditable', why: 'verify r3: a contenteditable (CodeMirror) is not a text box', from: '  if (el.isContentEditable) return true;\n', to: '', red: ['textCm'] },
   { tag: 'no-search-type', why: 'verify r3: an <input type=search> is not a text box', from: "const TEXT_INPUT_TYPES = new Set(['', 'text', 'search',", to: "const TEXT_INPUT_TYPES = new Set(['', 'text',", red: ['textSearch'] },
+  // lane takeover-surface-census (the vault's surfaces)
+  { tag: 'no-password-type', why: 'lane takeover-surface-census: an <input type=password> is not a text box (the vault\'s second password)', from: "'tel', 'password', 'number'", to: "'tel', 'number'", red: ['textPassword', 'dialogPassword'] },
+  { tag: 'no-readonly', why: 'lane takeover-surface-census: a read-only field counts as a text box (a press yields to a box that takes no typing)', from: "TEXT_INPUT_TYPES.has(String(el.type || '').toLowerCase()) && !el.readOnly && !el.disabled;", to: "TEXT_INPUT_TYPES.has(String(el.type || '').toLowerCase()) && !el.disabled;", red: ['controlReadonly'] },
   // verify r3 (the sink's blur)
   { tag: 'where-kind', why: 'verify r3 (r2\'s held) pre-fix: the chip names the text box the keys were given to, wherever the focus went', from: "      if (active && active !== sink && !inView(active)) { if (takesKeys(active)) return yieldKindOf(active); if (isFrame(active)) return 'other'; }\n      return 'none';", to: '      return s.kind;', red: ['widgetYielded', 'focusStorm'] },
   { tag: 'no-choice', why: 'verify r3 F1 pre-fix: a <select> is taken back like any other focus (its list closes)', from: "export function isChoiceControl(el) { try { return !!el && el.nodeType === 1 && el.tagName === 'SELECT' && !el.disabled; } catch { return false; } }", to: 'export function isChoiceControl(el) { return false; }', red: ['choiceSelect'] }, // (lane dialog-keys: a <select> in a dialog he opened is the dialog's — no choice rule there)
   { tag: 'blur-frame-blind', why: 'verify r3: a frame is taken back like any other focus (never said)', from: "  try { if (isFrame(a) && !(root && root.contains(a))) return 'frame'; } catch { /* detached */ }", to: '', red: ['frameSink'] },
-  { tag: 'blur-keeps-all', why: 'verify r3: the sink never takes a focus back (a press on a control / list / frame keeps it)', from: "  if (isEditable(a) || isChoiceControl(a)) return 'keep';", to: "  return 'keep';", red: ['frameSink', 'controlCheckbox', 'widgetList', 'textCm', 'controlSummary', 'dialogScript', 'dialogSynthetic', 'dialogPicture', 'dialogStale', 'dialogAppKey'] }, // (textCm: the gutter's scroller would keep the focus; lane dialog-keys: a dialog that opened BY ITSELF keeps its OK button's focus — its Enter would answer it)
+  { tag: 'blur-keeps-all', why: 'verify r3: the sink never takes a focus back (a press on a control / list / frame keeps it)', from: "  if (isEditable(a) || isChoiceControl(a)) return 'keep';", to: "  return 'keep';", red: ['frameSink', 'controlCheckbox', 'widgetList', 'textCm', 'controlSummary', 'dialogScript', 'dialogSynthetic', 'dialogPicture', 'dialogStale', 'dialogAppKey', 'controlReadonly', 'controlChip'] }, // (textCm: the gutter's scroller would keep the focus; lane dialog-keys: a dialog that opened BY ITSELF keeps its OK button's focus — its Enter would answer it)
   { tag: 'n1-no-video', why: 'the .299 integration pre-fix: the stream\'s <video> is not a place keys go', from: 'export function isKeyboardSurface(el) { return isPictureCanvas(el) || isStreamVideo(el); }', to: 'export function isKeyboardSurface(el) { return isPictureCanvas(el); }', red: ['n1Stream'] },
   { tag: 'n1-no-surface', why: 'verify r2 N1 pre-fix: noVNC\'s canvas is not a place keys go', from: "  try { return !!el && el.nodeType === 1 && el.tagName === 'CANVAS' && typeof el.closest === 'function' && !!el.closest('.picture-shell'); } catch { return false; }", to: '  return false;', red: ['n1Vnc', 'n1Script'] },
   // lane dialog-keys: a dialog the user's own act opened takes the keys; one that opens by itself never does
-  { tag: 'dialog-no-rule', why: 'lane dialog-keys pre-fix: every modal judged as opening by itself (taken back, said) — Enter reaches the page', from: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: o.byUserPress, opener: \'app\' });', to: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: false, opener: \'app\' });', red: ['dialogUserPress', 'dialogYielded', 'dialogNested', 'dialogScriptClose', 'dialogTwoViews', 'dialogAppKey', 'dialogChain', 'dialogFocusless', 'dialogSelect', 'dialogStatic', 'dialogBackGone', 'dialogSelfOverHeld', 'dialogThreeMiddleGone', 'dialogTouchHeld', 'dialogConfirmOverYieldHidden', 'dialogOneActOneDialog'] },
+  { tag: 'dialog-no-rule', why: 'lane dialog-keys pre-fix: every modal judged as opening by itself (taken back, said) — Enter reaches the page', from: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: o.byUserPress, opener: \'app\' });', to: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: false, opener: \'app\' });', red: ['dialogUserPress', 'dialogYielded', 'dialogNested', 'dialogScriptClose', 'dialogTwoViews', 'dialogAppKey', 'dialogChain', 'dialogFocusless', 'dialogSelect', 'dialogStatic', 'dialogBackGone', 'dialogSelfOverHeld', 'dialogThreeMiddleGone', 'dialogTouchHeld', 'dialogConfirmOverYieldHidden', 'dialogOneActOneDialog', 'dialogPassword'] },
   { tag: 'dialog-trust-any', why: 'lane dialog-keys: a synthetic press counts as the opener (the isTrusted check gone)', from: 's.opener = { at: now(), trusted: e.isTrusted === true, picture: onPicture(e.target) };', to: 's.opener = { at: now(), trusted: true, picture: onPicture(e.target) };', red: ['dialogSynthetic'] },
   { tag: 'dialog-app-key-any', why: 'lane dialog-keys: a synthetic key counts as the app\'s', from: '    onAppKey(e) { if (e && e.isTrusted === true)', to: '    onAppKey(e) { if (e)', red: ['dialogAppKey'] },
   { tag: 'dialog-no-picture', why: 'lane dialog-keys: a press on the picture (the page\'s) counts as the opener', from: 'const onPicture = (el) => { try { return !!el && !!picture && (el === picture || picture.contains(el)); } catch { return false; } };', to: 'const onPicture = () => false;', red: ['dialogPicture'] },
   { tag: 'dialog-orphan', why: 'lane dialog-keys: a closed dialog never leaves the stack (an orphan hold — the keys never come back)', from: '      const open = heldOpen();\n', to: '      const open = s.holds;\n', red: ['dialogUserPress', 'dialogYielded', 'dialogNested', 'dialogScriptClose', 'dialogTwoViews', 'dialogAppKey', 'dialogChain', 'dialogFocusless', 'dialogSelect', 'dialogStatic', 'dialogBackGone', 'dialogThreeMiddleGone', 'dialogConfirmOverYieldHidden', 'dialogOneActOneDialog'] }, // (verify r1: dialogSelfOverHeld stays green — the self-opened modal was never held, the nowhere rule alone answers it)
   { tag: 'dialog-back-base', why: 'lane dialog-keys: the newest\'s close skips the older dialog (nothing returns to it)', from: '      const back = all.filter((h) => !open.includes(h)).reverse().map((h) => h.back).find(inOpen) || null;', to: '      const back = null;', red: ['dialogNested'] },
   { tag: 'dialog-home-active', why: 'lane dialog-keys: a dialog opened from a yield returns to whatever held the focus (the button pressed), not the yield\'s text box', from: 'el: active && active !== sink && !inView(active) && takesKeys(active) ? active : s.home }', to: 'el: active }', red: ['dialogYielded', 'dialogConfirmOverYieldHidden'] },
-  { tag: 'dialog-no-cue', why: 'lane dialog-keys: a modal that opened by itself is taken back silently', from: '      if (!dialogReclaimCue({ verdict, at: now(), lastCueAt: s.lastCueAt })) return false;\n', to: '      return false;\n', red: ['dialogScript', 'dialogSynthetic', 'dialogPicture', 'dialogStale', 'dialogAppKey'] },
+  { tag: 'dialog-no-cue', why: 'lane dialog-keys: a modal that opened by itself is taken back silently', from: '      if (!dialogReclaimCue({ verdict, at: now(), lastCueAt: s.lastCueAt })) return false;\n', to: '      return false;\n', red: ['dialogScript', 'dialogSynthetic', 'dialogPicture', 'dialogStale', 'dialogAppKey', 'dialogPassword'] },
   // lane dialog-keys verify r1: the keys never fall to nowhere while a dialog holds
   { tag: 'dialog-nowhere-stays', why: 'verify r1 pre-fix: a settle that closed nothing moves nothing — the focus fallen to <body> (a self-opened modal answered over the held one) stays there, the typing goes nowhere', from: "      if (open.length === all.length) return nowhere(active) ? { to: 'older', el: top.overlay } : null;", to: '      if (open.length === all.length) return null;', red: ['dialogSelfOverHeld'] },
   // verify r1 K6: the three parts the revert table found no scenario for
@@ -1250,6 +1309,9 @@ ok(R.widgetYielded.ok, 'verify r3 (r2\'s held): yielded, a press on the chat\'s 
 ok(R.textSearch.ok, 'verify r3 (the census\'s text row): a SEARCH box (<input type=search> — the palette, the pickers) yields to the user\'s own press; "ab" lands in it', J(R.textSearch));
 ok(R.textCm.ok, 'verify r3 (the census\'s text row): the CODE EDITOR — a press on a line yields to CodeMirror\'s .cm-content ("zz" in the doc); a press on its gutter focuses the scroller, the sink takes it back ("g" to the page — without a takeover the gutter takes no typing either)', J(R.textCm));
 ok(R.noneCanvas.ok, 'verify r3 (the census\'s none row): a chart\'s canvas takes no keys — a press on it leaves them the page\'s; only a picture shell\'s canvas is a keyboard surface', J(R.noneCanvas));
+ok(R.textPassword.ok, 'lane takeover-surface-census (the census\'s text row): a PASSWORD box (the vault\'s second password) yields to the user\'s own press; "s3" lands in it, the page gets nothing', J(R.textPassword));
+ok(R.controlReadonly.ok, 'lane takeover-surface-census (the census\'s control row): a READ-ONLY field (the Vault window\'s shown value) takes no typing — the sink takes the focus back, the keys stay the page\'s, nothing said', J(R.controlReadonly));
+ok(R.controlChip.ok, 'lane takeover-surface-census (the census\'s control row): a role=button CHIP (tabindex 0 — the stream stats chip) works by the press, the sink takes the focus back, its Enter stays the page\'s', J(R.controlChip));
 // ── verify r4: attacks on r3's rules ──
 ok(R.cueRecreated.ok, 'verify r4 (attack 2): a box focused, REPLACED and focused again in one task (a keyed patch) — the gone box never said, the box that stayed said ONCE (before: reclaimed twice, said never — the one flag consumed by the wrong reader)', J(R.cueRecreated));
 ok(R.cueStaleSame.ok, 'verify r4 (attack 2, declared): a press ON the box whose focus lands after USER_PRESS_MS (a blocked render) is reclaimed and not said — the cue is for a press elsewhere', J(R.cueStaleSame));
@@ -1265,6 +1327,7 @@ ok(R.dialogScript.ok, 'lane dialog-keys (THE PASSWORD GUARD): a confirm that ope
 ok(R.dialogSynthetic.ok, 'lane dialog-keys (a script cannot fake the opener): a SYNTHETIC press (isTrusted false) that opens the confirm is not the user\'s — taken back and said, its Enter the page\'s', J(R.dialogSynthetic));
 ok(R.dialogPicture.ok, 'lane dialog-keys: a press on the PICTURE went to the page — a confirm opening by itself 50 ms later is not his: taken back and said', J(R.dialogPicture));
 ok(R.dialogStale.ok, `lane dialog-keys (declared): a confirm opening ${T.USER_PRESS_MS + 150} ms after the user\'s release (a slow fetch) is judged as opening by itself — taken back and said`, J(R.dialogStale));
+ok(R.dialogPassword.ok, `lane takeover-surface-census: 「验证是你」 opened in the press's own task TAKES the keys (the second password in its box, the page nothing); opened ${T.USER_PRESS_MS + 150} ms late (a hub round trip) it is a stale press — taken back, said, the typing the PAGE's: why Show key… asks first`, J(R.dialogPassword));
 ok(R.dialogYielded.ok, 'lane dialog-keys: YIELDED to the composer, a press on a chat button opens an input dialog — it takes the keys ("nm" + Enter answer it), its close gives them back to the COMPOSER (the yield\'s home): "!" lands there, the line is on, the chip says the chat; the page gets nothing', J(R.dialogYielded));
 ok(R.dialogNested.ok, 'lane dialog-keys: a confirm OVER an input dialog — the newest holds; its close returns to the older (what held the caret when it opened); the older\'s close returns to the page ("z")', J(R.dialogNested));
 ok(R.dialogScriptClose.ok, 'lane dialog-keys (no orphan hold): a dialog he opened REMOVED by a script returns the keys to the page ("q"); the OLDER of two removed by a script — the newest still holds, its close returns to the page ("r")', J(R.dialogScriptClose));
@@ -1275,7 +1338,7 @@ ok(R.dialogFocusless.ok, 'lane dialog-keys: a dialog he opened that focuses noth
 ok(R.dialogSelect.ok, 'lane dialog-keys: a <select> in a dialog he opened keeps the focus of his press (nothing takes it back while the dialog holds), its key never reaches the page; a press on OK answers it and the keys go back to the page', J(R.dialogSelect));
 ok(R.dialogStatic.ok, 'lane dialog-keys: the STATIC overlay (#dialog-overlay: shown by its class and announced, closed by the class) — its box takes "/w", hidden it gives the keys back to the page ("z")', J(R.dialogStatic));
 ok(R.dialogPageBar.ok, 'lane dialog-keys: the agent\'s PAGE dialog on the live view\'s own bar is no app modal — announced or not, never taken; the view keeps the keys', J(R.dialogPageBar));
-ok(Object.values(R).every((r) => r.ok) && Object.keys(R).length === 70, `…and the real module passes all ${Object.keys(R).length} scenarios under the same harness`);
+ok(Object.values(R).every((r) => r.ok) && Object.keys(R).length === 74, `…and the real module passes all ${Object.keys(R).length} scenarios under the same harness`);
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: CONTROLS.length, label: '§2 ' })) ok(r.pass, r.name, r.detail);
 
 // ═══ §3 WIRING PINS ═══════════════════════════════════════════════════════════
@@ -1408,6 +1471,40 @@ ok(miss.length === 0 && zh.includes('"键盘在对话框 — 点画面继续操�
   ok(rd.length > 400 && !/announceModal|MODAL_OPEN_EVENT|dialog-overlay/.test(rd), 'the agent\'s PAGE dialog (the view\'s own Accept / Dismiss bar) is never announced as an app modal — its handling is the view\'s, unchanged');
 }
 
+// lane takeover-surface-census: the vault's 「验证是你」 opens in the press's OWN task wherever a press asks for a stored value — Show
+// key… (revealAccountKey) asks FIRST while the vault is unlocked and this page holds no window (§1 dialogPassword: asked after the
+// hub's refusal it opened a round trip late, and the second password went to the agent's page); the Vault window's 「显示」
+// (revealValue) asks before its request
+{ const VR = fs.readFileSync(path.join(REPO, 'src/lib/vault-reveal.js'), 'utf8');
+  const fnOf = (src, head) => { const a = src.indexOf(head); return a < 0 ? '' : src.slice(a, src.indexOf('\n}\n', a)); };
+  const firstLine = (fn) => fn.split('\n').slice(1).find((l) => /\S/.test(l) && !/^\s*\/\//.test(l)) || '';
+  const PRE = "  if (!revealLeftMs() && vaultFacts()?.state === 'unlocked' && !(await askRevealPassword())) return null;";
+  const asksFirst = (src) => { const f = fnOf(src, 'export async function revealAccountKey('); return firstLine(f) === PRE && f.indexOf(PRE) < f.indexOf('fetchJson('); };
+  ok(asksFirst(VR) && /^import \{ vaultWords, vaultFacts, onVaultFacts \} from '\.\/vault-unlock\.js';$/m.test(VR), 'vault-reveal.js: Show key… (revealAccountKey) asks 验证是你 FIRST — before any request — while the vault is unlocked and this page holds no window', firstLine(fnOf(VR, 'export async function revealAccountKey(')));
+  ok(!asksFirst(VR.replace(PRE + '\n', '')), 'NEGATIVE CONTROL (the pre-lane revealAccountKey: the key asked for first): the pin is red');
+  const rv = fnOf(VR, 'export async function revealValue(');
+  ok(/^    if \(!revealLeftMs\(\) && !\(await askRevealPassword\(\)\)\) return \{ ok: false, code: 'cancelled' \};$/m.test(rv) && rv.indexOf('askRevealPassword()') < rv.indexOf('rvPost('), 'vault-reveal.js: the Vault window\'s 「显示」 (revealValue) asks before its request while this page holds no window', rv.slice(0, 300));
+
+  // q-050 (Fable verify) — THE SECOND LATE-ASK ROAD: on the hub's `reveal_needs_password` (a stale window — a lock→unlock an
+  // agent can send, a hub restart, the 5-minute boundary) NEITHER function asks again a round trip late; it forgets the window
+  // and returns the refusal, so the NEXT press asks first in its own task (the §1 dialogPassword leg shows a late ask leaks).
+  const countAsk = (fn) => (fn.match(/askRevealPassword\(/g) || []).length;
+  const acctFn = fnOf(VR, 'export async function revealAccountKey(');
+  ok(countAsk(acctFn) === 1 && /forgetReveal\(\);\s*\n\s*return \{ code: 'reveal_needs_password'/.test(acctFn),
+    'q-050: revealAccountKey asks 验证是你 ONCE; on the hub\'s refusal it forgets + returns the code — never a round-trip-late ask', acctFn.slice(-260));
+  ok(countAsk(fnOf(VR.replace("    forgetReveal();\n    return { code: 'reveal_needs_password', error: revealWords", "    forgetReveal();\n    if (!(await askRevealPassword())) return null;\n    return { code: 'reveal_needs_password', error: revealWords"), 'export async function revealAccountKey(')) === 2,
+    'NEGATIVE CONTROL (the pre-fix revealAccountKey asking a round trip late): askRevealPassword appears TWICE — the pin is red');
+  const rvFn = fnOf(VR, 'export async function revealValue(');
+  ok(/code === 'reveal_needs_password'\) \{ forgetReveal\(\); return \{ ok: false, code: 'reveal_needs_password' \}; \}/.test(rvFn) && !/\bcontinue;/.test(rvFn),
+    'q-050: revealValue forgets + RETURNS on a stale window (no continue → no loop back to a late ask)', rvFn.slice(0, 360));
+  ok(/\bcontinue;/.test(fnOf(VR.replace("{ forgetReveal(); return { ok: false, code: 'reveal_needs_password' }; }", "{ forgetReveal(); continue; }"), 'export async function revealValue(')),
+    'NEGATIVE CONTROL (the pre-fix revealValue looping back with continue): the pin is red');
+  ok(/onVaultFacts\(\(f\) => \{ if \(!f \|\| f\.state !== 'unlocked'\) forgetReveal\(\); \}\);/.test(VR),
+    'q-050 belt: vault-reveal.js forgets this page\'s reveal window whenever the vault facts are not unlocked — a stale window never reaches a late ask');
+  ok(!/onVaultFacts\(\(f\) =>/.test(VR.replace("onVaultFacts((f) => { if (!f || f.state !== 'unlocked') forgetReveal(); });", "")),
+    'NEGATIVE CONTROL (no belt subscription): the pin is red');
+}
+
 // ═══ §4 THE INPUT-SURFACE CENSUS (verify r3) ═══════════════════════════════════
 // N1's class (a surface that takes keys for the user, unknown to the yield — userW's report in another window) closed by a
 // CENSUS, not by the next example: every construct under src/lib/** that makes an element take keys (grep-derived: an
@@ -1418,14 +1515,14 @@ ok(miss.length === 0 && zh.includes('"键盘在对话框 — 点画面继续操�
 // surface without a row, a row whose construct left its file, a class without a green leg — red.
 console.log('§4 the input-surface census: every element that takes keys, grep-derived, classified, each class proven');
 const SURFACE_CLASSES = {
-  text:    { press: 'YIELDS', focus: 'the box itself (CodeMirror: its .cm-content); its <label> is the box (verify r4)', script: 'taken back (said once when the user\'s own press elsewhere caused it — Q1)', legs: ['userW', 'textSearch', 'textCm', 'script', 'q1Cue', 'labelPress'], controls: ['no-press', 'no-contenteditable', 'no-search-type', 'no-label'] },
+  text:    { press: 'YIELDS', focus: 'the box itself (CodeMirror: its .cm-content); its <label> is the box (verify r4)', script: 'taken back (said once when the user\'s own press elsewhere caused it — Q1)', legs: ['userW', 'textSearch', 'textCm', 'script', 'q1Cue', 'labelPress', 'textPassword'], controls: ['no-press', 'no-contenteditable', 'no-search-type', 'no-label', 'no-password-type'] },
   host:    { press: 'YIELDS', focus: 'xterm\'s helper textarea (its screen and the textarea are one input)', script: 'taken back', legs: ['terminal'], controls: ['no-xterm-host'] },
   picture: { press: 'YIELDS', focus: 'xpra: the pane\'s IME textarea · noVNC: its canvas', script: 'taken back', legs: ['n1Xpra', 'n1Vnc', 'n1Stream', 'n1Script'], controls: ['n1-no-host', 'n1-no-surface', 'n1-no-video'] },
   frame:   { press: 'DECLARED — taken back, said', focus: 'the sink (a press inside a frame is the frame document\'s: nothing tells it from the frame\'s own script — verify r2 H5)', script: 'taken back', legs: ['frameSink', 'h1Frame'], controls: ['blur-frame-blind', 'h1-frame-blind'] },
   choice:  { press: 'DECLARED — the pointer picks', focus: 'the <select> keeps it (its list open); its keys stay the page\'s (F1)', script: 'kept (a script cannot open a list)', legs: ['choiceSelect'], controls: ['no-choice'] },
-  control: { press: 'DECLARED — the pointer works', focus: 'the sink takes it back (a checkbox / radio / range / colour / file / read-only field, a role=button chip, a <details> fold\'s summary: its Space / Enter / arrows stay the page\'s; verify r4 measured: the colour picker stays open, a summary toggles)', script: 'taken back', legs: ['controlCheckbox', 'controlSummary'], controls: ['blur-keeps-all'] },
+  control: { press: 'DECLARED — the pointer works', focus: 'the sink takes it back (a checkbox / radio / range / colour / file / read-only field, a role=button chip, a <details> fold\'s summary: its Space / Enter / arrows stay the page\'s; verify r4 measured: the colour picker stays open, a summary toggles)', script: 'taken back', legs: ['controlCheckbox', 'controlSummary', 'controlReadonly', 'controlChip'], controls: ['blur-keeps-all', 'no-readonly'] },
   widget:  { press: 'DECLARED — not typing', focus: 'the sink takes it back while the view owns (a list\'s arrows / Enter stay the page\'s — a listbox / combobox widget of ours too); yielded, the keys stay where they were and the chip says "not in a text box" (r2\'s held)', script: 'taken back', legs: ['widgetList', 'widgetYielded', 'focusStorm'], controls: ['blur-keeps-all', 'where-kind'] },
-  dialog:  { press: 'TAKES THE KEYS when the user\'s OWN act opened it (lane dialog-keys, the owner\'s rule) — else TAKEN BACK, said', focus: 'the dialog\'s own choice (a confirm\'s OK, an input dialog\'s box; one that focuses nothing: its first text box, else its overlay — never a button it did not choose); Enter / Escape / Tab / typing are the dialog\'s and the takeover goes on; its close (an answer, a backdrop press, a script\'s removal) gives the keys back where they were — the sink, the yield\'s text box, the older dialog. Its select is the dialog\'s too', script: 'OPENS BY ITSELF ⇒ taken back, SAID once (the password guard: no press — or a synthetic, stale or picture press — never moves the keys out of the page); its Enter is the page\'s', legs: ['dialogUserPress', 'dialogScript', 'dialogSynthetic', 'dialogPicture', 'dialogStale', 'dialogNested', 'dialogScriptClose', 'dialogYielded', 'dialogTwoViews', 'dialogChain', 'dialogFocusless', 'dialogSelect', 'dialogStatic', 'dialogPageBar'], controls: ['dialog-no-rule', 'dialog-trust-any', 'dialog-orphan', 'dialog-no-cue', 'dialog-no-picture', 'dialog-back-base', 'dialog-home-active'] },
+  dialog:  { press: 'TAKES THE KEYS when the user\'s OWN act opened it (lane dialog-keys, the owner\'s rule) — else TAKEN BACK, said', focus: 'the dialog\'s own choice (a confirm\'s OK, an input dialog\'s box; one that focuses nothing: its first text box, else its overlay — never a button it did not choose); Enter / Escape / Tab / typing are the dialog\'s and the takeover goes on; its close (an answer, a backdrop press, a script\'s removal) gives the keys back where they were — the sink, the yield\'s text box, the older dialog. Its select is the dialog\'s too', script: 'OPENS BY ITSELF ⇒ taken back, SAID once (the password guard: no press — or a synthetic, stale or picture press — never moves the keys out of the page); its Enter is the page\'s', legs: ['dialogUserPress', 'dialogScript', 'dialogSynthetic', 'dialogPicture', 'dialogStale', 'dialogNested', 'dialogScriptClose', 'dialogYielded', 'dialogTwoViews', 'dialogChain', 'dialogFocusless', 'dialogSelect', 'dialogStatic', 'dialogPageBar', 'dialogPassword'], controls: ['dialog-no-rule', 'dialog-trust-any', 'dialog-orphan', 'dialog-no-cue', 'dialog-no-picture', 'dialog-back-base', 'dialog-home-active'] },
   helper:  { press: 'TAKEN BACK — silent', focus: 'the sink (a script-only box: a copy fallback\'s scratch textarea and its execCommand, the terminal\'s paste target — never announced, F2)', script: 'taken back', legs: ['helperCopy', 'cueRecreated'], controls: ['cue-gone-said', 'cue-flag'] },
   view:    { press: 'THE VIEW', focus: 'its own sink (the keys go to the page)', script: '—', legs: ['picture', 'bar', 'ownTab'], controls: ['no-chrome'] },
   none:    { press: 'NOT A KEY SURFACE', focus: 'nothing (a chart, a measuring context, a shadow root that holds paper)', script: '—', legs: ['noneCanvas'], controls: [] },
@@ -1619,6 +1716,19 @@ const CENSUS = [
   ['window.js', 'canvas', 'none', 'the chip text measure'],
   ['xpra-view.js', 'textarea', 'picture', 'the xpra pane\'s IME textarea'],
   ['xpra-view.js', 'canvas', 'picture', 'the xpra pane\'s windows'],
+  // lane takeover-surface-census (the .323 base red, measured at int324): the surfaces the .313–.323 lanes grew, none classed the day
+  // it landed — each read in its file (its listeners, where its focus lands), classed by the census's own rules
+  ['device-acts-dialog.js', 'details', 'control', 'Activity…\'s rows (a <details> per act: its summary opens the output head — lane device-act-audit)'],
+  ['device-acts-dialog.js', 'select', 'choice', 'Activity…\'s "Who asked" filter'],
+  ['machine-app.js', 'tabindex', 'control', 'one window\'s stream: the stats chip (role=button, 0; a click / Enter / Space open the details — lane stream-stats-popup)'],
+  ['machine-displays.js', 'canvas', 'none', 'THE STILL: a display\'s last picture held through a switch (pointer-events none, no tabindex, no listener — lane desktop-display-modes)'],
+  ['stream-stats.js', 'canvas', 'none', 'the stream details\' three charts (a hover / a tap reads a second; no keys, no tabindex; the pinned panel sits beside the picture shell, never in it)'],
+  ['vault-automation.js', 'input', 'text+control', 'Mint an automation key: its name (text); the verbs\' and Grant to\'s checkboxes (control) — design q-046'],
+  ['vault-reveal.js', 'input', 'text', '「验证是你」\'s second password (type=password; opened in the press\'s own task it takes the keys — Show key… asks first since this lane)'],
+  ['vault-unlock.js', 'input', 'text', 'the vault\'s unlock / setup / change modals: the second password boxes (type=password)'],
+  ['vault-window.js', 'details', 'control', 'a stored value\'s Technical details fold'],
+  ['vault-window.js', 'input', 'text+control', 'the Vault window\'s search (type=search); a shown value\'s read-only field (control: the sink takes it back; Copy copies it)'],
+  ['vault-window.js', 'select', 'choice', 'the sort select; the header\'s Lock after idle'],
   // ── verify r4 (attack 5): the rows the r3 grep could not see — element helpers, conditional tags, index.html, the new kinds ──
   ['browser-replay-window.js', 'combobox', 'widget', 'the sessions / actions lists (role=listbox: ← → Home End Space)'],
   ['channel-filter-editor.js', 'select', 'choice', 'the filter\'s pickers (selectBox — el(\'select\') from channel-chrome.js)'],

@@ -703,7 +703,10 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
       fetchAttachment: receive === 'scan' ? undefined : async (convId, { messageId, attachmentId } = {}) => {
         meter(1);
         const c = getWorld().get(convId);
-        const m = c && c.records.find((x) => x.vendorId === messageId);
+        // lane channels-attachment-outside-archive (B-5f20): the vendor knows its WHOLE history — a message of the search
+        // archive (its history pages never served it, so it is never stored) answers by its ids like any other
+        const old = caps.search ? fakeArchive(kind, clock(), deps.env || process.env).find((a) => a.convId === convId && a.m.vendorId === messageId) : null;
+        const m = (c && c.records.find((x) => x.vendorId === messageId)) || (old ? old.m : null);
         const a = m && Array.isArray(m.attachments) ? m.attachments.find((x) => x.id === attachmentId) : null;
         if (!a) { const { ChannelError } = require('./index.js'); throw new ChannelError('not-found', `fake: no attachment ${attachmentId} on ${messageId}`, { retryable: false }); }
         // R3 (§23): the fake vendor's two refusals — for good, and only the first time
@@ -938,6 +941,10 @@ function fakeArchive(kind, t, env) {
     // lane around-sheet-fix: a PICTURE in the vendor's history VibeSpace never stored (the owner's 2026-10-03 case: a
     // CJK-named author, a Lark-shaped image) — the "Around this message" sheet's chip; '[image]' never matches a search
     { convId: `${kind}-ops`, m: { vendorId: `${kind}-ops-old-pic`, at: base + 90e3, author: { id: 'ou_fake_li', name: '李天雨' }, text: '[image]', attachments: [{ id: `${kind}-ops-old-pic-img`, name: null, bytes: null, mime: 'image/*', placeholder: '[image]' }] } },
+    // lane channels-attachment-outside-archive (B-5f20): a FILE in the vendor's history VibeSpace never stored — the
+    // owner's 2026-10-20 case's shape (a Lark `file` message: `file_key` `file_v3_…`, its `file_name`, no type said), ids
+    // rewritten; `search "Q3-plan" --full` finds it, `read --around` prints its fetch line
+    { convId: `${kind}-ops`, m: { vendorId: `${kind}-ops-old-file`, at: base + 100e3, author: who[1], text: '[file: Q3-plan.pdf]', attachments: [{ id: `file_v3_00fake_${kind}_q3plan`, name: 'Q3-plan.pdf', bytes: null, mime: null }] } },
     { convId: `${kind}-ops`, m: { vendorId: `${kind}-ops-old-2`, at: base + 120e3, author: who[1], text: 'Budget sign-off is due Friday' } },
     { convId: `${kind}-archived-chat`, m: { vendorId: `${kind}-arch-1`, at: base + 180e3, author: who[1], text: 'The budget from last year, for the record' } },
   ];

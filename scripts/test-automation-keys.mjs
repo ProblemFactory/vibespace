@@ -15,6 +15,15 @@
 //      (human_only) — no agent route writes a grant; locked ⇒ 423
 //   ⑨ THE RENAME SEAM (src/server/conversation-ops.js — the ws case's body, moved whole) + the verb's REACH
 //   ⑩ wiring pins
+//   ⑪ THE LIMITS (lane automation-open-limits — the q-048 verify's M2): openLimitsVerdict's table over real folders (each
+//      field's code; `/`, `/tmp/../etc`, `..` out, a link out, a prefix sibling ⇒ cwd_outside_roots; a link in ⇒ its real
+//      path), limits: null = the old behaviour, a damaged value narrows, limitsPlan's named refusals · ⑪b MUTANTS (a
+//      lexical-only check, a slash-less prefix) ⇒ RED
+//   ⑫ THE JUDGE on the engine over the REAL conversation-ops seam: outside ⇒ refused + audited, the spend guard never
+//      asked, nothing spawned, a once-grant unspent, no card; inside ⇒ authorize → spawn (the REAL folder) → note; the
+//      default account judged; limits edited while a card waits; the old key = old behaviour until the first edit ·
+//      ⑫b MUTANT: the judge after the authorizer ⇒ the refused open was CHARGED ⇒ RED
+//   ⑬ the doors (mint with limits, 边界… / 审计… person-only, the agent's refusal names the limits) · ⑭ window + CLI pins
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -44,6 +53,8 @@ process.on('exit', () => { try { fs.rmSync(TMP, { recursive: true, force: true }
 const sha256 = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 const NOW = Date.UTC(2026, 9, 19, 22, 0);
 const K = (o = {}) => ({ id: 'ak-000000000001', name: 'dispatch', scopes: ['conversations.rename', 'conversations.open'], createdAt: NOW, createdBy: 'user', revokedAt: null, lastUsedAt: null, digest: 'a'.repeat(64), ...o });
+// lane automation-open-limits: an opening key is minted WITH limits (the owner picks); /tmp holds the legs' opens
+const OPEN_LIMITS = { cwdRoots: ['/tmp'], accounts: 'any', permissionModes: ['default'], models: 'any', modes: ['chat'] };
 const G = (o = {}) => ({ id: 'ag-00000000000' + (o.n || 1), keyId: 'ak-000000000001', subject: 'session:conv-1', mode: 'always', at: NOW, by: 'user', spentAt: null, ...o });
 
 console.log('① the closed table, the record and the grant');
@@ -122,7 +133,7 @@ console.log('④ MUTANT — an outside caller judged by the internal grants');
 console.log('⑤ mintPlan — a value for the vault, a digest for the record, never one in the other');
 {
   const logs = [];
-  const p = A.mintPlan({ name: 'Lane dispatch', scopes: ['conversations.rename', 'conversations.open', 'conversations.rename'], by: 'user', now: NOW, randomBytes: crypto.randomBytes, sha256 });
+  const p = A.mintPlan({ name: 'Lane dispatch', scopes: ['conversations.rename', 'conversations.open', 'conversations.rename'], limits: OPEN_LIMITS, by: 'user', now: NOW, randomBytes: crypto.randomBytes, sha256 });
   ok(p.ok && A.VALUE_RE.test(p.value) && A.KEY_ID_RE.test(p.record.id) && p.entry === `apikey:${p.record.id}`, 'vsak_ + 43 base64url characters (32 random bytes) · an ak- id · the vault entry apikey:<id>');
   ok(p.record.digest === sha256(p.value) && p.record.digest !== p.value && !JSON.stringify(p.record).includes(p.value) && !('value' in p.record), 'the record keeps sha256(value) only — never the value');
   eq(p.record.scopes, ['conversations.open', 'conversations.rename'], 'its verbs deduped, in the table\'s order');
@@ -164,7 +175,7 @@ const auditOf = (w) => { try { return fs.readFileSync(path.join(w.dir, A.AUDIT_F
 const hitsIn = (dir, needles) => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else { const b = fs.readFileSync(p); const s = b.toString('latin1'); for (const n of needles) for (const form of [n, Buffer.from(n).toString('hex'), Buffer.from(n).toString('base64')]) if (s.includes(form)) out.push(path.relative(dir, p)); } } }; walk(dir); return [...new Set(out)]; };
 {
   const w = await mkWorld('engine');
-  const m = w.engine.mint({ name: 'dispatch', scopes: ['conversations.rename', 'conversations.open'], by: 'user' });
+  const m = w.engine.mint({ name: 'dispatch', scopes: ['conversations.rename', 'conversations.open'], limits: OPEN_LIMITS, by: 'user' });
   ok(m.ok && m.key && !JSON.stringify(m).includes('vsak_') && !('digest' in m.key), 'mint answers the key\'s public fields — never its value, never its digest');
   const value = w.vault.secretGet(`apikey:${m.key.id}`).value.toString();
   ok(A.VALUE_RE.test(value), 'the value is the vault entry apikey:<id> (only the vault holds it)');
@@ -249,7 +260,7 @@ const hitsIn = (dir, needles) => { const out = []; const walk = (d) => { for (co
     'conversations.rename': (args) => { ran.push(`rename:${args.name}`); return { ok: true, name: args.name }; },
     'conversations.open': (args) => { ran.push(`open:${args.name}`); return { ok: true, conversationId: 'conv-9' }; },
   } });
-  w.engine.mint({ name: 'k', scopes: ['conversations.rename', 'conversations.open'] });
+  w.engine.mint({ name: 'k', scopes: ['conversations.rename', 'conversations.open'], limits: OPEN_LIMITS });
   const turn = () => new Promise((r) => setImmediate(r));
   // M1: the caller disconnects mid-card (its request's signal aborts) ⇒ withdrawn; the card closes; an Always runs NOTHING
   const gone = new AbortController();
@@ -296,7 +307,7 @@ const hitsIn = (dir, needles) => { const out = []; const walk = (d) => { for (co
   const ranX = [];
   const wx = await mkWorld('ask-one-card', { verbs: { 'conversations.rename': () => { ranX.push('rename'); return { ok: true }; }, 'conversations.open': () => { ranX.push('open'); return { ok: true }; } } });
   const ex = MX.create({ dataDir: wx.dir, vault: wx.vault, userTodos: wx.userTodos, now: wx.now, verbs: { 'conversations.rename': () => { ranX.push('rename'); return { ok: true }; }, 'conversations.open': () => { ranX.push('open'); return { ok: true }; } } });
-  ex.mint({ name: 'k', scopes: ['conversations.rename', 'conversations.open'] });
+  ex.mint({ name: 'k', scopes: ['conversations.rename', 'conversations.open'], limits: OPEN_LIMITS });
   const xr = ex.use({ caller: caller(), verb: 'conversations.rename', args: { name: 'x' } });
   const xo = ex.use({ caller: caller(), verb: 'conversations.open', args: { cwd: '/tmp', name: 'rider' } });
   await turn();
@@ -398,16 +409,269 @@ console.log('⑨ THE RENAME SEAM — the ws case\'s body, moved whole; the verb\
   ok(OPS.callOp('rename', {}).code === 'not_ready', 'before the ws handler registered ⇒ not_ready');
 }
 
+console.log('⑪ THE LIMITS — openLimitsVerdict: each field\'s code, `..` and symlink escapes, a key minted before limits');
+const LROOT = path.join(TMP, 'lim-root'), LOUT = path.join(TMP, 'lim-out'), IN = path.join(LROOT, 'wt-a');
+fs.mkdirSync(path.join(IN, 'deep'), { recursive: true }); fs.mkdirSync(LOUT, { recursive: true }); fs.mkdirSync(LROOT + '-evil', { recursive: true });
+fs.symlinkSync(LOUT, path.join(LROOT, 'escape'));          // a link INSIDE the root to a folder outside it
+fs.symlinkSync(IN, path.join(LOUT, 'back-in'));            // a link OUTSIDE the root to a folder inside it
+const RP = (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
+const POOL = 'pool-d1e27705257c';
+const LIMS = { cwdRoots: [LROOT], accounts: [POOL], permissionModes: ['default', 'bypassPermissions'], models: ['opus', 'default'], modes: ['chat'] };
+const OK_SPEC = { cwd: IN, accountId: POOL };
+const LT = [
+  ['inside a root', OK_SPEC, 'ok'],
+  ['the root itself', { ...OK_SPEC, cwd: LROOT }, 'ok'],
+  ['a folder below', { ...OK_SPEC, cwd: path.join(IN, 'deep') }, 'ok'],
+  ['a link outside pointing in (opened at its real path)', { ...OK_SPEC, cwd: path.join(LOUT, 'back-in') }, 'ok'],
+  ['`..` out and back in', { ...OK_SPEC, cwd: `${LOUT}/../${path.basename(LROOT)}/wt-a` }, 'ok'],
+  ['/', { ...OK_SPEC, cwd: '/' }, 'cwd_outside_roots'],
+  ['/etc', { ...OK_SPEC, cwd: '/etc' }, 'cwd_outside_roots'],
+  ['/tmp/../etc', { ...OK_SPEC, cwd: '/tmp/../etc' }, 'cwd_outside_roots'],
+  ['`..` out of the root', { ...OK_SPEC, cwd: `${IN}/../../${path.basename(LOUT)}` }, 'cwd_outside_roots'],
+  ['a link inside the root pointing out', { ...OK_SPEC, cwd: path.join(LROOT, 'escape') }, 'cwd_outside_roots'],
+  ['a sibling sharing the root\'s prefix (lim-root-evil)', { ...OK_SPEC, cwd: LROOT + '-evil' }, 'cwd_outside_roots'],
+  ['a folder that does not exist', { ...OK_SPEC, cwd: path.join(LROOT, 'nope') }, 'cwd_outside_roots'],
+  ['a relative cwd', { ...OK_SPEC, cwd: 'wt-a' }, 'cwd_outside_roots'],
+  ['another account', { ...OK_SPEC, accountId: 'someone-elses-account' }, 'account_not_allowed'],
+  ['no account named, no default ⇒ the CLI\'s own login, not listed', { cwd: IN }, 'account_not_allowed'],
+  ['bypassPermissions (listed)', { ...OK_SPEC, permissionMode: 'bypassPermissions' }, 'ok'],
+  ['plan (not listed)', { ...OK_SPEC, permissionMode: 'plan' }, 'permission_not_allowed'],
+  ['opus (listed)', { ...OK_SPEC, model: 'opus' }, 'ok'],
+  ['no model named ⇒ default (listed)', { ...OK_SPEC }, 'ok'],
+  ['gpt-9000', { ...OK_SPEC, model: 'gpt-9000' }, 'model_not_allowed'],
+  ['terminal (not listed)', { ...OK_SPEC, mode: 'terminal' }, 'mode_not_allowed'],
+];
+const limWord = (v) => (v.ok ? 'ok' : v.code);
+const runLimits = (mod, lims = LIMS) => LT.filter(([, spec, want]) => limWord(mod.openLimitsVerdict(lims, spec, { realpath: RP })) !== want).map(([n, spec]) => `${n}: ${limWord(mod.openLimitsVerdict(lims, spec, { realpath: RP }))}`);
+{
+  const bad = runLimits(A);
+  ok(!bad.length, `the ${LT.length}-row limits table: inside / below / a link in ⇒ ok; /, /etc, /tmp/../etc, \`..\` out, a link out, a prefix sibling, a missing or relative folder ⇒ cwd_outside_roots; then account_not_allowed · permission_not_allowed · model_not_allowed · mode_not_allowed`, bad);
+  eq(Object.values(A.LIMIT_CODES), ['cwd_outside_roots', 'account_not_allowed', 'permission_not_allowed', 'model_not_allowed', 'mode_not_allowed'], 'ONE code per field (folders › accounts › permission modes › models › modes)');
+  ok(Object.values(A.LIMIT_CODES).every((c) => A.CODES[c] === 403), 'each limits code answers 403 at the door');
+  const viaLink = A.openLimitsVerdict(LIMS, { ...OK_SPEC, cwd: path.join(LOUT, 'back-in') }, { realpath: RP });
+  ok(viaLink.ok && viaLink.cwd === RP(IN), 'a folder reached through a link is opened at its REAL path (the judged path is the spawned one)', viaLink);
+  const out = A.openLimitsVerdict(LIMS, { ...OK_SPEC, cwd: path.join(LROOT, 'escape') }, { realpath: RP });
+  ok(out.field === 'cwdRoots' && out.why.includes(`really ${RP(LOUT)}`) && out.why.includes(LROOT), 'the refusal names the real folder and the key\'s folders', out);
+  const first = A.openLimitsVerdict(LIMS, { cwd: '/etc', accountId: 'x', permissionMode: 'plan', model: 'gpt-9000', mode: 'terminal' }, { realpath: RP });
+  ok(first.code === 'cwd_outside_roots', 'everything wrong at once ⇒ the FIRST field\'s code (the folder)', first);
+  const old = A.openLimitsVerdict(null, { cwd: '/', accountId: 'anyone', permissionMode: 'bypassPermissions', model: 'gpt-9000', mode: 'terminal' }, { realpath: RP });
+  ok(!old.ok && old.code === 'cwd_outside_roots', 'limits: null (a key minted before limits) ⇒ now REFUSED (q-049 M1): it reads as a fresh key with no folders, so every open is cwd_outside_roots until the owner sets bounds — fail closed', old);
+  const fresh0 = A.keyOf(K()).limits;
+  ok(fresh0 && fresh0.cwdRoots.length === 0 && fresh0.accounts.length === 0 && fresh0.permissionModes[0] === 'default' && fresh0.models === 'any' && JSON.stringify(A.publicKey(K()).limits) === JSON.stringify(fresh0) && JSON.stringify(A.keyOf({ ...K(), limits: null }).limits) === JSON.stringify(fresh0), 'a record with no (or null) limits reads as a FRESH key\'s limits — no folders, so every open is refused until the owner sets them (q-049 M1: a missing field never widens a key)');
+  ok(!A.openLimitsVerdict(A.keyOf(K()).limits, { cwd: '/etc' }, { realpath: RP }).ok, 'end-to-end (q-049 M1): a pre-limits key read off a record REFUSES an open — keyOf gives it a fresh key\'s folderless limits, the judge refuses /etc');
+  const damaged = A.keyOf({ ...K(), limits: 'garbage' }).limits;
+  ok(damaged && damaged.cwdRoots.length === 0 && damaged.accounts.length === 0 && !A.openLimitsVerdict(damaged, OK_SPEC, { realpath: RP }).ok, 'a DAMAGED limits value narrows to a fresh key\'s (no folder, no account) — a broken record never widens a key', damaged);
+  const lexical = A.openLimitsVerdict({ ...LIMS, cwdRoots: ['/srv/x'] }, { ...OK_SPEC, cwd: '/srv/x/../x/y' });
+  ok(lexical.ok && lexical.cwd === '/srv/x/y', 'without an injected realpath (the browser bundle) the lexical fold stands in');
+  // the owner's pick (limitsPlan — the mint and 边界… doors)
+  const plan = A.limitsPlan({ cwdRoots: ['/a/../b/', '/b'], accounts: 'any' }, ['conversations.open']);
+  eq(plan.limits, { cwdRoots: ['/b'], accounts: 'any', permissionModes: ['default'], models: 'any', modes: ['chat'] }, 'limitsPlan: the folders folded + deduped; a field left out takes a fresh key\'s default (the harness\'s own permission mode, any model, chat)');
+  const refusals = [
+    [{ cwdRoots: ['/x'], accounts: 'any', bogus: 1 }, /unknown limit "bogus"/],
+    [{ cwdRoots: ['relative'], accounts: 'any' }, /"relative" is not an absolute folder/],
+    [{ cwdRoots: ['/x'], accounts: ['bad id!'] }, /accounts: "bad id!" is not an account/],
+    [{ cwdRoots: ['/x'], accounts: 'any', modes: ['chat', 'shell'] }, /modes: "shell" is not chat or terminal/],
+    [{ accounts: 'any' }, /at least one folder/],
+    [{ cwdRoots: ['/x'] }, /names the accounts/],
+    [{ cwdRoots: ['/x'], accounts: 'any', permissionModes: [] }, /at least one permission mode/],
+    [{ cwdRoots: ['/x'], accounts: 'any', models: [] }, /names its models/],
+    [{ cwdRoots: ['/x'], accounts: 'any', modes: [] }, /chat, terminal or both/],
+    [null, /the limits are an object/],
+  ];
+  const missed = refusals.filter(([pick, re]) => { const r = A.limitsPlan(pick, ['conversations.open']); return r.ok || r.code !== 'bad_args' || !re.test(r.why); }).map(([pick]) => JSON.stringify(pick));
+  ok(!missed.length, `limitsPlan refuses BY NAME (bad_args): an unknown field, a relative folder, a malformed account / mode, and — for a key that opens — no folder, no account, no permission mode, no model, no mode (${refusals.length} picks)`, missed);
+  ok(A.limitsPlan({}, ['conversations.rename']).ok, 'a key that never opens needs no folder or account');
+  const mp = A.mintPlan({ name: 'opener', scopes: ['conversations.open'], randomBytes: crypto.randomBytes, sha256 });
+  const mp2 = A.mintPlan({ name: 'opener', scopes: ['conversations.open'], limits: LIMS, randomBytes: crypto.randomBytes, sha256 });
+  ok(mp.code === 'bad_args' && /at least one folder/.test(mp.why) && mp2.ok && JSON.stringify(mp2.record.limits) === JSON.stringify(A.limitsOf(LIMS)), 'mintPlan: a fresh opening key without a pick ⇒ refused by name (the owner picks); with one ⇒ the record carries it', { mp, lim: mp2.record && mp2.record.limits });
+  ok(A.mintPlan({ name: 'x', scopes: ['conversations.open'], limits: null, randomBytes: crypto.randomBytes, sha256 }).code === 'bad_args', 'a NEW opening key can never be minted with no bounds (limits: null ⇒ bad_args — the owner must pick a folder)');
+  ok(A.limitsWords(LIMS) === `folders ${LROOT} · accounts ${POOL} · permission modes default, bypassPermissions · models opus, default · modes chat` && /refused until/.test(A.limitsWords(null)), 'limitsWords: names only; a null (pre-limits) key words the fail-closed state', A.limitsWords(LIMS));
+}
+console.log('⑪b MUTANTS — a lexical-only folder check; a root prefix without its slash');
+{
+  const LSRC = fs.readFileSync(path.join(ROOT, 'src/automation-keys.js'), 'utf8');
+  const n1 = "  const cwd = typeof realpath === 'function' ? real(str(s.cwd)) : normPath(s.cwd);";
+  ok(LSRC.split(n1).length === 2, 'ANCHOR: the cwd\'s real path is read once');
+  const M1x = M.load('src/automation-keys.js', LSRC.replace(n1, '  const cwd = normPath(s.cwd);'), 'lim-lexical');
+  const r1 = runLimits(M1x);
+  ok(r1.some((x) => x.startsWith('a link inside the root pointing out')), 'MUTANT RED: a lexical-only check lets a link inside the root out of it (the symlink row goes ok)', r1);
+  const n2 = "const within = (p, root) => root === '/' || p === root || p.startsWith(root + '/');";
+  ok(LSRC.split(n2).length === 2, 'ANCHOR: the containment rule is spelled once');
+  const M2x = M.load('src/automation-keys.js', LSRC.replace(n2, "const within = (p, root) => p.startsWith(root);"), 'lim-prefix');
+  const r2 = runLimits(M2x);
+  ok(r2.some((x) => x.startsWith('a sibling sharing the root')), 'MUTANT RED: a bare startsWith lets lim-root-evil pass as lim-root', r2);
+}
+
+console.log('⑫ THE JUDGE — in use(): after the grant, BEFORE the grant is spent, the spend authorizer and the spawn');
+const LIM_OPEN = { cwdRoots: [LROOT], accounts: 'any', permissionModes: ['default'], models: 'any', modes: ['chat'] };
+/** The REAL conversation-ops seam (forDeps) over a recording create path + a recording spend guard. */
+const judgeRig = () => {
+  const calls = [];
+  const sessions = new Map();
+  const spendGuard = { authorize: (o) => { calls.push(['authorize', o.identity && o.identity.key]); return { ok: true, hold: 'h' + calls.length }; }, note: () => { calls.push(['note']); }, release: () => { calls.push(['release']); } };
+  const handleCreate = (ws, frame) => {
+    calls.push(['spawn', frame.cwd, frame.permissionMode || null, frame.accountId || null]);
+    const id = `sess-${calls.length}-1`;
+    sessions.set(id, { backend: 'claude', backendSessionId: `conv-w${calls.length}`, name: frame.name || null, cwd: frame.cwd, mode: frame.mode, clients: new Set([ws]) });
+    ws.send(JSON.stringify({ type: 'created', sessionId: id, reqId: frame.reqId, name: frame.name || null, cwd: frame.cwd, mode: frame.mode }));
+  };
+  const ops = OPS.forDeps({ handleCreate, activeSessions: sessions, getSessionKey: (s) => `claude:${s.backendSessionId}`, spendGuard,
+    specTables: () => ({ backends: ['claude'], chatBackends: ['claude'], byBackend: { claude: { models: ['opus'], modelFree: true, efforts: [], effortFree: false, permissionModes: ['bypassPermissions', 'plan'] } } }) });
+  return { calls, sessions, verbs: OPS.automationVerbs({ activeSessions: sessions, ops, waitMs: 0 }) };
+};
+const judgeEngine = (mod, w, rig, openFacts = {}) => mod.create({ dataDir: w.dir, vault: w.vault, userTodos: w.userTodos, now: w.now, verbs: rig.verbs, openFacts });
+const grantsOf = (w) => JSON.parse(fs.readFileSync(path.join(w.dir, A.STORE_FILE), 'utf8')).grants;
+{
+  const rig = judgeRig();
+  const w = await mkWorld('judge');
+  const e = judgeEngine(ENG, w, rig);
+  const k = e.mint({ name: 'limited', scopes: ['conversations.open'], limits: LIM_OPEN });
+  ok(k.ok && JSON.stringify(k.key.limits) === JSON.stringify(A.limitsOf(LIM_OPEN)), 'mint with limits: the key\'s public record carries them (names only)', k);
+  e.grant(k.key.id, ['session:conv-1']);
+  const r1 = await e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: LOUT, name: 'outside' } });
+  ok(r1.code === 'cwd_outside_roots' && !rig.calls.length && JSON.stringify(r1.limits) === JSON.stringify(k.key.limits) && r1.field === 'cwdRoots',
+    'an open OUTSIDE the key\'s folder ⇒ cwd_outside_roots carrying the key\'s limits — the spend guard never asked, nothing spawned', { r1, calls: rig.calls });
+  const r2 = await e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN, permission: 'bypassPermissions' } });
+  ok(r2.code === 'permission_not_allowed' && !rig.calls.length, 'bypassPermissions on a key that lists only the harness\'s own ⇒ permission_not_allowed, nothing charged', r2);
+  const r3 = await e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: path.join(LOUT, 'back-in'), name: 'inside' } });
+  eq(rig.calls.map((c) => c[0]), ['authorize', 'spawn', 'note'], 'an open INSIDE ⇒ the order: the spend authorizer, the spawn, the charge');
+  ok(r3.ok && rig.calls[1][1] === RP(IN), 'the spawn got the REAL folder the judge passed (a link outside pointing in ⇒ its target), not the asked path', { r3: r3.ok, spawn: rig.calls[1] });
+  const lines = auditOf(w).filter((l) => l.verb === 'conversations.open');
+  ok(lines.length === 3 && lines[0].code === 'cwd_outside_roots' && lines[0].args.cwd === LOUT && lines[1].code === 'permission_not_allowed' && lines[2].ok, 'the audit: each refused open with its code and the asked folder; the allowed one ok', lines.map((l) => [l.ok, l.code, l.args.cwd]));
+  // a ONCE grant is not spent by a refused open
+  const k2 = e.mint({ name: 'once-limited', scopes: ['conversations.open'], limits: LIM_OPEN });
+  e.grant(k2.key.id, ['session:conv-4'], { mode: 'once' });
+  const before = rig.calls.length;
+  const r4 = await e.use({ caller: caller({ conversationId: 'conv-4', sessionKey: 'claude:conv-4' }), verb: 'conversations.open', args: { cwd: '/etc' }, want: k2.key.id });
+  ok(r4.code === 'cwd_outside_roots' && rig.calls.length === before && grantsOf(w).find((g) => g.keyId === k2.key.id).spentAt === null, 'a refused open never SPENDS a once-grant (judged before the grant is spent)', r4);
+  // an UNGRANTED caller: no card for an open its key may not make
+  const r5 = await e.use({ caller: caller({ conversationId: 'conv-5', sessionKey: 'claude:conv-5' }), verb: 'conversations.open', args: { cwd: '/etc' }, want: k.key.id });
+  ok(r5.code === 'cwd_outside_roots' && !cards(w).length, 'no grant + an open outside the limits ⇒ refused at once, NO first-use card (the owner is never asked about it)', r5);
+  // the limits edited while a card waits ⇒ judged again after the answer
+  const p6 = e.use({ caller: caller({ conversationId: 'conv-6', sessionKey: 'claude:conv-6' }), verb: 'conversations.open', args: { cwd: IN }, want: k.key.id });
+  await new Promise((r) => setImmediate(r));
+  const c6 = cards(w);
+  const narrowed = e.setLimits(k.key.id, { ...LIM_OPEN, cwdRoots: [LOUT] }, { by: 'user' });
+  if (c6.length) e.answer(c6[0].action.askId, { answer: 'always' });
+  const r6 = await p6;
+  ok(c6.length === 1 && narrowed.ok && r6.code === 'cwd_outside_roots' && rig.calls.length === before, 'the owner narrows the folders WHILE the card waits, then answers Always ⇒ the open is judged by the limits as they stand now: refused, nothing spawned', { cards: c6.length, narrowed: narrowed.ok, r6 });
+  // the EFFECTIVE account: an open that names none is judged by the default the create path would bill
+  const k3 = e.mint({ name: 'pool-only', scopes: ['conversations.open'], limits: { ...LIM_OPEN, accounts: [POOL] } });
+  e.grant(k3.key.id, ['session:conv-1']);
+  const eDefault = (id) => judgeEngine(ENG, w, rig, { defaults: () => ({ accountId: id, model: null }) });
+  const r7 = await eDefault(POOL).use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN }, want: k3.key.id });
+  const r8 = await eDefault('pool-other').use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN }, want: k3.key.id });
+  ok(r7.ok && r8.code === 'account_not_allowed' && /pool-other/.test(r8.why), 'no --pool ⇒ the hub\'s DEFAULT account is what is judged: the listed pool opens, another default ⇒ account_not_allowed', { r7: r7.ok, r8 });
+  // 边界… — the owner's edit
+  ok(e.setLimits(k.key.id, { cwdRoots: ['rel'] }).code === 'bad_args' && e.setLimits('ak-ffffffffffff', LIM_OPEN).code === 'not_found', 'setLimits: a bad pick refused by name; an unknown key not_found');
+  const lastEdit = auditOf(w).filter((l) => l.verb === 'key.limits');
+  ok(lastEdit.length === 1 && lastEdit[0].ok && lastEdit[0].subject === 'owner', 'an edit is audited key.limits (the owner)', lastEdit);
+}
+{
+  // q-049 M1 — a key minted BEFORE limits (its record has no `limits` field) now reads as a FRESH key (no folders) and
+  // REFUSES every open until the owner sets its bounds. The RED→GREEN that proves M1 (2.369.323 opened anything, anywhere).
+  const rig = judgeRig();
+  const w = await mkWorld('judge-old');
+  const e0 = judgeEngine(ENG, w, rig);
+  const m = e0.mint({ name: 'old', scopes: ['conversations.open'], limits: LIM_OPEN });
+  const st = JSON.parse(fs.readFileSync(path.join(w.dir, A.STORE_FILE), 'utf8'));
+  delete st.keys[0].limits;   // the shape 2.369.323 wrote — no `limits` field at all
+  st.grants = [{ id: 'ag-0000000000aa', keyId: m.key.id, subject: 'session:conv-1', mode: 'always', at: NOW, by: 'user', spentAt: null }];
+  fs.writeFileSync(path.join(w.dir, A.STORE_FILE), JSON.stringify(st), { mode: 0o600 });
+  const e = judgeEngine(ENG, w, rig);
+  const freshLimits = e.list().keys[0].limits;
+  ok(freshLimits && freshLimits.cwdRoots.length === 0 && freshLimits.permissionModes[0] === 'default' && freshLimits.models === 'any', 'q-049 M1: a record with no `limits` field reads as a FRESH key — no folders (the window flags it 「Limits not set」), not null', freshLimits);
+  const r = await e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: '/', permission: 'bypassPermissions', mode: 'terminal' } });
+  ok(r.code === 'cwd_outside_roots' && !rig.calls.some((c) => c[0] === 'spawn'), 'q-049 M1 (fail CLOSED): a key minted before limits now REFUSES `/` — no folders set, nothing spawned (2.369.323 opened it)', { r: r.ok || r.code, calls: rig.calls.map((c) => c[0]) });
+  const set = e.setLimits(m.key.id, LIM_OPEN);
+  const r2in = await e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN } });
+  const r2out = await e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: '/' } });
+  ok(set.ok && set.key.limits && r2in.ok && r2out.code === 'cwd_outside_roots', 'the owner\'s first edit sets them ⇒ from then on judged: inside the folder opens, `/` still refused', { r2in: r2in.ok || r2in.code, r2out: r2out.code });
+  const rv = e.revoke(m.key.id);
+  ok(rv.ok && e.setLimits(m.key.id, LIM_OPEN).code === 'key_revoked', 'a revoked key\'s limits are not editable (key_revoked)');
+}
+console.log('⑫b MUTANT — the limits judged AFTER the spend authorizer (inside the act)');
+{
+  const ESRC = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8');
+  const judge = `    let runArgs = v0.args;
+    if (verb === 'conversations.open') {
+      const lim = limitsJudge(keyById(key.id) || key, v0.args);
+      if (!lim.ok) return done(lim, key.id, asked ? { ask: asked } : {});
+      runArgs = lim.args;
+    }`;
+  const act = '    try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); }';
+  ok(ESRC.split(judge).length === 2 && ESRC.split(act).length === 2, 'ANCHOR: the judge and the act are each spelled once');
+  const MX = M.load('src/server/automation-engine.js', ESRC.replace(judge, '    let runArgs = v0.args;').replace(act, `    try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); if (verb === 'conversations.open') { const lim = limitsJudge(keyById(key.id) || key, v0.args); if (!lim.ok) result = lim; } }`), 'limits-after');
+  const rig = judgeRig();
+  const w = await mkWorld('judge-mutant');
+  const e = judgeEngine(MX, w, rig);
+  const k = e.mint({ name: 'limited', scopes: ['conversations.open'], limits: LIM_OPEN });
+  e.grant(k.key.id, ['session:conv-1']);
+  const r = await e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: LOUT } });
+  ok(r.code === 'cwd_outside_roots' && rig.calls.some((c) => c[0] === 'authorize') && rig.calls.some((c) => c[0] === 'spawn'),
+    `MUTANT RED: the same refusal judged after the act — the open was CHARGED and SPAWNED first (${rig.calls.map((c) => c[0]).join(' → ')}): a refused open must never be charged`, { r: r.code, calls: rig.calls });
+}
+
+console.log('⑬ THE DOORS — mint with limits, 边界… (a person\'s), 审计…, the agent\'s refusal names the limits');
+{
+  const express = require(path.join(ROOT, 'node_modules/express'));
+  const rig = judgeRig();
+  const w = await mkWorld('limit-doors', { verbs: rig.verbs });
+  const app = express(); app.use(express.json());
+  const tokens = { vsst_lim: caller() };
+  require(path.join(ROOT, 'src/routes/automation.js')).registerAutomationRoutes(app, { engine: w.engine, callerOf: (t) => tokens[t] || null, limitChoices: () => ({ accounts: [{ id: POOL, name: 'Pool one', backend: 'claude', type: 'pooled' }], permissionModes: [{ backend: 'claude', value: 'default', label: 'Default' }], models: [] }) });
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const page = { 'Content-Type': 'application/json', origin: base, 'sec-fetch-site': 'same-origin' };
+  const go = async (method, p, { headers = {}, body } = {}) => { const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
+  const none = await go('POST', '/api/automation/keys', { headers: page, body: { name: 'no pick', scopes: ['conversations.open'] } });
+  ok(none.status === 400 && none.body.code === 'bad_args' && /at least one folder/.test(none.body.error), 'a person mints an opening key WITHOUT limits ⇒ 400 bad_args naming what to pick', none.body);
+  const mint = await go('POST', '/api/automation/keys', { headers: page, body: { name: 'door limited', scopes: ['conversations.open'], limits: LIM_OPEN } });
+  ok(mint.status === 200 && mint.body.key.limits && mint.body.key.limits.cwdRoots[0] === LROOT, 'a person mints it WITH limits', mint.body);
+  const id = mint.body.key.id;
+  await go('POST', `/api/automation/keys/${id}/grants`, { headers: page, body: { subjects: ['session:conv-1'] } });
+  const lst = await go('GET', '/api/automation/keys', { headers: page });
+  ok(lst.body.limitChoices && lst.body.limitChoices.accounts[0].id === POOL && lst.body.keys[0].limits, 'GET /api/automation/keys carries the limit pickers\' choices and each key\'s limits');
+  const refused = await go('POST', '/api/agent/automation/conversations.open', { headers: { Authorization: 'Bearer vsst_lim' }, body: { cwd: '/etc', name: 'x' } });
+  ok(refused.status === 403 && refused.body.code === 'cwd_outside_roots' && JSON.stringify(refused.body.limits) === JSON.stringify(mint.body.key.limits) && /outside this key's folders/.test(refused.body.error) && !rig.calls.length,
+    'the agent\'s open outside ⇒ 403 cwd_outside_roots, the error naming it, the answer carrying the key\'s limits — nothing spawned', refused.body);
+  const asAgent = await go('POST', `/api/automation/keys/${id}/limits`, { headers: { ...page, Authorization: 'Bearer vsst_lim' }, body: { limits: { ...LIM_OPEN, cwdRoots: ['/'] } } });
+  const auditAgent = await go('GET', `/api/automation/keys/${id}/audit`, { headers: { Authorization: 'Bearer vsst_lim' } });
+  ok(asAgent.status === 403 && asAgent.body.code === 'human_only' && auditAgent.body.code === 'human_only', '边界… and 审计… refuse an agent\'s token (human_only) — an agent never widens its own key');
+  const edit = await go('POST', `/api/automation/keys/${id}/limits`, { headers: page, body: { limits: { ...LIM_OPEN, cwdRoots: [LROOT, LOUT] } } });
+  ok(edit.status === 200 && edit.body.key.limits.cwdRoots.length === 2, 'a person edits them (边界…)', edit.body);
+  const au = await go('GET', `/api/automation/keys/${id}/audit`, { headers: page });
+  const refusedLine = au.body.lines && au.body.lines.find((l) => l.verb === 'conversations.open');
+  ok(au.status === 200 && refusedLine && refusedLine.ok === false && refusedLine.code === 'cwd_outside_roots' && refusedLine.args.cwd === '/etc' && au.body.lines[0].verb === 'key.limits',
+    '审计… (the owner\'s audit view): the refused open with its code and folder; newest first (the edit on top)', au.body.lines && au.body.lines.map((l) => [l.verb, l.ok, l.code]));
+  srv.close();
+}
+
+console.log('⑭ THE WINDOW + THE CLI (text pins) — the 「未设边界」 chip, the limits only while open is ticked, no greyed control');
+{
+  const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
+  const va = read('src/lib/vault-automation.js');
+  ok(/if \(!key\.limits\.cwdRoots\.length\) \{\n\s+const chip = el\('span', 'vw-ak-unbounded', t\('Limits not set'\)\);/.test(va), 'THE CHIP (q-049 M1): an open key with no folders draws 「Limits not set」 (vw-ak-unbounded) — a pre-limits key reads as folderless and refuses every open');
+  ok(/const limB = opens \? el\('button', 'vw-btn vw-ak-limits-edit', t\('Limits…'\)\) : null;/.test(va) && /const syncLim = \(\) => \{ limWrap\.hidden = !\(openCb && openCb\.checked\); \};/.test(va), '边界… on a key that opens; the mint dialog\'s limits shown only while 开一个对话 is ticked (absent, never greyed)');
+  ok(!/\.disabled\s*=|setAttribute\('disabled'/.test(va), 'no control in the automation section is ever disabled (the owner\'s rule: no greyed controls)');
+  const zhSrc = read('src/lib/i18n-zh.js'), jaSrc = read('src/lib/i18n-ja.js');
+  ok(zhSrc.includes('"Limits not set": "未设边界"') && zhSrc.includes('"Limits…": "边界…"') && jaSrc.includes('"Limits not set": "制限未設定"') && jaSrc.includes('"Limits…": "制限…"'), 'zh 「未设边界」/「边界…」 · ja 「制限未設定」/「制限…」');
+  const CLI = R('data/bin/vibespace-api');
+  ok(CLI.limitsWords(LIM_OPEN) === `folders ${LROOT} · accounts any · permission modes default · models any · modes chat` && /refused until/.test(CLI.limitsWords(null)), 'the CLI words a key\'s limits (names only); a pre-limits key words the fail-closed state');
+  ok(/\\n  this key's limits: \$\{limitsWords\(data\.limits\)\}/.test(read('data/bin/vibespace-api')), 'the CLI\'s refusal line carries "this key\'s limits: …" whenever the hub sent them');
+}
+
 console.log('⑩ wiring pins');
 {
   const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
   const ws = read('src/ws-handler.js'), wire = read('src/server/mounts-plugins-wiring.js');
   ok(/rename: \(data\) => ConversationOps\.renameSession\(\{ activeSessions, setCustomName, writeSessionMeta, readSessionMeta, broadcastActiveSessions, getSessionKey \}, data\),/.test(ws) && /convOps\.renameConversation\(data, data\.name, byOfWs\(ws\)\);[^\n]*\n\s+break;/.test(ws) && /ConversationOps\.provide\(convOpsOwn\);/.test(ws) && !/const trimmedName/.test(ws), 'the ws rename case calls THE function (its body lives in conversation-ops.js only — lane automation-verbs: through the renameConversation seam) and hands it to the automation door');
+  ok(/openFacts: \{ defaults: \(backend\) => require\('\.\/conversation-ops\.js'\)\.openDefaults\(backend, \{ accounts: getAccounts\(\), \.\.\.automationSettings \}\) \}/.test(wire) && /limitChoices: \(\) => require\('\.\/conversation-ops\.js'\)\.limitChoices\(\{ accounts: getAccounts\(\) \}\)/.test(wire), 'lane automation-open-limits wiring: the engine judges over the account store\'s default + the instance\'s default model; the doors hand the pickers\' choices');
   ok(/require\('\.\/automation-engine\.js'\)\.create\(\{ dataDir: path\.join\(rootDir, 'data'\), vault, userTodos,/.test(wire) && /registerAutomationRoutes\(app, \{ engine: automation,/.test(wire) && /automation: \(\) => automation,/.test(wire), 'the hub wires the engine (the vault, For you), its doors, and its rows in the Vault window');
   ok(VE.isSecretName('apikey:ak-000000000001') && R('src/vault.js').SECRETS_AT_REST.some((r) => r.entry === 'apikey:<key id>') && R('src/vault-inventory.js').GROUP_IDS.includes('automation') && R('src/vault-inventory.js').revealableOf('automation', 'apikey:ak-000000000001'),
     'the vault: apikey:<id> is a secret entry, SECRETS_AT_REST names it, the window lists «Automation keys» (revealable — only to hand to an outside party)');
   const routes = read('src/routes/automation.js');
-  ok(!/app\.(post|delete|put|patch)\('\/api\/agent\/automation\/[^']*grant/.test(routes) && (routes.match(/app\.(get|post|delete)\('\/api\/automation\//g) || []).length === 6 && (routes.match(/person\(/g) || []).length >= 6, 'NO agent route writes a grant; the six owner doors are person-only');
+  ok(!/app\.(post|delete|put|patch)\('\/api\/agent\/automation\/[^']*grant/.test(routes) && (routes.match(/app\.(get|post|delete)\('\/api\/automation\//g) || []).length === 8 && (routes.match(/person\(/g) || []).length >= 8, 'NO agent route writes a grant; the eight owner doors (+ 边界…, 审计… — lane automation-open-limits) are person-only');
   ok(/name: 'test-automation-keys', tier: 'fast'/.test(read('scripts/ci.mjs')), 'this suite has its tier row');
 }
 

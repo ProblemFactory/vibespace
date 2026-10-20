@@ -93,6 +93,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   let epoch = 0;              // bumped at every unlock / lock — a cache of a key (the passkey cipher) is good for one epoch
   let lockedSince = now();
   let unlockedSince = null;   // lane vault-one-door: the Vault window's header says since when
+  const startedAt = now();    // lane vault-relock-door (owner 2026-10-20): the engine's construction = the server's boot (ms); the open tab tells a RESTART (a NEW startedAt) from a lock act (the SAME one)
   let failedTries = 0, pacedUntil = 0, busy = false, lastActivity = now(), inFlight = 0;   // inFlight: derives running now count toward the pace BEFORE they land (verify r1 A1: 40 concurrent wrong passwords landed 40 derives)
   const unlockHooks = [];   // what a locked start left undone and the unlock must retry (the wiring: mounts' restore)
   const uses = new Map();   // lane vault-contents-window: entry name → { at, by } — the store key's last use (memory only; the Vault window's «last used»)
@@ -123,6 +124,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     const st = state(), t = now();
     return {
       state: st,
+      startedAt,   // lane vault-relock-door: the boot this facts() comes from — unchanged by lock/unlock, a new value only a new process
       setUpAt: record ? record.createdAt || null : null,
       rotatedAt: record ? record.rotatedAt || null : null,
       lockedSince: st === 'locked' ? lockedSince : null,

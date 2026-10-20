@@ -18,6 +18,12 @@
  *     grant table says whether that subject may use the key, the key's scopes whether the verb is in it, the vault's state
  *     whether anything may happen at all — an agent never holds a value (q-043's 「用而不见」 holds by construction).
  *   · `identityOf(keyId)` = `automation:<keyId>` — the spend identity a billed verb (conversations.open, L2) is charged to.
+ *   · LIMITS (lane automation-open-limits — the q-048 verify's M2, q-046 §2 「key 的 limits」): WHAT a key's
+ *     conversations.open may ask for — `{cwdRoots, accounts, permissionModes, models, modes}`, picked by the owner when
+ *     the key is minted, edited in the Vault window (边界…). `openLimitsVerdict` judges the EFFECTIVE open (the folder's
+ *     real path, the account / model / permission mode the spawn would use) on the hub, after the grant and BEFORE the
+ *     spend authorizer and the spawn. A key minted before limits existed (or a damaged `limits`) reads as a FRESH key —
+ *     no folders — so it REFUSES every open until the owner sets its bounds (q-049 M1: fail closed, never unbounded).
  */
 
 const KEY_ID_RE = /^ak-[0-9a-f]{12}$/;
@@ -92,6 +98,8 @@ const CODES = Object.freeze({
   spend_refused: 429, pending: 409,
   // q-048 verify M1: the caller went away while its first-use card waited (withdrawn; nothing ran — the audit line is the record)
   caller_gone: 410,
+  // lane automation-open-limits (q-048 verify M2): the open asks for what its key's limits do not allow (one code per field)
+  cwd_outside_roots: 403, account_not_allowed: 403, permission_not_allowed: 403, model_not_allowed: 403, mode_not_allowed: 403,
 });
 
 /** A key record off disk → its shape (null = not a record). Copies NAMED fields only — never a spread. */
@@ -102,12 +110,15 @@ function keyOf(raw) {
     id: raw.id, name: clean(raw.name, NAME_MAX) || raw.id, scopes: (Array.isArray(raw.scopes) ? raw.scopes : []).filter((v, i, a) => VERBS.includes(v) && a.indexOf(v) === i),
     createdAt: num(raw.createdAt), createdBy: clean(raw.createdBy, 60) || null, revokedAt: num(raw.revokedAt), lastUsedAt: num(raw.lastUsedAt),
     digest: /^[0-9a-f]{64}$/.test(str(raw.digest)) ? raw.digest : null,
+    // lane automation-open-limits + q-049 M1: absent / null / malformed ⇒ a FRESH key's limits (no folders ⇒ every open
+    // refused until the owner sets them). A missing field never WIDENS a key — fail closed, like a damaged value.
+    limits: limitsOf(raw.limits) || limitsOf(DEFAULT_LIMITS),
   };
 }
 /** What a page or an agent may see of a key: everything but the digest (never a value — the record holds none). */
 function publicKey(k) {
   const r = keyOf(k);
-  return r ? { id: r.id, name: r.name, scopes: r.scopes.slice(), createdAt: r.createdAt, createdBy: r.createdBy, revokedAt: r.revokedAt, lastUsedAt: r.lastUsedAt } : null;
+  return r ? { id: r.id, name: r.name, scopes: r.scopes.slice(), createdAt: r.createdAt, createdBy: r.createdBy, revokedAt: r.revokedAt, lastUsedAt: r.lastUsedAt, limits: r.limits } : null;
 }
 /** A grant record → its shape (null = not one). */
 function grantOf(raw) {
@@ -177,7 +188,7 @@ function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGro
  * and forgets the value). `randomBytes(n)` / `sha256(text)` are injected (this module imports nothing: the browser bundle
  * reads it too). → { ok, record, value, entry } | { ok: false, code: 'bad_args', why }.
  */
-function mintPlan({ name, scopes, by = 'user', now = 0, randomBytes, sha256 } = {}) {
+function mintPlan({ name, scopes, limits, by = 'user', now = 0, randomBytes, sha256 } = {}) {
   if (typeof randomBytes !== 'function' || typeof sha256 !== 'function') throw new TypeError('mintPlan: randomBytes and sha256 are injected');
   const n = clean(name, NAME_MAX + 1);
   if (!n) return bad('a key needs a name');
@@ -186,15 +197,139 @@ function mintPlan({ name, scopes, by = 'user', now = 0, randomBytes, sha256 } = 
   if (!sc.length) return bad('a key needs at least one verb');
   const unknown = sc.find((v) => !VERBS.includes(v));
   if (unknown) return bad(`no such verb "${clean(unknown, 60)}" (one of: ${VERBS.join(', ')})`);
+  const lim = limitsPlan(limits === undefined ? {} : limits, sc);   // a fresh key: the owner picks (no folder, no account until he does)
+  if (!lim.ok) return lim;
   const id = 'ak-' + Buffer.from(randomBytes(6)).toString('hex');
   const value = VALUE_PREFIX + Buffer.from(randomBytes(32)).toString('base64url');
   const digest = str(sha256(value));
-  return { ok: true, value, entry: entryOf(id), record: { id, name: n, scopes: VERBS.filter((v) => sc.includes(v)), createdAt: Number(now) || 0, createdBy: clean(by, 60) || 'user', revokedAt: null, lastUsedAt: null, digest } };
+  return { ok: true, value, entry: entryOf(id), record: { id, name: n, scopes: VERBS.filter((v) => sc.includes(v)), createdAt: Number(now) || 0, createdBy: clean(by, 60) || 'user', revokedAt: null, lastUsedAt: null, digest, limits: lim.limits } };
 }
 const entryOf = (keyId) => `${ENTRY_PREFIX}${keyId}`;
 const keyIdOfEntry = (entry) => { const s = str(entry); return s.startsWith(ENTRY_PREFIX) && KEY_ID_RE.test(s.slice(ENTRY_PREFIX.length)) ? s.slice(ENTRY_PREFIX.length) : null; };
 /** The spend identity of a key (a billed verb is charged to it — src/server/spend-guard.js, L2). */
 const identityOf = (keyId) => `automation:${keyId}`;
+
+// ── LIMITS (lane automation-open-limits — the q-048 verify's M2: an open key had NO bounds — any cwd incl. `/` and an
+// unnormalized `/tmp/../etc`, any account, any model, bypassPermissions, terminal — the grant was the only fence) ──
+const LIMIT_FIELDS = Object.freeze(['cwdRoots', 'accounts', 'permissionModes', 'models', 'modes']);
+/** One refusal code per field (403 at the door — CODES below). */
+const LIMIT_CODES = Object.freeze({ cwdRoots: 'cwd_outside_roots', accounts: 'account_not_allowed', permissionModes: 'permission_not_allowed', models: 'model_not_allowed', modes: 'mode_not_allowed' });
+const OPEN_MODES = Object.freeze(['chat', 'terminal']);
+const HARNESS_DEFAULT = 'default';     // a permission mode / model the open did not name: the harness's own choice (no flag)
+const SUBSCRIPTION = 'subscription';   // the CLI's own login — the account an open bills when it names none and no default is set
+const ROOTS_MAX = 20, LIMIT_LIST_MAX = 50, PATH_MAX = 4096;
+const ACCOUNT_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;            // an account / pool id (src/conversation-spec.js)
+const LIMIT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:\-[\]]{0,79}$/;      // a model / permission-mode id (conversation-spec.js MODEL_RE)
+const PATH_BAD_RE = /[\u0000-\u001f\u007f\u2028\u2029]/;
+/** A FRESH key's limits: no folder and no account until the owner picks them; the harness's own permission mode; any
+ *  model; chat only. */
+const DEFAULT_LIMITS = Object.freeze({ cwdRoots: Object.freeze([]), accounts: Object.freeze([]), permissionModes: Object.freeze([HARNESS_DEFAULT]), models: 'any', modes: Object.freeze(['chat']) });
+/** An absolute path, lexically normalized (`.` / `..` / `//` folded — `/tmp/../etc` is `/etc`); null = not absolute. */
+function normPath(p) {
+  const s = str(p);
+  if (!s.startsWith('/') || s.length > PATH_MAX || PATH_BAD_RE.test(s)) return null;
+  const out = [];
+  for (const part of s.split('/')) { if (!part || part === '.') continue; if (part === '..') out.pop(); else out.push(part); }
+  return '/' + out.join('/');
+}
+/** `p` is `root` or below it (both normalized). */
+const within = (p, root) => root === '/' || p === root || p.startsWith(root + '/');
+/** A record's limits → their shape (named fields only; a malformed entry is dropped) | null (not an object). */
+function limitsOf(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const ids = (v, re) => (Array.isArray(v) ? v : []).map(str).filter((x, i, a) => re.test(x) && a.indexOf(x) === i).slice(0, LIMIT_LIST_MAX);
+  return {
+    cwdRoots: (Array.isArray(raw.cwdRoots) ? raw.cwdRoots : []).map(normPath).filter((x, i, a) => x && a.indexOf(x) === i).slice(0, ROOTS_MAX),
+    accounts: raw.accounts === 'any' ? 'any' : ids(raw.accounts, ACCOUNT_RE),
+    permissionModes: ids(raw.permissionModes, LIMIT_ID_RE),
+    models: raw.models === 'any' ? 'any' : ids(raw.models, LIMIT_ID_RE),
+    modes: OPEN_MODES.filter((m) => Array.isArray(raw.modes) && raw.modes.includes(m)),
+  };
+}
+/**
+ * THE OWNER'S PICK (the mint and the 边界… doors) → { ok, limits } | bad_args naming the field. Strict: an unknown field or a
+ * malformed entry is refused by name (never dropped — what is stored is what he picked); a field left out takes the fresh
+ * key's default. A key that holds conversations.open must name at least one folder, its accounts (or any), a permission
+ * mode, its models (or any) and a mode — a key that can open nothing is refused at the door, not discovered at the first call.
+ */
+function limitsPlan(raw, scopes = []) {
+  const a = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
+  if (!a) return bad('the limits are an object {cwdRoots, accounts, permissionModes, models, modes}');
+  for (const k of Object.keys(a)) if (!LIMIT_FIELDS.includes(k)) return bad(`unknown limit "${clean(k, 40)}" (one of: ${LIMIT_FIELDS.join(', ')})`);
+  const v = { ...DEFAULT_LIMITS, ...Object.fromEntries(Object.entries(a).filter(([, x]) => x !== undefined)) };
+  const listOf = (k, re, what, { any = false, max = LIMIT_LIST_MAX } = {}) => {
+    if (any && v[k] === 'any') return null;
+    if (!Array.isArray(v[k])) return bad(`${k} is a list${any ? ' or "any"' : ''}`);
+    if (v[k].length > max) return bad(`${k} holds at most ${max}`);
+    const badOne = v[k].find((x) => typeof x !== 'string' || !re.test(x));
+    return badOne === undefined ? null : bad(`${k}: "${clean(badOne, 80)}" is not ${what}`);
+  };
+  const e = (() => {
+    if (!Array.isArray(v.cwdRoots)) return bad('cwdRoots is a list of absolute folders');
+    if (v.cwdRoots.length > ROOTS_MAX) return bad(`cwdRoots holds at most ${ROOTS_MAX}`);
+    const badRoot = v.cwdRoots.find((r) => normPath(r) === null);
+    if (badRoot !== undefined) return bad(`cwdRoots: "${clean(badRoot, 80)}" is not an absolute folder`);
+    return listOf('accounts', ACCOUNT_RE, 'an account or pool id', { any: true })
+      || listOf('permissionModes', LIMIT_ID_RE, 'a permission mode')
+      || listOf('models', LIMIT_ID_RE, 'a model id', { any: true })
+      || listOf('modes', /^(?:chat|terminal)$/, 'chat or terminal');
+  })();
+  if (e) return e;
+  const lim = limitsOf(v);
+  if ((Array.isArray(scopes) ? scopes : []).includes('conversations.open')) {
+    if (!lim.cwdRoots.length) return bad('a key that opens conversations names at least one folder they may open in');
+    if (lim.accounts !== 'any' && !lim.accounts.length) return bad('a key that opens conversations names the accounts they may use (or any)');
+    if (!lim.permissionModes.length) return bad(`a key that opens conversations names at least one permission mode (${HARNESS_DEFAULT} = the harness's own)`);
+    if (lim.models !== 'any' && !lim.models.length) return bad('a key that opens conversations names its models (or any)');
+    if (!lim.modes.length) return bad('a key that opens conversations names chat, terminal or both');
+  }
+  return { ok: true, limits: lim };
+}
+/** The limits in words (the CLI's refusal, the audit view): names only. */
+function limitsWords(limits) {
+  const L = limitsOf(limits);
+  if (!L) return 'no bounds set — every open is refused until you set them in the Vault window';
+  const any = (v) => (v === 'any' ? 'any' : v.join(', ') || 'none');
+  return `folders ${any(L.cwdRoots)} · accounts ${any(L.accounts)} · permission modes ${any(L.permissionModes)} · models ${any(L.models)} · modes ${any(L.modes)}`;
+}
+/**
+ * THE JUDGMENT OF AN OPEN AGAINST ITS KEY'S LIMITS (on the hub — src/server/automation-engine.js use(): after the grant,
+ * BEFORE the grant is spent, the spend authorizer runs and anything spawns). `spec` = the EFFECTIVE open the hub resolved
+ * — {mode, cwd, accountId, model, permissionMode}, a value the caller did not name being the one the spawn would use (the
+ * hub's default account else `subscription`, the instance's default model else `default`, the harness's own permission
+ * mode `default`, chat). `realpath(p)` is INJECTED (this module imports nothing): the folder's real path, null = missing.
+ * → { ok: true, cwd } (`cwd` = the REAL folder — the spawn uses it, so the judged path is the opened one)
+ * | { ok: false, code, field, why } — one code per field, in the
+ * order folders › accounts › permission modes › models › modes. A folder is inside a root only by its REAL path: `..`
+ * and a symlink out of the roots are refused `cwd_outside_roots` like any other folder outside them.
+ */
+function openLimitsVerdict(limits, spec = {}, { realpath = null } = {}) {
+  const s = spec && typeof spec === 'object' ? spec : {};
+  // q-049 M1: null / undefined / malformed limits ⇒ a FRESH key's (no folders) — every open is refused, never unbounded
+  const L = limitsOf(limits) || limitsOf(DEFAULT_LIMITS);
+  const no = (field, why) => ({ ok: false, code: LIMIT_CODES[field], field, why });
+  const real = (p) => {
+    if (typeof realpath !== 'function') return p;
+    try { const r = realpath(p); return typeof r === 'string' ? normPath(r) : null; } catch { return null; }
+  };
+  if (!normPath(s.cwd)) return no('cwdRoots', 'a cwd is an absolute folder');
+  // the path AS ASKED goes to realpath (the kernel's own reading: a symlink before a `..` is followed first); without an
+  // injected realpath (the browser bundle) the lexical fold stands in
+  const cwd = typeof realpath === 'function' ? real(str(s.cwd)) : normPath(s.cwd);
+  const named = (words) => (words.length ? words.join(', ') : 'none');
+  if (!cwd) return no('cwdRoots', `"${clean(s.cwd, 200)}" does not exist (a folder's real path decides where it is)`);
+  const roots = L.cwdRoots.map(real).filter(Boolean);
+  if (!roots.some((r) => within(cwd, r))) return no('cwdRoots', `"${clean(s.cwd, 200)}"${cwd !== str(s.cwd) ? ` (really ${cwd})` : ''} is outside this key's folders (${named(L.cwdRoots)})`);
+  const account = str(s.accountId) || SUBSCRIPTION;
+  if (L.accounts !== 'any' && !L.accounts.includes(account)) return no('accounts', `the account ${account} is not one of this key's (${named(L.accounts)})`);
+  const perm = str(s.permissionMode) || HARNESS_DEFAULT;
+  if (!L.permissionModes.includes(perm)) return no('permissionModes', `the permission mode ${perm} is not one of this key's (${named(L.permissionModes)})`);
+  const model = str(s.model) || HARNESS_DEFAULT;
+  if (L.models !== 'any' && !L.models.includes(model)) return no('models', `the model ${model} is not one of this key's (${named(L.models)})`);
+  const mode = str(s.mode) || 'chat';
+  if (!L.modes.includes(mode)) return no('modes', `the mode ${mode} is not one of this key's (${named(L.modes)})`);
+  return { ok: true, cwd };
+}
 
 /** A call's arguments as the AUDIT keeps them: names and ids only — never a text body (a rename's new name IS a name). */
 function argsSummary(verb, args) {
@@ -215,4 +350,5 @@ module.exports = {
   KEY_ID_RE, VALUE_PREFIX, VALUE_RE, ENTRY_PREFIX, NAME_MAX, SUBJECT_RE, MODES, ASK_TTL_MS, ASK_QUIET_MS, AUDIT_FILE, STORE_FILE,
   SCOPES, VERBS, scopeOf, CODES, keyOf, publicKey, grantOf, isSubject, callerSubjects,
   useVerdict, pickKey, mintPlan, entryOf, keyIdOfEntry, identityOf, argsSummary, auditLine,
+  LIMIT_FIELDS, LIMIT_CODES, OPEN_MODES, HARNESS_DEFAULT, SUBSCRIPTION, DEFAULT_LIMITS, normPath, limitsOf, limitsPlan, limitsWords, openLimitsVerdict,
 };

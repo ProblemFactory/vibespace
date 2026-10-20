@@ -7,7 +7,7 @@
 import { t } from './i18n.js';
 import { createModalShell, fetchJson } from './utils.js';
 import { enterSubmits } from './chat-enter-keys.js';
-import { vaultWords } from './vault-unlock.js';
+import { vaultWords, vaultFacts, onVaultFacts } from './vault-unlock.js';
 
 let pageSecret = null;   // THIS page's window — memory only
 let revealUntil = 0;     // its end on this page's clock (the hub's own clock is the authority)
@@ -29,6 +29,10 @@ export function noteRevealLeft(ms) { if (pageSecret && Number(ms) > 0) { revealU
 export function forgetReveal() { const had = !!pageSecret; pageSecret = null; revealUntil = 0; if (had) changed(); }
 /** End it at the hub too (the Vault window closed / 隐藏全部). */
 export async function endReveal() { const p = pageSecret; forgetReveal(); if (p) await rvPost('/api/vault/reveal-end', { page: p }); }
+// lane takeover-surface-census (q-050): forget this page's window the moment the vault is not unlocked — a lock→unlock (an
+// agent can lock), a hub restart or the 5-minute boundary leaves a window the hub will reject; forgetting here means the
+// NEXT press asks FIRST (in its own task), never a round trip late (the second late-ask road q-050 found).
+onVaultFacts((f) => { if (!f || f.state !== 'unlocked') forgetReveal(); });
 
 /** A reveal door's refusal in the person's words (the vault's own codes first). */
 export function revealWords(r) {
@@ -77,14 +81,14 @@ export function askRevealPassword() {
   return asking;
 }
 
-/** ONE value for ONE row reference (asks 验证是你 first when this page has no window; once more if the hub ended it).
+/** ONE value for ONE row reference (asks 验证是你 first when this page has no window; a stale window the hub rejects forgets + refuses — the next press asks fresh, q-050).
  *  → the door's answer { ok, value, leftMs } | { ok: false, code } (`cancelled` = the person closed the ask). */
 export async function revealValue(id) {
   for (let i = 0; i < 2; i++) {
     if (!revealLeftMs() && !(await askRevealPassword())) return { ok: false, code: 'cancelled' };
     const r = await rvPost('/api/vault/reveal', { id, page: pageSecret });
     if (r && r.ok) { noteRevealLeft(r.leftMs); return r; }
-    if (r && r.code === 'reveal_needs_password') { forgetReveal(); continue; }
+    if (r && r.code === 'reveal_needs_password') { forgetReveal(); return { ok: false, code: 'reveal_needs_password' }; }
     if (r && r.code === 'vault_locked') forgetReveal();
     return r || { ok: false, code: 'error' };
   }
@@ -92,14 +96,18 @@ export async function revealValue(id) {
 }
 
 /** Manage Agents' Show key…: the account route answers through this page's window (a set-up vault) — 验证是你 first when
- *  the hub asks for it. → { key } | { error, code } | null (the person closed the ask). */
+ *  the hub asks for it. → { key } | { error, code } | null (the person closed the ask).
+ *  lane takeover-surface-census: an unlocked vault always asks for the window, so with none 验证是你 opens FIRST, in the press's
+ *  own task — a dialog the person's act opened takes the keys while they drive an agent's browser. Asked after the hub's
+ *  refusal, it opened a round trip late (past USER_PRESS_MS, src/browser-takeover.js) and the second password went to the page. */
 export async function revealAccountKey(id) {
+  if (!revealLeftMs() && vaultFacts()?.state === 'unlocked' && !(await askRevealPassword())) return null;
   for (let i = 0; i < 2; i++) {
     const r = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/key`, { headers: revealHeaders() });
     if (r && r.key) { noteRevealLeft(r.leftMs); return r; }
     if (!(r && r.code === 'reveal_needs_password')) return r ? { ...r, error: r.code ? revealWords(r) : r.error } : r;
     forgetReveal();
-    if (!(await askRevealPassword())) return null;
+    return { code: 'reveal_needs_password', error: revealWords({ code: 'reveal_needs_password' }) };
   }
   return { code: 'reveal_needs_password', error: revealWords({ code: 'reveal_needs_password' }) };
 }

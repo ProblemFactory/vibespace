@@ -2,6 +2,22 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.325 — 2026-10-20
+
+### Added
+- Each automation key has Audit… in the Vault window: what it did, including an open it refused.
+
+### Fixed
+- After a restart, a page you already had open now asks for the second password again — before, it could stay silent until you noticed.
+- While the vault is locked a strip at the top of every page says so with an Unlock button, and the For you tray says the vault is waiting.
+- An agent can now fetch a file on a message it found by a full search or by reading around a result, even when that message is older than the saved copy.
+
+### Security
+- An automation key says which folders, accounts, models and permission modes the conversations it opens may use; anything outside is refused.
+- You pick them when you mint a key and change them with Limits…; a key with no folders — including one minted earlier — refuses every open until you set them.
+- A key's Default permission mode now reads “the CLI's own setting”: with no flag this machine's Claude decides, so it is not a cap.
+- While you drive the agent's browser, Show key… asks for the second password at once, so what you type goes into its box, never into the browser's page.
+
 ## 2.369.324 — 2026-10-20
 
 ### Fixed

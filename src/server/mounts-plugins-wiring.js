@@ -88,9 +88,14 @@ require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, 
 // (never in an agent's hands); a conversation / a Task Group is GRANTED a key by a person; a use is judged on the hub
 // (src/server/automation-engine.js over PURE src/automation-keys.js), audited, and stops while the vault is locked
 const automationGroupsOf = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return []; try { return tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id); } catch { return []; } };
+// lane automation-open-limits (the q-048 verify's M2): an open's limits judge the EFFECTIVE open — what it names, else the
+// account store's default and the instance's default model (the typed accessor ws-create's ladder reads)
+const automationSettings = require('./harness-config-sync.js').accessorsFor({ serverSetting, harnesses: require('../harnesses') });
 const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, log: (m) => console.log('[automation]', m),
-  verbs: require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf }) });
+  verbs: require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf }),
+  openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }) } });
 require('../routes/automation.js').registerAutomationRoutes(app, { engine: automation, who: (req) => require('../auth.js').Auth.signInHandle(req),
+  limitChoices: () => require('./conversation-ops.js').limitChoices({ accounts: getAccounts() }),   // lane automation-open-limits: the limit pickers
   // the caller = the vsst_'s conversation; the live list IS the running conversations (an ended one's token is unknown ⇒ 401)
   callerOf: (token) => { for (const [id, s] of activeSessions) if (s && sameToken(token, s.agentToken)) { const cid = s.backendSessionId || s.claudeSessionId || null; return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, name: s.name || s.webuiName || null, live: !s.isTmuxView, groups: automationGroupsOf(s, id) }; } return null; },
   subjects: () => { const tasks = getTasks && getTasks(); const sessions = []; for (const s of activeSessions.values()) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude' }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; } });
@@ -528,7 +533,7 @@ setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', 
 vault.onUnlock(() => mounts.restore().catch((e) => console.error('[mounts] restore after the vault unlocked:', e.message))); // lane vault-e2e-password: a boot over a LOCKED vault could not open a mount's secret — the unlock re-mounts what is desired
 // lane vault-e2e-password-fix-r2 — THE OPEN SWEEPS (seal what an older build left in the clear) and THE LOCK SIGNS EVERY LOGIN
 // OUT (the owner's decision ④): src/server/vault-hooks.js
-require('./vault-hooks.js').wireVaultHooks({ vault, auth, wss, hostTokens, plugins, sealed: [droplineTokens], integrations,
+require('./vault-hooks.js').wireVaultHooks({ vault, auth, wss, hostTokens, plugins, sealed: [droplineTokens], integrations, userTodos, // lane vault-relock-door: the boot's SET-UP+LOCKED For-you notice (the tray says the vault is waiting)
   // a device that dialed in while LOCKED never got its hello (the hub could not read its token): its link is dropped at the
   // open, so it re-dials and the whole dial-in runs — the hello, the mounts' heal, every session's back-tunnel re-owned
   redial: () => { let n = 0; for (const [deviceId, stream] of agentdDials) { const dm = agentdDialDevices && agentdDialDevices.get(deviceId); if (dm && dm.status && dm.status().connected) continue; try { stream.destroy(); n++; } catch { } } if (n) console.log(`[vault] ${n} device link(s) dialed in while locked — dropped so they re-dial and say hello`); return n; } });

@@ -254,7 +254,7 @@ export function openVaultWindow(app, { syncId } = {}) {
       h.append(vwEl('span', 'vw-group-name', (STORE_WORDS[s.store] || (() => s.label))()), vwEl('span', 'vw-group-n', String(info.count || 0)));
       if (info.error) h.append(vwEl('span', 'vw-group-err', t('could not be read ({code})', { code: info.error })));
       // design q-046: 铸造… on the «Automation keys» head — the vault unlocked only (a key's value is sealed at once)
-      if (s.store === 'automation' && d.state === 'unlocked') { const m = vwEl('button', 'vw-btn vw-ak-mint', t('Mint…')); m.type = 'button'; m.onclick = () => showMintDialog({ refresh }); h.append(m); }
+      if (s.store === 'automation' && d.state === 'unlocked') { const m = vwEl('button', 'vw-btn vw-ak-mint', t('Mint…')); m.type = 'button'; m.onclick = () => showMintDialog({ refresh, data: st.auto }); h.append(m); }
       headEls.set(s.store, h);
     }
     for (const row of d.rows) rowEls.set(row.id, rowFor(row));

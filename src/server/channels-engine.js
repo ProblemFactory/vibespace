@@ -4680,6 +4680,32 @@ function create(deps = {}) {
     if (r.until <= t) { attRefused.delete(k); return null; }
     return r;
   }
+  // lane channels-attachment-outside-archive (B-5f20): A MESSAGE A VENDOR READ SHOWED, NOT STORED — an `around` read
+  // (the owner's sheet, an agent's `read --around`) answers messages older than the saved copy, each with its files; the
+  // agent's line printed `fetch: vibespace-channels attachment <conv> <msg> <id>` and the fetch answered not-found (no
+  // ARCHIVED message carried the id). The answer's messages with a file are remembered here by (account, conversation,
+  // message) — the vendor's own answer for THAT conversation placed them in it, never an id a caller typed (Lark's
+  // resource address names no chat: a typed pair would fetch another conversation's file through this one's reach).
+  // Memory only (never the log — F8: a log is contiguous from its oldest), the newest SHOWN_OUTSIDE_MAX messages.
+  const SHOWN_OUTSIDE_MAX = 2000;
+  const shownOutside = new Map();   // `${adapterId}\0${convId}\0${vendorId}` -> {vendorId, at, author, attachments}
+  function noteShownOutside(adapterId, convId, records) {
+    for (const r of Array.isArray(records) ? records : []) {
+      const parts = r && r.vendorId && Array.isArray(r.attachments) ? r.attachments.filter((a) => a && a.id && a.role !== 'body') : [];
+      if (!parts.length) continue;
+      const k = `${adapterId}\0${convId}\0${r.vendorId}`;
+      shownOutside.delete(k);
+      shownOutside.set(k, { vendorId: String(r.vendorId), at: Number(r.at) || null, author: r.author || null, attachments: parts.map((a) => ({ id: String(a.id), name: a.name || null, mime: a.mime || null, bytes: a.bytes || null })), shown: true });
+      if (shownOutside.size > SHOWN_OUTSIDE_MAX) shownOutside.delete(shownOutside.keys().next().value);
+    }
+  }
+  function shownCarrier(adapterId, convId, attId, msg) {
+    const r = msg ? shownOutside.get(`${adapterId}\0${convId}\0${String(msg)}`) : null;
+    return r && r.attachments.some((a) => String(a.id) === String(attId)) ? r : null;
+  }
+  /** The two not-founds an attachment road can end on, each naming where it looked. */
+  const NOT_IN_EITHER = 'that message is not in the saved copy, and no read --around showed it in this conversation — find it first: vibespace-channels search "words" --full, then vibespace-channels read <conv> --around <msg id>';
+  const VENDOR_HAS_NONE = 'that message is not in the saved copy, and the vendor has no such message (or no such file on it) any more — nothing fetched';
   function ownerRecordOf(adapterId, convId, attId, msg) {
     const has = (r) => r && Array.isArray(r.attachments) && r.attachments.some((a) => a && String(a.id) === String(attId));
     if (msg) {
@@ -4687,7 +4713,8 @@ function create(deps = {}) {
       if (byMsg && has(byMsg)) return byMsg;
     }
     const recs = store.readTail(adapterId, convId, { limit: 5000 });
-    return recs.find((r) => (!msg || String(r.vendorId) === String(msg)) && has(r)) || null;
+    // B-5f20: the archive FIRST, then a message a vendor read showed in this conversation (`shown: true` — source 'vendor')
+    return recs.find((r) => (!msg || String(r.vendorId) === String(msg)) && has(r)) || shownCarrier(adapterId, convId, attId, msg);
   }
   /**
    * A MESSAGE'S FORMATTED BODY, KEPT AT INGEST (lane channel-rich, D2): an
@@ -4724,13 +4751,14 @@ function create(deps = {}) {
     if (!stillSees(ctx, adapterId, convId)) return ACL.notFound();
     if (!r || !r.ok) return r;
     const { en, rec } = convFor(adapterId, convId);
-    const carrier = msg && typeof store.findRecord === 'function' ? store.findRecord(adapterId, convId, String(msg)) : null;
-    const carries = !!(carrier && Array.isArray(carrier.attachments) && carrier.attachments.some((a) => a && String(a.id) === String(attId)));
-    const seen = carries ? viewsOf(rec, [carrier]).map(agentCopy)[0] : null;
+    const stored = msg && typeof store.findRecord === 'function' ? store.findRecord(adapterId, convId, String(msg)) : null;
+    const inStore = !!(stored && Array.isArray(stored.attachments) && stored.attachments.some((a) => a && String(a.id) === String(attId)));
+    const carrier = inStore ? stored : shownCarrier(adapterId, convId, attId, msg);   // B-5f20: or the message a vendor read showed
+    const seen = carrier ? viewsOf(rec, [carrier]).map(agentCopy)[0] : null;
     const who = seen && seen.author ? seen.author.name || seen.author.id : null;
     const meta = r.meta || {};
     return {
-      ok: true, file: r.file, cached: !!r.cached,
+      ok: true, file: r.file, cached: !!r.cached, source: inStore ? 'archive' : 'vendor',
       mime: meta.mime ? agentText(meta.mime, { kind: 'line', max: 128 }) : null, from: who ? agentText(who, { kind: 'line', max: 200 }) : null, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId) },
     };
   }
@@ -4746,7 +4774,9 @@ function create(deps = {}) {
     // `role: 'body'` part: §25, an agent reads `text`, the window draws the body; its id is guessable, `part:1`), and never a
     // cached file of this conversation by an id no message it names carries — both the same not-found as no attachment
     if (agent) {
-      const carrier = msg && typeof store.findRecord === 'function' ? store.findRecord(adapterId, convId, String(msg)) : null;
+      // B-5f20: the archive FIRST; a message the saved copy does not hold, once a vendor read SHOWED it here (never body)
+      const carrier = (msg && typeof store.findRecord === 'function' ? store.findRecord(adapterId, convId, String(msg)) : null) || shownCarrier(adapterId, convId, attId, msg);
+      if (!carrier) return { ok: false, code: 'not-found', error: NOT_IN_EITHER };
       const part = carrier && Array.isArray(carrier.attachments) ? carrier.attachments.find((a) => a && String(a.id) === String(attId)) : null;
       if (!part || part.role === 'body') return { ok: false, code: 'not-found', error: 'no message in this conversation carries that attachment' };
     }
@@ -4777,7 +4807,7 @@ function create(deps = {}) {
     if (held && held.data) {
       const hatt = owner.attachments.find((a) => String(a.id) === String(attId)) || {};
       const put = await store.attachmentPut(adapterId, convId, attId, { msg: scope, data: held.data, name: peerName(hatt.name, 256) || null, mime: held.mime || hatt.mime || null }, { budgetBytes: attachmentBudgetBytes() });
-      return answer({ ok: true, file: put.file, meta: put.meta, cached: false, held: true });
+      return answer({ ok: true, file: put.file, meta: put.meta, cached: false, held: true, source: owner.shown ? 'vendor' : 'archive' });
     }
     v = Att.fetchVerdict({
       cached: false, remembered: null, owner: !!owner, fetchable: c.attachments === 'fetch', enabled: rec.enabled !== false,
@@ -4788,7 +4818,7 @@ function create(deps = {}) {
       case 'join': return attInflight.get(k);
       case 'fetch': break;
       default:
-        if (v.code === 'not-found') return { ok: false, code: 'not-found', error: 'no message in this conversation carries that attachment' };
+        if (v.code === 'not-found') return { ok: false, code: 'not-found', error: msg && !(typeof store.findRecord === 'function' && store.findRecord(adapterId, convId, String(msg))) ? NOT_IN_EITHER : 'no message in this conversation carries that attachment' };
         if (v.code === 'not-supported') return { ok: false, code: 'not-supported', error: `${rec.label || rec.id} can list attachments but not fetch them` };
         if (v.code === 'disabled') return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
         if (v.code === 'backoff') {
@@ -4811,7 +4841,7 @@ function create(deps = {}) {
         const code = err instanceof ChannelError ? err.code : 'vendor-error';
         const retryAfterSec = Number(err && err.detail && err.detail.retryAfterSec) || null;
         const ttl = Att.negativeTtlMs(code, { retryAfterSec });
-        const error = String((err && err.message) || err);
+        const error = owner.shown && code === 'not-found' ? VENDOR_HAS_NONE : String((err && err.message) || err);
         // integration 2.369.192 (R3 × R5): a call the account's END aborted (R5's dropLive — a disable, a disconnect, a new
         // sign-in: "the account changed") is NOT the vendor's refusal — an answer that outlived its entry keeps nothing, the
         // negative cache included (else the next ask read a remembered `transport` before the account's own `disabled`)
@@ -4829,7 +4859,7 @@ function create(deps = {}) {
       }
       const put = await store.attachmentPut(adapterId, convId, attId, { msg: scope, data, name: peerName(att.name, 256) || peerName(r && r.name, 256) || null, mime: (r && r.mime) || att.mime || null }, { budgetBytes: attachmentBudgetBytes() });
       if (put.evicted.length) log.log(`[channels] ${adapterId}: attachment cache over ${Math.round(attachmentBudgetBytes() / 1048576)} MB — evicted ${put.evicted.length} least-recently-used file(s)`);
-      return { ok: true, file: put.file, meta: put.meta, cached: false, evicted: put.evicted.length };
+      return { ok: true, file: put.file, meta: put.meta, cached: false, evicted: put.evicted.length, source: owner.shown ? 'vendor' : 'archive' };
     })();
     attInflight.set(k, run);
     try { return answer(await run); } finally { attInflight.delete(k); }
@@ -6452,6 +6482,7 @@ function create(deps = {}) {
     catch (err) { return { ok: false, code: err instanceof ChannelError ? err.code : 'vendor-error', error: String((err && err.message) || err).slice(0, 300) }; }
     finally { if (aroundFlights.get(fk) === flight) aroundFlights.delete(fk); }
     if (r.facts) measureFullSearch(rec, { around: r.facts });
+    if (!outlived(rec, e)) noteShownOutside(rec.id, cid, r.records);   // B-5f20: what it showed with a file can be fetched
     const en = store.index.live()[`${rec.id}/${cid}`];
     return { ok: true, rec, records: r.records, known: !!en, title: en ? titleOf(registry.capsOf(rec.kind), en.title) || null : null, vendorId: vid };
   }

@@ -110,8 +110,14 @@ saved /tmp/vibespace-channels/lark-main/3f9a1c0d2b4e.png (image/png, 48213 bytes
   of each minute (the same 25 % as refreshes) — past it `not fetched: …
   [vendor-budget]` with the wait (exit 4), like a vendor back-off
   (`backoff`, `rate-limited`). `not-found` = no such conversation for you or
-  no message there carries that id; `not-supported` = the channel lists
-  attachments but cannot fetch them; `too-large` = past the vendor's bound.
+  no message there carries that id — for a message older than the saved
+  copy, until `read <conv> --around <msg id>` showed it, or when the vendor
+  no longer has it (the sentence says which); `not-supported` = the channel
+  lists attachments but cannot fetch them; `too-large` = past the vendor's bound.
+- A file on a message `search --full` found: `read <conv> --around <msg id>`
+  prints its `attachment:` line, and that line's command fetches it from the
+  vendor by its ids (the same budget and cache; the message stays unsaved —
+  the line under `saved …` says so).
 - It lands in your temp dir under a name made of hashes and its type
   (`.png`, `.jpg`, `.gif`, `.webp`, `.pdf`, `.txt`, else `.bin`) — never the
   sender's file name. `--out <path>` picks the path; an existing file there

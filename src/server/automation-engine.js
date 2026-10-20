@@ -18,6 +18,11 @@
  *     across a lock and `onOpen` warms nothing (a use never needs a value: the grant table decides).
  *   · THE VERBS are the closed table's (PURE SCOPES); `verbs` maps the WIRED ones to their server-side doors (L1:
  *     conversations.rename — src/server/conversation-ops.js); every other verb answers 501 `verb_not_wired` (L2 wires them).
+ *   · THE LIMITS (lane automation-open-limits — the q-048 verify's M2): a conversations.open is judged against its key's
+ *     limits (PURE openLimitsVerdict) over the EFFECTIVE open — the folder's real path (`openFacts.realpath`), the default
+ *     account and model the spawn would use (`openFacts.defaults(backend)`) — AFTER the grant and BEFORE the grant is spent,
+ *     the spend authorizer runs and anything spawns; the refusal is audited with its code and names the key's limits. An
+ *     open its key may not make files no first-use card. 边界… (`setLimits`, a person's door) sets them.
  */
 const fs = require('fs');
 const path = require('path');
@@ -45,8 +50,11 @@ function writeJsonAtomic(file, obj) {
  * @param {Object<string, (args: object, ctx: object) => (object|Promise<object>)>} [o.verbs]  the wired verbs' doors
  */
 function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date.now(), log = () => {}, randomBytes = crypto.randomBytes,
-  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) } } = {}) {
+  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, openFacts = {} } = {}) {
   if (!dataDir || !vault) throw new TypeError('automation-engine: dataDir and vault are required');
+  // lane automation-open-limits: the facts an open's limits are judged over — a folder's real path (null = missing) and the
+  // hub's defaults for what an open does not name (the wiring hands the account store's and the instance's)
+  const realpath = typeof openFacts.realpath === 'function' ? openFacts.realpath : (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
   const FILE = path.join(dataDir, A.STORE_FILE), AUDIT = path.join(dataDir, A.AUDIT_FILE);
   const asks = new Map();      // askId → {askId, keyId, keyName, subject, sessionKey, who, verb, askedAt, waiters, todoId, timer}
   const byPair = new Map();    // `${keyId}|${subject}` → askId (ONE card per pair)
@@ -75,10 +83,10 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
 
   // ── THE OWNER'S DOORS (the cookie routes only) ──
   /** Mint a key: the value sealed as `apikey:<id>`, the record (digest only) written; the value is forgotten here. */
-  function mint({ name, scopes, by = 'user' } = {}) {
+  function mint({ name, scopes, limits, by = 'user' } = {}) {
     if (vaultState() !== 'unlocked') return named(vaultState() === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
     if (db.bad) return named('failed', 'data/automation-keys.json could not be read — nothing is written over it');
-    const plan = A.mintPlan({ name, scopes, by, now: now(), randomBytes, sha256 });
+    const plan = A.mintPlan({ name, scopes, limits, by, now: now(), randomBytes, sha256 });
     if (!plan.ok) return plan;
     if (db.keys.some((k) => !k.revokedAt && k.name === plan.record.name)) return named('bad_args', `a key named "${plan.record.name}" exists — names tell keys apart`);
     const put = vault.secretPut(plan.entry, plan.value);
@@ -127,6 +135,23 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     // own answer (once or always) settles only that card, in answer() (q-048 verify M3: one card per verb)
     if (mode === 'always' && !fromAsk) for (const q of [...asks.values()]) if (q.keyId === k.id && added.some((g) => g.subject === q.subject || q.groups.includes(g.subject))) settle(q, 'always', { answeredBy: by, why: 'granted' });
     return { ok: true, added };
+  }
+  /** 边界… (lane automation-open-limits — the owner's edit): the key's limits become his pick (PURE limitsPlan — refused by
+   *  name, never trimmed); a key minted before limits gets its first ones HERE, never by a default. Audited `key.limits`. */
+  function setLimits(keyId, limits, { by = 'user' } = {}) {
+    if (vaultState() !== 'unlocked') return named(vaultState() === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
+    db = read();
+    if (db.bad) return named('failed', 'data/automation-keys.json could not be read — nothing is written over it');
+    const k = keyById(keyId);
+    if (!k) return named('not_found');
+    if (k.revokedAt) return named('key_revoked');
+    const plan = A.limitsPlan(limits, k.scopes);
+    if (!plan.ok) return plan;
+    const next = { ...k, limits: plan.limits };
+    try { write({ keys: db.keys.map((x) => (x.id === k.id ? next : x)), grants: db.grants }); }
+    catch (e) { return named('failed', `the key list could not be written (${e.code || e.message})`); }
+    audit({ keyId: k.id, subject: 'owner', verb: 'key.limits', ok: true, by });
+    return { ok: true, key: A.publicKey(next) };
   }
   /** Take a grant back (the window's ✕ on a 授权给 chip). */
   function ungrant(grantId, { by = 'user' } = {}) {
@@ -256,6 +281,24 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   // THE LOCK: every call waiting on a card answers 423 now; nothing is cached (a use reads the store and the vault's state each time)
   if (typeof vault.onLock === 'function') vault.onLock(() => { for (const q of [...asks.values()]) settle(q, 'vault_locked', { why: 'locked' }); });
 
+  // ── THE LIMITS (lane automation-open-limits — the q-048 verify's M2) ──
+  /** The EFFECTIVE open a call asks for — what the spawn would use: a value it does not name is the hub's default (the
+   *  default account the create path bills, the instance's default model); no permission mode = the harness's own. */
+  function effectiveOpen(args) {
+    const a = args || {};
+    const backend = a.backend || 'claude';
+    let d = {};
+    try { d = (typeof openFacts.defaults === 'function' && openFacts.defaults(backend)) || {}; } catch { d = {}; }
+    return { backend, mode: a.mode || 'chat', cwd: a.cwd, accountId: a.pool || d.accountId || null, model: a.model || d.model || null, permissionMode: a.permission || null };
+  }
+  /** → { ok: true, args } (the open's args — its cwd the REAL folder judged, so the judged path is the opened one) | the
+   *  named refusal, carrying the key's limits (names only: what the caller may ask for instead). */
+  function limitsJudge(k, args) {
+    const v = A.openLimitsVerdict(k.limits, effectiveOpen(args), { realpath });
+    if (v.ok) return { ok: true, args: { ...args, cwd: v.cwd } };   // q-049 M1: no `unbounded` — null limits now refuse
+    return { ...named(v.code, v.why, { field: v.field, limits: k.limits }), args };
+  }
+
   // ── THE USE ──
   /**
    * ONE call through the door. `caller` = { conversationId, sessionKey, name, live, groups } (the vsst_'s conversation);
@@ -281,6 +324,8 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     let verdict = A.useVerdict({ key, grants: db.grants, subject, subjectGroups: groups, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
     let asked = null;
     if (!verdict.ok && (verdict.code === 'not_granted' || verdict.code === 'once_spent')) {
+      // lane automation-open-limits: an open its key may not make files no card — the owner is never asked about it
+      if (verb === 'conversations.open') { const pre = limitsJudge(key, v0.args); if (!pre.ok) return done(pre, key.id); }
       const r = await ask({ key, caller, verb, signal });
       asked = r.outcome;
       if (r.outcome === 'gone') return done({ ...named('caller_gone', 'the call went away while its card waited — nothing ran'), args: v0.args }, key.id, { ask: 'gone' });
@@ -293,6 +338,16 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       // once: the grant the answer wrote — spent by THIS call (a joined call finds it spent and asks again)
     }
     if (!verdict.ok) return done({ ...named(verdict.code), args: v0.args }, key.id, asked ? { ask: asked } : {});
+    // THE LIMITS (lane automation-open-limits — the q-048 verify's M2): WHAT an open asks for, against its key's limits as
+    // they stand NOW (re-read — the owner may have edited them while a card waited): AFTER the grant, BEFORE the grant is
+    // spent, the spend authorizer runs and anything spawns (impl → conversation-ops openConversation). A refused open is
+    // never charged and never spends a once-grant; its audit line carries the code
+    let runArgs = v0.args;
+    if (verb === 'conversations.open') {
+      const lim = limitsJudge(keyById(key.id) || key, v0.args);
+      if (!lim.ok) return done(lim, key.id, asked ? { ask: asked } : {});
+      runArgs = lim.args;
+    }
     // THE GRANT IS SPENT BEFORE THE ACT (a once-grant never runs twice), lastUsedAt stamped
     try {
       const t = now();
@@ -303,7 +358,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     // Task Groups) — the owner's grants bound what a key reaches, never the caller's say-so
     const reach = (conversationId, targetGroups = []) => !!conversationId && (conversationId === caller.conversationId
       || db.grants.some((g) => g.keyId === key.id && (g.subject === `session:${conversationId}` || (Array.isArray(targetGroups) && targetGroups.some((tg) => g.subject === `group:${tg}`)))));
-    try { result = await impl(v0.args, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); }
+    try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); }
     catch (e) { return done({ ...named('failed', String((e && e.message) || e).slice(0, 200)), args: v0.args }, key.id, asked ? { ask: asked } : {}); }
     // lane automation-verbs: a refusal keeps what the caller can act on — the spend bucket and when it frees, the field it names
     const keep = result && typeof result === 'object' ? Object.fromEntries(['bucket', 'retryAfter', 'field'].filter((k) => result[k] != null).map((k) => [k, result[k]])) : {};
@@ -320,7 +375,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     const mine = A.callerSubjects(caller.conversationId, caller.groups || []);
     return db.keys.filter((k) => !k.revokedAt).map((k) => {
       const gs = db.grants.filter((g) => g.keyId === k.id && mine.includes(g.subject) && !(g.mode === 'once' && g.spentAt));
-      return gs.length ? { id: k.id, name: k.name, scopes: k.scopes.slice(), via: gs.map((g) => ({ subject: g.subject, mode: g.mode })) } : null;
+      return gs.length ? { id: k.id, name: k.name, scopes: k.scopes.slice(), via: gs.map((g) => ({ subject: g.subject, mode: g.mode })), limits: k.limits } : null;
     }).filter(Boolean);
   }
   /** THIS caller's audit lines (its own conversation's), newest last — names and ids only. */
@@ -335,7 +390,18 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     return out.slice(-Math.max(1, Math.min(500, Number(limit) || 50)));
   }
 
-  return { list, mint, revoke, grant, ungrant, use, answer, reconcile, keysFor, auditFor, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
+  /** The OWNER's audit view of one key (the Vault window's 审计… — lane automation-open-limits): its lines, newest first,
+   *  names and ids only (a refused open with its code among them). */
+  function auditOfKey(keyId, { limit = 50 } = {}) {
+    db = read();
+    if (!keyById(keyId)) return named('not_found');
+    let text = '';
+    try { text = fs.readFileSync(AUDIT, 'utf8'); } catch { return { ok: true, lines: [] }; }
+    const lines = text.split('\n').slice(-AUDIT_READ_MAX * 4).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((x) => x && x.key === keyId);
+    return { ok: true, lines: lines.slice(-Math.max(1, Math.min(200, Number(limit) || 50))).reverse() };
+  }
+
+  return { list, mint, revoke, grant, ungrant, setLimits, use, answer, reconcile, keysFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
 }
 
 module.exports = { create, ACTION_TYPE };

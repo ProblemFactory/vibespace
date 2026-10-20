@@ -9,6 +9,10 @@
 //      dropped, a vendor rate refusal backs off (zero calls after), `around` = one read and NOTHING stored (the log's
 //      bytes, the index row), an account without the row refuses by name, the agent's `--full` (one page, reach after
 //      the answer — a hidden hit absent and uncounted, its floor) and `--around`
+//   §D lane channels-attachment-outside-archive (B-5f20): a FILE on a message the saved copy never held — `--full`
+//      finds it, `--around` shows its line, `attachment` fetches it through the adapter (ONE vendor call, the ids the
+//      read showed, charged as the caller), the cache answers the second; typed ids never shown, a wrong message, a
+//      message the vendor no longer has, an account that cannot fetch — each refused by name
 //   §K patched-copy controls: each new rule removed ⇒ its leg goes red
 import fs from 'node:fs';
 import path from 'node:path';
@@ -193,11 +197,20 @@ async function storeLeg(create, label) {
 
 // ── §C THE ENGINE OVER THE FAKE VENDOR'S SEARCH ────────────────────────────
 console.log('§C the engine: a press, the floor, the scroll, the merge, the back-off, around, the agent');
-function counted(kind, { search = true } = {}) {
+function counted(kind, { search = true, fetch = true } = {}) {
   const m = fake.makeFakeAdapter({ kind, receive: 'poll', sendAs: ['user'], search });
-  const calls = { search: 0, around: 0 }, inject = { rate: 0, extra: null };
-  return { calls, inject, mod: { kind, caps: m.caps, create(rec, deps) {
+  const calls = { search: 0, around: 0, fetches: [] }, inject = { rate: 0, extra: null, gone: new Set() };
+  // §D: `fetch: false` = a channel that LISTS files but cannot fetch them (caps.attachments 'metadata', no fetchAttachment)
+  return { calls, inject, mod: { kind, caps: fetch ? m.caps : { ...m.caps, attachments: 'metadata' }, create(rec, deps) {
     const impl = m.create(rec, deps);
+    if (!fetch) delete impl.fetchAttachment;
+    const f0 = impl.fetchAttachment;
+    // §D: every vendor fetch recorded with its ids; `inject.gone` = messages the vendor no longer has
+    if (f0) impl.fetchAttachment = async (cid, o = {}) => {
+      calls.fetches.push({ convId: cid, messageId: o.messageId, attachmentId: o.attachmentId, mime: o.mime === undefined ? null : o.mime });
+      if (inject.gone.has(o.messageId)) throw new CH.ChannelError('not-found', `fake: no message ${o.messageId}`, { retryable: false });
+      return f0(cid, o);
+    };
     if (!search) return impl;
     const s0 = impl.search.bind(impl), a0 = impl.around.bind(impl);
     impl.search = async (o) => {
@@ -304,6 +317,85 @@ const logHash = (eng, a, c) => { try { return crypto.createHash('sha1').update(f
   for (let i = 0; i < fake.FAKE_SEARCH.perMin + 2; i++) { const x = await eng.searchFor({ kind: 'agent', id: `agent-L${i}`, name: 'L', groups: [] }, `zz loop ${i}`, { full: true, adapterId: 'srch' }); fx[x.ok ? 'ok' : x.code] = (fx[x.ok ? 'ok' : x.code] || 0) + 1; tick(200); }
   const own = await eng.searchVendor('srch', 'budget', { again: true });
   ok(own.ok && fx.ok === fake.FAKE_SEARCH.perMin - fake.FAKE_SEARCH.pagesPerPress, 'verify r1 F3: agents looping --full leave one press of the endpoint\'s minute — the owner\'s press is asked', JSON.stringify({ agents: fx, owner: own.code || 'ok' }));
+  eng.stop && eng.stop();
+}
+
+// ── §D A FILE ON A MESSAGE OUTSIDE THE SAVED COPY (lane channels-attachment-outside-archive, B-5f20) ──────
+console.log('§D a file the archive never held: --full finds it, --around shows it, attachment fetches it from the vendor');
+async function mkAttEngine(name, ENGmod = ENG) {
+  const dataDir = path.join(ROOT, name);
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: ['srch', 'srcm'].map((k) => ({ id: k, kind: k, label: k, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null }, scan: null })) }));
+  const S = counted('srch'), M = counted('srcm', { fetch: false });
+  const registry = CH.createChannelRegistry();
+  registry.register(S.mod); registry.register(M.mod);
+  let clock = Date.now();
+  const eng = ENGmod.create({ dataDir, registry, env: {}, broadcast: () => {}, now: () => clock });
+  await eng.pass('srch', { force: true });
+  await eng.pass('srcm', { force: true });
+  return { eng, S, M, tick: (ms) => { clock += ms; } };
+}
+const FILE_MSG = 'srch-ops-old-file', FILE_ID = 'file_v3_00fake_srch_q3plan';
+const AGF = { kind: 'agent', id: 'agent-F', name: 'Fetcher', groups: [] };
+/** The agent's road, as the CLI walks it: `search "Q3-plan" --full` → `read srch/srch-ops --around <id>` → `attachment`. */
+async function agentRoad(eng, S) {
+  await eng.setAccess('srch', { kind: 'conversation', convId: 'srch-ops' }, [{ principal: { kind: 'agent', id: AGF.id, name: AGF.name } }]);
+  const full = await eng.searchFor(AGF, 'Q3-plan', { full: true, adapterId: 'srch' });
+  const typed = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: FILE_MSG, by: 'agent', principal: AGF });
+  const typedCalls = S.calls.fetches.length;
+  const around = await eng.readAroundFor(AGF, 'srch', 'srch-ops', FILE_MSG);
+  const spent = { ...eng.budgetOf('srch').spentBy };   // what the fetch alone is charged is measured from here
+  const fetched = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: FILE_MSG, by: 'agent', principal: AGF });
+  return { full, typed, typedCalls, around, spent, fetched };
+}
+{
+  const { eng, S, M } = await mkAttEngine('eng-att');
+  const h0 = logHash(eng, 'srch', 'srch-ops');
+  const road = await agentRoad(eng, S);
+  const sp0 = road.spent;
+  const hit = road.full.ok && road.full.results.find((x) => x.vendorId === FILE_MSG);
+  ok(hit && hit.source === 'vendor' && !eng.store.findRecord('srch', 'srch-ops', FILE_MSG), '--full finds the file message — one the saved copy never held (a hit names its message id)', JSON.stringify({ code: road.full.code, hit }));
+  ok(road.typed.code === 'not-found' && /not in the saved copy/.test(road.typed.error) && /read <conv> --around/.test(road.typed.error) && road.typedCalls === 0, 'the RIGHT ids typed before any vendor read showed the message here: not-found naming both (the saved copy, no --around), ZERO vendor calls — Lark\'s resource address names no chat', JSON.stringify({ typed: road.typed, calls: road.typedCalls }));
+  const shown = road.around.ok ? road.around.records.find((r) => r.vendorId === FILE_MSG) : null;
+  const part = shown ? (shown.attachments || []).find((a) => a.id === FILE_ID) : null;
+  ok(part && part.name === 'Q3-plan.pdf' && /not saved/.test(road.around.note), '--around shows the file message with its attachment id and name (printed, not saved)', JSON.stringify({ code: road.around.code, part }));
+  const x1 = road.fetched;
+  const sp1 = { ...eng.budgetOf('srch').spentBy };
+  ok(x1.ok && x1.source === 'vendor' && x1.cached === false && S.calls.fetches.length === 1 && JSON.stringify(S.calls.fetches[0]) === JSON.stringify({ convId: 'srch-ops', messageId: FILE_MSG, attachmentId: FILE_ID, mime: null }) && fs.readFileSync(x1.file, 'utf-8') === `fixture attachment ${FILE_ID} of ${FILE_MSG}\n`, 'the fetch: ONE adapter call with the message id and file key the read showed (no type said ⇒ none passed), source \'vendor\', the vendor\'s bytes', JSON.stringify({ x1, fetches: S.calls.fetches }));
+  ok((sp1.agent || 0) - (sp0.agent || 0) === 1 && (sp1.owner || 0) === (sp0.owner || 0), 'charged as the AGENT (spendAs \'agent\'): one unit on the agents\' share, none on the owner\'s — the archive road\'s attribution', JSON.stringify({ sp0, sp1 }));
+  ok(x1.from === 'Brook' && x1.conversation && x1.conversation.id === 'srch-ops' && x1.mime === 'text/plain', 'the answer names the sender and the conversation the read showed it in', JSON.stringify({ from: x1.from, conv: x1.conversation, mime: x1.mime }));
+  const x2 = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: FILE_MSG, by: 'agent', principal: AGF });
+  const sp2 = { ...eng.budgetOf('srch').spentBy };
+  ok(x2.ok && x2.cached === true && x2.source === 'vendor' && x2.file === x1.file && S.calls.fetches.length === 1 && JSON.stringify(sp2) === JSON.stringify(sp1), 'the second fetch: the CACHE — zero vendor calls, nothing charged, still source \'vendor\'', JSON.stringify({ x2, n: S.calls.fetches.length, sp2 }));
+  const x3 = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: 'srch-ops-old-nope', by: 'agent', principal: AGF });
+  ok(x3.code === 'not-found' && /not in the saved copy/.test(x3.error) && /--around/.test(x3.error) && S.calls.fetches.length === 1, 'a WRONG message id: not-found naming both (not saved, never shown here), zero vendor calls', JSON.stringify(x3));
+  const AGX = { kind: 'agent', id: 'agent-X', name: 'Outsider', groups: [] };
+  const xh = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: FILE_MSG, by: 'agent', principal: AGX });
+  ok(xh.code === 'not-found' && !/saved copy/.test(xh.error || '') && S.calls.fetches.length === 1, 'an agent that cannot read the conversation: the uniform not-found — reach before the road, the cache never asked', JSON.stringify(xh));
+  // the owner's door (`?msg=`): the picture the same read showed — `type=image` (its `image/*`), charged to the OWNER
+  const o1 = await eng.attachment('srch', 'srch-ops', 'srch-ops-old-pic-img', { msg: 'srch-ops-old-pic' });
+  const sp3 = { ...eng.budgetOf('srch').spentBy };
+  ok(o1.ok && o1.source === 'vendor' && S.calls.fetches.length === 2 && S.calls.fetches[1].messageId === 'srch-ops-old-pic' && S.calls.fetches[1].mime === 'image/*' && fs.readFileSync(o1.file).subarray(1, 4).toString() === 'PNG' && (sp3.owner || 0) - (sp2.owner || 0) === 1 && (sp3.agent || 0) === (sp2.agent || 0), 'the owner\'s door on the same road: the shown picture asked as an image, charged to the owner (spendAs \'owner\')', JSON.stringify({ o1: o1.code || o1.source, f: S.calls.fetches[1], sp3 }));
+  ok(logHash(eng, 'srch', 'srch-ops') === h0 && !eng.store.findRecord('srch', 'srch-ops', FILE_MSG) && !eng.store.findRecord('srch', 'srch-ops', 'srch-ops-old-pic'), 'NOTHING stored: the log\'s bytes are identical — the files are cached, the messages stay unsaved (F8)');
+  // an account whose channel lists files but cannot fetch them: `not-supported` by name, nothing asked
+  const ms = await eng.searchVendor('srcm', 'Q3-plan');
+  const mh = ms.ok ? ms.hits.find((h) => h.vendorId === 'srcm-ops-old-file') : null;
+  const ma = mh ? await eng.aroundOwner('srcm', 'srcm-ops', { vendorId: mh.vendorId, at: mh.at }) : null;
+  const mu = await eng.attachment('srcm', 'srcm-ops', 'file_v3_00fake_srcm_q3plan', { msg: 'srcm-ops-old-file' });
+  ok(ma && ma.ok && mu.code === 'not-supported' && /srcm can list attachments but not fetch them/.test(mu.error) && M.calls.fetches.length === 0, 'a channel without the fetch capability (caps.attachments \'metadata\'): not-supported, naming the account — no call', JSON.stringify({ ma: ma && ma.code, mu }));
+  eng.stop && eng.stop();
+}
+{
+  // the vendor no longer has a message the read showed (deleted, recalled): not-found naming BOTH, then remembered
+  const { eng, S } = await mkAttEngine('eng-att-gone');
+  const r = await eng.searchVendor('srch', 'Q3-plan');
+  const h = r.ok ? r.hits.find((x) => x.vendorId === FILE_MSG) : null;
+  await eng.aroundOwner('srch', 'srch-ops', { vendorId: FILE_MSG, at: h && h.at });
+  S.inject.gone.add(FILE_MSG);
+  const g1 = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: FILE_MSG });
+  const g2 = await eng.attachment('srch', 'srch-ops', FILE_ID, { msg: FILE_MSG });
+  ok(g1.code === 'not-found' && /not in the saved copy, and the vendor has no such message/.test(g1.error) && S.calls.fetches.length === 1, 'a shown message the vendor no longer has: ONE call, not-found naming both — "not in the saved copy, and the vendor has no such message"', JSON.stringify({ g1, n: S.calls.fetches.length }));
+  ok(g2.code === 'not-found' && g2.remembered === true && g2.error === g1.error && S.calls.fetches.length === 1, 'asked again: the remembered refusal, the same words, no second call', JSON.stringify(g2));
   eng.stop && eng.stop();
 }
 
@@ -458,6 +550,20 @@ console.log('§K controls: each rule removed ⇒ its leg red');
   const k11b = await k11.eng.searchVendor('srch', 'budget', { peek: true, memo: k11a.memoScope, convId: 'srch-ops' });
   ok(k11b.memo && k11b.next, 'CONTROL: an engine handing the agent\'s page token to the owner answers with a token that belongs to another searcher', JSON.stringify({ memo: k11b.memo, next: k11b.next }));
   k11.eng.stop && k11.eng.stop();
+}
+{
+  // §D's controls (B-5f20): THE PRE-FIX ENGINE — the archive the only carrier — answers not-found on the same fixture;
+  // an engine fetching by the ids it was GIVEN (no vendor read placed them here) calls the vendor on typed ids
+  const preFix = patched('src/server/channels-engine.js', "    return r && r.attachments.some((a) => String(a.id) === String(attId)) ? r : null;\n", '    return null;\n', 'att-archive-only');
+  const kp = await mkAttEngine('eng-att-prefix', preFix);
+  const kpr = await agentRoad(kp.eng, kp.S);
+  ok(kpr.around.ok && kpr.fetched.code === 'not-found' && kp.S.calls.fetches.length === 0, 'CONTROL: the pre-fix engine (the archive the only carrier) answers not-found on the line --around printed — the owner\'s 2026-10-20 case', JSON.stringify({ a: kpr.around.code, f: kpr.fetched }));
+  kp.eng.stop && kp.eng.stop();
+  const byTyped = patched('src/server/channels-engine.js', "    return r && r.attachments.some((a) => String(a.id) === String(attId)) ? r : null;\n", "    return msg ? { vendorId: String(msg), at: null, author: null, attachments: [{ id: String(attId), name: null, mime: null }], shown: true } : null;\n", 'att-typed-ids');
+  const kt = await mkAttEngine('eng-att-typed', byTyped);
+  const ktr = await agentRoad(kt.eng, kt.S);
+  ok(ktr.typed.ok && ktr.typedCalls === 1 && kt.S.calls.fetches[0].messageId === FILE_MSG, 'CONTROL: an engine asking the vendor by the ids it was GIVEN fetches before any read showed the message here — the zero-call leg is not vacuous', JSON.stringify({ typed: ktr.typed.code || ktr.typed.source, n: kt.S.calls.fetches.length }));
+  kt.eng.stop && kt.eng.stop();
 }
 for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 6 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 

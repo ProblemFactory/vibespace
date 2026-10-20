@@ -103,6 +103,8 @@ export function inboxModel(app) {
     // B-c127: an item ABOUT a channel conversation (an approval pointer, a reach request, an unknown outcome) opens
     // THAT conversation — its 'channels' group is no session, and the click used to end in "Session not found"
     if (item?.action?.type === 'open-channel' && item.action.adapterId && item.action.convId) { close(); app.openChannel?.(item.action.adapterId, item.action.convId); return; }
+    // lane vault-relock-door: the restart notice's door opens the unlock dialog (its key 'vault' is no session; the body click used to end in "Session not found")
+    if (item?.action?.type === 'vault-unlock') { close(); try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } return; }
     // lane device-upgrade-stuck: a machine-level item (a device agent whose update failed) lands on Manage Agents → Machines
     if (key === 'machines') { close(); try { localStorage.setItem('vibespace.agentsTab', 'machines'); } catch { } app._showAgentsDialog?.(); return; }
     const s = sessionFor(key);

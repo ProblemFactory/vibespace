@@ -27,6 +27,10 @@ vibespace-api audit [--key <name|id>] [--since <ISO time>] [--limit N]   this co
   - If your call stops waiting (the command is killed or times out), it is withdrawn: the card closes and a later answer runs
     nothing (`caller_gone` in the audit). Call again when you need it.
 - **Several keys hold the verb** and none is granted ⇒ `key_ambiguous`. Name one with `--key`.
+- **Limits.** A key that opens conversations carries the user's **limits**: the folders they may open in, the accounts, the
+  permission modes, the models and the modes (chat / terminal). `keys` prints them under each such key. An open outside them
+  is refused by name before anything is charged or spawned, and the refusal prints the key's limits — ask inside them, or
+  ask the user to change them (the Vault window's Limits…). A key minted before limits existed prints `none set`.
 
 ## Calling a verb
 
@@ -72,6 +76,18 @@ vibespace-api groups invite <g-…|group name> <target>
 - Only these choices cross: backend, mode, cwd, name (≤ 60 characters), model, effort, permission mode (the backend's own
   values — a refused one is named: `bad_model`, `bad_effort`, `bad_permission_mode`, …), Task Group, account or pool.
   A resume, a fork, a remote machine or extra CLI arguments are not an automation's to ask for.
+- **The key's limits decide where and how** (judged first, in this order):
+
+| refusal | means |
+|---|---|
+| `cwd_outside_roots` | the folder is not inside one of the key's folders. It counts by its REAL path: `..` and a link out of a folder are outside; a folder that does not exist is refused too. Inside, the conversation opens in the real folder |
+| `account_not_allowed` | the account is not one of the key's. With no `--pool`, the account judged is the default one the open would bill (`subscription` = the CLI's own login) |
+| `permission_not_allowed` | the permission mode is not one of the key's; no `--permission` = `default` (the harness's own) |
+| `model_not_allowed` | the model is not one of the key's; no `--model` = the instance's default model, else `default` |
+| `mode_not_allowed` | the mode is not one of the key's (a key opens chat unless the user ticked terminal) |
+
+  Example: `vibespace-api: that folder is outside this key's folders: "/etc" is outside this key's folders (/var/tmp/lanes) (cwd_outside_roots)`
+  then `  this key's limits: folders /var/tmp/lanes · accounts pool-… · permission modes default, bypassPermissions · models any · modes chat` (exit 1).
 
 **Opening a worker (the coordinator's road):**
 
@@ -99,6 +115,7 @@ vibespace-api conversations end <sess-…>
 | `spend_refused` (429) | the spend ceiling is full — `bucket` names it (`hour-cap`, `day-cap`, `instance-cap`, …), `retryAfter` when it frees; nothing was opened |
 | `pending` (409) | the conversation has not reported its id yet — poll `conversations status` |
 | `bad_args` / `unknown_field` / `bad_cwd` / `bad_name` / `bad_model` / `bad_effort` / `bad_permission_mode` / … | the argument it names is malformed or not allowed |
+| `cwd_outside_roots` / `account_not_allowed` / `permission_not_allowed` / `model_not_allowed` / `mode_not_allowed` (403) | an open outside its key's limits (the table under «The typed verbs») — nothing was charged or opened; the answer prints the key's limits |
 
 ## The audit
 

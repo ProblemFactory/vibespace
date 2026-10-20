@@ -84,6 +84,7 @@
   "/api/archive/list",
   "/api/artifacts",
   "/api/automation/keys",
+  "/api/automation/keys/:id/audit",
   "/api/available-models",
   "/api/backend-status",
   "/api/bookmarks",

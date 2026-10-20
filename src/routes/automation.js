@@ -4,6 +4,9 @@
 //     (GET /api/automation/keys — never a value, never a digest), 铸造 (POST /api/automation/keys {name, scopes}), 撤销
 //     (POST …/keys/:id/revoke), 授权给 (POST …/keys/:id/grants {subjects}), take a grant back (DELETE
 //     /api/automation/grants/:grantId), and the answer to a first-use card (POST /api/automation/asks/:askId {answer}).
+//     Lane automation-open-limits (the q-048 verify's M2): 铸造 carries the key's LIMITS ({…, limits}), 边界… sets them
+//     (POST …/keys/:id/limits {limits}), 审计… reads one key's audit lines (GET …/keys/:id/audit); the list carries the
+//     pickers' choices (`limitChoices`: the accounts, the harness tables' permission modes and models).
 //   · AN AGENT (its own conversation's vsst_ — a job's jbt_ is refused `session_only`: L1 grants conversations and
 //     Task Groups only): POST /api/agent/automation/:verb (the body = the verb's arguments; `?key=` names a key), GET
 //     /api/agent/automation/keys (the keys THIS conversation may use: names + scopes), GET /api/agent/automation/audit
@@ -29,6 +32,10 @@ const WORDS = Object.freeze({
   ask_quiet: 'the owner refused this key for this conversation a moment ago',
   ask_unfiled: 'the question could not be filed in For you — refused',
   caller_gone: 'the call went away while its card waited — nothing ran',
+  // lane automation-open-limits: the open asks for what its key's limits do not allow (the answer names them: `limits`)
+  cwd_outside_roots: 'that folder is outside this key\'s folders', account_not_allowed: 'that account is not one of this key\'s',
+  permission_not_allowed: 'that permission mode is not one of this key\'s', model_not_allowed: 'that model is not one of this key\'s',
+  mode_not_allowed: 'that mode is not one of this key\'s',
   ask_unknown: 'that question is gone', ask_settled: 'already answered',
   session_only: 'only a conversation uses automation keys (a job does not, yet)',
   human_only: 'only a person mints, grants, revokes or answers — an agent never writes a grant',
@@ -42,9 +49,10 @@ const STATUS = Object.freeze({ ...A.CODES, vault_not_set_up: 409, ask_unknown: 4
  * @param {object} o.engine      src/server/automation-engine.js
  * @param {(token: string) => object|null} o.callerOf  a vsst_ → its conversation ({conversationId, sessionKey, name, live, groups})
  * @param {() => {sessions: object[], groups: object[]}} [o.subjects]  the grant picker's choices (live conversations + Task Groups)
+ * @param {() => {accounts: object[], permissionModes: object[], models: object[]}} [o.limitChoices]  the limit pickers' choices
  * @param {(req) => string|null} [o.who]  the sign-in handle (the `by` of a person's act)
  */
-function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ sessions: [], groups: [] }), who = () => null }) {
+function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ sessions: [], groups: [] }), limitChoices = () => ({ accounts: [], permissionModes: [], models: [] }), who = () => null }) {
   const answer = (res, r) => {
     if (r && r.ok) return res.json(r);
     const code = (r && r.code) || 'failed';
@@ -60,8 +68,10 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
   const body = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
 
   // ── people ──
-  app.get('/api/automation/keys', person(() => ({ ...engine.list(), verbs: A.SCOPES.map((s) => ({ verb: s.verb, label: s.label, billed: s.billed })), subjects: subjects() })));
-  app.post('/api/automation/keys', person((req) => engine.mint({ name: body(req).name, scopes: body(req).scopes, by: byOf(req) })));
+  app.get('/api/automation/keys', person(() => ({ ...engine.list(), verbs: A.SCOPES.map((s) => ({ verb: s.verb, label: s.label, billed: s.billed })), subjects: subjects(), limitChoices: limitChoices() })));
+  app.post('/api/automation/keys', person((req) => engine.mint({ name: body(req).name, scopes: body(req).scopes, limits: body(req).limits, by: byOf(req) })));
+  app.post('/api/automation/keys/:id/limits', person((req) => engine.setLimits(String(req.params.id), body(req).limits, { by: byOf(req) })));
+  app.get('/api/automation/keys/:id/audit', person((req) => engine.auditOfKey(String(req.params.id), { limit: req.query && req.query.limit })));
   app.post('/api/automation/keys/:id/revoke', person((req) => engine.revoke(String(req.params.id), { by: byOf(req) })));
   app.post('/api/automation/keys/:id/grants', person((req) => engine.grant(String(req.params.id), body(req).subjects, { by: byOf(req) })));
   app.delete('/api/automation/grants/:grantId', person((req) => engine.ungrant(String(req.params.grantId), { by: byOf(req) })));

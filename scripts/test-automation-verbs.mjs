@@ -10,6 +10,9 @@
 //      (quiet) · end ⇒ every effect seen on the hub (the session list, the Task Group, the group's members, the worker gone)
 //   ④ THE AUDIT: one line per verb for the coordinator (open / status / rename / bind / invite / end, ok), names only;
 //      THE SPEND: one automation-open stamp charged to the key's identity (data/spend-budget.json)
+//   ④b THE LIMITS (lane automation-open-limits — the q-048 verify's M2): a key limited to ONE folder — an open outside it
+//      (a sibling, `..`, a link out) ⇒ cwd_outside_roots (the CLI exits 1 printing the key's limits), audited, NOTHING
+//      spawned, nothing charged; inside ⇒ it opens there
 //   ⑤ a conversation WITHOUT a grant opens ⇒ the first-use card in For you (action automation-ask); the person denies ⇒
 //      ask_denied (exit 1), nothing spawned, nothing charged
 //   ⑥ LOCKED ⇒ 423 vault_locked on every verb of the door, and the CLI exits 3
@@ -115,7 +118,8 @@ try {
 
   console.log('② a key with the six verbs, granted to the coordinator');
   const SCOPES = ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'groups.invite', 'conversations.status'];
-  const mk = await req('POST', '/api/automation/keys', { name: 'dispatch', scopes: SCOPES });
+  // lane automation-open-limits: an opening key carries the owner's limits — the coordinator's folder, its permission mode
+  const mk = await req('POST', '/api/automation/keys', { name: 'dispatch', scopes: SCOPES, limits: { cwdRoots: [CWD], accounts: 'any', permissionModes: ['default', 'bypassPermissions'], models: 'any', modes: ['chat'] } });
   const KEY = mk.json && mk.json.key && mk.json.key.id;
   const gt = KEY && await req('POST', `/api/automation/keys/${KEY}/grants`, { subjects: [`session:${C.sid}`] });
   check(`the key minted (${KEY}) and granted to session:<coordinator>; no value in the answer`, /^ak-/.test(String(KEY)) && gt && gt.status === 200 && !/vsak_/.test(JSON.stringify(mk.json)), { mk: mk.status, gt: gt && gt.status });
@@ -149,6 +153,32 @@ try {
     JSON.stringify(mine.map((l) => l.verb)) === JSON.stringify(['conversations.open', 'conversations.status', 'conversations.rename', 'conversations.bind', 'groups.invite', 'conversations.end']) && mine.every((l) => l.ok && l.key === KEY) && !audit.some((l) => /vsak_/.test(JSON.stringify(l))), mine);
   const spend = await until(() => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); return (j.budget && j.budget.identities && j.budget.identities[`automation:${KEY}`]) || null; } catch { return null; } }, 5000);
   check('the spend: ONE automation-open stamp charged to the key (automation:<keyId>)', Array.isArray(spend) && spend.length === 1 && spend[0].reason === 'automation-open', spend);
+
+  console.log('④b THE LIMITS — a key limited to one folder');
+  const LANE = path.join(CWD, 'lane-a'), SIB = path.join(CWD, 'lane-b');
+  for (const d of [LANE, SIB]) fs.mkdirSync(d, { recursive: true });
+  fs.symlinkSync(SIB, path.join(LANE, 'out'));   // a link INSIDE the folder to a sibling outside it
+  const lk1 = await req('POST', '/api/automation/keys', { name: 'one-root', scopes: ['conversations.open', 'conversations.end'], limits: { cwdRoots: [LANE], accounts: 'any', permissionModes: ['default'], models: 'any', modes: ['chat'] } });
+  const LKEY = lk1.json && lk1.json.key && lk1.json.key.id;
+  const lg = LKEY && await req('POST', `/api/automation/keys/${LKEY}/grants`, { subjects: [`session:${C.sid}`] });
+  check('a second key, limited to ONE folder (lane-a), granted to the coordinator', /^ak-/.test(String(LKEY)) && lg && lg.status === 200 && lk1.json.key.limits.cwdRoots[0] === LANE, lk1.json);
+  const spawnsBefore = stubs().length;
+  const outs = [];
+  for (const where of [SIB, `${LANE}/../lane-b`, path.join(LANE, 'out')]) outs.push(await cli(['conversations', 'open', '--key', 'one-root', '--cwd', where, '--name', 'outside'], C.token));
+  await sleep(500);
+  check("open OUTSIDE it (a sibling, `..`, a link out) ⇒ exit 1 with cwd_outside_roots, the CLI printing the key's limits by name",
+    outs.every((o) => o.code === 1 && /\(cwd_outside_roots\)/.test(o.err) && o.err.includes(`this key's limits: folders ${LANE} · accounts any · permission modes default · models any · modes chat`)), outs.map((o) => [o.code, o.err.slice(0, 300)]));
+  const lAudit = fs.readFileSync(path.join(wt, 'data', 'automation-audit.jsonl'), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((l) => l && l.key === LKEY && l.verb === 'conversations.open');
+  const lSpend = (() => { try { return JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')).budget.identities[`automation:${LKEY}`] || null; } catch { return null; } })();
+  check('…each audited with its code (three refused opens), NOTHING spawned (no new CLI), nothing charged to the key',
+    lAudit.length === 3 && lAudit.every((l) => !l.ok && l.code === 'cwd_outside_roots') && stubs().length === spawnsBefore && !(Array.isArray(lSpend) && lSpend.length), { lAudit, spawns: [spawnsBefore, stubs().length], lSpend });
+  const inside = await cli(['conversations', 'open', '--key', 'one-root', '--cwd', LANE, '--name', 'inside'], C.token);
+  const IW = inside.json || {};
+  check('open INSIDE it ⇒ exit 0, the worker opened there (its cwd = the folder), charged to that key',
+    inside.code === 0 && /^sess-/.test(String(IW.sessionId)) && IW.cwd === fs.realpathSync(LANE) && stubs().length === spawnsBefore + 1, inside);
+  const ie = await cli(['conversations', 'end', '--key', 'one-root', IW.sessionId], C.token);
+  const rvk = await req('POST', `/api/automation/keys/${LKEY}/revoke`);
+  check('…and the key ends what it opened (then it is revoked: one key holds open again for ⑤)', ie.code === 0 && rvk.status === 200, { ie, rvk: rvk.status });
 
   console.log('⑤ a conversation WITHOUT a grant ⇒ the first-use card; the person denies');
   const nBefore = (await active()).length;

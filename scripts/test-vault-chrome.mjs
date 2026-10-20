@@ -10,6 +10,8 @@
 //   ⑤ RESTART again ⇒ locked again (no auto-unlock of any kind), and a phone viewport gets the same modal, inside the screen
 //   ⑥ the words in Chinese: 「解锁保险库」 / 「第二密码不对」
 //   ③b (lane vault-one-door) 「稍后」 leaves the chip; a locked card's door (`vs-vault-door`) opens the UNLOCK modal again
+//   ③c (lane vault-relock-door) the OPEN tab re-asks on a bundle-preserving restart (no navigate): a NEW startedAt ⇒ the
+//      modal; a same-startedAt broadcast is the chip only; a persistent lock strip shows while locked; a pre-fix bundle stays silent
 //   ⑦ lane vault-e2e-password-fix-r2: auth.json holds the login's sha256, never the cookie's token; a LOCK from the page
 //      signs every login out — the page lands on the sign-in, and after it the unlock modal (the owner's decision ④)
 // Run: node scripts/test-vault-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
@@ -118,6 +120,8 @@ check('the page opens the UNLOCK modal at once (still signed in)', !!(await unti
 await splashGone();
 check('… on top of the app (its Unlock button is what a click reaches)', !!(await until(onTop('.vault-unlock-go'), { timeout: 5000 })));
 check('the taskbar lock chip shows', !!(await until(visible('#taskbar-vault'), { timeout: 5000 })));
+check('③ the persistent lock strip shows at the top of the workspace (owner 2026-10-20: 常驻警告)', !!(await until(visible('#vault-lock-strip'), { timeout: 5000 })));
+check('③ the strip never covers the unlock dialog\u2019s button (the dialog stays reachable)', !!(await evalJs(onTop('.vault-unlock-go'))));
 const lockedInt = await integration();
 check('the integration answers key-unreadable:vault_locked', lockedInt.storeError === 'key-unreadable:vault_locked', lockedInt);
 await shot('vault-2-locked.png');
@@ -127,6 +131,7 @@ check('… and the vault stays locked', (await api('GET', '/api/vault/state')).j
 await shot('vault-3-wrong.png');
 await click('#vault-unlock-dialog .vault-later');
 check('③b 「稍后」 closes the modal; the lock chip stays (the door back)', !!(await until(`!document.getElementById('vault-unlock-dialog') && !!document.getElementById('taskbar-vault')`, { timeout: 3000 })));
+check('③b the persistent strip stays after 「稍后」 (not dismissable) and its Unlock button is now reachable (on top)', !!(await until(`!!document.getElementById('vault-lock-strip')`, { timeout: 3000 })) && !!(await evalJs(onTop('#vault-lock-strip .vls-unlock'))));
 await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);
 check('③b a locked card\'s door (vs-vault-door) opens the UNLOCK modal again (lane vault-one-door: the old ⚙ dialog is gone; the door is unchanged)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
 
@@ -134,8 +139,25 @@ console.log('④ the right password');
 await typeInto('#vault-unlock-pw', SECOND); await click('.vault-unlock-go');
 check('the modal closes', !!(await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 15000 })));
 check('the lock chip goes', !!(await until(`!document.getElementById('taskbar-vault')`, { timeout: 5000 })));
+check('④ the persistent lock strip goes when the vault is unlocked', !!(await until(`!document.getElementById('vault-lock-strip')`, { timeout: 5000 })));
 const openInt = await integration();
 check('the integration\'s key opens again (the feature works)', openInt.configured && !openInt.storeError, openInt);
+
+console.log('③c the OPEN tab re-asks on a bundle-preserving restart — no navigate; a same-startedAt broadcast is the chip only');
+const atOpen = (await api('GET', '/api/vault/state')).json || {};
+await stopServer(); startServer();
+check('the hub is back (same bundle)', await ready());
+check('③c the OPEN tab opens the unlock modal on the ws reconnect — no navigate (the bug: it used to stay silent)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })));
+check('③c … and draws the strip and the chip', !!(await until(`!!document.getElementById('vault-lock-strip') && !!document.getElementById('taskbar-vault')`, { timeout: 5000 })));
+const atBoot = (await api('GET', '/api/vault/state')).json || {};
+check('③c the restart is a NEW startedAt (why the tab re-asks — a restart, not a lock act)', typeof atBoot.startedAt === 'number' && atBoot.startedAt !== atOpen.startedAt, { was: atOpen.startedAt, now: atBoot.startedAt });
+await click('#vault-unlock-dialog .vault-later');
+check('③c 「稍后」 closes the dialog; the strip stays (not dismissable)', !!(await until(`!document.getElementById('vault-unlock-dialog') && !!document.getElementById('vault-lock-strip')`, { timeout: 3000 })));
+await evalJs(`document.getElementById('taskbar-vault')?.remove(); true`);   // a fresh signal: the next locked broadcast re-draws the chip
+const idle = await api('POST', '/api/vault/idle', { hours: 0 });
+check('③c the idle door answers while locked (a same-startedAt locked broadcast — a lock act\u2019s shape without ⑦\u2019s sign-out)', idle.status === 200, idle);
+check('③c the broadcast reached the tab (the chip is re-drawn)', !!(await until(visible('#taskbar-vault'), { timeout: 5000 })));
+check('③c RED CONTROL: a same-startedAt broadcast opened NO new dialog (a lock act is the chip only; only a NEW startedAt re-asks)', !(await evalJs(`!!document.getElementById('vault-unlock-dialog')`)));
 
 console.log('⑤ RESTART again ⇒ locked again; a phone gets the same modal');
 await stopServer(); startServer();
@@ -145,6 +167,7 @@ await cdp('Page.navigate', { url: URL });
 check('locked again after the restart — the unlock modal (no auto-unlock of any kind)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })) && (await api('GET', '/api/vault/state')).json?.state === 'locked');
 await splashGone();
 check('the phone\'s Unlock button is reachable (on top)', !!(await until(onTop('.vault-unlock-go'), { timeout: 5000 })));
+check('⑤ the persistent strip shows on the phone too, and never covers the dialog button', !!(await until(visible('#vault-lock-strip'), { timeout: 5000 })) && !!(await evalJs(onTop('.vault-unlock-go'))));
 const rect = await evalJs(`(() => { const d = document.querySelector('#vault-unlock-dialog .dialog'); const r = d.getBoundingClientRect(); const go = document.querySelector('.vault-unlock-go').getBoundingClientRect(); return { l: r.left, r: r.right, w: innerWidth, goH: go.height }; })()`);
 check(`the phone modal sits inside the screen (${Math.round(rect.l)}…${Math.round(rect.r)} of ${rect.w}) with a ≥ 36 px button (a phone target)`, rect.l >= 0 && rect.r <= rect.w && rect.goH >= 36, rect);
 await shot('vault-4-phone.png');
@@ -174,6 +197,35 @@ await cdp('Page.navigate', { url: URL });
 check('signed in again ⇒ the unlock modal (the vault stayed locked)', relogin === 200 && !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })));
 const log = fs.readFileSync(path.join(SHOTS, 'server.log'), 'utf8') + fs.readFileSync(path.join(DATA, 'vault-audit.jsonl'), 'utf8');
 check('no password in the server log or the audit', ![SECOND, 'not the second password', 'wrong again!', SIGN_IN].some((p) => log.includes(p)));
+
+console.log('③c-RED the pre-fix client does NOT re-ask on a reconnect/broadcast — a patched worktree bundle (the fix is load-bearing)');
+await stopServer();
+{
+  const vu = path.join(wt, 'src/lib/vault-unlock.js');
+  const orig = fs.readFileSync(vu, 'utf8');
+  // the pre-fix client: a reconnect did NOTHING (no re-read) and the vault-state broadcast only drew the chip (applyVaultFacts,
+  // never onVaultState's startedAt-gated re-ask). Revert BOTH; the load-time ask and the strip stay — the regression this
+  // isolates is the missing RE-ASK. A bundle with the reconnect re-read in place would re-open the modal here and go red.
+  const noRecon = orig.split('\n').filter((l) => !l.includes("onStateChange?.((connected) => { if (connected && vaultBooted) fetchJson('/api/vault/state')")).join('\n');
+  const prefix = noRecon.replace("if (msg && msg.type === 'vault-state') onVaultState(msg); }", "if (msg && msg.type === 'vault-state') applyVaultFacts(msg); }");
+  check('③c-RED the patch reverts the reconnect re-read AND the broadcast re-ask (the control is real)', noRecon.split('\n').length === orig.split('\n').length - 1 && prefix !== noRecon);
+  fs.writeFileSync(vu, prefix);
+  execSync(`${wt}/node_modules/.bin/esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify`, { cwd: wt, stdio: 'ignore' });
+  startServer();
+  check('the hub is back (pre-fix bundle)', await ready());
+  await cdp('Page.navigate', { url: URL });
+  check('③c-RED the boot path still asks (unchanged — the regression is ONLY the reconnect/broadcast re-ask)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })));
+  await splashGone();
+  await click('#vault-unlock-dialog .vault-later');
+  await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 3000 });
+  await stopServer(); startServer();
+  check('the hub is back', await ready());
+  check('③c-RED the pre-fix tab\u2019s ws reconnects (so it can RECEIVE the broadcast — it just won\u2019t act on it)', !!(await until(`!!(window.app && window.app.ws && window.app.ws.connected)`, { timeout: 20000 })));
+  await evalJs(`document.getElementById('taskbar-vault')?.remove(); true`);
+  const idleR = await api('POST', '/api/vault/idle', { hours: 0 });   // a locked broadcast carrying the NEW startedAt
+  check('③c-RED the locked broadcast reaches the pre-fix tab — its chip is re-drawn (the tab is live)', idleR.status === 200 && !!(await until(visible('#taskbar-vault'), { timeout: 10000 })));
+  check('③c-RED and yet the pre-fix client opened NO unlock modal (the silent bug: it re-asks only through the fix\u2019s onVaultState startedAt gate)', !(await evalJs(`!!document.getElementById('vault-unlock-dialog')`)));
+}
 
 await stopServer();
 console.log(failed ? `\nFAILED (${passed} passed, ${failed} failed)` : `\nALL PASS (${passed})`);
