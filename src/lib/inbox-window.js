@@ -286,8 +286,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     ta.placeholder = t('Reply…');
     ta.setAttribute('aria-label', t('Reply'));
     ta.value = model.drafts.get(id) || '';
-    const why = mk('div', 'iw-reply-why');
-    reply.append(voiceField(ta, attachDictation(ta)), why);
+    const why = mk('div', 'iw-reply-why'); // the box's one-line note ABOVE it: the verdict's fact (an ended conversation: the send reopens it)
+    reply.append(why, voiceField(ta, attachDictation(ta)));
     const actions = mk('div', 'iw-actions');
     const arts = mk('div', 'iw-arts'); // lane foryou-attachments: the ask's --artifact chips, under the question
     el.append(head, title, arts, detail, cutLine, replied, opts, reply, actions);
@@ -363,14 +363,24 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     if (!it) return;
     model.patchDot(c.ld);
     const v = viewOf(it, st.display.find((e) => e.item.id === c.id));
-    const disabled = !v.reply.enabled || sending;
-    c.ta.disabled = !v.reply.enabled;
-    const whyTxt = v.reply.why ? t(v.reply.why) : '';
+    // THE BOX IS NEVER DISABLED (lane inbox-reply-dead-session, userW inc-mvfuzlom-nwav 2026-10-19: ten presses on a
+    // disabled box of an ended conversation, the reason only in a hover title): the verdict's fact is SAID in the note
+    // above it, an ended conversation's send reads "Reopen and send" and reopens it, a refused send is said by name —
+    // only a send in flight holds the send and the chips
+    const box = model.replyBox(it);
+    c.ta.disabled = false;
+    const whyTxt = v.reply.show && box.note ? t(box.note.key, { why: box.note.why || '' }) : v.reply.why ? t(v.reply.why) : '';
     if (c.why.textContent !== whyTxt) c.why.textContent = whyTxt;
     c.why.style.display = whyTxt ? '' : 'none';
-    for (const o of c.opts.children) { o.disabled = disabled; o.title = v.reply.enabled ? t('Reply with "{label}"', { label: o.textContent }) : whyTxt; }
+    c.why.dataset.reopen = box.reopen ? '1' : '';
+    for (const o of c.opts.children) { o.disabled = sending; o.title = v.reply.enabled ? t('Reply with "{label}"', { label: o.textContent }) : box.reopen ? t('Reopen and send "{label}"', { label: o.textContent }) : whyTxt; }
     const rb = c.actions.querySelector('[data-act="reply"]');
-    if (rb) { rb.disabled = disabled; rb.title = v.reply.enabled ? t('Send reply (Enter) · newline (Shift+Enter)') : whyTxt; }
+    if (rb) {
+      rb.disabled = sending;
+      rb.title = t(box.sendTitle);
+      const lb = rb.querySelector('.iw-act-label');
+      if (lb && lb.textContent !== t(box.send)) lb.textContent = t(box.send);
+    }
   };
   const renderPane = () => {
     const id = st.selected;
@@ -459,7 +469,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     // the verdict's sentence sits under the box — or, with no box, where the box would be
     // (a helper's ask is answered on its card, a job item in the job panel: itemView's `why`)
     if (!v.reply.show) { if (c.why.parentNode !== c.el) c.el.insertBefore(c.why, c.actions); }
-    else if (c.why.parentNode !== c.reply) c.reply.append(c.why);
+    else if (c.why.parentNode !== c.reply) c.reply.prepend(c.why); // above the box (lane inbox-reply-dead-session)
     patchBoardPane();
     patchLivePane();
   };

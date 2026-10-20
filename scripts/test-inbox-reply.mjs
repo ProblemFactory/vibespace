@@ -23,6 +23,20 @@
 //      the payload's `turn`
 //   §6 NEGATIVE CONTROL: a patched copy of the route without its isAgentBearer
 //      line lets a vsst_ token through (the §4 leg can go red)
+//   §8 A REPLY TO A CONVERSATION THAT ENDED REOPENS IT (lane inbox-reply-dead-session, userW inc-mvfuzlom-nwav
+//      2026-10-19: 「在 inbox 里面回复 session 的时候, 如果那个 session 已经挂了, 就回不了了.」):
+//      §8a PURE reopenCreate = the page's resume road's create message field for field (+ a census of
+//          session-lifecycle resumeSession's savedCfg reads and createMsg keys, so a new resume field reds here);
+//          PURE replyBoxView = the box both surfaces draw (never disabled; the note; "Reopen and send"); zh/ja words
+//      §8b the ROUTE with a reopen dep: dead ⇒ reopened + ONE frame on the reopened session === composeReply +
+//          resolved + {reopened, sessionId, conversation}; a resume failure ⇒ 409 resume_failed with ITS reason,
+//          nothing resolved; a reopen that throws ⇒ named; reopened but refused by the sender ⇒ its code +
+//          reopened:true (the page opens it); live / terminal / an agent bearer never reopen; live byte-identical
+//      §8c the ORCH reopener (src/server/inbox-reopen.js) over a recording create: the message, the headless
+//          creator leaves the session's clients, a create error by name, resume-already-live ⇒ that session, ONE
+//          create for two concurrent replies, a webui key / an undiscovered local conversation refused by name
+//      §8d wiring pins (server.js, ws-handler's handleCreate, the route's spend comment) + RED CONTROL: the route
+//          without its reopen line answers the pre-lane 409 no_live_session
 //   §7 chunk 4 ("Mark all seen"): the store's setStatusMany (known changed,
 //      unknown named, ONE onChange, an invalid status throws by name), the
 //      snapshot's resolved tail keeping a whole batch, and POST
@@ -109,7 +123,7 @@ console.log('§2 replyVerdict');
   const v = (session, it = item) => R.replyVerdict({ item: it, session });
   const noSess = v(null), term = v({ live: true, mode: 'terminal', remoteState: null }), unreach = v({ live: true, mode: 'chat', remoteState: 'unreachable' });
   const idle = v({ live: true, mode: 'chat', remoteState: null }), mid = v({ live: true, mode: 'chat', remoteState: null, turn: 'running' });
-  ok(noSess.code === 'no_live_session' && noSess.why === 'Agent not running — open the session, then reply', 'no session ⇒ no_live_session + its tooltip sentence', noSess);
+  ok(noSess.code === 'no_live_session' && noSess.why === 'This conversation has ended — sending reopens it with this reply as its first message' && R.REOPEN_CODES.length === 1 && R.REOPEN_CODES[0] === 'no_live_session', 'no session ⇒ no_live_session, its sentence says the send REOPENS it (REOPEN_CODES = [no_live_session])', noSess);
   ok(term.code === 'not_chat' && term.why === 'Terminal session — reply in its window', 'terminal ⇒ not_chat', term);
   ok(unreach.code === 'host_unreachable' && unreach.why === 'Host unreachable — reconnect, then reply', 'unreachable host ⇒ host_unreachable', unreach);
   ok(idle.ok === true && mid.ok === true, 'live idle ⇒ ok; live MID-TURN ⇒ ok too (the session queues it)');
@@ -212,7 +226,7 @@ const { createUserInputSender } = require(path.join(REPO, 'src/server/user-input
 const { createAdapterRegistry } = require(path.join(REPO, 'src/adapters/index.js'));
 const adapterRegistry = createAdapterRegistry({});
 const sessionStatusKey = (session, id) => { const bsid = session?.backendSessionId || session?.claudeSessionId; return bsid ? `${session.backend || 'claude'}:${bsid}` : `webui:${id}`; }; // server.js's, verbatim
-function harness(routeFile = 'src/routes/user-todos-reply.js') {
+function harness(routeFile = 'src/routes/user-todos-reply.js', { reopen = null } = {}) {
   const { registerUserTodoReplyRoutes } = require(path.isAbsolute(routeFile) ? routeFile : path.join(REPO, routeFile)); // a patched copy (§6) is an absolute path outside the checkout
   const routes = {};
   const app = { post: (p, h) => { routes['POST ' + p] = h; }, get: (p, h) => { routes['GET ' + p] = h; } };
@@ -226,11 +240,13 @@ function harness(routeFile = 'src/routes/user-todos-reply.js') {
   });
   const { m: userTodos, calls } = mkStore();
   const NOW = Date.parse('2026-09-23T07:00:00Z');
-  registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserInput: sender.send, sessionStatusKey, now: () => NOW });
+  const reopened = []; // §8: every reopen the route asked for
+  registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserInput: sender.send, sessionStatusKey, now: () => NOW, ...(reopen ? { reopen: (item, o) => { reopened.push([item.id, o]); return reopen(item, o, { activeSessions, addSession }); } } : {}) });
   const handler = routes['POST /api/user-todos/:id/reply'];
   const call = (id, body, headers = {}) => { let status = 200, json = null; handler({ params: { id }, body, headers }, { status(c) { status = c; return this; }, json(j) { json = j; return this; } }); return { status, json }; };
+  const callAsync = async (id, body, headers = {}) => { let status = 200, json = null; await handler({ params: { id }, body, headers }, { headersSent: false, status(c) { status = c; return this; }, json(j) { json = j; this.headersSent = true; return this; } }); return { status, json }; };
   const addSession = (id, over = {}) => { const wrote = []; const s = { backend: 'claude', mode: 'chat', pty: { write: (x) => wrote.push(x) }, _isStreaming: false, _remoteState: null, backendSessionId: 'sid-' + id, buffer: '', ...over }; activeSessions.set(id, s); return { s, wrote }; };
-  return { call, userTodos, calls, activeSessions, rec, addSession, NOW, handler };
+  return { call, callAsync, reopened, userTodos, calls, activeSessions, rec, addSession, NOW, handler };
 }
 const userTextOf = (line) => { const f = JSON.parse(line); return f.message.content[0].text; };
 {
@@ -358,7 +374,7 @@ console.log('§5 turn facts + wiring');
   const sp = read('scripts/test-spend-paths.mjs');
   ok(/\{ file: 'src\/server\/user-input\.js', prim: 'user-frame'/.test(sp) && !/\{ file: 'src\/ws-handler\.js', prim: 'user-frame'/.test(sp), 'the spend ALLOW row names src/server/user-input.js#user-frame (re-pointed, not duplicated)');
   const srv = read('server.js');
-  ok(/createUserInputSender\(\{[^}]*\}\)\.send;/.test(srv) && /registerUserTodoReplyRoutes\(app, \{ userTodos, activeSessions, sendUserInput, sessionStatusKey \}\)/.test(srv), 'server.js constructs the ONE sender and hands it to the reply route');
+  ok(/createUserInputSender\(\{[^}]*\}\)\.send;/.test(srv) && /registerUserTodoReplyRoutes\(app, \{ userTodos, activeSessions, sendUserInput, sessionStatusKey, reopen: \(item, o\) => inboxReopen\.reopen\(item, o\) \}\)/.test(srv), 'server.js constructs the ONE sender and hands it to the reply route');
   ok(/registerWsHandler\(wss, \{[\s\S]*?\bsendUserInput,[\s\S]*?\n\}\);/.test(srv), '…and to the ws handler through ctx');
   ok(/turn: require\('\.\/src\/server\/turn-facts\.js'\)\.turnOf\(s\)/.test(srv) && /turnDigest\(activeSessions\)/.test(srv) && /\}, 1000\)\.unref\(\)/.test(srv), 'the payload carries `turn`, re-broadcast by ONE unref\'d 1 s digest');
   const { SPEND_REASONS } = require(path.join(REPO, 'src/spend-authorizer.js'));
@@ -550,6 +566,210 @@ console.log('§7 setStatusMany + resolve-many (chunk 4: "Mark all seen")');
   const rsrc = read('src/routes/user-todos-reply.js');
   const body = (rsrc.match(/function registerResolveManyRoute[\s\S]*?\n\}\n/) || [''])[0];
   ok(/if \(isAgentBearer\(req\)\) return fail\(403, 'agent_forbidden'/.test(body) && /userTodos\.setStatusMany\(/.test(body) && /RESOLVE_MANY_MAX/.test(body), 'the route refuses agent tokens first and writes through setStatusMany under the 200 cap');
+}
+
+// ── §8 A REPLY TO A CONVERSATION THAT ENDED REOPENS IT (lane inbox-reply-dead-session) ──────────────
+console.log('§8a PURE reopenCreate — the page\'s own resume road, field for field');
+const RO = require(path.join(REPO, 'src/inbox-reopen.js'));
+{
+  const cfg = { model: 'claude-opus-4', permission: 'plan', effort: 'high', outputStyle: 'Explanatory', worktree: true, autoResume: false, account: 'acct-1', modelLock: true, lockModel: 'claude-opus-4', poolPin: { memberId: 'm-1', at: 7, poolId: 'pool-a' } };
+  const a = RO.reopenCreate({ key: 'claude:c-1', entry: { cwd: '/home/u/proj', name: 'disc name' }, cfg, defaults: { permission: 'default', extraArgs: '--verbose' }, name: 'My lane', taskId: 'T-1', reqId: 'reopen-x' });
+  const want = { type: 'create', backend: 'claude', mode: 'chat', cwd: '/home/u/proj', sessionName: 'My lane', model: 'claude-opus-4', permissionMode: 'plan', effort: 'high', outputStyle: 'Explanatory', autoResume: false, extraArgs: '--verbose', worktree: true, spawnOriginHint: { model: 'chosen', effort: 'chosen' }, resume: true, resumeId: 'c-1', cols: 120, rows: 30, reqId: 'reopen-x', taskId: 'T-1', accountId: 'acct-1', modelLock: true, lockModel: 'claude-opus-4', poolPin: { memberId: 'm-1', at: 7, poolId: 'pool-a' } };
+  const clean = (o) => JSON.parse(JSON.stringify(o));
+  ok(a.ok && JSON.stringify(clean(a.data)) === JSON.stringify(want), 'a config that states everything ⇒ the create the page sends: resume of c-1 in chat mode, the conversation\'s own model / permission / effort / style / account / lock / pool pin, the harness\'s extra args, its first Task Group', clean(a.data));
+  ok(a.conversation && a.conversation.backend === 'claude' && a.conversation.backendSessionId === 'c-1' && a.conversation.cwd === '/home/u/proj' && a.conversation.hostId === null, '…and names the conversation it reopens (backend, id, cwd, no host)', a.conversation);
+  const b = RO.reopenCreate({ key: 'codex:t-9', entry: { cwd: 'box: /srv/x', host: 'h-1' }, cfg: null, defaults: { permission: 'default' }, name: '' });
+  ok(b.ok && b.data.backend === 'codex' && b.data.hostId === 'h-1' && b.data.cwd === '/srv/x' && b.data.model === undefined && b.data.effort === undefined && b.data.spawnOriginHint.model === 'harness' && b.data.permissionMode === 'default' && b.data.accountId === undefined && b.data.poolPin === undefined && b.data.sessionName === undefined,
+    'no config ⇒ model / effort NOT sent (the server\'s continuity ladder reads the conversation\'s own), the instance permission default filled in, a merged record\'s "host: /path" cut to the path, the host carried', clean(b.data));
+  const c = RO.reopenCreate({ key: 'claude:c-2', entry: { cwd: '/p' }, cfg: { permission: '' }, defaults: { permission: 'acceptEdits' } });
+  ok(c.ok && c.data.permissionMode === undefined, 'a STATED empty permission beats the default (createSession: `permission !== undefined ? permission : default`, then `|| undefined`)', clean(c.data));
+  const d = RO.reopenCreate({ key: 'claude:c-3', entry: null, item: { cwd: '/far', hostId: 'h-2' } });
+  ok(d.ok && d.data.hostId === 'h-2' && d.data.cwd === '/far', 'not in this machine\'s discovery but the ask names its host ⇒ the remote resume on that host (the create judges the transcript there)', clean(d.data));
+  const refusals = [
+    [RO.reopenCreate({ key: 'webui:abc', entry: { cwd: '/p' } }), /filed before its conversation had an id/],
+    [RO.reopenCreate({ key: 'claude:c-4', entry: null, item: { cwd: '/p' } }), /no transcript of this conversation was found on this machine/],
+    [RO.reopenCreate({ key: 'claude:c-5', entry: { cwd: '' }, item: {} }), /folder this conversation ran in is not known/],
+    [RO.reopenCreate({ key: 'accounts' }), /filed before its conversation had an id/],
+  ];
+  ok(refusals.every(([r, re]) => r.ok === false && re.test(r.why)), 'a webui: key, a LOCAL conversation discovery does not list (no transcript — never guessed), an unknown folder, a producer key ⇒ refused BY NAME', refusals.map(([r]) => r.why));
+  // THE MIRROR CENSUS: the page's resume road reads these config fields and sends these keys — a new one reds HERE
+  const life = read('src/lib/session-lifecycle.js');
+  const resumeBody = (life.match(/\n  resumeSession\(sessionId, cwd, sessionName[\s\S]*?\n  \},\n/) || [''])[0];
+  const cfgReads = [...new Set([...resumeBody.matchAll(/savedCfg\.(\w+)/g)].map((m) => m[1]))].sort();
+  ok(resumeBody.length > 1000 && JSON.stringify(cfgReads) === JSON.stringify([...RO.REOPEN_CFG_KEYS].sort()), `session-lifecycle resumeSession reads exactly REOPEN_CFG_KEYS from the conversation's config (${cfgReads.join(', ')})`, { cfgReads, REOPEN_CFG_KEYS: RO.REOPEN_CFG_KEYS });
+  const createMsg = (life.match(/const createMsg = \{[\s\S]*?\n    \};/) || [''])[0];
+  const sentKeys = Object.keys(a.data).filter((k) => k !== 'type');
+  const notInClient = sentKeys.filter((k) => !new RegExp(`[{,\\s]${k}[:,]`).test(createMsg));
+  ok(createMsg.length > 500 && notInClient.length === 0, `every key reopenCreate sends is a key of the page's createMsg (${sentKeys.length} keys)`, notInClient);
+  const jumpSrc = read('src/lib/user-todos-actions.js');
+  ok(/else if \(s\.status === 'stopped'\) app\.resumeSession\(s\.sessionId, s\.cwd, displayName\(s\), \{ backend: s\.backend, hostId: s\.hostId \|\| s\.host \|\| undefined \}\);/.test(jumpSrc), 'the For-you\'s own "open the session" door is that resume (jump: resumeSession(id, cwd, name, {backend, hostId}) — no mode, no model: what reopenCreate mirrors)');
+}
+console.log('§8a PURE replyBoxView — the box both surfaces draw, never disabled');
+{
+  const stopped = R.replyBoxView({ show: true, enabled: false, why: R.REPLY_WHY.no_live_session, code: 'no_live_session' });
+  const live = R.replyBoxView({ show: true, enabled: true, why: '', code: null });
+  const term = R.replyBoxView({ show: true, enabled: false, why: R.REPLY_WHY.not_chat, code: 'not_chat' });
+  const failedRe = R.replyBoxView({ show: true, enabled: false, why: R.REPLY_WHY.no_live_session, code: 'no_live_session' }, { code: 'resume_failed', why: 'claude is not installed on this machine' });
+  const failedSend = R.replyBoxView({ show: true, enabled: true, code: null }, { code: 'send_failed', why: 'EPIPE' });
+  ok(stopped.reopen && stopped.note.key === R.REPLY_WHY.no_live_session && stopped.send === 'Reopen and send' && /Reopen the conversation/.test(stopped.sendTitle), 'an ended conversation ⇒ reopen, the note says it ends + the send reopens it, the send reads "Reopen and send"', stopped);
+  ok(!live.reopen && live.note === null && live.send === 'Reply' && live.sendTitle === 'Send reply (Enter) · newline (Shift+Enter)', 'a live chat ⇒ no note, "Reply" with its old title (the live box is unchanged)', live);
+  ok(!term.reopen && term.note.key === R.REPLY_WHY.not_chat && term.send === 'Reply', 'a live terminal ⇒ its fact said in the note, nothing reopened (a send is answered by name)', term);
+  ok(failedRe.note.key === 'Could not reopen the conversation: {why}' && failedRe.note.why === 'claude is not installed on this machine' && failedRe.reopen, 'a failed reopen ⇒ the note says it with the resume\'s own reason (never silent)', failedRe);
+  ok(failedSend.note.key === 'Could not reply: {why}' && failedSend.note.why === 'EPIPE', 'any other refused send ⇒ "Could not reply: …" in the note', failedSend);
+  ok(!Object.keys(stopped).some((k) => /disabled|enabled/i.test(k)), 'the box view has NO enabled/disabled field — nothing in it can grey a box out', Object.keys(stopped));
+  // the words, en / zh / ja — the brief's own zh sentence and button
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  const pair = (src, k) => { const m = src.match(new RegExp('\\n  ' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': ("(?:[^"\\\\]|\\\\.)*"),')); return m ? JSON.parse(m[1]) : null; };
+  const WORDS = [R.REPLY_WHY.no_live_session, 'Reopen and send', 'Reopen the conversation and send this reply (Enter) · newline (Shift+Enter)', 'Reopen and send "{label}"', 'Reopened the conversation and sent your reply', 'Could not reopen the conversation: {why}', 'Could not open the conversation: {why}'];
+  ok(pair(zh, R.REPLY_WHY.no_live_session) === '这个对话已结束；发送会重新打开它并把这条回复作为第一条消息' && pair(zh, 'Reopen and send') === '重新打开并发送', 'zh: 「这个对话已结束；发送会重新打开它并把这条回复作为第一条消息」 + 「重新打开并发送」 (the brief\'s words)', [pair(zh, R.REPLY_WHY.no_live_session), pair(zh, 'Reopen and send')]);
+  ok(pair(ja, R.REPLY_WHY.no_live_session) === 'この会話は終了しています。送信すると会話を再開し、この返信を最初のメッセージとして送ります' && pair(ja, 'Reopen and send') === '再開して送信', 'ja: the note + 「再開して送信」', [pair(ja, R.REPLY_WHY.no_live_session), pair(ja, 'Reopen and send')]);
+  ok(WORDS.every((k) => pair(zh, k) && pair(ja, k)) && !zh.includes('Agent not running — open the session, then reply') && !ja.includes('Agent not running — open the session, then reply'), `every new word has zh + ja (${WORDS.length}); the retired "open the session, then reply" key is gone from both`, WORDS.filter((k) => !pair(zh, k) || !pair(ja, k)));
+}
+console.log('§8b the ROUTE with a reopen dep');
+{
+  // the fake reopen = what the ORCH answers: the conversation is live again under a NEW webui id
+  const H = harness(undefined, { reopen: async (item, o, { addSession }) => { const id = 'reo-' + item.sessionKey.split(':')[1]; const { s, wrote } = addSession(id, { backendSessionId: item.sessionKey.split(':')[1] }); H8.made.push({ id, s, wrote }); return { ok: true, sessionId: id, conversation: { backend: 'claude', backendSessionId: item.sessionKey.split(':')[1], cwd: '/p', hostId: null, name: 'ended one' } }; } });
+  const H8 = { made: [] };
+  const dead = H.userTodos.add('claude:ended-1', { origin: 'agent', text: 'Ship it?', options: ['yes', 'no'], urgency: 'high' });
+  const n0 = H.calls.length;
+  const r = await H.callAsync(dead.id, { text: 'yes — ship after the tests' });
+  const made = H8.made[0];
+  ok(r.status === 200 && r.json.ok === true && r.json.reopened === true && r.json.sessionId === 'reo-ended-1' && r.json.conversation && r.json.conversation.backendSessionId === 'ended-1' && /-reply$/.test(r.json.msgId), 'an ENDED conversation ⇒ 200 {ok, reopened:true, sessionId, conversation, msgId}', r.json);
+  ok(H.reopened.length === 1 && H.reopened[0][0] === dead.id && H.reopened[0][1] && H.reopened[0][1].by === 'human:local', 'the route asked for ONE reopen of that item, naming who pressed (device-audit byOfReq)', H.reopened);
+  ok(made && made.wrote.length === 1 && userTextOf(made.wrote[0]) === R.composeReply({ ...dead, status: 'open' }, 'yes — ship after the tests', { now: H.NOW }), 'the reply is the reopened session\'s FIRST input — exactly ONE frame, its text === composeReply(item, reply)', made && made.wrote.map((w) => userTextOf(w).slice(0, 80)));
+  ok(made && typeof made.s._userInputAt === 'number' && !made.s._machineInputAt, '…typed as the PERSON\'s turn (_userInputAt — never the machine-turn mark)');
+  const after = H.userTodos.get(dead.id);
+  ok(after.status === 'done' && after.resolvedBy === 'reply' && after.reply.text === 'yes — ship after the tests' && r.json.item.id === dead.id && H.calls.length === n0 + 1, 'the item resolved by the reply (ONE store broadcast)', after);
+  // a chip on an ended conversation = the same reopen (its label is the whole reply)
+  const deadChip = H.userTodos.add('claude:ended-2', { origin: 'agent', text: 'Pick', options: ['left', 'right'] });
+  const rc = await H.callAsync(deadChip.id, { text: 'right' });
+  ok(rc.status === 200 && rc.json.reopened && H8.made[1] && H8.made[1].wrote.length === 1 && userTextOf(H8.made[1].wrote[0]).endsWith('\n\nright'), 'an option chip on an ended conversation reopens it the same way (the label is its first message)', rc.json);
+  // live / terminal / agent bearer: never a reopen
+  const nRe = H.reopened.length;
+  const { wrote: lw } = H.addSession('live-8');
+  const liveIt = H.userTodos.add('claude:sid-live-8', { origin: 'agent', text: 'live one' });
+  const rl = H.call(liveIt.id, { text: 'plain answer' });
+  ok(rl.status === 200 && !rl.json.reopened && lw.length === 1 && H.reopened.length === nRe, 'a LIVE session with the reopen wired ⇒ the old path (no reopen asked, one frame, no `reopened`)', rl.json);
+  const H0 = harness();
+  const { wrote: lw0 } = H0.addSession('live-8');
+  const liveIt0 = H0.userTodos.add('claude:sid-live-8', { origin: 'agent', text: 'live one' });
+  H0.call(liveIt0.id, { text: 'plain answer' });
+  const strip = (w) => { const f = JSON.parse(w); return JSON.stringify({ ...f, uuid: undefined, message: { ...f.message, content: [{ ...f.message.content[0], text: f.message.content[0].text.replace(/#ut-\w+/, '#ID') }] } }); };
+  ok(lw0.length === 1 && strip(lw0[0]) === strip(lw[0]), 'BYTE-IDENTICAL live path: the frame with the reopen wired === the frame without it (the item id aside)', [lw0[0] && strip(lw0[0]).slice(0, 160), lw[0] && strip(lw[0]).slice(0, 160)]);
+  H0.userTodos.stop(); H0.userTodos.flush();
+  H.addSession('term-8', { mode: 'terminal' });
+  const termIt = H.userTodos.add('claude:sid-term-8', { origin: 'agent', text: 'terminal one' });
+  const rt = H.call(termIt.id, { text: 'x' });
+  ok(rt.status === 409 && rt.json.code === 'not_chat' && H.reopened.length === nRe, 'a live TERMINAL ⇒ 409 not_chat, never a reopen (only no_live_session reopens)', rt.json);
+  const deadB = H.userTodos.add('claude:ended-3', { origin: 'agent', text: 'agent tries' });
+  const rb = H.call(deadB.id, { text: 'as the owner' }, { authorization: 'Bearer vsst_zzz' });
+  const rj = H.call(deadB.id, { text: 'as the owner' }, { authorization: 'Bearer jbt_zzz' });
+  ok(rb.status === 403 && rb.json.code === 'agent_forbidden' && rj.status === 403 && H.reopened.length === nRe && H.userTodos.get(deadB.id).status === 'open', 'an AGENT bearer (vsst_ / jbt_) on an ended conversation ⇒ 403, nothing reopened, nothing resolved', [rb.json, rj.json]);
+  const bad = await H.callAsync(deadB.id, { text: '   ' });
+  ok(bad.status === 400 && bad.json.code === 'empty' && H.reopened.length === nRe, 'a blank reply ⇒ 400 empty BEFORE any reopen (nothing started for nothing)', bad.json);
+  H.userTodos.stop(); H.userTodos.flush();
+}
+{
+  const failing = harness(undefined, { reopen: async () => ({ ok: false, why: 'claude is not installed on this machine (no "claude" on PATH — install it or set CLAUDE_CMD)' }) });
+  const it = failing.userTodos.add('claude:ended-9', { origin: 'agent', text: 'q' });
+  const r = await failing.callAsync(it.id, { text: 'answer' });
+  ok(r.status === 409 && r.json.code === 'resume_failed' && r.json.error === 'claude is not installed on this machine (no "claude" on PATH — install it or set CLAUDE_CMD)' && failing.userTodos.get(it.id).status === 'open' && !failing.userTodos.get(it.id).reply, 'a resume that FAILS ⇒ 409 resume_failed with the resume\'s own reason, the item still open, no reply kept', r.json);
+  failing.userTodos.stop(); failing.userTodos.flush();
+  const throwing = harness(undefined, { reopen: async () => { throw new Error('spawn EACCES'); } });
+  const it2 = throwing.userTodos.add('claude:ended-10', { origin: 'agent', text: 'q' });
+  const r2 = await throwing.callAsync(it2.id, { text: 'answer' });
+  ok(r2.status === 409 && r2.json.code === 'resume_failed' && /spawn EACCES/.test(r2.json.error) && throwing.userTodos.get(it2.id).status === 'open', 'a reopen that THROWS ⇒ 409 resume_failed naming the error', r2.json);
+  throwing.userTodos.stop(); throwing.userTodos.flush();
+  const H = harness(undefined, { reopen: async (item, o, { addSession }) => { addSession('reo-term', { mode: 'terminal' }); return { ok: true, sessionId: 'reo-term', conversation: { backend: 'claude', backendSessionId: 'ended-11' } }; } });
+  const it3 = H.userTodos.add('claude:ended-11', { origin: 'agent', text: 'q' });
+  const r3 = await H.callAsync(it3.id, { text: 'answer' });
+  ok(r3.status === 409 && r3.json.code === 'not_chat' && r3.json.reopened === true && r3.json.sessionId === 'reo-term' && H.userTodos.get(it3.id).status === 'open', 'reopened but the SENDER refused ⇒ its code + reopened:true + sessionId (the page opens it), the item still open', r3.json);
+  H.userTodos.stop(); H.userTodos.flush();
+}
+console.log('§8c the ORCH reopener over a recording create');
+{
+  const IR = require(path.join(REPO, 'src/server/inbox-reopen.js'));
+  const mk = ({ answer = 'created', discovered = { cwd: '/home/u/proj', name: 'disc' }, us = {}, getHandle = true, delay = 0, located = null } = {}) => {
+    const activeSessions = new Map();
+    const creates = [];
+    const handleCreate = async (ws, data, attached) => {
+      creates.push({ ws, data, attached });
+      if (delay) await new Promise((r) => setTimeout(r, delay));
+      if (answer === 'throw') throw new Error('boom');
+      if (answer === 'created') { const sess = { mode: 'chat', clients: new Map([[ws, { cols: data.cols, rows: data.rows }]]) }; activeSessions.set('w-new', sess); ws.send(JSON.stringify({ type: 'created', sessionId: 'w-new', name: 'Resumed name', reqId: data.reqId })); }
+      else if (answer === 'already') { activeSessions.set('w-old', { mode: 'chat', clients: new Map() }); ws.send(JSON.stringify({ type: 'error', code: 'resume-already-live', existingId: 'w-old', reqId: data.reqId, message: 'already live' })); }
+      else if (answer === 'error') ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: the account cannot serve' }));
+    };
+    const logs = [];
+    const locates = [];
+    const R2 = IR.create({ getHandleCreate: () => (getHandle ? handleCreate : null), activeSessions, discover: async (key) => (discovered ? { ...discovered, sessionKey: key } : null), readUserState: () => us,
+      locate: (b, id, cwd) => { locates.push([b, id, cwd]); return located; },
+      defaultsFor: (b) => ({ permission: b === 'claude' ? 'default' : '', extraArgs: '' }), taskFor: (key) => (key === 'claude:c-1' ? 'T-7' : null), log: (l) => logs.push(l) });
+    return { R2, creates, activeSessions, logs, locates };
+  };
+  const us = { sessionConfigs: { 'claude:c-1': { model: 'claude-opus-4', account: 'acct-9' } }, customNames: { 'c-1': 'Named by the owner' } };
+  const A = mk({ us });
+  const r = await A.R2.reopen({ id: 'ut-1', sessionKey: 'claude:c-1', sessionName: 'frozen' }, { by: 'human:me' });
+  const sent = A.creates[0];
+  ok(r.ok && r.sessionId === 'w-new' && A.creates.length === 1, 'reopen ⇒ ONE create through the handed create case ⇒ {ok, sessionId}', r);
+  ok(sent && sent.data.resume === true && sent.data.resumeId === 'c-1' && sent.data.mode === 'chat' && sent.data.cwd === '/home/u/proj' && sent.data.model === 'claude-opus-4' && sent.data.accountId === 'acct-9' && sent.data.permissionMode === 'default' && sent.data.taskId === 'T-7' && sent.data.sessionName === 'Named by the owner' && /^reopen-/.test(sent.data.reqId),
+    'the create = the resume of c-1 with the conversation\'s user-state config, the owner\'s custom name (a legacy bare-id key), its Task Group, the harness default permission', sent && sent.data);
+  ok(sent && sent.ws._headless === true && sent.ws._actBy === 'human:me' && sent.ws.readyState === 1 && sent.attached instanceof Set, 'the creator is a HEADLESS socket naming who pressed (its own attached set)', sent && { h: sent.ws._headless, by: sent.ws._actBy });
+  ok(!A.activeSessions.get('w-new').clients.has(sent.ws) && A.activeSessions.get('w-new').clients.size === 0, '…and it LEFT the session\'s clients the moment the create answered (the window the page opens attaches like any other)');
+  ok(r.conversation && r.conversation.name === 'Resumed name' && r.conversation.backendSessionId === 'c-1' && r.conversation.cwd === '/home/u/proj', 'the answer names the conversation (the create\'s own name for it)', r.conversation);
+  const E = mk({ answer: 'error' });
+  const re = await E.R2.reopen({ sessionKey: 'claude:c-2' });
+  ok(!re.ok && re.why === 'Account error: the account cannot serve' && E.logs.some((l) => /the resume failed — Account error/.test(l)), 'a create that answers an ERROR ⇒ {ok:false, why: its own words} (+ one journal line)', re);
+  const L2 = mk({ answer: 'already' });
+  const ra = await L2.R2.reopen({ sessionKey: 'claude:c-3' });
+  ok(ra.ok && ra.sessionId === 'w-old' && ra.already === true, 'resume-already-live (a page resumed it a moment ago) ⇒ THAT session carries the reply', ra);
+  const N = mk({ answer: 'none' });
+  const rn = await N.R2.reopen({ sessionKey: 'claude:c-4' });
+  ok(!rn.ok && /did not start/.test(rn.why), 'a create that answered nothing ⇒ said ("did not start"), never a silent ok', rn);
+  const T = mk({ answer: 'throw' });
+  const rt = await T.R2.reopen({ sessionKey: 'claude:c-5' });
+  ok(!rt.ok && /did not start: boom/.test(rt.why), 'a create that THROWS ⇒ said with its message', rt);
+  const S = mk({ delay: 30 });
+  const [p1, p2] = await Promise.all([S.R2.reopen({ sessionKey: 'claude:c-6' }), S.R2.reopen({ sessionKey: 'claude:c-6' })]);
+  ok(S.creates.length === 1 && p1.ok && p2.ok && p1.sessionId === p2.sessionId && S.R2.inflightCount() === 0, 'two replies at once (a double press, a second device) ⇒ ONE create, both answered with the same session', { creates: S.creates.length });
+  const W2 = mk();
+  const rw = await W2.R2.reopen({ sessionKey: 'webui:abc' });
+  const U = mk({ discovered: null });
+  const ru = await U.R2.reopen({ sessionKey: 'claude:c-7', cwd: '/p' });
+  const B = mk({ getHandle: false });
+  const rbt = await B.R2.reopen({ sessionKey: 'claude:c-8' });
+  ok(!rw.ok && /before its conversation had an id/.test(rw.why) && !ru.ok && /no transcript/.test(ru.why) && !rbt.ok && /still booting/.test(rbt.why) && W2.creates.length + U.creates.length + B.creates.length === 0, 'a webui key / a local conversation neither discovery nor the harness store knows / no create case yet ⇒ refused BY NAME, no create sent', [rw.why, ru.why, rbt.why]);
+  ok(U.locates.length === 1 && U.locates[0][0] === 'claude' && U.locates[0][1] === 'c-7' && U.locates[0][2] === '/p', '…the harness store WAS asked first (backend, id, the ask\'s folder)', U.locates);
+  const Lc = mk({ discovered: null, located: '/home/u/.claude/projects/-p/c-9.jsonl' });
+  const rl = await Lc.R2.reopen({ sessionKey: 'claude:c-9', cwd: '/p' });
+  ok(rl.ok && Lc.creates.length === 1 && Lc.creates[0].data.cwd === '/p' && Lc.creates[0].data.hostId === undefined && Lc.creates[0].data.resumeId === 'c-9', 'not discovered but the HARNESS STORE locates its transcript ⇒ resumed here, in the folder the ask was filed from', Lc.creates[0] && Lc.creates[0].data);
+  const Rc = mk({ discovered: null, located: '/srv/vibespace/data/remote-jsonl/h-1/c-10.jsonl' });
+  const rr = await Rc.R2.reopen({ sessionKey: 'claude:c-10', cwd: '/p' });
+  ok(!rr.ok && /no transcript/.test(rr.why) && Rc.creates.length === 0, 'a REMOTE copy cached here is no evidence (it would resume another machine\'s conversation locally) ⇒ refused by name', rr);
+  const Hc = mk({ discovered: null, located: '/never' });
+  const rh = await Hc.R2.reopen({ sessionKey: 'claude:c-11', cwd: '/far', hostId: 'h-2' });
+  ok(rh.ok && Hc.locates.length === 0 && Hc.creates[0].data.hostId === 'h-2' && Hc.creates[0].data.cwd === '/far', 'an ask filed from ANOTHER machine ⇒ resumed on that host (never located here)', Hc.creates[0] && Hc.creates[0].data);
+}
+console.log('§8d wiring pins + RED CONTROL');
+{
+  const srv = read('server.js'), wsh = read('src/ws-handler.js'), rsrc = read('src/routes/user-todos-reply.js');
+  ok(/const wsApi = registerWsHandler\(wss, \{/.test(srv) && /\n  return \{ handleCreate \};\n\}\n/.test(wsh), 'ws-handler hands its create case back (return { handleCreate }) and server.js keeps it (wsApi)');
+  ok(/const inboxReopen = require\('\.\/src\/server\/inbox-reopen\.js'\)\.create\(\{ getHandleCreate: \(\) => wsApi && wsApi\.handleCreate, activeSessions, readUserState: \(\) => persistenceRouter\.readUserState\(\), discover: async \(key\) => .*warmSessions\(\).*sessionKey === key/.test(srv), 'server.js builds the reopener over the create case, user-state and the discovery sweep the sidebar lists');
+  ok(/if \(!v\.ok && v\.code === 'no_live_session' && typeof reopen === 'function'\) return reopenAndSend\(req, res, item, t\.text\);\n      if \(!v\.ok\) return fail\(res, v\.code, v\.why\);/.test(rsrc), 'the route reopens ONLY on no_live_session, right before the refusal it replaces');
+  ok(/NOT AN UNATTENDED SPEND: this first turn is the PERSON's/.test(rsrc) && (rsrc.match(/\bsendUserInput\s*\(/g) || []).length === 2, 'the reopened first turn is commented at its call as the PERSON\'s typed turn, and rides THE typing path (the file\'s 2 sendUserInput calls — the spend census\'s typed-send ALLOW row)');
+  ok(!/formatChatInput|deliverToConversation|authorizeSpend|sendToSession/.test(read('src/server/inbox-reopen.js')) && !/formatChatInput|deliverToConversation|authorizeSpend|sendToSession|sendUserInput/.test(read('src/inbox-reopen.js')), 'the reopener sends nothing into a conversation (no frame, no ladder, no typing) — a resume bills no turn');
+  // RED CONTROL: the route WITHOUT its reopen line = the pre-lane answer
+  const rel = 'src/routes/user-todos-reply.js';
+  const needle = "      if (!v.ok && v.code === 'no_live_session' && typeof reopen === 'function') return reopenAndSend(req, res, item, t.text);";
+  ok(rsrc.includes(needle), '§8d control needle exists');
+  const MUT = mutantCopies('inbox-reply-reopen', REPO);
+  const mut = MUT.write(rel, rsrc.split('\n').map((l) => (l === needle ? '' : l)).join('\n'), 'no-reopen');
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§8d ' })) ok(row.pass, row.name, row.detail);
+  const H = harness(mut, { reopen: async () => ({ ok: true, sessionId: 'never' }) });
+  const it = H.userTodos.add('claude:ended-ctl', { origin: 'agent', text: 'control' });
+  const r = await H.callAsync(it.id, { text: 'answer' });
+  ok(r.status === 409 && r.json.code === 'no_live_session' && H.reopened.length === 0, 'RED CONTROL: without the reopen line an ended conversation\'s reply is the pre-lane 409 no_live_session — the §8b legs can go red', r.json);
+  H.userTodos.stop(); H.userTodos.flush();
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

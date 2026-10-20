@@ -38,6 +38,15 @@
 //   ⑱ javascript: / data: / vbscript: links never survive; https gets _blank + noopener noreferrer
 //   ⑲ the REAL vibespace-ask: a 9 000-char --detail is cut at 8 000 and the CLI says so; a 600-char
 //      question at 500; 7 999 chars whole and silent
+// lane inbox-reply-dead-session (userW inc-mvfuzlom-nwav 2026-10-19 — ten presses on this window's disabled box):
+//   ② the ended conversation's box is TYPEABLE (a real click focuses it, typing lands), its note says the send reopens
+//      it, its send reads 「Reopen and send」
+//   ⑳ RED CONTROL first: a second page served a client bundle built with a PATCHED COPY of src/lib/inbox-window.js —
+//      the lane's `c.ta.disabled = false` swapped back to the pre-lane `c.ta.disabled = !v.reply.enabled`
+//      (pairing-ui-harness buildPatchedBundle, the copy outside the checkout) — the same item, the same real press:
+//      the box is disabled, document.activeElement never the box, the typing lost (the incident). Then, last, on the
+//      desktop: a REAL press on 「Reopen and send」 ⇒ the conversation resumes behind the real create path, the reply is
+//      its FIRST input, it is live under one session, its window opens showing the reply, the item resolved
 // VS_SHOT_DIR=<dir> saves the screenshots (the window with a long item, the 480 px window,
 // the popup with its new ⤢). Requires google-chrome (SKIP without).
 import { execSync, spawn, spawnSync } from 'node:child_process';
@@ -46,6 +55,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs'; // ⑳'s RED CONTROL: the patched copy lives outside the checkout
+import { buildPatchedBundle } from './pairing-ui-harness.mjs'; // …built into a client bundle the control page is served
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -122,7 +133,7 @@ const SEEDED = [
   seed(LONG_ID, LIVE_KEY, { text: 'Review the ledger migration plan (long)', detail: LONG_DETAIL, urgency: 'high', createdAt: now - 20e3 }),
   seed(A2_ID, LIVE_KEY, { text: 'Second ask for the live session', createdAt: now - 40e3 }),
   seed(A3_ID, LIVE_KEY, { text: 'Third ask for the live session', createdAt: now - 30e3 }),
-  seed(HOSTILE_ID, 'claude:' + STOPPED_SID, { text: HOSTILE_TITLE, detail: HOSTILE_DETAIL, urgency: 'high', options: [HOSTILE_OPT, 'fine'], sessionName: HOSTILE_NAME, createdAt: now - 90e3 }),
+  seed(HOSTILE_ID, 'claude:' + STOPPED_SID, { text: HOSTILE_TITLE, detail: HOSTILE_DETAIL, urgency: 'high', options: [HOSTILE_OPT, 'fine'], sessionName: HOSTILE_NAME, createdAt: now - 90e3, cwd: CWD }), // cwd: the asker's folder — ⑳'s reopen locates the transcript there
   seed(OTHER_ID, 'claude:' + OTHER_SID, { text: 'An ask from another session', createdAt: now - 80e3 }),
   seed(NOTICE_ID, 'accounts', { kind: 'notice', origin: 'spend', sessionName: 'Spending', text: 'Account A has used 10 of its 12 unattended turns this hour (83%).', createdAt: now - 70e3 }),
   seed(BIG_RESOLVED_ID, 'claude:' + OTHER_SID, { text: 'A long item handled yesterday', detail: BIG(MARK_BIG_R), status: 'done', resolvedBy: 'user', resolvedAt: now - 86400e3, createdAt: now - 90000e3 }),
@@ -158,7 +169,10 @@ const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('2.1.274 (Claude Code) stub'); process.exit(0); }
 if (args.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
 fs.writeFileSync(${JSON.stringify(stubDir)} + '/env-' + process.pid + '.json', JSON.stringify(process.env));
-const SID = ${JSON.stringify(LIVE_SID)};
+// a RESUMED run (lane inbox-reply-dead-session ⑳) is that conversation: it echoes --resume's id and logs its stdin apart
+const RESUME = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : null;
+const SID = RESUME || ${JSON.stringify(LIVE_SID)};
+const STDIN_TO = RESUME ? ${JSON.stringify(stubDir)} + '/stdin-' + RESUME + '.ndjson' : ${JSON.stringify(STDIN_LOG)};
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5', cwd: ${JSON.stringify(CWD)}, tools: [], permissionMode: 'default', claude_code_version: '2.1.274' });
 let n = 0, buf = '';
@@ -168,7 +182,7 @@ process.stdin.on('data', (d) => {
   while ((i = buf.indexOf('\\n')) >= 0) {
     const line = buf.slice(0, i); buf = buf.slice(i + 1);
     if (!line.trim()) continue;
-    fs.appendFileSync(${JSON.stringify(STDIN_LOG)}, line + '\\n');
+    fs.appendFileSync(STDIN_TO, line + '\\n');
     let m = null; try { m = JSON.parse(line); } catch {}
     if (!m || m.type !== 'user') continue;
     const k = ++n;
@@ -352,7 +366,15 @@ try {
   check('window.__xss stays undefined after the hostile item painted and every element was hovered', x2.xss === undefined, x2);
   check('the pane title / detail / option chips are the RAW strings (TEXT, no element made of them)', x2.title === HOSTILE_TITLE && x2.detail === HOSTILE_DETAIL && x2.opts[0] === HOSTILE_OPT && x2.opts[1] === 'fine' && x2.bad === 0, x2);
   check('the hostile SESSION NAME is text in the pane head, the list\'s group head and the scope button; the row title raw', x2.name === HOSTILE_NAME && x2.groupName === HOSTILE_NAME && x2.scope === HOSTILE_NAME && x2.rowTitle === HOSTILE_TITLE, x2);
-  check('…its reply box is DRAWN disabled with the verdict\'s sentence (the stopped session)', await evalJs(`(() => { const it = document.querySelector('${IW} .iw-item'); const ta = it.querySelector('.iw-reply-input'); const w = it.querySelector('.iw-reply-why'); return ta.disabled && w.textContent === 'Agent not running — open the session, then reply' && [...it.querySelectorAll('.iw-opt')].every((o) => o.disabled); })()`));
+  // lane inbox-reply-dead-session: the ended conversation's box is NEVER disabled — the fact said, the send reopens it
+  const IT2 = `${IW} .iw-item[data-id=${JSON.stringify(HOSTILE_ID)}]`;
+  const x2b = await evalJs(`(() => { const it = document.querySelector(${JSON.stringify(IT2)}); const ta = it.querySelector('.iw-reply-input'); const w = it.querySelector('.iw-reply-why'); const b = it.querySelector('.iw-act[data-act="reply"]'); return { ta: ta.disabled, why: w.textContent, whyShown: w.style.display !== 'none', above: w.getBoundingClientRect().bottom <= ta.getBoundingClientRect().top + 1, label: b && b.querySelector('.iw-act-label').textContent, btn: b && b.disabled, chips: [...it.querySelectorAll('.iw-opt')].map((o) => o.disabled) }; })()`);
+  check('…its reply box is TYPEABLE (never disabled), the note ABOVE it says the conversation ended and the send reopens it, the send reads 「Reopen and send」, the chips pressable', x2b.ta === false && x2b.why === 'This conversation has ended — sending reopens it with this reply as its first message' && x2b.whyShown && x2b.above && x2b.label === 'Reopen and send' && x2b.btn === false && x2b.chips.length === 2 && x2b.chips.every((d) => d === false), x2b);
+  const TA2 = IT2 + ' .iw-reply-input';
+  check('a REAL click into that box focuses it (document.activeElement IS the box)', await realClick(P1, TA2) && await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(TA2)})`, 2000));
+  await cdp('Input.insertText', { text: 'typed on an ended conversation' });
+  check('…and real typing lands in it', (await evalJs(`document.querySelector(${JSON.stringify(TA2)}).value`)) === 'typed on an ended conversation');
+  await evalJs(`(() => { const ta = document.querySelector(${JSON.stringify(TA2)}); ta.value = ''; ta.blur(); return true; })()`); // (the RED CONTROL on a patched bundle is ⑳'s first half)
 
   // ── ③ Mark done: the mail-client rule + the in-place row ──
   console.log('③ Mark done moves the selection to the next open item; the resolved row stays in place, dimmed');
@@ -606,6 +628,93 @@ try {
   check(`…its action buttons and ‹ back are ≥ 36 px (${actSizes.join(',')})`, actSizes.length >= 3 && actSizes.every((h) => h >= 36), actSizes);
   await shot(P1, 'inbox-window-phone');
   check('no uncaught page exceptions on the phone', P1.errors.length === 0, P1.errors.slice(0, 3));
+
+  // ── ⑳ A REPLY FROM THE WINDOW TO A CONVERSATION THAT ENDED REOPENS IT (lane inbox-reply-dead-session) ──
+  // the incident's own surface (userW inc-mvfuzlom-nwav: ten presses on `textarea.iw-reply-input`), last, on the desktop
+  // again: a REAL click into the box, real typing, a REAL press on 「Reopen and send」 — the conversation resumes behind
+  // the real create path (the stub echoes --resume's id, its stdin logged apart) and the reply is its FIRST input
+  console.log('⑳ RED CONTROL (the pre-lane window on a patched bundle), then the window\'s 「Reopen and send」 on an ended conversation');
+  {
+    const wsrc = fs.readFileSync(path.join(repo, 'src/lib/inbox-window.js'), 'utf8');
+    const LANE = '    c.ta.disabled = false;', PRE = '    c.ta.disabled = !v.reply.enabled;';
+    check('control: the lane\'s line is in the window module exactly once (the patched copy swaps it back to the pre-lane line)', wsrc.split(LANE).length === 2 && !wsrc.includes(PRE));
+    const MUT = mutantCopies('inbox-window-ui-dead', repo);
+    const bundleText = await buildPatchedBundle(MUT, 'src/lib/inbox-window.js', wsrc.split(LANE).join(PRE), 'pre-lane');
+    for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: '⑳ ' })) check(row.name, row.pass, row.detail);
+    const t2 = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+    const P2 = await connect(t2.webSocketDebuggerUrl);
+    const body = Buffer.from(bundleText).toString('base64');
+    let served = 0;
+    P2.sock.on('message', (d) => {
+      let m = null; try { m = JSON.parse(d); } catch { return; }
+      if (m.method !== 'Fetch.requestPaused') return;
+      const id = m.params.requestId;
+      if (/\/bundle\.js(\?|$)/.test(m.params.request.url)) { served++; P2.cdp('Fetch.fulfillRequest', { requestId: id, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }], body }).catch(() => {}); }
+      else P2.cdp('Fetch.continueRequest', { requestId: id }).catch(() => {});
+    });
+    await P2.cdp('Runtime.enable'); await P2.cdp('Page.enable');
+    await P2.cdp('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }] });
+    await P2.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    await P2.cdp('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await P2.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+    await P2.cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+    await P2.waitApp();
+    await sleep(900);
+    await P2.evalJs(`app.openInbox({ itemId: ${JSON.stringify(HOSTILE_ID)} }); true`);
+    const cTa = `${IW} .iw-item[data-id=${JSON.stringify(HOSTILE_ID)}] .iw-reply-input`;
+    const shown = await P2.waitFor(`!!document.querySelector(${JSON.stringify(cTa)})`, 8000);
+    const cDisabled = await P2.evalJs(`document.querySelector(${JSON.stringify(cTa)})?.disabled === true`);
+    await realClick(P2, cTa);
+    await P2.cdp('Input.insertText', { text: 'lost' });
+    const cr = await P2.evalJs(`(() => { const ta = document.querySelector(${JSON.stringify(cTa)}); return { focused: document.activeElement === ta, value: ta ? ta.value : null, active: document.activeElement && document.activeElement.className }; })()`);
+    check(`RED CONTROL: the page served the PATCHED bundle (${served}×) shows the ended conversation's box DISABLED, and the same real press lands on it without focusing it — document.activeElement never the box, the typing lost (the incident's ten presses)`, served >= 1 && shown && cDisabled && cr.focused === false && cr.value === '', { served, shown, cDisabled, cr });
+    // the probe is not vacuous on this page: the same box enabled by hand, the same real press focuses it
+    await P2.evalJs(`(() => { const ta = document.querySelector(${JSON.stringify(cTa)}); ta.disabled = false; return true; })()`);
+    await realClick(P2, cTa);
+    check('…and on that SAME control page the same press focuses the box once it is enabled (the probe can read green there)', await P2.waitFor(`document.activeElement === document.querySelector(${JSON.stringify(cTa)})`, 2000));
+    await P2.evalJs(`(() => { const ta = document.querySelector(${JSON.stringify(cTa)}); ta.value = ''; ta.blur(); return true; })()`);
+    try { P2.sock.close(); } catch { }
+    try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t2.id}`); } catch { }
+    try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/activate/${target.id}`); } catch { }
+    await sleep(300);
+  }
+  {
+    const UA0 = (await cdp('Browser.getVersion')).userAgent;
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await cdp('Emulation.setEmulatedMedia', { features: [] });
+    await cdp('Emulation.setUserAgentOverride', { userAgent: UA0 });
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+    await waitApp();
+    await sleep(1200);
+    const was = [...(await storeNow()).resolved, ...(await storeNow()).open].find((i) => i.id === HOSTILE_ID);
+    if (was && was.status !== 'open') await fetch(`http://127.0.0.1:${PORT}/api/user-todos/${HOSTILE_ID}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'open' }) });
+    check(`(the stopped fixture's item is OPEN — it was ${was ? was.status : 'missing'}; the owner's ↺ if needed)`, (await storeNow()).open.some((i) => i.id === HOSTILE_ID));
+    await evalJs(`app.openInbox({ itemId: ${JSON.stringify(HOSTILE_ID)} }); true`);
+    const paneTa = `${IW} .iw-item[data-id=${JSON.stringify(HOSTILE_ID)}] .iw-reply-input`;
+    const paneSend = `${IW} .iw-item[data-id=${JSON.stringify(HOSTILE_ID)}] .iw-act[data-act="reply"]`;
+    check('the window opens ON the ended conversation\'s item', await waitFor(`${ST}?.selected === ${JSON.stringify(HOSTILE_ID)} && !!document.querySelector(${JSON.stringify(paneTa)})`, 8000));
+    check('a REAL click into its box focuses it', await realClick(P1, paneTa) && await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(paneTa)})`, 2000));
+    const REPLY20 = 'reopened from the For-you window';
+    await evalJs(`(() => { const ta = document.querySelector(${JSON.stringify(paneTa)}); ta.value = ''; return true; })()`);
+    await cdp('Input.insertText', { text: REPLY20 });
+    check(`the press target reads 「Reopen and send」 (${await evalJs(`document.querySelector(${JSON.stringify(paneSend)})?.textContent`)})`, (await evalJs(`document.querySelector(${JSON.stringify(paneSend + ' .iw-act-label')})?.textContent`)) === 'Reopen and send');
+    const resumedLog = path.join(stubDir, `stdin-${STOPPED_SID}.ndjson`);
+    check('a REAL press on 「Reopen and send」', await realClick(P1, paneSend));
+    const t0 = Date.now();
+    let firstUser = null;
+    while (Date.now() - t0 < 30000 && !firstUser) {
+      if (fs.existsSync(resumedLog)) { for (const l of fs.readFileSync(resumedLog, 'utf8').split('\n').filter(Boolean)) { let m = null; try { m = JSON.parse(l); } catch { } if (m && m.type === 'user') { const c = m.message && m.message.content; firstUser = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => x.text || '').join('') : ''; break; } } }
+      if (!firstUser) await sleep(200);
+    }
+    check(`within 30 s the RESUMED conversation reads the reply as its FIRST user input: [For you reply #${HOSTILE_ID}] … ${REPLY20}`, !!firstUser && firstUser.startsWith(`[For you reply #${HOSTILE_ID}]`) && firstUser.endsWith('\n\n' + REPLY20), (firstUser || '(none)').slice(0, 300));
+    const live20 = await evalJs(`fetch('/api/active').then((r) => r.json()).then((j) => (Array.isArray(j) ? j : j.sessions || []).filter((s) => s.backendSessionId === ${JSON.stringify(STOPPED_SID)}).map((s) => s.id))`);
+    check('the SAME conversation is live again (one session, its own id resumed)', Array.isArray(live20) && live20.length === 1, live20);
+    check('its conversation window opens and shows the reply', await waitFor(`(() => { const v = [...app.sessions.values()].find((x) => x && x.sessionId === ${JSON.stringify(live20 && live20[0])}); return !!v && [...document.querySelectorAll('.chat-view')].some((cv) => (cv.textContent || '').includes(${JSON.stringify(REPLY20)})); })()`, 15000));
+    check('the item is resolved by the reply', (await storeNow()).resolved.some((i) => i.id === HOSTILE_ID && i.resolvedBy === 'reply' && i.reply && i.reply.text === REPLY20));
+    check('no uncaught page exceptions through the reopen', P1.errors.length === 0, P1.errors.slice(0, 3));
+    try { if (live20 && live20[0]) liveWs.send(JSON.stringify({ type: 'kill', sessionId: live20[0] })); } catch {}
+  }
 
   try { liveWs.send(JSON.stringify({ type: 'kill', sessionId: sid })); await sleep(500); liveWs.close(); } catch {}
 } catch (e) {

@@ -27,6 +27,7 @@ import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one res
 import { showReauthAccountDialog } from './channel-account-dialogs.js'; // lane channel-names-readable: a `channel-reauth` item's verb = THE account's Re-authorize dialog
 import { askArtifactRow, askArtifactProbe, linkTarget } from './foryou-links.js'; // PURE (lane foryou-attachments): an ask's chip → its artifact row + the open-time probe; a link in the words → its target
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
+import { replyBoxView } from '../inbox-reply.js'; // PURE (lane inbox-reply-dead-session): THE reply box both surfaces draw — never disabled
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
@@ -178,15 +179,39 @@ export function inboxModel(app) {
     if (!r || !r.success) { showToast(t('Could not update the item') + (r?.error ? `: ${r.error}` : ''), { type: 'error' }); return false; }
     return true;
   };
+  /** A reply REOPENED its ended conversation (lane inbox-reply-dead-session): that conversation's window opens on THIS
+   *  page — a window still showing it ended (a read-only / view-only one) is closed first, as a hand Resume does. */
+  const openReopened = (r) => {
+    const c = (r && r.conversation) || {};
+    try {
+      for (const [winId, term] of [...app.sessions]) {
+        const spec = app.wm?.windows?.get(winId)?._openSpec;
+        if (spec && c.backendSessionId && (spec.backend || 'claude') === (c.backend || 'claude') && spec.backendSessionId === c.backendSessionId && term?.sessionId !== r.sessionId) app.wm.closeWindow(winId);
+      }
+    } catch { }
+    try { app.attachSession(r.sessionId, c.name || '', c.cwd || '', { mode: 'chat', backend: c.backend || 'claude', backendSessionId: c.backendSessionId || undefined, hostId: c.hostId || undefined }); }
+    catch (e) { showToast(t('Could not open the conversation: {why}', { why: e.message }), { type: 'error' }); }
+  };
+  // THIS page's last refused send per item ({code, why}) — the box's note says it until the next send (never silent)
+  const replyFailures = new Map();
   /** THE REPLY (design-user-inbox-reply D1): POST /api/user-todos/:id/reply —
    *  the typing path, quoted. Both outcomes reach the user as a toast; resolves
-   *  true when the reply was sent (the caller then clears its box + draft). */
+   *  true when the reply was sent (the caller then clears its box + draft). A
+   *  reply to a conversation that ENDED reopens it (`reopened` — its window opens here). */
   const postReply = async (id, text) => {
     // fetchJson never throws — a null (network) or an {error, code} body is a
     // FAILURE the user must see (no silent failures); the box keeps its text
     const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
-    if (r && r.ok) { showToast(t('Reply sent')); drafts.delete(id); return true; }
-    showToast(t('Could not reply: {why}', { why: r && r.error ? t(r.error) : t('server unreachable') }), { type: 'error' });
+    if (r && r.ok) {
+      replyFailures.delete(id); drafts.delete(id);
+      if (r.reopened) { showToast(t('Reopened the conversation and sent your reply')); openReopened(r); }
+      else showToast(t('Reply sent'));
+      return true;
+    }
+    const why = r && r.error ? t(r.error) : t('server unreachable');
+    replyFailures.set(id, { code: (r && r.code) || 'unreachable', why });
+    if (r && r.reopened && r.sessionId) openReopened(r); // reopened, but the reply did not go: the conversation is open — show it
+    showToast(r && r.code === 'resume_failed' ? t('Could not reopen the conversation: {why}', { why }) : t('Could not reply: {why}', { why }), { type: 'error' });
     return false;
   };
   /** "CLEAR CONTENT…" (2026-09-28): THE verb both surfaces offer on an item's menu —
@@ -378,6 +403,9 @@ export function inboxModel(app) {
     return out;
   };
   const replyState = (i) => replyButtonState(i, factFor(i.sessionKey));
+  /** THE box both surfaces draw for item `i` (PURE replyBoxView): the verdict's fact said in its note, "Reopen and
+   *  send" on an ended conversation, this page's last refusal of it — and never a disabled control. */
+  const replyBox = (i) => replyBoxView(replyState(i), replyFailures.get(i.id) || null);
   /** A `.ut-live-dot[data-key]` brought to its session's current fact (D1.7). */
   const patchDot = (dot) => {
     const st = liveDotState(factFor(dot.dataset.key));
@@ -457,7 +485,7 @@ export function inboxModel(app) {
     get todos() { return todos; },
     get loaded() { return loaded; },
     byId, sessionFor, displayName, wordsOf, detailOf, nameFor, jump, setStatus, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
-    ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, patchDot, boardOf, drafts,
+    ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts,
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */
     rowCtx: { t, nameFor, wordsOf, detailOf, replyState, lang: resolveLang },
@@ -474,6 +502,7 @@ export function inboxModel(app) {
       return off;
     },
   };
+  model.rowCtx.replyBox = replyBox; // the row's box (lane inbox-reply-dead-session): never disabled — the fact said, an ended conversation reopened
   app._inboxModel = model;
   return model;
 }

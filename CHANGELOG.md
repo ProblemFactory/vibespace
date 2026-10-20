@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.321 — 2026-10-20
+
+### Fixed
+- In For you, replying to a conversation that has ended reopens it and sends your reply as its first message; the box says so instead of greying out.
+
 ## 2.369.320 — 2026-10-19
 
 ### Fixed

@@ -155,7 +155,8 @@ process.stdin.on('end', () => process.exit(0));
     }
     await P.cdp('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile });
     if (mobile) await P.cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-    await P.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `${ONBOARDED_SOURCE}; try { localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); } catch {}` });
+    await P.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // the census's own spelling (test-architecture §47 reads this module before a suite that imports it)
+    await P.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); } catch {}` });
     await P.cdp('Page.navigate', { url: `${BASE}/` });
     await P.waitApp();
     await sleep(700);

@@ -622,6 +622,7 @@
 - (2026-10-19) A PLAYING MAC STREAM FELL TO THE VNC PICTURE BY ITSELF: SCK -3805 named display_gone (stream-fallback-never-silent) — 不变量 = gone only when two successful facts reads 1 s apart say so; a played stream is retried, then the person chooses (kb-bugfix-invariants)
 
 - (2026-10-19) THE .315 MIRROR'S NULL PIN: stream details moved above a bottom-corner pill a frame AFTER they first showed, then clamped over it as they grew (mirror-315-webrtc-pin) — 不变量 = a popup is painted only where it stays; a chrome wait names the place its press needs (kb-bugfix-invariants)
+- (2026-10-19) A REPLY TO A CONVERSATION THAT HAD ENDED WAS IMPOSSIBLE: the For-you box was disabled, its reason a hover title (userW inc-mvfuzlom-nwav; inbox-reply-dead-session) — 不变量 = a reply box is never disabled: a dead addressee is said in it and the send REOPENS it (kb-bugfix-invariants)
 
 ## A SIGN-IN THAT EXISTED HAD NO VISIBLE DOOR: THE VOICE ROW SHOWED A STATUS CHIP, THE INTEGRATIONS CARD ONLY A KEY (a fleet user's report 2026-10-18 「plugin页面没地方进行登录，integrations（一般人发现不了）里也只能setup key」; lane dropline-connect-door, .298)
 **Symptom.** On a cluster instance WITH an https address (VIBESPACE_PUBLIC_URL ⇒ the OAuth tier worked) a person found no way to sign in to Dropline. Plugins › Voice input · Dropline showed the chip «no Dropline key yet», a disabled switch and ⚙ (settings only). Services › Integrations › Dropline asked for a REQUIRED key ("Create one at dropline.fish.audio/app") and had no Connect. His row held `values: {}` and a lastError from Test on an empty key.
@@ -5847,3 +5848,25 @@ The self-upgrade re-execs the device daemon `detached + stdio: 'ignore' + window
 **不变量 / Gates.** A popup is painted only where it stays: a placement that depends on the anchor runs in the frame the popup first shows and again on every resize — never a frame later, never once. A chrome suite's wait names the place its press needs (the popup's numbers in and its button's place held), never the first frame it was visible, and the press's landing is printed.
 - test-desktop-webrtc-chrome 86 (heavy; was 84): the new leg + its RED CONTROL looped 10× idle, 10× on 2 cores, 10× ×8 throttle + 4 cores, then 10× + 10× after the row-set wait — 0 red, the control red 50/50; the full suite 86/86 idle and on 2 cores (6 runs at load 6–13).
 - The same lane: ci.yml's failure-only upload had uploaded nothing since B-60d2 (a suite's scratch dir — the `/tmp/vs-*-shots-*` glob — is removed at its exit) and never held ci.mjs's fail-logs; the hosted heavy step now sets VS_UI_SHOTS_DIR and uploads `data/ci-heavy/fail-logs/*.log` + that dir.
+
+## A REPLY TO A CONVERSATION THAT HAD ENDED WAS IMPOSSIBLE: THE FOR-YOU BOX WAS DISABLED, ITS REASON IN A HOVER TITLE (userW inc-mvfuzlom-nwav, 2026-10-19 23:01Z on 2.369.318: 「在 inbox 里面回复 session 的时候, 如果那个 session 已经挂了, 就回不了了.」; lane inbox-reply-dead-session)
+**Symptom.** The action ring showed ten pointer presses on `textarea.iw-reply-input` in 30 s, and no typing. The For-you window drew the box of an item whose conversation was not running as DISABLED (`c.ta.disabled = !v.reply.enabled`). Its reason, "Agent not running — open the session, then reply", was only a hover title. The tray row disabled its Reply button, chips and send the same way.
+**Cause.** The ONE reply verdict (src/inbox-reply.js replyVerdict, asked by the route and both surfaces) answers `no_live_session` for a stopped conversation. Both surfaces mapped "the verdict refuses a direct send" onto "disable the control". That is a greyed-out control with a hint (the UI law), and a dead addressee that is not said (the 2026-10-07 invariant: a record's state is a fact about its addressee). Nothing in the box could reopen the conversation; the hint sent the person to the sidebar.
+**Fix.**
+- THE BOX IS NEVER DISABLED. Both surfaces draw one PURE view, replyBoxView.
+  - The box is typeable. Its note, above it, says the fact: "This conversation has ended — sending reopens it with this reply as its first message" / 「这个对话已结束；发送会重新打开它并把这条回复作为第一条消息」.
+  - The send reads "Reopen and send" / 「重新打开并发送」. The chips stay pressable.
+  - A refused send is said twice: in the note and in a toast.
+- THE SEND REOPENS IT. `POST /api/user-todos/:id/reply` with `no_live_session` and the `reopen` dep wired goes to src/server/inbox-reopen.js.
+  - It resumes the conversation through THE ws create case: ws-handler's `handleCreate`, handed a headless creator that leaves the session's clients once the create answered.
+  - It sends the create message the page's own resume road builds: PURE src/inbox-reopen.js `reopenCreate`, session-lifecycle `resumeSession` → `createSession` field for field.
+  - The facts that message reads: the discovery row, or the harness store's transcript `locate` in the ask's folder (never a cached remote copy); user-state's per-conversation config; the harness defaults; the first Task Group.
+  - Then it types the reply through THE typing path (`sendUserInput`, origin inbox-reply), resolves the item, and answers `{ok, reopened:true, sessionId, conversation}`. The page opens that conversation's window.
+  - A resume that fails answers `resume_failed` 409 with the create's own words, and the item stays open. One reopen runs per conversation at a time.
+  - A live session's path is byte-identical.
+- SPEND. The reopened first turn is the PERSON's typed reply. It is commented at its call, and the route's typed-send ALLOW row in test-spend-paths covers it. The resume itself sends nothing.
+- A PREMISE CORRECTED. data/session-meta is deleted when a session exits, so an ended conversation has no such record. Its resume settings live where the page reads them: user-state `sessionConfigs` (the gear popover), plus the harness defaults.
+**不变量 / Gates.** A reply box is never disabled. A dead addressee is said in the box, and the send REOPENS it: the same conversation, with the page's own resume settings, never a refusal the person has to work around.
+- test-inbox-reply §8: the PURE mirror, plus a census of resumeSession's `savedCfg` reads and createMsg's keys, so a new resume field reds there. Also replyBoxView, the route legs (reopened, resume_failed, live byte-identical, agent 403), and the ORCH over a recording create. RED CONTROL: the route without its reopen line answers 409 no_live_session.
+- test-inbox-reply-ui ③ + ㉑: zh / ja / en notes on a real page, then a real reopen — the resumed CLI's first stdin is the reply, and its window opens.
+- test-inbox-window-ui ② + ⑳. RED CONTROL: a page served a bundle whose inbox-window.js carries the pre-lane line; the same real press never focuses the box.

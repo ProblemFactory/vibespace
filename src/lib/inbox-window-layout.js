@@ -177,8 +177,10 @@ export function itemView(item, ctx = {}) {
   if (!resolved && typeof ctx.expires === 'function') { const ex = ctx.expires(i.expiresAt); if (ex) meta.push({ kind: 'expires', text: ex }); }
   if (resolved && typeof ctx.ago === 'function' && Number.isFinite(i.resolvedAt)) meta.push({ kind: 'resolved-at', text: ctx.ago(i.resolvedAt) });
   if (ctx.origin && ctx.origin.label) meta.push({ kind: 'origin', text: t(ctx.origin.label) });
-  // THE REPLY SURFACE: `why` is the one sentence the pane shows under it — a
-  // drawn-but-disabled box says why it is disabled; an item with NO box says
+  // THE REPLY SURFACE: `why` is the one sentence the pane shows with it — a
+  // box whose direct send the verdict refuses says the fact (the box itself is
+  // never disabled: the window draws src/inbox-reply.js replyBoxView — an ended
+  // conversation's send reopens it, lane inbox-reply-dead-session); an item with NO box says
   // where it is answered instead (a helper's card, the job panel) — except an
   // item that is not from an agent session at all (`no_session`: a login /
   // spend notice), where "nothing to reply to" would be noise on every pane.

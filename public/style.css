@@ -1484,7 +1484,8 @@ button.ut-notice-head:hover { color: var(--accent); }
 .fy-link:hover, .fy-link:focus-visible { text-decoration-style: solid; outline: none; }
 .iw-arts .ut-arts { margin: 10px 0 2px; gap: 6px; }
 .iw-arts .ut-art { font-size: 12px; padding: 4px 10px 4px 8px; }
-.ut-reply { display: flex; gap: 4px; align-items: flex-end; margin-top: 4px; cursor: default; }
+.ut-reply { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; margin-top: 4px; cursor: default; }
+.ut-reply-why { flex: 0 0 100%; font-size: 11px; color: var(--text-dim); line-height: 1.35; } /* the box's note above it (an ended conversation: the send reopens it) */
 .ut-reply-input {
   flex: 1; min-width: 0; resize: none; overflow-y: auto; min-height: 22px; max-height: 140px;
   background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -1512,6 +1513,7 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
   html:not(.voice-absent) .voice-field > textarea { padding-right: 46px; min-height: 44px; }
 }
 .ut-reply-send { display: inline-flex; align-items: center; justify-content: center; padding: 0; height: 22px; width: 22px; color: var(--accent); }
+.ut-reply-send[data-reopen="1"] { width: auto; gap: 4px; padding: 0 8px; white-space: nowrap; font-size: 11px; } /* "Reopen and send" — its words beside the icon */
 .ut-live-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; box-sizing: border-box; border: 1.5px solid var(--text-dim); background: var(--text-dim); }
 .ut-live-dot[data-state="running"] { border-color: var(--green, #3fb950); background: var(--green, #3fb950); }
 .ut-live-dot[data-state="idle"] { border-color: var(--green, #3fb950); background: transparent; }
@@ -4300,7 +4302,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 }
 .iw-reply-input:focus { outline: none; border-color: var(--accent); }
 .iw-reply-input:disabled { opacity: 0.6; cursor: not-allowed; }
-.iw-reply-why { margin-top: 6px; font-size: 11px; color: var(--text-dim); }
+.iw-reply-why { margin-bottom: 6px; font-size: 11px; color: var(--text-dim); } /* the note ABOVE the box */
 .iw-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .iw-act {
   display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 11px; padding: 4px 10px; cursor: pointer;

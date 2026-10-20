@@ -175,9 +175,11 @@ const it = (x = {}) => ({ id: 'ut-1', sessionKey: 'claude:s1', text: 'Ship it?',
 {
   const item = it();
   const v = L.itemView(item, ctx(item, { fact: null }));
-  ok(v.reply.show && !v.reply.enabled && v.reply.why === 'Agent not running — open the session, then reply' && J(v.actions) === J(['reply', 'done', 'dismiss', 'copy']), 'a stopped session ⇒ the box is DRAWN disabled and says why (the real verdict\'s sentence)', v.reply);
+  // lane inbox-reply-dead-session: `enabled` is the VERDICT (a direct send would be refused) — the window draws the box
+  // TYPEABLE all the same (replyBoxView, §⑦'s wiring pins) and its send reopens the conversation
+  ok(v.reply.show && !v.reply.enabled && v.reply.why === 'This conversation has ended — sending reopens it with this reply as its first message' && J(v.actions) === J(['reply', 'done', 'dismiss', 'copy']), 'a stopped session ⇒ the box is DRAWN with the verdict\'s sentence: the conversation ended, the send reopens it (the real verdict)', v.reply);
   const term = L.itemView(item, ctx(item, { fact: { live: true, mode: 'terminal' } }));
-  ok(!term.reply.enabled && term.reply.why === 'Terminal session — reply in its window', 'a terminal session ⇒ disabled, "reply in its window"', term.reply);
+  ok(!term.reply.enabled && term.reply.why === 'Terminal session — reply in its window', 'a terminal session ⇒ the verdict refuses a direct send, "reply in its window" said', term.reply);
 }
 {
   const note = it({ sessionKey: 'accounts', kind: 'notice', expiresAt: 5000, text: 'Login ends' });
@@ -287,6 +289,20 @@ console.log('⑦ wiring pins — the window really calls every rule; the doors; 
   ok(/const selKey = sel && typeof sel\.sessionKey === 'string' && \(sel\.sessionKey\.includes\(':'\) \|\| sel\.sessionKey === 'jobs'\) \? sel\.sessionKey : null;/.test(w) && /const cand = st\.scopeKey \|\| selKey;/.test(w), 'the scope candidate is a SESSION (or Background Work) — never an instance-level `accounts` notice\'s first name');
   ok(/st\.tab = tb\.dataset\.tab; st\.noticeOrder = null; st\.layout = null; render\(\);/.test(w) && /st\.scopeKey = sb\.dataset\.scope === 'all' \? null : \(sb\.dataset\.key \|\| null\); st\.layout = null; render\(\);/.test(w) && /if \(id\) st\.pendingItem = id;\s*\n\s*st\.layout = null;/.test(w), 'a tab / scope switch and every door re-sort the list (a navigation is a new view; the append-only slots hold between navigations)');
   ok(/if \(!String\(txt\)\.trim\(\)\) \{ if \(st\.cur && !st\.cur\.ta\.disabled\) st\.cur\.ta\.focus\(\); return; \}/.test(w), 'Reply with an empty box puts the cursor in the box instead of doing nothing');
+  // lane inbox-reply-dead-session (userW inc-mvfuzlom-nwav: ten presses on a disabled box): THE BOX IS NEVER DISABLED
+  const live = (w.match(/const patchLivePane = \(\) => \{[\s\S]*?\n  \};\n/) || [''])[0];
+  ok(live.length > 400 && /const box = model\.replyBox\(it\);\n    c\.ta\.disabled = false;/.test(live) && !/\.disabled = [^;]*enabled/.test(live) && /o\.disabled = sending;/.test(live) && /rb\.disabled = sending;/.test(live),
+    'the window\'s live patch draws THE box (model.replyBox): the textarea never disabled, the send and the chips held only while a send is in flight — no `.disabled = …enabled` left', live.slice(0, 200));
+  ok(/lb\.textContent = t\(box\.send\)/.test(live) && /rb\.title = t\(box\.sendTitle\);/.test(live) && /t\(box\.note\.key, \{ why: box\.note\.why \|\| '' \}\)/.test(live) && /box\.reopen \? t\('Reopen and send "\{label\}"', \{ label: o\.textContent \}\)/.test(live),
+    'an ended conversation\'s send READS "Reopen and send" (its visible label), the note says the fact or the last refusal, a chip\'s title says it reopens');
+  ok(/reply\.append\(why, voiceField\(ta, attachDictation\(ta\)\)\);/.test(w) && /c\.reply\.prepend\(c\.why\)/.test(w), 'the note sits ABOVE the box (built first, moved back to the front)');
+  const actsSrc = read('src/lib/user-todos-actions.js');
+  ok(/const replyBox = \(i\) => replyBoxView\(replyState\(i\), replyFailures\.get\(i\.id\) \|\| null\);/.test(actsSrc) && /if \(r\.reopened\) \{ showToast\(t\('Reopened the conversation and sent your reply'\)\); openReopened\(r\); \}/.test(actsSrc) && /replyFailures\.set\(id, \{ code: \(r && r\.code\) \|\| 'unreachable', why \}\);/.test(actsSrc),
+    'THE model: replyBox = the PURE replyBoxView over the verdict + this page\'s last refusal; a reopened reply toasts and OPENS the conversation\'s window; a refusal is kept for the note');
+  const rowSrc = read('src/lib/user-todos-row.js');
+  const apply = (rowSrc.match(/export function applyLive\(el, item, ctx\) \{[\s\S]*?\n\}\n/) || [''])[0];
+  ok(apply.length > 400 && /btn\.disabled = false;/.test(apply) && /c\.disabled = busy;/.test(apply) && /send\.disabled = busy;/.test(apply) && !/disabled = !rs\.enabled/.test(apply) && /\.ut-reply-why/.test(apply) && /ut-reply-send-label/.test(apply),
+    'the TRAY row (and the mini inbox, the phone sheet — the same rows) never disables its Reply, its chips or its send; its box carries the note and "Reopen and send"');
   ok(/if \(it\.detailTruncated\) loadDetail\(id\);/.test(w) && /model\.ensureDetail\(id\)\.then\(\(\{ error \}\) => \{ if \(error\) \{ st\.loadErr = \{ id, why: error \};/.test(w) && /detailState: !it\.detailTruncated \? 'whole' : \(st\.loadErr && st\.loadErr\.id === it\.id \? 'failed' : 'loading'\)/.test(w) && /const \{ error \} = await model\.ensureDetail\(id\);/.test(w) && /c\.cutLine\.textContent !== cutTxt/.test(w), 'a previewed detail (a resolved item\'s snapshot) is loaded whole through the model when shown and before Copy; the pane says loading / the failure by name (textContent)');
   ok(/\.iw-detail-cut \{[^}]*var\(--text-dim\)/.test(css) && /\.iw-detail-cut\[data-state="failed"\] \{[^}]*var\(--red, #e55\)/.test(css), 'the cut line uses theme vars');
   // i18n: every new word has zh + ja

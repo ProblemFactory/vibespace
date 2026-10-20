@@ -138,6 +138,7 @@ const PURE = new Set(['src/agentd-signature.js' /* lane device-bundle-signing (d
   'src/auto-resume-signal.js',
   'src/record-clear.js', // "Clear content…" (2026-09-28): the five record kinds, which text fields a clear replaces, WHO may clear (owner any · an agent its own session's · a job token never), the group log's replacement-record fold — the stores' doors, the routes and the client dialog ask ONE definition
   'src/inbox-reply.js', // a reply to a For-you item (design-user-inbox-reply D1): the quote block, its parser, the ONE availability verdict — the route and the panel ask the same rule (lane S1 verify r3: its card_item rung is a lookup into helper-ask.js's table)
+  'src/inbox-reopen.js', // lane inbox-reply-dead-session: a For-you reply to an ENDED conversation reopens it — the create message the page's own resume road sends (session-lifecycle resumeSession → createSession, field for field); requires only resume-continuity (PURE)
   'src/helper-ask.js', // lane S1: a helper's permission ask — the record, the Agent call, the chip / card / inbox words, and (verify r3) THE ask's transition table every consumer looks up
   'src/permission-outcome.js', // lane S1 verify r5: the CENSUS of the CLI's own permission-outcome sentences — the one reader of a tool_result's word (a main card and a helper's ask); unknown is never allowed
   'src/safety-stop.js', // lane classifier-stop-card: the CENSUS of the CLI's own safety-stop sentences — the claude normalizer's one reader of a stop (the notice + its model-only nudge → ONE card)

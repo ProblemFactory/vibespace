@@ -4,6 +4,36 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.321 — 2026-10-20
+
+### lane inbox-reply-dead-session — a For-you reply to a conversation that ENDED reopens it (userW inc-mvfuzlom-nwav, 2026-10-19 23:01Z on 2.369.318: 「在 inbox 里面回复 session 的时候, 如果那个 session 已经挂了, 就回不了了.」; FIX, base e23b1bee = 2.369.319)
+- BEFORE: the action ring held ten pointer presses on `textarea.iw-reply-input` in 30 s and no typing.
+  - The For-you window disabled the box of an item whose conversation was not running (`c.ta.disabled = !v.reply.enabled`, src/lib/inbox-window.js:367). The reason, "Agent not running — open the session, then reply", was only a hover title.
+  - The tray row disabled its Reply button, chips and Send the same way (user-todos-row.js applyLive).
+- THE BOX (PURE src/inbox-reply.js `replyBoxView`, one view for the tray, the mini inbox, the phone sheet and the window) is NEVER disabled.
+  - Its note ABOVE it says the fact: `REPLY_WHY.no_live_session` is now "This conversation has ended — sending reopens it with this reply as its first message" / 「这个对话已结束；发送会重新打开它并把这条回复作为第一条消息」. ja is the same sentence.
+  - The send reads "Reopen and send" / 「重新打开并发送」 / 「再開して送信」: the window's visible label, the tray's `.ut-reply-send-label`. The chips stay pressable ("Reopen and send "…"").
+  - A refused send is kept per item on the page (`replyFailures`) and said in the note plus a toast: "Could not reopen the conversation: {why}" / "Could not reply: {why}".
+  - `REOPEN_CODES = ['no_live_session']`. replyButtonState is unchanged, so test-user-todos-layout is unchanged: it still reads `enabled:false` = "the verdict refuses a DIRECT send".
+- THE SEND REOPENS. `POST /api/user-todos/:id/reply`, when the verdict is `no_live_session` and the `reopen` dep is wired, goes to src/server/inbox-reopen.js (ORCH).
+  - THE RESUME ROAD = the ws create case itself: src/ws-create.js `handleCreate` through ws-handler, whose `registerWsHandler` now returns `{ handleCreate }` (server.js keeps it as `wsApi`).
+  - It is handed `headlessCreator(by)`: `readyState 1`, `_actBy` = device-audit byOfReq. It keeps the create's frames and leaves `session.clients` once 'created' arrives.
+  - The message = PURE src/inbox-reopen.js `reopenCreate`, the For-you's own "open the session" door (user-todos-actions.js jump → session-lifecycle.js `resumeSession` → `createSession`, the createMsg at session-lifecycle.js:172), field for field: `mode:'chat'`, `resume:true`, `resumeId`.
+  - Config fields (`REOPEN_CFG_KEYS`): model / effort only when the conversation's config states them (`resumeSpawnPick` resume:true hasSource:false, as the page); permission (else the harness default); outputStyle, worktree, autoResume, account → accountId, modelLock / lockModel, the poolPin shape.
+  - Also: the harness's defaultExtraArgs, the first Task Group whose `sessions` list the key, the custom name.
+  - The facts: the discovery row (routes/sessions `warmSessions()` by `sessionKey`); else the harness store's `locate(id, item.cwd)` (never a remote-jsonl copy); else an item `hostId` resumes on its host; else `no transcript…`, said; user-state `sessionConfigs` / `customNames`.
+  - Then ONE `sendUserInput(sessionId, composeReply(…), {origin:'inbox-reply'})`, `resolveByReply`, and `{ok, reopened:true, sessionId, conversation, msgId, item}`. The page closes a dead window of that conversation and `attachSession`s the live one.
+  - `resume_failed` 409 = the create's own error words: the CLI missing, an account that cannot serve, resume-in-flight…. The item stays open.
+  - `resume-already-live` with a live `existingId` ⇒ that session carries the reply. ONE reopen per conversation in flight.
+  - The live path is untouched: §8b compares the frame with and without the dep.
+- A PREMISE OF THE BRIEF, CORRECTED: data/session-meta is deleted when a session exits (session-stdout cleanupOnExit, the kill path), so an ended conversation has none. Its resume settings live where the page reads them: user-state `sessionConfigs`, the gear popover.
+- SPEND: the reopened first turn is the PERSON's typed reply. It is commented at the call. The route's existing typed-send ALLOW row covers both `sendUserInput` calls in the file. test-spend-paths 361/361: no new site — the brief's "§44" census is test-spend-paths; test-architecture §44 is the settings census.
+- Suites:
+  - test-inbox-reply 194 (§8: the PURE mirror + its census of resumeSession's `savedCfg` reads / createMsg keys, replyBoxView, the route — reopened / chip / live byte-identical / terminal / agent 403 / blank / resume_failed / throw / reopened-but-refused — the ORCH over a recording create, wiring; RED CONTROL: the route without its reopen line ⇒ 409 no_live_session)
+  - test-inbox-window-model 131, test-user-todos-layout 314 (unchanged), test-spend-paths 361, test-architecture 738 (src/inbox-reopen.js PURE)
+  - heavy test-inbox-reply-ui 181: ③ nothing disabled; ㉑ zh / ja / en notes on real reloads, then a real click + typing + Enter — the stub resumed (--resume echoed) reads the reply as its FIRST stdin, one live session, its window shows the reply, the toast, the item resolved
+  - heavy test-inbox-window-ui 121: ② typeable + focus + typing; ⑳ RED CONTROL — a page served a bundle built with a PATCHED inbox-window.js (the pre-lane line, pairing-ui-harness buildPatchedBundle): the box disabled, the same real press never focuses it, the typing lost; a positive probe on the same page; then the window's real 「Reopen and send」 end to end
+
 ## 2.369.320 — 2026-10-19
 
 ### 主开发 — the .319 Actions mirror (fast): test-tailscale-dns 「Log in: the auth URL captured — {done:true}」 = a PRODUCT race

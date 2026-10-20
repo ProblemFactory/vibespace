@@ -15,8 +15,9 @@
 //      ⇒ the stub's stdin gets `[For you reply #<id>] … <reply>`, a toast says
 //      so, the row resolves IN PLACE with "You replied", the chat shows the
 //      reply card with its quote folded
-//   ③ a stopped session's item: the reply button is disabled, its title the
-//      verdict's sentence
+//   ③ a stopped session's item (lane inbox-reply-dead-session): NOTHING is disabled — the reply button, the
+//      chips and the box stay pressable / typeable; the box's note says the conversation ended and the send
+//      reopens it, the send reads "Reopen and send"
 //   ④ a reply box being typed into survives a broadcast (another item filed by
 //      the agent): the SAME textarea, its text, its focus; the new row appended
 //      at its group's end
@@ -82,6 +83,13 @@
 //   ⑱ only a band 1–2 arrival toasts; a band-5 ask files silently
 //   ⑳ THE FIRST SCREEN, MEASURED: the 480 px popup at 1280×800 shows ≤ 6 rows + every band's fold head WITHOUT scrolling
 //      (production-shaped words: text 150 / 330 characters, a detail, option chips); ⑥ the same list in the 375×812 sheet
+// lane inbox-reply-dead-session (userW inc-mvfuzlom-nwav 2026-10-19: 「在 inbox 里面回复 session 的时候, 如果那个 session 已经挂了,
+// 就回不了了.」 — ten presses on a disabled box):
+//   ㉑ last, on the desktop: the stopped fixture's item in zh / ja / en (a real reload each) — the box typeable, its
+//      note above it in the device's words, its send 「重新打开并发送」; then a REAL click + typing + Enter: the
+//      conversation RESUMES through the real create path (the stub echoes --resume's id and logs that run's stdin
+//      apart), the reply is its FIRST user input, the conversation is live under ONE session, its window opens on
+//      the page showing the reply, the toast says so, the item is resolved by the reply
 // Requires google-chrome (SKIP without). Run: node scripts/test-inbox-reply-ui.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -159,7 +167,7 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const FLOOD_IDS = Array.from({ length: FLOOD_N }, (_, k) => 'ut-f100d' + String(k).padStart(5, '0'));
 fs.writeFileSync(path.join(wt, 'data', 'user-todos.json'), JSON.stringify({ items: [{
   id: HOSTILE_ID, sessionKey: 'claude:' + STOPPED_SID, text: HOSTILE_TITLE, detail: HOSTILE_DETAIL, urgency: 'high', kind: 'action',
-  options: [HOSTILE_OPT, 'fine'], reply: null,
+  options: [HOSTILE_OPT, 'fine'], reply: null, cwd: CWD, // the asker's folder (filed with the ask) — ㉑'s reopen locates the transcript there
   status: 'open', by: 'agent', sessionName: 'stopped fixture', jobId: null, createdAt: Date.now() - 60e3, resolvedAt: null, resolvedBy: null,
 }, ...FLOOD_IDS.map((id, k) => ({
   id, sessionKey: 'claude:' + FLOOD_SID, text: `flood ask ${String(k).padStart(2, '0')}`, detail: null, urgency: 'low', kind: 'action',
@@ -180,7 +188,10 @@ const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('2.1.274 (Claude Code) stub'); process.exit(0); }
 if (args.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
 fs.writeFileSync(${JSON.stringify(stubDir)} + '/env-' + process.pid + '.json', JSON.stringify(process.env));
-const SID = ${JSON.stringify(LIVE_SID)};
+// a RESUMED run (lane inbox-reply-dead-session ㉑) is that conversation: it echoes --resume's id and logs its stdin apart
+const RESUME = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : null;
+const SID = RESUME || ${JSON.stringify(LIVE_SID)};
+const STDIN_TO = RESUME ? ${JSON.stringify(stubDir)} + '/stdin-' + RESUME + '.ndjson' : ${JSON.stringify(STDIN_LOG)};
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5', cwd: ${JSON.stringify(CWD)}, tools: [], permissionMode: 'default', claude_code_version: '2.1.274' });
 let n = 0, buf = '';
@@ -190,7 +201,7 @@ process.stdin.on('data', (d) => {
   while ((i = buf.indexOf('\\n')) >= 0) {
     const line = buf.slice(0, i); buf = buf.slice(i + 1);
     if (!line.trim()) continue;
-    fs.appendFileSync(${JSON.stringify(STDIN_LOG)}, line + '\\n');
+    fs.appendFileSync(STDIN_TO, line + '\\n');
     let m = null; try { m = JSON.parse(line); } catch {}
     if (!m || m.type !== 'user') continue;
     const k = ++n;
@@ -268,7 +279,7 @@ const fileItem = async (token, add) => {
   const r = await fetch(`http://127.0.0.1:${PORT}/api/agent/user-todo`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ add }) });
   return r.json();
 };
-const REPLY_WHY_NOT_RUNNING = 'Agent not running — open the session, then reply';
+const REPLY_WHY_ENDED = 'This conversation has ended — sending reopens it with this reply as its first message';
 // VS_SHOT_DIR=<dir> saves the B-328d screenshots (the desktop popup, the phone sheet) for a visual check
 const shot = async (name, sel) => {
   const dir = process.env.VS_SHOT_DIR;
@@ -343,11 +354,17 @@ try {
   check('window.__xss is undefined after the hostile row painted (title, option label and detail)', x1.xss === undefined, x1);
   check('the row text is the RAW title, the chips the RAW labels, the detail the RAW detail', x1.text === HOSTILE_TITLE && x1.chips[0] === HOSTILE_OPT && x1.chips[1] === 'fine' && x1.detail === HOSTILE_DETAIL, x1);
 
-  // ── ③ stopped ⇒ disabled with the verdict's sentence ──
-  console.log('③ a stopped session: disabled, with the reason');
-  const x3 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))}); const b = r.querySelector('.ut-reply-btn'); const dot = document.querySelector('#user-todos-popup .ut-live-dot[data-key=' + JSON.stringify(${JSON.stringify('claude:' + STOPPED_SID)}) + ']'); return { has: !!b, disabled: b?.disabled, title: b?.title, chipsDisabled: [...r.querySelectorAll('.ut-opt')].every((c) => c.disabled), dot: dot?.dataset.state, dotTitle: dot?.title }; })()`);
-  check(`the reply button is drawn DISABLED with title "${x3.title}"`, x3.has && x3.disabled === true && x3.title === REPLY_WHY_NOT_RUNNING, x3);
-  check('its option chips are disabled too, and its group dot says not running', x3.chipsDisabled && x3.dot === 'off' && x3.dotTitle === 'not running', x3);
+  // ── ③ stopped ⇒ NOTHING disabled: the fact is said, the send reopens (lane inbox-reply-dead-session) ──
+  console.log('③ a stopped session: no control disabled — the box says the conversation ended and its send reopens it');
+  const x3 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))}); const b = r.querySelector('.ut-reply-btn'); const dot = document.querySelector('#user-todos-popup .ut-live-dot[data-key=' + JSON.stringify(${JSON.stringify('claude:' + STOPPED_SID)}) + ']'); return { has: !!b, disabled: b?.disabled, title: b?.title, anyChipDisabled: [...r.querySelectorAll('.ut-opt')].some((c) => c.disabled), chipTitles: [...r.querySelectorAll('.ut-opt')].map((c) => c.title), dot: dot?.dataset.state, dotTitle: dot?.title }; })()`);
+  check(`the reply button is ENABLED, its title the fact: "${x3.title}"`, x3.has && x3.disabled === false && x3.title === REPLY_WHY_ENDED, x3);
+  check('its option chips stay pressable, each titled "Reopen and send …"; the group dot says not running', !x3.anyChipDisabled && x3.chipTitles.length === 2 && x3.chipTitles.every((tt) => tt.startsWith('Reopen and send')) && x3.dot === 'off' && x3.dotTitle === 'not running', x3);
+  await evalJs(`document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID) + ' .ut-reply-btn')}).click(); true`);
+  check('the reply button opens its box, the textarea focused (typeable)', await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID) + ' .ut-reply textarea')})`, 3000));
+  const x3b = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))}); const n = r.querySelector('.ut-reply-why'); const s = r.querySelector('.ut-reply-send'); return { note: n && n.textContent, shown: !!n && n.getClientRects().length > 0, label: s && (s.querySelector('.ut-reply-send-label') || {}).textContent, aria: s && s.getAttribute('aria-label'), sendDisabled: s && s.disabled }; })()`);
+  check('…its note says 「the conversation ended — sending reopens it」 and its send reads "Reopen and send" (pressable)', x3b.note === REPLY_WHY_ENDED && x3b.shown && x3b.label === 'Reopen and send' && x3b.aria === 'Reopen and send' && x3b.sendDisabled === false, x3b);
+  await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))}); r.querySelector('.ut-reply textarea').value = ''; r.querySelector('.ut-reply-btn').click(); return true; })()`);
+  check('(the empty box folds again — nothing sent here; ㉑ sends for real)', await waitFor(`!document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID) + ' .ut-reply')})`, 2000));
 
   // ── ② reply to a live item ──
   console.log('② reply from the box: the typing path, quoted, resolved in place');
@@ -919,6 +936,74 @@ try {
   await sleep(150);
   check('the next Escape closes the sheet', await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`));
   check('no uncaught page exceptions on the phone', pageErrors.length === 0, pageErrors.slice(0, 3));
+
+  // ── ㉑ A REPLY TO A CONVERSATION THAT ENDED REOPENS IT (lane inbox-reply-dead-session, userW inc-mvfuzlom-nwav) ──
+  // last, on the desktop again: the stopped fixture's own item (nothing after this needs it stopped) — the note in
+  // zh / ja / en on a real page, then 重新打开并发送 for real: the conversation resumes behind the REAL create path, its
+  // window opens, and the stub (resumed: it echoes --resume's id) records the reply as its FIRST input
+  console.log('㉑ a reply to a conversation that ENDED: the box says so (zh / ja / en), its send reopens it with the reply as its first message');
+  {
+    const UA0 = (await cdp('Browser.getVersion')).userAgent;
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await cdp('Emulation.setEmulatedMedia', { features: [] });
+    await cdp('Emulation.setUserAgentOverride', { userAgent: UA0 });
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    const tableOf = (lang) => { const src = fs.readFileSync(path.join(repo, `src/lib/i18n-${lang}.js`), 'utf8'); const m = src.match(new RegExp('\\n  ' + JSON.stringify(REPLY_WHY_ENDED).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': ("(?:[^"\\\\]|\\\\.)*"),')); const b = src.match(/\n  "Reopen and send": ("(?:[^"\\]|\\.)*"),/); return { note: m ? JSON.parse(m[1]) : null, send: b ? JSON.parse(b[1]) : null }; };
+    const WORDS = { en: { note: REPLY_WHY_ENDED, send: 'Reopen and send' }, zh: tableOf('zh'), ja: tableOf('ja') };
+    check('the zh words are the brief\'s own: 「这个对话已结束；发送会重新打开它并把这条回复作为第一条消息」 · 「重新打开并发送」', WORDS.zh.note === '这个对话已结束；发送会重新打开它并把这条回复作为第一条消息' && WORDS.zh.send === '重新打开并发送' && !!WORDS.ja.note && !!WORDS.ja.send, WORDS);
+    const hostileSel = rowSel(HOSTILE_ID);
+    // an earlier leg resolved the stopped fixture's item (a band's 「全部标为已看」): the owner's own ↺ Reopen brings it back open
+    const was = [...(await storeNow()).resolved, ...(await storeNow()).open].find((i) => i.id === HOSTILE_ID);
+    if (was && was.status !== 'open') await fetch(`http://127.0.0.1:${PORT}/api/user-todos/${HOSTILE_ID}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'open' }) });
+    check(`(the stopped fixture's item is OPEN for this leg — it was ${was ? was.status + (was.resolvedBy ? ' by ' + was.resolvedBy : '') : 'missing'}; reopened by the owner's ↺ if needed)`, (await storeNow()).open.some((i) => i.id === HOSTILE_ID));
+    const openBoxOn = async () => {
+      await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (!p || p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`);
+      // the row may sit in its band's fold by now (every earlier leg filed asks): open the folds that hold rows back, one by one
+      await waitFor(`!!document.querySelector('#user-todos-popup .ut-bands')`, 8000);
+      for (let k = 0; k < 6 && !(await evalJs(`!!document.querySelector(${JSON.stringify(hostileSel + ' .ut-reply-btn')})`)); k++) {
+        const opened = await evalJs(`(() => { const f = [...document.querySelectorAll('#user-todos-popup .ut-fold[data-state="folded"]')].find((x) => !x.disabled); if (!f) return false; f.click(); return true; })()`);
+        if (!opened) break;
+        await sleep(300);
+      }
+      if (!(await waitFor(`!!document.querySelector(${JSON.stringify(hostileSel + ' .ut-reply-btn')})`, 8000))) return { missing: await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); return { hidden: !p || p.classList.contains('hidden'), mobile: !!(window.app && app.isMobile), w: innerWidth, rows: [...document.querySelectorAll('#user-todos-popup .ut-item')].map((r) => r.dataset.id).slice(0, 40), row: !!document.querySelector(${JSON.stringify(hostileSel)}), folds: [...document.querySelectorAll('#user-todos-popup .ut-fold')].map((f) => f.dataset.state + ':' + f.disabled + ':' + f.textContent) }; })()`), store: (await storeNow()).open.some((i) => i.id === HOSTILE_ID) };
+      await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(hostileSel)}); if (!r.querySelector('.ut-reply')) r.querySelector('.ut-reply-btn').click(); return true; })()`);
+      await waitFor(`!!document.querySelector(${JSON.stringify(hostileSel + ' .ut-reply textarea')})`, 3000);
+      return evalJs(`(() => { const r = document.querySelector(${JSON.stringify(hostileSel)}); const n = r.querySelector('.ut-reply-why'); const s = r.querySelector('.ut-reply-send'); const ta = r.querySelector('.ut-reply textarea'); return { note: n && n.textContent, shown: !!n && n.style.display !== 'none' && n.getClientRects().length > 0, above: !!n && !!ta && n.getBoundingClientRect().bottom <= ta.getBoundingClientRect().top + 1, send: s && (s.querySelector('.ut-reply-send-label') || {}).textContent, sendDisabled: s && s.disabled, taDisabled: ta && ta.disabled, btnDisabled: r.querySelector('.ut-reply-btn').disabled }; })()`);
+    };
+    for (const lang of ['zh', 'ja', 'en']) {
+      await evalJs(`(() => { ${lang === 'en' ? "localStorage.removeItem('vibespace.lang')" : `localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)})`}; return true; })()`);
+      await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+      await waitApp();
+      await sleep(1200);
+      const b = await openBoxOn();
+      const w = WORDS[lang];
+      check(`${lang}: the box on the ended conversation is TYPEABLE (no control disabled), its note ABOVE it says 「${w.note}」, its send reads 「${w.send}」`, !!b && b.note === w.note && b.shown && b.above && b.send === w.send && b.taDisabled === false && b.sendDisabled === false && b.btnDisabled === false, b);
+    }
+    // en: a REAL click into the box, real typing, Enter — 重新打开并发送
+    const taSel = hostileSel + ' .ut-reply textarea';
+    check('a REAL click into the ended conversation\'s box focuses it (the incident\'s ten presses landed on a disabled box)', await realClick(taSel) && await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(taSel)})`, 2000));
+    const REOPEN_REPLY = 'reopen it and carry on — from the tray';
+    await cdp('Input.insertText', { text: REOPEN_REPLY });
+    check('…and the typed words land in it', (await evalJs(`document.querySelector(${JSON.stringify(taSel)}).value`)) === REOPEN_REPLY);
+    const resumedLog = path.join(stubDir, `stdin-${STOPPED_SID}.ndjson`);
+    await pressEnter();
+    const t0 = Date.now();
+    let firstUser = null;
+    while (Date.now() - t0 < 30000 && !firstUser) {
+      if (fs.existsSync(resumedLog)) { for (const l of fs.readFileSync(resumedLog, 'utf8').split('\n').filter(Boolean)) { let m = null; try { m = JSON.parse(l); } catch { } if (m && m.type === 'user') { const c = m.message && m.message.content; firstUser = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => x.text || '').join('') : ''; break; } } }
+      if (!firstUser) await sleep(200);
+    }
+    check(`within 30 s the RESUMED conversation's CLI (--resume ${STOPPED_SID.slice(0, 8)}…) reads the reply as its FIRST user input: [For you reply #${HOSTILE_ID}] … ${REOPEN_REPLY}`, !!firstUser && firstUser.startsWith(`[For you reply #${HOSTILE_ID}]`) && firstUser.endsWith('\n\n' + REOPEN_REPLY), (firstUser || '(none)').slice(0, 300));
+    const live = await evalJs(`fetch('/api/active').then((r) => r.json()).then((j) => (Array.isArray(j) ? j : j.sessions || []).filter((s) => s.backendSessionId === ${JSON.stringify(STOPPED_SID)}).map((s) => s.id))`);
+    check('the conversation is LIVE again under ONE session (the resume road: the same conversation id, never a fresh one)', Array.isArray(live) && live.length === 1, live);
+    const wid = live && live[0];
+    check('its conversation window OPENS on this page and shows the reply as a user message', await waitFor(`(() => { const v = [...app.sessions.values()].find((x) => x && x.sessionId === ${JSON.stringify(wid)}); const el = v && (v.container || v.el || v.root); return !!v && !!document.querySelector('.chat-view') && [...document.querySelectorAll('.chat-view')].some((cv) => (cv.textContent || '').includes(${JSON.stringify(REOPEN_REPLY)})); })()`, 15000));
+    check('the toast says it: "Reopened the conversation and sent your reply"', await waitFor(`[...document.querySelectorAll('#global-toasts .global-toast')].some((e) => (e.textContent || '').includes('Reopened the conversation and sent your reply'))`, 5000));
+    const store21 = await storeNow();
+    check('the item is resolved by the reply (the reply kept on it)', store21.resolved.some((i) => i.id === HOSTILE_ID && i.resolvedBy === 'reply' && i.reply && i.reply.text === REOPEN_REPLY), store21.resolved.find((i) => i.id === HOSTILE_ID));
+    check('no uncaught page exceptions through the reopen', pageErrors.length === 0, pageErrors.slice(0, 3));
+    try { if (wid) liveWs.send(JSON.stringify({ type: 'kill', sessionId: wid })); } catch {}
+  }
 
   try { liveWs.send(JSON.stringify({ type: 'kill', sessionId: sid })); await sleep(500); liveWs.close(); } catch {}
 } catch (e) {

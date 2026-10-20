@@ -40,7 +40,7 @@ const REPLY_WHY = Object.freeze({
   job_item: 'Background Work item — answer it in the job panel',
   card_item: 'Answer it on the helper’s card — click the item to go there',
   exit_ask: 'Answer it with Allow or Deny — a typed reply does not answer it',
-  no_live_session: 'Agent not running — open the session, then reply',
+  no_live_session: 'This conversation has ended — sending reopens it with this reply as its first message', // the send REOPENS it (REOPEN_CODES)
   not_chat: 'Terminal session — reply in its window',
   host_unreachable: 'Host unreachable — reconnect, then reply',
 });
@@ -55,6 +55,11 @@ const REPLY_WHY = Object.freeze({
 // (exit-proxy's one-state rule): "yes, allow it" typed as a reply DENIED the command (reproduced: 403 ask_denied,
 // audit why item-done-by-reply) while the agent read the "yes" as a new message.
 const REPLY_HIDDEN_CODES = Object.freeze(['no_session', 'job_item', 'card_item', 'exit_ask']);
+// The codes a send ANSWERS BY REOPENING (lane inbox-reply-dead-session, userW inc-mvfuzlom-nwav 2026-10-19 — the box was
+// disabled on an ended conversation): the route resumes the conversation and the reply is its first input
+// (src/server/inbox-reopen.js); the box is typeable, says so, and its send reads "Reopen and send". A box is never
+// disabled for any code — a send the verdict refuses is answered by name.
+const REOPEN_CODES = Object.freeze(['no_live_session']);
 // The action kinds answered by their own buttons on the item (Allow / Deny), never by a typed reply.
 const ANSWER_ACTION_TYPES = Object.freeze(['exit-run-ask', 'hub-act-ask']); // lane hub-act-ask: a held hub act too (Allow once / Always on this machine / Deny)
 // The action kinds that are answered on a card, never by a typed reply.
@@ -182,8 +187,27 @@ function replyVerdict({ item, session } = {}) {
   return { ok: true };
 }
 
+/** THE REPLY BOX, both surfaces (the tray row's box and the For-you window's — lane inbox-reply-dead-session): what a
+ *  DRAWN box shows for `rs` = the verdict's projection ({show, enabled, why, code} — user-todos-layout replyButtonState)
+ *  and `failure` = this item's last refused send ({code, why} — the route's words) or null. A box is NEVER disabled —
+ *  the CLAUDE.md law «no greyed-out controls with a hint»: it is typeable and its send pressable (only a send in flight
+ *  holds it); the fact the verdict knows is SAID in its note, and a send the verdict refuses is answered by name.
+ *  → {reopen, note: null | {key, why?}, send, sendTitle} — every string an English t() key. */
+function replyBoxView(rs, failure = null) {
+  const r = rs && typeof rs === 'object' ? rs : {};
+  const reopen = !r.enabled && REOPEN_CODES.includes(r.code);
+  const f = failure && typeof failure === 'object' && typeof failure.why === 'string' && failure.why ? failure : null;
+  const note = f ? { key: f.code === 'resume_failed' ? 'Could not reopen the conversation: {why}' : 'Could not reply: {why}', why: f.why }
+    : !r.enabled && r.why ? { key: String(r.why) } : null;
+  return {
+    reopen, note,
+    send: reopen ? 'Reopen and send' : 'Reply',
+    sendTitle: reopen ? 'Reopen the conversation and send this reply (Enter) · newline (Shift+Enter)' : 'Send reply (Enter) · newline (Shift+Enter)',
+  };
+}
+
 module.exports = {
   REPLY_MARKER_RE, DETAIL_QUOTE_CAP, REPLY_MAX, OPTIONS_MAX, OPTION_MAX_CHARS, SERVER_KEYS,
-  REPLY_WHY, REPLY_HIDDEN_CODES, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES,
-  checkReplyText, normalizeOptions, composeReply, parseReply, replyVerdict,
+  REPLY_WHY, REPLY_HIDDEN_CODES, REOPEN_CODES, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES,
+  checkReplyText, normalizeOptions, composeReply, parseReply, replyVerdict, replyBoxView,
 };

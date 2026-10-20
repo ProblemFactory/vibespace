@@ -1762,6 +1762,9 @@ function registerWsHandler(wss, ctx) {
       }
     });
   });
+  // the create case for a creator that is not a socket: a For-you reply reopening an ended conversation
+  // (src/server/inbox-reopen.js hands it a headless creator — lane inbox-reply-dead-session)
+  return { handleCreate };
 }
 
 // pickCodexThreadCandidate also serves restoreSessions' id recapture (a

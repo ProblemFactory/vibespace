@@ -306,7 +306,11 @@ export function replyBoxEl(t) {
   send.title = t('Send reply (Enter) · newline (Shift+Enter)');
   send.setAttribute('aria-label', send.title);
   send.innerHTML = UI_ICONS.send;
-  box.append(voiceField(ta, attachDictation(ta)), send); // the microphone inside the box's trailing edge, Send unchanged
+  // the box's one-line note ABOVE it (lane inbox-reply-dead-session): the verdict's fact — an ended conversation's send reopens it
+  const why = document.createElement('div');
+  why.className = 'ut-reply-why';
+  why.style.display = 'none';
+  box.append(why, voiceField(ta, attachDictation(ta)), send); // the microphone inside the box's trailing edge, Send unchanged
   return box;
 }
 
@@ -318,30 +322,47 @@ export function boxInUse(box) {
 }
 
 /** The live half: the reply button, the chips and an open box's Send follow
- *  the verdict of the session's CURRENT facts (ctx.replyState). */
+ *  the verdict of the session's CURRENT facts (ctx.replyState) — through THE box
+ *  (ctx.replyBox, PURE src/inbox-reply.js replyBoxView): NEVER disabled (lane
+ *  inbox-reply-dead-session, userW inc-mvfuzlom-nwav — an ended conversation's
+ *  box was greyed out with its reason in a hover title). The fact is said in the
+ *  box's note and every title; an ended conversation's send reopens it; only a
+ *  send in flight holds the send and the chips. */
 export function applyLive(el, item, ctx) {
   const { t } = ctx;
   const rs = ctx.replyState ? ctx.replyState(item) : { show: false, enabled: false, why: '' };
-  const why = rs.enabled ? '' : t(rs.why || '');
+  const box = ctx.replyBox ? ctx.replyBox(item) : { reopen: false, note: rs.enabled || !rs.why ? null : { key: rs.why }, send: 'Reply', sendTitle: 'Send reply (Enter) · newline (Shift+Enter)' };
+  const why = box.note ? t(box.note.key, { why: box.note.why || '' }) : '';
   const btn = el.querySelector(':scope > .ut-body > .ut-actions > .ut-reply-btn');
   if (btn) {
-    btn.disabled = !rs.enabled;
-    btn.title = rs.enabled ? t('Reply') : why;
+    btn.disabled = false;
+    btn.title = rs.enabled ? t('Reply') : why || t('Reply');
     btn.setAttribute('aria-label', btn.title);
   }
   const busy = el.dataset.sending === '1';
   el.querySelectorAll(':scope > .ut-body > .ut-opts > .ut-opt').forEach((c) => {
     const label = (Array.isArray(item.options) && item.options[Number(c.dataset.idx)]) || '';
-    c.disabled = !rs.enabled || busy;
-    c.title = rs.enabled ? t('Reply with "{label}"', { label }) : why;
+    c.disabled = busy;
+    c.title = rs.enabled ? t('Reply with "{label}"', { label }) : box.reopen ? t('Reopen and send "{label}"', { label }) : why;
   });
+  const note = el.querySelector(':scope > .ut-body > .ut-reply > .ut-reply-why');
+  if (note) {
+    if (note.textContent !== why) note.textContent = why;
+    note.style.display = why ? '' : 'none';
+    note.dataset.reopen = box.reopen ? '1' : '';
+  }
   const send = el.querySelector(':scope > .ut-body > .ut-reply > .ut-reply-send');
   // a box on a row that has since RESOLVED still sends (a reply to a resolved
-  // item is accepted, D1.4) — only the session's liveness gates it
+  // item is accepted, D1.4)
   if (send) {
-    send.disabled = !rs.enabled || busy;
-    send.title = rs.enabled ? t('Send reply (Enter) · newline (Shift+Enter)') : why;
-    send.setAttribute('aria-label', send.title);
+    send.disabled = busy;
+    send.title = t(box.sendTitle);
+    send.setAttribute('aria-label', box.reopen ? t(box.send) : send.title);
+    // an ended conversation's send READS "Reopen and send" (its words beside the icon)
+    let lb = send.querySelector(':scope > .ut-reply-send-label');
+    if (box.reopen && !lb) { lb = document.createElement('span'); lb.className = 'ut-reply-send-label'; send.append(lb); }
+    if (lb) { const w = box.reopen ? t(box.send) : ''; if (lb.textContent !== w) lb.textContent = w; lb.style.display = w ? '' : 'none'; }
+    send.dataset.reopen = box.reopen ? '1' : '';
   }
 }
 

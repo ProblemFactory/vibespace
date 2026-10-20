@@ -12,6 +12,15 @@
  *       empty / too_long / input_rejected / too_large 400 ·
  *       no_session / job_item / card_item / exit_ask / no_live_session / not_chat / host_unreachable 409 ·
  *       send_failed 500. A refusal resolves nothing.
+ *     A CONVERSATION THAT ENDED IS REOPENED (lane inbox-reply-dead-session, userW inc-mvfuzlom-nwav 2026-10-19:
+ *       「在 inbox 里面回复 session 的时候, 如果那个 session 已经挂了, 就回不了了.」): with the `reopen` dep wired
+ *       (src/server/inbox-reopen.js) a reply whose verdict is `no_live_session` RESUMES the item's conversation by
+ *       the page's own resume road (the ws create {resume:true, resumeId}, its config from user-state), types the
+ *       reply as its first input through the SAME sender, resolves the item and answers
+ *       → {ok:true, reopened:true, sessionId, conversation:{backend, backendSessionId, cwd, hostId, name}, msgId, item}
+ *       (the page opens that conversation's window) | {error, code:'resume_failed'} 409 — the resume's own reason
+ *       (no transcript, the CLI missing, an account that cannot serve…), the item still open. A live session's
+ *       path is untouched.
  *
  *   POST /api/user-todos/resolve-many   {ids: string[] (1..200), status: 'dismissed'|'done'}
  *     → {ok:true, changed: n, unknown: [id…]} — "Mark all seen" on a group head
@@ -36,8 +45,10 @@ const STATUS = Object.freeze({
   agent_forbidden: 403, not_found: 404,
   empty: 400, too_long: 400, input_rejected: 400, too_large: 400,
   no_session: 409, job_item: 409, card_item: 409, exit_ask: 409, no_live_session: 409, not_chat: 409, host_unreachable: 409,
-  send_failed: 500,
+  resume_failed: 409, send_failed: 500,
 });
+// who pressed it (a sign-in's handle, never the cookie) — the act a reopen starts on a device names it (src/device-audit.js)
+const byOf = (req) => { try { return require('../device-audit.js').byOfReq(req); } catch { return null; } };
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
 
 /** The live session an item belongs to: [webuiId, session] | null. A chat-mode
@@ -55,8 +66,20 @@ function sessionForItem(item, activeSessions, sessionStatusKey) {
   return best;
 }
 
-function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserInput, sessionStatusKey, now = () => Date.now() }) {
+function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserInput, sessionStatusKey, reopen = null, now = () => Date.now() }) {
   const fail = (res, code, error) => res.status(STATUS[code] || 400).json({ error, code });
+  // THE REOPEN (lane inbox-reply-dead-session): the conversation ended ⇒ resume it, then the reply is its first input
+  const reopenAndSend = (req, res, item, text) => Promise.resolve(reopen(item, { by: byOf(req) })).then((o) => {
+    if (!o || !o.ok) return fail(res, 'resume_failed', (o && o.why) || 'the conversation could not be reopened');
+    // NOT AN UNATTENDED SPEND: this first turn is the PERSON's — the reply they typed and pressed Send on (owner-only,
+    // agent tokens refused above), exactly the turn the composer would send after a hand Resume; the resume itself
+    // sends nothing. So it rides THE typing path (no authorizer, no ladder — src/server/user-input.js says why) and
+    // the spend census excuses it with this file's typed-send row (scripts/test-spend-paths.mjs).
+    const r = sendUserInput(o.sessionId, composeReply(item, text, { now: now() }), { msgId: Date.now() + '-reply', origin: 'inbox-reply' });
+    if (!r || !r.ok) return res.status(STATUS[(r && r.code) || 'send_failed'] || 500).json({ error: (r && r.error) || 'the reply was not sent', code: (r && r.code) || 'send_failed', reopened: true, sessionId: o.sessionId, conversation: o.conversation || null });
+    const updated = userTodos.resolveByReply(item.id, text);
+    res.json({ ok: true, reopened: true, sessionId: o.sessionId, conversation: o.conversation || null, msgId: r.msgId, item: updated });
+  }).catch((e) => { if (!res.headersSent) fail(res, 'resume_failed', 'the conversation could not be reopened: ' + e.message); });
   app.post('/api/user-todos/:id/reply', (req, res) => {
     try {
       if (isAgentBearer(req)) return fail(res, 'agent_forbidden', 'a reply is the user\'s own message — an agent token cannot send one');
@@ -67,6 +90,7 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
       const hit = sessionForItem(item, activeSessions, sessionStatusKey);
       const s = hit && hit[1];
       const v = replyVerdict({ item, session: s ? { live: true, mode: s.mode || 'terminal', remoteState: (s._remoteState && s._remoteState.state !== 'connected') ? s._remoteState.state : null } : null });
+      if (!v.ok && v.code === 'no_live_session' && typeof reopen === 'function') return reopenAndSend(req, res, item, t.text);
       if (!v.ok) return fail(res, v.code, v.why);
       const r = sendUserInput(hit[0], composeReply(item, t.text, { now: now() }), { msgId: Date.now() + '-reply', origin: 'inbox-reply' });
       if (!r || !r.ok) {
