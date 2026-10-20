@@ -21,7 +21,7 @@
 //   §H the wiring in server.js.
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -204,10 +204,12 @@ console.log('\n§F who ran out — the next EMFILE has a name');
 // ── §G the debounced writes never throw ──
 console.log('\n§G the debounced writes keep their state, retry, and report — never a crash (session-status, user-todos, the channels index)');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-for (const [rel, cls, file, poke] of [
-  ['src/session-status.js', 'SessionStatusManager', 'session-status.json', (m) => { m._state.statuses.k = { at: 1 }; m._save(); }],
-  ['src/user-todos.js', 'UserTodoManager', 'user-todos.json', (m) => { m._state.items.push({ id: 'x', status: 'open', text: 't', createdAt: 1 }); m._save(); }],   // through the store's OWN timer (verify r1: a poke that armed the guarded timer by hand let a reverted guard go green)
-]) {
+// THE FOUR LEGS RUN AT ONCE (lane fast-tier-ratchet): each waits on its store's OWN timers (a 500 ms debounce, a 1 s retry)
+// in its own data dir, so they are independent — run one after another they slept ~8 s of the suite's 8. Each leg returns
+// its verdicts and they are judged in the old order once all have settled; the real timers, the real EISDIR and the
+// pre-fix child are unchanged.
+const writerLeg = async ([rel, cls, file, poke]) => {
+  const out = [];
   const dir = path.join(ROOT, 'st-' + cls);
   fs.mkdirSync(path.join(dir, file + '.tmp'), { recursive: true });   // the tmp path is a DIRECTORY: every write fails (EISDIR) — the error class that killed the server
   const Cls = require(path.join(REPO, rel))[cls];
@@ -215,15 +217,17 @@ for (const [rel, cls, file, poke] of [
   const m = new Cls({ dataDir: dir, onChange() { }, onWriteError: (e, f, o) => errs.push({ code: e.code, f, ...o }) });
   poke(m);
   await sleep(800);
-  ok(errs.length === 1 && errs[0].code === 'EISDIR' && errs[0].failures === 1 && errs[0].retryMs === 1000 && m._dirty === true, `${cls}: the failed write did NOT throw — dirty kept, reported (${JSON.stringify(errs[0])})`);
+  out.push([errs.length === 1 && errs[0].code === 'EISDIR' && errs[0].failures === 1 && errs[0].retryMs === 1000 && m._dirty === true, `${cls}: the failed write did NOT throw — dirty kept, reported (${JSON.stringify(errs[0])})`]);
   fs.rmdirSync(path.join(dir, file + '.tmp'));
   await sleep(1400);
-  ok(fs.existsSync(path.join(dir, file)) && m._dirty === false && m._writeFailures === 0, `${cls}: the retry landed once the file system recovered`);
+  out.push([fs.existsSync(path.join(dir, file)) && m._dirty === false && m._writeFailures === 0, `${cls}: the retry landed once the file system recovered`]);
   try { clearTimeout(m._expiryTimer); clearInterval(m._expiryTimer); } catch { }
-}
-{
+  return out;
+};
+const channelLeg = async () => {
   // THE THIRD WRITER a full table met (test-restore-liveness ⑤, measured: a server whose table was full died in the
   // channels index's debounce timer once session-status was fixed) — the same rule, the same proof
+  const out = [];
   const { createChannelStore } = require(path.join(REPO, 'src/channel-store.js'));
   const dir = path.join(ROOT, 'channels');
   const warns = [];
@@ -232,24 +236,41 @@ for (const [rel, cls, file, poke] of [
   fs.mkdirSync(tmp, { recursive: true });   // the index's tmp path is a directory: its write fails (EISDIR)
   await st.index.update((ix) => { ix.conversations['fake/c1'] = { probe: 1 }; });
   await sleep(800);
-  ok(warns.some((w) => /\[channels\] index\.json not written \(EISDIR; attempt 1\) — kept in memory, retrying in 1 s/.test(w)), `channel-store: the failed index write did NOT throw — said and owed (${JSON.stringify(warns[0] || '')})`);
+  out.push([warns.some((w) => /\[channels\] index\.json not written \(EISDIR; attempt 1\) — kept in memory, retrying in 1 s/.test(w)), `channel-store: the failed index write did NOT throw — said and owed (${JSON.stringify(warns[0] || '')})`]);
   fs.rmdirSync(tmp);
   await sleep(1500);
   let onDisk = null; try { onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8')); } catch { }
-  ok(onDisk && onDisk.conversations && onDisk.conversations['fake/c1'], 'channel-store: the retry wrote the owed index (dirty is cleared only once it is on disk)');
+  out.push([onDisk && onDisk.conversations && onDisk.conversations['fake/c1'], 'channel-store: the retry wrote the owed index (dirty is cleared only once it is on disk)']);
   try { st.close(); } catch { }
-}
-{
+  return out;
+};
+const controlLeg = async () => {
   // CONTROL — the PRE-FIX session-status: its timer called _flush() bare; the same failure is a process death
+  const out = [];
   const src = fs.readFileSync(path.join(REPO, 'src/session-status.js'), 'utf8');
   const pre = src.replace('this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, 500);', 'this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flush(); }, 500);');
-  ok(pre !== src, 'control setup: the pre-fix copy took its patch');
+  out.push([pre !== src, 'control setup: the pre-fix copy took its patch']);
   const copy = M.write('src/session-status.js', pre, 'prefix');
   const dir = path.join(ROOT, 'st-pre');
   fs.mkdirSync(path.join(dir, 'session-status.json.tmp'), { recursive: true });
-  const r = spawnSync(process.execPath, ['-e', `const { SessionStatusManager } = require(${JSON.stringify(copy)}); const m = new SessionStatusManager({ dataDir: ${JSON.stringify(dir)}, onChange() {} }); m._state.statuses.k = { at: 1 }; m._save(); setTimeout(() => process.exit(0), 1500);`], { encoding: 'utf8', timeout: 10000 });
-  ok(r.status !== 0 && /EISDIR/.test(r.stderr), `CONTROL: the pre-fix timer's write error kills the process (exit ${r.status}, ${JSON.stringify((/Error: [^\n]*/.exec(r.stderr) || [''])[0])}) — the 12:03 crash`);
-}
+  const r = await new Promise((res) => {
+    const c = spawn(process.execPath, ['-e', `const { SessionStatusManager } = require(${JSON.stringify(copy)}); const m = new SessionStatusManager({ dataDir: ${JSON.stringify(dir)}, onChange() {} }); m._state.statuses.k = { at: 1 }; m._save(); setTimeout(() => process.exit(0), 1500);`], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = ''; c.stderr.on('data', (d) => { stderr += d; });
+    const kill = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 10000);
+    c.on('close', (status) => { clearTimeout(kill); res({ status, stderr }); });
+  });
+  out.push([r.status !== 0 && /EISDIR/.test(r.stderr), `CONTROL: the pre-fix timer's write error kills the process (exit ${r.status}, ${JSON.stringify((/Error: [^\n]*/.exec(r.stderr) || [''])[0])}) — the 12:03 crash`]);
+  return out;
+};
+const legsG = await Promise.all([
+  ...[
+    ['src/session-status.js', 'SessionStatusManager', 'session-status.json', (m) => { m._state.statuses.k = { at: 1 }; m._save(); }],
+    ['src/user-todos.js', 'UserTodoManager', 'user-todos.json', (m) => { m._state.items.push({ id: 'x', status: 'open', text: 't', createdAt: 1 }); m._save(); }],   // through the store's OWN timer (verify r1: a poke that armed the guarded timer by hand let a reverted guard go green)
+  ].map(writerLeg),
+  channelLeg(),
+  controlLeg(),
+]);
+for (const leg of legsG) for (const [c, msg] of leg) ok(c, msg);
 
 // ── §H the wiring ──
 console.log('\n§H the wiring in server.js');

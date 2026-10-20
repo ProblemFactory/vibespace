@@ -241,7 +241,14 @@ for (const m of MUTANTS) {
   const src = orig[m.file];
   if (!anchorsHold(src, m)) { console.log(`  ?? ${m.name}: PATCH DID NOT APPLY (the anchor moved — this mutation proved nothing)`); bad++; continue; }
   fs.writeFileSync(m.file, mutate(src, m));
-  const r = spawnSync(process.execPath, [path.join(REPO, 'scripts', m.suite + '.mjs')], { cwd: REPO, encoding: 'utf-8', timeout: 600000 });
+  // `test-ci-gate` = the gate's own gate, which is seven parts since lane fast-tier-ratchet (2026-10-20): the mutation is
+  // held when ANY part goes red (each part runs until one does)
+  const GATE_PARTS = ['test-ci-gate', 'test-ci-gate-push', 'test-ci-gate-tiers', 'test-ci-gate-shards', 'test-ci-gate-reaper', 'test-ci-gate-hang', 'test-ci-gate-watchdog'];
+  let r = null;
+  for (const name of m.suite === 'test-ci-gate' ? GATE_PARTS : [m.suite]) {
+    r = spawnSync(process.execPath, [path.join(REPO, 'scripts', name + '.mjs')], { cwd: REPO, encoding: 'utf-8', timeout: 600000 });
+    if (r.status !== 0) break;
+  }
   restore();
   const out = (r.stdout || '') + (r.stderr || '');
   const failed = /(\d+) FAILED/.exec(out);

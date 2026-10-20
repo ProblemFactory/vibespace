@@ -59,7 +59,24 @@ const MUT = mutantCopies('record-clear-census', ROOT);
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const J = JSON.stringify;
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+// THE TREE IS READ ONCE (lane fast-tier-ratchet): every census pass and every control re-read the whole checkout — 18 passes over
+// ~430 server files and 18 over the client tree, ~3 s of the suite's 8. The checkout never changes during the run (§tree proves
+// nothing is written under src/), so a file is read once; a control's PATCHED COPY (an `override`, outside the checkout) is
+// always read fresh from disk, so every control still judges the bytes it planted.
+const TREE = new Map();
+const readTree = (abs) => { let t = TREE.get(abs); if (t === undefined) { t = fs.readFileSync(abs, 'utf8'); TREE.set(abs, t); } return t; };
+const readAt = (override, rel) => (override[rel] ? fs.readFileSync(override[rel], 'utf8') : readTree(path.join(ROOT, rel)));
+const read = (rel) => readTree(path.join(ROOT, rel));
+/** the 1-based line of offset `at` in `src` — a newline index per text, built once (the census asked `src.slice(0, at).split('\n')`
+ *  per site: quadratic in a file's size) */
+const NL = new Map();
+const lineOf = (src, at) => {
+  let ix = NL.get(src);
+  if (!ix) { ix = []; for (let k = src.indexOf('\n'); k >= 0; k = src.indexOf('\n', k + 1)) ix.push(k); NL.set(src, ix); }
+  let lo = 0, hi = ix.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (ix[mid] < at) lo = mid + 1; else hi = mid; }
+  return lo + 1;
+};
 /** code lines only: a whole-line `//` or `*` comment is not a reader */
 const codeLines = (src) => src.split('\n').map((l, i) => ({ i: i + 1, l })).filter(({ l }) => !/^\s*(\/\/|\*|\/\*)/.test(l));
 
@@ -76,7 +93,7 @@ function walk(dir, out = []) {
 const SERVER_FILES = ['server.js', ...walk('src')];
 const CLI_FILES = fs.readdirSync(path.join(ROOT, 'data/bin')).filter((f) => /^vibespace-(task|ask|job|msg|channels|status)$/.test(f)).map((f) => 'data/bin/' + f);
 /** the file list the census reads — `override` maps a rel path to another absolute path (the controls) */
-const sources = (override = {}) => new Map([...SERVER_FILES, ...CLI_FILES].map((rel) => [rel, fs.readFileSync(override[rel] || path.join(ROOT, rel), 'utf8')]));
+const sources = (override = {}) => new Map([...SERVER_FILES, ...CLI_FILES].map((rel) => [rel, readAt(override, rel)]));
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 // §A FILE OWNERSHIP
@@ -710,7 +727,7 @@ function walkLib(dir = 'src/lib', out = []) {
   return out;
 }
 const LIB_FILES = [...walkLib(), 'src/client.js'];
-const libSources = (override = {}) => new Map(LIB_FILES.map((rel) => [rel, fs.readFileSync(override[rel] || path.join(ROOT, rel), 'utf8')]));
+const libSources = (override = {}) => new Map(LIB_FILES.map((rel) => [rel, readAt(override, rel)]));
 // ── H1 ──
 const STORAGE = {
   // class: pref = a device preference / view state (sizes, fonts, filters, folds, tabs); ids = ids / keys only; owner = the
@@ -1077,7 +1094,7 @@ const BELT = [
 const beltCensus = (srcs) => {
   const hits = [];
   for (const rel of SURFACE_FILES) {
-    const text = srcs.get(rel) || fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const text = srcs.get(rel) || read(rel);
     text.split('\n').forEach((l, i) => {
       if (/^\s*(\/\/|\*|\/\*)/.test(l) || !TEXT_FIELD.test(l) || ACCESSOR.test(l)) return;
       const row = BELT.find(([f, snip]) => f === rel && l.includes(snip));
@@ -1160,7 +1177,7 @@ const CACHES = {
 const cacheCensus = (srcs) => {
   const rows = [];
   for (const rel of SURFACE_FILES) {
-    const text = srcs.get(rel) || fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const text = srcs.get(rel) || read(rel);
     text.split('\n').forEach((l) => {
       if (/^\s*(\/\/|\*|\/\*)/.test(l)) return;
       const m = /^(\s*)(?:(?:const|let|var)\s+(\w+)\s*=|this\.(\w+)\s*=|(\w+)\s*:)\s*new (Map|Set|WeakMap|WeakSet)\(/.exec(l);
@@ -1199,7 +1216,7 @@ const REPAINT = [
   ['an agent group\'s window (the cleared rows in place + pages in flight, r5 ⑧; + the FIRST page in flight, verify r6)', 'src/lib/channel-window.js', [/if \(Array\.isArray\(msg\.cleared\)\) \{ for \(const c of msg\.cleared\) if \(c && c\.groupId === groupId && c\.record\) \{ drawn\.set\(c\.vendorId, c\.record\); clearedSeen\.set\(c\.vendorId, c\.record\); \} \}\s*if \(!group\) \{ if \(g\) group = g; return; \}/, /if \(Array\.isArray\(msg\.cleared\)\) patchCleared\(msg\.cleared\);/, /const g0 = groupGen;\s*const r = await fetchJson\(`\/api\/channel-groups\/[^\n]*\n\s*if \(!r \|\| r\.error\) return \{ error: r \|\| \{\} \};\s*if \(r\.group && groupGen === g0\) group = r\.group;/]],
   ['the Channels panel\'s group rows (+ a refresh never replaces a newer list, verify r6)', 'src/lib/channels-panel.js', [/if \(msg\.type === 'channel-groups-updated'\) \{\s*if \(!Array\.isArray\(msg\.groups\)\) return;\s*groups = msg\.groups; groupsGen\+\+;[^\n]*\n\s*if \(digest === null\) return;[^\n]*\n\s*draw\(\);/, /const g0 = groupsGen;[\s\S]{0,900}?if \(groupsGen !== g0\) \{/]],
 ];
-const repaintCensus = (srcs) => REPAINT.filter(([, f, re]) => { const src = srcs.get(f) || fs.readFileSync(path.join(ROOT, f), 'utf8'); return !(Array.isArray(re) ? re : [re]).every((r) => r.test(src)); }).map(([n]) => n);
+const repaintCensus = (srcs) => REPAINT.filter(([, f, re]) => { const src = srcs.get(f) || read(f); return !(Array.isArray(re) ? re : [re]).every((r) => r.test(src)); }).map(([n]) => n);
 {
   const missing = repaintCensus(libSources());
   ok(missing.length === 0, `H5 each of the ${REPAINT.length} surfaces re-renders from the CURRENT record on its store's broadcast (the clear's frame included)`, missing);
@@ -1252,7 +1269,7 @@ const orderSites = (srcs) => {
       const args = callArgs(text, open);
       if (!FIVE_ROUTE.test(args.trimStart()) || /\bmethod\s*:\s*['"`](POST|PUT|PATCH|DELETE)/i.test(args)) continue;
       const ls = text.lastIndexOf('\n', m.index) + 1, le = text.indexOf('\n', m.index);
-      sites.push({ rel, at: `${rel}:${text.slice(0, m.index).split('\n').length}`, line: text.slice(ls, le < 0 ? text.length : le), before: text.slice(Math.max(0, m.index - 400), m.index), after: text.slice(m.index, m.index + 1200) });
+      sites.push({ rel, at: `${rel}:${lineOf(text, m.index)}`, line: text.slice(ls, le < 0 ? text.length : le), before: text.slice(Math.max(0, m.index - 400), m.index), after: text.slice(m.index, m.index + 1200) });
     }
   }
   return sites;
@@ -1462,7 +1479,7 @@ function walkAll(dir, out = []) {
 }
 const I_CLI = I_BIN.filter((f) => !/\.(c|m)?js$/.test(f) && !I_GENERATED.has(f));   // the agent CLIs (extension-less scripts)
 const I_FILES = ['server.js', ...walkAll('src'), ...I_BIN.filter((f) => /\.(c|m)?js$/.test(f) && !I_GENERATED.has(f))];
-const iSources = (override = {}) => new Map(I_FILES.map((rel) => [rel, fs.readFileSync(override[rel] || path.join(ROOT, rel), 'utf8')]));
+const iSources = (override = {}) => new Map(I_FILES.map((rel) => [rel, readAt(override, rel)]));
 const I_LEAF = (p) => p.split('.').pop().replace('[]', '');
 const I_SHAPE_FIELDS = [...new Set(Object.values(RC.SHAPES).flatMap((s) => s.map(([p]) => I_LEAF(p))))];
 // [field, what it carries, the door's file, the statement that rewrites it (or the declaration)]
@@ -1693,7 +1710,7 @@ function iAliases(src, rel, W) {
   for (const d of defs) {
     const scope = src.slice(d.end, iBlockEnd(src, masked, d.at)), aRe = iParamRe(d.alias);
     const swap = new RegExp(String.raw`(?<![\w$.])${d.alias.replace(/\$/g, '\\$')}(?![\w$])`, 'g');
-    const push = (abs, sink, args) => { const code = iCode(args); if (aRe.test(code)) out.push({ rel, line: src.slice(0, abs).split('\n').length, sink, read: d.read, args: code.replace(swap, d.read), alias: d.alias, defLine: src.slice(0, d.at).split('\n').length }); };
+    const push = (abs, sink, args) => { const code = iCode(args); if (aRe.test(code)) out.push({ rel, line: lineOf(src, abs), sink, read: d.read, args: code.replace(swap, d.read), alias: d.alias, defLine: lineOf(src, d.at) }); };
     let c;
     CALL.lastIndex = 0;
     while ((c = CALL.exec(scope))) {
@@ -1735,7 +1752,7 @@ function interpCensus(srcs) {
       if (/\bfunction\s+$/.test(src.slice(Math.max(0, m.index - 12), m.index))) continue;
       if (!/new\s/.test(callee) && /^\s*\{/.test(src.slice(m.index + m[0].length + whole.length + 1, m.index + m[0].length + whole.length + 4))) continue;   // a method header `name(args) {`
       const args = w && !iSink(callee, rel, src.slice(Math.max(0, m.index - 60), m.index)) ? iSplitArgs(whole).filter((_, i) => w.idx.includes(i)).join(', ') : whole;
-      const line = src.slice(0, m.index).split('\n').length;
+      const line = lineOf(src, m.index);
       for (const read of iReads(args)) rows.push({ rel, line, sink: sink[0], read, args, wrapped: !!w && !iSink(callee, rel, '') });
     }
     if (!iIsLib(rel)) {
@@ -1746,14 +1763,14 @@ function interpCensus(srcs) {
         let k = m.index, depth = 0;
         for (; k > 0; k--) { const ch = src[k]; if (ch === '}') depth++; else if (ch === '{') { if (depth === 0) break; depth--; } }
         const obj = iSpan(src, k + 1);
-        const line = src.slice(0, m.index).split('\n').length;
+        const line = lineOf(src, m.index);
         for (const read of iReads(obj)) rows.push({ rel, line, sink: 'notice', read, args: obj });
       }
       I_PROP.lastIndex = 0;
       while ((m = I_PROP.exec(src))) {
         if (iComment(src, m.index) || iInLiteral(src, m.index, m[0].length) || !/[{,(\n]\s*$/.test(src.slice(Math.max(0, m.index - 60), m.index))) continue;
         const val = iSpan(src, m.index + m[0].length, { stopAtComma: true });
-        const line = src.slice(0, m.index).split('\n').length;
+        const line = lineOf(src, m.index);
         for (const read of iReads(val)) rows.push({ rel, line, sink: 'sentence', read, args: val });
       }
     }
@@ -2041,7 +2058,7 @@ const iAbsent = (srcs) => {
     const memo = I_ABSENT_MEMO.get(rel);
     if (memo && memo.src === src) { hits.push(...memo.hits); continue; }
     const code = iCode(src), mine = [];   // the code keeps the line breaks of everything but a template's text
-    for (const [what, re] of I_ABSENT) { const g = new RegExp(re.source, 'g'); let m; while ((m = g.exec(code))) mine.push(`${rel}:${code.slice(0, m.index).split('\n').length} (${what})`); }
+    for (const [what, re] of I_ABSENT) { const g = new RegExp(re.source, 'g'); let m; while ((m = g.exec(code))) mine.push(`${rel}:${lineOf(code, m.index)} (${what})`); }
     I_ABSENT_MEMO.set(rel, { src, hits: mine });
     hits.push(...mine);
   }

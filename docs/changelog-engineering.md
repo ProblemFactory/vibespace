@@ -4,6 +4,36 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.322 — 2026-10-20
+
+### lane fast-tier-ratchet — the fast tier's rows say what they measure; the cap moves UP to the truth and DOWN by the fixes (backlog B-0c52, design q-038; 主开发's rulings A + 2; base ae155910 = 2.369.320)
+- THE MEASUREMENT: every fast row ALONE through the lane env, one at a time, two rounds; the stated time = the slower of two QUIET runs (start load ≤ 32 on the 16-core / 32-thread Ryzen AI Max+ 395; 187 rows whose round-1 / round-2 run started above that were re-run in a quiet window).
+  - Round 1 (load 8–82): 983 s against the stated 626 s; with chat-e2e's own 30.2 s (it skips without a login here) ~1013 s.
+  - The quiet table: 883.7 s over 441 rows. 159 rows moved > 25 %; 17 were > 3× stale (cache-bounds 1.1 → 25.1 s, vendor-whitelist 2.1 → 15.1, quota-source 2.2 → 18.4, design-routes 2.2 → 11.2, vault-law 0.5 → 11.8, app-manifest 70 ms → 3.6 s…); 11 rows ≥ 10 s.
+  - Cross-check: the real fast gate's own per-suite times (4916e81b's ci.mjs log on the same box) agree — test-ci-gate 42.0 s, quota-source 17.7, vendor-whitelist 17.3, vault-law 11.8.
+- THE ROOT FIXES (each A/B'd alone, base vs work interleaved, identical ✓ lines; a product mutant planted ⇒ RED; measured before → after):
+  - test-quota-source 18.4 s → 237 ms: it ran the WHOLE of test-vendor-whitelist as a child, a suite the tier already runs as its own fast row ⇒ a pin that the row is fast.
+  - test-vendor-whitelist 15.1 → 7.7 s: the §10 tree census re-judged ~760 files for each of ~14 controls ⇒ per-file findings memoised on (rel, text).
+  - test-vault-law 11.8 → 1.3 s: 12 judges re-tokenized the whole tree with acorn ⇒ tokens + per-file red lines memoised on the text.
+  - test-record-clear-census 8.6 → 5.6 s: 36 whole-tree reads (sources / libSources / iSources per control) ⇒ the checkout read once (a control's patched copy always fresh), a newline index for the 7 `slice(0, i).split('\n')` line counts.
+  - test-integration-registry 7.8 → 3.5 s: the `.test(` receiver census over the tracked tree twice ⇒ memoised per text, repo reads once.
+  - test-fd-limit 7.4 → 2.4 s: §G's four legs slept ~2.2 s each in series on the stores' own real timers ⇒ run at once (independent dirs), judged in the old order.
+  - test-chat-frame-guard 7.4 → 2.2 s: 6.2 s of fixed sleeps ⇒ waits on the effect each leg asserts (the sidecar, the forwarded line, the failure event, the debounced persist; the shred's absence proved by an ordered SENTINEL line behind it).
+  - test-instance-url 6.6 → 3.4 s: two boots' restores (each the product's fixed 3 s first attempt) ⇒ at once.
+  - scripts/ci.mjs: `stripComments` + `machineGlobalFixtures` memoised on the text, a line with no `/` returned as is (exact) — test-ci-remote 16.2 → 6.4 s, test-ci-gate −6 s.
+  - test-peer-text-census 13.6 → 12.9 s: the door census per file memoised on the text (one `includes` per door over the joined code lines; `rawCodeLines` memoised).
+  - test-ci-gate 37.3 s ⇒ SEVEN suites (6.4 + 6.3 + 4.9 + 4.2 + 1.5 + 5.2 + 4.1 s; 469 checks, as before), the sections' text unchanged, the shared head in scripts/ci-gate-kit.mjs.
+    - The rows: -push and -tiers carry the checkout allowance (their §5 / §8 make one; the allowances 4 → 5).
+    - The self-exemptions name the part whose controls spell the shapes (§4's doc scan ⇒ -push; §7's date census ⇒ -tiers).
+    - Dependents follow it: dbg-ci-mutations runs every part for a `test-ci-gate` mutation; test-scratch-reaper reads `stubGateRepo` from the kit; test-architecture's SCRATCH_KEEP / END_EXEMPT rows name -reaper.
+  - Together −72 s measured on these rows (150.2 → 78.2 s).
+- THE NAMED DEBT (ruling 2): `fastRuleFindings` lets a PURE / in-process / LAW row ≥ 10 s stay fast ONLY with `over: '<why it is slow + its next-list item>'`.
+  - It is red both ways (a slow row without one; a paid debt that keeps one), and never on a disqualified row (a server / browser / checkout / binary row is heavy, over or not).
+  - test-ci-gate §2b pins over-list == the rows ≥ 10 s, plus the NEG shapes, and prints the table.
+  - The ten: cache-bounds 25.1 · stream-mac 18.0 · channel-drain 15.6 (the money-class drain gate) · browser-verbs 14.2 · peer-text-census 12.9 (the hostile-text gate) · browser-backend 12.8 · browser-keeper 12.7 · ledger-rebuild 12.3 · stream-window 11.7 · live-input 10.1. The two gates are not split to fit a number.
+- THE CAP: `FAST_SUM_CAP_MS` 640 → 904 s = the restated sum 883.7 s + 20 s (ci.mjs, test-ci-gate's pin, kb-design-lessons, CLAUDE.md's tier-rule clause); it ratchets DOWN from here.
+- The slowest ten, BEFORE (stated → measured): chat-e2e 30.2 → 30.2 · channel-drain 9.9 → 15.6 · live-input 9.7 → 10.1 · usage-exit-hook 9.0 → 9.3 · chat-trim-guard 9.0 → 9.2 · pid-identity 9.0 → 9.4 · browser-verbs 8.9 → 14.2 · stream-mac 8.6 → 18.0 · fd-limit 8.0 → 2.4 · ws-keepalive 8.0 → 7.9. AFTER (restated): chat-e2e 30.2 · cache-bounds 25.1 · stream-mac 18.0 · channel-drain 15.6 · browser-verbs 14.2 · peer-text-census 12.9 · browser-backend 12.8 · browser-keeper 12.7 · ledger-rebuild 12.3 · stream-window 11.7.
+
 ## 2.369.321 — 2026-10-20
 
 ### 主开发 — the .320 Actions mirror (fast): test-record-shape §4d's two NEGATIVE CONTROLS red on the runner's newer claude build

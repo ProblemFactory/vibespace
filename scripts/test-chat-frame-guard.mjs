@@ -33,6 +33,10 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// THE WAITS ARE ON EFFECTS (lane fast-tier-ratchet): each leg waits for the thing it then asserts (the sidecar written, the line
+// forwarded, the failure event, the debounced persist) — ≤ 5 s, polled every 25 ms — never a fixed sleep that assumed it had
+// happened (6.2 s of the suite's 7.4 were those sleeps). A regression still times out into the same assertion, red.
+const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await sleep(25); } return fn(); };
 
 // ── 1. poison guard ──
 {
@@ -57,13 +61,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const fake = path.join(dir, 'fake-claude.sh');
   fs.writeFileSync(fake, `#!/bin/bash\nwhile IFS= read -r l; do printf '%s\\n' "$l" >> ${cap}; done\n`, { mode: 0o755 });
   const w = spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), buf, meta, fake], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, VIBESPACE_SKIP_AGENT_HOOKS: '1' } });
-  await sleep(700);
+  const capLines = () => (fs.existsSync(cap) ? fs.readFileSync(cap, 'utf8').trim().split('\n').filter(Boolean) : []);
+  await until(() => fs.existsSync(meta));   // the wrapper's boot sidecar (written before it reads stdin)
   const frame = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'BIG:' + 'x'.repeat(200 * 1024) }] } });
   const fp = path.join(dir, 'frame.json');
   fs.writeFileSync(fp, frame);
   w.stdin.write(JSON.stringify({ type: '_frame_file', path: fp }) + '\n');
-  await sleep(900);
-  const got = fs.existsSync(cap) ? fs.readFileSync(cap, 'utf8').trim().split('\n') : [];
+  await until(() => capLines().length >= 1);
+  const got = capLines();
   ok(got.length === 1 && got[0] === frame, `frame-file payload reaches the child INTACT as one line (${got[0]?.length || 0} bytes)`);
   ok(!fs.existsSync(fp), 'frame file unlinked after forwarding');
   // 2.361.1 skew gate: the wrapper ADVERTISES frame-file support in its boot
@@ -83,9 +88,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const bad = path.join(dir, 'bad.json');
   fs.writeFileSync(bad, frame.slice(0, 1000) + frame); // concatenated shred
   w.stdin.write(JSON.stringify({ type: '_frame_file', path: bad }) + '\n');
-  await sleep(700);
-  const got2 = fs.readFileSync(cap, 'utf8').trim().split('\n');
-  ok(got2.length === 1, 'shredded frame file DROPPED (child got nothing new)');
+  // a SENTINEL line after it: the wrapper handles stdin in order and a frame file synchronously (read → parse → forward →
+  // unlink), so once the sentinel reached the child, the shredded pointer's turn is over — nothing of it may sit before it
+  const SENTINEL = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'sentinel after the shred' }] } });
+  w.stdin.write(SENTINEL + '\n');
+  await until(() => capLines().length >= 2);
+  const got2 = capLines();
+  ok(got2.length === 2 && got2[1] === SENTINEL, 'shredded frame file DROPPED (child got nothing new before the next line)');
   ok(!fs.existsSync(bad), 'shredded file still cleaned up');
   w.kill('SIGKILL');
 }
@@ -162,7 +171,8 @@ setInterval(() => {}, 1e3);
   ok(t.length === 1 && img?.url === `data:image/png;base64,${IMG}` && txt?.text === 'what is in this screenshot',
     `frame-file payload reaches the app-server INTACT as one turn/start (image ${img?.url?.length || 0} bytes + text)`);
   ok(!fs.existsSync(fp), 'codex frame file unlinked after delivery');
-  await sleep(1200); // buffer (1s) + meta (500ms) persist on debounces
+  // buffer (1 s) + meta (500 ms) persist on debounces — wait for both to land
+  await until(() => readMeta()?.activeTurnId === null && readMeta()?.streaming === false && (fs.existsSync(buf) ? fs.readFileSync(buf, 'utf8') : '').includes('"webui_msg_id":"m-frame-1"'));
   // the stub completes every turn at once (2.369.20 queue-while-busy semantics): the turn
   // was adopted through the normal chat-input path (turn/start above) and is RELEASED by
   // turn/completed — activeTurnId must be null, not a stale id (the startTurn-vs-completed
@@ -182,23 +192,23 @@ setInterval(() => {}, 1e3);
   const bad = path.join(dir, 'bad.json');
   fs.writeFileSync(bad, stdinPayload.slice(0, 1000) + stdinPayload);
   w.stdin.write(JSON.stringify({ type: '_frame_file', path: bad }) + '\n');
-  await sleep(700);
+  await until(() => failures().length >= 1 && !fs.existsSync(bad));
   ok(turns().length === 1, 'shredded codex frame file DROPPED (no new turn/start)');
   ok(!fs.existsSync(bad), 'shredded codex frame file still unlinked');
   ok(failures().length === 1 && /frame file/.test(failures()[0]) && /send it again/.test(failures()[0]), `shredded frame → task_failed event the user can see (${JSON.stringify(failures()[0])})`);
   // missing file → LOUD
   w.stdin.write(JSON.stringify({ type: '_frame_file', path: path.join(dir, 'never-written.json') }) + '\n');
-  await sleep(500);
+  await until(() => failures().length >= 2);
   ok(failures().length === 2 && /read failed/.test(failures()[1]), 'missing frame file → task_failed with the reason');
   // nested pointer inside a frame file → refused (no recursion / arbitrary reads)
   const nest = path.join(dir, 'nest.json');
   fs.writeFileSync(nest, JSON.stringify({ type: '_frame_file', path: '/etc/hostname' }));
   w.stdin.write(JSON.stringify({ type: '_frame_file', path: nest }) + '\n');
-  await sleep(500);
+  await until(() => failures().length >= 3);
   ok(failures().length === 3 && /nested/.test(failures()[2]) && turns().length === 1, 'nested _frame_file pointer refused (loud, no turn)');
   // unparseable RAW stdin line (the shredded-in-transit shape) → LOUD, wrapper alive
   w.stdin.write('{"type":"chat-input","text":"' + 'B'.repeat(300) + '\n');
-  await sleep(500);
+  await until(() => failures().length >= 4);
   ok(failures().length === 4 && /corrupted in transit/.test(failures()[3]) && /send it again/.test(failures()[3]), `unparseable stdin line → task_failed (was a silent continue): ${JSON.stringify(failures()[3].slice(0, 80))}`);
   ok(!/BBBB/.test(failures()[3]) && !/BBBB/.test(out), 'the rejection quotes at most a short prefix (never the payload)');
   ok(w.exitCode === null, 'wrapper survives every rejection');

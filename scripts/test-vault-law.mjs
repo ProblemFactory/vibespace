@@ -36,11 +36,13 @@ for (const f of fs.readdirSync(path.join(REPO, 'data/bin'))) {
   const t = fs.readFileSync(p, 'utf8');
   if (/^#!.*node/.test(t) || f.endsWith('.js') || f.endsWith('.mjs')) tree.set('data/bin/' + f, t);
 }
+const TOKS = new Map(); // text → its tokens (the census and the store-key pass ask the same text)
 function tokensOf(text) {
+  const memo = TOKS.get(text); if (memo) return memo;
   const out = [];
   try { for (const t of acorn.tokenizer(text.replace(/^#![^\n]*/, ''), { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowImportExportEverywhere: true })) out.push(t); }
-  catch (e) { return { err: e.message, toks: out }; }
-  return { toks: out };
+  catch (e) { const r = { err: e.message, toks: out }; TOKS.set(text, r); return r; }
+  const r = { toks: out }; TOKS.set(text, r); return r;
 }
 const isName = (t, v) => !!t && t.type.label === 'name' && (v == null || t.value === v);
 const isPunc = (t, l) => !!t && t.type.label === l;
@@ -61,38 +63,46 @@ const AUTO_STR = /VAULT_PASSWORD|VIBESPACE_VAULT|vault[-_.]?password|auto[-_ ]?u
 const DOOR_RECEIVERS = /^(vault|engine|eng|VE|vaultEngine)$/;
 const FEEDS = /process\.env|readFileSync|readFile\(|clusterPreset|presets?\.|argv/;
 /** THE JUDGE: → red lines for a tree (Map rel → text). */
+/** per file, memoised on its TEXT (lane fast-tier-ratchet): every mutant below re-judges the whole tree with ONE file planted —
+ *  the other ~430 files' red lines are the same text's, so only the planted file is tokenized again (was 12 × the tree) */
+const FILE_RED = new Map();
 function judge(files) {
   const red = [];
   for (const [rel, text] of files) {
+    const hit = FILE_RED.get(rel);
+    if (hit && hit.text === text) { red.push(...hit.red); continue; }
+    const mine = [];
     const { toks, err } = tokensOf(text);
-    if (err) { red.push(`${rel}: could not tokenize (${err})`); continue; }
+    if (err) { mine.push(`${rel}: could not tokenize (${err})`); FILE_RED.set(rel, { text, red: mine }); red.push(...mine); continue; }
     const knowsVault = rel === 'src/server/vault-engine.js' || /require\(\s*['"][./]*(server\/)?vault(-engine)?(\.js)?['"]\s*\)/.test(text);   // the vault's own files and every file that requires them
     for (let i = 0; i < toks.length; i++) {
       const t = toks[i];
       // ① an auto-unlock shape: a name or a string (comments never count)
-      if (isName(t) && AUTO_NAME.test(t.value)) red.push(`${rel}: the name ${t.value} — an auto-unlock shape`);
-      if ((t.type.label === 'string' || t.type.label === 'template') && AUTO_STR.test(String(t.value)) && rel !== 'src/routes/vault.js') red.push(`${rel}: the string ${JSON.stringify(String(t.value).slice(0, 60))} — an auto-unlock shape`);
+      if (isName(t) && AUTO_NAME.test(t.value)) mine.push(`${rel}: the name ${t.value} — an auto-unlock shape`);
+      if ((t.type.label === 'string' || t.type.label === 'template') && AUTO_STR.test(String(t.value)) && rel !== 'src/routes/vault.js') mine.push(`${rel}: the string ${JSON.stringify(String(t.value).slice(0, 60))} — an auto-unlock shape`);
       // ② a vault door called from anywhere but the routes (and fed by anything but the request body)
       if (isPunc(toks[i - 1], '.') && isName(t) && /^(unlock|setup|change)$/.test(t.value) && isName(toks[i - 2]) && DOOR_RECEIVERS.test(toks[i - 2].value) && isPunc(toks[i + 1], '(')) {
         const a = argsText(text, toks, i) || '';
-        if (rel !== 'src/routes/vault.js') red.push(`${rel}: ${toks[i - 2].value}.${t.value}(${a.slice(0, 50)}) — a vault door called outside src/routes/vault.js`);
+        if (rel !== 'src/routes/vault.js') mine.push(`${rel}: ${toks[i - 2].value}.${t.value}(${a.slice(0, 50)}) — a vault door called outside src/routes/vault.js`);
         else {
           const line = text.slice(text.lastIndexOf('\n', t.start) + 1, text.indexOf('\n', t.start));
-          if (!/take\(req, /.test(line) || FEEDS.test(a)) red.push(`${rel}: ${toks[i - 2].value}.${t.value}(${a.slice(0, 50)}) — its password is not the request body's (take(req, …))`);
+          if (!/take\(req, /.test(line) || FEEDS.test(a)) mine.push(`${rel}: ${toks[i - 2].value}.${t.value}(${a.slice(0, 50)}) — its password is not the request body's (take(req, …))`);
         }
       }
-      if (isPunc(toks[i - 1], '.') && isName(toks[i - 2], 'V') && isName(t) && /^(unlock|setup|changePassword)$/.test(t.value) && isPunc(toks[i + 1], '(') && rel !== 'src/server/vault-engine.js') red.push(`${rel}: V.${t.value}( — the record's verdicts are the engine's alone`);
+      if (isPunc(toks[i - 1], '.') && isName(toks[i - 2], 'V') && isName(t) && /^(unlock|setup|changePassword)$/.test(t.value) && isPunc(toks[i + 1], '(') && rel !== 'src/server/vault-engine.js') mine.push(`${rel}: V.${t.value}( — the record's verdicts are the engine's alone`);
       // a BARE door call (the engine unlocking / setting itself up): only src/vault.js's changePassword re-runs its own unlock
-      if (knowsVault && isName(t) && /^(unlock|setup)$/.test(t.value) && isPunc(toks[i + 1], '(') && !isPunc(toks[i - 1], '.') && !(toks[i - 1] && toks[i - 1].type.keyword === 'function') && !isName(toks[i - 1], 'async') && rel !== 'src/vault.js') red.push(`${rel}: a bare ${t.value}( call — nothing but a person's door (src/routes/vault.js → the engine object) opens the vault`);
+      if (knowsVault && isName(t) && /^(unlock|setup)$/.test(t.value) && isPunc(toks[i + 1], '(') && !isPunc(toks[i - 1], '.') && !(toks[i - 1] && toks[i - 1].type.keyword === 'function') && !isName(toks[i - 1], 'async') && rel !== 'src/vault.js') mine.push(`${rel}: a bare ${t.value}( call — nothing but a person's door (src/routes/vault.js → the engine object) opens the vault`);
       // a key file read by name (balanced arguments: a path built through require('path').join(…) too)
-      if (isName(t) && /^(readFileSync|readFile|openSync|createReadStream)$/.test(t.value) && isPunc(toks[i + 1], '(') && rel !== 'src/secret-box.js' && rel !== 'src/server/vault-engine.js') { const a = argsText(text, toks, i) || ''; const m = /(['"`])(\.[a-z][a-z0-9-]*-key|[a-z][a-z0-9-]*\.key)\1/.exec(a); if (m) red.push(`${rel}: ${t.value}(… '${m[2]}') — a key file read outside the vault`); }
+      if (isName(t) && /^(readFileSync|readFile|openSync|createReadStream)$/.test(t.value) && isPunc(toks[i + 1], '(') && rel !== 'src/secret-box.js' && rel !== 'src/server/vault-engine.js') { const a = argsText(text, toks, i) || ''; const m = /(['"`])(\.[a-z][a-z0-9-]*-key|[a-z][a-z0-9-]*\.key)\1/.exec(a); if (m) mine.push(`${rel}: ${t.value}(… '${m[2]}') — a key file read outside the vault`); }
       // any vault door fed from the environment / a file / a preset, anywhere
-      if (isName(t) && /^(unlock|setup)$/.test(t.value) && isPunc(toks[i + 1], '(')) { const a = argsText(text, toks, i) || ''; if (FEEDS.test(a)) red.push(`${rel}: ${t.value}(${a.slice(0, 60)}) — a password fed from the environment, a file or a preset`); }
+      if (isName(t) && /^(unlock|setup)$/.test(t.value) && isPunc(toks[i + 1], '(')) { const a = argsText(text, toks, i) || ''; if (FEEDS.test(a)) mine.push(`${rel}: ${t.value}(${a.slice(0, 60)}) — a password fed from the environment, a file or a preset`); }
       // ③ the key-file law's legacy branch only inside secret-box
-      if (isName(t) && /^(loadOrMintKey|mintKeyFile)$/.test(t.value) && isPunc(toks[i + 1], '(') && rel !== 'src/secret-box.js' && !(toks[i - 1] && toks[i - 1].type.keyword === 'function')) red.push(`${rel}: ${t.value}( — the key-file law runs inside secret-box's lawfulKey only (after the vault)`);
+      if (isName(t) && /^(loadOrMintKey|mintKeyFile)$/.test(t.value) && isPunc(toks[i + 1], '(') && rel !== 'src/secret-box.js' && !(toks[i - 1] && toks[i - 1].type.keyword === 'function')) mine.push(`${rel}: ${t.value}( — the key-file law runs inside secret-box's lawfulKey only (after the vault)`);
     }
     // an agent tool never names a person's vault door
-    if (rel.startsWith('data/bin/') && /\/api\/(agent\/)?vault\/(unlock|setup|change|idle)/.test(text)) red.push(`${rel}: names a person's vault door (unlock / setup / change / idle are never an agent's)`);
+    if (rel.startsWith('data/bin/') && /\/api\/(agent\/)?vault\/(unlock|setup|change|idle)/.test(text)) mine.push(`${rel}: names a person's vault door (unlock / setup / change / idle are never an agent's)`);
+    FILE_RED.set(rel, { text, red: mine });
+    red.push(...mine);
   }
   // ③ lawfulKey asks the vault BEFORE the legacy law; a box never caches a vault-held key
   const sb = files.get('src/secret-box.js') || '';

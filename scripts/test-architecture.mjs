@@ -4625,7 +4625,7 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
       return true;
     });
   };
-  const SCRATCH_KEEP = { 'test-ci-gate.mjs': "§9d's fixture TEXT proves the opt-out; the suite itself keeps nothing" };
+  const SCRATCH_KEEP = { 'test-ci-gate-reaper.mjs': "§9d's fixture TEXT proves the opt-out; the suite itself keeps nothing" }; // lane fast-tier-ratchet: §9d moved with the gate's split
   const SCRATCH_END_EXEMPT = {
     'test-acp-harness.mjs': ['dir', 'dir0'],
     'test-auto-resume-loop.mjs': ['dir', 'dir2', 'mdir'],
@@ -4633,7 +4633,7 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     'test-channel-api-cards.mjs': ['dir', 'tmp'],
     'test-channel-manifest.mjs': ['dataDir'],
     'test-chat-frame-guard.mjs': ['home'],
-    'test-ci-gate.mjs': ['sGone', 'sGone2', 'sGone5', 'sLive'],
+    'test-ci-gate-reaper.mjs': ['sGone', 'sGone2', 'sGone5', 'sLive'], // §9 (the gate's split, lane fast-tier-ratchet)
     'test-codex-0153.mjs': ['home'],
     'test-codex-effort-meta.mjs': ['dir', 'd2', 'tmp', 'home'],
     'test-codex-p2-client.mjs': ['dir'],

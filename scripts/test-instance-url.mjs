@@ -137,17 +137,18 @@ const mk = (opts = {}) => {
   const pl = fakePlugins();
   const second = create({ dataDir: dir, port: 3456, plugins: pl, serverSetting: () => null, authEnabled: () => true, broadcast: () => { } });
   ok('a fresh process still knows it is mapped (frpc is its own process — the mapping usually outlives a restart)', second.status().desired === true && second.status().url === 'https://persisted.relay.example/');
-  second.restore({ retries: 1, delayMs: 5 });
-  await sleep(3300);
-  second.stop();
-  ok('restore republishes on boot, on the SAME subdomain', second.url() === 'https://persisted.relay.example', second.url());
   // a relay that is down must not lose the intent
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-iurl2-'));
   fs.writeFileSync(path.join(dir2, 'instance-url.json'), JSON.stringify({ desired: true, sub: 'x', url: 'https://x.relay.example/' }));
   const third = create({ dataDir: dir2, port: 3456, plugins: fakePlugins({ fail: true }), serverSetting: () => null, authEnabled: () => true, broadcast: () => { } });
+  // BOTH boots restore at once (lane fast-tier-ratchet): restore's first attempt is its own fixed 3 s boot delay, and the
+  // two processes share nothing — waited one after another they slept 6.6 s of the suite's 6.6
+  second.restore({ retries: 1, delayMs: 5 });
   third.restore({ retries: 1, delayMs: 5 });
   await sleep(3300);
+  second.stop();
   third.stop();
+  ok('restore republishes on boot, on the SAME subdomain', second.url() === 'https://persisted.relay.example', second.url());
   ok('a failed republish keeps the intent and SAYS why (no silent disappearance)', third.status().desired === true && /relay down/.test(third.status().error || ''), JSON.stringify(third.status()));
   ok('a failed republish does not erase the last known URL either (it may still be live)', third.status().url === 'https://x.relay.example/');
   fs.rmSync(dir2, { recursive: true, force: true });

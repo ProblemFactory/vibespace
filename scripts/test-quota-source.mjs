@@ -22,7 +22,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -461,9 +460,12 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
 }
 
 // ── 8. §ban-safety: the vendor whitelist stays green ──
+// lane fast-tier-ratchet: this leg used to RUN the whole of scripts/test-vendor-whitelist.mjs as a child (~14 s) — the same
+// suite the fast tier already runs as its own row on every push, so the tier ran it twice. The proof is that row: the vendor
+// whitelist is a FAST row of ci.mjs (pre-push, fail-fast), and its census reads this slice's files like every other.
 {
-  const r = spawnSync(process.execPath, [path.join(REPO, 'scripts/test-vendor-whitelist.mjs')], { encoding: 'utf8', timeout: 60000 });
-  ok('scripts/test-vendor-whitelist.mjs passes (no new vendor call site anywhere in this slice)', r.status === 0, (r.stdout || '').split('\n').filter((l) => /✗/.test(l)).join('; ') || r.stderr);
+  const ci = read('scripts/ci.mjs');
+  ok('scripts/test-vendor-whitelist.mjs is a FAST row of ci.mjs — the §ban-safety census runs over this slice on every push (no new vendor call site)', /\{ name: 'test-vendor-whitelist', tier: 'fast'/.test(ci) && fs.existsSync(path.join(REPO, 'scripts/test-vendor-whitelist.mjs')));
 }
 
 try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }

@@ -349,18 +349,34 @@ const tracked = () => execFileSync('git', ['ls-files', '-z', '--', 'server.js', 
 // a line of CODE: not a comment line; a trailing ` // …` dropped; every string literal blanked (a door named in a log
 // message or a help text is not a call)
 const stripStrings = (l) => l.replace(/'(?:[^'\\\n]|\\.)*'/g, "''").replace(/"(?:[^"\\\n]|\\.)*"/g, '""').replace(/`(?:[^`\\\n]|\\.)*`/g, '``');
-const rawCodeLines = (src) => src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\s\/\/\s.*$/, ''));
+// memoised on the TEXT (lane fast-tier-ratchet): pinJudge asks it once per TABLE row (~150) of the same few files, and every
+// planted control below re-runs the census over the whole tree with ONE file changed — a file's facts are its text's
+const rawCodeLinesMemo = new Map();
+const rawCodeLines = (src) => { let v = rawCodeLinesMemo.get(src); if (!v) { v = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\s\/\/\s.*$/, '')); rawCodeLinesMemo.set(src, v); } return v; };
 // memoised by the TEXT (read-only arrays): every planted control re-runs the census / the fences over ~390 files of which
 // it changed one (lane fast-budget: the controls' re-scans were 71 of the suite's 81 s)
 const codeLinesMemo = new Map();
 const codeLines = (src) => { let v = codeLinesMemo.get(src); if (!v) { v = rawCodeLines(src).map(stripStrings); codeLinesMemo.set(src, v); } return v; };
+// a file's doors + renderer definitions, memoised on its TEXT — a door is a single-line word, so `code.includes(d)` over the
+// code lines joined by a newline answers exactly what `lines.some((l) => l.includes(d))` did, one scan per door
+const fileFactsMemo = new Map();
+const fileFacts = (text) => {
+  let v = fileFactsMemo.get(text);
+  if (!v) {
+    const lines = codeLines(text), code = lines.join('\n');
+    v = { doors: DOORS.filter((d) => code.includes(d)), defs: [] };
+    for (const l of lines) { const m = RENDERER_DEF_RE.exec(l); if (m) v.defs.push(m[1] || m[2] || m[3]); }
+    fileFactsMemo.set(text, v);
+  }
+  return v;
+};
 function census(readFile, files) {
   const found = [];
   const defs = new Map();
   for (const f of files) {
-    const lines = codeLines(readFile(f));
-    for (const d of DOORS) if (lines.some((l) => l.includes(d))) found.push(`${f} :: ${d}`);
-    for (const l of lines) { const m = RENDERER_DEF_RE.exec(l); if (m) defs.set(m[1] || m[2] || m[3], f); }
+    const ff = fileFacts(readFile(f));
+    for (const d of ff.doors) found.push(`${f} :: ${d}`);
+    for (const n of ff.defs) defs.set(n, f);
   }
   const unlisted = found.filter((k) => !TABLE[k]);
   const ghosts = Object.keys(TABLE).filter((k) => !found.includes(k));

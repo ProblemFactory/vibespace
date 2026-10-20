@@ -822,7 +822,7 @@ console.log('\n§8 wiring');
     'scratch.mjs scratchDir + scratchHome and mutant-copy\'s dirs stamp their roots');
   // every stub repository the gate's own gates build copies ALL of ci.mjs's relative imports (a missing sibling = a stub whose ci.mjs cannot load)
   const sibs = [...ci.matchAll(/^import [^\n]* from '\.\/([^']+)';$/gm)].map((m) => m[1]).sort();
-  const stubbers = ['test-ci-gate.mjs', 'test-ci-heavy-launch.mjs'].map((f) => [f, fnBody(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'), 'function stubGateRepo(')]);
+  const stubbers = ['ci-gate-kit.mjs', 'test-ci-heavy-launch.mjs'] /* lane fast-tier-ratchet: test-ci-gate's stub builder moved to its parts' kit */.map((f) => [f, fnBody(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'), 'function stubGateRepo(')]);
   const copies = (b, s) => b.includes(`'${s}'`) || b.includes(`'scripts/${s}'`); // a builder names a sibling bare or by its repo path (B-60d2's loop)
   ok(sibs.includes('scratch-run.mjs') && stubbers.every(([, b]) => sibs.every((s) => copies(b, s))), `both stub builders copy every sibling ci.mjs imports (${sibs.join(', ')})`, stubbers.map(([f, b]) => [f, sibs.filter((s) => !copies(b, s))]));
   ok(/^\.vs-run\.json$/m.test(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8')), '.vs-run.json is gitignored (the isolated worktree\'s record is never a change)');

@@ -693,7 +693,8 @@ try {
   tracked = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: REPO, env: gitEnvFrom(process.env), encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 })
     .split('\0').filter(Boolean).filter((f) => !BIN_EXT.has(path.extname(f).toLowerCase()) && fs.existsSync(path.join(REPO, f)));
 } catch (e) { console.log(`  … SKIP the git-derived censuses (git ls-files failed: ${e.message})`); }
-const readRepo = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
+const REPO_TEXT = new Map(); // the checkout is read once per file (lane fast-tier-ratchet) — the censuses below walk the tracked tree several times; nothing writes under REPO
+const readRepo = (f) => { let t = REPO_TEXT.get(f); if (t === undefined) { t = fs.readFileSync(path.join(REPO, f), 'utf-8'); REPO_TEXT.set(f, t); } return t; };
 
 // (a) ENV NAMES: the regex matches the NAME, whatever the spelling around it
 const ENV_RE = /VIBESPACE_INTEGRATIONS?\b|VIBESPACE_INTEGRATION_/;
@@ -845,7 +846,14 @@ const STORE_HANDLE_NAMES = new Set(['integrations', 'integrationStore', 'integSt
 const HANDLE_RHS_RE = /integrationsWiring\.store\b|integrationStore\.create\(|integration-store(?:\.js)?['"]\)\.create\(|\.getStore\(\)|\bstore\(\)|\b(?:deps|ctx|opts)\.integrations\b/;
 const STORE_ACCESSOR_RE = /(?:^|\.)(?:store|getStore|integrations|integrationStore)\(\)$/;
 const ROW_ID_LITERALS = new Set(R.rowIds());
+// memoised on the TEXT (lane fast-tier-ratchet): the CONTROLS pass re-runs the census over the whole tracked tree plus five
+// synthetic producers — the tree's files are the same text's, so only the planted files are scanned again (was 2 × the tree)
+const TEST_SITES = new Map();
 function testCallSites(src) {
+  const memo = TEST_SITES.get(src); if (memo) return memo;
+  const r = testCallSitesOf(src); TEST_SITES.set(src, r); return r;
+}
+function testCallSitesOf(src) {
   const s = src.replace(/^\s*(\*|\/\/).*$/gm, '');
   const handles = new Set(STORE_HANDLE_NAMES);
   for (const m of s.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+)/g)) if (HANDLE_RHS_RE.test(m[2])) handles.add(m[1]);
