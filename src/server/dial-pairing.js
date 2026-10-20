@@ -300,6 +300,8 @@ async function deviceForDial(deviceId, _retried = false) {
       // lane device-allow-flags: the allow list the device states (its hello-ack) → its record, the card repainted when it moved;
       // its name in a refusal's re-run sentence
       onPolicy: (p) => { const h = hosts.findByDeviceId(deviceId); if (h && hosts.notePolicy?.(h.id, p)) { try { bcastAll({ type: 'hosts-updated' }); } catch { } } },
+      // lane win-input-elevated: the daemon's own token elevation (its hello-ack) → its record, the card repainted when it moved
+      onElevated: (e) => { const h = hosts.findByDeviceId(deviceId); if (h && hosts.noteElevated?.(h.id, e)) { try { bcastAll({ type: 'hosts-updated' }); } catch { } } },
       machine: () => { const h = hosts.findByDeviceId(deviceId); return (h && h.name) || deviceId; },
       // lane hub-act-ask: an act nobody clicked follows the machine's Hub automation list (asks on a cluster instance)
       actGate: hosts.actGateFor(() => { const h = hosts.findByDeviceId(deviceId); return h ? h.id : 'host-dial-' + deviceId; }),

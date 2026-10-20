@@ -20,6 +20,7 @@
  */
 const SIGNED_OUT_CODE = 4401;
 const VB = require('../vault-blocked.js');   // PURE: the lock epoch's list and the item's words
+const VI = require('../vault-inventory.js'); // PURE: the two producers' rules (lane vault-window-v2)
 
 // lane vault-relock-door (owner 2026-10-20 「为啥我有的时候更新后需要重新输入二次密码有时候不用」): the restart's For-you item. The
 // vault locks at every restart by law; the open tab re-asks and a persistent strip warns (src/lib/vault-unlock.js), but a
@@ -88,4 +89,43 @@ function wireVaultHooks({ vault, auth = null, wss = null, hostTokens = null, plu
   });
 }
 
-module.exports = { wireVaultHooks, SIGNED_OUT_CODE, VAULT_INBOX_KEY, RELOCK_TEXT, VAULT_ITEM_TEXT, BLOCKED_TEXT, NOTHING_YET, ROW_LINE, MORE_LINE };
+// THE VAULT WINDOW'S 「需要你」 (lane vault-window-v2, design q-047 §3.4) — the band at the window's top is the For-you list's
+// own items of origin 'vault' (filtered — never a second queue). Two producers file them here:
+//   · useFailed({ entry, name, code, who }) — a use door refused a caller by a cause the owner can act on (locked / not
+//     granted / expired — PURE useFailVerdict): ONE notice per entry per hour; while it is open each later failure of the
+//     hour updates its count; once answered, the hour's later failures are counted, never re-filed (the next hour files again)
+//   · agentPut({ entry, name, who }) — an agent stored a value it had SEEN (q-043 §9 `put`: its door calls this): ONE
+//     notice per store act; nothing re-files it once answered
+// The words ride as STRUCTURE (the client says them in its language); the English is the store's dedupe key.
+const fillKey = (l) => String(l.key).replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
+function createVaultAttention({ userTodos = null, now = () => Date.now(), log = console } = {}) {
+  const hours = new Map();   // entry → { next, itemId }
+  const file = (words, action) => userTodos.add(VAULT_INBOX_KEY, {
+    origin: 'vault', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Vault',
+    text: fillKey(words.text), detail: words.detail.map(fillKey).join('\n'), i18n: { text: words.text, detail: words.detail }, action,
+  });
+  /** → the item filed / updated, or null (no cause the owner is told about, a merged failure, no store). */
+  function useFailed({ entry = null, name = null, code, who = null } = {}) {
+    if (!userTodos) return null;
+    const key = String(entry || 'apikey:*').slice(0, 200);
+    const prev = hours.get(key) || null;
+    const v = VI.useFailVerdict(prev && prev.next, { code, at: now(), who });
+    if (!v.counted) return null;
+    const open = prev && !v.fresh && prev.itemId ? userTodos.get(prev.itemId) : null;
+    if (!v.fresh && !(open && open.status === 'open')) { hours.set(key, { next: v.next, itemId: prev && prev.itemId }); return null; }   // answered inside the hour: counted, never re-filed
+    try {
+      const it = file(VI.useFailCard({ name, next: v.next }), { type: 'vault-use-failed', entry: key });
+      hours.set(key, { next: v.next, itemId: it && it.id });
+      while (hours.size > 256) hours.delete(hours.keys().next().value);
+      return it;
+    } catch (e) { log.warn?.(`[vault] a failed use of ${key} was not filed: ${(e && e.message) || e}`); return null; }
+  }
+  function agentPut({ entry, name = null, who = null } = {}) {
+    if (!userTodos || !entry) return null;
+    try { return file(VI.rotateCard({ name: name || entry, who }), { type: 'vault-rotate', entry: String(entry).slice(0, 200) }); }
+    catch (e) { log.warn?.(`[vault] the rotate suggestion for ${entry} was not filed: ${(e && e.message) || e}`); return null; }
+  }
+  return { useFailed, agentPut, _hours: hours };
+}
+
+module.exports = { wireVaultHooks, createVaultAttention, SIGNED_OUT_CODE, VAULT_INBOX_KEY, RELOCK_TEXT, VAULT_ITEM_TEXT, BLOCKED_TEXT, NOTHING_YET, ROW_LINE, MORE_LINE };

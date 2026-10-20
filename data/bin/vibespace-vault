@@ -4,7 +4,9 @@
 // locked until the user unlocks it from the page. An agent may SEE the state (`status`) and LOCK it (`lock` — a suspected
 // leak, the end of a sensitive task); it never unlocks it, sets it up or changes the password: those are people's doors, and
 // the password is never an agent's to ask for. A LOCKED vault has already told the user what waits on it (lane
-// vault-locked-refusal-notice: For you names every caller it stopped) — an agent never asks them to unlock. Scoped by the per-session token in the env.
+// vault-locked-refusal-notice: For you names every caller it stopped) — an agent never asks them to unlock. Scoped by the
+// per-session token in the env. `totp <name>` (design q-047 L1, lane vault-totp) prints a two-step code's CURRENT code —
+// when the user granted that code to this conversation — never its seed.
 const API = process.env.VIBESPACE_API;
 const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
 if (!API || !TOKEN) { console.error('vibespace-vault: not running inside a VibeSpace session (missing env)'); process.exit(2); }
@@ -13,6 +15,8 @@ const USAGE = [
   'usage — the vault that seals every credential this VibeSpace stores (unlocked only by the user\'s second password):',
   '  vibespace-vault [status]   the state: unlocked / locked / not set up',
   '  vibespace-vault lock       lock it now — every stored credential stays sealed until the user unlocks it again',
+  '  vibespace-vault totp <name> [--json]   the CURRENT two-step code of <name> + the seconds it has left — when the user',
+  '                             granted it to this conversation (Vault window ▸ 用于…); never the seed',
   '  (unlock, set up and change are the user\'s, from the page: ⚙ System ▸ Vault… — never ask for the password)',
 ].join('\n');
 
@@ -37,6 +41,14 @@ function print(d) {
 async function main() {
   const args = process.argv.slice(2);
   const [cmd = 'status'] = args;
+  if (cmd === 'totp') {
+    const rest = args.slice(1), json = rest.includes('--json'), names = rest.filter((a) => a !== '--json');
+    if (names.length !== 1 || names[0].startsWith('-')) { console.error('vibespace-vault: totp takes ONE name\n' + USAGE); process.exit(2); }
+    const d = await call('GET', '/api/agent/vault/totp/' + encodeURIComponent(names[0]));
+    if (json) console.log(JSON.stringify({ name: d.name, code: d.code, secondsLeft: d.secondsLeft, period: d.period }));
+    else console.log(`${d.code} (${d.secondsLeft} s left)`);
+    return;
+  }
   if (args.length > 1 || cmd === 'help' || cmd === '-h' || cmd === '--help') { console.log(USAGE); if (args.length > 1) process.exit(2); return; }
   if (cmd === 'status') return print(await call('GET', '/api/agent/vault/state'));
   if (cmd === 'lock') { const d = await call('POST', '/api/agent/vault/lock'); print(d); return; }

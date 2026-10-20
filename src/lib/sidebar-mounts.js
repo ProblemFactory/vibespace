@@ -806,12 +806,17 @@ export function installSidebarMounts(Sidebar) {
       const badge = isDial
         ? `<span class="mounts-badge${rs.state === 'connected' ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${escHtml(rs.state === 'connected' ? tr('DEVICE') : rs.state === 'auth-fail' ? tr('KEY REFUSED') : rs.state === 'refused' ? tr('REFUSED') : tr('OFFLINE'))}</span>`
         : (st?.ok && st.tools ? `<span class="mounts-badge${st.tools.claude && st.tools.dtach ? '' : ' mounts-badge-red'}" title="Ready to run sessions — dtach ${st.tools.dtach ? '✓' : '✗ (missing)'}, Node ${st.tools.node ? '✓' : '✗ (missing)'}, Claude ${st.tools.claude ? '✓' : '✗ (missing)'}. Click Set up to install what’s missing.">${st.tools.claude && st.tools.dtach ? 'READY' : 'NEEDS SETUP'}</span>` : '');
+      // lane win-input-elevated: a Windows device agent the owner raised to run as administrator wears an ADMIN badge; a Windows
+      // device at normal rights offers the 「Run as administrator…」 door (below). Elevation is Windows-only and the owner's choice.
+      const winDev = isDial && h.dial && h.dial.lastAccept && h.dial.lastAccept.platform === 'win32';
+      const deviceElevated = h.deviceElevated === true;
+      const elevBadge = winDev && deviceElevated ? `<span class="mounts-badge" title="${escHtml(tr('The device agent runs as administrator — agents can type into windows you opened as administrator (you choose which, in the allow list)'))}">${escHtml(tr('ADMIN'))}</span>` : '';
       const top = document.createElement('div');
       top.className = 'mounts-row-top mounts-host-top'; // naive-user N-row: wraps its 8 actions under the name (style.css)
       top.innerHTML = `
         <span class="mounts-dot mounts-dot-${dot}" title="${escHtml(dotTip)}"></span>
         <b class="mounts-name" title="${escHtml(nameTip)}">${escHtml(h.name)}</b>
-        ${badge}`;
+        ${badge}${elevBadge}`;
       // The auto-probe can take up to 10s (fresh ssh) — during it the grey dot
       // was indistinguishable from "never tested / dead machine". Say checking.
       if (testing) top.appendChild(hostStateChip('pending', { text: tr('testing…'), title: tr('Checking the connection…') }));
@@ -860,6 +865,21 @@ export function installSidebarMounts(Sidebar) {
       if (isDial) actions.append(ibtn(MI.retry, tr('Pairing command — see the dial state, pick an address, generate a new command (keeps the row)'), async () => {
         this._showDevicePairDialog(h);
       }));
+      // lane win-input-elevated: a Windows device at normal rights ⇒ the door to raise it (the owner runs the consent-prompted
+      // re-registration). Shown iff we KNOW it is Windows and NOT elevated; never for a Mac/Linux device (elevation is Windows-only).
+      if (winDev && !deviceElevated) actions.append(ibtn(MI.bolt, tr('Run as administrator…'), async () => {
+        const { body, close } = createModalShell({ id: 'device-elevate-dialog', title: tr('Run "{name}"’s device agent as administrator', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+        const p1 = document.createElement('p'); p1.className = 'agents-note';
+        p1.textContent = tr('When the device agent runs as administrator, agents can type into windows you opened as administrator — and you choose which, in the allow list. VibeSpace never elevates on its own; Windows asks you to confirm.');
+        const p2 = document.createElement('p'); p2.className = 'agents-note';
+        p2.textContent = tr('Easiest: run the pairing command again — it now runs as administrator by default and asks you to confirm once. Or, in an administrator PowerShell on the machine, run:');
+        const pre = document.createElement('pre'); pre.className = 'device-elevate-recipe';
+        pre.textContent = "$t = Get-ScheduledTask -TaskName 'VibeSpaceDevice-*' | Select-Object -First 1\n$p = New-ScheduledTaskPrincipal -UserId $t.Principal.UserId -LogonType $t.Principal.LogonType -RunLevel Highest\nSet-ScheduledTask -TaskName $t.TaskName -Principal $p\n# back to normal rights: re-run with -RunLevel Limited";
+        const copy = document.createElement('button'); copy.className = 'btn-create'; copy.textContent = tr('Copy'); copy.onclick = () => { copyText(pre.textContent); showToast(tr('Copied — run it in an administrator PowerShell on the machine')); };
+        const closeBtn = document.createElement('button'); closeBtn.className = 'btn-cancel'; closeBtn.textContent = tr('Close'); closeBtn.onclick = () => close();
+        const acts = document.createElement('div'); acts.className = 'dialog-actions'; acts.append(closeBtn, copy);
+        body.append(p1, p2, pre, acts);
+      }, 'mounts-icon-accent'));
       actions.append(
         ibtn(MI.folderPush, tr('Mount a folder from this VibeSpace onto "{name}"', { name: h.name }), () => { this._showHostMountDialog(h); }),
         ibtn(MI.folderPull, tr('Mount a folder from "{name}" into this VibeSpace', { name: h.name }), () => { this._showMachinePullDialog(h); }),
@@ -1478,7 +1498,8 @@ export function installSidebarMounts(Sidebar) {
       // (default: the list the device itself states, else this instance kind's: a cluster's leaves SOCKS / LAN / keyboard
       // & mouse off); the device keeps it, and only running the command again THERE changes it
       let allow = normalize(Array.isArray(allowNow) ? allowNow : Array.isArray(r.allowDefault) ? r.allowDefault : FLAGS);
-      const cmdOf = (k) => CMDS[k] + (k === 'win' ? ` \`\n  -Allow ${allowArgOf(allow)}` : ` \\\n  --allow ${allowArgOf(allow)}`);
+      let winNoElevate = false; // lane win-input-elevated: the Windows command registers the agent to run as administrator by DEFAULT; this appends -NoElevate for a normal-rights install
+      const cmdOf = (k) => CMDS[k] + (k === 'win' ? ` \`\n  -Allow ${allowArgOf(allow)}${winNoElevate ? ' `\n  -NoElevate' : ''}` : ` \\\n  --allow ${allowArgOf(allow)}`);
       let curOs = null;
       const NOTES = {
         mac: tr('macOS: nothing to install first — the command brings its own Node if needed. No ssh, no FUSE.'),
@@ -1505,13 +1526,26 @@ export function installSidebarMounts(Sidebar) {
       ta.readOnly = true; ta.className = 'device-pair-cmd'; ta.spellcheck = false;
       const note = document.createElement('p');
       note.className = 'agents-note';
+      // lane win-input-elevated: Windows-only — the agent runs as administrator by default (one OS consent at install); a tick to opt out
+      const elevWrap = document.createElement('div');
+      elevWrap.className = 'device-pair-elev';
+      const elevNote = document.createElement('p');
+      elevNote.className = 'agents-note';
+      elevNote.textContent = tr('On Windows the device agent runs as administrator by default — Windows asks you to confirm once when you run the command. Agents can then type into windows you opened as administrator (you choose which, in the allow list below).');
+      const elevLab = document.createElement('label');
+      elevLab.className = 'device-pair-elev-flag';
+      const elevCb = document.createElement('input');
+      elevCb.type = 'checkbox';
+      elevCb.onchange = () => { winNoElevate = elevCb.checked; if (curOs) setOs(curOs); };
+      elevLab.append(elevCb, ' ' + tr('Install with normal rights (no administrator)'));
+      elevWrap.append(elevNote, elevLab);
       // verify-r4 F7: a paired device's command in ITS OS's form (the OS its daemon states on every dial — the receiver's
       // fact); only a device nobody has heard from yet gets the browser's OS as a guess (the tabs are the choice). The owner
       // opens VibeSpace on Windows: a paired Mac's "new command" was the PowerShell form
       const guessOs = deviceOs || (/Mac/i.test(navigator.platform || '') ? 'mac' : /Win/i.test(navigator.platform || '') ? 'win' : 'linux');
       const chips = {};
       const setOs = (k) => {
-        curOs = k; ta.value = cmdOf(k); note.textContent = NOTES[k];
+        curOs = k; ta.value = cmdOf(k); note.textContent = NOTES[k]; elevWrap.style.display = k === 'win' ? '' : 'none';
         for (const [ck, el] of Object.entries(chips)) el.className = ck === k ? 'btn-create' : 'btn-cancel';
       };
       for (const [k, label] of [['mac', 'macOS'], ['linux', 'Linux'], ['win', 'Windows']]) {
@@ -1555,7 +1589,7 @@ export function installSidebarMounts(Sidebar) {
       allowNote.textContent = tr('The device keeps this list; only running the command again on the device changes it — this VibeSpace cannot.') + (r.clusterInstance ? ' ' + tr('On a cluster instance SOCKS, LAN and keyboard & mouse start off.') : '');
       box.appendChild(allowNote);
       paintTicks();
-      body.append(done, box, seg, ta, note, tail, act2);
+      body.append(done, box, seg, ta, note, elevWrap, tail, act2);
       // verify-r5 A1: THIS command can be replaced while it is on screen (another window pressed Generate / Replace, or
       // another user) — the device row's generation moves past the one minted here: said on this sheet, once
       const gen = Number(r.generation) || 0;

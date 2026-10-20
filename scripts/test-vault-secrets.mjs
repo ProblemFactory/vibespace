@@ -611,6 +611,31 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
     ok(r.code === 'vault_locked', 'LOCKED ⇒ the automation key\'s use answers vault_locked (423 at the door)', r);
     await v.unlock(PW, {});
   }
+  // design q-047 L1 (lane vault-totp): a TWO-STEP SEED added on the same data dir — the vault entry totp:<name> holds it,
+  // data/vault-grants.json who may have the CODE: the seed is in NO file under data/ (raw / hex / base64); LOCKED ⇒ an agent's
+  // use answers vault_locked; and the seed's readers are NAMED: every src/ file that calls secretGet( is a row below (a new
+  // reader is RED until classified) — of them, only the two-step module and the reveal door can open a totp: entry
+  {
+    const TV = R('src/server/vault-totp.js').create({ dataDir: D, vault: v });
+    const SEEDP = R('src/totp.js').base32Encode(crypto.randomBytes(20));   // a planted seed, built at runtime
+    const add = TV.addEntry({ uri: `otpauth://totp/Plant:me?secret=${SEEDP}&issuer=Plant` }, { who: 'me' });
+    const raw = Buffer.from(R('src/totp.js').base32Decode(SEEDP).bytes);
+    const gr = TV.grant('plant-me', ['group:T-plant'], { who: 'me' });
+    ok(add.ok && gr.ok && hitsIn(D, [SEEDP, raw.toString('hex'), raw.toString('base64')], { skip: (f) => f === authLink }).length === 0 && !fs.readFileSync(path.join(D, 'vault-grants.json'), 'utf8').includes(SEEDP),
+      'a two-step seed: the vault entry totp:<name> holds it, data/vault-grants.json who may have the code — the seed (base32, its bytes in hex / base64) is in NO file under data/');
+    v.lock('door');
+    const u = TV.use({ conversationId: 'c-plant', groups: ['T-plant'], run: 'a'.repeat(24) }, 'plant-me');
+    ok(u.code === 'vault_locked' && !JSON.stringify(u).includes(SEEDP), 'LOCKED ⇒ the granted agent\'s code answers vault_locked', u);
+    await v.unlock(PW, {});
+    const READERS = new Map([
+      ['src/server/vault-totp.js', 'THE two-step module: a code (and a preview) from the record — never the seed in an answer'],
+      ['src/server/vault-contents.js', 'the reveal door (secretSource): ONE value behind the second password — a totp entry as its otpauth link'],
+      ['src/server/automation-engine.js', 'apikey:<id> only (A.entryOf)'], ['src/server/host-tokens.js', 'host:<id> only'], ['src/plugins/frp.js', 'frp:token only'], ['src/server/sealed-json.js', 'file:<name> only'],
+    ]);
+    const walkJs = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkJs(path.join(dir, e.name)) : e.name.endsWith('.js') ? [path.join(dir, e.name)] : []));
+    const callers = [...walkJs(path.join(REPO, 'src')), path.join(REPO, 'server.js')].filter((f) => /\bsecretGet\(/.test(fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''))).map((f) => path.relative(REPO, f)).filter((f) => f !== 'src/server/vault-engine.js').sort();
+    ok(callers.join() === [...READERS.keys()].sort().join(), `THE SEED'S READERS are named: every src/ caller of secretGet( is classified (${callers.join(', ')})`, { callers, named: [...READERS.keys()] });
+  }
   // the boundary, stated by the census: what stays a file (TLS key, vendor CLI files, …) is the exception list — none of it is planted here
   const VAULT_SRC = fs.readFileSync(path.join(REPO, 'src/vault.js'), 'utf8');
   ok(/SECRETS_AT_REST/.test(VAULT_SRC) && R('src/vault.js').SECRETS_AT_REST.filter((r) => r.exception).map((r) => r.what).join(' · ').length > 0, 'the exceptions are a NAMED list (src/vault.js SECRETS_AT_REST): ' + R('src/vault.js').SECRETS_AT_REST.filter((r) => r.exception).map((r) => r.what).join(' · '));

@@ -21,6 +21,15 @@
 //   rows come back; the vault's door (`vs-vault-door`) opens the UNLOCK modal while locked and the window once unlocked;
 //   ⑨ 立即锁定 from the header locks (the page lands on the sign-in) and the window lists nothing. --shots keeps a 1280×800
 //   PNG of the header in each state (vw-head-*.png).
+//   V2 (lane vault-window-v2, design q-047 §3): ②b the RAIL — 全部 + the nine purposes, each count = its rows in the list =
+//   its group head (NINE-COLUMN COUNTS = ROWS), a purpose picked shows its rows only; a row = name · kind chip · provenance
+//   chip; THE REVEAL DOOR'S HELP (the automation key's why is its 「显示」's title — no free-floating line); the provenance
+//   filter, 只看可显示, the search, «nothing matches»; no greyed control; 添加… and its doors. ②c 「需要你」 — two cards the
+//   REAL producers filed (seeded into the store's own file before the boot): answered in the band ⇒ gone from the tray;
+//   answered in the tray ⇒ gone from the band. ④ KEYED: a search moves rows, an open value stays in its element.
+//   ⑥a LOCKED: one sentence + 解锁… in the list, the rail counts «—», NO 添加…. ⑦ THE PHONE COLUMN (375×812): the rail a
+//   chip strip, the filters behind 筛选… (a modal — the list behind follows), a row stacks. ⑧ the zh words of the rail and
+//   the 「显示」 help (the owner's own sentence).
 // Run: node scripts/test-vault-window-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -55,6 +64,19 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 const DATA = path.join(wt, 'data');
+// lane vault-window-v2: two 「需要你」 cards filed by the REAL producers (src/server/vault-hooks.js) into the For-you store's own
+// file — the hub loads them at boot (no test door in the product)
+const SEED = {};
+{
+  fs.mkdirSync(DATA, { recursive: true });
+  const { UserTodoManager } = require(path.join(wt, 'src/user-todos.js'));
+  const VH = require(path.join(wt, 'src/server/vault-hooks.js'));
+  const ut = new UserTodoManager({ dataDir: DATA, expirySweepMs: 0 });
+  const att = VH.createVaultAttention({ userTodos: ut });
+  SEED.fail = att.useFailed({ entry: 'apikey:ak-release', name: 'release-bot', code: 'vault_locked', who: 'Release helper' }).id;
+  SEED.rotate = att.agentPut({ entry: 'agent:github-token', name: 'github-token', who: 'Release helper' }).id;
+  ut.stop();
+}
 let srv = null;
 const srvLog = fs.openSync(path.join(SHOTS, 'server.log'), 'a');
 const startServer = () => { srv = spawn(process.execPath, ['-r', SHIM, 'server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: SIGN_IN, VIBESPACE_CHANGELOG_FIXTURE_DIR: FIXTURE }, stdio: ['ignore', srvLog, srvLog] }); };
@@ -161,6 +183,68 @@ check('NO VALUE IN THE PAGE: neither planted value (nor its random part) in the 
 check('the setup-token row says 「Long-lived OAuth token」 (its own kind word) and setup-token', /Long-lived OAuth token/.test(await until(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent`, { timeout: 5000 }) || '') && /setup-token/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`)));
 await shot('vw-1-list.png');
 
+console.log('②b V2 (lane vault-window-v2, design q-047 §3): the purposes, the chips, the 显示 help, the filters, 添加…');
+const mintAk = await api('POST', '/api/automation/keys', { name: 'release-bot', scopes: ['conversations.rename'] });
+check('an automation key minted (a row of the automation purpose, made by the hub)', mintAk.status === 200 && !!(mintAk.json && mintAk.json.ok), mintAk);
+await closeVaultWindow();
+check('the window opens again with it', !!(await openWindow()) && !!(await until(`!!document.querySelector('.vw-row[data-store="automation"]')`, { timeout: 8000 })));
+const RAIL = `[...document.querySelectorAll('.vw-rail .vw-rail-item')].map((b) => [b.dataset.purpose, b.querySelector('.vw-rail-n').textContent])`;
+const railNow = await until(`(() => { const r = ${RAIL}; return r.length >= 10 ? r : null; })()`, { timeout: 5000 });
+check('THE RAIL: 全部 + the nine purposes in the design\'s order (Other only when something lands in it)', !!railNow && railNow.map(([p]) => p).join() === 'all,two-step,accounts,integrations,machines,storage,app-logins,passkeys,automation,agents', railNow);
+const countsNow = () => evalJs(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; const by = {}; for (const r of rows) by[r.dataset.purpose] = (by[r.dataset.purpose] || 0) + 1; return { by, total: rows.length, rail: Object.fromEntries(${RAIL}), heads: Object.fromEntries([...document.querySelectorAll('.vw-list .vw-group')].map((h) => [h.dataset.purpose, h.querySelector('.vw-group-n').textContent])) }; })()`);
+const c0 = await countsNow();
+check('NINE-COLUMN COUNTS = ROWS: each purpose\'s rail count = its rows in the list = its group head; 全部 = every row (accounts 2 · integrations 1 · automation 1)', Number(c0.rail.all) === c0.total && Object.entries(c0.rail).filter(([p]) => p !== 'all').every(([p, n]) => Number(n) === (c0.by[p] || 0)) && Object.entries(c0.heads).every(([p, n]) => Number(n) === c0.by[p]) && c0.by.accounts === 2 && c0.by.integrations === 1 && c0.by.automation === 1 && c0.total === 4, c0);
+await click('.vw-rail-item[data-purpose="accounts"]');
+check('a purpose picked in the rail shows ITS rows only (its own head, the two account rows)', !!(await until(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; return rows.length === 2 && rows.every((r) => r.dataset.purpose === 'accounts') && document.querySelector('.vw-rail-item[data-purpose="accounts"]').classList.contains('on'); })()`, { timeout: 5000 })));
+await click('.vw-rail-item[data-purpose="all"]');
+check('全部 brings every row back', !!(await until(`document.querySelectorAll('.vw-list .vw-row').length === 4`, { timeout: 5000 })));
+const AK = '.vw-row[data-store="automation"]';
+const chipsOf = (sel) => evalJs(`(() => { const r = document.querySelector(${JSON.stringify(sel)}); if (!r) return null; const p = r.querySelector('.vw-chip-prov'); return { kind: r.querySelector('.vw-chip-kind')?.textContent, prov: p && p.dataset.prov, provText: p && p.textContent, help: p && p.title, purpose: r.dataset.purpose }; })()`);
+const akc = await chipsOf(AK), kc = await chipsOf(rowKey(accId));
+check('a row = name · KIND chip · PROVENANCE chip: the automation key «API key · Minted by the hub · never shown»; an account\'s key «API key · By you» (each chip says where the value came from as its help)', akc && akc.kind === 'API key' && akc.prov === 'hub-mint' && akc.provText === 'Minted by the hub · never shown' && /nobody typed it in/.test(akc.help) && kc && kc.prov === 'me' && kc.provText === 'By you' && kc.purpose === 'accounts', { akc, kc });
+const helpNow = await evalJs(`(() => ({ ak: document.querySelector(${JSON.stringify(AK + ' .vw-show')})?.title, int: document.querySelector(${JSON.stringify(ROW_INT + ' .vw-show')})?.title, why: document.querySelectorAll('.vw-ak-why').length, words: [...document.querySelectorAll(${JSON.stringify(AK + ' .vw-meta, ' + AK + ' .vw-value, ' + AK + ' .vw-chips')})].map((e) => e.textContent).join(' | ') }))()`);
+check('THE REVEAL DOOR\'S HELP (the owner\'s confusion note): the automation key\'s 「显示」 says WHY as its own help — «only to hand it to an outside system…» — and no sentence sits beside the value as if it were the key\'s state', helpNow.ak === "Show the key's value — only to hand it to an outside system; agents inside use it by grant and never need to see it" && /second password is asked once/.test(helpNow.int || '') && helpNow.why === 0 && !/outside party|outside system/.test(helpNow.words), helpNow);
+const rowsShown = () => evalJs(`[...document.querySelectorAll('.vw-list .vw-row')].map((r) => r.dataset.store)`);
+await click('.vw-fchip[data-prov="system"]');
+check('the provenance filter «System»: only the hub\'s own row stays; the rail counts follow (全部 1 · accounts 0)', !!(await until(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; return rows.length === 1 && rows[0].dataset.store === 'automation' && document.querySelector('.vw-rail-item[data-purpose="all"] .vw-rail-n').textContent === '1' && document.querySelector('.vw-rail-item[data-purpose="accounts"] .vw-rail-n').textContent === '0'; })()`, { timeout: 5000 })), await rowsShown());
+await click('.vw-fchip[data-prov="system"]');
+await click('.vw-fchip[data-prov="me"]');
+check('«By you»: the person\'s own three rows, the hub\'s key gone', !!(await until(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; return rows.length === 3 && rows.every((r) => r.dataset.prov === 'me'); })()`, { timeout: 5000 })), await rowsShown());
+await click('.vw-fchip[data-prov="me"]');
+await click('.vw-only-shown');
+check('只看可显示: every row here can be shown — all four stay', !!(await until(`document.querySelectorAll('.vw-list .vw-row').length === 4 && document.querySelector('.vw-only-shown').classList.contains('on')`, { timeout: 5000 })));
+await click('.vw-only-shown');
+await typeInto('.vw-search', 'release');
+check('the search: «release» finds the key by its name', !!(await until(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; return rows.length === 1 && rows[0].dataset.store === 'automation'; })()`, { timeout: 5000 })));
+await typeInto('.vw-search', 'zz-nothing-here');
+check('nothing matches ⇒ the list says so', /No stored value matches/.test(await until(`document.querySelector('.vw-list .vw-empty')?.textContent`, { timeout: 5000 }) || ''));
+await typeInto('.vw-search', '');
+check('cleared ⇒ the four rows back', !!(await until(`document.querySelectorAll('.vw-list .vw-row').length === 4`, { timeout: 5000 })));
+check('NO GREYED CONTROL anywhere in the window (a door a row has not is not drawn)', (await evalJs(`document.querySelectorAll('.vw [disabled]').length`)) === 0);
+check('unlocked ⇒ 「添加…」 in the bar', !!(await until(visible('.vw-add'), { timeout: 3000 })));
+await click('.vw-add');
+const addMenu = await until(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((e) => e.textContent).join('|') || null`, { timeout: 3000 });
+check('添加… lists the doors that add a value — each the store\'s own (an account, an integration key, a channel account, an automation key)', addMenu === 'Account…|Integration key…|Channel account…|Automation key…', addMenu);
+await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
+await shot('vw-v2-list.png');
+
+console.log('②c 「需要你」 — For you\'s own vault items: answered in one place, gone from both');
+const b0 = await until(`(() => { const r = [...document.querySelectorAll('.vw-band .vw-band-row')]; return r.length === 2 ? r.map((x) => ({ id: x.dataset.id, type: x.dataset.type, text: x.querySelector('.vw-band-txt').textContent, doors: [...x.querySelectorAll('[data-door]')].map((b) => b.dataset.door).join() })) : null; })()`, { timeout: 8000 });
+check('the band at the top shows the two cards the producers filed, with 2 in its head', !!b0 && b0.some((x) => x.id === SEED.rotate && x.type === 'vault-rotate') && b0.some((x) => x.id === SEED.fail && x.type === 'vault-use-failed') && (await evalJs(`document.querySelector('.vw-band-n').textContent`)) === '2', b0);
+check('their words and doors: «Using “release-bot” failed» — 打开行 + 知道了; «“github-token” was stored by an agent that saw its value — rotate it» — 换新… + 知道了', !!b0 && b0.find((x) => x.id === SEED.fail).text === 'Using “release-bot” failed' && b0.find((x) => x.id === SEED.fail).doors === 'open,ack' && /github-token/.test(b0.find((x) => x.id === SEED.rotate).text) && b0.find((x) => x.id === SEED.rotate).doors === 'renew,ack', b0);
+const trayOpen = (id) => `!!document.querySelector('#user-todos-popup .ut-item[data-id="${id}"]:not(.ut-item-resolved)')`;
+await click('#taskbar-user-todos');
+await until(visible('#user-todos-popup'), { timeout: 5000 });
+await click('#user-todos-popup .ut-notice-head');
+check('the For-you tray lists the SAME two items, open', !!(await until(`${trayOpen(SEED.fail)} && ${trayOpen(SEED.rotate)}`, { timeout: 8000 })));
+await click(`.vw-band-row[data-id="${SEED.rotate}"] .vw-band-ack`);
+check('知道了 in the BAND ⇒ its row leaves the band', !!(await until(`!document.querySelector('.vw-band-row[data-id="${SEED.rotate}"]')`, { timeout: 8000 })));
+const storeOpen = async (id) => ((await api('GET', '/api/user-todos')).json?.todos?.open || []).some((i) => i.id === id);
+check('… and the TRAY: the same item is no longer open there (its row resolved in place; the store says so)', !!(await until(`!(${trayOpen(SEED.rotate)})`, { timeout: 8000 })) && !(await storeOpen(SEED.rotate)));
+await click(`#user-todos-popup .ut-item[data-id="${SEED.fail}"] .ut-done`);
+check('✓ in the TRAY ⇒ the same card leaves the band, and the band goes (nothing left)', !!(await until(`!document.querySelector('.vw-band-row[data-id="${SEED.fail}"]') && document.querySelector('.vw-band').hidden`, { timeout: 8000 })) && !(await storeOpen(SEED.fail)));
+await click('#taskbar-user-todos');
+
 console.log('③ 显示 ⇒ 验证是你 ⇒ the value');
 await click(ROW_INT + ' .vw-show');
 check('「显示」 asks for the second password (the 验证是你 modal)', !!(await until(visible('#vault-reveal-dialog'), { timeout: 5000 })));
@@ -179,6 +263,12 @@ await shot('vw-3-shown.png');
 console.log('④ inside the window: no second ask; another sign-in needs its own');
 await click(rowKey(accId) + ' .vw-show');
 check('a second 「显示」 shows its value without asking', (await until(`document.querySelector(${JSON.stringify(rowKey(accId) + ' .vw-plain')})?.value`, { timeout: 8000 })) === PLANT_KEY && !(await evalJs(`!!document.getElementById('vault-reveal-dialog')`)));
+// lane vault-window-v2: KEYED — a search / a filter MOVES row elements; an open value stays in its own element
+await evalJs(`document.querySelector(${JSON.stringify(rowKey(accId))}).__vwMark = 7; true`);
+await typeInto('.vw-search', 'Window leg key');
+check('KEYED: a search moves rows — the open row is the SAME element, its value still there; the other open row leaves the list', !!(await until(`(() => { const r = document.querySelector(${JSON.stringify(rowKey(accId))}); return !!r && r.__vwMark === 7 && r.querySelector('.vw-plain')?.value === ${JSON.stringify(PLANT_KEY)} && !document.querySelector(${JSON.stringify(ROW_INT)}); })()`, { timeout: 5000 })));
+await typeInto('.vw-search', '');
+check('… cleared: the row that left comes back with ITS value still shown (never redrawn)', (await until(`document.querySelector(${JSON.stringify(ROW_INT + ' .vw-plain')})?.value`, { timeout: 5000 })) === PLANT_INT && (await evalJs(`document.querySelector(${JSON.stringify(rowKey(accId))}).__vwMark`)) === 7);
 const tab2 = await api('POST', '/api/vault/reveal', { id: 'integrations:cloud:browserless#apiKey' });
 check('the SAME cookie without the page secret (a second tab) ⇒ 403 reveal_needs_password while this page\'s window is open', tab2.status === 403 && tab2.json && tab2.json.code === 'reveal_needs_password', tab2);
 const OWN = `http://127.0.0.1:${PORT}`;
@@ -228,7 +318,11 @@ await click('#vault-unlock-dialog .vault-later');
 await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 3000 });
 await evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
 check('the header says locked and offers 解锁… + 修改第二密码… (the change works locked too) + the idle row', (await until(`document.querySelector('.vw-head')?.dataset.state === 'locked'`, { timeout: 15000 })) === true && (await headDoors()) === 'vault-do-unlock,vault-do-change' && (await headIdle()), await headDoors());
-check('the list says it is locked and holds no row (the header\'s 解锁… is the one door: no second Unlock in the list; no greyed search — the bar is away)', /locked/.test(await until(`document.querySelector('.vw-note')?.textContent`, { timeout: 8000 }) || '') && (await evalJs(`document.querySelectorAll('.vw-row').length`)) === 0 && !(await evalJs(`!!document.querySelector('.vw-note button')`)) && (await evalJs(`getComputedStyle(document.querySelector('.vw-bar')).display`)) === 'none');
+check('LOCKED (design q-047 §3.5): the list says so with 解锁… and holds no row; the rail counts say «—»; NO 「添加…」 (the bar is away — nothing greyed)', /locked/.test(await until(`document.querySelector('.vw-locked-box')?.textContent`, { timeout: 8000 }) || '') && (await evalJs(`document.querySelectorAll('.vw-row').length`)) === 0 && (await evalJs(`!!document.querySelector('.vw-locked-box .vw-unlock')`)) && (await evalJs(`[...document.querySelectorAll('.vw-rail .vw-rail-n')].every((n) => n.textContent === '—') && document.querySelectorAll('.vw-rail .vw-rail-item').length >= 10`)) && (await evalJs(`getComputedStyle(document.querySelector('.vw-bar')).display`)) === 'none' && !(await evalJs(visible('.vw-add'))));
+await click('.vw-locked-box .vw-unlock');
+check('the list\'s 解锁… opens the unlock modal', !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
+await click('#vault-unlock-dialog .vault-later');
+await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 3000 });
 await headShot('vw-head-2-locked.png');
 await click('.vw-head .vault-do-unlock');
 check('解锁… from the header opens the unlock modal', !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
@@ -263,8 +357,8 @@ check('⋯ ▸ Show key… again', await showKey());
 check('… inside the window: the key at once, nothing asked', !!(await until(keyShown, { timeout: 8000 })) && !(await evalJs(`!!document.getElementById('vault-reveal-dialog')`)));
 await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove())`);
 
-console.log('⑦ a phone');
-await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 760, deviceScaleFactor: 2, mobile: true });
+console.log('⑦ a phone (375×812 — design q-047 §3.6)');
+await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 2, mobile: true });
 await cdp('Page.navigate', { url: URL });
 await until(`!!(window.app && app.wm)`, { timeout: 30000 });
 await splashGone();
@@ -272,6 +366,15 @@ check('the window opens on a phone with its rows', !!(await openWindow()));
 const ph = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(ROW_INT)}).getBoundingClientRect(); const b = document.querySelector(${JSON.stringify(ROW_INT + ' .vw-show')}).getBoundingClientRect(); return { l: r.left, r: r.right, w: innerWidth, bh: b.height }; })()`);
 check(`a row fits the screen (${Math.round(ph.l)}…${Math.round(ph.r)} of ${ph.w}) and 「显示」 is a ≥ 36 px target`, ph.l >= 0 && ph.r <= ph.w + 1 && ph.bh >= 36, ph);
 check('「显示」 is reachable (on top)', !!(await until(onTop(ROW_INT + ' .vw-show'), { timeout: 5000 })));
+const pf = await evalJs(`(() => { const rail = document.querySelector('.vw-rail'); const items = [...rail.querySelectorAll('.vw-rail-item')]; const tops = new Set(items.map((i) => Math.round(i.getBoundingClientRect().top))); const row = document.querySelector(${JSON.stringify(ROW_INT)}); const g = (s) => row.querySelector(s).getBoundingClientRect(); const main = g('.vw-main'), chips = g('.vw-chips'), act = g('.vw-act'); const rr = rail.getBoundingClientRect(); return { items: items.length, tops: tops.size, overflow: getComputedStyle(rail).overflowX, railW: Math.round(rr.width), w: innerWidth, filters: getComputedStyle(document.querySelector('.vw-filters')).display, filterBtn: document.querySelector('.vw-filter-btn').getBoundingClientRect().height, add: document.querySelector('.vw-add').getBoundingClientRect().height, stacked: chips.top >= main.bottom - 1 && act.top >= chips.bottom - 1 }; })()`);
+check('THE PHONE COLUMN: the rail is ONE scrolling chip strip; the filters sit behind 筛选… (≥ 36 px, 添加… too); a row stacks — name → chips → value + doors', pf.items >= 10 && pf.tops === 1 && pf.overflow === 'auto' && pf.railW <= pf.w && pf.filters === 'none' && pf.filterBtn >= 36 && pf.add >= 36 && pf.stacked, pf);
+await click('.vw-filter-btn');
+check('筛选… opens the filters in a modal (sort · where from · only the ones I can show)', !!(await until(visible('#vault-filter-dialog .vw-fchip[data-prov="system"]'), { timeout: 5000 })) && !!(await evalJs(`!!document.querySelector('#vault-filter-dialog .vw-only-shown') && !!document.querySelector('#vault-filter-dialog select')`)));
+await click('#vault-filter-dialog .vw-fchip[data-prov="system"]');
+check('… a press applies at once: the list behind it follows (the hub\'s own row only)', !!(await until(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; return rows.length === 1 && rows[0].dataset.store === 'automation'; })()`, { timeout: 5000 })));
+await click('#vault-filter-dialog .vw-fchip[data-prov="system"]');
+await click('#vault-filter-dialog .vw-filter-done');
+check('… and back: every row, the modal closed', !!(await until(`document.querySelectorAll('.vw-list .vw-row').length === 4 && !document.getElementById('vault-filter-dialog')`, { timeout: 5000 })));
 await shot('vw-6-phone.png');
 await cdp('Emulation.clearDeviceMetricsOverride');
 
@@ -283,6 +386,8 @@ await splashGone();
 await openWindow();
 check('「显示」', (await evalJs(`document.querySelector(${JSON.stringify(ROW_INT + ' .vw-show')})?.textContent`)) === '显示');
 check('the setup-token row says 「长期 OAuth 令牌」', /长期 OAuth 令牌/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`)));
+check('the rail in Chinese: 全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 自动化 key · agent 存放', (await evalJs(`[...document.querySelectorAll('.vw-rail .vw-rail-name')].map((e) => e.textContent).join(' · ')`)) === '全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 自动化 key · agent 存放');
+check('「显示」 on the automation key carries the owner\'s own sentence as its help; the chips read 「hub 铸造 · 从未显示」 / 「我自己」', (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-show')?.title`)) === '显示密钥值——只在要交给外部系统时；内部 agent 按授权使用，不需要看到值' && (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-chip-prov')?.textContent`)) === 'hub 铸造 · 从未显示' && (await evalJs(`document.querySelector(${JSON.stringify(rowKey(accId) + ' .vw-chip-prov')})?.textContent`)) === '我自己');
 await click(ROW_INT + ' .vw-show');
 check('「验证是你」', (await until(`document.querySelector('#vault-reveal-dialog h3')?.textContent`, { timeout: 5000 })) === '验证是你');
 await shot('vw-7-zh.png');

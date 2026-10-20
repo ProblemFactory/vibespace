@@ -67,7 +67,8 @@ function taskUnit(ps1) {
   const blk = persistOf(ps1), bad = [];
   if (!blk) return ['no persistence block'];
   if (/cmd(\.exe)?\b/i.test(blk.replace(/^\s*#.*$/gm, ''))) bad.push('cmd.exe in the task block');
-  const acts = [...blk.matchAll(/New-ScheduledTaskAction\s+-Execute\s+'([^']*)'/g)].map((m) => m[1]);
+  const blkA = blk.replace(/^\s*\$reg = .*$/m, ''); // lane win-input-elevated: the elevated child's embedded register string is judged by elevationUnit, not here
+  const acts = [...blkA.matchAll(/New-ScheduledTaskAction\s+-Execute\s+'([^']*)'/g)].map((m) => m[1]);
   if (acts.length !== 1 || acts[0] !== 'powershell.exe') bad.push('the action is not ONE powershell.exe: ' + JSON.stringify(acts));
   if (!/\$taskArgs = '-NoProfile -NonInteractive -WindowStyle Hidden -Command "' \+ \$launch \+ '"'/.test(blk)) bad.push('the outer PowerShell is not -WindowStyle Hidden');
   if (!/'; Start-Process -WindowStyle Hidden -FilePath ' \+ \(Quote-Ps \$nodeExe\)/.test(blk)) bad.push('node is not started -WindowStyle Hidden with its path a quoted literal');
@@ -77,6 +78,22 @@ function taskUnit(ps1) {
   return bad;
 }
 ok(taskUnit(PS1).length === 0, 'the ps1 task: no cmd.exe; Execute powershell.exe -WindowStyle Hidden → Start-Process -WindowStyle Hidden; node a quoted literal; the script quoted for node; -Hidden settings; AtLogOn -Force', taskUnit(PS1));
+// lane win-input-elevated: the installer raises the logon task to RunLevel Highest BY DEFAULT behind ONE OS consent (the
+// person clicks UAC), falling back to normal rights when declined or -NoElevate. Static shape here; the runtime flow (Highest
+// by default / Limited on a declined consent / RunAs requested) is proven in a portable-pwsh probe (win-input-elevated/probes).
+function elevationUnit(ps1) {
+  const blk = persistOf(ps1), bad = [];
+  if (!/\[switch\]\$NoElevate/.test(ps1)) bad.push('the -NoElevate switch is missing');
+  if (!/function Test-VsAdmin \{[^\n]*IsInRole\(\[Security\.Principal\.WindowsBuiltInRole\]::Administrator\)/.test(ps1)) bad.push('Test-VsAdmin does not read IsInRole(Administrator)');
+  if (!/New-ScheduledTaskPrincipal -UserId \$me -LogonType Interactive -RunLevel Highest/.test(blk)) bad.push('the admin-inline register has no RunLevel Highest principal');
+  if (!/-RunLevel Highest/.test(blk)) bad.push('RunLevel Highest is absent');
+  if (!/Start-Process powershell\.exe -Verb RunAs[^\n]*-EncodedCommand/.test(blk)) bad.push('no Start-Process -Verb RunAs (one OS consent) for the elevated register');
+  if (!/if \(-not \$highest\) \{ Register-ScheduledTask -TaskName \$task -Action \$a -Trigger \(New-ScheduledTaskTrigger -AtLogOn\) -Settings \$s -Force/.test(blk)) bad.push('no normal-rights fallback register when not elevated');
+  if (/-ArgumentList[^\n]*(DialToken|HostToken|\$DialToken|\$HostToken|vsdt_|vsht_)/.test(blk)) bad.push('a token rides the elevated child command line');
+  return bad;
+}
+ok(elevationUnit(PS1).length === 0, 'the ps1 elevation flow: -NoElevate; Test-VsAdmin reads IsInRole(Administrator); RunLevel Highest by default; ONE Start-Process -Verb RunAs consent (encoded, secret-free); a normal-rights fallback when not elevated / declined; no token on the elevated child command line', elevationUnit(PS1));
+ok(/RUNS AS ADMINISTRATOR/.test(PS1) && /you chose a normal install/.test(PS1) && /Run as administrator\.\.\./.test(PS1), 'the three persist outcomes: admin / normal (chose -NoElevate) / declined-UAC-with-the-card-door');
 ok(PS1.includes(`function Quote-Ps([string]$s) { return "'" + ($s -replace '[''\\u2018\\u2019\\u201A\\u201B]', '$0$0') + "'" }`) && HS_SRC.includes(`const psQuote = (s) => "'" + String(s).replace(/['\\u2018\\u2019\\u201A\\u201B]/g, '$&$&') + "'";`), 'Quote-Ps (ps1) and psQuote (daemon) double the SAME four characters');
 // the ps1's concatenation, evaluated: 'literal' ('' escape) · (Quote-Ps $v) · (Quote-Ps "…$v…") · $v, joined by +
 function psConcat(rhs, vars) {
@@ -191,7 +208,9 @@ function daemonSites(text, file) {
   return out;
 }
 const PS1_STARTS = (ps1) => {
-  const rows = [], code = ps1.split('\n').map((l, i) => ({ l, n: i + 1 })).filter((x) => !/^\s*#/.test(x.l));
+  // lane win-input-elevated: the `$reg = '…'` line is the ENCODED command the elevated child runs (its action is judged by
+  // elevationUnit, not here) — it is a string literal, not a top-level launch, so it is not a launch site.
+  const rows = [], code = ps1.split('\n').map((l, i) => ({ l, n: i + 1 })).filter((x) => !/^\s*#/.test(x.l) && !/^\s*\$reg\s*=/.test(x.l));
   for (const { l, n } of code) {
     if (/^\s*(\$\w+\s*=\s*)?Start-Process\b[^\n]*\$nodeExe/.test(l)) rows.push({ line: n, kind: 'first launch', hidden: /-WindowStyle Hidden/.test(l) });
     if (/New-ScheduledTaskAction\b/.test(l)) { const m = /-Execute '([^']*)'/.exec(l); rows.push({ line: n, kind: 'logon task', hidden: !!m && m[1] === 'powershell.exe' && taskUnit(ps1).length === 0 }); }

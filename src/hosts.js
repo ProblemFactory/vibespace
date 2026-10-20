@@ -345,6 +345,17 @@ class HostManager {
     try { this._save(); } catch (e) { console.warn('[hosts] save failed:', e.message); }
     return true;
   }
+  /** lane win-input-elevated: whether a machine's device agent STATES it runs elevated (every hello-ack `elevated`) — kept on
+   *  its record as `deviceElevated` (the Machines card shows the badge / the Run-as-administrator door, offline too). → true = moved. */
+  noteElevated(hostId, elevated) {
+    const e = elevated === true;
+    let h = null; try { h = this.get(hostId); } catch { return false; }
+    if (!h) return false;
+    if ((h.deviceElevated === true) === e) return false; // absent / false both read as not-elevated ⇒ the card is unchanged, no repaint (a first hello of `false` must not broadcast)
+    h.deviceElevated = e;
+    try { this._save(); } catch (err) { console.warn('[hosts] save failed:', err.message); }
+    return true;
+  }
   /** lane hub-act-ask: THE ASK's door of a REMOTE machine's device client (src/agentd/client.js `actGate`) — the asker
    *  server.js puts on `hubActs` (src/server/hub-act-ask.js); none wired (a suite, a tool) ⇒ every act goes (the audit still
    *  names who asked). `hostIdOf` = the row's id, or a function (a dial device's row is looked up at the act). */
@@ -1237,7 +1248,7 @@ class HostManager {
       onAct: (line) => this.noteAct(id, line), // lane device-act-audit: every act sent over this link = one line of data/device-audit.jsonl
       onUpgradeRefused: (from, to, info) => this.onAgentUpgrade?.('refused', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }), // lane device-bundle-signing
       onUpgradeTrusted: (from, to, info) => this.onAgentUpgrade?.('trusted', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }), // fix r2: a first trust (TOFU)
-      onPolicy: (p) => this.notePolicy(id, p), machine: () => h.name || id, // lane device-allow-flags: its stated allow list; its name in a refusal
+      onPolicy: (p) => this.notePolicy(id, p), onElevated: (e) => this.noteElevated(id, e), machine: () => h.name || id, // lane device-allow-flags: its stated allow list; lane win-input-elevated: its own token elevation; its name in a refusal
       actGate: this.actGateFor(id), // lane hub-act-ask: an act nobody clicked follows the machine's Hub automation list (asks on a cluster instance)
     });
     await dm.connect();

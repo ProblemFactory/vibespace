@@ -110,6 +110,33 @@ function macCommandsOf(ev, target = null) {
   }
 }
 
+// lane win-input-elevated: the UAC consent UI and the secure desktop are NEVER automatable. These are their window CLASSES
+// (GetClassName of the foreground window): the modern credential/consent host, the classic consent.exe top-level, and the
+// secure-desktop dark background. An ELEVATED daemon's SendInput WOULD reach them by the OS's rules — the product refuses by name.
+const INJECT_DENY = Object.freeze({
+  'Credential Dialog Xaml Host': 'consent-ui', // Windows 10/11 UAC consent / credential prompt
+  'Consent': 'consent-ui',                     // consent.exe top-level
+  '$$$Secure UAP Background Dialog': 'secure-desktop',
+  'UACBackgroundWindowClass': 'secure-desktop',
+});
+const INJECT_DENY_CLASSES = Object.freeze(Object.keys(INJECT_DENY));
+const WHY_TEXT = Object.freeze({ 'consent-ui': 'the Windows UAC consent prompt is never automatable', 'secure-desktop': 'the Windows secure desktop is never automatable', 'not-in-allow': 'this window is not in the elevated-input allow list' });
+/** PURE. May an agent's input be injected into the foreground window? `windowClass` = GetClassName of it, `elevated` = does
+ *  THIS daemon run elevated (the only state in which the OS lets our input reach an admin window), `allow` = the owner's
+ *  optional allow-list of window classes (null/[] = every non-denied window). → { ok, why }. The UAC consent UI + the secure
+ *  desktop are denied ALWAYS — even elevated, even if the allow-list names them (you must never automate your way past UAC). */
+function injectAllowed({ windowClass = '', elevated = false, allow = null } = {}) {
+  const cls = String(windowClass || '');
+  if (Object.prototype.hasOwnProperty.call(INJECT_DENY, cls)) return { ok: false, why: INJECT_DENY[cls] };
+  if (!elevated) return { ok: true, why: 'uipi-os' }; // not elevated: UIPI (the OS) is the fence; injection proceeds as before
+  const list = Array.isArray(allow) ? allow.filter((x) => typeof x === 'string' && x) : null;
+  if (list && list.length && !list.includes(cls)) return { ok: false, why: 'not-in-allow' };
+  return { ok: true, why: 'allowed' };
+}
+// PURE helpers for the live fence: parse the resident script's `front <classB64> <titleB64>` answer; count an inject batch's keys/clicks.
+function parseFront(answer) { const m = /^front (\S*) (\S*)\s*$/.exec(String(answer || '')); const dec = (b) => { try { return Buffer.from(b, 'base64').toString('utf8'); } catch { return ''; } }; return m ? { windowClass: dec(m[1]), windowTitle: dec(m[2]) } : { windowClass: '', windowTitle: '' }; }
+function countActs(list) { let keys = 0, clicks = 0; for (const e of list) { if (e && e.t === 'kd') keys++; else if (e && e.t === 'md') clicks++; } return { keys, clicks }; }
+
 // THE RESIDENT SCRIPT. One command per stdin line, one answer per line: `ok` | `uipi` | `err <what> <win32 error>`. The C#
 // compiles once (~1 s); `ready` is the first line out. `S` / `R` (lane desktop-handover-fix-r2 — the agent's paste): `S` keeps
 // what the clipboard holds (its text, or that it was empty) INSIDE the script; `R <base64 utf-16le>` puts it back only while
@@ -119,6 +146,7 @@ const INPUT_PS = [
   "Add-Type -TypeDefinition @'",
   'using System;',
   'using System.Runtime.InteropServices;',
+  'using System.Text;',
   'public static class VsInput {',
   '  [StructLayout(LayoutKind.Sequential)] struct MOUSEINPUT { public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }',
   '  [StructLayout(LayoutKind.Sequential)] struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }',
@@ -132,6 +160,8 @@ const INPUT_PS = [
   '  [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr p, uint access, out IntPtr t);',
   '  [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr t, int cls, out int v, int len, out int ret);',
   '  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);',
+  '  [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int max);',
+  '  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int max);',
   '  [DllImport("user32.dll")] static extern int CountClipboardFormats();',
   '  [DllImport("user32.dll")] static extern bool IsClipboardFormatAvailable(uint f);',
   '  [DllImport("user32.dll", SetLastError = true)] static extern bool OpenClipboard(IntPtr h);',
@@ -157,19 +187,24 @@ const INPUT_PS = [
   '    int elevated = 0, ret; bool got = GetTokenInformation(t, 20, out elevated, 4, out ret); CloseHandle(t);',
   '    return got && elevated != 0;',
   '  }',
+  '  public static string FrontClass() { StringBuilder sb = new StringBuilder(256); int n = GetClassName(GetForegroundWindow(), sb, sb.Capacity); return n > 0 ? sb.ToString() : ""; }',
+  '  public static string FrontTitle() { IntPtr h = GetForegroundWindow(); StringBuilder sb = new StringBuilder(256); int n = GetWindowText(h, sb, sb.Capacity); return n > 0 ? sb.ToString() : ""; }',
   '}',
   "'@",
   "[Console]::Out.WriteLine('ready')",
+  '$script:Elevated = $false',
   'while ($true) {',
   '  $l = [Console]::In.ReadLine(); if ($l -eq $null) { break }',
   "  $a = $l.Split(' ')",
   '  try {',
   '    switch ($a[0]) {',
   "      'M' { $r = [VsInput]::Move([int]$a[1], [int]$a[2]) }",
-  "      'D' { $r = if ([VsInput]::FrontElevated()) { 'uipi' } else { [VsInput]::Button([int]$a[1], $false) } }",
+  "      'D' { $r = if (-not $script:Elevated -and [VsInput]::FrontElevated()) { 'uipi' } else { [VsInput]::Button([int]$a[1], $false) } }",
   "      'U' { $r = [VsInput]::Button([int]$a[1], $true) }",
   "      'W' { $r = [VsInput]::Wheel([int]$a[1], [int]$a[2]) }",
-  "      'K' { $r = if ($a[3] -eq '0' -and [VsInput]::FrontElevated()) { 'uipi' } else { [VsInput]::Key([int]$a[1], [int]$a[2], [int]$a[3]) } }",
+  "      'E' { $script:Elevated = ($a[1] -eq '1'); $r = 'ok' }",
+  "      'F' { $r = 'front ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([VsInput]::FrontClass())) + ' ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([VsInput]::FrontTitle())) }",
+  "      'K' { $r = if (-not $script:Elevated -and $a[3] -eq '0' -and [VsInput]::FrontElevated()) { 'uipi' } else { [VsInput]::Key([int]$a[1], [int]$a[2], [int]$a[3]) } }",
   "      'C' { Set-Clipboard -Value ([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($a[1]))); $r = 'ok' }",
   "      'S' { $vsHad = [VsInput]::ClipKind(); $vsSaved = if ($vsHad -eq 'text') { Get-Clipboard -Raw } else { $null }; $r = 'ok' }",
   "      'R' { $want = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($a[1])); $r = 'kept'; if ($vsHad -and (Get-Clipboard -Raw) -ceq $want) { if ($vsHad -eq 'text') { Set-Clipboard -Value $vsSaved; $r = 'ok' } elseif ($vsHad -eq 'empty') { $r = [VsInput]::ClipClear() } }; $vsHad = $null; $vsSaved = $null }",
@@ -226,9 +261,13 @@ const STUB_MAX_BYTES = 256 * 1024;
 
 /** ONE injector. `spawn` / `env` = the daemon's; `stubFile` = where the Linux stub writes; `fs` = node:fs (the stub's); `mac`
  *  = () => the Mac's screen helper (src/agentd/stream-mac.js createMacHelper: ensure, spawnPlan) — asked only on a Mac. */
-function createInjector({ platform = process.platform, spawn = null, env = process.env, stubFile = null, fs = null, log = () => { }, lineMs = LINE_MS, readyMs = READY_MS, mac = null } = {}) {
+function createInjector({ platform = process.platform, spawn = null, env = process.env, stubFile = null, fs = null, log = () => { }, lineMs = LINE_MS, readyMs = READY_MS, mac = null, elevated = false, allow = null, audit = null } = {}) {
   const kind = platform === 'win32' ? 'sendinput' : platform === 'linux' ? 'stub' : platform === 'darwin' ? 'cgevent' : null;
   let child = null, ready = false, buf = '', closed = false, helper = null, lastTarget = null;
+  let elevatedTold = false; // lane win-input-elevated: the resident script was told (E 1) that this daemon is elevated (reset on respawn)
+  const isElevated = () => (typeof elevated === 'function' ? !!elevated() : !!elevated);
+  const allowOf = () => { const a = typeof allow === 'function' ? allow() : allow; return Array.isArray(a) ? a : null; };
+  const auditLine = (line) => { try { if (typeof audit === 'function') audit(line); } catch { /* audit is best-effort */ } };
   let rs = null, spare = false, unTcc = null; // THE RESPAWN RULE's state (a Mac's); a replacement's respawn is no crash's
   const queue = []; // { resolve, timer, ax } in line order
   const spawns = [];
@@ -248,7 +287,7 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
     const argv = kind === 'cgevent' ? (helper ? [helper.file, ...helper.args] : null) : [...MD.PS_ARGV, MD.psEncoded(INPUT_PS)];
     if (!argv) return false;
     try { child = spawn(argv[0], argv.slice(1), { env, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] }); } catch (e) { log(`[input] the injector did not start: ${e && e.message}`); child = null; return false; }
-    ready = false; buf = ''; lastTarget = null;
+    ready = false; buf = ''; lastTarget = null; elevatedTold = false;
     const me = child;
     step({ t: 'spawn' });
     me.on('error', () => { if (child === me) { child = null; step({ t: 'gone' }); settleAll('err spawn 0'); } });
@@ -298,7 +337,7 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
     return null;
   }
   /** Inject validated events in order. → { ok, n (events fully sent), refused: [{ i, t, code, detail? }] } */
-  async function inject(events, target = null) {
+  async function inject(events, target = null, meta = null) {
     const list = Array.isArray(events) ? events : [];
     const refused = [];
     let n = 0;
@@ -308,6 +347,17 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
       if (no) return { ok: false, n: 0, refused: list.map((e, i) => ({ i, t: e && e.t, code: no.code })), code: no.code, error: no.error };
       const tl = target && target.pid && target.wid ? `P ${target.pid} ${target.wid}` : `P ${(target && target.pid) || 0}`; // the app (+ the window its keys must reach)
       if (tl !== lastTarget && list.length) { const code = codeOf(await sendLine(tl)); if (!code) lastTarget = tl; else return { ok: false, n: 0, refused: list.map((e, i) => ({ i, t: e && e.t, code })) }; }
+    }
+    if (kind === 'sendinput' && isElevated() && list.length) {
+      // lane win-input-elevated: this daemon runs elevated, so the OS lets our SendInput reach admin windows. Tell the resident
+      // script once (E 1) to drop the unelevated UIPI short-circuit, then FENCE it ourselves: read the foreground window and ask
+      // the PURE verdict. The UAC consent UI + secure desktop are refused ALWAYS; every elevated batch is one audit line.
+      if (!elevatedTold) { const te = codeOf(await sendLine('E 1')); if (!te) elevatedTold = true; }
+      const front = parseFront(await sendLine('F'));
+      const v = injectAllowed({ windowClass: front.windowClass, elevated: true, allow: allowOf() });
+      const acts = countActs(list);
+      auditLine({ at: Date.now(), actor: (meta && meta.actor) || (target && target.actor) || null, windowClass: front.windowClass, windowTitle: front.windowTitle, keys: acts.keys, clicks: acts.clicks, ok: v.ok, why: v.why });
+      if (!v.ok) return { ok: false, n: 0, refused: list.map((e, i) => ({ i, t: e && e.t, code: 'inject_not_allowed', detail: v.why })), code: 'inject_not_allowed', error: WHY_TEXT[v.why] || 'injection into this window is not allowed' };
     }
     for (let i = 0; i < list.length; i++) {
       const c = kind === 'cgevent' ? macCommandsOf(list[i], target) : commandsOf(list[i]);
@@ -329,4 +379,4 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
   return { kind, inject, clip, close };
 }
 
-module.exports = { SCAN_CODES, commandsOf, MAC_KEYCODES, macCommandsOf, INPUT_PS, macRespawn, createInjector };
+module.exports = { SCAN_CODES, commandsOf, MAC_KEYCODES, macCommandsOf, INPUT_PS, macRespawn, createInjector, injectAllowed, INJECT_DENY_CLASSES };

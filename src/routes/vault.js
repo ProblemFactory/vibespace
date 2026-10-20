@@ -3,10 +3,13 @@
 // changes it, sets the idle lock — from this instance's own page, behind its sign-in; an agent may read the state and LOCK
 // (`vibespace-vault status|lock`), never unlock. Every password arrives in a request body and goes straight to the engine
 // (src/server/vault-engine.js) — it is never logged, echoed, or kept on the request. The engine paces wrong passwords
-// (5 ⇒ the next minute refused, `paced`) and audits every failure with the caller's address.
+// (5 ⇒ the next minute refused, `paced`) and audits every failure with the caller's address. TWO-STEP CODES (design q-047
+// L1, lane vault-totp — src/server/vault-totp.js): a person adds, views the code of, deletes and grants an entry; an agent
+// gets a granted entry's CURRENT CODE (never the seed) — a seed arrives in a request body and is taken off it like a password.
 const { ownOriginOf, pageVerdict } = require('../write-origin.js');   // THE origin rule (its strict form: a person on this page)
 const { sameToken } = require('../pairing-token.js');
 const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
+const { runOfToken } = require('../server/vault-totp.js');
 
 const STATUS = Object.freeze({
   wrong_password: 403, corrupt: 500, paced: 429, vault_not_set_up: 409, already_set_up: 409, busy: 409, migration_failed: 500,
@@ -14,6 +17,9 @@ const STATUS = Object.freeze({
   human_only: 403, cross_site: 403, unauthorized: 401, vault_locked: 423, no_link: 404,
   reveal_needs_password: 403, not_found: 404, unreadable: 500, // lane vault-contents-window
   not_revealable: 403, // int317: a machine's link token / a sealed file's key — never shown
+  // design q-047 L1 (lane vault-totp): the two-step doors
+  exists: 409, bad_seed: 400, seed_too_short: 400, bad_uri: 400, hotp_unsupported: 400, bad_digits: 400, bad_period: 400, bad_algorithm: 400, bad_text: 400, bad_name: 400,
+  bad_args: 400, not_granted: 403, not_running: 409, failed: 500,
 });
 const WORDS = Object.freeze({
   wrong_password: 'that is not the second password',
@@ -37,6 +43,20 @@ const WORDS = Object.freeze({
   not_found: 'that stored value is not there any more',
   unreadable: 'that stored value could not be opened',
   not_revealable: 'that stored value is never shown — VibeSpace uses it itself (a machine\'s link token runs commands on that machine)',
+  exists: 'a two-step code of that name is in the vault already — delete it first, or pick another name',
+  bad_seed: 'that is not a two-step seed (base32: the letters A–Z and the digits 2–7)',
+  seed_too_short: 'that seed is too short to be a two-step seed',
+  bad_uri: 'that is not an otpauth://totp/ link',
+  hotp_unsupported: 'a counter-based (HOTP) code is not supported — only time-based two-step codes',
+  bad_digits: 'a two-step code is 6 to 8 digits',
+  bad_period: 'a two-step code changes every 15 to 120 seconds',
+  bad_algorithm: 'the algorithm is SHA1, SHA256 or SHA512',
+  bad_text: 'the issuer or the account is too long or holds a control character',
+  bad_name: 'a name is 1–120 letters, digits, ".", "_" or "-"',
+  bad_args: 'name a running conversation or a task group',
+  not_granted: 'this conversation may not use that two-step code — the owner grants it in the Vault window (用于…); never ask for the seed',
+  not_running: 'that conversation is not running — a code is granted to a running conversation',
+  failed: 'the two-step door failed — nothing changed',
 });
 const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
 const ipOf = (req) => String(req.ip || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '') || null;
@@ -50,7 +70,8 @@ function personVerdict(req) {
   return v.ok ? { ok: true } : { ok: false, code: 'cross_site' };
 }
 
-function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {} }) {
+function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {},
+  totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }) }) {
   const answer = (res, r) => {
     if (r && r.ok) return res.json({ ...r, ...vault.facts() });
     const code = (r && r.code) || 'error';
@@ -65,8 +86,8 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   };
   const person = (fn) => async (req, res) => {
     const v = personVerdict(req);
-    if (!v.ok) { take(req, 'password', 'old', 'new'); return answer(res, v); }
-    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
+    if (!v.ok) { take(req, 'password', 'old', 'new', 'seed', 'uri'); return answer(res, v); }
+    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new', 'seed', 'uri'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
   };
   /** An AGENT (vsst_ session / jbt_ job token) — it may read the state and lock, nothing else. */
   const agentOk = (req) => {
@@ -96,6 +117,36 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     app.post('/api/vault/reveal-session', person((req) => { const [pw] = take(req, 'password'); return contents.startReveal(whoOf(req), pw, { ip: ipOf(req) }); }));
     app.post('/api/vault/reveal', person((req) => { const [page] = take(req, 'page'); return contents.reveal(whoOf(req), page, req.body && req.body.id, { ip: ipOf(req) }); }));
     app.post('/api/vault/reveal-end', person((req) => { const [page] = take(req, 'page'); return contents.endReveal(whoOf(req), page); }));
+  }
+  // ── TWO-STEP CODES (design q-047 L1, lane vault-totp — src/server/vault-totp.js over PURE src/totp.js). PEOPLE: the list
+  //    (names + grants), 添加 (an otpauth:// link or the seed — taken off the body; `preview` = the code it makes, nothing
+  //    stored), 看码 (the CURRENT code — no 「验证是你」, audited, paced), 删除, 用于… (grant / take back). The seed itself
+  //    shows only through /api/vault/reveal (the window above). Never cached by a proxy. ──
+  if (totp) {
+    const whoT = (req) => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } };
+    const noStore = (fn) => (req, res) => { res.set('Cache-Control', 'no-store'); return fn(req, res); };
+    const body = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
+    app.get('/api/vault/totp', noStore(person(() => ({ ...totp.list({ live: grantLive }), subjects: subjects() }))));
+    app.post('/api/vault/totp', noStore(person((req) => {
+      const [uri, seed] = take(req, 'uri', 'seed');
+      const b = body(req);
+      return totp.addEntry({ uri, seed, name: b.name, issuer: b.issuer, account: b.account, digits: b.digits, period: b.period, algorithm: b.algorithm }, { who: whoT(req), ip: ipOf(req), preview: b.preview === true });
+    })));
+    app.get('/api/vault/totp/:name', noStore(person((req) => totp.view(whoT(req), req.params.name, { ip: ipOf(req) }))));
+    app.delete('/api/vault/totp/:name', noStore(person((req) => totp.drop(req.params.name, { who: whoT(req), ip: ipOf(req) }))));
+    app.post('/api/vault/totp/:name/grants', noStore(person((req) => totp.grant(req.params.name, body(req).subjects, { who: whoT(req), ip: ipOf(req), by: `user:${whoT(req).slice(0, 24)}`, runOf }))));
+    app.delete('/api/vault/totp/grants/:id', noStore(person((req) => totp.ungrant(req.params.id, { who: whoT(req), ip: ipOf(req) }))));
+    // AGENTS: a granted entry's CURRENT code + the seconds left — never the seed, never a setting. The caller = the vsst_'s
+    // conversation (its run = the token's digest); a job token, an unknown token ⇒ 401; every answer audited (vault-totp-use)
+    app.get('/api/agent/vault/totp/:name', (req, res) => {
+      res.set('Cache-Control', 'no-store');
+      const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
+      let caller = null;
+      try { caller = token.startsWith('vsst_') ? callerOf(token) : null; } catch { caller = null; }
+      if (!caller) return answer(res, { ok: false, code: 'unauthorized' });
+      const r = totp.use({ conversationId: caller.conversationId, groups: caller.groups, live: caller.live, run: runOfToken(token) }, req.params.name, { ip: ipOf(req) });
+      return r.ok ? res.json({ ok: true, name: r.name, code: r.code, secondsLeft: r.secondsLeft, period: r.period }) : answer(res, r);
+    });
   }
   // ── agents: the state and the lock — never unlock ──
   app.get('/api/agent/vault/state', (req, res) => (agentOk(req) ? res.json(agentFacts()) : answer(res, { ok: false, code: 'unauthorized' })));

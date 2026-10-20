@@ -396,6 +396,24 @@ function psOnce(script) {
     catch { resolve({ code: null, stdout: '' }); }
   });
 }
+// lane win-input-elevated: the daemon's OWN token elevation (is it admin?). A process's own elevation never changes, so it
+// is measured once and cached; it is read live at EVERY hello (a self-upgrade re-reads from the new process's token). The
+// installer's one-time RunLevel-Highest task (or the owner's own task change) is the ONLY thing that elevates — the product
+// forces nothing. win32 only; a non-win32 daemon, a failed or timed-out probe ⇒ NOT elevated (the safe default: fenced).
+let amIElevatedCache = null; // null = not yet measured; true/false once known
+let amIElevatedRun = null;
+function amIElevated() {
+  if (process.platform !== 'win32') { amIElevatedCache = false; return Promise.resolve(false); }
+  if (amIElevatedCache !== null) return Promise.resolve(amIElevatedCache);
+  if (amIElevatedRun) return amIElevatedRun;
+  amIElevatedRun = psOnce('[Console]::Out.Write(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))')
+    .then((r) => { amIElevatedCache = r.code === 0 && /^true$/i.test(String(r.stdout).trim()); return amIElevatedCache; })
+    .catch(() => { amIElevatedCache = false; return false; })
+    .finally(() => { amIElevatedRun = null; });
+  return amIElevatedRun;
+}
+// a sync read for the injector: false until the first measure resolves (the boot kick starts it before the first hello)
+function selfElevated() { return amIElevatedCache === true; }
 function consoleCodePage() {
   if (!codePageAsk) codePageAsk = XS.codePageAsker({ execFile: require('child_process').execFile, envOf: () => spawnEnv() });
   return codePageAsk;
@@ -515,6 +533,27 @@ const TOKEN_FILE = path.join(STATE, 'token');
 // the `dial-status` op, written by the dial loop at every outcome (atomic tmp+rename, 0600; never the token)
 const DIAL_STATUS_FILE = path.join(STATE, 'dial-status.json');
 function readDialStatus() { try { return JSON.parse(fs.readFileSync(DIAL_STATUS_FILE, 'utf-8')); } catch { return null; } }
+// lane win-input-elevated: the daemon's record of every act injected into an ELEVATED window (the fence's audit) —
+// state/input-audit.jsonl, a bounded ring. Fields: at, actor, windowClass, windowTitle, keys, clicks, ok, why.
+const INPUT_AUDIT_FILE = path.join(STATE, 'input-audit.jsonl');
+const INPUT_AUDIT_MAX = 2000;
+function appendInputAudit(line) {
+  try {
+    fs.mkdirSync(STATE, { recursive: true });
+    let prev = ''; try { prev = fs.readFileSync(INPUT_AUDIT_FILE, 'utf-8'); } catch { }
+    let rows = prev ? prev.split('\n').filter(Boolean) : [];
+    rows.push(JSON.stringify({ at: new Date().toISOString(), ...line }));
+    if (rows.length > INPUT_AUDIT_MAX) rows = rows.slice(rows.length - INPUT_AUDIT_MAX);
+    fs.writeFileSync(INPUT_AUDIT_FILE, rows.join('\n') + '\n', { mode: 0o600 });
+  } catch { }
+}
+// the owner's optional allow-list of window classes agents may type into WHEN the daemon is elevated (state/input-allow.json
+// {classes:[...]}); absent/empty ⇒ null ⇒ every non-denied window is allowed (the UAC consent UI + secure desktop are ALWAYS denied).
+const INPUT_ALLOW_FILE = path.join(STATE, 'input-allow.json');
+function readInputAllow() {
+  try { const j = JSON.parse(fs.readFileSync(INPUT_ALLOW_FILE, 'utf-8')); const c = j && Array.isArray(j.classes) ? j.classes.filter((x) => typeof x === 'string' && x) : null; return c && c.length ? c : null; } catch { return null; }
+}
+
 function writeDialStatus(st) {
   try { const tmp = DIAL_STATUS_FILE + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(st), { mode: 0o600 }); fs.renameSync(tmp, DIAL_STATUS_FILE); }
   catch (e) { try { log('dial-status not written: ' + e.message); } catch { } }
@@ -1474,7 +1513,7 @@ const windowWatches = new Map();
 // one) and the WebRTC stream sessions that feed it (src/agentd/stream-host.js) — both made at their first use, so werift
 // is never loaded by an agent that never streams
 let inputInjector = null, streamHost = null, streamScreen = null, streamWindow = null;
-const injectorOf = () => inputInjector || (inputInjector = require('./../input-inject.js').createInjector({ platform: process.platform, spawn: require('child_process').spawn, env: spawnEnv(), stubFile: process.env.VIBESPACE_INPUT_STUB_FILE || null, fs, log, mac: () => macHelperOf() }));
+const injectorOf = () => inputInjector || (inputInjector = require('./../input-inject.js').createInjector({ platform: process.platform, spawn: require('child_process').spawn, env: spawnEnv(), stubFile: process.env.VIBESPACE_INPUT_STUB_FILE || null, fs, log, mac: () => macHelperOf(), elevated: selfElevated, allow: readInputAllow, audit: appendInputAudit }));
 // lane stream-p1b-screen (design q-041 r2 §2 采集/映射+编码): THE screen source — this machine's facts (`stream-facts`) and its
 // ffmpeg pipelines (src/agentd/stream-screen.js); the HDR road's mapper is a worker of THIS bundle (the `stream-map` branch)
 const streamMapWorker = () => new (require('worker_threads').Worker)(__filename, { workerData: { role: 'stream-map' } });
@@ -1760,11 +1799,12 @@ function serveConnection(sock, { dialed = false } = {}) {
         authed = true;
         authedServers++;
         this._countedServer = true;
-        posixShells().then((shells) => mux.control({ // verify-r2: measured now (≤ POSIX_PROBE_MS, async) — a shell installed since this agent started counts
+        Promise.all([posixShells(), amIElevated()]).then(([shells, elevated]) => mux.control({ // verify-r2: measured now (≤ POSIX_PROBE_MS, async) — a shell installed since this agent started counts
           op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: VERSION,
           platform: process.platform, arch: process.arch, nodeVersion: process.version,
           posixShells: shells, // lane windows-device-fs verify-r1 F1: the shells THIS machine starts (the hub's door keys on it)
           policy: DP.reportOf(POLICY), // lane device-allow-flags: THIS machine's allow list (read-only for the hub: it shows it, asks it first)
+          elevated, // lane win-input-elevated: THIS daemon's own token runs elevated (admin), read live each hello; absent on an old daemon ⇒ the hub treats it as not-elevated and never asks it to type into an admin window
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
@@ -2781,7 +2821,7 @@ if (SOCK_PICK && SOCK_PICK.via !== 'natural') {
 const lockIsOurs = () => { try { return fs.readFileSync(LOCK, 'utf-8').trim() === String(process.pid); } catch { return false; } };
 listenWithRetry(server, SOCK, { log, lockIsOurs, onFatal: (e) => { log('server error: ' + e.message); process.exit(1); }, onListening: () => {
   try { fs.chmodSync(SOCK, 0o600); } catch { }
-  posixShells(); // verify-r2: the first measure starts at boot, so the first hello rarely waits for it
+  posixShells(); amIElevated(); // verify-r2: the first measure starts at boot, so the first hello rarely waits for it (amIElevated too, so the first hello reports a known value)
   if (SOCK_PICK) {
     // the WITNESS: the bridge and the hub read where we REALLY listen (atomic, 0600)
     try { const w = SOCKP.witnessPathOf(ROOT), tmp = w + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, SOCK + '\n', { mode: 0o600 }); fs.renameSync(tmp, w); } catch (e) { log('socket witness not written: ' + e.message); }

@@ -2,7 +2,7 @@
 // VIBESPACE'S OWN AUTOMATION KEYS ON A REAL HUB (heavy: a worktree hub, a stub claude behind the real chat wrapper, headless
 // Chrome — design q-046 L1, lane automation-keys-core). The whole chain, end to end:
 //   ① the vault set up from the page · ② a LIVE conversation through the real spawn (its own vsst_ in the stub's env)
-//   ③ the Vault window's «自动化 key»: 铸造… (a name + 给对话改名) ⇒ the row: its name, its verb, 「只为交给外界」 beside 显示,
+//   ③ the Vault window's «自动化 key»: 铸造… (a name + 给对话改名) ⇒ the row: its name, its verb, 「显示」's help says why (lane vault-window-v2: never a line beside it),
 //      no grant yet — and no value anywhere in the page
 //   ④ THE FIRST USE: the conversation runs the REAL `vibespace-api call conversations.rename` with no grant ⇒ ONE urgent card
 //      in For you; the person presses 「一直（授权给这个会话）」 in the tray ⇒ the waiting call renames the conversation (the
@@ -10,7 +10,7 @@
 //   ⑤ THE AUDIT: exactly two lines for that conversation (the grant, the rename — asked: always), names only; `vibespace-api
 //      audit` prints them
 //   ⑥ 授权给… (the picker, multi-select): unchecked ⇒ the grant goes; checked ⇒ it is back
-//   ⑦ 显示 ⇒ 验证是你 ⇒ the value (vsak_…) in ITS row only, 「只为交给外界」 beside it; the vault's audit has the reveal
+//   ⑦ 显示 ⇒ 验证是你 ⇒ the value (vsak_…) in ITS row only, nothing said beside it as a state; the vault's audit has the reveal
 //   ⑧ THE LOCK ⇒ the door answers 423 vault_locked and the CLI exits 3 saying so; the unlock ⇒ it works again
 //   ⑨ 撤销 ⇒ the row goes, the CLI's `keys` says nothing is granted · ⑩ the words in Japanese (自動化キー / 発行…)
 //   ⑨b THE LIMITS (lane automation-open-limits — the q-048 verify's M2): 铸造… with 开一个对话 ticked shows the limits (absent
@@ -103,8 +103,12 @@ const load = async (lang) => {
   void lang;
 };
 const ROW = '.vw-row[data-store="automation"]';
-const openWindow = async () => { await evalJs(`app.replayOpenSpec({ action: 'openVault' })`); return until(visible('.vw-group[data-store="automation"]'), 15000); };
-const closeWindows = () => evalJs(`(() => { for (const [id, w] of app.wm.windows) if (w && w.type === 'vault') app.wm.closeWindow(id); return true; })()`);
+// lane vault-window-v2: the window groups by PURPOSE and 全部 draws a purpose only when it holds a row — the rail's «自动化 key» opens
+// the purpose itself (its head with 铸造… even while it is empty)
+const openWindow = async () => { await evalJs(`app.replayOpenSpec({ action: 'openVault' })`); if (!(await until(visible('.vw-rail-item[data-purpose="automation"]'), 15000))) return false; await click('.vw-rail-item[data-purpose="automation"]'); return until(visible('.vw-group[data-purpose="automation"]'), 15000); };
+// lane vault-window-v2: wait until the old window has LEFT the page — openWindow then reads the new one's rail and head (a
+// closing window's rail answered the click and its rows the next read: the new window had not drawn yet)
+const closeWindows = async () => { await evalJs(`(() => { for (const [id, w] of app.wm.windows) if (w && w.type === 'vault') app.wm.closeWindow(id); return true; })()`); return until(`!document.querySelector('.vw')`, 5000); };
 const cli = (args, { token }) => new Promise((resolve) => {
   const p = spawn(process.execPath, [path.join(wt, 'data/bin/vibespace-api'), ...args], { env: { PATH: process.env.PATH, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '', err = '';
@@ -136,16 +140,16 @@ try {
   check('a live claude chat session (stub CLI behind the real wrapper), its own vsst_ in its env, its conversation id known', !!wid && !!token && token.startsWith('vsst_') && !!(await live()), { wid, token: !!token });
 
   console.log('③ the Vault window: 铸造… an automation key');
-  check('the window opens on «自动化 key» (a group head with 铸造…)', !!(await openWindow()) && (await textOf('.vw-group[data-store="automation"] .vw-group-name')) === '自动化 key' && (await textOf('.vw-ak-mint')) === '铸造…');
+  check('the window opens on «自动化 key» (a group head with 铸造…)', !!(await openWindow()) && (await textOf('.vw-group[data-purpose="automation"] .vw-group-name')) === '自动化 key' && (await textOf('.vw-ak-mint')) === '铸造…');
   await click('.vw-ak-mint');
   check('铸造… opens its dialog: a name and the closed table of verbs (开一个对话 says it bills)', !!(await until(visible('#vault-ak-mint'), 5000)) && /（会开始一个计费回合）/.test(await textOf('#vault-ak-mint')) && (await evalJs(`document.querySelectorAll('#vault-ak-mint .vw-ak-verbs .vw-ak-pick input[type=checkbox]').length`)) === 6 && !(await evalJs(visible('#vault-ak-mint .vw-ak-limwrap')))); // lane automation-verbs: + conversations.status (a read)
   await typeInto('#vault-ak-mint .vw-ak-name', 'Lane dispatch');
   await evalJs(`(() => { const c = document.querySelector('#vault-ak-mint input[value="conversations.rename"]'); c.checked = true; return true; })()`);
   await click('.vw-ak-mint-go');
-  const row = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW)}); return r ? { label: r.querySelector('.vw-label').textContent, why: (r.querySelector('.vw-ak-why') || {}).textContent, none: (r.querySelector('.vw-ak-none') || {}).textContent, scopes: (r.querySelector('.vw-ak-scopes') || {}).textContent } : null; })()`, 15000);
-  check('the row: the key\'s name, its verb, 「只为交给外界」 beside 显示, no grant yet', row && row.label === 'Lane dispatch' && row.why === '只为交给外界' && row.scopes === '给对话改名' && row.none === '还没有授权给任何会话或任务组', row);
+  const row = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW)}); return r ? { label: r.querySelector('.vw-label').textContent, why: (r.querySelector('.vw-show') || {}).title, line: r.querySelectorAll('.vw-ak-why').length, none: (r.querySelector('.vw-ak-none') || {}).textContent, scopes: (r.querySelector('.vw-ak-scopes') || {}).textContent } : null; })()`, 15000);
+  check('the row: the key\'s name, its verb, the reason as 「显示」\'s HELP (lane vault-window-v2 — the owner read the old line beside it as the key\'s state), no grant yet', row && row.label === 'Lane dispatch' && row.why === '显示密钥值——只在要交给外部系统时；内部 agent 按授权使用，不需要看到值' && row.line === 0 && row.scopes === '给对话改名' && row.none === '还没有授权给任何会话或任务组', row);
   check('no value anywhere in the page (markup + every input)', !/vsak_/.test(await pageText()));
-  await evalJs(`(() => { document.querySelector('.vw-group[data-store="automation"]').scrollIntoView({ block: 'start' }); return true; })()`);
+  await evalJs(`(() => { document.querySelector('.vw-group[data-purpose="automation"]').scrollIntoView({ block: 'start' }); return true; })()`);
   await shot('ak-1-window.png');
 
   console.log('④ THE FIRST USE — the real CLI, no grant ⇒ the card ⇒ 一直');
@@ -196,7 +200,7 @@ try {
   check('「显示」 asks 验证是你', (await until(`document.querySelector('#vault-reveal-dialog h3')?.textContent`, 8000)) === '验证是你');
   await typeInto('#vault-reveal-pw', SECOND); await click('.vault-reveal-go');
   const plain = await until(`document.querySelector(${JSON.stringify(ROW + ' .vw-plain')})?.value`, 10000);
-  check('the value appears in ITS row (vsak_ + 43), 「只为交给外界」 beside it', /^vsak_[A-Za-z0-9_-]{43}$/.test(plain || '') && (await textOf(ROW + ' .vw-ak-why')) === '只为交给外界', plain && plain.slice(0, 5));
+  check('the value appears in ITS row (vsak_ + 43); no sentence beside it reads as a state (lane vault-window-v2)', /^vsak_[A-Za-z0-9_-]{43}$/.test(plain || '') && (await evalJs(`document.querySelectorAll(${JSON.stringify(ROW + ' .vw-ak-why')}).length`)) === 0, plain && plain.slice(0, 5));
   await shot('ak-4-revealed.png');
   const va = fs.readFileSync(path.join(wt, 'data', 'vault-audit.jsonl'), 'utf8');
   check('the vault\'s audit has the reveal (store automation) — never the value', /"event":"vault-reveal".*"store":"automation"/.test(va) && !va.includes(plain), null);
@@ -308,7 +312,7 @@ try {
   await evalJs(`(() => { localStorage.setItem('vibespace.lang', 'ja'); return true; })()`);
   await load();
   await openWindow();
-  check('「自動化キー」 + 「発行…」', (await textOf('.vw-group[data-store="automation"] .vw-group-name')) === '自動化キー' && (await textOf('.vw-ak-mint')) === '発行…');
+  check('「自動化キー」 + 「発行…」', (await textOf('.vw-group[data-purpose="automation"] .vw-group-name')) === '自動化キー' && (await textOf('.vw-ak-mint')) === '発行…');
   check('「制限…」 + 「監査ログ…」 on a key that opens (lane automation-open-limits)', !!(await until(`[...document.querySelectorAll('.vw-ak-limits-edit')].some((b) => b.textContent === '制限…') && [...document.querySelectorAll('.vw-ak-audit')].some((b) => b.textContent === '監査ログ…')`, 8000)));
   await shot('ak-5-ja.png');
 } catch (e) {

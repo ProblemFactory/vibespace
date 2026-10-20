@@ -9629,4 +9629,80 @@ export default {
   "The relay holds a different name list for this instance — its record here or at the relay was changed. Rotate the relay token in Plugins › Public URLs and send the new registration line to the relay admin.": "リレーに登録されたこのインスタンスの名前一覧が違います — こちらかリレー側の記録が変更されています。プラグイン › 公開 URL でリレートークンをローテーションし、新しい登録行をリレー管理者に送ってください。", // lane relay-token-per-instance
   "Relay token revoked — mint a new one": "リレートークンは取り消されました — 新しく発行してください", // lane relay-token-per-instance
   "Own relay token": "自分のリレートークン", // lane relay-token-per-instance
+  "A person stored it — in this window, a card or Settings": "人が保存しました——このウィンドウ、カード、または設定で", // lane vault-window-v2
+  "A person scanned or pasted it": "人がスキャンまたは貼り付けで保存しました", // lane vault-window-v2
+  "VibeSpace made it itself — nobody typed it in": "VibeSpace が自分で生成しました——誰も入力していません", // lane vault-window-v2
+  "An agent had VibeSpace make it — the agent never saw the value": "エージェントが VibeSpace に生成させました——エージェントは値を見ていません", // lane vault-window-v2
+  "An agent stored a value it had seen — rotate it": "エージェントが見た値を保存しました——更新を推奨します", // lane vault-window-v2
+  "VibeSpace uses it itself — it is never shown": "VibeSpace 自身が使います——表示されません", // lane vault-window-v2
+  "Show the key's value — only to hand it to an outside system; agents inside use it by grant and never need to see it": "キーの値を表示——外部システムに渡すときだけ。内部のエージェントは許可で使い、値を見る必要はありません", // lane vault-window-v2
+  "Show this value — the second password is asked once, then values stay visible for 5 minutes": "この値を表示——第二パスワードを一度入力すると、5 分間表示されます", // lane vault-window-v2
+  "Show every value listed — the second password is asked once, then values stay visible for 5 minutes": "一覧の値をすべて表示——第二パスワードを一度入力すると、5 分間表示されます", // lane vault-window-v2
+  "Hide this value": "この値を隠す", // lane vault-window-v2
+  "Expired": "期限切れ", // lane vault-window-v2
+  "Expires in {n} days": "{n} 日後に期限切れ", // lane vault-window-v2
+  "Rotate suggested": "更新を推奨", // lane vault-window-v2
+  "Account…": "アカウント…", // lane vault-window-v2
+  "Integration key…": "連携キー…", // lane vault-window-v2
+  "Channel account…": "チャネルアカウント…", // lane vault-window-v2
+  "Automation key…": "自動化キー…", // lane vault-window-v2
+  "Needs you": "対応が必要", // lane vault-window-v2
+  "What it is for": "用途", // lane vault-window-v2
+  "Search names, kinds, where they came from…": "名前・種類・出所で検索…", // lane vault-window-v2
+  "Only the ones I can show": "表示できるものだけ", // lane vault-window-v2
+  "Where from": "出所", // lane vault-window-v2
+  "The code could not be read — {reason}": "コードを読めません——{reason}", // lane vault-window-v2
+  "{n} s left": "残り {n} 秒", // lane vault-window-v2
+  "{when} · you": "{when} · あなた", // lane vault-window-v2
+  "{when} · VibeSpace": "{when} · VibeSpace", // lane vault-window-v2
+  "View code": "コードを見る", // lane vault-window-v2
+  "No stored value matches these filters": "この絞り込みに合う値はありません", // lane vault-window-v2
+  "Got it": "了解", // lane vault-window-v2
+  "Open the row": "行を開く", // lane vault-window-v2
+  "{n} stored values, sealed in the vault. Showing one asks for the second password again; they stay visible for 5 minutes. Every reveal is recorded.": "{n} 件の値が保管庫に封印されています。表示するには第二パスワードをもう一度入力します。5 分間表示され、表示はすべて記録されます。", // lane vault-window-v2
+  "While it is locked every use answers «locked» — nothing fails in another way.": "ロック中は、すべての利用が「ロック中」と答えます——別の形で失敗することはありません。", // lane vault-window-v2
+  "Two-step codes": "2 段階認証コード", // lane vault-window-v2
+  "Accounts & sign-in": "アカウントとサインイン", // lane vault-window-v2
+  "Integrations & channels": "連携とチャネル", // lane vault-window-v2
+  "Machines & relay": "マシンとリレー", // lane vault-window-v2
+  "Kept by agents": "エージェントの保管", // lane vault-window-v2
+  "By you": "自分", // lane vault-window-v2
+  "Scanned · by you": "スキャン · 自分", // lane vault-window-v2
+  "Minted by the hub · never shown": "ハブが生成 · 未表示", // lane vault-window-v2
+  "Minted by an agent · never shown": "エージェントが生成 · 未表示", // lane vault-window-v2
+  "Stored by an agent · it saw the value": "エージェントが保存 · 平文を見た", // lane vault-window-v2
+  "System · never shown": "システム · 表示しない", // lane vault-window-v2
+  "Minted by an agent": "エージェントが生成", // lane vault-window-v2
+  "An agent saw it": "エージェントが平文を見た", // lane vault-window-v2
+  "Using “{name}” failed": "「{name}」の利用に失敗しました", // lane vault-window-v2
+  "An automation key could not be used": "自動化キーを利用できませんでした", // lane vault-window-v2
+  "{n} refused within the hour — the vault was locked: {locked} · not granted: {granted} · expired: {expired}": "1 時間で {n} 回拒否——保管庫がロック中：{locked} · 未許可：{granted} · 期限切れ：{expired}", // lane vault-window-v2
+  "Last asked by {who}": "最後の要求：{who}", // lane vault-window-v2
+  "Open the Vault window to see the row. A locked vault answers every use «locked» until a person unlocks it; a grant is given in the row.": "保管庫ウィンドウでその行を確認してください。ロック中の保管庫は、誰かが解除するまですべての利用に「ロック中」と答えます。許可はその行で与えます。", // lane vault-window-v2
+  "“{name}” was stored by an agent that saw its value — rotate it": "「{name}」はエージェントが平文を見て保存しました——更新を推奨します", // lane vault-window-v2
+  "Stored by {who}": "{who} が保存", // lane vault-window-v2
+  "Renew it where it was issued, then store the new value; until then the agent's transcript holds the old one.": "発行元で新しくして、新しい値を保存してください。それまではエージェントの記録に古い値が残ります。", // lane vault-window-v2
+  "Show the seed and its settings as an otpauth link — the second password is asked once; the code itself needs none": "シードと設定を otpauth リンクとして表示——第二パスワードを一度入力します。コード自体はパスワード不要です", // lane vault-window-v2
+  "Two-step code": "2 段階認証コード", // design q-047 L1 (lane vault-totp)
+  "Hide code": "コードを隠す", // design q-047 L1 (lane vault-totp)
+  "The current two-step code — no second password; every view is in the vault's audit": "現在の 2 段階認証コード — 第二パスワードは不要。表示のたびに保管庫の監査に記録されます", // design q-047 L1 (lane vault-totp)
+  "Shows the seed and its settings (an otpauth link) — after the second password": "シードとその設定（otpauth リンク）を表示 — 第二パスワードの入力後", // design q-047 L1 (lane vault-totp)
+  "Use for…": "使用先…", // design q-047 L1 (lane vault-totp)
+  "Grant the current code (never the seed) to a running conversation or a task group": "現在のコード（シードは渡さない）を実行中の会話またはタスクグループに許可します", // design q-047 L1 (lane vault-totp)
+  "Code granted to:": "コードの許可先:", // design q-047 L1 (lane vault-totp)
+  "ended": "終了", // design q-047 L1 (lane vault-totp)
+  "Grant the code of \"{name}\" to": "「{name}」のコードを許可する相手", // design q-047 L1 (lane vault-totp)
+  "A conversation granted the code gets the current code (vibespace-vault totp) — never the seed. A conversation's grant ends when that conversation ends.": "許可された会話が受け取るのは現在のコード（vibespace-vault totp）だけで、シードは決して受け取りません。会話への許可はその会話の終了とともに失効します。", // design q-047 L1 (lane vault-totp)
+  "Delete the two-step code \"{name}\"?": "2 段階認証コード「{name}」を削除しますか？", // design q-047 L1 (lane vault-totp)
+  "Its seed leaves the vault and every grant of its code stops. A site that asks for this code needs it set up again.": "シードは保管庫から消え、このコードの許可はすべて止まります。このコードを求めるサイトでは設定し直しが必要です。", // design q-047 L1 (lane vault-totp)
+  "The device agent runs as administrator — agents can type into windows you opened as administrator (you choose which, in the allow list)": "デバイスエージェントは管理者として動作します — あなたが管理者として開いたウィンドウにエージェントが入力できます（どれを許可するかは許可リストで選べます）", // lane win-input-elevated
+  "ADMIN": "管理者", // lane win-input-elevated
+  "Run as administrator…": "管理者として実行…", // lane win-input-elevated
+  "Run \"{name}\"’s device agent as administrator": "\"{name}\" のデバイスエージェントを管理者として実行", // lane win-input-elevated
+  "When the device agent runs as administrator, agents can type into windows you opened as administrator — and you choose which, in the allow list. VibeSpace never elevates on its own; Windows asks you to confirm.": "デバイスエージェントが管理者として動作すると、あなたが管理者として開いたウィンドウにエージェントが入力できます — どれを許可するかは許可リストで選びます。VibeSpace が自分で昇格することはなく、Windows が確認を求めます。", // lane win-input-elevated
+  "Easiest: run the pairing command again — it now runs as administrator by default and asks you to confirm once. Or, in an administrator PowerShell on the machine, run:": "一番簡単なのは、ペアリングコマンドをもう一度実行することです — 既定で管理者として動作し、一度だけ確認を求めます。または、そのマシンの管理者 PowerShell で次を実行します：", // lane win-input-elevated
+  "Copied — run it in an administrator PowerShell on the machine": "コピーしました — そのマシンの管理者 PowerShell で実行してください", // lane win-input-elevated
+  "On Windows the device agent runs as administrator by default — Windows asks you to confirm once when you run the command. Agents can then type into windows you opened as administrator (you choose which, in the allow list below).": "Windows ではデバイスエージェントは既定で管理者として動作します — コマンドを実行すると Windows が一度だけ確認を求めます。その後、エージェントはあなたが管理者として開いたウィンドウに入力できます（どれを許可するかは下の許可リストで選びます）。", // lane win-input-elevated
+  "Install with normal rights (no administrator)": "通常の権限でインストール（管理者なし）", // lane win-input-elevated
+  "administrator": "管理者", // lane win-input-elevated
 };

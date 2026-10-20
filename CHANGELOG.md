@@ -2,6 +2,20 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.328 — 2026-10-20
+
+### Added
+- The vault can keep two-step (authenticator) codes: you see the current code while it is unlocked, and the seed only after the second password.
+- A conversation you allow with Use for… gets a two-step code's current code when it asks, never the seed.
+- When an agent's use of a stored key is refused (the vault locked, not granted, expired), For you tells you once an hour per key.
+
+### Changed
+- The Vault window groups what it keeps by what each secret is for, with search, sort, where each came from and a Needs you band at the top; the phone too.
+- An automation key's Show button now says in its help when to show the value; the line beside the key that read like its state is gone.
+
+### Security
+- When you run VibeSpace's device agent elevated, the app shows it and lets you allow or block which windows agents may type into.
+
 ## 2.369.327 — 2026-10-20
 
 ### Added

@@ -17,7 +17,8 @@ param(
   [Parameter(Mandatory=$true)][string]$HostToken,
   [string]$NodeExe,
   [string]$Allow,
-  [switch]$NoCheck
+  [switch]$NoCheck,
+  [switch]$NoElevate
 )
 $ErrorActionPreference = 'Stop'
 # PS 5.1 defaults to TLS 1.0 — nodejs.org (and most CDNs) refuse it
@@ -196,6 +197,8 @@ if ($p.HasExited) {
 # daemon builds the SAME text (src/agentd/hidden-start.js logonTaskArgs) and re-registers an old install's task with it.
 # A PowerShell single-quoted literal (the curly single quotes PowerShell also reads as quotes are doubled too)
 function Quote-Ps([string]$s) { return "'" + ($s -replace '[''\u2018\u2019\u201A\u201B]', '$0$0') + "'" }
+# lane win-input-elevated: am I (the installer) already elevated? A function so a test can stub it (IsInRole is a .NET call).
+function Test-VsAdmin { return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
 $persist = 'none (re-run this command after a reboot)'
 try {
   $task = "VibeSpaceDevice-$dialHost"
@@ -206,8 +209,28 @@ try {
   $taskArgs = '-NoProfile -NonInteractive -WindowStyle Hidden -Command "' + $launch + '"'
   $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $taskArgs
   $s = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-  Register-ScheduledTask -TaskName $task -Action $a -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings $s -Force | Out-Null
-  $persist = "scheduled task '$task' (starts at logon, hidden)"
+  # ELEVATION (lane win-input-elevated): BY DEFAULT the device agent runs with highest privileges (RunLevel Highest) so that
+  # when an agent types into a window the person opened AS ADMINISTRATOR the input is not dropped by Windows UIPI. Registering a
+  # Highest task needs admin, so we ask the OS's OWN consent ONCE (Start-Process -Verb RunAs — the person clicks the UAC dialog;
+  # the product never elevates silently and never touches the consent UI). The elevated child gets only the task name, the
+  # SECRET-FREE argument string and the user id — never a token (the task is argless). A declined consent (or -NoElevate) ⇒ the
+  # task is registered at the normal level and the machine card offers 「Run as administrator…」.
+  $me = "$env:USERDOMAIN\$env:USERNAME"
+  $highest = $false
+  if (-not $NoElevate -and (Test-VsAdmin)) {
+    try { $p = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Highest; Register-ScheduledTask -TaskName $task -Action $a -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings $s -Principal $p -Force | Out-Null; $highest = $true } catch { $highest = $false }
+  } elseif (-not $NoElevate) {
+    try {
+      $reg = '$ErrorActionPreference=''Stop''; $a = New-ScheduledTaskAction -Execute ''powershell.exe'' -Argument ' + (Quote-Ps $taskArgs) + '; $s = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; $p = New-ScheduledTaskPrincipal -UserId ' + (Quote-Ps $me) + ' -LogonType Interactive -RunLevel Highest; Register-ScheduledTask -TaskName ' + (Quote-Ps $task) + ' -Action $a -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings $s -Principal $p -Force | Out-Null'
+      $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reg))
+      $proc = Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$enc
+      $highest = ($proc.ExitCode -eq 0) -and (((Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue).Principal.RunLevel) -eq 'Highest')
+    } catch { $highest = $false }
+  }
+  if (-not $highest) { Register-ScheduledTask -TaskName $task -Action $a -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings $s -Force | Out-Null }
+  if ($highest) { $persist = "scheduled task '$task' (starts at logon, hidden, RUNS AS ADMINISTRATOR)" }
+  elseif ($NoElevate) { $persist = "scheduled task '$task' (starts at logon, hidden; normal rights — you chose a normal install)" }
+  else { $persist = "scheduled task '$task' (starts at logon, hidden; normal rights — UAC was declined; use 'Run as administrator...' on the machine card to raise it)" }
 } catch { Write-Host "   (no scheduled task: $_)" }
 
 Write-Host "OK vibespace device agent running (pid $($p.Id)). Restart after reboot: $persist"

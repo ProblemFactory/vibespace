@@ -81,7 +81,16 @@ const vaultContents = require('./vault-contents.js').create({ vault, sources: {
   passkeys: () => (browserDialogs && typeof browserDialogs.passkeyVaultRows === 'function' ? { vaultRows: () => browserDialogs.passkeyVaultRows(), vaultReveal: (e, f) => browserDialogs.passkeyVaultReveal(e, f) } : null),
   automation: () => automation,   // design q-046: the automation keys (their values, one per reveal — to hand to an outside party)
 } });
+// design q-047 L1 (lane vault-totp): TWO-STEP CODES — the vault's `totp:<name>` entries (src/server/vault-totp.js over PURE
+// src/totp.js): a person sees the CODE (no 「验证是你」, audited); a conversation — THIS RUN of it (its token's digest) — or a
+// Task Group a person granted gets it; the seed only behind the reveal door, never to an agent
+const vaultTotp = require('./vault-totp.js').create({ dataDir: path.join(rootDir, 'data'), vault, log: (m) => console.log('[vault-totp]', m) });
+// the RUNNING session that carries `cid` AS ITS OWN (addressableId: a pending fork shares its parent's id and is never picked —
+// test-msg-cli-groups §2c); a use by such a fork presents another token, so the parent's run-bound grant never covers it
+const totpSessionOf = (cid) => [...activeSessions.values()].find((s) => s && !s.isTmuxView && require('../claude-lock-capture.js').addressableId(s) === cid) || null;
+const totpRunOf = (cid) => { const s = totpSessionOf(cid); return s ? require('./vault-totp.js').runOfToken(s.agentToken) : null; };   // THIS run of a running conversation (its token's digest)
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req),
+  totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
   linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
   // int317 (RED-3): the door's audit row → the device audit (the machine card's Activity…) — the session, its host key, the status
   auditLink: ({ sid, hostKey, status }) => { const h = vaultHostOf(hostKey); if (hosts && hosts.deviceAudit) hosts.deviceAudit.append(require('../device-acts.js').linkTokenLine({ at: Date.now(), sid, hostKey, hostId: h ? h.id : null, machine: h ? (h.name || h.id) : null, status })); } });
@@ -92,14 +101,19 @@ const automationGroupsOf = (s, id) => { const tasks = getTasks && getTasks(); if
 // lane automation-open-limits (the q-048 verify's M2): an open's limits judge the EFFECTIVE open — what it names, else the
 // account store's default and the instance's default model (the typed accessor ws-create's ladder reads)
 const automationSettings = require('./harness-config-sync.js').accessorsFor({ serverSetting, harnesses: require('../harnesses') });
-const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, log: (m) => console.log('[automation]', m),
+// the caller = the vsst_'s conversation; the live list IS the running conversations (an ended one's token is unknown ⇒ 401) —
+// the automation doors' and the two-step code door's (design q-047 L1) ONE reading of a session token
+const sessionCallerOf = (token) => { for (const [id, s] of activeSessions) if (s && sameToken(token, s.agentToken)) { const cid = s.backendSessionId || s.claudeSessionId || null; return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, name: s.name || s.webuiName || null, live: !s.isTmuxView, groups: automationGroupsOf(s, id) }; } return null; };
+// the grant pickers' subjects: every running conversation and every Task Group (automation keys' 授权给…, two-step codes' 用于…)
+const conversationSubjects = () => { const tasks = getTasks && getTasks(); const sessions = []; for (const s of activeSessions.values()) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude' }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; };
+// lane vault-window-v2 (design q-047 §3.4): the Vault window's 「需要你」 producers — a use door's refusal (使用失败), an agent's put (建议轮换)
+const vaultAttention = require('./vault-hooks.js').createVaultAttention({ userTodos });
+const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, log: (m) => console.log('[automation]', m),
   verbs: require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf }),
   openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }) } });
 require('../routes/automation.js').registerAutomationRoutes(app, { engine: automation, who: (req) => require('../auth.js').Auth.signInHandle(req),
   limitChoices: () => require('./conversation-ops.js').limitChoices({ accounts: getAccounts() }),   // lane automation-open-limits: the limit pickers
-  // the caller = the vsst_'s conversation; the live list IS the running conversations (an ended one's token is unknown ⇒ 401)
-  callerOf: (token) => { for (const [id, s] of activeSessions) if (s && sameToken(token, s.agentToken)) { const cid = s.backendSessionId || s.claudeSessionId || null; return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, name: s.name || s.webuiName || null, live: !s.isTmuxView, groups: automationGroupsOf(s, id) }; } return null; },
-  subjects: () => { const tasks = getTasks && getTasks(); const sessions = []; for (const s of activeSessions.values()) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude' }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; } });
+  callerOf: sessionCallerOf, subjects: conversationSubjects });
 setTimeout(() => { try { const n = automation.reconcile(); if (n) console.log(`[automation] ${n} first-use card(s) from before the restart resolved expired`); } catch { } }, 3000).unref?.();
 // r2 (verify r1): THE GATE the credential doors registered before this line ask (the account key, the mount config, the export)
 app.locals.vaultGate = require('../routes/vault.js').vaultGate({ vault, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req) });

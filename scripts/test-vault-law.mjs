@@ -142,7 +142,12 @@ console.log('④ the agent side has no unlock');
   const agentDoors = [...routes.matchAll(/app\.(get|post)\('(\/api\/agent\/vault\/[^']+)'/g)].map((m) => m[2]);
   // lane vault-e2e-password-fix-r2: + the LINK TOKEN door — a remote session's attach child asks for ITS machine's device
   // token (its own session token names the session; the engine is never asked to unlock: LOCKED ⇒ 423 vault_locked)
-  ok(agentDoors.join() === '/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/link-token', `the agent doors are state, lock and the session's own link token only (${agentDoors.join(', ')})`);
+  // design q-047 L1 (lane vault-totp): + the TWO-STEP CODE door — a GET answering a granted entry's CURRENT code (never the
+  // seed: its answer is built from named fields only — test-vault-routes ⑨ plants a seed and ⑩'s mutant leaks it ⇒ RED)
+  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/link-token', `the agent doors are the two-step code, state, lock and the session's own link token only (${agentDoors.join(', ')})`);
+  const codeDoor = (() => { const i = routes.indexOf("app.get('/api/agent/vault/totp/:name'"); const j = routes.indexOf('\n    });', i); return i > 0 && j > i ? routes.slice(i, j) : ''; })();
+  ok(/res\.json\(\{ ok: true, name: r\.name, code: r\.code, secondsLeft: r\.secondsLeft, period: r\.period \}\)/.test(codeDoor) && !/seed|secretGet|reveal|unlock/.test(codeDoor) && /callerOf\(token\)/.test(codeDoor),
+    'the two-step code door answers NAMED fields only (name, code, secondsLeft, period) — no seed, no secretGet, no reveal, no unlock; its caller is the session token\'s conversation');
   const lt = routes.slice(routes.indexOf("'/api/agent/vault/link-token'"));
   ok(lt.length > 0 && !/vault\.(unlock|setup|change)\(/.test(lt.slice(0, lt.indexOf('\n  });'))) && /vsst_/.test(lt.slice(0, 900)) && /_agentdSession/.test(lt.slice(0, 900)),
     'the link-token door answers a session token (vsst_) of a session on a paired machine only, and never unlocks / sets up / changes');

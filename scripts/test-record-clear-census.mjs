@@ -1982,6 +1982,8 @@ const I_RECV = {
   'src/lib/vault-automation.js|key': ['host', 'an automation key\'s NAME (the owner\'s own words, typed in 铸造…) in a dialog\'s title — the key\'s own record, never a record\'s text'],
   'src/server/automation-engine.js|plan.record': ['host', 'a key\'s NAME in the mint refusal sentence (a second live key of that name) — the owner\'s own words'],
   'src/server/automation-engine.js|key': ['host', 'an automation key\'s NAME on its first-use card and its log line — the owner\'s own words, never a record\'s text'],
+  // ── lane vault-window-v2 (design q-047 §3.4) ──
+  'src/server/vault-hooks.js|words': ['host', 'the Vault window\'s two For-you cards\' words (PURE vault-inventory useFailCard / rotateCard): an entry\'s NAME (an automation key\'s, an agent-stored value\'s — the owner\'s or the store\'s own words), the asking conversation\'s name, counts — the source of a new For-you record, never a copy of one'],
   'src/server/automation-engine.js|caller': ['host', 'the asking CONVERSATION\'s name on the first-use card and its log line — the session list\'s own name (the hub\'s record), never a record\'s text'],
   'src/server/dial-health-watch.js|w': ['host', 'the second-dialer item\'s words — a machine name, an address, a time (itemOf), the machine\'s own record'],
   'src/server/dial-health-watch.js|v': ['host', 'the verdict\'s refusing address (secondDialerVerdict) in the journal line — the machine\'s own dial record'],

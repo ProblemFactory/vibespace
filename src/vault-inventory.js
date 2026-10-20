@@ -10,7 +10,8 @@
  * store lists its own (`vaultRows()` beside its own ciphertext — the store stays the one reader of its bytes); this module
  * turns what they list into rows:
  *
- *   { id, store, entry, field, kind, label, detail, createdAt, rotatedAt, lastUsed: { at, by } | null, size, doors }
+ *   { id, store, entry, field, kind, label, detail, createdAt, rotatedAt, lastUsed: { at, by } | null, size, doors, revealable,
+ *     origin, expiresAt }
  *
  *   · `id` = `<store>:<entry>#<field>` — the ONE reference a reveal names (parseRef);
  *   · `size` = a LENGTH CLASS ('short' ≤ 16 bytes · 'medium' ≤ 64 · 'long' ≤ 512 · 'very long'), estimated from the
@@ -18,7 +19,10 @@
  *   · `lastUsed` = the store KEY's last use in the vault engine (store-level: a key opens every row of its store), `by` =
  *     'human' for a reveal from the Vault window, 'system' for every other read;
  *   · `doors` = the store's OWN delete route + its card's confirm, and the re-authorize door where the store has one
- *     (integrations, channels) — this window never re-implements a door.
+ *     (integrations, channels) — this window never re-implements a door;
+ *   · `origin` (lane vault-window-v2, design q-047 §3.2) = how the value CAME — a closed word a store may list ('mint' /
+ *     'put' / 'qr' / 'paste' / 'manual'), else null; `expiresAt` = the instant a store knows the value stops working (an
+ *     account's long-lived token), else null. Both are facts about the value, never a piece of it.
  *
  * `rowOf` copies NAMED fields only (never a spread): a store row that carried its value, its ciphertext or anything else
  * leaves nothing of it in the row (scripts/test-vault-inventory.mjs plants a unique value in every store and greps the
@@ -32,6 +36,9 @@
  * clock stepped back cannot stretch it (the monotonic clock bounds it too).
  */
 
+/** An extraction marker (scripts/i18n-extract.mjs): a string the PAGE words with t() — lane vault-window-v2's purposes,
+ *  provenance chips and For-you card sentences are DECLARED here and worded by the client. */
+const i18nKey = (s) => s;
 /** The sealed stores, in the window's order — the ids of src/server/vault-engine.js STORE_KEYS `store` (each one key). */
 const STORES = Object.freeze([
   Object.freeze({ store: 'accounts', label: 'Accounts' }),
@@ -60,6 +67,9 @@ const SECRET_ROWS = Object.freeze([   // the entry name's shape → its row's fi
   { re: /^host:(.+)$/, field: 'token', kind: 'token', label: (rest, nameOf) => `Machine link token · ${nameOf(rest)}`, detail: NEVER_SHOWN },
   { re: /^frp:(token)$/, field: 'token', kind: 'token', label: () => 'Relay token', detail: '' },
   { re: /^file:(.+)$/, field: 'key', kind: 'secret-key', label: (rest) => `Sealed file key · ${rest}`, detail: NEVER_SHOWN },
+  // design q-047 L1 (lane vault-totp): a two-step code — its row names the entry only (the issuer, the account and the
+  // settings are the entry's VALUE: shown with the seed, behind 显示 — owner decision ① as amended); the code is its own door
+  { re: /^totp:([\w.-]{1,120})$/, field: 'seed', kind: 'totp', label: (rest) => rest, detail: '' },
 ]);
 function secretRowOf(s, { machineName = (k) => k } = {}) {
   const name = String((s && s.name) || ''), at = s && s.at;
@@ -71,10 +81,11 @@ function secretRowOf(s, { machineName = (k) => k } = {}) {
 /** The kinds a row says (English keys — the page words them). `long-lived-oauth-token` = an account's `claude setup-token`
  *  (sk-ant-oat01-…, a year, no refresh) — its OWN words so nobody reads it as the CLI's browser login (the owner 2026-10-19,
  *  lane vault-one-door); `oauth-token` stays for a mount's or a channel's OAuth sign-in. */
-const KINDS = Object.freeze(['api-key', 'long-lived-oauth-token', 'oauth-token', 'client-secret', 'password', 'token', 'secret-key', 'session-token', 'private-key', 'parameter', 'login', 'secret']);
+const KINDS = Object.freeze(['api-key', 'long-lived-oauth-token', 'oauth-token', 'client-secret', 'password', 'token', 'secret-key', 'session-token', 'private-key', 'parameter', 'login', 'secret', 'totp']);
 const KIND_WORDS = Object.freeze({
   'api-key': 'API key', 'long-lived-oauth-token': 'Long-lived OAuth token', 'oauth-token': 'OAuth token', 'client-secret': 'Client secret', password: 'Password', token: 'Token',
   'secret-key': 'Secret key', 'session-token': 'Session token', 'private-key': 'Private key', parameter: 'Parameter', login: 'Login', secret: 'Secret',
+  totp: 'Two-step code',
 });
 /** A field NAME → its kind (a store may say the kind itself; this is the fallback for declared-field stores). */
 function kindOfField(name) {
@@ -140,12 +151,19 @@ function doorsOf({ store, entry, field }) {
   if (store === 'channels') return f.startsWith('caller.') ? { delete: null, rotate: null } : { delete: { open: 'channel-remove', id: e }, rotate: { open: 'channel-reauth', id: e } };
   if (store === 'passkeys') { const i = e.indexOf('/'); return i > 0 ? { delete: { method: 'DELETE', path: `/api/browser/passkeys/${enc(e.slice(0, i))}/${enc(e.slice(i + 1))}`, confirm: 'passkey' }, rotate: null } : { delete: null, rotate: null }; }
   if (store === 'app-secrets') return { delete: { method: 'POST', path: `/api/desktop/apps/${enc(e)}/secrets/forget`, confirm: 'app-logins' }, rotate: null };
+  // design q-047 L1 (lane vault-totp): a two-step code — its own delete door (its grants go with it) and THE CODE door (a
+  // person's GET, no 「验证是你」, audited); no 换新 (a site that changed the seed = delete + add — design §4 #9)
+  if (store === 'secrets' && /^totp:[\w.-]{1,120}$/.test(e)) { const p = `/api/vault/totp/${enc(e.slice(5))}`; return { delete: { method: 'DELETE', path: p, confirm: 'totp' }, rotate: null, code: { path: p } }; }
   return { delete: null, rotate: null };
 }
 
 const clip = (v, n) => (v == null ? '' : String(v)).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, n);
 const when = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; };
 const BY = Object.freeze(['human', 'agent', 'job', 'system']);
+/** How a value CAME (lane vault-window-v2, design q-047 §3.2) — a closed set a store may list on a row: 'mint' (made by the
+ *  hub or an agent, nobody typed it), 'put' (an agent stored a value it had seen — q-043 §9), 'qr' / 'paste' / 'manual'
+ *  (a two-step seed the owner scanned, pasted or typed — design §2.1 `source`). Anything else is no origin. */
+const ORIGINS = Object.freeze(['mint', 'put', 'qr', 'paste', 'manual']);
 const useOf = (u) => (u && when(u.at) ? { at: when(u.at), by: BY.includes(u.by) ? u.by : 'system' } : null);
 
 /** ONE row from what a store listed — NAMED fields only. `raw` = { entry, field, kind?, label, detail?, createdAt?,
@@ -162,6 +180,7 @@ function rowOf(store, raw, { lastUsed = null } = {}) {
     createdAt: when(raw.createdAt), rotatedAt: when(raw.rotatedAt), lastUsed: useOf(lastUsed),
     size: bytes == null ? 'unknown' : sizeClassOf(bytes), doors: doorsOf({ store, entry: raw.entry, field: raw.field }),
     revealable: revealableOf(store, raw.entry),
+    origin: ORIGINS.includes(raw.origin) ? raw.origin : null, expiresAt: when(raw.expiresAt),   // lane vault-window-v2
   };
 }
 
@@ -180,15 +199,23 @@ function inventoryOf(listed, { uses = {} } = {}) {
   return { stores, rows };
 }
 
-/** The page's search: label, detail, entry, field, the kind's words, the store's label — every word must match. */
-function searchRows(rows, q) {
+/** The page's search: label, detail, entry, field, the kind's words, the store's label, the purpose's and the provenance's
+ *  words — every word must match. `wordsOf(row)` = the page's OWN words for the row (its language: the kind, the purpose,
+ *  the provenance as it draws them — lane vault-window-v2), added to the English ones. */
+function searchRows(rows, q, { wordsOf = null } = {}) {
   const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return (rows || []).slice();
-  return (rows || []).filter((r) => { const hay = [r.label, r.detail, r.entry, r.field, KIND_WORDS[r.kind], (storeOf(r.store) || {}).label].join(' ').toLowerCase(); return words.every((w) => hay.includes(w)); });
+  return (rows || []).filter((r) => {
+    const own = typeof wordsOf === 'function' ? (() => { try { return [].concat(wordsOf(r) || []); } catch { return []; } })() : [];
+    const pu = PURPOSES.find((p) => p.id === purposeOf(r)), pv = PROVENANCES.find((p) => p.id === provenanceOf(r));
+    const hay = [r.label, r.detail, r.entry, r.field, KIND_WORDS[r.kind], (storeOf(r.store) || {}).label, pu && pu.label, pv && pv.label, ...own].join(' ').toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
 }
 const SORTS = Object.freeze(['name', 'kind', 'created', 'used']);
-/** Rows in a sort (inside their store group — the page groups by store). */
-function sortRows(rows, by = 'name') {
+/** Rows in a sort — inside their store group (`byStore`, the v1 order), or alone (lane vault-window-v2: the page groups by
+ *  PURPOSE, and sorts inside each purpose with `byStore: false`). */
+function sortRows(rows, by = 'name', { byStore = true } = {}) {
   const out = (rows || []).slice();
   const cmp = {
     name: (a, b) => a.label.localeCompare(b.label) || a.field.localeCompare(b.field),
@@ -196,7 +223,167 @@ function sortRows(rows, by = 'name') {
     created: (a, b) => (b.createdAt || 0) - (a.createdAt || 0) || a.label.localeCompare(b.label),
     used: (a, b) => ((b.lastUsed && b.lastUsed.at) || 0) - ((a.lastUsed && a.lastUsed.at) || 0) || a.label.localeCompare(b.label),
   }[SORTS.includes(by) ? by : 'name'];
-  return out.sort((a, b) => GROUP_IDS.indexOf(a.store) - GROUP_IDS.indexOf(b.store) || cmp(a, b));
+  return out.sort((a, b) => (byStore ? GROUP_IDS.indexOf(a.store) - GROUP_IDS.indexOf(b.store) : 0) || cmp(a, b));
+}
+
+// ── THE PURPOSES (lane vault-window-v2, design q-047 §3.1 — the owner's decision ④: the window groups by what a secret is
+// FOR, the store is named under 技术细节). ONE row ⇒ ONE purpose (purposeOf answers exactly one id for every row a store
+// lists — scripts/test-vault-inventory.mjs ⑧ walks the real stores; a row of no purpose, or a row in two, is RED).
+// The order is the rail's (the mock's: designs/vault-window-v2). `Other` shows only when something lands in it.
+const PURPOSES = Object.freeze([
+  Object.freeze({ id: 'two-step', label: i18nKey('Two-step codes') }),          // secrets `totp:` (lane vault-totp's entries)
+  Object.freeze({ id: 'accounts', label: i18nKey('Accounts & sign-in') }),      // accounts
+  Object.freeze({ id: 'integrations', label: i18nKey('Integrations & channels') }),   // integrations (not a machine's row) + channels
+  Object.freeze({ id: 'machines', label: i18nKey('Machines & relay') }),        // an integration's per-machine row (`<row>/<host>`) + secrets `host:` / `frp:`
+  Object.freeze({ id: 'storage', label: i18nKey('Storage') }),                  // mounts
+  Object.freeze({ id: 'app-logins', label: i18nKey('App logins') }),            // app-secrets
+  Object.freeze({ id: 'passkeys', label: i18nKey('Passkeys') }),                // passkeys
+  Object.freeze({ id: 'automation', label: i18nKey('Automation keys') }),       // automation (`apikey:`)
+  Object.freeze({ id: 'agents', label: i18nKey('Kept by agents') }),            // an `agent:` entry (q-043 §9 mint / put) — BEFORE every rule above
+  Object.freeze({ id: 'other', label: i18nKey('Other'), onlyWhenAny: true }),   // nothing above (a sealed file's key …)
+]);
+const PURPOSE_IDS = Object.freeze(PURPOSES.map((p) => p.id));
+/** A row → its ONE purpose id. A machine's row is known by the shape its store already gives it (`<row>/<host>`, the same
+ *  test doorsOf makes); what cannot be told lands in its store's purpose, never a guess. */
+function purposeOf(row) {
+  if (!row || typeof row !== 'object') return null;
+  const store = row.store, entry = String(row.entry == null ? '' : row.entry);
+  if (!GROUP_IDS.includes(store)) return null;
+  if (/^agent:/.test(entry)) return 'agents';
+  if (store === 'accounts') return 'accounts';
+  if (store === 'integrations') return entry.includes('/') ? 'machines' : 'integrations';
+  if (store === 'channels') return 'integrations';
+  if (store === 'mounts') return 'storage';
+  if (store === 'app-secrets') return 'app-logins';
+  if (store === 'passkeys') return 'passkeys';
+  if (store === 'automation') return 'automation';
+  if (/^(?:host|frp):/.test(entry)) return 'machines';
+  if (/^totp:/.test(entry)) return 'two-step';
+  if (/^apikey:/.test(entry)) return 'automation';
+  return 'other';
+}
+/** Rows → the purpose groups in the rail's order: [{ id, label, rows }] — every purpose (an empty one too: the rail counts
+ *  0), `Other` only when it holds a row. Each row lands in exactly one group. */
+function groupByPurpose(rows) {
+  const by = new Map(PURPOSE_IDS.map((id) => [id, []]));
+  for (const r of rows || []) { const p = purposeOf(r); if (by.has(p)) by.get(p).push(r); }
+  return PURPOSES.filter((p) => !p.onlyWhenAny || by.get(p.id).length).map((p) => ({ id: p.id, label: p.label, rows: by.get(p.id) }));
+}
+
+// ── THE PROVENANCE (design q-047 §3.2): where a value came from — who has seen it in the clear. ONE chip per row, the first
+// rule that holds. «never shown» is said of how the value was MADE (nobody typed it, no agent read it), not of a later reveal.
+const PROVENANCES = Object.freeze([
+  Object.freeze({ id: 'me', label: i18nKey('By you'), filter: 'me' }),                                        // 我自己 — a person stored it (the default)
+  Object.freeze({ id: 'scan', label: i18nKey('Scanned · by you'), filter: 'me' }),                            // 扫码 · 我自己 — a two-step seed scanned / pasted
+  Object.freeze({ id: 'hub-mint', label: i18nKey('Minted by the hub · never shown'), filter: 'system' }), // hub 铸造 · 从未显示
+  Object.freeze({ id: 'agent-mint', label: i18nKey('Minted by an agent · never shown'), filter: 'agent-mint' }),   // agent 铸造 · 从未显示 (q-043 §9 mint)
+  Object.freeze({ id: 'agent-put', label: i18nKey('Stored by an agent · it saw the value'), filter: 'agent-put' }),   // agent 存入 · agent 见过明文 (§9 put)
+  Object.freeze({ id: 'system', label: i18nKey('System · never shown'), filter: 'system' }),               // 系统 · 永不显示 (revealable: false)
+]);
+const PROVENANCE_IDS = Object.freeze(PROVENANCES.map((p) => p.id));
+/** The bar's provenance filter (multi-select; none picked = every row): four choices over the six chips. */
+const PROVENANCE_FILTERS = Object.freeze([
+  Object.freeze({ id: 'me', label: i18nKey('By you') }),
+  Object.freeze({ id: 'agent-mint', label: i18nKey('Minted by an agent') }),
+  Object.freeze({ id: 'agent-put', label: i18nKey('An agent saw it') }),
+  Object.freeze({ id: 'system', label: i18nKey('System') }),
+]);
+function provenanceOf(row) {
+  if (!row || typeof row !== 'object') return null;
+  const entry = String(row.entry == null ? '' : row.entry);
+  if (row.origin === 'put') return 'agent-put';
+  if (/^agent:/.test(entry)) return 'agent-mint';
+  if (row.origin === 'qr' || row.origin === 'paste') return 'scan';
+  if (row.store === 'secrets' && /^totp:/.test(entry)) return 'me';
+  if (row.revealable === false) return 'system';
+  if (row.store === 'automation' || row.origin === 'mint' || (row.store === 'secrets' && /^(?:apikey|frp|host|file):/.test(entry))) return 'hub-mint';
+  return 'me';
+}
+const provenanceFilterOf = (row) => { const p = PROVENANCES.find((x) => x.id === provenanceOf(row)); return p ? p.filter : null; };
+
+/** A row's STATE chips (§3.3 — a fact the row holds, never a hint): its value expires within 3 days / has expired; an agent
+ *  saw it (rotate). → [{ id: 'expires', days } | { id: 'expired' } | { id: 'rotate' }] */
+const EXPIRY_WARN_MS = 3 * 86400e3;
+function stateChipsOf(row, now = 0) {
+  const out = [];
+  if (!row) return out;
+  const exp = Number(row.expiresAt);
+  if (Number.isFinite(exp) && exp > 0) {
+    if (exp <= now) out.push({ id: 'expired' });
+    else if (exp - now <= EXPIRY_WARN_MS) out.push({ id: 'expires', days: Math.max(1, Math.ceil((exp - now) / 86400e3)) });
+  }
+  if (provenanceOf(row) === 'agent-put') out.push({ id: 'rotate' });
+  return out;
+}
+
+/** THE WINDOW'S VIEW over the rows: the search, the provenance filter (none = all), 只看可显示, then the purpose picked in
+ *  the rail ('all' = every one). → { rows (sorted inside each purpose), groups (as groupByPurpose, over the filtered rows),
+ *  counts: { all, <purpose>: n } (the rail's — after every filter but the purpose) }. */
+function viewOf(rows, { q = '', prov = [], revealOnly = false, purpose = 'all', sort = 'used', wordsOf = null } = {}) {
+  const pick = new Set((prov || []).filter((x) => PROVENANCE_FILTERS.some((f) => f.id === x)));
+  let shown = searchRows(rows || [], q, { wordsOf });
+  if (pick.size) shown = shown.filter((r) => pick.has(provenanceFilterOf(r)));
+  if (revealOnly) shown = shown.filter((r) => r.revealable !== false);
+  const groups = groupByPurpose(shown);
+  const counts = { all: shown.length };
+  for (const g of groups) counts[g.id] = g.rows.length;
+  const inView = groups.filter((g) => purpose === 'all' || g.id === purpose).map((g) => ({ ...g, rows: sortRows(g.rows, sort, { byStore: false }) }));
+  return { groups: inView, counts, rows: inView.flatMap((g) => g.rows) };
+}
+
+// ── 「需要你」 (design q-047 §3.4): the For-you list's OWN items filed by the vault (origin 'vault') — the same data, the
+// same answers; the window draws the open ones at its top, never a second queue.
+const BAND_MAX = 5;
+const URGENCY_RANK = { urgent: 0, high: 1, normal: 2, low: 3 };
+/** The open For-you items → the band's: { items (≤ 5, urgent first, newest first inside), total }. */
+function bandItemsOf(open) {
+  const mine = (open || []).filter((i) => i && i.origin === 'vault' && i.status !== 'done' && i.status !== 'dismissed' && !i.clearedAt);
+  mine.sort((a, b) => (URGENCY_RANK[a.urgency] ?? 2) - (URGENCY_RANK[b.urgency] ?? 2) || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+  return { items: mine.slice(0, BAND_MAX), total: mine.length };
+}
+/** An item's doors in the band (closed per action type): a held automation call = its three answers; the restart's notice =
+ *  unlock; a rotate suggestion = renew + got it; a failed use = open the row + got it; anything else = open + got it. */
+function bandDoorsOf(item) {
+  const type = item && item.action && item.action.type;
+  if (type === 'automation-ask') return ['once', 'always', 'deny'];
+  if (type === 'vault-unlock') return ['unlock'];
+  if (type === 'vault-rotate') return ['renew', 'ack'];
+  return ['open', 'ack'];
+}
+
+// ── THE TWO PRODUCERS' RULES (design q-047 §3.4 — src/server/vault-hooks.js files them, origin 'vault') ──
+/** A use door's refusal → its cause in the card's words (locked / not granted / expired); anything else is no failure the
+ *  owner is told about (a refusal the owner gave — ask_denied, ask_quiet — or a caller's own mistake). */
+const USE_FAIL_CAUSES = Object.freeze({
+  vault_locked: 'locked', not_granted: 'not-granted', verb_not_in_scope: 'not-granted', once_spent: 'not-granted', key_revoked: 'not-granted',
+  subject_ended: 'expired', ask_expired: 'expired',
+});
+const USE_FAIL_MERGE_MS = 60 * 60e3;   // one card per entry per hour: the failures inside it are counted on that card
+/** prev = this entry's running hour (or null) → { counted, fresh (a new hour: file the card), next }. */
+function useFailVerdict(prev, { code, at, who = null } = {}) {
+  const cause = USE_FAIL_CAUSES[code];
+  if (!cause || !Number.isFinite(at)) return { counted: false, fresh: false, next: prev || null };
+  const fresh = !prev || !Number.isFinite(prev.since) || at < prev.since || at - prev.since >= USE_FAIL_MERGE_MS;
+  const base = fresh ? { since: at, n: 0, causes: {} } : prev;
+  return { counted: true, fresh, next: { since: base.since, n: base.n + 1, causes: { ...base.causes, [cause]: (base.causes[cause] || 0) + 1 }, lastAt: at, lastWho: who ? String(who).slice(0, 80) : null } };
+}
+/** The use-failure card's words as STRUCTURE (the client words them with t(); the English is the store's dedupe key — the
+ *  text names the entry only, so one hour's failures of one entry stay ONE item). */
+function useFailCard({ name = null, next }) {
+  const text = name ? { key: i18nKey('Using “{name}” failed'), params: { name: String(name).slice(0, 80) } } : { key: i18nKey('An automation key could not be used'), params: {} };
+  const c = (next && next.causes) || {};
+  const detail = [{ key: i18nKey('{n} refused within the hour — the vault was locked: {locked} · not granted: {granted} · expired: {expired}'), params: { n: (next && next.n) || 0, locked: c.locked || 0, granted: c['not-granted'] || 0, expired: c.expired || 0 } }];
+  if (next && next.lastWho) detail.push({ key: i18nKey('Last asked by {who}'), params: { who: next.lastWho } });
+  detail.push({ key: i18nKey('Open the Vault window to see the row. A locked vault answers every use «locked» until a person unlocks it; a grant is given in the row.') });
+  return { text, detail };
+}
+/** The rotate suggestion's words: an agent stored a value it had seen (q-043 §9 put) — ONE card per entry, filed when it
+ *  is stored; once answered it never comes back by itself. */
+function rotateCard({ name, who = null }) {
+  return {
+    text: { key: i18nKey('“{name}” was stored by an agent that saw its value — rotate it'), params: { name: String(name || '').slice(0, 80) } },
+    detail: [...(who ? [{ key: i18nKey('Stored by {who}'), params: { who: String(who).slice(0, 80) } }] : []), { key: i18nKey('Renew it where it was issued, then store the new value; until then the agent\'s transcript holds the old one.') }],
+  };
 }
 
 // ── THE REVEAL WINDOW ──
@@ -238,4 +425,7 @@ function countdownText(ms) {
 module.exports = {
   STORES, STORE_IDS, GROUPS, GROUP_IDS, revealableOf, secretRowOf, storeOf, KINDS, KIND_WORDS, kindOfField, SIZE_CLASSES, sizeClassOf, plainBytesOf, refOf, parseRef, doorsOf, rowOf,
   inventoryOf, searchRows, SORTS, sortRows, REVEAL_MS, REVEAL_PACE_MAX, REVEAL_PACE_CEILING, REVEAL_PACE_MS, CLIPBOARD_CLEAR_MS, PAGE_RE, revealVerdict, paceVerdict, countdownText,
+  // lane vault-window-v2 (design q-047 §3): the purposes, the provenance, the state chips, the window's view, the band, the two producers' rules
+  ORIGINS, PURPOSES, PURPOSE_IDS, purposeOf, groupByPurpose, PROVENANCES, PROVENANCE_IDS, PROVENANCE_FILTERS, provenanceOf, provenanceFilterOf, EXPIRY_WARN_MS, stateChipsOf, viewOf,
+  BAND_MAX, bandItemsOf, bandDoorsOf, USE_FAIL_CAUSES, USE_FAIL_MERGE_MS, useFailVerdict, useFailCard, rotateCard,
 };

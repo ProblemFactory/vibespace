@@ -224,6 +224,7 @@ await dmw.streamAnswer(offW.sid, { answer: { type: 'answer', sdp: b2.pc.localDes
   const args = fs.existsSync(psArgs) ? JSON.parse(fs.readFileSync(psArgs, 'utf8')) : [];
   const I = require(path.join(REPO, 'src/input-inject.js'));
   ok(cw.info.platform === 'win32' && JSON.stringify(lines().slice(0, 2)) === JSON.stringify(['K 72 1 0', 'M 5 6']) && Buffer.from(args[args.length - 1] || '', 'base64').toString('utf16le') === I.INPUT_PS, 'the key reached THE resident script\'s stdin as its scan-code line (ArrowUp = 0x48, extended), then the move — the script it runs is INPUT_PS verbatim', { lines: lines(), argc: args.length });
+  ok(cw.info && cw.info.elevated === false, 'the hello-ack carries the daemon\'s OWN token elevation (false here — this is not an elevated Windows daemon); an old daemon omits the field and the hub reads it as not-elevated (never asked to type into an admin window)', { elevated: cw.info && cw.info.elevated });
   fs.writeFileSync(elevated, '1');
   b2.got.dc.send(JSON.stringify({ t: 'md', x: 5, y: 6, b: 0 }));
   const named = await until(() => pushW.some((m) => m.op === 'stream-stats' && m.stats && m.stats.input && m.stats.input.refused && m.stats.input.refused.code === 'uipi_blocked'), 5000);

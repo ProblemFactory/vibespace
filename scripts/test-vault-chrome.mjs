@@ -16,6 +16,10 @@
 //      on it", ONE For-you item names «VibeSpace (… the integrations store)»; the unlock resolves it and the count is 0
 //   ⑦ lane vault-e2e-password-fix-r2: auth.json holds the login's sha256, never the cookie's token; a LOCK from the page
 //      signs every login out — the page lands on the sign-in, and after it the unlock modal (the owner's decision ④)
+//   ④b design q-047 L1 (lane vault-totp): a two-step code in the Vault window — its row (name · «Two-step code» · 看码 · 显示 ·
+//      用于… · 删除), no code before 看码 and no seed in the DOM; 看码 ⇒ the CURRENT code (RFC 6238 at this clock, 3 + 3) with
+//      NO 验证是你, its ring (--p) and seconds; at the step's boundary it is asked again and changes; 显示 ⇒ 验证是你, then the
+//      otpauth link; 全部显示 skips the seed; 用于… opens its picker; 隐藏码 hides it; every view an audit line, the seed in none
 // Run: node scripts/test-vault-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -153,6 +157,55 @@ check('④ the persistent lock strip goes when the vault is unlocked', !!(await 
 check('④ lane vault-locked-refusal-notice: the unlock resolves THE item and clears the count', (await vaultItems()).length === 0 && (await api('GET', '/api/vault/state')).json?.blocked === 0);
 const openInt = await integration();
 check('the integration\'s key opens again (the feature works)', openInt.configured && !openInt.storeError, openInt);
+
+console.log('④b TWO-STEP CODES (design q-047 L1, lane vault-totp) — 看码 + its ring in the Vault window; the seed only behind 显示');
+{
+  const T = require(path.join(repo, 'src/totp.js'));
+  const SEEDC = T.base32Encode(Buffer.from('12345678901234567890'));   // RFC 6238's SHA1 key, its base32 built at runtime (never a literal)
+  const codeAt = (ms) => T.totp(Buffer.from('12345678901234567890'), { now: ms, hmac: (a, k, m) => require('crypto').createHmac(String(a).toLowerCase(), k).update(m).digest() }).code;
+  const add = await api('POST', '/api/vault/totp', { uri: `otpauth://totp/GitHub:owner%40example.com?secret=${SEEDC}&issuer=GitHub` });
+  check('④b a two-step code added through its person door (an otpauth link) ⇒ github-owner — the answer carries no seed', add.status === 200 && add.json?.name === 'github-owner' && !JSON.stringify(add.json).includes(SEEDC), add);
+  await evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
+  const ROW = '.vw-row[data-id="secrets:totp:github-owner#seed"]';
+  const q = (sel) => JSON.stringify(ROW + ' ' + sel);
+  check('④b its row in the Vault window: the name · «Two-step code» · 看码 · 显示 · 用于… · 删除', !!(await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW)}); return !!r && r.querySelector('.vw-label')?.textContent === 'github-owner' && /Two-step code/.test(r.querySelector('.vw-meta')?.textContent || '') && !!r.querySelector('.vw-code-view') && !!r.querySelector('.vw-show') && !!r.querySelector('.vw-totp-grant') && !!r.querySelector('.vw-del'); })()`, { timeout: 15000 })));
+  check('④b no code before 看码, and no seed anywhere in the DOM', !!(await evalJs(`document.querySelector(${q('.vw-code')}).hidden && !document.documentElement.outerHTML.includes(${JSON.stringify(SEEDC)})`)));
+  check('④b 显示\'s help says what it shows and behind what (a door\'s help, never a state)', /seed and its settings/.test(await evalJs(`document.querySelector(${q('.vw-show')}).title`) || ''));
+  const t0 = Date.now();
+  await click(`${ROW} .vw-code-view`);
+  const read = `(() => { const c = document.querySelector(${q('.vw-code')}); if (!c || c.hidden) return null; const d = c.querySelector('.vw-code-digits').textContent; return d ? { d, left: c.querySelector('.vw-code-left').textContent, p: c.querySelector('.vw-ring').style.getPropertyValue('--p'), dialog: !!document.getElementById('vault-reveal-dialog'), btn: document.querySelector(${q('.vw-code-view')}).textContent } : null; })()`;
+  const shown = await until(read, { timeout: 8000 });
+  const want = new Set([codeAt(t0), codeAt(Date.now())]);
+  check('④b 看码 ⇒ the CURRENT code (RFC 6238 over the seed at this clock), grouped 3 + 3 — and NO 验证是你', !!shown && want.has(shown.d.replace(' ', '')) && /^\d{3} \d{3}$/.test(shown.d) && !shown.dialog && shown.btn === 'Hide code', { shown, want: [...want] });
+  const secs = shown && /^(\d+) s$/.test(shown.left) ? Number(shown.left.split(' ')[0]) : -1;
+  check('④b … its ring (--p in (0, 100] %) and its seconds («N s», 1 ≤ N ≤ 30)', !!shown && /^\d+%$/.test(shown.p) && parseInt(shown.p, 10) > 0 && parseInt(shown.p, 10) <= 100 && secs >= 1 && secs <= 30, shown);
+  await evalJs(`document.querySelector(${JSON.stringify(ROW)}).scrollIntoView({ block: 'center' }); true`);
+  await shot('vault-7-totp-code.png');
+  const first = shown ? shown.d : '';
+  const next = await until(`(() => { const r = ${read}; return r && r.d !== ${JSON.stringify(first)} ? r : null; })()`, { timeout: (secs + 6) * 1000, step: 250 });
+  check('④b at the step\'s boundary the code is asked again and CHANGES (the ring restarted near full)', !!next && new Set([codeAt(Date.now() - 2000), codeAt(Date.now())]).has(next.d.replace(' ', '')) && parseInt(next.p, 10) >= 80, { first, next });
+  const views = fs.readFileSync(path.join(DATA, 'vault-audit.jsonl'), 'utf8').split('\n').filter((l) => l.includes('"vault-totp-view"'));
+  check('④b every view is a vault-totp-view audit line (2 so far) — never a code', views.length === 2 && !views.some((l) => (first && l.includes(first.replace(' ', ''))) || (next && l.includes(next.d.replace(' ', '')))), views);
+  await click(`${ROW} .vw-show`);
+  check('④b 显示 on that row asks 验证是你 first (the seed is behind the second password)', !!(await until(visible('#vault-reveal-dialog'), { timeout: 5000 })));
+  await typeInto('#vault-reveal-pw', SECOND); await click('.vault-reveal-go');
+  const plain = await until(`document.querySelector(${q('.vw-plain')})?.value`, { timeout: 8000 });
+  check('④b … then ONE value: the otpauth link — the seed and every setting', plain === `otpauth://totp/GitHub:owner%40example.com?secret=${SEEDC}&issuer=GitHub&algorithm=SHA1&digits=6&period=30`, plain);
+  await click(`${ROW} .vw-show`);
+  await click('.vw-show-all');
+  const all = await until(`(() => { const i = document.querySelector('.vw-row[data-id="integrations:cloud:browserless#apiKey"] .vw-plain'); return i && i.value ? { other: i.value, seed: !!document.querySelector(${q('.vw-plain')}) } : null; })()`, { timeout: 8000 });
+  check('④b 全部显示 opens the other values but NOT the two-step seed (a seed only by its own 显示 — never a list\'s)', !!all && all.other === 'chrome-leg-api-key' && all.seed === false, all);
+  await click('.vw-hide-all');
+  await click(`${ROW} .vw-totp-grant`);
+  check('④b 用于… opens its picker (no conversation runs here: it says so)', !!(await until(visible('#vault-totp-grant'), { timeout: 5000 })) && /Nothing to pick|Task groups|Conversations/.test(await evalJs(`document.querySelector('#vault-totp-grant')?.textContent || ''`)));
+  await shot('vault-8-totp-use-for.png');
+  await evalJs(`document.querySelector('#vault-totp-grant .btn-cancel')?.click(); true`);
+  await click(`${ROW} .vw-code-view`);
+  check('④b 隐藏码 hides it (no digits left in the row)', !!(await until(`document.querySelector(${q('.vw-code')}).hidden && !document.querySelector(${q('.vw-code-digits')}).textContent`, { timeout: 3000 })));
+  const audit = fs.readFileSync(path.join(DATA, 'vault-audit.jsonl'), 'utf8') + fs.readFileSync(path.join(SHOTS, 'server.log'), 'utf8');
+  check('④b the seed in no audit line and no server log line', !audit.includes(SEEDC));
+  await evalJs(`(() => { for (const [id, w] of app.wm.windows) if (w && w.type === 'vault') app.wm.closeWindow(id); return true; })()`);
+}
 
 console.log('③c the OPEN tab re-asks on a bundle-preserving restart — no navigate; a same-startedAt broadcast is the chip only');
 const atOpen = (await api('GET', '/api/vault/state')).json || {};

@@ -9630,4 +9630,80 @@ export default {
   "The relay holds a different name list for this instance — its record here or at the relay was changed. Rotate the relay token in Plugins › Public URLs and send the new registration line to the relay admin.": "中继为这台实例登记的名字列表不同——本地或中继上的记录被改过。在 插件 › 公网 URL 里轮换中继 token，并把新登记行发给中继管理员。", // lane relay-token-per-instance
   "Relay token revoked — mint a new one": "中继 token 已吊销——铸造一个新的", // lane relay-token-per-instance
   "Own relay token": "本实例的中继 token", // lane relay-token-per-instance
+  "A person stored it — in this window, a card or Settings": "由人存入——在这个窗口、卡片或设置里", // lane vault-window-v2
+  "A person scanned or pasted it": "由人扫码或粘贴存入", // lane vault-window-v2
+  "VibeSpace made it itself — nobody typed it in": "VibeSpace 自己生成——没有人输入过它", // lane vault-window-v2
+  "An agent had VibeSpace make it — the agent never saw the value": "agent 让 VibeSpace 生成——agent 从未见过这个值", // lane vault-window-v2
+  "An agent stored a value it had seen — rotate it": "agent 存入了它见过的值——建议轮换", // lane vault-window-v2
+  "VibeSpace uses it itself — it is never shown": "VibeSpace 自己用——永不显示", // lane vault-window-v2
+  "Show the key's value — only to hand it to an outside system; agents inside use it by grant and never need to see it": "显示密钥值——只在要交给外部系统时；内部 agent 按授权使用，不需要看到值", // lane vault-window-v2
+  "Show this value — the second password is asked once, then values stay visible for 5 minutes": "显示这个值——先输一次第二密码，之后 5 分钟内可见", // lane vault-window-v2
+  "Show every value listed — the second password is asked once, then values stay visible for 5 minutes": "显示列出的每个值——先输一次第二密码，之后 5 分钟内可见", // lane vault-window-v2
+  "Hide this value": "隐藏这个值", // lane vault-window-v2
+  "Expired": "已过期", // lane vault-window-v2
+  "Expires in {n} days": "{n} 天后到期", // lane vault-window-v2
+  "Rotate suggested": "建议轮换", // lane vault-window-v2
+  "Account…": "账号…", // lane vault-window-v2
+  "Integration key…": "集成密钥…", // lane vault-window-v2
+  "Channel account…": "频道账号…", // lane vault-window-v2
+  "Automation key…": "自动化 key…", // lane vault-window-v2
+  "Needs you": "需要你", // lane vault-window-v2
+  "What it is for": "用途", // lane vault-window-v2
+  "Search names, kinds, where they came from…": "搜索名字、种类、来源…", // lane vault-window-v2
+  "Only the ones I can show": "只看可显示", // lane vault-window-v2
+  "Where from": "出处", // lane vault-window-v2
+  "The code could not be read — {reason}": "读不到验证码——{reason}", // lane vault-window-v2
+  "{n} s left": "剩 {n} 秒", // lane vault-window-v2
+  "{when} · you": "{when} · 你", // lane vault-window-v2
+  "{when} · VibeSpace": "{when} · VibeSpace", // lane vault-window-v2
+  "View code": "看码", // lane vault-window-v2
+  "No stored value matches these filters": "没有符合这些筛选的值", // lane vault-window-v2
+  "Got it": "知道了", // lane vault-window-v2
+  "Open the row": "打开行", // lane vault-window-v2
+  "{n} stored values, sealed in the vault. Showing one asks for the second password again; they stay visible for 5 minutes. Every reveal is recorded.": "{n} 个保存的值，封存在保险库里。显示一个值要再输一次第二密码，5 分钟内有效；每次显示都记录。", // lane vault-window-v2
+  "While it is locked every use answers «locked» — nothing fails in another way.": "锁着时每个用途门都答「已锁」，不会失败成别的样子。", // lane vault-window-v2
+  "Two-step codes": "两步验证", // lane vault-window-v2
+  "Accounts & sign-in": "登录与账号", // lane vault-window-v2
+  "Integrations & channels": "集成与频道", // lane vault-window-v2
+  "Machines & relay": "机器与中继", // lane vault-window-v2
+  "Kept by agents": "agent 存放", // lane vault-window-v2
+  "By you": "我自己", // lane vault-window-v2
+  "Scanned · by you": "扫码 · 我自己", // lane vault-window-v2
+  "Minted by the hub · never shown": "hub 铸造 · 从未显示", // lane vault-window-v2
+  "Minted by an agent · never shown": "agent 铸造 · 从未显示", // lane vault-window-v2
+  "Stored by an agent · it saw the value": "agent 存入 · agent 见过明文", // lane vault-window-v2
+  "System · never shown": "系统 · 永不显示", // lane vault-window-v2
+  "Minted by an agent": "agent 铸造", // lane vault-window-v2
+  "An agent saw it": "agent 见过明文", // lane vault-window-v2
+  "Using “{name}” failed": "「{name}」使用失败", // lane vault-window-v2
+  "An automation key could not be used": "一个自动化 key 用不了", // lane vault-window-v2
+  "{n} refused within the hour — the vault was locked: {locked} · not granted: {granted} · expired: {expired}": "一小时内被拒 {n} 次——保险库锁着：{locked} · 未授权：{granted} · 已过期：{expired}", // lane vault-window-v2
+  "Last asked by {who}": "最近一次来自 {who}", // lane vault-window-v2
+  "Open the Vault window to see the row. A locked vault answers every use «locked» until a person unlocks it; a grant is given in the row.": "打开保险库窗口看这一行。锁着的保险库对每次使用都答「已锁」，直到有人解锁；授权在这一行里给。", // lane vault-window-v2
+  "“{name}” was stored by an agent that saw its value — rotate it": "「{name}」由 agent 存入、它见过明文——建议轮换", // lane vault-window-v2
+  "Stored by {who}": "由 {who} 存入", // lane vault-window-v2
+  "Renew it where it was issued, then store the new value; until then the agent's transcript holds the old one.": "去签发它的地方换新，再存入新值；在那之前 agent 的转录里留着旧值。", // lane vault-window-v2
+  "Show the seed and its settings as an otpauth link — the second password is asked once; the code itself needs none": "以 otpauth 链接显示种子和它的参数——先输一次第二密码；验证码本身不用密码", // lane vault-window-v2
+  "Two-step code": "两步验证码", // design q-047 L1 (lane vault-totp)
+  "Hide code": "隐藏码", // design q-047 L1 (lane vault-totp)
+  "The current two-step code — no second password; every view is in the vault's audit": "当前的两步验证码——不用第二密码；每次查看都记进保险库的审计", // design q-047 L1 (lane vault-totp)
+  "Shows the seed and its settings (an otpauth link) — after the second password": "显示种子和它的设置（一条 otpauth 链接）——先输入第二密码", // design q-047 L1 (lane vault-totp)
+  "Use for…": "用于…", // design q-047 L1 (lane vault-totp)
+  "Grant the current code (never the seed) to a running conversation or a task group": "把当前验证码（永不给种子）授权给运行中的对话或任务组", // design q-047 L1 (lane vault-totp)
+  "Code granted to:": "验证码已授权给：", // design q-047 L1 (lane vault-totp)
+  "ended": "已结束", // design q-047 L1 (lane vault-totp)
+  "Grant the code of \"{name}\" to": "把「{name}」的验证码授权给", // design q-047 L1 (lane vault-totp)
+  "A conversation granted the code gets the current code (vibespace-vault totp) — never the seed. A conversation's grant ends when that conversation ends.": "被授权的对话拿到的是当前验证码（vibespace-vault totp）——永远拿不到种子。对话的授权随那个对话结束而失效。", // design q-047 L1 (lane vault-totp)
+  "Delete the two-step code \"{name}\"?": "删除两步验证码「{name}」？", // design q-047 L1 (lane vault-totp)
+  "Its seed leaves the vault and every grant of its code stops. A site that asks for this code needs it set up again.": "它的种子离开保险库，这个验证码的每个授权立即停止。要这个验证码的网站得重新设置。", // design q-047 L1 (lane vault-totp)
+  "The device agent runs as administrator — agents can type into windows you opened as administrator (you choose which, in the allow list)": "设备代理以管理员权限运行 — 代理能向你以管理员身份打开的窗口输入（允许哪些由你在允许清单里选）", // lane win-input-elevated
+  "ADMIN": "管理员", // lane win-input-elevated
+  "Run as administrator…": "以管理员权限运行…", // lane win-input-elevated
+  "Run \"{name}\"’s device agent as administrator": "让\"{name}\"的设备代理以管理员权限运行", // lane win-input-elevated
+  "When the device agent runs as administrator, agents can type into windows you opened as administrator — and you choose which, in the allow list. VibeSpace never elevates on its own; Windows asks you to confirm.": "当设备代理以管理员权限运行时，代理能向你以管理员身份打开的窗口输入 — 允许哪些由你在允许清单里选。VibeSpace 从不自行提权；由 Windows 请你确认。", // lane win-input-elevated
+  "Easiest: run the pairing command again — it now runs as administrator by default and asks you to confirm once. Or, in an administrator PowerShell on the machine, run:": "最简单：再运行一次配对命令 — 它现在默认以管理员权限运行，并会请你确认一次。或者，在那台机器的管理员 PowerShell 里运行：", // lane win-input-elevated
+  "Copied — run it in an administrator PowerShell on the machine": "已复制 — 在那台机器的管理员 PowerShell 里运行", // lane win-input-elevated
+  "On Windows the device agent runs as administrator by default — Windows asks you to confirm once when you run the command. Agents can then type into windows you opened as administrator (you choose which, in the allow list below).": "在 Windows 上，设备代理默认以管理员权限运行 — 你运行命令时 Windows 会请你确认一次。之后代理能向你以管理员身份打开的窗口输入（允许哪些由下面的允许清单选）。", // lane win-input-elevated
+  "Install with normal rights (no administrator)": "以普通权限安装（非管理员）", // lane win-input-elevated
+  "administrator": "管理员", // lane win-input-elevated
 };

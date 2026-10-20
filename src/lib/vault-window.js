@@ -1,6 +1,6 @@
 // THE VAULT WINDOW (lane vault-contents-window — the owner 2026-10-19: "vault 能不能加一个查看现在所有存储内容的功能，类似
-// google password manager，需要输入密码才能查看一段时间"). Every credential the vault seals, listed MASKED, grouped by store
-// (src/vault-inventory.js makes the rows: no character of a value, only a length class). The first 「显示」 (or 「全部显示」)
+// google password manager，需要输入密码才能查看一段时间"). Every credential the vault seals, listed MASKED (src/vault-inventory.js
+// makes the rows: no character of a value, only a length class). The first 「显示」 (or 「全部显示」)
 // asks for the second password again (「验证是你」, POST /api/vault/reveal-session — src/lib/vault-reveal.js: the window is
 // THIS PAGE's, its secret in page memory only); for the next 5 minutes — a FIXED window the hub keeps, the countdown chip
 // says how long — each 「显示」 is ONE POST /api/vault/reveal answering ONE value. A value goes in through `.value` only (never innerHTML), lives only in its row's field while that row is open
@@ -10,9 +10,20 @@
 // THE ONE DOOR (lane vault-one-door — the owner 2026-10-19, 「这个没必要分成两个按钮吧」): ⚙ System ▸ Vault… is the only gear row
 // and opens THIS window; its HEADER is what the old ⚙ dialog held — the state (since when, set up when), the doors by state
 // (设置第二密码… · 解锁… · 立即锁定 · 修改第二密码…) and 闲置后锁定 — over vault-unlock.js's facts and modals.
-// Entry points: ⚙ System ▸ Vault…, the sidebar's System panel line, the vault's door (`vs-vault-door`) while unlocked.
+// V2 (lane vault-window-v2, design q-047 §3 — the owner 2026-10-19 「鉴于要支持的种类越来越复杂，建议重新设计一下 vault 界面的
+// UI」; decision ④: group by the nine purposes, the store named under 技术细节): a RAIL of purposes with counts (PURE
+// purposeOf — one row, one purpose), a BAR (search · sort · provenance · 只看可显示 · 添加…), each row = name + meta · kind chip
+// · provenance chip (PURE provenanceOf) · state chip · last use · its doors by kind, and 「需要你」 at the top = For you's OWN open
+// items of origin 'vault' (inboxModel — the same items, the same answers: answered here, gone from the tray; answered there,
+// gone here). A reveal's reason is its 「显示」's HELP (title), never a chip-like sentence beside the value (the owner's
+// confusion note 2026-10-20: 「只为交给外界」 read as the key's state). KEYED: a row element lives while its row's facts do — a
+// search, a filter, a sort or a refresh MOVES nodes (an open value stays where it is); a phone (or a narrow window) gets the
+// rail as a chip strip and the filters behind ONE 筛选… (a container query over the same nodes, never a second renderer).
+// Locked: the rail counts say «—», the list one sentence + 解锁…, NO 添加… (locked = read-only, q-033; no greyed control).
+// Entry points: ⚙ System ▸ Vault…, the sidebar's System panel line, the vault's door (`vs-vault-door`) while unlocked, a
+// 「需要你」 item's door in For you (focus = its row).
 import { t } from './i18n.js';
-import { fetchJson, showToast, showConfirmDialog, copyText } from './utils.js';
+import { fetchJson, showToast, showConfirmDialog, copyText, createModalShell, showContextMenu } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
@@ -20,19 +31,64 @@ import { showUnlock, showSetup, showChange, vaultFacts, onVaultFacts, refreshVau
 import { revealLeftMs, revealHeaders, onRevealChange, noteRevealLeft, forgetReveal, endReveal, revealValue, revealWords } from './vault-reveal.js'; // r2: THE PAGE's window (its secret in page memory)
 import { removeAccount, showReauthAccountDialog } from './channel-account-dialogs.js';
 import { passkeyDeleteWords } from './browser-panel-model.js';
-import { GROUPS, KIND_WORDS, searchRows, sortRows, countdownText, CLIPBOARD_CLEAR_MS } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
+import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PROVENANCES, provenanceOf, PROVENANCE_FILTERS, stateChipsOf, viewOf, bandItemsOf, bandDoorsOf } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
 import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
+import { loadTotp, totpExtras } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…
+import { inboxModel } from './user-todos-actions.js'; // lane vault-window-v2: 「需要你」 = For you's own items (one store, one set of answers)
 
 const ICON = svgIcon16('<rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/><circle cx="8" cy="10.5" r="1"/>');
 const MASK = '••••••••';
 const vwEl = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-const STORE_WORDS = { accounts: () => t('Accounts'), integrations: () => t('Integrations'), channels: () => t('Channels'), mounts: () => t('Storage'), 'app-secrets': () => t('App logins'), passkeys: () => t('Passkeys'), automation: () => t('Automation keys'), secrets: () => t('Hub secrets') };
+/** THE ICONS as elements (this module names no HTML sink — test-vault-inventory ①b): 16-unit stroke glyphs, built node by node. */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const GLYPHS = {
+  person: [['circle', { cx: 8, cy: 5, r: 3 }], ['path', { d: 'M2.5 14a5.5 5.5 0 0111 0' }]],
+  bot: [['rect', { x: 3, y: 5, width: 10, height: 8, rx: 2 }], ['path', { d: 'M8 2v3M6 9h.01M10 9h.01' }]],
+  key: [['circle', { cx: 5.5, cy: 10.5, r: 3 }], ['path', { d: 'M8 8l6-6M11 5l2 2M9.5 6.5l1.5 1.5' }]],
+  lock: [['rect', { x: 3, y: 7, width: 10, height: 7, rx: 1.5 }], ['path', { d: 'M5.5 7V5a2.5 2.5 0 015 0v2' }]],
+  qr: [['rect', { x: 2, y: 2, width: 5, height: 5 }], ['rect', { x: 9, y: 2, width: 5, height: 5 }], ['rect', { x: 2, y: 9, width: 5, height: 5 }], ['path', { d: 'M9 9h2v2M14 9v2h-2M9 14h2M12 12h2v2' }]],
+  warn: [['path', { d: 'M8 2l6.5 11.5h-13z' }], ['path', { d: 'M8 7v3M8 12h.01' }]],
+  bolt: [['path', { d: 'M9 1.5L3 9h4.5L7 14.5 13 7H8.5z' }]],
+  search: [['circle', { cx: 7, cy: 7, r: 4.5 }], ['path', { d: 'M10.5 10.5L14 14' }]],
+  plus: [['path', { d: 'M8 3v10M3 8h10' }]],
+  eye: [['path', { d: 'M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z' }], ['circle', { cx: 8, cy: 8, r: 2 }]],
+  copy: [['rect', { x: 5, y: 5, width: 8, height: 8, rx: 1.5 }], ['path', { d: 'M3 11V4a1 1 0 011-1h7' }]],
+  filter: [['path', { d: 'M2 3.5h12M4.5 8h7M7 12.5h2' }]],
+};
+function glyph(name, size = 12) {
+  const s = document.createElementNS(SVG_NS, 'svg');
+  for (const [k, v] of Object.entries({ viewBox: '0 0 16 16', width: size, height: size, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', class: 'vw-ico' })) s.setAttribute(k, String(v));
+  for (const [tag, attrs] of GLYPHS[name] || []) { const c = document.createElementNS(SVG_NS, tag); for (const [k, v] of Object.entries(attrs)) c.setAttribute(k, String(v)); s.append(c); }
+  return s;
+}
+const btnEl = (label, cls, { icon = null, title = null } = {}) => { const b = vwEl('button', `vw-btn ${cls || ''}`.trim()); b.type = 'button'; if (icon) b.append(glyph(icon)); b.append(document.createTextNode(label)); if (title) b.title = title; return b; };
 const SIZE_WORDS = { short: () => t('short'), medium: () => t('medium'), long: () => t('long'), 'very long': () => t('very long'), unknown: () => t('unknown length') };
 const kindWord = (k) => t(KIND_WORDS[k] || 'Secret');
 const whenText = (ms) => (ms ? new Date(ms).toLocaleString() : '');
+const whenShort = (ms) => (ms ? new Date(ms).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '');
 /** A row's name in the page's words: an integration's / a hub secret's label is an English key (` · <machine>` after it). */
 const WORDED = new Set(['integrations', 'secrets']);
 const labelWord = (row) => (WORDED.has(row.store) ? String(row.label).split(' · ').map((p, i) => (i ? p : t(p))).join(' · ') : row.label);
+const purposeWord = (id) => t((PURPOSES.find((p) => p.id === id) || { label: 'Other' }).label);
+const PROV_ICON = { me: 'person', scan: 'qr', 'hub-mint': 'key', 'agent-mint': 'bot', 'agent-put': 'bot', system: 'lock' };
+/** The provenance chip's help — where the value came from (a fact of its making; a later reveal does not change it). */
+const PROV_HELP = {
+  me: () => t('A person stored it — in this window, a card or Settings'),
+  scan: () => t('A person scanned or pasted it'),
+  'hub-mint': () => t('VibeSpace made it itself — nobody typed it in'),
+  'agent-mint': () => t('An agent had VibeSpace make it — the agent never saw the value'),
+  'agent-put': () => t('An agent stored a value it had seen — rotate it'),
+  system: () => t('VibeSpace uses it itself — it is never shown'),
+};
+const provWord = (id) => t((PROVENANCES.find((p) => p.id === id) || PROVENANCES[0]).label);
+/** THE REVEAL DOOR'S HELP (the owner's confusion note 2026-10-20): why a value is shown is the 「显示」 button's own help. */
+const showHelp = (row) => (row.store === 'automation'
+  ? t('Show the key\'s value — only to hand it to an outside system; agents inside use it by grant and never need to see it')
+  : isTotp(row) ? t('Show the seed and its settings as an otpauth link — the second password is asked once; the code itself needs none')   // the owner's amendment to q-047 ①: the seed behind 验证是你
+  : t('Show this value — the second password is asked once, then values stay visible for 5 minutes'));
+const stateWord = (c) => (c.id === 'expired' ? t('Expired') : c.id === 'expires' ? t('Expires in {n} days', { n: c.days }) : t('Rotate suggested'));
+const isTotp = (row) => row.kind === 'totp' || !!(row.doors && row.doors.code);
+const SORT_CHOICES = [['used', () => t('Recently used')], ['name', () => t('Name')], ['kind', () => t('Kind')], ['created', () => t('Newest')]];   // design q-047 §3.2: 最近使用 first
 
 /** The store card's own confirm words for its delete door (the same keys the card uses). */
 function confirmWords(key, row) {
@@ -42,6 +98,7 @@ function confirmWords(key, row) {
   if (key === 'integration') return { title: t('Clear my keys'), message: t('Clear the keys you entered for {label}? The row falls back to the cluster default when one exists.', { label: row.label }), confirm: t('Clear') };
   if (key === 'passkey') { const [site, user] = String(row.label).split(' · '); const w = passkeyDeleteWords({ site, user: user || '' }, { w: t }); return { title: w.title, message: w.message, confirm: w.confirm }; }
   if (key === 'app-logins') return { title: t('Forget the logins this app keeps?'), message: t('VibeSpace keeps this app\'s logins for it in its own session; after you forget them the app asks again.'), confirm: t('Forget') };
+  if (key === 'totp') return { title: t('Delete the two-step code "{name}"?', { name: row.label }), message: t('Its seed leaves the vault and every grant of its code stops. A site that asks for this code needs it set up again.'), confirm: t('Delete') };
   return { title: t('Delete'), message: row.label, confirm: t('Delete') };
 }
 
@@ -64,16 +121,18 @@ function vaultHead() {
     word.dataset.state = state;
     line.append(stateIconEl(state), word);
     const since = state === 'unlocked' ? f.unlockedSince : state === 'locked' ? f.lockedSince : null;
-    if (since) line.append(vwEl('span', 'vault-state-when', t('since {when}', { when: whenText(since) })));
-    if (f.setUpAt) line.append(vwEl('span', 'vault-state-when', t('Set up {when}', { when: whenText(f.setUpAt) })));
+    // v2: the short form (the mock's 「自 10/19 15:28 起」); the full instant is its help
+    const whenEl = (text, at) => { const e = vwEl('span', 'vault-state-when', text); e.title = whenText(at); return e; };
+    if (since) line.append(whenEl(t('since {when}', { when: whenShort(since) }), since));
+    if (f.setUpAt) line.append(whenEl(t('Set up {when}', { when: whenShort(f.setUpAt) }), f.setUpAt));
     const acts = vwEl('div', 'vault-actions');
     const btn = (label, cls, fn) => { const b = vwEl('button', cls, label); b.type = 'button'; b.onclick = fn; acts.append(b); };
     if (state === 'not_set_up') btn(t('Set a second password…'), 'btn-create vault-do-setup', () => showSetup());
     if (state === 'locked') btn(t('Unlock…'), 'btn-create vault-do-unlock', () => showUnlock());
     if (state === 'unlocked') btn(t('Lock now'), 'btn-cancel vault-do-lock', () => lockNow());
     if (state !== 'not_set_up') btn(t('Change the second password…'), 'btn-cancel vault-do-change', () => showChange());
-    head.append(line, acts);
-    if (state === 'not_set_up') return;
+    head.append(line);
+    if (state === 'not_set_up') { head.append(acts); return; }
     const idle = vwEl('label', 'vault-idle');
     const sel = vwEl('select', 'vault-idle-select');
     const cur = String(Number(f.idleLockHours) || 0);
@@ -81,7 +140,8 @@ function vaultHead() {
     sel.title = t('Lock the vault after this long with no keyboard or mouse on any VibeSpace page');
     sel.onchange = () => setIdleHours(sel.value);
     idle.append(vwEl('span', null, t('Lock after idle')), sel);
-    head.append(idle);
+    acts.append(idle);   // v2: the idle lock on the doors' line (the mock's header: two lines)
+    head.append(acts);
   };
   return { head, draw };
 }
@@ -91,35 +151,75 @@ async function channelAccount(id) {
   return { a: (d && Array.isArray(d.adapters) ? d.adapters.find((x) => x && x.id === id) : null) || null, kinds: (d && d.kinds) || [] };
 }
 
-/** THE WINDOW (singleton). */
-export function openVaultWindow(app, { syncId } = {}) {
+/** 添加… — the doors that add a stored value, each its own (this window never re-implements one). A lane that adds a kind
+ *  (lane vault-totp: 两步验证…) registers its door here: { id, label: () => string, order, run: (app, ctx) => void }. */
+const ADD_DOORS = [];
+export function registerVaultAdd(door) {
+  if (!door || typeof door.id !== 'string' || typeof door.run !== 'function' || ADD_DOORS.some((d) => d.id === door.id)) return false;
+  ADD_DOORS.push(door); ADD_DOORS.sort((a, b) => (a.order || 0) - (b.order || 0));
+  return true;
+}
+registerVaultAdd({ id: 'account', order: 10, label: () => t('Account…'), run: (app) => app._showAgentsDialog?.() });
+registerVaultAdd({ id: 'integration', order: 20, label: () => t('Integration key…'), run: (app) => app.openIntegration?.() });
+registerVaultAdd({ id: 'channel', order: 30, label: () => t('Channel account…'), run: (app) => app.openChannels?.() });
+registerVaultAdd({ id: 'automation', order: 40, label: () => t('Automation key…'), run: (app, c) => showMintDialog({ refresh: c.refresh, data: c.auto() }) });
+
+/** THE WINDOW (singleton). `focus` = a row (or an entry) to bring into view — a 「需要你」 item's door. */
+export function openVaultWindow(app, { syncId, focus = null } = {}) {
   for (const [id, w] of app.wm.windows || []) {
-    if (w && w.type === 'vault') { app.wm.revealWindow(id, { replay: !!syncId }); return w; }
+    if (w && w.type === 'vault') { app.wm.revealWindow(id, { replay: !!syncId }); if (focus) w._vwFocus?.(focus); return w; }
   }
-  const winInfo = app.wm.createWindow({ title: t('Vault'), type: 'vault', syncId, openSpec: { action: 'openVault' }, width: 780, height: 600 });
+  const winInfo = app.wm.createWindow({ title: t('Vault'), type: 'vault', syncId, openSpec: { action: 'openVault' }, width: 980, height: 680 });
   const sig = winInfo._listenerCtl?.signal;
   // THE STATE: rows (masked) and the row elements (a value lives only in its row's <input> — nothing here holds one); the
-  // reveal window is the page's (src/lib/vault-reveal.js)
-  const st = { data: null, q: '', sort: 'name', closed: false, wasOpen: false, auto: null };   // auto: design q-046 — the keys, their grants, the picker's subjects
-  const rowEls = new Map(), headEls = new Map();
+  // reveal window is the page's (src/lib/vault-reveal.js). The view (search / sort / provenance / 只看可显示 / the purpose)
+  // is never stored: every open starts at 全部 (design q-047 §3.2)
+  const st = { data: null, q: '', sort: 'used', prov: new Set(), revealOnly: false, purpose: 'all', closed: false, wasOpen: false, auto: null, focus };
+  const rowEls = new Map(), headEls = new Map(), railEls = new Map(), bandEls = new Map();
 
   const root = vwEl('div', 'vw');
-  const bar = vwEl('div', 'vw-bar');
   const hd = vaultHead();   // lane vault-one-door: the old ⚙ dialog, as this window's header
+  // 「需要你」 (design q-047 §3.4)
+  const band = vwEl('div', 'vw-band');
+  band.hidden = true;
+  const bandHead = vwEl('div', 'vw-band-head');
+  const bandN = vwEl('span', 'vw-band-n');
+  bandHead.append(glyph('bolt'), vwEl('span', 'vw-band-title', t('Needs you')), bandN);
+  const bandRows = vwEl('div', 'vw-band-rows');
+  band.append(bandHead, bandRows);
+  // THE BODY: the rail (purposes + counts) and the pane (bar, note, list)
+  const body = vwEl('div', 'vw-body');
+  const rail = vwEl('div', 'vw-rail');
+  rail.setAttribute('role', 'tablist'); rail.setAttribute('aria-label', t('What it is for'));
+  const pane = vwEl('div', 'vw-pane');
+  const bar = vwEl('div', 'vw-bar');
+  const searchBox = vwEl('label', 'vw-search-box');
+  const search = vwEl('input', 'vw-search');
+  search.type = 'search'; search.placeholder = t('Search names, kinds, where they came from…'); search.setAttribute('aria-label', t('Search')); search.spellcheck = false;
+  searchBox.append(glyph('search'), search);
+  const filters = vwEl('div', 'vw-filters');
+  const sortSel = vwEl('select', 'vw-sort vw-chip');
+  sortSel.setAttribute('aria-label', t('Sort'));
+  for (const [k, w] of SORT_CHOICES) { const o = vwEl('option', null, w()); o.value = k; o.selected = k === st.sort; sortSel.append(o); }
+  const provChips = PROVENANCE_FILTERS.map((f) => { const b = vwEl('button', 'vw-chip vw-fchip', t(f.label)); b.type = 'button'; b.dataset.prov = f.id; b.setAttribute('aria-pressed', 'false'); return b; });
+  const onlyShown = vwEl('button', 'vw-chip vw-only-shown', t('Only the ones I can show'));
+  onlyShown.type = 'button'; onlyShown.setAttribute('aria-pressed', 'false');
+  filters.append(vwEl('span', 'vw-flabel', t('Sort')), sortSel, vwEl('span', 'vw-flabel', t('Where from')), ...provChips, onlyShown);
+  const filterB = btnEl(t('Filter…'), 'vw-filter-btn', { icon: 'filter' });   // a phone / a narrow window: the filters behind one door
+  const addB = btnEl(t('Add…'), 'vw-add vw-primary', { icon: 'plus' });
+  bar.append(searchBox, filters, filterB, addB);
+  const note = vwEl('div', 'vw-note');
+  const noteText = vwEl('span', 'vw-note-text');
   const timer = vwEl('span', 'vw-timer');
   timer.hidden = true;
-  const search = vwEl('input', 'vw-search');
-  search.type = 'search'; search.placeholder = t('Search'); search.setAttribute('aria-label', t('Search')); search.spellcheck = false;
-  const sortSel = vwEl('select', 'vw-sort');
-  sortSel.setAttribute('aria-label', t('Sort'));
-  for (const [k, w] of [['name', t('Name')], ['kind', t('Kind')], ['created', t('Newest')], ['used', t('Recently used')]]) { const o = vwEl('option', null, w); o.value = k; sortSel.append(o); }
-  const showAllB = vwEl('button', 'vw-btn vw-show-all', t('Show all'));
-  const hideAllB = vwEl('button', 'vw-btn vw-hide-all', t('Hide all'));
-  showAllB.type = hideAllB.type = 'button';
-  bar.append(timer, search, sortSel, showAllB, hideAllB);
-  const note = vwEl('div', 'vw-note');
+  const showAllB = btnEl(t('Show all'), 'vw-show-all', { title: t('Show every value listed — the second password is asked once, then values stay visible for 5 minutes') });
+  const hideAllB = btnEl(t('Hide all'), 'vw-hide-all');
+  hideAllB.hidden = true;
+  note.append(noteText, timer, hideAllB, showAllB);
   const list = vwEl('div', 'vw-list');
-  root.append(hd.head, bar, note, list);
+  pane.append(bar, note, list);
+  body.append(rail, pane);
+  root.append(hd.head, band, body);
   winInfo.content.appendChild(root);
 
   // ── the reveal window: its countdown, its end ──
@@ -130,7 +230,8 @@ export function openVaultWindow(app, { syncId } = {}) {
     x.plain.remove();
     x.plain = null;
     x.mask.hidden = false; x.copy.hidden = true;
-    x.show.textContent = t('Show');
+    x.show.lastChild.textContent = t('Show');
+    x.show.title = showHelp(x.row);
     x.el.classList.remove('vw-open');
   }
   function hideAll() { for (const x of openRows()) hideValue(x); }
@@ -139,6 +240,7 @@ export function openVaultWindow(app, { syncId } = {}) {
     if (st.wasOpen && left <= 0) { st.wasOpen = false; const had = openRows().length; hideAll(); forgetReveal(); if (had) showToast(t('Values hidden again — the 5 minutes are over')); }   // wasOpen first: forgetReveal re-enters through onRevealChange
     st.wasOpen = left > 0;
     timer.hidden = !(left > 0);
+    hideAllB.hidden = !openRows().length;
     if (left > 0) timer.textContent = t('Visible for {time}', { time: countdownText(left) });
   }
   const tick = setInterval(() => { if (!st.closed) drawTimer(); }, 1000);
@@ -157,8 +259,10 @@ export function openVaultWindow(app, { syncId } = {}) {
       }
       x.plain.value = r.value;   // THE ONE SINK of a value: an input's value (never innerHTML, never kept elsewhere)
       x.mask.hidden = true; x.copy.hidden = false;
-      x.show.textContent = t('Hide');
+      x.show.lastChild.textContent = t('Hide');
+      x.show.title = t('Hide this value');
       x.el.classList.add('vw-open');
+      drawTimer();
       return true;
     }
     if (r && r.code === 'cancelled') return false;
@@ -168,8 +272,8 @@ export function openVaultWindow(app, { syncId } = {}) {
   }
 
   async function copyValue(x) {
-    if (!x.plain) return;
-    const v = x.plain.value;
+    const v = x.plain ? x.plain.value : x.codeText ? x.codeText.textContent.replace(/\s+/g, '') : '';
+    if (!v) return;
     await copyText(v);
     showToast(t('Copied — cleared from the clipboard in 30 s if this tab stays open'));
     // our own timer: clear what we put there (when the page can read it back, only if it is still ours)
@@ -197,114 +301,304 @@ export function openVaultWindow(app, { syncId } = {}) {
   }
   async function doRenew(row) {
     const r = row.doors && row.doors.rotate;
-    if (!r) return;
-    if (r.open === 'integration') { app.openIntegration?.(r.id); return; }
+    if (!r) return false;
+    if (r.open === 'integration') { app.openIntegration?.(r.id); return true; }
     if (r.open === 'channel-reauth') {
       const { a, kinds } = await channelAccount(r.id);
       if (a) showReauthAccountDialog(app, a, { kinds }); else showToast(t('That stored value is not there any more'), { type: 'error' });
+      return true;
     }
+    return false;
   }
 
-  // ── the rows (keyed: a search or a sort moves them; an open value stays where it is) ──
+  // ── the rows (keyed: a row element lives while its row's facts do; a search, a filter or a sort moves it) ──
+  const autoOf = (row) => (row.store === 'automation' && st.auto ? ((st.auto.keys || []).find((k) => `apikey:${k.id}` === row.entry) || null) : null);
+  // a row's signature leaves its last use out: a reveal moves the store key's last use, and an open value must survive the
+  // next refresh — the 「最近使用」 cell is patched in place instead
+  const sigOf = (row) => JSON.stringify([{ ...row, lastUsed: null }, autoOf(row), row.store === 'automation' ? !!st.auto : 0]);
+  const usedText = (row) => (row.lastUsed ? (row.lastUsed.by === 'human' ? t('{when} · you', { when: whenShort(row.lastUsed.at) }) : t('{when} · VibeSpace', { when: whenShort(row.lastUsed.at) })) : '');
+  const usedHelp = (row) => (row.lastUsed ? (row.lastUsed.by === 'human' ? t('last opened {when} by you', { when: whenText(row.lastUsed.at) }) : t('key last used {when} by VibeSpace', { when: whenText(row.lastUsed.at) })) : '');
   function rowFor(row) {
     const e = vwEl('div', 'vw-row');
-    e.dataset.id = row.id; e.dataset.store = row.store;
+    const purpose = purposeOf(row) || 'other', prov = provenanceOf(row) || 'me';
+    e.dataset.id = row.id; e.dataset.store = row.store; e.dataset.purpose = purpose; e.dataset.prov = prov;
     const main = vwEl('div', 'vw-main');
     main.append(vwEl('div', 'vw-label', labelWord(row)));
-    const meta = [kindWord(row.kind)];
+    const meta = [];
+    if (row.detail && row.store !== 'automation') meta.push(WORDED.has(row.store) ? t(row.detail) : row.detail);   // an integration's field label is an English key (the registry's); an automation key's why is its 显示's help, never a line beside it (the owner's confusion note)
+    meta.push(kindWord(row.kind));
     if (!(row.store === 'secrets' && row.size === 'unknown')) meta.push(t('length: {size}', { size: (SIZE_WORDS[row.size] || SIZE_WORDS.unknown)() }));   // a hub secret: names and dates only
-    if (row.detail && row.store !== 'automation') meta.unshift(WORDED.has(row.store) ? t(row.detail) : row.detail);   // an integration's field label is an English key (the registry's); an automation key says its why beside 显示
-    if (row.createdAt) meta.push(t('saved {when}', { when: whenText(row.createdAt) }));
-    if (row.lastUsed) meta.push(row.lastUsed.by === 'human' ? t('last opened {when} by you', { when: whenText(row.lastUsed.at) }) : t('key last used {when} by VibeSpace', { when: whenText(row.lastUsed.at) }));
+    if (row.createdAt) meta.push(t('saved {when}', { when: whenShort(row.createdAt) }));
     main.append(vwEl('div', 'vw-meta', meta.join(' · ')));
-    const tech = vwEl('details', 'vw-tech');
-    tech.append(vwEl('summary', null, t('Technical details')), vwEl('div', 'vw-tech-body', `${row.store} · ${row.entry} · ${row.field}`));
-    main.append(tech);
+    // THE CHIPS: kind · provenance · state (a fact the row holds — never a hint, never a greyed control)
+    const chips = vwEl('div', 'vw-chips');
+    chips.append(vwEl('span', 'vw-chip vw-chip-kind', kindWord(row.kind)));
+    const pc = vwEl('span', `vw-chip vw-chip-prov vw-prov-${prov}`);
+    pc.dataset.prov = prov; pc.title = PROV_HELP[prov] ? PROV_HELP[prov]() : '';
+    pc.append(glyph(PROV_ICON[prov] || 'person', 11), document.createTextNode(provWord(prov)));
+    chips.append(pc);
+    for (const c of stateChipsOf(row, Date.now())) { const s = vwEl('span', 'vw-chip vw-chip-state'); s.dataset.state = c.id; s.append(glyph('warn', 11), document.createTextNode(stateWord(c))); chips.append(s); }
+    const used = vwEl('div', 'vw-used', usedText(row));
+    used.title = usedHelp(row);
+    // THE VALUE + THE DOORS (by kind — a door the row has not is not drawn; design q-047 §3.3)
     const val = vwEl('div', 'vw-value');
     const mask = vwEl('span', 'vw-mask', MASK);
     mask.setAttribute('aria-label', t('Hidden'));
-    const show = vwEl('button', 'vw-btn vw-show', t('Show'));
-    const copy = vwEl('button', 'vw-btn vw-copy', t('Copy'));
-    show.type = copy.type = 'button';
+    const show = btnEl(t('Show'), 'vw-show', { icon: 'eye', title: showHelp(row) });
+    const copy = btnEl(t('Copy'), 'vw-copy', { icon: 'copy' });
     copy.hidden = true;
-    if (row.revealable === false) show.hidden = true;   // int317: a machine's link token / a sealed file's key — never shown (the hub refuses it by name)
-    val.append(mask, show, copy);
-    // design q-046: an automation key's value is shown ONLY to hand to an outside party — said beside 显示, every time
-    if (row.store === 'automation') val.append(vwEl('span', 'vw-ak-why', t('Only to hand to an outside party')));
+    const x = { row, el: e, mask, show, copy, used, plain: null, codeText: null, codeLeft: null, sig: sigOf(row) };
+    let totpTx = null;   // design q-047 L1: lazily holds the ported totpExtras (its box / doors land once `doors` exists)
+    if (isTotp(row)) {
+      // design q-047 L1 (lane vault-totp): 看码 + its ring + 复制 + 用于… (its own door GET /api/vault/totp/:name) — never a mask for the code;
+      // the SEED and its settings stay behind 验证是你 (显示), the owner's amendment to ① — so a revealable two-step row also draws mask + show
+      totpTx = totpExtras(row, st.totp, { refresh, signal: sig, show });
+      x.stopCode = totpTx.stop;
+      val.append(...totpTx.value);
+      if (row.revealable !== false) val.append(mask, show);
+    } else if (row.revealable === false) val.append(mask);   // int317: a machine's link token / a sealed file's key — never shown (the hub refuses it by name): no 显示 at all
+    else val.append(mask, show, copy);
     const doors = vwEl('div', 'vw-doors');
     if (row.store === 'automation' && st.auto) { const ex = automationExtras(row, st.auto, { refresh }); main.append(ex.box); doors.append(...ex.doors); }
-    const x = { row, el: e, mask, show, copy, plain: null };
-    if (row.doors && row.doors.rotate) { const b = vwEl('button', 'vw-btn vw-renew', t('Renew…')); b.type = 'button'; b.onclick = () => doRenew(row); doors.append(b); }
-    if (row.doors && row.doors.delete) { const b = vwEl('button', 'vw-btn vw-del', t('Delete')); b.type = 'button'; b.onclick = () => doDelete(row); doors.append(b); }
+    if (totpTx) { main.append(totpTx.box); doors.append(...totpTx.doors); }   // design q-047 L1: the code's grant chips + 用于…
+    if (row.doors && row.doors.rotate) { const b = btnEl(t('Renew…'), 'vw-renew'); b.onclick = () => doRenew(row); doors.append(b); }
+    if (row.doors && row.doors.delete) { const b = btnEl(t('Delete'), 'vw-del'); b.onclick = () => doDelete(row); doors.append(b); }
     show.onclick = () => (x.plain ? hideValue(x) : revealRow(x));
     copy.onclick = () => copyValue(x);
-    e.append(main, val, doors);
+    const tech = vwEl('details', 'vw-tech');
+    tech.append(vwEl('summary', null, t('Technical details')), vwEl('div', 'vw-tech-body', `${row.store} · ${row.entry} · ${row.field}`));
+    const act = vwEl('div', 'vw-act');
+    act.append(val, doors);
+    e.append(main, chips, used, act, tech);
     return x;
   }
+  /** The rows after a refresh: a row whose facts did not change KEEPS its element (an open value stays open); a changed one
+   *  is drawn again; a gone one leaves. */
   function build() {
-    hideAll();
-    rowEls.clear(); headEls.clear();
-    list.textContent = '';
     const d = st.data;
-    if (!d || !Array.isArray(d.rows)) return;
-    for (const s of GROUPS) {
-      const info = (d.stores || []).find((x) => x.store === s.store) || { count: 0 };
-      const h = vwEl('div', 'vw-group');
-      h.dataset.store = s.store;
-      h.append(vwEl('span', 'vw-group-name', (STORE_WORDS[s.store] || (() => s.label))()), vwEl('span', 'vw-group-n', String(info.count || 0)));
-      if (info.error) h.append(vwEl('span', 'vw-group-err', t('could not be read ({code})', { code: info.error })));
-      // design q-046: 铸造… on the «Automation keys» head — the vault unlocked only (a key's value is sealed at once)
-      if (s.store === 'automation' && d.state === 'unlocked') { const m = vwEl('button', 'vw-btn vw-ak-mint', t('Mint…')); m.type = 'button'; m.onclick = () => showMintDialog({ refresh, data: st.auto }); h.append(m); }
-      headEls.set(s.store, h);
+    const rows = d && Array.isArray(d.rows) ? d.rows : [];
+    const live = new Set(rows.map((r) => r.id));
+    for (const [id, x] of rowEls) if (!live.has(id)) { x.stopCode?.(); hideValue(x); x.el.remove(); rowEls.delete(id); }
+    for (const row of rows) {
+      const old = rowEls.get(row.id);
+      if (old && old.sig === sigOf(row)) { old.row = row; const u = usedText(row); if (old.used.textContent !== u) { old.used.textContent = u; old.used.title = usedHelp(row); } continue; }
+      if (old) { old.stopCode?.(); hideValue(old); old.el.remove(); }
+      rowEls.set(row.id, rowFor(row));
     }
-    for (const row of d.rows) rowEls.set(row.id, rowFor(row));
   }
+  function headFor(id) {
+    if (headEls.has(id)) return headEls.get(id);
+    const h = vwEl('div', 'vw-group');
+    h.dataset.purpose = id;
+    const n = vwEl('span', 'vw-group-n');
+    h.append(vwEl('span', 'vw-group-name', purposeWord(id)), n);
+    headEls.set(id, { el: h, n, mint: null });
+    return headEls.get(id);
+  }
+  const wordsOf = (r) => [kindWord(r.kind), purposeWord(purposeOf(r)), provWord(provenanceOf(r)), labelWord(r)];
+  /** THE VIEW → the rail, the group heads and the rows in place (nodes MOVED, never rebuilt). */
   function place() {
     const d = st.data;
-    if (!d || d.state === 'locked') return;
-    const shown = sortRows(searchRows(d.rows || [], st.q), st.sort);
-    const frag = document.createDocumentFragment();
-    for (const s of GROUPS) {
-      const mine = shown.filter((r) => r.store === s.store);
-      const h = headEls.get(s.store);
-      if (!h || (!mine.length && st.q)) continue;
-      frag.append(h);
-      if (!mine.length) { const empty = vwEl('div', 'vw-empty', t('Nothing stored here')); frag.append(empty); continue; }
-      for (const r of mine) { const x = rowEls.get(r.id); if (x) frag.append(x.el); }
+    const locked = !d || d.state === 'locked';
+    drawRail(locked ? null : d, { locked: !!d && d.state === 'locked' });
+    if (locked) return;
+    const v = viewOf(d.rows || [], { q: st.q, prov: [...st.prov], revealOnly: st.revealOnly, purpose: st.purpose, sort: st.sort, wordsOf });
+    const want = [];
+    const filtered = !!(st.q || st.prov.size || st.revealOnly);
+    for (const g of v.groups) {
+      if (!g.rows.length && (st.purpose === 'all' || filtered)) continue;
+      const h = headFor(g.id);
+      h.n.textContent = String(g.rows.length);
+      // design q-046: 铸造… on the «Automation keys» head — the vault unlocked only (a key's value is sealed at once)
+      if (g.id === 'automation' && d.state === 'unlocked' && !h.mint) { h.mint = btnEl(t('Mint…'), 'vw-ak-mint'); h.mint.onclick = () => showMintDialog({ refresh, data: st.auto }); h.el.append(h.mint); }
+      if (h.mint) h.mint.hidden = d.state !== 'unlocked';
+      want.push(h.el);
+      if (!g.rows.length) { want.push(emptyEl(t('Nothing stored here'), `empty-${g.id}`)); continue; }
+      for (const r of g.rows) { const x = rowEls.get(r.id); if (x) want.push(x.el); }
     }
-    list.textContent = '';
-    list.append(frag);
-    if (!shown.length && st.q) list.append(vwEl('div', 'vw-empty', t('No stored value matches “{q}”', { q: st.q })));
+    if (!v.rows.length && filtered) want.push(emptyEl(st.q ? t('No stored value matches “{q}”', { q: st.q }) : t('No stored value matches these filters'), 'empty-match'));
+    else if (!v.rows.length && st.purpose === 'all') want.push(emptyEl(t('Nothing stored here'), 'empty-all'));
+    reconcile(list, want);
+    railCounts(v.counts);
+    if (st.focus) { const f = st.focus; st.focus = null; focusRow(f); }
   }
+  const empties = new Map();
+  function emptyEl(text, key) { let e = empties.get(key); if (!e) { e = vwEl('div', 'vw-empty'); e.dataset.key = key; empties.set(key, e); } if (e.textContent !== text) e.textContent = text; return e; }
+  /** Keyed reconciliation: `want` in order, by MOVING nodes (an element already in place is never touched; nothing is rebuilt). */
+  function reconcile(box, want) {
+    const keep = new Set(want);
+    for (const c of [...box.children]) if (!keep.has(c)) c.remove();
+    want.forEach((node, i) => { if (box.children[i] !== node) box.insertBefore(node, box.children[i] || null); });
+  }
+  // ── the rail ──
+  function railItem(id, label) {
+    let it = railEls.get(id);
+    if (it) return it;
+    const b = vwEl('button', 'vw-rail-item');
+    b.type = 'button'; b.dataset.purpose = id; b.setAttribute('role', 'tab');
+    const n = vwEl('span', 'vw-rail-n');
+    b.append(vwEl('span', 'vw-rail-name', label), n);
+    b.onclick = () => { if (b.classList.contains('vw-rail-off')) return; st.purpose = id; place(); list.scrollTop = 0; };   // before the first answer too: the pick waits for the rows
+    it = { el: b, n };
+    railEls.set(id, it);
+    return it;
+  }
+  /** `locked` = the hub said locked: a table of what is kept, its counts «—», nothing to pick; no rows yet (the first answer
+   *  still on its way) = the purposes with no count, a pick already kept. */
+  function drawRail(d, { locked = false } = {}) {
+    const ids = ['all', ...PURPOSES.filter((p) => !p.onlyWhenAny || (d && (d.rows || []).some((r) => purposeOf(r) === p.id))).map((p) => p.id)];
+    const want = ids.map((id) => railItem(id, id === 'all' ? t('All') : purposeWord(id)).el);
+    reconcile(rail, want);
+    for (const [id, it] of railEls) {
+      const on = id === st.purpose;
+      it.el.classList.toggle('on', on); it.el.setAttribute('aria-selected', on ? 'true' : 'false');
+      it.el.classList.toggle('vw-rail-off', locked);
+      it.el.tabIndex = locked ? -1 : 0;
+      if (locked) it.n.textContent = '—'; else if (!d) it.n.textContent = '';
+    }
+  }
+  function railCounts(counts) { for (const [id, it] of railEls) it.n.textContent = String(counts[id] || 0); }
+  /** Bring a row (an id, or an entry's rows) into view, flashed — a 「需要你」 item's 打开 / For you's door. */
+  function focusRow(ref) {
+    const s = String(ref || '');
+    const x = rowEls.get(s) || [...rowEls.values()].find((y) => y.row.entry === s || `${y.row.store}:${y.row.entry}` === s);
+    if (!x) { if (s.startsWith('apikey:')) { st.purpose = 'automation'; place(); } return false; }
+    if (!x.el.isConnected) { st.q = ''; search.value = ''; st.prov.clear(); st.revealOnly = false; st.purpose = 'all'; syncFilters(); place(); }
+    x.el.scrollIntoView({ block: 'center' });
+    x.el.classList.remove('vw-flash'); void x.el.offsetWidth; x.el.classList.add('vw-flash');
+    return true;
+  }
+  winInfo._vwFocus = (ref) => { if (st.data && st.data.rows) focusRow(ref); else st.focus = ref; };
+
+  // ── 「需要你」 — For you's own open items of origin 'vault' (the same store; answered here = answered there) ──
+  const inbox = (() => { try { return inboxModel(app); } catch { return null; } })();
+  function bandDoor(item, door) {
+    const label = { once: t('Allow once'), always: t('Always for this conversation'), deny: t('Deny'), unlock: t('Unlock…'), renew: t('Renew…'), ack: t('Got it'), open: t('Open the row') }[door];
+    const b = btnEl(label, `vw-band-${door}${door === 'once' || door === 'unlock' ? ' vw-primary' : ''}${door === 'deny' ? ' vw-del' : ''}`);
+    b.dataset.door = door;
+    b.onclick = async () => {
+      if (door === 'once' || door === 'always' || door === 'deny') { await inbox.runAction(item, door); return; }   // THE tray's own answer (src/lib/user-todos-actions.js)
+      if (door === 'unlock') { showUnlock(); return; }
+      if (door === 'ack') { await inbox.setStatus(item.id, 'done'); return; }
+      const entry = item.action && item.action.entry;
+      if (door === 'renew') { const x = [...rowEls.values()].find((y) => y.row.entry === entry); if (!(x && (await doRenew(x.row)))) focusRow(entry); return; }
+      if (entry) focusRow(entry); else inbox.jump(item.sessionKey, item);
+    };
+    return b;
+  }
+  function drawBand() {
+    if (!inbox) { band.hidden = true; return; }
+    const { items, total } = bandItemsOf((inbox.todos && inbox.todos.open) || []);
+    band.hidden = !items.length;
+    bandN.textContent = String(total);
+    const want = [];
+    for (const it of items) {
+      const sigB = JSON.stringify([it.id, it.text, it.i18n, it.action, it.urgency]);
+      let r = bandEls.get(it.id);
+      if (!r || r.sig !== sigB) {
+        const el = vwEl('div', 'vw-band-row');
+        el.dataset.id = it.id;
+        if (it.action && it.action.type) el.dataset.type = it.action.type;
+        const txt = vwEl('span', 'vw-band-txt', inbox.wordsOf(it));
+        const det = inbox.detailOf(it);
+        if (det) txt.title = det;
+        const doors = vwEl('span', 'vw-band-doors');
+        for (const d of bandDoorsOf(it)) doors.append(bandDoor(it, d));
+        el.append(txt, doors);
+        r = { el, sig: sigB };
+        bandEls.set(it.id, r);
+      }
+      want.push(r.el);
+    }
+    for (const id of [...bandEls.keys()]) if (!items.some((i) => i.id === id)) bandEls.delete(id);
+    reconcile(bandRows, want);
+  }
+  inbox?.on('todos', () => { if (!st.closed) drawBand(); }, { signal: sig });
+
+  // ── the bar ──
+  function syncFilters() {
+    for (const b of provChips) { const on = st.prov.has(b.dataset.prov); b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+    onlyShown.classList.toggle('on', st.revealOnly); onlyShown.setAttribute('aria-pressed', st.revealOnly ? 'true' : 'false');
+    for (const o of sortSel.options) o.selected = o.value === st.sort;
+    filterB.classList.toggle('on', !!(st.prov.size || st.revealOnly));
+  }
+  const toggleProv = (id) => { if (st.prov.has(id)) st.prov.delete(id); else st.prov.add(id); syncFilters(); place(); };
+  for (const b of provChips) b.onclick = () => toggleProv(b.dataset.prov);
+  onlyShown.onclick = () => { st.revealOnly = !st.revealOnly; syncFilters(); place(); };
+  /** 筛选… (a phone): the same filters in a modal — each press applies at once (the list behind it follows). */
+  filterB.onclick = () => {
+    const { dialog, body: mb, close } = createModalShell({ id: 'vault-filter-dialog', title: t('Filter'), dialogClass: 'vault-dialog-box vw-filter-dialog', minWidth: 'min(340px, 92vw)' });
+    const mk = (label, on, fn, cls) => { const b = vwEl('button', `vw-chip ${cls}${on ? ' on' : ''}`, label); b.type = 'button'; b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.onclick = () => { fn(); const now = b.classList.toggle('on'); b.setAttribute('aria-pressed', now ? 'true' : 'false'); }; return b; };
+    const sortRow = vwEl('div', 'vw-fsec');
+    const sel2 = vwEl('select', 'vw-sort vw-chip');
+    for (const [k, w] of SORT_CHOICES) { const o = vwEl('option', null, w()); o.value = k; o.selected = k === st.sort; sel2.append(o); }
+    sel2.onchange = () => { st.sort = sel2.value; syncFilters(); place(); };
+    sortRow.append(vwEl('div', 'vw-flabel', t('Sort')), sel2);
+    const provRow = vwEl('div', 'vw-fsec vw-fchips');
+    provRow.append(vwEl('div', 'vw-flabel', t('Where from')), ...PROVENANCE_FILTERS.map((f) => { const b = mk(t(f.label), st.prov.has(f.id), () => toggleProv(f.id), 'vw-fchip'); b.dataset.prov = f.id; return b; }));
+    const onlyRow = vwEl('div', 'vw-fsec');
+    onlyRow.append(mk(t('Only the ones I can show'), st.revealOnly, () => { st.revealOnly = !st.revealOnly; syncFilters(); place(); }, 'vw-only-shown'));
+    mb.append(sortRow, provRow, onlyRow);
+    const footer = vwEl('div', 'dialog-footer');
+    const done = vwEl('button', 'btn-create vw-filter-done', t('Close'));
+    done.type = 'button'; done.onclick = () => close();
+    footer.append(done);
+    dialog.append(footer);
+  };
+  addB.onclick = (ev) => {
+    const r = addB.getBoundingClientRect();
+    const ctx = { refresh, auto: () => st.auto };
+    showContextMenu(r.left, r.bottom + 4, ADD_DOORS.map((d) => ({ label: d.label(), action: () => d.run(app, ctx) })));
+    ev.stopPropagation();
+  };
+
   function drawHead() {
     const d = st.data, state = d ? d.state : null;
-    note.textContent = '';
     const locked = state === 'locked';
-    root.classList.toggle('vw-nobar', !d || state !== 'unlocked');   // lane vault-one-door: no greyed controls — the bar shows once there is something to search
-    if (locked) note.append(vwEl('span', null, t('The vault is locked — unlock it to see what it holds.')));   // the header's 解锁… is the one door
-    else if (state === 'not_set_up') note.append(vwEl('span', null, t('Set a second password first — stored values are shown only behind it')));
-    else if (d) note.append(vwEl('span', null, t('{n} stored values, sealed in the vault. Showing one asks for the second password again; they stay visible for 5 minutes.', { n: (d.rows || []).length })));
+    root.classList.toggle('vw-nobar', !d || state !== 'unlocked');   // lane vault-one-door: no greyed controls — the bar shows once there is something to search (and 添加… once the vault can take a value)
+    root.classList.toggle('vw-locked', locked);
+    noteText.textContent = '';
+    showAllB.hidden = state !== 'unlocked';
+    if (state === 'not_set_up') noteText.textContent = t('Set a second password first — stored values are shown only behind it');
+    else if (d && !locked) noteText.textContent = t('{n} stored values, sealed in the vault. Showing one asks for the second password again; they stay visible for 5 minutes. Every reveal is recorded.', { n: (d.rows || []).length });
+    if (locked) {
+      // design q-047 §3.5: the list says it is locked + 解锁… — no 添加… (locked = read-only), nothing greyed
+      const box = vwEl('div', 'vw-locked-box');
+      const icon = vwEl('div', 'vw-locked-icon');
+      icon.append(glyph('lock', 28));
+      const txt = vwEl('div', 'vw-locked-text');
+      txt.append(vwEl('div', null, t('The vault is locked — unlock it to see what it holds.')), vwEl('div', null, t('While it is locked every use answers «locked» — nothing fails in another way.')));
+      const u = btnEl(t('Unlock…'), 'vw-unlock vw-primary');
+      u.onclick = () => showUnlock();
+      box.append(icon, txt, u);
+      reconcile(list, [box]);
+    }
   }
   function lockedNow() { forgetReveal(); hideAll(); drawTimer(); refresh(); }
   async function refresh() {
     const r = await fetchJson('/api/vault/contents', { headers: revealHeaders() });
     if (st.closed) return;
-    if (!r || r.ok === false) { st.data = null; drawHead(); list.textContent = ''; note.textContent = revealWords(r || {}); return; }
-    st.data = { state: r.state, stores: r.stores || [], rows: r.rows || [] };
-    st.auto = r.state === 'unlocked' ? await loadAutomation() : null;   // design q-046: the keys' grants + the picker's subjects (never a value)
+    if (!r || r.ok === false) { st.data = null; drawHead(); reconcile(list, []); noteText.textContent = revealWords(r || {}); drawRail(null, { locked: !!r && r.code === 'vault_locked' }); return; }
+    // design q-046: the keys' grants + the picker's subjects (never a value) — read BEFORE the new rows are published: a pick in
+    // the rail between the two drew the purpose with no row and a 铸造… with no choices (test-automation-keys-chrome ⑨b, 2/3)
+    const auto = r.state === 'unlocked' ? await loadAutomation() : null;
     if (st.closed) return;
+    st.data = { state: r.state, stores: r.stores || [], rows: r.rows || [] };
+    st.auto = auto;
+    st.totp = r.state === 'unlocked' && st.data.rows.some(isTotp) ? await loadTotp() : null;   // design q-047 L1: the codes' grants + the picker's subjects (never a value)
     if (r.reveal && r.reveal.open) noteRevealLeft(r.reveal.leftMs); else forgetReveal();
     drawTimer();
+    if (r.state === 'locked') { hideAll(); for (const [id, x] of rowEls) { x.stopCode?.(); x.el.remove(); rowEls.delete(id); } }
     build(); drawHead(); place();
   }
 
   search.addEventListener('input', () => { st.q = search.value; place(); }, { signal: sig });
   sortSel.onchange = () => { st.sort = sortSel.value; place(); };
   showAllB.onclick = async () => {
-    const shown = sortRows(searchRows((st.data && st.data.rows) || [], st.q), st.sort);
-    for (const r of shown) { if (r.revealable === false) continue; const x = rowEls.get(r.id); if (x && !x.plain && !(await revealRow(x))) break; }   // int317: never-shown rows are skipped (not a stop)
+    const shown = [...rowEls.values()].filter((x) => x.el.isConnected).sort((a, b) => (a.el.compareDocumentPosition(b.el) & 4 ? -1 : 1));
+    for (const x of shown) { if (x.row.revealable === false || isTotp(x.row)) continue; if (!x.plain && !(await revealRow(x))) break; }   // int317: never-shown rows are skipped (not a stop)
   };
-  hideAllB.onclick = () => hideAll();
+  hideAllB.onclick = () => { hideAll(); drawTimer(); };
   // a lock anywhere (another tab, an agent's lock, the idle lock) hides every value at once
   const off = app.ws?.onGlobal?.((msg) => {
     if (!msg || msg.type !== 'vault-state' || st.closed) return;
@@ -320,9 +614,11 @@ export function openVaultWindow(app, { syncId } = {}) {
     offReveal();
     try { off?.(); } catch { /* the socket is gone */ }
     document.getElementById('vault-reveal-dialog')?.remove();
+    document.getElementById('vault-filter-dialog')?.remove();
     endReveal();   // the window closed: this page's reveal window ends with it
   });
   hd.draw(); refreshVaultFacts();
+  syncFilters(); drawRail(null); drawBand();
   refresh();
   return winInfo;
 }
@@ -346,7 +642,7 @@ export async function paintVaultLine(host, app) {
 registerWindowType({
   type: 'vault', label: 'Vault', singleton: true, icon: ICON, persist: false,
   action: 'openVault',
-  replay: (app, spec, { syncId } = {}) => openVaultWindow(app, { syncId }),
+  replay: (app, spec, { syncId } = {}) => openVaultWindow(app, { syncId, focus: (spec && spec.focus) || null }),
 });
 /** ⚙ System ▸ Vault… — THE ONE ROW (lane vault-one-door: the old dialog's row and Vault contents… became this one). */
 registerMenuItem({

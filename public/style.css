@@ -7579,7 +7579,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
   .vault-pw { min-height: 40px; font-size: 16px; }
 }
 /* THE VAULT WINDOW (lane vault-contents-window): every sealed value, masked; 「显示」 behind the second password for 5 minutes */
-.vw { height: 100%; display: flex; flex-direction: column; font-size: 12px; min-height: 0; }
+.vw { height: 100%; display: flex; flex-direction: column; font-size: 12px; min-height: 0; container: vw / inline-size; }
 .vw-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
 /* lane vault-one-door: the header = the old ⚙ System ▸ Vault… dialog (state line, doors by state, the idle lock) */
 .vw-head { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
@@ -7591,29 +7591,82 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .vw-state { font-weight: 600; color: var(--text); }
 .vw-state[data-state="locked"] { color: var(--warn-text); }
 .vw-timer { padding: 1px 8px; border-radius: 10px; background: var(--hover-overlay); color: var(--warn-text); font-variant-numeric: tabular-nums; }
-.vw-search { flex: 1 1 160px; min-width: 120px; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
-.vw-sort { padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
-.vw-btn { padding: 3px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; cursor: pointer; white-space: nowrap; }
+.vw-search { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; outline: none; }
+.vw-sort { padding: 0 7px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input); color: var(--text); font: inherit; font-size: 11px; height: 22px; }
+.vw-btn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; cursor: pointer; white-space: nowrap; }
 .vw-btn:hover { background: var(--hover-overlay); }
 .vw-btn:disabled { opacity: .5; cursor: default; }
 .vw-del { color: var(--bad-text); }
-.vw-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; color: var(--text-secondary); }
+.vw-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 14px 0; color: var(--text-dim); font-size: 11px; }
+.vw-note-text { flex: 1 1 260px; min-width: 0; }
 .vw-note:empty { display: none; }
-.vw-list { flex: 1; overflow: auto; padding: 0 12px 14px; min-height: 0; }
-.vw-group { display: flex; align-items: baseline; gap: 8px; margin: 12px 0 4px; font-weight: 600; color: var(--text); }
+.vw-list { flex: 1; overflow: auto; padding: 4px 14px 14px; min-height: 0; }
+.vw-group { display: flex; align-items: center; gap: 6px; padding: 12px 0 4px; border-bottom: 1px solid var(--border); font-size: 11px; letter-spacing: .04em; font-weight: 600; color: var(--text-dim); }
 .vw-group-n { color: var(--text-dim); font-weight: normal; }
 .vw-group-err { color: var(--bad-text); font-weight: normal; }
-.vw-empty { padding: 4px 0 6px; color: var(--text-dim); }
-.vw-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 40%) auto; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); }
-.vw-label { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vw-meta { color: var(--text-dim); margin-top: 2px; overflow-wrap: anywhere; }
-.vw-tech { margin-top: 2px; color: var(--text-dim); }
+.vw-empty { padding: 8px 0 10px; color: var(--text-dim); }
+/* lane vault-window-v2 (design q-047 §3.3): a row = name + meta · kind / provenance / state chips · last use · the value and its doors; 技术细节 under it */
+.vw-row { display: grid; grid-template-columns: minmax(200px, 1.2fr) minmax(170px, 1fr) 140px minmax(250px, auto); align-items: center; gap: 4px 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.vw-row.vw-flash { animation: highlight-flash 1.2s ease-out; }
+.vw-label { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vw-meta { color: var(--text-dim); margin-top: 2px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vw-tech { grid-column: 1 / -1; color: var(--text-dim); font-size: 11px; }
 .vw-tech summary { cursor: pointer; width: max-content; }
 .vw-tech-body { font-family: var(--font-mono, monospace); overflow-wrap: anywhere; }
 .vw-value { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.vw-mask { flex: 1; letter-spacing: 2px; color: var(--text-secondary); }
+.vw-mask { letter-spacing: .2em; color: var(--text-dim); font-family: var(--font-mono, monospace); }
 .vw-plain { flex: 1; min-width: 0; padding: 3px 6px; border: 1px solid var(--border-active); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font-family: var(--font-mono, monospace); font-size: 12px; }
-.vw-doors { display: flex; gap: 6px; }
+.vw-doors { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.vw-act { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.vw-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.vw-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 11px; white-space: nowrap; }
+button.vw-chip { cursor: pointer; }
+.vw-chip.on { background: var(--accent-dim); color: var(--text); border-color: transparent; }
+.vw-chip-kind { background: var(--hover-overlay); }
+.vw-prov-agent-put, .vw-chip-state { border-color: var(--warn-text); color: var(--warn-text); }
+.vw-prov-system, .vw-prov-hub-mint, .vw-prov-agent-mint { border-style: dashed; color: var(--text-dim); }
+.vw-ico { flex: none; }
+.vw-used { color: var(--text-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.vw-code { display: inline-flex; align-items: baseline; gap: 8px; font-family: var(--font-mono, monospace); }
+.vw-code-digits { font-size: 16px; font-weight: 700; letter-spacing: .12em; color: var(--text); }
+.vw-code-left { font-size: 10px; color: var(--text-dim); }
+.vw [hidden] { display: none; }   /* a door this row has not is not drawn (never greyed): the attribute wins over a display rule */
+.vw-primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; font-weight: 600; }
+.vw .vault-state-line { flex-wrap: wrap; }
+.vw .vw-state, .vw .vault-state-when { white-space: nowrap; }
+.vw.vw-locked .vw-note { display: none; }
+.vw-primary:hover { background: var(--accent-hover); }
+/* the body: the purposes' rail beside the pane (bar · note · list) */
+.vw-body { flex: 1; min-height: 0; display: flex; }
+.vw-rail { width: 200px; flex: none; display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border-right: 1px solid var(--border); overflow: auto; }
+.vw-rail-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
+.vw-rail-item:hover { background: var(--hover-overlay); }
+.vw-rail-item.on { background: var(--accent-dim); color: var(--text); font-weight: 600; }
+.vw-rail-item.vw-rail-off { cursor: default; }
+.vw-rail-item.vw-rail-off:hover { background: transparent; }
+.vw-rail-n { margin-left: auto; color: var(--text-dim); font-weight: normal; font-size: 11px; }
+.vw-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.vw-search-box { flex: 1 1 200px; min-width: 140px; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-dim); }
+.vw-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 11px; }
+.vw-flabel { color: var(--text-secondary); font-size: 11px; }
+.vw-filter-btn { display: none; }
+.vw-filter-btn.on { border-color: var(--accent); }
+.vw-filter-dialog .dialog-body { display: flex; flex-direction: column; gap: 12px; }
+.vw-fsec { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.vw-fsec .vw-flabel { flex: 1 0 100%; }
+/* 「需要你」 (design q-047 §3.4): For you's own open vault items — the same items, answered here or there */
+.vw-band { margin: 10px 14px 0; padding: 6px 10px; display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--accent-dim); border-radius: var(--radius); background: var(--hover-overlay); }
+.vw-band[hidden] { display: none; }
+.vw-band-head { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: 11px; font-weight: 700; }
+.vw-band-n { font-weight: normal; color: var(--text-dim); }
+.vw-band-rows { display: flex; flex-direction: column; gap: 2px; }
+.vw-band-row { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.vw-band-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.vw-band-doors { display: flex; flex-wrap: wrap; gap: 6px; }
+/* locked (design q-047 §3.5): one sentence + 解锁… — no 添加…, nothing greyed */
+.vw-locked-box { padding: 40px 20px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; color: var(--text-secondary); line-height: 1.5; }
+.vw-locked-icon { color: var(--text-dim); }
+.vw-locked .vw-rail-n { letter-spacing: 0; }
 /* design q-046 (lane automation-keys-core): «Automation keys» — the verbs, the grants (chips, ✕ takes one back), last used, 铸造… /
    授权给… / 撤销; the value only behind 显示, ONLY to hand to an outside party (said beside it) */
 .vw-ak { margin-top: 3px; display: flex; flex-direction: column; gap: 3px; color: var(--text-secondary); }
@@ -7623,8 +7676,14 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .vw-ak-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 8px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); }
 .vw-ak-x { border: 0; background: none; color: var(--text-dim); cursor: pointer; padding: 0 4px; font: inherit; }
 .vw-ak-x:hover { color: var(--bad-text); }
-.vw-ak-why { color: var(--warn-text); font-size: 11px; white-space: nowrap; }
 .vw-ak-mint { margin-left: auto; font-weight: normal; }
+/* design q-047 L1 (lane vault-totp): a two-step code's row — 看码 → the code, its ring (the seconds left: --p) and the seconds; 用于… chips reuse .vw-ak-* */
+.vw-code { display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 700; letter-spacing: .1em; color: var(--text); white-space: nowrap; }
+.vw-code[hidden] { display: none; }
+.vw-ring { width: 16px; height: 16px; border-radius: 50%; background: conic-gradient(var(--accent) var(--p, 100%), var(--border) 0); position: relative; flex: none; }
+.vw-ring::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg-window); }
+.vw-code-left { font-size: 11px; font-weight: normal; letter-spacing: normal; color: var(--text-dim); }
+.vw-value:has(> .vw-code-view) { flex-wrap: wrap; row-gap: 4px; }
 .vw-ak-dialog .dialog-body { display: flex; flex-direction: column; gap: 6px; min-width: 320px; max-height: 60vh; overflow: auto; }
 .vw-ak-dialog label.vw-ak-pick, .vw-ak-pick { flex-direction: row; display: flex; align-items: center; gap: 8px; }
 .vw-ak-sec { margin-top: 6px; font-weight: 600; color: var(--text); }
@@ -7649,7 +7708,23 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 @media (max-width: 600px) { .vw-ak-x { min-width: 36px; min-height: 36px; } .vw-ak-pick { min-height: 36px; } .vw-ak-dir, .vw-ak-up { min-height: 36px; } }
 .sys-vault-line { border-top: 1px solid var(--border); }
 @media (max-width: 600px) {
-  .vw-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .vw-btn, .vw-search, .vw-sort { min-height: 36px; }
+  .vw-btn, .vw-search-box, .vw-sort, .vw-rail-item, button.vw-chip { min-height: 36px; }   /* a press target; a chip that only SAYS something stays a chip */
   .vw-plain { min-height: 36px; font-size: 16px; }
+}
+/* THE PHONE (design q-047 §3.6) — and any window this narrow: the rail becomes a chip strip, the filters one 筛选…, a row stacks
+   (name / meta → chips → the value and its doors → last use → 技术细节); the band's words wrap above their buttons */
+@container vw (max-width: 640px) {
+  .vw-body { flex-direction: column; }
+  .vw-rail { width: auto; flex-direction: row; gap: 6px; padding: 6px 10px; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; flex: none; }
+  .vw-rail-item { flex: none; padding: 4px 10px; border: 1px solid var(--border); background: var(--bg-input); }
+  .vw-rail-n { margin-left: 4px; }
+  .vw-filters { display: none; }
+  .vw-filter-btn { display: inline-flex; }
+  .vw-search-box { flex: 1 1 100px; min-width: 0; }
+  .vw-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .vw-act { order: 3; }
+  .vw-used { order: 4; }
+  .vw-tech { order: 5; }
+  .vw-band-row { flex-wrap: wrap; padding: 4px 0; }
+  .vw-band-txt { flex: 1 0 100%; white-space: normal; }
 }

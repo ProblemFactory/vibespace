@@ -239,7 +239,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     const dm = await handleIfConnected(h);
     steps.dial = Date.now() - t0;
     const info = dm && dm.status ? (dm.status().info || null) : null;
-    const row = { hostId: h.id, label: String(h.name || h.id), transport: h.transport === 'dial' ? 'dial' : 'ssh', link: info ? 'online' : link, connected: !!info, capabilities: info && Array.isArray(info.capabilities) ? info.capabilities : null, platform: info ? info.platform || null : null };
+    const row = { hostId: h.id, label: String(h.name || h.id), transport: h.transport === 'dial' ? 'dial' : 'ssh', link: info ? 'online' : link, connected: !!info, capabilities: info && Array.isArray(info.capabilities) ? info.capabilities : null, platform: info ? info.platform || null : null, elevated: info ? info.elevated === true : null };
     // design 014 D1: a connected Windows / macOS machine's own VNC server, probed as the launcher opens (Linux rows untouched)
     if (row.connected && M.DESKTOP_PLATFORMS.includes(row.platform)) { const p = await probeTimed(h.id, dm).catch((e) => ({ vnc: { ok: false, code: 'no_listener', why: String((e && e.message) || e) }, steps: {} })); row.vnc = p.vnc; Object.assign(steps, p.steps); }
     const out = { ...row, ...M.machinePickRow(row) };

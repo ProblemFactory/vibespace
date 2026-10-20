@@ -19,6 +19,8 @@
 //      verb is fresh, a repeat is not), bounded at 50 actors × 8 verbs (the rest a count), names never ids; the engine's ONE
 //      helper notes only while LOCKED, the store-key road notes itself (actor VibeSpace, the store as the verb), a fresh note
 //      re-announces (facts().blocked = the strip's count) and runs onBlocked once; the unlock and a lock act clear it
+//   N  the `totp:<name>` entry (design q-047 L1, lane vault-totp): a secret name, sealed + read back unlocked, refused locked,
+//      forgotten locked too; a name outside the grammar is no secret
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -405,6 +407,25 @@ console.log('M  A REFUSAL IS THE SIGNAL (lane vault-locked-refusal-notice) — w
   ok(e.facts().blocked === 0 && e.blockedSummary().count === 0, 'the UNLOCK clears it');
   e.lock('door');
   ok(e.blockedSummary().count === 0 && e.blocked('Lane three', 'v') === true && e.blockedSummary().count === 1, 'a LOCK ACT starts a fresh epoch: nobody stopped yet, the first refusal is fresh');
+  e.close();
+}
+
+console.log('N  the two-step entry totp:<name> (design q-047 L1, lane vault-totp)');
+{
+  const { dir } = world();
+  const e = mk(dir);
+  await e.setup(PW, {});
+  const SEED = ['JBSWY3DP', 'EHPK3PXP'].join('');   // a secret-shaped fixture is built at runtime, never a literal
+  const rec = JSON.stringify({ v: 1, seed: SEED, digits: 6, period: 30, algorithm: 'SHA1', issuer: 'GitHub', account: 'o', addedAt: 1, source: 'manual' });
+  ok(VE.isSecretName('totp:github-owner') && VE.isSecretName('totp:a.b_c-1') && !VE.isSecretName('totp:') && !VE.isSecretName('totp:a b') && !VE.isSecretName('totp:a/b'), 'totp:<[\\w.-]> is a secret name; an empty / spaced / slashed one is not');
+  const put = e.secretPut('totp:github-owner', rec), got = e.secretGet('totp:github-owner');
+  ok(put.ok && got.ok && got.value.toString('utf8') === rec && e.secretNames().some((x) => x.name === 'totp:github-owner') && e.facts().secrets === 1, 'unlocked: sealed, read back to the very text, listed by NAME (a secret, not a store key)');
+  got.value.fill(0);
+  ok(!fs.readFileSync(path.join(dir, 'vault.json'), 'utf8').includes(SEED), 'vault.json holds no seed in the clear');
+  e.lock('test');
+  const lp = e.secretPut('totp:other', rec), lg = e.secretGet('totp:github-owner');
+  ok(!lp.ok && /vault_locked/.test(lp.code) && !lg.ok && /vault_locked/.test(lg.code), 'LOCKED: a put and a get refused by name (vault_locked) — nothing written', { lp, lg });
+  ok(e.secretDrop('totp:github-owner').ok && !e.secretNames().some((x) => x.name === 'totp:github-owner'), 'a locked vault still FORGETS one (a delete needs no key)');
   e.close();
 }
 

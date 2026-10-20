@@ -15,6 +15,15 @@
 //      the right one ⇒ a 5-minute window for THAT sign-in only; ONE value per reveal; the window ends at 5 min (clock),
 //      at a lock (and stays ended after the next unlock), at endReveal; 20 reveals a minute, the 21st paced; LOCKED ⇒ no
 //      rows; the audit holds who / entry / ip and never a value or a password
+//   ④ TWO-STEP CODES (design q-047 L1, lane vault-totp): a `totp:<name>` entry is ONE row (kind totp, field seed, its name as
+//      the label), its doors (the CODE, its own delete, no 换新), no seed and no setting anywhere in the inventory, and its
+//      reveal = ONE value: the otpauth link
+//   ⑧ (lane vault-window-v2, design q-047 §3): THE PURPOSES — the table pinned (nine + Other, the rail's order), every row of
+//      the real stores in EXACTLY ONE purpose, each store's rows where the design puts them; THE PROVENANCE table (one chip
+//      per row, the rules in order); the row's two new named fields (origin closed, expiresAt — the accounts' long-lived token
+//      says when it stops); the state chips; the window's view (counts per purpose = the group's rows, the provenance filter,
+//      只看可显示, the page's own words in the search); the band's items and doors; the use-failure hour; MUTANTS: a row of no
+//      purpose ⇒ RED, a row in two purposes ⇒ RED; the window's band reads For you only and answers through it (pinned)
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -30,7 +39,7 @@ console.log('① PURE — src/vault-inventory.js');
 {
   const raw = { entry: 'acct-1', field: 'key', kind: 'api-key', label: 'Work', detail: 'claude', createdAt: 5, cipher: 'aaaabbbbccccdddd:eeeeffffgggghhhhiiiijj==.QUJD', value: 'PLANTED-VALUE', plain: 'PLANTED', secret: 'PLANTED', token: 'PLANTED', bytes: undefined };
   const row = VI.rowOf('accounts', raw, { lastUsed: { at: 9, by: 'human' } });
-  ok(JSON.stringify(Object.keys(row)) === JSON.stringify(['id', 'store', 'entry', 'field', 'kind', 'label', 'detail', 'createdAt', 'rotatedAt', 'lastUsed', 'size', 'doors', 'revealable']), 'rowOf: the row is exactly its NAMED fields (never a spread)', Object.keys(row));
+  ok(JSON.stringify(Object.keys(row)) === JSON.stringify(['id', 'store', 'entry', 'field', 'kind', 'label', 'detail', 'createdAt', 'rotatedAt', 'lastUsed', 'size', 'doors', 'revealable', 'origin', 'expiresAt']), 'rowOf: the row is exactly its NAMED fields (never a spread)', Object.keys(row));
   ok(!/PLANTED|QUJD|aaaabbbb/.test(JSON.stringify(row)), 'rowOf: a raw row\'s value, plaintext, secret, token and ciphertext leave nothing in the row', row);
   ok(VI.STORE_IDS.join() === require(path.join(REPO, 'src/server/vault-engine.js')).STORE_KEYS.map((k) => k.store).sort((a, b) => VI.STORE_IDS.indexOf(a) - VI.STORE_IDS.indexOf(b)).join() && VI.STORE_IDS.length === 6, 'the stores are the vault engine\'s six (one key each)');
   ok(row.id === 'accounts:acct-1#key' && row.lastUsed.by === 'human' && row.lastUsed.at === 9, 'the id is <store>:<entry>#<field>; lastUsed { at, by }');
@@ -77,6 +86,17 @@ console.log('①b THE PAGE\'S XSS RULE — src/lib/vault-window.js');
   const fromAnswer = valueSinks.filter((x) => /\br\.value\b/.test(x));
   ok(fromAnswer.length === 1 && fromAnswer[0] === 'x.plain = r.value' && valueSinks.filter((x) => !/^x\.plain = /.test(x)).every((x) => /= ('')|= k$/.test(x)), 'a revealed value has ONE sink — its row field\'s `.value`; every other `.value =` is a clear or an option key', valueSinks);
   ok(!/sessionStorage|localStorage|indexedDB|postMessage|BroadcastChannel|\.send\(/.test(src), 'nothing of the page stores or forwards a value (no storage, no message, no socket send)');
+  // lane vault-window-v2: NO GREYED CONTROL — a door the row has not is not drawn (design q-047 §3.3); a planted `disabled` is caught
+  const greyed = (s) => /\.disabled\s*=\s*(?!false\b)|setAttribute\(\s*'disabled'/.test(s);
+  ok(!greyed(src) && greyed(src + "\nb.disabled = true;") && greyed(src + "\nb.setAttribute('disabled', '');"), 'no greyed control in the window: nothing sets `disabled` (CONTROL: a planted `.disabled = true` / setAttribute(\'disabled\') is caught)');
+  // the 「需要你」 band is For you's view, never a second queue: its items come from the inbox model's store and its answers go
+  // through the model's own verbs (runAction / setStatus) — a band that kept its own list is caught
+  const bandFrom = /const \{ items, total \} = bandItemsOf\(\(inbox\.todos && inbox\.todos\.open\) \|\| \[\]\);/;
+  const bandAnswers = /await inbox\.runAction\(item, door\)/.test(src) && /await inbox\.setStatus\(item\.id, 'done'\)/.test(src);
+  const ownList = (s) => /(?:bandItems|bandQueue|bandState)\s*(?:=|\.push)/.test(s);
+  ok(bandFrom.test(src) && bandAnswers && !ownList(src) && ownList(src + '\nst.bandItems = [];'), 'the band reads For you\'s open items (inboxModel) and answers through its verbs — no list of its own (CONTROL: a planted own list is caught)');
+  // the reveal's reason is the 显示 button's help, never a sentence beside the value (the owner's confusion note 2026-10-20)
+  ok(!/vw-ak-why/.test(src) && /title: showHelp\(row\)/.test(src) && /Only to hand it to an outside system|only to hand it to an outside system/.test(src), 'the automation key\'s why is its 「显示」\'s help (title) — the free-floating vw-ak-why line is gone');
 }
 
 console.log('② THE REAL STORES — a unique value planted in each');
@@ -325,6 +345,108 @@ ok(rev.length >= 20 && rev.every((l) => l.by === 'human' && l.store && l.entry &
 ok(lines.some((l) => l.event === 'vault-reveal-window') && lines.some((l) => l.event === 'vault-reveal-refused' && l.code === 'wrong_password') && lines.some((l) => l.event === 'vault-reveal-paced'), 'the audit: the window opened, the refused password, the pace');
 ok(![...allPlants, PW, 'not the second password', PAGE, w4.page].some((v) => audit.includes(v)), 'THE AUDIT CARRIES NO VALUE, no password and no page secret');
 ok(vc.reveal('me', w4.page, 'accounts:' + a1.id + '#key').ok && eng.lastUse('accounts').by === 'human' && eng.lastUse('nope') === null, 'a reveal is a use of the store key BY A PERSON (the row\'s «last used»; the store\'s own reads after it say system)', eng.lastUse('accounts'));
+
+console.log('④ TWO-STEP CODES — the inventory row (design q-047 L1, lane vault-totp)');
+{
+  const d2 = path.join(ROOT, 'totp'); fs.mkdirSync(d2);
+  const c2 = Date.parse('2026-10-20T12:00:00Z');
+  const e2 = VE.create({ dataDir: d2, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => c2, register: false });
+  await e2.setup(PW);
+  const SEED = require(path.join(REPO, 'src/totp.js')).base32Encode(crypto.randomBytes(20));   // a planted seed, built at runtime
+  const VT = require(path.join(REPO, 'src/server/vault-totp.js')).create({ dataDir: d2, vault: e2, now: () => c2 });
+  const added = VT.addEntry({ uri: `otpauth://totp/GitHub:owner%40example.com?secret=${SEED}&issuer=GitHub&digits=8&period=60&algorithm=SHA256` }, { who: 'me' });
+  const vc2 = VC.create({ vault: e2, sources: { secrets: () => VC.secretSource({ vault: e2 }) }, now: () => c2, mono: () => c2 });
+  const inv2 = vc2.list();
+  const row = inv2.rows.find((r) => r.id === 'secrets:totp:github-owner#seed') || {};
+  ok(added.ok && row.kind === 'totp' && row.field === 'seed' && row.label === 'github-owner' && row.detail === '' && row.revealable === true && row.size === 'unknown' && row.createdAt === c2,
+    'a two-step entry is ONE row: kind totp, field seed, its NAME as the label — the issuer, the account and the settings are its value (behind 显示)', row);
+  ok(row.doors && row.doors.code && row.doors.code.path === '/api/vault/totp/github-owner' && row.doors.delete.method === 'DELETE' && row.doors.delete.path === '/api/vault/totp/github-owner' && row.doors.delete.confirm === 'totp' && row.doors.rotate === null,
+    'its doors: THE CODE (a person\'s GET), its own delete (confirm totp — its grants go with it), no 换新 (a new seed = delete + add)', row.doors);
+  ok(VI.KINDS.includes('totp') && VI.KIND_WORDS.totp === 'Two-step code' && VI.searchRows(inv2.rows, 'two-step').some((r) => r.id === row.id), 'the kind: totp in the closed table, «Two-step code» in words, found by searching for it');
+  const t2 = JSON.stringify(inv2);
+  ok(!t2.includes(SEED) && !t2.includes('GitHub') && !t2.includes('owner@example.com') && !t2.includes('SHA256'), 'THE INVENTORY CARRIES NO SEED and no setting (issuer, account, algorithm)');
+  ok(VI.secretRowOf({ name: 'totp:' + 'x'.repeat(121), at: 1 }) === null && VI.doorsOf({ store: 'secrets', entry: 'host:h1', field: 'token' }).code === undefined && VI.doorsOf({ store: 'secrets', entry: 'totp:a b', field: 'seed' }).code === undefined,
+    'a name outside [\\w.-]{1,120} is no row and no door; no other hub secret has a code door');
+  const w = await vc2.startReveal('me', PW, {});
+  const rv = vc2.reveal('me', w.page, row.id, {});
+  ok(rv.ok && rv.value === `otpauth://totp/GitHub:owner%40example.com?secret=${SEED}&issuer=GitHub&algorithm=SHA256&digits=8&period=60`, 'its reveal (inside the second password\'s window) is ONE value: the otpauth link — the seed and every setting, never the raw record', rv);
+  e2.close();
+}
+
+console.log('⑧ THE PURPOSES AND THE PROVENANCE (lane vault-window-v2, design q-047 §3.1 / §3.2)');
+{
+  ok(VI.PURPOSE_IDS.join() === 'two-step,accounts,integrations,machines,storage,app-logins,passkeys,automation,agents,other' && new Set(VI.PURPOSE_IDS).size === VI.PURPOSES.length && VI.PURPOSES.filter((p) => p.onlyWhenAny).map((p) => p.id).join() === 'other',
+    'THE TABLE (pinned — a new purpose changes this line): nine purposes + Other (shown only when it holds a row), the rail\'s order, each id once', VI.PURPOSE_IDS);
+  const onceIn = (V, rows) => { const groups = V.groupByPurpose(rows); const seen = new Map(); for (const g of groups) for (const r of g.rows) seen.set(r.id, (seen.get(r.id) || 0) + 1); return rows.filter((r) => seen.get(r.id) !== 1).map((r) => [r.id, seen.get(r.id) || 0]); };
+  ok(inv.rows.length >= 15 && inv.rows.length === inv.stores.reduce((n, x) => n + x.count, 0) && onceIn(VI, inv.rows).length === 0 && inv.rows.every((r) => VI.PURPOSE_IDS.includes(VI.purposeOf(r))), `EVERY ROW of the real stores (${inv.rows.length}, all eight groups) lands in EXACTLY ONE purpose`, onceIn(VI, inv.rows));
+  const P = (id) => VI.purposeOf(inv.rows.find((r) => r.id === id) || null);
+  const where = {
+    ['accounts:' + a1.id + '#key']: 'accounts', ['accounts:' + sub.id + '#oat']: 'accounts', 'integrations:cloud:browserless#apiKey': 'integrations', 'integrations:desktop-signin/host-9#password': 'machines',
+    'channels:acct-lark#token': 'integrations', 'channels:webhook#caller.inbox.c-0a1b2c3d.token': 'integrations', 'mounts:mnt1#secretKey': 'storage', 'mounts:my-storage#secretKey': 'storage',
+    [byStore('app-secrets')[0].id]: 'app-logins', [byStore('passkeys')[0].id]: 'passkeys', [byStore('automation')[0].id]: 'automation',
+    'secrets:host:dial-dev9#token': 'machines', 'secrets:frp:token#token': 'machines', 'secrets:file:dropline-oauth.json#key': 'other',
+  };
+  if (machineRow) where[`integrations:${machineRow.id}/host-7#${mSecretField.key}`] = 'machines';
+  const off = Object.entries(where).filter(([id, p]) => P(id) !== p).map(([id, p]) => [id, P(id), p]);
+  ok(off.length === 0, 'each store\'s rows where design §3.1 puts them: accounts · integrations + channels · a machine\'s row + host: + frp: (machines & relay) · mounts · app logins · passkeys · automation · a sealed file\'s key (other)', off);
+  const R = (store, entry, extra = {}) => VI.rowOf(store, { entry, field: extra.field || 'value', label: entry, ...extra });
+  ok(VI.purposeOf(R('secrets', 'totp:github', { kind: 'totp', field: 'code' })) === 'two-step' && VI.purposeOf(R('secrets', 'apikey:ak-1')) === 'automation' && VI.purposeOf({ store: 'secrets', entry: 'agent:github-token' }) === 'agents' && VI.purposeOf({ store: 'accounts', entry: 'agent:x' }) === 'agents' && VI.purposeOf({ store: 'nope', entry: 'x' }) === null && VI.purposeOf(null) === null,
+    'the rows to come: a two-step entry (lane vault-totp\'s totp:) · an apikey: entry · an agent: entry wins over its store (q-043 §9 — one entry, one purpose) · an unknown store / nothing ⇒ no purpose');
+  // THE PROVENANCE
+  ok(VI.PROVENANCE_IDS.join() === 'me,scan,hub-mint,agent-mint,agent-put,system' && VI.PROVENANCE_FILTERS.map((f) => f.id).join() === 'me,agent-mint,agent-put,system' && VI.PROVENANCES.every((p) => VI.PROVENANCE_FILTERS.some((f) => f.id === p.filter)),
+    'the provenance chips (six) and the bar\'s four filters — every chip answers to one filter', VI.PROVENANCES.map((p) => `${p.id}→${p.filter}`));
+  const pv = (id) => VI.provenanceOf(inv.rows.find((r) => r.id === id));
+  ok(pv('accounts:' + a1.id + '#key') === 'me' && pv('integrations:cloud:browserless#apiKey') === 'me' && pv(byStore('automation')[0].id) === 'hub-mint' && pv('secrets:frp:token#token') === 'hub-mint' && pv('secrets:host:dial-dev9#token') === 'system' && pv('secrets:file:dropline-oauth.json#key') === 'system' && inv.rows.every((r) => VI.PROVENANCE_IDS.includes(VI.provenanceOf(r))),
+    'the real rows: a person\'s value = 我自己 · an automation key / the relay token = hub 铸造 · a link token / a file key (never shown) = 系统 — every row exactly one chip');
+  ok(VI.provenanceOf(R('secrets', 'totp:gh', { origin: 'qr' })) === 'scan' && VI.provenanceOf(R('secrets', 'totp:gh', { origin: 'paste' })) === 'scan' && VI.provenanceOf(R('secrets', 'totp:gh', { origin: 'manual' })) === 'me'
+    && VI.provenanceOf({ store: 'secrets', entry: 'agent:tok', origin: 'mint', revealable: true }) === 'agent-mint' && VI.provenanceOf({ store: 'secrets', entry: 'agent:tok', origin: 'put', revealable: true }) === 'agent-put' && VI.provenanceOf(R('integrations', 'cloud:x', { origin: 'put' })) === 'agent-put',
+    'the rules in order: put ⇒ agent 见过明文 (whatever the entry) · agent: ⇒ agent 铸造 · a scanned / pasted seed ⇒ 扫码 · a typed one ⇒ 我自己');
+  ok(VI.rowOf('accounts', { entry: 'a', field: 'key', label: 'x', origin: 'put', expiresAt: 9 }).origin === 'put' && VI.rowOf('accounts', { entry: 'a', field: 'key', label: 'x', origin: 'bogus' }).origin === null && VI.rowOf('accounts', { entry: 'a', field: 'key', label: 'x', expiresAt: 'soon' }).expiresAt === null,
+    'the row\'s origin is a CLOSED word (anything else is no origin); expiresAt an instant or null');
+  const oatRow = inv.rows.find((r) => r.id === 'accounts:' + sub.id + '#oat');
+  ok(oatRow && oatRow.expiresAt === acc._oatFact(acc.get(sub.id)).validUntil && oatRow.expiresAt > clock, 'the accounts store says when a long-lived token stops (its row\'s expiresAt = minted + the token\'s life)', oatRow && oatRow.expiresAt);
+  const S = (row, now) => VI.stateChipsOf(row, now).map((c) => c.id + (c.days ? ':' + c.days : '')).join();
+  ok(S({ expiresAt: 10 * 86400e3 }, 8 * 86400e3) === 'expires:2' && S({ expiresAt: 10 * 86400e3 }, 6 * 86400e3) === '' && S({ expiresAt: 5 }, 9) === 'expired' && S({ store: 'secrets', entry: 'agent:x', origin: 'put' }, 0) === 'rotate' && S({ store: 'accounts', entry: 'a' }, 0) === '',
+    'the state chips: expires within 3 days (N days) · expired · an agent saw it (rotate) — nothing else');
+  // THE WINDOW'S VIEW
+  const v0 = VI.viewOf(inv.rows, {});
+  ok(v0.counts.all === inv.rows.length && v0.groups.every((g) => v0.counts[g.id] === g.rows.length) && VI.PURPOSE_IDS.filter((id) => id !== 'other').every((id) => id in v0.counts) && v0.rows.length === inv.rows.length,
+    'the rail\'s counts: 全部 = every row, each purpose = its group\'s rows (the nine always counted; Other when it holds one)', v0.counts);
+  const vs = VI.viewOf(inv.rows, { prov: ['system'] });
+  ok(vs.rows.length && vs.rows.every((r) => ['system', 'hub-mint'].includes(VI.provenanceOf(r))) && vs.counts.all === vs.rows.length, 'the provenance filter «系统» keeps the hub\'s own and the never-shown rows only', vs.rows.map((r) => r.id));
+  const vr = VI.viewOf(inv.rows, { revealOnly: true });
+  ok(vr.rows.every((r) => r.revealable !== false) && vr.rows.length === inv.rows.filter((r) => r.revealable !== false).length, '只看可显示 drops the never-shown rows');
+  const vp = VI.viewOf(inv.rows, { purpose: 'storage' });
+  ok(vp.groups.length === 1 && vp.groups[0].id === 'storage' && vp.counts.all === inv.rows.length && vp.counts.storage === byStore('mounts').length, 'a purpose picked in the rail shows its group only; the counts stay the whole view\'s');
+  const vw = VI.viewOf(inv.rows, { q: '存储', wordsOf: (r) => (VI.purposeOf(r) === 'storage' ? ['存储'] : []) });
+  ok(vw.rows.length === byStore('mounts').length, 'the search matches the page\'s OWN words for a row (its language — here 存储)', vw.rows.map((r) => r.id));
+  const vu = VI.viewOf([R('accounts', 'b', { label: 'B', createdAt: 1 }), R('accounts', 'a', { label: 'A', createdAt: 2 })], { sort: 'created' });
+  ok(vu.rows.map((r) => r.label).join() === 'A,B' && VI.viewOf(vu.rows, { sort: 'name' }).rows.map((r) => r.label).join() === 'A,B', 'the sort inside a purpose (newest / name)');
+  // THE BAND
+  const it = (id, o = {}) => ({ id, origin: 'vault', status: 'open', urgency: 'normal', createdAt: 1, ...o });
+  const b = VI.bandItemsOf([it('a', { createdAt: 5 }), it('b', { urgency: 'urgent', createdAt: 1 }), { id: 'c', origin: 'login', status: 'open' }, it('d', { status: 'done' }), it('e', { clearedAt: 3 }), it('f', { createdAt: 9 }), it('g'), it('h'), it('i')]);
+  ok(b.items.map((x) => x.id).join() === 'b,f,a,g,h' && b.total === 6, 'the band: origin vault only, open, not cleared — urgent first, then newest, at most 5 (the total said)', b);
+  ok(VI.bandDoorsOf({ action: { type: 'automation-ask' } }).join() === 'once,always,deny' && VI.bandDoorsOf({ action: { type: 'vault-unlock' } }).join() === 'unlock' && VI.bandDoorsOf({ action: { type: 'vault-rotate' } }).join() === 'renew,ack' && VI.bandDoorsOf({ action: { type: 'vault-use-failed' } }).join() === 'open,ack' && VI.bandDoorsOf({}).join() === 'open,ack',
+    'the band\'s doors per card: a held automation call = its three answers · the restart\'s = unlock · rotate = renew + got it · a failed use / any other = open + got it');
+  // THE USE-FAILURE HOUR
+  const H = VI.USE_FAIL_MERGE_MS;
+  const f1 = VI.useFailVerdict(null, { code: 'vault_locked', at: 1000, who: 'Release helper' });
+  const f2 = VI.useFailVerdict(f1.next, { code: 'not_granted', at: 1000 + H - 1 });
+  const f3 = VI.useFailVerdict(f2.next, { code: 'ask_expired', at: 1000 + H });
+  ok(f1.fresh && f1.next.n === 1 && f1.next.causes.locked === 1 && !f2.fresh && f2.next.n === 2 && f2.next.causes['not-granted'] === 1 && f2.next.since === 1000 && f3.fresh && f3.next.n === 1 && f3.next.causes.expired === 1,
+    'one card per entry per hour: the first failure files, the hour\'s next ones count on it, the next hour files again', [f1, f2, f3]);
+  ok(['ask_denied', 'ask_quiet', 'caller_gone', 'unknown_verb', 'failed', 'vault_not_set_up'].every((c) => !VI.useFailVerdict(null, { code: c, at: 1 }).counted) && Object.keys(VI.USE_FAIL_CAUSES).sort().join() === 'ask_expired,key_revoked,not_granted,once_spent,subject_ended,vault_locked,verb_not_in_scope',
+    'only a cause the owner can act on is a failure (locked / not granted / expired) — the owner\'s own refusal, a caller gone, a mistake in the call are not');
+  // MUTANTS — compiled in memory at the real path (nothing written under src/)
+  const Mod = require('module'), mf = path.join(REPO, 'src/vault-inventory.js'), srcI = fs.readFileSync(mf, 'utf8');
+  const compile = (code) => { const m = new Mod(mf); m.filename = mf; m.paths = Mod._nodeModulePaths(path.dirname(mf)); m._compile(code, mf); return m.exports; };
+  const noPurpose = srcI.replace("if (store === 'channels') return 'integrations';", "if (store === 'channels') return null;");
+  const twoPurposes = srcI.replace('for (const r of rows || []) { const p = purposeOf(r); if (by.has(p)) by.get(p).push(r); }', "for (const r of rows || []) { const p = purposeOf(r); if (by.has(p)) by.get(p).push(r); if (r.store === 'mounts') by.get('other').push(r); }");
+  const m1 = compile(noPurpose), m2 = compile(twoPurposes);
+  const lost = onceIn(m1, inv.rows), twice = onceIn(m2, inv.rows);
+  ok(noPurpose !== srcI && lost.length >= 3 && lost.every(([id, n]) => id.startsWith('channels:') && n === 0), 'MUTANT (a row of NO purpose — channels answer none) ⇒ RED: its rows land nowhere', lost);
+  ok(twoPurposes !== srcI && twice.length === byStore('mounts').length && twice.every(([, n]) => n === 2), 'MUTANT (a row in TWO purposes) ⇒ RED: each mount counted twice', twice);
+}
 
 try { ce.stop(); ce.store.close(); } catch { }
 eng.close();

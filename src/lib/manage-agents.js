@@ -2354,7 +2354,9 @@ export function installManageAgents(App, ctx = {}) {
             l2.dataset.dialState = drs ? drs.state : '';
             // lane-exit-run-output E1: the device's STATED platform (its hello / dial headers) — a Windows machine runs commands under cmd.exe
             const plat = platformLabel(h.dial && h.dial.lastAccept && h.dial.lastAccept.platform);
-            l2.textContent = [dialWords, plat, exitSummaryText(h.exit), agentUpgradeText(h)].filter(Boolean).join(' · '); // no `exit` ⇒ nobody / nobody (the ONE reader)
+            // lane win-input-elevated: a Windows device agent raised to run as administrator says so here
+            const elevWord = (h.dial && h.dial.lastAccept && h.dial.lastAccept.platform === 'win32' && h.deviceElevated === true) ? t('administrator') : '';
+            l2.textContent = [dialWords, plat, elevWord, exitSummaryText(h.exit), agentUpgradeText(h)].filter(Boolean).join(' · '); // no `exit` ⇒ nobody / nobody (the ONE reader)
             sum.appendChild(l2);
           }
           // lane device-allow-flags (design q-042 D5): the machine's OWN allow list (what its agent stated, kept on the record) —

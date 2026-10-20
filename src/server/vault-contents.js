@@ -22,6 +22,7 @@
 const crypto = require('crypto');
 const { performance } = require('perf_hooks');
 const VI = require('../vault-inventory.js');
+const T = require('../totp.js');
 
 /**
  * @param {object} o
@@ -137,7 +138,9 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
 }
 
 /** «Hub secrets» (int317): the engine's OWN secret entries as a source — `vaultRows` = their names and dates
- *  (VI.secretRowOf), `vaultReveal` = the relay token only (the never-shown ones are refused before a source is asked). */
+ *  (VI.secretRowOf), `vaultReveal` = the relay token, or a two-step code's otpauth link (design q-047 L1 — owner decision ①
+ *  amended: the seed and its settings, behind the second password, ONE value; never the record's other fields) — the
+ *  never-shown ones are refused before a source is asked. */
 function secretSource({ vault, machineName } = {}) {
   return {
     vaultRows: () => (typeof vault.secretNames === 'function' ? vault.secretNames() : []).map((s) => VI.secretRowOf(s, { machineName })).filter(Boolean),
@@ -146,7 +149,12 @@ function secretSource({ vault, machineName } = {}) {
       const g = vault.secretGet(entry);
       if (!g || !g.ok) throw Object.assign(new Error((g && g.code) || 'error'), { code: (g && g.code) || 'error' });
       if (!g.value) return null;
-      try { return g.value.toString('utf8'); } finally { g.value.fill(0); }
+      let text;
+      try { text = g.value.toString('utf8'); } finally { g.value.fill(0); }
+      if (!String(entry).startsWith(T.ENTRY_PREFIX)) return text;
+      const rec = T.recordOf(text);
+      if (!rec) throw Object.assign(new Error('key-malformed'), { code: 'key-malformed' });
+      return T.uriOf(rec, T.nameOfEntry(entry));
     },
   };
 }

@@ -51,7 +51,7 @@ function writeJsonAtomic(file, obj) {
  * @param {Object<string, (args: object, ctx: object) => (object|Promise<object>)>} [o.verbs]  the wired verbs' doors
  */
 function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date.now(), log = () => {}, randomBytes = crypto.randomBytes,
-  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, openFacts = {} } = {}) {
+  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, openFacts = {}, attention = null } = {}) {
   if (!dataDir || !vault) throw new TypeError('automation-engine: dataDir and vault are required');
   // lane automation-open-limits: the facts an open's limits are judged over — a folder's real path (null = missing) and the
   // hub's defaults for what an open does not name (the wiring hands the account store's and the instance's)
@@ -308,9 +308,15 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   async function use({ caller, verb, args = {}, want = null, signal = null } = {}) {
     const t0 = now();
     const subject = caller && caller.conversationId ? `session:${caller.conversationId}` : null;
-    // lane vault-locked-refusal-notice: a LOCKED refusal is the signal — the vault's ONE helper notes the conversation by
-    // its NAME and the verb, so the owner's For-you item names it (the agent's words say the owner was told)
-    const done = (r, keyId = null, extra = {}) => { if (r && r.code === 'vault_locked' && typeof vault.blocked === 'function') { try { vault.blocked(VB.actorName(caller && caller.name, 'a conversation'), `vibespace-api ${verb}`); } catch { } } audit({ keyId, subject: subject || 'unknown', verb, args: r.args || extra.args || null, ok: r.ok, code: r.code, ...(extra.ask ? { ask: extra.ask } : {}) }); return r; };
+    const done = (r, keyId = null, extra = {}) => {
+      // lane vault-locked-refusal-notice: a LOCKED refusal is the signal — the vault's ONE helper notes the conversation by its NAME and the verb
+      if (r && r.code === 'vault_locked' && typeof vault.blocked === 'function') { try { vault.blocked(VB.actorName(caller && caller.name, 'a conversation'), `vibespace-api ${verb}`); } catch { } }
+      audit({ keyId, subject: subject || 'unknown', verb, args: r.args || extra.args || null, ok: r.ok, code: r.code, ...(extra.ask ? { ask: extra.ask } : {}) });
+      // lane vault-window-v2 (design q-047 §3.4): a refusal the owner can act on (locked / not granted / expired) is a 「使用失败」
+      // notice in For you — ONE per key per hour (src/server/vault-hooks.js createVaultAttention; the rule PURE in vault-inventory)
+      if (!r.ok && attention && typeof attention.useFailed === 'function') { try { const k = keyId ? keyById(keyId) : null; attention.useFailed({ entry: keyId ? `apikey:${keyId}` : null, name: k ? k.name : null, code: r.code, who: caller && caller.name }); } catch { } }
+      return r;
+    };
     if (!subject || !A.isSubject(subject)) return done(named('unauthorized', 'the calling conversation has no id yet — send it one message first'));
     const scope = A.scopeOf(verb);
     if (!scope) return done(named('unknown_verb', `no such verb (one of: ${A.VERBS.join(', ')})`));

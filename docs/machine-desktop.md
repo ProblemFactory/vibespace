@@ -36,6 +36,31 @@ If nobody can click Yes on that machine, the dialog says so and gives the same c
 
 Opening its desktop asks for **the VNC password** each time.
 
+## Windows: run the device agent as administrator (optional — lets agents type into admin windows)
+
+By default the device-agent installer registers its logon task to run **with highest privileges** (RunLevel Highest):
+when you run the pairing command, Windows asks you to confirm once (a standard UAC prompt — VibeSpace never elevates
+silently and never clicks the consent prompt for you). Decline it (or add `-NoElevate`, or tick **“Install with normal
+rights”** in the pairing dialog) to install at the normal level instead.
+
+When the agent runs elevated, an agent’s keystrokes and clicks can reach windows you opened **as administrator** (Windows
+otherwise drops an unelevated program’s input into an admin window — UIPI). VibeSpace fences this: the **UAC consent
+prompt and the secure desktop are never automatable** (refused by window class, always), you choose which other windows
+agents may type into (the allow list), and every act injected into an elevated window is written to the device’s audit log.
+
+To raise an existing normal-rights install later, press **「Run as administrator…」** on the machine card, or run this in an
+**administrator PowerShell** on that machine:
+
+```powershell
+$t = Get-ScheduledTask -TaskName 'VibeSpaceDevice-*' | Select-Object -First 1
+$p = New-ScheduledTaskPrincipal -UserId $t.Principal.UserId -LogonType $t.Principal.LogonType -RunLevel Highest
+Set-ScheduledTask -TaskName $t.TaskName -Principal $p
+```
+
+To put it back to normal rights, run the same with `-RunLevel Limited`. A device self-upgrade keeps the task (it only
+replaces the agent’s `current\` folder), so the level persists; the agent reads its elevation from its own token at every
+connection, so the machine card stays correct.
+
 ## What the window does
 
 - It shows **everything on that machine's screen**, and what you type goes to it. Only people can open it — an agent
