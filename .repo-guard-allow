@@ -97,3 +97,5 @@ fake_consent_key_0001
 # fixture lines (dbg-comm-surfaces' expired refresh token, test-channels-lark-shape's echoed bearer), not real
 expired-refresh-token
 u-echo-bearer-000
+# the Windows account / group word in scripts, comments and docs (the probe install scripts, the device agent): a dictionary word, never a credential value — written as a regex so this row does not flag itself
+Administrat(or|ors)\b
