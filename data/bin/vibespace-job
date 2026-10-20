@@ -50,7 +50,8 @@ function pubLine(j) {
   if (j.publishedUrl) return `public URL: ${j.publishedUrl}${j.publishedExternally ? ' (published from the Ports panel)' : ''} — public: anyone with the link reaches it`;
   if (!j.publish) return '';
   if (j.publishState === 'publishing') return `public URL: publishing… (waiting for port ${(j.ports || [])[0]} to answer)`;
-  if (j.publishState === 'failed') return `public URL: NOT published — ${j.publishError || 'publish failed'}${j.lastPublicUrl ? ' (was ' + j.lastPublicUrl + ')' : ''}`;
+  // lane job-notice-dedupe: the cause, since when, how many attempts — the relay's fact (a re-publish the relay made shows the URL above)
+  if (j.publishState === 'failed') return `public URL: NOT published — ${j.publishWhy || j.publishError || 'publish failed'}${j.publishSince ? ' — since ' + new Date(j.publishSince).toISOString().slice(0, 16).replace('T', ' ') + 'Z' + (j.publishAttempts ? ` (${j.publishAttempts} attempt${j.publishAttempts === 1 ? '' : 's'})` : '') : ''}${j.lastPublicUrl ? ' (was ' + j.lastPublicUrl + ')' : ''}`;
   return `public URL: none while ${j.state}${j.lastPublicUrl ? ' — the next start publishes ' + j.lastPublicUrl + ' again' : ''}`;
 }
 function printJob(j, tailLines) {
@@ -83,7 +84,8 @@ control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibesp
          vibespace-job access <id> [--view session|group|all] [--control session|group|all]
          vibespace-job notify <id> on|off|inherit   (owner only — change auto-notify without recreating)
          vibespace-job subscribe <id> [--filter "SpaceX|Starship"] · unsubscribe <id>   (any session that can VIEW
-           the job gets its notifications; --filter = case-insensitive regex on the message text, re-subscribe updates it)
+           the job gets its notifications; --filter = case-insensitive regex on the message text, re-subscribe updates it;
+           the OWNER subscribing to its own job: the filter shapes its auto-notify too)
 in-job:  vibespace-job progress "text"     · vibespace-job ask --form @panel.json [--timeout 30m]
          vibespace-job answers [--wait 100] · vibespace-job announce "what happened" (notify owner+subscribers NOW —
            for watch jobs where exit code ≠ newsworthiness; --notify-ok at create = scheduled successes notify too)
@@ -262,7 +264,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (!pos[1]) { console.error(`usage: vibespace-job ${verb} <id|name>`); process.exit(1); }
       const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/${verb}`, verb === 'subscribe' ? { filter: flags.filter } : {});
       console.log(verb === 'subscribe'
-        ? (r.updated ? 'subscription filter updated' : r.already ? 'already subscribed' : 'subscribed') + (r.filter ? ` (filter: /${r.filter}/i — only matching messages reach you)` : '') + ` (${r.count} subscriber(s)); vibespace-job unsubscribe ${pos[1]} to stop`
+        ? (r.updated ? 'subscription filter updated' : r.already ? 'already subscribed' : 'subscribed') + (r.filter ? ` (filter: /${r.filter}/i — only matching messages reach you${r.ownerLane ? ', your own auto-notify included' : ''})` : '') + ` (${r.count} subscriber(s)); vibespace-job unsubscribe ${pos[1]} to stop`
         : (r.removed ? 'unsubscribed' : 'was not subscribed') + ` (${r.count} left)`);
       break;
     }

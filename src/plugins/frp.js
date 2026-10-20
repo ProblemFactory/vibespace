@@ -63,6 +63,8 @@ module.exports = {
       return { token: t, locked: false };
     };
     const lockedWords = 'the vault is locked — the relay token opens after the owner unlocks it with the second password (the relay does not start until then)';
+    // lane vault-locked-refusal-notice: the refusal, NOTED (the vault's ONE helper) — «the relay» and what it was refused
+    const lockedRefusal = (verb) => { const v = vaultOf(); try { if (v && typeof v.blocked === 'function') v.blocked('the relay', verb); } catch { } return Object.assign(new Error(lockedWords), { code: 'vault_locked' }); };
     // Effective relay config: USER override wins over the cluster-injected ENV defaults (user directive: the fleet
     // auto-injects VIBESPACE_FRPS_* as defaults + enables the plugin; the user can change any of it). The address /
     // port / subdomain host are SETTINGS rows (All Settings › Plugins › Public URLs — lane plugin-settings-p0); the
@@ -170,7 +172,7 @@ module.exports = {
           // written); not set up ⇒ plugins.json as before (the next setup / unlock seals it)
           const v = vaultOf();
           const st = v ? v.state() : (typeof h.sealedDir === 'function' && h.sealedDir() ? 'locked' : 'not_set_up');
-          if (st === 'locked') throw Object.assign(new Error(lockedWords), { code: 'vault_locked' });
+          if (st === 'locked') throw lockedRefusal('set its token');
           if (st === 'unlocked') {
             const r = s ? v.secretPut(FRP_ENTRY, s) : v.secretDrop(FRP_ENTRY);
             if (!r.ok) throw Object.assign(new Error(`the relay token could not be sealed into the vault (${r.code})`), { code: r.code });
@@ -248,7 +250,7 @@ module.exports = {
       },
 
       start() {
-        if (frpCfg().vaultLocked) throw Object.assign(new Error(lockedWords), { code: 'vault_locked' });
+        if (frpCfg().vaultLocked) throw lockedRefusal('start');
         if (!frpConfigured()) throw new Error('the frp relay is not configured on this instance (set VIBESPACE_FRPS_ADDR/TOKEN)');
         const bin = frpBin();
         if (!bin) throw new Error('frpc not installed — run install first');
@@ -308,7 +310,7 @@ module.exports = {
        *  (the SNI broker); else a TCP port map `http://<relay>:<port>/` (retrying
        *  on collision — the relay is fleet-shared). name = a stable proxy name. */
       async publish(name, localPort, { preferPort = 0, preferSub = '', proto: protoHint = '' } = {}) {
-        if (frpCfg().vaultLocked) throw Object.assign(new Error(lockedWords), { code: 'vault_locked' });
+        if (frpCfg().vaultLocked) throw lockedRefusal('publish a public URL');
         if (!frpConfigured()) throw new Error('public URLs are not available — the frp relay is not configured on this instance');
         if (!frpDaemonPid()) { verbs.start(); await new Promise((r) => setTimeout(r, 1500)); }
         const cfg = frpCfg();

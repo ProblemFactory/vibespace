@@ -415,10 +415,14 @@ function convCapsState(cached, now, ttlMs = CONV_CAPS_TTL_MS) {
  *  lane channel-threads: `thread-reply` (reply INTO a thread), `react` /
  *  `unreact` (the account's user adds / removes its own reaction),
  *  `read-reactions` (the chips have a source). */
-const OFFER_WHAT = ['send-as-user', 'send-as-bot', 'fetch-attachment', 'read', 'thread-reply', 'react', 'unreact', 'read-reactions', 'send-attachment'];
+const OFFER_WHAT = ['send-as-user', 'send-as-bot', 'fetch-attachment', 'read', 'thread-reply', 'react', 'unreact', 'read-reactions', 'send-attachment', 'recall'];
 /** A capability row an adapter did not declare reads as none (fail closed — spec §6.5). */
 const threadsRow = (c) => (c && c.threads && typeof c.threads === 'object' ? c.threads : { read: 'none', replyInto: false, listing: 'none' });
 const reactionsRow = (c) => (c && c.reactions && typeof c.reactions === 'object' ? c.reactions : { read: 'none', add: false, remove: 'none', vocabulary: 'names', custom: 'none', perMessageMax: null });
+/** lane channels-proposals-recall: the WRITE half of a recall — `canRecall` ({windowSec}: the vendor takes back a message
+ *  the account's user sent, within that many seconds of sending; null = no window said) over the READ half
+ *  (`revisions.recall`: the store learns a recall). Both rows or none: a recall the store could never show is not offered. */
+const recallRowOf = (c) => (c && c.revisions && typeof c.revisions === 'object' && c.revisions.recall === true && c.canRecall && typeof c.canRecall === 'object' ? c.canRecall : null);
 
 /**
  * DOES THIS CONTROL EXIST — the only question the composer, the approval card
@@ -467,6 +471,13 @@ function offers(caps, convCaps, what, now = Date.now()) {
     if (!resolved.reactions) return { offered: false, why: resolved.why || 'unknown' };
     if (!resolved.reactions.add) return { offered: false, why: resolved.reactions.why || 'reactions-scope-not-granted' };
     return { offered: true, why: null };
+  }
+  // lane channels-proposals-recall: taking back the USER's own message acts AS the user — the declared row AND this
+  // conversation's own send-as-user resolution (a chat the user left, a sign-in without the send scopes: not offered)
+  if (what === 'recall') {
+    if (!recallRowOf(c)) return { offered: false, why: 'recall-not-declared' };
+    const u = offers(c, convCaps, 'send-as-user', now);
+    return u.offered ? { offered: true, why: null } : { offered: false, why: u.why || 'unknown' };
   }
   if (what === 'read-reactions') {
     const r = reactionsRow(c);
@@ -1327,7 +1338,7 @@ module.exports = {
   sendWhyText, threadWhyText, reactWhyText, reactReadText, refusedScopeText,
   CONV_CAPS_TTL_MS, HOST_FACTS_TTL_MS, PUSH_HEARTBEAT_MS, SCAN_SOURCE_ORDER, OFFER_WHAT,
   PUSH_MISS_THRESHOLD, PUSH_MISS_MIN_SAMPLES, PUSH_MISS_WINDOW_MS, PUSH_MISS_MIN_KEEP, PUSH_CLAIMS,
-  laneState, scanState, convCapsState, offers, authState,
+  laneState, scanState, convCapsState, offers, authState, recallRowOf,
   identityWarning, identityWarningText, freshnessClaim, freshnessText, humanAge,
   // 2026-09-26: the per-conversation cadence, the override choices, the vendor budget + push remedies
   TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, tierUntil, cadenceFor, budgetText, learnedBudgetText, passStateText, firstReadText, pushUnavailableText,

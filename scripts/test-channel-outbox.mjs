@@ -2123,6 +2123,21 @@ async function ccReachLeg(engine, tag) {
       rcS._all().find((e) => e.dataset.approve === '1').click();
       await new Promise((r) => setTimeout(r, 0));
       ok(posts.length === n0 + 1 && posts[n0].body.shown === P.shownDigest({ ...rp, id: 'p-s' }), 'F6 (real card): an untrusted script click on a fresh card still posts (with its digest) — the hold is for a person\'s pointer');
+      // lane channels-proposals-recall: a RECALL card quotes the user's own message it takes back and is decided like a
+      // reaction — plain Reject / Approve (no text to edit, never a wake: the receipt rides the agent's next turn)
+      {
+        const rq = { id: 'p-rc1', kind: 'recall', adapterId: 'lark', adapterLabel: 'Lark', convId: 'oc_1', title: 'Ops room', state: 'awaiting-approval', text: '', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, recall: { msg: 'om_mine', quote: { author: 'me', text: 'the numbers are wrong' } }, policy: { mode: 'review', reasons: ['recall'] }, sendAs: 'user', at: 1, ttlAt: clock0 + 86400e3 };
+        const n1 = posts.length;
+        const rcard = CO.renderProposalCard(app, rq);
+        const one = (cls) => { const e = find(rcard, cls)[0]; return e ? e.textContent : null; };
+        const labels = rcard._all().filter((e) => e.tagName === 'BUTTON').map((b) => b.textContent);
+        const said = { body: one('chan-prop-recall'), who: one('chan-prop-identity'), pol: one('chan-prop-policy'), labels, row: CO.rowFirstLine(rq) };
+        ok(said.body === 'Worker wants to take back your message: "the numbers are wrong"' && said.who === 'Takes it back as you' && /taking back your message always needs your approval/.test(String(said.pol)) && !labels.includes('Edit…') && labels.includes('Reject…') && said.row === said.body,
+          'lane channels-proposals-recall (real card): a recall QUOTES the user\'s message it takes back, says it acts as the user and why it waits; no Edit; its Outbox row reads the same sentence', JSON.stringify(said));
+        rcard._all().find((e) => e.dataset.approve === '1').click();
+        await new Promise((r) => setTimeout(r, 0));
+        ok(posts.length === n1 + 1 && /\/api\/channels\/outbox\/p-rc1\/approve$/.test(posts[n1].url) && posts[n1].body.expectWakes === 0 && posts[n1].body.deliver === 'next-turn', '…its Approve posts the approval with no wake (the receipt rides the next turn)', JSON.stringify(posts[n1]));
+      }
       // ── B-f467 (userW 2026-10-03: "no visual centre of gravity — some things I want to see at a glance"; his
       // screenshot = the All view with a Gmail compose awaiting + a sent Lark card): ONE ROW PER PROPOSAL in the channel
       // list's grammar; the FULL CARD (this renderer) opens under its row ──

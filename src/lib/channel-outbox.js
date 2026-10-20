@@ -356,6 +356,7 @@ export function reasonLabel(r) {
     case 'off-hours': return t('outside working hours');
     case 'authority': return t('the drafter holds draft authority only');
     case 'reaction-policy': return t('agent reactions need your approval on this account');
+    case 'recall': return t('taking back your message always needs your approval');   // lane channels-proposals-recall
     default: return String(r || '');
   }
 }
@@ -430,13 +431,17 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
   // ── THE BODY — an agent's text, plain (or the editor while editing); O1: every invisible direction / zero-width
   // character is a visible mark, and the card says so once; a REACTION's sentence (spec §5.3) ──
   const reaction = p.kind === 'reaction' && p.reaction ? p.reaction : null;
-  const body = el('div', 'chan-prop-text' + (reaction ? ' chan-prop-reaction' : ''));
+  // lane channels-proposals-recall: a RECALL's sentence quotes the user's own message it takes back (textContent — the
+  // quote is the stored record's words, one line, frames neutered by the PURE quote)
+  const recall = p.kind === 'recall' && p.recall ? p.recall : null;
+  const body = el('div', 'chan-prop-text' + (reaction ? ' chan-prop-reaction' : recall ? ' chan-prop-reaction chan-prop-recall' : ''));
   let hiddenMarks = [];
   if (reaction) body.textContent = reactionCardText(p);
+  else if (recall) body.textContent = recallCardText(p);
   else hiddenMarks = revealInto(body, p.text || '');
   // lane composer-file-only-send (B-dce6): a proposal that is ONLY its files draws no empty text line — the file rows
   // below are the message; the node stays (hidden) for the Edit to replace
-  if (!reaction && !String(p.text || '').trim() && P.storedAttachments(p).length) { body.hidden = true; body.dataset.fileOnly = '1'; }
+  if (!reaction && !recall && !String(p.text || '').trim() && P.storedAttachments(p).length) { body.hidden = true; body.dataset.fileOnly = '1'; }
   card.appendChild(body);
   if (hiddenMarks.length) {
     const hw = el('div', 'chan-prop-idwarn chan-prop-hiddenwarn');
@@ -477,7 +482,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
   }
   // THE IDENTITY ROW (§9.5): the fact on the meta line; the warning below, once.
   const asWho = p.sendAs === 'bot' ? t('the bot') : t('you');
-  meta.appendChild(el('span', 'chan-prop-identity', reaction ? t('Reacts as you') : t('Will send as {who}', { who: asWho })));
+  meta.appendChild(el('span', 'chan-prop-identity', reaction ? t('Reacts as you') : recall ? t('Takes it back as you') : t('Will send as {who}', { who: asWho })));
   // r3: approving a send that starts a turn WAKES the agent — the cost, said before the click
   if (p.wakes && p.state === 'awaiting-approval') meta.appendChild(el('span', 'chan-prop-wakes chan-warn', t('Approving wakes this agent: 1 billed turn')));
   if (p.state === 'awaiting-approval' && p.ttlAt) meta.appendChild(el('span', 'chan-prop-ttl', t('Expires unapproved at {when}', { when: stamp(p.ttlAt) })));
@@ -564,7 +569,8 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
     const edit = btn(t('Edit…'), null);
     edit.dataset.edit = '1';
     // a reaction has no text to edit and never wakes anyone (spec §5.3): plain Reject / Approve, the receipt rides the next turn
-    if (reaction) {
+    // (lane channels-proposals-recall: a recall the same — Approve takes the message back, Reject keeps it)
+    if (reaction || recall) {
       const approveR = btn(toAgent ? approveLabel('next-turn') : t('Approve'), null, 'mounts-btn-primary');
       approveR.dataset.approve = '1';
       approveR.dataset.deliver = 'next-turn';
@@ -574,7 +580,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
         if (!r) { for (const b of act.querySelectorAll('button')) b.disabled = false; return; }
         const sent = !!(r.proposal && r.proposal.state === 'sent');
         const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
-        showToast(sent ? t('Reaction added') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
+        showToast(sent ? (recall ? t('Message taken back') : t('Reaction added')) : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
       };
       reject.onclick = () => {
         const old = card.querySelector('.chan-prop-rejectbox');
@@ -708,6 +714,14 @@ export function reactionCardText(p) {
   return x.op === 'remove'
     ? t('{agent} wants to remove the reaction {glyph} from {author}: "{quote}"', { agent, glyph, author: q.author || '?', quote: q.text || '' })
     : t('{agent} wants to react {glyph} to {author}: "{quote}"', { agent, glyph, author: q.author || '?', quote: q.text || '' });
+}
+/** lane channels-proposals-recall: a recall proposal's sentence — "{agent} wants to take back your message: "{quote}"" —
+ *  every part textContent; the quote is the stored message's own words (one line, ≤ 120, frames neutered). */
+export function recallCardText(p) {
+  const d = (p && p.draftedBy) || {};
+  const agent = d.kind === 'agent' ? (d.name || d.id || t('an agent')) : t('you');
+  const q = ((p && p.recall) || {}).quote || {};
+  return t('{agent} wants to take back your message: "{quote}"', { agent, quote: q.text || '' });
 }
 /** The fate line's words for one proposal ('' = none). */
 function fateLineText(p) {
@@ -845,6 +859,7 @@ export function rowWhoWhere(p) {
 /** B-f467: the first line of what would be sent (a reaction: its sentence; a file sent by itself: its names). */
 export function rowFirstLine(p) {
   if (p && p.kind === 'reaction' && p.reaction) return reactionCardText(p);
+  if (p && p.kind === 'recall' && p.recall) return recallCardText(p);   // lane channels-proposals-recall
   return String((p && p.text) || '').split('\n').map((s) => s.trim()).find(Boolean) || (p ? P.storedAttachments(p).map((a) => String(a.name || '')).filter(Boolean).join(', ') : '');
 }
 /**

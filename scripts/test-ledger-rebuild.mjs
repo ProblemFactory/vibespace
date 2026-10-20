@@ -256,8 +256,11 @@ async function measure(UH, fx, tag, { reference = true } = {}) {
   JSON.parse = function (...a) { parses++; return parse.apply(this, a); };
   try { await quiet(async () => { await new Promise((r) => setImmediate(() => { read(u); r(); })); await u.rebuildSettled(); await turn(); }); } finally { JSON.parse = parse; }
   const m = meter.stop();
-  const same = reference ? digest(u._evCache) === digest(onLoopBuild(u.dir, u._evCache.cutoff, u._ledgerWindowMs(), UH)._evCache) : null;
-  return { ...m, swapCpu, parses, same, hash: digest(u._evCache), rows: u._evCache.events.length + u._evCache.cold.n };
+  // lane fast-debt-clear: the fold digest computed ONCE (it was twice for the fix — `same` and `hash` — and once for the
+  // control, whose hash nothing reads); the reference build only for the fix, as before
+  const hash = reference ? digest(u._evCache) : null;
+  const same = reference ? hash === digest(onLoopBuild(u.dir, u._evCache.cutoff, u._ledgerWindowMs(), UH)._evCache) : null;
+  return { ...m, swapCpu, parses, same, hash, rows: u._evCache.events.length + u._evCache.cold.n };
 }
 {
   const big = shape('big', 0.2);

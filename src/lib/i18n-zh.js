@@ -6112,6 +6112,13 @@ export default {
   "{agent} wants to react {glyph} to {author}: \"{quote}\"": "{agent} 想用 {glyph} 回应 {author}：“{quote}”",
   "reacted {glyph}": "用 {glyph} 回应",
   "proposed {n} reactions": "提议了 {n} 个表情回应",
+  // lane channels-proposals-recall: an agent proposes taking back (撤回) a message the user sent
+  "taking back your message always needs your approval": "撤回你的消息总是需要你批准",
+  "Takes it back as you": "以你的身份撤回",
+  "Message taken back": "消息已撤回",
+  "{agent} wants to take back your message: \"{quote}\"": "{agent} 想撤回你的这条消息：“{quote}”",
+  "proposed taking back your message": "提议撤回你的一条消息",
+  "proposed taking back {n} of your messages": "提议撤回你的 {n} 条消息",
   "Agent reactions": "Agent 表情回应",
   "You approve each one": "每个都由你批准",
   "As the channel policy allows": "按频道策略允许的方式",
@@ -9324,6 +9331,11 @@ export default {
   "Unlock the vault": "解锁保险库", // lane vault-e2e-password
   "The vault is locked — device links, the relay and account switching are waiting.": "保险库未解锁 — 设备链接、中继和账号切换在等", // lane vault-relock-door: the persistent lock strip
   "The vault locked after a restart — enter the second password to unlock. Device links, the relay and account switching are waiting.": "保险库在重启后已锁定 — 输入第二密码解锁；设备链接、中继与账号切换在等", // lane vault-relock-door: the restart For-you notice
+  "The vault is locked — {n} waiting on it (For you names them).": "保险库未解锁 — {n} 项在等它（「待你处理」里写明了是谁）", // lane vault-locked-refusal-notice: the strip's count
+  "The vault is locked — waiting on it: {who}. Enter the second password to unlock.": "保险库未解锁 — 在等它的：{who}。输入第二密码解锁", // lane vault-locked-refusal-notice: the For-you item names who was blocked
+  "Nothing has been refused yet — whatever the lock stops is named here as it happens.": "还没有操作被拒绝 — 锁定挡住的每一项都会随时列在这里", // lane vault-locked-refusal-notice: the item's detail before any refusal
+  "{who} — {what}": "{who} — {what}", // lane vault-locked-refusal-notice: one blocked caller and what it was refused
+  "…and {n} more, refused while it is locked": "……另有 {n} 项在锁定期间被拒绝", // lane vault-locked-refusal-notice: past the item's lines
   "The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.": "VibeSpace 保存的凭据（账号、挂载、渠道、集成、应用登录、通行密钥、已配对机器的连接、中继与语音登录）在你输入第二密码之前一直锁着——每次重启、每次锁定之后都是。", // lane vault-e2e-password (r2: machines, relay, voice; every lock)
   "Second password": "第二密码", // lane vault-e2e-password
   "Unlock": "解锁", // lane vault-e2e-password

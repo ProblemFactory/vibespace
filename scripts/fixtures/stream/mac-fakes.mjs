@@ -15,6 +15,8 @@
 //                                  lane stream-fallback-never-silent: cfg.endOnce = a token file — the endAfter ending happens only
 //                                  while it exists, and takes it (ONE ending: the capture started again plays on); cfg.factsFail
 //                                  = a counter file — while it holds n > 0 a `facts` run fails (exit 1, nothing on stdout), n - 1.
+//                                  lane fast-debt-clear: cfg.pace = pictures a second the fake WRITES (its `started` line still
+//                                  says --fps): a leg that counts pictures gets them sooner
 //   MAC_FACTS                      the canned facts (two 4K displays at 2×, two windows — names invented)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -76,7 +78,7 @@ if (a[0] === 'input') {
     if (next != null) { n = next; next = null; }
     process.stdout.write(pics[n % pics.length]); n++; sent++;
     if (sent % 10 === 0) say({ t: 'stats', captured: sent, encoded: sent, idle: 0, repeats: 0, keys: 1, forced, dropped: 0, encMs: 9.5, capMs: 1.2, kbps: 900, bps: 0, w, h, fps, lowLatency: true });
-  }, 1000 / fps);
+  }, 1000 / (Number(cfg.pace) || fps));
 } else { process.stderr.write('fake helper: no mode in ' + a.join(' ') + '\\n'); process.exit(2); }
 `, { mode: 0o755 });
   if (cfg.version != null) fs.writeFileSync(bin + '.version', cfg.version);

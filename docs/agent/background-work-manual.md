@@ -40,6 +40,9 @@ Three independent audiences:
    are delivered to that subscriber. Re-subscribe to update your own filter;
    `unsubscribe` to leave. Subscribing to a CRON covers its per-fire runs.
    Subscriptions ignore the owner's toggles (explicit opt-in, cap 10/job).
+   The OWNER subscribing to its own job: the filter shapes its auto-notify
+   too — mute one kind of message without `notify off` (which would silence
+   a real failure as well).
 3. **Everyone else who can view** — passive only: one line in their next
    context injection (never a wake); a job's announce flood coalesces to a
    single `×N + latest` line.
@@ -128,7 +131,13 @@ batch, read <path>".
 **How to find the URL:** `vibespace-job show <id>` and `vibespace-job poll <id>`
 print a `public URL:` line (`list` appends `↗ <url>`). While the service is
 still starting it says `publishing…` (the publish waits up to 60 s for the
-port to answer before it decides http vs tcp); a failed publish says why.
+port to answer before it decides http vs tcp); a failed publish says why,
+since when and after how many attempts. That state is the relay's: when the
+relay publishes again (the vault unlocked, the Ports panel, its own retry)
+`poll` shows the URL at once. Your conversation hears a failure ONCE per
+cause and ONCE when it is back — never the same notice again; a locked vault
+is never said per job (the owner has the unlock item; the status says
+`waiting for the vault`, and the URL comes back by itself when it opens).
 The URL is STABLE: stop / start / restart / server restart / reboot keep the
 same name (only an explicit unpublish in the Ports panel forgets it). If it
 ever does change, your conversation gets one notice with the old and the new

@@ -104,7 +104,7 @@ vibespace-api conversations end <sess-…>
 
 | code | means |
 |---|---|
-| `vault_locked` (423) | the vault is locked — every call waits until the user unlocks it on the page. Tell them; never ask for the password (exit code 3) |
+| `vault_locked` (423) | the vault is locked — every call waits until the user unlocks it on the page. The user has already been told (For you names this conversation and the verb): never ask them to unlock it or for the password — wait, or do other work (exit code 3) |
 | `not_granted` | no grant lets this conversation use the key (or a `--target` the key does not reach) |
 | `key_revoked` / `verb_not_in_scope` | the user revoked the key / the key does not hold this verb |
 | `ask_denied` / `ask_expired` / `ask_quiet` | the user refused / nobody answered in 60 s / a refusal is still in its 10 minutes |

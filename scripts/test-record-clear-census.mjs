@@ -188,6 +188,8 @@ const CHANNELS_GATES = {
   sharedSince: 'store.index.peek(',                     // lane slack-file-send-key r2: the sent transition's look-back — a KNOWN conversation's own stored shares (file ids only, never served)
   propose: 'convFor(',
   proposeReaction: 'convFor(',
+  proposeRecall: 'convFor(',                            // lane channels-proposals-recall: a recall's quote — a KNOWN conversation the caller sees, its own stored message
+  recallMessage: 'convOr404(',                          // …and the approved recall: the conversation known first, then the message it takes back
   // lane lark-threads: "does the log hold this message" — a boolean, never a served record; asked by the change feed's
   // by-id fetch and rule 22's recheck, each over a conversation with an index row (the groups adapter has no feed and no
   // separate thread listing)
@@ -417,6 +419,8 @@ const ROUTES = {
   'POST /api/agent/channels/api': 'meta', 'GET /api/agent/channels/api/creds': 'meta', 'GET /api/agent/channels/api/docs': 'meta',
   'GET /api/agent/channels/api/proposals/:id': 'meta', 'GET /api/agent/channels/api/log': 'meta',
   'POST /api/agent/channels/react': 'meta',            // lane channel-threads: msgCaller (the caller's identity + group ids) → a reaction PROPOSAL; no store's text
+  'POST /api/agent/channels/recall': 'meta',           // lane channels-proposals-recall: msgCaller → a recall PROPOSAL (the user's own message quoted, belted); no store's text of the five kinds
+  'GET /api/agent/channels/proposals': 'meta',         // lane channels-proposals-recall: msgCaller → the caller's own outbox rows (ids, states, a belted summary); no store's text of the five kinds
   'POST /api/agent/channels/:adapterId/:convId/thread/:msg/refresh': 'meta',   // lane channel-threads: msgCaller → the thread walk; no store's text
   'GET /api/hosts/:id/exit-access': 'meta',            // lane-pairing: the exit lists + the roster (session names, Task Group ids + titles) — no record of the five kinds
   // ── lane design-core: the Design window's agent routes — agentCaller = jobByToken (a jbt_ caller's identity), the answer a design folder's files + the registry ──
@@ -1795,6 +1799,7 @@ const I_RECV = {
   'src/agentd/agentd.js|msg': ['carrier', 'the delivered text of the device\'s peer-post op (the ladder\'s rung ③)'],
   'src/jobs.js|job': ['job', 'the Background Work record'],
   'src/jobs.js|a': ['job', 'the job\'s notify ACTION (`job.action` — SHAPES `action.text`)'],
+  'src/jobs.js|v.notice': ['words', 'a PURE verdict\'s sentence (src/job-notice.js noticeVerdict — lane job-notice-dedupe: the job\'s public URL + the relay\'s failure sentence + when it went down; the job\'s name rides the card label, never this text)'],
   'src/lib/jobs-panel.js|j': ['job', 'a job snapshot the panel drew'],
   'src/lib/jobs-panel.js|job': ['job', 'the job the Job input window drew'],
   'src/lib/user-todos-panel.js|nameFor()': ['todo', 'a For-you item\'s label (a Background Work item\'s is the job\'s name)'],

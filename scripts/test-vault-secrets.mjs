@@ -617,10 +617,10 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
   for (const [what, , , good] of TABLE) void what, void good;
 }
 
-console.log('\u2468 THE RESTART\u2019S FOR-YOU ITEM (lane vault-relock-door) \u2014 a boot over a SET UP + LOCKED vault files ONE tray notice; a second boot keeps ONE; unlock resolves it; not set up files nothing');
+console.log('\u2468 THE RESTART\u2019S FOR-YOU ITEM (lane vault-relock-door) \u2014 a boot over a SET UP + LOCKED vault files ONE tray notice; a second boot keeps ONE; unlock resolves it; not set up files nothing \u2014 lane vault-locked-refusal-notice: it is THE item \u2014 a refusal refreshes it (who and what), one row ever, a dismissal holds for the lock epoch, an upgrade\u2019s old row gives way, bounded; RED: the pre-fix engine files nothing');
 {
   const { UserTodoManager } = R('src/user-todos.js');
-  const { VAULT_INBOX_KEY, RELOCK_TEXT } = R('src/server/vault-hooks.js');
+  const { VAULT_INBOX_KEY, RELOCK_TEXT, VAULT_ITEM_TEXT, BLOCKED_TEXT, NOTHING_YET, ROW_LINE, MORE_LINE } = R('src/server/vault-hooks.js');
   const mkTodos = (d) => new UserTodoManager({ dataDir: d, onChange: () => {}, expirySweepMs: 0 });
   const relocks = (t) => t.forSession(VAULT_INBOX_KEY).filter((i) => i.action && i.action.type === 'vault-unlock');
   // NOT SET UP \u21d2 nothing (the migration window asks at page load, never a tray row)
@@ -643,7 +643,7 @@ console.log('\u2468 THE RESTART\u2019S FOR-YOU ITEM (lane vault-relock-door) \u2
     ok(v1.state() === 'locked', 'a boot over a set-up dir starts LOCKED by law');
     wireVaultHooks({ vault: v1, userTodos: t1, log: quiet });
     const one = relocks(t1);
-    ok(one.length === 1 && one[0].kind === 'notice' && one[0].origin === 'vault' && one[0].action.type === 'vault-unlock' && one[0].text === RELOCK_TEXT, 'set up + locked boot \u21d2 ONE For-you notice (origin vault, the vault-unlock door, the restart text)', one.map((i) => ({ kind: i.kind, origin: i.origin, type: i.action && i.action.type })));
+    ok(one.length === 1 && one[0].kind === 'notice' && one[0].origin === 'vault' && one[0].action.type === 'vault-unlock' && one[0].text === VAULT_ITEM_TEXT && one[0].i18n.text.key === RELOCK_TEXT && one[0].i18n.detail[0].key === NOTHING_YET, 'set up + locked boot \u21d2 ONE For-you notice (origin vault, the vault-unlock door, the restart words; lane vault-locked-refusal-notice: THE item\u2019s one text, nothing refused yet)', one.map((i) => ({ kind: i.kind, origin: i.origin, type: i.action && i.action.type, text: i.text, i18n: i.i18n })));
     t1.flush(); t1.stop();
     const v2 = mkVault(d); const t2 = mkTodos(d); // boot 2: the persisted item re-read
     wireVaultHooks({ vault: v2, userTodos: t2, log: quiet });
@@ -652,6 +652,109 @@ console.log('\u2468 THE RESTART\u2019S FOR-YOU ITEM (lane vault-relock-door) \u2
     await v2.unlock(PW, {});
     ok(relocks(t2).length === 0 && t2.get(one[0].id) && t2.get(one[0].id).status === 'done' && t2.get(one[0].id).resolvedBy === 'vault', 'a person\u2019s unlock resolves the item (onUnlock)', t2.get(one[0].id));
     t2.stop();
+  }
+
+  // ── lane vault-locked-refusal-notice (the owner 2026-10-20: "为啥老是有 agent 和我说需要解锁 vault"): A REFUSAL IS THE SIGNAL —
+  //    the boot item becomes THE item: refreshed by a refusal that changes who the lock stopped, one row ever, resolved on unlock
+  const VB = R('src/vault-blocked.js');
+  const allVault = (t) => t._state.items.filter((i) => i.sessionKey === VAULT_INBOX_KEY && i.action && i.action.type === 'vault-unlock');
+  const mkClocked = (d, clock) => { let changes = 0; const t = new UserTodoManager({ dataDir: d, onChange: () => { changes++; }, expirySweepMs: 0, now: () => clock.t }); return { t, changes: () => changes }; };
+  {
+    const d = dirOf('blocked-boot');
+    const clock = { t: 1800000000000 };
+    const v0 = mkVault(d, { now: () => clock.t }); await v0.setup(PW, {}); v0.lock('close', { quiet: true });
+    clock.t += 1000;
+    const v1 = mkVault(d, { now: () => clock.t }); const { t, changes } = mkClocked(d, clock);
+    wireVaultHooks({ vault: v1, userTodos: t, log: quiet });
+    const id0 = relocks(t)[0] && relocks(t)[0].id;
+    // a device link refused (the REAL host-tokens door, the machine named by nameOf — never its id)
+    const ht = HT.create({ dataDir: d, nameOf: (k) => (k === 'host-0123abcd' ? 'mac-mini' : null) });
+    clock.t += 1000;
+    let e1 = null; try { ht.tokenFor('host-0123abcd'); } catch (e) { e1 = e; }
+    const a = relocks(t);
+    ok(e1 && e1.code === 'vault_locked' && a.length === 1 && a[0].id === id0 && a[0].i18n.text.key === BLOCKED_TEXT && a[0].i18n.text.params.who === 'mac-mini (device link)' && a[0].detail === 'mac-mini — device link · 1×',
+      'a REFUSAL (a device link, the real host-tokens door) refreshes THE SAME item: its line names the machine by NAME and what it was refused', a.map((i) => ({ id: i.id, i18n: i.i18n, detail: i.detail })));
+    const c0 = changes();
+    try { ht.tokenFor('host-0123abcd'); } catch { }
+    ok(changes() === c0 && relocks(t)[0].i18n.text.params.who === 'mac-mini (device link)', 'the same refusal again changes nothing the owner reads (no store write, no broadcast)', { before: c0, after: changes() });
+    clock.t += 1000;
+    v1.blocked('Worker one', 'vibespace-api conversations.rename');
+    SB.lawfulKey(path.join(d, '.accounts-key'), { hasCiphertext: () => false });   // the store-key road: noted by the engine itself
+    const b = relocks(t);
+    ok(b.length === 1 && b[0].id === id0 && allVault(t).length === 1 && b[0].i18n.text.params.who === 'mac-mini (device link) · Worker one (vibespace-api conversations.rename) · VibeSpace (the accounts store)' && b[0].i18n.detail.length === 3 && b[0].i18n.detail.every((l) => l.key === ROW_LINE),
+      'a second caller and the store-key road ⇒ STILL ONE item (one row ever): the named callers first, VibeSpace’s own read last; one detail line each', b.map((i) => i.i18n));
+    ok(v1.facts().blocked === 3, 'facts().blocked = 3 (what the lock strip counts)');
+    // the owner sets it aside: a later refusal THIS lock epoch refiles nothing
+    clock.t += 1000;
+    t.setStatus(id0, 'dismissed', 'user');
+    clock.t += 1000;
+    v1.blocked('Lane three', 'device link');
+    ok(t.get(id0).status === 'dismissed' && relocks(t).length === 0 && !JSON.stringify(t.get(id0).i18n).includes('Lane three'), 'the owner DISMISSED it ⇒ a later refusal in the same lock epoch reopens nothing (quiet until the next lock)', t.get(id0));
+    clock.t += 1000;
+    await v1.unlock(PW, {});
+    ok(v1.facts().blocked === 0 && relocks(t).length === 0, 'the unlock clears the list (the strip’s count 0)');
+    clock.t += 1000;
+    v1.lock('door');   // a lock ACT: no item until somebody is stopped
+    ok(relocks(t).length === 0, 'a LOCK ACT files nothing by itself (the strip says it; the item waits for a refusal)');
+    clock.t += 1000;
+    v1.blocked('Worker one', 'vibespace-api conversations.rename');
+    const c = relocks(t);
+    ok(c.length === 1 && c[0].id === id0 && allVault(t).length === 1 && c[0].i18n.text.params.who === 'Worker one (vibespace-api conversations.rename)',
+      'the FIRST refusal of the new lock epoch REOPENS the same row (same id — one row, ever), naming only who this lock stopped', c.map((i) => ({ id: i.id, who: i.i18n.text.params })));
+    clock.t += 1000;
+    await v1.unlock(PW, {});
+    const done = t.get(id0);
+    ok(done.status === 'done' && done.resolvedBy === 'vault' && relocks(t).length === 0, 'a person’s unlock resolves it (the onUnlock door, unchanged)', done);
+    t.stop();
+  }
+  // an older build's restart notice (its own text) gives way to THE item — never two rows for one lock
+  {
+    const d = dirOf('blocked-legacy');
+    const v0 = mkVault(d); await v0.setup(PW, {}); v0.lock('close', { quiet: true });
+    const t0 = mkTodos(d);
+    const old = t0.add(VAULT_INBOX_KEY, { origin: 'vault', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Vault', text: RELOCK_TEXT, i18n: { text: { key: RELOCK_TEXT } }, action: { type: 'vault-unlock' } });
+    t0.flush(); t0.stop();
+    const v1 = mkVault(d); const t1 = mkTodos(d);
+    wireVaultHooks({ vault: v1, userTodos: t1, log: quiet });
+    const open = relocks(t1);
+    ok(open.length === 1 && open[0].text === VAULT_ITEM_TEXT && t1.get(old.id).status === 'done' && t1.get(old.id).resolvedBy === 'vault', 'an UPGRADE over an open 2.369.325 restart notice: that row is resolved, THE item is the one open row', { open: open.map((i) => i.text), old: t1.get(old.id) && t1.get(old.id).status });
+    t1.stop();
+  }
+  // bounded: 60 callers ⇒ ≤ 12 detail lines, the rest counted
+  {
+    const d = dirOf('blocked-bound');
+    const v0 = mkVault(d); await v0.setup(PW, {}); v0.lock('close', { quiet: true });
+    const v1 = mkVault(d); const t1 = mkTodos(d);
+    wireVaultHooks({ vault: v1, userTodos: t1, log: quiet });
+    for (let i = 0; i < 60; i++) v1.blocked(`Lane ${i}`, 'device link');
+    const it = relocks(t1)[0];
+    const last = it.i18n.detail[it.i18n.detail.length - 1];
+    ok(it.i18n.detail.length === 12 && last.key === MORE_LINE && last.params.n === `${VB.MAX_ACTORS - VB.DETAIL_ROWS}+` && it.i18n.text.params.who.endsWith(' · …') && v1.facts().blocked === VB.MAX_ACTORS,
+      `BOUNDED: 60 callers \u21d2 ${VB.DETAIL_ROWS} detail lines + one \u00ab\u2026and ${VB.MAX_ACTORS - VB.DETAIL_ROWS}+ more\u00bb line (the + = some fell past the list: counted, not named), the item\u2019s line ends \u2026; the list holds ${VB.MAX_ACTORS}`, { lines: it.i18n.detail.length, last, blocked: v1.facts().blocked });
+    t1.stop();
+  }
+  // RED CONTROL: a PATCHED COPY of the PRE-FIX engine (a scratch dir, never the tree) — its refusals note nothing ⇒ a lock act
+  // followed by a refusal files NO item: the owner is never told and the agent is the messenger (the owner's complaint)
+  {
+    const MB = mutantCopies('vault-secrets-blocked', REPO);
+    const esrc = fs.readFileSync(path.join(REPO, 'src/server/vault-engine.js'), 'utf8');
+    const anchor = "  function blocked(actor, verb) {\n    if (state() !== 'locked') return false;\n";
+    ok(esrc.includes(anchor), 'the control’s anchor is the ONE helper’s first line');
+    const VEpre = MB.load('src/server/vault-engine.js', esrc.replace(anchor, "  function blocked(actor, verb) {\n    return false;   // PRE-FIX: a refusal is nobody's signal\n"), 'pre-fix');
+    const run = async (engineMod, tag) => {
+      const d = dirOf(tag);
+      const v = engineMod.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false }); engines.push(v);
+      await v.setup(PW, {});
+      const t = mkTodos(d);
+      wireVaultHooks({ vault: v, userTodos: t, log: quiet });
+      v.lock('door');
+      let code = null; try { SB.secretBox(path.join(d, '.accounts-key'), { hasCiphertext: () => false }).enc('x'); } catch (e) { code = e.reason; }
+      const items = relocks(t); t.stop(); v.close();
+      return { code, items: items.length, who: items[0] ? items[0].i18n.text.params : null };
+    };
+    const pre = await run(VEpre, 'blocked-red-pre'), fixed = await run(VE, 'blocked-red-fixed');
+    ok(pre.code === KF.VAULT_LOCKED && pre.items === 0, 'RED: the pre-fix engine — a store read refused vault_locked after a lock act files NO item (the owner is not told)', pre);
+    ok(fixed.code === KF.VAULT_LOCKED && fixed.items === 1 && fixed.who && fixed.who.who === 'VibeSpace (the accounts store)', 'the shipped engine — the same refusal files ONE item naming it', fixed);
   }
 }
 

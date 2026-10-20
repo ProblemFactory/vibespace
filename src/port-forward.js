@@ -129,6 +129,9 @@ class PortForwardManager {
     rec.publicSub = r.subdomain || rec.publicSub || null;
     rec.publicPort = r.remotePort || rec.publicPort || null;
     this._published.add(rec.id);
+    // lane job-notice-dedupe (fb-666f37fd38): the relay's success is THE fact a service job's public-URL state follows — told
+    // here, in the same tick, whoever published (the heal sweep, a restore, a machine link, the Ports panel, the job itself)
+    try { const jm = this.getJobs && this.getJobs(); if (jm && typeof jm.relayPublished === 'function') jm.relayPublished(rec, r.url || null); } catch (e) { this.log('jobs follow ' + rec.id + ': ' + e.message); }
   }
 
   /** A fresh direct TCP socket to <host>:<port> from THIS instance (used to

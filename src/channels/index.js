@@ -39,6 +39,7 @@
 const { PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf, POLICY_MODES } = require('../channel-policy.js');
 const IntegrationRegistry = require('../integration-registry.js');   // lane dc-channels-manifest: a vendor's `integration` must name a row
 const ChannelSettings = require('../channel-settings.js');   // B-df40 part 3: the declared per-vendor rows a caps settingKey must name
+const { recallRowOf } = require('../channel-caps.js');   // lane channels-proposals-recall: `revisions.recall` + `canRecall` declare `recall`
 
 const CHANNEL_ERROR_CODES = Object.freeze([
   'auth-expired',
@@ -58,7 +59,7 @@ const vaultLockedWhy = (why) => why === 'vault-locked' || /the vault is locked/.
 /** THE "not connected" refusal of an adapter's token read (lane vault-e2e-password-fix-r2): a LOCKED vault is its own code
  *  (`vault-locked` — retryable, the card says 「保险库已锁定——先解锁」), never `auth-expired` ("the login expired"). */
 function notConnectedError(vendor, why) {
-  if (vaultLockedWhy(why)) return new ChannelError('vault-locked', `${vendor} cannot read its sign-in: the vault is locked — it opens after the owner unlocks the vault on the page`, { retryable: true });
+  if (vaultLockedWhy(why)) return new ChannelError('vault-locked', `${vendor} cannot read its sign-in: ${VB.agentWords('it opens after a person unlocks the vault on the page')}`, { retryable: true });   // lane vault-locked-refusal-notice: the owner was told
   return new ChannelError('auth-expired', `${vendor} is not connected (${why || 'no token'})`, { retryable: false });
 }
 
@@ -146,6 +147,7 @@ const Feed = require('../channel-feed.js');   // PURE (lane lark-search-poll): t
 // a described single chat's name, which has no constructor of its own, takes it here — verify r1 #2)
 const { peerName, FACT_KIND_NAMES, validateFacts } = require('../channel-record.js');   // + lane message-facts: the closed fact kinds, the one validator
 const SR = require('../channel-search.js');   // design 010: the search row's enums + THE snippet bound (PURE)
+const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
 const RECEIVE_MODES = Object.freeze(['push', 'poll', 'scan']);
 // lane webhook-l1-server: HOW a push lane hears its vendor — CLOSED (a long-lived socket, a pull subscription, a long
 // poll, or an HTTP door the vendor calls: `http-inbound`, the webhook adapter's `/hook/<slug>`)
@@ -358,6 +360,8 @@ const METHOD_GATES = Object.freeze({
   messageById: (c) => !!(c.changeFeed && typeof c.changeFeed === 'object') && threadsOf(c).listing === 'separate',
   // lane channel-record-revisions: a stored message re-read for its later facts (a recall, an edit)
   revisionOf: (c) => revisionsOf(c).how !== 'none',
+  // lane channels-proposals-recall: take back a message the account's user sent (`recall(convId, {messageId})`)
+  recall: (c) => !!recallRowOf(c),
   // design 010: the vendor's own search (a person's press) and a hit read in context — declared by `caps.search`
   search: (c) => !!searchRowOf(c),
   around: (c) => !!searchRowOf(c) && !!searchRowOf(c).context,
@@ -521,6 +525,14 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
     if (r.how === 'none' && (r.recall || r.edit)) bad("caps.revisions how 'none' with recall / edit — a fact that can never be learned");
     if (r.how !== 'none' && !r.recall && !r.edit) bad(`caps.revisions how '${r.how}' learns nothing (recall and edit both false)`);
   }
+  // lane channels-proposals-recall: the WRITE half of a recall — the user's own message taken back, within `windowSec`
+  // of sending (null = the vendor says no window); only beside `revisions.recall` (the store must be able to show it)
+  if (c.canRecall !== undefined) {
+    const r = c.canRecall;
+    if (!r || typeof r !== 'object' || Object.keys(r).some((k) => k !== 'windowSec')) bad('caps.canRecall must be an object {windowSec}');
+    if (r.windowSec !== null && !(Number.isInteger(r.windowSec) && r.windowSec > 0)) bad('caps.canRecall.windowSec must be a positive whole number of seconds, or null');
+    if (!(c.revisions && c.revisions.recall === true)) bad('caps.canRecall without caps.revisions.recall — a recall the store could never show');
+  }
   // lane lark-search-poll: the change feed row, every number bounded and every refusal named
   if (c.changeFeed !== undefined) {
     const f = c.changeFeed;
@@ -636,6 +648,7 @@ function validateMethods(kind, caps, mod) {
     // lane lark-search-poll: a feed method present that `caps.changeFeed` does not declare is refused too
     if (FEED_METHODS.includes(name) && !declared(caps) && has) throw new Error(`channel adapter '${kind}': ${name} is implemented but caps.changeFeed does not declare it`);
     if (name === 'revisionOf' && !declared(caps) && has) throw new Error(`channel adapter '${kind}': revisionOf is implemented but caps.revisions does not declare it`);
+    if (name === 'recall' && !declared(caps) && has) throw new Error(`channel adapter '${kind}': recall is implemented but caps.canRecall / caps.revisions.recall do not declare it`);
     // lane message-facts: `factsOf` declared ⇔ implemented
     if (name === 'factsOf' && !declared(caps) && has) throw new Error(`channel adapter '${kind}': factsOf is implemented but caps.factsOf / caps.facts do not declare it`);
     // design 010: a search method present that `caps.search` does not declare is refused too
@@ -1041,6 +1054,8 @@ function createChannelRegistry({ channelSettings } = {}) {
         return { state: st, editedAt: at, text: r.text.slice(0, 64 * 1024), blocks: Array.isArray(r.blocks) ? r.blocks : null };
       },
       reactions: gated('reactions', impl.reactions && impl.reactions.bind(impl)),
+      /** lane channels-proposals-recall: ONE recall of the user's own message — `{ok, at}`; a refusal is a ChannelError */
+      recall: gated('recall', impl.recall && impl.recall.bind(impl)),
       react: gated('react', impl.react && impl.react.bind(impl)),
       unreact: gated('unreact', impl.unreact && impl.unreact.bind(impl)),
       emojiImage: gated('emojiImage', impl.emojiImage && impl.emojiImage.bind(impl)),

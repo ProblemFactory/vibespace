@@ -131,9 +131,10 @@ const ROWS = Object.freeze([
   },
   {
     // lane vault-e2e-password: the vault's state and its lock (unlock is never an agent's) — INDEX-ONLY: a locked vault says
-    // itself in every refusal (`vault_locked`), so no injected surface pays for it
+    // itself in every refusal (`vault_locked`), so no injected surface pays for it; lane vault-locked-refusal-notice: and that
+    // refusal says the user was already told (src/vault-blocked.js agentWords) — the summary says it too
     name: 'vibespace-vault', topic: 'vault', manual: 'vault-manual.md', gate: 'always', teach: null,
-    summary: 'the vault that seals every stored credential: its state, and lock it now (unlocking is the user\'s, never yours)',
+    summary: 'the vault that seals every stored credential: its state, lock it now (locked ⇒ the user is told; never ask them to unlock)',
   },
   {
     // design q-046 (lane automation-keys-core): VibeSpace's own automation API — INDEX-ONLY (a call with no grant asks the

@@ -257,6 +257,9 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
     readThreadFor: 'a thread\'s records through withView\'s agent branch (viewsOf → agentCopy: no tree, no role:body attachment, frame-inert) — the same door as readFor',
     agentThreadRefresh: 'counts + the thread\'s key — no record',
     proposeReaction: 'the agent\'s own reaction proposal (a key + the reacted message\'s id)',
+    // lane channels-proposals-recall
+    proposalsListFor: 'the agent\'s own proposals as rows (ids, kind, state, its conversation key through agentIdsOf, a one-line summary through the belt) — the set statusFor reads',
+    proposeRecall: 'the agent\'s own recall proposal (the message id + a quote of the user\'s own message through the belt; agentIdsOf)',
     // lane channel-attach-read (B-d6b9)
     attachment: 'the bytes of a part a message of a readable conversation carries — never its role:body part (not-found, even cached); the sender / title / type through the belt; driven below and in test-channels-images ③b',
   };

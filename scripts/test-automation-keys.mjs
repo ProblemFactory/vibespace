@@ -30,6 +30,7 @@ import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
 import { scratch } from './scratch.mjs';
@@ -387,6 +388,20 @@ console.log('⑧ THE DOORS — an agent calls with its own token; every owner do
   w.vault.lock('door');
   const locked = await go('POST', '/api/agent/automation/conversations.rename', { headers: { Authorization: 'Bearer vsst_good' }, body: { name: 'x' } });
   ok(locked.status === 423 && locked.body.code === 'vault_locked', 'LOCKED ⇒ the door answers 423 vault_locked');
+  // lane vault-locked-refusal-notice (the owner 2026-10-20: agents kept asking them to unlock): a LOCKED refusal IS the signal
+  const VB = R('src/vault-blocked.js');
+  ok(locked.body.error === VB.agentWords('every automation waits until a person unlocks it on this instance\'s page') && /the user has already been told/.test(locked.body.error) && /do not ask them to unlock it/.test(locked.body.error) && !/never ask for the password\)/.test(locked.body.error),
+    'LOCKED ⇒ the words toward the agent: the user has ALREADY been told (For you names it) — do not ask them to unlock; the code stays vault_locked', locked.body.error);
+  const bl = w.vault.blockedSummary();
+  ok(bl.count === 1 && bl.actors[0].actor === 'Worker one' && bl.actors[0].verbs.join() === 'vibespace-api conversations.rename' && w.vault.facts().blocked === 1,
+    'the refusal NOTED the conversation by its NAME and the verb (the vault\'s ONE helper — what the owner\'s For-you item names; facts().blocked = the strip\'s count)', bl);
+  // THE CLI'S EXIT TEXT — the real data/bin/vibespace-api against this door (async: the door answers from this process)
+  const cli = await new Promise((res) => execFile(process.execPath, [path.join(ROOT, 'data/bin/vibespace-api'), 'call', 'conversations.rename', '--name', 'y'], { env: { PATH: process.env.PATH || '', VIBESPACE_API: base, VIBESPACE_SESSION_TOKEN: 'vsst_good' }, timeout: 15000 }, (e, stdout, stderr) => res({ status: e ? e.code : 0, stderr: String(stderr || '') })));
+  ok(cli.status === 3 && cli.stderr.includes('the user has already been told') && cli.stderr.includes('do not ask them to unlock it') && cli.stderr.includes('(vault_locked)'),
+    'the CLI exits 3 and prints the hub\'s words: the user was already told — do not ask them to unlock (wait, or do other work)', cli);
+  ok(w.vault.blockedSummary().count === 1 && w.vault.blockedSummary().actors[0].n === 2, 'a second refusal of the same conversation × verb is counted on its row — never a second row', w.vault.blockedSummary());
+  await w.vault.unlock(PW, {});
+  ok(w.vault.blockedSummary().count === 0 && w.vault.facts().blocked === 0, 'the unlock clears who the lock stopped (a new lock epoch starts empty)');
   srv.close();
 }
 
@@ -659,6 +674,9 @@ console.log('⑭ THE WINDOW + THE CLI (text pins) — the 「未设边界」 chi
   const CLI = R('data/bin/vibespace-api');
   ok(CLI.limitsWords(LIM_OPEN) === `folders ${LROOT} · accounts any · permission modes default · models any · modes chat` && /refused until/.test(CLI.limitsWords(null)), 'the CLI words a key\'s limits (names only); a pre-limits key words the fail-closed state');
   ok(/\\n  this key's limits: \$\{limitsWords\(data\.limits\)\}/.test(read('data/bin/vibespace-api')), 'the CLI\'s refusal line carries "this key\'s limits: …" whenever the hub sent them');
+  const apiCli = read('data/bin/vibespace-api');
+  ok(apiCli.includes("'the vault locked ⇒ every call answers vault_locked (exit 3): the user has already been told — never ask them to unlock; wait, or do other work',") && !/tell the user; never ask for the password/.test(apiCli),
+    'lane vault-locked-refusal-notice: the CLI\'s usage and header say the user was already told (never "tell the user")');
 }
 
 console.log('⑩ wiring pins');

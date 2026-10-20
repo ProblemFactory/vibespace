@@ -77,12 +77,20 @@ function drawChip() {
 // vault is LOCKED a strip at the top of the workspace says so with an Unlock button — the maintenance banner's shape and
 // place (a flex child of #main-wrapper, BELOW it when both show). It is NOT dismissable (no ×, no 「稍后」 — only the
 // unlock dialog's 「稍后」 closes the dialog). Drawn by applyVaultFacts: shown WHENEVER locked (incl. after a person's lock
-// act), removed as soon as the vault is unlocked or not set up. ──
+// act), removed as soon as the vault is unlocked or not set up. lane vault-locked-refusal-notice: once the lock has stopped
+// someone (`facts.blocked` — the callers a vault_locked refusal noted this lock epoch) the strip says HOW MANY; the For-you
+// item names them. Re-worded in place on every facts change (the count grows; the unlock removes the strip). ──
+const stripWords = (n) => (n > 0 ? t('The vault is locked — {n} waiting on it (For you names them).', { n }) : t('The vault is locked — device links, the relay and account switching are waiting.'));
 function drawLockStrip() {
   const locked = !!facts && facts.state === 'locked';
   let strip = document.getElementById('vault-lock-strip');
   if (!locked) { strip?.remove(); return; }
-  if (strip) return;
+  const n = Math.max(0, Math.floor(Number(facts.blocked) || 0));
+  if (strip) {
+    const tx = strip.querySelector('.vls-text');
+    if (tx && strip.dataset.blocked !== String(n)) { tx.textContent = stripWords(n); strip.dataset.blocked = String(n); }
+    return;
+  }
   const wrap = document.getElementById('main-wrapper');
   if (!wrap) return;
   strip = el('div', 'vault-lock-strip');
@@ -92,7 +100,8 @@ function drawLockStrip() {
   const go = el('button', 'vls-unlock', t('Unlock…'));
   go.type = 'button';
   go.onclick = () => window.dispatchEvent(new CustomEvent(VAULT_DOOR_EVENT));
-  strip.append(ic, el('span', 'vls-text', t('The vault is locked — device links, the relay and account switching are waiting.')), go);
+  strip.dataset.blocked = String(n);
+  strip.append(ic, el('span', 'vls-text', stripWords(n)), go);
   // below the maintenance banner (that one inserts itself as #main-wrapper's first child), else the first strip at the top
   const mb = document.getElementById('maintenance-banner');
   if (mb && mb.parentNode === wrap) wrap.insertBefore(strip, mb.nextSibling);

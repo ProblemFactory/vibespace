@@ -16,6 +16,7 @@ const { withoutNoticeHead } = require('./notification-senders.js'); // lane noti
 const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
 const { spawn, execFile } = require('child_process');
 const M = require('./job-model.js');
+const JN = require('./job-notice.js'); // PURE (lane job-notice-dedupe): a published service's notice is a STATE CHANGE — the verdict over its down record
 const { credentialEnvNames } = require('./harness-env.js'); // PURE: B-6be2 — the job door's credential strip, derived from the descriptors
 const { list: harnessList } = require('./harnesses');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
@@ -565,6 +566,11 @@ class JobManager {
         this._deliverTo(sub.conversationId, job, ev, { subscriber: true, text: notifText });
       }
       if (!cid) return; // user-created or lineage-less job — user lanes (inbox/panel) already cover it
+      // THE OWNER'S OWN FILTER (lane job-notice-dedupe, fb-a001be4917): the owner conversation subscribed to its own job with a
+      // --filter — that filter shapes its auto-notify too (the loop above skips the owner and this lane ignored it: the only
+      // escape from a repeat was `notify off`, which silences a real failure as well). Journalled, never stashed.
+      const own = [...(job.subscribers || []), ...((parent && parent.subscribers) || [])].find((s) => s.conversationId === cid && s.filter);
+      if (own && !M.filterMatches(own.filter, notifText)) { this._notifyLogPush(job, { lane: 'filtered', ok: false, reason: 'your own subscription filter' }); return; }
       const eff = M.notifyEffective(this._notifyOverrideOf(job), this.d.groupNotifyFor ? this.d.groupNotifyFor(job) : null, this.d.notifyGlobal ? this.d.notifyGlobal() : true);
       if (!eff.on) { job.lastNotify = { ts: now(), lane: 'off', ok: false, source: eff.source }; this._notifyLogPush(job, { lane: 'off', ok: false, reason: 'auto-notify off (' + eff.source + ')' }); return; }
       this._deliverTo(cid, job, ev, {});
@@ -758,13 +764,15 @@ class JobManager {
       const changed = (existing.filter || null) !== vf.filter;
       existing.filter = vf.filter;
       this._touch(job); this._save();
-      return { ok: true, already: !changed, updated: changed, filter: vf.filter, count: job.subscribers.length };
+      return { ok: true, already: !changed, updated: changed, filter: vf.filter, count: job.subscribers.length, ownerLane: this._ownsJob(job, caller) };
     }
     if (job.subscribers.length >= 10) return { error: 'subscriber cap (10) reached for this job' };
     job.subscribers.push({ conversationId: caller.conversationId, sessionId: caller.sessionId || null, ts: now(), filter: vf.filter });
     this._touch(job); this._save();
-    return { ok: true, count: job.subscribers.length, filter: vf.filter };
+    return { ok: true, count: job.subscribers.length, filter: vf.filter, ownerLane: this._ownsJob(job, caller) };
   }
+  /** the caller IS the owner conversation — its subscription's filter shapes the owner auto-notify too (lane job-notice-dedupe) */
+  _ownsJob(job, caller) { return !!(caller && caller.conversationId && job.owner && job.owner.conversation && job.owner.conversation.id === caller.conversationId); }
   unsubscribe(job, caller) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     const before = (job.subscribers || []).length;
@@ -1011,15 +1019,58 @@ class JobManager {
         const r = await pf.publish(job._pfId);
         if (gen !== job._pubGen) return;
         job._publish = null;
-        this._adoptJobUrl(job, r && r.publicUrl || null);
+        this._publishOutcome(job, { ok: true, url: r && r.publicUrl || null });
         if (!up || (r && (r.pending || r.proto === 'tcp'))) this._publishRecheck(job, gen, 30);
       } catch (e) {
-        this.d.log('[jobs] publish unavailable for', job.id, '—', e.message); job.publishedUrl = null;
-        job._publish = { state: 'failed', error: String(e.message || e).slice(0, 300) };
-        if (job.lastPublicUrl) this._notifyOwner(job, { what: `public URL ${job.lastPublicUrl} is DOWN — publish failed: ${job._publish.error}` });
+        if (gen !== job._pubGen) return;
+        job._publish = null;
+        const o = this._publishOutcome(job, { ok: false, error: e });
+        this.d.log(`[jobs] publish unavailable for ${job.id} — ${(e && e.message) || e} (${o.cause}, attempt ${o.attempts}${o.notice ? ', said to the owner' : ', not said again'})`);
       }
       this._touch(job);
     } catch (e) { this.d.log('[jobs] forward failed for', job.id, '—', e.message); }
+  }
+  /** THE ONE PLACE A PUBLISH OUTCOME LANDS (lane job-notice-dedupe): the job's own attempt and the relay's success the Ports
+   *  manager adopted (relayPublished). The down record (`publishDown`, persisted — the repeat came at every restart) follows
+   *  src/job-notice.js's verdict; the owner conversation hears a STATE CHANGE only (a cause once, its recovery once). */
+  _publishOutcome(job, next) {
+    const v = JN.noticeVerdict({ prev: job.publishDown || null, next, url: job.lastPublicUrl || null, at: now() });
+    if (v.record) job.publishDown = v.record; else delete job.publishDown;
+    if (next.ok) this._adoptJobUrl(job, next.url || null, { quiet: !!v.notice }); // a recovery to a NEW address says both in one notice
+    else job.publishedUrl = null;
+    if (v.notice) this._notifyOwner(job, { what: v.notice.what });
+    return { cause: v.record ? v.record.cause : null, attempts: v.record ? v.record.attempts : 0, notice: v.notice };
+  }
+  _isJobForward(job, rec) {
+    if (!rec) return false;
+    if (job._pfId) return job._pfId === rec.id;
+    return rec.hostId === '__local__' && !rec.targetHost && Number(rec.remotePort) === Number((job.ports || [])[0]);
+  }
+  /** THE RELAY'S FACT (lane job-notice-dedupe, fb-666f37fd38 — the URL answered 200 while `poll` still said «NOT published —
+   *  the vault is locked»): the Ports manager adopted a public URL for a forward (its heal sweep, a restore, a machine link,
+   *  the Ports panel, the job's own publish) — the service on it follows in the same tick, never a stale snapshot. */
+  relayPublished(rec, url) {
+    if (!url) return 0;
+    let n = 0;
+    for (const job of this.jobs.values()) {
+      if (job.kind !== 'service' || !job.publish || !['up', 'starting'].includes(job.state) || !this._isJobForward(job, rec)) continue;
+      if (!job.publishDown && job.publishedUrl === url) continue;
+      job._publish = null;
+      this._publishOutcome(job, { ok: true, url });
+      this._touch(job); n++;
+    }
+    return n;
+  }
+  /** The relay can publish again (the vault unlocked): every published service still DOWN re-publishes NOW — not at the next
+   *  restart, not after the Ports manager's 5-minute heal backoff. → how many. */
+  relayChanged(why) {
+    let n = 0;
+    for (const job of this.jobs.values()) {
+      if (job.kind !== 'service' || !job.publish || !job.publishDown || job.state !== 'up' || !(job.ports || []).length) continue;
+      this._ensurePublish(job); n++;
+    }
+    if (n) this.d.log(`[jobs] ${why}: ${n} published service(s) still down re-publish now`);
+    return n;
   }
   /** true once a loopback TCP connect to the job's port succeeds; false after budgetMs (or when superseded/stopped). */
   async _portAnswers(job, port, budgetMs, gen) {
@@ -1051,12 +1102,12 @@ class JobManager {
     t.unref?.();
   }
   /** The job's live URL + its last one (`lastPublicUrl` survives a stop); a URL different from the last one is said. */
-  _adoptJobUrl(job, url) {
+  _adoptJobUrl(job, url, { quiet = false } = {}) {
     const before = job.lastPublicUrl || null;
     job.publishedUrl = url;
     if (!url) return;
     job.lastPublicUrl = url;
-    if (before && before !== url) {
+    if (before && before !== url && !quiet) {
       this.d.log(`[jobs] ${job.id} public URL changed`);
       this._notifyOwner(job, { what: `public URL CHANGED: ${before} → ${url} (the old link no longer works — share the new one)` });
     }
@@ -1066,6 +1117,7 @@ class JobManager {
     try {
       const pf = this.d.getPorts && this.d.getPorts();
       job._pubGen = (job._pubGen || 0) + 1; job._publish = null;
+      delete job.publishDown; // the down episode ends with a deliberate stop / park / refusal (never at a restart: that is when it repeated)
       if (!pf || !job._pfId) return;
       try { await pf.unpublish(job._pfId, { keepName: !forget }); } catch { }
       try { await pf.unforward(job._pfId, { keepName: !forget }); } catch { }
@@ -1513,7 +1565,10 @@ class JobManager {
     const run = job.runs && job.runs[job.runs.length - 1];
     const out = {
       id: job.id, kind: job.kind, name: job.name, note: job.note, state: job.state, publishedUrl: job.publishedUrl || null,
-      publishState: job._publish ? job._publish.state : null, publishError: (job._publish && job._publish.error) || null, lastPublicUrl: job.lastPublicUrl || null,
+      // lane job-notice-dedupe: the down record is the state while the service runs (a re-publish in flight does not hide it);
+      // a stopped service has none (teardown ends the episode)
+      publishState: job.publishDown && job.publish && !job.publishedUrl ? 'failed' : job._publish ? job._publish.state : null, publishError: (job.publishDown && job.publishDown.error) || null, lastPublicUrl: job.lastPublicUrl || null,
+      publishCause: (job.publishDown && job.publishDown.cause) || null, publishWhy: JN.whyOf(job.publishDown), publishSince: (job.publishDown && job.publishDown.sinceAt) || null, publishAttempts: (job.publishDown && job.publishDown.attempts) || 0,
       desiredUp: job.desiredUp, progress: job.progress || null, ports: job.ports, publish: job.publish,
       schedule: job.schedule, nextFireAt: job.nextFireAt || null, context: job.context || null,
       owner: { createdBy: job.owner?.createdBy, groups: job.owner?.groupsSnapshot || [] },

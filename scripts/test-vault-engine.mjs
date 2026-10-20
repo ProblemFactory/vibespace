@@ -15,6 +15,10 @@
 //   I  a damaged vault.json ⇒ locked for good (never the files beside it)
 //   J  pacing: 5 wrong ⇒ the next minute refused (the right password too); change keeps the keys; idle lock (off by default)
 //   K  SIGTERM / SIGINT lock (the prepended listener), the broadcast on every change, the audit lines (no password)
+//   M  A REFUSAL IS THE SIGNAL (lane vault-locked-refusal-notice): the PURE list keyed by the lock epoch (a new actor / a new
+//      verb is fresh, a repeat is not), bounded at 50 actors × 8 verbs (the rest a count), names never ids; the engine's ONE
+//      helper notes only while LOCKED, the store-key road notes itself (actor VibeSpace, the store as the verb), a fresh note
+//      re-announces (facts().blocked = the strip's count) and runs onBlocked once; the unlock and a lock act clear it
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -346,6 +350,62 @@ console.log('L  startedAt names the boot (lane vault-relock-door) \u2014 the ope
   const e2 = mk(dir, { now: () => clock });
   ok(e2.facts().startedAt === clock && e2.facts().startedAt !== at0, 'a NEW engine over the same dir (a restart) \u21d2 a new startedAt (same bundle, a different process \u2014 the open tab re-asks)', JSON.stringify({ at0, at1: e2.facts().startedAt }));
   e2.close();
+}
+
+console.log('M  A REFUSAL IS THE SIGNAL (lane vault-locked-refusal-notice) — who a vault_locked refusal stopped, keyed by the lock epoch');
+{
+  const VB = require(path.join(REPO, 'src/vault-blocked.js'));
+  // the PURE list
+  const L = VB.createBlocked();
+  ok(L.note({ actor: 'Lane one', verb: 'vibespace-api conversations.rename', at: 1, epoch: 3 }).fresh === true, 'a first refusal of an actor is fresh (the owner reads something new)');
+  ok(L.note({ actor: 'Lane one', verb: 'vibespace-api conversations.rename', at: 2, epoch: 3 }).fresh === false && L.summary().actors[0].n === 2 && L.summary().refusals === 2, 'the same actor × verb again is NOT fresh — counted on its row (a door refusing every second refreshes nothing)');
+  ok(L.note({ actor: 'Lane one', verb: 'device link', at: 3, epoch: 3 }).fresh === true && L.summary().actors[0].verbs.join('|') === 'vibespace-api conversations.rename|device link', 'a NEW verb of the same actor is fresh (one row, its verbs)');
+  ok(L.note({ actor: 'Lane two', verb: 'x', at: 4, epoch: 4 }).fresh === true && L.summary().count === 1 && L.summary().epoch === 4, 'KEYED BY THE LOCK EPOCH: a note from another epoch starts the list afresh');
+  for (const id of ['sess-1a2b3c4d', 'claude:3f0e9c1a-77aa-4b1c-9d2e-0123456789ab', '3f0e9c1a-77aa-4b1c-9d2e-0123456789ab', 'host-0123456789abcdef', 'dial-mac01', '0123456789abcdef0123', '', '   '])
+    ok(VB.actorName(id, 'a conversation') === 'a conversation', `never a bare id: ${JSON.stringify(id)} ⇒ the fallback name`);
+  ok(VB.actorName('  Lane\n  foo  ') === 'Lane foo' && VB.actorName('x'.repeat(200)).length === 80, 'a name is one line, ≤ 80 characters');
+  const B = VB.createBlocked();
+  let freshN = 0;
+  for (let i = 0; i < 60; i++) if (B.note({ actor: `caller ${i}`, verb: 'v', at: i, epoch: 1 }).fresh) freshN++;
+  const bs = B.summary();
+  ok(bs.count === VB.MAX_ACTORS && bs.more === 10 && freshN === VB.MAX_ACTORS + 1 && bs.refusals === 60, `BOUNDED: ${VB.MAX_ACTORS} actors kept, the rest a count (more = 10); only the first refusal past the table is fresh`, JSON.stringify({ count: bs.count, more: bs.more, freshN }));
+  const V9 = VB.createBlocked();
+  const vf = []; for (let i = 0; i < 11; i++) vf.push(V9.note({ actor: 'one', verb: `verb ${i}`, epoch: 1 }).fresh);
+  ok(V9.summary().actors[0].verbs.length === VB.MAX_VERBS && V9.summary().actors[0].moreVerbs === 3 && vf.filter(Boolean).length === VB.MAX_VERBS + 1, `≤ ${VB.MAX_VERBS} verbs a row, the rest a count (one fresh note past the bound)`);
+  const W = VB.createBlocked();
+  W.note({ actor: VB.HUB, verb: 'the accounts store', epoch: 1 });
+  for (const a of ['Lane A', 'Lane B', 'mac-mini', 'Lark — Inbox', 'Lane E']) W.note({ actor: a, verb: 'v', epoch: 1 });
+  const iw = VB.itemWords(W.summary());
+  ok(iw.who.startsWith('Lane A (v) · Lane B (v) · mac-mini (v) · Lark — Inbox (v)') && iw.who.endsWith(' · …') && iw.lines.length === 6 && iw.lines[5].who === VB.HUB, 'the item’s words: the named callers first (≤ 4 on its line, then …), VibeSpace’s own reads last; one detail line each', JSON.stringify(iw));
+  ok(VB.itemWords(bs).lines.length === VB.DETAIL_ROWS && VB.itemWords(bs).moreActors === VB.MAX_ACTORS - VB.DETAIL_ROWS && VB.itemWords(bs).moreRefusals === 10, '… bounded too: ≤ 11 detail lines, the rest counted (the store keeps ≤ 12 i18n lines)');
+  ok(/the user has already been told/.test(VB.AGENT_WORDS) && /do not ask them to unlock it or for its password/.test(VB.AGENT_WORDS) && VB.agentWords('x waits').startsWith('the vault is locked — x waits; the user has already been told'), 'THE words toward an agent: the user was already told — never ask them to unlock');
+
+  // the engine
+  const { dir } = world();
+  const sent = [];
+  const e = mk(dir, { bcast: (m) => sent.push(m) });
+  const runs = [];
+  e.onBlocked((s) => runs.push(s));
+  ok(e.blocked('Lane one', 'v') === false && e.blockedSummary().count === 0, 'NOT SET UP: the helper notes nothing (only a LOCKED vault refuses by this code)');
+  await e.setup(PW, {});
+  ok(e.blocked('Lane one', 'v') === false && e.facts().blocked === 0, 'UNLOCKED: the helper notes nothing');
+  e.lock('door');
+  sent.length = 0;
+  const box = boxOf(dir, '.accounts-key');
+  const err = refusalOf(() => box.dec(SB.encWith(crypto.randomBytes(32), 'x')));
+  const s1 = e.blockedSummary();
+  ok(err && err.reason === KF.VAULT_LOCKED && s1.count === 1 && s1.actors[0].actor === VB.HUB && s1.actors[0].verbs.join() === 'the accounts store', 'THE STORE-KEY ROAD notes itself: a store’s key read refused while locked ⇒ actor «VibeSpace», the store as the verb (nothing read — the lock law unchanged)', JSON.stringify(s1));
+  ok(e.facts().blocked === 1 && sent.some((m) => m.type === 'vault-state' && m.blocked === 1) && runs.length === 1 && runs[0].count === 1, 'a fresh note re-announces the facts (blocked = 1, the strip’s count) and runs onBlocked ONCE with the summary');
+  refusalOf(() => box.dec('x')); refusalOf(() => box.enc('y'));
+  ok(runs.length === 1 && e.blockedSummary().actors[0].n === 3, 'the same store refused again ⇒ counted, no hook, no broadcast storm');
+  ok(e.secretGet('host:host-0123456789abcdef').code === KF.VAULT_LOCKED && e.blockedSummary().actors[0].verbs.includes('a device link token') && !JSON.stringify(e.blockedSummary()).includes('0123456789abcdef'), 'a secret refused while locked ⇒ noted by its kind («a device link token») — never the machine’s id');
+  ok(e.blocked('Worker one', 'vibespace-api conversations.rename') === true && runs.length === 3 && e.facts().blocked === 2, 'a door’s own note (the ONE helper) ⇒ a second actor, the hook runs');
+  ok(e.state() === 'locked' && !fs.existsSync(path.join(dir, '.accounts-key')), 'the lock law is unchanged: still locked, no key file written by any note');
+  await e.unlock(PW);
+  ok(e.facts().blocked === 0 && e.blockedSummary().count === 0, 'the UNLOCK clears it');
+  e.lock('door');
+  ok(e.blockedSummary().count === 0 && e.blocked('Lane three', 'v') === true && e.blockedSummary().count === 1, 'a LOCK ACT starts a fresh epoch: nobody stopped yet, the first refusal is fresh');
+  e.close();
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });

@@ -1095,9 +1095,11 @@ function create(engineCtx) {
     const pf = policyFor(rec, en);
     return { ok: true, conversation: { key: agentId(en.key), adapterId: en.adapterId, adapter: rec.label || rec.id, title: agentTitle(en, en.id), policy: { mode: pf.mode, source: pf.source } } };
   }
+  /** The caller's OWN proposals (drafted under its conversation id), newest first — what `status` and `proposals` read. */
+  const ownProposals = (ctx) => proposalsFor().filter((p) => p.draftedBy && p.draftedBy.kind === 'agent' && ctx && p.draftedBy.id === ctx.id);
   /** Own proposals only — somebody else's id is the same uniform not-found. */
   function statusFor(ctx, proposalId = null) {
-    const mine = proposalsFor().filter((p) => p.draftedBy && p.draftedBy.kind === 'agent' && ctx && p.draftedBy.id === ctx.id);
+    const mine = ownProposals(ctx);
     if (proposalId) {
       const p = mine.find((x) => x.id === proposalId);
       const cv = p ? null : convStatusFor(ctx, proposalId);
@@ -1106,6 +1108,42 @@ function create(engineCtx) {
       return { ok: true, proposal: agentProposalView(ctx, p) };
     }
     return { ok: true, proposals: mine.slice(0, 50).map((p) => agentProposalView(ctx, p)) };
+  }
+  /**
+   * lane channels-proposals-recall (agent feedback fb-a91218a6bf: a reply's output cut short lost its proposal id, and
+   * nothing listed the pending ones for `withdraw` / `--replaces`): THIS conversation's own proposals as ONE list — the set
+   * `status` reads — one row each: id · kind (reply / compose / reaction / recall) · the conversation · a one-line summary
+   * · the state · when it was filed. Default = what still awaits the user (what `withdraw` / `--replaces` can take back);
+   * `all` = every state. Each row is the drafter's view (`agentProposalView`): a conversation the agent no longer sees
+   * keeps its fate only (no title, no summary). The summary is PEER TEXT (a draft the user edited is the user's words; a
+   * recall quotes the user's message): through the belt, one line, bounded. The newest PROPOSALS_LIST_MAX, then `more`.
+   */
+  const PROPOSALS_LIST_MAX = 100;
+  const PROPOSALS_PENDING = Object.freeze(['proposed', 'awaiting-approval']);
+  const proposalKindOf = (p) => (p.kind === 'reaction' || p.kind === 'recall' ? p.kind : p.compose ? 'compose' : 'reply');
+  function proposalSummaryOf(v) {
+    if (v.accessRemoved) return null;
+    if (v.kind === 'reaction' && v.reaction) return `${v.reaction.op === 'remove' ? 'remove the reaction' : 'react'} ${v.reaction.glyph || `:${v.reaction.key}:`} on ${v.reaction.msg}`;
+    if (v.kind === 'recall' && v.recall) return `take back the user's message ${v.recall.msg}${v.recall.quote && v.recall.quote.text ? `: "${v.recall.quote.text}"` : ''}`;
+    const first = String(v.text || '').split('\n').map((s) => s.trim()).find(Boolean) || '';
+    const n = Array.isArray(v.attachments) ? v.attachments.length : 0;
+    return `${v.compose ? `to ${(v.compose.to || []).join(', ')} — ${v.compose.subject || ''}: ` : ''}${first || (n ? '(only its files)' : '')}${n ? ` (+${n} file${n === 1 ? '' : 's'})` : ''}`;
+  }
+  function proposalsListFor(ctx, { all = false } = {}) {
+    const mine = ownProposals(ctx);
+    const pending = mine.filter((p) => PROPOSALS_PENDING.includes(p.state));
+    const rows = all ? mine : pending;
+    const out = rows.slice(0, PROPOSALS_LIST_MAX).map((p) => {
+      const v = agentProposalView(ctx, p);
+      const s = proposalSummaryOf(v);
+      return {
+        id: v.id, kind: proposalKindOf(p), state: v.state, at: v.at || null, updatedAt: v.updatedAt || null,
+        conversation: `${v.adapterId}/${v.convId || '(new)'}`, title: v.title ? agentText(v.title, { kind: 'line', max: 120 }) : null,
+        summary: s ? agentText(s, { kind: 'line', max: 160 }) : null,
+        ...(v.accessRemoved ? { accessRemoved: true } : {}), ...(v.replaces ? { replaces: v.replaces } : {}), ...(v.replacedBy ? { replacedBy: v.replacedBy } : {}),
+      };
+    });
+    return { ok: true, all: !!all, proposals: out, more: Math.max(0, rows.length - out.length), awaiting: pending.length, total: mine.length, max: PROPOSALS_LIST_MAX };
   }
 
   // ── the verbs ─────────────────────────────────────────────────────────────
@@ -1679,7 +1717,7 @@ function create(engineCtx) {
     statsView, wakeLatencyFor, accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets,
     wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession,
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
-    directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, readFor, readThreadFor, statusFor, setGrain, setAccess, setWatchers,
+    directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
     previewRule, membersNow,
   };

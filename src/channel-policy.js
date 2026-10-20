@@ -82,7 +82,7 @@ const POLICY_MODES = Object.freeze(['direct', 'review']);
  *  value reads `propose` (fail closed — spec §6.5). */
 const REACTION_POLICIES = Object.freeze(['propose', 'direct', 'off']);
 const reactionPolicyOf = (v) => (REACTION_POLICIES.includes(v) ? v : 'propose');
-const DECISION_REASONS = Object.freeze(['channel-policy', 'links', 'attachments', 'off-hours', 'authority', 'reaction-policy']);
+const DECISION_REASONS = Object.freeze(['channel-policy', 'links', 'attachments', 'off-hours', 'authority', 'reaction-policy', 'recall']);
 const RECEIPT_STATUSES = Object.freeze(['sent', 'rejected', 'edited', 'expired', 'failed', 'withdrawn']);
 /** The reason stored on a withdrawal the agent gave no words for — a CONTRACT
  *  string (the CLI prints it, the receipt carries it), never rendered as-is by
@@ -405,6 +405,28 @@ function reactionQuote(record) {
  * the row can only relax to the channel's verdict, never past it.
  * `{refused:true, code, why}` | `{mode, reasons, detail}`.
  */
+/** lane channels-proposals-recall: a RECALL is never direct — it takes back the USER's own words, so the user approves
+ *  it whatever the channel's policy or the drafter's authority say (its own reason, in the closed set). */
+function decideRecall() { return { mode: 'review', reasons: ['recall'], detail: { recall: true } }; }
+const recallSpan = (sec) => (sec % 3600 === 0 ? `${sec / 3600} h` : `${Math.max(1, Math.round(sec / 60))} min`);
+const recallAge = (ms) => (ms < 2 * 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))} min` : ms < 72 * 3600e3 ? `${Math.round(ms / 3600e3)} h` : `${Math.round(ms / 86400e3)} days`);
+/**
+ * lane channels-proposals-recall: MAY THIS STORED MESSAGE BE TAKEN BACK — asked when the recall is PROPOSED and again
+ * when the approval SENDS it (a window passes while a card waits). `record` = the stored message, `row` = the adapter's
+ * `canRecall` ({windowSec}), `recalledAt` = when the store learned its recall (null = never), `now` the instant.
+ * `{ok:true}` | `{ok:false, code, error}` — the codes are the agent's refusals by name; the words never quote the message
+ * or its author (they reach an agent).
+ */
+function recallVerdict({ record = null, row = null, recalledAt = null, now = Date.now() } = {}) {
+  if (!row) return { ok: false, code: 'unsupported', error: 'this channel cannot take a message back (it declares no recall)' };
+  if (!record) return { ok: false, code: 'not-found', error: 'no such message in this conversation (read it first — the id is the one `read` prints)' };
+  if (!(record.author && record.author.isSelf === true)) return { ok: false, code: 'not-yours', error: 'that message is not the user\'s own — the channel takes back only a message the user sent' };
+  if (recalledAt) return { ok: false, code: 'already-recalled', error: 'that message is already recalled' };
+  const sentAt = Number(record.at) || 0;
+  const w = row.windowSec;
+  if (w && sentAt && now - sentAt > w * 1000) return { ok: false, code: 'window-passed', error: `that message was sent ${recallAge(now - sentAt)} ago — the channel takes a message back only within ${recallSpan(w)} of sending`, windowSec: w };
+  return { ok: true };
+}
 function decideReaction({ reactionPolicy = null, channelPolicy = null, authority = 'draft', now = Date.now() } = {}) {
   const row = reactionPolicyOf(reactionPolicy);
   if (row === 'off') return { refused: true, code: 'react-not-available', why: 'policy-off' };
@@ -473,7 +495,7 @@ function rootReplyOf(caps) {
  *  only). null for a composed message and a reaction (they are not replies). */
 function placementOf(p) {
   const x = p && typeof p === 'object' ? p : {};
-  if (x.compose || x.kind === 'reaction') return null;
+  if (x.compose || x.kind === 'reaction' || x.kind === 'recall') return null;
   if (PLACEMENTS.includes(x.placement)) return x.placement;
   if (x.inThread === true) return 'thread';
   return x.replyTo ? 'quote' : 'chat';
@@ -1065,6 +1087,8 @@ function shownFields(p) {
     // lane lark-upload-preflight: a card that WARNED "this account cannot send files" (its Approve = "Send without the file")
     // is not the card that showed them attached — the warning is part of what was shown (appended only when there is one)
     ...(q.filesBlocked && typeof q.filesBlocked === 'object' ? [['files-blocked', s(q.filesBlocked.why)]] : []),
+    // lane channels-proposals-recall: WHICH message a recall takes back (appended only for a recall)
+    ...(q.kind === 'recall' && q.recall && typeof q.recall === 'object' ? [['recall', s(q.recall.msg)]] : []),
   ];
 }
 /** FNV-1a 32 over the UTF-16 units, seeded (the plugin-manifest precedent). */
@@ -1378,6 +1402,7 @@ function receiptDeliveryVerdict(choice, proposal, session = {}) {
   if (p.state === 'withdrawn') return { deliver: 'none', why: 'withdrawn' };
   // lane channel-threads (spec §5.3): a reaction never earns a billed turn — its receipt rides the next one
   if (p.kind === 'reaction') return { deliver: 'next-turn', why: 'reaction' };
+  if (p.kind === 'recall') return { deliver: 'next-turn', why: 'recall' };   // lane channels-proposals-recall: the same — no text, no billed turn
   if (choice !== 'wake-now') return { deliver: 'next-turn', why: choice === undefined || choice === null || choice === 'next-turn' ? 'chosen' : 'unknown-choice' };
   if (session && session.live === false) return { deliver: 'next-turn', why: 'gone' };
   if (p.receiptWake) return { deliver: 'next-turn', why: 'already-woken' };
@@ -1473,6 +1498,8 @@ function receiptFor(p) {
     replacedBy: p.state === 'withdrawn' ? (p.replacedBy || null) : null,
     // lane channel-threads: a REACTION's receipt names the emoji, the message and the op (its block is one line)
     ...(p.kind === 'reaction' && p.reaction ? { kind: 'reaction', reaction: { msg: p.reaction.msg, key: p.reaction.key, glyph: p.reaction.glyph || null, op: p.reaction.op } } : {}),
+    // lane channels-proposals-recall: a RECALL's receipt names the message it took back (its block is one line)
+    ...(p.kind === 'recall' && p.recall ? { kind: 'recall', recall: { msg: p.recall.msg } } : {}),
     // …and a REPLY names where it landed (2026-09-28: its PLACEMENT — a quote, a thread, a thread also shown in the
     // chat; `inThread` + the thread's key kept beside it as the alias older readers know)
     ...replyPlaceOf(p),
@@ -1499,7 +1526,7 @@ const ACCESS_REMOVED_NOTE = 'you no longer have access to that conversation, so 
 function withheldReceiptLine(r) {
   const x = r || {};
   const what = WITHHELD_WORDS[x.status] || String(x.status || 'decided').toUpperCase().slice(0, 40);
-  return inertFrames(`Channel receipt — proposal ${safeInline(x.proposalId, 80)}: ${what}${x.kind === 'reaction' ? ' (a reaction)' : ''} — ${ACCESS_REMOVED_NOTE}`);
+  return inertFrames(`Channel receipt — proposal ${safeInline(x.proposalId, 80)}: ${what}${x.kind === 'reaction' ? ' (a reaction)' : x.kind === 'recall' ? ' (a recall)' : ''} — ${ACCESS_REMOVED_NOTE}`);
 }
 
 /** ONE vendor-controlled value, safe to embed in the receipt: frames neutered,
@@ -1529,6 +1556,12 @@ function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text =
     const st = r.status === 'edited' ? 'sent' : String(r.status || '');
     const tail = r.reason && st !== 'sent' && r.reason !== REJECTED_DEFAULT_REASON ? ` (${safeInline(r.reason, 200)})` : '';
     return inertFrames(`Channel receipt — ${safeInline(adapterLabel || r.adapterId || 'channel', 60)} · ${safeInline(title || r.convId || '', 120)}\n${x.op === 'remove' ? 'removing reaction' : 'reaction'} ${em} on ${safeInline(x.msg, 200)}: ${st}${tail} (proposal ${safeInline(r.proposalId, 80)})`);
+  }
+  // lane channels-proposals-recall: a RECALL's receipt is ONE line too — `recall of your message om_x1: recalled / rejected`
+  if (r.kind === 'recall' && r.recall) {
+    const st = r.status === 'sent' || r.status === 'edited' ? 'recalled' : String(r.status || '');
+    const tail = r.reason && st !== 'recalled' && r.reason !== REJECTED_DEFAULT_REASON ? ` (${safeInline(r.reason, 200)})` : '';
+    return inertFrames(`Channel receipt — ${safeInline(adapterLabel || r.adapterId || 'channel', 60)} · ${safeInline(title || r.convId || '', 120)}\nrecall of your message ${safeInline(r.recall.msg, 200)}: ${st}${tail} (proposal ${safeInline(r.proposalId, 80)})`);
   }
   const lines = [];
   lines.push(`Channel receipt — ${safeInline(adapterLabel || r.adapterId || 'channel', 60)} · ${safeInline(title || r.convId || '', 120)}`.trim());
@@ -1579,7 +1612,7 @@ module.exports = {
   RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,
   canTransition, isTerminal, policyMode, policyModesOf, policyRowModel, policyWhereText, GUARD_KEYS, GUARD_REASONS, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   ACCESS_REMOVED_NOTE, withheldReceiptLine,
-  REACTION_POLICIES, reactionPolicyOf, REACTION_OPS, validateReaction, reactionQuote, decideReaction,
+  REACTION_POLICIES, reactionPolicyOf, REACTION_OPS, validateReaction, reactionQuote, decideReaction, decideRecall, recallVerdict,
   PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, isThreadPlacement, placementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,
   honestyLine, withHonestyLine, canReconcile, reconcileVerdict,
   REJECTED_DEFAULT_REASON, outcomeOf, outcomeText, reconcileWhyText,

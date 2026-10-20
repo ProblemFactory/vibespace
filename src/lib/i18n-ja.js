@@ -6111,6 +6111,13 @@ export default {
   "{agent} wants to react {glyph} to {author}: \"{quote}\"": "{agent} が {author} に {glyph} でリアクションしようとしています：「{quote}」",
   "reacted {glyph}": "{glyph} でリアクション",
   "proposed {n} reactions": "{n} 件のリアクションを提案",
+  // lane channels-proposals-recall: an agent proposes taking back (送信取り消し) a message the user sent
+  "taking back your message always needs your approval": "あなたのメッセージの送信取り消しには常にあなたの承認が必要です",
+  "Takes it back as you": "あなたとして送信を取り消し",
+  "Message taken back": "メッセージの送信を取り消しました",
+  "{agent} wants to take back your message: \"{quote}\"": "{agent} があなたのメッセージの送信を取り消そうとしています：「{quote}」",
+  "proposed taking back your message": "あなたのメッセージ 1 件の送信取り消しを提案",
+  "proposed taking back {n} of your messages": "あなたのメッセージ {n} 件の送信取り消しを提案",
   "Agent reactions": "Agent のリアクション",
   "You approve each one": "1 件ずつあなたが承認",
   "As the channel policy allows": "チャンネルのポリシーに従う",
@@ -9323,6 +9330,11 @@ export default {
   "Unlock the vault": "保管庫のロックを解除", // lane vault-e2e-password
   "The vault is locked — device links, the relay and account switching are waiting.": "保管庫はロック中 — デバイス連携・中継・アカウント切り替えが待機中です", // lane vault-relock-door: the persistent lock strip
   "The vault locked after a restart — enter the second password to unlock. Device links, the relay and account switching are waiting.": "再起動後に保管庫がロックされました — 第二パスワードを入力して解除してください。デバイス連携・中継・アカウント切り替えが待機中です", // lane vault-relock-door: the restart For-you notice
+  "The vault is locked — {n} waiting on it (For you names them).": "保管庫はロック中 — {n} 件が待機中です（「あなた宛て」に一覧があります）", // lane vault-locked-refusal-notice: the strip's count
+  "The vault is locked — waiting on it: {who}. Enter the second password to unlock.": "保管庫はロック中 — 待機中：{who}。第二パスワードを入力して解除してください", // lane vault-locked-refusal-notice: the For-you item names who was blocked
+  "Nothing has been refused yet — whatever the lock stops is named here as it happens.": "まだ何も拒否されていません — ロックで止まったものはその都度ここに表示されます", // lane vault-locked-refusal-notice: the item's detail before any refusal
+  "{who} — {what}": "{who} — {what}", // lane vault-locked-refusal-notice: one blocked caller and what it was refused
+  "…and {n} more, refused while it is locked": "…ほか {n} 件がロック中に拒否されました", // lane vault-locked-refusal-notice: past the item's lines
   "The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.": "VibeSpace が保存している認証情報（アカウント、マウント、チャンネル、連携、アプリのログイン、パスキー、ペアリング済みマシンの接続、リレーと音声のサインイン）は、第二パスワードを入力するまでロックされたままです — 再起動とロックのたびに。", // lane vault-e2e-password (r2: machines, relay, voice; every lock)
   "Second password": "第二パスワード", // lane vault-e2e-password
   "Unlock": "ロック解除", // lane vault-e2e-password

@@ -12,6 +12,8 @@
 //   ③b (lane vault-one-door) 「稍后」 leaves the chip; a locked card's door (`vs-vault-door`) opens the UNLOCK modal again
 //   ③c (lane vault-relock-door) the OPEN tab re-asks on a bundle-preserving restart (no navigate): a NEW startedAt ⇒ the
 //      modal; a same-startedAt broadcast is the chip only; a persistent lock strip shows while locked; a pre-fix bundle stays silent
+//   ③/④ lane vault-locked-refusal-notice: the integration's refusal is NOTED — facts.blocked ≥ 1, the strip says "N waiting
+//      on it", ONE For-you item names «VibeSpace (… the integrations store)»; the unlock resolves it and the count is 0
 //   ⑦ lane vault-e2e-password-fix-r2: auth.json holds the login's sha256, never the cookie's token; a LOCK from the page
 //      signs every login out — the page lands on the sign-in, and after it the unlock modal (the owner's decision ④)
 // Run: node scripts/test-vault-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
@@ -124,6 +126,14 @@ check('③ the persistent lock strip shows at the top of the workspace (owner 20
 check('③ the strip never covers the unlock dialog\u2019s button (the dialog stays reachable)', !!(await evalJs(onTop('.vault-unlock-go'))));
 const lockedInt = await integration();
 check('the integration answers key-unreadable:vault_locked', lockedInt.storeError === 'key-unreadable:vault_locked', lockedInt);
+// lane vault-locked-refusal-notice: the refusal IS the signal — noted (the store-key road: «VibeSpace», the store), counted
+// on the strip, named by THE one For-you item
+const st3 = (await api('GET', '/api/vault/state')).json || {};
+check('③ the refusal is NOTED: the vault\u2019s facts count who the lock stopped (blocked \u2265 1)', Number(st3.blocked) >= 1, st3);
+check('③ the persistent strip shows the COUNT ("N waiting on it")', !!(await until(`(() => { const s = document.getElementById('vault-lock-strip'); const n = s ? Number(s.dataset.blocked) : 0; return n >= 1 && s.querySelector('.vls-text').textContent === 'The vault is locked \u2014 ' + n + ' waiting on it (For you names them).'; })()`, { timeout: 8000 })), await evalJs(`document.querySelector('#vault-lock-strip .vls-text')?.textContent`));
+const vaultItems = async () => { const r = (await api('GET', '/api/user-todos')).json || {}; return ((r.todos && r.todos.open) || []).filter((i) => i.sessionKey === 'vault' && i.action && i.action.type === 'vault-unlock'); };
+const items3 = await vaultItems();
+check('③ ONE For-you item names who was stopped and what (VibeSpace \u2014 the integrations store)', items3.length === 1 && items3[0].i18n && /VibeSpace \(.*the integrations store/.test(items3[0].i18n.text.params?.who || ''), items3.map((i) => i.i18n));
 await shot('vault-2-locked.png');
 await typeInto('#vault-unlock-pw', 'not the second password'); await click('.vault-unlock-go');
 check('a wrong password says so', (await until(`document.querySelector('#vault-unlock-dialog .vault-err')?.textContent`, { timeout: 8000 })) === 'That is not the second password');
@@ -140,6 +150,7 @@ await typeInto('#vault-unlock-pw', SECOND); await click('.vault-unlock-go');
 check('the modal closes', !!(await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 15000 })));
 check('the lock chip goes', !!(await until(`!document.getElementById('taskbar-vault')`, { timeout: 5000 })));
 check('④ the persistent lock strip goes when the vault is unlocked', !!(await until(`!document.getElementById('vault-lock-strip')`, { timeout: 5000 })));
+check('④ lane vault-locked-refusal-notice: the unlock resolves THE item and clears the count', (await vaultItems()).length === 0 && (await api('GET', '/api/vault/state')).json?.blocked === 0);
 const openInt = await integration();
 check('the integration\'s key opens again (the feature works)', openInt.configured && !openInt.storeError, openInt);
 

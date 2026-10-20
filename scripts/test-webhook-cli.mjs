@@ -65,7 +65,7 @@ try {
   ok(rd.code === 0 && hi > 0 && ri > hi && L[hi + 1] === '  c-1a2b3c4d "deploy-bot" · system · delivery poll · last call 2026-10-10 09:00Z · generation 1' && L[hi + 2] === '  c-5e6f7a8b "Hub B" · peer · delivery reply-url · last call never · generation 2', 'read webhook/ci prints `callers:` (id, name, kind, delivery, last call, generation) BEFORE the records', rd.stdout);
   console.log('§4 census: no verb makes a path or mints a token');
   const src = fs.readFileSync(CLI, 'utf-8');
-  const ALLOWED = ['list', 'refresh', 'read', 'attachment', 'reply', 'react', 'unreact', 'withdraw', 'status', 'compose', 'search', 'watches', 'watch', 'unwatch', 'api', 'request'];
+  const ALLOWED = ['list', 'refresh', 'read', 'attachment', 'reply', 'react', 'unreact', 'withdraw', 'status', 'compose', 'search', 'watches', 'watch', 'unwatch', 'api', 'request', 'proposals', 'recall'];   // + lane channels-proposals-recall: the agent's own proposals listed; a recall PROPOSED (neither makes a path nor mints a token)
   const census = (s) => { const verbs = [...new Set([...s.matchAll(/verb === '([a-z-]+)'/g)].map((m) => m[1]))]; return { verbs, extra: verbs.filter((v) => !ALLOWED.includes(v)), mint: verbs.filter((v) => /regist|mint|token|rotate|revoke|pair|path|caller|join/.test(v)), owner: /\/api\/channels\/webhook\//.test(s) }; };
   const cs = census(src);
   ok(!cs.extra.length && !cs.mint.length && !cs.owner && cs.verbs.length === ALLOWED.length, `the verbs are the closed set (${cs.verbs.length}); none registers / mints / pairs; no owner webhook route in the CLI`, cs);
@@ -75,7 +75,7 @@ try {
   console.log('§5 the CLI never prints a vswh_ token');
   const DOOR = "async function answerOf(res) { return JSON.parse(String(await res.text()).replace(/(vswh|vswp)_[A-Za-z0-9_-]*/g, '$1_[withheld]')); }";   // int248 r2 (verify r1 #1): a pairing code too
   const rawWrites = (s) => (s.match(/process\.(stdout|stderr)\.write\(|console\.(info|warn|debug|trace|dir|table)\(/g) || []).length;
-  ok(src.split('\n').filter((l) => l === DOOR).length === 1 && !/\.json\(\)/.test(src) && (src.match(/await answerOf\(res\)/g) || []).length === 6 && rawWrites(src) === 0, 'THE ANSWER DOOR: one line, verbatim; every server answer (6 reads) is parsed through it, none by res.json(); no raw stdout / stderr write');
+  ok(src.split('\n').filter((l) => l === DOOR).length === 1 && !/\.json\(\)/.test(src) && (src.match(/await answerOf\(res\)/g) || []).length === 7 /* lane channels-proposals-recall: + the recall answer */ && rawWrites(src) === 0, 'THE ANSWER DOOR: one line, verbatim; every server answer (7 reads) is parsed through it, none by res.json(); no raw stdout / stderr write');
   ok(rawWrites(src.replace(DOOR, DOOR + "\nprocess.stdout.write('vswh_' + 'x');")) === 1 && /\.json\(\)/.test(src.replace('await answerOf(res)', 'await res.json()')), 'CONTROLS: a planted raw write / one answer read past the door ⇒ the census is RED');
   const leakyAnswers = (j) => { const s = JSON.stringify(j).replace(/"__T__"/g, JSON.stringify(TOKEN + ' ' + CODE)); return JSON.parse(s); };
   const plant = [

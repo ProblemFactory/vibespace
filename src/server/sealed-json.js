@@ -30,18 +30,20 @@ function sealedJson(file, { dataDir = path.dirname(file) } = {}) {
   /** 'not_set_up' | 'locked' | 'unlocked' as THIS process sees the dir (no engine over a sealed dir = locked) */
   const stateOf = () => { const v = vault(); return v ? v.state() : (SB.sealedDir(dataDir) ? 'locked' : 'not_set_up'); };
   const epochOf = () => { const v = vault(); return `${stateOf()}:${v ? v.epoch() : 0}`; };
+  /** lane vault-locked-refusal-notice: the refusal, NOTED (the vault's ONE helper — «VibeSpace», this file) → the error */
+  const lockedRefusal = () => { const v = vault(); try { if (v && typeof v.blocked === 'function') v.blocked('VibeSpace', `the sealed file ${base}`); } catch { } return lockedError(base); };
   function readRaw() { try { return fs.readFileSync(file, 'utf8'); } catch (e) { if (e && e.code === 'ENOENT') return null; throw e; } }
   /** this file's key — minted INTO the vault at the first sealed write; LOCKED ⇒ refused by name */
   function keyOf({ mint = false } = {}) {
     const v = vault();
-    if (!v) throw lockedError(base);
+    if (!v) throw lockedRefusal();
     const r = v.secretGet(entry);
-    if (!r.ok) throw r.code === KF.VAULT_LOCKED ? lockedError(base) : Object.assign(new Error(`${base}: its vault key could not be read (${r.code})`), { code: r.code });
+    if (!r.ok) throw r.code === KF.VAULT_LOCKED ? lockedRefusal() : Object.assign(new Error(`${base}: its vault key could not be read (${r.code})`), { code: r.code });
     if (r.value) return r.value;
     if (!mint) throw Object.assign(new Error(`${base} is sealed but the vault holds no key for it — restore data/vault.json from a backup`), { code: 'key-missing' });
     const k = crypto.randomBytes(32);
     const p = v.secretPut(entry, k);
-    if (!p.ok) { k.fill(0); throw p.code === KF.VAULT_LOCKED ? lockedError(base) : Object.assign(new Error(`${base}: a vault key could not be made (${p.code})`), { code: p.code }); }
+    if (!p.ok) { k.fill(0); throw p.code === KF.VAULT_LOCKED ? lockedRefusal() : Object.assign(new Error(`${base}: a vault key could not be made (${p.code})`), { code: p.code }); }
     return k;
   }
   function writeSealed(obj) {
@@ -57,11 +59,11 @@ function sealedJson(file, { dataDir = path.dirname(file) } = {}) {
     let j = null;
     if (text !== null) { try { j = JSON.parse(text); } catch { j = null; } }
     if (isSealed(j)) {
-      if (st !== 'unlocked') throw lockedError(base);
+      if (st !== 'unlocked') throw lockedRefusal();
       const k = keyOf();
       try { j = JSON.parse(SB.decWith(k, j.box)); } finally { k.fill(0); }
     } else if (j !== null) {
-      if (st === 'locked') throw lockedError(base);   // nothing is read while locked — a plaintext copy neither
+      if (st === 'locked') throw lockedRefusal();   // nothing is read while locked — a plaintext copy neither
       if (st === 'unlocked') { try { writeSealed(j); } catch { /* stays plain — the next open seals it */ } }
     }
     cache = j; cacheAt = at;
@@ -69,7 +71,7 @@ function sealedJson(file, { dataDir = path.dirname(file) } = {}) {
   }
   function write(obj) {
     const st = stateOf();
-    if (st === 'locked') throw lockedError(base);
+    if (st === 'locked') throw lockedRefusal();
     if (st === 'unlocked') writeSealed(obj);
     else { fs.mkdirSync(path.dirname(file), { recursive: true }); replaceShredding(file, JSON.stringify(obj)); }   // not set up: plain JSON, 0600 (as before)
     cache = obj; cacheAt = epochOf();

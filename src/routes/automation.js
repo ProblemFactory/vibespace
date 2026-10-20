@@ -14,12 +14,13 @@
 // Every answer carries a CODE (src/automation-keys.js CODES); the vault locked ⇒ 423 `vault_locked`, every door.
 const A = require('../automation-keys.js');
 const { personVerdict } = require('./vault.js');
+const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
 
 const WORDS = Object.freeze({
   not_granted: 'no grant lets this conversation use that key — the owner grants it in the Vault window (or answers the For-you card)',
   key_revoked: 'that key was revoked',
   verb_not_in_scope: 'that key does not hold this verb',
-  vault_locked: 'the vault is locked — every automation waits until a person unlocks it on this instance\'s page (never ask for the password)',
+  vault_locked: VB.agentWords('every automation waits until a person unlocks it on this instance\'s page'),   // lane vault-locked-refusal-notice: the owner was told (For you names this conversation) — the agent never asks
   vault_not_set_up: 'the vault is not set up — automation keys live in it',
   subject_ended: 'this conversation is not running any more',
   once_spent: 'the one use the owner allowed was spent — the next call asks again',

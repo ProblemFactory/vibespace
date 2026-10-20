@@ -232,6 +232,7 @@ const fakeExec = (cfg) => {
   ok(r7.state === 'missing' && r7.code === 'no_helper' && /error: boom/.test(r7.error) && r7.canBuild === true && !fs.existsSync(SP.macHelperPaths(h7).version), 'a build that fails ⇒ no_helper with the compiler\'s error line; no version written', r7);
 }
 
+const daemonRun = daemonLegs(); // §6 + §7, beside §4–§5b (see daemonLegs)
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4 THE SOURCE end to end over the fake helper');
 {
   // lane stream-mac-stall (measured on the owner's Mac — `sample` of the wedged .305 helper vs-4b7bcb1e31e9): the encode thread
@@ -256,12 +257,16 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§4 THE SOURCE en
 }
 
 const hS = home('smac-src'), logS = path.join(hS, 'helper.log');
-const FK = writeFakeMacHelper(hS, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted', accessibility: 'granted' }, log: logS, flv: flvFile(hS), displayFrame: { x: 0, y: 0, w: 1920, h: 1080 }, windowFrame: { x: -1678, y: 106, w: 656, h: 422 }, windowPid: 777, movedFrame: { x: -1600, y: 120, w: 656, h: 422 } });
+const FK = writeFakeMacHelper(hS, { pace: 240, version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted', accessibility: 'granted' }, log: logS, flv: flvFile(hS), displayFrame: { x: 0, y: 0, w: 1920, h: 1080 }, windowFrame: { x: -1678, y: 106, w: 656, h: 422 }, windowPid: 777, movedFrame: { x: -1600, y: 120, w: 656, h: 422 } });
 const envS = { HOME: hS, PATH: process.env.PATH };
 const logs = () => helperLog(logS);
 const capsOf = () => logs().filter((l) => l.argv && l.argv[1] === 'capture').length; // helpers started to capture
 const factsOf = () => logs().filter((l) => l.argv && l.argv[1] === 'facts').length; // facts reads run
 let skew = 0; // the bitrate leg moves this clock a second on instead of waiting one out
+// lane fast-debt-clear: the source legs' helper WRITES 240 pictures a second (cfg.pace — the plan still asks 60, the stats say
+// 60); a leg that waited 300 ms for the pictures after a clock move (18 at 60 a second) now waits for those 18 pictures —
+// the rate rule weighs the BYTES sent inside its window, so they weigh what they weighed
+const fresh = async (r, n = 18) => { const n0 = r.aus.length; return until(() => r.aus.length >= n0 + n || r.ended, 3000); };
 const scr = MAC.createMacScreen({ spawn, execFile, env: envS, fs, log: () => { }, now: () => Date.now() + skew });
 {
   const calls = [];
@@ -299,9 +304,9 @@ const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   const st1 = r.src.stats();
   ok(logs().some((l) => l.ctl === 'key') && st1.keysAnswered === st0.keysAnswered + 1 && st1.keyWaitMs <= 500, `a key frame on request: \`key\` on the helper's stdin, answered ${st1.keyWaitMs} ms later (the SAME frame on a Mac — no GOP to wait out)`, st1);
   // THE RATE over the helper's own output (lane stream-mac-rate): the session's cap 8000 = the floor of 2560×1440 @ 60 ⇒ nothing moves it
-  skew += 2100; await sleep(300);
+  skew += 2100; await fresh(r);
   for (let i = 0; i < 6; i++) r.src.setTargetKbps(1);
-  skew += 2100; await sleep(300);
+  skew += 2100; await fresh(r);
   for (let i = 0; i < 6; i++) r.src.setTargetKbps(1);
   const st8 = r.src.stats();
   ok(!logs().some((l) => l.ctl && l.ctl.startsWith('bps')) && st8.kbps === 8000 && st8.floor === 8000 && st8.rateChanges === 0 && st8.rate.why === 'shortfall', 'at the floor already (the cap 8000 = the floor of 2560×1440 @ 60): a held shortfall sends NO `bps` — never under the floor', st8);
@@ -317,18 +322,18 @@ const run = async (msg, { want = 40, kbps = 8000 } = {}) => {
   const ctl = () => logs().filter((l) => l.ctl && l.ctl.startsWith('bps')).map((l) => l.ctl);
   const n0 = ctl().length, st0 = r.src.stats();
   const est = async (k, n = 5) => { for (let i = 0; i < n; i++) r.src.setTargetKbps(k); await sleep(30); }; // 5 = the rule's minSamples: the last one decides
-  skew += 2100; await sleep(300); await est(99999);
+  skew += 2100; await fresh(r); await est(99999);
   ok(ctl().length === n0 && st0.kbps === 20000 && st0.floor === 8000 && r.src.stats().rate.why === 'echo', 'THE RATE (the page\'s cap 20000, the floor 8000): the helper starts at the cap; an echo (the estimate above what was sent) sends nothing', { st0, rate: r.src.stats().rate });
-  skew += 2100; await sleep(300); await est(1); // the echo's samples gone: a shortfall begins (held)
+  skew += 2100; await fresh(r); await est(1); // the echo's samples gone: a shortfall begins (held)
   const held = r.src.stats().rate.why;
-  skew += 2100; await sleep(300); await est(1);
+  skew += 2100; await fresh(r); await est(1);
   const after = r.src.stats();
   ok(same(ctl().slice(n0), ['bps 8000000']) && after.kbps === 8000 && after.rateChanges === 1 && after.rate.why === 'shortfall' && held === 'hold', 'a shortfall held 2 s ⇒ ONE `bps` line — LIVE (no restart), at the FLOOR (8000 kbps), not the estimate\'s 1', { ctl: ctl().slice(n0), after });
   const atBps = r.aus.length;
   ok(await until(() => r.aus.length >= atBps + 5, 3000), 'lane stream-mac-stall: the pictures keep coming after the `bps` (the agent\'s half; the helper\'s: §2\'s lock law + the report\'s real Mac leg)', { atBps, now: r.aus.length });
-  skew += 2100; await sleep(300); await est(1);
+  skew += 2100; await fresh(r); await est(1);
   ok(ctl().length === n0 + 1 && r.src.stats().kbps === 8000, 'more shortfall: nothing under the floor', ctl().slice(n0));
-  skew += 10100; await sleep(300); await est(99999);
+  skew += 10100; await fresh(r); await est(99999);
   ok(same(ctl().slice(n0), ['bps 8000000', 'bps 10000000']) && r.src.stats().kbps === 10000 && r.src.stats().rate.why === 'recover', '10 s without a shortfall ⇒ +25 % toward the cap, live (8000 → 10000)', ctl().slice(n0));
   r.src.stop();
   await sleep(150);
@@ -589,6 +594,11 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§5b THE RESPAWN 
   for (const z of [X, F, D, O]) z.inj.close();
 }
 
+// lane fast-debt-clear: §6 + §7 (the REAL Mac-shaped daemons) run BESIDE §4–§5b, started before §4 and awaited here. They
+// share nothing with the source legs: their own homes, helpers, logs and bundle copies; process.env.HOME / the agentd root
+// they set per daemon are read only by THEIR DeviceManager (every source / injector / helper of §4–§5b gets its env passed in).
+// The body keeps the column it had at the top level (the diff stays the legs' own).
+async function daemonLegs() {
 console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§6 a REAL Mac-shaped daemon');
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
 const DW = require(path.join(REPO, 'src/server/desktop-webrtc.js'));
@@ -727,6 +737,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§7 a REAL Mac-sh
   const argvs = helperLog(logW).map((l) => l.argv).filter(Boolean);
   ok(argvs.length >= 5 && argvs.every((a) => a[0] === '--disclaim' && a[1] === 'facts'), 'every helper run the daemon made for these was a DISCLAIMED `facts` — the window look ran nowhere else', { n: argvs.length, odd: argvs.filter((a) => a[1] !== 'facts') });
 }
-
+}
+await daemonRun;
 console.log(`\n${fail ? '✗' : '✓'} test-stream-mac: ${pass} passed, ${fail} failed`);
 setTimeout(() => process.exit(fail ? 1 : 0), 50);

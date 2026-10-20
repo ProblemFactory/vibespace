@@ -2,6 +2,22 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.326 — 2026-10-20
+
+### Added
+- An agent can list its proposals that still wait for you, so it can take one back or replace it even when its earlier output was cut short.
+- An agent can propose taking back a message you sent in a chat; nothing happens until you approve it, as with any message it drafts.
+
+### Fixed
+- When the locked vault stops an agent, For you names who was stopped and what, so agents no longer ask you to unlock it.
+- The lock strip at the top of the page says how many are waiting on the vault.
+- A background service whose public address fails for one reason now says so once, and once more when it is back — not again at every restart.
+- A background service's status shows its public address as soon as it is back, and unlocking the vault brings the address back at once.
+- An agent can mute one kind of message about its own job with a filter, without turning its notifications off.
+
+### Maintenance
+- Test and release tooling only; nothing changes for you.
+
 ## 2.369.325 — 2026-10-20
 
 ### Added

@@ -461,6 +461,9 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     ...fakeR5Caps(receive),
     ...(feed ? { changeFeed: FAKE_FEED } : {}),
     ...(revisionsFile && receive === 'poll' ? { revisions: Object.freeze({ recall: true, edit: true, how: 'byid' }) } : {}),
+    // lane channels-proposals-recall: the same seam takes a message of the user's BACK (Lark's 24 h window) — the recall
+    // is written into the revisions file, so the vendor's own by-id answer agrees with it afterwards
+    ...(revisionsFile && receive === 'poll' && sendAs.length ? { canRecall: Object.freeze({ windowSec: 24 * 3600 }) } : {}),
     ...(search ? { search: FAKE_SEARCH } : {}),
     // lane composer-file-only-send: the NAMED files seam (`VIBESPACE_CHANNELS_FAKE_FILES=1`) — the poll fake takes files
     // (Gmail's bounds; a file by itself is a message) and sends as a bot too, in its one bot-only room
@@ -547,8 +550,21 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
       if (x.state === 'edited' && typeof x.text === 'string') return { state: 'edited', editedAt: Number(x.editedAt) || clock(), text: x.text };
       return { state: 'same' };
     };
+    // lane channels-proposals-recall: `[[fake:lost]]` in the message id = the request left and the answer never came
+    const recall = async (convId, { messageId = null } = {}) => {
+      const id = String(messageId || '');
+      const { ChannelError } = require('./index.js');
+      if (!id) throw new ChannelError('not-found', 'fake: a recall needs its message id', { retryable: false });
+      if (id.includes('[[fake:lost]]')) throw new ChannelError('transport', 'fake: the recall left and the answer never came', { retryable: false, detail: { lost: true } });
+      let j = {};
+      try { j = JSON.parse(fs.readFileSync(revisionsFile, 'utf8')) || {}; } catch { j = {}; }
+      j.revisions = { ...(j.revisions && typeof j.revisions === 'object' ? j.revisions : {}), [id]: { state: 'recalled' } };
+      fs.writeFileSync(revisionsFile, JSON.stringify(j));
+      return { ok: true, at: clock() };
+    };
     return {
       ...(revisionsFile && receive === 'poll' ? { revisionOf } : {}),
+      ...(revisionsFile && receive === 'poll' && sendAs.length ? { recall } : {}),
       auth: {
         async state() {
           if (resolveIntegration) {

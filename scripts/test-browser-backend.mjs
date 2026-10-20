@@ -52,6 +52,8 @@ let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** a wait that names its effect (lane fast-debt-clear): poll `f` until it holds, at most `ms` — the assert after it judges */
+const until = async (f, ms = 5000) => { const end = Date.now() + ms; while (!f() && Date.now() < end) await sleep(10); return f(); };
 
 // ── scratch world ──
 const ROOT = scratch('browser-backend');
@@ -71,8 +73,16 @@ process.env.FAKE_AB_STATE = AB_STATE;
 // `--executable-path` / `--args` / `-p` prefix), answers `open` with a minted
 // targetId (logged per session), prints a "plan" line when launched as cloak
 // (what the keeper reads the TIER back from), and fails on licence when told.
-fs.writeFileSync(path.join(BIN, 'agent-browser'), `#!${process.execPath}
-const fs = require('fs'), path = require('path'), { spawn } = require('child_process');
+// lane fast-debt-clear: ~a quarter of this suite's ~100 binary calls are `--version` — a node start for one line, the
+// suite's load-sensitive cost (4.1 s idle, 12.8 s on a busy box). The binary on PATH is a /bin/sh FRONT answering
+// `--version` exactly as the node fake below does (the same line, no state touched) and exec-ing the node fake for every
+// other call (the same argv, env, stdin and cwd — exec replaces the shell)
+const FAKE_JS = path.join(ROOT, 'fake-agent-browser.cjs');
+fs.writeFileSync(path.join(BIN, 'agent-browser'), `#!/bin/sh
+if [ "$1" = "--version" ]; then echo 'agent-browser 0.38.0'; exit 0; fi
+exec '${process.execPath}' '${FAKE_JS}' "$@"
+`, { mode: 0o755 });
+fs.writeFileSync(FAKE_JS, `const fs = require('fs'), path = require('path'), { spawn } = require('child_process');
 const st = process.env.FAKE_AB_STATE; const ns = process.env.AGENT_BROWSER_NAMESPACE || 'default';
 const f = path.join(st, ns + '.json');
 const read = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
@@ -105,7 +115,7 @@ const tabNew = a === 'tab' && b === 'new';
 if (a === 'open' || tabNew) {
   const url = tabNew ? argv[2] : b;
   let s = read();
-  { let slow = 0; try { slow = Number(fs.readFileSync(path.join(st, 'slow-ms'), 'utf8')) || 0; } catch { } if (slow) { const t = Date.now() + slow; while (Date.now() < t) {} } }
+  { let slow = 0; try { slow = Number(fs.readFileSync(path.join(st, 'slow-ms'), 'utf8')) || 0; } catch { } if (slow) { fs.writeFileSync(path.join(st, 'slow-began'), ns); const t = Date.now() + slow; while (Date.now() < t) {} } }
   if (!(s && alive(s.pid))) {
     if (fs.existsSync(path.join(st, 'fail-license'))) { process.stderr.write('cloakbrowser: license validation failed — concurrent session limit reached for this key\\n'); process.exit(1); }
     if (fs.existsSync(path.join(st, prefix.exe ? 'fail-cloak' : 'fail-plain'))) { process.stderr.write('fake: segmentation fault on start\\n'); process.exit(1); } // the rebuilt dialog: a launch that fails for no licence reason
@@ -434,8 +444,11 @@ function mkKeeper({ liveKeys = new Set([KEY_A, KEY_B]), providers = wired, dataD
   fs.unlinkSync(path.join(p.dir, 'Last Version'));
   // browser_restarting mid-switch: slow the fake's open, attach concurrently
   fs.writeFileSync(path.join(AB_STATE, 'slow-ms'), '400'); // a FILE flag: the keeper's child env was captured at creation
+  fs.rmSync(path.join(AB_STATE, 'slow-began'), { force: true });
   const swP = k.switchBackend({ profileId: p.id, target: 'cloak', by: { kind: 'user' } });
-  await sleep(60);
+  // lane fast-debt-clear: the attach goes in once the switch's relaunch is IN the slow open (the fake marks it) — never after
+  // a 60 ms clock, which a busy box could run past the whole switch or short of its start
+  await until(() => fs.existsSync(path.join(AB_STATE, 'slow-began')));
   const mid = await threw(() => k.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }));
   const midResolve = k.resolveFor({ browserKey: KEY_A });
   await swP;

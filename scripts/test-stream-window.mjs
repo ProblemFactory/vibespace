@@ -321,7 +321,7 @@ console.log('§7 THE REAL SOURCE, end to end (a fake helper, a fake ffmpeg)');
   // ⑧ THE RATE on the real source: the intra-refresh wave on the encoder's argv; werift's low estimate never under the window's
   //    floor; a viewer's key-frame ask restarts the encoder (no periodic key frame), at most every 2 s
   let skew = 0;
-  wgc.set({ capture: { ...W0, script: [] } });
+  wgc.set({ capture: { ...W0, script: [], pace: 120 } }); // the plan stays 30 fps (the floor's); the fake writes 120 a second (lane fast-debt-clear)
   const s9 = await WS.createWindowSource({ platform: 'win32', spawn: cp.spawn, execFile: cp.execFile, env: process.env, log: (l) => logs.push(l), helperPath: wgc.exe, now: () => Date.now() + skew,
     screenFacts: async () => ({ ok: true, ffmpeg: { path: ff.exe, encoders: ['h264_nvenc'] }, displays: [{ id: '\\\\.\\DISPLAY1', hdr: false }] }) }).source({ sourceId: '657982' });
   fs.writeFileSync(ffLog, '');
@@ -331,7 +331,9 @@ console.log('§7 THE REAL SOURCE, end to end (a fake helper, a fake ffmpeg)');
   const encArgv = () => fs.readFileSync(ffLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.includes('pipe:0'));
   ok(encArgv()[0].join(' ').includes('-c:v h264_nvenc') && encArgv()[0].includes('-intra-refresh') && s9.stats().refresh === 'intra', '⑧ the window road\'s NVENC refreshes by an intra-refresh wave (no periodic key frame)', encArgv()[0]);
   ok(s9.stats().floor === 1000 && s9.stats().kbps === 8000, '⑧ a 320×240 window\'s floor (1000 at 30 fps); the start at the session\'s cap', s9.stats());
-  const feed = async (kbps) => { const n0 = a9.length; await until(() => a9.length > n0 + 40, 4000); for (let i = 0; i < 6; i++) s9.setTargetKbps(kbps); }; // ~1.3 s of units at the moved clock (the fixture sends ~166 kbps), then six samples
+  // 40 units at the moved clock, then six samples: the rule weighs the BYTES sent inside its 2 s window, so 40 units weigh
+  // what they weighed at 30 a second (the fixture's ~166 kbps over ~1.3 s) — paced at 120 they come in ~0.33 s (lane fast-debt-clear)
+  const feed = async (kbps) => { const n0 = a9.length; await until(() => a9.length > n0 + 40, 4000); for (let i = 0; i < 6; i++) s9.setTargetKbps(kbps); };
   skew += 6000; await feed(1e6);
   ok(s9.stats().restarts === 0 && s9.stats().rate.why === 'echo', '⑧ samples at or above what was sent = werift\'s echo ⇒ nothing changes', s9.stats().rate);
   skew += 6000; await feed(50);

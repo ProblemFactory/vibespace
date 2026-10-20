@@ -28,6 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const A = require('../automation-keys.js');
+const VB = require('../vault-blocked.js');   // PURE: a refusal's actor name (lane vault-locked-refusal-notice)
 
 const ACTION_TYPE = 'automation-ask';
 const SETTLED_MAX = 256, RECENT_MAX = 512, AUDIT_READ_MAX = 2000;
@@ -307,7 +308,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   async function use({ caller, verb, args = {}, want = null, signal = null } = {}) {
     const t0 = now();
     const subject = caller && caller.conversationId ? `session:${caller.conversationId}` : null;
-    const done = (r, keyId = null, extra = {}) => { audit({ keyId, subject: subject || 'unknown', verb, args: r.args || extra.args || null, ok: r.ok, code: r.code, ...(extra.ask ? { ask: extra.ask } : {}) }); return r; };
+    // lane vault-locked-refusal-notice: a LOCKED refusal is the signal — the vault's ONE helper notes the conversation by
+    // its NAME and the verb, so the owner's For-you item names it (the agent's words say the owner was told)
+    const done = (r, keyId = null, extra = {}) => { if (r && r.code === 'vault_locked' && typeof vault.blocked === 'function') { try { vault.blocked(VB.actorName(caller && caller.name, 'a conversation'), `vibespace-api ${verb}`); } catch { } } audit({ keyId, subject: subject || 'unknown', verb, args: r.args || extra.args || null, ok: r.ok, code: r.code, ...(extra.ask ? { ask: extra.ask } : {}) }); return r; };
     if (!subject || !A.isSubject(subject)) return done(named('unauthorized', 'the calling conversation has no id yet — send it one message first'));
     const scope = A.scopeOf(verb);
     if (!scope) return done(named('unknown_verb', `no such verb (one of: ${A.VERBS.join(', ')})`));

@@ -337,7 +337,9 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   V.send({ type: 'input_text', text, rid: 2 });
   V.send({ type: 'input_keyboard', eventType: 'keyDown', key: 'y', code: 'KeyY', text: 'y', windowsVirtualKeyCode: 89, modifiers: 0, rid: 3 });
   await until(() => V.receipts().length >= 3, 15000);
-  await until(() => U.got.length >= 2 + Math.ceil(text.length / 3), 3000);
+  // every record the bridge SENT has reached the page: its own chunk count, never the fixed chunker's (lane fast-debt-clear —
+  // the pre-fix control sends the text as ONE record, so a wait for ceil(n / 3) of them only ended at its 3 s bound)
+  await until(() => U.got.length >= 2 + B.bridge.stats()[0].textChunks, 3000);
   await sleep(50);
   const out = { value: U.value, refused: U.refused, got: U.got.map((m) => m.text), receipts: V.receipts(), maxOut: K.maxOut, credits: K.credits, hello: V.hello, stats: B.bridge.stats()[0] };
   await V.close(); await B.close(); await U.close();
@@ -378,6 +380,17 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
     const A = viewer(B.P), W = viewer(B.P); await A.ready(); await W.ready();
     return { U, K, B, A, W, close: async () => { await A.close(); await W.close(); await B.close(); await U.close(); } };
   };
+  // a watch that cannot arm (no CDP endpoint) is said ONCE and left — never re-armed in a storm. Its own world (upstream,
+  // keeper stub, bridge, viewer — browser-stream.js keeps no module state) waits out the 500 ms re-arm delay BESIDE the copy
+  // world below (lane fast-debt-clear); judged after it
+  const noArm = (async () => {
+    const U2 = await fakeUpstream(); const { k: k2 } = stubKeeper(U2); let arms = 0;
+    k2.watchCopiesFor = async (_t, { onEnd }) => { arms++; try { onEnd('error'); } catch { } return { ok: false, error: 'no CDP endpoint for this browser' }; };
+    const B2 = await bridgeOn(BS, k2); const A2 = viewer(B2.P); await A2.ready(); await takeover(A2); await sleep(800); // past the 500 ms re-arm delay an ARMED watch would take
+    const said = B2.logs.filter((l) => /copying out of the page is not available/.test(l)).length, saidAny = B2.logs.filter((l) => /copying out/.test(l)).length;
+    await A2.close(); await B2.close(); await U2.close();
+    return { arms, said, saidAny };
+  })();
   const w = await world(BS);
   ok(w.K.watches.length === 0, 'no copy watch while nobody drives');
   await takeover(w.A); await until(() => w.K.watches.length === 1, 2000);
@@ -427,13 +440,10 @@ async function pasteLeg(BSmod, { mediated = false, text = 'hello world', failAt 
   w.W.send({ type: 'fit', width: 700, height: 450, dpr: 1, visible: false, place: { page: 'pWWWWWW', device: 'dSame01' } }); await sleep(40);
   ok(w.B.bridge.stats()[0].input.claim === null, 'hiding ends the claim (the largest window rules again)');
   await w.close();
-  // a watch that cannot arm (no CDP endpoint) is said ONCE and left — never re-armed in a storm
+  // a watch that cannot arm (no CDP endpoint) is said ONCE and left — never re-armed in a storm (its world ran beside the one above)
   {
-    const U2 = await fakeUpstream(); const { k: k2 } = stubKeeper(U2); let arms = 0;
-    k2.watchCopiesFor = async (_t, { onEnd }) => { arms++; try { onEnd('error'); } catch { } return { ok: false, error: 'no CDP endpoint for this browser' }; };
-    const B2 = await bridgeOn(BS, k2); const A2 = viewer(B2.P); await A2.ready(); await takeover(A2); await sleep(800); // past the 500 ms re-arm delay an ARMED watch would take
-    ok(arms === 1 && B2.logs.filter((l) => /copying out of the page is not available/.test(l)).length === 1, `a watch that cannot arm is said once in the journal and not retried (${arms} arm, ${B2.logs.filter((l) => /copying out/.test(l)).length} line)`);
-    await A2.close(); await B2.close(); await U2.close();
+    const { arms, said, saidAny } = await noArm;
+    ok(arms === 1 && said === 1, `a watch that cannot arm is said once in the journal and not retried (${arms} arm, ${saidAny} line)`);
   }
   // NEGATIVE CONTROL: the copy delivered to every viewer; and no watch armed at all
   const src = read('src/server/browser-stream.js');

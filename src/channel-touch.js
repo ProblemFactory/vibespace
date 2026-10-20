@@ -49,7 +49,7 @@
  */
 
 /** The closed op set, in the order a row SAYS them (a draft outranks a read). */
-const OPS = Object.freeze(['reply', 'compose', 'react', 'read', 'search', 'refresh', 'request', 'status', 'api']);
+const OPS = Object.freeze(['reply', 'compose', 'react', 'recall', 'read', 'search', 'refresh', 'request', 'status', 'api']);   // + lane channels-proposals-recall
 /** The ops that make a row a DRAFT row (sorted first; the reverse link says "Drafted by"). */
 const DRAFT_OPS = Object.freeze(['reply', 'compose']);
 /** The per-session ring (the witness keeps the newest). */
@@ -296,6 +296,7 @@ function rowWords(row, t) {
   if (o.reply) out.push(o.reply === 1 ? replyWords(row && row.placement, t) : t('drafted {n} replies', { n: o.reply }));
   if (o.compose) out.push(o.compose === 1 ? t('wrote a new message') : t('wrote {n} new messages', { n: o.compose }));
   if (o.react) out.push(o.react === 1 && row.glyph ? t('reacted {glyph}', { glyph: row.glyph }) : t('proposed {n} reactions', { n: o.react }));
+  if (o.recall) out.push(o.recall === 1 ? t('proposed taking back your message') : t('proposed taking back {n} of your messages', { n: o.recall }));
   if (o.read || row.readCalls) out.push(o.read === 1 ? t('read 1 message') : t('read {n} messages', { n: o.read || 0 }));
   if (o.search) out.push(o.search === 1 ? t('1 search hit') : t('{n} search hits', { n: o.search }));
   if (o.refresh) out.push(t('refreshed'));

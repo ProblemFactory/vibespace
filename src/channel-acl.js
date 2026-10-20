@@ -65,6 +65,11 @@ if (msgAcl.LEVELS.length !== 3 || !msgAcl.RANK || msgAcl.RANK[msgAcl.LEVELS[2]] 
  *  byte-identical answers (no existence oracle). */
 const NOT_FOUND_TEXT = 'no such conversation (not found, or not visible to you) — `vibespace-channels list` shows your reach';
 function notFound() { return { ok: false, code: 'not-found', error: NOT_FOUND_TEXT }; }
+/** lane channels-proposals-recall: the same uniform answer for a verb that ACTS on a conversation (`recall`), said as
+ *  what it is — not visible to the caller — with the door the USER opens (an agent stops filing feedback for a grant
+ *  only the user gives). Byte-identical for a conversation outside the caller's reach and one that does not exist. */
+const NOT_VISIBLE_TEXT = 'not visible to you — no such conversation, or one outside the reach the user granted you; the user grants reach in Channels (the account\'s ⋯ → Reach & policy…); where `vibespace-channels list --all` shows it as requestable, `vibespace-channels request <conv> "why"` asks';
+function notVisible() { return { ok: false, code: 'not-visible', error: NOT_VISIBLE_TEXT }; }
 
 const normLevel = (v) => (RANK[v] !== undefined ? v : 'hidden');
 const canSee = (lv) => RANK[normLevel(lv)] >= RANK.visible;
@@ -230,8 +235,8 @@ function directoryListable(dir, kind) { const d = dir || DIRECTORY_DEFAULT; retu
 
 module.exports = {
   DIRECTORY_DEFAULT, directoryOf, validateDirectory, directoryListable,
-  LEVELS, RANK, GRANT_ORIGINS, PRINCIPAL_KINDS, EVERYONE_ID, SCOPE_KINDS, NOT_FOUND_TEXT,
-  notFound, canSee, canRequest, widen, fromMsgLevel, grantId, validateGrant, principalApplies, scopeApplies,
+  LEVELS, RANK, GRANT_ORIGINS, PRINCIPAL_KINDS, EVERYONE_ID, SCOPE_KINDS, NOT_FOUND_TEXT, NOT_VISIBLE_TEXT,
+  notFound, notVisible, canSee, canRequest, widen, fromMsgLevel, grantId, validateGrant, principalApplies, scopeApplies,
   effective, applyGrant, removeGrant, approveRequest, grantsFor,
   API_TIERS, API_RANK, API_NAMED_ONLY, effectiveApi,
   accountGrant, patternGrant, grantsForConversation,

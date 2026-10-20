@@ -6,6 +6,7 @@
 // (5 ⇒ the next minute refused, `paced`) and audits every failure with the caller's address.
 const { ownOriginOf, pageVerdict } = require('../write-origin.js');   // THE origin rule (its strict form: a person on this page)
 const { sameToken } = require('../pairing-token.js');
+const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
 
 const STATUS = Object.freeze({
   wrong_password: 403, corrupt: 500, paced: 429, vault_not_set_up: 409, already_set_up: 409, busy: 409, migration_failed: 500,
@@ -30,7 +31,7 @@ const WORDS = Object.freeze({
   bad_hours: 'the idle lock is a whole number of hours (0 = never)',
   human_only: 'only a person unlocks, sets up or changes the vault — an agent may read its state and lock it',
   cross_site: 'the vault answers this instance\'s own page only',
-  vault_locked: 'the vault is locked — a person unlocks it on this instance\'s page (never ask for the password)',
+  vault_locked: VB.agentWords('a person unlocks it on this instance\'s page'),   // lane vault-locked-refusal-notice: the owner was told — the agent never asks
   no_link: 'this session runs on no paired machine — it has no link token',
   reveal_needs_password: 'enter the second password again to see stored values (they stay visible for 5 minutes)',
   not_found: 'that stored value is not there any more',
@@ -121,7 +122,8 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     // verify RED-2: a 423 makes the session WAIT (its attach parks, the wrapper never gives up) — the session row says
     // 「等待保险库解锁」 (`_vaultWait`, a STATE, never an error); the first answer that is not the lock ends the wait
     const waiting = (on) => { if (!!s._vaultWait === on) return; if (on) s._vaultWait = Date.now(); else delete s._vaultWait; try { onVaultWait(s); } catch { } };
-    try { const token = linkTokenFor(hostKey); waiting(false); return answerLink(200, { ok: true, token }); }
+    // lane vault-locked-refusal-notice: a LOCKED refusal notes THIS conversation by name (the owner's For-you item names it)
+    try { const token = linkTokenFor(hostKey, { actor: s.name || s.webuiName || null }); waiting(false); return answerLink(200, { ok: true, token }); }
     catch (e) {
       const code = e && e.code === 'vault_locked' ? 'vault_locked' : 'error';
       const again = code === 'vault_locked' && !!s._vaultWait;

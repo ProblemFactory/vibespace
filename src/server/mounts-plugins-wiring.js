@@ -65,8 +65,9 @@ const vault = require('./vault-engine.js').create({ dataDir: path.join(rootDir, 
 // lane vault-e2e-password-fix-r2: THE DEVICE LINK TOKENS (src/server/host-tokens.js — the vault's `host:<id>` entries): the ONE
 // road to a session is GET /api/agent/vault/link-token (the attach child asks with its session token); every attach config
 // an older build wrote loses its copy now, whatever the vault's state
-const hostTokens = require('./host-tokens.js').create({ dataDir: path.join(rootDir, 'data') });
+const hostTokens = require('./host-tokens.js').create({ dataDir: path.join(rootDir, 'data'), nameOf: (k) => { const h = vaultHostOf(k); return (h && h.name) || null; } });   // nameOf: a LOCKED refusal is noted by the machine's name (lane vault-locked-refusal-notice)
 try { hostTokens.stripCopies(); } catch (e) { console.warn('[vault] the attach configs could not be swept:', e.message); }
+vault.onUnlock(() => { try { const jm = getJobs && getJobs(); if (jm && typeof jm.relayChanged === 'function') jm.relayChanged('the vault unlocked'); } catch (e) { console.error('[jobs] re-publish after the vault unlocked:', e.message); } }); // lane job-notice-dedupe (fb-666f37fd38): a published service the lock held down re-publishes NOW — not after the Ports heal backoff (above every route: a line in a route's span reads as that route's store)
 // THE VAULT'S CONTENTS (lane vault-contents-window): the Vault window's masked inventory and its 5-minute reveal — each store
 // lists and opens its own rows (`vaultRows` / `vaultReveal`); the getters are read at request time (the stores below exist by then)
 const appSecretsDoor = { vaultRows: () => require('../app-secrets.js').appSecretRows({ dataDir: path.join(rootDir, 'data') }), vaultReveal: (e, f) => require('../app-secrets.js').appSecretReveal({ dataDir: path.join(rootDir, 'data') }, e, f) };
@@ -81,7 +82,7 @@ const vaultContents = require('./vault-contents.js').create({ vault, sources: {
   automation: () => automation,   // design q-046: the automation keys (their values, one per reveal — to hand to an outside party)
 } });
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req),
-  linkTokenFor: (hostKey) => hostTokens.tokenFor(hostKey), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
+  linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
   // int317 (RED-3): the door's audit row → the device audit (the machine card's Activity…) — the session, its host key, the status
   auditLink: ({ sid, hostKey, status }) => { const h = vaultHostOf(hostKey); if (hosts && hosts.deviceAudit) hosts.deviceAudit.append(require('../device-acts.js').linkTokenLine({ at: Date.now(), sid, hostKey, hostId: h ? h.id : null, machine: h ? (h.name || h.id) : null, status })); } });
 // design q-046 (lane automation-keys-core): VIBESPACE'S OWN AUTOMATION KEYS — a key's value is the vault entry `apikey:<id>`

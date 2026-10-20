@@ -402,6 +402,10 @@ const caps = Object.freeze({
   // lane channel-record-revisions (owner 2026-10-13, userW's recall): a stored message re-read BY ID (`GET
   // im/v1/messages/:id` — `deleted` = 撤回, `updated` + `update_time` + the new body = an edit); the search feed only names NEW
   revisions: Object.freeze({ recall: true, edit: true, how: 'byid' }),
+  // lane channels-proposals-recall (agent feedback fb-1b79b2d9d4): the WRITE half — `DELETE im/v1/messages/:message_id`
+  // (撤回) AS the user (the user token): the vendor takes back only a message the user sent, and only inside the tenant's
+  // recall window (the admin console sets it; 24 h is the vendor's default — declared here, judged before any call)
+  canRecall: Object.freeze({ windowSec: 24 * 3600 }),
   threads: Object.freeze({ read: 'vendor', replyInto: true, listing: 'separate', placements: Object.freeze(['chat', 'quote', 'thread']), rootReply: 'quote' }),
   reactions: Object.freeze({ read: 'list', add: true, remove: 'own', vocabulary: 'names', custom: 'none', perMessageMax: null }),
   // lane lark-search-poll (B-5aab, design §1.3): THE CHANGE FEED — `im/v1/messages/search` with an EMPTY query and a
@@ -1852,6 +1856,16 @@ function create(record = {}, deps = {}) {
     return { ok: true, at: now() };
   }
 
+  /** lane channels-proposals-recall: RECALL a message the USER sent (`DELETE im/v1/messages/:message_id`, 撤回) AS the
+   *  user: ONE request, never retried. Not exercised against the vendor in this lane (no vendor calls): a message of
+   *  someone else's or one past the tenant's window is refused by the ENGINE before this call (`not-yours` /
+   *  `window-passed`); any refusal the vendor still answers keeps its own code and words (a typed ChannelError). */
+  async function recallImpl(convId, { messageId } = {}) {
+    if (!messageId) throw new ChannelError('not-found', 'lark: a recall needs its message id', { retryable: false });
+    await api(`/im/v1/messages/${encodeURIComponent(String(messageId))}`, { method: 'DELETE', what: 'lark recall message' });
+    return { ok: true, at: now() };
+  }
+
     /** lane channels-list-polish: the paced, metered, token-free fetch of a picture address one of the readers vetted. */
   return {
     live,
@@ -2171,6 +2185,7 @@ function create(record = {}, deps = {}) {
     reactions: reactionsImpl,
     react: reactImpl,
     unreact: unreactImpl,
+    recall: recallImpl,   // lane channels-proposals-recall
     /** The picker's vocabulary (L9) — a declaration, no vendor call. */
     async reactionSet() { return { keys: LARK_EMOJI.map((e) => ({ key: e.key, glyph: e.glyph, label: e.label, custom: false })), quick: LARK_QUICK.slice(), custom: false, at: now() }; },
 

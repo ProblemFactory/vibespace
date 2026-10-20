@@ -9,7 +9,8 @@
 //                            { at, exit, stderr } (dies). Every argv → cfg.log. Lane stream-window-fixes: stdin closed ⇒ the
 //                            real helper's `end` line ({"ev":"end","why":"stdin","code":0}) and exit 0 — unless
 //                            cfg.capture.ignoreStdin (a helper that never notices: the agent's grace kill); its pid →
-//                            cfg.capture.pidFile
+//                            cfg.capture.pidFile. Lane fast-debt-clear: cfg.capture.pace = frames a second the fake WRITES
+//                            (the `open` line still says --fps): a leg that only counts units gets them sooner
 //   writeFakeCsc(file, cfg)  the in-box csc.exe: writes its /out: file (cfg.helper = a script copied there, runnable — the
 //                            agent then spawns THAT as its helper), or refuses the first define set when cfg.refuse names it
 //                            (a Windows without MinUpdateInterval); every argv → cfg.log
@@ -51,7 +52,7 @@ process.stdout.on('error', () => process.exit(0));
 if (c.pidFile) fs.writeFileSync(c.pidFile, String(process.pid));
 process.stdin.on('end', () => { if (c.ignoreStdin) return; err({ ev: 'end', why: 'stdin', code: 0 }); process.exit(0); }); process.stdin.resume();
 const head = (fr) => { const b = Buffer.alloc(16); b.write('VSWF', 0, 'latin1'); b.writeUInt32LE(w, 4); b.writeUInt32LE(h, 8); b.writeUInt16LE(fr ? 1 : 0, 12); b[14] = 4; return b; };
-setInterval(() => { if (process.stdout.writableNeedDrain) return; process.stdout.write(Buffer.concat([head(fresh), Buffer.alloc(w * h * 4, 0x80)])); }, 1000 / fps);
+setInterval(() => { if (process.stdout.writableNeedDrain) return; process.stdout.write(Buffer.concat([head(fresh), Buffer.alloc(w * h * 4, 0x80)])); }, 1000 / (Number(c.pace) || fps));
 for (const s of c.script || []) setTimeout(() => {
   if (s.size) { w = s.size.w; h = s.size.h; err({ ev: 'size', w, h, bpp: 4 }); }
   if (s.fresh !== undefined) fresh = !!s.fresh;

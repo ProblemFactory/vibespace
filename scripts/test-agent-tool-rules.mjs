@@ -56,6 +56,9 @@
 //     the server's own answer (record input, record offer; the client says only
 //     which answer); F7 no Always Allow over a hidden character — each with a
 //     patched-copy control
+//   ⑯ lane vault-locked-refusal-notice: a LOCKED vault already told the user — the vibespace-vault row, the registry line,
+//     the CLI's status words, the manuals and the doors' words say so (THE clause, src/vault-blocked.js); no agent-facing file
+//     words it as a message to relay
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -506,6 +509,31 @@ console.log('⑭ r6 — what you approve is what runs (F4 inert tails · F5 ever
   ok(/commandTouchesChannels\(cmd\) \? '<div class="chat-channel-touches" hidden><\/div>' : vendorBypassHintHtml\(cmd\);/.test(rend) && (rend.match(/vendorBypassOf\(/g) || []).length === 1, 'the renderer draws the hint ONLY where no witness box is drawn (channelTouchHolderHtml\'s else-branch), from the ONE classifier');
   const dig = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
   ok(/'Read more: vibespace-channels read <conv> \(never your own SDK or script: no card, read marker or budget\)/.test(dig), 'the channel digest\'s read line (the injection that teaches reading a channel) tells the agent: never its own SDK or script');
+}
+
+console.log('⑯ lane vault-locked-refusal-notice — a LOCKED vault already told the user: every agent-facing surface says so, none says "tell the user"');
+{
+  const VB = require(path.join(REPO, 'src/vault-blocked.js'));
+  const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
+  const row = R.AGENT_TOOL_RULES.find((r) => r.tool === 'vibespace-vault');
+  ok(row && /a LOCKED vault has already told the user what waits on it, so the agent never asks them to unlock/.test(row.why), 'the rule row of vibespace-vault: a locked vault already told the user — the agent never asks them to unlock', row && row.why);
+  const reg = require(path.join(REPO, 'src/agent-cli-registry.js'));
+  const vrow = reg.ROWS.find((r) => r.name === 'vibespace-vault');
+  ok(vrow && /locked ⇒ the user is told; never ask them to unlock/.test(vrow.summary) && Buffer.byteLength(vrow.summary) <= reg.CAPS.summary && read('docs/agent/index-manual.md').includes(vrow.summary), 'the CLI registry\'s one line (the index every agent reads) says it, within the 140 B cap, and the generated index carries it', vrow && vrow.summary);
+  const vcli = read('data/bin/vibespace-vault');
+  ok(vcli.includes(VB.TOLD) && !/tell them; never ask for the password/.test(vcli), 'vibespace-vault status, LOCKED: the user has already been told (THE clause, src/vault-blocked.js TOLD) — never "tell them"');
+  const man = read('docs/agent/vault-manual.md');
+  ok(/the user has already been told\*\*/.test(man) && /Do not ask them to unlock it, do not file a `vibespace-ask` about it/.test(man) && !/`vibespace-ask` is the way to ask them to unlock/.test(man), 'the vault manual: told already — never ask, never a vibespace-ask about it (the line that taught agents to ask is gone)');
+  ok(/The user has already been told \(For you names this conversation and the verb\): never ask them to unlock it/.test(read('docs/agent/automation-manual.md')) && !/Tell them; never ask for the password/.test(read('docs/agent/automation-manual.md')), 'the automation manual\'s vault_locked row says the same');
+  // the doors' own words toward an agent (the code stays vault_locked)
+  ok(/vault_locked: VB\.agentWords\('a person unlocks it on this instance\\'s page'\)/.test(read('src/routes/vault.js')) && /vault_locked: VB\.agentWords\('every automation waits until a person unlocks it on this instance\\'s page'\)/.test(read('src/routes/automation.js')), 'the vault doors and the automation door answer vault_locked in THE words (agentWords)');
+  const CH = require(path.join(REPO, 'src/channels/index.js'));
+  const ce = CH.notConnectedError ? CH.notConnectedError('Lark', 'vault-locked') : null;
+  ok(!CH.notConnectedError || (ce.code === 'vault-locked' && ce.message.includes(VB.TOLD)), 'a channel whose sign-in the locked vault keeps closed: vault-locked, in THE words', ce && ce.message);
+  // nowhere toward an agent still says to tell the user (a census over the agent-facing files)
+  const AGENT_FACING = ['data/bin/vibespace-api', 'data/bin/vibespace-vault', 'docs/agent/vault-manual.md', 'docs/agent/automation-manual.md', 'src/routes/vault.js', 'src/routes/automation.js', 'src/channels/index.js'];
+  const stale = AGENT_FACING.filter((f) => /\(tell the user; never ask for the password\)|tell the user and wait; `vibespace-ask`|tell them; never ask for the password|Tell them; never ask for the password/.test(read(f)));
+  ok(!stale.length, `no agent-facing file words a locked vault as a message to relay (${AGENT_FACING.length} files)`, stale);
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);

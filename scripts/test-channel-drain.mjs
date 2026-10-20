@@ -52,6 +52,8 @@ import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 import { spawn } from 'node:child_process';   // lane channel-drain-scale: ⑦'s meter children, overlapped with the walk
+import os from 'node:os';
+import { Worker, isMainThread, parentPort } from 'node:worker_threads';   // lane fast-debt-clear: THE WALK WORKERS (before ①)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const MODEL = 'src/channel-drain.js';
@@ -74,7 +76,7 @@ const judgeLater = (spec) => new Promise((resolve) => {
   c.stderr.on('data', (b) => { err += b; });
   c.on('close', (code) => { try { resolve(JSON.parse(out.trim().split('\n').pop())); } catch { resolve({ ok: false, n: spec.n, err: `child exit ${code} ${err.slice(-300)}` }); } });
 });
-const SCALE_ROWS = [1000, 10000, 45000].map((n) => judgeLater({ module: path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'src/channel-drain.js'), ...SCALE_PASS, n, kind: 'linear' }));
+const SCALE_ROWS = !isMainThread ? [] : [1000, 10000, 45000].map((n) => judgeLater({ module: path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'src/channel-drain.js'), ...SCALE_PASS, n, kind: 'linear' }));
 
 // ── the rule numbers the spec states (the constants are asserted equal below, never trusted) ──
 const CAP = 200, RESERVE = 20, K = 25;
@@ -710,6 +712,41 @@ const RULE_COVER = [
   ['r22-armed', 'rule 22a: the timer\'s turn armed rechecks'], ['r22-recheck', 'rule 22a: a recheck page (nothing else pending)'], ['r22-skip', 'rule 22a: a conversation-level refusal of a recheck, the pass went on'],
   ['r22-error', 'rule 22a: an account failure on a recheck (rule 3)'], ['r22-press', 'rule 22b: an owner\'s round carried the recheck'], ['18-wait-recheck', 'rule 18: a wait holding a recheck'],
 ];
+// ═══ THE WALK WORKERS (lane fast-debt-clear) ═══════════════════════════════════════════════════════════════════
+// A seeded walk is a PURE function of (model, seed, profile, steps) and shares nothing with another, so ①'s 48 walks and
+// ④'s mutant walks run in a small pool of worker threads — each this very file evaluated up to HERE (the sim, the profiles,
+// the rules' cover; no leg, no child: SCALE_ROWS launches only on the main thread) answering jobs. The main thread judges
+// every answer with the asserts the in-line walk had, in seed order, and runs the tables, the repros and the rest meanwhile.
+if (!isMainThread) {
+  parentPort.on('message', ({ id, kind, seed, prof, steps, file, want }) => {
+    let out;
+    try {
+      if (kind === 'walk') { const { sim, settled, unanswered } = walk(D0, seed, prof, steps); out = { steps: sim.steps, passNo: sim.passNo, fetches: sim.fetches.length, waiters: sim.waiters.size, violations: sim.violations, cover: sim.cover, settled, unanswered }; }
+      else out = { hit: walkMutant(require(file), want) };
+    } catch (e) { out = { error: String((e && e.stack) || e) }; }
+    parentPort.postMessage({ id, out });
+  });
+  await new Promise(() => { });   // a worker never runs a leg
+}
+const pool = (() => {
+  const n = Math.max(1, Math.min(4, os.availableParallelism() - 1)), waiting = new Map(), queue = [], free = [];
+  let seq = 0;
+  const give = (w, job) => { w.job = job; w.postMessage(job); };
+  const workers = Array.from({ length: n }, () => {
+    const w = new Worker(new URL(import.meta.url));
+    w.on('message', ({ id, out }) => { const r = waiting.get(id); waiting.delete(id); w.job = null; if (r) r(out); const j = queue.shift(); if (j) give(w, j); else free.push(w); });
+    w.on('error', (e) => { if (w.job && waiting.has(w.job.id)) { waiting.get(w.job.id)({ error: String((e && e.stack) || e) }); waiting.delete(w.job.id); } });
+    free.push(w);
+    return w;
+  });
+  return {
+    run(msg) { const job = { ...msg, id: ++seq }; return new Promise((resolve) => { waiting.set(job.id, resolve); const w = free.shift(); if (w) give(w, job); else queue.push(job); }); },
+    close() { for (const w of workers) w.terminate(); },
+  };
+})();
+/** a pool answer in the shape ①'s asserts read (a worker's error = a walk that held nothing) */
+const asWalked = (r) => (r.error ? { sim: { steps: 0, passNo: 0, fetches: { length: 0 }, waiters: { size: 0 }, violations: ['the walk worker failed: ' + r.error.slice(0, 300)], cover: {} }, settled: false, unanswered: 1 }
+  : { sim: { steps: r.steps, passNo: r.passNo, fetches: { length: r.fetches }, waiters: { size: r.waiters }, violations: r.violations, cover: r.cover }, settled: r.settled, unanswered: r.unanswered });
 console.log('① THE WALK: 48 seeds × 3000 steps over four profiles (half the mixed seeds also run rule 21, the change feed), every rule at every step against the oracle');
 const WALK_STEPS = 3000;
 const totals = {};
@@ -718,11 +755,14 @@ let totalSteps = 0, totalPasses = 0, totalFetches = 0;
   const t0 = Date.now();
   const byProfile = {};
   let seedNo = 0;
+  // the 48 walks in the pool (THE WALK WORKERS, above), judged below in seed order
+  const walked = new Map();
+  { let n = 0; const runs = []; for (const prof of Object.keys(PROFILES)) for (let i = 0; i < 12; i++) { const seed = 20260926 + 7919 * (n++); runs.push(pool.run({ kind: 'walk', seed, prof, steps: WALK_STEPS }).then((r) => walked.set(seed, asWalked(r)))); } await Promise.all(runs); }
   for (const prof of Object.keys(PROFILES)) {
     byProfile[prof] = {};
     for (let i = 0; i < 12; i++) {
       const seed = 20260926 + 7919 * (seedNo++);
-      const { sim, settled, unanswered } = walk(D0, seed, prof, WALK_STEPS);
+      const { sim, settled, unanswered } = walked.get(seed);
       totalSteps += sim.steps; totalPasses += sim.passNo; totalFetches += sim.fetches.length;
       for (const [k, v] of Object.entries(sim.cover)) { totals[k] = (totals[k] || 0) + v; byProfile[prof][k] = (byProfile[prof][k] || 0) + v; }
       ok(sim.violations.length === 0 && sim.steps >= WALK_STEPS, `${prof} seed ${seed}: ${sim.steps} steps, ${sim.passNo} passes, ${sim.fetches.length} fetches, ${sim.waiters.size} requests — every rule held at every step`, sim.violations.slice(0, 5).join(' | '));
@@ -1130,7 +1170,8 @@ const M = mutantCopies('channel-drain', REPO);
 function mutant(tag, edits) {
   let src = SRC;
   for (const [from, to] of edits) { if (!src.includes(from)) return { setup: false, why: `anchor missing: ${from.slice(0, 80)}` }; src = src.replace(from, to); }
-  return { setup: src !== SRC, D: M.load(MODEL, src, tag) };
+  const D = M.load(MODEL, src, tag);
+  return { setup: src !== SRC, D, file: M.files[M.files.length - 1] };   // the copy's path: a walk worker requires its own instance
 }
 /** Run short walks on a mutant until one of the invariants it should break is named; the violated rule families. */
 function walkMutant(D, want, seeds = 6, steps = 1500) {
@@ -1175,16 +1216,20 @@ const MUTANTS = [
   { tag: 'wait-unbounded', rule: 18, why: 'one wait for the whole shortfall (the drain not asked again for 10 s)', edits: [['  return Math.max(1, Math.min(PACE_WAIT_MAX_MS, Math.ceil((short * 1000) / r)));', '  return Math.max(1, Math.ceil((short * 1000) / r));']], walk: ['18-wait-ms'], repro: () => { const r = REPROS.overBurst(DM); return { red: r.maxWait > 1000, said: J(r) }; } },
 ];
 let DM = null;
-for (const m of MUTANTS) {
-  const mm = mutant(m.tag, m.edits);
+// lane fast-debt-clear: every mutant's WALK goes to the pool at once; the main thread runs the repros in order meanwhile
+// and judges each mutant exactly as before
+const builtMutants = MUTANTS.map((m) => { const mm = mutant(m.tag, m.edits); return { m, mm, walkRun: mm.setup ? pool.run({ kind: 'mutant', file: mm.file, want: m.walk }) : null }; });
+for (const { m, mm, walkRun } of builtMutants) {
   if (!ok(mm.setup, `MUTANT setup · ${m.tag} (rule ${m.rule}, ${m.why}) is reconstructed from the shipped bytes`, mm.why)) continue;
   DM = mm.D;
   let rep;
   try { rep = m.repro(); } catch (e) { rep = { red: true, said: 'threw: ' + e.message }; }
-  const hit = walkMutant(DM, m.walk);
+  const w = await walkRun;
+  const hit = w.error ? { ['worker:' + w.error.slice(0, 60)]: 1 } : w.hit;
   const named = m.walk.filter((k) => hit[k]);
   ok(rep.red && named.length > 0, `MUTANT ${m.tag}: its repro goes red (${rep.said.slice(0, 160)}) AND the walk names rule ${m.rule}'s invariant (${named.map((k) => `${k} ×${hit[k]}`).join(', ')})`, `repro red ${rep.red}; walk hit ${J(hit)}`);
 }
+pool.close();
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length })) ok(r.pass, r.name, r.detail);
 // the 70-cell table under the three mutants whose rule it pins most directly
 {

@@ -3,7 +3,8 @@
 // automation keys in the Vault window and GRANTS one to a conversation or a Task Group; this conversation then calls a verb
 // with its OWN session token — the hub judges every call (the grant × the verb × the vault), runs it, and writes one audit
 // line. You never see, hold or pass a key's value: there is no verb that returns one. While the vault is locked every call
-// answers `vault_locked` (tell the user; never ask for the password). Scoped by the per-session token in the env.
+// answers `vault_locked` (exit 3) — the user has already been told (For you names this conversation and the verb): never ask
+// them to unlock it or for the password; wait, or do other work (lane vault-locked-refusal-notice). Scoped by the per-session token in the env.
 const API = process.env.VIBESPACE_API;
 const TOKEN = process.env.VIBESPACE_SESSION_TOKEN;
 if (require.main === module && (!API || !TOKEN)) { // (a suite may require the module for its argv table)
@@ -26,6 +27,7 @@ const USAGE = [
   '  vibespace-api groups invite <g-…|group name> <target>    into an agent group you are in (no wake)',
   '  <target> = a conversation id, <backend>:<id> or a session id (sess-…); a conversation the key opened is within its reach',
   'no grant yet ⇒ the call asks the user in For you (≤ 60 s) and waits; a refusal is final for 10 minutes. Full manual: vibespace-docs api',
+  'the vault locked ⇒ every call answers vault_locked (exit 3): the user has already been told — never ask them to unlock; wait, or do other work',
   'an open stays inside its key\'s LIMITS (folders · accounts · permission modes · models · modes — `keys` prints them); outside ⇒ refused by name',
 ].join('\n');
 

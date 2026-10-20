@@ -100,7 +100,8 @@ const { createChannelRegistry, ChannelError } = require('../channels/index.js');
 const { identityOf, identityMismatch, heldIdentity, mismatchSentence, namelessSentence, cancelledSentence, stampIdentity } = require('../channel-identity.js');   // verify r5: whose account a consent may land on; r6: the held identity read off the token it holds, a nameless consent; r7: a cancelled consent; lane slack-grid-identity: the one stamp rule
 const caps = require('../channel-caps.js');
 const fake = require('../channels/fake.js');
-const { secretBox, holdsCiphertext } = require('../secret-box.js');
+const { secretBox, holdsCiphertext, vaultForDir } = require('../secret-box.js');
+const VB = require('../vault-blocked.js');   // PURE: a refusal's actor name (lane vault-locked-refusal-notice)
 const { VAULT_LOCKED: VAULT_LOCKED_CODE } = require('../key-file.js');   // lane vault-e2e-password-fix-r2: the vault's refusal code
 const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');   // the two credential-key forms, spelled ONCE (the store's)
 const R = require('../integration-registry.js');   // PURE: the rows' `bindsPerAccount` + `clientFieldsOf` (the custom client's two fields)
@@ -543,6 +544,9 @@ function create(deps = {}) {
   /** lane vault-e2e-password-fix-r2: the vault holds this store's key and is LOCKED — every account's sign-in (and every
    *  app credential the integrations store seals) is closed until a person unlocks: a STATE of its own, never "expired" */
   const vaultLocked = () => { try { const r = box.refusal(); return !!(r && r.code === VAULT_LOCKED_CODE); } catch { return false; } };
+  /** lane vault-locked-refusal-notice: a sign-in the LOCKED vault keeps closed is noted by the account's label (the vault's
+   *  ONE helper — the owner's For-you item names it; the store road noted «VibeSpace — the channels store» beside it) */
+  const noteLocked = (rec) => { try { const v = vaultForDir(dataDir); if (v && typeof v.blocked === 'function') v.blocked(VB.actorName(rec && rec.label, 'a channel account'), 'its sign-in'); } catch { } };
   const flows = oauth || createOAuthLoopback({ now, log });
   // design 018 → lane dc-channels-consent: THE ONE CONSENT MACHINE — a per-boot HMAC key signs each redirect consent's
   // state (a restart ends every flow anyway). The state's SHAPE, the landing page and the relay setting are the
@@ -675,7 +679,10 @@ function create(deps = {}) {
       const a = rec.auth || {};
       if (!a.tokenEnc) return { token: null, why: 'never-authenticated' };
       try { return { token: JSON.parse(box.dec(a.tokenEnc)), why: null }; }
-      catch (e) { return { token: null, why: e && e.reason === VAULT_LOCKED_CODE ? 'vault-locked' : `token-undecryptable: ${(e && e.message) || e}` }; }   // r2: the adapter throws `vault-locked`
+      catch (e) {
+        if (e && e.reason === VAULT_LOCKED_CODE) { noteLocked(rec); return { token: null, why: 'vault-locked' }; }   // r2: the adapter throws `vault-locked`
+        return { token: null, why: `token-undecryptable: ${(e && e.message) || e}` };
+      }
     };
     return {
       read,
@@ -5914,6 +5921,44 @@ function create(deps = {}) {
     audit({ kind: 'reaction', op: 'remove', adapterId, convId, msg: id, key, by });
     return { ok: true, reactions: reactionsFor(rec, convId, [id], { e }).get(id) || [] };
   }
+  /**
+   * lane channels-proposals-recall: TAKE BACK THE USER'S OWN MESSAGE (an approved `recall` proposal — the adapter's
+   * `recall`, declared by `canRecall` beside `revisions.recall`): the row and this conversation's offer, then
+   * `P.recallVerdict` again (a window that passed while the card waited is refused with no vendor call); ONE paced +
+   * metered vendor call, NEVER retried; only AFTER the vendor answered is the record marked recalled — the same `fx` line a
+   * by-id recheck writes (the content stays: "Recalled … — VibeSpace keeps the content"). A lost answer is `lost`.
+   */
+  async function recallMessage(adapterId, convId, msg, { by = 'user' } = {}) {
+    const g = convOr404(adapterId, convId);
+    if (g.refusal) return g.refusal;
+    const { rec, e, c } = g;
+    const row = caps.recallRowOf(c);
+    const offer = row ? await offerNow(rec, adapterId, convId, 'recall') : null;
+    if (offer && !offer.offered) return { ok: false, code: 'recall-not-available', why: offer.why, error: `a message cannot be taken back here (${offer.why})` };
+    const id = String(msg || '');
+    const recalledAt = () => Rev.recalledAtOf(store.readSide(adapterId, convId, { msgs: new Set([id]) }).filter((x) => x && x.k === 'fx'));
+    const v = P.recallVerdict({ record: id ? store.findRecord(adapterId, convId, id) : null, row, recalledAt: id ? recalledAt() : null, now: now() });
+    if (!v.ok) return v;
+    if (inBackoff(e)) return backoffRefusal(rec, e);
+    if (!affordable(rec, e)) return budgetRefusal(rec, e);
+    let r;
+    const prevBy = e.chargeBy; e.chargeBy = 'owner';
+    try { r = await vendor(rec, e, () => e.adapter.recall(convId, { messageId: id })); }
+    catch (err) { return recallRefusal(err); }
+    finally { e.chargeBy = prevBy; }
+    if (outlived(rec, e)) return { ok: false, code: 'account-changed', error: 'the account changed while the message was taken back' };
+    if (!recalledAt()) appendSides(rec, convId, [{ k: 'fx', msg: id, at: Number(r && r.at) || now(), src: by === 'agent' ? 'agent' : 'self', facts: Rev.recallFacts() }]);
+    audit({ kind: 'recall', adapterId, convId, msg: id, by });
+    return { ok: true, at: Number(r && r.at) || now() };
+  }
+  /** A refused recall keeps the vendor's code and words; a transport failure after the request may have left is `lost`
+   *  (the reaction rule — the proposal reads `unknown`, one read of the message settles it). */
+  function recallRefusal(err) {
+    const code = err instanceof ChannelError ? err.code : 'vendor-error';
+    const d = (err && err.detail) || {};
+    const lost = !!(d.threw || d.lost) || code === 'transport';
+    return { ok: false, code, error: String((err && err.message) || err), retryAfterSec: Number(d.retryAfterSec) || undefined, ...(lost ? { lost: true } : {}) };
+  }
   /** One audit line per reaction act (the owner's record of what went out in their name). */
   function audit(line) { try { store.audit(line); } catch (err) { log.warn(`[channels] reaction audit failed: ${(err && err.message) || err}`); } }
   /** `GET /api/channels/:adapterId/emoji-set` — the picker's vocabulary (cached 6 h). */
@@ -7742,7 +7787,7 @@ function create(deps = {}) {
     laneOf, EMPTY_SCAN, pass, effectiveConvCaps, rejudgeConvCaps, rawFactsOf, ownRecordOf, viewOf, agentCopy, humanNameOf, accountsBrief, conversationName,
     presetsOf, clientFieldDecls, customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, kick, known, budgetRefusal,
     dropLive, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, withView, offerNow, NOT_A_THREAD, threadRead, threadRefresh,
-    rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, vendorSearch, aroundFor, refreshConvCaps, retractUnsaved,
+    rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, recallMessage, vendorSearch, aroundFor, refreshConvCaps, retractUnsaved,
     retractFailure, track, wakeTimers, clearWakeTimer, coalesceSeconds, billedWake, pathBudgetVerdict,
     get stopped() { return stopped; },
     get timer() { return timer; },
@@ -7752,12 +7797,12 @@ function create(deps = {}) {
     accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets, wakeEffOf,
     storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, convFor,
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
-    setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, readFor, readThreadFor, statusFor, setGrain, setAccess, setWatchers, removePattern,
+    setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
     previewRule, membersNow,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
-    honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, compose, composeEach,
+    honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
     approve, reject, onProposal, withdrawProposal, replaceProposal, noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces,
     receipt, expireSweep, pointerSync, learnSentFiles, filesOfferFor, releaseHeld, stopHeld,
   } = Object.assign(engineCtx, ChannelsOutbound.create(engineCtx));
@@ -8157,6 +8202,7 @@ function create(deps = {}) {
     onFresh,   // lane channel-agent-watch: the hit dispatch, driven by test-channel-agent-watch ⑤ with records the store already holds
     carryParked,   // lane stash-pending-live: a member's own turn (the hook's stash drain) carries what its watchers parked
     listFor, readFor, statusFor,
+    proposalsListFor, proposeRecall,   // lane channels-proposals-recall: the agent's own proposals as a list; a recall of the user's message, proposed
     reachCountFor,   // lane channels-teach: the hook teaches vibespace-channels on this (a count, never a render)
     flushPending: (adapterId, convId, opts) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushPending(rec, convId, opts || {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },
     // R4: a window is per (conversation | scope, WATCHER) — `key` names the conversation (or `scope:acct:<id>` / `scope:pat:<id>`), `principal` the watcher

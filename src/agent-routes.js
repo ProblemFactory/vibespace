@@ -2216,6 +2216,48 @@ app.get('/api/agent/channels/status', (req, res) => {
   if (p) touchChannel(id, [{ op: 'status', adapterId: p.adapterId, convId: p.convId || null, title: p.title, account: p.adapterLabel, proposalId: p.id }]);
   chanAnswer(res, r);
 });
+// lane channels-proposals-recall (agent feedback fb-a91218a6bf — a reply's output cut short lost its proposal id): THIS
+// conversation's OWN proposals as ONE list (the set `status` reads), one row each — id · kind · conversation · summary
+// (peer text, through the belt) · state · filed at; `all=1` = every state, else what still awaits the user. The outbox
+// only: no vendor call, no touch (the list names no single conversation).
+app.get('/api/agent/channels/proposals', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.proposalsListFor !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  try { chanAnswer(res, eng.proposalsListFor(channelPrincipal(s, id), { all: req.query.all === '1' || req.query.all === 'true' })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// lane channels-proposals-recall (agent feedback fb-1b79b2d9d4 — the user wanted a message HE sent on Lark taken back):
+// PROPOSE a RECALL of the user's own message — never direct (the user approves it, as any send); the approval takes it
+// back through the adapter's `recall` and the record shows it recalled. Refused BY NAME, nothing created: `not-visible`
+// (the uniform answer, naming the user's reach door), `unsupported`, `recall-not-available`, `not-found`, `not-yours`,
+// `already-recalled`, `window-passed`. Its OWN status table (chanAnswer's is the refresh census's source).
+const RECALL_STATUS = Object.freeze({ 'not-visible': 404, 'not-found': 404, unsupported: 409, 'recall-not-available': 409, 'not-yours': 409, 'already-recalled': 409, 'window-passed': 409, 'bad-member': 409 });
+app.post('/api/agent/channels/recall', async (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.proposeRecall !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  const b = req.body || {};
+  const key = splitConvKey(b.conv);
+  if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>)', code: 'bad-request' });
+  if (typeof b.msg !== 'string' || !b.msg.trim()) return res.status(400).json({ error: 'msg is required (the message id `vibespace-channels read` prints)', code: 'bad-request' });
+  // the drafter is the conversation's OWN id (the reply rule: no `webui:` placeholder, no pending fork's borrowed id)
+  const ownV = ownConversationIdOf(s);
+  if (!ownV.cid) return res.status(409).json({ error: ownV.why, code: 'bad-member' });
+  try {
+    const r = await eng.proposeRecall(channelPrincipal(s, id), key.adapterId, key.convId, { msg: b.msg.trim(), why: typeof b.why === 'string' ? b.why : null });
+    if (r && r.ok && r.proposal) touchChannel(id, [{ op: 'recall', adapterId: key.adapterId, convId: key.convId, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id }]);
+    if (r && r.ok) return res.json(r);
+    const code = (r && r.code) || 'error';
+    return res.status(RECALL_STATUS[code] || 500).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/agent/channels/request', async (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;

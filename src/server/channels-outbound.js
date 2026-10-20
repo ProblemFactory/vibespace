@@ -16,6 +16,7 @@ const ACL = require('../channel-acl.js');
 const Drain = require('../channel-drain.js');
 const OF = require('../channel-outbox-files.js');
 const Thr = require('../channel-thread.js');
+const Rev = require('../channel-revisions.js');   // lane channels-proposals-recall: a message the store already shows recalled
 const { toAgentText: agentText } = require('../peer-text.js');
 const { reactionsOf: reactionsRow, threadsOf: threadsRow, ChannelError } = require('../channels/index.js');
 const { HOLD_MAX_SEC } = require('../channels/vendor-hold.js');   // lane lark-send-hold: the longest wait a vendor hold can name
@@ -30,7 +31,7 @@ function create(engineCtx) {
     accountsBrief, conversationName, notify, kick, budgetRefusal, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, offerNow,
     threadRefresh, rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, refreshConvCaps, track, policyFor,
     policyRequiresReview, authorityCapsFor, healP2, effectiveFor, billedWake, reachFor, groupsOfSession, convFor, stillSees, effectiveForAccount,
-    accountScopeGrants,
+    accountScopeGrants, recallMessage,
   } = engineCtx;
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -131,9 +132,10 @@ function create(engineCtx) {
     // whether a lost outcome can be reconciled by the machine at all.
     const pending = p.state === 'proposed' || p.state === 'awaiting-approval' || p.state === 'sending';
     const reactionKind = p.kind === 'reaction';
+    const recallKind = p.kind === 'recall';   // lane channels-proposals-recall: no text either; a lost one is checked by ONE read of the message by its id
     // a reaction carries no text, so no sender line; its lost outcome is checked by ONE list call where reactions are listed
-    const honestyLine = reactionKind ? null : pending ? P.honestyLine({ draftedBy: p.draftedBy, enabled: honestyLineFor(rec) }) : (p.result && p.result.honestyLine ? P.honestyLine({ draftedBy: p.draftedBy, enabled: true }) : null);
-    const can = p.state === 'unknown' ? (!c ? { ok: false, code: 'no-adapter', why: 'the adapter no longer exists' } : reactionKind ? (reactionsRow(c).read === 'list' ? { ok: true } : { ok: false, code: 'no-idempotency', why: 'this channel does not list reactions — only a person can check the platform' }) : P.canReconcile(c)) : null;
+    const honestyLine = reactionKind || recallKind ? null : pending ? P.honestyLine({ draftedBy: p.draftedBy, enabled: honestyLineFor(rec) }) : (p.result && p.result.honestyLine ? P.honestyLine({ draftedBy: p.draftedBy, enabled: true }) : null);
+    const can = p.state === 'unknown' ? (!c ? { ok: false, code: 'no-adapter', why: 'the adapter no longer exists' } : recallKind ? (caps.recallRowOf(c) ? { ok: true } : { ok: false, code: 'no-idempotency', why: 'this channel no longer declares a recall — only a person can check the platform' }) : reactionKind ? (reactionsRow(c).read === 'list' ? { ok: true } : { ok: false, code: 'no-idempotency', why: 'this channel does not list reactions — only a person can check the platform' }) : P.canReconcile(c)) : null;
     return {
       ...p, ...(p.convId && conversationName(p.adapterId, p.convId) ? { title: conversationName(p.adapterId, p.convId) } : {}),   // B-c127: the conversation's name NOW (a proposal froze its title — or the raw id — when it was drafted)
       adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, identityWarning: c ? caps.identityWarning(c) : null, ttlAt, canDecide: p.state === 'awaiting-approval',
@@ -143,7 +145,7 @@ function create(engineCtx) {
       ...(() => { const fb = rec && p.state === 'awaiting-approval' && P.storedAttachments(p).length ? filesBlockedOf(filesOfferFor(rec, p.key && store.index.live()[p.key] ? effectiveConvCaps(rec, store.index.live()[p.key]) : null)) : null; return fb ? { filesBlocked: fb } : {}; })(),   // B-f467: the Outbox row draws the conversation's own avatar (a mail thread = the mail glyph)
       // r3: how many agents approving this WAKES (a billed turn each) — the
       // card says it and echoes it with the Approve (`expectWakes`)
-      wakes: !reactionKind && sendStartsTurn(rec) ? 1 : 0,
+      wakes: !reactionKind && !recallKind && sendStartsTurn(rec) ? 1 : 0,
       honestyLine, canReconcile: !!(can && can.ok), reconcileWhy: can && !can.ok ? can.why : null, reconcileWhyCode: can && !can.ok ? (can.code || null) : null,
       // THE OUTCOME AS STRUCTURE (a3 i18n): `p.reason` stays the English
       // contract string agents read; the card words `outcome` in its language.
@@ -180,6 +182,8 @@ function create(engineCtx) {
     if (v.replyEnvelope && typeof v.replyEnvelope === 'object') out.replyEnvelope = agentEnvelope(v.replyEnvelope);   // B-a085: the recipients the agent's CLI prints
     if (v.receipt && typeof v.receipt === 'object') out.receipt = { ...v.receipt, vendorMessageId: agentId(v.receipt.vendorMessageId) };
     if (v.reaction && typeof v.reaction === 'object') out.reaction = { ...v.reaction, msg: agentId(v.reaction.msg), ...(v.reaction.quote && typeof v.reaction.quote === 'object' ? { quote: { ...v.reaction.quote, author: agentText(v.reaction.quote.author, { kind: 'line', max: 200 }) } } : {}) };
+    // lane channels-proposals-recall: the message a recall takes back, and its quote (the user's own words — still through the belt)
+    if (v.recall && typeof v.recall === 'object') out.recall = { ...v.recall, msg: agentId(v.recall.msg), ...(v.recall.quote && typeof v.recall.quote === 'object' ? { quote: { author: agentText(v.recall.quote.author, { kind: 'line', max: 200 }), text: agentText(v.recall.quote.text, { kind: 'line', max: 200 }) } } : {}) };
     return out;
   }
   function withheldProposal(p) {
@@ -187,8 +191,9 @@ function create(engineCtx) {
       id: p.id, kind: p.kind || 'message', state: p.state, at: p.at || null, updatedAt: p.updatedAt || null,
       adapterId: p.adapterId, convId: p.convId || null, title: null, draftedBy: p.draftedBy || null,
       accessRemoved: true, note: P.ACCESS_REMOVED_NOTE,
-      receipt: p.receipt ? { proposalId: p.id, status: p.receipt.status, ...(p.kind === 'reaction' ? { kind: 'reaction' } : {}), withheld: true } : null,
+      receipt: p.receipt ? { proposalId: p.id, status: p.receipt.status, ...(p.kind === 'reaction' || p.kind === 'recall' ? { kind: p.kind } : {}), withheld: true } : null,
       ...(p.kind === 'reaction' && p.reaction ? { reaction: { msg: p.reaction.msg, key: p.reaction.key, op: p.reaction.op, glyph: p.reaction.glyph || null } } : {}),
+      ...(p.kind === 'recall' && p.recall ? { recall: { msg: p.recall.msg } } : {}),   // lane channels-proposals-recall: the id it named itself, never the quote
     };
   }
   /** The drafter's Task Groups AT DRAFT TIME (`drafterGroups`, beside `draftedBy` — whose shape the audit and the
@@ -757,6 +762,59 @@ function create(engineCtx) {
     const fresh = store.outbox.snapshot().proposals[created.id];
     return { ok: true, proposal: agentProposalView(ctx, fresh), decision };
   }
+  /**
+   * lane channels-proposals-recall (agent feedback fb-1b79b2d9d4; the owner: 「注意看一下 agent 给的 CLI 反馈」): PROPOSE
+   * TAKING BACK a message the USER sent — a proposal of kind `recall`, NEVER direct (`P.decideRecall`: the user approves
+   * it whatever the channel's policy or the drafter's authority); the card quotes the message it takes back (the belt).
+   * Refused BY NAME before anything is created: `not-visible` (the uniform answer for a conversation outside the
+   * caller's reach and one that does not exist — the sentence names the user's door), `unsupported` (the adapter
+   * declares no `canRecall`), `recall-not-available` (this conversation does not resolve the user's send identity now),
+   * then `P.recallVerdict`'s `not-found` / `not-yours` / `already-recalled` / `window-passed`. The same recall already
+   * waiting answers that proposal again (`already`). The send re-judges all of it (a window passes while a card waits).
+   */
+  async function proposeRecall(ctx, adapterId, convId, input = {}) {
+    const { en, rec } = convFor(adapterId, convId);
+    const agent = !!(ctx && ctx.kind === 'agent');
+    if (!en || !rec || (agent && !ACL.canSee(reachFor(ctx, rec, en).level))) return ACL.notVisible();
+    const row = caps.recallRowOf(registry.capsOf(rec.kind));
+    if (!row) return { ok: false, code: 'unsupported', error: `${rec.label || rec.id} cannot take a message back (its channel declares no recall) — nothing was proposed` };
+    const msg = String((input && input.msg) || '').slice(0, 512);
+    const target = msg ? store.findRecord(adapterId, convId, msg) : null;
+    const recalledAt = target ? Rev.recalledAtOf(store.readSide(adapterId, convId, { msgs: new Set([msg]) }).filter((x) => x && x.k === 'fx')) : null;
+    const v = P.recallVerdict({ record: target, row, recalledAt, now: now() });
+    if (!v.ok) return { ...v, error: `${v.error} — nothing was proposed` };
+    const offer = await offerNow(rec, adapterId, convId, 'recall');
+    if (!offer.offered) return { ok: false, code: 'recall-not-available', why: offer.why, error: `a message cannot be taken back here now (${offer.why}) — nothing was proposed` };
+    const pending = proposalsFor(en.key).find((q) => q.kind === 'recall' && q.recall && q.recall.msg === msg && (q.state === 'awaiting-approval' || q.state === 'proposed' || q.state === 'sending') && (!agent || (q.draftedBy && q.draftedBy.id === ctx.id)));
+    if (pending) return { ok: true, already: true, proposal: agentProposalView(ctx, pending), decision: pending.policy || null };
+    // the verify-r2 rule (IDENTITY): the offer was an await — a revoke that landed meanwhile creates NOTHING
+    if (!stillSees(ctx, adapterId, convId)) return ACL.notVisible();
+    const t = now();
+    const decision = P.decideRecall();
+    const drafter = agent ? { kind: 'agent', id: ctx.id, name: ctx.name || null } : { kind: 'user', id: null, name: null };
+    const w = input && input.why;
+    const why = typeof w === 'string' && w.trim() ? { kind: 'text', id: null, label: w.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 300) } : null;
+    let created = null;
+    await store.outbox.update((ob) => {
+      const id = store.outbox.nextId();
+      created = ob.proposals[id] = {
+        id, kind: 'recall', adapterId, convId, key: en.key, title: agentTitle(en, convId),
+        recall: { msg, quote: P.reactionQuote(target), sentAt: Number(target.at) || null },
+        text: '', originalText: '', replyTo: msg, why, attachments: [],
+        draftedBy: drafter, ...drafterGroupsOf(ctx), authority: 'draft', at: t, updatedAt: t, state: 'proposed',
+        policy: { mode: decision.mode, reasons: decision.reasons, detail: decision.detail },
+        sendAs: 'user', identity: identityFor(rec, 'user'),
+        ttlMs: P.PROPOSAL_TTL_MS, awaitingSince: null, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null,
+        history: [{ state: 'proposed', at: t, by: drafter.kind }],
+      };
+    });
+    auditOutbox(created, 'propose', { mode: decision.mode, reasons: decision.reasons, recall: { msg } });
+    await transition(created.id, 'awaiting-approval', 'policy');
+    await pointerSync(en.key);
+    notifyOutbox([created.id]);
+    notify([convId]);
+    return { ok: true, proposal: agentProposalView(ctx, store.outbox.snapshot().proposals[created.id]), decision };
+  }
   const COMPOSE_NOT_FOUND = 'no such account (not found, or you have no access to the whole account) — `vibespace-channels status` shows your access';
   /**
    * COMPOSE A NEW MESSAGE (B-6acc, the owner 2026-09-26: "给我一个agent使用
@@ -943,9 +1001,11 @@ function create(engineCtx) {
     // (nothing moves on a refusal: the proposal still awaits). 2026-09-27: a
     // receipt the decider chose to deliver NOW is a wake too — in the same echo
     const reactionKind = p0.kind === 'reaction';
+    // lane channels-proposals-recall: a recall has no text to edit either (Approve takes the message back; Reject keeps it)
+    if (p0.kind === 'recall' && typeof text === 'string' && text.trim()) return { ok: false, code: 'bad-proposal', error: 'a recall has no text to edit — approve or reject it', why: 'recall' };
     // lane channel-threads: a reaction has no text to edit and never starts a turn (spec §5.3)
     if (reactionKind && typeof text === 'string' && text.trim()) return { ok: false, code: 'bad-proposal', error: 'a reaction has no text to edit — approve or reject it', why: 'reaction' };
-    const wakeN = !reactionKind && sendStartsTurn(adapterRecords().adapters.find((r) => r.id === p0.adapterId) || null) ? 1 : 0;
+    const wakeN = !reactionKind && p0.kind !== 'recall' && sendStartsTurn(adapterRecords().adapters.find((r) => r.id === p0.adapterId) || null) ? 1 : 0;
     const rch = receiptChoiceFor(p0, deliver);
     const echo = wakeGate(p0.convId, wakeN + rch.n, { consent });
     if (!echo.ok) return { ...echo, proposal: proposalView(p0) };
@@ -1032,6 +1092,7 @@ function create(engineCtx) {
   function receiptChoiceFor(p0, deliver) {
     // a reaction never earns a billed turn (spec §5.3): its receipt rides the next one, whatever was asked
     if (p0 && p0.kind === 'reaction') return { choice: 'next-turn', n: 0 };
+    if (p0 && p0.kind === 'recall') return { choice: 'next-turn', n: 0 };   // lane channels-proposals-recall: the same
     const choice = deliver === 'wake-now' ? 'wake-now' : 'next-turn';
     return { choice, n: choice === 'wake-now' && p0 && p0.draftedBy && p0.draftedBy.kind === 'agent' && p0.draftedBy.id ? 1 : 0 };
   }
@@ -1252,6 +1313,7 @@ function create(engineCtx) {
     const p = store.outbox.snapshot().proposals[id];
     if (!p || p.state !== 'sending') return { ok: false, why: p ? `state ${p.state}` : 'no such proposal' };
     if (p.kind === 'reaction') return sendReactionNow(id, p);
+    if (p.kind === 'recall') return sendRecallNow(id, p);   // lane channels-proposals-recall
     const rec = adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
     // THE WIRE TEXT (§9.5): the approved text — plus the sender honesty line
     // ONLY when the channel's switch is on AND the drafter is an agent. The
@@ -1470,6 +1532,42 @@ function create(engineCtx) {
     log.log(`[channels] outbox ${id} → ${p1.adapterId}/${p1.convId}: reaction ${x.op} ${x.key} on ${x.msg}: ${to}${p1.reason ? ` — ${p1.reason}` : ''}`);
     return { ok: to === 'sent', state: to };
   }
+  /**
+   * lane channels-proposals-recall: THE RECALL an approval sends — ONE call through the engine's door (`recallMessage`:
+   * the row, the offer, `P.recallVerdict` again, the budget, the vendor, then the record marked recalled); an attempt
+   * line BEFORE, an outcome line after. A lost answer is `unknown` (Check outcome = ONE read of the message by its id) —
+   * never retried; a refusal (the window passed while the card waited) is `failed` with its code, and no vendor call.
+   */
+  async function sendRecallNow(id, p) {
+    const x = p.recall || {};
+    const t0 = now();
+    await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) q.attemptAt = t0; });
+    auditOutbox(store.outbox.snapshot().proposals[id], 'attempt', { idemKey: p.id, recall: { msg: x.msg } });
+    let r;
+    try { r = await recallMessage(p.adapterId, p.convId, x.msg, { by: p.draftedBy && p.draftedBy.kind === 'agent' ? 'agent' : 'user' }); }
+    catch (err) { r = { ok: false, code: 'vendor-error', error: String((err && err.message) || err), lost: true }; }
+    const t = now();
+    let to, patch;
+    if (r && r.ok) {
+      to = 'sent';
+      patch = (q) => { q.result = { vendorMessageId: null, at: t, sentAs: 'user', lane: null, honestyLine: false, observed: null, handle: null, recall: { msg: x.msg } }; q.reason = null; };
+    } else if (r && r.lost) {
+      to = 'unknown';
+      patch = (q) => { q.reason = `outcome unknown: the recall request left and the answer was lost (${r.error || r.code}); NOT retried automatically — press Check outcome (one read of the message by its id)`; q.failure = { code: r.code || 'vendor-error', detail: { lost: true, message: r.error || null }, at: t }; };
+    } else {
+      to = 'failed';
+      patch = (q) => { q.reason = `${(r && r.code) || 'failed'}: ${(r && r.error) || 'refused'}`; q.failure = { code: (r && r.code) || 'failed', retryable: false, detail: { reason: (r && r.error) || null, why: (r && r.why) || null }, at: t }; };
+    }
+    await transition(id, to, 'adapter', patch);
+    const p1 = store.outbox.snapshot().proposals[id];
+    auditOutbox(p1, 'outcome', { code: r && r.ok ? null : (r && r.code) || null, lost: to === 'unknown', recall: true });
+    if (to === 'unknown') await speakUnknown(p1);
+    else await receipt(id);
+    await pointerSync(p1.key);
+    notifyOutbox([id]); notify(p1.convId ? [p1.convId] : []);
+    log.log(`[channels] outbox ${id} → ${p1.adapterId}/${p1.convId}: recall of ${x.msg}: ${to}${p1.reason ? ` — ${p1.reason}` : ''}`);
+    return { ok: to === 'sent', state: to };
+  }
   /** WHAT AN AGENT SENT FROM HERE (spec §5.4): the conversation's bounded per-drafter set of vendor ids — the
    *  `reply-to-mine` / `in-thread-with-me` rules and the reaction digest read it. A failed write costs one rule
    *  hit, is SAID, and never the send. */
@@ -1618,6 +1716,7 @@ function create(engineCtx) {
     if (!rec) return { ok: false, code: 'reconcile-not-available', error: 'the adapter no longer exists — the outcome cannot be checked from here', proposal: proposalView(p) };
     const c = registry.capsOf(rec.kind);
     if (p.kind === 'reaction') return reconcileReaction(id, p, rec, c, by);
+    if (p.kind === 'recall') return reconcileRecall(id, p, rec, c, by);   // lane channels-proposals-recall
     const can = P.canReconcile(c);
     const t = now();
     if (!can.ok) {
@@ -1719,6 +1818,49 @@ function create(engineCtx) {
     await pointerSync(p1.key);
     notifyOutbox([id]); notify(p1.convId ? [p1.convId] : []);
     return { ok: true, resolved: true, state: to, answer: landed ? 'landed' : 'not-landed', proposal: proposalView(p1) };
+  }
+
+  /** lane channels-proposals-recall: a LOST recall settled by ONE read of the message by its id (`revisionOf` — the row
+   *  `canRecall` stands beside `revisions.recall`, so it is declared): recalled ⇒ `sent` (and the record shows it),
+   *  still there ⇒ `failed` (`not-landed`), no answer ⇒ still `unknown`. Never a second recall. */
+  async function reconcileRecall(id, p, rec, c, by) {
+    const x = p.recall || {};
+    const t = now();
+    const n = ((p.reconcile && p.reconcile.n) || 0) + 1;
+    const stampR = (q, answer, why, resolved) => { q.reconcile = { n, lastAt: t, lastBy: by, lastAnswer: answer, lastWhy: why || null, detail: null, resolvedAt: resolved ? t : null }; };
+    if (!caps.recallRowOf(c)) {
+      await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) stampR(q, 'not-available', 'this channel no longer declares a recall — only a person can check the platform', false); });
+      notifyOutbox([id]);
+      return { ok: false, code: 'reconcile-not-available', error: 'this channel no longer declares a recall — only a person can check the platform', proposal: proposalView(store.outbox.snapshot().proposals[id]) };
+    }
+    const e = adapterFor(rec);
+    if (!affordable(rec, e)) return { ...budgetRefusal(rec, e), proposal: proposalView(p) };
+    auditOutbox(p, 'reconcile-attempt', { by, n, recall: true });
+    let st = null, why = null;
+    const prevBy = e.chargeBy; e.chargeBy = 'owner';
+    try { const a = await vendor(rec, e, () => e.adapter.revisionOf(p.convId, { messageId: x.msg })); st = (a && a.state) || 'unknown'; }
+    catch (err) { why = `the message could not be read by its id: ${(err && err.message) || err}`; }
+    finally { e.chargeBy = prevBy; }
+    if (!st || st === 'unknown') {
+      await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) stampR(q, 'unknown', why || 'the channel did not say', false); });
+      notifyOutbox([id]);
+      return { ok: true, resolved: false, state: 'unknown', answer: 'unknown', reason: why, proposal: proposalView(store.outbox.snapshot().proposals[id]) };
+    }
+    const landed = st === 'recalled';
+    if (landed && !Rev.recalledAtOf(store.readSide(p.adapterId, p.convId, { msgs: new Set([String(x.msg)]) }).filter((y) => y && y.k === 'fx'))) appendSides(rec, p.convId, [{ k: 'fx', msg: String(x.msg), at: t, src: 'byid', facts: Rev.recallFacts() }]);
+    const tr = await transition(id, landed ? 'sent' : 'failed', 'reconcile', (q) => {
+      stampR(q, landed ? 'landed' : 'not-landed', null, true);
+      if (landed) { q.result = { vendorMessageId: null, at: t, sentAs: 'user', lane: null, honestyLine: false, observed: null, handle: null, reconciled: true, recall: { msg: x.msg } }; q.reason = null; q.failure = null; }
+      else { q.reason = 'reconcile: the message is still there — the recall never landed'; q.failure = { code: 'not-landed', detail: null, at: t }; }
+    });
+    if (!tr.ok) return { ok: false, code: 'bad-state', error: tr.why };
+    const p1 = store.outbox.snapshot().proposals[id];
+    auditOutbox(p1, 'reconcile-outcome', { answer: landed ? 'landed' : 'not-landed', n, recall: true });
+    await retractUnknownItem(p1);
+    await receipt(id);
+    await pointerSync(p1.key);
+    notifyOutbox([id]); notify(p1.convId ? [p1.convId] : []);
+    return { ok: true, resolved: true, state: landed ? 'sent' : 'failed', answer: landed ? 'landed' : 'not-landed', proposal: proposalView(p1) };
   }
 
   /**
@@ -1948,7 +2090,7 @@ function create(engineCtx) {
 
   return {
     honestyLineFor, sendIdentityFor, proposalsFor, agentProposalView, stashAbout, stashGate, outboxView, notifyOutbox, sendStartsTurn,
-    outboxAttachment, filesSweep, propose, proposeReaction, compose, composeEach, approve, reject, onProposal, withdrawProposal, replaceProposal,
+    outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach, approve, reject, onProposal, withdrawProposal, replaceProposal,
     noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces, receipt, expireSweep, pointerSync, learnSentFiles,
     filesOfferFor,   // lane owner-composer-attach: the owner's composer judges its chips by the same offer the send reads
     releaseHeld, stopHeld,   // lane lark-send-hold: the held sends of an account go out at its reset; stop drops the timers

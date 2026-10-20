@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFile } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { mutantCopies } from './mutant-copy.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
@@ -376,6 +376,9 @@ console.log('§6–§11 r2: the cold walk off the loop, held, single-flight; the
   ok(d2.bytes >= month, `control: a whole-month read through fs.promises.readFile is SEEN by the same instrument (${d2.bytes} B) ⇒ RED`);
 }
 console.log('§13–§19 r3: no loop fold, worker death / deadline / missing shard, rewrites, hash hits, the queue');
+// lane fast-debt-clear: §30's month is BUILT and WARMED inside §15's 1 s control window (its own directory, an instance of its
+// own — no worker, no queue), FOLDED beside §26's r3 control, judged in §30's block
+let month30Prep = null, month30Run = null;
 {
   const t = mkUh('r3', 40 * DAY, 60 * 1024);
   fs.mkdirSync(t.dir, { recursive: true });
@@ -432,26 +435,15 @@ console.log('§13–§19 r3: no loop fold, worker death / deadline / missing sha
   const deaf = uhSrc.replace("w.on('error', (e) => end(reject,", "w.on('error', (e) => void (reject,").replace("w.on('exit', (code) => end(reject,", "w.on('exit', (code) => void (reject,");
   const td = new (M.load('src/usage-history.js', deaf, 'deaf').UsageHistory)({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); td.ledgerWindowMs = 40 * DAY; td.ledgerHotMaxBytes = 60 * 1024; td.warm();
   td.coldWorkerFile = oom; td.coldWorkerHeapMb = 32; td.coldFoldDeadlineMs = 1500;
-  const e14d = await td.aggregateAsync({ to: NOW - 7 }).then(() => null, (e) => e);
-  ok(deaf !== uhSrc && e14d && e14d.code === 'DEADLINE', `control (a walk deaf to its worker's death): "${e14d && e14d.message}" ⇒ RED`);
-  const fb = uhSrc.replace("      throw e;\n    } finally { if (c.walking > 0) c.walking--; }", "      return this.aggregate(opts); // the r2 fallback\n    } finally { if (c.walking > 0) c.walking--; }");
-  const UHf = M.load('src/usage-history.js', fb, 'fallback').UsageHistory;
-  const tf = new UHf({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); tf.ledgerWindowMs = 40 * DAY; tf.ledgerHotMaxBytes = 60 * 1024; tf.warm(); tf.coldWorkerHeapMb = 32; tf.coldWorkerFile = oom;
-  let nf = 0; const realf = tf._allRows.bind(tf); tf._allRows = function* (...x) { nf++; yield* realf(...x); };
-  await tf.aggregateAsync({ to: NOW - 6 }).catch(() => null);
-  ok(fb !== uhSrc && nf > 0, `control (the r2 sync fallback on a worker death): folded on the loop ×${nf} ⇒ RED`);
-  // the cap binds under a parent --max-old-space-size (execArgv [])
-  const child = (src) => spawnSync(process.execPath, ['--max-old-space-size=4096', '--input-type=module', '-e', src], { encoding: 'utf8', timeout: 60000 });
-  const body = (file) => `import { createRequire } from 'node:module'; const require = createRequire(${JSON.stringify(path.join(REPO, 'scripts/x.js'))}); const { UsageHistory } = require(${JSON.stringify(file)}); const u = new UsageHistory({ dataDir: ${JSON.stringify(path.join(tmp, 'r3'))}, homeDir: ${JSON.stringify(tmp)} }); u.ledgerWindowMs = ${40 * DAY}; u.ledgerHotMaxBytes = ${60 * 1024}; u.warm(); u.coldWorkerHeapMb = 4; u.coldWorkerFile = WORKER_FILE; u.aggregateAsync({ to: ${NOW - 7} }).then(() => console.log('ANSWERED'), (e) => console.log('REFUSED ' + e.message));`;
-  const withCap = child(body(path.join(REPO, 'src/usage-history.js')).replace('WORKER_FILE', 'null'));
-  ok(/REFUSED .*memory/.test(withCap.stdout), `§14 under a parent --max-old-space-size=4096 the fold's 4 MB cap still binds (the soft cap) (${(withCap.stdout || withCap.stderr).trim().slice(0, 80)})`);
-  const wSrc = fs.readFileSync(path.join(REPO, 'src/usage-cold-worker.js'), 'utf8');
-  const noSoft = M.write('src/usage-cold-worker.js', wSrc.replace("if (capBytes && ++n % 2000 === 0 && v8.getHeapStatistics().used_heap_size > capBytes) throw", "if (false) throw"), 'nosoftcap');
-  const without = child(body(path.join(REPO, 'src/usage-history.js')).replace('WORKER_FILE', JSON.stringify(noSoft)));
-  ok(/ANSWERED/.test(without.stdout), `control (resourceLimits alone, no soft cap): the parent's flag lifts the cap, the fold answers (${(without.stdout || without.stderr).trim().slice(0, 60)}) ⇒ RED`);
+  // lane fast-debt-clear: THE INDEPENDENT DEADLINE LEGS AT ONCE — this control's 1.5 s deadline elapses while the fallback copy,
+  // the two children and §15 run: it walks in its OWN patched module (own STUCK / LIVE sets, own queue) and its OOM stub reads
+  // no shard (§15 / §16 touch r3's files, never what this walk holds); judged after §15
+  const e14dRun = td.aggregateAsync({ to: NOW - 7 }).then(() => null, (e) => e);
   // §15 (verify #2): a worker that never answers ⇒ the deadline frees the queue
-  const hung = path.join(tmp, 'hung-worker.js');
-  fs.writeFileSync(hung, `const { parentPort } = require('worker_threads'); parentPort.on('message', () => {}); setTimeout(() => process.exit(0), 4000);`);
+  // the stub never answers; it leaves at its own 4 s, or as soon as the leg drops the RELEASE file (lane fast-debt-clear: the
+  // no-deadline control waited the stub's 4 s out after its 1 s verdict — a wait for nothing the leg asserts)
+  const hung = path.join(tmp, 'hung-worker.js'), hungRelease = path.join(tmp, 'hung-worker.release');
+  fs.writeFileSync(hung, `const fs = require('fs'); const { parentPort } = require('worker_threads'); parentPort.on('message', () => {}); setTimeout(() => process.exit(0), 4000); setInterval(() => { if (fs.existsSync(${JSON.stringify(hungRelease)})) process.exit(0); }, 10);`);
   t.coldWorkerFile = hung; t.coldFoldDeadlineMs = 300;
   const p1 = t.aggregateAsync({ to: NOW - 8 }).then(() => 'answered', (e) => e.code);
   const p2 = t.aggregateAsync({ to: NOW - 9 }).then(() => 'answered', (e) => e.code);
@@ -462,9 +454,31 @@ console.log('§13–§19 r3: no loop fold, worker death / deadline / missing sha
   ok(/^hot \d+/.test(r15[2]), '§15 a hot-only query is never wedged behind it');
   t.coldFoldDeadlineMs = 1e9; t.coldWorkerFile = hung;
   const pc = t.aggregateAsync({ to: NOW - 10 }).then(() => 'answered', (e) => e.code);
-  const raced = await Promise.race([pc, new Promise((r) => setTimeout(() => r('still waiting'), 1000))]);
+  const racer = Promise.race([pc, new Promise((r) => setTimeout(() => r('still waiting'), 1000))]);
+  // §14's r2 fallback copy and its two children run INSIDE this control's 1 s (lane fast-debt-clear): they share nothing with
+  // t's pending walk (the copy is its own patched module; the children their own processes, READING r3), and the verdict
+  // below can only be 'still waiting' if the fold still waits when they are done — never less than 1 s of proof
+  const fb = uhSrc.replace("      throw e;\n    } finally { if (c.walking > 0) c.walking--; }", "      return this.aggregate(opts); // the r2 fallback\n    } finally { if (c.walking > 0) c.walking--; }");
+  const UHf = M.load('src/usage-history.js', fb, 'fallback').UsageHistory;
+  const tf = new UHf({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); tf.ledgerWindowMs = 40 * DAY; tf.ledgerHotMaxBytes = 60 * 1024; tf.warm(); tf.coldWorkerHeapMb = 32; tf.coldWorkerFile = oom;
+  let nf = 0; const realf = tf._allRows.bind(tf); tf._allRows = function* (...x) { nf++; yield* realf(...x); };
+  await tf.aggregateAsync({ to: NOW - 6 }).catch(() => null);
+  ok(fb !== uhSrc && nf > 0, `control (the r2 sync fallback on a worker death): folded on the loop ×${nf} ⇒ RED`);
+  // the cap binds under a parent --max-old-space-size (execArgv []) — the two children run at once (each its own process
+  // READING r3; spawnSync held the loop for both in turn — lane fast-debt-clear)
+  const child = (src) => new Promise((resolve) => execFile(process.execPath, ['--max-old-space-size=4096', '--input-type=module', '-e', src], { encoding: 'utf8', timeout: 60000 }, (_e, stdout, stderr) => resolve({ stdout: String(stdout || ''), stderr: String(stderr || '') })));
+  const body = (file) => `import { createRequire } from 'node:module'; const require = createRequire(${JSON.stringify(path.join(REPO, 'scripts/x.js'))}); const { UsageHistory } = require(${JSON.stringify(file)}); const u = new UsageHistory({ dataDir: ${JSON.stringify(path.join(tmp, 'r3'))}, homeDir: ${JSON.stringify(tmp)} }); u.ledgerWindowMs = ${40 * DAY}; u.ledgerHotMaxBytes = ${60 * 1024}; u.warm(); u.coldWorkerHeapMb = 4; u.coldWorkerFile = WORKER_FILE; u.aggregateAsync({ to: ${NOW - 7} }).then(() => console.log('ANSWERED'), (e) => console.log('REFUSED ' + e.message));`;
+  const wSrc = fs.readFileSync(path.join(REPO, 'src/usage-cold-worker.js'), 'utf8');
+  const noSoft = M.write('src/usage-cold-worker.js', wSrc.replace("if (capBytes && ++n % 2000 === 0 && v8.getHeapStatistics().used_heap_size > capBytes) throw", "if (false) throw"), 'nosoftcap');
+  const [withCap, without] = await Promise.all([child(body(path.join(REPO, 'src/usage-history.js')).replace('WORKER_FILE', 'null')), child(body(path.join(REPO, 'src/usage-history.js')).replace('WORKER_FILE', JSON.stringify(noSoft)))]);
+  ok(/REFUSED .*memory/.test(withCap.stdout), `§14 under a parent --max-old-space-size=4096 the fold's 4 MB cap still binds (the soft cap) (${(withCap.stdout || withCap.stderr).trim().slice(0, 80)})`);
+  ok(/ANSWERED/.test(without.stdout), `control (resourceLimits alone, no soft cap): the parent's flag lifts the cap, the fold answers (${(without.stdout || without.stderr).trim().slice(0, 60)}) ⇒ RED`);
+  month30Prep = prep30();
+  const raced = await racer;
   ok(raced === 'still waiting', `control (no deadline): after 1 s the fold is ${raced} ⇒ RED`);
-  await pc; t.coldWorkerFile = null; t.coldFoldDeadlineMs = 0;
+  fs.writeFileSync(hungRelease, ''); await pc; fs.rmSync(hungRelease, { force: true }); t.coldWorkerFile = null; t.coldFoldDeadlineMs = 0;
+  const e14d = await e14dRun;   // §14's deaf control, started before the fallback copy (above)
+  ok(deaf !== uhSrc && e14d && e14d.code === 'DEADLINE', `control (a walk deaf to its worker's death): "${e14d && e14d.message}" ⇒ RED`);
   // §16 (verify #13): a shard vanishes under the walk ⇒ answered, the rows counted + said; the next read rebuilds
   const shards = fs.readdirSync(t.dir).filter((x) => x.startsWith('events-')).sort();
   const victim = path.join(t.dir, shards[1]), keep = fs.readFileSync(victim);
@@ -662,7 +676,12 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   const r3stuck = uhSrc4.replace("if (STUCK.size) return Promise.reject(", "if (false) return Promise.reject(");
   const ts3 = new (M4.load('src/usage-history.js', r3stuck, 'r3stuck').UsageHistory)({ dataDir: path.join(tmp, 'r4'), homeDir: tmp }); ts3.ledgerWindowMs = 40 * DAY; ts3.ledgerHotMaxBytes = 60 * 1024; ts3.warm();
   ts3.coldWorkerFile = blocked; ts3.coldFoldDeadlineMs = 300; ts3.coldTerminateDeadlineMs = 300;
-  await ts3.aggregateAsync({ to: NOW - 43 }).catch(() => null); await ts3.aggregateAsync({ to: NOW - 44 }).catch(() => null);
+  // lane fast-debt-clear: §30's month builds and folds while this control's two blocked workers wait out their deadlines — the
+  // control walks its OWN patched module (own STUCK set), §30 the real one, whose STUCK set is empty from `gone26` on (nothing
+  // after it in §26 touches the real module); r4big is §30's own directory
+  const r3stuckRun = (async () => { await ts3.aggregateAsync({ to: NOW - 43 }).catch(() => null); await ts3.aggregateAsync({ to: NOW - 44 }).catch(() => null); })();
+  month30Run = fold30(month30Prep);
+  await r3stuckRun;
   ok(r3stuck !== uhSrc4 && ts3._coldWalks === 2, `control (no stuck refusal, r3): ${ts3._coldWalks} blocked workers alive at once ⇒ RED`);
   ok(await releaseUntil(stuckGone(ts3)), '§26 the r3 control\'s two blocked workers knocked loose: both exited (② one knock wakes every reader; the next finds none and waits for nothing)');
   // the r4 fixture's release, verbatim — the controls' subject
@@ -698,16 +717,25 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   // worker thread forever (measured, Node 22 + 24): a knock wakes a reader, a reader's open + close a writer
   await until(() => { if (!fifoTid()) return true; knock(); try { fs.closeSync(fs.openSync(fifo, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK)); } catch { } return false; });
 }
-{ // §30 (verify #5): a month bigger than the fold's soft cap folds in row-budget chunks
+/** §30 (verify #5): a month bigger than the fold's soft cap — built and warmed inside §15's control window, folded twice
+ *  beside §26's r3 control */
+function prep30() {
   const t5 = mkUh('r4big', 40 * DAY, 60 * 1024);
   fs.mkdirSync(t5.dir, { recursive: true });
   const base5 = Date.UTC(new Date(NOW - 120 * DAY).getUTCFullYear(), new Date(NOW - 120 * DAY).getUTCMonth(), 2);
   const rows5 = []; for (let k = 0; k < 120000; k++) rows5.push(JSON.stringify({ ...mkRow(base5 + k * 10000), pad: 'p'.repeat(200) }));
   fs.writeFileSync(path.join(t5.dir, shardOf(base5)), rows5.join('\n') + '\n');
   t5.warm(); t5.coldWorkerHeapMb = 30;
+  return { t5, base5 };
+}
+async function fold30({ t5, base5 }) {
   t5.coldRowBudget = 5000; const ok5 = await t5.aggregateAsync({ to: NOW - 100 * DAY }).then((x) => x.totals.requests, (e) => e.message);
-  ok(ok5 === 120000, `§30 a ${Math.round(fs.statSync(path.join(t5.dir, shardOf(base5))).size / 1048576)} MB month under a 30 MB soft cap, 5 000-row chunks: ${ok5}`);
   t5.coldRowBudget = 1e9; const bad5 = await t5.aggregateAsync({ to: NOW - 101 * DAY }).then(() => 'answered', (e) => e);
+  return { ok5, bad5, mb: Math.round(fs.statSync(path.join(t5.dir, shardOf(base5))).size / 1048576) };
+}
+{ // §30 (verify #5): a month bigger than the fold's soft cap folds in row-budget chunks (its fold ran beside §26's r3 control)
+  const { ok5, bad5, mb } = await month30Run;
+  ok(ok5 === 120000, `§30 a ${mb} MB month under a 30 MB soft cap, 5 000-row chunks: ${ok5}`);
   ok(bad5 && bad5.code === 'FOLD_TOO_BIG' && /retrying will not help/.test(bad5.message) && !/retry$/.test(bad5.message), `control (the whole-group read): "${bad5.message && bad5.message.slice(0, 70)}…" ⇒ RED, and it does not say retry`);
 }
 // §31 THE STEPPED BOOT WARM (B-1319): server.js warms the ledger with warmStepped — a MiB per tick, its window slide a

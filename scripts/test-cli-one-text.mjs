@@ -139,6 +139,9 @@ const VERDICTS = {
   'channels react': ['guard', 'channels', ['react', 'lark/oc_1', 'om_1', 'THUMBSUP', '--why', 'because', 'vs', 'that'], 'its --why (a word after the emoji key)'],
   'channels unreact': ['guard', 'channels', ['unreact', 'lark/oc_1', 'om_1', 'THUMBSUP', '--why', 'because', 'vs'], 'its --why'],
   'channels withdraw': ['guard', 'channels', ['withdraw', 'pr-1', '--why', 'because', 'vs'], 'its --why (a word after the id)'],
+  // lane channels-proposals-recall: the list takes no text; a recall's --why is guarded like withdraw's (a word after the id)
+  'channels proposals': ['no-text', 'none (--all is a flag)'],
+  'channels recall': ['guard', 'channels', ['recall', 'lark/oc_1', 'om_1', '--why', 'because', 'vs'], 'its --why (a word after the message id)'],
   'channels search': ['guard', 'channels', ['search', 'two', 'words'], 'the query — never a narrower search than the one typed'],
   'channels list': ['no-text', 'conversations'], 'channels read': ['no-text', 'a conversation + flags'], 'channels attachment': ['no-text', 'a message id + an attachment id'], 'channels refresh': ['no-text', 'a conversation'],
   'channels status': ['no-text', 'an id'], 'channels watch': ['no-text', 'rule flags the SERVER parses (src/channel-watch-spec.js refuses an unexpected word by name)'],
@@ -185,7 +188,7 @@ ok(!unsaid.length, 'every verdict is of the closed set and says why', unsaid);
 }
 const ONE = rows.filter((r) => VERDICTS[r][0] === 'one-text');
 const GUARD = rows.filter((r) => VERDICTS[r][0] === 'guard');
-ok(ONE.length === 8 && GUARD.length === 6, `${ONE.length} one-text commands, ${GUARD.length} guard commands carry legs below`);
+ok(ONE.length === 8 && GUARD.length === 7 /* lane channels-proposals-recall: + channels recall */, `${ONE.length} one-text commands, ${GUARD.length} guard commands carry legs below`);
 
 // the incident's shape — invented words, the same three pieces the shell made of the agent's reply
 const PIECES = ['……若对照有源码权限的人', 'vs', '人员名单会对不上。\n2. 某同事 …'];

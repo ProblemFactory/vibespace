@@ -285,7 +285,7 @@ let deviceMgr = null;
 // the setup the 0600 file as before) — src/server/host-tokens.js (lane vault-e2e-password-fix-r2); no attach config holds it.
 const AGENTD_DIR = path.join(__dirname, 'data', 'agentd');
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
-const hostTokens = require('./src/server/host-tokens.js').create({ dataDir: path.join(__dirname, 'data'), agentdDir: AGENTD_DIR });
+const hostTokens = require('./src/server/host-tokens.js').create({ dataDir: path.join(__dirname, 'data'), agentdDir: AGENTD_DIR, nameOf: (k) => { const h = String(k).startsWith('dial-') ? hosts.findByDeviceId(String(k).slice(5)) : hosts.get(k); return (h && h.name) || null; } });   // nameOf: a LOCKED refusal names the machine (lane vault-locked-refusal-notice)
 function agentdHostToken(hostId) { return hostTokens.tokenFor(hostId); }
 // Install/refresh the daemon on a host, throttled per boot+version: a marker
 // records the last version shipped; matching = skip (one ssh round trip saved

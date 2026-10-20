@@ -16,5 +16,9 @@ vibespace-vault lock       lock it now
   leave credentials open. Connections that are already running keep what they hold until they reconnect.
 
 **Never ask the user for the second password, and never try to unlock, set up or change the vault** — those are the
-user's own doors on the page (an agent token is refused `human_only`). When a tool you need says the vault is locked,
-tell the user and wait; `vibespace-ask` is the way to ask them to unlock.
+user's own doors on the page (an agent token is refused `human_only`).
+
+**When a tool you need says the vault is locked (`vault_locked`), the user has already been told** — VibeSpace notes
+every refusal and their For you tray names who was stopped and what (this conversation included), with an Unlock
+button. Do not ask them to unlock it, do not file a `vibespace-ask` about it and do not repeat it in chat: wait, or do
+other work, and try the tool again later.

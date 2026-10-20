@@ -33,6 +33,10 @@
 // fetches a picture or a file of a conversation you may read and SAVES it
 // (`--out <path>`, else the temp dir under a name made of hashes and its type —
 // never the sender's file name); you open it with your own tools.
+// lane channels-proposals-recall (2026-10-20, two agent feedback records): `proposals [--all]` lists THIS conversation's
+// own proposals (id · kind · conversation · summary · state · filed) — the id for `withdraw` / `--replaces` survives a
+// cut-short reply output; `recall <conv> <msg id>` PROPOSES taking back a message the USER sent (the user approves it,
+// as any send) — refused by name where it cannot be (not-visible / unsupported / not-yours / window-passed / …).
 // Full manual: vibespace-docs channels.
 'use strict';
 // ── PURE (lane channel-attach-read): where an attachment lands, decided by its TYPE (the stored mime, else the
@@ -86,6 +90,7 @@ const CH_TEXT_SPEC = {
   react: { n: 3, what: 'the emoji key', remedy: 'escape the inner quotes of --why (its text is ONE argument)', valued: ['--why'], optional: [], bare: [] },
   unreact: { n: 3, what: 'the emoji key', remedy: 'escape the inner quotes of --why (its text is ONE argument)', valued: ['--why'], optional: [], bare: [] },
   withdraw: { n: 1, what: 'the proposal id', remedy: 'escape the inner quotes of --why (its text is ONE argument)', valued: ['--why'], optional: [], bare: [] },
+  recall: { n: 2, what: 'the message id', remedy: 'escape the inner quotes of --why (its text is ONE argument)', valued: ['--why'], optional: [], bare: [] },
   search: { n: 1, what: 'the search', remedy: 'quote the words as ONE argument ("two words"), or escape the inner quotes', valued: ['--account', '--limit'], optional: [], bare: ['--full'] },
 };
 const CH_SPEC = CH_TEXT_SPEC[verb] || null;
@@ -231,6 +236,14 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
       stray words (a message is ONE argument: a word after it ⇒ exit 2, nothing sent) and answers sent: N characters
                                                    ← takes back YOUR proposal while the user has not decided it
                                                      (--replaces on reply/compose = withdraw it + propose the new one, in one step)
+  vibespace-channels proposals [--all]             ← YOUR proposals in this conversation, one line each: id · kind · conversation ·
+                                                     what it says · state · filed — the ids withdraw / --replaces take;
+                                                     default = the ones still awaiting the user, --all = every state
+  vibespace-channels recall <conv> <msg id> [--why "…"]
+                                                   ← PROPOSES taking back a message the USER sent (the user approves it — never
+                                                     direct); refused by name: not-yours (only the user's own), window-passed
+                                                     (the channel's recall window), unsupported (a channel without recall),
+                                                     not-visible (a conversation outside your reach — the user grants reach)
   vibespace-channels search "words" [--account <id>] [--limit N] [--full]
                                                    ← what is STORED (free); --full = ONE page of the account's own search over its whole history (your share, one per account per 20 s)
                                                    ← messages you can see (the stored logs; no vendor call)
@@ -275,6 +288,7 @@ function printProposal(p, { full = false } = {}) {
   if (p.compose) console.log(`    a NEW message to ${(p.compose.to || []).join(', ')}${(p.compose.cc || []).length ? ` (cc ${p.compose.cc.join(', ')})` : ''} — subject: ${p.compose.subject}`);
   printRecipients(p);
   if (p.kind === 'reaction' && p.reaction) console.log(`    a reaction: ${p.reaction.op === 'remove' ? 'remove' : 'add'} ${p.reaction.glyph || `:${p.reaction.key}:`} on ${p.reaction.msg}`);
+  if (p.kind === 'recall' && p.recall) console.log(`    a recall: the user's message ${p.recall.msg}${p.recall.quote && p.recall.quote.text ? ` — "${p.recall.quote.text}"` : ''}`);
   // 2026-09-28: WHERE the reply lands (the server's words; an older server's proposal carries `inThread` only)
   const place = p.placementText || (p.inThread ? 'in a thread' : null);
   if (place && p.placement !== 'chat') console.log(`    placed ${place}${p.replyTo ? ` — answering ${p.replyTo}` : ''}${p.inThread && p.threadKey ? ` (thread ${p.threadKey})` : ''}`);
@@ -577,6 +591,44 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const r = await call('POST', `/api/agent/channels/proposals/${encodeURIComponent(id)}/withdraw`, body);
     const p = r.proposal || {};
     console.log(`withdrawn — proposal ${p.id || id} is taken back; the user's approval card for it is gone${p.withdrawal && p.withdrawal.why ? ` (why: ${p.withdrawal.why})` : ''}`);
+    return;
+  }
+  // lane channels-proposals-recall (agent feedback fb-a91218a6bf): YOUR proposals here, one line each — the id a cut-short
+  // reply output lost, for `withdraw` / `--replaces`; default = what still awaits the user, --all = every state
+  if (verb === 'proposals') {
+    const all = args.includes('--all');
+    const r = await call('GET', '/api/agent/channels/proposals' + (all ? '?all=1' : ''));
+    const rows = r.proposals || [];
+    if (!rows.length) { console.log(all ? 'you have no proposals.' : `nothing of yours awaits the user${r.total ? ` (${r.total} decided — vibespace-channels proposals --all)` : ''}.`); return; }
+    for (const p of rows) {
+      const st = p.state === 'awaiting-approval' || p.state === 'proposed' ? 'AWAITING' : String(p.state || '').toUpperCase();
+      console.log(`${p.id}  ${st}  ${p.kind}  → ${p.conversation}${p.title ? ` (${p.title})` : ''}  filed ${when(p.at)}`);
+      console.log(`    ${p.accessRemoved ? '(you no longer have access to that conversation — its fate only)' : p.summary || '(nothing to quote)'}`);
+    }
+    if (r.more) console.log(`… ${r.more} more — only the newest ${r.max || rows.length} are listed`);
+    if (!all && r.total > r.awaiting) console.log(`(${r.total - r.awaiting} decided — vibespace-channels proposals --all)`);
+    if (rows.some((p) => p.state === 'awaiting-approval' || p.state === 'proposed')) console.log('take one back: vibespace-channels withdraw <id>   replace one: vibespace-channels reply <conv> "…" --replaces <id>');
+    return;
+  }
+  // lane channels-proposals-recall (agent feedback fb-1b79b2d9d4): PROPOSE taking back a message the USER sent — the user
+  // approves it (never direct); a refusal names why (exit 4), nothing is created
+  if (verb === 'recall') {
+    const conv = args[1];
+    const msg = chText(2);   // lane cli-one-text-arg: a word after the id (a --why whose quote closed early) ⇒ exit 2
+    if (!conv || !msg || [conv, msg].some((x) => x.startsWith('--')) || conv.indexOf('/') <= 0) { console.error('usage: vibespace-channels recall <conv> <msg id> [--why "…"]   (the id `read` prints)'); process.exit(1); }
+    const body = { conv, msg };
+    if (flag('--why')) body.why = flag('--why');
+    const res = await fetch(API + '/api/agent/channels/recall', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: JSON.stringify(body) }).catch((e) => ({ _neterr: e.message }));
+    if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
+    let j = {}; try { j = await answerOf(res); } catch { }
+    const RECALL_REFUSED = ['unsupported', 'recall-not-available', 'not-yours', 'already-recalled', 'window-passed'];
+    if (RECALL_REFUSED.includes(j.code)) { console.log(`not proposed: ${j.error} [${j.code}]`); process.exit(4); }
+    if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + ']' : '')); process.exit(1); }
+    const p = j.proposal || {};
+    const x = p.recall || {};
+    if (j.already) console.log(`already proposed — proposal ${p.id} (taking back ${x.msg || msg}) is ${p.state}`);
+    else console.log(`proposed — proposal ${p.id}: taking back the user's message ${x.msg || msg} is awaiting the user's approval (a recall always is); the receipt arrives in your next turn`);
+    if (x.quote && x.quote.text) console.log(`  the message: "${x.quote.text}"`);
     return;
   }
   if (verb === 'status') {

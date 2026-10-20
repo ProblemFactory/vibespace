@@ -108,6 +108,8 @@ const fxS = JSON.parse(read(FIXTURE));
 const a = ['file-index', 'bugfix-index'].map((n) => v(fxS, n));
 ok(a.every((j) => j.ok && j.census.retired === 1 && j.census.lost === 0 && (md ? j.census.shaOk === true : j.census.shaOk === null)),
   `(a) removed WITH a retirement ⇒ green — ${a[0].line}`);
+// a MOVED row (its head is one of the fixture's): lane vault-locked-refusal-notice — one INDEX line added near the top moved
+// the middle onto a `src/` line written after the diet (no fixture row), so `gone` named nothing and (b)/(d) went red
 const sFl = homeLines(blk('file-index', fxS), S), gone = sFl.findIndex((l, i) => i > sFl.length / 2 && l.startsWith('src/') && fil.heads.includes(cut(l, K)));
 const goneRow = fil.heads.findIndex((t) => t === cut(sFl[gone], K));
 const b = v(fxS, 'file-index', sFl.filter((_, i) => i !== gone));

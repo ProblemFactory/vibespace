@@ -23,6 +23,13 @@
  *     overwritten then unlinked). `onOpen(fn)` runs after a setup and after every unlock (the sweeps that seal what the vault
  *     does not hold yet); `onLock(fn)` after a person's / an agent's / the idle lock (never the shutdown's: a restart is not a
  *     lock act — the hub's wiring signs every login out on one).
+ *   · A REFUSAL IS THE SIGNAL (lane vault-locked-refusal-notice — the owner 2026-10-20: "为啥老是有 agent 和我说需要解锁 vault"):
+ *     `blocked(actor, verb)` is the ONE helper every door calls when it refuses `vault_locked` — WHO it stopped (a name a
+ *     person reads) and WHAT — into the lock epoch's list (src/vault-blocked.js, PURE; ≤ 50 actors, the rest a count; the
+ *     unlock clears it). The store-key road notes itself (`keyFor` / `secretGet` / `secretPut` refused while locked ⇒ actor
+ *     «VibeSpace», the store as the verb). A note that changes what the owner reads re-announces the facts (`blocked` = the
+ *     count the lock strip shows) and runs `onBlocked(fn)` (the wiring refreshes its ONE For-you item). Nothing here reads a
+ *     key or unlocks: the lock law is unchanged.
  */
 const fs = require('fs');
 const path = require('path');
@@ -31,6 +38,7 @@ const V = require('../vault.js');
 const SB = require('../secret-box.js');
 const KF = require('../key-file.js');
 const { runMigrations } = require('../migration-runner.js');
+const VB = require('../vault-blocked.js');   // PURE: who a refusal stopped, this lock epoch (lane vault-locked-refusal-notice)
 
 /** THE STORE KEYS the vault holds — the key files the key-file law used to keep beside their data (name = the base name under
  *  data/; `raw` = the file holds the 32 bytes, else 64 hex characters). scripts/test-vault-law.mjs: every key file a src/
@@ -100,6 +108,8 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   const keyNameOf = (store) => { const k = STORE_KEYS.find((x) => x.store === store); return k ? k.name : null; };   // a store id (src/vault-inventory.js STORES) → its key's entry name
   const openHooks = [];     // r2: after a setup AND every unlock — seal what the vault does not hold yet (host token files, the frp field)
   const lockHooks = [];     // r2: after a lock act (door / agent / idle) — the wiring signs every login out
+  const blockedList = VB.createBlocked();   // lane vault-locked-refusal-notice: who a refusal stopped this lock epoch (memory only)
+  const blockedHooks = [];  // … and who is told: the wiring's one For-you item
 
   function load() {
     let text;
@@ -135,6 +145,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       corrupt: !!recordBad,
       keys: record ? Object.keys(record.entries).filter((n) => !isSecretName(n)).length : 0,
       secrets: record ? Object.keys(record.entries).filter(isSecretName).length : 0,   // r2: the device link tokens + the frp token
+      blocked: st === 'locked' ? blockedList.count() : 0,   // lane vault-locked-refusal-notice: how many callers the lock stopped (the strip's count)
     };
   }
   const announce = () => { try { bcast({ type: 'vault-state', ...facts() }); } catch { } };
@@ -202,6 +213,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   function keyFor(name, opts = {}) {
     const r = keyRead(name, opts);
     if (r && r.ok) uses.set(name, { at: now(), by: ['human', 'agent', 'job'].includes(opts.by) ? opts.by : 'system' });
+    else if (r && r.code === KF.VAULT_LOCKED) blocked(VB.HUB, storeVerb(name));   // lane vault-locked-refusal-notice: the store-key road notes itself
     return r;
   }
   function keyRead(name, { keyFile, raw = false, hasCiphertext = () => true, legacy } = {}) {
@@ -237,7 +249,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
    *  `{ ok: false, code: 'key-unreadable:vault_locked' | 'vault_not_set_up' | 'key-malformed' }`. Never reads a file. */
   function secretGet(name) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
-    if (state() !== 'unlocked') return { ok: false, code: lockedCode() };
+    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); return { ok: false, code: lockedCode() }; }
     const box = record.entries[name];
     if (!box) return { ok: true, value: null };
     const v = V.unwrapEntry(dek, name, box);
@@ -246,7 +258,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   /** Seal `value` under `name` (unlocked only — locked ⇒ refused by name, nothing written). */
   function secretPut(name, value) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
-    if (state() !== 'unlocked') return { ok: false, code: lockedCode() };
+    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); return { ok: false, code: lockedCode() }; }
     const plain = Buffer.isBuffer(value) ? Buffer.from(value) : Buffer.from(String(value == null ? '' : value), 'utf8');
     try {
       const next = { ...record, entries: { ...record.entries, [name]: { ...V.wrapEntry(dek, name, plain), at: now() } } };   // int317: `at` = when it was sealed (the Vault window's «saved»)
@@ -292,6 +304,22 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (!proven) audit('vault-adopt-unsealed', { why: `${name}: the record read back did not open to the file's value — the file is kept` });
     else { try { shred(file); audit('vault-adopted', { why: name }); } catch (e) { audit('vault-adopt-unsealed', { why: `${name}: ${KF.errnoOf(e)}` }); } }
     return { ok: true, value: want };
+  }
+  // ── A REFUSAL IS THE SIGNAL (lane vault-locked-refusal-notice) ──
+  const storeVerb = (name) => { const k = STORE_KEYS.find((x) => x.name === name); return k ? `the ${k.store} store` : name; };
+  const secretVerb = (name) => { const n = String(name), kind = n.split(':')[0]; return kind === 'host' ? 'a device link token' : kind === 'apikey' ? 'an automation key' : kind === 'file' ? `the sealed file ${n.slice(5)}` : `the stored secret ${n}`; };   // a machine's / a key's id is never the words
+  /** THE ONE HELPER a door calls when it refuses `vault_locked`: `actor` = WHO it stopped (a NAME a person reads — the door
+   *  passes the conversation's / the machine's / the account's name, never an id), `verb` = WHAT. Only while LOCKED (a
+   *  not-set-up vault refuses nothing by this code). A note that changes what the owner reads re-announces the facts and
+   *  runs the onBlocked hooks with the epoch's summary. → whether it was such a note. Never throws, never reads a key. */
+  function blocked(actor, verb) {
+    if (state() !== 'locked') return false;
+    let r;
+    try { r = blockedList.note({ actor, verb, at: now(), epoch }); } catch { return false; }
+    if (!r.fresh) return false;
+    announce();
+    runHooks(blockedHooks, 'a refusal', blockedList.summary());
+    return true;
   }
   const runHooks = (list, what, ...args) => { for (const fn of list) { try { const r = fn(...args); if (r && typeof r.catch === 'function') r.catch((e) => log.warn?.(`[vault] ${what} hook failed: ${(e && e.message) || e}`)); } catch (e) { log.warn?.(`[vault] ${what} hook failed: ${(e && e.message) || e}`); } } };
 
@@ -369,7 +397,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       }
       const { sealing, ...done } = back;
       try { writeRecord(done); record = done; } catch { record = back; /* the sealing list is resumed at the next unlock */ }
-      dek = made.dek; made = null; epoch++; failedTries = 0; pacedUntil = 0; lastActivity = now(); unlockedSince = now();
+      dek = made.dek; made = null; epoch++; blockedList.clear(); failedTries = 0; pacedUntil = 0; lastActivity = now(); unlockedSince = now();
       for (const it of items) keys.set(it.name, it.key);
       items = [];
       audit('vault-set-up', { ip, why: `${Object.keys(record.entries).length} key(s) sealed` });
@@ -404,7 +432,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       return { ok: false, code: r.code, failedTries, ...(pacedUntil > now() ? { retryInMs: pacedUntil - now() } : {}) };
     }
     if (dek) { V.zero(r.dek); return { ok: true, already: true }; }   // a racing unlock landed first
-    dek = r.dek; epoch++; failedTries = 0; pacedUntil = 0; lastActivity = now(); unlockedSince = now();
+    dek = r.dek; epoch++; blockedList.clear(); failedTries = 0; pacedUntil = 0; lastActivity = now(); unlockedSince = now();   // the unlock clears who the lock stopped
     resumeSeal();
     audit('vault-unlocked', { ip });
     announce();
@@ -445,7 +473,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     V.zero(dek); dek = null;
     for (const k of keys.values()) V.zero(k);
     keys.clear();
-    epoch++; lockedSince = now();
+    epoch++; lockedSince = now(); blockedList.clear();   // a new lock epoch: nobody stopped yet
     if (!quiet) { audit('vault-locked', { ip, why }); announce(); runHooks(lockHooks, 'a lock', why); }
     return { ok: true };
   }
@@ -498,7 +526,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   let timer = null;
   if (idleTimer) { timer = setInterval(idleTick, 60e3); timer.unref?.(); }
 
-  const provider = { keyFor, peek, hasEntry, state, epoch: () => epoch, secretGet, secretPut, secretDrop, secretAdopt };
+  const provider = { keyFor, peek, hasEntry, state, epoch: () => epoch, secretGet, secretPut, secretDrop, secretAdopt, blocked };   // `blocked`: a door that holds only the data dir reaches the ONE helper (SB.vaultForDir)
   const unregister = register ? SB.registerVault(dataDir, provider) : () => {};
   const engine = {
     dataDir, file: FILE, state, facts, setup, unlock, lock, change, setIdleLock, touch, idleTick, keyFor, peek, hasEntry,
@@ -511,6 +539,9 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     onOpen(fn) { if (typeof fn === 'function') openHooks.push(fn); },
     /** r2: `fn(why)` after a lock act — the door, an agent, the idle lock; never the shutdown's quiet lock. */
     onLock(fn) { if (typeof fn === 'function') lockHooks.push(fn); },
+    /** lane vault-locked-refusal-notice: THE ONE HELPER (above) + the epoch's list + `fn(summary)` after a note that changed it. */
+    blocked, blockedSummary: () => blockedList.summary(),
+    onBlocked(fn) { if (typeof fn === 'function') blockedHooks.push(fn); },
     secretGet, secretPut, secretDrop, secretAdopt, secretNames,
     epoch: () => epoch, resumeSeal,
     close() { if (timer) clearInterval(timer); lock('close', { quiet: true }); unregister(); LIVE.delete(engine); },

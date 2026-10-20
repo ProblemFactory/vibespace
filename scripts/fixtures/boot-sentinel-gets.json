@@ -47,6 +47,7 @@
   "/api/agent/channels/api/proposals/:id",
   "/api/agent/channels/attachment",
   "/api/agent/channels/list",
+  "/api/agent/channels/proposals",
   "/api/agent/channels/read",
   "/api/agent/channels/search",
   "/api/agent/channels/status",

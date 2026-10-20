@@ -22,6 +22,8 @@ const DA = require('../src/desktop-apps.js');
 let pass = 0, fail = 0;
 const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** a wait that names its effect (lane fast-debt-clear): poll `f` until it holds, at most `ms` — the assert after it judges */
+const until = async (f, ms = 3000) => { const end = Date.now() + ms; while (!f() && Date.now() < end) await sleep(10); return f(); };
 const S = scratch('bkr'); fs.mkdirSync(S, { recursive: true });
 const DP = await deadPort(); // the port the PURE rows name: one the kernel just released, never a fixed one (§81)
 /** A mutant copy of a PURE module (one replace, asserted to apply) — the RED controls' instrument. */
@@ -78,6 +80,7 @@ const http = require('http'), fs = require('fs'), path = require('path');
 const ST = process.env.FAKE_STATE; const args = process.argv.slice(2);
 const udd = (args.find((a) => a.startsWith('--user-data-dir=')) || '').slice(16);
 let mode = 'ok'; try { mode = fs.readFileSync(path.join(ST, 'chrome-mode'), 'utf8').trim(); } catch {}
+try { mode = fs.readFileSync(path.join(ST, 'chrome-mode-' + udd.replace(/[^A-Za-z0-9]/g, '_')), 'utf8').trim(); } catch {} // one profile's own mode (the cdp_port_missing keeper leg)
 fs.appendFileSync(path.join(ST, 'chrome.log'), JSON.stringify({ pid: process.pid, args, mode, DISPLAY: process.env.DISPLAY || null, XAUTHORITY: process.env.XAUTHORITY || null, TMPDIR: process.env.TMPDIR || null, ab: Object.keys(process.env).filter((k) => k.startsWith('AGENT_BROWSER_')) }) + '\\n');
 process.on('SIGTERM', () => process.exit(0));
 if (mode === 'exit') { console.error('ERROR: the profile appears to be in use by another Google Chrome process'); process.exit(21); }
@@ -102,11 +105,11 @@ try { process.kill(r.pid, 'SIGTERM'); } catch { }
 setMode('stale');
 let t = Date.now();
 r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: [`--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log'), waitMs: 900 });
-const stalePid = chromeLog().pop().pid; await sleep(200);
+const stalePid = chromeLog().pop().pid; await until(() => !alive(stalePid));
 ok(!r.ok && r.code === 'cdp_port_missing' && /stale one/.test(r.error) && Date.now() - t >= 900 && !alive(stalePid), 'stale: a port file older than the spawn is never taken — cdp_port_missing at the deadline, the Chrome it spawned ended', r);
 setMode('never');
 r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: [`--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log'), waitMs: 600 });
-const neverPid = chromeLog().pop().pid; await sleep(200);
+const neverPid = chromeLog().pop().pid; await until(() => !alive(neverPid));
 ok(!r.ok && r.code === 'cdp_port_missing' && !/stale one/.test(r.error) && !alive(neverPid), 'missing: no file at all ⇒ cdp_port_missing, the Chrome ended', r);
 setMode('exit');
 r = await ATL.spawnChrome({ exe: path.join(FAKE_BIN, 'google-chrome'), argv: [`--user-data-dir=${PD}`], env: baseEnv, profileDir: PD, logFile: path.join(S, 'io.log'), waitMs: 3000 });
@@ -209,7 +212,7 @@ const stopCalls = abLog().slice(before);
 const closeAll = stopCalls.find((c) => c.argv[0] === 'close' && c.argv[1] === '--all');
 ok(closeAll && closeAll.cdp === recA.cdpUrl && closeAll.root === recA.socketDir && closeAll.profile === null && closeAll.envCdp === null && closeAll.headed === null && closeAll.ns === 'vs-' + pA.id, 'stop: the driver\'s close --all ran `--cdp <its ws url>` in the config\'s own root, no profile dir, no launch key', closeAll);
 ok(closeAll && closeAll.config && path.basename(closeAll.config) === 'machine.json', '…naming the LEASE file (the one the agent\'s own commands name), never the launch file machine-<id>.json', closeAll && closeAll.config);
-await sleep(300);
+await until(() => !alive(chromeA) && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fake-1'));
 ok(vA.state === 'stopped' && !alive(chromeA) && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fake-1') && !dlive.has('da-fake-1'), 'the Chrome was ended by its identity and its display session went with it', { state: vA.state, dcalls });
 ok(sessionsUnder(recA.socketDir).length === 0 && sessionsUnder(path.join(SOCKBASE, `vs-ab-${process.getuid()}`, pB.id)).length === 1, 'close --all ended config A\'s sessions and NOT config B\'s (another root)', { a: sessionsUnder(recA.socketDir), b: sessionsUnder(path.join(SOCKBASE, `vs-ab-${process.getuid()}`, pB.id)) });
 // RED control: one shared root for both configs ⇒ the same close --all ends B's session too
@@ -221,14 +224,32 @@ ok(sessionsUnder(recA.socketDir).length === 0 && sessionsUnder(path.join(SOCKBAS
   execFileSync(path.join(FAKE_BIN, 'agent-browser'), c.args, { env: c.env });
   ok(sessionsUnder(shared).length === 0, 'CONTROL: configs sharing one socket root ⇒ A\'s close --all ended B\'s session (the crossing the per-config root prevents)');
 }
+// cdp_port_missing AT THE KEEPER (judged below, after the heal and the two driver-road legs): a Chrome that never writes
+// its port waits out the product's real 5 s PORT_WAIT_MS. Lane fast-debt-clear: it runs on its OWN keeper (its own data
+// dir, its own fake display keeper, its mode in its own profile's file), so the deadline elapses BESIDE the legs between
+// — they share no keeper, record, display session, display count, mode or tick with it (the heal's reconcile walks DK's
+// sessions, never this one's); the stale / missing legs above keep their own (shorter) deadlines
+const isolatedDisplays = (tag) => { const calls = [], live = new Map(); let n = 0; return { calls, live, DK: {
+  facts: async () => ({ bins: { xpra: '/usr/bin/xpra', xauth: '/usr/bin/xauth' } }),
+  launchDisplay: async (body) => { calls.push(['launch', body.forBrowser, body.label]); const id = `da-${tag}-${++n}`; const rec = { id, kind: DA.DISPLAY_FOR_BROWSER, forBrowser: body.forBrowser, state: 'ready', display: ':' + (190 + n), label: DA.displayForBrowserLabel(body.label) }; live.set(id, rec); return { ...rec }; },
+  x11EnvFor: (id) => (live.has(id) ? { DISPLAY: live.get(id).display, XAUTHORITY: path.join(S, 'xauth-' + id) } : null),
+  stop: async (id, o) => { calls.push(['stop', id, o && o.why]); const r0 = live.get(id); live.delete(id); return r0 ? { ...r0, state: 'exited' } : null; },
+  liveRecords: () => [...live.values()],
+} }; };
+const DM = isolatedDisplays('mute');
+const kM = mk({ dataDir: path.join(S, 'data-mute'), displaySessions: DM.DK });
+const pE = kM.createProfile({ label: 'Mute' }, { owner: { kind: 'instance', id: null } });
+fs.writeFileSync(path.join(STATE, 'chrome-mode-' + pE.dir.replace(/[^A-Za-z0-9]/g, '_')), 'never');
+const tE = Date.now();
+const muteRun = kM.start(pE.id, { why: 'test' }).then(() => null, (e) => e);
 // Chrome's OWN exit (the window closed / a crash) ⇒ the tick records it, its display goes with it
 setMode('ok');
 let vB = await k.start(pB.id, { why: 'test' });
 const recB = k._reg().browsers[pB.id];
 ok(vB.state === 'ready' && recB.launch === 'attach' && recB.displaySession.id === 'da-fake-2', 'a second config starts on its own display session', recB.displaySession);
-process.kill(recB.pid, 'SIGKILL'); await sleep(300);
+process.kill(recB.pid, 'SIGKILL'); await until(() => !alive(recB.pid));
 await k.tick();
-await sleep(100);
+await until(() => k._reg().browsers[pB.id].state === 'stopped' && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fake-2'), 1000);
 const recB2 = k._reg().browsers[pB.id];
 ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fake-2'), 'its Chrome died ⇒ the tick records "the browser exited" and stops its display session', { state: recB2.state, err: recB2.lastError });
 // THE HEAL: an attach Chrome that dies under a HOLDER is started again by the tick — bounded by the driver road's budget
@@ -277,14 +298,12 @@ const recD = k._reg().browsers[pD.id];
 ok(vD.state === 'ready' && recD.launch === 'driver' && /its display session did not come up \(xpra exited \(code 1\)\)/.test(recD.launchWhy) && dcalls.some((c) => c[0] === 'stop' && c[1] === 'da-fail'), 'a display session that failed ⇒ stopped, the driver road runs, the record says why', recD.launchWhy);
 await k.stop(pD.id, { why: 'user' });
 fakeDisplayFail = false;
-// cdp_port_missing AT THE KEEPER: a Chrome that never writes its port ⇒ refused by name, nothing left running
-setMode('never');
-const pE = k.createProfile({ label: 'Mute' }, { owner: { kind: 'instance', id: null } });
-let err = null; t = Date.now();
-try { await k.start(pE.id, { why: 'test' }); } catch (e) { err = e; }
-const muteChrome = chromeLog().pop(); await sleep(300);
-const recE = k._reg().browsers[pE.id];
-ok(err && err.code === 'cdp_port_missing' && recE.state === 'failed' && !alive(muteChrome.pid) && Date.now() - t >= AT.PORT_WAIT_MS && !dlive.has(recE.displaySession && recE.displaySession.id), 'a Chrome that writes no port in 5 s ⇒ cdp_port_missing by name, the record failed, the Chrome ended, its display stopped', { code: err && err.code, state: recE.state });
+// cdp_port_missing AT THE KEEPER (started before Chrome's own exit, on its own keeper): a Chrome that never writes its port
+// ⇒ refused by name, nothing left running
+const err = await muteRun;
+const muteChrome = chromeLog().find((l) => l.mode === 'never' && l.args.includes(`--user-data-dir=${pE.dir}`)) || {}; await until(() => !alive(muteChrome.pid));
+const recE = kM._reg().browsers[pE.id];
+ok(err && err.code === 'cdp_port_missing' && recE.state === 'failed' && Number.isInteger(muteChrome.pid) && !alive(muteChrome.pid) && Date.now() - tE >= AT.PORT_WAIT_MS && !DM.live.has(recE.displaySession && recE.displaySession.id), 'a Chrome that writes no port in 5 s ⇒ cdp_port_missing by name, the record failed, the Chrome ended, its display stopped', { code: err && err.code, state: recE.state });
 // THE BOOT: a new keeper on the same data adopts a live attach record by Chrome's identity + its CDP answer
 setMode('ok');
 vA = await k.start(pA.id, { why: 'test' });
