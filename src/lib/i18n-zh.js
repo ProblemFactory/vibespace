@@ -864,6 +864,9 @@ export default {
   "Pursued for {time}": "已持续 {time}",
   "Re-activate the last cleared/completed goal": "重新激活上一个已清除/已完成的目标",
   "Re-check": "重新检查",
+  "Look for the {cli} command on this machine again": "在这台机器上重新查找 {cli} 命令",
+  "✓ Signed in as {name} — usage read": "✓ 已登录为 {name} — 已读取用量",
+  "✓ Signed in as {name} — usage not read: {reason}": "✓ 已登录为 {name} — 未能读取用量：{reason}",
   "Read a task markdown file back into the store (its frontmatter id/title/status are authoritative; existing sessions/folders/progress are preserved)": "将任务 markdown 文件读回存储（其 frontmatter 的 id/title/status 为准；已有的会话/文件夹/进度会被保留）",
   "Reason": "原因",
   "Reasoning effort (as last commanded — the CLI does not report it back) — click to change": "推理强度（按最后一次下达的命令 — CLI 不会回报）— 点击修改",
@@ -1946,6 +1949,7 @@ export default {
   "the browser stopped answering": "浏览器不再响应",
   "the desktop server closed the stream": "桌面服务器关闭了流",
   "the connection dropped": "连接断开了",
+  "the picture stopped arriving": "画面不再传过来", // lane stream-leg-flap
   "the desktop session ended": "桌面会话已结束",
   "another window is driving it": "另一个窗口正在操作它",
   "This pane is watching — press Resume here to type into the desktop": "此窗格只在观看——点“在这里继续”才能向桌面输入",
@@ -6086,6 +6090,17 @@ export default {
   "quotes your message of {when}": "引用了你 {when} 发的消息",
   "replies in the thread of your message of {when}": "在你 {when} 发的消息的话题里回复",
   "in the thread of your mail \"{subject}\"": "回复了你的邮件「{subject}」",
+  "Also judge plain replies (LLM plugin)": "也判定普通回复（LLM 插件）",
+  "A message with no quote and no thread that arrives after this agent's own message is judged once: is it an answer to it? A yes notifies like a quote does; each judgment is one call within the plugin's daily budget. How long after the agent's message: Settings › Channels.": "在这个 agent 自己的消息之后到达、没有引用也不在话题里的消息，会被判定一次：它是在回答那条消息吗？判定为是，就像引用一样通知；每次判定是一次调用，算在插件的每日预算里。在 agent 的消息之后多久之内判定：设置 › 频道。",
+  "The LLM plugin is not available on this server — plain replies are not judged (quotes and thread replies still notify).": "这个服务器上没有 LLM 插件——普通回复不会被判定（引用和话题里的回复照常通知）。",
+  "The LLM plugin is off — plain replies are not judged until you turn it on (quotes and thread replies still notify).": "LLM 插件已关闭——打开之前普通回复不会被判定（引用和话题里的回复照常通知）。",
+  "The LLM plugin has no key yet — plain replies are not judged until you add one on the Language model card (Integrations & keys).": "LLM 插件还没有钥匙——在「语言模型」卡片（集成与密钥）上添加之前，普通回复不会被判定。",
+  "The LLM plugin's switch “Notification rules can use a sentence as the condition” is off — plain replies are not judged until you turn it on.": "LLM 插件 的“通知规则里可以用一句话当条件”开关已关闭——打开之前普通回复不会被判定。",
+  "Judge a plain reply to an agent's message for (hours)": "agent 发消息后判定普通回复的时长（小时）",
+  "For a reply rule with «Also judge plain replies» on: a message with no quote and no thread that arrives within this many hours of the agent's own message in the same chat is judged ONCE by the LLM plugin (is it an answer?). Later messages are never judged. Each judgment is one call within the plugin's daily budget.": "对开启了「也判定普通回复」的回复规则：在同一个聊天里、agent 自己的消息之后这么多小时之内到达、没有引用也不在话题里的消息，由 LLM 插件判定一次（它是回答吗？）。更晚到达的消息从不判定。每次判定是一次调用，算在插件的每日预算里。",
+  "judged an answer to your message of {when}": "判定为在回答你 {when} 发的消息",
+  "judging plain replies is either on or off": "「判定普通回复」只能是开或关",
+  "Plain replies": "普通回复",
   "is in a thread I am in, or quotes a message of mine": "在我参与的话题中，或引用了我的消息",
   // owner decision A (2026-09-28): a wake's place reason, worded for the owner's window (the agent reads the English)
   "quoted your message": "引用了你的消息",
@@ -6468,7 +6483,7 @@ export default {
   "The layout could not be re-read after reconnecting — window changes on this page are held until it can be": "重新连接后无法重新读取布局——本页面的窗口改动将暂存，直到能读取为止",
   "The layout was re-read — window changes made on this page more than a minute ago were not kept ({n})": "布局已重新读取——本页面一分钟多以前做的窗口改动未能保留（{n} 项）",
   "Stop drawing in a browser nobody watches": "停止绘制没人看的浏览器",
-  "Stop drawing in a browser nobody watches or drives for 30 s (hidden window / headless). The browser is thawed before the next command.": "无人观看、也没有命令驱动满 30 秒的浏览器（隐藏窗口 / 无头）停止绘制。下一条命令执行前会先恢复它。",
+  "ON (default): a browser nobody watches or drives for 30 s (hidden window / headless) stops drawing. It draws again before the next command, or within a frame when you open its live view. Turn it off to keep every page drawing.": "开（默认）：无人观看、也没有命令驱动满 30 秒的浏览器（隐藏窗口 / 无头）停止绘制。下一条命令执行前会先恢复它；打开它的实时视图时一帧之内恢复。关掉则所有页面一直绘制。",
   "Do not announce the agent browser as automated": "不要让 agent 浏览器自报是自动化的",
   "ON (default): the agent's browser starts with --disable-blink-features=AutomationControlled, so pages no longer read it as an automated browser (navigator.webdriver is false). It hides that one signal only — a site that still refuses the browser makes the agent propose a switch to CloakBrowser, which you approve. If your own ~/.agent-browser/config.json already names an AutomationControlled value, yours is kept. Applies to the next browser that starts; CloakBrowser is not affected.": "开(默认): agent 的浏览器启动时带 --disable-blink-features=AutomationControlled，网页不再把它读成自动化浏览器(navigator.webdriver 为 false)。它只隐藏这一个信号——网站仍然拒绝这个浏览器时，agent 会提议切换到 CloakBrowser，由你批准。如果你自己的 ~/.agent-browser/config.json 已经写了 AutomationControlled 的值，保留你的。对下一个启动的浏览器生效；不影响 CloakBrowser。",
   "No switch can be offered: CloakBrowser cannot be installed on this machine — its build for this kind of machine was never measured.": "无法提供切换：这台机器装不了 CloakBrowser——它这类机器的版本从未测量过。",
@@ -9196,6 +9211,7 @@ export default {
   "Mark handled": "已处理",
   "Click to show it all": "点击展开全文",
   "handled {when}": "{when} 已处理",
+  "handled in {version} by {who}, {when}": "{who} 于 {when} 标为已处理（{version} 修复）", // lane feedback-handled-verb
   "Could not load the feedback list": "反馈列表加载失败",
   "What agents reported with vibespace-feedback — a command, a flow, a screen or a manual that felt wrong. Newest first; a repeat within a day is counted on its row.": "agent 用 vibespace-feedback 报告的问题——用着不顺手的命令、流程、界面或手册。最新的在最上面；一天内重复的报告记在同一行的次数上。",
   "Open ({n})": "未处理（{n}）",
@@ -9334,6 +9350,7 @@ export default {
   "The vault locked after a restart — enter the second password to unlock. Device links, the relay and account switching are waiting.": "保险库在重启后已锁定 — 输入第二密码解锁；设备链接、中继与账号切换在等", // lane vault-relock-door: the restart For-you notice
   "The vault is locked — {n} waiting on it (For you names them). Unlock… enters the second password.": "保险库未解锁 — {n} 项在等它（「待你处理」里写明了是谁）。「解锁…」输入第二密码。", // lane vault-locked-refusal-notice: the strip's count
   "The vault is locked — waiting on it: {who}. Enter the second password to unlock.": "保险库未解锁 — 在等它的：{who}。输入第二密码解锁", // lane vault-locked-refusal-notice: the For-you item names who was blocked
+  "The vault is locked — agents that need a credential will be refused until you unlock it. Enter the second password to unlock.": "保险库已锁定 — 解锁前，需要凭据的 agent 都会被拒绝。输入第二密码解锁", // lane vault-locked-loud: the urgent For-you item from the moment it locks
   "Nothing has been refused yet — whatever the lock stops is named here as it happens.": "还没有操作被拒绝 — 锁定挡住的每一项都会随时列在这里", // lane vault-locked-refusal-notice: the item's detail before any refusal
   "{who} — {what}": "{who} — {what}", // lane vault-locked-refusal-notice: one blocked caller and what it was refused
   "…and {n} more, refused while it is locked": "……另有 {n} 项在锁定期间被拒绝", // lane vault-locked-refusal-notice: past the item's lines
@@ -9549,6 +9566,8 @@ export default {
   "End a conversation": "结束一个对话", // design q-046 (lane automation-keys-core)
   "Invite a conversation into a group": "把对话邀进群", // design q-046 (lane automation-keys-core)
   "Look up a conversation's ids": "查看对话的 id", // design q-046 (lane automation-verbs)
+  "Mark an agent's feedback handled": "把 agent 的反馈标为已处理", // lane feedback-handled-verb
+  "Read the agents' open feedback": "读 agent 未处理的反馈", // lane feedback-handled-verb
   "(starts a billed turn)": "（会开始一个计费回合）", // design q-046 (lane automation-keys-core)
   "The key's value is sealed in the vault — nobody sees it. Grant it to a conversation or a task group next.": "这把 key 的值封存在保险库里——谁都看不到。接下来把它授权给一个会话或一个任务组。", // design q-046 (lane automation-keys-core)
   "Mint": "铸造", // design q-046 (lane automation-keys-core)
@@ -9596,6 +9615,12 @@ export default {
   "No audit line for this key yet": "这把 key 还没有审计记录", // lane automation-open-limits
   "Limits not set": "未设边界", // lane automation-open-limits (q-049 M1)
   "The CLI's own setting": "CLI 自己的设置", // lane automation-open-limits (q-049 M2)
+  "The CLI's own setting (now {mode})": "CLI 自己的设置（现在是 {mode}）", // lane automation-open-permission-resolve (q-049 M2)
+  "its built-in default": "内置默认",
+  "Set in {file}": "设在 {file}",
+  "No settings file sets a permission mode — the CLI runs its built-in default": "没有设置文件指定权限模式 —— CLI 用内置默认",
+  "This call would open \"{name}\" in {cwd}.": "这次调用会在 {cwd} 开一个叫「{name}」的对话。",
+  "This call would open a conversation in {cwd}.": "这次调用会在 {cwd} 开一个对话。",
   "No folders are set — every conversation it would open is refused until you set them with Limits…": "未设边界：它想开的每个对话都会被拒，直到你用「边界…」设定", // lane automation-open-limits (q-049 M1)
   "Limits…": "边界…", // lane automation-open-limits
   "Audit…": "审计…", // lane automation-open-limits
@@ -9852,4 +9877,8 @@ export default {
   "To let every conversation use it, turn on «Usable by agent runs» on its row in ⚙ System ▸ Vault….": "要让所有会话都能用它，请在 ⚙ 系统 ▸ 保险库… 里打开它那一行的「可供 agent 运行使用」。", // lane vault-manual-and-lock
   "Unlock… at the top of the page; For you names what is waiting on it": "页面顶部的「解锁…」；「待你处理」里写明了在等它的事", // lane vault-manual-and-lock: the two facts beside the owner's own words
   "Power throttling": "电源限制", // lane stream-sdr-ecoqos: the stream details' row (Windows' EcoQoS on the machine's stream processes)
+  "Your time zone (the times agents see and say to you)": "你的时区（agent 看到并告诉你的时间）", // lane agent-context-owner-facts
+  "An IANA zone such as America/Los_Angeles or Asia/Shanghai. Every time an agent reads — the Task Group board, the Activity log, TASK.md, the context a session starts with, the backlog and the tools' answers — is printed in this zone and named (16:16 PT), so the time an agent tells you is your clock. Empty = this server's own zone: its TZ setting, else the system's.": "IANA 时区名，例如 America/Los_Angeles 或 Asia/Shanghai。agent 读到的每个时间——任务组看板、活动记录、TASK.md、会话开始时的上下文、待办和工具的回答——都按这个时区打印并标出时区（16:16 PT），所以 agent 告诉你的时间就是你的时钟。留空 = 这台服务器自己的时区：它的 TZ 设置，否则系统时区。", // lane agent-context-owner-facts
+  "{n} conversations are asking to use stored secrets": "{n} 个会话正在请求使用保险库里的密钥", // B-4934: the vault's «N conversations are asking» notice
+  "Each conversation asks on its own card in For you. This line goes when 8 or fewer are asking.": "每个会话的请求都是「待你处理」里单独的一张卡片。请求中的会话不超过 8 个时，这一行会消失。", // B-4934: the vault's «N conversations are asking» notice
 };

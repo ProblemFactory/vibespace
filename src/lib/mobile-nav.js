@@ -67,7 +67,7 @@ export class MobileNav {
     // without this the gs-menu (Usage/Manage agents/Diagnostics/Settings…)
     // has no entry point at all on mobile.
     const gear = document.getElementById('mobile-nav-gear');
-    if (gear) gear.onclick = (e) => { e.stopPropagation(); app._showGlobalSettings(gear); };
+    if (gear) gear.onclick = (e) => { e.stopPropagation(); app._pressGlobalSettings(gear); };   // lane vault-locked-loud: a locked vault unlocks first
 
     document.getElementById('mobile-nav-close').onclick = () => {
       const activeId = app.wm.activeWindowId;

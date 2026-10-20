@@ -8,7 +8,7 @@ server. `vibespace-docs <topic>` prints it.
 | Topic | Tool | One line | Full manual |
 |---|---|---|---|
 | `status` | `vibespace-status` | your session's LIVE state on the user's board (working / needs-input / blocked / review / done), set the moment it changes | `vibespace-docs status` |
-| `ask` | `vibespace-ask` | file what the USER must act on into their For you tray (bottom right, never "your inbox"); resolve it when they answer | `vibespace-docs ask` |
+| `ask` | `vibespace-ask` | file what the USER must act on into their tray (named by its label and place, never "your inbox"); resolve it when they answer | `vibespace-docs ask` |
 | `task` | `vibespace-task` | the Task Group's memory: log finished work (progress), park deferred items (backlog), read the group's shared state | `vibespace-docs task` |
 | `jobs` | `vibespace-job` | background work that OUTLIVES this conversation (a service, a long run, a schedule); you are notified when it ends | `vibespace-docs jobs` |
 | `channels` | `vibespace-channels` | the mail, chats and threads the user connected and lets you see: list, search, read; a reply is a proposal the user approves | `vibespace-docs channels` |

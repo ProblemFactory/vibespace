@@ -605,7 +605,8 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     'src/server/vault-contents.js': { n: 1, ends: ['view'], why: 'every page\'s reveal window closes at once (the epoch would refuse it at its next use); a 验证是你 still checking opens none' },
     'src/server/vault-run-door.js': { n: 1, ends: ['asks', 'grants', 'runs'], why: 'every run card and every agent request withdrawn vault_locked; every grant, seen shape and 8-hour «always» ended; every running child ended whole (its group, its marked strays, its files)' },
     'src/server/automation-engine.js': { n: 1, ends: ['asks', 'grants'], why: 'every held automation call answers vault_locked; every once-grant no call spent is spent' },
-    'src/server/vault-hooks.js': { n: 2, ends: ['logins', 'sealed'], why: 'r2: every login signed out (the vault\'s fifth consequence, the sign-in\'s); a sealed file forgets its decrypted copy' },
+    'src/server/vault-hooks.js': { n: 3, ends: ['logins', 'sealed', 'said'], why: 'r2: every login signed out (the vault\'s fifth consequence, the sign-in\'s); a sealed file forgets its decrypted copy; lane vault-locked-loud (int332): the lock act files THE urgent unlock prompt at once',
+      item: 'the lock\'s OWN prompt (lane vault-locked-loud): an action row (the badge counts it) filed BY the lock and resolved by the unlock — not an ask a lock withdraws' },
   };
   const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.(c|m)?js$/.test(e.name) ? [path.join(d, e.name)] : []));
   const files = [...walk('src'), 'server.js'];
@@ -616,7 +617,8 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
   ok(sites.size >= 4 && !unknown.length && !dead.length, `the census: every onLock subscriber of the tree (${[...sites].map(([f, k]) => `${path.basename(f)}×${k}`).join(', ')}) is a row with what it ends — none unclassified, none dead`, JSON.stringify({ unknown, dead }));
   ok(CONSEQUENCES.every((c) => Object.values(SUBSCRIBERS).some((s) => s.ends.includes(c))), 'each of the four consequences (view · asks · grants · runs) is carried by a subscriber');
   const askFiles = files.filter((f) => /origin: 'vault',[^}]{0,240}?kind: 'action'/.test(code(f)));
-  ok(askFiles.length >= 2 && askFiles.every((f) => SUBSCRIBERS[f] && SUBSCRIBERS[f].ends.includes('asks')), `every file that files a vault ASK (origin vault, kind action: ${askFiles.map((f) => path.basename(f)).join(', ')}) subscribes and withdraws it on a lock`, askFiles.join(', '));
+  // int332: a file whose action row is the LOCK'S OWN prompt (vault-hooks.js, lane vault-locked-loud) declares it as `item` — filed by the lock, resolved by the unlock
+  ok(askFiles.length >= 2 && askFiles.every((f) => SUBSCRIBERS[f] && (SUBSCRIBERS[f].ends.includes('asks') || SUBSCRIBERS[f].item)), `every file that files a vault ASK (origin vault, kind action: ${askFiles.map((f) => path.basename(f)).join(', ')}) subscribes and withdraws it on a lock — or declares its action row as the lock's own prompt`, askFiles.join(', '));
   const eng = code('src/server/vault-engine.js');
   ok(/if \(!quiet\) \{ audit\('vault-locked', \{ ip, why \}\); announce\(\); runHooks\(lockHooks, 'a lock', why\); \}/.test(eng) && /close\(\) \{[^}]*lock\('close', \{ quiet: true \}\)/.test(eng), 'the engine runs them on a lock ACT only (door / agent / idle) — the shutdown\'s quiet lock runs none');
   // (2) THE LIVE WORLD — the four at once

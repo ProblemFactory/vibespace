@@ -4,7 +4,7 @@
 // stream-json contract recorded in scripts/fixtures/antigravity-cli-1.4.3.json (provenance there: 'binary' for what the
 // real 1.4.3 did offline, 'docs' for the stream shapes). Every argv and stdin line is appended to $AGY_STUB_LOG.
 //   --version / --help            → the recorded version / help (stderr, like the real one)
-//   -p /usage                     → see $AGY_STUB_USAGE below (the reading's judge + the capture script)
+//   -p /usage                     → see $AGY_STUB_USAGE below (the reading's judge, the capture script, the reading door)
 //   not signed in: $AGY_STUB_AUTH=none = the MEASURED stream start on a pipe (refused at once, result ERROR);
 //                  $AGY_STUB_AUTH=wait = the MEASURED start on a character-device stdin (the OAuth URL on stderr, then it
 //                  WAITS reading a pasted code on stdin, up to $AGY_STUB_AUTH_WAIT_MS, and answers a result ERROR)
@@ -33,10 +33,14 @@ const out = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 const usage = (n) => ({ input_tokens: 100 * n, output_tokens: 7 * n, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 107 * n });
 
 // `-p /usage` (the reading the CLI answers itself): $AGY_STUB_USAGE = auth (default — the MEASURED unauthenticated
-// envelope) | ok (a SUCCESS with no turn — a stand-in payload, its shape NOT agy's: no signed-in capture yet) | turn
-// (a SUCCESS that started a turn — what the judge must call turn-started)
+// envelope) | ok (a SUCCESS with no turn — a stand-in payload, its shape NOT agy's) | capture (the SIGNED-IN answer,
+// verbatim from scripts/fixtures/antigravity-usage-1.4.3.json — lane antigravity-card-fixes) | turn (a SUCCESS that
+// started a turn — what the judge must call turn-started). The working dir is logged (the reading runs in the account's
+// empty login dir).
 if (flag('-p') === '/usage' || flag('--print') === '/usage') {
   const mode = process.env.AGY_STUB_USAGE || 'auth';
+  logLine({ usageCwd: process.cwd() });
+  if (mode === 'capture') { out(JSON.parse(fs.readFileSync(path.join(__dirname, 'antigravity-usage-1.4.3.json'), 'utf8')).envelope); process.exit(0); }
   if (mode === 'turn') { out({ conversation_id: crypto.randomUUID(), status: 'SUCCESS', response: 'stand-in', duration_seconds: 1.2, num_turns: 1, usage: usage(1) }); process.exit(0); }
   if (mode === 'ok') { out({ conversation_id: '', status: 'SUCCESS', response: 'stand-in model\t80%\towner@example.com', duration_seconds: 0, num_turns: 0, usage: usage(0) }); process.exit(0); }
   process.stderr.write("Error: authentication required. Run 'agy' to log in, then retry.\nerror: authentication failed or timed out\n");

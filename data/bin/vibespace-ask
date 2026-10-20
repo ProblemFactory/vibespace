@@ -68,7 +68,7 @@ for (let i = rawArgs.indexOf('--artifact'); i >= 0; i = rawArgs.indexOf('--artif
   for (const v of rawArgs.splice(i, 1 + n).slice(1)) artifacts.push(/^\/p\/[\w-]+\/?$/.test(v) || v.startsWith('/') ? v : require('node:path').resolve(v));
 }
 const USAGE = [
-  'usage — mirror questions for the USER into their For you tray, bottom right of their screen (they may not be watching this window):',
+  'usage — mirror questions for the USER into their tray (the answer names its label and where it is on their screen; they may not be watching this window):',
   '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation (up to 8000 chars)"] [--urgency low|normal|high|urgent] [--options "A|B|C"] [--notice] [--artifact <path|/p/id>…]',
   '      --artifact = up to 8 things the user should OPEN from the item (a file you want reviewed, a design folder, a published /p/<id> page) —',
   '                   chips under the question, one press opens each; every path after the flag until the next flag, relative to this shell\'s cwd.',
@@ -173,7 +173,11 @@ async function fileItem(typed) {
   if (artifacts.length) body.add.artifacts = artifacts; // lane foryou-attachments: judged by the server — any that would not open ⇒ nothing filed
   const answer = await call(body);
   const { item } = answer;
-  console.log((item.existing ? 'already in the user\'s For you tray (refreshed): ' : 'added to the user\'s For you tray (bottom right of their screen): ') + item.text + '  (' + item.id + ')');
+  // lane agent-context-owner-facts (B-7960 b): WHERE it landed is the hub's words (the tray's label in the owner's language +
+  // its CURRENT place — src/tray-words.js); never a place written here (the owner may have moved it)
+  const tray = answer.tray && typeof answer.tray === 'object' ? answer.tray : {};
+  const trayName = tray.name || 'the user\'s tray', trayPhrase = tray.phrase || trayName;
+  console.log((item.existing ? 'already in ' + trayName + ' (refreshed): ' : 'added to ' + trayPhrase + ': ') + item.text + '  (' + item.id + ')');
   console.log('  ' + TX.sentLine(answer, text, detail));   // lane cli-one-text-arg: the route's count — a cut is visible here
   if (Array.isArray(item.options) && item.options.length) console.log('  options: ' + item.options.join(' | ') + '  (a chip reply arrives as exactly that label)');
   for (const a of Array.isArray(item.artifacts) ? item.artifacts : []) console.log('  attached: ' + (a.kind === 'page' ? a.url : a.path) + ' (' + a.kind + (a.host ? ' on ' + a.host : '') + ') — one press opens it from the item');
@@ -183,6 +187,6 @@ async function fileItem(typed) {
   // lose its tail silently (the user read a question whose context stopped mid-sentence)
   if (item.detailCut) console.log('NOTE: your --detail was CUT at ' + item.detailCut + ' characters — the user\'s tray holds only that much and the rest never reached them. Put the whole content in your CHAT reply (the tray is a notification mirror).');
   if (item.textCut) console.log('NOTE: the question itself was CUT at ' + item.textCut + ' characters — keep the question to a sentence or two and put the context in --detail and your CHAT reply.');
-  console.log('REMINDER: the For you tray is only a NOTIFICATION MIRROR — now ALSO write the full question/content (options + your recommendation) in your CHAT REPLY to the user. Do not end the turn with the tray as the only copy. If you mention it, say "the For you tray at the bottom right" — never "your inbox" (no such word is on their screen).');
+  console.log('REMINDER: the tray is only a NOTIFICATION MIRROR — now ALSO write the full question/content (options + your recommendation) in your CHAT REPLY to the user. Do not end the turn with the tray as the only copy. If you mention it, say "' + trayPhrase + '" — never "your inbox".');
 }
 main().catch((e) => { console.error('vibespace-ask:', e.message); process.exit(1); });

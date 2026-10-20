@@ -13,6 +13,9 @@ const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(new URL(import.meta.url).pathname), '..');
 const DH = require('../src/dial-health.js');
 const HW = require('../src/server/dial-health-watch.js');
+// lane agent-context-owner-facts (B-7960 a): the item's «since» is the owner's clock, named — this fixture's instance runs in UTC
+// (its pins), never whatever zone the box running the suite is in
+require('../src/server/owner-facts.js').configure({ setting: (k) => (k === 'instance.timezone' ? 'UTC' : undefined) });
 const { UserTodoManager } = require('../src/user-todos.js');
 const { HostManager } = require('../src/hosts.js');
 let pass = 0, fail = 0;

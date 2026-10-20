@@ -310,7 +310,7 @@ console.log('— turnState');
   ok(capsOf('gemini').turnState === null && capsOf('gemini').inProgressTools === false, "an unknown backend gets the no-turn row (never claude's by accident)");
   // The declaration must be TRUE of the consumer: each authoritative harness's
   // stdout consumer flips _isStreaming from its own protocol records.
-  const consumers = { claude: 'claude-stream-json', codex: 'codex-events', opencode: 'acp-events' };
+  const consumers = { claude: 'claude-stream-json', codex: 'codex-events', opencode: 'acp-events', antigravity: 'acp-events' };
   for (const [id, mod] of Object.entries(consumers)) {
     const src = fs.readFileSync(path.join(REPO, `src/server/stdout/${mod}.js`), 'utf8');
     ok(capsOf(id).turnState !== 'authoritative' || /session\._isStreaming = /.test(src),
@@ -368,7 +368,7 @@ ok(capsOf('codex').review === true && capsOf('claude').review === false && capsO
 // Both spellings of the literal id test: the bare `backend === 'codex'` and
 // the DEFAULTED `(s.backend || 'claude') === 'codex'` (the codex ⟳ trigger's
 // spelling — the bare-only regex read it as clean).
-const hasBackendIdGate = (text) => /backend(?:\s*(?:\|\||\?\?)\s*'[a-z-]+'\s*\))?\s*[!=]==\s*'(?:codex|claude|opencode|shell)'/.test(text);
+const hasBackendIdGate = (text) => /backend(?:\s*(?:\|\||\?\?)\s*'[a-z-]+'\s*\))?\s*[!=]==\s*'(?:codex|claude|opencode|antigravity|shell)'/.test(text);
 const blockOf = (src, marker, lines) => {
   const i = src.indexOf(marker);
   return i < 0 ? null : src.slice(i).split('\n').slice(0, lines).join('\n');
@@ -475,7 +475,7 @@ console.log('— worktree caps (owner ruling 9)');
   // repo (see the caps-row comment): only claude has the flag, it is spelled
   // --worktree, and it needs a git repository.
   ok(capsOf('claude').worktree.supported && capsOf('claude').worktree.flag === '--worktree' && capsOf('claude').worktree.requiresGitRepo === true
-    && ['codex', 'shell', 'opencode'].every((id) => capsOf(id).worktree.supported === false),
+    && ['codex', 'shell', 'opencode', 'antigravity'].every((id) => capsOf(id).worktree.supported === false),
     'claude is the only harness with the flag, spelled exactly --worktree, needing a git repo');
   ok(worktreeCaps('gemini') === NO_WORKTREE, "an unknown backend gets the all-false NO_WORKTREE row (never claude's by accident)");
   // NEVER --tmux (its own help: "Create a tmux session for the worktree
@@ -765,7 +765,7 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
     // visible, and it is pinned to still cover the four sites that carry the
     // decision.
     const MARK = /autoResume|auto-resume|armIfEnabled|noteQuotaReading|windowOpened|resumeVerb|autoResumeCapsFor/;
-    const ID_GATE = /backend\s*[!=]==\s*'(?:codex|claude|opencode|shell)'/;
+    const ID_GATE = /backend\s*[!=]==\s*'(?:codex|claude|opencode|antigravity|shell)'/;
     const walk = (d, out = []) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) { if (!/node_modules|\.git/.test(f)) walk(f, out); } else if (/\.(js|mjs)$/.test(e.name)) out.push(f); } return out; };
     // BUILD OUTPUTS ARE NOT SOURCES: data/bin/vibespace-agentd*.js is esbuild's
     // bundle of the very src/ files censused below (gitignored since 2.369.75),
@@ -969,7 +969,7 @@ console.log('\n— the Artifacts sentence (lane artifacts-prompt-hint)');
     ok(AR.sessionToolsIntro(T, { fileTools: AR.fileToolsOf({}) }).includes('Use your file tools for files'), 'a session with no backend gets the unnamed sentence (never a guessed harness)');
   } finally { H.unregister('acme-files'); H.unregister('acme-noart'); }
   const fn = AR.fileToolsOf.toString();
-  ok(!/['"](?:claude|codex|opencode|shell)['"]/.test(fn) && /artifactTools/.test(fn), 'fileToolsOf reads the descriptor and spells no harness id (§46 spirit)');
+  ok(!/['"](?:claude|codex|opencode|antigravity|shell)['"]/.test(fn) && /artifactTools/.test(fn), 'fileToolsOf reads the descriptor and spells no harness id (§46 spirit)');
   // the task context's tools section carries it too, after the absolute-paths line, once (single + multi)
   const { TaskGroupManager } = require(path.join(REPO, 'src/task-groups.js'));
   const proto = TaskGroupManager.prototype;

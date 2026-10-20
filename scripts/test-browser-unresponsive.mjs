@@ -5,6 +5,11 @@
 //   ③ the restart admission table   ④ the REAL keeper on its REAL tick over a FAKE browser whose DevTools port accepts and never
 //   answers (the measured shape): verdict ⇒ row fact + journal + ONE For-you ⇒ the agent's refusal flips ⇒ restart ⇒ the
 //   other holder's card ⇒ cleared + resolved   ⑤ patched-copy controls (no verdict ⇒ "try again" forever; an ungated agent restart)
+//   ⑦ lane browser-daemon-survives-update (B-1574, userW's four freezes): A RESTART JUDGES THE PAGE'S ANSWERS — the PURE page
+//   verdict + the admission rows, then the REAL keeper over a stub browser whose endpoint answers (/json/version, /json/list)
+//   and whose pages accept a socket and never answer (the measured hung renderer): no verdict from the tick, the agent's
+//   restart ADMITTED and journalled with why; one page answering ⇒ refused naming both; the driver's timeouts with every
+//   page answering ⇒ admitted; a dialog ⇒ refused with its door; CONTROL the pre-fix keeper copy refuses browser_answering
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
@@ -85,6 +90,36 @@ ok(ad.user, 'the user: always');
 ok(ad.agentHung, 'an agent while the verdict stands: admitted');
 ok(ad.agentAnswering, 'an agent while it answers: refused browser_answering');
 ok(ad.agentDriven, 'an agent while a human drives: refused take_over_first');
+// lane browser-daemon-survives-update: THE PAGE VERDICT (pageAnswerVerdict) + the admission rows that read it
+{
+  const A = { targetId: 'A1A1A1A1A1A1A1A1', url: 'https://mail.example/inbox' }, Bp = { targetId: 'B2B2B2B2B2B2B2B2', url: 'https://docs.example/d/1' };
+  const pv = (list, pages, extra = {}) => BS.pageAnswerVerdict({ list, pages, ...extra });
+  const rows = {
+    unasked: BS.pageAnswerVerdict(null).state === 'unasked',
+    noList: pv(false, [], { error: 'timeout' }).why === 'no-list' && pv(false, []).state === 'hung',
+    noPages: pv(true, []).state === 'answering' && pv(true, []).why === 'no-pages',
+    noneAnswered: pv(true, [{ ...A, answered: false, reached: true }, { ...Bp, answered: false }]).why === 'no-page-answered',
+    oneAnswered: pv(true, [{ ...A, answered: true }, { ...Bp, answered: false }]).state === 'answering',
+    bound: pv(true, [{ ...A, answered: false }], { boundMs: 400 }).boundMs === 400 && BS.pageAnswerVerdict({ list: true, pages: [] }).boundMs === BS.PAGE_ANSWER_MS,
+  };
+  ok(Object.values(rows).every(Boolean) && BS.PAGE_ANSWER_MS === 5000, 'the page verdict table: unasked / the list unanswered ⇒ hung / no page ⇒ answering / no page\'s renderer answered (its history did) ⇒ hung / one answered ⇒ answering; the bound (5 s) rides the verdict', rows);
+  const hung = pv(true, [{ ...A, answered: false }, { ...Bp, answered: false }]), some = pv(true, [{ ...A, answered: true }, { ...Bp, answered: false }]), all = pv(true, [{ ...A, answered: true }, { ...Bp, answered: true }]);
+  const ag = (o) => BS.restartAdmission({ by: 'agent', label: 'jarvis-work', ...o });
+  const t = {
+    pagesHung: ag({ pages: hung }).ok === true && ag({ pages: hung }).why === 'no-page-answered',
+    listHung: ag({ pages: pv(false, [], { error: 'connect ECONNREFUSED 127.0.0.1:9' }) }).why === 'no-list',
+    someAnswer: ag({ pages: some }).code === 'browser_answering',
+    allAnswer: ag({ pages: all }).code === 'browser_answering',
+    driver: ag({ pages: all, stuck: { state: 'unresponsive', why: 'timeouts', count: 3 } }).why === 'driver',
+    driverNotOnSilent: ag({ pages: some, stuck: { state: 'unresponsive', why: 'timeouts', count: 3 } }).code === 'browser_answering',
+    dialogHeld: ag({ pages: hung, stuck: { state: 'dialog' } }).code === 'browser_answering' && /a page dialog holds your tab/.test(ag({ pages: hung, stuck: { state: 'dialog' } }).error),
+    humanFirst: ag({ pages: hung, humanDriving: true }).code === 'take_over_first',
+    browserVerdictFirst: ag({ unresponsive: { since: T0, asks: 3 }, pages: all }).why === 'browser',
+  };
+  ok(Object.values(t).every(Boolean), 'the admission rows: no page answers (or no list) ⇒ admitted — WHATEVER the endpoint said; a page that answers ⇒ refused; every page answers but the agent\'s last commands timed out through the driver ⇒ admitted (driver); a dialog ⇒ held, refused; a person driving first; the keeper\'s own verdict first', t);
+  const w = ag({ pages: some }).error;
+  ok(/1 of 2 pages answered within 5 s \(A1A1A1A1 "https:\/\/mail\.example\/inbox"\); 1 did not \(B2B2B2B2 "https:\/\/docs\.example\/d\/1"\) — close a tab that does not answer: `vibespace-browser tab close <tab>`/.test(w), 'the refusal NAMES what answered and what did not, and the door for the one that did not', w);
+}
 
 // ═══ ④ THE REAL KEEPER ON ITS REAL TICK over a browser that accepts and never answers ═══
 console.log('— ④ the real keeper over a hung DevTools port');
@@ -223,6 +258,70 @@ if (kSrc.includes(G_FROM)) {
   const cm = await closerLeg(require(mf), 'unguarded', 4);
   ok(!cm.threw && cm.verdicts > 0 && cm.notices.length >= 1 && /has not answered since/.test(cm.notices[0]), `⑥ CONTROL: a keeper copy without the guard judges the closing-again browser unresponsive (${cm.verdicts} verdict ticks) and files "${cm.notices && cm.notices[0]}" — the leg above can go red`, cm);
 } else ok(false, '⑥ CONTROL: the guarded verdict call was not found in src/server/browser-keeper.js');
+
+// ═══ ⑦ lane browser-daemon-survives-update: THE REAL KEEPER — a restart judges the page's answers ═══
+console.log('— ⑦ a restart judges the page\'s answers (a stub browser: its endpoint answers, its pages do not)');
+{
+  const http = require('http');
+  const { WebSocketServer } = require('ws');
+  const PAGES = [{ id: 'A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1', url: 'https://mail.example/inbox' }, { id: 'B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2', url: 'https://docs.example/d/1' }];
+  const answering = new Set(); // the pages whose renderer answers; the rest accept a socket and say nothing (the measured hung renderer)
+  let STUB = 0; const socks = new Set();
+  const stub = http.createServer((req, res) => {
+    const body = String(req.url).startsWith('/json/list') ? JSON.stringify(PAGES.map((x) => ({ id: x.id, type: 'page', url: x.url, title: x.url, webSocketDebuggerUrl: `ws://127.0.0.1:${STUB}/devtools/page/${x.id}` }))) : JSON.stringify({ Browser: 'Chrome/154.0.0.0' });
+    res.writeHead(200, { 'content-type': 'application/json' }); res.end(body);
+  });
+  const wss = new WebSocketServer({ noServer: true });
+  stub.on('upgrade', (req, sock, head) => { const id = String(req.url).split('/').pop(); wss.handleUpgrade(req, sock, head, (ws) => { socks.add(ws); ws.on('close', () => socks.delete(ws)); ws.on('message', (m) => { if (!answering.has(id)) return; let j = null; try { j = JSON.parse(String(m)); } catch { return; } ws.send(JSON.stringify({ id: j.id, result: j.method === 'Runtime.evaluate' ? { result: { type: 'number', value: 2 } } : { currentIndex: 0, entries: [] } })); }); }); });
+  await new Promise((r) => stub.listen(0, '127.0.0.1', r)); STUB = stub.address().port;
+  async function pagesLeg(Kmod, tag, { answer = [], stuck = null } = {}) {
+    const st = path.join(ROOT, 'pages-' + tag); fs.mkdirSync(st, { recursive: true });
+    const env = { ...rtEnv, FAKE_AB_STATE: st, FAKE_CDP_PORT: String(STUB) };
+    answering.clear(); for (const id of answer) answering.add(id);
+    const jl = []; const jlog = (m) => jl.push(String(m));
+    const kk = Kmod.create({ dataDir: path.join(st, 'data'), homeDir: HOME, env: () => env, broadcast: () => { }, serverSetting: () => undefined, serverNotice: null, getTelemetry: () => null,
+      liveKeys: () => new Set([KEY_A, KEY_B]), runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: { log: jlog, warn: jlog, error: jlog }, install: false, tickMs: 3600e3, answerAskMs: 250, pageAnswerMs: 400 });
+    const r = { tag };
+    try {
+      const q = kk.createProfile({ label: 'jarvis-work' }, { owner: { kind: 'instance', id: null } });
+      await kk.attach({ profileId: q.id, browserKey: KEY_A, sessionId: 'sess-a' });
+      if (stuck) kk.setStuckSource((bk) => (bk === KEY_A ? { ...stuck, profileId: q.id } : null));
+      await kk.tick(); await kk.tick();
+      r.judged = !!kk.browserOf(q.id).unresponsive; r.pid0 = kk.browserOf(q.id).pid;
+      const t0 = Date.now();
+      try { await kk.restartProfile(q.id, { by: 'agent', browserKey: KEY_A, sessionName: 'Research' }); r.restarted = true; } catch (e) { r.refused = { code: e.code, message: e.message }; }
+      r.ms = Date.now() - t0; r.pid1 = kk.browserOf(q.id).pid; r.state1 = kk.browserOf(q.id).state;
+      r.lines = jl.filter((l) => /restart/.test(l));
+      await kk.stop(q.id).catch(() => { });
+    } catch (e) { r.threw = String(e && e.stack); }
+    kk.shutdown();
+    let t = ''; try { t = fs.readFileSync(path.join(st, 'launches.log'), 'utf8'); } catch { } for (const l of t.trim().split('\n').filter(Boolean)) { try { process.kill(JSON.parse(l).pid, 'SIGKILL'); } catch { } }
+    return r;
+  }
+  const [A1, B2] = PAGES.map((x) => x.id);
+  const silent = await pagesLeg(K, 'silent');
+  ok(!silent.threw && !silent.judged && silent.restarted && silent.state1 === 'ready' && silent.pid1 !== silent.pid0 && silent.lines.some((l) => /restarted by the conversation "Research" — none of its 2 page\(s\) answered within 0\.4 s/.test(l)),
+    `⑦ the endpoint answers, NO page does: the tick never judged it (its /json/version answers) — the agent's restart is ADMITTED on the pages' answers, the browser started again (daemon ${silent.pid0} → ${silent.pid1}, ${silent.ms} ms), the journal says why`, silent);
+  const one = await pagesLeg(K, 'one', { answer: [A1] });
+  ok(!one.threw && one.refused && one.refused.code === 'browser_answering' && /1 of 2 pages answered within 0\.4 s \(A1A1A1A1 "https:\/\/mail\.example\/inbox"\); 1 did not \(B2B2B2B2 "https:\/\/docs\.example\/d\/1"\)/.test(one.refused.message) && one.pid1 === one.pid0 && one.lines.some((l) => /restart refused browser_answering \(its pages: pages, 1 answered, 1 did not\)/.test(l)),
+    '⑦ one page answers: refused browser_answering NAMING what answered and what did not (+ the tab-close door), nothing restarted, the journal says it', one);
+  const drv = await pagesLeg(K, 'driver', { answer: [A1, B2], stuck: { state: 'unresponsive', why: 'timeouts', count: 3, since: Date.now() - 90000 } });
+  ok(!drv.threw && drv.restarted && drv.lines.some((l) => /every page answered, but the agent's last commands timed out through the browser driver/.test(l)), '⑦ every page answers but the agent\'s last 3 commands timed out through the driver (the dialog watch\'s fact): ADMITTED — the page answers, its helper does not', drv);
+  const dlg = await pagesLeg(K, 'dialog', { stuck: { state: 'dialog', since: Date.now() } });
+  ok(!dlg.threw && dlg.refused && dlg.refused.code === 'browser_answering' && /a page dialog holds your tab: it is held, not hung/.test(dlg.refused.message) && /dialog accept/.test(dlg.refused.message), '⑦ a page dialog holds the tab (no page answers its renderer): held, not hung — refused with its own door, the dialog kept', dlg);
+  const fine = await pagesLeg(K, 'all', { answer: [A1, B2] });
+  ok(!fine.threw && fine.refused && /2 of 2 pages answered/.test(fine.refused.message), '⑦ every page answers: refused browser_answering (2 of 2 named)', fine.refused);
+  // CONTROL — the pre-fix restart (a keeper copy that judges the keeper's own endpoint verdict alone): the incident's refusal
+  const R_FROM = '        pages = BS.pageAnswerVerdict(await askPages(rec));\n';
+  if (kSrc.includes(R_FROM)) {
+    const mf = path.join(MUT, 'keeper-endpoint-only.js');
+    fs.writeFileSync(mf, kSrc.replace(R_FROM, '').replace(/require\((['"])(\.\.?\/[^'"]+)\1\)/g, (m, q, rel) => 'require(' + JSON.stringify(path.resolve(SRV, rel)) + ')'));
+    const ctl = await pagesLeg(require(mf), 'pre-fix');
+    ok(!ctl.threw && ctl.refused && ctl.refused.code === 'browser_answering' && ctl.pid1 === ctl.pid0, `⑦ CONTROL: the pre-fix keeper (no page asked) refuses the same hung pages browser_answering — "${ctl.refused && ctl.refused.message}" — the leg above can go red`, ctl);
+  } else ok(false, '⑦ CONTROL: the page ask was not found in src/server/browser-keeper.js');
+  for (const x of socks) { try { x.terminate(); } catch { } }
+  await new Promise((r) => stub.close(r));
+}
 
 console.log(`\n${fail ? '✗' : '✓'} test-browser-unresponsive: ${pass} passed, ${fail} failed`);
 keeper.shutdown(); keeper = null;

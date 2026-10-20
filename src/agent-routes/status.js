@@ -9,6 +9,7 @@
  */
 const { sameToken } = require('../pairing-token.js'); // B-8dda: every vsst_ lookup compares in constant time
 const { liveForkPending } = require('../claude-lock-capture.js');
+const OF = require('../server/owner-facts.js'); // lane agent-context-owner-facts (B-7960 b): the tray's label + current place, for the add answer
 const cliText = require('../agent-cli-text.js'); // lane cli-one-text-arg (PURE): the stored question / detail, counted for the echo of the CLI (sent: N characters)
 
 function register(app, c) {
@@ -50,7 +51,7 @@ app.post('/api/agent/user-todo', async (req, res) => {
       const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', origin: 'agent', sessionName: s.name || null, kind: add.kind || null, options: add.options == null ? null : add.options, artifacts, cwd: s.cwd || null, hostId: s.host && s.host !== 'local' ? s.host : null });
       if (artifacts) require('../server/artifact-registry.js').presentAsk(s, item.artifacts, { id: item.id }); // the conversation's Artifacts list shows them (the one writer) // kind: 'notice' = FYI only (vibespace-ask --notice); options = one-click answers (--options "A|B|C") — both validated by the store, a bad shape refused by name
       bookkept(s);
-      return res.json({ success: true, item, chars: cliText.chars(item.text), ...(item.detail ? { detailChars: cliText.chars(item.detail) } : {}) });   // lane cli-one-text-arg: what the store KEPT (a question past 500 is cut)
+      return res.json({ success: true, item, chars: cliText.chars(item.text), ...(item.detail ? { detailChars: cliText.chars(item.detail) } : {}), tray: (({ name, phrase }) => ({ name, phrase }))(OF.tray()) });   // lane cli-one-text-arg: what the store KEPT (a question past 500 is cut) · B-7960 b: WHERE it landed in the hub's words (its label + current place)
     }
     res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"} | {show:"id"} | {clear:"id"}' });
   } catch (e) { res.status(400).json({ error: e.message }); }

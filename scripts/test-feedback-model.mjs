@@ -7,7 +7,8 @@
 //   ③ fold — the dedup: same normalized text + about, last seen within 24 h, ANY session ⇒ count + 1 on the existing
 //      record (reporters kept, ≤ 50); 24 h after the last report, or another about, is a new record
 //   ④ fold — the ring: ≤ 500 records; the least recently reported one is dropped (open OR handled) and named in `dropped`
-//   ⑤ setStatus / publicRow / isMine / byNewest / openCount / paceVerdict
+//   ⑤ setStatus / publicRow / isMine / byNewest / openCount / paceVerdict — lane feedback-handled-verb: a handled record
+//      names the release that shipped the fix + a note (refused by name when malformed); a reopen clears them
 // Run: node scripts/test-feedback-model.mjs
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -92,6 +93,17 @@ console.log('— ⑤ status, the public row, mine, order, pacing');
   ok(h.ok && h.record.status === 'handled' && h.record.handledAt === 9 && h.record.handledBy === 'owner', 'handled stamps when and by whom');
   const o = M.setStatus(h.record, 'open', { now: 10 });
   ok(o.ok && o.record.status === 'open' && o.record.handledAt === null && o.record.handledBy === null, 'reopen clears them');
+  // lane feedback-handled-verb: the maintainer's vibespace-api feedback.handled stamps the release + a note through THIS call
+  const hv = M.setStatus(r, 'handled', { by: 'VibeSpace 主开发', now: 11, version: ' 2.369.330 ', note: 'the composer rides\nabove the keyboard' });
+  ok(hv.ok && hv.record.handledVersion === '2.369.330' && hv.record.handledNote === 'the composer rides above the keyboard' && hv.record.handledBy === 'VibeSpace 主开发' && hv.record.handledAt === 11, 'handled with a release and a note: the release trimmed, the note one line, by the conversation\'s name', hv);
+  const pr = M.publicRow(hv.record);
+  ok(pr.handledVersion === '2.369.330' && pr.handledNote === 'the composer rides above the keyboard', 'publicRow carries them (the owner\'s sheet draws «handled in 2.369.330 by …» and the note)');
+  const ov = M.setStatus(hv.record, 'open', { now: 12 });
+  ok(ov.ok && ov.record.handledVersion === null && ov.record.handledNote === null, 'a reopen clears the release and the note too');
+  ok(M.setStatus(r, 'handled', { now: 1, version: '2.369' }).code === 'version_bad' && M.setStatus(r, 'handled', { now: 1, version: 'v2.369.330' }).code === 'version_bad' && M.setStatus(r, 'handled', { now: 1, note: 'x'.repeat(201) }).code === 'note_too_long' && M.setStatus(r, 'handled', { now: 1, note: '字'.repeat(200) }).ok,
+    'a malformed release or a 201-character note: refused by name (200 CJK characters fit — characters, not bytes)');
+  const fresh = rec('y');
+  ok(M.setStatus(r, 'handled', { now: 1 }).record.handledVersion === null && M.setStatus(r, 'handled', { now: 1 }).record.handledNote === null && 'handledVersion' in fresh && fresh.handledVersion === null && fresh.handledNote === null, 'the owner\'s click names none (null); a new record carries both fields, null');
   ok(M.setStatus(r, 'done', { now: 1 }).code === 'status_unknown', 'another status ⇒ status_unknown');
   const p = M.publicRow({ ...r, reporters: ['cid-a', 'cid-b'], harness: 'codex' });
   ok(!('reporters' in p) && p.harness === 'codex' && p.text === 'x' && p.count === 1 && p.status === 'open' && p.group.name === 'VibeSpace 车道', 'publicRow: no reporter list; the harness by name; the rest as stored');

@@ -220,6 +220,44 @@ async function browserTargets(cdpUrl, { timeoutMs = READ_MS, WebSocketImpl = Web
 }
 
 /**
+ * lane browser-daemon-survives-update (B-1574): DO THE PAGES ANSWER? One bounded read of the page list (`/json/list`), then
+ * on EVERY page target, over its own fresh socket, in parallel, each bounded by `timeoutMs`: `Runtime.evaluate` of `1+1`
+ * (the page's RENDERER — `answered`) and `Page.getNavigationHistory` (the browser's side of the tab — `reached`). MEASURED
+ * on 0.38.2 + Chrome 154: every renderer SIGSTOPped ⇒ /json/version and /json/list answer in 1 ms, the history in 1 ms,
+ * the evaluate never — so the endpoint alone never says the page answers. The page sockets are the endpoint's own
+ * `/devtools/page/<id>` (a forwarded endpoint's list names the far side's host). → `{list, error?, pages: [{targetId, url,
+ * answered, reached, ms, error?}]}` — browser-stuck's pageAnswerVerdict reads it; never throws.
+ */
+async function pageAnswers(cdpUrl, { timeoutMs = 5000, max = 64, WebSocketImpl = WebSocket } = {}) {
+  const h = hostPortOf(cdpUrl);
+  if (!cdpUrl || !h) return { list: false, error: 'no CDP endpoint', pages: [] };
+  const l = await getJson(h, '/json/list', timeoutMs);
+  // an HTTP answer that is not a page list (another kind of endpoint, a 404) is an ANSWER with no page to ask; nothing
+  // listening (ECONNREFUSED) is `refused` — its Chrome is gone — and a silence is neither
+  if (!l.ok && /answered \d+/.test(String(l.error || ''))) return { list: true, error: l.error, pages: [] };
+  if (!l.ok) return { list: false, refused: /ECONNREFUSED/.test(String(l.error || '')), error: l.error || 'no answer', pages: [] };
+  if (!Array.isArray(l.json)) return { list: true, error: 'the page list was not a list', pages: [] };
+  const host = h.host.includes(':') && !h.host.startsWith('[') ? `[${h.host}]` : h.host;
+  const targets = l.json.filter((t) => t && t.type === 'page' && /^[A-Za-z0-9._-]{1,64}$/.test(String(t.id || ''))).slice(0, max);
+  const pages = await Promise.all(targets.map((t) => pageAsk(`ws://${host}:${h.port}/devtools/page/${t.id}`, timeoutMs, WebSocketImpl).then((r) => ({ targetId: String(t.id), url: String(t.url || ''), ...r }))));
+  return { list: true, pages };
+}
+/** One page's two asks over ONE socket (ids 1 and 2 sent together), bounded as a whole: done at the evaluate's answer. */
+function pageAsk(wsUrl, timeoutMs, WebSocketImpl) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    let done = false, ws = null, reached = false;
+    const fin = (answered, error) => { if (done) return; done = true; clearTimeout(timer); try { ws && ws.terminate(); } catch { /* */ } resolve({ answered, reached: reached || answered, ms: Date.now() - t0, ...(answered ? {} : { error: String(error || '') }) }); };
+    const timer = setTimeout(() => fin(false, 'Runtime.evaluate timed out'), timeoutMs);
+    try { ws = new WebSocketImpl(wsUrl, { maxPayload: 1024 * 1024, handshakeTimeout: timeoutMs }); } catch (e) { fin(false, e.message); return; }
+    ws.on('open', () => { try { ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: '1+1', returnByValue: true } })); ws.send(JSON.stringify({ id: 2, method: 'Page.getNavigationHistory', params: {} })); } catch (e) { fin(false, e.message); } });
+    ws.on('message', (d) => { let m = null; try { m = JSON.parse(String(d)); } catch { return; } if (!m) return; if (m.id === 2) reached = true; if (m.id === 1) fin(true); });
+    ws.on('error', (e) => fin(false, e && e.message));
+    ws.on('close', () => fin(false, 'closed before the answer'));
+  });
+}
+
+/**
  * lane browser-windows (U1): A WINDOW OF ITS OWN — `Target.createTarget` with the PURE `windowCreateParams` (`newWindow:
  * true, focus:false`) over the keeper browser's own (browser-level) endpoint, one socket, one command, bounded; the new
  * tab's window read back (`Browser.getWindowForTarget`) on the same socket so the caller can say where it landed.
@@ -482,4 +520,4 @@ async function openTabByActivate(cdpUrl, { anchorTargetId, windowId = null, time
   return { ok: false, code: 'window_mismatch', error: `the tab opened in window ${last == null ? '(unknown)' : last}, not the holder's window ${wantWin} — ${n} tr${n === 1 ? 'y' : 'ies'}, every stray closed at once`, leaks, tries: n };
 }
 
-module.exports = { readViewport, captureFrame, watchCopies, copyWatchSource, browserTargets, openWindow, windowOf, closeTarget, openTabInWindow, openTabByActivate, navigateTarget, OPENER_WORLD, captureTarget, visibilityOf, watchTarget, pageUrlOf, COPY_TEXT_MAX, READ_MS };
+module.exports = { readViewport, captureFrame, watchCopies, copyWatchSource, browserTargets, pageAnswers, openWindow, windowOf, closeTarget, openTabInWindow, openTabByActivate, navigateTarget, OPENER_WORLD, captureTarget, visibilityOf, watchTarget, pageUrlOf, COPY_TEXT_MAX, READ_MS };

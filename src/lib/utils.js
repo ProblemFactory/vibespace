@@ -1,8 +1,9 @@
 import { t } from './i18n.js';
 import { metric } from './telemetry-client.js';
-import { pressCloses, pressPhase, tapVerdict } from './outside-press.js';
+import { pressCloses, pressPhase, tapVerdict, shouldCloseOnBlur } from './outside-press.js';
 import { NATIVE_PRESS_SELECTOR, PRESS_CHROME_SELECTOR, effectiveUserSelect, pointOnText, pressTargetClass, longPressVerdict, selectionCloses, selectStartAllowed, trustedContextMenu } from './press-select.js';
 import { enterSubmits } from './chat-enter-keys.js';
+import { arrivalVerdict } from '../sync-arrival.js'; // PURE: StateSync's arrival rule (lane statesync-last-arrival)
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
@@ -450,6 +451,14 @@ export function stripCwdHostLabel(cwd) {
 // = once: a TRANSIENT surface on a touch device also closes when a text
 // selection starts OUTSIDE it — lane mobile-select M2, PURE selectionCloses in
 // press-select.js; a persistent popup is armed for the app's life and opts out).
+// A PRESS INTO A FRAME closes it too (lane menu-close-residue, B-5bd5 ①): a
+// press inside an <iframe> (a Web view, a plugin window, the mail frame, a
+// Design artboard) is dispatched in the frame's own document and never reaches
+// this document's pointerdown — the one signal the parent gets is `window`
+// blur, with document.activeElement already the frame and document.hasFocus()
+// still true (measured; a blur to another top-level window leaves the active
+// element where it was, hasFocus() false). PURE shouldCloseOnBlur decides: a
+// frame inside the surface or its excludes keeps it open. Nothing per site.
 export function onOutsidePress(root, close, { exclude = [], ignore = null, nested = true, once = true, signal = null, selection = once } = {}) {
   const roots = (Array.isArray(root) ? root : [root]).filter(Boolean);
   const ctl = new AbortController();
@@ -493,6 +502,25 @@ export function onOutsidePress(root, close, { exclude = [], ignore = null, neste
     if (tapVerdict({ dx: e.clientX - p.x, dy: e.clientY - p.y, heldMs: e.timeStamp - p.at })) judge(p.target, e);
   }, o);
   document.addEventListener('pointercancel', (e) => { if (pending && pending.id === e.pointerId) pending = null; }, o);
+  // A PRESS INTO A FRAME IS AN OUTSIDE PRESS (lane menu-close-residue, B-5bd5 ①): the frame's document takes the press,
+  // the parent sees only `window` blur — judged by PURE shouldCloseOnBlur over document.activeElement (already the frame
+  // at the blur) and document.hasFocus() (true: the focus went into a frame of THIS page; a blur to another window or
+  // the devtools reads false and leaves activeElement where it was). Same dispose, same `once`, same ignore rule.
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('blur', (e) => {
+      const active = document.activeElement || null;
+      const v = shouldCloseOnBlur({
+        active, el: roots, excludes: exclude,
+        pageFocused: typeof document.hasFocus === 'function' ? document.hasFocus() : true,
+        ignored: !!(ignore && active && ignore(active, e)),
+        connected: roots.some((r) => r.isConnected !== false),
+      });
+      if (v.retire) { dispose(); return; }
+      if (!v.close) return;
+      if (once) dispose();
+      close(e);
+    }, { signal: ctl.signal });
+  }
   // A SELECTION THAT STARTS OUTSIDE THE SURFACE WINS (lane mobile-select M2). On a phone a long press elsewhere is
   // never an outside TAP, so a menu stayed open while the platform's selection began beside or under it — the next
   // move of the finger landed on the menu's words. Touch only (a mouse selection begins with a press that already
@@ -542,17 +570,29 @@ export function attachPopoverClose(popover, ...excludeEls) {
 }
 
 /**
- * Create a positioned popover, removing any existing one with the same class.
- * Returns the popover element for caller to populate.
- * @param {HTMLElement} anchor - element to position below
+ * Create a positioned popover, removing any existing one with the same class. Returns the popover element for the
+ * caller to populate. When the one removed hung off the SAME anchor (the anchor pressed while its popover is open) the
+ * press TOGGLES: nothing opens and the element returned is DETACHED (`_closedByAnchor`), filled unseen.
+ * @param {HTMLElement} anchor - element to position below (the toggle's key)
  * @param {string} className - CSS class (also used to remove duplicates)
- * @param {object} [opts] - { parent, position: 'below'|'cursor', x, y }
+ * @param {object} [opts] - { parent, position: 'below'|'cursor', x, y, toggle: false (a programmatic rebuild) }
  */
 export function createPopover(anchor, className, opts = {}) {
-  document.querySelectorAll('.' + className.split(' ')[0]).forEach(p => p.remove());
+  // THE ANCHOR TOGGLES (lane menu-close-residue, B-5bd5 ②): the dedup already knows the open popover of this class —
+  // when it hangs off THIS anchor, this call is the anchor pressed again (the anchor is exempt from the closer, so the
+  // popover was still open at the click) and the press CLOSES it instead of rebuilding it: the open one is removed and
+  // a DETACHED element comes back, which the caller fills unseen — nothing per site (a caller that already asked
+  // `isConnected` first — the principal picker, the stream pill, the filter buttons — never reaches this). A
+  // cursor-placed popover is not an anchor's (the doc link bar's "anchor" is the whole pane: every press there is a new
+  // place) and `opts.toggle === false` opts a programmatic rebuild out.
+  const cls = '.' + className.split(' ')[0];
+  let reopened = false;
+  document.querySelectorAll(cls).forEach((p) => { if (anchor && p._anchor === anchor && p.isConnected !== false) reopened = true; p.remove(); });
   const pop = document.createElement('div');
   pop.className = className;
   pop.dataset.popover = '1'; // global Escape handler closes anything tagged
+  if (reopened && opts.position !== 'cursor' && opts.toggle !== false) { pop._closedByAnchor = true; return pop; } // closed: detached, never shown
+  pop._anchor = anchor; // the toggle's key (the dedup above reads it)
   pop.style.position = 'fixed';
   pop.style.zIndex = '99999';
   // Initial placement (off-screen to measure)
@@ -1044,18 +1084,23 @@ function _fallbackCopy(text) {
 // ── StateSync: unified versioned state sync with diff broadcast ──
 // Each store tracks a version. On reconnect, requests missed ops from server.
 // Components listen via events: stateSync.on('drafts', 'chat:sess-1', handler)
+// THE ARRIVAL RULE (lane statesync-last-arrival, B-cede): the server answers each own set with the version it produced
+// (`state-ack`); a remote op the server ordered BEFORE an own set of the same key never lands over it, and one arriving
+// while an own set of that key awaits its ack waits for the ack (src/sync-arrival.js, judged in _applyOp only).
 class StateSync {
   constructor(wsManager) {
     this.ws = wsManager;
-    this.stores = {};    // name → { version, data, listeners }
+    this.stores = {};    // name → { version, data, listeners, pending, acked, held }
     this._globalHandler = (msg) => {
       if (msg.type === 'state-sync') this._applyOp(msg.store, msg);
+      else if (msg.type === 'state-ack') this._applyAck(msg.store, msg);
       else if (msg.type === 'state-snapshot') this._applySnapshot(msg.store, msg.data, msg.version);
     };
     wsManager.onGlobal(this._globalHandler);
     // On reconnect, request missed ops for all stores
     this._stateHandler = (connected) => {
-      if (!connected) return;
+      // the socket dropped: an own set in flight is never answered on it — its held ops are judged now (resync converges)
+      if (!connected) { for (const [name, s] of Object.entries(this.stores)) { s.pending.clear(); for (const key of [...s.held.keys()]) this._release(name, key); } return; }
       const versions = {};
       for (const [name, s] of Object.entries(this.stores)) versions[name] = s.version;
       if (Object.keys(versions).length) this.ws.send({ type: 'state-resync', versions });
@@ -1068,7 +1113,9 @@ class StateSync {
   // doc-comments-synced) must never take a store still loading for an empty one.
   init(storeName) {
     if (this.stores[storeName]) return this.stores[storeName].loaded;
-    const s = this.stores[storeName] = { version: 0, data: {}, listeners: new Map(), loaded: null };
+    // pending: key → own sets not yet acked; acked: key → the version of the last acked own set; held: key → remote ops
+    // waiting for that ack (the arrival rule's three facts)
+    const s = this.stores[storeName] = { version: 0, data: {}, listeners: new Map(), loaded: null, pending: new Map(), acked: new Map(), held: new Map() };
     s.loaded = (async () => {
       try {
         const res = await fetch(`/api/sync/${storeName}`);
@@ -1087,12 +1134,13 @@ class StateSync {
   set(storeName, key, value) {
     const s = this.stores[storeName];
     if (!s) return;
+    s.pending.set(key, (s.pending.get(key) || 0) + 1);
     if (value == null || value === '') {
       delete s.data[key];
-      this.ws.send({ type: 'state-set', store: storeName, key, value: '' });
+      this.ws.send({ type: 'state-set', store: storeName, key, value: '', basedOn: s.version });
     } else {
       s.data[key] = value;
-      this.ws.send({ type: 'state-set', store: storeName, key, value });
+      this.ws.send({ type: 'state-set', store: storeName, key, value, basedOn: s.version });
     }
   }
 
@@ -1112,10 +1160,36 @@ class StateSync {
   _applyOp(storeName, op) {
     const s = this.stores[storeName];
     if (!s) return;
+    if (op.version > s.version) s.version = op.version;
+    const verdict = arrivalVerdict({ remote: op, own: { ackedVersion: s.acked.get(op.key), pending: s.pending.has(op.key) } }); // THE ARRIVAL RULE — its one caller
+    if (verdict === 'queue') { const q = s.held.get(op.key); if (q) q.push(op); else s.held.set(op.key, [op]); return; }
+    if (verdict === 'drop') return;
+    s.acked.delete(op.key); // a newer op superseded the own set — every later op is newer still
     if (op.op === 'set') s.data[op.key] = op.value;
     else if (op.op === 'delete') delete s.data[op.key];
-    if (op.version) s.version = op.version;
     this._notify(s, op.key, op.op === 'delete' ? '' : op.value);
+  }
+
+  // The server's answer to an own set: the version it produced. The key's last outstanding ack releases its held ops.
+  _applyAck(storeName, ack) {
+    const s = this.stores[storeName];
+    if (!s || typeof ack.key !== 'string') return;
+    if (Number.isSafeInteger(ack.version) && ack.version > 0) {
+      if ((s.acked.get(ack.key) || 0) < ack.version) s.acked.set(ack.key, ack.version);
+      if (ack.version > s.version) s.version = ack.version;
+    }
+    const n = (s.pending.get(ack.key) || 0) - 1;
+    if (n > 0) { s.pending.set(ack.key, n); return; }
+    s.pending.delete(ack.key);
+    this._release(storeName, ack.key);
+  }
+
+  _release(storeName, key) {
+    const s = this.stores[storeName];
+    const q = s && s.held.get(key);
+    if (!q) return;
+    s.held.delete(key);
+    for (const op of q) this._applyOp(storeName, op);
   }
 
   _applySnapshot(storeName, data, version) {
@@ -1132,6 +1206,13 @@ class StateSync {
     const rolledBack = (version || 0) < s.version;
     s.data = data || {};
     s.version = version || 0;
+    // a key with an own set still awaiting its ack keeps the own value: the server answers that set AFTER this snapshot,
+    // so the snapshot's value is an op of the key like any other — the arrival rule holds it and judges it at the ack
+    for (const key of [...s.pending.keys()]) {
+      const op = key in s.data ? { op: 'set', key, value: s.data[key], version: s.version } : { op: 'delete', key, version: s.version };
+      if (key in oldData) s.data[key] = oldData[key]; else delete s.data[key];
+      this._applyOp(storeName, op);
+    }
     if (rolledBack) {
       for (const key of new Set([...oldKeys, ...Object.keys(s.data)])) {
         const localVal = oldData[key] ?? '';

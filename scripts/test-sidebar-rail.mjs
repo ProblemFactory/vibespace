@@ -144,13 +144,18 @@ try {
   check('agents panel renders', await openPanel('agents'));
   // redesign: roster header has the Add-account menu button, rows carry a ⋯ menu
   check('agents roster uses redesigned header', await evalJs(`!!document.querySelector('.rail-panel-agents .acct-roster-head .acct-add')`));
-  // a fresh instance has only the CLI-login row (no ⋯); IF a named account
-  // exists it must carry the ⋯ menu, and NO row may carry the old Test button
+  // a fresh instance has only each roster's CLI-login row (no ⋯ — there is no account to rename or remove); IF a named
+  // account exists it must carry the ⋯ menu, and NO row may carry the old Test button. The CLI-login rows are DERIVED —
+  // every `__…__` data-id (Claude's __global__, Codex's __codex_global__, an isolated-home harness's __home_global__):
+  // the hand-written two-id list went RED on .330's Antigravity roster (lane mirror-331-reds-chrome)
   check('named account rows (if any) have overflow menu, none have inline Test', await evalJs(`
-    (() => { const rows = [...document.querySelectorAll('.rail-panel-agents .acct-key-row:not([data-id="__global__"]):not([data-id="__codex_global__"])')];
+    (() => { const rows = [...document.querySelectorAll('.rail-panel-agents .acct-key-row')].filter((r) => !/^__[a-z_]+__$/.test(r.dataset.id || ''));
       const noTest = !document.querySelector('.rail-panel-agents .acct-test');
       const allMenu = rows.every(r => r.querySelector('.acct-menu'));
       return noTest && allMenu; })()`));
+  check('CONTROL: a CLI-login row copy given an account id (a named row without ⋯) fails the same rule', await evalJs(`
+    (() => { const r = document.querySelector('.rail-panel-agents .acct-key-row[data-id^="__"]')?.cloneNode(true); if (!r) return false; r.dataset.id = 'acct-control';
+      return ![r].filter((x) => !/^__[a-z_]+__$/.test(x.dataset.id || '')).every((x) => x.querySelector('.acct-menu')); })()`));
   // add-account menu opens a context menu
   await evalJs(`document.querySelector('.rail-panel-agents .acct-add').click()`);
   await sleep(200);

@@ -58,7 +58,7 @@ const USAGE = [
 
 const SAYS = {
   unlocked: 'unlocked — the stored credentials open',
-  locked: 'LOCKED — every stored credential stays sealed until the user unlocks it from the page; the user has already been told (their For you tray names what is waiting on it) — do not ask them to unlock it or for its password: wait, or do other work, and try again later',
+  locked: (d) => 'LOCKED — every stored credential stays sealed until the user unlocks it from the page; the user has already been told (' + (d.tray || 'their tray') + ' names what is waiting on it) — do not ask them to unlock it or for its password: wait, or do other work, and try again later',
   not_set_up: 'not set up — the user sets the second password in ⚙ System ▸ Vault…',
 };
 
@@ -86,10 +86,16 @@ function postLong(route, body) {
     req.end(raw);
   });
 }
-const when = (at) => { try { return new Date(at).toISOString().slice(0, 16).replace('T', ' ') + 'Z'; } catch { return '?'; } };
+// lane agent-context-owner-facts (B-7960): the lock time and the tray are the HUB's words (the owner's zone, named; the tray's
+// label + current place) — this file never formats a time or names a tray itself (it ships to hosts in other zones)
+const when = (d) => (d.when && d.when.lockedSince) || (Number(d.lockedSince) ? new Date(Number(d.lockedSince)).toISOString() : '?');
+// int332 seam: the .331 grant / request / use rows (lane vault-manual-and-lock) carry raw timestamps the hub does not word yet —
+// a full ISO stamp (the fallback shape `when` uses above; test-task-injection §8 bans a hand-sliced one), never a sliced UTC
+const whenAt = (at) => { try { return new Date(at).toISOString(); } catch { return '?'; } };
 function print(d) {
-  console.log('vault: ' + (SAYS[d.state] || d.state));
-  if (d.state === 'locked' && d.lockedSince) console.log('  locked since ' + when(d.lockedSince));
+  const say = SAYS[d.state];
+  console.log('vault: ' + (typeof say === 'function' ? say(d) : say || d.state));
+  if (d.state === 'locked' && d.lockedSince) console.log('  locked since ' + when(d));
 }
 
 /** A call whose refusal says its code too (request / uses) — exit 1 on a refusal, the code in parentheses. */
@@ -108,7 +114,7 @@ async function requestCmd(rest) {
   if (positional.length !== 1 || out['--for'] === undefined) { console.error('vibespace-vault: request <vault://…> --for "<what you will run with it, and why>"'); process.exit(2); }
   const d = await callCoded('POST', '/api/agent/vault/request', { entry: positional[0], purpose: out['--for'] }, 'request');
   if (d.already === 'open') { console.log(`${d.ref} is already open for runs — run it (a new kind of command still shows the user its card first)`); return; }
-  if (d.already === 'granted') { console.log(`${d.ref} is already granted to this conversation (${d.once ? 'for one run' : 'for every run'} until ${when(d.until)}) — run it`); return; }
+  if (d.already === 'granted') { console.log(`${d.ref} is already granted to this conversation (${d.once ? 'for one run' : 'for every run'} until ${whenAt(d.until)}) — run it`); return; }
   console.log(`asked the user for ${d.ref} — the question is in their For you tray; nothing waits on it`);
   console.log('  their answer: once (your next run with it) · 8h (every run for 8 hours) · deny; a lock ends a grant');
   console.log('  `vibespace-vault uses` shows it when it comes; do other work meanwhile, and do not ask again in the chat');
@@ -119,13 +125,13 @@ async function usesCmd() {
   if (d.state && d.state !== 'unlocked') console.log('vault: ' + (SAYS[d.state] || d.state));
   console.log('grants (this conversation):');
   if (!d.grants || !d.grants.length) console.log('  none');
-  for (const g of d.grants || []) console.log(`  ${g.entry}  ${g.once ? 'one run' : 'every run'} until ${when(g.until)}  for: ${g.purpose || '-'}`);
+  for (const g of d.grants || []) console.log(`  ${g.entry}  ${g.once ? 'one run' : 'every run'} until ${whenAt(g.until)}  for: ${g.purpose || '-'}`);
   console.log('requests waiting on the user:');
   if (!d.requests || !d.requests.length) console.log('  none');
-  for (const q of d.requests || []) console.log(`  ${q.entry}  asked ${when(q.at)}  for: ${q.purpose || '-'}`);
+  for (const q of d.requests || []) console.log(`  ${q.entry}  asked ${whenAt(q.at)}  for: ${q.purpose || '-'}`);
   console.log('uses (newest first):');
   if (!d.uses || !d.uses.length) console.log('  none');
-  for (const u of d.uses || []) console.log(`  ${when(u.at)}  ${u.entry || '-'}  via ${u.door || '-'}  ${u.outcome}${u.receipt ? '  receipt ' + u.receipt : ''}${u.purpose ? '  for: ' + u.purpose : ''}`);
+  for (const u of d.uses || []) console.log(`  ${whenAt(u.at)}  ${u.entry || '-'}  via ${u.door || '-'}  ${u.outcome}${u.receipt ? '  receipt ' + u.receipt : ''}${u.purpose ? '  for: ' + u.purpose : ''}`);
 }
 
 async function runCmd(rest) {
@@ -223,7 +229,7 @@ async function main() {
   if (cmd === 'list') {
     const d = await call('GET', '/api/agent/vault/runnable');
     if (!d.entries || !d.entries.length) { console.log('no stored secret is open for your runs — ask the user for one with its purpose: vibespace-vault request <vault://…> --for "<why>" (they open it in ⚙ System ▸ Vault…, or grant it to you from For you)'); return; }
-    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${when(e.until)}` : ''}`);
+    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : ''}`);
     return;
   }
   if (cmd === 'uses') return usesCmd();

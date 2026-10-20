@@ -116,7 +116,7 @@ console.log('— ② the adapter verb (formatQueueOp)');
   {
     const { QUEUE_VERBS, capsOf } = require(path.join(REPO, 'src/backend-caps.js'));
     const args = { remove: { id: 'q1' }, steer: { id: 'q1' }, 'steer-all': {}, reorder: { id: 'q1', afterId: 'q2' }, edit: { id: 'q1', text: 'hi' }, 'run-now': { id: 'q1' }, 'run-all': {} };
-    for (const [backend, id] of [['codex', 'codex'], ['opencode', 'opencode'], ['claude', 'claude']]) {
+    for (const [backend, id] of [['codex', 'codex'], ['opencode', 'opencode'], ['claude', 'claude'], ['antigravity', 'antigravity']]) {
       const declared = capsOf(id).inputModes.queueVerbs;
       const a = reg.get(backend);
       for (const verb of QUEUE_VERBS) {
@@ -159,7 +159,7 @@ console.log('— ③ the ws case gates on the caps row AND the running wrapper')
   const m = /case 'queue-op': \{([\s\S]*?)\n        \}/.exec(src);
   ok("ws-handler has ONE 'queue-op' case", !!m);
   const body = m ? m[1] : '';
-  ok('it reads inputModes from backend-caps — no backend-id branch anywhere in the case', /capsOf\(session\.backend\)\.inputModes/.test(body) && !/=== 'codex'|=== 'claude'|=== 'opencode'/.test(body), body.slice(0, 400));
+  ok('it reads inputModes from backend-caps — no backend-id branch anywhere in the case', /capsOf\(session\.backend\)\.inputModes/.test(body) && !/=== 'codex'|=== 'claude'|=== 'opencode'|=== 'antigravity'/.test(body), body.slice(0, 400));
   ok('the gate is the VERB TABLE, not a pair of booleans: no verbs ⇒ refuse, an undeclared verb ⇒ refuse WITH ITS OWN SENTENCE', /if \(!harnessVerbs\.length\)/.test(body) && /if \(!harnessVerbs\.includes\(data\.op\)\) \{ refuse\(queueVerbRefusal\(data\.op, label\)/.test(body), body.slice(0, 400));
   {
     // …and that sentence says what happens to the message ANYWAY (a refusal
@@ -1207,7 +1207,7 @@ console.log('— wiring + docs pins');
     /if \((?:!imeOwnsKey\(e\) && \()?e\.key === 'Tab' \|\| e\.key === 'Enter'\)/.test(cinput2) && /const mod = !!\(e\.ctrlKey \|\| e\.metaKey\);[\s\S]*?return mod \? 'send' : 'newline';/.test(read('src/lib/chat-enter-keys.js')) && /if \(act === 'send'\) \{ e\.preventDefault\(\); this\._send\(\); \}/.test(cinput2)
     && (cinput2.match(/e\.key === 'Enter' && e\.altKey/g) || []).length === 1);
   ok('the chord condition excludes every other modifier (Alt+Shift/Alt+Ctrl+Enter are not it)', /e\.key === 'Enter' && e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey && this\.steerChordAllowed/.test(cinput2));
-  ok('BOTH surfaces gate on the ONE capability answer, never on a backend id', /this\._steerBtn\.classList\.toggle\('hidden', !\(live && modes\.allowSteerChord\)\)/.test(cinput2) && !/=== 'codex'|=== 'claude'|=== 'opencode'/.test(cinput2));
+  ok('BOTH surfaces gate on the ONE capability answer, never on a backend id', /this\._steerBtn\.classList\.toggle\('hidden', !\(live && modes\.allowSteerChord\)\)/.test(cinput2) && !/=== 'codex'|=== 'claude'|=== 'opencode'|=== 'antigravity'/.test(cinput2));
   ok('…which comes from the PURE composerSendModes over the LIVE queue caps (the same object the strip reads)', /_sendModes\(\) \{ return composerSendModes\(this\._queueCaps[,)]/.test(cinput2) && /_canSteerComposer\(\) \{ return !!this\._chatInput\?\.steerChordAllowed; \}/.test(cv2));
   ok('both faces repaint on BOTH inputs: the streaming flag AND the late-arriving caps (the dead-chip ordering)', /_updateSendModes\(\);\s*\n\s*\}/.test(cinput2) && /this\._renderQueue\(\);[\s\S]{0,400}this\._updateSendModes\(\);/.test(cinput2) && (cinput2.match(/this\._updateSendModes\(\)/g) || []).length >= 4, (cinput2.match(/this\._updateSendModes\(\)/g) || []).length);
   ok('the send→steer conversion reuses the ONE queue-op sender (no second wire shape anywhere)', /this\._sendQueueOp\('steer', it\.id\);/.test(cv2) && (cv2.match(/type: 'queue-op'/g) || []).length === 1);

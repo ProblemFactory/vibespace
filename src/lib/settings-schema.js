@@ -19,6 +19,7 @@ import { t } from './i18n.js';
 import { HARNESS_SETTINGS, settingPath, checkTable, rowsOfKind } from '../harness-settings.js'; // PURE (CJS): the descriptor-declared per-harness tables — the Claude/Codex/OpenCode sections are DERIVED from them (docs/design-harness-settings.zh.md §4)
 import { whenClauses } from './settings-view.js'; // PURE: the tier / when rules (WHEN_KINDS) — re-exported below
 import { CHANNEL_SETTINGS, settingPath as channelSettingPath } from '../channel-settings.js';
+import { IDLE_PAINT_DEFAULT } from '../browser-idle.js'; // PURE (CJS): browser.idlePaintFreeze's ONE default — the keeper reads the same value
 import { PLUGIN_SETTINGS, checkPluginRows, manifestRows, rowPath as pluginRowPath, linksOf as pluginLinksOf } from '../plugin-settings.js'; // PURE (CJS): one table per built-in plugin — the 「插件 › <名>」 sections are DERIVED from it (docs/design-plugin-settings.zh.md); manifest rows share its validator // PURE (CJS): the per-vendor channel rows — the Channels "Per vendor" block is DERIVED from them (B-df40 part 3)
 
 // lane attention-policy: the 「需关注 · 怎么判断」 block's shared fields (its rows, its head, the Settings search's words)
@@ -612,6 +613,16 @@ const SETTINGS_SCHEMA = {
     description: t('Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every option below only applies while this is ON.'),
     category: t('Integration'), liveApply: true,
   },
+  // lane agent-context-owner-facts (B-7960 a — userW: every time the product told an agent was UTC while he lives in
+  // America/Los_Angeles; an agent relayed «23:16» for 16:16 PT). THE one zone every time an agent reads is printed in
+  // (src/when-words.js; read on the server by src/server/owner-facts.js, on the page by src/lib/owner-clock.js). Empty =
+  // the server's own zone: its TZ environment, else the system zone — never UTC by preference.
+  'instance.timezone': {
+    type: 'string', default: '',
+    label: t('Your time zone (the times agents see and say to you)'),
+    description: t('An IANA zone such as America/Los_Angeles or Asia/Shanghai. Every time an agent reads — the Task Group board, the Activity log, TASK.md, the context a session starts with, the backlog and the tools\' answers — is printed in this zone and named (16:16 PT), so the time an agent tells you is your clock. Empty = this server\'s own zone: its TZ setting, else the system\'s.'),
+    category: t('Integration'), liveApply: true,
+  },
   // ── AGENT BROWSER (P0, docs/design-agent-browser-v2 §3.2) ──────────────
   // Four environment variables at spawn; no VibeSpace process, no daemon. The
   // kill switch exists because every path in this feature falls back
@@ -674,11 +685,12 @@ const SETTINGS_SCHEMA = {
   },
   // lane browser-swiftshader-cpu-r2 (2026-10-07): a browser on an unseen rung (the hidden window, headless) that nobody
   // watches and no command drives for 30 s stops drawing (src/browser-idle.js — the page frozen; thawed at the next
-  // command's resolve / a live view). OFF until the owner turns it on; read by the keeper at every sweep.
+  // command's resolve / a live view); read by the keeper at every sweep. ON by default since 2.369.332 (lane
+  // idle-paint-default-on, the owner 2026-10-20): the default is IDLE_PAINT_DEFAULT (src/browser-idle.js), never a literal here.
   'browser.idlePaintFreeze': {
-    type: 'boolean', default: false,
+    type: 'boolean', default: IDLE_PAINT_DEFAULT,
     label: t('Stop drawing in a browser nobody watches'),
-    description: t('Stop drawing in a browser nobody watches or drives for 30 s (hidden window / headless). The browser is thawed before the next command.'),
+    description: t('ON (default): a browser nobody watches or drives for 30 s (hidden window / headless) stops drawing. It draws again before the next command, or within a frame when you open its live view. Turn it off to keep every page drawing.'),
     tier: 'advanced',
     category: t('Agent browser'), liveApply: true,
   },
@@ -1157,6 +1169,15 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 60, min: 0, max: 600, step: 5,
     label: t('Coalesce pushed messages before waking an agent (seconds)'),
     description: t('Polling batches a minute of messages into ONE wake by nature; a push lane delivers them one by one, so a burst of 30 would become 30 billed turns. While a push lane carries messages, matched hits are gathered for this many seconds and delivered as one wake that lists them all. 0 = wake per message. Poll and scan lanes are already batches and never wait.'),
+    tier: 'advanced',
+    category: t('Channels'), liveApply: true,
+  },
+  // lane dm-reply-infers (B-6b4b): how long after an agent's own message a PLAIN message in the same chat may still be judged
+  // an answer to it (a reply rule with «judge plain replies» on — src/channel-filter.js INFER.hours; outside it nothing is judged)
+  'channels.replyInferHours': {
+    type: 'number', default: 24, min: 1, max: 168, step: 1,
+    label: t('Judge a plain reply to an agent\'s message for (hours)'),
+    description: t('For a reply rule with «Also judge plain replies» on: a message with no quote and no thread that arrives within this many hours of the agent\'s own message in the same chat is judged ONCE by the LLM plugin (is it an answer?). Later messages are never judged. Each judgment is one call within the plugin\'s daily budget.'),
     tier: 'advanced',
     category: t('Channels'), liveApply: true,
   },

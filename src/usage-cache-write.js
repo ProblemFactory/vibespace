@@ -81,6 +81,10 @@ function readCacheObject(cacheDir, key) {
  *  evidence. A claude snapshot never carries `limitId`. */
 function backendOfCacheObject(obj) {
   if (!obj || typeof obj !== 'object') return null;
+  // a producer that names its harness is taken at its word (lane antigravity-card-fixes: the on-demand reading of an
+  // antigravity account, src/server/cli-usage-door.js, stamps `backend`) — its projected buckets would otherwise read as
+  // claude's. No claude / codex writer stamps the field; the shape rules below are theirs.
+  if (typeof obj.backend === 'string' && obj.backend) return obj.backend;
   if (obj.limitId !== undefined || obj.rateLimitReachedType !== undefined || obj.spendControlReached !== undefined) return 'codex';
   if (obj.scopedWeekly !== undefined || obj.overallStatus !== undefined || obj.spend !== undefined) return 'claude';
   if (obj.fiveHour && typeof obj.fiveHour === 'object' && obj.fiveHour.windowMinutes) return 'codex';
@@ -116,8 +120,11 @@ function liftCacheObject(obj, { identity = null, backend = null, familyOf = null
     const set = quotaModel.makeLimitSet({ identity, fetchedAt: obj.fetchedAt, source: obj.source, limits: obj.limits });
     // Scoped to claude on purpose: codex names its limits itself ('codex',
     // 'codex_bengalfox', 'premium') and none of them is called 'plan', so a
-    // backend-blind rung would invent a plan limit on every codex file.
-    if (be0 !== 'codex') {
+    // backend-blind rung would invent a plan limit on every codex file — and on
+    // every file of a third harness (lane antigravity-card-fixes, reproduced: an
+    // antigravity reading's projected 5h/7d came back as a phantom 'plan' limit
+    // and its 7d windows as duplicate model caps on the SECOND write).
+    if (be0 === 'claude') {
       const { CLAUDE_EXTRA_KEYS } = require('./harnesses/claude-quota.js');
       const legacy = quotaModel.fromLegacy(obj, {
         identity, source: obj.source || null, fetchedAt: Number(measuredAt) || Number(obj.fetchedAt) || null,

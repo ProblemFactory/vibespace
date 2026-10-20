@@ -2,6 +2,7 @@ import { attachPopoverClose, escHtml, showToast, uiScale } from './utils.js';
 import { dragEndVerdict } from './drag-end.js';
 import { captureOn, setDragShield, attachDragFeed } from './drag-feed.js'; // ONE feed for every drag door (verify r1)
 import { minOf, clampToMin, raiseToMin, keepInside, zoneBox, wholePx, rescaleBox } from './window-min-size.js';
+import { fixedWindowPlacement } from './desktop-app-placement.js'; // lane app-window-fit-topleft (B-1f0b): where a window whose app fixed its size stands (PURE)
 import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { showWindowContextMenu } from './taskbar.js';
@@ -259,6 +260,7 @@ class WindowManager {
       // the minimize — skipped here, a workspace that narrowed while it was hidden (the sidebar opened) handed the
       // restore the old workspace's box (a right third of 1876 px at left 1252 on a 1450 px one: 422 CSS px past the
       // edge), which restore's capture then persisted as the window's fractions (a cascade on the next widening)
+      if (win.fixedSize && this._placeFixed(win)) continue; // lane app-window-fit-topleft: larger than THIS workspace ⇒ its top-left, this client's (never captured)
       if (win.gridBounds && !win.isMaximized) this._applyGridBounds(win);
       if (win.minWidth || win.minHeight) this._applyOwnMin(win); // the workspace cap follows the workspace (r2)
     }
@@ -1053,9 +1055,11 @@ class WindowManager {
    * every path that writes a size lands on it, the .window floor included), `window-fixed-size` (style.css hides the
    * resize handles and the maximize button), no resize drag, no maximize, no snap or grid zone on a drag, and every
    * programmatic zone (a cell, a half, stored bounds, a layout) MOVES it without sizing it (_placeWindow). NEVER capped
-   * at the workspace: a fixed window larger than the screen keeps the app's size, its top-left kept on the workspace,
-   * the rest past the edge (movable; the window's Scale ▸ is the lever). A maximized window is restored first. null
-   * releases it: the size it had before the lock comes back (slid inside), resizable again. Returns whether it changed.
+   * at the workspace: a fixed window LARGER than the workspace in either dimension keeps the app's size and stands at
+   * the workspace's top-left, its title bar held to the workspace's width (lane app-window-fit-topleft, _placeFixed),
+   * the rest past the edge (movable; the window's Scale ▸ 1× is the lever); one that fits keeps its place, slid inside.
+   * A maximized window is restored first. null releases it: the size it had before the lock comes back (slid inside),
+   * resizable again. Returns whether it changed.
    */
   setFixedSize(id, size) {
     const win = this.windows.get(id); if (!win) return false;
@@ -1080,7 +1084,7 @@ class WindowManager {
       if (p.height) el.style.height = p.height;
       this._applyOwnMin(win); // the app's own minimum (if any) is the window's again
     }
-    if (!this._mobileLayout()) {
+    if (!this._placeFixed(win, true) && !this._mobileLayout()) {
       const k = keepInside({ left: at.left, top: at.top, width: el.offsetWidth || w, height: el.offsetHeight || h }, this._workspaceBox());
       if (k.moved) { el.style.left = k.left + 'px'; el.style.top = k.top + 'px'; }
     }
@@ -1089,6 +1093,30 @@ class WindowManager {
     if (win.onResize) win.onResize();
     this._scheduleOverlapUpdate();
     this._notify();
+    return true;
+  }
+
+  /**
+   * WHERE A WINDOW WHOSE APP FIXED ITS SIZE STANDS (lane app-window-fit-topleft, B-1f0b): PURE fixedWindowPlacement over
+   * its locked frame and the workspace. 'top-left' (larger than the workspace in either dimension) ⇒ the window at 0,0 of
+   * #workspace — the most of it shows — and its title bar no wider than the room `barMax` leaves (the ✕ on screen at any
+   * size); 'cascade' / 'none' ⇒ the bar free and the place the caller's (the lock slides it inside, as before). Asked at
+   * the LOCK (`lock`, setFixedSize — captured and announced with it) and at a WORKSPACE REFLOW (the sidebar, the browser
+   * window: _reflowWindows) only — never on a drag frame. The reflow's move is this client's, never captured nor
+   * announced (the workspace-capped minimum's rule): a workspace that fits the window again gives it its stored place
+   * back. Returns whether it placed the window.
+   */
+  _placeFixed(win, lock = false) {
+    const el = win.element;
+    const v = fixedWindowPlacement({ fixed: !!win.fixedSize, frame: win.fixedSize, workspace: this._workspaceBox(), phone: this._mobileLayout() });
+    if (win.titleBar) {
+      const bar = v.barMax ? `${Math.max(0, v.barMax - (el.clientLeft || 0))}px` : ''; // the bar starts inside the window's border
+      if (win.titleBar.style.maxWidth !== bar) win.titleBar.style.maxWidth = bar;
+    }
+    if (v.act !== 'top-left') return false;
+    const moved = parseFloat(el.style.left) !== v.left || parseFloat(el.style.top) !== v.top;
+    if (moved) { el.style.left = v.left + 'px'; el.style.top = v.top + 'px'; }
+    if (moved && !lock && win.onMoved) { try { win.onMoved(); } catch {} } // a MOVE: the xpra view re-snaps its device-pixel-exact surface
     return true;
   }
 

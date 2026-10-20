@@ -25,7 +25,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 export const FAMILIES = {
-  harness: { ids: ['claude', 'codex', 'opencode', 'acp', 'shell'], owners: [{ dir: 'src/harnesses/' }, { dir: 'src/adapters/' }] },
+  harness: { ids: ['claude', 'codex', 'opencode', 'antigravity', 'acp', 'shell'], owners: [{ dir: 'src/harnesses/' }, { dir: 'src/adapters/' }] },
   channel: { ids: ['lark', 'slack', 'gmail', 'fake', 'agents'], owners: [{ dir: 'src/channels/' }] },
   display: { ids: ['xpra', 'vnc', 'desktop-singleton', 'x11vnc'], owners: [{ file: 'src/desktop-backends.js', table: /^const DISPLAY_BACKENDS\s*=/m }] },
   browser: { ids: ['cloak', 'chromium', 'agent-browser'], owners: [{ file: 'src/browser-switch.js' }, { file: 'src/browser-profiles.js', table: /^const PROVIDERS\s*=/m }] },
@@ -61,6 +61,10 @@ export const EXEMPT = [
   { family: 'harness', file: 'src/lib/agent-meta.js', table: /^export const BACKEND_META\s*=/m, reason: 'the client META registry — the descriptor rows mirrored key for key (test-harness-contract deep-compares)' },
   { family: 'harness', file: 'src/record-shape.js', reason: 'the transcript-record SCHEMA ORACLE per harness:carrier:shape — naming the harness whose record shape it states is its job' },
   { family: 'harness', file: 'src/server/cli-env.js', table: /^const AVAILABLE_MODELS\s*=/m, reason: 'the /api/available-models seed table (the model list a harness offers before its own source answers)' },
+  // lane harness-add-census (2026-10-20): the family's id list is itself a FENCE scripts/harness-fences.mjs derives — antigravity joined it, and the two client
+  // tables its rows had never counted are declared here (the ratchet's baseline fell to 0 for both: `--lower`)
+  { family: 'harness', file: 'src/lib/app.js', table: /^const BACKEND_SESSION_OPTIONS\s*=/m, reason: 'the per-harness session options (models / effort) the New Session dialog offers — one declared row per chat harness' },
+  { family: 'harness', file: 'src/lib/permission-mode-labels.js', reason: 'the permission-mode WORDS per harness (the values a CLI takes, in plain words) — each harness\'s vocabulary is declared here, not branched on' },
 ];
 
 const BRANCH = (ids) => {

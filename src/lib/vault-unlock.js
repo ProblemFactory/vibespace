@@ -11,11 +11,15 @@
 //     module keeps the modals those doors open and the requests behind them (`lockNow`, `setIdleHours`, `onVaultFacts`).
 // The `vault-state` broadcast keeps every open page on one state (the multi-client law). Passwords live in the inputs and
 // one request body each — never stored, never logged, never in an error line.
+// lane vault-locked-loud (the owner 2026-10-20: "如果 vault 没解锁应该直接在界面上有个显著提醒"): what a LOCKED vault says on the first
+// screen — the dialog (once per lock in a tab), the ⚙ button's red mark (a press unlocks first, then the menu) — is ONE table,
+// PURE src/vault-loud.js `vaultLoudState`, asked here and only here; the hub's urgent For-you item asks the same table.
 import { t } from './i18n.js';
 import { createModalShell, fetchJson, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { enterSubmits } from './chat-enter-keys.js';
 import { replayOpenSpec } from './window-types.js'; // the door (vs-vault-door) opens the Vault window while unlocked (src/lib/vault-window.js registers it)
+import { vaultLoudState, LATER_KEY } from '../vault-loud.js'; // lane vault-locked-loud: THE table — the dialog, the ⚙ mark, the item
 
 const MIN = 8;
 let facts = null;
@@ -108,11 +112,42 @@ function drawLockStrip() {
   else wrap.insertBefore(strip, wrap.firstChild);
 }
 
+// ── the ⚙ button's red mark (lane vault-locked-loud): while LOCKED the global-settings button — the toolbar's and the phone
+// nav's — wears a red lock in its corner and says «Vault locked — click to unlock»; a press opens the unlock dialog first, then
+// the menu (`unlockFirst`). Drawn by applyVaultFacts from THE table's `mark`, so every client follows the broadcast. ──
+const GEAR_IDS = ['btn-global-settings', 'mobile-nav-gear'];
+function drawGearMark(on) {
+  for (const id of GEAR_IDS) {
+    const b = document.getElementById(id);
+    if (!b) continue;
+    const mark = b.querySelector(':scope > .vault-gear-mark');
+    if (!on) {
+      mark?.remove();
+      b.classList.remove('vault-locked');
+      if (b.dataset.vaultTitle != null) { b.title = b.dataset.vaultTitle; delete b.dataset.vaultTitle; }
+      continue;
+    }
+    if (mark) continue;
+    if (b.dataset.vaultTitle == null) b.dataset.vaultTitle = b.title;
+    b.title = t('Vault locked — click to unlock (For you names what is waiting on it)');   // int332: the chip's full words (test-vault-words: a person sentence says told + where)
+    const m = el('span', 'vault-gear-mark');
+    m.setAttribute('aria-hidden', 'true');
+    m.innerHTML = UI_ICONS.lock || '';
+    b.classList.add('vault-locked');
+    b.appendChild(m);
+  }
+}
+
+// the lock whose ask this tab set aside (「稍后」 / Esc / ✕) — sessionStorage: a reload asks no more for it, a new lock asks again
+function dismissedLock() { try { return sessionStorage.getItem(LATER_KEY); } catch { return null; } }
+function dismissLock(f) { const s = vaultLoudState({ facts: f }); if (!s.lock) return; try { sessionStorage.setItem(LATER_KEY, s.lock); } catch { } }
+
 function applyVaultFacts(f) {
   if (!f || !f.state) return;
   facts = f;
   drawChip();
   drawLockStrip();   // lane vault-relock-door: the persistent warning while locked (shown/removed with the state, never per restart)
+  drawGearMark(vaultLoudState({ facts: f }).mark);   // lane vault-locked-loud: the ⚙ button's red mark
   if (f.state !== 'locked') document.getElementById('vault-unlock-dialog')?.remove();
   if (f.state !== 'not_set_up') document.getElementById('vault-setup-dialog')?.remove();
   for (const fn of [...factsListeners]) { try { fn(f); } catch { /* one header's error never stops another */ } }
@@ -145,10 +180,16 @@ export function stateIconEl(state) { const s = el('span', 'vault-state-icon'); s
  *  needs no import of this module. */
 const VAULT_DOOR_EVENT = 'vs-vault-door';
 
-/** THE UNLOCK MODAL — right after the page loads while the vault is locked. */
-export function showUnlock() {
+/** THE UNLOCK MODAL — right after the page loads while the vault is locked. lane vault-locked-loud: 「稍后」, Esc and ✕ close it
+ *  and set THIS lock's ask aside for the tab (the strip, the chip and the ⚙ mark stay); `then` runs once it closes, whichever
+ *  way (the ⚙ press: the menu after the dialog). */
+export function showUnlock({ then = null } = {}) {
   if (document.getElementById('vault-unlock-dialog')) return;   // one modal (the door may be pressed while it is open)
-  const { dialog, body, close } = createModalShell({ id: 'vault-unlock-dialog', title: t('Unlock the vault'), dialogClass: 'vault-dialog-box', minWidth: 'min(420px, 92vw)', closeOnBackdrop: false });
+  const onClose = () => {
+    if (facts && facts.state === 'locked') dismissLock(facts);   // closed while still locked = set aside (an unlock is not)
+    if (typeof then === 'function') setTimeout(then, 0);   // after the closing press: the menu's outside-click never sees it
+  };
+  const { dialog, body, close } = createModalShell({ id: 'vault-unlock-dialog', title: t('Unlock the vault'), dialogClass: 'vault-dialog-box', minWidth: 'min(420px, 92vw)', closeOnBackdrop: false, escapeToClose: true, onClose });
   body.appendChild(el('p', 'vault-text', t('The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.')));
   const pw = pwInput('vault-unlock-pw', t('Second password'));
   const err = el('div', 'vault-err'); err.setAttribute('role', 'alert');
@@ -171,6 +212,13 @@ export function showUnlock() {
   pw.addEventListener('keydown', (e) => { if (enterSubmits(e)) { e.preventDefault(); submit(); } });
   footerOf(dialog, [later, go]);
   setTimeout(() => pw.focus(), 0);
+}
+
+/** The ⚙ button's press (app.js, mobile-nav.js — lane vault-locked-loud): while LOCKED the unlock dialog first, then `open` (the
+ *  menu, as today) once it closes; otherwise `open` at once. */
+export function unlockFirst(open) {
+  if (vaultLoudState({ facts }).mark) { showUnlock({ then: open }); return; }
+  open();
 }
 
 /** THE SETUP MODAL — the second password, twice, with the plain warning. `nag` = the load-time ask (「稍后」 snoozes this tab). */
@@ -242,23 +290,25 @@ export async function maybeNagVault() {
  *  (the server booted again — the DEK was zeroed by law) — open the unlock modal ONCE for that boot. A lock ACT (the SAME
  *  startedAt: 立即锁定 from another device, an agent's lock, the idle lock) draws only the chip + the persistent strip
  *  (applyVaultFacts); the dialog stays closed, and a 「稍后」 within one boot survives every later lock act. */
-function onVaultState(f) {
-  const prevStartedAt = facts ? facts.startedAt : undefined;
+function onVaultState(f, on = 'broadcast') {
+  const seen = facts ? facts.startedAt : undefined;
   applyVaultFacts(f);
-  if (f && f.state === 'locked' && f.startedAt != null && f.startedAt !== prevStartedAt) showUnlock();
+  // lane vault-locked-loud: THE table decides — a load / reconnect asks unless this tab set THIS lock aside; a broadcast asks
+  // only for a new boot (the relock-door rule above)
+  if (vaultLoudState({ facts: f, dismissed: dismissedLock(), on, seen }).dialog) showUnlock();
 }
 
 /** Boot: read the state, follow the broadcast, and ask for the second password while locked. */
 export async function initVault(app) {
   appRef = app;
-  appRef?.ws?.onGlobal?.((msg) => { if (msg && msg.type === 'vault-state') onVaultState(msg); });
+  appRef?.ws?.onGlobal?.((msg) => { if (msg && msg.type === 'vault-state') onVaultState(msg, 'broadcast'); });
   // lane vault-relock-door: a bundle-preserving restart (a crash, the Restart=always respawn, a same-build systemctl
   // restart) reconnects this tab WITHOUT a reload — the stale-bundle reload fires only when the bundle CHANGED (app.js
   // `_checkBundleFreshness`). So on every reconnect AFTER the boot read, re-read the state: a NEW boot (`startedAt`) re-asks
   // the second password, while a reconnect to the SAME process (the same startedAt) changes nothing. The gate matters: the
   // page's first ws connect is the load itself — the boot read below is the one that asks then, after the app's DOM exists.
   let vaultBooted = false;
-  appRef?.ws?.onStateChange?.((connected) => { if (connected && vaultBooted) fetchJson('/api/vault/state').then((f) => { if (f && f.state) onVaultState(f); }).catch(() => {}); });
+  appRef?.ws?.onStateChange?.((connected) => { if (connected && vaultBooted) fetchJson('/api/vault/state').then((f) => { if (f && f.state) onVaultState(f, 'reconnect'); }).catch(() => {}); });
   // the idle lock's clock: a person's keyboard / pointer, at most one ping per 5 min, only while an idle lock is set
   const ping = () => {
     if (!facts || facts.state !== 'unlocked' || !facts.idleLockHours || Date.now() - activityAt < 300e3) return;
@@ -271,8 +321,7 @@ export async function initVault(app) {
   const f = await fetchJson('/api/vault/state');
   vaultBooted = true;   // from here a reconnect may re-ask; the first connect was the load, handled by this read
   if (!f || !f.state) return;
-  // the LOAD-TIME ask is unconditional (the original behaviour): the page always asks for the second password while locked at
-  // load — `maybeNagVault` (app.js) may have pre-read the facts, so the startedAt gate (reconnect only) must NOT suppress it.
-  applyVaultFacts(f);
-  if (f.state === 'locked') showUnlock();
+  // the LOAD-TIME ask never looks at startedAt (`maybeNagVault` (app.js) may have pre-read the facts — the relock-door trap):
+  // a load asks while locked unless this tab set THIS lock aside (lane vault-locked-loud: a reload after 「稍后」 asks no more)
+  onVaultState(f, 'load');
 }

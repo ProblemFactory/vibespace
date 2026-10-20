@@ -591,6 +591,48 @@ function decisionBlock(rule, { principals, changed }) {
   return { el: box, onEstimate(e) { est = e || null; refresh(); } };
 }
 
+// lane dm-reply-infers (B-6b4b, owner 2026-10-20): THE REPLY RULE'S JUDGED ROAD — opt-in per rule (default off, `infer`): a
+// plain message after this agent's own (no quote, no thread), inside the reply-judging window (Settings › Channels), is
+// judged ONCE by the LLM plugin; a yes notifies like a quote does. The plugin off / no key / its Rules switch off is SAID on
+// the row with the way to the Plugins card (the decision row's rule) — the marker road works either way.
+function inferOffWhy(row) {
+  if (!row) return null;
+  if (row.missing) return t('The LLM plugin is not available on this server — plain replies are not judged (quotes and thread replies still notify).');
+  if (!row.enabled) return t('The LLM plugin is off — plain replies are not judged until you turn it on (quotes and thread replies still notify).');
+  if (!row.configured) return t('The LLM plugin has no key yet — plain replies are not judged until you add one on the Language model card (Integrations & keys).');
+  if (((row.decision && row.decision.features) || {}).rules !== true) return t('The LLM plugin\'s switch “Notification rules can use a sentence as the condition” is off — plain replies are not judged until you turn it on.');
+  return null;
+}
+function inferBlock(rule, { changed }) {
+  const box = el('div', 'chan-af-infer');
+  const lab = el('label', 'dialog-check-row chan-af-infer-on');   // the dialog's checkbox row (out-ranks `.dialog-body label`'s column)
+  const tick = el('input'); tick.type = 'checkbox'; tick.checked = rule.infer === true; tick.className = 'chan-af-infer-tick';
+  lab.append(tick, el('span', '', t('Also judge plain replies (LLM plugin)')));
+  const note = noteEl(t('A message with no quote and no thread that arrives after this agent\'s own message is judged once: is it an answer to it? A yes notifies like a quote does; each judgment is one call within the plugin\'s daily budget. How long after the agent\'s message: Settings › Channels.'));
+  note.classList.add('chan-af-infer-note');
+  const off = el('div', 'chan-dec-plugin');
+  box.append(lab, note, off);
+  let row = null;
+  function refresh() {
+    note.hidden = !tick.checked;
+    off.textContent = '';
+    const why = tick.checked ? inferOffWhy(row) : null;
+    if (!why) return;
+    const line = noteEl(why, true);
+    line.classList.add('chan-dec-off');
+    if (!row.missing) {
+      const open = btn(t('Open Plugins'), null, 'chan-dec-open');
+      open.onclick = () => { const a = globalThis.app; if (a && typeof a.openPluginsDialog === 'function') a.openPluginsDialog(); };
+      line.append(' ', open);
+    }
+    off.appendChild(line);
+  }
+  tick.onchange = () => { if (tick.checked) rule.infer = true; else delete rule.infer; changed(); refresh(); };
+  decisionPluginRow().then((r) => { row = r; refresh(); });
+  refresh();
+  return { el: box };
+}
+
 function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onRemove }) {
   const seq = ++cardSeq;
   const box = el('div', 'chan-watch-row');
@@ -695,7 +737,7 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
       case 'regex': bind(textInput(rule.value, t('regular expression, e.g. invoice\\s*#?\\d+')), 'value'); break;
       case 'sender-in-group': bind(textInput(Array.isArray(rule.members) ? rule.members.join(', ') : (rule.value || ''), t('ids or names, comma-separated')), 'members', (v) => v.split(',').map((x) => x.trim()).filter(Boolean)); break;
       case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': break;
-      case 'reply-to-sent': fields.appendChild(noteEl(t('Set this on a group to cover each of its agents for their own sends — a reply notifies only the agent whose message it answers.'))); break;
+      case 'reply-to-sent': fields.appendChild(noteEl(t('Set this on a group to cover each of its agents for their own sends — a reply notifies only the agent whose message it answers.'))); row._extra = inferBlock(rule, { changed }).el; break;   // + the judged road (lane dm-reply-infers)
       case 'time-window': bind(textInput(rule.from || '09:00', 'HH:MM'), 'from'); bind(textInput(rule.to || '18:00', 'HH:MM'), 'to'); break;
       case 'fact': bind(textInput(rule.key, t('key, e.g. event')), 'key', (v) => v.trim()); bind(textInput(rule.value, t('value, e.g. deploy.failed')), 'value'); break;
       case 'decision': { const d = decisionBlock(rule, { principals, changed }); row._extra = d.el; decisionRows.add(d); if (decisionEst) d.onEstimate(decisionEst); break; }   // lane decision-rule

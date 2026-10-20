@@ -39,6 +39,7 @@ const ROOT = scratch('chan-agent-watch');
 fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(ROOT, { recursive: true });
 const MUT = mutantCopies('chan-agent-watch', REPO);
+const J2s = (x) => JSON.stringify(x);
 
 const AGENT = { kind: 'agent', id: 'agent-1', name: 'Worker' };
 const OTHER = { kind: 'agent', id: 'agent-2', name: 'Other' };
@@ -84,7 +85,7 @@ ok(ACL.validateDirectory({ singles: true }).ok && ACL.validateDirectory({ single
 const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
 const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLevelFor: () => 'none' };
 function dayStartClock() { const t0 = Date.now(); const day0 = Math.floor(t0 / 86400e3) * 86400e3 + 60e3; let skew = 0; const f = () => day0 + (Date.now() - t0) + skew; f.advance = (ms) => { skew += ms; }; return f; }
-function mkEngine(name, { ENGM = ENG, live = null, sendHook = null } = {}) {
+function mkEngine(name, { ENGM = ENG, live = null, sendHook = null, decisionEngine = null, lines = null } = {}) {
   const dataDir = path.join(ROOT, name);
   const clock = dayStartClock();
   const userTodos = new UserTodoManager({ dataDir, now: clock });
@@ -99,7 +100,8 @@ function mkEngine(name, { ENGM = ENG, live = null, sendHook = null } = {}) {
   // lane slack-file-send-key r2: a leg may stand in for the vendor's send (the adapter's own send handed in)
   if (sendHook) { const mk0 = fk.create; fk.create = (record, deps) => { const a = mk0(record, deps); const s0 = a.send; a.send = (convId, o) => sendHook(s0, convId, o); return a; }; }
   registry.register(fk);
-  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos, deliver, now: clock, log: { log() {}, warn() {}, error() {} }, liveSessions: () => live || [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }] });
+  const log = lines ? { log: (x) => lines.push(String(x)), warn: (x) => lines.push(String(x)), error() {} } : { log() {}, warn() {}, error() {} };   // + lines: lane dm-reply-infers reads the journal
+  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos, deliver, now: clock, log, liveSessions: () => live || [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }], ...(decisionEngine ? { decisionEngine } : {}) });
   return { eng, userTodos, delivered, stashed, clock };
 }
 
@@ -519,5 +521,108 @@ async function parityLeg(ENGM, name) {
 
 { const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf8'); ok(cli && require(path.join(REPO, 'src/channel-watch-spec.js')).watchSpecFromArgs([]).spec.delivery === 'next-turn' && require(path.join(REPO, 'src/channel-watch-spec.js')).watchSpecOfBody({}).spec.delivery === 'next-turn', 'wiring (verify r1 ⑤): the CLI\'s default mode is next-turn — an agent never chooses a billed wake for itself by default'); }
 fs.rmSync(ROOT, { recursive: true, force: true });
+console.log('⑪ lane dm-reply-infers (B-6b4b): a plain reply judged ONCE by the decision API — a yes wakes once, a no never, the memo holds, the scope and the caps');
+{
+  const DE = require(path.join(REPO, 'src/server/decision-engine.js'));
+  // D1's REAL engine over an in-process provider (no vendor call): it answers YES when the sent text asks for the contract
+  function judgeSide(name, { p = null, budgetCents = 100 } = {}) {
+    const ddir = path.join(ROOT, `${name}-decision`); fs.mkdirSync(ddir, { recursive: true });
+    const fetches = [];
+    const fetchImpl = async (url, init) => {
+      const body = JSON.parse(await new Response(init.body).text()); fetches.push(body);
+      const sentLine = (/\nsent: ([^\n]*)/.exec(body.input) || [])[1] || '';
+      const prob = p !== null ? p : /contract/.test(sentLine) ? 0.9 : 0.2;
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ answers: body.questions.map((q) => ({ type: 'predicate', name: q.name, probability: prob })), usage: { input_tokens: 120 } }) };
+    };
+    const integrations = { resolveIntegration: () => ({ values: { provider: 'openai', apiKey: ['sk', 'test', 'dmri', '0001'].join('-') }   /* built at runtime: the secret scan */, source: 'user' }) };
+    const dec = DE.create({ dataDir: ddir, integrations, fetchImpl, log: { log() {}, warn() {}, error() {} } });
+    dec.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ rules: true, dailyBudgetCents: budgetCents }) });
+    const judged = [];   // EVERY judge() call the channels engine makes (a memo answer too)
+    const spy = { ...dec, judge: async (use, parts, o) => { const r = await dec.judge(use, parts, o); judged.push({ use, parts, o, r }); return r; } };
+    const journal = () => { try { return fs.readFileSync(path.join(ddir, 'decision-journal.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+    return { dec, spy, fetches, judged, journal, ddir, integrations };
+  }
+  const RI = { kind: 'reply-to-sent', infer: true };
+  async function inferLeg(name, { rule = RI, ENGM = ENG, p = null, budgetCents = 100, principal = AGENT, live = null } = {}) {
+    const J = judgeSide(name, { p, budgetCents });
+    const lines = [];
+    const { eng, delivered } = mkEngine(name, { ENGM, live, decisionEngine: J.spy, lines });
+    await eng.pass(A, { force: true });
+    const rec = eng.adapterRecords().adapters.find((r) => r.id === A);
+    const got = eng.messages(A, C, { limit: 1 });
+    const r0 = (got.records || got)[0];
+    const t0 = Number(r0.at);
+    const set = rule ? await eng.setGrain(A, { kind: 'conversation', convId: C }, { access: [acc(principal)], watchers: [{ principal, delivery: 'wake', notify: 'wake', mode: 'filtered', filter: { match: 'any', rules: [rule] } }] }) : null;
+    await eng.store.index.update((ix) => { if (ix.conversations[KEY]) ix.conversations[KEY].kind = 'dm'; });   // userW's p2p chat
+    const sent = (id, cid, vid, text, dt) => ({ id, adapterId: A, convId: C, state: 'sent', text, draftedBy: { kind: 'agent', id: cid, name: cid }, at: t0 + dt, updatedAt: t0 + dt, result: { vendorMessageId: vid, at: t0 + dt } });
+    await eng.store.outbox.update((ob) => { ob.proposals['p-a'] = sent('p-a', 'agent-1', 'vm-a1', 'Can you send me the signed contract by Friday?', 100); ob.proposals['p-b'] = sent('p-b', 'agent-2', 'vm-b1', 'Lunch on Thursday?', 200); });
+    const mkR = (vid, dt, more = {}) => ({ ...r0, id: `${r0.id}-${vid}`, vendorId: vid, at: t0 + dt, author: { id: 'ou_userw', name: 'userW', isSelf: false, isBot: false }, text: `Signed it — sending now (${vid})`, replyTo: null, root: null, threadKey: null, ...more });
+    const step = async (...rs) => { await eng.onFresh(rec, C, rs, { origin: 'test' }); await eng.settleWakes(); };
+    return { eng, J, lines, delivered, mkR, step, set, r0, t0 };
+  }
+  const H1 = 3600e3;
+  // ── a DM follow-up IN SCOPE judged YES ⇒ ONE wake ──
+  const y = await inferLeg('e11-yes');
+  await y.step(y.mkR('w-1', 2 * H1));
+  const yIn = y.J.fetches[0] && y.J.fetches[0].input;
+  const yRow = y.J.journal().find((r) => r.use === 'reply-infer');
+  ok(y.set.ok && y.J.judged.length === 1 && y.J.fetches.length === 1 && y.delivered.length === 1 && y.delivered[0].cid === 'agent-1', 'a plain DM answer 2 h after the agent\'s send, judged YES ⇒ ONE call, ONE wake to the agent that sent', JSON.stringify({ judged: y.J.judged.length, fetches: y.J.fetches.length, delivered: y.delivered.map((d) => d.cid) }));
+  ok(/matched: judged an answer to your message of \d\d:\d\d UTC/.test(y.delivered[0].text) && /\nReply to your message \([^)]*, "Can you send me the signed contract by Friday\?", judged 0\.90\): from userW at /.test(y.delivered[0].text) && y.delivered[0].o && y.delivered[0].o.spendReason === 'channel-message', 'the same wake, the same card: the why says it was judged, the hand-over line names the answered message and the score (the existing money door, channel-message)', y.delivered[0].text.split('\n').slice(0, 4).join(' | '));
+  ok(yIn && /\nsent: Can you send me the signed contract by Friday\?\nreply: Signed it — sending now \(w-1\)\ngap: 120 minutes$/.test(yIn) && !yIn.includes(y.r0.text) && y.J.fetches[0].questions.length === 1 && y.J.fetches[0].questions[0].name === 'answers_sent', 'the parts = the sent text + the candidate\'s text + the gap — NOTHING else of the conversation (its first message is not in the input); ONE fixed question', yIn);
+  ok(yRow && yRow.outcome === 'ok' && yRow.p === 0.9 && y.J.judged[0].o.memo.sent === 'vm-a1' && y.J.judged[0].o.memo.id === `${y.r0.id}-w-1`, 'the decision ledger (data/decision-journal.jsonl) logs the judgment with its score; the memo = the record\'s id + the sent message\'s id', JSON.stringify({ yRow, memo: y.J.judged[0].o.memo }));
+  // ── judged NO ⇒ no wake, and THE MEMO HOLDS: a second pass never judges again (a restart neither) ──
+  async function noLeg(ENGM, name) {
+    const n = await inferLeg(name, { ENGM, p: 0.2 });
+    await n.step(n.mkR('w-1', 2 * H1));
+    const first = n.J.fetches.length;
+    await n.step(n.mkR('w-1', 2 * H1));   // the same record handed in again (a re-pass)
+    return { n, first, second: n.J.fetches.length, delivered: n.delivered.length };
+  }
+  const no = await noLeg(ENG, 'e11-no');
+  const dec2 = DE.create({ dataDir: no.n.J.ddir, integrations: no.n.J.integrations, fetchImpl: async () => { throw new Error('a restart must not call'); }, log: { log() {}, warn() {}, error() {} } });
+  dec2.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ rules: true }) });
+  const again = await dec2.judge('reply-infer', no.n.J.judged[0].parts, no.n.J.judged[0].o);
+  ok(no.first === 1 && no.second === 1 && no.delivered === 0 && no.n.J.judged.length === 2 && no.n.J.judged[1].r.memo === true && again.ok && again.memo === true && again.answers[0].probability === 0.2, 'judged NO ⇒ no wake; the SAME record again ⇒ answered by the memo, no second call; a restart (a new engine over the same data) remembers the no', JSON.stringify({ first: no.first, second: no.second, delivered: no.delivered, again: again.memo }));
+  const src = engineSource(REPO);
+  const MEMO = "{ questions: [DM.REPLY_INFER_QUESTION], memo: { id: String(r0.id), sent: String(c.sent.id) }, accountNever: rec.judge === 'never' }";
+  const rejudge = MUT.load('src/server/channels-engine.js', src.replace(MEMO, "{ questions: [DM.REPLY_INFER_QUESTION], memo: null, accountNever: rec.judge === 'never' }"), 'infer-rejudge');
+  const nm = await noLeg(rejudge, 'e11-no-mut');
+  ok(src.split(MEMO).length === 2 && nm.second === 2, 'CONTROL: an engine that asks WITHOUT the memo re-judges the same record on the second pass (2 calls) — the memo leg above goes RED', JSON.stringify({ first: nm.first, second: nm.second }));
+  // ── OUTSIDE THE SCOPE ⇒ never judged (judge() is not even asked) ──
+  const o = await inferLeg('e11-out');
+  await o.step(o.mkR('w-early', 50), o.mkR('w-late', 25 * H1), { ...o.mkR('w-own', 2 * H1), author: { id: 'ou_owner', name: 'Owner', isSelf: true, isBot: false } });
+  ok(o.J.judged.length === 0 && o.J.fetches.length === 0 && o.delivered.length === 0, 'outside the scope ⇒ judge() is never called (0 calls): a message BEFORE the send, one 25 h after it (the default 24 h span), the owner\'s own message', JSON.stringify({ judged: o.J.judged.length }));
+  // ── a MARKER hit stays the marker road: never judged ──
+  const m = await inferLeg('e11-marker');
+  await m.step(m.mkR('w-q', 60e3, { replyTo: 'vm-a1' }));
+  ok(m.J.judged.length === 0 && m.delivered.length === 1 && /matched: quotes your message of /.test(m.delivered[0].text) && !/judged/.test(m.delivered[0].text), 'a QUOTE of the send ⇒ the marker road\'s wake, judge() never called', JSON.stringify({ judged: m.J.judged.length, delivered: m.delivered.length }));
+  // ── THE CAP reached ⇒ no judgment, and the record says so ──
+  const b = await inferLeg('e11-budget', { budgetCents: 0 });
+  await b.step(b.mkR('w-1', 2 * H1));
+  const bRow = b.J.journal().find((r) => r.use === 'reply-infer');
+  ok(b.J.fetches.length === 0 && b.delivered.length === 0 && bRow && bRow.outcome === 'refused' && bRow.why === 'daily-budget' && b.lines.some((l) => /reply-infer — 1 plain message\(s\) not judged — daily-budget \(no hit, no wake/.test(l)), 'the day\'s budget spent ⇒ no call, no wake; the decision ledger records the refusal (daily-budget) and the channels journal names it', JSON.stringify({ bRow, lines: b.lines.filter((l) => /reply-infer/.test(l)) }));
+  const hcap = await inferLeg('e11-hour', { p: 0.2 });
+  await hcap.step(...Array.from({ length: 22 }, (_, i) => hcap.mkR(`w-h${i}`, 2 * H1 + i * 1000)));
+  ok(hcap.J.fetches.length === 20 && hcap.J.judged.length === 20 && hcap.lines.filter((l) => /reply-infer — 1 plain message\(s\) not judged — per-hour/.test(l)).length === 1, `the conversation's hour cap (${F.INFER.perHour}): 22 plain messages ⇒ 20 judgments; the rest NOT judged, said ONCE an hour (not once a message)`, JSON.stringify({ fetches: hcap.J.fetches.length, said: hcap.lines.filter((l) => /per-hour/.test(l)) }));
+  // ── review r1: a judgment that cannot change the answer is never bought — `any` with a keyword that hits, `every` with one that misses ──
+  const kw = await inferLeg('e11-kw', { rule: null });
+  await kw.eng.setGrain(A, { kind: 'conversation', convId: C }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, delivery: 'wake', notify: 'wake', mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'keyword', value: 'signed' }, RI] } }] });
+  await kw.step(kw.mkR('w-1', 2 * H1));
+  const ev = await inferLeg('e11-every', { rule: null });
+  await ev.eng.setGrain(A, { kind: 'conversation', convId: C }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, delivery: 'wake', notify: 'wake', mode: 'filtered', filter: { match: 'every', rules: [RI, { kind: 'keyword', value: 'invoice' }] } }] });
+  await ev.step(ev.mkR('w-1', 2 * H1));
+  ok(kw.J.judged.length === 0 && kw.delivered.length === 1 && /matched: keyword "signed"/.test(kw.delivered[0].text) && ev.J.judged.length === 0 && ev.delivered.length === 0, 'a judgment that cannot change the answer is never bought: `any` + a keyword that hits ⇒ the keyword\'s wake, 0 judgments; `every` + a keyword that misses ⇒ no wake, 0 judgments', JSON.stringify({ kw: [kw.J.judged.length, kw.delivered.length], every: [ev.J.judged.length, ev.delivered.length] }));
+  // ── a GROUP judges each member against its OWN send (the fan-out keeps per-member sends) ──
+  const live2 = [{ cid: 'agent-1', name: 'Worker', groups: ['g-work'] }, { cid: 'agent-2', name: 'Other', groups: ['g-work'] }];
+  const g = await inferLeg('e11-group', { principal: { kind: 'group', id: 'g-work', name: 'Work' }, live: live2 });
+  await g.step(g.mkR('w-1', 2 * H1));
+  ok(g.J.fetches.length === 2 && J2s(g.J.judged.map((x) => x.o.memo.sent).sort()) === J2s(['vm-a1', 'vm-b1']) && g.delivered.length === 1 && g.delivered[0].cid === 'agent-1', 'a GROUP row with infer: the message is judged once per member send (A\'s contract ask → yes, B\'s lunch ask → no) — only A is woken', JSON.stringify({ sends: g.J.judged.map((x) => x.o.memo.sent), delivered: g.delivered.map((d) => d.cid) }));
+  // ── infer OFF ⇒ the marker road, byte for byte: nothing judged, the plain answer missed, a quote still wakes ──
+  const off = await inferLeg('e11-off', { rule: { kind: 'reply-to-sent' } });
+  await off.step(off.mkR('w-1', 2 * H1));
+  await off.step(off.mkR('w-q', 2 * H1 + 1000, { replyTo: 'vm-a1' }));
+  ok(off.J.judged.length === 0 && off.delivered.length === 1 && /matched: quotes your message of /.test(off.delivered[0].text) && !off.lines.some((l) => /reply-infer/.test(l)), 'infer OFF: the 2 h plain answer is missed (the RED control), judge() never called, a quote still wakes — the marker road unchanged', JSON.stringify({ judged: off.J.judged.length, delivered: off.delivered.length }));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

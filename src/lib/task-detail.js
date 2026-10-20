@@ -4,6 +4,7 @@ import { t } from './i18n.js';
 import { isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…": a cleared Activity entry is worded here, never its stored English key
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { enterSubmits } from './chat-enter-keys.js';
+import { whenOn } from './owner-facts.js'; // B-7960 a: the board's times = the agents' words (the owner's zone, named)
 
 /**
  * Task detail window — the structured editor over data/tasks.json
@@ -49,8 +50,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     const entries = (task.progress || []).slice(-30);
     if (!entries.length) progList.innerHTML = `<div class="empty-hint">${escHtml(t('No progress notes yet'))}</div>`;
     for (const p of entries) {
-      const when = new Date(p.at);
-      const stamp = `<span class="task-detail-progress-time">${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
+      const stamp = `<span class="task-detail-progress-time">${escHtml(whenOn(app, p.at))}</span>`;   // B-7960 a: 2026-10-20 16:16 PT
       if (p.detail && !isCleared(p)) { // (a clear drops the detail: a cleared entry is always the plain row below)
         // summary+detail entries expand on click — the summary is the log
         // line, the detail is the full context the agent filed with it

@@ -352,6 +352,8 @@ const ENGINE_BOUNDS = {
   'channels.relaxedPollSec': { dflt: 300, min: 60, max: 900 },
   // lane lark-threads (A2): the recent-roots recheck's cadence per active conversation (drain rule 22a)
   'channels.threadRecheckSec': { dflt: 3600, min: 300, max: 86400 },
+  // lane dm-reply-infers: how long after a principal's own send a plain message may still be judged an answer (F.INFER.hours)
+  'channels.replyInferHours': { dflt: 24, min: 1, max: 168 },
 };
 const SETTING_BOUNDS = Object.freeze({ ...ENGINE_BOUNDS, ...ChannelSettings.boundsOf(ChannelSettings.CHANNEL_SETTINGS) });
 /** Consecutive failures before the adapter row goes amber and says so. */
@@ -6989,6 +6991,76 @@ function create(deps = {}) {
     return decisions;
   }
 
+  // ── THE REPLY RULE'S JUDGED ROAD (lane dm-reply-infers, B-6b4b — owner 2026-10-20: «用 decision api 判定一次就行了，
+  // 也不一定非得对方下一条就是回复，错误 trigger 还是挺贵的») ──────────────────────────────────────────────────────────────
+  // A `reply-to-sent` rule with `infer: true` (opt-in): every fresh record in its SCOPE (PURE `F.inferCandidate` — a peer's
+  // UNMARKED message after a send of the watcher's principal, within `channels.replyInferHours`) is judged ONCE through D1's
+  // engine (use `reply-infer`: ONE fixed question, the parts = the sent text + the candidate's text + the gap and nothing
+  // else; the memo = the record's id + the sent message's id, so a re-pass, a restart or a second watcher never re-bills),
+  // BEFORE any filter runs; the answers land in `ctx.inferred`. A candidate is asked once a batch however many watchers
+  // share it. Bounded by the conversation's own hour cap (F.INFER.perHour — reserved with its check, given back when no
+  // call was made) inside D1's daily budget / switches / backoff; a refusal = no hit + ONE journal line per reason per
+  // conversation an hour (never a wake). Outside the scope, and for a rule without `infer`, nothing is asked.
+  const inferHourly = new Map();   // `${adapterId}/${convId}` → the judgments it took this hour (a memo answer costs none)
+  const inferSaid = new Map();     // `${conv} ${why}` → when the journal last said it (once an hour)
+  function inferSay(rec, convId, why, n) {
+    const k = `${rec.id}/${convId} ${why}`, t = now();
+    if (t - (inferSaid.get(k) || 0) < DECISION_SAY_MS) return;
+    inferSaid.set(k, t);
+    if (inferSaid.size > 2000) inferSaid.delete(inferSaid.keys().next().value);
+    log.log(`[channels] ${rec.id}/${convId}: reply-infer — ${n} plain message(s) not judged — ${why} (no hit, no wake; said once an hour)`);
+  }
+  const inferHoursSetting = () => setting('channels.replyInferHours');   // THE settings reader (SETTING_BOUNDS = the schema row's numbers)
+  const INFER_PARALLEL = 4;        // judgments in flight per pass (review r1: never the sum of N calls before the batch's other watchers)
+  async function preInfer(rec, convId, fresh, order, selfId, ctxOf, extra = {}) {
+    // the half an item matches with (a group row's `rest` item never reads the sent rule — its members' items do)
+    const items = order.filter((item) => { if (item.watcher.mode !== 'filtered') return false; const f0 = filterFor(item.watcher.filterId); return F.inferRuleOf(item.split ? F.splitFilter(f0, item.split) : f0); });
+    if (!items.length) return null;
+    const hours = inferHoursSetting();
+    const inferred = new Map();
+    const asks = new Map();   // inferKeyOf → {r0, c}: one judgment per record × send, whoever watches
+    for (const item of items) {
+      const f0 = filterFor(item.watcher.filterId);
+      const f = item.split ? F.splitFilter(f0, item.split) : f0;
+      const cx = { ...ctxOf(item.watcher.principal), ...extra, principal: item.watcher.principal, inferHours: hours };
+      for (const r0 of fresh) {
+        try {   // one record the scope cannot read is skipped by name — never the batch's other candidates (R4 verify r5's rule)
+          if (FO.selfRead(r0, selfId) || FO.systemRead(r0)) continue;   // the owner's own message and a vendor notice are never judged
+          const c = F.inferCandidate(r0, cx);
+          // a judgment that cannot change this filter's answer is never bought (review r1: `any` already hit, `every` already missed)
+          if (c && !asks.has(c.key) && F.inferWorth(f, r0, cx)) asks.set(c.key, { r0, c });
+        } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: a record could not be scoped for reply-infer — not judged: ${(err && err.message) || err}`); }
+      }
+    }
+    if (!asks.size) return { inferred, hours };   // nothing in scope: no call, nothing to say
+    if (!decisionEngine || typeof decisionEngine.judge !== 'function') { inferSay(rec, convId, 'no LLM plugin on this server', asks.size); return { inferred, hours }; }
+    if (!decisionEngine.settings().pluginOn) { inferSay(rec, convId, 'plugin-off', asks.size); return { inferred, hours }; }
+    const conv = `${rec.id}/${convId}`;
+    const queue = [...asks];
+    const one = async ([key, { r0, c }]) => {
+      const t = now();
+      const hrs = (inferHourly.get(conv) || []).filter((x) => x > t - 3600e3);
+      inferHourly.set(conv, hrs);
+      if (hrs.length >= F.INFER.perHour) { inferSay(rec, convId, 'per-hour', 1); return; }
+      hrs.push(t);   // RESERVE the hour slot in the same step as its check: concurrent passes see it
+      const sentText = String(c.sent.text || c.sent.words || c.sent.subject || '') || '(a file)';
+      let res = null;
+      try {
+        res = await decisionEngine.judge('reply-infer', { sent: sentText, reply: r0.text || '', gap: `${c.gapMin} minutes` }, { questions: [DM.REPLY_INFER_QUESTION], memo: { id: String(r0.id), sent: String(c.sent.id) }, accountNever: rec.judge === 'never' });
+      } catch (err) { res = { ok: false, why: `error: ${(err && err.message) || err}`.slice(0, 160) }; }
+      if (!res || !res.ok || res.memo) { const a = inferHourly.get(conv) || []; const i = a.lastIndexOf(t); if (i >= 0) a.splice(i, 1); }   // no call made: the slot goes back
+      if (!res || !res.ok) { inferSay(rec, convId, (res && res.why) || 'refused', 1); return; }
+      const a = (Array.isArray(res.answers) && res.answers[0]) || null;
+      inferred.set(key, a);
+      const p = a && !a.refused && typeof a.probability === 'number' ? a.probability : null;
+      log.log(`[channels] ${conv}: reply-infer — a plain message ${c.gapMin} min after a send judged ${p !== null && p >= F.INFER.threshold ? 'an answer' : 'not an answer'}${p !== null ? ` (${p.toFixed(2)})` : ' (no score)'}${res.memo ? ' — remembered, no call' : ''}`);
+    };
+    // ≤ INFER_PARALLEL in flight: the hour slot is reserved in the same synchronous step as its check, so N workers see it
+    await Promise.all(Array.from({ length: Math.min(INFER_PARALLEL, queue.length) }, async () => { while (queue.length) await one(queue.shift()); }));
+    if (inferHourly.size > 2000) for (const [k, v] of inferHourly) if (!v.length) inferHourly.delete(k);
+    return { inferred, hours };
+  }
+
   /** THE FUNNEL ENTRY. `fresh` are the records that just became durable.
    *  R4: EVERY WATCHER in effect matches with ITS OWN filter and is delivered
    *  on its own (a wake, a digest window, a scope digest), each against its
@@ -7049,7 +7121,7 @@ function create(deps = {}) {
         props.sort((a, b) => Number(a.result.at || a.at) - Number(b.result.at || b.at));
         for (const p of props) {
           const m = sentOut.get(String(p.draftedBy.id)) || new Map();
-          for (const v of P.sentIdsOf(p.result)) m.set(v, { at: Number(p.result.at || p.at), words: String(p.text || '').replace(/\s+/g, ' ').trim().slice(0, 80), subject: String((p.compose && p.compose.subject) || p.title || '').slice(0, 120) });
+          for (const v of P.sentIdsOf(p.result)) m.set(v, { at: Number(p.result.at || p.at), words: String(p.text || '').replace(/\s+/g, ' ').trim().slice(0, 80), subject: String((p.compose && p.compose.subject) || p.title || '').slice(0, 120), id: String(p.result.vendorMessageId), text: String(p.text || '').slice(0, 2000) });   // + id / text: lane dm-reply-infers (the send a plain reply is judged against — every part shares the first id)
           if (m.size > F.SENT_MAX) m.delete(m.keys().next().value);
           sentOut.set(String(p.draftedBy.id), m);
         }
@@ -7075,6 +7147,9 @@ function create(deps = {}) {
     // lane decision-rule: the decision rules' answers BEFORE any filter runs (null = no decision rule in scope — no cost)
     let decisions = null;
     try { decisions = await preJudge(rec, convId, fresh, order, selfId); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the decision pre-judge failed — no decision rule hits this batch: ${(err && err.message) || err}`); }
+    // lane dm-reply-infers: the reply rule's judged road — its answers before any filter runs (null = no `infer` rule in scope)
+    let infer = null;
+    try { infer = await preInfer(rec, convId, fresh, order, selfId, placeCtx, { subjectOf, ...(decisions ? { decisions } : {}) }); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the reply-infer pre-pass failed — no plain message is judged this batch: ${(err && err.message) || err}`); }
     for (const item of order) {
       try {
         const w = item.watcher;
@@ -7085,7 +7160,7 @@ function create(deps = {}) {
         const filter = item.split ? F.splitFilter(filter0, item.split) : filter0;
         if (item.split && !filter) continue;
         const hits = [];
-        const mctx = { ...(filter && Array.isArray(filter.rules) && filter.rules.some((x) => x && F.PLACE_RULE_KINDS.includes(x.kind)) ? placeCtx(w.principal) : {}), subjectOf, ...(decisions ? { decisions, principal: w.principal } : {}) };
+        const mctx = { ...(filter && Array.isArray(filter.rules) && filter.rules.some((x) => x && F.PLACE_RULE_KINDS.includes(x.kind)) ? placeCtx(w.principal) : {}), subjectOf, ...(decisions ? { decisions, principal: w.principal } : {}), ...(infer ? { inferred: infer.inferred, inferHours: infer.hours } : {}) };
         for (const r of fresh) {
           try {
             // lane channel-self-unread (B-c91b: 'inc-' matched the owner's OWN Outbox replies to userW): the owner's

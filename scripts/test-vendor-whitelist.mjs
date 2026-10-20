@@ -26,6 +26,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { trackedFiles } from './tracked-files.mjs';   // B-1561: the census lists data/bin via git, never a working-tree readdir
 import { createRequire } from 'node:module';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
@@ -60,9 +61,11 @@ const walk = (dir) => {
 };
 walk(path.join(REPO, 'src'));
 files.push(path.join(REPO, 'server.js'));
-for (const f of fs.readdirSync(path.join(REPO, 'data', 'bin'))) {
+// B-1561: data/bin from git ls-files — an untracked rclone / rclone-dl.zip / the generated agentd bundle is not source
+for (const rel of trackedFiles(REPO, 'data/bin')) {
+  const f = path.basename(rel);
   if (/\.(js|mjs)$/.test(f) || !f.includes('.')) {
-    const p = path.join(REPO, 'data', 'bin', f);
+    const p = path.join(REPO, rel);
     try { if (fs.statSync(p).isFile()) files.push(p); } catch { }
   }
 }
@@ -163,6 +166,17 @@ for (const [rel, n] of Object.entries(constructions)) {
   const plantedEngine = eng.replace(/^.*budgetVerdict\(\{\s*$/m, '    const v = { ok: true }; ({');
   ok(!ALLOW['src/decision-model.js'] && constructionsIn(dm) === 0 && plantedModel !== dm && constructionsIn(plantedModel) >= 1, 'CONTROL: a decisions fetch planted in the PURE model (beside its own URL) is a construction outside the allowlist (RED)', String(constructionsIn(plantedModel)));
   ok(constructionsIn(eng) === 1 && plantedEngine !== eng && (plantedEngine.match(/budgetVerdict\(/g) || []).length < (eng.match(/budgetVerdict\(/g) || []).length, 'CONTROL: the engine with its budgetVerdict call removed loses the gate the row names (the gate census turns RED)');
+}
+// lane dm-reply-infers (B-6b4b): the reply judgment is a USE of the ONE decisions caller, never a new site — the ALLOW table
+// keeps its rows (the decisions endpoint: decision-engine.js alone, max 1); the channels engine holds no request primitive and
+// reaches the vendor for `reply-infer` only through decisionEngine.judge (the row's gates: budgetVerdict, pluginOn, the key)
+{
+  const ce = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const dmText = fs.readFileSync(path.join(REPO, 'src/decision-model.js'), 'utf-8');
+  const pre = ce.slice(ce.indexOf('async function preInfer('), ce.indexOf('/** THE FUNNEL ENTRY.'));
+  const viaJudge = ce.split('\n').filter((l) => /decisionEngine\.judge\('reply-infer'/.test(l)).length;
+  ok(Object.keys(ALLOW).length === 6 /* int332: 5 on the lane's .328 base; .329 added the provider-models row */ && ALLOW['src/server/decision-engine.js'].max === 1 && !ALLOW['src/server/channels-engine.js'] && !constructions['src/server/channels-engine.js'] && viaJudge === 1 && pre.length > 500 && !/\bfetch\s*\(|https?\.request\(|\.textModel\b/.test(pre) && dmText.includes("'reply-infer': Object.freeze({"),
+    `lane dm-reply-infers: use reply-infer adds NO vendor site — the allowlist keeps its ${Object.keys(ALLOW).length} rows (the decisions row: decision-engine.js, max 1); the channels engine's pre-pass calls decisionEngine.judge('reply-infer', …) once and holds no request primitive`);
 }
 // lane rule-learning: the chat completions call is EXACTLY one site in ONE file (count exact); the gates live in the CODE (a
 // header that merely names them is no gate); CONTROLS — a copy planted beside the learn route (RED: outside the allowlist), a

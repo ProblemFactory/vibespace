@@ -12,7 +12,8 @@
     "ci": "node scripts/ci.mjs",
     "ci:heavy": "node scripts/ci.mjs --heavy --isolate",
     "ci:status": "node scripts/ci.mjs --status",
-    "postinstall": "node scripts/install-git-hooks.mjs"
+    "postinstall": "node scripts/install-git-hooks.mjs",
+    "harness:new": "node scripts/harness-new.mjs"
   },
   "agentTools": {
     "_why": "Tools the AGENT runs from its own shell, on its own PATH — NOT VibeSpace dependencies. agent-browser is deliberately NOT in dependencies/optionalDependencies: npm puts node_modules/.bin on PATH for `npm run`, so a local copy would be the binary our own gate measures while every agent session kept using the global one on PATH — the suite and production would silently test different builds. The floor is therefore DECLARED here and CHECKED AT RUNTIME (src/browser-profiles.js FLOOR_VERSION + src/browser-facts.js), with scripts/test-browser-profiles.mjs pinning the two to the same string.",

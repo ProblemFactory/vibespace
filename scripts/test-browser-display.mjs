@@ -221,14 +221,15 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
       && VV({ now: T0, lastVerbAt: T0 - 31000, viewers: 1 }).act === null && VV({ now: T0, lastVerbAt: 0, viewers: 1, frozen: true }).act === 'thaw'
       && VV({ now: T0, lastViewerAt: T0 - 5000, frozen: true }).act === 'thaw' && VV({ now: T0, driving: true, frozen: true }).why === 'driving'
       && VV({ now: T0, busy: true }).act === null && VV({ now: T0, lastVerbAt: T0 - 60000, frozen: true }).act === null; };
-    // lane browser-swiftshader-cpu-r2: the owner's switch (browser.idlePaintFreeze, OFF by default) — off ⇒ never a freeze, a
-    // browser frozen before it went off is thawed; an absent `enabled` is off
+    // lane browser-swiftshader-cpu-r2: the owner's switch (browser.idlePaintFreeze; ON by default since 2.369.332, lane
+    // idle-paint-default-on) — off ⇒ never a freeze, a browser frozen before it went off is thawed; an absent `enabled` in
+    // the verdict is off (the keeper always passes what it read)
     const offRow = (VV) => VV({ now: T0, lastVerbAt: T0 - 600000 }).act === null && VV({ enabled: false, now: T0, lastVerbAt: T0 - 600000 }).why === 'off'
       && VV({ enabled: 'yes', now: T0, lastVerbAt: T0 - 600000 }).act === null && VV({ enabled: false, now: T0, lastVerbAt: T0 - 600000, frozen: true }).act === 'thaw';
     const ssrc = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf8'); const sch = (ssrc.split("  'browser.idlePaintFreeze': {")[1] || '').split('\n  },')[0];
     const ksrc0 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'); const sw = ksrc0.slice(ksrc0.indexOf('async function sweepIdlePaint(t)'), ksrc0.indexOf('function idleReleaseAfterMs()'));
-    ok(offRow(V) && /type: 'boolean', default: false,/.test(sch) && /tier: 'advanced',/.test(sch) && /category: t\('Agent browser'\)/.test(sch) && /setting\('browser\.idlePaintFreeze', false\) === true/.test(sw) && /idlePaintVerdict\(\{ enabled,/.test(sw),
-      'lane browser-swiftshader-cpu-r2: browser.idlePaintFreeze (advanced, OFF by default) — off ⇒ never a freeze (absent = off), a browser frozen before it went off is thawed; the keeper reads the switch at EVERY sweep', sch);
+    ok(offRow(V) && /type: 'boolean', default: IDLE_PAINT_DEFAULT,/.test(sch) && /^import \{ IDLE_PAINT_DEFAULT \} from '\.\.\/browser-idle\.js';/m.test(ssrc) && /tier: 'advanced',/.test(sch) && /category: t\('Agent browser'\)/.test(sch) && /setting\('browser\.idlePaintFreeze', BIdle\.IDLE_PAINT_DEFAULT\) === true/.test(sw) && /idlePaintVerdict\(\{ enabled,/.test(sw),
+      'lane browser-swiftshader-cpu-r2: browser.idlePaintFreeze (advanced; its default is IDLE_PAINT_DEFAULT at the schema row AND the keeper\'s read, never a literal of their own) — off ⇒ never a freeze (an absent `enabled` in the verdict = off), a browser frozen before it went off is thawed; the keeper reads the switch at EVERY sweep', sch);
     ok(idleRow(V) && BI.IDLE_PAINT_MS === 30000 && BI.IDLE_PAINT_PROOF.frozenThenFlip.gpu === 0 && BI.IDLE_PAINT_PROOF.minimized.gpu > 50,
       'lane browser-swiftshader-cpu: idlePaintVerdict — no viewer and no verb for 30 s ⇒ freeze; a viewer / a recent viewer / a verb ⇒ thaw; a dialog or a navigation ⇒ left drawing; the proof: frozen 0 %, minimized still draws');
     ok(BI.unseenRung({ headed: true, fallback: { rung: 'hidden-window' } }) && BI.unseenRung({ headed: false }) && !BI.unseenRung({ headed: true, fallback: null }) && !BI.unseenRung(null),
@@ -238,6 +239,35 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
     ok(isrc.includes(vline) && !idleRow(MI.load('src/browser-idle.js', isrc.replace(vline, ''), 'no-viewer-rule').idlePaintVerdict), 'CONTROL: a verdict that ignores the live view freezes a watched page (RED on the idle row)');
     const offLine = "  if (enabled !== true) why = 'off';\n  else if (driving) why = 'driving';";
     ok(isrc.includes(offLine) && !offRow(MI.load('src/browser-idle.js', isrc.replace(offLine, "  if (driving) why = 'driving';"), 'switch-blind').idlePaintVerdict), 'CONTROL: a verdict that ignores the switch freezes while it is off (RED on the off row)');
+    // lane idle-paint-default-on (the owner 2026-10-20 「可以」 on IDLE_PAINT_PROOF.fleet): ON BY DEFAULT — the REAL keeper's
+    // sweep over a stand-in paint watch on ONE idle hidden-window browser, the setting unset / '' / false / true. A default
+    // never rewrites a stored value: explicitly false stays off.
+    const NOW_I = Date.parse('2026-10-20T12:00:00Z'); let idleSeq = 0;
+    const idleSweep = async (Kmod, stored, facts = {}) => {
+      const root = path.join(ROOT, `idle-default-${++idleSeq}`), dataDir = path.join(root, 'data'); fs.mkdirSync(dataDir, { recursive: true });
+      fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [{ id: 'bp-000000c1', label: 'IDLE', dir: path.join(root, 'prof'), createdAt: NOW_I - 3600e3 }],
+        browsers: { 'bp-000000c1': { profileId: 'bp-000000c1', ns: 'vs-bp-000000c1', state: 'ready', pid: null, hostId: null, external: false, display: { headed: true, fallback: { rung: 'hidden-window' } } } } }));
+      const acts = [], quiet = { log() {}, info() {}, warn() {}, error() {} };
+      const kk = Kmod.create({ dataDir, homeDir: root, env: () => ({ PATH: path.join(root, 'nobin'), HOME: root }), install: false, log: quiet, now: () => NOW_I, tickMs: 3600e3,
+        serverSetting: (k) => (k === 'browser.idlePaintFreeze' ? stored : undefined), daemonTable: async () => [] });
+      kk.setPaintWatch({ paintFacts: () => ({ lastVerbAt: NOW_I - 600000, busy: false, frozen: false, ...facts }),
+        freezePaint: async (pid) => { acts.push(`freeze ${pid}`); return { ok: true, tabs: 1 }; }, thawPaint: async (pid) => { acts.push(`thaw ${pid}`); return { ok: true }; } });
+      const seen = !!kk.profile('bp-000000c1'); await kk.sweepIdlePaint(NOW_I); kk.shutdown();
+      return seen ? acts.join(',') : 'no profile';
+    };
+    const K0 = require('../src/server/browser-keeper.js'), FZ = 'freeze bp-000000c1';
+    const d = { unset: await idleSweep(K0, undefined), empty: await idleSweep(K0, ''), off: await idleSweep(K0, false), on: await idleSweep(K0, true), offFrozen: await idleSweep(K0, false, { frozen: true }) };
+    ok(BI.IDLE_PAINT_DEFAULT === true && d.unset === FZ && d.empty === FZ && d.on === FZ && d.off === '' && d.offFrozen === 'thaw bp-000000c1',
+      'lane idle-paint-default-on: ON BY DEFAULT — the real keeper\'s sweep stops an idle hidden-window browser drawing when the owner never set the switch (unset or empty); explicitly false ⇒ never a freeze, one frozen before is thawed; explicitly true ⇒ frozen', d);
+    const n = { recent: await idleSweep(K0, undefined, { lastVerbAt: NOW_I - 5000 }), busy: await idleSweep(K0, undefined, { busy: true }), frozen: await idleSweep(K0, undefined, { frozen: true }) };
+    ok(n.recent === '' && n.busy === '' && n.frozen === '', 'lane idle-paint-default-on: nothing else moves — a verb 5 s ago or a dialog / navigation pending leaves it drawing; one already frozen is not frozen again', n);
+    const P = BI.IDLE_PAINT_PROOF.fleet;
+    ok(P && P.image === 'vibespace:3.7.0' && /^\d{4}-\d\d-\d\d$/.test(P.measured) && P.dashboard.gpu > 50 && P.dashboard.frozenGpu === 0 && P.light.frozenGpu === 0 && P.dashboard.frozenFrames10s === 0 && P.dashboard.resumeMs < 100 && P.light.resumeMs < 100 && P.dashboard.fpsAfter === 60,
+      'lane idle-paint-default-on: the default\'s reason is dated beside it — the fleet image: a dashboard\'s GPU process 99.8 % → frozen 0 %, 0 frames; back in 31–43 ms at 60 fps', P);
+    const ksrc1 = ksrc0, readLine = "setting('browser.idlePaintFreeze', BIdle.IDLE_PAINT_DEFAULT) === true";
+    const Klit = MI.load('src/server/browser-keeper.js', ksrc1.replace(readLine, "setting('browser.idlePaintFreeze', false) === true"), 'literal-default');
+    const c = { unset: await idleSweep(Klit, undefined), on: await idleSweep(Klit, true) };
+    ok(ksrc1.includes(readLine) && c.unset !== FZ && c.on === FZ, 'CONTROL: a keeper whose read keeps a literal default of its own (the .331 `false`) never freezes an instance whose owner never set the switch (RED on the default row) — an explicit true still freezes', c);
     const src0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8'); const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
     const thawAt = rsrc.indexOf('await D.thawPaint(t.profileId, { holder: t })');
     ok((thawAt > 0 && thawAt < rsrc.indexOf('if (arm) D.verbStarted(')) && /Target\.activateTarget[\s\S]{0,120}Target\.createTarget[\s\S]{0,300}Target\.closeTarget[\s\S]{0,200}Target\.activateTarget/.test(src0)

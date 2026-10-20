@@ -1428,6 +1428,23 @@ app.post('/api/usage/repair-identity', (req, res) => {
   res.json({ success: true, counts: rep.counts, ms: rep.ms, identities: (rep.identities || []).map((r) => ({ key: r.key, name: r.name, apiPhase: r.apiPhase, n: r.n, of: r.of, sidecar: r.sidecar, sidecarWas: r.sidecarWas, cache: r.cache, readmitted: r.readmitted })) });
 });
 
+// THE ON-DEMAND READINGS (lane antigravity-card-fixes): a named account whose harness declares `quota.onDemand`
+// (antigravity's `agy -p /usage`) has the typed limits the last PERSON'S Re-check wrote (src/server/cli-usage-door.js,
+// through the one write path) — what the last press left, nothing estimated, nothing polled. Keyed by account id;
+// agy's own window names ride along so the card says them as agy does.
+function onDemandReadings() {
+  const out = {};
+  try {
+    for (const a of (accounts.list().accounts || [])) {
+      if (!a || !a.id || !harnesses.get(a.backend || 'claude')?.quota?.onDemand) continue;
+      const c = usageWrite.readCacheObject(USAGE_CACHE_DIR, a.id);
+      if (!c || !Array.isArray(c.limits) || !c.limits.length) continue;
+      out[a.id] = { limits: c.limits, fetchedAt: c.fetchedAt || null, source: c.source || null, windowNames: c.windowNames && typeof c.windowNames === 'object' ? c.windowNames : null };
+    }
+  } catch { }
+  return out;
+}
+
 app.get('/api/usage', (req, res) => {
   ingestPassiveUsage(); // pick up whatever active sessions' statuslines just wrote
   const codexRl = summarizeCodexRateLimits();
@@ -1505,6 +1522,8 @@ app.get('/api/usage', (req, res) => {
     // Host-HELD account quota snapshots (2.245.0, on-demand ⟳ only), keyed
     // '<hostId>:<accountId>' — the Agents machine sections' per-row usage
     hostAccounts: _hostAcctUsage,
+    // Named accounts read on a person's Re-check (quota.onDemand — antigravity), keyed by account id
+    homeAccounts: onDemandReadings(),
   });
 });
 

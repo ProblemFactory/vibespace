@@ -136,5 +136,5 @@ Creating needs no approval (it costs nothing and leaks nothing); USING your own 
 | `argv_refused` · `tool_prints_secrets` · `tool_wraps_another` · `env_refused` · `entry_too_short_to_mask` · `cwd_refused` | the run's plan is refused | — (change the command) |
 | `job_no_use` | a Background Work job never uses a stored secret | run it from the conversation |
 | `device_road_later` | a run on a paired machine is not here yet | — |
-| `too_many_runs` · `too_many_requests` | too many at once | — (wait) |
+| `too_many_runs` · `too_many_requests` · `too_many_askers` | too many at once (4 runs, or 8 open requests, per conversation; 32 conversations asking at once) | — (wait) |
 | `bad_name` · `value_in_argv` · `bad_length` · `bad_charset` | mint / put's own words | — |

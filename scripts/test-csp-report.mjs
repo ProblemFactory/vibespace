@@ -6,7 +6,8 @@
 //   ① the policy: every directive pinned (default-src 'self', script-src 'self' with no inline / eval, object-src 'none',
 //      base-uri 'self', frame-ancestors 'self', report-uri, no report-to) — MUTANT: object-src dropped ⇒ RED
 //   ② a report as a line: no value (no sample, no query, no fragment), a URL cut to origin + 3 segments, the Reporting-API
-//      shape too, an unknown directive dropped
+//      shape too, an unknown directive dropped; a kept segment that looks like a token cut to `<token>` (B-a35f, q-043 verify
+//      L4 — MUTANT: the cut dropped ⇒ RED); ③b over the route, the stored line and the For-you notice hold `<token>`
 //   ③ the route: a fake report lands as ONE line; the duplicate is still one line + ONE notice; the same pair on another
 //      line is a second line and no second notice; a restart re-writes and re-notices nothing; a report from a FRAME the
 //      page made (document about / blob / data) is a line and NO notice (主开发's ruling 2) — the count tells them apart
@@ -94,6 +95,20 @@ const report = (o = {}) => ({ 'csp-report': { 'document-uri': `http://127.0.0.1:
   ok(kw && kw.blocked === 'inline' && kw.document === 'about', 'a keyword stays a keyword (inline, about)', kw);
   ok(C.uriOf(`data:text/html,<script>${SECRET}</script>`) === 'data' && C.uriOf('chrome-extension://abcdefghijklmnop/x.js?q=1') === 'chrome-extension://abcdefghijklmnop' && C.uriOf('blob:http://h/uuid') === 'blob', 'a data: URL is its scheme; an extension is its id; a blob: URL its scheme');
   ok(C.reportsOf(JSON.stringify(report({ 'effective-directive': 'evil-src', 'violated-directive': 'evil-src' }))).length === 0, 'a directive outside the CSP vocabulary is dropped');
+  // B-a35f (q-043 verify L4): a KEPT segment that looks like a token is cut to <token> — ≥ 16 of [A-Za-z0-9_-], any ≥ 32, the hub's own prefixes
+  const CUTS = [
+    ['https://h.example.net/share/abcdEFGH1234_-xy/x', 'https://h.example.net/share/<token>/x', '16 characters of [A-Za-z0-9_-]'],
+    [`https://h.example.net/${'a.b'.repeat(11)}/x`, 'https://h.example.net/<token>/x', 'any segment of 32 or more'],
+    ['https://h.example.net/p/vi-0123456789ab', 'https://h.example.net/p/<token>', 'a hub token prefix (vsst_ jbt_ vsrt_ vi-)'],
+    ['https://h.example.net/abcdefghijklmno/x', 'https://h.example.net/abcdefghijklmno/x', '15 characters stay'],
+    ['https://h.example.net/fonts/v2/a.b-c.woff2', 'https://h.example.net/fonts/v2/a.b-c.woff2', 'short segments stay'],
+    ['https://h.example.net/a/b/c/abcdEFGH1234_-xy', 'https://h.example.net/a/b/c/…', 'past the third segment the count cuts already'],
+  ];
+  const cutBad = CUTS.filter(([u, want]) => C.uriOf(u) !== want).map(([u, want, why]) => ({ why, got: C.uriOf(u), want }));
+  ok(!cutBad.length, `a kept path segment that looks like a token is cut to <token> (${CUTS.map((c) => c[2]).join('; ')})`, cutBad);
+  const srcT = readRepo('src/app-csp.js'), cutT = ".map((g) => (TOKEN_SEGMENT.test(g) ? '<token>' : g))";
+  const MT = srcT.split(cutT).length === 2 ? load(path.join(REPO, 'src/app-csp.js'), srcT.replace(cutT, '')) : null;
+  ok(MT && MT.uriOf(CUTS[0][0]) === 'https://h.example.net/share/abcdEFGH1234_-xy/x', 'MUTANT (the segment cut dropped) ⇒ RED: the token is kept in the line', MT && MT.uriOf(CUTS[0][0]));
   const rapi = C.reportsOf(JSON.stringify([{ type: 'csp-violation', body: { effectiveDirective: 'script-src-elem', blockedURL: 'eval', sourceFile: 'http://h/x.js', lineNumber: 3, documentURL: 'http://h/', disposition: 'report', sample: SECRET } }, { type: 'deprecation', body: {} }]));
   ok(rapi.length === 1 && rapi[0].blocked === 'eval' && rapi[0].line === 3 && !JSON.stringify(rapi).includes(SECRET), 'the Reporting-API shape (application/reports+json) reads the same, other report types skipped', rapi);
   ok(C.reportsOf('not json').length === 0 && C.reportsOf('{}').length === 0 && C.reportsOf(JSON.stringify(Array(50).fill({ type: 'csp-violation', body: { effectiveDirective: 'img-src', blockedURL: 'data' } }))).length === 20, 'not JSON / no report ⇒ nothing; at most 20 reports a post');
@@ -145,6 +160,20 @@ const FILE1 = path.join(D1, SINK.FILE);
   await post(H2, report()); await post(H2, report({ 'effective-directive': 'script-src-elem', 'blocked-uri': 'inline' }));
   ok(linesOf(FILE1).length === 5 && H2.added.length === 0 && H2.sink.summary().app.lines === 3 && H2.sink.summary().frames.lines === 2, 'a RESTART reads the keys on disk: the same reports write nothing and file nothing; the count of lines is read back', { lines: linesOf(FILE1).length, notices: H2.added.length, sum: H2.sink.summary() });
   await H2.close();
+}
+
+// ── ③b A TOKEN IN A PATH SEGMENT (B-a35f, q-043 verify L4) ──
+console.log('③b a token in a kept path segment lands as <token> — the stored line and the For-you notice');
+{
+  const DT = path.join(ROOT, 'token', 'data'); fs.mkdirSync(DT, { recursive: true });
+  const H = await hub({ dir: DT });
+  const TOK = ['Zq', '9x'.repeat(15)].join('');   // 32 characters of [A-Za-z0-9_-], built at run time (the secret scan)
+  const r = await post(H, report({ 'blocked-uri': `https://share.example.net/share/${TOK}/x?k=1` }));
+  const ln = linesOf(path.join(DT, SINK.FILE));
+  ok(r.status === 204 && ln.length === 1 && ln[0].blocked === 'https://share.example.net/share/<token>/x' && H.added.length === 1 && H.added[0].text.includes('https://share.example.net/share/<token>/x') && H.added[0].i18n.text.params.blocked === 'https://share.example.net/share/<token>/x',
+    'a blocked URL /share/<32 characters>/x ⇒ the stored line and the For-you notice (its text and its words) hold `<token>`', { line: ln[0], notice: H.added[0] && H.added[0].text });
+  ok(!fs.readFileSync(path.join(DT, SINK.FILE), 'utf8').includes(TOK) && !JSON.stringify(H.added).includes(TOK), 'the token is nowhere — not data/csp-reports.jsonl, not the notice\'s text, detail or words');
+  await H.close();
 }
 
 // ── ④ BOUNDS ──

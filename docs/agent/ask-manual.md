@@ -1,16 +1,19 @@
 # vibespace-ask — full manual
 
-Files an item into the USER's **For you tray** — the tray at the bottom right
-of their screen (top right on a phone): something only the human can do (a
+Files an item into the USER's **For you tray** (its label in their language:
+For you / 待你处理 / あなた宛て; where it sits is theirs to choose — your
+injected rules and every `vibespace-ask` answer name its label and its CURRENT
+place): something only the human can do (a
 decision, missing input, a review). The inverse of your own todo list. The
 tray is a NOTIFICATION MIRROR — the full question, options and your
 recommendation must ALSO be in your chat reply; never let the tray be the
 only copy.
 
 **Name it the way the user sees it.** When you tell the user you filed
-something, say "I added it to the For you tray at the bottom right" — never
-"your inbox" or "your queue": no button on their screen carries those words,
-and a user told "check your inbox" does not know where to look.
+something, use the words the `vibespace-ask` answer printed — e.g. "I added it
+to the “待你处理” tray at the top right of your screen": the label they read and
+the place it is NOW (they may have moved it, and a phone has it in the top
+bar). Never a place from memory, and never "your inbox" or "your queue".
 
 ## Verbs
 
@@ -68,9 +71,9 @@ detail up to 8000 (a longer one is CUT and said). The answer says `sent: N chara
 
 ## What the user sees
 
-The For you button in the taskbar (bottom right by default) with per-urgency
-count pills; a new item also pops a toast naming where the tray is ("Added to
-For you (bottom right)"); items grouped by session
+The For you button (in the taskbar by default; Customize mode moves it to any
+bar) with per-urgency count pills; a new item also pops a toast naming where
+the tray is on that screen; items grouped by session
 (clicking jumps into your conversation); a ⤢ on every item opens the For you
 WINDOW, where a long item is read at full width (markdown rendered — headings,
 lists, code blocks, tables), answered, marked done or dismissed.
@@ -134,6 +137,6 @@ The MOMENT the user answers (in chat or anywhere), resolve the item YOURSELF wit
 
 The For you item is a NOTIFICATION MIRROR, not the message itself: everything you file (the question, options, your recommendation) must ALSO appear IN FULL in your chat reply — never say something only in the tray (the user reads and copies from chat; tray rows are hard to read at length).
 
-Whenever you ask the user anything or end a turn waiting on them — file it in their For you tray (bottom right of their screen: say that, never "your inbox") AND write the full question (options + recommendation) in your CHAT REPLY; the tray only notifies, never the sole copy:
+Whenever you ask the user anything or end a turn waiting on them — file it in their For you tray (name it with its label and place as your rules and the answer say, never "your inbox") AND write the full question (options + recommendation) in your CHAT REPLY; the tray only notifies, never the sole copy:
 
 Resolve it YOURSELF the moment they answer (chat counts): `vibespace-ask resolve <id>`

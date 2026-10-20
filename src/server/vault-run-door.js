@@ -52,6 +52,10 @@
  *     `{conv, key: null, entries, until, at, by}` + `once` and the purpose — memory only, ≤ 8 hours: it opens that entry for
  *     THAT conversation's runs as the per-row switch opens it for everyone (the shape card still shows each new command); a
  *     once-grant is spent before its run starts. The run's use line carries the grant's purpose.
+ *     THE CAP (B-4934, q-043 verify L2): 8 open requests PER CONVERSATION (`too_many_requests`) and, hub-wide, 32 CONVERSATIONS
+ *     asking at once (the 33rd ⇒ `too_many_askers`) — a count of callers, never of requests, so one conversation's many open
+ *     questions never refuse another's first. More than 8 conversations asking ⇒ ONE Vault notice in For you «N conversations
+ *     are asking» (re-worded as N moves; closed at 8 or fewer, at a lock, at a boot).
  *   · THE USE LINE (lane vault-manual-and-lock — the use law's seam): every run that ran, and every refusal past the plan, is
  *     ALSO one `vault-use` line per entry through the engine's ONE writer (`noteUse`: door `run`, the conversation, the
  *     purpose, the outcome, the run's receipt) — what `vibespace-vault uses` reads back for that conversation.
@@ -90,7 +94,14 @@ const REQUEST_TYPE = 'vault-grant-ask';      // lane vault-manual-and-lock: an a
 const PURPOSE_MAX = 200;                     // the request's purpose, in the agent's own words (one line)
 const GRANT_MS = 8 * 3600e3;                 // a grant lives ≤ 8 hours (once: until its run; 8h: every run) — and never past a lock
 const GRANT_ANSWERS = Object.freeze(['once', '8h', 'deny']);
-const REQUESTS_PER_CALLER = 8, REQUESTS_MAX = 64;
+// B-4934 (q-043 verify L2): the hub-wide bound counts CONVERSATIONS, not requests — 64 requests hub-wide let eight
+// conversations × 8 open asks fill the table, and a ninth conversation's honest first ask answered too_many_requests
+const REQUESTS_PER_CALLER = 8, REQUEST_CALLERS_MAX = 32;
+const ASKING_LINE_OVER = 8;                  // more conversations than this asking at once ⇒ ONE Vault notice «N conversations are asking»
+const VAULT_INBOX_KEY = 'vault';             // the For-you bucket the vault's own notices file under (src/server/vault-hooks.js)
+const ASKING_TEXT = `More than ${ASKING_LINE_OVER} conversations are asking to use stored secrets`;   // the store's dedupe key (one row; N rides its words)
+const ASKING_KEY = '{n} conversations are asking to use stored secrets';
+const ASKING_DETAIL = 'Each conversation asks on its own card in For you. This line goes when 8 or fewer are asking.';
 const REQUEST_QUIET_MS = 10 * 60e3;          // a Deny (or the card dismissed) quiets that conversation × entry 10 minutes (the automation card's rule)
 const USE_SKIP = new Set(['ask_pending', 'too_many_runs', 'spawn_failed', 'storage_blocked']);   // a wait or the hub's own failure before any child ran — not a use's outcome (a child that ran is always one)
 const STORE_FILE = 'vault-run.json';
@@ -116,6 +127,7 @@ const STATUS = Object.freeze({
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, caller_gone: 410, too_many_runs: 429,
   spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400,
   request_pending: 409, request_quiet: 429, purpose_required: 400, purpose_too_long: 400, too_many_requests: 429,   // lane vault-manual-and-lock
+  too_many_askers: 429,   // B-4934
 });
 const MORE_WORDS = Object.freeze({
   hidden_chars: 'the command holds characters that show differently than they run (control or direction marks) — refused',
@@ -128,7 +140,8 @@ const MORE_WORDS = Object.freeze({
   request_pending: 'you already asked the user for that entry — the question waits in their For you tray; `vibespace-vault uses` shows the answer when it comes',
   purpose_required: 'say what the entry is for: vibespace-vault request <vault://…> --for "<what you will run with it, and why>"',
   purpose_too_long: `the purpose is one line of at most ${PURPOSE_MAX} characters`,
-  too_many_requests: 'too many questions are waiting on the user already — wait for their answers',
+  too_many_requests: `this conversation already has ${REQUESTS_PER_CALLER} questions waiting on the user — wait for their answers (\`vibespace-vault uses\` lists them)`,
+  too_many_askers: `${REQUEST_CALLERS_MAX} other conversations are waiting on the user's answers already — nothing was filed; ask again once some are answered`,   // B-4934
   request_quiet: 'the user said no to that a moment ago — do not ask again for 10 minutes; do other work',
 });
 const named = (code, extra = {}) => (MORE_WORDS[code] ? { ok: false, code, words: MORE_WORDS[code], ...extra } : VR.refusalOf(code, extra));
@@ -250,6 +263,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const reqByPair = new Map(); // `${scope}\n${entry id}` → askId (ONE open request per conversation × entry)
   const grants = new Map();    // `${scope}\n${entry id}` → { conv, key: null, entries: [id], until, once, at, by, askId, purpose }
   const reqQuiet = new Map();  // pair → until (a Deny / a dismissed card: no new card for that pair for 10 minutes)
+  let asking = { id: null, n: 0, quiet: false, batch: false };   // B-4934: the «N conversations are asking» notice (its item, its count, set aside by the owner)
   let db = null, dbEpoch = -1;
   const hubIdentity = (() => { try { return PI.identityOf(process.pid); } catch { return null; } })();   // written into every run folder (the boot sweep's proof)
   const vaultState = () => { try { return vault.state(); } catch { return 'locked'; } };
@@ -450,6 +464,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!userTodos) return 0;
     let n = 0;
     try { for (const it of (userTodos.snapshot?.() || {}).open || []) if (it && it.action && ((it.action.type === ACTION_TYPE && !asks.has(it.action.askId)) || (it.action.type === REQUEST_TYPE && !requests.has(it.action.askId)))) { try { userTodos.setStatus(it.id, 'done', it.action.type === REQUEST_TYPE ? 'vault_locked' : 'ask-expired'); n++; } catch { } } } catch (e) { log(`run card reconcile failed: ${e.message}`); }
+    try { for (const it of (userTodos.snapshot?.() || {}).open || []) if (it && it.sessionKey === VAULT_INBOX_KEY && !it.action && it.text === ASKING_TEXT && it.id !== asking.id) userTodos.setStatus(it.id, 'done', 'vault'); } catch { }   // B-4934: a previous process's «N are asking» (its requests died with it)
     return n;
   }
   const shapeIdOf = (key) => crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16);
@@ -481,7 +496,28 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (q.todoId && userTodos) { try { const it = userTodos.get?.(q.todoId); if (it && it.status === 'open') userTodos.setStatus(q.todoId, 'done', outcome === 'vault_locked' ? 'vault_locked' : outcome === 'changed' ? 'ask-changed' : outcome); } catch { } }
     if (outcome === 'denied') { reqQuiet.set(q.pair, now() + REQUEST_QUIET_MS); for (const [p, u] of reqQuiet) if (!(u > now())) reqQuiet.delete(p); }
     log(`${q.who}: the request for ${q.ref} ${outcome}${why !== outcome ? ` (${why})` : ''}`);
+    askingLine();
     return true;
+  }
+  /** B-4934: the owner's tray says how many conversations hold open requests once there are more than 8 — ONE Vault notice,
+   *  re-worded in place as the count moves (its English text is the store's dedupe key; N rides its words), closed at 8 or
+   *  fewer. Set aside by the owner, it stays quiet until the count falls to 8 or fewer. */
+  function askingLine() {
+    if (!userTodos || asking.batch) return;
+    const n = new Set([...requests.values()].map((x) => x.scope)).size;
+    const it = asking.id ? (() => { try { return userTodos.get(asking.id); } catch { return null; } })() : null;
+    if (n <= ASKING_LINE_OVER) {
+      if (it && it.status === 'open') { try { userTodos.setStatus(it.id, 'done', 'vault'); } catch { } }
+      asking = { id: null, n: 0, quiet: false, batch: false };
+      return;
+    }
+    if (it && it.status !== 'open' && it.resolvedBy !== 'vault') asking.quiet = true;   // dismissed / done by a person
+    if (asking.quiet || (it && it.status === 'open' && asking.n === n)) return;
+    try {
+      const r = userTodos.add(VAULT_INBOX_KEY, { origin: 'vault', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Vault', text: ASKING_TEXT,
+        detail: ASKING_DETAIL, i18n: { text: { key: ASKING_KEY, params: { n } }, detail: [{ key: ASKING_DETAIL }] } });
+      if (r && r.id) asking = { ...asking, id: r.id, n };
+    } catch (e) { log(`the «${n} conversations are asking» line could not be filed: ${e.message}`); }
   }
   /**
    * An AGENT asks the owner for an entry, with its purpose. `caller` as `run` reads it; `entry` = a `vault://` reference;
@@ -519,7 +555,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (up && requests.has(up)) return named('request_pending', { ref: ref.ref });
     const qu = reqQuiet.get(pair);
     if (qu && qu > now()) return named('request_quiet', { ref: ref.ref, until: new Date(qu).toISOString() });
-    if ([...requests.values()].filter((x) => x.scope === scope).length >= REQUESTS_PER_CALLER || requests.size >= REQUESTS_MAX) return named('too_many_requests');
+    const askers = new Set([...requests.values()].map((x) => x.scope));
+    if ([...requests.values()].filter((x) => x.scope === scope).length >= REQUESTS_PER_CALLER) return named('too_many_requests');
+    if (!askers.has(scope) && askers.size >= REQUEST_CALLERS_MAX) return named('too_many_askers');   // B-4934: a conversation already asking is never refused for others' asks
     const askId = randomBytes(16).toString('hex');
     const who = String(VB.actorName(caller.name, 'a conversation')).slice(0, 80);
     const q = { askId, pair, scope, conv: caller.conversationId, sessionKey: caller.sessionKey || null, who, ref: ref.ref, id: ref.id, label: String(row.label || ref.label).slice(0, 120), purpose: said, detail: '', askedAt: now(), todoId: null };
@@ -542,6 +580,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       }
     }
     requests.set(askId, q); reqByPair.set(pair, askId);
+    askingLine();
     audit('vault-request', { by: { kind: 'agent', key: caller.sessionKey || null, name: caller.name || null }, conv: scope, entry: ref.ref, purpose: said, askId });
     return { ok: true, askId, ref: ref.ref };
   }
@@ -863,7 +902,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function onLocked(why = 'lock') {
     for (const rec of [...runs]) { log(`the vault locked (${why}): stopping the run of ${rec.name || rec.conv}`); stop(rec, 'lock'); shredDir(rec.dir); }   // its files go AT ONCE (the child is being stopped)
     for (const q of [...asks.values()]) settle(q, 'vault_locked', 'locked');
-    for (const q of [...requests.values()]) settleRequest(q, 'vault_locked', 'locked');   // lane vault-manual-and-lock: every open request is withdrawn
+    asking.batch = true;   // B-4934: one recount after the whole withdrawal, not one per request
+    try { for (const q of [...requests.values()]) settleRequest(q, 'vault_locked', 'locked'); } finally { asking.batch = false; }   // lane vault-manual-and-lock: every open request is withdrawn
+    askingLine();
     seen.clear(); shortAlways.clear(); grants.clear(); db = null; dbEpoch = -1;   // … and every grant ends (once / 8 hours)
   }
   if (typeof vault.onLock === 'function') vault.onLock((why) => onLocked(why));
@@ -895,4 +936,4 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
 }
 
 const statusOf = (code) => STATUS[code] || 400;
-module.exports = { create, classOf, statusOf, STATUS, MORE_WORDS, ACTION_TYPE, REQUEST_TYPE, GRANT_MS, GRANT_ANSWERS, PURPOSE_MAX, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };
+module.exports = { create, classOf, statusOf, STATUS, MORE_WORDS, ACTION_TYPE, REQUEST_TYPE, GRANT_MS, GRANT_ANSWERS, PURPOSE_MAX, REQUESTS_PER_CALLER, REQUEST_CALLERS_MAX, ASKING_LINE_OVER, ASKING_TEXT, ASKING_KEY, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };

@@ -10,6 +10,7 @@
  */
 
 const crypto = require('crypto');
+const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const caps = require('../channel-caps.js');
 const F = require('../channel-filter.js');
 const WS = require('../channel-watch-spec.js');   // lane agent-watch-parity: the agent's watch = the Notify dialog's grammar, judged by the same validators
@@ -750,7 +751,7 @@ function create(engineCtx) {
     // re-registration is refused by name; a `wake` ask may still be filed (the user decides; their Approve lifts the mark)
     const scopeW = tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId };
     const blk = agentWatchBlockOf(scopeW, pk);
-    if (blk && d !== 'wake') return { ok: false, code: 'removed-by-user', error: `the user removed your notification on ${tg.key ? agentId(tg.key) : tg.adapterId} (${new Date(blk.at).toISOString().slice(0, 16).replace('T', ' ')} UTC) — it is theirs to restore: ask them (vibespace-ask), or file a wake ask (--mode wake) they approve; re-registering it yourself is refused` };
+    if (blk && d !== 'wake') return { ok: false, code: 'removed-by-user', error: `the user removed your notification on ${tg.key ? agentId(tg.key) : tg.adapterId} (${OF.when(blk.at)}) — it is theirs to restore: ask them (vibespace-ask), or file a wake ask (--mode wake) they approve; re-registering it yourself is refused` };
     // verify r1 F2: a bound on the rows one agent may hold of its OWN across every grain, said with the count
     if (!(mine && F.watchOriginOf(mine) === 'agent') && agentWatchCount(pk) >= F.MAX_AGENT_WATCHES) return { ok: false, code: 'watch-limit', error: `you already hold ${F.MAX_AGENT_WATCHES} notifications of your own (the limit) — \`vibespace-channels unwatch <conv>\` frees one; the user can set more for you in Notify…` };
     const row = { principal, origin: 'agent', delivery: d, notify: S.notify, mode: S.mode, ...(fl.filter ? { filter: fl.filter } : {}), ...(S.notify === 'digest' ? { digestMinutes: S.digestMinutes } : {}), dailyWakeCap: Math.max(1, S.dailyWakeCap) };

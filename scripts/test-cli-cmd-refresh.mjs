@@ -20,6 +20,10 @@
 //      between spawns — each spawn runs the binary where it NOW is, without a
 //      restart (RED on the pre-fix code: the second spawn runs nothing), and
 //      with it gone entirely the spawn fails the way it always did.
+//   ④ the same server's /api/backend-status (lane antigravity-card-fixes): it
+//      booted with no agy; an agy placed in dir B afterwards is INSTALLED at the
+//      next forced read (Manage agents' Install / Re-check), and not installed
+//      again once removed — no restart (RED on the pre-fix code).
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -234,6 +238,24 @@ else {
   ok(marks().length === before, `CONTROL: with the binary gone everywhere nothing runs — the spawn fails the way it always did (${r5?.type})`);
   const l3 = cliLines()[2] || '';
   ok(cliLines().length === 3 && /found nothing/.test(l3) && l3.includes(`'${path.join(A, 'claude')}'`), `and the journal says the re-resolve found nothing (${l3.trim().slice(0, 200)})`);
+  // ④ (lane antigravity-card-fixes, the owner's 「Antigravity CLI 未安装」 for an agy installed after the hub booted):
+  // THE STATUS READ re-checks the CLI paths (src/server/cli-cmd.js `check`) — on THIS server, after its spawn legs (a
+  // status read runs `claude --version`, which would add a mark; here the fake claude is already gone)
+  console.log('\n④ the same server: /api/backend-status sees an agy installed after boot, and its removal');
+  const agyStatus = async (q = '') => { try { const r = await fetch(`http://127.0.0.1:${PORT}/api/backend-status${q}`); return (await r.json())?.antigravity || {}; } catch (e) { return { error: e.message }; } };
+  const FALLBACK_AGY = FALLBACK_DIRS.filter((d) => fs.existsSync(path.join(d, 'agy')));
+  if (FALLBACK_AGY.length) skip(`a real agy sits in a resolver fallback dir (${FALLBACK_AGY.join(', ')}) — the "not installed" start cannot be made here`);
+  else {
+    const s0 = await agyStatus();
+    ok(s0.installed === false && s0.cmdPath === null, `booted with no agy on its PATH: the Antigravity row says not installed (${JSON.stringify(s0)})`);
+    fs.writeFileSync(path.join(B, 'agy'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const s1 = await agyStatus('?recheck=1');
+    ok(s1.installed === true && s1.cmdPath === path.join(B, 'agy'), `agy appears in dir B; Manage agents' forced read (Install / Re-check) says INSTALLED there — THE FINDING, no restart (pre-fix: still not installed) (${JSON.stringify(s1)})`);
+    ok(journal.includes(`[cli-cmd] antigravity: 'agy' found at '${path.join(B, 'agy')}'`), 'the adoption is one journal line (later spawns are born with the path)');
+    fs.rmSync(path.join(B, 'agy'));
+    const s2 = await agyStatus();
+    ok(s2.installed === false && s2.cmdPath === null, `agy removed: the next plain read says not installed (${JSON.stringify(s2)})`);
+  }
   try { ws.close(); } catch { }
   done();
 }

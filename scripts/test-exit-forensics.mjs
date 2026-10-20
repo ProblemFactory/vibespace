@@ -1192,12 +1192,12 @@ console.log('— §6 B-f698: an unexpected exit while working is resumed once by
   // ── verify r1 (B-f698): who is never respawned, and the crash loop ──
   const r1Table = (X) => {
     const V1 = (o) => X.unexpectedExitVerdict({ mode: 'chat', midTurn: true, conversationId: 'c1', now: 1e12, facts: { code: 1, wrapperFate: 'finalized' }, ...o });
-    return { codex: act(V1({ backend: 'codex' })), opencode: act(V1({ backend: 'opencode' })), remote: act(V1({ remote: true })), claude: act(V1({ backend: 'claude' })),
+    return { codex: act(V1({ backend: 'codex' })), opencode: act(V1({ backend: 'opencode' })), remote: act(V1({ remote: true })), claude: act(V1({ backend: 'claude' })), antigravity: act(V1({ backend: 'antigravity' })),
       loop: act(V1({ midTurn: false, respawnedAt: 1e12 - 60000 })), idleLate: act(V1({ midTurn: false, respawnedAt: 1e12 - 5 * 60000 - 1 })), idle: act(V1({ midTurn: false })),
       loopClean: act(V1({ midTurn: false, respawnedAt: 1e12 - 60000, facts: { code: 0, wrapperFate: 'finalized' } })) };
   };
   const vr = r1Table(XF);
-  ok(vr.codex === 'null/backend:codex' && vr.opencode === 'null/backend:opencode' && vr.remote === 'null/remote' && vr.claude === 'respawn/first', 'r1 pure: a codex / OpenCode conversation or a REMOTE one is never respawned, even on a code-1 record (only a Claude conversation on this machine)', vr);
+  ok(vr.codex === 'null/backend:codex' && vr.opencode === 'null/backend:opencode' && vr.antigravity === 'null/backend:antigravity' && vr.remote === 'null/remote' && vr.claude === 'respawn/first', 'r1 pure: a codex / OpenCode conversation or a REMOTE one is never respawned, even on a code-1 record (only a Claude conversation on this machine)', vr);
   ok(vr.loop === 'notify/again' && vr.idleLate === 'null/idle' && vr.idle === 'null/idle' && vr.loopClean === 'null/clean' && XF.RESPAWN_STARTUP_MS === 5 * 60000, 'r1 pure: the crash loop — a respawned conversation that dies again while STARTING (idle, < 5 min) only notifies; idle later, never respawned, or a clean exit stays nothing', vr);
   const pause = (ms) => new Promise((r) => setTimeout(r, ms));
   filed.length = 0; reinstall(); const mL = mkClient(); others = [mL];
@@ -1293,6 +1293,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/dial-session-bridge.js': [4, 'device: dial bridge handles'],
     'src/server/dial-pairing.js': [1, 'device: a pairing handle'],
     'src/hosts.js': [1, 'device: an install child on a timeout'],
+    'src/server/cli-usage-door.js': [1, "not respawned: the Re-check usage read's OWN `agy -p /usage` child (lane antigravity-card-fixes; int332 seam — the lane forked before this census's row set), SIGKILL at the read's timeout — a bounded one-shot a person pressed for; its exit is the read's answer (a named refusal), never a session's"],
     'src/opencode-serve.js': [5, 'not respawned: OpenCode serve (backend ≠ claude)'],
     'src/desktop-serve.js': [3, 'not a conversation: desktop apps'],
     'src/device-mount.js': [4, 'not a conversation: rclone mounts (lane mac-pull-refresh added one — its bounded refresh child; composed at the 2.369.202 integration)'],

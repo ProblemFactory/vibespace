@@ -107,6 +107,21 @@ const PLACE_RULE_KINDS = Object.freeze(['reply-to-mine', 'in-thread-with-me', 'r
  *  SENT_WINDOW_MS / SENT_MAX ids) — never the owner's own messages (`ctx.ownerMine`, which `reply-to-mine` reads). */
 const SENT_WINDOW_MS = 30 * 24 * 3600e3;
 const SENT_MAX = 500;
+/** lane dm-reply-infers (B-6b4b — userW: a plain 1:1 Lark answer two hours after an agent's send woke nobody; owner
+ *  2026-10-20: «用 decision api 判定一次就行了，也不一定非得对方下一条就是回复，错误 trigger 还是挺贵的»): `reply-to-sent` with
+ *  `infer: true` (opt-in per rule, default OFF — a rule without it is the marker road, byte for byte) ALSO hits an UNMARKED
+ *  peer message the decision API judged an answer to what THIS principal sent. THE SCOPE (`inferCandidate`, PURE): no
+ *  vendor marker at all (no quote, no reply id, no topic / thread root — a marker hit stays the marker road, unjudged; a
+ *  quote of ANOTHER message is never judged), not a mail thread (marker (c) covers it), not one of the principal's own
+ *  sends, and this principal (an agent, or a group member for its OWN sends — `ctx.sentByMe` is per member) SENT into the
+ *  same conversation within `ctx.inferHours` before it (the server setting `channels.replyInferHours`, INFER.hours.def =
+ *  24); the newest such send is the one asked about — never "the next message is the reply": every candidate is judged,
+ *  none is assumed. Outside the scope nothing is judged (no vendor call). THE JUDGMENT is the engine's
+ *  (src/server/channels-engine.js `preInfer` → decision-engine `judge('reply-infer')`: ONE fixed question, the memo =
+ *  the record's id + the sent message's id — never judged twice); its answers ride `ctx.inferred` keyed `inferKeyOf`; a
+ *  yes = probability ≥ INFER.threshold. No answer (a cap, no key, a switch off) ⇒ no hit: fail closed, a wake is money. */
+const INFER = Object.freeze({ hours: Object.freeze({ min: 1, max: 168, def: 24 }), threshold: 0.8, perHour: 20 });
+const INFER_WHY = 'judged an answer to your message of {when}';
 /** lane reply-to-sent (owner revision 21:50Z: "对组设置这个权限就等于对每个 agent 单独处理"): a GROUP row carrying the rule is
  *  judged PER MEMBER — `fanOutWatchers` gives each live member its own item (its own key `group:<gid>><cid>`, ledger,
  *  stash); the row's OTHER rules (match any) stay the group's one round-robin item. `splitFilter` = the two halves. */
@@ -465,7 +480,13 @@ function validateRule(rule) {
       out.label = str(r.label).trim().slice(0, 100) || null;
       break;
     }
-    case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': case 'reply-to-sent': break;
+    case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': break;
+    case 'reply-to-sent': {
+      // lane dm-reply-infers: `infer` — opt-in (true); absent / false = the marker road (the stored rule stays `{kind}` alone)
+      if (r.infer !== undefined && r.infer !== null && typeof r.infer !== 'boolean') return refuse('infer-flag', 'reply-to-sent: infer is true or false', { kind: r.kind });
+      if (r.infer === true) out.infer = true;
+      break;
+    }
     case 'fact': {
       const key = str(r.key).trim();
       if (!FACT_RULE_KEY_RE.test(key)) return refuse('key-required', 'fact: key (a fact kind or a declared field — letters, digits, - _) is required', { kind: r.kind });
@@ -573,6 +594,7 @@ function filterProblemText(v, { t = (s, p) => (p ? String(s).replace(/\{(\w+)\}/
     case 'route-principal': return t('a route names a Task Group or an agent');
     case 'threshold-range': return t('the threshold is between {min} and {max}', { min: DECISION.threshold.min, max: DECISION.threshold.max });
     case 'per-hour-range': return t('the judgments per hour are a whole number from 1 to {n}', { n: v.max || DECISION.perHour.max });
+    case 'infer-flag': return t('judging plain replies is either on or off');
     default: return String(v.error || v.code || '');
   }
 }
@@ -592,7 +614,7 @@ function ruleWhy(rule) {
     case 'time-window': return `within ${rule.from}-${rule.to}`;
     case 'reply-to-mine': return WHY_REPLY;
     case 'in-thread-with-me': return WHY_THREAD;
-    case 'reply-to-sent': return WHY_SENT;
+    case 'reply-to-sent': return rule.infer === true ? `${WHY_SENT} (plain messages judged)` : WHY_SENT;
     case 'decision': return `decision "${conditionWords(rule)}"${rule.question === 'choice' && Array.isArray(rule.choices) ? ` (one of ${rule.choices.map((o) => (o.to ? `${o.value} → ${o.to.name || o.to.id}` : o.value)).join(' | ')} | ${DECISION.none})` : ''}`;
     default: return rule.kind;
   }
@@ -672,7 +694,7 @@ function threadOnlyCaps(caps) {
 function placeHit(rule, record, ctx) {
   const rec = record || {};
   if (isSystemRecord(rec)) return null;   // lane lark-system-records
-  if (rule && rule.kind === 'reply-to-sent') { const s = sentHit(rec, ctx); return s ? s.why : null; }
+  if (rule && rule.kind === 'reply-to-sent') { const s = sentHit(rec, ctx) || (rule.infer === true ? inferHit(rec, ctx) : null); return s ? s.why : null; }   // + the judged road (lane dm-reply-infers)
   const mine = ctx ? mineOf(ctx) : null;
   if (!mine || !mine.size || !ctx || typeof ctx.kindOf !== 'function') return null;
   const self = str(rec.vendorId);
@@ -699,6 +721,59 @@ function placeHit(rule, record, ctx) {
     return null;
   }
   return null;
+}
+
+/** lane dm-reply-infers: the key a judged answer rides `ctx.inferred` under — the record's id + the sent message's id
+ *  (the memo's own material: one record, one send, one judgment). */
+const inferKeyOf = (record, sent) => `${str(record && record.id)}|${str(sent && sent.id)}`;
+const inferSpanMs = (ctx) => { const h = Number(ctx && ctx.inferHours); return (Number.isFinite(h) && h >= INFER.hours.min ? Math.min(INFER.hours.max, h) : INFER.hours.def) * 3600e3; };
+/** Does a filter ask for the judged road (a `reply-to-sent` rule with `infer: true`)? The engine's pre-pass reads it. */
+function inferRuleOf(filter) { return !!filter && Array.isArray(filter.rules) && filter.rules.some((r) => r && r.kind === 'reply-to-sent' && r.infer === true); }
+/** lane dm-reply-infers: THE SCOPE — is this record a CANDIDATE to judge (see INFER)? → `{sent, key, gapMin}` (the newest
+ *  send of this principal before it, within the span) or null (never judged — no vendor call). */
+function inferCandidate(record, ctx) {
+  const rec = record || {};
+  if (isSystemRecord(rec)) return null;   // a vendor notice answers nothing
+  const sends = ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : null;
+  if (!sends || !sends.size || ctx.convKind === 'thread') return null;   // a mail thread: marker (c) already reads it
+  const self = str(rec.vendorId);
+  if (self && sends.has(self)) return null;   // the send itself
+  if (sentHit(rec, ctx)) return null;        // a marker hit stays the marker road — never judged
+  // UNMARKED: no reply id, no root, no quote, no topic (THE classifier's); on a thread-only channel (Slack) no thread_ts
+  if (str(rec.replyTo) || str(rec.root)) return null;
+  const c = (typeof ctx.kindOf === 'function' && ctx.kindOf(rec)) || {};
+  if (String(c.kind || 'plain') !== 'plain' || c.quotes || c.topic) return null;
+  if (ctx.threadOnly && str(rec.threadKey) && str(rec.threadKey) !== self) return null;
+  if (!str(rec.text).trim()) return null;   // no words — nothing to judge (review r1)
+  const at = Number(rec.at);
+  if (!Number.isFinite(at)) return null;
+  const span = inferSpanMs(ctx);
+  let newest = null;
+  for (const s of sends.values()) { const t = Number(s && s.at); if (Number.isFinite(t) && t < at && at - t <= span && (!newest || t > Number(newest.at))) newest = s; }
+  if (!newest || !str(newest.id)) return null;
+  return { sent: newest, key: inferKeyOf(rec, newest), gapMin: Math.max(0, Math.round((at - Number(newest.at)) / 60000)) };
+}
+/** lane dm-reply-infers: THE JUDGED ROAD's verdict over the pre-judged answer (`ctx.inferred`) → `{why, sent, score}` or
+ *  null (no answer, a refusal, or p < INFER.threshold — no hit). */
+function inferHit(record, ctx) {
+  const d = ctx && ctx.inferred;
+  if (!d) return null;
+  const c = inferCandidate(record, ctx);
+  if (!c) return null;
+  const a = (d instanceof Map ? d.get(c.key) : d[c.key]) || null;
+  const p = a && !a.refused && typeof a.probability === 'number' && a.probability >= 0 && a.probability <= 1 ? a.probability : null;
+  if (p === null || p < INFER.threshold) return null;
+  return { why: INFER_WHY.replace('{when}', clockOf(c.sent.at)), sent: c.sent, score: Math.round(p * 100) / 100 };
+}
+/** lane dm-reply-infers (review r1): can the judgment CHANGE this filter's answer for this record? `any` — not when another
+ *  rule already hits (the record notifies anyway); `every` — not when another rule misses (it never can). The other rules
+ *  are matched exactly as the matcher will (the caller's ctx: decisions, subjectOf, the principal), never with a judgment. */
+function inferWorth(filter, record, ctx) {
+  const rules = filter && Array.isArray(filter.rules) ? filter.rules : [];
+  const rest = rules.filter((r) => !(r && r.kind === 'reply-to-sent' && r.infer === true));
+  if (!rest.length) return true;
+  const m = matchRecord({ ...filter, rules: rest }, record, { ...(ctx || {}), inferred: null });
+  return filter.match === 'every' ? m.hit : !m.hit;
 }
 
 /** lane webhook-l1-server: the lower-cased values a record's FACTS hold for `key` — a fact kind's own value (a line, a
@@ -778,9 +853,10 @@ function matchRecord(filter, record, ctx = {}) {
   const why = [];
   let hits = 0;
   let sent = null;   // lane reply-to-sent: the sent message this record answers (the hand-over line names it)
+  let score = null;  // lane dm-reply-infers: a JUDGED answer's score (the hand-over line and the pending row keep it)
   for (const rule of f.rules) {
     if (!rule || !RULE_KINDS.includes(rule.kind)) continue;
-    if (rule.kind === 'reply-to-sent' && !sent) { const s = sentHit(record, ctx); if (s) sent = s.sent; }
+    if (rule.kind === 'reply-to-sent' && !sent) { const s = sentHit(record, ctx) || (rule.infer === true ? inferHit(record, ctx) : null); if (s) { sent = s.sent; if (s.score !== undefined) score = s.score; } }
     // a place rule names the clause that fired ("quoted your message" / "a reply to …" / "in a thread …")
     const placeWhy = PLACE_RULE_KINDS.includes(rule.kind) ? placeHit(rule, record, ctx) : undefined;
     const named = placeWhy !== undefined ? placeWhy : rule.kind === 'decision' ? decisionHit(rule, record, ctx) : undefined;   // lane decision-rule: the verdict's own words
@@ -788,7 +864,7 @@ function matchRecord(filter, record, ctx = {}) {
     else if (match === 'every') return { hit: false, why: [] };
   }
   const hit = match === 'every' ? hits === f.rules.length && hits > 0 : hits > 0;
-  return { hit, why: hit ? why : [], ...(hit && sent ? { sent: { at: Number(sent.at) || null, words: str(sent.words).slice(0, 80) } } : {}) };
+  return { hit, why: hit ? why : [], ...(hit && sent ? { sent: { at: Number(sent.at) || null, words: str(sent.words).slice(0, 80), ...(score !== null ? { score } : {}) } } : {}) };
 }
 
 // ── the estimate ───────────────────────────────────────────────────────────
@@ -1570,7 +1646,7 @@ function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hi
   const lineOf = (h, max) => {
     const r = h.record;
     const who = safeInline((r.author && (r.author.display || r.author.name || r.author.id)) || '(no sender)', 80);   // lane lark-system-records: never "unknown"
-    const re = h.sent && typeof h.sent === 'object' ? `Reply to your message (${h.sent.at ? stamp(h.sent.at) : 'earlier'}, "${safeInline(h.sent.words || '', 60)}"): ` : '';
+    const re = h.sent && typeof h.sent === 'object' ? `Reply to your message (${h.sent.at ? stamp(h.sent.at) : 'earlier'}, "${safeInline(h.sent.words || '', 60)}"${typeof h.sent.score === 'number' ? `, judged ${h.sent.score.toFixed(2)}` : ''}): ` : '';   // + the judged score (lane dm-reply-infers)
     // verify r1 #17 (int248 r2): the facts the adapter declares for a wake (a webhook call's sender + declared fields) under the text
     const fl = typeof factLine === 'function' ? String(factLine(r) || '') : '';
     return `${re}from ${who} at ${stamp(r.at)}\n${safeLine(r.text, max)}${fl ? `\n${safeLine(fl, 300)}` : ''}`;
@@ -1668,7 +1744,7 @@ function whyText(why) {
 }
 
 module.exports = {
-  RULE_KINDS, PLACE_RULE_KINDS, SENT_WINDOW_MS, SENT_MAX, SENT_WHYS, WHY_SENT, sentHit, threadOnlyCaps, hasSentRule, splitFilter, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
+  RULE_KINDS, PLACE_RULE_KINDS, SENT_WINDOW_MS, SENT_MAX, SENT_WHYS, WHY_SENT, sentHit, INFER, INFER_WHY, inferKeyOf, inferRuleOf, inferCandidate, inferHit, inferWorth, threadOnlyCaps, hasSentRule, splitFilter, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
   DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
   BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
   validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, placeHit, PLACE_WHYS, matchRecord, estimate,

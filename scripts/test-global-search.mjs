@@ -229,7 +229,7 @@ console.log('§9 the controls: trigram, the index under data/, a raw-shape branc
   ok(SI.localDiskVerdict(path.join(dataDir, 'x'), fs.realpathSync(dataDir)) === 'index-under-data' && SI.localDiskVerdict('/tmp/x', '/nowhere', { statfs: () => ({ type: 0x6969 }) }) === 'not-local-disk' && SI.localDiskVerdict('/tmp/x', '/nowhere', { statfs: () => ({ type: 0xef53 }) }) === null,
     'the local-disk rule refuses data/ and an NFS / CIFS / FUSE mount by name, accepts ext4');
   // the no-harness-id census (test-architecture §46's rule over the three search files)
-  const ID = /['"`](?:claude|codex|opencode|acp|shell)['"`]|\b(?:response_item|event_msg|session_meta|function_call|tool_use|tool_result)\b|\.type\s*===?\s*['"`](?:user|assistant|result|message)['"`]/;
+  const ID = /['"`](?:claude|codex|opencode|antigravity|acp|shell)['"`]|\b(?:response_item|event_msg|session_meta|function_call|tool_use|tool_result)\b|\.type\s*===?\s*['"`](?:user|assistant|result|message)['"`]/;
   const offenders = (txt) => txt.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l) && ID.test(l.replace(/\/\/.*$/, '')));
   const FILES = ['src/search-model.js', 'src/search-index-worker.js', 'src/server/search-index.js'];
   const hits = FILES.flatMap((f) => offenders(read(f)).map((l) => f + ': ' + l.trim().slice(0, 80)));

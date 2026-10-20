@@ -85,9 +85,9 @@ function world({ guard = 'allow', create = 'ok', conv = null } = {}) {
     if (create === 'error') { ws.send(JSON.stringify({ type: 'error', message: 'Unknown backend "claude".' })); return; }
     if (create === 'silent') return;
     const id = 'sess-9-' + (activeSessions.size + 1);
-    const session = { name: data.name, cwd: data.cwd, mode: data.mode, backend: data.backend, clients: new Map([[ws, { cols: data.cols, rows: data.rows }]]), claudeSessionId: conv, backendSessionId: conv };
+    const session = { name: data.sessionName || null, cwd: data.cwd, mode: data.mode, backend: data.backend, clients: new Map([[ws, { cols: data.cols, rows: data.rows }]]), claudeSessionId: conv, backendSessionId: conv };   // as src/ws-create.js: the name is the frame's `sessionName` (B-dbba)
     activeSessions.set(id, session);
-    ws.send(JSON.stringify({ type: 'created', sessionId: id, name: data.name, cwd: data.cwd, mode: data.mode, reqId: data.reqId, billing: { accountId: data.accountId || null } }));
+    ws.send(JSON.stringify({ type: 'created', sessionId: id, name: session.name, cwd: data.cwd, mode: data.mode, reqId: data.reqId, billing: { accountId: data.accountId || null } }));
     W.afterCreatedClients = session.clients.size;
     try { ws.send(JSON.stringify({ type: 'output', data: 'after' })); } catch { } // the session prints: a detached sink must take nothing
   };
@@ -122,7 +122,7 @@ for (const kind of [{ kind: 'human', actBy: 'human:abc' }, { kind: 'agent', cid:
   ok(r.ok && /^sess-9-/.test(r.sessionId) && r.pending === true && r.claudeSessionId === null && r.billing.accountId === 'pool-d1e27705257c', 'an automation opens: the ids come back, `pending` until its CLI reports the conversation id', r);
   ok(JSON.stringify(W.log.map((l) => l[0])) === JSON.stringify(['authorize', 'create', 'note']) && W.log[0][1] === 'automation-open' && W.log[0][2] === 'automation:ak1' && W.log[2][2] === 'h1',
     'the spend guard is asked FIRST (reason automation-open, the identity automation:<key>), the create runs, the hold is NOTED', W.log);
-  ok(W.lastFrame.type === 'create' && W.lastFrame.reqId.startsWith('auto-') && W.lastFrame.cols === 120 && W.lastFrame.rows === 30 && W.lastFrame.permissionMode === 'bypassPermissions' && W.lastFrame.spawnOriginHint.effort === 'chosen' && !('resumeId' in W.lastFrame),
+  ok(W.lastFrame.type === 'create' && W.lastFrame.reqId.startsWith('auto-') && W.lastFrame.cols === 120 && W.lastFrame.rows === 30 && W.lastFrame.permissionMode === 'bypassPermissions' && W.lastFrame.spawnOriginHint.effort === 'chosen' && !('resumeId' in W.lastFrame) && W.lastFrame.sessionName === MKWORKER.name && !('name' in W.lastFrame),
     "the handler gets the frame the owner's dialog would send for the same choices (a reqId, 120×30, the judged fields only)", W.lastFrame);
   const s = W.activeSessions.get(r.sessionId);
   ok(W.lastSocket._headless === true && W.lastSocket._actBy === 'agent:claude:c0ffee' && W.afterCreatedClients === 0 && s.clients.size === 0,

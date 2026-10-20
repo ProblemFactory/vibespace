@@ -38,6 +38,7 @@
  * turn is the wake through the ladder.
  */
 const fs = require('fs');
+const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const path = require('path');
 const { wrapperCaps } = require('./wrapper-files.js');
 const STDIN_CONFIRM_MS = 600;   // the broken-stdin detector's confirm stage (session-stdout's ATTACH_PROBE_CONFIRM_MS, same reason)
@@ -119,7 +120,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
         } catch (e) { log(`[${sessionId}] frame-file bypass failed (${e.message}) — falling back to direct stdin`); }
       } else if (stdinPayload.length > 1024 * 1024) {
         const mb = (stdinPayload.length / 1048576).toFixed(1);
-        const started = caps?.startedAt ? new Date(caps.startedAt).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : 'unknown time';
+        const started = caps?.startedAt ? OF.when(caps.startedAt) : 'unknown time';
         const why = caps?.reason === 'no-sidecar'
           ? 'its wrapper has not reported its capabilities yet (still starting up?) — wait a moment and send it again'
           : `its wrapper (started ${started}) predates the frame-file update — Terminate + Resume the session, then send it again`;

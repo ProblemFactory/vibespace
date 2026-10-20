@@ -28,6 +28,9 @@ const CHANNELS_REMINDER_SEG = Object.freeze({
   request: 'vibespace-channels list --all|request <conv> "why" — the mail and chats the user connected, yours to ask for',
 });
 const channelsByReach = (map, reach) => map[reach === 'request' ? 'request' : 'read'];
+/** the tray in the hub's words (tray-words phrase: its label and its current place); a caller that has none says only
+ *  that it is theirs — never a guessed place */
+const trayOf = (tray) => (typeof tray === 'string' && tray ? tray : 'their tray');
 
 const GATES = Object.freeze(['status', 'ask', 'task', 'jobs', 'channels', 'always']);
 /** the byte caps test-cli-registry holds the rendered teaching to (every gate open, the widest shape; RED past them):
@@ -40,7 +43,8 @@ const GATES = Object.freeze(['status', 'ask', 'task', 'jobs', 'channels', 'alway
  *  · summary — one index cell. */
 const CAPS = Object.freeze({ summary: 140, sessionStart: 2725, reminder: 1200 });
 
-// ctx: sessionStart { g: the `--group <id> ` prefix ('' single-group), multi, reach } · reminder { multi, reach, topics }
+// ctx: sessionStart { g: the `--group <id> ` prefix ('' single-group), multi, reach, tray } · reminder { multi, reach, topics, tray }
+// (tray = the hub's words for where the owner's tray is — src/tray-words.js trayWords().phrase)
 const ROWS = Object.freeze([
   {
     name: 'vibespace-status', topic: 'status', manual: 'status-manual.md', gate: 'status',
@@ -52,10 +56,12 @@ const ROWS = Object.freeze([
   },
   {
     name: 'vibespace-ask', topic: 'ask', manual: 'ask-manual.md', gate: 'ask',
-    summary: 'file what the USER must act on into their For you tray (bottom right, never "your inbox"); resolve it when they answer',
+    summary: 'file what the USER must act on into their tray (named by its label and place, never "your inbox"); resolve it when they answer',
+    // lane agent-context-owner-facts (B-7960 b): WHERE the tray is is the hub's words (src/tray-words.js over the owner's
+    // chrome settings + their last page: label and CURRENT place) — `tray` in ctx; never a position written here
     teach: {
-      sessionStart: () => 'Asking the user anything / ending a turn waiting on them: ALSO file it in their For you tray (bottom right of their screen: say that, never "your inbox") — `vibespace-ask "the question" --detail "options + your recommendation"` — AND write the full question in your CHAT REPLY; `vibespace-ask resolve <id>` the moment they answer. Manual: `vibespace-docs ask`.',
-      reminder: () => 'vibespace-ask "q" [--artifact <path|/p/id>…] — MIRROR every chat question into their For you tray (bottom right of their screen — name it that way, never "your inbox"; the FULL content still goes in your chat reply — the tray is only the notification), and resolve <id|text> the moment they answer',
+      sessionStart: ({ tray }) => `Asking the user anything / ending a turn waiting on them: ALSO file it in ${trayOf(tray)} (say that, never "your inbox") — \`vibespace-ask "the question" --detail "options + your recommendation"\` — AND write the full question in your CHAT REPLY; \`vibespace-ask resolve <id>\` the moment they answer. Manual: \`vibespace-docs ask\`.`,
+      reminder: ({ tray }) => `vibespace-ask "q" [--artifact <path|/p/id>…] — MIRROR every chat question into ${trayOf(tray)} (name it so, never "your inbox"; the FULL content still goes in your chat reply), and resolve <id|text> the moment they answer`,
     },
   },
   {
@@ -165,9 +171,9 @@ const teachOf = (row, surface) => (row.teach && typeof row.teach[surface] === 'f
  *  then one copy-ready paragraph per open row. Every toggle and the reach closed ⇒ [] (2.211.0: nothing taught; the msg
  *  pointer never rides alone — test-msg-cli-groups). `gid` = the --group prefix agents must use ('' single-group; the
  *  generic '--group <id> ' in the shared multi-group section). */
-function renderSessionStartTools(T, { gid = '', multi = false } = {}, rows = ROWS) {
+function renderSessionStartTools(T, { gid = '', multi = false, tray = null } = {}, rows = ROWS) {
   const F = T || { status: true, ask: true, task: true, jobs: true };
-  const ctx = { g: gid || '', multi: !!multi, reach: F.channels || false };
+  const ctx = { g: gid || '', multi: !!multi, reach: F.channels || false, tray };
   const on = rows.map((r) => ({ r, fn: teachOf(r, 'sessionStart') })).filter((x) => x.fn && gateOpen(x.r.gate, F))
     .map((x) => ({ r: x.r, text: x.fn(ctx) })).filter((x) => x.text);
   if (!on.some((x) => x.r.gate !== 'always')) return [];
@@ -189,9 +195,9 @@ function pointerTopics(T, rows = ROWS) {
 
 /** THE PER-TURN REMINDER's standard line (2.78.0): one segment per open row that teaches one, the docs pointer, and — for
  *  a Group MANAGER session — the clause naming the group verbs of vibespace-task (a mode of that CLI, not a CLI). */
-function renderReminderLine(T, { multi = false, manager = false } = {}, rows = ROWS) {
+function renderReminderLine(T, { multi = false, manager = false, tray = null } = {}, rows = ROWS) {
   const F = T || {};
-  const ctx = { multi: !!multi, reach: F.channels || false, topics: pointerTopics(F, rows) };
+  const ctx = { multi: !!multi, reach: F.channels || false, topics: pointerTopics(F, rows), tray };
   const segs = rows.map((r) => ({ r, fn: teachOf(r, 'reminder') })).filter((x) => x.fn && gateOpen(x.r.gate, F))
     .map((x) => x.fn(ctx)).filter(Boolean);
   const mgrClause = manager ? ' · you are a Group MANAGER: `vibespace-task group-list` + group-create/-update/-bind organize ALL groups (any verb takes --group <id>)' : '';

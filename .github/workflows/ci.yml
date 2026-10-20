@@ -40,8 +40,15 @@ jobs:
         run: bash scripts/ci-apt.sh dtach
       - name: Install claude CLI (chat E2E; subscription oat auth is the
           officially documented CI channel — docs/en/github-actions)
-        run: npm i -g @anthropic-ai/claude-code
-      - run: npm ci
+        run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code
+      # THE ONE NPM DOOR (lane ci-npm-retry, B-fa5e): .330's heavy 6/6 died in
+      # `npm ci` on a registry reset MID-DOWNLOAD — a blip npm's own
+      # fetch-retries never covers (it retries a request until its headers).
+      # An INSTALL may be retried: 3 fresh attempts 20 s apart, each failed one
+      # a ::warning::, red only after the third. A SUITE never is — a flake is
+      # a race (test-ci-gate §2g holds both).
+      - name: npm ci (3 attempts on a registry blip)
+        run: bash scripts/ci-npm.sh ci
       - run: node scripts/ci.mjs
         env:
           # claude setup-token secret; absent on fork PRs → chat E2E SKIPs
@@ -95,8 +102,10 @@ jobs:
       - name: Install CJK fonts (the runner measures zh / ja text as users see it)
         run: bash scripts/ci-apt.sh --no-update fonts-noto-cjk
       - name: Install claude CLI
-        run: npm i -g @anthropic-ai/claude-code
-      - run: npm ci
+        run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code
+      # the ONE npm door (see the fast job): installs retried, suites never
+      - name: npm ci (3 attempts on a registry blip)
+        run: bash scripts/ci-npm.sh ci
       # Runner images ship Chrome; the chrome suites SKIP with a reason if a
       # future image drops it, so this never becomes a silent pass.
       #

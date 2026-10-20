@@ -129,6 +129,10 @@ async function call(method, url, body) {
 // numbers MUST match the server's findIdx, so this file never re-sorts (it is
 // shipped to hosts without a checkout and cannot require the module).
 const MARK = { high: '! ', low: '↓ ' };
+// lane agent-context-owner-facts (B-7960 a): an instant prints as the HUB's words (`when.<field>`: THE formatter in the
+// owner's zone, named — 2026-10-20 16:16 PT); this file never formats one itself (it ships to hosts in other zones). A hub
+// that sends no words ⇒ the full ISO instant, its Z naming UTC — never a bare sliced time an agent relays as local.
+const atWords = (o, k, ms) => { const v = ms != null ? ms : o && o[k]; return (o && o.when && o.when[k]) || (Number(v) ? new Date(Number(v)).toISOString() : ''); };
 const fmtBacklog = (items, showDetail, you) => {
   for (const [i, b] of items.entries()) {   // (a for-of, not a callback: the print census walks what each printed piece holds — lane peer-census verify r4)
     const claimed = b.claimedBy || [];
@@ -140,16 +144,16 @@ const fmtBacklog = (items, showDetail, you) => {
       + (b.detail && !showDetail ? '  †' : '')
       + tail);
     if (showDetail && claimed.length) console.log('       claimed by ' + claimed.join(', '));
-    if (showDetail && b.addedBy) console.log('       parked by ' + b.addedBy + (b.addedAt ? ' at ' + new Date(b.addedAt).toISOString().slice(0, 16).replace('T', ' ') : ''));
+    if (showDetail && b.addedBy) console.log('       parked by ' + b.addedBy + (b.addedAt ? ' at ' + atWords(b, 'addedAt') : ''));
     if (showDetail && b.detail) for (const dl of b.detail.split('\n')) console.log('       ' + dl);
   }
   if (!showDetail && items.some((b) => b.detail)) console.log('  († = has detail — rerun with --full)');
 };
 const printItem = (b) => {
   console.log('[' + (b.id || '?') + '] ' + b.text + '   status: ' + (b.status || 'open') + '   priority: ' + (b.priority || 'normal'));
-  if (b.addedBy) console.log('  parked by: ' + b.addedBy + (b.addedAt ? '  at ' + new Date(b.addedAt).toISOString().slice(0, 16).replace('T', ' ') : ''));
+  if (b.addedBy) console.log('  parked by: ' + b.addedBy + (b.addedAt ? '  at ' + atWords(b, 'addedAt') : ''));
   console.log('  claimed by: ' + ((b.claimedBy || []).join(', ') || '(no one — `vibespace-task backlog-claim ' + (b.id || '<id>') + '` to take it)'));
-  if (b.resolvedBy) console.log('  resolved by: ' + b.resolvedBy + (b.resolvedAt ? '  at ' + new Date(b.resolvedAt).toISOString().slice(0, 16).replace('T', ' ') : ''));
+  if (b.resolvedBy) console.log('  resolved by: ' + b.resolvedBy + (b.resolvedAt ? '  at ' + atWords(b, 'resolvedAt') : ''));
   if (b.detail) { console.log('  detail:'); for (const dl of b.detail.split('\n')) console.log('    ' + dl); }
 };
 // THE CLEANUP NUDGE (2026-09-22): add / edit / claim answer with `nudge` when
@@ -174,7 +178,7 @@ async function printShow() {
     for (const pr of task.progress) {
       // an entry THIS session wrote shows its id — the handle `progress-redact <id>` takes
       const own = !!you && pr.session === you && !!pr.id;
-      console.log('  - ' + new Date(pr.at).toISOString().slice(0, 16).replace('T', ' ') + (own ? ' [' + pr.id + ']' : '') + ' ' + pr.note + (pr.detail && !full ? '  †' : ''));
+      console.log('  - ' + atWords(pr, 'at') + (own ? ' [' + pr.id + ']' : '') + ' ' + pr.note + (pr.detail && !full ? '  †' : ''));
       if (full && pr.detail) for (const dl of pr.detail.split('\n')) console.log('      ' + dl);
     }
     if (!full && task.progress.some((pr) => pr.detail)) console.log('  († = has detail — rerun with --full)');

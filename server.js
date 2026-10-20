@@ -602,6 +602,7 @@ function getSyncStore(name) { return syncStores[name]; }
 function serverSetting(key) {
   try { return persistenceRouter.readSettings ? persistenceRouter.readSettings()[key] : undefined; } catch { return undefined; }
 }
+require('./src/server/owner-facts.js').configure({ setting: serverSetting, userState: () => persistenceRouter.readUserState() });   // lane agent-context-owner-facts (B-7960): THE owner's clock (instance.timezone) and tray words every agent-facing door says
 // Integration master switch (agents.vibespaceIntegration, default ON): OFF =
 // pristine CLI — no hook registration, no VIBESPACE_API/agent-tools env in new
 // spawns, no context/nudge delivery even to already-running sessions. THE one
@@ -1046,7 +1047,7 @@ require('./src/server/account-usage-routes.js').create({
   getHosts: () => { try { return hosts; } catch { return null; } },
   getMounts: () => { try { return mounts; } catch { return null; } }, getModels: () => AVAILABLE_MODELS, refreshModels: () => refreshHarnessModels(), getIntegrations: () => { try { return integrationsWiring.store; } catch { return null; } }, // + the harness catalogs a built-in model provider lists (lane provider-record); + their mtime-guarded re-read and the Integrations store a provider's key is read from (lane models-at-session)
   getTelemetry: () => { try { return telemetry; } catch { return null; } },
-  getUsageHistory: () => { try { return usageHistory; } catch { return null; } }, broadcastAll: (m) => bcastAll(m), getLoginExpiryWatch: () => { try { return loginExpiryWatch; } catch { return null; } }, // ← constructed BELOW this stanza; lazy, like every other late singleton (拆分 P1). Sharing a line because server.js is AT the size ratchet — the wiring stanza may not grow.
+  getUsageHistory: () => { try { return usageHistory; } catch { return null; } }, broadcastAll: (m) => bcastAll(m), getLoginExpiryWatch: () => { try { return loginExpiryWatch; } catch { return null; } }, getCliCmds: () => cliCmds, // + the CLI registry the on-demand usage reading checks (lane antigravity-card-fixes) ← constructed BELOW this stanza; lazy, like every other late singleton (拆分 P1). Sharing a line because server.js is AT the size ratchet — the wiring stanza may not grow.
 });
 // ── Session status (agent-set via vibespace-status CLI, user-overridable) ──
 // The user's override of an agent-set status is injected as a system-reminder

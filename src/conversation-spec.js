@@ -159,11 +159,15 @@ function spendIdentityOf(by) {
   if (!by || by.kind !== 'automation' || !isStr(by.key) || !by.key) return null;
   return { key: `automation:${by.key}`, name: by.keyName ? `automation key «${by.keyName}»` : `automation key ${by.key}` };
 }
-/** The create frame's fields for a JUDGED spec (the frame the owner's dialog would send for the same choices). */
+/** The create frame's fields for a JUDGED spec (the frame the owner's dialog would send for the same choices). The name
+ *  rides `sessionName` — the field src/ws-create.js reads and the New session dialog sends (B-dbba, lane
+ *  automation-open-permission-resolve: as `name` it was ignored, and the worker opened as «Session N» until a separate
+ *  rename); the conversation then carries it from its create (session.name, nameExplicit, the `created` answer). */
 function wireOf(spec) {
   const s = spec || {};
   const w = { backend: s.backend, mode: s.mode, cwd: s.cwd };
-  for (const k of ['name', 'model', 'effort', 'permissionMode', 'taskId', 'accountId']) if (s[k] !== undefined) w[k] = s[k];
+  if (s.name !== undefined) w.sessionName = s.name;
+  for (const k of ['model', 'effort', 'permissionMode', 'taskId', 'accountId']) if (s[k] !== undefined) w[k] = s[k];
   const hint = {};
   if (s.model !== undefined) hint.model = 'chosen';
   if (s.effort !== undefined) hint.effort = 'chosen';

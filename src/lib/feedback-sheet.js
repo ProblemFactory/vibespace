@@ -62,8 +62,13 @@ function paintRow(node, r, act) {
   const text = el('div', 'fb-text', r.text || '');
   text.title = t('Click to show it all');
   text.onclick = () => node.classList.toggle('fb-open');
-  const meta = el('div', 'fb-meta', [r.harness, r.instance && r.instance.name, r.instance && r.instance.version ? 'v' + r.instance.version : '', r.status === 'handled' && r.handledAt ? t('handled {when}', { when: whenText(r.handledAt) }) : ''].filter(Boolean).join(' · '));
+  // lane feedback-handled-verb: a report the maintainer marked through vibespace-api names the release and the conversation
+  const handled = r.status !== 'handled' || !r.handledAt ? ''
+    : r.handledVersion ? t('handled in {version} by {who}, {when}', { version: r.handledVersion, who: r.handledBy || t('an agent'), when: whenText(r.handledAt) })
+      : t('handled {when}', { when: whenText(r.handledAt) });
+  const meta = el('div', 'fb-meta', [r.harness, r.instance && r.instance.name, r.instance && r.instance.version ? 'v' + r.instance.version : '', handled].filter(Boolean).join(' · '));
   node.append(head, text, meta);
+  if (r.status === 'handled' && r.handledNote) node.append(el('div', 'fb-handled-note', r.handledNote));   // text, never HTML
   return node;
 }
 

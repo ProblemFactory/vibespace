@@ -216,7 +216,7 @@ function operatorRefresh() {
     const names = fetched && p.app ? [...new Set([p.app.labels && p.app.labels.zh, p.app.name, p.app.labels && p.app.labels.ja].filter(Boolean))] : [];
     const what = fetched ? `${names.join(' / ') || p.label} (${p.from && p.from.host ? p.from.host : 'your file'}, ${size(p.bytes && p.bytes.download)})` : p.kind === 'remove' ? `remove ${p.label}` : p.kind === 'source' ? `the package source ${p.label} (key ${(s.fingerprints || []).join(' ')})` : `${p.label} + ${Math.max(0, (s.newCount || 0) + (s.upgradeCount || 0) - 1)} packages, ${size(s.downloadBytes)} download, ${size(Math.max(0, s.installedBytes || 0))} on disk`;
     const yours = request.file ? `\nThe file you had (${request.file}) is no longer needed — VibeSpace keeps its own copy.` : '';
-    out(j, p.again ? `Already proposed ${p.id} (${p.state}): ${what}. It is the same ask — still one item in the user's For you tray. Wait for it: vibespace-app wait ${p.id}` : fetched ? `Proposed ${p.id}: ${what}. The user sees one card; nothing is installed until they press Install. The outcome reaches you on your next turn (or: vibespace-app wait ${p.id}).${yours}` : `Proposed ${p.id}: ${what}.\nNothing is installed until the user approves it in VibeSpace (For you → Install). Wait for it: vibespace-app wait ${p.id}`);
+    out(j, p.again ? `Already proposed ${p.id} (${p.state}): ${what}. It is the same ask — still one item in ${j.tray || 'the user\'s tray'}. Wait for it: vibespace-app wait ${p.id}` : fetched ? `Proposed ${p.id}: ${what}. The user sees one card; nothing is installed until they press Install. The outcome reaches you on your next turn (or: vibespace-app wait ${p.id}).${yours}` : `Proposed ${p.id}: ${what}.\nNothing is installed until the user approves it in VibeSpace (For you → Install). Wait for it: vibespace-app wait ${p.id}`);
     return;
   }
   if (verb === 'status') {
@@ -256,7 +256,7 @@ function operatorRefresh() {
     const body = { ...hostB(), label, launch, why, ...(flag('--remove') ? { remove: { line: flag('--remove') } } : {}), ...(flag('--reinstall') ? { reinstall: { line: flag('--reinstall') } } : {}), ...(flag('--icon') ? { icon: path.resolve(flag('--icon')) } : {}) };
     const j = await call('POST', '/api/agent/apps/register', body);
     out(j, j.recorded ? `Registered ${label} as ${j.id} on ${j.place} — recorded at once: its launch was already listed there (outside VibeSpace, ${j.witnessed}); it is now an app in Apps.`
-      : `Registered ${label} (${j.id}) on ${j.place}: ${j.again ? 'the same ask is already ' : ''}one item in the user's For you tray (${j.proposalId}) — it becomes an app in Apps when they accept. Wait for it: vibespace-app wait ${j.proposalId}`);
+      : `Registered ${label} (${j.id}) on ${j.place}: ${j.again ? 'the same ask is already ' : ''}one item in ${j.tray || 'the user\'s tray'} (${j.proposalId}) — it becomes an app in Apps when they accept. Wait for it: vibespace-app wait ${j.proposalId}`);
     return;
   }
   if (verb === 'add') {

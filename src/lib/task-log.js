@@ -8,6 +8,7 @@ import { PRIORITIES, normalizePriority, priorityMarker, sortBacklog } from '../b
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js';
 import { matchSnippet } from '../record-clear.js'; // PURE: why a Find matched a row whose note does not say it (the dialog's line)
 import { enterSubmits } from './chat-enter-keys.js';
+import { whenOn, timeOn, pageZone } from './owner-facts.js'; // B-7960 a: the board's times = the agents' words (the owner's zone, named)
 
 /**
  * Task Group log viewer — a full-window browser for the two lists that
@@ -80,13 +81,12 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     const cls = 'task-log-chip' + (key === 'user' ? ' user' : '') + (clickable ? ' clickable' : '') + (state.session === key ? ' active' : '');
     return `<span class="${cls}" data-skey="${escHtml(key)}" title="${escHtml(key === 'user' ? t('Added from the UI') : key)}">${escHtml(label)}</span>`;
   };
-  const fmtTime = (ts) => {
-    const d = new Date(ts);
-    return d.toLocaleTimeString(deviceLocale(), { hour: '2-digit', minute: '2-digit' });
-  };
+  // lane agent-context-owner-facts (B-7960 a): a row's time is THE formatter's (src/when-words.js) in the owner's zone,
+  // named — what an agent reading the same entry tells them (16:16 PT), never this browser's clock
+  const fmtTime = (ts) => timeOn(app, ts);
   // the DEVICE's language, never the browser's (verify r2: 9/28/2026 · 01:25 AM on a zh page, beside a
-  // confirm dialog that said 2026年9月28日) — the one Intl tag every surface prints dates with
-  const fmtDay = (ts) => new Date(ts).toLocaleDateString(deviceLocale());
+  // confirm dialog that said 2026年9月28日) — the one Intl tag every surface prints dates with; the DAY is the owner's zone's
+  const fmtDay = (ts) => new Date(ts).toLocaleDateString(deviceLocale(), { timeZone: pageZone(app) });
   const matches = (text) => !state.search || String(text || '').toLowerCase().includes(state.search.toLowerCase());
 
   const render = () => {
@@ -515,7 +515,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       const selfClaim = !!it.addedBy && claims.includes(it.addedBy);
       const claimX = (k) => `<button class="task-log-claim-x" data-unclaim="${escHtml(k)}" data-bidx="${it._i}" title="${escHtml(t('Remove this claim'))}">×</button>`;
       if (it.addedBy || it.addedAt) {
-        html += `<span class="task-log-attr-part" title="${escHtml(t('Parked by') + (it.addedAt ? ' · ' + new Date(it.addedAt).toLocaleString(deviceLocale()) : ''))}">+ ${sessionChip(it.addedBy)}${it.addedAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.addedAt))}</span>` : ''}${selfClaim ? `<span class="task-log-selfclaim" title="${escHtml(t('Claimed by {n} session(s)', { n: claims.length }))}">⚑</span>${claimX(it.addedBy)}` : ''}</span>`;
+        html += `<span class="task-log-attr-part" title="${escHtml(t('Parked by') + (it.addedAt ? ' · ' + whenOn(app, it.addedAt) : ''))}">+ ${sessionChip(it.addedBy)}${it.addedAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.addedAt))}</span>` : ''}${selfClaim ? `<span class="task-log-selfclaim" title="${escHtml(t('Claimed by {n} session(s)', { n: claims.length }))}">⚑</span>${claimX(it.addedBy)}` : ''}</span>`;
       }
       const foreign = claims.filter((k) => k !== it.addedBy);
       if (foreign.length) {
@@ -524,7 +524,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
         html += `<span class="task-log-attr-part task-log-unclaimed" title="${escHtml(t('No session has claimed this item'))}">${escHtml(t('unclaimed'))}</span>`;
       }
       if (it.status !== 'open' && (it.resolvedBy || it.resolvedAt)) {
-        html += `<span class="task-log-attr-part" title="${escHtml((it.status === 'done' ? t('Resolved by') : t('Dropped by')) + (it.resolvedAt ? ' · ' + new Date(it.resolvedAt).toLocaleString(deviceLocale()) : ''))}">${it.status === 'done' ? '✓' : '⊘'} ${sessionChip(it.resolvedBy)}${it.resolvedAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.resolvedAt))}</span>` : ''}</span>`;
+        html += `<span class="task-log-attr-part" title="${escHtml((it.status === 'done' ? t('Resolved by') : t('Dropped by')) + (it.resolvedAt ? ' · ' + whenOn(app, it.resolvedAt) : ''))}">${it.status === 'done' ? '✓' : '⊘'} ${sessionChip(it.resolvedBy)}${it.resolvedAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.resolvedAt))}</span>` : ''}</span>`;
       }
       return html;
     };
@@ -732,7 +732,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       md = entries.map((p) => {
         const who = p.session ? ` _(${sessionLabel(p.session)})_` : '';
         const detail = p.detail ? '\n' + p.detail.split('\n').map((l) => '  > ' + l).join('\n') : '';
-        return `- ${new Date(p.at).toISOString().slice(0, 16).replace('T', ' ')} ${isCleared(p) ? clearedText() : p.note}${who}${detail}`;
+        return `- ${whenOn(app, p.at)} ${isCleared(p) ? clearedText() : p.note}${who}${detail}`;
       }).join('\n');
     } else {
       // the view's own order (sortBacklog) and TASK.md's markers (`!` high · `↓` low)

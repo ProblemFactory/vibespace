@@ -272,6 +272,10 @@ const PLANS = Object.freeze({
   routing: Object.freeze({ fixed: [PART('condition', 500), PART('choices', 9 * 210, { each: 200, count: 9 })], variable: [PART('body', 2048), PART('thread', 3 * 320, { each: 300, count: 3 })], fixedCeiling: 800, recordCeiling: 1000, batch: 1, wakePath: true, memo: ['use', 'id', 'rule', 'groups'] }),
   inbox: Object.freeze({ fixed: [PART('levels', 600)], variable: [PART('facts', 240, { kind: 'line' }), PART('text', 400), PART('detail', 800), PART('session', 200, { kind: 'line' })], fixedCeiling: 200, recordCeiling: 400, batch: 1, perPass: 10, wakePath: false, memo: ['use', 'id', 'levels', 'digest'] }),
   webhook: Object.freeze({ fixed: [PART('condition', 500)], variable: [PART('payload', 4096, { json: true })], fixedCeiling: 200, recordCeiling: 1400, batch: 1, wakePath: true, memo: ['use', 'id', 'rule'] }),
+  // lane dm-reply-infers (B-6b4b): is a peer's PLAIN message (no quote / thread marker) an answer to what an agent sent? ONLY
+  // the sent text, the candidate's text and the gap between them (never another message of the conversation — cost); the
+  // memo = the candidate record + the sent message (+ the question's version): a record is judged ONCE against one send, for ever
+  'reply-infer': Object.freeze({ fixed: [], variable: [PART('sent', 1000), PART('reply', 1000), PART('gap', 60, { kind: 'line' })], fixedCeiling: 0, recordCeiling: 700, batch: 1, wakePath: true, memo: ['use', 'id', 'sent', 'question'] }),
   test: Object.freeze({ fixed: [], variable: [PART('body', 200)], fixedCeiling: 0, recordCeiling: 120, batch: 1, wakePath: false, memo: ['use', 'id'] }),
 });
 const USES = Object.freeze(Object.keys(PLANS));
@@ -329,7 +333,7 @@ function safeJson(s) { try { return JSON.parse(s); } catch { return str(s); } }
 function memoMaterial(use, m = {}) {
   const plan = PLANS[use];
   if (!plan) throw new Error(`unknown decision use '${use}'`);
-  return JSON.stringify(plan.memo.map((k) => (k === 'use' ? use : k === 'rubric' ? `v${RUBRIC.version}` : k === 'levels' ? `v${INBOX.version}` : m[k] === undefined ? null : m[k])));
+  return JSON.stringify(plan.memo.map((k) => (k === 'use' ? use : k === 'rubric' ? `v${RUBRIC.version}` : k === 'levels' ? `v${INBOX.version}` : k === 'question' ? `v${REPLY_INFER_VERSION}` : m[k] === undefined ? null : m[k])));
 }
 const memoKey = (use, m, sha) => sha(memoMaterial(use, m));
 /** Batch questions: record i's question `name` becomes `r<i>_<name>`; `unbatchAnswers` splits them back. */
@@ -730,6 +734,12 @@ const INBOX = Object.freeze({
   ]),
 });
 const INBOX_QUESTION = Object.freeze({ type: 'choice', name: 'inbox_need', instructions: 'What does the agent that filed this item need from the reader? Read the facts line first: it is the hub\'s own record.', choices: INBOX.choices.map((c) => ({ value: c.value, description: c.description })) });
+/** lane dm-reply-infers (B-6b4b, owner 2026-10-20: «用 decision api 判定一次就行了，也不一定非得对方下一条就是回复，错误 trigger 还是挺贵的»):
+ *  THE ONE QUESTION of use `reply-infer` — fixed, never the owner's words: given what an agent SENT and a later message
+ *  from someone else in the same chat (plus the gap), is the later message an answer to it. A predicate: its probability
+ *  is the score; channel-filter `INFER.threshold` says yes. The judge sees no other message of the chat. */
+const REPLY_INFER_VERSION = 1;   // the question's wording — a new wording is a new memo key (review r1)
+const REPLY_INFER_QUESTION = Object.freeze({ type: 'predicate', name: 'answers_sent', instructions: 'The [record] holds a message an agent sent into a chat (sent), a later message someone else wrote in the same chat (reply) and the time between them (gap). Is the later message an answer or a reply to the agent\'s message — not a new topic, not small talk, not a message meant for someone else?', whenTrue: 'Yes — the later message answers the agent\'s message.', whenFalse: 'No — it is about something else, or it cannot be told.' });
 const inboxLevelsText = () => `Choices v${INBOX.version}: ${INBOX.choices.map((c) => c.value).join(' | ')} (the question describes each). Sort the For-you item below. Its facts line (age, what the agent did since the ask, a named date, re-asks) is the hub's own record: trust it over the item's words.`;
 /** Does the tray's judge sort this item at all? An OPEN action item of NORMAL urgency (a missing urgency is normal) with
  *  no option chips and no producer buttons (an item that carries its answers is a decision already) and no reply yet.
@@ -916,8 +926,8 @@ function inboxRank(items, now = 0) {
 // Settings › Spending. Words go through the caller's `t` (the client's device words; a `{name}` filler stands in
 // for a test). Money that moved is NEVER drawn as $0.00: under a cent with calls > 0 is 「< $0.01」.
 const READOUT_WARN_AT = 0.9;                                   // ≥ 90 % of the day's cap ⇒ the line turns red
-const READOUT_USES = Object.freeze(['attention', 'inbox', 'rule', 'routing', 'webhook', 'learn', 'test']);   // the title's order (+ learn: lane rule-learning)
-const useWord = (k, t) => ({ attention: t('Needs attention'), inbox: t('For-you tray'), rule: t('Rules'), routing: t('Routing'), webhook: t('Webhooks'), learn: t('Block drafts'), test: t('Test') })[k] || k;
+const READOUT_USES = Object.freeze(['attention', 'inbox', 'rule', 'routing', 'webhook', 'reply-infer', 'learn', 'test']);   // the title's order (+ learn: lane rule-learning; + reply-infer: lane dm-reply-infers)
+const useWord = (k, t) => ({ attention: t('Needs attention'), inbox: t('For-you tray'), rule: t('Rules'), routing: t('Routing'), webhook: t('Webhooks'), 'reply-infer': t('Plain replies'), learn: t('Block drafts'), test: t('Test') })[k] || k;
 const fillWords = (s, v = {}) => String(s).replace(/\{(\w+)\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(v, k) ? String(v[k]) : m));
 const num0 = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
 /** `$1.23` · `< $0.01` when anything moved under a cent · `$0` when nothing did. `fine` (the by-use title) keeps a
@@ -976,6 +986,7 @@ function monthSpend(rows, month, offsetMinOf = () => 0) {
 }
 
 module.exports = {
+  REPLY_INFER_QUESTION, REPLY_INFER_VERSION,   // lane dm-reply-infers (use reply-infer)
   INBOX, INBOX_QUESTION, inboxLevelsText, inboxSorts, inboxEligible, inboxScoreInput, inboxVerdict, inboxMemoOf, datePhraseOf, inboxFacts, inboxFactsSig, inboxFactsLine, inboxStale, inboxPlace, inboxRank,   // lane inbox-decision-group (use ④) + lane decision-inbox-rank (v2)
   ATTENTION_THRESHOLD_RANGE, USER_BLOCK_MAX, EXAMPLES_KEPT, EXAMPLES_SENT, EXAMPLE_DIGEST_MAX, VERDICTS,   // lane decision-attention
   attentionThreshold, attentionHits, userBlockOf, attentionRecord, judgedOf, exampleOf, addExample, examplesForInput, criteriaQuestions,

@@ -41,12 +41,16 @@
  * offer, and `stream-offer` carries `relayLeg` {port, key, hosts} — a per-session 32-byte key that travels only over the
  * device link. The daemon PINGs this port from its own socket (src/stream-model.js legControl: HMAC over a rising counter +
  * a nonce); an authenticated PING (legPingVerdict — a forged one or a replayed counter is dropped and counted) names the
- * daemon's (ip, port) and is answered by a PONG; DATA comes only from that address. The hub forwards on the path the daemon
- * LAST spoke on: its leg (DATA, or a PING flagged UP) ⇒ the browser's datagrams go to it as leg DATA; its device-link frames
- * (or a PING without UP — it hears no PONG) ⇒ the device link; a leg silent for legStaleMs ⇒ the device link. The ladder:
- * direct (host pairs, the highest priority) → this leg → the device link. `relay.via` + `relay.leg` on the record, a log
- * line at every change. `udpLeg: false` offers no leg (the suites' device-link control); `legMute()` true drops the leg's
- * PINGs unanswered (the suites' unreachable-hub proof) — a person never sets either.
+ * daemon's (ip, port) and is answered by a PONG; DATA comes only from that address. THE PATH ELECTION (lane stream-leg-flap —
+ * src/stream-model.js legElect; the owner's Mac desktop went black 2026-10-20 when this hub followed the path the daemon LAST
+ * spoke on and flipped leg ⇄ link three times in 20 s): ONE election per session, with hysteresis — the leg is taken ONCE,
+ * when it comes up (a PING flagged UP, or its DATA) ⇒ the browser's datagrams go to it as leg DATA; it is left only when
+ * MEASURED dead: no sign of life for legDeadMs while it carried the picture (legStaleMs idle) ⇒ the device link. The device
+ * link speaking (`held`) and a PING not flagged UP (`quiet`) are counted, never obeyed. The ladder: direct (host pairs, the
+ * highest priority) → this leg → the device link; the device link's frames always reach the browser, whichever way the
+ * hub answers. `relay.via` + `relay.leg` on the record, a log line at every change. `udpLeg: false` offers no leg (the
+ * suites' device-link control); `legMute()` true drops the leg's PINGs unanswered (the suites' unreachable-hub proof);
+ * `elect` = the election (the suites' RED control hands in the .330 rule) — a person never sets any of them.
  * THE HAND-OVER (lane desktop-handover — src/server/desktop-handover-engine.js): `handover` = its hooks — ended(key, why) once
  * per session (the page's stop, the machine's `ended`), started(key, hostId, after) when a session's offer is made (`after` =
  * the page's previous key: a display switch carries the lease), factsOf(key) = the lease's facts every long poll answers
@@ -101,7 +105,7 @@ async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR) {
   return { ok: true, size: st.size };
 }
 
-function create({ access, log = console, now = Date.now, idleMs = L.idleMs, goneMs = L.goneMs, sweepMs = 5000, ips = hubIps, pollMaxMs = L.pollMaxMs, relay = true, direct = true, udpLeg = true, legMute = () => false, helpersDir = HELPERS_DIR, handover = null } = {}) {
+function create({ access, log = console, now = Date.now, idleMs = L.idleMs, goneMs = L.goneMs, sweepMs = 5000, ips = hubIps, pollMaxMs = L.pollMaxMs, relay = true, direct = true, udpLeg = true, legMute = () => false, elect = SM.legElect, helpersDir = HELPERS_DIR, handover = null } = {}) {
   const sessions = new Map(); // key → session
   const ended = (s, why) => { if (s.endNoted) return; s.endNoted = true; try { handover?.ended?.(s.key, why, s.hostId); } catch (e) { log.warn?.(`[stream] the hand-over did not hear ${s.key} end (${e && e.message})`); } };
   const keyOf = () => 'st' + now().toString(36) + Math.random().toString(36).slice(2, 10);
@@ -109,8 +113,8 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
   const relayFacts = (s) => {
     const r = s.relay; if (!r) return null;
     const g = r.leg;
-    return { port: r.port, up: r.up, down: r.down, dropped: r.dropped, via: legUsable(r) ? 'udp' : 'link',
-      leg: g ? { addr: g.addr ? `${g.addr.ip}:${g.addr.port}` : null, pings: g.pings, forged: g.forged, replayed: g.replayed, stray: g.stray, up: g.up, down: g.down, heardMsAgo: g.heardAt ? now() - g.heardAt : null, changes: g.changes.slice() } : null };
+    return { port: r.port, up: r.up, down: r.down, dropped: r.dropped, via: legUsable(s, r) ? 'udp' : 'link',
+      leg: g ? { addr: g.addr ? `${g.addr.ip}:${g.addr.port}` : null, pings: g.pings, forged: g.forged, replayed: g.replayed, stray: g.stray, up: g.up, down: g.down, heardMsAgo: g.heardAt ? now() - g.heardAt : null, quiet: g.quiet, held: g.held, changes: g.changes.slice() } : null };
   };
   const view = (s) => ({ key: s.key, sid: s.sid, hostId: s.hostId, codec: s.codec, source: s.source, windowId: s.windowId, startedAt: s.startedAt, state: s.state, stats: s.stats, path: s.path, ended: s.ended, relay: relayFacts(s) });
 
@@ -130,15 +134,19 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     }
   }
 
-  /** The relay's leg is the way to the daemon now: it last spoke there, and lately. */
-  const legUsable = (r) => !!(r && r.leg && r.leg.addr && r.leg.via === 'udp' && now() - r.leg.heardAt < L.legStaleMs);
-  function setVia(s, g, via, why) {
-    if (g.via === via) return;
-    g.via = via;
-    g.changes.push({ at: now(), via, why }); if (g.changes.length > 8) g.changes.shift();
-    log.log?.(`[stream] ${s.hostId}: session ${s.sid || '(being offered)'} relay via ${via === 'udp' ? `the daemon's udp leg ${g.addr.ip}:${g.addr.port}` : 'the device link'} (${why})`);
+  /** THE ELECTION's one door (src/stream-model.js legElect): every signal of either path goes through it; a change is
+   *  recorded, logged and wakes the page's poll. */
+  function vote(s, g, type) {
+    const e = elect({ via: g.via, aliveAt: g.aliveAt, dataAt: g.dataAt }, { type, at: now() });
+    g.aliveAt = e.aliveAt; g.dataAt = e.dataAt;
+    if (!e.changed) return;
+    g.via = e.via;
+    g.changes.push({ at: now(), via: e.via, why: e.why }); if (g.changes.length > 8) g.changes.shift();
+    log.log?.(`[stream] ${s.hostId}: session ${s.sid || '(being offered)'} relay via ${e.via === 'udp' ? `the daemon's udp leg ${g.addr.ip}:${g.addr.port}` : 'the device link'} (${e.why})`);
     wake(s);
   }
+  /** The relay's leg is the way to the daemon now: the election took it and has not judged it dead. */
+  const legUsable = (s, r) => { if (!(r && r.leg && r.leg.addr)) return false; if (r.leg.via === 'udp') vote(s, r.leg, 'judge'); return r.leg.via === 'udp'; };
   /** A leg packet at the relay's port: the daemon's PING (→ PONG) or DATA (→ the browser that wrote first). */
   function onLeg(s, r, msg, rinfo) {
     const g = r.leg;
@@ -152,11 +160,11 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
       g.addr = { ip: rinfo.address, port: rinfo.port }; g.heardAt = now();
       const pong = SM.legControl(SM.LEG.PONG, { counter: p.counter, nonce: p.nonce, mac: g.mac });
       try { r.sock.send(Buffer.from(pong), rinfo.port, rinfo.address); } catch { /* the next PING */ }
-      if (p.flags & SM.LEG.UP) setVia(s, g, 'udp', 'leg up'); else if (g.via === 'udp') setVia(s, g, 'link', 'the daemon hears no answer on its leg');
+      if (p.flags & SM.LEG.UP) vote(s, g, 'up'); else { g.quiet++; vote(s, g, 'quiet'); }
       return;
     }
     if (p && p.type === 'data' && g.addr && rinfo.address === g.addr.ip && rinfo.port === g.addr.port) {
-      g.heardAt = now(); setVia(s, g, 'udp', 'leg data');
+      g.heardAt = now(); vote(s, g, 'data');
       if (!r.peers.has(`${p.ip}:${p.port}`)) { r.dropped++; return; } // only to a peer that wrote first
       try { r.sock.send(Buffer.from(p.payload), p.port, p.ip); r.down++; g.down++; } catch { r.dropped++; }
       return;
@@ -170,14 +178,14 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     const r = { h: null, sock, peers: new Set(), stallUntil: 0, rest: new Uint8Array(0), up: 0, down: 0, dropped: 0, port: 0, leg: null };
     if (udpLeg) {
       const key = crypto.randomBytes(32); // SM.LEG.keyBytes — memory only (test-key-file-law RANDOM32); it reaches the daemon over the device link
-      r.leg = { key, mac: (b) => crypto.createHmac('sha256', key).update(b).digest().subarray(0, SM.LEG.macBytes), addr: null, lastCounter: 0, heardAt: 0, via: 'link', pings: 0, forged: 0, replayed: 0, stray: 0, up: 0, down: 0, changes: [] };
+      r.leg = { key, mac: (b) => crypto.createHmac('sha256', key).update(b).digest().subarray(0, SM.LEG.macBytes), addr: null, lastCounter: 0, heardAt: 0, aliveAt: 0, dataAt: 0, via: 'link', pings: 0, forged: 0, replayed: 0, stray: 0, up: 0, down: 0, quiet: 0, held: 0, changes: [] };
     }
     sock.on('error', (e) => { log.warn?.(`[stream] relay ${s.key}: ${e && e.message}`); closeRelay(s); });
     sock.on('message', (msg, rinfo) => {
       if (SM.isLegPacket(msg)) { onLeg(s, r, msg, rinfo); return; }
       const peer = `${rinfo.address}:${rinfo.port}`;
       if (!r.peers.has(peer)) { if (r.peers.size >= L.relayMaxPeers) { r.dropped++; return; } r.peers.add(peer); }
-      if (legUsable(r)) {
+      if (legUsable(s, r)) {
         const pkt = SM.legData(rinfo.address, rinfo.port, msg);
         if (!pkt) { r.dropped++; return; }
         try { sock.send(Buffer.from(pkt.buffer, pkt.byteOffset, pkt.length), r.leg.addr.port, r.leg.addr.ip); r.up++; r.leg.up++; } catch { r.dropped++; }
@@ -207,7 +215,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
       const u = SM.relayUnframe(all);
       if (u.bad) { closeRelay(s); return; }
       r.rest = new Uint8Array(u.rest);
-      if (u.frames.length && r.leg && r.leg.via === 'udp') setVia(s, r.leg, 'link', 'the daemon spoke on the device link');
+      if (u.frames.length && r.leg) { if (r.leg.via === 'udp') r.leg.held += u.frames.length; vote(s, r.leg, 'link'); } // counted, never obeyed (the election)
       for (const f of u.frames) { if (!r.peers.has(`${f.ip}:${f.port}`)) continue; r.sock.send(Buffer.from(f.payload), f.port, f.ip); r.down++; } // only to a peer that wrote first
     };
     h.onClose = () => { if (s.relay === r) { r.h = null; if (!r.leg) closeRelay(s); } };

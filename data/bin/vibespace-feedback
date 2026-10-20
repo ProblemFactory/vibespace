@@ -54,7 +54,7 @@ const when = (at) => { try { return new Date(at).toISOString().slice(0, 16).repl
 function printReports(list) {
   if (!list.length) { console.log('  (no reports from this conversation yet)'); return; }
   for (const r of list) {
-    console.log(`  ${r.id}  ${when(r.lastAt || r.at)}  [${r.kind}${r.about ? ' · ' + r.about : ''}] ${r.status}${r.count > 1 ? ' ×' + r.count : ''}`);
+    console.log(`  ${r.id}  ${when(r.lastAt || r.at)}  [${r.kind}${r.about ? ' · ' + r.about : ''}] ${r.status}${r.status === 'handled' && /^\d+\.\d+\.\d+$/.test(String(r.handledVersion || '')) ? ' in ' + r.handledVersion : ''}${r.count > 1 ? ' ×' + r.count : ''}`);
     console.log('      ' + String(r.text).split('\n').join('\n      '));
   }
 }

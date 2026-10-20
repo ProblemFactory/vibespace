@@ -1137,7 +1137,7 @@ gate 的对象相反。
 
 **空闲停绘（src/browser-idle.js，PURE）：** 在 Xvfb 上只有**冻结页面**（`Page.setWebLifecycleState frozen`）能让窗口停画——最小化（没有窗口管理器）和焦点模拟都照画。冻结会**隐藏**页面，`active` 一个人永远显示不回来；能显示回来的是标签栏：在它前面开一个空白标签页再关掉、再激活它（23 ms 出下一帧）。
 
-**开关（r2）：** `browser.idlePaintFreeze`（Agent browser 类，高级，**默认关**）。keeper 每次 sweep 现读这个设置（从不在启动时缓存）；关 ⇒ 永不冻结、没有任何 CDP 动作（关之前冻住的会被解冻）。`idlePaintVerdict` 多了 `enabled` 输入（缺省 = 关）。规则：实测的 6× 收益直接上线；没在真 CLI 上证明过的二阶收益不默认运行——owner 读过报告后再开。
+**开关（r2）：** `browser.idlePaintFreeze`（Agent browser 类，高级，**默认关**；2.369.332 起**默认开**——owner 2026-10-20「可以」，依据舰队镜像实测，lane idle-paint-default-on）。keeper 每次 sweep 现读这个设置（从不在启动时缓存）；关 ⇒ 永不冻结、没有任何 CDP 动作（关之前冻住的会被解冻）。`idlePaintVerdict` 多了 `enabled` 输入（缺省 = 关）。规则：实测的 6× 收益直接上线；没在真 CLI 上证明过的二阶收益不默认运行——owner 读过报告后再开。
 
 **r2 在真 CLI 上测出并修掉的（heavy scripts/test-browser-hidden-paint.mjs，两个对话共用一个具名 profile、各一个窗口）：** builder 的解冻先 `createTarget` 再激活——空白页落在**最后被激活的窗口**（§3.10 的 WINDOWS_PROOF），实测三个空白页各落在**上一个**前台标签页的窗口里，A 的命令解冻时有一个落进了 B 的窗口；而且一次解冻会把 B 窗口也翻一遍。现在：解冻只翻**发起者**（命令的 /resolve 目标、或 live view 的 {profile, browserKey}）自己的前台标签页（`scopeFor`），每个先 `activateTarget` 再开空白页，用 `Browser.getWindowForTarget` 核对落点，落错的立即关掉并记日志；别的对话的前台标签页记在 `hiddenFronts`，等**它自己的**命令或查看者来时再翻（被隐藏的页面不画，所以不耗 GPU）。证明的结果见该测试与 changelog-engineering 2.369.231。
 

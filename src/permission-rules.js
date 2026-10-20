@@ -561,6 +561,44 @@ function ruleTreeSummary(record, { t } = {}) {
   return tr('{layers} source(s) · {rules} rule(s)', { layers: withRules, rules: n });
 }
 
+/**
+ * THE MODE A CLAUDE CLI WOULD RUN UNDER when its spawn passes no `--permission-mode` (lane automation-open-permission-resolve,
+ * q-049 M2: an automation key's `default` was no cap — the CLI's own three-layer config decided, bypassPermissions
+ * included). Read off the typed record claudeRulesRecord builds: its layers are in the CLI's RESOLUTION order (least → most
+ * authoritative; a managed drop-in before its base file), so the LAST present layer that sets `permissions.defaultMode`
+ * wins; `permissions.disableBypassPermissionsMode: "disable"` in ANY layer turns a resolved bypassPermissions back into the
+ * CLI's built-in default (the CLI will not start bypass-capable under it). PURE — nothing is read here; the reader is
+ * src/server/permission-rules.js resolveDefaultMode.
+ * → { ok: true, backend: 'claude', cwd, mode, layer: {id, short, label, file} | null, disabledBy: {…} | null }
+ *   `mode: 'default'` with `layer: null` = no layer sets one (the built-in default); `disabledBy` names the layer that
+ *   switched a resolved bypassPermissions off (`layer` still names the one that asked for it).
+ * → { ok: false, reason, backend, cwd, mode: 'default', layer: null, disabledBy: null } for a record that is not ok
+ *   (unavailable — its reason travels) or not claude's: NOTHING resolved — a caller must not read `mode` as a fact.
+ */
+const CLAUDE_DEFAULT_MODE = 'default';
+function claudeDefaultMode(record) {
+  const rec = isObj(record) ? record : null;
+  const base = { backend: rec && rec.backend ? String(rec.backend) : 'claude', cwd: rec && rec.cwd ? rec.cwd : null, mode: CLAUDE_DEFAULT_MODE, layer: null, disabledBy: null };
+  if (!rec || rec.ok !== true) return { ok: false, reason: (rec && rec.reason) || 'unknown', ...base };
+  // claude's record by its SHAPE (never a backend id): every layer is one of CLAUDE_LAYERS (or its drop-in) — a codex
+  // record's `sessionFlags` / an opencode record's resolved blob is not, and resolves nothing
+  const claudeLayer = (id) => CLAUDE_LAYERS.some((l) => l.id === id || `${l.id}:${'drop-in'}` === id);
+  const layers = asArray(rec.layers).filter(isObj);
+  if (!layers.length || !layers.every((l) => claudeLayer(l.id))) return { ok: false, reason: 'unsupported-harness', ...base };
+  const where = (l) => ({ id: l.id, short: l.short || l.id, label: l.label || l.id, file: l.file || null });
+  let mode = CLAUDE_DEFAULT_MODE, layer = null, disabledBy = null;
+  for (const l of layers) {
+    if (!l.present) continue;
+    for (const r of asArray(l.rules)) {
+      if (!isObj(r) || r.kind !== 'value') continue;
+      if (r.key === 'permissions.defaultMode' && typeof r.value === 'string' && r.value.trim()) { mode = r.value.trim(); layer = where(l); }
+      if (r.key === 'permissions.disableBypassPermissionsMode' && String(r.value).trim() === 'disable' && !disabledBy) disabledBy = where(l);
+    }
+  }
+  if (disabledBy && mode === 'bypassPermissions') return { ok: true, ...base, mode: CLAUDE_DEFAULT_MODE, layer, disabledBy };
+  return { ok: true, ...base, mode, layer, disabledBy };
+}
+
 module.exports = {
   RULE_KINDS, CLAUDE_LAYERS, CLAUDE_MANAGED_DIR, CLAUDE_MANAGED_DROPIN,
   CLAUDE_PERMISSION_LISTS, CLAUDE_PERMISSION_VALUES, CODEX_PERMISSION_KEYS,
@@ -569,4 +607,5 @@ module.exports = {
   joinPath, claudeSettingsPaths, claudeRulesFromSettings, claudeRulesRecord,
   codexLayerLabel, codexRulesRecord, opencodeRulesRecord,
   unavailable, renderRuleTree, ruleTreeSummary, stringifyValue,
+  CLAUDE_DEFAULT_MODE, claudeDefaultMode,   // lane automation-open-permission-resolve (q-049 M2)
 };

@@ -42,6 +42,7 @@
  * to arrive through a registry entry, which cannot be added without a proof.
  */
 const fsp = require('fs/promises');
+const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -207,7 +208,7 @@ function create({ activeSessions, adapterRegistry, accounts, agentEnv, buffersDi
     }
     const wcaps = wrapperCaps(buffersDir, sessionId, session.socketPath);
     if (!wcaps.permissionRules) {
-      const started = wcaps.startedAt ? new Date(wcaps.startedAt).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : 'unknown time';
+      const started = wcaps.startedAt ? OF.when(wcaps.startedAt) : 'unknown time';
       return Promise.resolve(PR.unavailable(backend, 'wrapper-old', wcaps.reason === 'no-sidecar'
         ? 'This session’s agent has not reported its capabilities yet (still starting up?) — try again in a moment.'
         : `This session's agent (started ${started}) predates the permission-rule read. Terminate + Resume the session to use it.`,
@@ -422,4 +423,18 @@ function create({ activeSessions, adapterRegistry, accounts, agentEnv, buffersDi
   };
 }
 
-module.exports = { create, resolveOracleCmd, SETTINGS_MAX_BYTES, ORACLE_MAX_BYTES, CODEX_READ_TIMEOUT_MS };
+// lane automation-open-permission-resolve (q-049 M2): THE MODE A SPAWN WITH NO --permission-mode WOULD RUN UNDER — the
+// settings hierarchy of THAT cwd read off disk (the project and local layers follow the folder) and resolved by the PURE
+// claudeDefaultMode. claude only: the one harness whose rules are files, chosen by the caps row (`settings-files`), never a
+// backend id — another harness answers `ok: false` (nothing resolved). ONE reader, built on first use (create() spawns
+// nothing). Read-only like everything here.
+let defaultModeReader = null;
+async function resolveDefaultMode({ backend = 'claude', cwd = '', home = os.homedir(), configDir = '' } = {}) {
+  const caps = capsOf(backend).permissionRules || {};
+  const scope = cwd ? 'session' : 'instance';
+  if (caps.source !== 'settings-files') return PR.claudeDefaultMode(PR.unavailable(backend, 'unsupported-harness', 'this harness keeps no permission settings files to resolve a default mode from', { cwd: cwd || null, scope }));
+  defaultModeReader = defaultModeReader || create({});
+  return PR.claudeDefaultMode(await defaultModeReader.readClaudeRules({ cwd: cwd || '', home, configDir, scope, host: null }));
+}
+
+module.exports = { create, resolveOracleCmd, resolveDefaultMode, SETTINGS_MAX_BYTES, ORACLE_MAX_BYTES, CODEX_READ_TIMEOUT_MS };

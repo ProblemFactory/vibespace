@@ -29,6 +29,9 @@ import { freePort, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const R = (p) => require(path.join(REPO, p));
+// lane agent-context-owner-facts (B-7960 a): the items name the expiry in the owner's zone, named — this fixture's instance runs
+// in UTC (the pins read the UTC day), never whatever zone the box running the suite is in
+R('src/server/owner-facts.js').configure({ setting: (k) => (k === 'instance.timezone' ? 'UTC' : undefined) });
 
 let pass = 0, fail = 0;
 const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
@@ -949,7 +952,7 @@ console.log('— §5 wiring');
     /const loginExpiryWatch = require\('\.\/src\/server\/login-expiry-watch\.js'\)/.test(srv)
     && /getLoginExpiryWatch: \(\) => \{ try \{ return loginExpiryWatch; \} catch \{ return null; \} \}/.test(srv));
   const aur = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
-  ck('the routes destructure it (an unread dep is the 2.355.0 unstaged-wiring class)', /getTelemetry, getUsageHistory, getLoginExpiryWatch \}\) \{/.test(aur));
+  ck('the routes destructure it (an unread dep is the 2.355.0 unstaged-wiring class)', /getTelemetry, getUsageHistory, getLoginExpiryWatch(?:, getCliCmds = \(\) => null)? \}\) \{/.test(aur) /* int332: lane antigravity-card-fixes appends getCliCmds */);
   ck('every login FINALIZE route sweeps, gated on the login having actually succeeded', (() => {
     const calls = (aur.match(/sweepLoginExpiry\('[^']+'\)/g) || []).concat(aur.match(/sweepOnLoginTransition\([^)]*'[^']+'\)/g) || []);
     return calls.length === 4

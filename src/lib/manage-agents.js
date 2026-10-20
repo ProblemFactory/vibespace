@@ -403,7 +403,32 @@ export function rosterUsageSnapshot(stamp, maps) {
   else if (src === 'host-own') { const h = m.hostOwn?.[key]; u = h && h.fiveHour ? h : null; }
   else if (src === 'host-account') { u = m.hostAccounts?.[key] || null; }
   else if (src === 'codex') { u = m.codex?.[key] || null; est = m.estimates?.[key] || null; }
+  else if (src === 'home') { u = onDemandUsageView(m.home?.[key]); }
   return u ? { u, est } : null;
+}
+
+/** A NAMED ACCOUNT'S ON-DEMAND READING AS ROSTER DONUTS (lane antigravity-card-fixes): the typed limit set a person's
+ *  Re-check left (/api/usage `homeAccounts` — antigravity's `agy -p /usage`) → the view the shared renderer
+ *  (`_acctUsageHtml`) draws: one donut per window, each limit's 5h before its 7d, as a legacy-shaped bucket
+ *  (utilization 0..1, resetsAt in seconds, state); its tooltip is the CLI's own words and number ("Gemini Models ·
+ *  Weekly Limit Remaining 100%" — agy prints what REMAINS, the donut fills with what is used). A window that states no
+ *  spend is not drawn. null = nothing to draw. PURE, exported for the gate. */
+export function onDemandUsageView(r) {
+  if (!r || !Array.isArray(r.limits) || !r.limits.length) return null;
+  const names = r.windowNames && typeof r.windowNames === 'object' ? r.windowNames : {};
+  const windows = [];
+  for (const l of r.limits) {
+    const ws = (Array.isArray(l && l.windows) ? l.windows : []).filter((w) => w && Number.isFinite(Number(w.usedPct))).slice().sort((a, b) => (Number(a.minutes) || 0) - (Number(b.minutes) || 0));
+    for (const w of ws) {
+      const used = Math.max(0, Math.min(100, Number(w.usedPct)));
+      windows.push({
+        label: String(w.kind || '?').slice(0, 3), kind: w.kind === '5h' ? 'fiveHour' : 'weekly',
+        utilization: used / 100, ...(w.resetsAt ? { resetsAt: w.resetsAt } : {}), ...(w.state && w.state !== 'running' ? { state: w.state } : {}),
+        tip: `${l.name || l.limitId} · ${names[`${l.limitId}/${w.kind}`] || w.kind} ${Math.round((100 - used) * 100) / 100}%`,
+      });
+    }
+  }
+  return windows.length ? { windows, fetchedAt: r.fetchedAt || null } : null;
 }
 
 // ── THE CREDITS CHIP (2.369.189, owner: "这啥玩意啊 不如显示个钱的图标") ────────────
@@ -475,7 +500,7 @@ export function installManageAgents(App, ctx = {}) {
     let cells;
     try { cells = (typeof document !== 'undefined' && document.querySelectorAll) ? document.querySelectorAll('.acct-usage-cell[data-usage-src]') : []; } catch { return 0; }
     if (!cells || !cells.length) return 0;
-    const maps = { accounts: this._accountUsage, hostOwn: this._hostOwnUsage, hostAccounts: this._hostAccountUsage, codex: this._codexAccountUsage, rateLimit: this._rateLimit, estimates: this._usageEstimates };
+    const maps = { accounts: this._accountUsage, hostOwn: this._hostOwnUsage, hostAccounts: this._hostAccountUsage, codex: this._codexAccountUsage, home: this._homeAccountUsage, rateLimit: this._rateLimit, estimates: this._usageEstimates };
     let n = 0; const lists = new Set();
     for (const cell of cells) {
       const snap = rosterUsageSnapshot(cell.dataset, maps);
@@ -1409,7 +1434,8 @@ export function installManageAgents(App, ctx = {}) {
       const bg = pair.estPct != null && pair.estPct > pair.darkPct
         ? `conic-gradient(${c} ${Math.round(p * 3.6)}deg, ${light} ${Math.round(p * 3.6)}deg ${Math.round(pair.estPct * 3.6)}deg, var(--bg-input) ${Math.round(pair.estPct * 3.6)}deg)`
         : `conic-gradient(${c} ${Math.round(p * 3.6)}deg, var(--bg-input) ${Math.round(p * 3.6)}deg)`;
-      const tip = (pair.estPct != null
+      const tip = (typeof x?.tip === 'string' ? escHtml(x.tip) // an on-demand window says itself (onDemandUsageView)
+        : pair.estPct != null
         ? `${escHtml(tipName || label)}: ${p}% · ${escHtml(t('est {pct}%', { pct: pair.estPct }))}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}`
         : `${escHtml(tipName || label)}: ${p}%`) + escHtml(etaTip(x));
       const eta = bucketEta(x, now);
@@ -1420,9 +1446,11 @@ export function installManageAgents(App, ctx = {}) {
       const etaHtml = eta ? `<span class="acct-donut-eta" style="color:${eff >= 80 ? c : 'var(--text-secondary)'}">${escHtml(eta)}</span>` : '<span class="acct-donut-eta-slot" aria-hidden="true"></span>';
       return `<span class="acct-donut-col"><span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}" title="${tip}" style="background:${bg}"><span>${escHtml(label)}</span></span>${etaHtml}</span>`;
     };
-    const parts = [donut('5h', u.fiveHour, null, est?.fiveHour), donut('7d', u.sevenDay, null, est?.sevenDay)];
+    // an ON-DEMAND reading (onDemandUsageView) names its own windows; every other row is the 5h + 7d (+ scoped) view
+    const wins = Array.isArray(u.windows) ? u.windows : null;
+    const parts = wins ? wins.map((w) => donut(w.label, w, null, null)) : [donut('5h', u.fiveHour, null, est?.fiveHour), donut('7d', u.sevenDay, null, est?.sevenDay)];
     const scEst = (name) => (est?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(name || '').toLowerCase()) || null;
-    for (const sc of (u.scopedWeekly || [])) parts.push(donut(String(sc.name || '?').slice(0, 2), sc, sc.name, scEst(sc.name)));
+    if (!wins) for (const sc of (u.scopedWeekly || [])) parts.push(donut(String(sc.name || '?').slice(0, 2), sc, sc.name, scEst(sc.name)));
     const age = u.fetchedAt ? Math.round((now - u.fetchedAt) / 60000) : null;
     // The age span ALWAYS renders (empty when fresh) at a fixed min-width —
     // conditional rendering shifted the right-aligned donut group per row and
@@ -1435,7 +1463,7 @@ export function installManageAgents(App, ctx = {}) {
     // ~100px and doesn't shrink — below ~340px a container query swaps it for
     // ONE pill showing the TIGHTEST bucket (+ its compact countdown; full
     // detail in the tooltip).
-    const buckets = [['5h', u.fiveHour, est?.fiveHour, 'fiveHour'], ['7d', u.sevenDay, est?.sevenDay, 'weekly'], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc, scEst(sc.name), 'weekly'])]
+    const buckets = (wins ? wins.map((w) => [w.label, w, null, w.kind]) : [['5h', u.fiveHour, est?.fiveHour, 'fiveHour'], ['7d', u.sevenDay, est?.sevenDay, 'weekly'], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc, scEst(sc.name), 'weekly'])])
       .map(([label, x, e, kind]) => { const pr = estDisplayPair(x, e); return [label, pr.estPct ?? pct(x), pr.estPct != null, x, kind]; }).filter(([, p]) => Number.isFinite(p));
     // THE ROW'S OWN countdown (2026-09-15): one full-precision token per
     // account — blocked ⇒ when its last spent bucket resets (the pool's hard
@@ -1827,8 +1855,9 @@ export function installManageAgents(App, ctx = {}) {
 
 
   // ── THE ROSTER OF A HARNESS WITH ISOLATED-HOME LOGINS AND NO POOL (lane antigravity-harness: the Antigravity CLI's
-  // Google accounts). This machine only — no usage cell (no quota reading yet), no pool button (caps.pool
-  // false); the words come from the descriptor's billing row, so nothing here names the harness.
+  // Google accounts). This machine only — a named account's usage cell draws the reading its last ⋯ Re-check left
+  // (lane antigravity-card-fixes: /api/usage homeAccounts, stamped 'home' so the 8 s poll repaints it), no pool button
+  // (caps.pool false); the words come from the descriptor's billing row, so nothing here names the harness.
   async _renderHomeAccounts(ctx, be) {
     const { body, selectedHost, done, refresh } = ctx;
     if (selectedHost) return; // the roster lives under “This machine” (a remote run of these logins is not wired)
@@ -1843,6 +1872,7 @@ export function installManageAgents(App, ctx = {}) {
     const defId = accts[bill.defaultIdField] || null;
     const st = ctx.st?.[be] || {};
     const { CROWN, GLOBE, STAR_F, STAR_O, DOTS } = ROSTER_ICONS;
+    const usageOf = (id) => { const v = onDemandUsageView(this._homeAccountUsage?.[id]); return v ? this._acctUsageHtml(v) : ''; };
     const row = document.createElement('div'); row.className = 'ob-backend acct-section acct-roster';
     const left = document.createElement('div'); left.style.flex = '1';
     const globalRow = `<div class="acct-key-row${!defId ? ' is-default' : ''}" data-id="__home_global__">
@@ -1856,7 +1886,7 @@ export function installManageAgents(App, ctx = {}) {
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}">
         <span class="acct-type-icon" title="${escHtml(t('{login} account — runs on this machine', { login }))}">${CROWN}</span>
         <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span></span>
-        <span class="acct-usage-cell"></span>
+        <span class="acct-usage-cell" data-usage-src="home" data-usage-key="${escHtml(a.id)}">${usageOf(a.id)}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>
@@ -1887,9 +1917,20 @@ export function installManageAgents(App, ctx = {}) {
       if (e.target.closest('.acct-def')) { await setDefault(defId === id ? null : id); return; }
       if (!e.target.closest('.acct-menu')) return;
       const doRecheck = async () => {
-        let r = null;
+        let r = null, u = null;
+        this._cliRecheckDue = true; // the refresh below also looks for the CLI again (an install after start)
         try { r = await fetchJson(`/api/accounts/home-subscription/${encodeURIComponent(id)}/finalize`, { method: 'POST' }); } catch { r = null; }
-        showToast(r?.loggedIn ? t('✓ Signed in as {name}', { name: r.email || r.name || '' }) : t('Still not signed in — open “Add {login} account…” to finish the login.', { login }), { type: r?.loggedIn ? undefined : 'error' });
+        // signed in ⇒ the SAME press reads its usage (the CLI's own usage command, once a minute — lane
+        // antigravity-card-fixes); the answer lands in /api/usage's homeAccounts, re-read here so the row paints now
+        if (r?.loggedIn) {
+          try { u = await fetchJson(`/api/accounts/home-subscription/${encodeURIComponent(id)}/usage`, { method: 'POST' }); } catch { u = null; }
+          if (u?.ok) { try { const d = await fetchJson('/api/usage'); if (d) this._applyUsage?.(d); } catch { } }
+        }
+        const name = r?.email || r?.name || '';
+        showToast(!r?.loggedIn ? t('Still not signed in — open “Add {login} account…” to finish the login.', { login })
+          : u?.ok ? t('✓ Signed in as {name} — usage read', { name })
+          : u && !u.throttled && u.code !== 'no-reading' ? t('✓ Signed in as {name} — usage not read: {reason}', { name, reason: u.error || t('server unreachable') })
+          : t('✓ Signed in as {name}', { name }), { type: !r?.loggedIn ? 'error' : undefined });
         refresh();
       };
       const doRename = async () => {
@@ -1982,7 +2023,10 @@ export function installManageAgents(App, ctx = {}) {
       // full-refresh semantics the single-machine dialog had.
       const refresh = () => { this._agentsRefreshHook?.(); };
       let st = {};
-      try { st = (await fetchJson(selectedHost ? `/api/hosts/${selectedHost}/backend-status` : '/api/backend-status')) || {}; } catch {}
+      // a person's Install / Re-check asked for a fresh look at this machine's CLIs (cliCmds.check's `force`)
+      const recheck = !selectedHost && !!this._cliRecheckDue;
+      if (recheck) this._cliRecheckDue = false;
+      try { st = (await fetchJson(selectedHost ? `/api/hosts/${selectedHost}/backend-status` : `/api/backend-status${recheck ? '?recheck=1' : ''}`)) || {}; } catch {}
       if (stale() || !body.isConnected) return;
       // Accounts render UNDER their CLI: Anthropic accounts below Claude Code,
       // OpenAI/Codex accounts below Codex. Shared context for the extracted
@@ -2062,8 +2106,17 @@ export function installManageAgents(App, ctx = {}) {
         if (!info.installed && b.installCmd) {
           const instBtn = document.createElement('button'); instBtn.className = 'agent-btn primary'; instBtn.textContent = t('Install');
           instBtn.title = b.installCmd + (selectedHost ? ` — ${t('runs on the selected remote host')}` : '');
-          instBtn.onclick = () => run(b.installCmd);
+          // the next status read after an Install is a PERSON'S: the server looks the CLI up NOW (?recheck=1), never
+          // the read-time bound's last answer (lane antigravity-card-fixes)
+          instBtn.onclick = () => { if (!selectedHost) this._cliRecheckDue = true; run(b.installCmd); };
           actions.appendChild(instBtn);
+          // a CLI installed some other way (a terminal, a package manager): Re-check looks for it now
+          if (!selectedHost) {
+            const reBtn = document.createElement('button'); reBtn.className = 'agent-btn cli-recheck'; reBtn.textContent = t('Re-check');
+            reBtn.title = t('Look for the {cli} command on this machine again', { cli: b.cliName || b.key });
+            reBtn.onclick = () => { this._cliRecheckDue = true; refresh(); };
+            actions.appendChild(reBtn);
+          }
         }
         // Helper terminals are LOGIN shells — /etc/profile resets PATH, and a
         // host missing ~/.local/bin in ~/.profile made a bare `claude update`

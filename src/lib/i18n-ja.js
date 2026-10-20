@@ -863,6 +863,9 @@ export default {
   "Pursued for {time}": "{time} 継続中",
   "Re-activate the last cleared/completed goal": "最後にクリア/完了したゴールを再有効化",
   "Re-check": "再チェック",
+  "Look for the {cli} command on this machine again": "このマシンで {cli} コマンドをもう一度探す",
+  "✓ Signed in as {name} — usage read": "✓ {name} としてサインイン済み — 使用量を読み取りました",
+  "✓ Signed in as {name} — usage not read: {reason}": "✓ {name} としてサインイン済み — 使用量を読み取れませんでした：{reason}",
   "Read a task markdown file back into the store (its frontmatter id/title/status are authoritative; existing sessions/folders/progress are preserved)": "タスクの markdown ファイルをストアに読み込み直します（フロントマターの id/title/status が優先；既存のセッション/フォルダ/進捗は保持されます）",
   "Reason": "理由",
   "Reasoning effort (as last commanded — the CLI does not report it back) — click to change": "推論強度（最後に指定した値——CLI は報告し返しません）— クリックで変更",
@@ -1946,6 +1949,7 @@ export default {
   "the browser stopped answering": "ブラウザが応答しなくなりました",
   "the desktop server closed the stream": "デスクトップサーバーがストリームを閉じました",
   "the connection dropped": "接続が切れました",
+  "the picture stopped arriving": "映像が届かなくなりました", // lane stream-leg-flap
   "the desktop session ended": "デスクトップのセッションが終了しました",
   "another window is driving it": "別のウィンドウが操作しています",
   "This pane is watching — press Resume here to type into the desktop": "このペインは閲覧中です — デスクトップに入力するには「ここで再開」を押してください",
@@ -6085,6 +6089,17 @@ export default {
   "quotes your message of {when}": "あなたの {when} のメッセージを引用",
   "replies in the thread of your message of {when}": "あなたの {when} のメッセージのスレッドで返信",
   "in the thread of your mail \"{subject}\"": "あなたのメール「{subject}」のスレッド内",
+  "Also judge plain replies (LLM plugin)": "通常の返信も判定する（LLM プラグイン）",
+  "A message with no quote and no thread that arrives after this agent's own message is judged once: is it an answer to it? A yes notifies like a quote does; each judgment is one call within the plugin's daily budget. How long after the agent's message: Settings › Channels.": "この agent 自身のメッセージの後に届いた、引用もスレッドもないメッセージを一度だけ判定します：それへの返答か？ 返答と判定されれば引用と同じように通知します。判定は 1 回の呼び出しで、プラグインの 1 日の予算内です。agent のメッセージの後どのくらいの間判定するか：設定 › チャンネル。",
+  "The LLM plugin is not available on this server — plain replies are not judged (quotes and thread replies still notify).": "このサーバーには LLM プラグインがありません — 通常の返信は判定されません（引用とスレッドの返信はこれまでどおり通知されます）。",
+  "The LLM plugin is off — plain replies are not judged until you turn it on (quotes and thread replies still notify).": "LLM プラグインはオフです — オンにするまで通常の返信は判定されません（引用とスレッドの返信はこれまでどおり通知されます）。",
+  "The LLM plugin has no key yet — plain replies are not judged until you add one on the Language model card (Integrations & keys).": "LLM プラグインにはまだキーがありません — 言語モデルのカード（連携とキー）で追加するまで、通常の返信は判定されません。",
+  "The LLM plugin's switch “Notification rules can use a sentence as the condition” is off — plain replies are not judged until you turn it on.": "LLM プラグイン の「通知ルールの条件に一文を使える」スイッチがオフです — オンにするまで、通常の返信は判定されません。",
+  "Judge a plain reply to an agent's message for (hours)": "agent のメッセージの後に通常の返信を判定する時間（時間）",
+  "For a reply rule with «Also judge plain replies» on: a message with no quote and no thread that arrives within this many hours of the agent's own message in the same chat is judged ONCE by the LLM plugin (is it an answer?). Later messages are never judged. Each judgment is one call within the plugin's daily budget.": "「通常の返信も判定する」をオンにした返信ルールで：同じチャットで agent 自身のメッセージの後この時間内に届いた、引用もスレッドもないメッセージを LLM プラグインが一度だけ判定します（返答か？）。それより後に届いたメッセージは判定しません。判定は 1 回の呼び出しで、プラグインの 1 日の予算内です。",
+  "judged an answer to your message of {when}": "あなたの {when} のメッセージへの返答と判定",
+  "judging plain replies is either on or off": "「通常の返信を判定」はオンかオフのどちらかです",
+  "Plain replies": "通常の返信",
   "is in a thread I am in, or quotes a message of mine": "自分が参加しているスレッド内、または自分のメッセージの引用",
   // owner decision A (2026-09-28): a wake's place reason, worded for the owner's window (the agent reads the English)
   "quoted your message": "あなたのメッセージを引用",
@@ -6467,7 +6482,7 @@ export default {
   "The layout could not be re-read after reconnecting — window changes on this page are held until it can be": "再接続後にレイアウトを再読み込みできませんでした — このページのウィンドウ変更は、読み込めるまで保留されます",
   "The layout was re-read — window changes made on this page more than a minute ago were not kept ({n})": "レイアウトを再読み込みしました — このページで1分以上前に行ったウィンドウ変更は保持されませんでした（{n} 件）",
   "Stop drawing in a browser nobody watches": "誰も見ていないブラウザの描画を止める",
-  "Stop drawing in a browser nobody watches or drives for 30 s (hidden window / headless). The browser is thawed before the next command.": "誰も見ておらず、コマンドも 30 秒動かしていないブラウザ（非表示ウィンドウ / ヘッドレス）の描画を止めます。次のコマンドの前に再開されます。",
+  "ON (default): a browser nobody watches or drives for 30 s (hidden window / headless) stops drawing. It draws again before the next command, or within a frame when you open its live view. Turn it off to keep every page drawing.": "オン（既定）：誰も見ておらず、コマンドも 30 秒動かしていないブラウザ（非表示ウィンドウ / ヘッドレス）の描画を止めます。次のコマンドの前に、またはライブビューを開くと 1 フレーム以内に再開されます。オフにするとすべてのページが描画し続けます。",
   "Do not announce the agent browser as automated": "エージェントのブラウザを自動操作中と名乗らせない",
   "ON (default): the agent's browser starts with --disable-blink-features=AutomationControlled, so pages no longer read it as an automated browser (navigator.webdriver is false). It hides that one signal only — a site that still refuses the browser makes the agent propose a switch to CloakBrowser, which you approve. If your own ~/.agent-browser/config.json already names an AutomationControlled value, yours is kept. Applies to the next browser that starts; CloakBrowser is not affected.": "オン(既定): エージェントのブラウザは --disable-blink-features=AutomationControlled 付きで起動し、ページはそれを自動操作のブラウザとして読まなくなります(navigator.webdriver が false)。隠すのはこの一つの信号だけです——それでもサイトがブラウザを拒むと、エージェントが CloakBrowser への切り替えを提案し、あなたが承認します。ご自身の ~/.agent-browser/config.json に AutomationControlled の値がすでにあれば、そちらを保ちます。次に起動するブラウザから適用され、CloakBrowser には影響しません。",
   "No switch can be offered: CloakBrowser cannot be installed on this machine — its build for this kind of machine was never measured.": "切り替えは提案できません: このマシンには CloakBrowser をインストールできません——この種類のマシン向けのビルドは測定されていません。",
@@ -9195,6 +9210,7 @@ export default {
   "Mark handled": "対応済みにする",
   "Click to show it all": "クリックで全文を表示",
   "handled {when}": "{when} に対応済み",
+  "handled in {version} by {who}, {when}": "{who} が {when} に対応済み（{version} で修正）", // lane feedback-handled-verb
   "Could not load the feedback list": "フィードバック一覧を読み込めませんでした",
   "What agents reported with vibespace-feedback — a command, a flow, a screen or a manual that felt wrong. Newest first; a repeat within a day is counted on its row.": "エージェントが vibespace-feedback で報告した、使いにくかったコマンド・流れ・画面・マニュアルです。新しい順。1 日以内の同じ報告はその行の回数に数えます。",
   "Open ({n})": "未対応（{n}）",
@@ -9333,6 +9349,7 @@ export default {
   "The vault locked after a restart — enter the second password to unlock. Device links, the relay and account switching are waiting.": "再起動後に保管庫がロックされました — 第二パスワードを入力して解除してください。デバイス連携・中継・アカウント切り替えが待機中です", // lane vault-relock-door: the restart For-you notice
   "The vault is locked — {n} waiting on it (For you names them). Unlock… enters the second password.": "保管庫はロック中 — {n} 件が待機中です（「あなた宛て」に一覧があります）。「ロック解除…」で第二パスワードを入力します。", // lane vault-locked-refusal-notice: the strip's count
   "The vault is locked — waiting on it: {who}. Enter the second password to unlock.": "保管庫はロック中 — 待機中：{who}。第二パスワードを入力して解除してください", // lane vault-locked-refusal-notice: the For-you item names who was blocked
+  "The vault is locked — agents that need a credential will be refused until you unlock it. Enter the second password to unlock.": "保管庫はロック中です — 解除するまで、認証情報が必要なエージェントは拒否されます。第二パスワードを入力して解除してください", // lane vault-locked-loud: the urgent For-you item from the moment it locks
   "Nothing has been refused yet — whatever the lock stops is named here as it happens.": "まだ何も拒否されていません — ロックで止まったものはその都度ここに表示されます", // lane vault-locked-refusal-notice: the item's detail before any refusal
   "{who} — {what}": "{who} — {what}", // lane vault-locked-refusal-notice: one blocked caller and what it was refused
   "…and {n} more, refused while it is locked": "…ほか {n} 件がロック中に拒否されました", // lane vault-locked-refusal-notice: past the item's lines
@@ -9548,6 +9565,8 @@ export default {
   "End a conversation": "会話を終える", // design q-046 (lane automation-keys-core)
   "Invite a conversation into a group": "会話をグループに招待する", // design q-046 (lane automation-keys-core)
   "Look up a conversation's ids": "会話の ID を確かめる", // design q-046 (lane automation-verbs)
+  "Mark an agent's feedback handled": "エージェントのフィードバックを対応済みにする", // lane feedback-handled-verb
+  "Read the agents' open feedback": "エージェントの未対応フィードバックを読む", // lane feedback-handled-verb
   "(starts a billed turn)": "（課金されるターンを開始します）", // design q-046 (lane automation-keys-core)
   "The key's value is sealed in the vault — nobody sees it. Grant it to a conversation or a task group next.": "キーの値は保管庫に封印され、誰にも見えません。次に会話かタスクグループに付与してください。", // design q-046 (lane automation-keys-core)
   "Mint": "発行", // design q-046 (lane automation-keys-core)
@@ -9595,6 +9614,12 @@ export default {
   "No audit line for this key yet": "このキーの監査ログはまだありません", // lane automation-open-limits
   "Limits not set": "制限未設定", // lane automation-open-limits (q-049 M1)
   "The CLI's own setting": "CLI 自身の設定", // lane automation-open-limits (q-049 M2)
+  "The CLI's own setting (now {mode})": "CLI 自身の設定（現在は {mode}）", // lane automation-open-permission-resolve (q-049 M2)
+  "its built-in default": "組み込みの既定",
+  "Set in {file}": "{file} で設定",
+  "No settings file sets a permission mode — the CLI runs its built-in default": "権限モードを設定するファイルはありません —— CLI は組み込みの既定で動きます",
+  "This call would open \"{name}\" in {cwd}.": "この呼び出しは {cwd} に「{name}」という対話を開きます。",
+  "This call would open a conversation in {cwd}.": "この呼び出しは {cwd} に対話を開きます。",
   "No folders are set — every conversation it would open is refused until you set them with Limits…": "フォルダーが未設定です——「制限…」で設定するまで、このキーで開こうとする会話はすべて拒否されます", // lane automation-open-limits (q-049 M1)
   "Limits…": "制限…", // lane automation-open-limits
   "Audit…": "監査ログ…", // lane automation-open-limits
@@ -9851,4 +9876,8 @@ export default {
   "To let every conversation use it, turn on «Usable by agent runs» on its row in ⚙ System ▸ Vault….": "すべての会話で使えるようにするには、⚙ システム ▸ 保管庫… でその行の「エージェントの実行で使用可」をオンにします。", // lane vault-manual-and-lock
   "Unlock… at the top of the page; For you names what is waiting on it": "ページ上部の「ロック解除…」。待っているものは「あなた宛て」に載っています", // lane vault-manual-and-lock: the two facts beside the owner's own words
   "Power throttling": "電力調整", // lane stream-sdr-ecoqos: the stream details' row (Windows' EcoQoS on the machine's stream processes)
+  "Your time zone (the times agents see and say to you)": "あなたのタイムゾーン（エージェントが見て伝える時刻）", // lane agent-context-owner-facts
+  "An IANA zone such as America/Los_Angeles or Asia/Shanghai. Every time an agent reads — the Task Group board, the Activity log, TASK.md, the context a session starts with, the backlog and the tools' answers — is printed in this zone and named (16:16 PT), so the time an agent tells you is your clock. Empty = this server's own zone: its TZ setting, else the system's.": "IANA のゾーン名（America/Los_Angeles、Asia/Shanghai など）。エージェントが読むすべての時刻——タスクグループのボード、アクティビティログ、TASK.md、セッション開始時のコンテキスト、バックログ、ツールの回答——はこのゾーンで表示され、ゾーン名が付きます（16:16 PT）。エージェントが伝える時刻があなたの時計になります。空欄 = このサーバー自身のゾーン：TZ 設定、なければシステムのゾーン。", // lane agent-context-owner-facts
+  "{n} conversations are asking to use stored secrets": "{n} 件の会話が保管庫のシークレットの使用を求めています", // B-4934: the vault's «N conversations are asking» notice
+  "Each conversation asks on its own card in For you. This line goes when 8 or fewer are asking.": "会話ごとの依頼は「あなた宛て」のそれぞれのカードにあります。依頼中の会話が 8 件以下になると、この行は消えます。", // B-4934: the vault's «N conversations are asking» notice
 };

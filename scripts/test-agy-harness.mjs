@@ -428,13 +428,13 @@ console.log('— ⑩ THE /usage READING: the judge (the brief\'s STOP rule) + th
   const measured = U.judgeUsageAnswer({ code: 1, stdout: JSON.stringify(FX.unauthenticated.usageStdout), stderr: FX.unauthenticated.streamPipe.stderr.join('\n') });
   ok('the MEASURED unauthenticated answer (agy 1.4.3 offline) is auth-required — and shows no turn', measured.verdict === 'auth-required' && U.turnSigns(FX.unauthenticated.usageStdout).length === 0, measured);
   const clean = { conversation_id: '', status: 'SUCCESS', response: 'x', num_turns: 0, usage: { input_tokens: 0, output_tokens: 0 } };
-  ok('a SUCCESS with no turn is "unparsed" — KNOWN_SHAPES is empty: no reading is ever guessed before a signed-in capture', U.KNOWN_SHAPES.length === 0 && U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(clean) }).verdict === 'unparsed');
+  ok('a SUCCESS with no turn in a shape no signed-in capture pinned is "unparsed" — the one pinned shape is the 1.4.3 capture\'s (usage-groups; its parser legs: test-antigravity-usage)', U.KNOWN_SHAPES.length === 1 && U.KNOWN_SHAPES[0].id === 'usage-groups' && U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(clean) }).verdict === 'unparsed');
   const billed = [{ ...clean, num_turns: 1 }, { ...clean, conversation_id: 'c-1' }, { ...clean, usage: { input_tokens: 0, output_tokens: 3 } }, { event: 'result', result: { ...clean, num_turns: 2 } }];
   ok('THE STOP RULE: any sign of a turn — num_turns, a conversation, one token, the stream-json result shape — is turn-started', billed.every((e) => U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(e) }).verdict === 'turn-started'), billed.map((e) => U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(e) }).verdict));
   const src = fs.readFileSync(path.join(REPO, 'src/harnesses/antigravity-usage.js'), 'utf8');
   const cut = '  if (signs.length) return { verdict: \'turn-started\'';
   const mutated = path.join(ROOT, 'antigravity-usage-noturn.js');
-  fs.writeFileSync(mutated, src.replace(cut, '  if (false && signs.length) return { verdict: \'turn-started\''));
+  fs.writeFileSync(mutated, src.replace(cut, '  if (false && signs.length) return { verdict: \'turn-started\'').replace("require('../quota-model.js')", `require(${JSON.stringify(path.join(REPO, 'src/quota-model.js'))})`)); // the copy lives in scratch: its one relative require made absolute
   ok('RED control: a judge copy without the turn check calls a billed answer "unparsed" (the STOP rule can go red)', src.includes(cut) && require(mutated).judgeUsageAnswer({ code: 0, stdout: JSON.stringify(billed[0]) }).verdict === 'unparsed');
   ok('redactCapture: e-mails, project ids and opaque tokens become placeholders', JSON.stringify(U.redactCapture({ a: 'me@x.com', p: 'proj-name-123456', t: 'x'.repeat(48) })) === '{"a":"<email>","p":"<project>","t":"<opaque>"}');
   // the capture script, against the fake agy

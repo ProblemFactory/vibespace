@@ -22,7 +22,8 @@
 //   ⑧ rect census: the dialog, its rows and its buttons inside the viewport (desktop AND 390 px
 //      phone); the select bar's buttons inside the window; no clipped button text
 //   ⑨ no native dialog is ever called; no page exception
-//   ⑩ NEGATIVE CONTROL: the hostile note through a raw innerHTML copy DOES run
+//   ⑩ NEGATIVE CONTROL: the hostile note through a raw innerHTML copy IS an <img onerror> (an inert document — nothing is
+//      planted on the app page, whose CSP teardown fails a suite on any inline handler)
 //   verify r2 (the UX verifier's findings, each pinned where it shows): a Find that matches only a
 //   DETAIL opens that detail and the dialog says "Found in the detail: …"; a batch ends the
 //   selection; a cleared row in Select mode has no checkbox (and no ⋯); the day / time cells speak
@@ -116,6 +117,10 @@ fs.writeFileSync(path.join(DATA, 'task-groups.json'), J({ version: 1, tasks: { [
   id: WB, title: 'bulk', kind: 'task', archived: false, attention: null, objective: '', backlog: [], progress: BULK_ENTRIES,
   sessions: [], folders: [], contextDir: null, color: null, injectContext: true, colorSeq: 1, createdAt: NOW - 30 * H, updatedAt: NOW - 3 * H, contentUpdatedAt: NOW - 3 * H,
 } } }, null, 2));
+// lane agent-context-owner-facts (B-7960 a): the instance's zone — the board prints every Activity time in it, named, whatever
+// the browser's own zone (Asia/Tokyo: neither this box's nor a runner's, so the leg cannot pass on the browser's clock)
+const ZONE = 'Asia/Tokyo', ZONE_SHORT = 'GMT+9';
+fs.writeFileSync(path.join(DATA, 'settings.json'), J({ 'instance.timezone': ZONE }, null, 2));
 const OPEN_ID = 'ut-c1ea000001', RES_ID = 'ut-c1ea000002';
 const todo = (id, x) => ({ id, sessionKey: K, text: 'x', detail: null, urgency: 'normal', kind: 'action', status: 'open', by: 'agent', sessionName: null, jobId: null, i18n: null, action: null, expiresAt: null, options: null, reply: null, origin: 'agent', createdAt: NOW - 2 * H, resolvedAt: null, resolvedBy: null, ...x });
 fs.writeFileSync(path.join(DATA, 'user-todos.json'), J({ items: [
@@ -311,6 +316,9 @@ try {
   console.log('① the Task Group log window: right-click an entry → Clear content… → the one dialog → the row keeps its place');
   await P1.evalJs(`app.openTaskLog(${J(W)}, { tab: 'activity' }); true`);
   check('the log window opens on the Activity tab with its rows keyed by entry id', await P1.waitFor(`document.querySelectorAll('.task-log-act[data-pid]').length === ${ENTRIES.length}`, 10000), await P1.evalJs(`document.querySelectorAll('.task-log-act').length`));
+  // B-7960 a: every Activity row's time is the INSTANCE's zone, named (THE formatter, src/when-words.js) — the browser's clock never
+  const rowsZ = await P1.evalJs(`(() => { const want = (at) => new Date(at).toLocaleTimeString('en-GB', { timeZone: ${J(ZONE)}, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) + ' ' + ${J(ZONE_SHORT)}; const ents = ${J(ENTRIES.map((e) => [e.id, e.at]))}; return { own: Intl.DateTimeFormat().resolvedOptions().timeZone, rows: ents.map(([id, at]) => { const r = document.querySelector('.task-log-act[data-pid="' + id + '"] .task-log-time'); return [id, r ? r.textContent : null, want(at)]; }) }; })()`);
+  check(`the board's Activity rows print the instance's zone, named (${ZONE}: «HH:MM ${ZONE_SHORT}»), not the browser's own (${rowsZ && rowsZ.own})`, rowsZ && rowsZ.own !== ZONE && rowsZ.rows.length === ENTRIES.length && rowsZ.rows.every(([, got, want]) => got === want), rowsZ);
   check('client 1 saves its layout (the shared workspace)', await saveLayout(P1)); // client 2 then restores the SAME window
   const { t: t2, P: P2 } = await newPage();
   await page(P2, { lang: 'zh' });
@@ -350,8 +358,8 @@ try {
   await shot(P2, 'confirm-dialog-zh', '#record-clear-dialog .dialog');
   await P2.evalJs(`document.querySelector('#record-clear-dialog .btn-cancel')?.click(); true`);
   check('Cancel clears nothing', !(await storeEntry('P-00000b')).clearedAt);
-  const cellsZh = await P2.evalJs(`(() => { const r = document.querySelector(${J(rowOf('P-00000b'))}); const at = ${ENTRIES[1].at}; const day = [...document.querySelectorAll('.task-log-day')].map((d) => d.firstChild.textContent); return { time: r.querySelector('.task-log-time').textContent, wantTime: new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), days: day, wantDay: new Date(at).toLocaleDateString('zh-CN'), browser: new Date(at).toLocaleDateString('en-US') }; })()`);
-  check('zh: the day headers and time cells speak the DEVICE\'s language (zh-CN), like the dialog — never the browser\'s en-US 9/28/2026 (verify r2)', cellsZh.time === cellsZh.wantTime && cellsZh.days.includes(cellsZh.wantDay) && !cellsZh.days.includes(cellsZh.browser), cellsZh);
+  const cellsZh = await P2.evalJs(`(() => { const r = document.querySelector(${J(rowOf('P-00000b'))}); const at = ${ENTRIES[1].at}; const day = [...document.querySelectorAll('.task-log-day')].map((d) => d.firstChild.textContent); return { time: r.querySelector('.task-log-time').textContent, wantTime: new Date(at).toLocaleTimeString('en-GB', { timeZone: ${J(ZONE)}, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) + ' ' + ${J(ZONE_SHORT)}, days: day, wantDay: new Date(at).toLocaleDateString('zh-CN', { timeZone: ${J(ZONE)} }), browser: new Date(at).toLocaleDateString('en-US') }; })()`);   // B-7960 a: the time is the instance zone's, named; the DAY header the device's language in that zone
+  check('zh: the day headers speak the DEVICE\'s language (zh-CN) in the instance\'s zone, the time cell is the instance zone\'s, named — never the browser\'s en-US 9/28/2026 (verify r2)', cellsZh.time === cellsZh.wantTime && cellsZh.days.includes(cellsZh.wantDay) && !cellsZh.days.includes(cellsZh.browser), cellsZh);
 
   // ── ② the batch: Find → Select… → Select all shown → Clear selected ──
   console.log('② the batch: Find the words, select every entry shown, clear them in one go');
@@ -543,8 +551,11 @@ try {
 
   // ── ⑩ negative control ──
   console.log('⑩ negative control');
-  const x = await P1.evalJs(`new Promise((res) => { const d = document.createElement('div'); d.innerHTML = ${J(HOSTILE)}; document.body.appendChild(d); setTimeout(() => { const v = window.__xss; d.remove(); window.__xss = undefined; res(v); }, 800); })`);
-  check('the hostile note through a raw innerHTML copy DOES run (window.__xss === 1) — ② can go red', x === 1, x);
+  // Built in an INERT document (lane mirror-331-reds-chrome): nothing loads there and no handler is compiled. On the app
+  // page this copy's <img onerror> ran an inline handler — the suite's one CSP report, which the teardown (scripts/scratch.mjs)
+  // fails. Taking that report is no fix: the hub writes a report key once, so a product leak would share it and hide behind it.
+  const x = await P1.evalJs(`(() => { const d = document.implementation.createHTMLDocument('').createElement('div'); d.innerHTML = ${J(HOSTILE)}; const i = d.querySelector('img'); return i ? i.getAttribute('onerror') : null; })()`);
+  check('the hostile note through a raw innerHTML copy IS an <img onerror="window.__xss=1"> (built in an inert document) — ② can go red', x === 'window.__xss=1', x);
 
   // ── ⑧ the phone: the dialog fits ──
   console.log('⑧ the phone (390 px): the dialog fits the viewport');

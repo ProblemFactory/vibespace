@@ -27,6 +27,13 @@
 //      FIXES its size (WindowManager.setFixedSize) takes it exactly, never capped at the workspace, and is not resizable
 //      (no drag, no maximize, a zone moves it, never sizes it); null releases it — a patched copy without the lock as
 //      the control, wiring pins for the drag's snap branch, the CSS and desktop-app-window.
+//   §6 (lane app-window-fit-topleft, B-1f0b — the coordinator's decision on app-fit-fixed's «Larger than the workspace»:
+//      the 1000×900 GTK fixture at 2× on an 878 px workspace kept its cascade x): the PURE verdict table
+//      (src/lib/desktop-app-placement.js fixedWindowPlacement — fits ⇒ the cascade, taller / wider / both ⇒ the workspace's
+//      top-left, wider ⇒ the title bar held to the workspace, the phone layout keeps scale-to-fit), the REAL
+//      WindowManager at the lock and at a workspace reflow (this client's, never captured nor announced; the stored place
+//      back when it fits again), a call-site census (the lock and the reflow only — never a drag frame), and a patched
+//      copy with the verdict's two calls pulled back as the control (x kept, the ✕ past the edge, no re-judge).
 // Prerequisite: `npm run build`. Run: node scripts/test-window-minsize.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -487,6 +494,95 @@ console.log('§5 lane app-fit-fixed — a window whose app FIXES its size takes 
   const css = read('public/style.css'), daw = read('src/lib/desktop-app-window.js');
   ok(/\.window\.window-fixed-size > \.resize-handle, \.window\.window-fixed-size \.win-maximize \{ display: none; \}/.test(css) && /@media \(max-width: 768px\)[\s\S]*?\.window \{[^}]*max-width: none !important; max-height: none !important;/.test(css), 'WIRING: style.css hides a fixed window\'s resize handles and maximize button; the phone layout forces max none !important (the window IS the screen)');
   ok(/onFixedSize: applyFixedSize, fixedFollows: \(\) => !app\.wm\._mobileLayout\(\)/.test(daw) && /app\.wm\.setFixedSize\(winInfo\.id, windowMinForPane\(fixedPane, \{ w: er\.width - pr\.width, h: er\.height - pr\.height \}, uiScale\(\)\)\)/.test(daw) && /if \(!fixedPane && winInfo\.fixedSize\) \{ app\.wm\.setFixedSize\(winInfo\.id, null\)/.test(daw), 'WIRING: desktop-app-window turns the view\'s onFixedSize into setFixedSize (pane + the measured chrome, windowMinForPane) and releases it when the view says null; the picture scales only on the phone layout');
+}
+
+console.log('§6 lane app-window-fit-topleft (B-1f0b) — a fixed window LARGER than the workspace stands at its top-left, its ✕ on screen');
+{
+  const P = await import('../src/lib/desktop-app-placement.js');
+  // the owner's workspace at 2× (1920×963, the sidebar at 470) = 1450×878 layout px; the frames lane app-fit-fixed's reproducer
+  // measured: the 1000×900 GTK fixture at 2× = a 1002×965 window, WeChat's login 282×382, Inkscape's welcome 712×743
+  const WS = { w: 1450, h: 878 };
+  const V = (fixed, frame, workspace = WS, phone = false) => P.fixedWindowPlacement({ fixed, frame, workspace, phone });
+  const cellOf = (v) => [v.act, v.left, v.top, v.barMax, v.why];
+  const TABLE = [
+    ['fits — WeChat\'s login 282×382', V(true, { w: 282, h: 382 }), ['cascade', null, null, null, 'fits']],
+    ['fits — Inkscape\'s welcome 712×743', V(true, { w: 712, h: 743 }), ['cascade', null, null, null, 'fits']],
+    ['fits — exactly the workspace, 1450×878', V(true, { w: 1450, h: 878 }), ['cascade', null, null, null, 'fits']],
+    ['taller — the 1000×900 fixture at 2× (1002×965)', V(true, { w: 1002, h: 965 }), ['top-left', 0, 0, null, 'taller']],
+    ['taller by one px — 1002×879', V(true, { w: 1002, h: 879 }), ['top-left', 0, 0, null, 'taller']],
+    ['wider — 1602×465', V(true, { w: 1602, h: 465 }), ['top-left', 0, 0, 1450, 'wider']],
+    ['larger both ways — 1702×1065', V(true, { w: 1702, h: 1065 }), ['top-left', 0, 0, 1450, 'larger']],
+    ['the phone layout — the window IS the screen and the picture scales to fit (app-fit-fixed\'s «named, not fixed»)', V(true, { w: 1002, h: 965 }, { w: 390, h: 700 }, true), ['none', null, null, null, 'phone']],
+    ['a resizable window (not fixed)', V(false, { w: 1002, h: 965 }), ['none', null, null, null, 'not-fixed']],
+    ['a workspace not laid out', V(true, { w: 1002, h: 965 }, null), ['none', null, null, null, 'no-workspace']],
+    ['no frame', V(true, null), ['none', null, null, null, 'no-frame']],
+  ];
+  for (const [name, got, want] of TABLE) ok(same(cellOf(got), want), `PURE fixedWindowPlacement: ${name} ⇒ ${want[0]}${want[0] === 'top-left' ? ' (0,0)' : ''}${want[3] ? `, the title bar ≤ ${want[3]} px` : ''}`, got);
+  ok(same(V(true, { w: 1002, h: 965 }), V(true, { w: 1002, h: 965 })) && !/^\s*import\b|\brequire\(/m.test(read('src/lib/desktop-app-placement.js')), 'PURE: the same facts give the same cell; desktop-app-placement.js imports nothing');
+
+  // the REAL WindowManager over the fake DOM, on the owner's 1450×878 workspace
+  const placeOn = async (WM) => {
+    const wm = mkWm(WM); wm.workspace = { offsetWidth: 1450, offsetHeight: 878 };
+    let captured = 0; wm._captureGridBounds = () => { captured++; };
+    const mk = (on, id, w, h, l, t) => {
+      const el = mkEl(w, h, l, t); el.clientLeft = 1; const cls = new Set();
+      el.classList = { add: (c) => cls.add(c), remove: (c) => cls.delete(c), toggle: (c, v) => (v ? cls.add(c) : cls.delete(c)), contains: (c) => cls.has(c) };
+      const win = { id, element: el, titleBar: { style: { maxWidth: '' } }, onResize() {}, onMoved() { win.moved = (win.moved || 0) + 1; }, gridBounds: null, _tabChain: null, isMaximized: false };
+      on.windows.set(id, win); return win;
+    };
+    const box = (win) => { const st = win.element.style; return { left: parseFloat(st.left), top: parseFloat(st.top), width: parseFloat(st.width), height: parseFloat(st.height), bar: win.titleBar.style.maxWidth }; };
+    const frac = (win) => { const b = box(win); win.gridBounds = { left: b.left / 1450, top: b.top / 878, width: b.width / 1450, height: b.height / 878 }; }; // its stored place (a drop's capture)
+    const out = {};
+    // at the LOCK: a cascade window (100,100) whose app then fixes its size
+    const a = mk(wm, 'tall', 700, 500, 100, 100); wm.setFixedSize('tall', { w: 1002, h: 965 }); out.tall = box(a);
+    const b = mk(wm, 'wide', 700, 500, 100, 100); wm.setFixedSize('wide', { w: 1602, h: 465 }); out.wide = box(b);
+    const c = mk(wm, 'fits', 700, 500, 130, 130); wm.setFixedSize('fits', { w: 712, h: 743 }); out.fits = box(c);
+    const wmP = mkWm(WM); wmP._hideMq = { matches: true }; wmP.workspace = { offsetWidth: 390, offsetHeight: 700 };
+    const p = mk(wmP, 'phone', 390, 700, 0, 0); p.element.style.left = '12px'; p.element.style.top = '34px'; wmP.setFixedSize('phone', { w: 1002, h: 965 }); out.phone = box(p);
+    wm.setFixedSize('wide', null); out.released = box(b); wm.windows.delete('wide'); wm.windows.delete('tall'); wm.windows.delete('fits');
+    // a WORKSPACE RESIZE re-judges: a window that fit (at its stored place 100,60) on a workspace made shorter, then back
+    const d = mk(wm, 'rs', 700, 500, 100, 60); wm.setFixedSize('rs', { w: 712, h: 743 }); frac(d); out.rsLock = box(d);
+    const c0 = captured, n0 = wm.notified || 0;
+    wm.workspace = { offsetWidth: 1450, offsetHeight: 600 }; wm._reflowWindows(); out.rsShort = box(d); out.rsMoved = d.moved || 0;
+    wm._reflowWindows(); out.rsAgain = box(d); out.rsMovedAgain = d.moved || 0;
+    out.rsQuiet = { captured: captured - c0, notified: (wm.notified || 0) - n0 };
+    wm.workspace = { offsetWidth: 1450, offsetHeight: 878 }; wm._reflowWindows(); out.rsBack = box(d);
+    // the sidebar opened wider: a 1002-wide fixed window at 200,50 on a 900 px workspace, then the sidebar narrowed again
+    const e = mk(wm, 'nar', 700, 500, 200, 50); wm.setFixedSize('nar', { w: 1002, h: 600 }); frac(e);
+    wm.workspace = { offsetWidth: 900, offsetHeight: 878 }; wm._reflowWindows(); out.narrow = box(e);
+    wm.workspace = { offsetWidth: 1450, offsetHeight: 878 }; wm._reflowWindows(); out.narrowBack = box(e);
+    return out;
+  };
+  const { WindowManager } = await import('../src/lib/window.js');
+  const A = await placeOn(WindowManager);
+  ok(same(A.tall, { left: 0, top: 0, width: 1002, height: 965, bar: '' }), `LOCK, taller (the 1000×900 fixture at 2×): the window stands at the workspace's top-left (0,0), the app's size kept — never the cascade's x (${JSON.stringify(A.tall)})`);
+  ok(same(A.wide, { left: 0, top: 0, width: 1602, height: 465, bar: '1449px' }), `LOCK, wider: (0,0), and its title bar held to the workspace (1450 − the 1 px border = 1449 px: the ✕ at the workspace's right edge, on screen) (${JSON.stringify(A.wide)})`);
+  ok(same(A.fits, { left: 130, top: 130, width: 712, height: 743, bar: '' }), `LOCK, fits (Inkscape's welcome): it keeps the cascade (130,130), the bar free (${JSON.stringify(A.fits)})`);
+  ok(same(A.phone, { left: 12, top: 34, width: 1002, height: 965, bar: '' }), `LOCK on the phone layout: no placement (the window IS the screen there; the picture scales to fit) (${JSON.stringify(A.phone)})`);
+  ok(A.released.bar === '' && A.released.width === 700, `RELEASE (null): the bar is free again, the size before the lock back (${JSON.stringify(A.released)})`);
+  ok(same(A.rsLock, { left: 100, top: 60, width: 712, height: 743, bar: '' }) && same(A.rsShort, { left: 0, top: 0, width: 712, height: 743, bar: '' }) && A.rsMoved === 1, `WORKSPACE RESIZE (the browser made 600 px tall): the reflow re-judges — the window that fit at 100,60 is now taller ⇒ (0,0), told once as a move (${JSON.stringify(A.rsShort)})`);
+  ok(same(A.rsAgain, A.rsShort) && A.rsMovedAgain === 1, 'the same workspace reflowed again moves nothing (the verdict stands, the window is there)');
+  ok(same(A.rsQuiet, { captured: 0, notified: 0 }), `the reflow's move is THIS client's: never captured into the shared grid bounds, never announced (${JSON.stringify(A.rsQuiet)})`);
+  ok(same(A.rsBack, A.rsLock), `the workspace back at 878 px: it fits again ⇒ its stored place comes back (${JSON.stringify(A.rsBack)})`);
+  ok(same(A.narrow, { left: 0, top: 0, width: 1002, height: 600, bar: '899px' }) && same(A.narrowBack, { left: 200, top: 50, width: 1002, height: 600, bar: '' }), `the SIDEBAR opened wider (a 900 px workspace): a 1002-wide window ⇒ (0,0) with its bar at 899 px; narrowed again ⇒ its place, the bar free (${JSON.stringify(A.narrow)} → ${JSON.stringify(A.narrowBack)})`);
+
+  // the call sites: the verdict is asked in ONE place, and that place only at the lock and at the workspace reflow
+  const src = read('src/lib/window.js');
+  const sites = (re) => (src.match(re) || []).length;
+  ok(sites(/fixedWindowPlacement\(/g) === 1 && sites(/this\._placeFixed\(/g) === 2 && /if \(!this\._placeFixed\(win, true\) && !this\._mobileLayout\(\)\) \{/.test(src) && /if \(win\.fixedSize && this\._placeFixed\(win\)\) continue;/.test(src), `CENSUS: fixedWindowPlacement( is asked once (_placeFixed: ${sites(/fixedWindowPlacement\(/g)}), _placeFixed( from the lock (setFixedSize) and the workspace reflow (_reflowWindows) only — never a drag frame (${sites(/this\._placeFixed\(/g)} sites)`);
+  const reflowBody = src.slice(src.indexOf('  _reflowWindows() {'), src.indexOf('  _scheduleReflowWindows() {'));
+  ok(reflowBody.includes('this._placeFixed(win)') && /new ResizeObserver\(\(\) => this\._scheduleReflowWindows\(\)\)/.test(src), 'WIRING: the re-judge rides the workspace ResizeObserver\'s rAF-coalesced reflow (the sidebar, the browser window) — no observer, timer or listener of its own');
+
+  // CONTROL: the verdict's two calls pulled back (lane app-fit-fixed's code: keepInside alone at the lock, no re-judge)
+  const levers = [
+    ['    if (!this._placeFixed(win, true) && !this._mobileLayout()) {', '    if (!this._mobileLayout()) { // pre-fix CONTROL'],
+    ['      if (win.fixedSize && this._placeFixed(win)) continue;', '      if (false) continue; // pre-fix CONTROL'],
+  ];
+  const hits = levers.map(([from]) => src.split(from).length - 1);
+  ok(hits.every((n) => n === 1), `CONTROL: each lever is spelled exactly once in window.js (${hits.join(', ')})`);
+  let mut = src; for (const [from, to] of levers) mut = mut.replace(from, to);
+  const C = await placeOn((await import(MUTW.write('src/lib/window.js', mut, 'topleft'))).WindowManager);
+  ok(C.tall.left === 100 && C.tall.top === 0 && C.wide.top === 100 && C.wide.bar === '' && C.rsShort.left === 100 && C.rsMoved === 0, `CONTROL: pre-fix the taller window keeps the cascade's x (${C.tall.left},${C.tall.top}: "x kept, top slid to 0" — app-fit-fixed's report), the wider one its y (${C.wide.left},${C.wide.top}) with its bar — and the ✕ — 1602 px wide past a 1450 px workspace, and a workspace resize re-judges nothing (${JSON.stringify(C.rsShort)})`);
 }
 
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

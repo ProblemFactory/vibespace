@@ -60,3 +60,27 @@ export const agentOpenedRecord = (rec) => !!(rec && rec.origin === AGENT_BROWSER
 export function satelliteFocus({ agentOpened = false, mainActive = false, front = false } = {}) {
   return !agentOpened || front || mainActive ? { focus: true, why: !agentOpened ? 'person-opened' : front ? 'front' : 'looking' } : { focus: false, why: 'agent-quiet' };
 }
+
+// A WINDOW WHOSE APP FIXES ITS SIZE, LARGER THAN THE WORKSPACE (lane app-window-fit-topleft, B-1f0b — the coordinator's
+// decision on lane app-fit-fixed's «Larger than the workspace»: a 1000×900 GTK dialog at 2× on an 878 px workspace kept its
+// cascade x, its bottom strip past the edge). The app states WM_NORMAL_HINTS min = max (WeChat's login, Inkscape's welcome,
+// a GTK dialog) ⇒ the window IS that size, never scaled (WindowManager.setFixedSize). A frame that FITS the workspace keeps
+// its place ('cascade' — slid inside, keepInside); one LARGER than it in EITHER dimension stands at the workspace's top-left
+// ('top-left': 0,0 of #workspace — below the toolbar, beside the sidebar), so the most of it shows and Scale ▸ 1× reaches
+// the rest; WIDER than it ⇒ `barMax` = the room its title bar has from the window's left edge (the workspace's width): the
+// window manager holds the bar to it, so the ✕ is on screen at any size. The phone layout (the window IS the screen and the
+// picture scales — app-fit-fixed's «named, not fixed») and a workspace not laid out ⇒ 'none'. Facts in (layout px), a cell
+// out; window.js asks it at the lock and at a workspace reflow only — never on a drag frame.
+//   fixed — the window's app fixes its size; frame {w, h} — the locked window box; workspace {w, h} — #workspace (null: not
+//   laid out); phone — the ≤768 px layout.  → { act: 'none' | 'cascade' | 'top-left', left, top, barMax, why }
+export function fixedWindowPlacement({ fixed = false, frame = null, workspace = null, phone = false } = {}) {
+  const cell = (act, why, at = null, barMax = null) => ({ act, left: at ? at.left : null, top: at ? at.top : null, barMax, why });
+  if (!fixed) return cell('none', 'not-fixed');
+  if (phone) return cell('none', 'phone');
+  const fw = Number(frame && frame.w), fh = Number(frame && frame.h), ww = Number(workspace && workspace.w), wh = Number(workspace && workspace.h);
+  if (!(fw > 0 && fh > 0)) return cell('none', 'no-frame');
+  if (!(ww > 0 && wh > 0)) return cell('none', 'no-workspace');
+  const wider = fw > ww, taller = fh > wh;
+  if (!wider && !taller) return cell('cascade', 'fits');
+  return cell('top-left', wider && taller ? 'larger' : wider ? 'wider' : 'taller', { left: 0, top: 0 }, wider ? ww : null);
+}

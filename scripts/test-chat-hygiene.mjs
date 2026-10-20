@@ -156,7 +156,7 @@ console.log('§2 THE STOP WORDING — the bookkeeping calls, then at most one sh
   ok('tools first, then the message: every step precedes the closing sentence, which says "Make these calls first"', nudgeNew.indexOf('(1) set your CURRENT state') < nudgeNew.indexOf(NO_RESTATE) && nudgeNew.indexOf('vibespace-task progress') < nudgeNew.indexOf('Make these calls first'));
   ok('it names itself as VibeSpace, not the user', /this note is from VibeSpace, not from the user/.test(nudgeNew));
   ok('the classifier\'s marker opens the text (after the user\'s own extra, which rides on top)', nudgeNew.startsWith(RS.NOTE_MARKER) && nudgeWithExtra.split('\n')[1].startsWith(RS.NOTE_MARKER));
-  ok('it does not teach the word "inbox" (the step names the For you tray)', !/\binbox\b/i.test(nudgeNew) && /For you tray/.test(nudgeNew));
+  ok('it does not teach the word "inbox" (the step names the For you tray — by its label, in the hub\'s words: lane agent-context-owner-facts)', !/\binbox\b/i.test(nudgeNew) && /the “For you” tray only notifies/.test(nudgeNew));
   // the budget: a hook payload wraps into <persisted-output> at exactly 10240 B;
   // VibeSpace's own cap is 9600 B. The largest extra the setting takes is 500
   // chars; CJK is 3 B a char, a 4-byte glyph is the worst case (2000 B).
@@ -492,14 +492,17 @@ console.log('§5 THE FOR-YOU TRAY — named where it is');
   const panel = read('src/lib/user-todos-panel.js');
   ok('the new-item toast says where the tray is, measured off this device\'s own button, once per item (the knownIds rule)', /const where = trayWhere\(trayRect\(\), window\.innerWidth, window\.innerHeight\);/.test(panel) && /t\('Added to For you \(\{where\}\)', \{ where: t\(where\) \}\)/.test(panel) && /if \(prevKnown\.has\(i\.id\)\) continue;/.test(panel));
   const intro2 = AR.sessionToolsIntro({ status: true, ask: true }, {});
-  ok('the session-start intro tells the assistant to say "the For you tray at the bottom right", never "your inbox"', /"the For you tray at the bottom right"/.test(intro2) && /never "your inbox"/.test(intro2), intro2.slice(0, 300));
+  // lane agent-context-owner-facts (B-7960 b): the place is the HUB's words (src/tray-words.js over the owner's chrome
+  // settings — an unconfigured binding reads the default place), never a literal: every surface below says THOSE words
+  const TRAY = require(path.join(REPO, 'src/server/owner-facts.js')).tray();
+  ok(`the session-start intro tells the assistant to say the hub's tray words ("${TRAY.phrase}"), never "your inbox"`, intro2.includes(`"${TRAY.phrase}"`) && /never "your inbox"/.test(intro2), intro2.slice(0, 300));
   // lane cli-registry: both lines are rows of src/agent-cli-registry.js now — judged on what the session receives
   const TGH = require(path.join(REPO, 'src/task-groups.js'));
-  ok('…the per-turn reminder too', /MIRROR every chat question into their For you tray \(bottom right of their screen — name it that way, never "your inbox"/.test(AR.perTurnToolsLine({ status: true, ask: true, task: true, jobs: true })));
-  ok('…and a Task Group\'s context', /file it in their For you tray \(bottom right of their screen: say that, never "your inbox"\)/.test(TGH.TaskGroupManager.prototype._toolsSectionParts.call({}, '', false).join('\n')));
+  ok('…the per-turn reminder too', AR.perTurnToolsLine({ status: true, ask: true, task: true, jobs: true }).includes(`MIRROR every chat question into ${TRAY.phrase} (name it so, never "your inbox"`));
+  ok('…and a Task Group\'s context', TGH.TaskGroupManager.prototype._toolsSectionParts.call({}, '', false).join('\n').includes(`file it in ${TRAY.phrase} (say that, never "your inbox")`));
   const ask = read('data/bin/vibespace-ask');
-  ok('vibespace-ask\'s own output names the tray where the user sees it (agents repeat what the CLI printed)', /added to the user\\'s For you tray \(bottom right of their screen\)/.test(ask) && /say "the For you tray at the bottom right" — never "your inbox"/.test(ask));
-  ok('the ask manual says the same', /say "I added it to the For you tray at the bottom right" — never\s+"your inbox"/.test(read('docs/agent/ask-manual.md')));
+  ok('vibespace-ask\'s own output names the tray in the HUB\'s words — the add answer\'s `tray` (agents repeat what the CLI printed)', /'added to ' \+ trayPhrase \+ ': '/.test(ask) && /say "' \+ trayPhrase \+ '" — never "your inbox"/.test(ask) && /const trayName = tray\.name \|\| /.test(ask));
+  ok('the ask manual says the same: the words the answer printed, never a place from memory', /use the words the `vibespace-ask` answer printed/.test(read('docs/agent/ask-manual.md')) && /Never a place from memory, and never "your inbox" or "your queue"/.test(read('docs/agent/ask-manual.md')));
   // S3 verify F6: the four places "your inbox" survived the lane's own rule
   ok('(F6) the Settings row names the tray: "Agent tool: vibespace-ask (the For you tray)" (zh + ja)', /label: t\('Agent tool: vibespace-ask \(the For you tray\)'\)/.test(read('src/lib/settings-schema.js')) && ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes('  "Agent tool: vibespace-ask (the For you tray)": ')));
   const CC = require(path.join(REPO, 'src/channel-caps.js'));

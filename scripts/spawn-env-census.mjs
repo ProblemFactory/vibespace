@@ -351,6 +351,7 @@ export const COPIES = Object.freeze([
   ['src/server/cli-env.js', '{ ...process.env, ', 'probe', 3, PROBE + ' (the display probes, spawnSync)'],
   ['src/server/plugin-loader.js', 'agentEnv = () => ({ ...process.env })', 'default', 1, 'the module default; server.js hands agentEnv()'],
   ['src/server/vault-run-door.js', 'agentEnv = () => ({ ...process.env })', 'default', 1, 'the module default (lane vault-run-door); src/server/mounts-plugins-wiring.js hands agentEnv() — the run child gets a sanitized env, never the hub\'s; this is the test / fallback shape'],
+  ['src/server/cli-usage-door.js', 'function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite', 'default', 1, 'the module default `agentEnv = () => ({ ...process.env })` on the factory\'s signature line (lane antigravity-card-fixes, int332 seam; the needle is the line\'s head — the census reads 140 characters); src/server/account-usage-routes.js hands ws-handler\'s agentEnv() — the Re-check usage child gets the agents\' sanitized env, never the hub\'s; this is the test / fallback shape'],
   ['src/server/stdout/claude-stream-json.js', 'Object.entries(process.env)) if (!/^GIT_/', 'probe', 1, PROBE + ' (git rev-parse with the hub env minus GIT_*, 6 s)'],
   ['src/usage-routes.js', 'const env = { ...process.env };', 'probe', 1, 'the usage-panel claude probe (spawnSync, bounded), ambient credentials deleted — next: agentEnv'],
 ]);

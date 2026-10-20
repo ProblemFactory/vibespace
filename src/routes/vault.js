@@ -20,6 +20,7 @@
 const { ownOriginOf, pageVerdict } = require('../write-origin.js');   // THE origin rule (its strict form: a person on this page)
 const VU = require('../vault-use.js');   // PURE: the use's shape and the entry words (lane vault-use-law)
 const { sameToken } = require('../pairing-token.js');
+const OF = require('../server/owner-facts.js'); // lane agent-context-owner-facts (B-7960): the agent's state answer carries the lock time + the tray in the hub's words
 const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
 const { runOfToken } = require('../server/vault-totp.js');
 const V = require('../vault.js');   // PURE: the agent-secret namespace builder + mint verdict (lane vault-mint-put)
@@ -146,7 +147,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     for (const s of activeSessions.values()) if (s && sameToken(token, s.agentToken)) return true;
     return false;
   };
-  const agentFacts = () => { const f = vault.facts(); return { state: f.state, setUpAt: f.setUpAt, lockedSince: f.lockedSince, keys: f.keys }; };
+  const agentFacts = () => { const f = vault.facts(); return { state: f.state, setUpAt: f.setUpAt, lockedSince: f.lockedSince, keys: f.keys, ...(f.lockedSince ? { when: { lockedSince: OF.when(f.lockedSince) } } : {}), ...(f.state === 'locked' ? { tray: OF.tray().name } : {}) }; };   // B-7960: vibespace-vault prints these words, never a time or a tray of its own
 
   // ── people ──
   app.get('/api/vault/state', (req, res) => res.json(vault.facts()));

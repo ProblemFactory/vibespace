@@ -8,7 +8,9 @@
 // the hub's file tree, multi), the accounts (any, or a multi-select of the roster), the permission modes and the models (from the
 // harness tables; models any or chips) and the modes it may open — picked in 铸造…, edited in 边界…; a key minted before limits
 // reads as folderless and shows 「Limits not set」 until the owner sets its bounds (it refuses every open meanwhile — q-049
-// M1). 审计… lists the key's audit lines (a refused open with its code).
+// M1). 审计… lists the key's audit lines (a refused open with its code). Lane automation-open-permission-resolve (q-049 M2): the
+// picker's `default` row says what the CLI's own setting is NOW (the hub resolves it per folder) — the hub refuses an open whose
+// resolved mode the key does not list.
 import { t } from './i18n.js';
 import { fetchJson, showToast, showConfirmDialog, createModalShell } from './utils.js';
 import { SCOPES } from '../automation-keys.js'; // PURE: the closed table of verbs (their words)
@@ -43,6 +45,12 @@ function choiceRows(rows, held) {
   return out;
 }
 const choiceWord = (r) => (r.value === 'default' ? t("The CLI's own setting") : t(r.label));   // q-049 M2: `default` = no --permission flag (this machine's CLI decides) — not a cap
+// lane automation-open-permission-resolve (q-049 M2): the PICKER's `default` row says what the CLI's own setting IS right now —
+// the hub resolves it for the key's first folder (the hub's own folder for a fresh key): 「CLI 自己的设置（现在是 X）」; X = the
+// harness table's word for the resolved mode (its built-in default when no settings file sets one). The hub judges the same.
+const modeWord = (mode, ch) => { if (mode === 'default') return t('its built-in default'); const r = choiceRows((ch && ch.permissionModes) || [], []).find((x) => x.value === mode); return r ? t(r.label) : mode; };
+const pickWord = (r, now, ch) => (r.value !== 'default' ? t(r.label) : now && now.mode ? t("The CLI's own setting (now {mode})", { mode: modeWord(now.mode, ch) }) : t("The CLI's own setting"));
+const nowTitle = (now) => (now.layer && now.layer.file ? t('Set in {file}', { file: now.layer.file }) : t('No settings file sets a permission mode — the CLI runs its built-in default'));
 /** A key's limits in words (the row's line), one part per field — names only: folders, account names, the table's words. */
 function limitsParts(limits, data) {
   const ch = (data && data.limitChoices) || {};
@@ -57,7 +65,7 @@ function limitsParts(limits, data) {
 
 /** THE LIMITS EDITOR (铸造… and 边界…) → { node, value() }. `initial` null = a fresh mint: the editor starts from a fresh
  *  key's limits and NOTHING changes until the owner saves (a pre-limits key now reads as those same folderless limits). */
-function limitsEditor(initial, data) {
+function limitsEditor(initial, data, now = null) {
   const ch = (data && data.limitChoices) || { accounts: [], permissionModes: [], models: [] };
   const L = initial || FRESH_LIMITS;
   const box = el('div', 'vw-ak-limits');
@@ -115,7 +123,7 @@ function limitsEditor(initial, data) {
   const permList = el('div', 'vw-ak-perms');
   const permHarnesses = [...new Set((ch.permissionModes || []).map((r) => r.backend))];
   const whose = (r) => (r.backends.length && r.backends.length < permHarnesses.length ? ` · ${r.backends.map((b) => (BACKEND_META[b] && BACKEND_META[b].label) || b).join(', ')}` : '');
-  const permBoxes = choiceRows(ch.permissionModes, L.permissionModes).map((r) => { const p = limitPick(r.value, choiceWord(r) + whose(r), (L.permissionModes || []).includes(r.value)); permList.append(p.node); return p.cb; });
+  const permBoxes = choiceRows(ch.permissionModes, L.permissionModes).map((r) => { const p = limitPick(r.value, pickWord(r, now, ch) + whose(r), (L.permissionModes || []).includes(r.value)); if (r.value === 'default' && now) { p.node.title = nowTitle(now); p.node.dataset.now = now.mode; } permList.append(p.node); return p.cb; });
   box.append(el('div', 'vw-ak-sec', t('Permission modes')), permList);
   // MODELS — any, or chips: the harness tables' models + another id typed in
   const modelAny = limitPick('any', t('Any model'), L.models === 'any', 'vw-ak-pick vw-ak-model-any');
@@ -150,7 +158,7 @@ function limitsEditor(initial, data) {
 export function showLimitsDialog(key, data, { refresh } = {}) {
   const { body, close } = createModalShell({ id: 'vault-ak-limits', title: t('Limits of "{name}"', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true });
   if (!key.limits.cwdRoots.length) body.append(el('div', 'vw-ak-hint vw-ak-first', t('This key has no folders yet — what you save here becomes its bounds. Until you set at least one folder, every conversation it would open is refused.')));
-  const ed = limitsEditor(key.limits, data);
+  const ed = limitsEditor(key.limits, data, key.permissionNow || ((data && data.limitChoices) || {}).permissionNow || null);   // q-049 M2: resolved for the key's first folder
   body.append(ed.node);
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
@@ -324,7 +332,7 @@ export function showMintDialog({ refresh, data = null } = {}) {
   }
   body.append(verbs);
   // the limits — shown while 开一个对话 is ticked (absent, never greyed, otherwise)
-  const ed = limitsEditor(null, data);
+  const ed = limitsEditor(null, data, ((data && data.limitChoices) || {}).permissionNow || null);   // q-049 M2: a fresh key — the hub's own folder
   const limWrap = el('div', 'vw-ak-limwrap');
   limWrap.append(el('div', 'vw-ak-sec', t('What the conversations it opens may use')), ed.node);
   body.append(limWrap);

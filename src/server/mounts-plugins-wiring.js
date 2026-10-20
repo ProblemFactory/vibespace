@@ -120,10 +120,14 @@ const conversationSubjects = () => { const tasks = getTasks && getTasks(); const
 // lane vault-window-v2 (design q-047 §3.4): the Vault window's 「需要你」 producers — a use door's refusal (使用失败), an agent's put (建议轮换)
 const vaultAttention = require('./vault-hooks.js').createVaultAttention({ userTodos });
 const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, log: (m) => console.log('[automation]', m),
-  verbs: require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf }),
-  openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }) } });
+  // lane feedback-handled-verb: + feedback.handled / feedback.list over THE feedback store (the owner's PATCH's own call)
+  verbs: { ...require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
+  openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }),
+    // lane automation-open-permission-resolve (q-049 M2): the CLI's own permission mode for the judged folder (its project layer follows it)
+    permissionDefault: (cwd, backend) => require('./permission-rules.js').resolveDefaultMode({ backend, cwd }) } });
 require('../routes/automation.js').registerAutomationRoutes(app, { engine: automation, who: (req) => require('../auth.js').Auth.signInHandle(req),
   limitChoices: () => require('./conversation-ops.js').limitChoices({ accounts: getAccounts() }),   // lane automation-open-limits: the limit pickers
+  permissionNow: (cwd) => require('./permission-rules.js').resolveDefaultMode({ backend: 'claude', cwd: cwd || process.cwd() }),   // q-049 M2: the picker's 「CLI 自己的设置（现在是 X）」 — the key's first folder, else the hub's own
   callerOf: sessionCallerOf, subjects: conversationSubjects });
 setTimeout(() => { try { const n = automation.reconcile(); if (n) console.log(`[automation] ${n} first-use card(s) from before the restart resolved expired`); } catch { } }, 3000).unref?.();
 // r2 (verify r1): THE GATE the credential doors registered before this line ask (the account key, the mount config, the export)

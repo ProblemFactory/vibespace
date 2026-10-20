@@ -63,6 +63,7 @@ const agentBlock = (s) => toAgentText(s == null ? '' : s, { kind: 'block' });
 // lane cli-registry: the SessionStart tools section renders from THE agent CLI registry (one row per CLI on PATH — its
 // paragraph, its gate); CHANNELS_SECTION_LINES (lane channels-teach: the paragraph by reach) lives in its row, re-exported
 const { renderSessionStartTools, CHANNELS_SECTION_LINES } = require('./agent-cli-registry.js');
+const OF = require('./server/owner-facts.js'); // lane agent-context-owner-facts (B-7960): the owner's clock + tray words (PURE src/when-words.js, src/tray-words.js bound to the instance)
 
 // Task Groups (岗位) have NO status — they are persistent roles; only an
 // `archived` flag. Task STATUS lives on the session (session-status.js STATES,
@@ -313,18 +314,22 @@ class TaskGroupManager {
 
   // ── Context folder: generated TASK.md + injection payload (P2) ──
 
-  _tsShort(ms) { return new Date(ms).toISOString().slice(0, 16).replace('T', ' '); }
+  // lane agent-context-owner-facts (B-7960 a): every time this store renders for an agent goes through THE formatter in
+  // the owner's zone, named (`2026-10-20 16:16 PT` — src/when-words.js; the instance's zone: src/server/owner-facts.js).
+  // `now` drops today's date — passed ONLY by the injection, whose head states that day (OF.zoneSentence); TASK.md (a
+  // file read on later days), `show` and the update block keep every date.
+  _tsShort(ms, now = null) { return OF.when(ms, { now }); }
 
   // cap = how many Activity-log entries to include (TASK.md keeps 50).
   // cap = 0 omits the log entirely (renderContext appends its own budgeted log
   // section LAST instead — see the truncation note there).
-  renderTaskMd(t, cap = 50) {
-    const ts = (ms) => this._tsShort(ms);
+  renderTaskMd(t, cap = 50, { now = null } = {}) {
+    const ts = (ms) => this._tsShort(ms, now);
     const lines = [
       `# ${agentLine(t.title)}`,
       '',
       `- Task ID: ${t.id}`,
-      `- Updated: ${ts(t.updatedAt)} UTC`,
+      `- Updated: ${ts(t.updatedAt)}`,
     ];
     const folders = this._sanitizeFolders(t.folders);
     // verify r5 F2 (lane peer-census): a folder / context-dir PATH is a manager agent's words too (the manage verb takes any path under the allowlisted roots; a directory name is free text) — a line piece like a file name
@@ -514,7 +519,7 @@ class TaskGroupManager {
   // MAX_ENTRIES lines, (2) each note capped to PER_NOTE chars (the overflow is
   // recoverable via `show --full`, flagged with †), then (3) the byte budget as
   // a floor-guarded stop — and the route applies a final hard byte-cap on top.
-  _pickLogLines(t, room) {
+  _pickLogLines(t, room, now = null) {
     const MAX_ENTRIES = 12;   // how many history lines at most
     const PER_NOTE = 200;     // per-entry char cap so long notes don't hog the budget
     const total = (t.progress || []).length;
@@ -526,7 +531,7 @@ class TaskGroupManager {
       // clean char-slice (no word-boundary regex — that gutted CJK notes, which
       // have no spaces: /\s+\S*$/ stripped back to the first space); the belt cuts BEFORE it judges (verify r4 F1)
       const note = agentLine(raw, clipped ? PER_NOTE : 0);
-      const line = `- ${this._tsShort(p.at)} ${note}${(p.detail || clipped) ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
+      const line = `- ${this._tsShort(p.at, now)} ${note}${(p.detail || clipped) ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
       const len = Buffer.byteLength(line, 'utf-8') + 1;
       if (picked.length >= 3 && len > room) break;
       picked.unshift(line); room -= len;
@@ -551,7 +556,7 @@ class TaskGroupManager {
     // invocation. Per-feature toggles (2.211.0): a disabled tool is OMITTED. Since lane cli-registry the header and the
     // paragraphs (task / status / ask / jobs / channels by reach / msg) are the rows of src/agent-cli-registry.js — the
     // header's count = the paragraphs that rendered; every toggle and the reach closed ⇒ no section at all.
-    const out = renderSessionStartTools(tools, { gid, multi });
+    const out = renderSessionStartTools(tools, { gid, multi, tray: OF.tray().phrase });   // B-7960 b: the tray by its label and CURRENT place
     if (!out.length) return [];
     // the section's TRAILER (it teaches no CLI): absolute paths + lane artifacts-prompt-hint's sentence — which writes become
     // Artifacts, the session's harness names its file tools (agent-routes fileToolsOf). It rides the paths line, whose half
@@ -672,13 +677,14 @@ class TaskGroupManager {
 
   renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null, tools = null, isLiveClaim = null, fileTools = undefined } = {}) {
     const t = this.get(id);
+    const now = Date.now();   // B-7960: ONE instant for the zone sentence and every dateless time below it
     const parts = [
       `<vibespace-task-context>`,
-      `This session belongs to VibeSpace Task Group "${agentLine(t.title)}" (${t.id}). The state below is shared across ALL sessions of this group.`,
+      `This session belongs to VibeSpace Task Group "${agentLine(t.title)}" (${t.id}). The state below is shared across ALL sessions of this group. ${OF.zoneSentence(now)}`,
       this._persistRescueLine(),
       '',
       // cap=0: meta/objective only — the log is appended LAST below.
-      this.renderTaskMd(t, 0).replace(/\n---\n[\s\S]*$/, '').trim(),
+      this.renderTaskMd(t, 0, { now }).replace(/\n---\n[\s\S]*$/, '').trim(),
       ...this._backlogNoteLines(t, { gid: multi ? `--group ${t.id} ` : '', sessionKey, tools, isLiveClaim }),
     ];
     // ── How to report back — self-documenting + scoped + enum-disambiguated ──
@@ -717,7 +723,7 @@ class TaskGroupManager {
     const totalLog = (t.progress || []).length;
     if (totalLog) {
       const used = Buffer.byteLength(parts.join('\n'), 'utf-8');
-      const { picked } = this._pickLogLines(t, Math.max(1200, logBudget - used));
+      const { picked } = this._pickLogLines(t, Math.max(1200, logBudget - used), now);
       parts.push('', '## Activity log' + (picked.length < totalLog ? `  _(last ${picked.length} of ${totalLog} — \`vibespace-task show\` prints more)_` : '') + (picked.some(l => l.includes(' †')) ? `  _(† = has detail — \`vibespace-task show --full\`)_` : ''), '');
       parts.push(...picked);
     }
@@ -1007,9 +1013,10 @@ class TaskGroupManager {
     // groups 2..N from a persisted payload's 2KB preview.
     const ts = Object.fromEntries(ids.map((id) => [id, this.get(id)]));
     const titles = ids.map((id) => `"${agentLine(ts[id].title)}" (${id})`).join(', ');
+    const now = Date.now();   // B-7960: the zone sentence ONCE, every dateless time below it against the same day
     const head = [
       `<vibespace-task-context>`,
-      `This session belongs to ${ids.length} VibeSpace Task Groups (岗位): ${titles}. Their shared state follows in LAYERS (all groups' identities → shared folders → recent activity)${(!tools || tools.task !== false) ? '; use \`vibespace-task --group <id> …\` to act on a specific group' : ''}.`,
+      `This session belongs to ${ids.length} VibeSpace Task Groups (岗位): ${titles}. Their shared state follows in LAYERS (all groups' identities → shared folders → recent activity)${(!tools || tools.task !== false) ? '; use \`vibespace-task --group <id> …\` to act on a specific group' : ''}. ${OF.zoneSentence(now)}`,
       this._persistRescueLine(),
     ];
     head.push(...this._toolsSectionParts('--group <id> ', true, tools, fileTools));
@@ -1020,7 +1027,7 @@ class TaskGroupManager {
     const mineBudget = { bytes: MINE_LINE_TEXT_BYTES };
     for (const id of ids) {
       // renderTaskMd's H1/H2 demoted one level so groups nest under the layer heading
-      const md = this.renderTaskMd(ts[id], 0).replace(/\n---\n[\s\S]*$/, '').trim().replace(/^(#{1,2}) /gm, '#$1 ');
+      const md = this.renderTaskMd(ts[id], 0, { now }).replace(/\n---\n[\s\S]*$/, '').trim().replace(/^(#{1,2}) /gm, '#$1 ');
       head.push('', md);
       // per-group backlog note (own-parked summary or a one-line pointer)
       const bl = this._backlogNoteLines(ts[id], { gid: `--group ${id} `, sessionKey, tools, isLiveClaim, highBudget, mineBudget, nudge: false })
@@ -1050,7 +1057,7 @@ class TaskGroupManager {
       if (withLog.length) {
         parts.push('', `## Recent activity  _(newest last; \`vibespace-task --group <id> show --full\` prints more; † = has detail)_`);
         for (const id of withLog) {
-          const { picked, total } = this._pickLogLines(ts[id], roomPer);
+          const { picked, total } = this._pickLogLines(ts[id], roomPer, now);
           parts.push('', `### "${agentLine(ts[id].title)}"` + (picked.length < total ? `  _(last ${picked.length} of ${total})_` : ''), ...picked);
         }
       }

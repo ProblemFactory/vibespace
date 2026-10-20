@@ -104,7 +104,8 @@ router.get('/api/home', async (req, res) => {
   // an ACP harness whose CLI is not on this machine (claude/codex/shell always listed)
   let harnesses = null;
   try { harnesses = typeof req.app.locals.harnessAvailability === 'function' ? req.app.locals.harnessAvailability() : null; } catch { harnesses = null; }
-  res.json({ home: os.homedir(), authEnabled: !!req.app.locals.authEnabled, ssoEnabled: !!req.app.locals.ssoEnabled, repoDir: path.resolve(__dirname, '..', '..'), publicUrlDefault: process.env.VIBESPACE_PUBLIC_URL || null, instancePublicUrl: req.app.locals.instancePublicUrl || null, harnesses });
+  // zone (lane agent-context-owner-facts, B-7960 a): the owner's zone as the hub resolved it — the board prints in it
+  res.json({ zone: require('../server/owner-facts.js').zone(), home: os.homedir(), authEnabled: !!req.app.locals.authEnabled, ssoEnabled: !!req.app.locals.ssoEnabled, repoDir: path.resolve(__dirname, '..', '..'), publicUrlDefault: process.env.VIBESPACE_PUBLIC_URL || null, instancePublicUrl: req.app.locals.instancePublicUrl || null, harnesses });
 });
 
 // Bounded filename search — the chat's relative-path resolver's last resort

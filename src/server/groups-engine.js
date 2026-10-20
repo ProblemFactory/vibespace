@@ -69,6 +69,7 @@
  *                `wake()` (spendReason peer-message — no new producer).
  */
 const crypto = require('crypto');
+const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const G = require('../channel-groups.js');
 const GC = require('../group-card.js');
 const { makeRecord, inertFrames } = require('../channel-record.js');
@@ -913,7 +914,7 @@ function create({
         const e = endedOf(m.member);
         if (!e) continue;
         const name = displayName(g, m.member);
-        const date = e.at ? new Date(e.at).toISOString().slice(0, 10) : 'an earlier day';
+        const date = e.at ? OF.day(e.at) : 'an earlier day';
         return { ok: false, code: 'ended', error: `${name}'s conversation ended on ${date} (${e.why === 'gone' ? 'it is gone' : 'archived'}) — nothing can read it`, conversationId: m.member };
       }
     }

@@ -165,11 +165,21 @@ let GID = null, GID2 = null, M1 = null, M2 = null, M3 = null, INV = null, REN = 
   GID = made.group.id;
   const ren = await eng.rename({ by: G.OWNER, group: GID, name: 'finance' });
   if (!ren.ok) throw new Error('seed rename: ' + J(ren));
-  M1 = (await eng.post({ group: GID, from: B_CID, text: `bee: ${w('g1t')}` })).message.vendorId;
-  M2 = (await eng.post({ group: GID, from: SID, text: `me: ${w('g2t')}` })).message.vendorId;
+  // every seeded message must LAND with its word (lane mirror-331-reds-security, the .331 mirror's red): .331 belts a
+  // member's message at write (src/agent-output-belt.js → src/secret-shapes.js R2: a secret-NAMED value — `private: …`,
+  // `token: …` — is «redacted»). The base's `private: SNTL-g5t` was blanked before any reader saw it: §1 had no word to
+  // prove and that group's lastText after-walk had nothing to miss. A seed the belt eats now fails HERE, by name.
+  const seedPost = async (args, tag) => {
+    const res = await eng.post(args);
+    const t = res && res.message ? String(res.message.text) : '';
+    if (!t.includes(w(tag))) throw new Error(`seed: the ${tag} message landed as ${J(t)} — the write-time belt blanked its word (a seeded label must carry no secret word: src/secret-shapes.js R2)`);
+    return res.message.vendorId;
+  };
+  M1 = await seedPost({ group: GID, from: B_CID, text: `bee: ${w('g1t')}` }, 'g1t');
+  M2 = await seedPost({ group: GID, from: SID, text: `me: ${w('g2t')}` }, 'g2t');
   const made2 = await eng.create({ by: G.OWNER, name: 'private', members: [B_CID, OTHER_CID], quiet: true, consent: () => ({ ok: true }) });
   GID2 = made2.group.id;
-  M3 = (await eng.post({ group: GID2, from: B_CID, text: `private: ${w('g5t')}` })).message.vendorId;
+  M3 = await seedPost({ group: GID2, from: B_CID, text: `bee: ${w('g5t')}` }, 'g5t');
   await eng.markRead({ group: GID });
   { // the invite (raw.context) and rename (raw.from) records, by kind; every record of G that carries a word is cleared later
     const recs = store.readTail('groups', GID, { limit: 50 });
@@ -540,6 +550,36 @@ console.log('\n§5 CONTROL: a reader that keeps a shadow copy of the words makes
   check('CONTROL: the patched copy (a snapshot reading a shadow copy of the text) still shows the word after the clear — the walk\'s judge is RED on it', r.cleared.length === 1 && leak, { r, snap: m.snapshot() });
   try { m.stop(); } catch {}
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ── §5b MUTANT (lane mirror-331-reds-security): a clear that KEEPS the group summary's lastText — the judge goes red ──
+console.log('\n§5b MUTANT: a clear that keeps the group summary\'s lastText makes the same judge go red (and the base\'s seed could not see it)');
+{
+  const { createChannelStore } = require(path.join(repo, 'src/channel-store.js'));
+  const G = require(path.join(repo, 'src/channel-groups.js'));
+  const src = fs.readFileSync(path.join(repo, 'src/server/groups-engine.js'), 'utf8');
+  const LINE = 'if (fresh.some((r) => Number(r.at) === Number(g.lastAt))) { g.lastText = RC.CLEARED_TEXT; g.lastCleared = true; }';
+  check('§5b MUTANT setup: the clear\'s lastText line is found once in src/server/groups-engine.js', src.split(LINE).length === 2);
+  const KEEP = MUT.load('src/server/groups-engine.js', src.replace(LINE, '/* MUTANT: the clear keeps lastText */'), 'keeps-lasttext');
+  const REAL = require(path.join(repo, 'src/server/groups-engine.js'));
+  const run = async (GE, tag, label) => {
+    const dir = scratch('rc-walk-lt-' + tag); fs.mkdirSync(dir, { recursive: true });
+    const store = createChannelStore({ dir });
+    const roster = [{ cid: B_CID, name: 'bee', groups: [W], reachability: null }, { cid: OTHER_CID, name: 'other', groups: [W], reachability: null }];
+    let t = NOW;
+    const eng = GE.create({ store, deliver: { deliverToConversation: async () => ({ ok: false, reason: 'seed' }) }, broadcast: () => {}, now: () => (t += 1000), roster: () => roster, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
+    const made = await eng.create({ by: G.OWNER, name: 'lt', members: [B_CID, OTHER_CID], quiet: true, consent: () => ({ ok: true }) });
+    const m = await eng.post({ group: made.group.id, from: B_CID, text: `${label}: ${w('m1t')}` });
+    const before = fs.readFileSync(path.join(dir, 'groups.json'), 'utf8');
+    const cr = await eng.clearMessages({ group: made.group.id, ids: [m.message.vendorId] });
+    const after = fs.readFileSync(path.join(dir, 'groups.json'), 'utf8');
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { before: has(before), after: has(after), cleared: (cr.cleared || []).length };
+  };
+  const real = await run(REAL, 'real', 'bee'), keep = await run(KEEP, 'keep', 'bee'), blind = await run(KEEP, 'blind', 'private');
+  check('§5b the real clear: the word shows in the summary\'s lastText before, and is gone after', real.before && !real.after && real.cleared === 1, real);
+  check('§5b MUTANT: a clear that keeps lastText still shows the word after — the judge is RED on it', keep.before && keep.after && keep.cleared === 1, keep);
+  check('§5b CONTROL: the base\'s seed label («private: …», blanked by the write-time belt) shows NO word before — under the same mutant the walk had nothing to miss', !blind.before && !blind.after && blind.cleared === 1, blind);
 }
 for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: '§5 ' })) check(row.name, row.pass, row.detail);
 

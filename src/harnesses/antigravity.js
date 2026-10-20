@@ -11,7 +11,7 @@
 //   · a slash command is refused by the wrapper (agy would end the stream, exit 2); an unauthenticated agy prints its
 //     OAuth URL and waits 60 s for a pasted code ON STDIN — the wrapper kills it and says auth-required.
 // Commit 1: the MACHINE's own Antigravity login. Commit 2 (creds below): named Google accounts, each its own HOME ROOT.
-// No quota yet (NULL_QUOTA: the `-p /usage` reading is commit 3), no pool.
+// Commit 3 shipped the `-p /usage` judge; lane antigravity-card-fixes the READING (AGY_QUOTA below), no pool.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -19,6 +19,7 @@ const { BACKEND_CAPS } = require('../backend-caps');
 const { AgyAdapter } = require('../adapters/agy');
 const { AcpMessageManager, AcpSessionMessages } = require('../acp-message-manager');
 const { NULL_QUOTA } = require('./null-quota');
+const AGY_USAGE = require('./antigravity-usage');
 const { HARNESS_SETTINGS } = require('../harness-settings');
 
 /** The model slugs the headless docs list (`agy models` needs a sign-in — measured), provenance 'docs'; the
@@ -109,6 +110,17 @@ const shq = (v) => "'" + String(v).replace(/'/g, "'\\''") + "'";
 /** The spawn env of an account: its root as HOME and the bus disabled (the login is the root's file). */
 const spawnEnvOf = (dir) => ({ HOME: dir, DBUS_SESSION_BUS_ADDRESS: 'disabled:' });
 
+/** THE QUOTA CONTRACT (lane antigravity-card-fixes): NULL_QUOTA's honest nothing — no stream signal (so auto-resume
+ *  stays derived OFF), NO probe rung (`'cli-usage'` would arm claude's auto-cli TIMER, src/server/auto-cli-loop.js,
+ *  and spawn `claude -p /usage` on these accounts) — plus `onDemand`: the usage command agy answers without a turn,
+ *  read for ONE named account on a person's Re-check by src/server/cli-usage-door.js, in the account's own HOME root
+ *  (cwd = its empty login dir), judged + parsed by antigravity-usage.js. No pool: agy keeps a conversation in its
+ *  HOME root's own store, so a conversation cannot move to another account. */
+const AGY_QUOTA = Object.freeze({
+  ...NULL_QUOTA,
+  onDemand: Object.freeze({ argv: AGY_USAGE.USAGE_ARGV, source: AGY_USAGE.USAGE_SOURCE, judge: AGY_USAGE.judgeUsageAnswer, cwdOf: (env) => path.join(env.HOME, LOGIN_CWD) }),
+});
+
 /** BILLING IDENTITY of a live agy session: a named Google account (its own HOME root) or the machine's own login. */
 function agyBillingIdentity(s, { accounts, withHost }) {
   if (s._accountId) {
@@ -167,8 +179,9 @@ module.exports = {
   kind: 'chat',
   caps: BACKEND_CAPS.antigravity,
   Adapter: AgyAdapter,
-  // cli-env resolves the executable ONCE (exe.command, ANTIGRAVITY_CMD overrides; null when not installed) and hands
-  // the shared wrapper paths; the chat wrapper is agy's own, beside acp-wrapper.js
+  // cli-env resolves the executable at boot (exe.command, ANTIGRAVITY_CMD overrides; the bare name when nothing is
+  // found) and hands the shared wrapper paths; a status read re-checks it (src/server/cli-cmd.js `check` — an agy
+  // installed after boot is seen without a restart, lane antigravity-card-fixes); the chat wrapper is agy's own
   adapterConfig: (cfg) => ({
     harnessId: 'antigravity',
     label: 'Antigravity CLI',
@@ -187,11 +200,12 @@ module.exports = {
     locate: () => null,
     SessionMessages: AcpSessionMessages,
   },
-  quota: NULL_QUOTA,           // commit 3: the `-p /usage` reading (answered without a turn — agy's own changelog)
+  quota: AGY_QUOTA,            // the `-p /usage` reading on a person's Re-check (answered without a turn — agy's own changelog)
   // AUTO-RESUME'S RESUME VERB: a continue is a user line on the wrapper's stdin (the 'prompt' form, as ACP) — the
-  // verb exists; NULL_QUOTA classifies no limit, so nothing can arm it (derived: never offered)
+  // verb exists; AGY_QUOTA classifies no limit (NULL_QUOTA's signal), so nothing can arm it (derived: never offered)
   resume: { form: 'prompt', deliver: (session, text, deps) => !!deps.sendChatInput(session, text) },
-  // the billing row: a Google login per account (its HOME root), no API keys / long-lived token, no usage bucket yet
+  // the billing row: a Google login per account (its HOME root), no API keys / long-lived token; the usage of a named
+  // account rides /api/usage's homeAccounts map (the Re-check reading), not a billing-row store
   ui: { billing: { globalLogin: 'Google login', cliLogin: 'Google login', pickLogin: 'Google login (Antigravity CLI)', pickLoginHost: 'Google login (on the host)', planSuffix: '', switchLogin: 'Google login', accountLogin: 'Google', defaultIdField: 'defaultAntigravityAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: null, globalUsageKey: null, estimates: false }, effortReport: null, effortLevels: null, modelLock: true, legacyIds: false, resumeResend: false },
   creds,
   billingIdentity: agyBillingIdentity,
@@ -207,6 +221,7 @@ module.exports = {
   brand: '/brand/antigravity.svg',
 };
 module.exports.AGY_MODELS = AGY_MODELS;
+module.exports.AGY_QUOTA = AGY_QUOTA;
 module.exports.TOKEN_REL = TOKEN_REL;
 module.exports.ACCOUNT_MARK = ACCOUNT_MARK;
 module.exports.seedHomeRoot = seedHomeRoot;

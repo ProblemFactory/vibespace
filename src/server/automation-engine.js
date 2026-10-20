@@ -24,6 +24,14 @@
  *     account and model the spawn would use (`openFacts.defaults(backend)`) — AFTER the grant and BEFORE the grant is spent,
  *     the spend authorizer runs and anything spawns; the refusal is audited with its code and names the key's limits. An
  *     open its key may not make files no first-use card. 边界… (`setLimits`, a person's door) sets them.
+ *   · `default` IS NOT A CAP (lane automation-open-permission-resolve — q-049 M2): an open that names no permission mode runs
+ *     under the CLI's own setting, so `limitsJudge` RESOLVES it (`openFacts.permissionDefault(cwd, backend)` — the hub wires
+ *     src/server/permission-rules.js resolveDefaultMode; nothing is required here) for the REAL folder the folder judge
+ *     passed, AFTER that judge (the project layer follows the cwd; a folder outside the roots reads no config), and the
+ *     RESOLVED mode must be in the key's list (PURE permissionResolvedVerdict) — else `permission_not_allowed` naming the
+ *     mode and the layer. A read that throws refuses too (fail closed); no resolver wired = the harness's own, as before.
+ *   · B-dbba: an open's first-use card says WHAT it would open — the name the caller gave and the folder (the name rides
+ *     the create frame's `sessionName`, src/conversation-spec.js wireOf, so the conversation carries it from the start).
  */
 const fs = require('fs');
 const path = require('path');
@@ -204,7 +212,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** Ask the owner (≤ 60 s). → Promise<{outcome, answeredBy}> (`allowed` | `always` | `denied` | `expired` | `unfiled` | `quiet` | `vault_locked` | `gone`).
    *  `signal` = the call's own (the door aborts it when the caller's request closes): q-048 verify M1 — a caller that went
    *  away is WITHDRAWN from the card, and its last waiter gone closes the card (ask-over), so an answer runs nothing */
-  function ask({ key, caller, verb, signal = null }) {
+  function ask({ key, caller, verb, signal = null, args = null }) {
     const subject = `session:${caller.conversationId}`, pair = pairOf(key.id, subject, verb);
     const q0 = quiet.get(pair);
     if (q0 && q0 > now()) return Promise.resolve({ outcome: 'quiet', until: q0 });
@@ -226,12 +234,18 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       if (userTodos) {
         try {
           const verbWord = verb;   // the verb's id (a closed-table name — the same in every language; a parameter is never translated)
+          // B-dbba (lane automation-open-permission-resolve): an open's card says WHAT it would open — the name the caller gave and
+          // the folder, as the audit line keeps them (names only, bounded); another verb's card is as before
+          const openArgs = verb === 'conversations.open' && args && typeof args === 'object' ? { name: args.name ? String(args.name).slice(0, 60) : '', cwd: String(args.cwd || '').slice(0, 200) } : null;
+          const openLine = openArgs ? (openArgs.name ? { key: 'This call would open "{name}" in {cwd}.', params: { name: openArgs.name, cwd: openArgs.cwd } } : { key: 'This call would open a conversation in {cwd}.', params: { cwd: openArgs.cwd } }) : null;
+          const fill = (k, p) => k.replace(/\{(\w+)\}/g, (_, n) => (p && p[n] != null ? String(p[n]) : `{${n}}`));
+          const D1 = 'Allow once lets this call go ahead. Always grants the key to this conversation (the Vault window lists it; take it back there). Deny refuses it and asks no more for 10 minutes. No answer in 60 s: refused. The key\'s value is never shown to the conversation.';
           const it = userTodos.add(caller.sessionKey || 'vault', {
             origin: 'vault', urgency: 'urgent', kind: 'action', by: 'agent', sessionName: who, expiresAt: q.askedAt + A.ASK_TTL_MS,
             text: `${who} wants to use the automation key "${key.name}" (${verbWord})`,
-            detail: `Allow once lets this call go ahead. Always grants the key to this conversation (the Vault window lists it; take it back there). Deny refuses it and asks no more for 10 minutes. No answer in 60 s: refused. The key's value is never shown to the conversation.`,
+            detail: [openLine ? fill(openLine.key, openLine.params) : null, D1].filter(Boolean).join('\n'),
             i18n: { text: { key: '{who} wants to use the automation key "{key}" ({verb})', params: { who, key: key.name, verb: verbWord } },
-              detail: [{ key: 'Allow once lets this call go ahead. Always grants the key to this conversation (the Vault window lists it; take it back there). Deny refuses it and asks no more for 10 minutes. No answer in 60 s: refused. The key\'s value is never shown to the conversation.' }] },
+              detail: [...(openLine ? [openLine] : []), { key: D1 }] },
             action: { type: 'automation-ask', askId, keyId: key.id, key: String(key.name).slice(0, 60), verb, subject },
           });
           q.todoId = it && it.id;
@@ -312,10 +326,21 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   }
   /** → { ok: true, args } (the open's args — its cwd the REAL folder judged, so the judged path is the opened one) | the
    *  named refusal, carrying the key's limits (names only: what the caller may ask for instead). */
-  function limitsJudge(k, args) {
-    const v = A.openLimitsVerdict(k.limits, effectiveOpen(args), { realpath });
-    if (v.ok) return { ok: true, args: { ...args, cwd: v.cwd } };   // q-049 M1: no `unbounded` — null limits now refuse
-    return { ...named(v.code, v.why, { field: v.field, limits: k.limits }), args };
+  async function limitsJudge(k, args) {
+    const eff = effectiveOpen(args);
+    const v = A.openLimitsVerdict(k.limits, eff, { realpath });
+    if (!v.ok) return { ...named(v.code, v.why, { field: v.field, limits: k.limits }), args };   // q-049 M1: no `unbounded` — null limits now refuse
+    // q-049 M2 (lane automation-open-permission-resolve): no permission mode named ⇒ the CLI's own setting runs — resolved for
+    // the REAL folder just judged (the folder judge runs FIRST: a folder outside the roots reads no config at all) and judged
+    // against the key's list; a mode the open named was judged above by openLimitsVerdict
+    if (!eff.permissionMode && typeof openFacts.permissionDefault === 'function') {
+      let resolved = null;
+      try { resolved = await openFacts.permissionDefault(v.cwd, eff.backend); }
+      catch (e) { return { ...named(A.LIMIT_CODES.permissionModes, `the CLI's own permission setting for ${v.cwd} could not be read (${String((e && e.message) || e).slice(0, 120)}) — this key allows only what that setting is`, { field: 'permissionModes', limits: k.limits }), args }; }
+      const pv = A.permissionResolvedVerdict(k.limits, resolved);
+      if (!pv.ok) return { ...named(pv.code, pv.why, { field: pv.field, limits: k.limits, resolved: { mode: pv.resolved.mode, layer: pv.resolved.layer || null } }), args };
+    }
+    return { ok: true, args: { ...args, cwd: v.cwd } };
   }
 
   // ── THE USE ──
@@ -352,8 +377,8 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     let asked = null;
     if (!verdict.ok && (verdict.code === 'not_granted' || verdict.code === 'once_spent')) {
       // lane automation-open-limits: an open its key may not make files no card — the owner is never asked about it
-      if (verb === 'conversations.open') { const pre = limitsJudge(key, v0.args); if (!pre.ok) return done(pre, key.id); }
-      const r = await ask({ key, caller, verb, signal });
+      if (verb === 'conversations.open') { const pre = await limitsJudge(key, v0.args); if (!pre.ok) return done(pre, key.id); }
+      const r = await ask({ key, caller, verb, signal, args: v0.args });
       asked = r.outcome;
       if (r.outcome === 'gone') return done({ ...named('caller_gone', 'the call went away while its card waited — nothing ran'), args: v0.args }, key.id, { ask: 'gone' });
       if (r.outcome === 'vault_locked') return done({ ...named('vault_locked'), args: v0.args }, key.id, { ask: 'locked' });
@@ -371,7 +396,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     // never charged and never spends a once-grant; its audit line carries the code
     let runArgs = v0.args;
     if (verb === 'conversations.open') {
-      const lim = limitsJudge(keyById(key.id) || key, v0.args);
+      const lim = await limitsJudge(keyById(key.id) || key, v0.args);
       if (!lim.ok) return done(lim, key.id, asked ? { ask: asked } : {});
       runArgs = lim.args;
     }

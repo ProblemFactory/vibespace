@@ -79,6 +79,10 @@ console.log('§2 the engine (src/jobs.js) + the Ports manager (src/port-forward.
 const { JobManager } = require('../src/jobs.js');
 const { PortForwardManager } = require('../src/port-forward.js');
 const jobModel = require('../src/job-model.js');
+// lane agent-context-owner-facts (B-7960 a): the stub hub answers what the real one does — the job view + its instants as words
+// (agent-routes jobWhen), in this fixture's zone (UTC: never the box's own)
+const { jobWhen } = require('../src/agent-routes.js');
+require('../src/server/owner-facts.js').configure({ setting: (k) => (k === 'instance.timezone' ? 'UTC' : undefined) });
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-job-notice-'));
 const servers = [];
 try {
@@ -137,7 +141,7 @@ try {
   const api = http.createServer((q, res) => {
     res.setHeader('Content-Type', 'application/json');
     if (q.method === 'POST') { res.end(JSON.stringify({ success: true, ok: true, filter: '^(?!.*is DOWN)', count: 1, ownerLane: true })); return; }
-    const snap = { ...jobModel.agentJobView(G.snapshot(gj, { tail: 5 }), { mine: true }), mine: true, mySubscription: null };
+    const snap = jobWhen({ ...jobModel.agentJobView(G.snapshot(gj, { tail: 5 }), { mine: true }), mine: true, mySubscription: null });
     res.end(JSON.stringify(q.url.startsWith('/api/agent/jobs/') ? { success: true, job: snap } : { success: true, jobs: [snap] }));
   });
   await new Promise((r) => api.listen(0, '127.0.0.1', r)); servers.push(api);
@@ -146,7 +150,7 @@ try {
     let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); c.on('close', () => res(out));
   });
   const showLocked = await cli('show', job.id);
-  ok(/public URL: NOT published — waiting for the vault — it is locked; the owner has the unlock item[^\n]* — since \d{4}-\d\d-\d\d \d\d:\d\dZ \(6 attempts\) \(was https:\/\/vs1785a95b84\.relay\.test\/\)/.test(showLocked), 'vibespace-job show: NOT published — waiting for the vault … — since <when> (6 attempts) (was <url>)', showLocked);
+  ok(/public URL: NOT published — waiting for the vault — it is locked; the owner has the unlock item[^\n]* — since \d{4}-\d\d-\d\d \d\d:\d\d UTC \(6 attempts\) \(was https:\/\/vs1785a95b84\.relay\.test\/\)/.test(showLocked), 'vibespace-job show: NOT published — waiting for the vault … — since <when> (6 attempts) (was <url>)', showLocked);
 
   // (d) the vault unlocks: the re-publish STARTS in the unlock's own tick (never the hourly restart, never the 5-min heal)
   relay.mode = 'ok';

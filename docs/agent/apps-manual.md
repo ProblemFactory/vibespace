@@ -23,8 +23,8 @@ on every update; only the user's home survives). An app installed with `sudo apt
 installed through VibeSpace is kept: VibeSpace saves every `.deb` it needed and puts the app back by itself, offline,
 right after the server starts again. So: **never `sudo apt install` an app the user wants to keep — propose it here.**
 
-**The second thing:** you only PROPOSE. `install` / `remove` file ONE item in the user's For you tray (bottom right of
-their screen) with the plan — every package, the download and disk sizes, where they come from. Nothing runs until the
+**The second thing:** you only PROPOSE. `install` / `remove` file ONE item in the user's For you tray (the answer
+names where it is on their screen) with the plan — every package, the download and disk sizes, where they come from. Nothing runs until the
 user presses Install there; then VibeSpace runs it through its own package slot (one install per machine at a time).
 The outcome reaches you for free on your next turn (a VibeSpace notice), or now with `wait`.
 

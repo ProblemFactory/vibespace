@@ -521,7 +521,9 @@ console.log('⑯ lane vault-locked-refusal-notice — a LOCKED vault already tol
   const vrow = reg.ROWS.find((r) => r.name === 'vibespace-vault');
   ok(vrow && /locked ⇒ the user is told; never ask them to unlock/.test(vrow.summary) && Buffer.byteLength(vrow.summary) <= reg.CAPS.summary && read('docs/agent/index-manual.md').includes(vrow.summary), 'the CLI registry\'s one line (the index every agent reads) says it, within the 140 B cap, and the generated index carries it', vrow && vrow.summary);
   const vcli = read('data/bin/vibespace-vault');
-  ok(vcli.includes(VB.TOLD) && !/tell them; never ask for the password/.test(vcli), 'vibespace-vault status, LOCKED: the user has already been told (THE clause, src/vault-blocked.js TOLD) — never "tell them"');
+  // lane agent-context-owner-facts (B-7960 b): the CLI says THE clause with the tray in the hub's words (its label + place) where TOLD says "their tray"
+  const toldWithTray = VB.TOLD.replace('(their tray names', "(' + (d.tray || 'their tray') + ' names");
+  ok(toldWithTray !== VB.TOLD && vcli.includes(toldWithTray) && !/tell them; never ask for the password/.test(vcli), 'vibespace-vault status, LOCKED: the user has already been told (THE clause, src/vault-blocked.js TOLD — the tray named by the hub\'s words) — never "tell them"');
   const man = read('docs/agent/vault-manual.md');
   ok(/the user has already been told\*\*/.test(man) && /Do not ask them to unlock it, do not file a `vibespace-ask` about it/.test(man) && !/`vibespace-ask` is the way to ask them to unlock/.test(man), 'the vault manual: told already — never ask, never a vibespace-ask about it (the line that taught agents to ask is gone)');
   ok(/The user has already been told \(For you names this conversation and the verb\): never ask them to unlock it/.test(read('docs/agent/automation-manual.md')) && !/Tell them; never ask for the password/.test(read('docs/agent/automation-manual.md')), 'the automation manual\'s vault_locked row says the same');

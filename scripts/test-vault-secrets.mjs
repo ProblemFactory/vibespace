@@ -649,7 +649,7 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
 console.log('\u2468 THE RESTART\u2019S FOR-YOU ITEM (lane vault-relock-door) \u2014 a boot over a SET UP + LOCKED vault files ONE tray notice; a second boot keeps ONE; unlock resolves it; not set up files nothing \u2014 lane vault-locked-refusal-notice: it is THE item \u2014 a refusal refreshes it (who and what), one row ever, a dismissal holds for the lock epoch, an upgrade\u2019s old row gives way, bounded; RED: the pre-fix engine files nothing');
 {
   const { UserTodoManager } = R('src/user-todos.js');
-  const { VAULT_INBOX_KEY, RELOCK_TEXT, VAULT_ITEM_TEXT, BLOCKED_TEXT, NOTHING_YET, ROW_LINE, MORE_LINE } = R('src/server/vault-hooks.js');
+  const { VAULT_INBOX_KEY, RELOCK_TEXT, LOCKED_TEXT, VAULT_ITEM_TEXT, BLOCKED_TEXT, NOTHING_YET, ROW_LINE, MORE_LINE } = R('src/server/vault-hooks.js');
   const mkTodos = (d) => new UserTodoManager({ dataDir: d, onChange: () => {}, expirySweepMs: 0 });
   const relocks = (t) => t.forSession(VAULT_INBOX_KEY).filter((i) => i.action && i.action.type === 'vault-unlock');
   // NOT SET UP \u21d2 nothing (the migration window asks at page load, never a tray row)
@@ -672,7 +672,7 @@ console.log('\u2468 THE RESTART\u2019S FOR-YOU ITEM (lane vault-relock-door) \u2
     ok(v1.state() === 'locked', 'a boot over a set-up dir starts LOCKED by law');
     wireVaultHooks({ vault: v1, userTodos: t1, log: quiet });
     const one = relocks(t1);
-    ok(one.length === 1 && one[0].kind === 'notice' && one[0].origin === 'vault' && one[0].action.type === 'vault-unlock' && one[0].text === VAULT_ITEM_TEXT && one[0].i18n.text.key === RELOCK_TEXT && one[0].i18n.detail[0].key === NOTHING_YET, 'set up + locked boot \u21d2 ONE For-you notice (origin vault, the vault-unlock door, the restart words; lane vault-locked-refusal-notice: THE item\u2019s one text, nothing refused yet)', one.map((i) => ({ kind: i.kind, origin: i.origin, type: i.action && i.action.type, text: i.text, i18n: i.i18n })));
+    ok(one.length === 1 && one[0].kind === 'action' && one[0].urgency === 'urgent' && one[0].origin === 'vault' && one[0].action.type === 'vault-unlock' && one[0].text === VAULT_ITEM_TEXT && one[0].i18n.text.key === LOCKED_TEXT && one[0].i18n.detail[0].key === NOTHING_YET, 'set up + locked boot \u21d2 ONE For-you item (origin vault, the vault-unlock door; lane vault-locked-refusal-notice: THE item\u2019s one text, nothing refused yet; lane vault-locked-loud: an URGENT action row, the lock\u2019s own words)', one.map((i) => ({ kind: i.kind, origin: i.origin, type: i.action && i.action.type, text: i.text, i18n: i.i18n })));
     t1.flush(); t1.stop();
     const v2 = mkVault(d); const t2 = mkTodos(d); // boot 2: the persisted item re-read
     wireVaultHooks({ vault: v2, userTodos: t2, log: quiet });
@@ -723,8 +723,8 @@ console.log('\u2468 THE RESTART\u2019S FOR-YOU ITEM (lane vault-relock-door) \u2
     await v1.unlock(PW, {});
     ok(v1.facts().blocked === 0 && relocks(t).length === 0, 'the unlock clears the list (the strip’s count 0)');
     clock.t += 1000;
-    v1.lock('door');   // a lock ACT: no item until somebody is stopped
-    ok(relocks(t).length === 0, 'a LOCK ACT files nothing by itself (the strip says it; the item waits for a refusal)');
+    v1.lock('door');   // a lock ACT: lane vault-locked-loud — the item is filed AT ONCE (never first at a refusal)
+    ok(relocks(t).length === 1 && relocks(t)[0].id === id0 && relocks(t)[0].i18n.text.key === LOCKED_TEXT && relocks(t)[0].urgency === 'urgent', 'lane vault-locked-loud: a LOCK ACT files THE item at once — the same row reopened, urgent, before anybody is refused', relocks(t).map((i) => i.i18n));
     clock.t += 1000;
     v1.blocked('Worker one', 'vibespace-api conversations.rename');
     const c = relocks(t);
@@ -782,7 +782,9 @@ console.log('\u2468 THE RESTART\u2019S FOR-YOU ITEM (lane vault-relock-door) \u2
       return { code, items: items.length, who: items[0] ? items[0].i18n.text.params : null };
     };
     const pre = await run(VEpre, 'blocked-red-pre'), fixed = await run(VE, 'blocked-red-fixed');
-    ok(pre.code === KF.VAULT_LOCKED && pre.items === 0, 'RED: the pre-fix engine — a store read refused vault_locked after a lock act files NO item (the owner is not told)', pre);
+    // lane vault-locked-loud: the lock act itself files THE item now, so the pre-fix engine's miss is the NAME — its row says
+    // the lock, never who it stopped
+    ok(pre.code === KF.VAULT_LOCKED && pre.items === 1 && !(pre.who && pre.who.who), 'RED: the pre-fix engine — a store read refused vault_locked after a lock act names NOBODY on the item (the lock act filed it; the refusal noted nothing)', pre);
     ok(fixed.code === KF.VAULT_LOCKED && fixed.items === 1 && fixed.who && fixed.who.who === 'VibeSpace (the accounts store)', 'the shipped engine — the same refusal files ONE item naming it', fixed);
   }
 }

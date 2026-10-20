@@ -161,7 +161,9 @@ ok(['unlocked', 'locked'].every((s) => frames.some((f) => JSON.parse(f).type ===
 console.log('⑧ agents');
 {
   const s = await hit('/api/agent/vault/state', { method: 'GET', headers: { authorization: 'Bearer ' + SESSION_TOKEN } });
-  ok(s.status === 200 && s.json.state === 'locked' && Object.keys(s.json).sort().join() === 'keys,lockedSince,setUpAt,state', 'an agent reads the state (state, since, setUpAt, key count — nothing else)', s.json);
+  // lane agent-context-owner-facts (B-7960): + the hub's WORDS vibespace-vault prints — the lock time in the owner's zone, named, and the tray's label + place
+  ok(s.status === 200 && s.json.state === 'locked' && Object.keys(s.json).sort().join() === 'keys,lockedSince,setUpAt,state,tray,when' && Object.keys(s.json.when).join() === 'lockedSince' && / [A-Z]{2,5}$| GMT[+-][\d:]+$/.test(s.json.when.lockedSince) && /^the “[^”]+”( \(For you\))? tray$/.test(s.json.tray),
+    'an agent reads the state (state, since, setUpAt, key count — and the words it prints: when.lockedSince, tray — nothing else)', s.json);
   const bad = await hit('/api/agent/vault/state', { method: 'GET', headers: { authorization: 'Bearer vsst_' + 'f'.repeat(32) } });
   ok(bad.status === 401, 'an unknown session token ⇒ 401');
   vault.setIdleLock(0);
@@ -476,6 +478,20 @@ const hit0 = hit, PAGE0 = PAGE;
   const us2 = await hit('/api/agent/vault/uses', { method: 'GET', headers: B });
   ok(rG2.status === 403 && rG2.json.code === 'entry_not_runnable' && us2.json.uses.some((u) => u.receipt === rG.json.receipt && u.purpose === REQ.purpose && u.outcome === 'ok' && u.door === 'run') && !JSON.stringify(us2.json).includes(RUNV),
     'once was once (the next run is refused); USES reads the run back — the entry, its purpose, the outcome, the same receipt — never a value', us2.json.uses && us2.json.uses.slice(0, 2));
+  // B-4934 (q-043 verify L2): the hub-wide bound counts CONVERSATIONS — 32 asking at once, the 33rd refused BY NAME over the
+  // route (429 too_many_askers); past 8 asking, the owner's For you holds ONE Vault notice «N conversations are asking»
+  const CAPS = Array.from({ length: 33 }, () => 'vsst_' + crypto.randomBytes(16).toString('hex'));
+  CAPS.forEach((tok, k) => sessions2.set('cap' + k, { agentToken: tok, backendSessionId: 'conv-cap' + k, name: 'Cap Lane ' + k, cwd: WORK }));
+  const capAsk = (k) => hit('/api/agent/vault/request', { headers: { authorization: 'Bearer ' + CAPS[k] }, body: { entry: REQ.entry, purpose: 'the cap leg ' + k } });
+  const lineOf = () => (userTodos.snapshot().open || []).filter((i) => i.sessionKey === 'vault' && i.text === DOOR.ASKING_TEXT);
+  const cap8 = []; for (let k = 0; k < 8; k++) cap8.push(await capAsk(k));
+  ok(cap8.every((x) => x.status === 200 && x.json.ok) && !lineOf().length, 'THE CAP (B-4934): eight conversations asking ⇒ every ask filed, no «are asking» line (8 is not more than 8)', cap8.map((x) => x.status));
+  const cap9 = await capAsk(8);
+  ok(cap9.status === 200 && lineOf().length === 1 && lineOf()[0].i18n.text.params.n === 9 && lineOf()[0].origin === 'vault' && lineOf()[0].kind === 'notice', 'the NINTH conversation ⇒ filed (200); the owner\'s For you holds ONE Vault notice «9 conversations are asking to use stored secrets»', [cap9.status, lineOf().map((i) => i.i18n.text.params.n)]);
+  const capRest = []; for (let k = 9; k < 32; k++) capRest.push(await capAsk(k));
+  const cap33 = await capAsk(32);
+  ok(capRest.every((x) => x.status === 200) && cap33.status === 429 && cap33.json.code === 'too_many_askers' && cap33.json.error === DOOR.MORE_WORDS.too_many_askers && lineOf().length === 1 && lineOf()[0].i18n.text.params.n === 32,
+    '32 conversations asking ⇒ the 33rd ⇒ 429 too_many_askers BY NAME (its words: nothing was filed, ask again once some are answered); the one line says 32', [cap33.status, cap33.json, lineOf().map((i) => i.i18n.text.params.n)]);
   ok(!ANSWERS.some((a) => a.includes(RUNV)), 'no answer of this whole suite carries the value (every route, every refusal, every run)');
   srv2.close(); vault2.close();
   try { fs.chmodSync(BIN, 0o755); } catch { }

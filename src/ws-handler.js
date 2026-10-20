@@ -1475,8 +1475,8 @@ function registerWsHandler(wss, ctx) {
         case 'state-set': {
           const store = getSyncStore(data.store);
           if (store && store.clientWrites !== false && data.key && typeof data.key === 'string') { // lane agent-feedback: a server-owned mirror (`feedback`) takes no client write
-            if (data.value == null || data.value === '') store.delete(data.key, ws);
-            else store.set(data.key, data.value, ws);
+            if (data.value == null || data.value === '') store.delete(data.key, ws, data.basedOn);
+            else store.set(data.key, data.value, ws, data.basedOn); // answered to the sender (state-ack), stamped from + basedOn (lane statesync-last-arrival)
             // lane worker-dispatch verify r2 ①: a non-empty chat draft is a PERSON composing a reply (not yet sent, so
             // _userInputAt is stale) — stamp it so a dispatch never compacts a worker whose owner is mid-draft.
             if (data.store === 'drafts' && data.value != null && data.value !== '' && data.key.startsWith('chat:')) {

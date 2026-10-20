@@ -6,7 +6,8 @@
 //     another site cannot send one without a CORS preflight, which this server never answers), ≤ 32 KB read (the rest is
 //     never buffered), ≤ 60 posts a minute per address that ADD a line (a repeat is never paced — it writes nothing; a
 //     refusal is a count, never a log line).
-//   · NEVER A VALUE: a report is reduced by app-csp `reportsOf` (no sample, no query, a URL cut to origin + 3 segments).
+//   · NEVER A VALUE: a report is reduced by app-csp `reportsOf` (no sample, no query, a URL cut to origin + 3 segments, a
+//     segment that looks like a token cut to `<token>` — B-a35f).
 //   · ONE LINE per (directive, blocked, source, line) in data/csp-reports.jsonl (0600; past 1 MB it rotates to .1);
 //     the keys on disk are read at boot, so a restart re-writes nothing.
 //   · ONE For-you notice per NEW (directive, blocked) pair (origin `server`, key `csp-report`) — never per report, never for

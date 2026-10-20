@@ -428,6 +428,20 @@ export function uiRow(backend) {
 export function billingRow(backend) {
   return uiRow(backend).billing || NO_BILLING;
 }
+/** Every harness's DEFAULT-ACCOUNT field — its billing row's `defaultIdField` (claude's defaultAccountId, codex's
+ *  defaultCodexAccountId, antigravity's defaultAntigravityAccountId …), read off the rows at call time. */
+export function defaultIdFields() {
+  const out = [NO_BILLING.defaultIdField];
+  for (const be of Object.keys(BACKEND_META)) { const f = billingRow(be).defaultIdField; if (f && !out.includes(f)) out.push(f); }
+  return out;
+}
+/** THE CLIENT ACCOUNT CACHE'S DEFAULTS from a server answer (GET /api/accounts, the accounts-updated push): every
+ *  harness's field, null when unset. Lane antigravity-card-fixes (the owner 2026-10-20: the ★ never moved to an
+ *  Antigravity account): the cache copied two hand-picked fields (claude's + codex's), so the server stored
+ *  defaultAntigravityAccountId and every roster / New Session read of it saw undefined — the machine login stayed ★. */
+export function accountDefaultsOf(answer) {
+  return Object.fromEntries(defaultIdFields().map((f) => [f, (answer && answer[f]) || null]));
+}
 /** The chat window id of a conversation — ONE spelling (F5/M7). The row with `legacyIds` keeps the pre-backend
  *  form `view-<id>` (claude's saved layouts); every other backend is `view-<backend>-<id>`. Exact backend: no default. */
 export function viewIdFor(backend, bsid) {

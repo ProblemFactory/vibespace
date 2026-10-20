@@ -50,7 +50,9 @@
 //      and counted, the leg's address unchanged; its PINGs are answered (the keepalive) — RED CONTROL: the device-link path
 //      alone (udpLeg: false) through the same link drops below 10 fps (the ratio pinned). A hub that never answers the leg ⇒
 //      the device link from the first picture, the leg DOWN (no_echo) ≤ 2 s after the offer; answered again ⇒ the leg comes
-//      back UP and carries it; silenced mid-run ⇒ the device link takes over within 2 s + 2 s and the pictures keep coming
+//      back UP and carries it; silenced mid-run ⇒ the device link takes over after THREE unanswered PINGs (≤ 2 s + 3 × 2 s —
+//      lane stream-leg-flap: one lost PONG is a lossy leg, not a dead one), the hub follows once the leg is silent its 6 s,
+//      and the pictures keep coming
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -868,11 +870,12 @@ console.log('§10 THE UDP LEG: the daemon\'s own datagrams to the hub relay — 
   ok(back && stUp.relay.leg.state === 'up' && C.marks.length - nBack >= 25, `answered again: the next re-ask (≤ 5 s) brings the leg UP and it carries the picture (${C.marks.length - nBack} pictures in the next second)`, stUp.relay.leg);
   mute = true;
   const tMute = Date.now();
-  const fell = await until(async () => (await dmL.streamStats(C.s.sid)).stats.relay.via === 'link', 6000);
-  const fellMs = Date.now() - tMute;
-  await until(async () => (await C.wr.poll(C.s.key, 0, -1, 0)).relay.via === 'link', 2000);
+  const fell = await until(async () => (await dmL.streamStats(C.s.sid)).stats.relay.via === 'link', 11000);
+  const fellMs = Date.now() - tMute, tFell = Date.now();
+  const hubFell = await until(async () => (await C.wr.poll(C.s.key, 0, -1, 0)).relay.via === 'link', 9000);
+  const hubMs = Date.now() - tFell;
   const nFell = C.marks.length; await sleep(1500);
-  ok(fell && fellMs <= 4600 && C.marks.length - nFell >= 40, `silenced mid-run: the daemon's next PING goes unanswered — the device link within ${fellMs} ms (≤ 2 s + 2 s) and the pictures keep coming (${C.marks.length - nFell} in 1.5 s)`);
+  ok(fell && fellMs <= 9000 && hubFell && hubMs <= SM.STREAM_LIMITS.legDeadMs + 1500 && C.marks.length - nFell >= 40, `silenced mid-run: three PINGs in a row unanswered — the daemon takes the device link ${fellMs} ms after (≤ 2 s + 3 × 2 s), the hub ${hubMs} ms later (its 6 s silence bound), and the pictures keep coming (${C.marks.length - nFell} in 1.5 s)`);
   await C.wr.stop(C.s.key); C.wr.shutdown(); C.b.pc.close();
   dmL.stop(); endDaemonsOf(rootL); capped.close(); hubHttp.close();
 }

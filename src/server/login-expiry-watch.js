@@ -37,6 +37,7 @@
 // re-check the item before touching it), or count a credentials REWRITE that
 // keeps the same deadline as a re-login (see `reloggedIn`).
 const fs = require('fs');
+const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const path = require('path');
 const { loginAgeText, reviewWarnings, reloggedIn, shortSession, WARN_STAGES, ledgerExp, OAT_ONLY } = require('../login-expiry.js');
 
@@ -65,7 +66,7 @@ const WITNESS_SWEEPS = 3;
 
 function fmtWhen(ms) {
   if (!ms) return 'an unknown time';
-  try { return new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC'; } catch { return 'an unknown time'; }
+  try { return OF.when(ms); } catch { return 'an unknown time'; }
 }
 
 /** The item text for a rung. Includes the ACCOUNT NAME and the EXPIRY TIME

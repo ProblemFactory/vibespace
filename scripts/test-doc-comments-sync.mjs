@@ -24,6 +24,7 @@ const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name);
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const S = JSON.stringify;
 const { SyncStore } = require('../src/sync-store.js');
+const { arrivalVerdict } = require('../src/sync-arrival.js'); // the class's one import (lane statesync-last-arrival: StateSync's arrival rule)
 const M = require('../src/doc-model.js');
 
 // ── the real code, cut verbatim ──
@@ -34,7 +35,7 @@ const utils = read('src/lib/utils.js');
 const c0 = utils.indexOf('class StateSync {'), c1 = utils.indexOf('\nlet _stateSync = null;');
 const CLASS = c0 > 0 && c1 > c0 ? utils.slice(c0, c1) : '';
 console.log('§0 the cuts');
-ok(/case 'state-set'/.test(CASES) && /case 'state-resync'/.test(CASES) && /store\.set\(data\.key, data\.value, ws\)/.test(CASES), 'src/ws-handler.js: the state-set + state-resync cases cut verbatim');
+ok(/case 'state-set'/.test(CASES) && /case 'state-resync'/.test(CASES) && /store\.set\(data\.key, data\.value, ws, data\.basedOn\)/.test(CASES), 'src/ws-handler.js: the state-set + state-resync cases cut verbatim');
 ok(/init\(storeName\) \{/.test(CLASS) && /s\.loaded = \(async \(\) => \{/.test(CLASS) && /_applyOp\(storeName, op\)/.test(CLASS), 'src/lib/utils.js: the client StateSync class cut verbatim (init answers its one load)');
 ok(/saveDraft\('doc', draftId, /.test(read('src/lib/doc-window-ui.js')) && /export function saveDraft\(type, id, value\) \{\s*_stateSync\?\.set\('drafts', type \+ ':' \+ id, value\);/.test(utils), 'the Doc window writes through saveDraft(\'doc\', <host>\\u0001<path>) = the drafts store\'s doc:<host>\\u0001<path> key (the path below)');
 
@@ -52,7 +53,7 @@ function world(cases = CASES, { failRead = false, cls = CLASS } = {}) {
     if (failRead || !st) return { ok: false, json: async () => { throw new Error('not json'); } };
     return { ok: true, json: async () => JSON.parse(S(st.getSnapshot())) };
   };
-  const StateSync = new Function('fetch', cls + '\nreturn StateSync;')(fetchFake);
+  const StateSync = new Function('fetch', 'arrivalVerdict', cls + '\nreturn StateSync;')(fetchFake, arrivalVerdict);
   const client = (name) => {
     const globals = [], states = [];
     const sock = { name, readyState: 1, send(m) { for (const h of globals) h(JSON.parse(m)); } }; // server → this client

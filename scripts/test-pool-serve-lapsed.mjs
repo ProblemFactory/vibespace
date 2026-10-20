@@ -83,9 +83,9 @@ const build = (src, { tokenSig = () => 'tok-1', setting = undefined, lapseCleare
   const lines = [], todos = [], events = [], done = [];
   const fakeTodos = { add: (k, o) => { const it = { id: 'td' + (todos.length + 1), key: k, ...o, status: 'open' }; todos.push(it); return it; }, get: (id) => todos.find((x) => x.id === id) || null, setStatus: (id, st, why) => { done.push([id, st, why]); const it = todos.find((x) => x.id === id); if (it) it.status = st; } };
   const con = { log: (l) => lines.push(String(l)), warn: (...a) => lines.push('WARN ' + a.join(' ')) };
-  const fn = new Function('fs', 'path', 'USAGE_CACHE_DIR', 'accounts', 'SERVE_LAPSED', 'lapseCleared', 'serveAfterFailure', 'readingFingerprint', 'getUserTodos', 'i18nKey', 'quotaSourceFor', 'console', 'global', 'credsTokenSig', 'serverSetting',
+  const fn = new Function('fs', 'path', 'USAGE_CACHE_DIR', 'accounts', 'SERVE_LAPSED', 'lapseCleared', 'serveAfterFailure', 'readingFingerprint', 'getUserTodos', 'i18nKey', 'quotaSourceFor', 'console', 'global', 'credsTokenSig', 'serverSetting', 'OF',
     src + '\nreturn { ownReading, memberServeLapsed, noteMemberServeFailure };');
-  const api = fn(fs, path, CACHE, am2, PA.SERVE_LAPSED, lapseCleared, PA.serveAfterFailure, PA.readingFingerprint, () => fakeTodos, (s) => s, (be) => harnesses.get(be).quota, con, { __vsEvent: (k, d) => events.push([k, d]) }, tokenSig, (k) => (k === 'accounts.onDemandQuotaRefresh' ? setting : undefined));
+  const api = fn(fs, path, CACHE, am2, PA.SERVE_LAPSED, lapseCleared, PA.serveAfterFailure, PA.readingFingerprint, () => fakeTodos, (s) => s, (be) => harnesses.get(be).quota, con, { __vsEvent: (k, d) => events.push([k, d]) }, tokenSig, (k) => (k === 'accounts.onDemandQuotaRefresh' ? setting : undefined), require(path.join(REPO, 'src/server/owner-facts.js')));   // OF: the owner's clock the engine prints «since …» with (lane agent-context-owner-facts)
   return { ...api, lines, todos, events, done };
 };
 am2.setServeState(U, null);

@@ -41,6 +41,7 @@
  * answers `{error, code}` — fetchJson never throws, so a 200-with-nothing would be a silent failure.
  */
 const express = require('express');
+const OF = require('../server/owner-facts.js'); // lane agent-context-owner-facts (B-7960 b): the tray's label for the proposal answers
 const fs = require('fs');
 const path = require('path');
 const A = require('../app-manifest.js');
@@ -265,7 +266,7 @@ router.post('/api/agent/apps/proposals', async (req, res) => {
   const send = (status, obj) => { if (tick) { clearInterval(tick); res.end(JSON.stringify(obj)); } else res.status(status).json(obj); };
   try {
     const p = await g.engine.propose({ host: agentHost(req, g.who), request: b.request, why: String(b.why || '').slice(0, 500), by: { kind: 'agent', sessionId: g.who.sessionId, conversation: g.who.conversation, name: g.who.name, sessionKey: g.who.sessionKey } });
-    send(200, { ok: true, proposal: inertDeep(p), text: g.engine.outcomeText(p.id) });
+    send(200, { ok: true, proposal: inertDeep(p), text: g.engine.outcomeText(p.id), tray: OF.tray().name });   // B-7960 b: the tray's label, in the hub's words
   } catch (e) {
     if (!tick) return fail(res, e);
     send(0, { error: pkgWords(String((e && e.message) || e), 600), code: (e && e.code) || null });
@@ -319,7 +320,7 @@ router.post('/api/agent/apps/register', async (req, res) => {
   const entry = { label: b.label, launch: lines.launch, ...(lines.remove != null ? { remove: lines.remove } : {}), ...(lines.reinstall != null ? { reinstall: lines.reinstall } : {}), ...(b.icon != null ? { icon: b.icon } : {}) };
   try {
     const r = await g.engine.register({ host, entry, why: String(b.why || '').slice(0, 500), by: { kind: 'agent', sessionId: g.who.sessionId, conversation: g.who.conversation, name: g.who.name, sessionKey: g.who.sessionKey } });
-    res.json({ ...r, place: AW.installPlace({ hostId: r.host }) });
+    res.json({ ...r, place: AW.installPlace({ hostId: r.host }), tray: OF.tray().name });   // B-7960 b: the tray's label, in the hub's words
   } catch (e) { fail(res, e); }
 });
 /** THE DECLARED KIND ROWS (src/app-kinds/) — the CLI's copy reads them (vibespace-app add: its --kind words, the argv

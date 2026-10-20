@@ -18,6 +18,9 @@ const USAGE = [
   '  vibespace-api call <verb> [--key <name|id>] [--json \'{…}\'] [--<arg> <value>]…',
   '                                                    call one verb — e.g. vibespace-api call conversations.rename --name "Lane X"',
   '  vibespace-api audit [--key <name|id>] [--since <ISO time>] [--limit N]   this conversation\'s own audit lines',
+  '  vibespace-api call feedback.list                 the agents\' OPEN feedback reports with their ids (JSON)',
+  '  vibespace-api call feedback.handled --id <fb-…> --version <2.369.NNN> [--note "…"]',
+  '                                                    mark one handled, naming the release that shipped the fix',
   'the typed verbs (each prints the hub\'s answer as JSON; --key <name|id> picks a key):',
   '  vibespace-api conversations open --cwd <absolute path> [--name "…"] [--backend claude] [--mode chat|terminal]',
   '                [--model opus] [--effort xhigh] [--permission bypassPermissions] [--task <T-…>] [--pool <pool-…>]',
@@ -125,6 +128,9 @@ async function main() {
     Object.assign(args, named);
     const d = await call('POST', `/api/agent/automation/${encodeURIComponent(verb)}` + q({ key }), args);
     console.log(`ok — ${d.verb} with key "${d.key}"${d.result && d.result.name ? `: now "${d.result.name}"` : ''}`);
+    // lane feedback-handled-verb: the hub's answer as JSON below the line (feedback.list's reports, feedback.handled's stamp)
+    const { ok: _ok, ...answer } = d.result || {};
+    if (Object.keys(answer).length) console.log(JSON.stringify(answer, null, 2));
     return;
   }
   console.error('vibespace-api: unknown command "' + cmd + '"\n' + USAGE);

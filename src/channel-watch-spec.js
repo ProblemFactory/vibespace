@@ -38,7 +38,9 @@ const RULE_FLAGS = Object.freeze([
 /** A RULE_KINDS entry the CLI does not offer, with the reason it says (the census: every kind = a flag or a row here). */
 const NOT_OFFERED = Object.freeze({});
 /** The non-rule flags (value-taking unless listed in BOOL). */
-const OTHER_FLAGS = Object.freeze(['--mode', '--digest-minutes', '--cap', '--match', '--why', '--spec', '--tz-offset', '--kind', '--choice', '--threshold', '--per-hour']);
+const OTHER_FLAGS = Object.freeze(['--mode', '--digest-minutes', '--cap', '--match', '--why', '--spec', '--tz-offset', '--kind', '--choice', '--threshold', '--per-hour', '--infer']);
+/** lane dm-reply-infers: the non-rule flags that take NO value (`--infer` = the reply rule's judged road, opt-in). */
+const BOOL_FLAGS = Object.freeze(['--infer']);
 /** lane decision-rule: the flags that shape a `decision` rule (they need its --condition). */
 const DECISION_FLAGS = Object.freeze(['--choice', '--threshold', '--per-hour']);
 const MODES = Object.freeze(['next-turn', 'wake', 'digest']);
@@ -78,7 +80,7 @@ function watchSpecFromArgs(argv) {
   for (let i = 0; i < args.length; i++) {
     const f = args[i];
     const rf = RULE_FLAGS.find((x) => x.flag === f);
-    const takes = rf ? rf.value !== null : OTHER_FLAGS.includes(f);
+    const takes = rf ? rf.value !== null : OTHER_FLAGS.includes(f) && !BOOL_FLAGS.includes(f);
     if (!rf && !OTHER_FLAGS.includes(f)) return refuse('unknown-flag', `${f.startsWith('--') ? 'unknown flag ' + f : 'unexpected ' + JSON.stringify(f)} — watch takes ${[...RULE_FLAGS.map((x) => x.flag), ...OTHER_FLAGS].join(' ')} (vibespace-docs channels)`, { flag: f });
     let v = null;
     if (takes) {
@@ -119,6 +121,12 @@ function watchSpecFromArgs(argv) {
     if (one['--threshold'] !== undefined) r.threshold = one['--threshold'] === '' ? NaN : Number(one['--threshold']);
     if (one['--per-hour'] !== undefined) r.perHour = one['--per-hour'] === '' ? NaN : Number(one['--per-hour']);
   }
+  // lane dm-reply-infers: `--reply-to-sent --infer` — a plain message after your send is judged once by the LLM plugin
+  if (one['--infer'] !== undefined) {
+    const rs = rules.filter((r) => r.kind === 'reply-to-sent');
+    if (!rs.length) return refuse('infer-without-reply-to-sent', '--infer goes with --reply-to-sent (a plain message after your send is judged once by the LLM plugin: is it an answer?)', { flag: '--infer' });
+    for (const r of rs) r.infer = true;
+  }
   if (one['--match'] !== undefined && !rules.length) return refuse('match-without-rules', '--match says how the rules combine — give at least one rule flag', { flag: '--match' });
   const num = (v) => (v === undefined ? undefined : v === '' ? NaN : Number(v));
   return specVerdict({
@@ -155,4 +163,4 @@ function watchWhatWords(w, filter = null) {
   return (f.match === 'every' ? 'messages matching all of: ' : 'messages matching any of: ') + f.rules.map((r) => F.ruleWhy(r)).join(f.match === 'every' ? ' and ' : ', ');
 }
 
-module.exports = { RULE_FLAGS, NOT_OFFERED, OTHER_FLAGS, DECISION_FLAGS, MODES, MODE_WORDS, specVerdict, watchSpecFromArgs, watchSpecOfBody, watchHowWords, watchWhatWords };
+module.exports = { RULE_FLAGS, NOT_OFFERED, OTHER_FLAGS, BOOL_FLAGS, DECISION_FLAGS, MODES, MODE_WORDS, specVerdict, watchSpecFromArgs, watchSpecOfBody, watchHowWords, watchWhatWords };

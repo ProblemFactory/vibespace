@@ -2,6 +2,39 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.332 — 2026-10-20
+
+### Added
+- A plain reply (no quote, no thread) to a message an agent sent can now notify that agent: the LLM plugin judges it once. Turn it on per rule in Notify….
+- A conversation you granted an automation key can mark an agent's feedback handled, naming the release with the fix; Agent feedback shows who and when.
+- An Antigravity account in **Agents** shows its usage limits after you press **Re-check** in its ⋯ menu.
+
+### Changed
+- The Agent browser now stops drawing a page nobody watches or drives and resumes within a frame when you look or an agent acts (off in Settings › Agent browser).
+- When the vault is locked you see it at once: the unlock dialog opens on load, the ⚙ button turns red, and For you holds an urgent item until you unlock.
+
+### Fixed
+- An automation key that allows only the CLI's own permission setting is now checked against what that setting really is for the folder; the picker says it.
+- A conversation opened through an automation key carries the name you gave it from the start, and the request card says what it would open.
+- The agent browser comes back after a server update: a restart now works on a hung page even while the browser's helper still answers.
+- A browser helper whose browser has gone now ends itself within two minutes and says why, instead of staying behind.
+- After a restart, VibeSpace takes back the agent browsers it finds still running and ends the ones that no longer answer.
+- The times agents see and tell you (the Task Group board, its Activity log, the backlog, their tools) are in your time zone and named, like 16:16 PT.
+- Agents name the For you tray by its label on your screen, in your language, and where you put it, not "bottom right" after you moved it.
+- A menu or popover now closes when you click into an embedded page — a web view, a plugin window, mail, a design artboard.
+- Pressing ⚙ again closes its menu instead of rebuilding it; the same for the other buttons that open a menu under themselves.
+- Two devices that change the same setting at the same moment no longer end up each showing the other's older value: both show the latest one.
+- A view-only window of an OpenCode or Antigravity session that is not in your session list (one on another machine) loads its pages and search again.
+- An app window that is larger than your workspace opens at the workspace's top-left, so the most of it shows and its close button stays on screen.
+- A CLI installed after VibeSpace started is seen in **Agents** without a restart; **Re-check** beside **Install** looks for it at once.
+- The ★ in **Agents** now moves to the Antigravity account you pick as the default for new sessions.
+- A machine's desktop stream no longer goes black when both of its network paths answer: it stays on one, and a picture that stops arriving reconnects by itself.
+- One conversation's many open vault requests no longer block another conversation's first; with more than 8 asking, For you says how many are.
+- With the vault locked, a remote machine's sign-in dialog says «The vault is locked — unlock it to sign in automatically» as before; where to unlock is below.
+
+### Maintenance
+- Test and release tooling only; nothing changes for you.
+
 ## 2.369.331 — 2026-10-20
 
 ### Added

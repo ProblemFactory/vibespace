@@ -52,7 +52,8 @@ const LONG = ['line one of a long report: vibespace-task backlog-add said "parke
 const seed = (id, o) => ({ id, at: o.at, lastAt: o.lastAt || o.at, text: o.text, about: o.about || '', kind: o.kind || 'other', session: { id: 'cid-' + id, name: o.name }, group: o.group || null, harness: 'claude', instance: { name: 'box', version: '2.369.301' }, status: o.status || 'open', handledAt: o.status === 'handled' ? o.at + 1 : null, handledBy: o.status === 'handled' ? 'owner' : null, count: o.count || 1, reporters: ['cid-' + id] });
 fs.writeFileSync(path.join(INST, 'data', 'feedback.json'), JSON.stringify({ v: 1, dropped: 0, syncVersion: 0, records: [
   seed('fb-0000000001', { at: NOW - 3 * 3600e3, lastAt: NOW - 600e3, text: LONG, about: 'vibespace-task', kind: 'cli', name: 'lane alpha', group: { id: 'T-1', name: 'VibeSpace 车道' }, count: 3 }),
-  seed('fb-0000000002', { at: NOW - 2 * 3600e3, text: 'the phone sheet hides the Send button behind the keyboard', kind: 'ui', name: 'lane beta', status: 'handled' }),
+  // lane feedback-handled-verb: marked by the maintainer conversation through vibespace-api feedback.handled — the release + a note
+  { ...seed('fb-0000000002', { at: NOW - 2 * 3600e3, text: 'the phone sheet hides the Send button behind the keyboard', kind: 'ui', name: 'lane beta', status: 'handled' }), handledBy: 'VibeSpace 主开发', handledVersion: '2.369.330', handledNote: 'the composer rides above the keyboard now' },
   seed('fb-0000000003', { at: NOW - 60e3, text: XSS, about: '<b>bold</b>', kind: 'docs', name: 'lane gamma' }),
 ] }));
 // a fake claude: dumps the spawn env (the session token) and idles — the chat session stays live
@@ -114,7 +115,7 @@ async function openSystem(P) {
   await P.click(`${POP} .gs-menu > .gs-menu-item[data-id="system"]`);
   return until(() => P.js(`(() => { const h = document.querySelector('${POP} .gs-menu-item[data-id="system"]'); return !!h && h.getAttribute('aria-expanded') === 'true'; })()`), 3000);
 }
-const ROW_TEXTS = `[...document.querySelectorAll('#feedback-sheet .fb-row')].map((r) => ({ id: r.dataset.id, status: r.dataset.status, text: r.querySelector('.fb-text').textContent, who: r.querySelector('.fb-who').textContent, group: r.querySelector('.fb-group')?.textContent || null, chips: [...r.querySelectorAll('.fb-chip')].map((c) => c.textContent), count: r.querySelector('.fb-count')?.textContent || null, act: r.querySelector('.fb-act').textContent }))`;
+const ROW_TEXTS = `[...document.querySelectorAll('#feedback-sheet .fb-row')].map((r) => ({ id: r.dataset.id, status: r.dataset.status, text: r.querySelector('.fb-text').textContent, who: r.querySelector('.fb-who').textContent, group: r.querySelector('.fb-group')?.textContent || null, chips: [...r.querySelectorAll('.fb-chip')].map((c) => c.textContent), count: r.querySelector('.fb-count')?.textContent || null, act: r.querySelector('.fb-act').textContent, meta: r.querySelector('.fb-meta').textContent, note: r.querySelector('.fb-handled-note')?.textContent || null }))`;
 const TABS = `[...document.querySelectorAll('#feedback-sheet .fb-tab')].map((b) => b.textContent + (b.classList.contains('active') ? '*' : '')).join(' | ')`;
 
 let A, B;
@@ -188,6 +189,10 @@ try {
   await A.click('#feedback-sheet .fb-tab[data-filter="handled"]');
   rows = await A.js(ROW_TEXTS);
   ok(rows.length === 2 && rows.every((r) => r.status === 'handled' && r.act === 'Reopen') && rows[0].id === 'fb-0000000001', `the Handled filter: the two handled, each with Reopen (${rows.map((r) => r.id).join(' ')})`);
+  // lane feedback-handled-verb: the maintainer's mark names the release and the conversation, the note under it; the owner's own click is unchanged
+  const byAgent = rows.find((r) => r.id === 'fb-0000000002') || {}, byOwner = rows.find((r) => r.id === 'fb-0000000001') || {};
+  ok(/ · handled in 2\.369\.330 by VibeSpace 主开发, /.test(byAgent.meta) && byAgent.note === 'the composer rides above the keyboard now' && / · handled /.test(byOwner.meta) && !/handled in/.test(byOwner.meta) && byOwner.note === null,
+    `«handled in 2.369.330 by VibeSpace 主开发» + the note on the maintainer's mark; the owner's own click says «handled <when>» (${byAgent.meta} | ${byOwner.meta})`);
   await A.shot('sheet-handled-filter.png');
   await A.click('#feedback-sheet .fb-tab[data-filter="all"]');
   ok((await A.js(ROW_TEXTS)).length === 4, 'All: four rows');
@@ -209,6 +214,10 @@ try {
   await until(() => Z.js(`document.querySelectorAll('#feedback-sheet .fb-row').length === 2`), 5000);
   ok(await Z.js(`document.querySelector('#feedback-sheet .dialog-header h3').textContent === 'Agent 反馈' && /未处理（2）/.test(document.querySelector('#feedback-sheet .fb-tab').textContent) && document.querySelector('#feedback-sheet .fb-act').textContent === '已处理'`), 'the sheet in zh: 「Agent 反馈」, 未处理（2）, 已处理');
   await Z.shot('zh-sheet.png');
+  await Z.click('#feedback-sheet .fb-tab[data-filter="handled"]');
+  const zMeta = await until(() => Z.js(`document.querySelector('#feedback-sheet .fb-row[data-id="fb-0000000002"] .fb-meta')?.textContent || null`), 3000);
+  ok(/ · VibeSpace 主开发 于 .+ 标为已处理（2\.369\.330 修复）$/.test(String(zMeta)), `zh: 「VibeSpace 主开发 于 … 标为已处理（2.369.330 修复）」 (${zMeta})`);
+  await Z.shot('zh-sheet-handled-by-agent.png');
   Z.close();
 } catch (e) {
   ok(false, 'the suite ran to its end', e && e.stack);

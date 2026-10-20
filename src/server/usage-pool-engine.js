@@ -8,6 +8,7 @@
 // usageHistory, recordUsageAttribution) arrive as lazy getters/lambdas —
 // every use is at RUNTIME, after boot completes. ORCH tier.
 const os = require('os');
+const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -4144,7 +4145,7 @@ function settleResetCreditByReading(key, snap) {
       // its timers cleared, its followers told, the outcome on disk; one stamped by a timer only changes its word
       if (!x.outcome) settleResetCreditTry(x, 'reset'); else { x.outcome = 'reset'; x.outcomeAt = Date.now(); }
       console.log(`[reset-credit] ${x.sid || 'helper'}: the reset-credit request on ${nameOf(x.key)} sent ${new Date(sentAt).toISOString()} DID land — ${r.why}`);
-      serverNotice(`codex-reset-settled-${x.sid || 'helper'}-${Date.now()}`, `Reset credit on ${nameOf(x.key)} — the request sent at ${new Date(sentAt).toISOString().slice(0, 16).replace('T', ' ')} UTC did land (${r.why}); the limit was reset then.`, { i18n: { key: i18nKey('Reset credit on {account} — the request sent at {time} did land ({why}); the limit was reset then.'), params: { account: nameOf(x.key), time: new Date(sentAt).toISOString().slice(0, 16).replace('T', ' ') + ' UTC', why: r.why } } });
+      serverNotice(`codex-reset-settled-${x.sid || 'helper'}-${Date.now()}`, `Reset credit on ${nameOf(x.key)} — the request sent at ${OF.when(sentAt)} did land (${r.why}); the limit was reset then.`, { i18n: { key: i18nKey('Reset credit on {account} — the request sent at {time} did land ({why}); the limit was reset then.'), params: { account: nameOf(x.key), time: OF.when(sentAt), why: r.why } } });
       // the cards resolve at the READING's instant (as the answer path does): every card drawn before it offered this credit
       try { resolveResetCreditCards(x.key, { kind: 'used', at: x.settled.at, untilSec: win || null }); } catch { }
     } else if (r.how === 'untold') {
@@ -4153,7 +4154,7 @@ function settleResetCreditByReading(key, snap) {
       console.log(`[reset-credit] ${x.sid || 'helper'}: the reset-credit request on ${nameOf(x.key)} sent ${new Date(sentAt).toISOString()} cannot be judged — ${r.why}; the block ends`);
       // verify r6 (reproduced): the AUTO rung's attempt ending untold was journal-only — "a credit may have been spent and
       // nobody can say" is the owner's fact whoever pressed; said for every origin (once per attempt)
-      serverNotice(`codex-reset-untold-${x.sid || 'helper'}-${Date.now()}`, `Reset credit on ${nameOf(x.key)} — the request sent at ${new Date(sentAt).toISOString().slice(0, 16).replace('T', ' ')} UTC cannot be judged (${r.why}); it may have been spent. A new press spends a credit on the count shown now.`, { i18n: { key: i18nKey('Reset credit on {account} — the request sent at {time} cannot be judged ({why}); it may have been spent. A new press spends a credit on the count shown now.'), params: { account: nameOf(x.key), time: new Date(sentAt).toISOString().slice(0, 16).replace('T', ' ') + ' UTC', why: r.why } } });
+      serverNotice(`codex-reset-untold-${x.sid || 'helper'}-${Date.now()}`, `Reset credit on ${nameOf(x.key)} — the request sent at ${OF.when(sentAt)} cannot be judged (${r.why}); it may have been spent. A new press spends a credit on the count shown now.`, { i18n: { key: i18nKey('Reset credit on {account} — the request sent at {time} cannot be judged ({why}); it may have been spent. A new press spends a credit on the count shown now.'), params: { account: nameOf(x.key), time: OF.when(sentAt), why: r.why } } });
     } else console.log(`[reset-credit] ${x.sid || 'helper'}: the reset-credit request on ${nameOf(x.key)} sent ${new Date(sentAt).toISOString()} is settled ${r.how} — ${r.why}; nothing holds the account any more`);
     out = r;
   }
@@ -4411,16 +4412,16 @@ function resetCreditSkipNotice(t) {
   const landed = (() => { for (let x = t.prior; x; x = x.prior) if (x.settled && x.settled.how === 'landed') return x; return null; })();
   const expired = (() => { for (let x = t.prior; x; x = x.prior) if (x.settled && x.settled.how === 'expired') return x; return null; })();
   const untold = (() => { for (let x = t.prior; x; x = x.prior) if (x.settled && x.settled.how === 'untold') return x; return null; })();
-  const utc = (x) => new Date(x.sentAt || x.at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+  const sentWhen = (x) => OF.when(x.sentAt || x.at);
   const acct = nameOf(t.key);
   // verify r5: the read just taken shows a window other than the one the dialog showed — nothing was spent (said first:
   // whatever the priors say, the person approved THAT window)
   const moved = t.skipWhy === 'window-moved';
-  const movedAt = moved && Number(t.skipWindow) > 0 ? new Date(Number(t.skipWindow) * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : null;
+  const movedAt = moved && Number(t.skipWindow) > 0 ? OF.when(Number(t.skipWindow) * 1000) : null;
   if (moved && !landed && !expired && !untold) return { text: `Reset credit not used on ${acct} — the limit this dialog showed has moved since it opened (the account's window resets at ${movedAt || '?'} now); nothing was spent. Open it again to see the account now.`, i18n: { key: i18nKey('Reset credit not used on {account} — the limit this dialog showed has moved since it opened (the account’s window resets at {time} now); nothing was spent. Open it again to see the account now.'), params: { account: acct, time: movedAt || '?' } } };
-  if (landed) return { text: `Reset credit not used again on ${acct} — the request sent at ${utc(landed)} had already landed (${landed.settled.why}); this press spent nothing.`, i18n: { key: i18nKey('Reset credit not used again on {account} — the request sent at {time} had already landed ({why}); this press spent nothing.'), params: { account: acct, time: utc(landed), why: landed.settled.why } } };
+  if (landed) return { text: `Reset credit not used again on ${acct} — the request sent at ${sentWhen(landed)} had already landed (${landed.settled.why}); this press spent nothing.`, i18n: { key: i18nKey('Reset credit not used again on {account} — the request sent at {time} had already landed ({why}); this press spent nothing.'), params: { account: acct, time: sentWhen(landed), why: landed.settled.why } } };
   if (expired) return { text: `Reset credit not used on ${acct} — the limit this dialog showed has reset by itself since the earlier request; nothing was spent. Open it again to see the account now.`, i18n: { key: i18nKey('Reset credit not used on {account} — the limit this dialog showed has reset by itself since the earlier request; nothing was spent. Open it again to see the account now.'), params: { account: acct } } };
-  if (untold) return { text: `Reset credit not used yet on ${acct} — the request sent at ${utc(untold)} cannot be judged (${untold.settled.why}); nothing was spent this time. Open it again: the count shown is the account's now, and a new press spends one.`, i18n: { key: i18nKey('Reset credit not used yet on {account} — the request sent at {time} cannot be judged ({why}); nothing was spent this time. Open it again: the count shown is the account’s now, and a new press spends one.'), params: { account: acct, time: utc(untold), why: untold.settled.why } } };
+  if (untold) return { text: `Reset credit not used yet on ${acct} — the request sent at ${sentWhen(untold)} cannot be judged (${untold.settled.why}); nothing was spent this time. Open it again: the count shown is the account's now, and a new press spends one.`, i18n: { key: i18nKey('Reset credit not used yet on {account} — the request sent at {time} cannot be judged ({why}); nothing was spent this time. Open it again: the count shown is the account’s now, and a new press spends one.'), params: { account: acct, time: sentWhen(untold), why: untold.settled.why } } };
   if (moved) return { text: `Reset credit not used on ${acct} — the limit this dialog showed has moved since it opened (the account's window resets at ${movedAt || '?'} now); nothing was spent. Open it again to see the account now.`, i18n: { key: i18nKey('Reset credit not used on {account} — the limit this dialog showed has moved since it opened (the account’s window resets at {time} now); nothing was spent. Open it again to see the account now.'), params: { account: acct, time: movedAt || '?' } } };
   if (t.skipWhy === 'no-credits') return { text: `Reset credit not used on ${acct} — the account has no reset credits available.`, i18n: { key: i18nKey('Reset credit not used on {account} — the account has no reset credits available.'), params: { account: acct } } };
   if (t.skipWhy === 'no-verdict') return { text: `Reset credit not used on ${acct} — the conversation's codex wrapper read the account but got no verdict in time; nothing was spent. Use it again from the Agents list.`, i18n: { key: i18nKey('Reset credit not used on {account} — the conversation’s codex wrapper read the account but got no verdict in time; nothing was spent. Use it again from the Agents list.'), params: { account: acct } } };
@@ -4667,7 +4668,7 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
       try {
         const item = todos.add(sessionKey, {
           origin: 'pool', // B-328d: the pool engine's reset-credit decision
-          text: `Use a stored reset credit on ${who}? (limit resets ${R ? new Date(R * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'at an unknown time'})`,
+          text: `Use a stored reset credit on ${who}? (limit resets ${R ? OF.when(R * 1000) : 'at an unknown time'})`,
           detail: desc.text, urgency: 'normal', kind: 'action', sessionName: session.name || null,
           i18n: { text: { key: i18nKey('Use a stored reset credit on {account}?'), params: { account: who } }, detail: desc.lines },
           action: { type: 'reset-credit', sessionId: session._webuiId, accountKey: key, resetsAtSec: R || null, creditsLeft, reason: v.reason },
@@ -5824,7 +5825,7 @@ function noteMemberServeFailure(memberId, info = {}, { source = 'a turn', backen
       try { global.__vsEvent?.('pool-member-serve-lapsed', memberId); } catch { }
       try {
         const todos = getUserTodos();
-        const sinceText = new Date(serve.since).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+        const sinceText = OF.when(serve.since);
         // SAID AS IT IS UNDER THIS INSTANCE'S SETTING (verify r1 ⑧, r2 ②): only accounts.onDemandQuotaRefresh = 'auto-cli'
         // asks a lapsed member by itself; under the default ('manual') the person's Re-check does; under 'off' even Re-check
         // is refused (403), so the words name the setting. A subscription NO pool lists (verify r2 ③) gets no pool item at

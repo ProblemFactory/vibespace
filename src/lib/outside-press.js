@@ -68,3 +68,44 @@ export function tapVerdict({ dx = 0, dy = 0, heldMs = 0, cancelled = false } = {
   if (Math.hypot(dx, dy) > TAP_SLOP_PX) return false;
   return heldMs < LONG_PRESS_MS;
 }
+
+// ── A PRESS INTO A FRAME (lane menu-close-residue, B-5bd5 ①, 2026-10-20) ──
+// A press inside an <iframe> — a Web view window, a plugin window, the
+// Channels mail frame, a Design artboard — is dispatched in the FRAME's own
+// document: the parent's capture pointerdown never fires, so the closer above
+// was blind to it and the menu stayed open over the frame. The ONE signal the
+// parent gets is `window` blur. Measured in Chrome (the lane's probe, report
+// §1) for a same-origin frame, a cross-origin frame and a sandboxed srcdoc
+// artboard alike: at the blur event document.activeElement is ALREADY the frame
+// element and document.hasFocus() is still true (the page keeps the focus — it
+// went into one of its frames). A blur to ANOTHER top-level window (alt-tab,
+// the devtools, a second tab) leaves activeElement where it was (the body, a
+// menu row) and hasFocus() false; while a frame holds the focus such a blur
+// never reaches the parent at all. focusout is no signal: it fires only when
+// an element was focused, with relatedTarget null in both cases.
+
+/** The tags whose focus means "the presses go to another document" — keyboard-yield.js's isFrame family. */
+export const FRAME_TAGS = Object.freeze(['IFRAME', 'FRAME', 'OBJECT', 'EMBED']);
+
+/**
+ * Does a `window` blur close the surface? The facts the DOM half measured at the blur:
+ *   active       — document.activeElement (null / the body = the focus left the page or was nowhere)
+ *   el           — the surface (an element, or an array of roots); `contains` is asked
+ *   excludes     — its exempt elements (its anchor, its toggle buttons)
+ *   pageFocused  — document.hasFocus() at the blur (true: the focus went INTO a frame of this page)
+ *   ignored      — the surface's own ignore(active) rule said so
+ *   connected    — the surface is still in the document (false ⇒ retire, never close)
+ * Order matters and is the table: gone > no-active > not-a-frame > page-unfocused > inside > excluded > ignored > frame.
+ * @returns {{ close: boolean, retire: boolean, why: 'root-gone'|'no-active'|'not-a-frame'|'page-unfocused'|'inside'|'excluded'|'ignored'|'frame' }}
+ */
+export function shouldCloseOnBlur({ active = null, el = null, excludes = [], pageFocused = true, ignored = false, connected = true } = {}) {
+  if (connected === false) return { close: false, retire: true, why: 'root-gone' };
+  if (!active) return { close: false, retire: false, why: 'no-active' };
+  if (!FRAME_TAGS.includes(String(active.tagName || '').toUpperCase())) return { close: false, retire: false, why: 'not-a-frame' };
+  if (pageFocused === false) return { close: false, retire: false, why: 'page-unfocused' };
+  const within = (x) => !!x && typeof x.contains === 'function' && x.contains(active);
+  if ((Array.isArray(el) ? el : [el]).some(within)) return { close: false, retire: false, why: 'inside' };
+  if ((Array.isArray(excludes) ? excludes : [excludes]).some(within)) return { close: false, retire: false, why: 'excluded' };
+  if (ignored) return { close: false, retire: false, why: 'ignored' };
+  return { close: true, retire: false, why: 'frame' };
+}

@@ -126,7 +126,7 @@ console.log('§4 the shipped schema');
   const SCHEMA = S.SETTINGS_SCHEMA, CATS = S.SETTINGS_CATEGORIES;
   const real = (facts, o = {}) => V.settingsViewModel(SCHEMA, { categories: CATS, ctx: { get: (k) => (SCHEMA[k] ? SCHEMA[k].default : undefined), facts, nameOf: () => null }, t: tEn, ...o });
   const none = { vnc: false, desktopApps: false, harnesses: new Set(['claude']), channels: new Set() };
-  const all = { vnc: true, desktopApps: true, harnesses: new Set(['claude', 'codex', 'opencode']), channels: new Set(['lark', 'gmail']) };
+  const all = { vnc: true, desktopApps: true, harnesses: new Set(['claude', 'codex', 'opencode', 'antigravity']), channels: new Set(['lark', 'gmail']) };
   const m0 = real(none), m1 = real(all, { showAdvanced: true }), mu = real({});
   ok(!m0.byCategory.Codex.show && !m0.byCategory.OpenCode.show && m0.byCategory.Claude.show, 'a machine without the codex / opencode CLIs: the WHOLE Codex and OpenCode sections vanish (the table-level `when`), Claude stays');
   ok(m1.byCategory.Codex.show && m1.byCategory.Codex.rows.length === S.harnessSettingPaths('codex').length, '…with them installed, every derived Codex row draws');
@@ -141,7 +141,7 @@ console.log('§4 the shipped schema');
   const whens = Object.entries(SCHEMA).filter(([, r]) => r.when).length;
   console.log(`    tier census: ${adv.length} advanced of ${Object.keys(SCHEMA).length} rows; ${whens} rows carry a \`when\`; default view draws ${real(all).drawn} rows, ${real(all).hiddenAdvanced} advanced folded`);
   // ≤ 95 (lane antigravity-harness): every harness's extra-args row is advanced, and agy's is the fourth harness's
-  ok(adv.length >= 60 && adv.length <= 95, `the advanced tier holds ${adv.length} rows (the design's estimate ~75)`);
+  ok(adv.length >= 60 && adv.length <= 95, `the advanced tier holds ${adv.length} rows (the design's estimate ~75; ≤ 95 since lane dm-reply-infers' channels.replyInferHours made it 91)`);
   const nav = real(none).sections.filter((s) => s.show).map((s) => s.category);
   ok(nav.length === real(none).sections.filter((s) => s.rows.length || s.hiddenAdvanced).length && !nav.includes('Codex'), `V4: the categories drawn (= the nav items) are exactly those with a row or a hidden-count line (${nav.length})`);
   const moved = { 'desktop.idleTimeoutMin': 'Desktop apps', 'desktop.appScale': 'Desktop apps', 'desktop.seamless': 'Desktop apps', 'desktop.backendPrefs': 'Desktop apps', 'window.realDesktopTargets': 'Desktop apps', 'claude.autoResumeOnLimit': 'Spending', 'agentd.autoGraduate': 'Session', 'agentd.localPipeSessions': 'Session', 'agentd.localDiscovery': 'Session', 'agents.jobNotify': 'Background Work' };
@@ -367,6 +367,30 @@ console.log('§11 a textarea row stacks; the rail keeps the words ≥ 40 % (the 
   const at = (s) => CSS.indexOf(s), start = at('/* SETTINGS ROWS NEVER SQUEEZE THEIR WORDS');
   ok(start > 0 && ['.settings-row {\n', '.settings-row-info {', '.settings-row-control {', '.settings-json {\n', '.settings-link-btn {'].every((s) => at(s) >= 0 && at(s) < start), 'the block comes after the rules it overrides (a specificity tie goes to the later rule)');
   ok(block && !/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(block), 'theme vars only — no literal colour in the block');
+}
+
+// ── lane idle-paint-default-on (the owner 2026-10-20 「可以」): browser.idlePaintFreeze is ON by default — ONE default ──
+console.log('§12 browser.idlePaintFreeze: the row\'s default is src/browser-idle.js IDLE_PAINT_DEFAULT (on); a stored value is kept');
+{
+  const { createRequire } = await import('node:module');
+  const BI = createRequire(import.meta.url)('../src/browser-idle.js');
+  const KEY = 'browser.idlePaintFreeze';
+  const rowDefault = (SS) => SS.SETTINGS_SCHEMA[KEY] && SS.SETTINGS_SCHEMA[KEY].default === BI.IDLE_PAINT_DEFAULT && BI.IDLE_PAINT_DEFAULT === true;
+  ok(rowDefault(S) && S.SETTINGS_SCHEMA[KEY].type === 'boolean' && S.SETTINGS_SCHEMA[KEY].tier === 'advanced', 'the row\'s default is IDLE_PAINT_DEFAULT = true (the keeper\'s read takes the same value — test-browser-display)', S.SETTINGS_SCHEMA[KEY]);
+  const { SettingsManager } = await import('../src/lib/settings.js');
+  const mgr = (vals) => { const m = new SettingsManager(); m._values = { ...vals }; return m; };
+  const unset = mgr({}), off = mgr({ [KEY]: false }), on = mgr({ [KEY]: true });
+  const turnedOff = mgr({}); turnedOff.set(KEY, false); clearTimeout(turnedOff._saveTimer); turnedOff._saveTimer = null;
+  const backOn = mgr({ [KEY]: false }); backOn.set(KEY, true); clearTimeout(backOn._saveTimer); backOn._saveTimer = null;
+  ok(unset.get(KEY) === true && !unset.isModified(KEY) && off.get(KEY) === false && on.get(KEY) === true && on.isModified(KEY),
+    'the Settings model: never set ⇒ on (the default); a stored false stays off and a stored true stays stored — a default never rewrites a stored value');
+  ok(turnedOff._values[KEY] === false && turnedOff.get(KEY) === false && !(KEY in backOn._values) && backOn.get(KEY) === true,
+    'the door: turning it off STORES false (the server\'s read sees it); turning it back on drops the override (sparse storage — the default is on)');
+  const ssrc12 = read('src/lib/settings-schema.js'), LIT = "    type: 'boolean', default: IDLE_PAINT_DEFAULT,\n    label: t('Stop drawing in a browser nobody watches'),";
+  const M12 = mutantCopies('settings-view-idle', REPO);
+  const Slit = await import(pathToFileURL(M12.write('src/lib/settings-schema.js', ssrc12.replace(LIT, LIT.replace('default: IDLE_PAINT_DEFAULT,', 'default: false,')), 'literal-default', { esm: true })).href);
+  ok(ssrc12.includes(LIT) && !rowDefault(Slit), 'CONTROL: a row that keeps a literal default of its own (the .331 `false`) is RED on the default row');
+  for (const r of copiesCensus(M12.files, M12.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
 
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);

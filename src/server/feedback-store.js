@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const M = require('../feedback-model.js');
+const PT = require('../peer-text.js');   // the belt: another agent's words toward an agent (feedback.list)
 const { SyncStore } = require('../sync-store.js');
 
 function writeJsonAtomic(file, obj) {
@@ -65,11 +66,12 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     if (sid) lastPost.set(sid, at);
     return { ok: true, report: M.publicRow(f.record), duplicate: f.duplicate, chars: M.chars(v.value.text) };
   };
-  /** the owner's open / handled */
-  api.setStatus = (id, status, { by = 'owner' } = {}) => {
+  /** the owner's open / handled — THE one call (the owner's PATCH and the maintainer's feedback.handled); `version` /
+   *  `note`: the release that shipped the fix and a line about it (lane feedback-handled-verb) */
+  api.setStatus = (id, status, { by = 'owner', version = null, note = null } = {}) => {
     const i = state.records.findIndex((r) => r.id === id);
     if (i < 0) return { ok: false, code: 'not_found', error: `no report ${String(id).slice(0, 40)}` };
-    const s = M.setStatus(state.records[i], status, { by, now: now() });
+    const s = M.setStatus(state.records[i], status, { by, now: now(), version, note });
     if (!s.ok) return s;
     state.records[i] = s.record;
     sync.set(id, M.publicRow(s.record));
@@ -86,4 +88,39 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
   return api;
 }
 
-module.exports = { create };
+/**
+ * THE AUTOMATION VERBS (lane feedback-handled-verb — the owner 2026-10-20: 「你处理过的 agent 反馈你怎么不进行标记呢？」;
+ * src/server/automation-engine.js `verbs`). The maintainer conversation ships the fixes but had no door to mark the reports:
+ * a conversation the owner GRANTED a key holding these verbs now has one. The grant, the first-use card, the vault and the
+ * audit are the engine's — nothing here judges who may call.
+ *   feedback.handled  the OWNER's own act through THE SAME store call PATCH /api/feedback/:id makes (`store.setStatus`):
+ *                     the release that shipped the fix and the note stamped, `by` = the calling conversation's name — the
+ *                     sheet says «handled in 2.369.NNN by <name>»; the StateSync mirror and data/feedback.json follow as
+ *                     for the owner's click
+ *   feedback.list     the OPEN reports with their ids. Their words are OTHER agents' (a report, its about, the reporting
+ *                     conversation's and its Task Group's names), so every piece leaves through the belt (src/peer-text.js:
+ *                     the text a block, the rest pieces) — the reporters list never leaves (publicRow drops it)
+ */
+function automationVerbs({ store }) {
+  const piece = (v, max) => (v == null || v === '' ? null : PT.toAgentText(v, { kind: 'line', max }));
+  // the bounds in UTF-16 units: a stored field is ≤ its LIMITS in characters (a character may be two units)
+  const agentRow = (r) => ({
+    id: r.id, at: r.at, lastAt: r.lastAt, kind: r.kind, count: r.count, harness: r.harness,
+    about: piece(r.about, 2 * M.LIMITS.aboutMax) || '', text: PT.toAgentText(r.text, { kind: 'block', max: 2 * M.LIMITS.textMax }),
+    session: { id: r.session.id, name: piece(r.session.name, 2 * M.LIMITS.name) },
+    group: r.group ? { id: r.group.id, name: piece(r.group.name, 2 * M.LIMITS.name) } : null,
+    instance: { name: piece(r.instance.name, 2 * M.LIMITS.name), version: piece(r.instance.version, 2 * M.LIMITS.name) },
+  });
+  return {
+    'feedback.handled': (args, { caller }) => {
+      const r = store.setStatus(args.id, 'handled', { by: caller.name || caller.sessionKey || caller.conversationId, version: args.version, note: args.note });
+      return r.ok ? { ok: true, id: r.report.id, status: r.report.status, version: r.report.handledVersion, by: r.report.handledBy } : { ok: false, code: r.code, why: r.error };
+    },
+    'feedback.list': () => {
+      const open = store.list().reports.filter((r) => r.status !== 'handled');
+      return { ok: true, open: open.length, reports: open.map(agentRow) };
+    },
+  };
+}
+
+module.exports = { create, automationVerbs };

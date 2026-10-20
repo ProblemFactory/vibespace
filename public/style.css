@@ -6123,6 +6123,8 @@ a.chan-prop-file-name:hover, a.chan-prop-file-name:focus-visible { text-decorati
 .chan-af-rule .chan-opt-input { min-width: 0; width: 100%; }
 .chan-af-fields { display: flex; gap: 4px; min-width: 0; }
 .chan-af-rule.chan-af-rule-nofield { grid-template-columns: minmax(110px, 1fr) auto; }
+/* lane dm-reply-infers: the reply rule's opt-in judged road, under its row */
+.chan-af-infer { margin: 2px 0 6px; display: flex; flex-direction: column; gap: 4px; }
 /* lane decision-rule: the decision rule's row — the condition, the answer kind, options (+ a route), threshold, cost */
 .chan-af-decision { display: flex; flex-direction: column; gap: 6px; margin: 0 0 6px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
 .chan-af-decision .chan-dec-cond { width: 100%; min-height: 54px; resize: vertical; font: inherit; }
@@ -7605,6 +7607,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .fb-row.fb-open .fb-text { display: block; -webkit-line-clamp: unset; line-clamp: none; }
 .fb-meta { font-size: 10px; color: var(--text-dim); overflow-wrap: anywhere; }
 .fb-meta:empty { display: none; }
+.fb-handled-note { font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; white-space: pre-wrap; }
 @media (max-width: 768px) { .fb-act { min-height: 32px; } .fb-tab { min-height: 32px; } }
 
 /* THE VAULT (lane vault-e2e-password): the unlock / setup / change modals, the Vault window's header (lane vault-one-door), the taskbar lock chip */
@@ -7623,6 +7626,15 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .vault-chip:hover { background: var(--hover-overlay); }
 #mobile-nav-vault { min-width: 36px; min-height: 36px; justify-content: center; }
 #mobile-nav-vault .vault-chip-label { display: none; }
+/* lane vault-locked-loud: the ⚙ button's red mark while the vault is locked (src/lib/vault-unlock.js drawGearMark) — the cog in
+   --red and a corner badge (the conn-corner-dot pattern: absolute, a ring of the bar's own background) holding the lock glyph */
+#btn-global-settings.vault-locked, #mobile-nav-gear.vault-locked { position: relative; color: var(--red, #ef4444); }
+.vault-gear-mark {
+  position: absolute; top: 0; right: 0; width: 11px; height: 11px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; pointer-events: none;
+  color: var(--red, #ef4444); background: var(--bg-toolbar, var(--bg-root)); box-shadow: 0 0 0 1px var(--red, #ef4444);
+}
+.vault-gear-mark svg { width: 8px; height: 8px; }
 @media (max-width: 600px) {
   .vault-dialog-box .dialog-footer button, .vault-actions button { min-height: 36px; }
   .vault-pw { min-height: 40px; font-size: 16px; }

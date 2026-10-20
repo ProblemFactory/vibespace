@@ -13,6 +13,7 @@
  * A 60 s unref'd sweep re-judges every dial host: the knocking stops ⇒ the row's line goes and the clock starts.
  */
 const fs = require('fs');
+const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const path = require('path');
 const DH = require('../dial-health.js');
 
@@ -20,7 +21,7 @@ const INBOX_KEY = 'machines'; // the panel's jump lands on Manage Agents → Mac
 const RESOLVED_BY = 'system';
 const i18nKey = (s) => s;
 const nameOf = (s) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').trim().slice(0, 80) || 'a machine';
-const whenOf = (ms) => new Date(Number(ms) || 0).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+const whenOf = (ms) => OF.when(Number(ms) || 0);
 
 /** The item's words — English text + the same sentences as STRUCTURE (the client words them per device). */
 function itemOf({ machine, from, since, every }) {

@@ -22,18 +22,26 @@
  *     LOCK refused: its item above names those) and runs `onFailing` at the 20th in a day. That files ONE For-you item
  *     naming the actor and the entry (its `text` = the pair: one row per pair, ever); the OWNER resolves it — an unlock does
  *     not (it is not the lock's) — and the same pair files again only a day later (the store REOPENS the same row).
+ *   · SAID AT ONCE (lane vault-locked-loud — the owner 2026-10-20: "如果 vault 没解锁应该直接在界面上有个显著提醒，不需要等到 agent 被
+ *     block 了 … 或者在 inbox 有个 urgent 提醒"): THE item is URGENT (an action row: the red badge counts it, never the grey
+ *     notices) and is filed the MOMENT the vault becomes locked — a boot over a locked vault AND every lock act (a person's
+ *     door, an agent, the idle lock) — by PURE src/vault-loud.js's table (`item`), the one the page's dialog and ⚙ mark ask.
+ *     Before any refusal its line says what the lock means («… agents that need a credential will be refused until you unlock
+ *     it»); a refusal then names who (above). The unlock resolves it; the next lock files it again.
  */
 const SIGNED_OUT_CODE = 4401;
 const VB = require('../vault-blocked.js');   // PURE: the lock epoch's list and the item's words
 const VI = require('../vault-inventory.js'); // PURE: the two producers' rules (lane vault-window-v2)
 const VU = require('../vault-use.js');       // PURE: the use law — an entry in words (lane vault-use-law)
+const VL = require('../vault-loud.js');      // PURE: what a locked vault says at once (lane vault-locked-loud) — `item` here
 
 // lane vault-relock-door (owner 2026-10-20 「为啥我有的时候更新后需要重新输入二次密码有时候不用」): the restart's For-you item. The
 // vault locks at every restart by law; the open tab re-asks and a persistent strip warns (src/lib/vault-unlock.js), but a
 // client that was not open would see nothing. So at boot the hub files ONE tray item when the vault is SET UP and LOCKED.
 const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs) — the client words it with t() (zh + ja in src/lib/i18n-*.js)
 const VAULT_INBOX_KEY = 'vault'; // the For-you bucket (not a session), as login-expiry uses 'accounts' and apps uses 'apps'
-const RELOCK_TEXT = i18nKey('The vault locked after a restart — enter the second password to unlock. Device links, the relay and account switching are waiting.');
+const RELOCK_TEXT = i18nKey('The vault locked after a restart — enter the second password to unlock. Device links, the relay and account switching are waiting.');   // 2.369.325's line (an upgraded store's resolved rows still show it)
+const LOCKED_TEXT = i18nKey('The vault is locked — agents that need a credential will be refused until you unlock it. Enter the second password to unlock.');   // int332: + the door sentence (test-vault-words: a For-you sentence says where)   // lane vault-locked-loud: the line from the moment it locks
 // lane vault-locked-refusal-notice: THE item's identity (the store dedupes by bucket + text + action: one row, ever — the page
 // words it from `i18n`); the line once the lock has stopped someone; its detail lines
 const VAULT_ITEM_TEXT = 'The vault is locked — enter the second password to unlock.';
@@ -87,15 +95,17 @@ function wireVaultHooks({ vault, auth = null, wss = null, hostTokens = null, plu
     const lines = w ? [...w.lines.map((l) => ({ key: ROW_LINE, params: { who: l.who, what: l.what } })), ...(w.moreActors || w.moreRefusals ? [{ key: MORE_LINE, params: { n: w.moreRefusals ? `${w.moreActors}+` : w.moreActors } }] : [])] : [{ key: NOTHING_YET }];
     const detail = lines.map((l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m))).join('\n');
     try {
-      const r = userTodos.add(VAULT_INBOX_KEY, { origin: 'vault', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Vault', text: VAULT_ITEM_TEXT, detail,
-        i18n: { text: w ? { key: BLOCKED_TEXT, params: { who: w.who } } : { key: RELOCK_TEXT }, detail: lines }, action: { type: 'vault-unlock' } });
+      const r = userTodos.add(VAULT_INBOX_KEY, { origin: 'vault', kind: 'action', urgency: 'urgent', by: 'agent', sessionName: 'Vault', text: VAULT_ITEM_TEXT, detail,
+        i18n: { text: w ? { key: BLOCKED_TEXT, params: { who: w.who } } : { key: LOCKED_TEXT }, detail: lines }, action: { type: 'vault-unlock' } });
       if (r && r.id) itemId = r.id;
     } catch (e) { log.warn?.(`[vault] the vault's For-you item was not filed: ${(e && e.message) || e}`); }
   }
   if (userTodos) {
     // an older build's restart notice (its own text) gives way to THE item — never two rows for one lock
     try { for (const it of userTodos.forSession(VAULT_INBOX_KEY)) if (isVaultItem(it) && it.text !== VAULT_ITEM_TEXT) userTodos.setStatus(it.id, 'done', 'vault'); } catch { /* gone already */ }
-    if (vault.state() === 'locked') fileItem(typeof vault.blockedSummary === 'function' ? vault.blockedSummary() : null);
+    const loud = () => VL.vaultLoudState({ facts: vault.facts() }).item;   // lane vault-locked-loud: THE table's word — set up + locked
+    if (loud()) fileItem(typeof vault.blockedSummary === 'function' ? vault.blockedSummary() : null);
+    vault.onLock(() => { if (loud()) fileItem(null); });   // lane vault-locked-loud: the moment it locks (a lock act, the idle lock) — not first at a refusal
     if (typeof vault.onBlocked === 'function') vault.onBlocked((summary) => fileItem(summary));
   }
   // lane vault-use-law (design q-043 D7): THE DAILY-FAILURE CARD — one item per actor × entry, filed when the engine's count
@@ -156,5 +166,5 @@ function createVaultAttention({ userTodos = null, now = () => Date.now(), log = 
   return { useFailed, agentPut, _hours: hours };
 }
 
-module.exports = { wireVaultHooks, createVaultAttention, SIGNED_OUT_CODE, VAULT_INBOX_KEY, RELOCK_TEXT, VAULT_ITEM_TEXT, BLOCKED_TEXT, NOTHING_YET, ROW_LINE, MORE_LINE,
+module.exports = { wireVaultHooks, createVaultAttention, SIGNED_OUT_CODE, VAULT_INBOX_KEY, RELOCK_TEXT, LOCKED_TEXT, VAULT_ITEM_TEXT, BLOCKED_TEXT, NOTHING_YET, ROW_LINE, MORE_LINE,
   FAILING_TEXT, FAILING_LINE, FAILING_PW_LINE, FAILING_DOOR, FAILING_ONCE, FAILING_PW_HINT };   // lane vault-use-law: the daily-failure card

@@ -26,7 +26,7 @@
 // push-blocking pin test-ci-heavy-launch carried before it moved to heavy).
 //
 // SPLIT (lane fast-tier-ratchet, 2026-10-20): the one process ran 37 s — over THE TIER RULE's 10 s, and this LAW row stays
-// fast — so the sections are now seven suites, each ≤ 10 s, their text unchanged: THIS file keeps §1 and §2 (§2b–§2f);
+// fast — so the sections are now seven suites, each ≤ 10 s, their text unchanged: THIS file keeps §1 and §2 (§2b–§2g);
 // scripts/test-ci-gate-push.mjs §3–§5 · test-ci-gate-tiers.mjs §6–§8 + §8d · test-ci-gate-shards.mjs §8b–§8c ·
 // test-ci-gate-reaper.mjs §9–§10 · test-ci-gate-hang.mjs §11 · test-ci-gate-watchdog.mjs §12; what they share is
 // scripts/ci-gate-kit.mjs.
@@ -429,6 +429,127 @@ console.log('\n§2f ci.yml installs through scripts/ci-apt.sh (a repository we d
   ok(/apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 update\n/.test(r.stdout) && /install -y --no-install-recommends dtach\n?$/.test(r.stdout), 'then update + install of exactly the named package, IPv4 forced', r.stdout);
   const noUpd = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), '--no-update', 'fonts-noto-cjk'], { encoding: 'utf-8', env: { PATH: process.env.PATH, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_ECHO: '1' } });
   ok(noUpd.status === 0 && !/ update\n/.test(noUpd.stdout) && /install -y --no-install-recommends fonts-noto-cjk/.test(noUpd.stdout), '--no-update installs on the index the first step fetched');
+}
+
+// ── §2g AN INSTALL MAY BE RETRIED, A SUITE NEVER (lane ci-npm-retry, B-fa5e: .330's heavy 6/6 — run 39462417012 — died in
+// `npm ci` on a registry reset mid-download, «npm error network read ECONNRESET», exit 152; npm's own fetch-retries
+// covers a request only until its headers) ──
+// Every npm install in every workflow goes through scripts/ci-npm.sh (3 fresh attempts, 20 s apart, a ::warning:: each);
+// every job that runs scripts/ci.mjs installs through the door's `ci` form first; a step that names scripts/ci.mjs is
+// ONE plain `node scripts/ci.mjs …` line, once per job — no loop, no `||`, no retry action, no second `if: failure()`
+// run, no continue-on-error. Read line-based (no YAML parser in this tree — the lane read the same jobs / steps / run
+// values with the `yaml` package); the controls are mutant copies of ci.yml.
+console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never');
+{
+  const okd = (c, n, d) => ok(c, c || !d ? n : `${n}\n      ${String(d).trim().split('\n').join('\n      ')}`); // a red names what it saw
+  const WF_DIR = path.join(REPO, '.github', 'workflows');
+  // a workflow's jobs → steps, line-based: a step is a `- ` item under a `steps:` key, up to the next item at its indent
+  const jobsOf = (text) => {
+    const lines = text.split('\n'), jobs = [];
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^(\s*)steps:\s*$/.exec(lines[i]);
+      if (!m) continue;
+      const steps = [];
+      let at = -1;
+      for (let j = i + 1; j < lines.length; j++) {
+        const l = lines[j], ind = l.length - l.trimStart().length, note = !l.trim() || /^\s*#/.test(l);
+        if (!note && ind <= m[1].length) break;
+        if (!note && /^\s*- /.test(l) && (at < 0 || ind === at)) { at = ind; steps.push([l.slice(0, ind) + '  ' + l.slice(ind + 2)]); continue; }
+        if (steps.length) steps[steps.length - 1].push(l);
+      }
+      jobs.push(steps.map((ls) => {
+        const ind = ls[0].length - ls[0].trimStart().length, key = (k) => ls.findIndex((l) => new RegExp(`^ {${ind}}${k}:`).test(l));
+        const r = key('run');
+        let run = r < 0 ? null : ls[r].slice(ind + 'run:'.length).trim();
+        if (r >= 0 && /^[|>][-+]?$/.test(run)) { // a block scalar: every line deeper than its key (a `#` line too), then the next key
+          const body = [];
+          for (const l of ls.slice(r + 1)) { if (l.trim() && l.length - l.trimStart().length <= ind) break; body.push(l); }
+          const cut = Math.min(...body.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length));
+          run = body.map((l) => l.slice(cut)).join('\n').trim();
+        }
+        return { text: ls.filter((l) => l.trim() && !/^\s*#/.test(l)).join('\n'), run, uses: key('uses') >= 0, cont: key('continue-on-error') >= 0 };
+      }));
+    }
+    return jobs;
+  };
+  const DOOR = /^bash scripts\/ci-npm\.sh (?:ci|install -g(?: [@\w./-]+)+)$/;
+  const INSTALL = /\bnpm\s+(?:ci|i|install|add)\b/;
+  const SUITE_LINE = /^node scripts\/ci\.mjs(?: [^;&|<>`()\n]*)?$/;
+  const verdictOf = (files) => {
+    const bad = [];
+    let doorSteps = 0, suiteSteps = 0;
+    for (const [name, text] of files) {
+      for (const [k, steps] of jobsOf(text).entries()) {
+        let ciAt = -1, suites = 0;
+        for (const [s, st] of steps.entries()) {
+          const run = st.run ?? '';
+          if (DOOR.test(run)) { doorSteps++; if (/ ci$/.test(run) && ciAt < 0) ciAt = s; } else if (INSTALL.test(st.text)) bad.push(`${name} job ${k + 1}: an install outside the door: ${(st.run ?? st.text).split('\n')[0].trim()}`);
+          if (!/scripts\/ci\.mjs/.test(st.text)) continue;
+          suites++; suiteSteps++;
+          const bare = run.replace(/\$\{\{[^}]*\}\}/g, 'X');
+          if (st.uses || st.cont || !SUITE_LINE.test(bare)) bad.push(`${name} job ${k + 1}: a suite step that is not ONE plain line: ${st.text.trim().split('\n').map((l) => l.trim()).join(' ⏎ ')}`);
+          if (ciAt < 0) bad.push(`${name} job ${k + 1}: scripts/ci.mjs with no \`scripts/ci-npm.sh ci\` before it`);
+        }
+        if (suites > 1) bad.push(`${name} job ${k + 1}: scripts/ci.mjs runs in ${suites} steps (a second run is a retry)`);
+      }
+    }
+    return { bad, doorSteps, suiteSteps };
+  };
+  const files = fs.readdirSync(WF_DIR).filter((f) => /\.ya?ml$/.test(f)).sort().map((f) => [f, fs.readFileSync(path.join(WF_DIR, f), 'utf-8')]);
+  const v = verdictOf(files);
+  ok(files.length >= 3 && files.reduce((n, [, t]) => n + jobsOf(t).length, 0) >= 4, `the walk reads every workflow (${files.map(([f]) => f).join(', ')}) and every job's steps`);
+  okd(!v.bad.length && v.doorSteps === 4 && v.suiteSteps === 2,
+    `every npm install goes through scripts/ci-npm.sh (${v.doorSteps} steps: the claude CLI + npm ci in fast and heavy) and both scripts/ci.mjs steps are one plain line, once per job, after the door's npm ci (${v.suiteSteps})`, v.bad.join('\n'));
+  // the controls: mutant copies of ci.yml, each RED for its own reason
+  const ci = files.find(([f]) => f === 'ci.yml')[1];
+  const FAST_RUN = '      - run: node scripts/ci.mjs\n', HEAVY_RUN = /( {6}- run: )(node scripts\/ci\.mjs --heavy [^\n]*)/;
+  const MUTANTS = [
+    ['the fast job\'s npm ci bare again', (t) => t.replace('run: bash scripts/ci-npm.sh ci', 'run: npm ci'), /an install outside the door: npm ci$/m],
+    ['the claude CLI installed bare', (t) => t.replace('run: bash scripts/ci-npm.sh install -g', 'run: npm i -g'), /an install outside the door: npm i -g @anthropic-ai\/claude-code/],
+    ['an `npm install` fallback after the door', (t) => t.replace('run: bash scripts/ci-npm.sh ci', 'run: bash scripts/ci-npm.sh ci || npm install'), /an install outside the door: bash scripts\/ci-npm\.sh ci \|\| npm install/],
+    ['ci.mjs in a for loop', (t) => t.replace(FAST_RUN, '      - run: for i in 1 2 3; do node scripts/ci.mjs && break; sleep 20; done\n'), /not ONE plain line: run: for i in 1 2 3/],
+    ['the heavy shard run twice by ||', (t) => t.replace(HEAVY_RUN, '$1$2 || $2'), /not ONE plain line: run: node scripts\/ci\.mjs --heavy .* \|\| node/],
+    ['an until loop in a run block', (t) => t.replace(FAST_RUN, '      - run: |\n          until node scripts/ci.mjs; do sleep 20; done\n'), /not ONE plain line: run: \| ⏎ until node scripts\/ci\.mjs/],
+    ['a retry action around ci.mjs', (t) => t.replace(FAST_RUN, '      - uses: nick-fields/retry@v3\n        with:\n          max_attempts: 3\n          command: node scripts/ci.mjs\n'), /not ONE plain line: uses: nick-fields\/retry@v3/],
+    ['a second ci.mjs step if: failure()', (t) => t.replace(FAST_RUN, FAST_RUN + '        env:\n          VIBESPACE_CI_OAT: x\n      - if: failure()\n        run: node scripts/ci.mjs\n'), /job 1: scripts\/ci\.mjs runs in 2 steps/],
+    ['continue-on-error on the suite step', (t) => t.replace(FAST_RUN, FAST_RUN + '        continue-on-error: true\n'), /not ONE plain line: run: node scripts\/ci\.mjs ⏎ continue-on-error: true/],
+    ['ci.mjs handed to the door', (t) => t.replace(FAST_RUN, '      - run: bash scripts/ci-npm.sh node scripts/ci.mjs\n'), /not ONE plain line: run: bash scripts\/ci-npm\.sh node scripts\/ci\.mjs/],
+    ['the door\'s npm ci moved after ci.mjs', (t) => t.replace('      - name: npm ci (3 attempts on a registry blip)\n        run: bash scripts/ci-npm.sh ci\n      - run: node scripts/ci.mjs\n', '      - run: node scripts/ci.mjs\n      - name: npm ci (3 attempts on a registry blip)\n        run: bash scripts/ci-npm.sh ci\n'), /job 1: scripts\/ci\.mjs with no `scripts\/ci-npm\.sh ci` before it/],
+  ];
+  const reds = MUTANTS.map(([label, edit, why]) => {
+    const t = edit(ci), mv = verdictOf(files.map(([f, x]) => [f, f === 'ci.yml' ? t : x]));
+    return { label, applied: t !== ci, red: mv.bad.some((b) => why.test(b)), bad: mv.bad };
+  });
+  const missed = reds.filter((r) => !r.applied || !r.red);
+  okd(!missed.length, `CONTROL: ${reds.length} mutant copies of ci.yml each go RED for their own reason (${reds.map((r) => r.label).join(' · ')})`,
+    missed.map((r) => `${r.label}: ${r.applied ? 'GREEN — ' + JSON.stringify(r.bad) : 'the edit did not apply'}`).join('\n'));
+
+  // THE DOOR ITSELF over a stub npm + a stub sleep (each records its argv): attempts, the pause, the exit code, the refusals
+  const dir = mktmp('npm'), bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'npm'), '#!/bin/bash\necho "$*" >> "$STUB/npm.log"\nn=$(( $(cat "$STUB/n" 2>/dev/null || echo 0) + 1 )); echo $n > "$STUB/n"\nif [ "$n" -le "${STUB_FAILS:-0}" ]; then echo "npm error network read ECONNRESET" >&2; exit "${STUB_CODE:-152}"; fi\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'sleep'), '#!/bin/bash\necho "$*" >> "$STUB/sleep.log"\n', { mode: 0o755 });
+  const door = (args, fails, code) => {
+    for (const f of ['npm.log', 'sleep.log', 'n']) fs.rmSync(path.join(dir, f), { force: true });
+    const r = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-npm.sh'), ...args], { encoding: 'utf-8', env: { PATH: `${bin}:${process.env.PATH}`, STUB: dir, STUB_FAILS: String(fails), STUB_CODE: String(code ?? 152) } });
+    const rd = (f) => { try { return fs.readFileSync(path.join(dir, f), 'utf-8').trim().split('\n').filter(Boolean); } catch { return []; } };
+    return { status: r.status, out: r.stdout + r.stderr, npm: rd('npm.log'), sleep: rd('sleep.log') };
+  };
+  const KNOBS = '--fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=60000';
+  const twoBlips = door(['ci'], 2);
+  okd(twoBlips.status === 0 && twoBlips.npm.length === 3 && twoBlips.npm.every((a) => a === `ci ${KNOBS}`) && twoBlips.sleep.join() === '20,20'
+    && ['1/3', '2/3', '3/3'].every((n) => twoBlips.out.includes(`install attempt ${n}: npm ci ${KNOBS}`)) && (twoBlips.out.match(/^::warning::install attempt [12]\/3 failed \(npm exit 152\)/gm) || []).length === 2,
+  'two blips then a clean install: three FRESH `npm ci` (npm\'s fetch-retry knobs on each, never an `npm install`), «install attempt N/3», a 20 s pause and a ::warning:: between, green', twoBlips.out);
+  const down = door(['ci'], 9);
+  okd(down.status === 152 && down.npm.length === 3 && down.sleep.join() === '20,20' && /^::error::install failed 3 times \(npm exit 152\)/m.test(down.out),
+    `a registry that stays down: exactly 3 attempts, no pause after the third, the step RED with npm's own exit code (${down.status})`, down.out);
+  const clean = door(['ci'], 0), other = door(['ci'], 9, 1);
+  ok(clean.status === 0 && clean.npm.length === 1 && !clean.sleep.length && other.status === 1, 'a clean install is one attempt and no pause; npm\'s exit code is the step\'s (1 stays 1)');
+  const cli = door(['install', '-g', '@anthropic-ai/claude-code'], 1);
+  okd(cli.status === 0 && cli.npm.length === 2 && cli.npm.every((a) => a === `install -g ${KNOBS} @anthropic-ai/claude-code`), 'the claude CLI\'s global install takes the same door', cli.npm.join(' | '));
+  const refused = [[], ['install'], ['install', '-g'], ['ci', '--legacy-peer-deps'], ['i'], ['node', 'scripts/ci.mjs']].map((a) => ({ a, r: door(a, 0) }));
+  ok(refused.every(({ r }) => r.status === 2 && !r.npm.length && /usage: ci-npm\.sh ci \| install -g/.test(r.out)),
+    `the door runs only \`npm ci\` or a global install — a local \`npm install\`, extra flags or anything else is refused before npm runs (${refused.map(({ a, r }) => `[${a.join(' ')}] ${r.status}`).join(', ')})`);
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

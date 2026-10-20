@@ -24,6 +24,10 @@
  *     real path, the account / model / permission mode the spawn would use) on the hub, after the grant and BEFORE the
  *     spend authorizer and the spawn. A key minted before limits existed (or a damaged `limits`) reads as a FRESH key —
  *     no folders — so it REFUSES every open until the owner sets its bounds (q-049 M1: fail closed, never unbounded).
+ *   · FEEDBACK (lane feedback-handled-verb — the owner 2026-10-20: 「你处理过的 agent 反馈你怎么不进行标记呢？」): the
+ *     maintainer conversation the owner granted marks an agent's feedback report handled — the OWNER's own act (PATCH
+ *     /api/feedback/:id), through the same store call — naming the release that shipped the fix (`feedback.handled`), and
+ *     reads the open reports it acts on (`feedback.list`, a READ). Their doors: src/server/feedback-store.js automationVerbs.
  */
 
 const KEY_ID_RE = /^ak-[0-9a-f]{12}$/;
@@ -33,6 +37,9 @@ const ENTRY_PREFIX = 'apikey:';
 const NAME_MAX = 60;
 const ARG_TEXT_MAX = 120;
 const ID_RE = /^[\w.:-]{1,200}$/;          // a conversation / session / task id as the routes name them
+const FEEDBACK_ID_RE = /^fb-[0-9a-f]{10}$/;  // a feedback report's id (src/server/feedback-store.js mints them)
+const RELEASE_RE = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;   // a release (2.369.330) — the one that shipped a fix
+const NOTE_MAX = 200;                       // feedback.handled's note
 const SUBJECT_RE = /^(?:session:[\w.:-]{1,200}|group:[\w.:-]{1,120}|external)$/;
 const MODES = Object.freeze(['always', 'once']);
 const ASK_TTL_MS = 60e3;                    // the first-use card: 60 s, then refused (hub-act-ask's discipline)
@@ -54,6 +61,12 @@ const textArg = (v, what, { optional = false, max = ARG_TEXT_MAX } = {}) => {
   const s = clean(v, max + 1);
   if (!s) return optional ? { ok: true, value: null } : bad(`${what} is required`);
   return s.length > max ? bad(`${what} is at most ${max} characters`) : { ok: true, value: s };
+};
+/** A value that must match ONE shape (an id the store minted, a release number) — refused by name, never trimmed to fit. */
+const shapeArg = (v, what, re, words) => {
+  if (v == null || v === '') return bad(`${what} is required`);
+  const s = str(v).trim();
+  return re.test(s) ? { ok: true, value: s } : bad(`${what} must be ${words}`);
 };
 /** Validate an args object against named fields: `spec` = { field: (v) => {ok, value} }; unknown fields are refused by name. */
 function argsOf(raw, spec) {
@@ -84,6 +97,13 @@ const SCOPES = Object.freeze([
   // conversation id) — a READ, nothing acts; a key holds it like any verb
   Object.freeze({ verb: 'conversations.status', layer: 'read', billed: false, label: "Look up a conversation's ids",
     args: (a) => argsOf(a, { target: (v) => idArg(v, 'target') }) }),
+  // lane feedback-handled-verb: the owner's «Mark handled» on an agent's feedback report, naming the release that shipped
+  // the fix (+ a note); and the OPEN reports with their ids — a READ (another agent's words: belted at the hub)
+  Object.freeze({ verb: 'feedback.handled', layer: 'act', billed: false, label: "Mark an agent's feedback handled",
+    args: (a) => argsOf(a, { id: (v) => shapeArg(v, 'id', FEEDBACK_ID_RE, 'a feedback report id (fb- and 10 hex digits — feedback.list names them)'),
+      version: (v) => shapeArg(v, 'version', RELEASE_RE, 'the release that shipped the fix (like 2.369.330)'), note: (v) => textArg(v, 'note', { optional: true, max: NOTE_MAX }) }) }),
+  Object.freeze({ verb: 'feedback.list', layer: 'read', billed: false, label: "Read the agents' open feedback",
+    args: (a) => argsOf(a, {}) }),
 ]);
 const VERBS = Object.freeze(SCOPES.map((s) => s.verb));
 const scopeOf = (verb) => SCOPES.find((s) => s.verb === verb) || null;
@@ -100,6 +120,8 @@ const CODES = Object.freeze({
   caller_gone: 410,
   // lane automation-open-limits (q-048 verify M2): the open asks for what its key's limits do not allow (one code per field)
   cwd_outside_roots: 403, account_not_allowed: 403, permission_not_allowed: 403, model_not_allowed: 403, mode_not_allowed: 403,
+  // lane feedback-handled-verb: the feedback store could not write the change (data/feedback.json) — nothing changed
+  write_failed: 503,
 });
 
 /** A key record off disk → its shape (null = not a record). Copies NAMED fields only — never a spread. */
@@ -331,11 +353,33 @@ function openLimitsVerdict(limits, spec = {}, { realpath = null } = {}) {
   return { ok: true, cwd };
 }
 
+/**
+ * q-049 M2 — `default` IS NOT A CAP (lane automation-open-permission-resolve). A key listing `default` lets an open name no
+ * permission mode, and the CLI's own three-layer config then decides what runs — bypassPermissions included. So the hub
+ * RESOLVES it (src/server/permission-rules.js resolveDefaultMode over the REAL folder the folder judge passed — the project
+ * layer follows the cwd, hence AFTER openLimitsVerdict) and judges the RESOLVED mode against the key's list. `resolved` =
+ * {ok, mode, layer: {short, file} | null, disabledBy, cwd} (PURE src/permission-rules.js claudeDefaultMode); null or
+ * `ok: false` = nothing resolved (no resolver wired, another harness): the harness's own `default` stands, as
+ * openLimitsVerdict already judged it. → { ok: true, mode, resolved } | { ok: false, code: 'permission_not_allowed', field:
+ * 'permissionModes', why, resolved } — the why names the resolved mode and the layer that set it:
+ * «the CLI's own setting (project, /x/.claude/settings.json) is bypassPermissions; this key allows default, acceptEdits».
+ */
+function permissionResolvedVerdict(limits, resolved) {
+  const L = limitsOf(limits) || limitsOf(DEFAULT_LIMITS);
+  const r = resolved && typeof resolved === 'object' && resolved.ok === true ? resolved : null;
+  if (!r) return { ok: true, mode: HARNESS_DEFAULT, resolved: null };
+  const mode = str(r.mode).trim() || HARNESS_DEFAULT;
+  if (L.permissionModes.includes(mode)) return { ok: true, mode, resolved: r };
+  const layer = r.layer && typeof r.layer === 'object' ? r.layer : null;
+  const where = layer ? `${clean(layer.short || layer.id, 20).toLowerCase() || 'a layer'}, ${clean(layer.file, 300) || clean(r.cwd, 300) || 'no file'}` : 'built-in';
+  return { ok: false, code: LIMIT_CODES.permissionModes, field: 'permissionModes', why: `the CLI's own setting (${where}) is ${clean(mode, 40)}; this key allows ${L.permissionModes.join(', ')}`, resolved: r };
+}
+
 /** A call's arguments as the AUDIT keeps them: names and ids only — never a text body (a rename's new name IS a name). */
 function argsSummary(verb, args) {
   const a = args && typeof args === 'object' ? args : {};
   const out = {};
-  for (const k of ['target', 'task', 'group', 'backend', 'mode', 'model', 'effort', 'permission', 'pool']) if (a[k] != null) out[k] = clean(a[k], 200);
+  for (const k of ['target', 'task', 'group', 'backend', 'mode', 'model', 'effort', 'permission', 'pool', 'id', 'version']) if (a[k] != null) out[k] = clean(a[k], 200);   // a feedback note is a text body: never kept
   if (a.name != null) out.name = clean(a.name, 80);
   if (verb === 'conversations.open' && a.cwd != null) out.cwd = clean(a.cwd, 200);
   return out;
@@ -347,8 +391,8 @@ function auditLine({ at, keyId = null, subject = '', verb = '', args = null, ok 
 }
 
 module.exports = {
-  KEY_ID_RE, VALUE_PREFIX, VALUE_RE, ENTRY_PREFIX, NAME_MAX, SUBJECT_RE, MODES, ASK_TTL_MS, ASK_QUIET_MS, AUDIT_FILE, STORE_FILE,
+  KEY_ID_RE, VALUE_PREFIX, VALUE_RE, ENTRY_PREFIX, NAME_MAX, SUBJECT_RE, MODES, ASK_TTL_MS, ASK_QUIET_MS, AUDIT_FILE, STORE_FILE, FEEDBACK_ID_RE, RELEASE_RE, NOTE_MAX,
   SCOPES, VERBS, scopeOf, CODES, keyOf, publicKey, grantOf, isSubject, callerSubjects,
   useVerdict, pickKey, mintPlan, entryOf, keyIdOfEntry, identityOf, argsSummary, auditLine,
-  LIMIT_FIELDS, LIMIT_CODES, OPEN_MODES, HARNESS_DEFAULT, SUBSCRIPTION, DEFAULT_LIMITS, normPath, limitsOf, limitsPlan, limitsWords, openLimitsVerdict,
+  LIMIT_FIELDS, LIMIT_CODES, OPEN_MODES, HARNESS_DEFAULT, SUBSCRIPTION, DEFAULT_LIMITS, normPath, limitsOf, limitsPlan, limitsWords, openLimitsVerdict, permissionResolvedVerdict,
 };

@@ -49,6 +49,11 @@
  * is placed by facts, so the For-you judge went from 25–100 calls a day to about none. `status().inbox` adds `untied`
  * (eligible rows the rule left alone).
  *
+ * USE reply-infer (lane dm-reply-infers, B-6b4b): the channels engine's pre-pass asks ONE fixed question
+ * (`M.REPLY_INFER_QUESTION`) per candidate — a peer's plain message after a send of the principal, in the rule's scope —
+ * with the memo = the candidate record + the sent message (judged once, for ever); the Rules switch gates it, the day's
+ * budget bounds it like every use, and its journal line carries the score (`p`).
+ *
  * THE LEDGER (lane rule-learning, design q-037 P0): the ONE other paid caller on this pool — src/server/text-model-client.js
  * (the chat completions that DRAFT the person's 「我关心什么」 block, use `learn`) — is created HERE (`textModel`) over
  * `ledger`: the plugin's switches + budget, what the day spent (settled + reserved, every use), one use's share, a
@@ -61,7 +66,7 @@ const M = require('../decision-model.js');
 const A = require('../attention-model.js'); // PURE: THE attention list (lane foryou-folds) — the judge scores only a band-5 tie
 
 const ROW_ID = 'llm';   // lane llm-plugin-rename: the Language model row (the key) — its data files keep their decision-* names
-const FEATURE_OF = Object.freeze({ attention: 'attention', rule: 'rules', routing: 'routing', inbox: 'inbox', webhook: 'rules', test: null });
+const FEATURE_OF = Object.freeze({ attention: 'attention', rule: 'rules', routing: 'routing', inbox: 'inbox', webhook: 'rules', 'reply-infer': 'rules', test: null });   // + reply-infer (lane dm-reply-infers): a reply rule's judgment rides the Rules switch
 const JOURNAL_MAX = 5000;
 const JOURNAL_DAYS = 30;
 const QUIET_MS = 5 * 60 * 1000;
@@ -289,8 +294,9 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       try { writeJsonAtomic(F.usage, d); } catch (e) { log.warn?.(`[decision] usage not saved: ${e.message}`); }
     }
     lastOutcome = { at: now(), use, outcome: 'ok' };
-    // lane decision-attention-facts: an attention call's needs_now rides its journal line (`p`, 2 decimals)
-    const p = use === 'attention' && n === 1 ? M.needsNowP(answers) : undefined;
+    // lane decision-attention-facts: an attention call's needs_now rides its journal line (`p`, 2 decimals); lane
+    // dm-reply-infers: so does a reply judgment's score (the ledger keeps the yes and the no alike)
+    const p = use === 'attention' && n === 1 ? M.needsNowP(answers) : use === 'reply-infer' && answers[0] ? answers[0].probability : undefined;
     journal({ ...base, outcome: 'ok', status, inputTokens: u.inputTokens, outputTokens: u.outputTokens, usd, hits, p });
     return { ok: true, memo: false, answers: n > 1 ? M.unbatchAnswers(answers, n) : answers, usage: u, usd };
   }

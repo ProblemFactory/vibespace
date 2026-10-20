@@ -27,6 +27,16 @@
 // the menu closes, a mutant-copy server as the control) is
 // scripts/test-desktop-xpra-window.mjs §17. The census (no document mousedown /
 // click closer anywhere in src/lib) is test-architecture §59.
+//   LANE menu-close-residue (B-5bd5, 2026-10-20) — two residues of lane M:
+//   §1 the PURE blur table (shouldCloseOnBlur: a frame outside the surface closes, the body / a row / no focus / the
+//      page unfocused / a frame inside the surface or its anchor / the ignore rule / a removed root do not);
+//   §2 (l) the REAL helper's `window` blur path under a recording fake window — the measured Chrome facts replayed
+//      (document.activeElement = the frame, hasFocus() true ⇒ close; a blur to another window ⇒ not; the brief's
+//      window.dispatchEvent(new Event('blur')) ⇒ not); (m) createPopover's ANCHOR TOGGLE under the fake DOM — the
+//      same anchor again (a press or Enter) closes and hands back a DETACHED element, another anchor / a cursor-placed
+//      popover / toggle:false rebuild as before, a closed popover opens again;
+//   §3 two more patched copies: the helper WITHOUT its blur listener stays open on a press into a frame; createPopover
+//      WITHOUT the toggle rebuilds the ⚙ popover on the second press (the residue itself) — each while the real one does not.
 // Prerequisite: `npm run build` (build-version.js is generated). ~0.2 s.
 // Run: node scripts/test-outside-press.mjs
 import fs from 'node:fs';
@@ -82,20 +92,60 @@ console.log('§1 the verdicts (src/lib/outside-press.js)');
     [{}, true],
   ];
   ok(TAPS.every(([a, w]) => OP.tapVerdict(a) === w), `tapVerdict: ${TAPS.length} rows — still + quick = tap; > ${S} px, ≥ ${L} ms, cancelled, non-finite = not a tap (a scroll, a drag, a long-press never close)`, TAPS.map(([a]) => OP.tapVerdict(a)));
+  // THE BLUR TABLE (lane menu-close-residue): a press INTO a frame reaches the parent only as `window` blur
+  {
+    const F = { tagName: 'IFRAME' }, pop = { contains: () => false }, holds = (x) => ({ contains: (t) => t === x });
+    const B = [
+      // [facts, close, why, retire]
+      [{ active: F, el: pop }, true, 'frame'], // the measured shape: activeElement = the frame, hasFocus() true (default)
+      [{ active: F, el: [pop, { contains: () => false }] }, true, 'frame'], // roots as an array
+      [{ active: { tagName: 'iframe' }, el: pop }, true, 'frame'], // the tag's case is the DOM's business
+      [{ active: { tagName: 'FRAME' }, el: pop }, true, 'frame'],
+      [{ active: { tagName: 'OBJECT' }, el: pop }, true, 'frame'],
+      [{ active: { tagName: 'EMBED' }, el: pop }, true, 'frame'],
+      [{ active: { tagName: 'BODY' }, el: pop }, false, 'not-a-frame'], // the brief's simulation: window.dispatchEvent(new Event('blur')) with the body active
+      [{ active: { tagName: 'DIV' }, el: pop, pageFocused: false }, false, 'not-a-frame'], // a REAL blur to another window with a menu row focused (measured: activeElement unchanged, hasFocus() false)
+      [{ active: { tagName: 'BODY' }, el: pop, pageFocused: false }, false, 'not-a-frame'],
+      [{ active: null, el: pop }, false, 'no-active'],
+      [{ active: F, el: pop, pageFocused: false }, false, 'page-unfocused'], // a frame focused but the page lost the focus (the belt: measured never to reach the parent)
+      [{ active: F, el: holds(F) }, false, 'inside'], // a frame INSIDE the surface (a preview popover)
+      [{ active: F, el: [pop, holds(F)] }, false, 'inside'],
+      [{ active: F, el: pop, excludes: [holds(F)] }, false, 'excluded'], // a frame inside the anchor
+      [{ active: F, el: pop, excludes: holds(F) }, false, 'excluded'],
+      [{ active: F, el: pop, ignored: true }, false, 'ignored'],
+      [{ active: F, el: pop, connected: false }, false, 'root-gone', true],
+      [{ active: null, el: pop, connected: false }, false, 'root-gone', true],
+      [{ active: F, el: holds(F), excludes: [holds(F)], ignored: true }, false, 'inside'], // precedence
+      [{ active: F, el: pop, excludes: [holds(F)], ignored: true }, false, 'excluded'],
+      [{ active: { tagName: 'BODY' }, el: holds({ tagName: 'BODY' }), ignored: true }, false, 'not-a-frame'],
+    ];
+    const bad = B.filter(([f, c, why, retire = false]) => { const v = OP.shouldCloseOnBlur(f); return v.close !== c || v.why !== why || v.retire !== retire; });
+    ok(bad.length === 0, `shouldCloseOnBlur: ${B.length} rows — a frame outside closes; the body / a row / no focus / the page unfocused / a frame inside the surface or its anchor / ignore / a removed root do not; precedence gone > no-active > not-a-frame > page-unfocused > inside > excluded > ignored > frame`, bad.map(([f]) => [f, OP.shouldCloseOnBlur(f)]));
+    ok(OP.shouldCloseOnBlur().why === 'no-active' && OP.shouldCloseOnBlur({ active: F }).close === true, 'shouldCloseOnBlur: no facts = nothing focused (never closes); a frame with no surface given = closes');
+    const ky = fs.readFileSync(path.join(repo, 'src/lib/keyboard-yield.js'), 'utf8');
+    ok(JSON.stringify([...OP.FRAME_TAGS]) === JSON.stringify(['IFRAME', 'FRAME', 'OBJECT', 'EMBED']) && ky.includes("['IFRAME', 'FRAME', 'OBJECT', 'EMBED'].includes(el.tagName)"), 'FRAME_TAGS is the family keyboard-yield.js isFrame calls a frame (spelled the same there)');
+  }
   ok(!/\bimport\b|\brequire\s*\(/.test(fs.readFileSync(path.join(repo, 'src/lib/outside-press.js'), 'utf8').replace(/\/\/.*$/gm, '')), 'outside-press.js is PURE (imports nothing)');
 }
 
 // ── a fake DOM + a browser dispatch MODEL ───────────────────────────────────
 class El {
-  constructor(name, parent = null, { popover = false, cls = [], id = '' } = {}) { this.name = name; this.parent = parent; this.popover = popover; this.cls = new Set(cls); this.id = id; this.attached = true; this.removed = 0; this.l = []; this.classList = { add: (c) => this.cls.add(c), remove: (c) => this.cls.delete(c), contains: (c) => this.cls.has(c), toggle: (c) => (this.cls.has(c) ? this.cls.delete(c) : this.cls.add(c)) }; }
-  get isConnected() { return this.attached && (!this.parent || this.parent.isConnected); }
+  constructor(name, parent = null, { popover = false, cls = [], id = '' } = {}) { this.name = name; this.parent = parent; this.popover = popover; this.cls = new Set(cls); this.id = id; this.attached = true; this.removed = 0; this.l = []; this.children = []; this.dataset = {}; this.style = {}; if (parent) parent.children.push(this); this.classList = { add: (c) => this.cls.add(c), remove: (c) => this.cls.delete(c), contains: (c) => this.cls.has(c), toggle: (c) => (this.cls.has(c) ? this.cls.delete(c) : this.cls.add(c)) }; }
+  get isConnected() { return this.attached && (this.parent ? this.parent.isConnected : this === doc.body); } // a parentless element is detached (createPopover's toggled return); the body is the root
+  // the DOM surface createPopover touches (lane menu-close-residue §2 (m)): tag, class string, a child list, a rect
+  get tagName() { return this.name.toUpperCase(); }
+  get className() { return [...this.cls].join(' '); }
+  set className(v) { this.cls = new Set(String(v).split(/\s+/).filter(Boolean)); }
+  appendChild(c) { c.parent = this; c.attached = true; this.children.push(c); return c; }
+  getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }; }
+  matches(sel) { return sel.split(',').map((x) => x.trim()).some((a) => (a === '[data-popover]' ? this.popover || !!this.dataset.popover : a[0] === '.' ? this.cls.has(a.slice(1)) : a[0] === '#' ? this.id === a.slice(1) : false)); }
   contains(t) { for (let n = t; n; n = n.parent) if (n === this) return true; return false; }
   closest(sel) {
     const alts = sel.split(',').map((s) => s.trim());
     for (let n = this; n; n = n.parent) if (alts.some((a) => (a === '[data-popover]' ? n.popover : a[0] === '.' ? n.cls.has(a.slice(1)) : a[0] === '#' ? n.id === a.slice(1) : false))) return n;
     return null;
   }
-  remove() { this.removed++; this.attached = false; }
+  remove() { this.removed++; this.attached = false; if (this.parent) this.parent.children = this.parent.children.filter((c) => c !== this); }
   addEventListener(type, fn, opts) { this.l.push({ type, fn, capture: typeof opts === 'object' ? !!opts?.capture : !!opts }); }
 }
 const doc = {
@@ -108,11 +158,20 @@ const doc = {
     if (o.signal) o.signal.addEventListener('abort', () => { this.l = this.l.filter((r) => r !== rec); });
   },
   removeEventListener(type, fn, opts) { const cap = typeof opts === 'object' ? !!opts?.capture : !!opts; this.l = this.l.filter((r) => !(r.type === type && r.fn === fn && r.capture === cap)); },
-  createElement: (t) => new El(t), getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], body: null, documentElement: null, hidden: false,
+  createElement: (t) => new El(t), getElementById: () => null, querySelector: () => null, querySelectorAll: (sel) => (doc.body ? all(doc.body).filter((n) => n.matches(sel)) : []), body: null, documentElement: null, hidden: false,
+  activeElement: null, hasFocus: () => true, // the blur legs set both (what Chrome reports at a `window` blur)
 };
 globalThis.document = doc;
 globalThis.window = globalThis;
-globalThis.addEventListener = () => {}; globalThis.removeEventListener = () => {};
+/** every connected descendant of `root` (the fake's querySelectorAll) */
+const all = (root) => root.children.flatMap((c) => (c.attached ? [c, ...all(c)] : []));
+// the fake WINDOW records its listeners (lane menu-close-residue: the helper's `window` blur listener rides the same signal)
+const win = { l: [] };
+globalThis.addEventListener = (type, fn, opts) => { const o = typeof opts === 'object' && opts ? opts : {}; if (o.signal && o.signal.aborted) return; const rec = { type, fn }; win.l.push(rec); if (o.signal) o.signal.addEventListener('abort', () => { win.l = win.l.filter((r) => r !== rec); }); };
+globalThis.removeEventListener = (type, fn) => { win.l = win.l.filter((r) => !(r.type === type && r.fn === fn)); };
+/** a `window` blur as the browser dispatches it (document.activeElement / hasFocus() already updated — measured) */
+const blurAll = ({ active = null, hasFocus = true } = {}) => { doc.activeElement = active; doc.hasFocus = () => hasFocus; const ev = { type: 'blur', target: globalThis }; for (const r of [...win.l]) if (r.type === 'blur' && win.l.includes(r)) r.fn(ev); return ev; };
+const winSince = (before) => win.l.filter((r) => !before.includes(r));
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 globalThis.innerWidth = 1280; globalThis.innerHeight = 800;
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
@@ -162,14 +221,15 @@ function touch(target, { dx = 0, dy = 0, heldMs = 90, cancel = false, id = 7, up
 // the page: body > [workspace > window > pane (xpra: cancels pointerdown, like xpra-view.js) , vnc canvas (stops +
 // cancels its mousedown, like noVNC)] + the popover + its anchor + a nested flyout + an unrelated button
 const body = new El('body');
+doc.body = body;
 const workspace = new El('workspace', body);
-const win = new El('window', workspace);
-const pane = new El('xpra-pane', win);
+const win_ = new El('window', workspace);
+const pane = new El('xpra-pane', win_);
 const paneCanvas = new El('canvas', pane);
 pane.addEventListener('pointerdown', (e) => e.preventDefault()); // xpra-view.js: ime.focus(); e.preventDefault(); setPointerCapture
-const vncCanvas = new El('vnc-canvas', win);
+const vncCanvas = new El('vnc-canvas', win_);
 vncCanvas.addEventListener('mousedown', (e) => { e.stopPropagation(); e.preventDefault(); }); // noVNC's stopEvent
-const stopPane = new El('stopping-pane', win);
+const stopPane = new El('stopping-pane', win_);
 stopPane.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); }); // a pane that stops the press too
 const toolbar = new El('toolbar', body);
 const other = new El('other-button', toolbar);
@@ -305,6 +365,78 @@ console.log('§2 onOutsidePress under the dispatch model');
   ok(pop.removed === 1 && since(before).length === 0, '(k) attachPopoverClose: a press into the picture removes it and retires');
 }
 
+{
+  // (l) A PRESS INTO A FRAME (lane menu-close-residue, B-5bd5 ①): the frame's document takes the press, the parent sees
+  // `window` blur with document.activeElement = the frame and hasFocus() true (measured in Chrome for a same-origin, a
+  // cross-origin and a sandboxed srcdoc frame alike) — the closer closes on it, on the same signal and `once` rule
+  const { pop, anchor } = fresh(); const frame = new El('iframe', win_); let closed = 0; const bd = [...doc.l], bw = [...win.l];
+  const dispose = U.onOutsidePress(pop, () => { closed++; pop.remove(); }, { exclude: [anchor] });
+  ok(winSince(bw).length === 1 && winSince(bw)[0].type === 'blur' && since(bd).length === 3, `(l) the helper arms ONE window listener beside its three document ones: ${winSince(bw).map((r) => r.type).join(', ')}`);
+  blurAll({ active: body, hasFocus: true });
+  ok(closed === 0, '(l) the brief\'s simulation — window.dispatchEvent(new Event(\'blur\')) with the body active — does NOT close it (a blur to another window / the devtools)');
+  const row = new El('row-focused', toolbar);
+  blurAll({ active: row, hasFocus: false });
+  ok(closed === 0, '(l) a REAL blur to another top-level window (a menu row still the active element, hasFocus() false) does NOT close it');
+  blurAll({ active: frame, hasFocus: false });
+  ok(closed === 0, '(l) a frame as the active element with the page unfocused does NOT close it (the belt; measured never to reach the parent)');
+  blurAll({ active: frame, hasFocus: true });
+  ok(closed === 1 && pop.removed === 1, `(l) THE RESIDUE: a press into a frame — blur with activeElement = the frame, hasFocus() true — CLOSES it (closed ${closed}×)`);
+  ok(since(bd).length === 0 && winSince(bw).length === 0, '(l) once: every listener gone after the close (the window one rides the same signal)');
+  dispose();
+}
+{
+  // (l′) the frame rows that keep it open: a frame INSIDE the surface, a frame inside its anchor, the ignore rule; a
+  // surface removed by other means retires on the blur without close; once:false stays armed; the signal takes it down
+  const { pop, anchor } = fresh(); const inPop = new El('iframe', pop), inAnchor = new El('iframe', anchor), frame = new El('iframe', win_);
+  let closed = 0; const bw = [...win.l];
+  const d1 = U.onOutsidePress(pop, () => { closed++; }, { exclude: [anchor], ignore: (t) => t.id === 'ignored-frame', once: false });
+  const ignoredFrame = new El('iframe', win_, { id: 'ignored-frame' });
+  blurAll({ active: inPop }); blurAll({ active: inAnchor }); blurAll({ active: ignoredFrame });
+  ok(closed === 0 && winSince(bw).length === 1, `(l′) a frame inside the popover, inside its anchor, or named by the ignore rule keeps it open (closed ${closed}×)`);
+  blurAll({ active: frame }); blurAll({ active: frame });
+  ok(closed === 2 && winSince(bw).length === 1, `(l′) once:false — closes on each frame blur and stays armed (${closed}×)`);
+  d1();
+  ok(winSince(bw).length === 0, '(l′) dispose removes the window listener');
+  const gone = fresh(); let closedG = 0; const bw2 = [...win.l];
+  U.onOutsidePress(gone.pop, () => { closedG++; });
+  gone.pop.remove(); blurAll({ active: frame });
+  ok(closedG === 0 && winSince(bw2).length === 0, '(l′) a popover removed by other means (Escape): the blur retires the closer, close never runs');
+  const ctl = new AbortController(); const bw3 = [...win.l]; const sig = fresh();
+  U.onOutsidePress(sig.pop, () => {}, { signal: ctl.signal }); const armed = winSince(bw3).length; ctl.abort();
+  ok(armed === 1 && winSince(bw3).length === 0, '(l′) a window-scoped surface\'s signal takes the window listener down with the rest');
+}
+{
+  // (m) THE ANCHOR TOGGLES (lane menu-close-residue, B-5bd5 ②): createPopover's dedup knows the open popover of its
+  // class — hanging off the SAME anchor, the call is the anchor pressed again (a press, or Enter on the focused
+  // button: the toggle is keyed on the anchor, not on a press) and it CLOSES; the element handed back is DETACHED
+  const gear = new El('button', toolbar, { id: 'btn-global-settings' }); const bd = [...doc.l], bw = [...win.l];
+  const p1 = U.createPopover(gear, 'global-settings-popover');
+  ok(p1.isConnected && p1.parent === body && p1.dataset.popover === '1' && p1._anchor === gear && doc.querySelectorAll('.global-settings-popover').length === 1, '(m) the first call opens the popover under the anchor (attached, [data-popover], its anchor stamped)');
+  ok(since(bd).length === 3 && winSince(bw).length === 1, '(m) …with its closer armed (three document listeners + the window blur)');
+  const p2 = U.createPopover(gear, 'global-settings-popover');
+  ok(p1.removed === 1 && !p1.isConnected && doc.querySelectorAll('.global-settings-popover').length === 0, '(m) THE RESIDUE: the same anchor again CLOSES the open popover — nothing of that class in the document');
+  ok(p2 !== p1 && !p2.isConnected && p2._closedByAnchor === true && p2.parent === null, '(m) …and hands back a DETACHED element the caller fills unseen (nothing per site)');
+  mouseClick(other);
+  ok(since(bd).length === 0 && winSince(bw).length === 0, '(m) the closed popover\'s closer retires on the next press (root-gone), as any dedup removal did');
+  const p3 = U.createPopover(gear, 'global-settings-popover');
+  ok(p3.isConnected && !p3._closedByAnchor, '(m) the anchor pressed once more OPENS again (a toggle, not a lock)');
+  const other2 = new El('button', toolbar); const p4 = U.createPopover(other2, 'global-settings-popover');
+  ok(p3.removed === 1 && p4.isConnected && p4._anchor === other2, '(m) ANOTHER anchor of the same class replaces it (the dedup as before — not a toggle)');
+  p4.remove(); // Escape's sweep
+  const p5 = U.createPopover(other2, 'global-settings-popover');
+  ok(p5.isConnected && !p5._closedByAnchor, '(m) a popover closed by Escape: its anchor opens it again (a closed one never toggles)');
+  p5.remove();
+  const pane = new El('pane', win_); const c1 = U.createPopover(pane, 'doc-lbar', { position: 'cursor', x: 10, y: 10 }); const c2 = U.createPopover(pane, 'doc-lbar', { position: 'cursor', x: 40, y: 10 });
+  ok(c1.removed === 1 && c2.isConnected && !c2._closedByAnchor, '(m) a CURSOR-placed popover (the doc link bar: its "anchor" is the whole pane) is rebuilt at the new place, never toggled');
+  c2.remove();
+  const r1 = U.createPopover(gear, 'file-view-menu'); const r2 = U.createPopover(gear, 'file-view-menu', { toggle: false });
+  ok(r1.removed === 1 && r2.isConnected && !r2._closedByAnchor, '(m) toggle:false — a programmatic rebuild (the explorer view menu re-rendering itself) replaces as before');
+  r2.remove();
+  const s1 = U.createPopover(gear, 'session-config-popover'); const s2 = U.createPopover(gear, 'status-filter-menu');
+  ok(s1.isConnected && s2.isConnected, '(m) two popovers of different classes off one anchor are two popovers (the key is the class + the anchor)');
+  s1.remove(); s2.remove(); mouseClick(other);
+}
+
 // ── §3 CONTROLS ─────────────────────────────────────────────────────────────
 console.log('§3 controls — the pre-lane closer, and the helper patched back');
 {
@@ -358,6 +490,32 @@ const M = mutantCopies('outside-press', repo);
   mouseClick(stopPane);
   dD();
   ok(bubbleBlind && closedD === 1, `CONTROL (the helper in the bubble phase): a pane that stops its press keeps the menu OPEN; the real capture-phase helper closes it (${closedD}×) — the phase is the fix`);
+  // (d) lane menu-close-residue: the helper WITHOUT its window blur listener — a press into a frame (the parent sees
+  // only the blur) leaves the menu OPEN; the real helper closes
+  const BLUR_GATE = "if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {\n    window.addEventListener('blur', (e) => {";
+  const TOGGLE = "if (reopened && opts.position !== 'cursor' && opts.toggle !== false) {";
+  ok(src.split(BLUR_GATE).length === 2 && src.split(TOGGLE).length === 2, 'the two edits the lane\'s controls make are each spelled exactly once in utils.js');
+  const nbF = M.write('src/lib/utils.js', src.replace(BLUR_GATE, "if (false) {\n    window.addEventListener('blur', (e) => {"), 'no-blur');
+  const UN = await import(pathToFileURL(nbF).href);
+  const E = fresh(); const frameE = new El('iframe', win_); let closedE = 0;
+  const dE = UN.onOutsidePress(E.pop, () => { closedE++; }, { once: false });
+  blurAll({ active: frameE, hasFocus: true });
+  const blindToFrame = closedE === 0;
+  mouseClick(other);
+  dE();
+  const F = fresh(); let closedF = 0; const dF = U.onOutsidePress(F.pop, () => { closedF++; }, { once: false });
+  blurAll({ active: frameE, hasFocus: true }); dF();
+  ok(blindToFrame && closedE === 1 && closedF === 1, `CONTROL (the helper without its blur listener): a press into a frame leaves the menu OPEN (a press elsewhere still closes, ${closedE}×); the real helper closes on the frame (${closedF}×) — the blur listener is the fix`);
+  // (e) createPopover WITHOUT the toggle — the residue itself: the second press on ⚙ REBUILDS the popover
+  const ntF = M.write('src/lib/utils.js', src.replace(TOGGLE, 'if (false) {'), 'no-toggle');
+  const UT = await import(pathToFileURL(ntF).href);
+  const gearT = new El('button', toolbar);
+  const q1 = UT.createPopover(gearT, 'global-settings-popover'); const q2 = UT.createPopover(gearT, 'global-settings-popover');
+  const rebuilt = q1.removed === 1 && q2.isConnected && q2 !== q1 && doc.querySelectorAll('.global-settings-popover').length === 1;
+  q2.remove(); mouseClick(other);
+  const g1 = U.createPopover(gearT, 'global-settings-popover'); const g2 = U.createPopover(gearT, 'global-settings-popover');
+  ok(rebuilt && g1.removed === 1 && !g2.isConnected && doc.querySelectorAll('.global-settings-popover').length === 0, 'CONTROL (createPopover without the toggle — the pre-lane shape): ⚙ pressed while its menu is open REBUILDS the menu (a new attached popover); the real one closes it — the toggle in the dedup is the fix');
+  mouseClick(other);
   for (const row of copiesCensus(M.files, M.dir, repo, { label: 'mutant copies: ' })) ok(row.pass, row.name, row.detail);
 }
 

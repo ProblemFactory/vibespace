@@ -49,7 +49,7 @@ const fs = require('fs'), { spawnSync } = require('child_process');
 const argv = process.argv.slice(2), cmd = argv[argv.length - 1] || '';
 Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); // live long enough for the /proc sampler to see this argv (its own control)
 let input = ''; try { if (/^bash -s\\b/.test(cmd)) input = fs.readFileSync(0, 'utf8'); } catch {}
-fs.appendFileSync(${JSON.stringify(path.join(FAKE, 'calls.ndjson'))}, JSON.stringify({ pid: process.pid, argv, cmd, input }) + '\\n');
+fs.appendFileSync(${JSON.stringify(path.join(FAKE, 'calls.ndjson'))}, JSON.stringify({ pid: process.pid, argv, cmd, input, env: process.env }) + '\\n');
 if (/curl -s -o \\/dev\\/null/.test(cmd)) { process.stdout.write('200'); process.exit(0); }
 if (/^bash -s\\b/.test(cmd)) {
   const cut = input.indexOf('\\n# THE DIAL ADDRESS IS CHECKED BEFORE ANYTHING IS WRITTEN');
@@ -62,7 +62,11 @@ if (/^bash -s\\b/.test(cmd)) {
     'VIBESPACE_DEVICE_ROOT="$D" VIBESPACE_AGENTD_ROOT="$D" nohup "$VS_FAKE_NODE" "$VS_FAKE_BUNDLE" </dev/null >>"$D/state/agentd.out" 2>&1 &',
     'exit 0', '',
   ].join('\\n');
-  const r = spawnSync('bash', ['-c', cmd], { input: head + tail, stdio: ['pipe', 'inherit', 'inherit'], env: process.env });
+  // the MACHINE's own world is baked in here (lane mirror-331-reds-security), never read from the env the hub hands ssh:
+  // .331 gives every ssh road hosts.sshEnv() (an allowlist), and a fake that took its root from the hub's env failed the
+  // graduation it plays («VS_FAKE_ROOT: unbound variable», the .331 mirror) — a real machine never reads the hub's env
+  const machine = { ...process.env, VS_FAKE_ROOT: ${JSON.stringify(DEV2)}, VS_FAKE_NODE: ${JSON.stringify(process.execPath)} };
+  const r = spawnSync('bash', ['-c', cmd], { input: head + tail, stdio: ['pipe', 'inherit', 'inherit'], env: machine });
   process.exit(r.status == null ? 1 : r.status);
 }
 process.exit(0);
@@ -84,7 +88,9 @@ const sample = () => {
 };
 (async () => { while (sampling) { sample(); await sleep(40); } })();
 
-const W = await bootWorld('sinks', { chrome: false, env: { PATH: `${path.dirname(FAKE_SSH)}:${process.env.PATH}`, VS_FAKE_ROOT: DEV2, VS_FAKE_NODE: process.execPath, VS_FAKE_BUNDLE: '' } });
+// a name + value only the HUB's env carries (lane mirror-331-reds-security): no ssh the hub spawns may receive either
+const HUB_CANARY = 'hub-env-' + process.pid + '-' + Date.now().toString(36);
+const W = await bootWorld('sinks', { chrome: false, env: { PATH: `${path.dirname(FAKE_SSH)}:${process.env.PATH}`, VIBESPACE_SINKS_CANARY: HUB_CANARY } });
 // the bundle path is only known after the boot built it — the fake reads it from a file the suite writes now
 const { BASE, api, bundle, devDir, serverLog, wt } = W;
 fs.writeFileSync(FAKE_SSH, fs.readFileSync(FAKE_SSH, 'utf8').replace('if (/^bash -s\\b/.test(cmd)) {', `if (/^bash -s\\b/.test(cmd)) { process.env.VS_FAKE_BUNDLE = ${JSON.stringify(bundle)};`));
@@ -144,6 +150,16 @@ try {
   TOKEN_RE.lastIndex = 0;
   ok(inst && leakedArgv.length === 0, 'verify-r3 B-grad: NO ssh invocation the hub made carries a token in its argv (the local ssh\'s argv and the remote shell\'s command line are readable by every user of each machine)', leakedArgv);
   ok(inst && /^set -- /.test(inst.input) && inst.input.includes(parsed[1]) && inst.input.includes(parsed[2]), 'verify-r3 B-grad: the tokens rode the ssh STDIN (a `set --` line bash reads before the installer)', inst && inst.input.slice(0, 200));
+  // lane mirror-331-reds-security: THE SSH ROAD'S ENV, at runtime — every ssh the hub spawned through these flows got
+  // hosts.sshEnv() (src/agent-env.js serviceEnv + SSH_ENV_KEEP: judged by that helper itself) and nothing of the hub's
+  // own (the planted VIBESPACE_SINKS_CANARY), no token in a value: a multiplexed call's ssh forks the ControlMaster,
+  // which keeps the env it was given for ten minutes — so the tokens ride STDIN only
+  const AE = require(path.join(REPO, 'src/agent-env.js'));
+  const envBad = calls.map((c) => {
+    const env = c.env || {}, kept = AE.serviceEnv(env, { keep: AE.SSH_ENV_KEEP }), text = JSON.stringify(env);
+    return { cmd: String(c.cmd).slice(0, 60), extra: Object.keys(env).filter((k) => !(k in kept)), canary: text.includes(HUB_CANARY) || 'VIBESPACE_SINKS_CANARY' in env, token: /vs[dh]t_[0-9a-f]{16,}/.test(text) };
+  }).filter((x) => x.extra.length || x.canary || x.token);
+  ok(inst && calls.length >= 2 && calls.every((c) => c.env && typeof c.env === 'object' && c.env.PATH) && envBad.length === 0, `the ssh road's env: every ssh the hub spawned (${calls.length}) got the ssh allowlist only — no hub name (the planted canary), no token in a value (the tokens ride stdin; a ControlMaster keeps its env 10 min)`, envBad);
 
   // ── ④ the sinks ──
   console.log('④ the sinks');

@@ -52,6 +52,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { trackedFiles } from './tracked-files.mjs'; // lane fence-hygiene B-abd8: a census lists data/bin via git, never a readdir (an untracked rclone/zip/bundle is NOT an agent CLI)
 const require = createRequire(import.meta.url);
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -91,7 +92,7 @@ function walk(dir, out = []) {
   return out;
 }
 const SERVER_FILES = ['server.js', ...walk('src')];
-const CLI_FILES = fs.readdirSync(path.join(ROOT, 'data/bin')).filter((f) => /^vibespace-(task|ask|job|msg|channels|status)$/.test(f)).map((f) => 'data/bin/' + f);
+const CLI_FILES = trackedFiles(ROOT, 'data/bin').filter((f) => /^data\/bin\/vibespace-(task|ask|job|msg|channels|status)$/.test(f)); // B-abd8: git ls-files, not a working-tree walk
 /** the file list the census reads — `override` maps a rel path to another absolute path (the controls) */
 const sources = (override = {}) => new Map([...SERVER_FILES, ...CLI_FILES].map((rel) => [rel, readAt(override, rel)]));
 
@@ -795,6 +796,7 @@ const STORAGE = {
   'src/lib/settings.js|localStorage|\'webui-settings\'': ['pref', 'the settings mirror'],
   'src/lib/setup-flows.js|localStorage|\'vs-onboarded\'': ['marker', 'the onboarding wizard ran'],
   'src/lib/vault-unlock.js|sessionStorage|\'vs-vault-later\'': ['marker', 'the vault\'s setup ask snoozed for this tab (lane vault-e2e-password)'],
+  'src/lib/vault-unlock.js|sessionStorage|LATER_KEY': ['marker', 'the lock whose unlock ask this tab set aside — `startedAt:lockedSince` (two times, no words; src/vault-loud.js LATER_KEY = vs-vault-unlock-later — lane vault-locked-loud)'],
   'src/lib/sidebar-rail.js|localStorage|\'vibespace.railItem\'': ['pref', 'the active rail panel'],
   'src/lib/sidebar-state.js|localStorage|\'starredSessions\'': ['ids', 'starred session ids'],
   'src/lib/sidebar-state.js|localStorage|\'archivedSessions\'': ['ids', 'archived session ids'],
@@ -896,6 +898,7 @@ const USER_STATE = {
   'src/lib/sidebar-state.js|delta': ['owner', 'stars / archives (ids), the names the owner typed, modes, configs, legacy groups — the changed top-level keys'],
   'src/lib/sidebar-state.js|state': ['owner', 'the same document, whole (the pre-first-fetch path)'],
   'src/lib/window-share.js|[REACH_KEY]': ['ids', 'app → the principals a window is shared with'],
+  'src/lib/owner-facts.js|page': ['pref', 'the owner\'s last page: its language (en / zh / ja) and whether it is the phone layout — the agents name the tray by them (lane agent-context-owner-facts)'],
 };
 const userStateWrites = (srcs) => {
   const rows = [];
@@ -1494,7 +1497,7 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
 const I_PKG = JSON.parse(read('package.json'));
 // GENERATED files are read at their sources: esbuild's --outfile targets in package.json + a file that says GENERATED on its first lines
 const I_GENERATED = new Set([...Object.values(I_PKG.scripts || {}).join(' ').matchAll(/--outfile=(data\/bin\/[\w.-]+)/g)].map((m) => m[1]));
-const I_BIN = fs.readdirSync(path.join(ROOT, 'data/bin'), { withFileTypes: true }).filter((e) => e.isFile()).map((e) => 'data/bin/' + e.name);
+const I_BIN = trackedFiles(ROOT, 'data/bin'); // B-abd8: git ls-files — the .197 fix: an UNTRACKED data/bin artifact (rclone, rclone-dl.zip) is not a source file and never becomes an I_CLI "agent CLI"
 for (const f of I_BIN) if (/^[^\n]*\n?[^\n]*\bGENERATED\b/.test(read(f).slice(0, 400))) I_GENERATED.add(f);
 function walkAll(dir, out = []) {
   for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {

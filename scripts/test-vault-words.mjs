@@ -54,12 +54,13 @@ const ROWS = {
   'src/lib/vault-unlock.js': [
     ['The vault is locked — {n} waiting on it', 'person', 'THE STRIP (place 1) — how many the lock stopped; its Unlock… button beside the words'],
     ['device links, the relay and account switching are waiting', 'person', 'THE STRIP before anything was stopped (place 1)'],
-    ['Vault locked — click to unlock', 'person', 'the lock chip\'s title (taskbar + phone nav) — the chip is the door'],
+    ['Vault locked — click to unlock', 'person', 'the lock chip\'s title (taskbar + phone nav) + the ⚙ button\'s title (lane vault-locked-loud, int332) — each is the door', { count: 2 }],
     ['Vault locked', 'label', 'the lock chip\'s own two words and the toast confirming a person\'s own lock act — the chip\'s title says the facts', { count: 2 }],
     ['Unlock the vault', 'label', 'the unlock dialog\'s own title — the dialog IS where a person unlocks it'],
   ],
   'src/server/vault-hooks.js': [
     ['The vault locked after a restart', 'foryou', 'THE FOR-YOU ITEM after a restart (place 2) — the item IS the telling'],
+    ['The vault is locked — agents that need a credential will be refused until you unlock it', 'foryou', 'THE FOR-YOU ITEM the moment it locks (lane vault-locked-loud, int332) — the item IS the telling; the door sentence follows'],
     ['The vault is locked — enter the second password to unlock.', 'foryou', 'THE FOR-YOU ITEM\'s stable text (place 2)'],
     ['The vault is locked — waiting on it: {who}', 'foryou', 'THE FOR-YOU ITEM naming who the lock stopped (place 2)'],
     ['signed out: the vault was locked', 'label', 'a WebSocket close reason — the page goes to its sign-in, a person never reads it'],

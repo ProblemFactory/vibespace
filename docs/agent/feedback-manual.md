@@ -32,7 +32,8 @@ TXT
 
 - It lands on THIS VibeSpace only (data/feedback.json) — nothing is sent
   anywhere else. The user sees it under ⚙ System ▸ Agent feedback… (newest
-  first) and marks it handled when it is dealt with.
+  first) and marks it handled when it is dealt with — or the maintainer
+  conversation does, naming the release that shipped the fix.
 - WHO sent it is the server's fact: this conversation's name, its Task Group,
   the harness and the VibeSpace version are added for you — never pass them.
 - The same report (same words, same `--about`) seen in the last 24 hours —
@@ -49,8 +50,8 @@ vibespace-feedback list
 ```
 
 Prints the reports this conversation sent (or repeated): id, time, kind ·
-about, `open` / `handled`, `×N` when it was reported more than once, and the
-text. `vibespace-feedback` with no arguments prints the usage and this list.
+about, `open` / `handled` (`handled in 2.369.NNN` when the release that fixed
+it was named), `×N` when it was reported more than once, and the text. `vibespace-feedback` with no arguments prints the usage and this list.
 
 ## When NOT to use it
 

@@ -148,6 +148,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // lane H: how long a verb waits for the lease seam's listeners (the recorder ARMING its tap) before it runs
   armWaitMs = ARM_WAIT_MS,
   daemonTable = null, endIdentity = null, orphanScanMs = O.SCAN_MS, /* lane daemon-orphan-end: the gate's process table (rows) + ending seam */
+  pageAsk = null, pageAnswerMs = null, browserEndedMs = O.BROWSER_ENDED_MS, /* lane browser-daemon-survives-update: the gate's page ask (default browser-viewport pageAnswers), its bound, the ended-browser bound */
   taskGroupDefault = null, access = null, hostKnown = null,
   vncDisplay = null, // B-d635 (lane browser-reliability): VibeSpace's own VNC desktop display the probe also looks at (the server wiring names it)
   // P4 second half (§7.4 / §7.5): the integration store (a handle or a
@@ -2074,6 +2075,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       return noteAnswer(rec, p, !!(r.ok || /^HTTP \d+/.test(String(r.error || ''))), by); // any HTTP answer is an answer
     } finally { asking.delete(p.id); }
   }
+  /** lane browser-daemon-survives-update: ONE bounded ask of every page of a browser (its endpoint's page list, then one
+   *  Runtime.evaluate per page) → browser-viewport pageAnswers' shape, or null when no endpoint is known (never throws). */
+  async function askPages(rec) {
+    if (!rec || !rec.cdpUrl) return null;
+    const boundMs = pageAnswerMs || BS.PAGE_ANSWER_MS;
+    try { return { ...(await (pageAsk || require('./browser-viewport.js').pageAnswers)(rec.cdpUrl, { timeoutMs: boundMs })), boundMs }; }
+    catch (e) { return { list: false, error: String(e && e.message), pages: [], boundMs }; }
+  }
   /** The agent refusal's fact (browser-tabs' words), or null while the browser is not judged hung. */
   const unresponsiveOf = (rec, p) => (rec && rec.unresponsive && p ? { label: p.label, since: rec.unresponsive.since, now: now(), tabs: null } : null);
   /** ONE For-you item per (profile, since) — origin browser, its Restart act; self-resolving on an answer or a restart. */
@@ -2102,9 +2111,20 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     ensureLoaded();
     const rec = reg.browsers[profileId], p = profile(profileId);
     if (!rec || !p) throw namedError('not-found', `no browser record for ${profileId}`);
+    let admitted = null;
     if (by !== 'user') {
-      const a = BS.restartAdmission({ by: 'agent', unresponsive: rec.unresponsive || null, humanDriving: userDrivesAnyWindowOf(profileId), label: p.label });
-      if (!a.ok) { log.log?.(`[browser] ${browserKey || 'an agent'} on ${profileId}: restart refused ${a.code}`); throw namedError(a.code, a.error); }
+      // lane browser-daemon-survives-update: THE PAGE'S ANSWERS, asked now (every page, bounded) + the agent's own last answers
+      // (the dialog watch's fact) — never the helper's liveness alone: a browser whose endpoint answers while no page does is hung
+      const driving = userDrivesAnyWindowOf(profileId);
+      let pages = null, stuck = null;
+      if (!rec.unresponsive && !driving) {
+        try { stuck = stuckSource && browserKey ? stuckSource(browserKey) || null : null; } catch { stuck = null; }
+        if (stuck && stuck.profileId && stuck.profileId !== profileId) stuck = null;
+        pages = BS.pageAnswerVerdict(await askPages(rec));
+      }
+      const a = BS.restartAdmission({ by: 'agent', unresponsive: rec.unresponsive || null, humanDriving: driving, label: p.label, pages, stuck });
+      if (!a.ok) { log.log?.(`[browser] ${browserKey || 'an agent'} on ${profileId}: restart refused ${a.code}${pages ? ` (its pages: ${pages.why}, ${pages.answered.length} answered, ${pages.silent.length} did not)` : ''}`); throw namedError(a.code, a.error); }
+      admitted = { why: a.why, pages };
     }
     const u = rec.unresponsive || null;
     const who = by === 'user' ? 'the user' : `the conversation ${sessionName ? '"' + sessionName + '"' : browserKey || 'an agent'}`;
@@ -2117,7 +2137,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!isEph(p)) browser = await start(profileId, { why: `restarted by ${who}${u ? ` (not answering since ${BS.utcClock(u.since)})` : ''}` });
     const text = BS.restartedCardText({ label: p.label, by: who, since: u ? u.since : null, now: now() });
     for (const o of others) announceRelaunch({ kind: 'relaunch', outcome: 'restarted', profileId, label: p.label, browserKey: o.browserKey, sessionId: o.sessionId, text, n: 0, verbs: [] }); // int220: the builds row's seam (.219 moved the listeners there)
-    log.log?.(`[browser] ${profileId} "${p.label}": restarted by ${who}${u ? ` — it had not answered since ${BS.utcClock(u.since)} (asks ${u.asks})` : ''}; ${others.length} other conversation(s) told`);
+    log.log?.(`[browser] ${profileId} "${p.label}": restarted by ${who}${u ? ` — it had not answered since ${BS.utcClock(u.since)} (asks ${u.asks})` : admitted && admitted.why !== 'browser' ? ` — ${BS.restartWhyText(admitted.why, admitted.pages)}` : ''}; ${others.length} other conversation(s) told`);
     commit();
     return browser || browserView(reg.browsers[profileId]);
   }
@@ -2461,14 +2481,62 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   async function endOrphan(d, v, { rec, p, conversation, idleMs, rowIdleMs = idleMs, seenBy }) {
     const end = endIdentity || ((pid, st) => endProcess(pid, st, { termMs: 5000 })); // SIGTERM, SIGKILL after 5 s
     const result = await end(d.pid, d.starttime);
-    const xvfb = [];
+    const xvfb = [], chrome = [];
+    // lane browser-daemon-survives-update: a daemon ended because its browser stopped answering takes that Chrome with it
+    // (its child: proven ours by its parent, ended by pid + starttime — never left holding the profile's lock)
+    if (v.ended) for (const c of d.chrome || []) if (c.starttime != null) chrome.push({ pid: c.pid, result: await end(c.pid, c.starttime) });
     for (const x of d.xvfb || []) if (x.starttime != null) xvfb.push({ pid: x.pid, result: await end(x.pid, x.starttime) });
-    log.log?.(`[browser] ${O.endedLine({ pid: d.pid, why: v.why, conversation, idleMs, result, xvfb })} (seen by ${seenBy})`);
+    log.log?.(`[browser] ${O.endedLine({ pid: d.pid, why: v.why, conversation, idleMs, result, xvfb, chrome })} (seen by ${seenBy})`);
     if (rec && result !== 'survived') {
       if (B.isLiveBrowser(rec)) { if (isEph(p)) markEphemeralGone(rec, seenBy); else markDaemonGone(rec, seenBy); }
-      rec.state = 'stopped'; rec.stoppedBy = 'idle'; rec.endedAt = rec.endedAt || now(); rec.note = O.rowNote(rowIdleMs); dirty = true;
+      rec.state = 'stopped'; rec.stoppedBy = 'idle'; rec.endedAt = rec.endedAt || now(); rec.note = v.ended ? O.endedNote({ why: v.why, at: now() }) : O.rowNote(rowIdleMs); dirty = true;
+    } else if (!rec && v.ended && p && result !== 'survived') { // a daemon no record named (its mark): its profile's stopped row says it
+      const r0 = reg.browsers[p.id];
+      if (r0 && !B.isLiveBrowser(r0)) { r0.note = O.endedNote({ why: v.why, at: now() }); dirty = true; }
     }
     return result;
+  }
+  /** lane browser-daemon-survives-update: a daemon's own CDP endpoint — its record's url while the record names it, else its
+   *  Chrome's (the DevToolsActivePort that Chrome writes in its --user-data-dir, else its --remote-debugging-port). */
+  function endpointOfDaemon(d, rec) {
+    if (rec && rec.pid === d.pid && rec.starttime === d.starttime && rec.cdpUrl) return rec.cdpUrl;
+    for (const c of d.chrome || []) {
+      if (c.dir) { try { const e = B.parseDevToolsActivePort(fs.readFileSync(path.join(c.dir, 'DevToolsActivePort'), 'utf8')); if (e) return `ws://127.0.0.1:${e.port}${e.path}`; } catch { /* not written */ } }
+      if (c.port) return `http://127.0.0.1:${c.port}`;
+    }
+    return null;
+  }
+  /** Could the browser CLI be asked at all (a missing binary / a version gone is not a daemon that did not answer)? */
+  const cliAsked = (i) => !!i && !(i.raw && (i.raw.code === 'ENOENT' || i.raw.code === 'browser_cli_gone' || /^binary_absent|^browser_cli_gone/.test(String(i.raw.error || ''))));
+  /**
+   * lane browser-daemon-survives-update — THE BOOT'S RE-OWN: a daemon of ours (its record names it, or its launch mark names a
+   * known profile) that no live record keeps and whose Chrome runs: its own `session info` (under its pairs / its profile's
+   * namespace — the answer must be THIS daemon's) + every page of its endpoint (bounded) ⇒ O.reownVerdict. Re-owned = its
+   * profile's record names it again, ready (its leases are the profile's — kept by the boot's reconcile); ended = the daemon,
+   * its Chrome and its Xvfb by identity, the row says why. → the verdict, or null when another daemon is this profile's
+   * (the census judges this one) or the profile has no record to re-own it into.
+   */
+  async function bootReown(d, rec0, p) {
+    const rec = rec0 || reg.browsers[p.id] || null;
+    if (!rec || !isLocalRec(rec)) return null;
+    if (B.isLiveBrowser(rec) && !(rec.pid === d.pid && rec.starttime === d.starttime)) return null;
+    let i = null; try { i = isEph(p) && Array.isArray(rec.envPairs) ? await rt.info(null, { extraEnv: pairsEnv(rec.envPairs) }) : await rt.info(rec.ns || nsOf(p.id), { dir: p.dir || null }); } catch { i = null; }
+    if (!cliAsked(i)) return null;
+    if (i && i.ok && Number.isInteger(i.pid) && i.pid !== d.pid) return null; // another daemon answers under that name: not this one's to re-own
+    const url = endpointOfDaemon(d, rec);
+    const v = O.reownVerdict({ daemonAnswered: !!(i && i.ok), active: !!(i && i.active), ask: i && i.active && url ? await askPages({ cdpUrl: url }) : null });
+    if (v.act === 're-own') {
+      Object.assign(rec, { pid: d.pid, starttime: d.starttime, cdpUrl: url && /^wss?:/.test(url) ? url : rec.cdpUrl, state: 'ready', adoptedAt: now(), lastError: null, note: null, stoppedBy: null, endedAt: null });
+      recaptureBrowser(rec, 'boot'); dirty = true;
+      log.log?.(`[browser] ${O.reownLine({ pid: d.pid, profileId: p.id, label: p.label, act: v.act, why: v.why })}`);
+      return v;
+    }
+    const end = endIdentity || ((pid, st) => endProcess(pid, st, { termMs: 5000 }));
+    v.result = await end(d.pid, d.starttime);
+    for (const x of [...(d.chrome || []), ...(d.xvfb || [])]) if (x.starttime != null) await end(x.pid, x.starttime);
+    if (!B.isLiveBrowser(rec)) { rec.note = O.endedNote({ why: v.why, at: now() }); rec.lastError = `${v.why} — its daemon was ended at the restart`; dirty = true; }
+    log.log?.(`[browser] ${O.reownLine({ pid: d.pid, profileId: p.id, label: p.label, act: v.act, why: v.why, result: v.result })}`);
+    return v;
   }
   /** The census over THIS machine's daemons (the tick, every orphanScanMs; the boot, once after adoption) and each
    *  paired machine's stopped record whose daemon still answers (through `browser-serve`, capability-gated). */
@@ -2479,7 +2547,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     orphanRun = (async () => {
       let rows = [];
       try { rows = await (daemonTable || F.daemonRows)(); } catch (e) { log.warn?.(`[browser] the daemon census could not read the process table: ${e && e.message}`); rows = []; }
-      const live = liveKeys(); const dirs = orphanDirs(); const out = { ended: [], kept: [], reported: [] }; let pending = 0;
+      const live = liveKeys(); const dirs = orphanDirs(); const out = { ended: [], kept: [], reported: [], reowned: [] }; let pending = 0;
       for (const d of O.daemonsFromRows(rows)) {
         const id = `${d.pid}:${d.starttime}`; const seen = orphanSeen.get(id) || {}; orphanSeen.set(id, seen);
         const rec = Object.values(reg.browsers).find((r) => isLocalRec(r) && r.pid === d.pid && r.starttime === d.starttime) || null;
@@ -2491,9 +2559,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         const browserAlive = d.chrome.length > 0; if (browserAlive) seen.browserAt = t;
         const noBrowserSince = Math.max(d.startedAt || 0, seen.browserAt || 0, (rec && rec.browserLost && rec.browserLost.at) || 0);
         const stoppedIdleAt = rec ? (!B.isLiveBrowser(rec) ? rec.endedAt || noBrowserSince : null) : noBrowserSince;
-        const v = O.daemonVerdict({ daemon: { pid: d.pid, starttime: d.starttime, owned: !!(rec || mark), cdp: d.cdp, stoppedIdleAt, noBrowserSince }, browserAlive,
+        const owned = !!(rec || mark), unkept = stoppedIdleAt != null && owned && !d.cdp && d.starttime != null;
+        // lane browser-daemon-survives-update: AT BOOT a daemon of ours that no live record keeps, whose Chrome runs, is RE-OWNED
+        // (its page answers) or ENDED with its Chrome — never left (the auto-update path is a plain restart: no special case)
+        if (seenBy === 'boot' && unkept && browserAlive && p) {
+          const r = await bootReown(d, rec, p);
+          if (r) { (r.act === 're-own' ? out.reowned : out.ended).push({ pid: d.pid, why: r.why, ...(r.result ? { result: r.result } : {}) }); orphanSeen.delete(id); continue; }
+        }
+        // …and THE OTHER HALF on every census: such a daemon's Chrome is asked (its endpoint, bounded) — silent since ⇒ ended past the bound
+        if (unkept && browserAlive) { const url = endpointOfDaemon(d, rec); if (url) { const a = await probeCdp(url, { timeoutMs: answerAskMs || BS.ANSWER_ASK_MS }); if (a.ok || /^HTTP \d+/.test(String(a.error || ''))) seen.silentSince = null; else seen.silentSince = seen.silentSince || t; } }
+        const v = O.daemonVerdict({ daemon: { pid: d.pid, starttime: d.starttime, owned, cdp: d.cdp, stoppedIdleAt, noBrowserSince }, browserAlive,
           leases: rec && p ? holdersOn(p.id).length : 0 /* a lease names the RECORDED daemon, never a stray of the same mark */, conversationAlive: conversation ? (B.keyCarried(conversation, live) ? 'running' : 'gone') : null,
-          lastVerbAt: (p && p.lastVerbAt) || 0, lastViewerAt: 0, now: t });
+          lastVerbAt: (p && p.lastVerbAt) || 0, lastViewerAt: 0, now: t, silentSince: seen.silentSince || null, endedMs: browserEndedMs });
         if (v.act === 'end') { const r = await endOrphan(d, v, { rec, p, conversation, idleMs: t - noBrowserSince, rowIdleMs: t - Math.max((p && p.lastVerbAt) || 0, stoppedIdleAt == null ? noBrowserSince : stoppedIdleAt), seenBy }); out.ended.push({ pid: d.pid, why: v.why, result: r }); orphanSeen.delete(id); continue; }
         if (v.act === 'report') { out.reported.push({ pid: d.pid, why: v.why }); if (!seen.said && !d.cdp && !browserAlive) { seen.said = true; log.warn?.(`[browser] ${O.reportLine({ pid: d.pid, startedAt: d.startedAt, now: t })}`); } continue; }
         out.kept.push({ pid: d.pid, why: v.why }); if (!browserAlive) pending++;
@@ -4709,7 +4786,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  IDLE_PAINT_MS, thaw when a viewer is there (a verb thaws at its resolve, before it runs). Never throws. */
   async function sweepIdlePaint(t) {
     if (!paintWatch) return;
-    const enabled = setting('browser.idlePaintFreeze', false) === true; // lane browser-swiftshader-cpu-r2: the owner's switch, read at EVERY sweep (off by default)
+    const enabled = setting('browser.idlePaintFreeze', BIdle.IDLE_PAINT_DEFAULT) === true; // lane browser-swiftshader-cpu-r2: the owner's switch, read at EVERY sweep — unset ⇒ IDLE_PAINT_DEFAULT (ON since 2.369.332, lane idle-paint-default-on)
     for (const rec of Object.values(reg.browsers)) {
       if (!B.isLiveBrowser(rec) || stopping.has(rec.profileId) || starting.has(rec.profileId) || !BIdle.unseenRung(rec.display)) continue;
       const p = profile(rec.profileId); if (!p) continue;
@@ -6307,12 +6384,24 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const p = profile(rec.profileId);
       if (!isLocalRec(rec)) { await adoptRemote(rec, p); continue; }
       const verdict = pidVerdictOf(rec);
-      let active = false;
+      let active = false, own = null;
       // takeover C3: a managed ephemeral browser is asked under the session pairs it was started with
       if (verdict === 'ours' && rec.launch === 'attach') active = (await probeCdp(rec.cdpUrl, { timeoutMs: 2500 })).ok; // lane one-browser-b1: Chrome itself answers
-      else if (verdict === 'ours') { try { active = (isEph(p) && Array.isArray(rec.envPairs) ? await rt.info(null, { extraEnv: pairsEnv(rec.envPairs) }) : await rt.info(rec.ns, { dir: p ? p.dir : null })).active; } catch { active = false; } }
+      else if (verdict === 'ours') {
+        let i = null; try { i = isEph(p) && Array.isArray(rec.envPairs) ? await rt.info(null, { extraEnv: pairsEnv(rec.envPairs) }) : await rt.info(rec.ns, { dir: p ? p.dir : null }); } catch { i = null; }
+        active = !!(i && i.active);
+        // lane browser-daemon-survives-update: RE-OWNED only when its PAGE answers — `session info` answers active:true with its
+        // Chrome dead or wedged (measured 0.38.2) — else the daemon is ENDED by identity (its browser after it), never left
+        // running unowned; a machine with no browser CLI to ask keeps the old reading (the record stops, nothing signalled)
+        if (cliAsked(i)) {
+          own = O.reownVerdict({ daemonAnswered: !!(i && i.ok), active, ask: active ? await askPages(rec) : null });
+          if (own.act === 'end') { own.result = await endProcess(rec.pid, rec.starttime, { termMs: 5000 }); active = false; }
+          log.log?.(`[browser] ${O.reownLine({ pid: rec.pid, profileId: rec.profileId, label: p ? p.label : '', act: own.act, why: own.why, result: own.result || null })}`);
+        }
+      }
       const v = B.adoptVerdict(rec, { verdict, active });
       if (!v) continue;
+      if (own && own.act === 'end') { v.lastError = `${own.why} — its daemon was ended at the restart (${own.result})`; rec.note = O.endedNote({ why: own.why, at: now() }); }
       if (v.state === 'ready') { rec.state = 'ready'; rec.adoptedAt = now(); recaptureBrowser(rec, 'boot'); if (rec.closed && rec.closed.code === 'browser_unstable' && rec.closed.unstable === 'failing') bootRejudge.add(rec.profileId); // lane browser-unstable-rejudge
         log.log?.(`[browser] adopted ${rec.profileId} "${p ? p.label : ''}" (daemon pid ${rec.pid})`); if (isEph(p)) keptNote('start', p); }
       else {

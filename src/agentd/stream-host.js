@@ -64,8 +64,12 @@
  * counter + a nonce) at each of the hub's addresses and the host it dials; the first authenticated PONG names the hub's
  * address and the leg is UP: the shims' datagrams go out as leg DATA, the hub's DATA come in to the same shims. Nothing on
  * the machine listens for anyone — the firewall lets in the answers to what the agent sent. A PING every legKeepaliveMs
- * keeps the NAT / firewall state (every legLiveMs while the picture rides it); a PING unanswered for legEchoMs = DOWN: the
- * device link carries the datagrams again (re-asked every legReprobeMs; a PONG brings the leg back). The ladder: direct
+ * keeps the NAT / firewall state (every legLiveMs while the picture rides it). HYSTERESIS (lane stream-leg-flap — the
+ * owner's Mac, 2 × 4K over Tailscale, dropped to the device link at every late PONG and back 3 s later, three times in
+ * 20 s, the picture black): a PING unanswered for legEchoMs is a MISS — the picture stays on the leg and the next PING goes
+ * at once (a late PONG still counts); legMissMax misses IN A ROW = DOWN: the device link carries the datagrams again
+ * (re-asked every legReprobeMs; a PONG brings the leg back); a socket error drops one datagram and is counted, never a
+ * verdict. The ladder: direct
  * (ICE-lite host pairs) → the hub relay over this leg → the hub relay over the device link. Said on the record (stats
  * `relay.via` + `relay.leg`, the log) and on the strip.
  * THE FIREWALL FACT: once a session's offer is made, a datagram from a second socket of ours to each of our host addresses
@@ -150,9 +154,10 @@ function fakeStill() {
  * THE UDP LEG, the daemon's half (one per relayed session). `spec` = the hub's {port, key (base64, 32 bytes), hosts}; `extra`
  * = more hosts to try (the host this daemon dials); `onData(ip, port, payload)` = a browser's datagram the hub sent over the
  * leg (→ the shims); `onChange(leg)` = UP / DOWN (the stats push, the log). Injectable for the fast suite: `now`, `socket`
- * (a dgram-like {bind, send, on, close, address}), `timer: false` (the suite calls tick()). → the leg | null (a bad spec)
+ * (a dgram-like {bind, send, on, close, address}), `timer: false` (the suite calls tick()); `missMax` = the misses in a row
+ * that make it DOWN (the suites' RED control hands in 1 — the .330 rule). → the leg | null (a bad spec)
  */
-function createLeg(spec, { extra = [], onData = () => { }, onChange = () => { }, log = () => { }, now = Date.now, socket = null, timer = true, random = crypto.randomBytes } = {}) {
+function createLeg(spec, { extra = [], onData = () => { }, onChange = () => { }, log = () => { }, now = Date.now, socket = null, timer = true, random = crypto.randomBytes, missMax = L.legMissMax } = {}) {
   const key = spec && typeof spec.key === 'string' && /^[A-Za-z0-9+/]{43}=$/.test(spec.key) ? Buffer.from(spec.key, 'base64') : null;
   const port = spec && Number.isInteger(spec.port) && spec.port > 0 && spec.port <= 65535 ? spec.port : 0;
   if (!key || key.length !== SM.LEG.keyBytes || !port) return null;
@@ -162,7 +167,7 @@ function createLeg(spec, { extra = [], onData = () => { }, onChange = () => { },
   const mac = (b) => crypto.createHmac('sha256', key).update(b).digest().subarray(0, SM.LEG.macBytes);
   const sock = socket || dgram.createSocket('udp4');
   const g = { state: 'probing', why: null, target: null, targets, port, counter: 0, pending: new Map(), lastPingAt: 0, heardAt: 0, sent: false,
-    rttMs: null, pings: 0, pongs: 0, up: 0, down: 0, stray: 0, since: now(), changes: [], closed: false, timer: null };
+    rttMs: null, pings: 0, pongs: 0, up: 0, down: 0, stray: 0, misses: 0, missed: 0, sendErrors: 0, since: now(), changes: [], closed: false, timer: null };
   const setState = (st, why = null) => {
     if (g.state === st) return;
     g.state = st; g.why = why; g.since = now();
@@ -188,7 +193,7 @@ function createLeg(spec, { extra = [], onData = () => { }, onChange = () => { },
       const want = g.pending.get(p.counter);
       if (!p.ok || !want || !Buffer.from(p.nonce).equals(want.nonce) || from.port !== port || (g.target && from.address !== g.target.ip)) { g.stray++; return; }
       for (const c of [...g.pending.keys()]) if (c <= p.counter) g.pending.delete(c);
-      g.rttMs = Math.max(0, now() - want.at); g.pongs++; g.heardAt = now();
+      g.rttMs = Math.max(0, now() - want.at); g.pongs++; g.heardAt = now(); g.misses = 0; // an answer — a late one too — ends the run of misses
       if (!g.target) g.target = { ip: from.address, port };
       if (g.state !== 'up') { setState('up'); ping(); } // the hub hears at once that the picture now rides the leg
       return;
@@ -199,7 +204,7 @@ function createLeg(spec, { extra = [], onData = () => { }, onChange = () => { },
       try { onData(p.ip, p.port, p.payload); } catch { /* the shim's */ }
     }
   });
-  sock.on('error', () => { if (!g.closed && g.state === 'up') setState('down', 'socket_error'); });
+  sock.on('error', () => { if (!g.closed) g.sendErrors++; }); // one datagram dropped (a Mac's ENOBUFS under a burst): counted — the echo judges the leg
   /** One datagram of werift's toward a browser → the hub over the leg. → false when the leg is not up (the link's turn). */
   g.send = (ip, p, payload) => {
     if (g.closed || g.state !== 'up' || !g.target) return false;
@@ -211,12 +216,16 @@ function createLeg(spec, { extra = [], onData = () => { }, onChange = () => { },
   g.tick = () => {
     if (g.closed) return;
     const t = now();
-    let oldest = Infinity; for (const v of g.pending.values()) oldest = Math.min(oldest, v.at);
-    if (oldest !== Infinity && t - oldest >= L.legEchoMs) { g.pending.clear(); if (g.state !== 'down') setState('down', 'no_echo'); }
+    let fresh = 0, missedNow = 0; // a PING past legEchoMs is a MISS once (it stays pending: its late PONG still counts)
+    for (const v of g.pending.values()) { if (v.missed) continue; if (t - v.at >= L.legEchoMs) { v.missed = true; missedNow++; } else fresh++; }
+    if (missedNow) {
+      if (g.state === 'up') { g.misses += missedNow; g.missed += missedNow; if (g.misses >= missMax) { g.pending.clear(); setState('down', 'no_echo'); } }
+      else { g.pending.clear(); if (g.state !== 'down') setState('down', 'no_echo'); } // never up: the device link carried it all along
+    }
     const every = g.state === 'up' ? (g.sent ? L.legLiveMs : L.legKeepaliveMs) : g.state === 'probing' ? L.legProbeMs : L.legReprobeMs;
-    if (t - g.lastPingAt >= every && (g.state !== 'up' || !g.pending.size)) ping();
+    if (g.state === 'up' ? !fresh && (missedNow > 0 || t - g.lastPingAt >= every) : t - g.lastPingAt >= every) ping(); // up: a miss is re-asked at once
   };
-  g.facts = () => ({ state: g.state, why: g.why, target: g.target ? `${g.target.ip}:${g.target.port}` : null, rttMs: g.rttMs, pings: g.pings, pongs: g.pongs, up: g.up, down: g.down, stray: g.stray, since: g.since });
+  g.facts = () => ({ state: g.state, why: g.why, target: g.target ? `${g.target.ip}:${g.target.port}` : null, rttMs: g.rttMs, pings: g.pings, pongs: g.pongs, up: g.up, down: g.down, stray: g.stray, misses: g.misses, missed: g.missed, sendErrors: g.sendErrors, since: g.since });
   g.close = () => { g.closed = true; clearInterval(g.timer); try { sock.close(); } catch { /* gone */ } };
   if (timer) { g.timer = setInterval(g.tick, 250); g.timer.unref?.(); }
   if (socket) ping(); else sock.bind(0, () => ping());

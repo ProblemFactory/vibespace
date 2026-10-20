@@ -471,6 +471,8 @@ export function wakeWhyText(why) {
       if (m) return t('replies in the thread of your message of {when}', { when: m[1] });
       m = /^in the thread of your mail "(.*)"$/.exec(s);
       if (m) return t('in the thread of your mail "{subject}"', { subject: m[1] });
+      m = /^judged an answer to your message of (.+)$/.exec(s);   // lane dm-reply-infers: the judged road (F.INFER_WHY)
+      if (m) return t('judged an answer to your message of {when}', { when: m[1] });
       return s;
     }
   }

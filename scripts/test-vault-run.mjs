@@ -40,6 +40,11 @@
 //      asks) and spends; 8 hours = every run; deny / the card closed elsewhere / a changed item / a gone conversation grant
 //      nothing; the switch OFF and a LOCK end every grant and withdraw every request; the use lines carry the purpose and the
 //      run's receipt and `uses` reads back this conversation's alone; the request's card on the page
+//   ⑩b THE CAP'S SHAPE (B-4934, q-043 verify L2): eight conversations × 8 open asks, then a NINTH conversation's first ask
+//      is FILED (MUTANT: the old 64-request hub-wide cap ⇒ RED); one conversation's 9th ⇒ too_many_requests by name; 32
+//      conversations asking ⇒ the 33rd too_many_askers by name while one already asking still asks; more than 8 asking ⇒
+//      ONE Vault notice «N conversations are asking», re-worded in place, closed at 8 or fewer, quiet once the owner set it
+//      aside, closed by a lock and by a boot
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -475,6 +480,10 @@ console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program o
   lw.vault.lock('door');
   const dirsAtLock = runDirs(lw).length;
   const lr = (await run).r;
+  // the stray is SIGKILLed before the answer; its REAPING is its new parent's (the user's systemd) a moment later — measured:
+  // state R, parent systemd, gone ≤ 10 ms; checked at once it read alive 2 runs in 5 on the base. A bounded wait (as the leg
+  // above sleeps 30 ms): a stray never killed (deaf to SIGTERM, an endless timer) is still alive after it ⇒ still RED
+  for (let i = 0; i < 200 && alive(sp); i++) await sleep(10);
   ok(lr.code === 'vault_locked' && !alive(sp) && dirsAtLock === 0, 'a LOCK: the run\'s files are shredded AT ONCE, its child and the stray in its own session (deaf to SIGTERM) are gone, the answer vault_locked', { code: lr.code, stray: alive(sp), dirsAtLock });
   // a grandchild holding the pipes mid-value: cut after 2 s — half a value never flushed
   const hw = await world();
@@ -735,6 +744,75 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
   ok(/const GRANT_ANSWERS = \['once', '8h', 'deny'\];/.test(read('src/lib/user-todos-row.js')) && /a === '8h' \? t\('For 8 hours'\)/.test(read('src/lib/user-todos-row.js')) && /a === 'grant-8h' \? '8h'/.test(read('src/lib/inbox-window.js'))
     && /\/api\/vault\/request\/asks\//.test(read('src/lib/user-todos-actions.js')) && R('src/inbox-reply.js').ANSWER_ACTION_TYPES.includes('vault-grant-ask') && /'vault-grant-ask': 'askId'/.test(read('src/user-todos.js')), 'the popup row and the window answer once / 8h / deny through POST /api/vault/request/asks/:askId; a typed reply never answers it; one item per request');
+}
+
+console.log('⑩b THE CAP\'S SHAPE (B-4934, q-043 verify L2): 8 open asks per conversation; hub-wide a count of CONVERSATIONS (32); «N conversations are asking»');
+{
+  const CAP_ROWS = Array.from({ length: 9 }, (_, k) => ({ entry: `cap${k}`, field: 'secretKey', label: `bucket ${k}`, cipher: 'x'.repeat(60), v: VALUE }));
+  ROWS.mounts.push(...CAP_ROWS);
+  try {
+    const capRef = (k) => `vault://mounts/cap${k}/secretKey`;
+    const conv = (k, w) => ({ conversationId: `conv-c${k}`, sessionKey: `claude:conv-c${k}`, name: `Lane C${k}`, cwd: w.work, scope: `webui-c${k}` });
+    /** eight conversations × 8 open asks (the table the old 64-request cap called full), then a NINTH conversation's first */
+    const capLeg = async (doorMod) => {
+      const w = await world({ doorMod });
+      const eight = []; for (let k = 0; k < 8; k++) for (let j = 0; j < 8; j++) eight.push(w.door.request({ caller: conv(k, w), entry: capRef(j), purpose: `job ${j}` }));
+      return { w, eight, ninth: w.door.request({ caller: conv(8, w), entry: capRef(0), purpose: 'my first ask' }) };
+    };
+    const { w, eight, ninth } = await capLeg(DOOR);
+    ok(eight.every((r) => r.ok) && ninth.ok && w.door._requests.size === 65, 'eight conversations × 8 open asks (64), then a NINTH conversation\'s first ask is FILED — never refused for the other conversations\' asks', [eight.filter((r) => !r.ok).map((r) => r.code), ninth.code]);
+    const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const NEW_CAP = "if (!askers.has(scope) && askers.size >= REQUEST_CALLERS_MAX) return named('too_many_askers');";
+    const mOld = SRC.split(NEW_CAP).length === 2 ? M.load('src/server/vault-run-door.js', SRC.replace(NEW_CAP, "if (requests.size >= 64) return named('too_many_requests');"), 'oldcap') : null;
+    const old = mOld ? await capLeg(mOld) : null;
+    ok(old && old.eight.every((r) => r.ok) && old.ninth.code === 'too_many_requests', 'MUTANT «the hub-wide bound counts REQUESTS (64)» — the pre-fix shape: the ninth conversation\'s first ask is refused too_many_requests ⇒ RED; the shipped door files it', old && old.ninth);
+    const over = w.door.request({ caller: conv(0, w), entry: capRef(8), purpose: 'one more' });
+    ok(over.code === 'too_many_requests' && over.words === DOOR.MORE_WORDS.too_many_requests && /this conversation already has 8 questions waiting/.test(over.words) && DOOR.statusOf(over.code) === 429 && w.door._requests.size === 65,
+      'the PER-CONVERSATION cap holds: one conversation\'s 9th open ask ⇒ too_many_requests BY NAME (429; the words name ITS 8 and `vibespace-vault uses`)', over);
+    // THE TRAY LINE: more than 8 conversations asking ⇒ ONE Vault notice, its count in its words
+    const lineOf = () => (w.userTodos.snapshot().open || []).filter((i) => i.sessionKey === 'vault' && i.text === DOOR.ASKING_TEXT);
+    const L9 = lineOf();
+    ok(L9.length === 1 && L9[0].origin === 'vault' && L9[0].kind === 'notice' && !L9[0].action && L9[0].i18n.text.key === '{n} conversations are asking to use stored secrets' && L9[0].i18n.text.params.n === 9,
+      'NINE conversations asking (more than 8) ⇒ ONE Vault notice in the owner\'s For you «9 conversations are asking to use stored secrets» — a notice (each ask is its own card)', L9);
+    const id9 = L9[0] && L9[0].id;
+    const t10 = w.door.request({ caller: conv(9, w), entry: capRef(0), purpose: 'p' });
+    const L10 = lineOf();
+    ok(t10.ok && L10.length === 1 && L10[0].id === id9 && L10[0].i18n.text.params.n === 10, 'a tenth conversation ⇒ the SAME row says 10 (re-worded in place — never a second row)', L10.map((i) => [i.id, i.i18n.text.params.n]));
+    const idsOf = (k) => [...w.door._requests.values()].filter((q) => q.scope === `webui-c${k}`).map((q) => q.askId);
+    for (const a of idsOf(9)) w.door.answerRequest(a, { answer: 'deny' });
+    ok(lineOf().length === 1 && lineOf()[0].id === id9 && lineOf()[0].i18n.text.params.n === 9, 'an answer lowers it (10 → 9)', lineOf().map((i) => i.i18n.text.params.n));
+    for (const a of idsOf(8)) w.door.answerRequest(a, { answer: 'deny' });
+    const closed = w.userTodos.get(id9);
+    ok(!lineOf().length && closed.status === 'done' && closed.resolvedBy === 'vault', '8 or fewer asking ⇒ the line is closed (by the vault, not the owner)', closed && [closed.status, closed.resolvedBy]);
+    // THE HUB-WIDE BOUND counts CONVERSATIONS: 32 asking ⇒ the 33rd refused BY NAME; one already asking still asks
+    w.door._reqQuiet.clear();   // (the denies above quieted conv-c8 / c9 × cap0)
+    const more = []; for (let k = 8; k < 32; k++) more.push(w.door.request({ caller: conv(k, w), entry: capRef(0), purpose: 'p' }));
+    const n33 = w.door.request({ caller: conv(32, w), entry: capRef(0), purpose: 'p' });
+    const again31 = w.door.request({ caller: conv(31, w), entry: capRef(1), purpose: 'p' });
+    ok(more.every((r) => r.ok) && n33.code === 'too_many_askers' && n33.words === DOOR.MORE_WORDS.too_many_askers && /^32 other conversations are waiting on the user's answers already — nothing was filed/.test(n33.words) && DOOR.statusOf('too_many_askers') === 429 && again31.ok,
+      '32 conversations asking at once ⇒ the 33rd is refused too_many_askers BY NAME (429; nothing filed) while a conversation ALREADY asking still asks (the bound counts conversations, never requests)', [more.filter((r) => !r.ok).map((r) => r.code), n33, again31.code]);
+    ok(lineOf().length === 1 && lineOf()[0].i18n.text.params.n === 32 && !(w.userTodos.snapshot().open || []).some((i) => i.sessionKey === 'claude:conv-c32'), 'the line says 32; the refused 33rd filed nothing', lineOf().map((i) => i.i18n.text.params.n));
+    // SET ASIDE by the owner ⇒ quiet while the count moves
+    const id32 = lineOf()[0].id;
+    w.userTodos.setStatus(id32, 'dismissed', 'user');
+    for (const a of idsOf(31)) w.door.answerRequest(a, { answer: 'deny' });
+    ok(w.userTodos.get(id32).status === 'dismissed' && !lineOf().length, 'the owner dismissed the line ⇒ it stays dismissed while the count moves (32 → 31) — never reopened under their pointer');
+    w.vault.lock('agent');
+    ok(!w.door._requests.size && !lineOf().length, 'a LOCK withdraws every request; no line');
+    await w.vault.unlock(PW);
+    // a NEW episode files it again; a LOCK with the line open closes it; a BOOT closes a previous process's
+    for (let k = 0; k < 9; k++) w.door.request({ caller: conv(k, w), entry: capRef(0), purpose: 'p' });
+    const ep2 = lineOf();
+    ok(ep2.length === 1 && ep2[0].i18n.text.params.n === 9, 'a new episode (nine asking after the lock) ⇒ the line again', ep2.map((i) => [i.status, i.i18n.text.params.n]));
+    w.vault.lock('agent');
+    const atLock = ep2[0] && w.userTodos.get(ep2[0].id);
+    ok(atLock && atLock.status === 'done' && atLock.resolvedBy === 'vault' && !lineOf().length, 'a LOCK with the line open closes it (by the vault — one recount after the whole withdrawal)', atLock && [atLock.status, atLock.resolvedBy]);
+    await w.vault.unlock(PW);
+    for (let k = 0; k < 9; k++) w.door.request({ caller: conv(k, w), entry: capRef(0), purpose: 'p' });
+    const before = lineOf().length;
+    w.mk().reconcile();
+    ok(before === 1 && !lineOf().length, 'a BOOT (reconcile): a line a previous process filed is closed — its requests died with it', before);
+  } finally { ROWS.mounts.splice(-CAP_ROWS.length); }
 }
 
 try { fs.chmodSync(BIN, 0o755); } catch { }   // the read-only bin given back (the scratch dir is removed)

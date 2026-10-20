@@ -185,7 +185,7 @@ console.log('— wiring pins');
 {
   const ma = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
   const um = fs.readFileSync(path.join(REPO, 'src/lib/usage-meter.js'), 'utf8');
-  ok('every usage cell the two rosters render is stamped (claude row via usageStampAttrs, claude global + host-own, codex row pool/loggedIn, codex global)', (ma.match(/data-usage-src=/g) || []).length === 6 && /acct-usage-cell"\$\{usageStampAttrs\}/.test(ma));
+  ok('every usage cell the rosters render is stamped (claude row via usageStampAttrs, claude global + host-own, codex row pool/loggedIn, codex global, an isolated-home account\'s on-demand reading — lane antigravity-card-fixes)', (ma.match(/data-usage-src=/g) || []).length === 7 && /acct-usage-cell"\$\{usageStampAttrs\}/.test(ma) && /<span class="acct-usage-cell" data-usage-src="home" data-usage-key="\$\{escHtml\(a\.id\)\}">\$\{usageOf\(a\.id\)\}<\/span>/.test(ma));
   ok('the claude row\'s stamp is the SAME decision as its snapshot (pool → current target; host-login → host-own; host-held → host:account; local → the account)', /const usageStamp = isPool \? \(a\.current \? \{ src: 'accounts', key: a\.current \} : null\)/.test(ma) && /\{ src: 'host-own', key: selectedHost \}/.test(ma) && /\{ src: 'host-account', key: selectedHost \+ ':' \+ a\.id \}/.test(ma) && /\(a\.loggedIn \|\| a\.oat\) \? \{ src: 'accounts', key: a\.id \} : null/.test(ma));
   ok('_renderUsage (every poll, every popup refresh) calls the repaint first', /_renderUsage\(\) \{\s*\n(\s*\/\/[^\n]*\n)*\s*try \{ this\._repaintRosterUsage\?\.\(\); \} catch \{ \}/.test(um));
   ok('the repaint re-derives the two-soonest highlight per list it touched', /for \(const list of lists\) markSoonRows\(list\);/.test(ma));

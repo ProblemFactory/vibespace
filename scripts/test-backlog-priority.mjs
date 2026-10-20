@@ -435,7 +435,7 @@ check('done/drop echo the resolved item by id', /backlog\[r\]\.resolvedAt = Date
 {
   // (the raw source: renderTaskMd holds a '/**' string literal the comment stripper would eat through)
   const raw = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8');
-  const body = raw.slice(raw.indexOf('  renderTaskMd(t, cap = 50) {'), raw.indexOf('  syncAllContextMd() {'));
+  const body = raw.slice(raw.indexOf('  renderTaskMd(t, cap = 50, { now = null } = {}) {'), raw.indexOf('  syncAllContextMd() {'));   // lane agent-context-owner-facts: + the `now` option (the injection's dateless today)
   check('renderTaskMd lists through sortBacklog', /\n\s*const openBl = sortBacklog\(\(t\.backlog \|\| \[\]\)\.filter/.test(body));
 }
 check('update() normalizes priority', /priority: normalizePriority\(it\?\.priority\),/.test(tg));

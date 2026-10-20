@@ -35,6 +35,9 @@ function fourNotices(BP) {
 /** census({ intro, channels }) → { shapes: [{ name, blocks: [[label, bytes]], total, room }], intro, cap, reminder }. `intro(T, facts)`
  *  replaces sessionToolsIntro (the suite's control); every other block is the production renderer's. */
 export function census({ intro = null, repo = REPO, channels = false } = {}) {
+  // lane agent-context-owner-facts (B-7960 a): the times ride in the owner's zone, named — measured in the incident's zone
+  // (America/Los_Angeles), never this box's own (PT here, UTC on a runner: the same shape would measure differently)
+  require(path.join(repo, 'src/server/owner-facts.js')).configure({ setting: (k) => (k === 'instance.timezone' ? 'America/Los_Angeles' : undefined) });
   const AR = require(path.join(repo, 'src/agent-routes.js'));
   const { TaskGroupManager } = require(path.join(repo, 'src/task-groups.js'));
   const { SessionStatusManager } = require(path.join(repo, 'src/session-status.js'));

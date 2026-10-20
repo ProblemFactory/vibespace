@@ -172,7 +172,9 @@ YOURS:
                                                   own (other conversations work in theirs at the same time)
   vibespace-browser restart [<profile>]           relaunch a browser that has STOPPED ANSWERING (refused browser_unresponsive):
                                                   logins kept, every other conversation on it told — only while it is
-                                                  judged hung and the user is not driving it (a working one: browser_answering)
+                                                  judged hung (its pages answer nothing — asked at the restart, whatever its
+                                                  daemon says) and the user is not driving it (a page that answers:
+                                                  browser_answering, naming what answered and what did not)
   vibespace-browser resume                        start THIS conversation's own browser again with its kept tabs (same
                                                   order, the same tab on show) — or, while it runs, reopen the tabs a
                                                   close kept (its logins stay either way; a command's note names them)

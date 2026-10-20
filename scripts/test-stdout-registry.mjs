@@ -17,6 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
+import { trackedFiles } from './tracked-files.mjs';   // B-1561: the census lists data/bin via git, never a working-tree readdir
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -2006,7 +2007,8 @@ console.log('— Claude Code\'s `origin.kind:"auto-continuation"` is GENERIC pro
   const ORIGIN_RE = /['"`]auto-continuation['"`]/;
   const walk = (dir, out = []) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const f = path.join(dir, e.name); if (e.isDirectory()) walk(f, out); else if (/\.(c?js|mjs)$/.test(e.name)) out.push(f); } return out; };
   const files = [...walk(path.join(REPO, 'src')), path.join(REPO, 'server.js'),
-    ...fs.readdirSync(path.join(REPO, 'data/bin')).filter((n) => n !== 'vibespace-agentd.js' /* generated bundle of src/ */).map((n) => path.join(REPO, 'data/bin', n)).filter((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } })];
+    // B-1561: data/bin from git ls-files — an untracked rclone / rclone-dl.zip / the generated agentd bundle is not source
+    ...trackedFiles(REPO, 'data/bin').filter((rel) => rel !== 'data/bin/vibespace-agentd.js' /* generated bundle of src/ */).map((rel) => path.join(REPO, rel)).filter((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } })];
   const readers = files.filter((f) => ORIGIN_RE.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(REPO, f));
   ok(`census: no source among ${files.length} reads the CLI's generic "auto-continuation" origin as a signal`, files.length > 100 && readers.length === 0, readers.join(', '));
   // NEGATIVE CONTROL — the census can say no: the refuted classifier rung it exists to keep out

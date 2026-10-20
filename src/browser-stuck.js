@@ -734,15 +734,81 @@ function unresponsiveFact(next) { return next && Number.isFinite(next.since) ? {
 /** "16:34" (UTC — the journal's and the agent's clock; the UI formats `since` in the viewer's own zone). */
 function utcClock(ms) { const d = new Date(Number(ms) || 0); return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); }
 function minutesSince(since, now) { return Math.max(1, Math.round(((Number(now) || 0) - (Number(since) || 0)) / 60000)); }
+// ── lane browser-daemon-survives-update (B-1574 — userW, profile jarvis-work, FOUR freezes 10-05..10-18, each a working day's
+// browser): A RESTART JUDGES THE PAGE'S ANSWERS, NEVER THE HELPER'S. The held-not-hung lesson (a page that ANSWERED every
+// command was called not responding) in reverse: 'not responding' is a claim about the page's answers, so a page that
+// answers NO CDP call within its bound is hung whatever the daemon's `session info` or the browser's own endpoint says.
+// MEASURED on agent-browser 0.38.2 + Chrome 154 (the lane's probe): every renderer SIGSTOPped ⇒ `/json/version` and
+// `/json/list` answer in 1 ms and `session info` answers active:true, while a direct Runtime.evaluate on the page says
+// nothing in 5 s and the agent's own `eval` fails "CDP command timed out" at 30 s — the verdict above (`/json/version`)
+// never fired, so `restart` was refused browser_answering for as long as the page stayed hung. The restart now ASKS every
+// page itself (one Runtime.evaluate each, bounded) and reads the agent's own last answers (the dialog watch's timeouts).
+/** The bound of ONE page's ask: a healthy page answers `1+1` in 1–5 ms (measured, 16 busy tabs p95 25 ms — lane
+ *  browser-held-not-hung); 5 s is 1000× that and a sixth of the agent's own 30 s command timeout. */
+const PAGE_ANSWER_MS = 5000;
 /**
- * WHO MAY RESTART (PURE): the user always; an agent ONLY while the verdict stands and no human drives it. → {ok} or
- * {ok:false, code, error}.
+ * THE PAGE VERDICT (PURE): one bounded ask of the browser's page list and of every page in it → `{state, why, answered,
+ * silent}` (each a list of `{targetId, url}`), first match wins:
+ *   · not asked (no CDP endpoint known)                              ⇒ 'unasked'
+ *   · the page list itself unanswered (refused, silent, unreadable)  ⇒ 'hung'  'no-list' (nothing there answers CDP)
+ *   · no page at all, the list answered                              ⇒ 'answering' 'no-pages' (an empty browser answers)
+ *   · ≥ 1 page and NONE answered within the bound                    ⇒ 'hung'  'no-page-answered'
+ *   · else (≥ 1 page answered)                                       ⇒ 'answering' 'pages'
+ * `ask` = `{list: bool, error?, pages: [{targetId, url, answered, ms?, error?}]}` | null.
  */
-function restartAdmission({ by = 'agent', unresponsive = null, humanDriving = false, label = '' } = {}) {
+function pageAnswerVerdict(ask) {
+  const row = (x) => ({ targetId: str(x && x.targetId).slice(0, 64), url: pageText(x && x.url, URL_MAX) });
+  if (!ask || typeof ask !== 'object') return { state: 'unasked', why: 'unasked', answered: [], silent: [], boundMs: PAGE_ANSWER_MS };
+  const boundMs = Number(ask.boundMs) > 0 ? Number(ask.boundMs) : PAGE_ANSWER_MS; // the bound the ask ran under (the words say it)
+  const pages = Array.isArray(ask.pages) ? ask.pages.filter((x) => x && typeof x === 'object') : [];
+  const answered = pages.filter((x) => x.answered === true).map(row), silent = pages.filter((x) => x.answered !== true).map(row);
+  if (ask.list !== true) return { state: 'hung', why: 'no-list', answered, silent, boundMs, error: pageText(ask.error, 200) };
+  if (!pages.length) return { state: 'answering', why: 'no-pages', answered, silent, boundMs };
+  if (!answered.length) return { state: 'hung', why: 'no-page-answered', answered, silent, boundMs };
+  return { state: 'answering', why: 'pages', answered, silent, boundMs };
+}
+/**
+ * WHO MAY RESTART (PURE): the user always; an agent only while no human drives it and the browser is judged hung — by
+ * THE PAGE'S ANSWERS, never the helper's liveness. → {ok, why} or {ok:false, code, error}. First match wins:
+ *   · by the user                                                        ⇒ ok
+ *   · a person drives it                                                 ⇒ take_over_first
+ *   · the keeper's standing verdict (`unresponsive`: its endpoint silent) ⇒ ok 'browser'
+ *   · a page dialog / prompt / passkey holds the conversation's tab      ⇒ browser_answering (held, not hung — its own door)
+ *   · `pages` (pageAnswerVerdict, asked now) 'hung'                      ⇒ ok 'no-list' | 'no-page-answered'
+ *   · every page answered but the agent's own last commands timed out    ⇒ ok 'driver' (the page answers, its driver does not)
+ *     through the driver (`stuck` = the dialog watch's fact: unresponsive by timeouts)
+ *   · else                                                               ⇒ browser_answering, naming what answered and what did not
+ */
+function restartAdmission({ by = 'agent', unresponsive = null, humanDriving = false, label = '', pages = null, stuck = null } = {}) {
   if (by === 'user') return { ok: true };
   if (humanDriving) return { ok: false, code: 'take_over_first', error: `the user is driving "${label}" right now — it is not restarted under their hands; ask them in your reply` };
-  if (!unresponsive) return { ok: false, code: 'browser_answering', error: `the browser of profile "${label}" is answering — an agent restarts only a browser that has stopped answering (browser_unresponsive); a slow page is \`vibespace-browser tab close\` or the user's Restart in the Browser panel` };
-  return { ok: true };
+  if (unresponsive) return { ok: true, why: 'browser' };
+  const held = stuck && ['dialog', 'prompt', 'passkey'].includes(stuck.state) ? stuck.state : null;
+  if (held) return { ok: false, code: 'browser_answering', error: `the browser of profile "${label}" is answering — ${held === 'dialog' ? 'a page dialog' : held === 'prompt' ? 'a browser prompt (a file chooser, a sign-in)' : 'a passkey request'} holds your tab: it is held, not hung, and a restart would lose it — \`vibespace-browser dialog status\` says what it asks; answer it (\`vibespace-browser dialog accept\` / \`dismiss\`)` };
+  const v = pages && typeof pages === 'object' && pages.state ? pages : null;
+  if (v && v.state === 'hung') return { ok: true, why: v.why };
+  if (v && v.state === 'answering' && !v.silent.length && stuck && stuck.state === 'unresponsive' && stuck.why === 'timeouts') return { ok: true, why: 'driver' };
+  return { ok: false, code: 'browser_answering', error: answeringText(label, v) };
+}
+const secs = (ms) => `${Math.round((Number(ms) > 0 ? Number(ms) : PAGE_ANSWER_MS) / 100) / 10} s`;
+/** The refusal's words: what answered and what did not, and the door for each (English, agent-facing, never t()). */
+function answeringText(label, v) {
+  const head = `the browser of profile "${label}" is answering`;
+  const rule = 'an agent restarts only a browser whose pages answer nothing (browser_unresponsive)';
+  const tabs = (l) => l.slice(0, 4).map((x) => `${x.targetId.slice(0, 8) || '?'}${x.url ? ' ' + quoted(x.url) : ''}`).join(', ') + (l.length > 4 ? `, +${l.length - 4} more` : '');
+  if (!v || v.state === 'unasked') return `${head} — ${rule}; a slow page is \`vibespace-browser tab close\` or the user's Restart in the Browser panel`;
+  const n = v.answered.length, m = n + v.silent.length;
+  const said = v.why === 'no-pages' ? 'its page list answered (it has no page open)' : `${n} of ${m} page${m === 1 ? '' : 's'} answered within ${secs(v.boundMs)} (${tabs(v.answered)})`;
+  const silent = v.silent.length ? `; ${v.silent.length} did not (${tabs(v.silent)}) — close a tab that does not answer: \`vibespace-browser tab close <tab>\`` : '; a slow page is `vibespace-browser tab close`, or the user\'s Restart in the Browser panel';
+  return `${head} — ${said}${silent}. ${rule[0].toUpperCase()}${rule.slice(1)}.`;
+}
+/** The journal's words for an admitted agent restart (what the verdict read). */
+function restartWhyText(why, v) {
+  if (why === 'browser') return 'its DevTools endpoint had stopped answering (browser_unresponsive)';
+  if (why === 'no-list') return `its page list did not answer within ${secs(v && v.boundMs)}${v && v.error ? ` (${v.error})` : ''}`;
+  if (why === 'no-page-answered') return `none of its ${v ? v.silent.length : 0} page(s) answered within ${secs(v && v.boundMs)}`;
+  if (why === 'driver') return 'every page answered, but the agent\'s last commands timed out through the browser driver';
+  return String(why || '');
 }
 /** The card each OTHER holder reads after a restart (one per lease, never a billed turn). */
 function restartedCardText({ label = '', by = 'the user', since = 0, now = 0 } = {}) {
@@ -914,6 +980,7 @@ module.exports = {
   cookieReaches, originsOf, siteOfHost, siteResetVerdict, siteResetOwn, siteResetText,
   // lane browser-unresponsive: the WHOLE browser that does not answer (one verdict, every surface reads it)
   UNRESPONSIVE_AFTER_MS, UNRESPONSIVE_MIN_ASKS, ANSWER_ASK_MS, browserAnswerVerdict, unresponsiveFact, utcClock, minutesSince, restartAdmission,
+  PAGE_ANSWER_MS, pageAnswerVerdict, answeringText, restartWhyText, // lane browser-daemon-survives-update: a restart judges the page's answers, never the helper's
   restartedCardText, unresponsiveLine, answeredAgainLine, unresponsiveNotice, unresponsiveWords,
   // lane browser-ui-prompts: the browser's own prompts (a file chooser, an HTTP sign-in) — one record, one sentence, one bar
   PROMPT_TYPES, PROMPT_ASK_MS, AUTH_HOLD_MAX_MS, promptFromCdp, promptText, promptBlock, promptAnsweredNote, promptWords,

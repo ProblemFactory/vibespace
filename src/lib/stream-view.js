@@ -7,6 +7,9 @@
 //   • signaling: POST …/stream/start → the offer (with the hub relay's candidates), the page's answer and its trickled
 //     candidates up; THE LONG POLL (…/stream/watch) brings the agent's candidates, its numbers and `ended` down
 //   • the stats strip: getStats once a second (src/stream-model.js statsOf — RTT, jitter, fps, decode ms, kbps, the path)
+//   • THE STALL (lane stream-leg-flap — the owner's black «串流 · 2 个显示器 · 0 fps»): a PLAYING picture that decodes nothing for
+//     STREAM_LIMITS.stallMs while the machine says it sends (src/stream-model.js stallStep) ends `stalled` — the window says so
+//     and offers the stream again (its NEVER SILENT ladder), never «0 fps» for ever while ICE still says connected
 //   • input (P1b): the pointer, the wheel and the keys go down the data channel (src/lib/stream-input.js — the primary
 //     modifier moved by THE table; physical keys); Ctrl/⌘+V sends this computer's clipboard text first, then the V; a
 //     shown frame is acknowledged (≤ 4 a second) so the agent can time the picture's way
@@ -23,7 +26,7 @@
 //     answer puts AV1 first (setCodecPreferences — werift sends the answer's first codec); a picture whose bytes arrive while no
 //     frame is decoded for 2 s (hdrStallStep) = this browser cannot decode it ⇒ `onHdrFailed()` (the shell restarts in SDR, says so)
 import { fetchJson } from './utils.js';
-import { STREAM_LIMITS, streamStep, fallbackVerdict, statsOf, relayPathOf, firewallRuleCommand } from '../stream-model.js';
+import { STREAM_LIMITS, streamStep, fallbackVerdict, stallStep, statsOf, relayPathOf, firewallRuleCommand } from '../stream-model.js';
 import { viewerPlatform, keyMapFor, keyMessage, pointerMessage, wheelMessage } from './stream-input.js';
 import { hdrStallStep } from '../hdr-viewer.js';
 
@@ -53,6 +56,7 @@ export function createStreamView(host, opts = {}) {
   let refusedSeen = null, switchSaid = 0, played = false;
   let refusal = null; // lane desktop-display-modes: a refused start's numbers (the per-machine cap's count)
   let hdrWatch = null, hdrFailed = false; // lane stream-hdr-passthrough: the decode watch of an HDR picture (hdrStallStep)
+  let stall = null; // lane stream-leg-flap: THE STALL's watch (stallStep)
 
   const send = (msg) => {
     const open = !!(msg && dc && dc.readyState === 'open');
@@ -170,6 +174,11 @@ export function createStreamView(host, opts = {}) {
     }
     const v = fallbackVerdict({ pc: pc.connectionState, since: pcSince, now: performance.now() });
     if (v.sick && (st.state === 'playing' || st.state === 'connecting')) step(v.event, v.event === 'failed' ? 'ice_failed' : 'ice_disconnected');
+    // lane stream-leg-flap: THE STALL — the frames stopped while ICE still says connected (no rule above acts on it) ⇒ ended
+    // `stalled`: the hub's record says so, the window says so and offers the stream again
+    const sv = stallStep(stall, { playing: st.state === 'playing', visible: typeof document === 'undefined' || document.visibilityState !== 'hidden', pageFrames: page.frames, agentFrames: agent && agent.frames, now: performance.now() });
+    stall = sv.w;
+    if (sv.stalled && st.state === 'playing') { why = null; step('ended', 'stalled'); }
   }
   // THE FIRST FRAME (and the acks): requestVideoFrameCallback where the browser has it, else the element's `playing`
   let lastAck = 0;

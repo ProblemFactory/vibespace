@@ -12,7 +12,7 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
-import { isAgentMemoryPath, effortDisplay, getBackendMeta, backendFeatureCaps, noteMemoryPaths, initHealthIssues, initFrameOf, notificationDeliveryFor, billingRow, viewIdFor, legacyIdFor } from './agent-meta.js';
+import { isAgentMemoryPath, effortDisplay, getBackendMeta, backendFeatureCaps, noteMemoryPaths, initHealthIssues, initFrameOf, notificationDeliveryFor, billingRow, viewIdFor, legacyIdFor, BACKEND_META } from './agent-meta.js';
 import { registerCommand, registerKeybinding, runCommand, hasCommand } from './contributions.js';
 // The verb list a wrapper that publishes a queue WITHOUT naming verbs serves —
 // the SAME array the server maps a verb-less sidecar onto (src/server/
@@ -2318,7 +2318,9 @@ class ChatView {
       // a claude view id is `view-<uuid>` and the first UUID segment used to
       // be misread as a backend here, breaking pagination/search for any view
       // window whose session isn't in the local list (remote sessions never are).
-      if (sep > 0 && /^(codex|claude|shell)$/.test(rawId.slice(0, sep))) {
+      // every registered backend (BACKEND_META's keys), never a hand list — lane harness-add-census: the list said
+      // codex|claude|shell, so an opencode / antigravity view id of a session not in the local list was never parsed
+      if (sep > 0 && Object.prototype.hasOwnProperty.call(BACKEND_META, rawId.slice(0, sep))) {
         const backend = rawId.slice(0, sep);
         const backendSessionId = rawId.slice(sep + 1);
         if (backend && backendSessionId) {

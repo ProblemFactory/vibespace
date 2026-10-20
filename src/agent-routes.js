@@ -10,6 +10,7 @@
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const OF = require('./server/owner-facts.js'); // lane agent-context-owner-facts (B-7960): the owner's clock + tray words — every time and tray sentence an agent reads here
 const { sameToken } = require('./pairing-token.js'); // B-8dda: every vsst_ lookup compares in constant time
 
 // ── stash → injection block (drain-at-render) ─────────────────────────────
@@ -91,8 +92,13 @@ const msgRefusals = (xs) => (xs || []).map((w) => ({ name: msgName(w.name), reas
 // copy takes the same belt inside src/task-groups.js's renders.)
 const taskLine = (v, max = 4096) => agentText(v == null ? '' : v, { kind: 'line', max });
 const taskBlock = (v) => agentText(v == null ? '' : v, { kind: 'block' });
-const taskItemAnswer = (b) => (b && typeof b === 'object' ? { ...b, text: taskLine(b.text), ...(typeof b.detail === 'string' ? { detail: taskBlock(b.detail) } : {}) } : b);
-const taskEntryAnswer = (p) => (p && typeof p === 'object' ? { ...p, note: taskLine(p.note), ...(typeof p.detail === 'string' ? { detail: taskBlock(p.detail) } : {}) } : p);
+// lane agent-context-owner-facts (B-7960 a): every instant an agent CLI prints rides as the hub's words (`when.<field>` —
+// THE formatter in the owner's zone, named); the CLI never formats a time itself (it ships to hosts in other zones)
+const whenWords = (o, keys) => { const w = {}; for (const k of keys) if (o && Number(o[k])) w[k] = OF.when(Number(o[k])); return Object.keys(w).length ? { when: w } : {}; };
+const taskItemAnswer = (b) => (b && typeof b === 'object' ? { ...b, text: taskLine(b.text), ...(typeof b.detail === 'string' ? { detail: taskBlock(b.detail) } : {}), ...whenWords(b, ['addedAt', 'resolvedAt']) } : b);
+const taskEntryAnswer = (p) => (p && typeof p === 'object' ? { ...p, note: taskLine(p.note), ...(typeof p.detail === 'string' ? { detail: taskBlock(p.detail) } : {}), ...whenWords(p, ['at']) } : p);
+/** a job view + its instants as words (vibespace-job prints `when.<field>`) */
+const jobWhen = (v) => (v && typeof v === 'object' ? { ...v, ...whenWords({ ...v, runStartedAt: v.run && v.run.startedAt }, ['nextFireAt', 'archivedAt', 'publishSince', 'runStartedAt']) } : v);
 const taskShowAnswer = (t, openSorted) => ({ id: t.id, title: taskLine(t.title), archived: !!t.archived, objective: t.objective == null ? t.objective : taskBlock(t.objective), backlog: (openSorted || []).map(taskItemAnswer), progress: (t.progress || []).slice(-10).map(taskEntryAnswer), contextDir: t.contextDir });
 // B-86d3 ② (lane hook-seen-marks): `vibespace-task show --full` lists the WHOLE context-folder index the injection's
 // budgeted one points at — a file name is any member's word, so each path leaves through the belt as a line piece
@@ -168,7 +174,7 @@ function turnIsUserInitiated(s) {
 function renderMsgStash(entries, { maxEntries = MSG_STASH_MAX_ENTRIES, maxBytes = MSG_STASH_MAX_BYTES, keep = 'newest', heading = null } = {}) {   // the stash HAND-OVER (src/server/stash-handover.js) renders every entry at once under a larger budget
   if (!entries || !entries.length) return { text: '', shown: [], rest: [] };
   const line = (e) => {
-    const stamp = new Date(Number(e.ts) || Date.now()).toISOString().slice(5, 16) + 'Z';
+    const stamp = OF.when(Number(e.ts) || Date.now());   // B-7960 a: the owner's zone, named, the date kept (a drained stash is read later)
     const who = e.fromName || e.source || 'unknown';
     // lane S3: a stashed VibeSpace notification (the browser handback, a
     // Background Work event, a channel wake) drains under the SAME head the live
@@ -320,7 +326,7 @@ function drainNotifsUnderCap(jm, deliver, cid, ahead, log = console.log) {
 const STOP_NUDGE_CLOSE = 'Make these calls first, then stop: do not restate your answer; end with at most one short line (the user already has your answer above, and this bookkeeping is not news to them).';
 function stopNudgeReason(T = {}, extra = '') {
   const steps = ['set your CURRENT state — vibespace-status <working|needs-input|blocked|review|done> --reason "one line" (done if this piece of work is finished; needs-input/review if you are waiting on the user)'];
-  if (T.ask) steps.push('if you asked the user anything this turn or are waiting on them, MIRROR it — vibespace-ask "question" (the full content must already be in your chat reply; the For you tray only notifies) — and vibespace-ask resolve anything they already answered');
+  if (T.ask) steps.push(`if you asked the user anything this turn or are waiting on them, MIRROR it — vibespace-ask "question" (the full content must already be in your chat reply; ${OF.tray().name} only notifies) — and vibespace-ask resolve anything they already answered`);   // B-7960 b: the tray by its label
   if (T.task) steps.push('if you completed meaningful work, log it — vibespace-task progress "summary"');
   return (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale; this note is from VibeSpace, not from the user): ' + steps.map((t, i) => `(${i + 1}) ${t}`).join('; ') + '. ' + STOP_NUDGE_CLOSE;
 }
@@ -2511,7 +2517,7 @@ app.post('/api/agent/jobs', (req, res) => {
   // resume / off, with the deciding layer named.
   let notify = null;
   try { notify = a.jm.notifyPreview(a.jm.jobs.get(r.job.id)); } catch { }
-  res.json({ success: true, job: r.job, renamed: r.renamed, notify });
+  res.json({ success: true, job: jobWhen(r.job), renamed: r.renamed, notify });
 });
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
@@ -2519,7 +2525,7 @@ app.get('/api/agent/jobs', (req, res) => {
   // `vibespace-job list --archived`) — same snapshot shape + archived:true
   if (req.query.archived) {
     const arch = a.selfJob ? [] : jobModel.visibleJobs(a.jm.archivedList(), a.caller);
-    return res.json({ success: true, archived: true, jobs: arch.map((r) => { const mine = jobModel.isOwner(r, a.caller); return { ...jobModel.agentJobView(a.jm.snapshotArchived(r), { mine }), mine, mySubscription: null }; }) });   // verify r5 F1 (lane peer-census): another lineage's record through the belt
+    return res.json({ success: true, archived: true, jobs: arch.map((r) => { const mine = jobModel.isOwner(r, a.caller); return jobWhen({ ...jobModel.agentJobView(a.jm.snapshotArchived(r), { mine }), mine, mySubscription: null }); }) });   // verify r5 F1 (lane peer-census): another lineage's record through the belt
   }
   let list = a.selfJob ? [a.selfJob] : jobModel.visibleJobs([...a.jm.jobs.values()], a.caller);
   // ?mine=1 → owned by this conversation · ?subscribed=1 → this conversation subscribed
@@ -2529,11 +2535,11 @@ app.get('/api/agent/jobs', (req, res) => {
     success: true,
     jobs: list.map((j) => {
       const mine = a.selfJob ? true : jobModel.isOwner(j, a.caller);
-      return {
+      return jobWhen({
         ...jobModel.agentJobView(a.jm.snapshot(j), { mine }),   // verify r5 F1 (lane peer-census): a job of ANOTHER lineage (view opened / subscribed) is another session's words — through the belt; the owner lineage reads its own raw
         mine,
         mySubscription: a.selfJob ? null : (j.subscribers || []).find((s) => s.conversationId === a.caller.conversationId) || null,
-      };
+      });
     }),
   });
 });
@@ -2550,7 +2556,7 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
     // archived id still answer, the SAME shape, with archived:true — an agent
     // holding an old id never gets a 404 because of housekeeping
     const arc = a.selfJob ? null : findVisibleIn(a.jm.archivedList(), a.caller, ref);
-    if (arc) { const mine = jobModel.isOwner(arc, a.caller); return res.json({ success: true, job: { ...jobModel.agentJobView(a.jm.snapshotArchived(arc, { tail: Math.min(Number(req.query.tail) || 0, 400) }), { mine }), mine, mySubscription: null } }); }   // verify r5 F1: through the belt
+    if (arc) { const mine = jobModel.isOwner(arc, a.caller); return res.json({ success: true, job: jobWhen({ ...jobModel.agentJobView(a.jm.snapshotArchived(arc, { tail: Math.min(Number(req.query.tail) || 0, 400) }), { mine }), mine, mySubscription: null }) }); }   // verify r5 F1: through the belt
     return res.status(404).json({ error: NOT_VISIBLE(ref) });
   }
   const wait = Math.min(Number(req.query.wait) || 0, 600) * 1000;
@@ -2564,11 +2570,11 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
   const mine = a.selfJob ? true : jobModel.isOwner(job, a.caller);
   res.json({
     success: true,
-    job: {
+    job: jobWhen({
       ...jobModel.agentJobView(a.jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 400) }), { mine }),   // verify r5 F1 (lane peer-census): another lineage's context / command / last line / LOG TAIL through the belt; `progress` (any viewer writes it) for everyone
       mine,
       mySubscription: a.selfJob ? null : (job.subscribers || []).find((s) => s.conversationId === a.caller.conversationId) || null,
-    },
+    }),
   });
 });
 app.post('/api/agent/jobs/:ref/:act', (req, res) => {
@@ -2655,7 +2661,7 @@ function sessionToolsIntro(T, facts = {}) {
   if (!T.status && !T.ask) return '';
   const L = ['<vibespace-session-tools>', 'This session runs inside VibeSpace; its tools are on your PATH (no arguments = usage; `vibespace-docs <topic>` = the full manual).'];
   if (T.status) L.push('Status: keep your OWN status current on the user\'s board — `vibespace-status <working|needs-input|blocked|review|done> [--urgency high] [--reason "why"]`: `blocked` / `needs-input` the moment you wait on the user, `done` when this piece of work is finished. Manual: vibespace-docs status.');
-  if (T.ask) L.push('Asking the user ANYTHING (or ending a turn waiting on them): ALSO file it with `vibespace-ask "question" --detail "context + your recommendation"` [--options "A|B|C"] — call where it lands "the For you tray at the bottom right", never "your inbox"; the full question ALSO goes in your chat reply (the tray only notifies); their answer opens with `[For you reply #<id>]` — `vibespace-ask resolve <id>` YOURSELF the moment they answer. Manual: vibespace-docs ask.');
+  if (T.ask) L.push('Asking the user ANYTHING (or ending a turn waiting on them): ALSO file it with `vibespace-ask "question" --detail "context + your recommendation"` [--options "A|B|C"] — call it "' + OF.tray().phrase + '", never "your inbox"; the full question ALSO goes in your chat reply (the tray only notifies); their answer opens with `[For you reply #<id>]` — `vibespace-ask resolve <id>` YOURSELF the moment they answer. Manual: vibespace-docs ask.');
   if (T.jobs) L.push('Background work that must OUTLIVE this conversation (a server, a monitor, a batch, a schedule) — never nohup/systemd/harness-cron: `vibespace-job run "<cmd>" --name <name> --context "<what your future self needs>"`, later `vibespace-job poll <id>`. Manual: vibespace-docs jobs.');
   L.push('Other agents: `vibespace-msg send <name|id|group> "text"` reaches them on THEIR next turn at no cost (`--wake` or an @name = a billed turn now); group news arrives here on your next turn. Manual: vibespace-docs msg.');
   L.push(browserIntroLine(facts.browserVariant, { display: facts.browserDisplay }));   // lane browser-recipes: + the machine's display fact (a pod: no display)
@@ -2681,7 +2687,7 @@ function sessionToolsIntro(T, facts = {}) {
  *  session's REACH says so (lane channels-teach: `T.channels` = 'read' | 'request' | false, agent-routes toolsFor), the
  *  docs pointer, the manager clause. Since lane cli-registry the segments are the rows of src/agent-cli-registry.js. */
 function perTurnToolsLine(T, { multi = false, manager = false } = {}) {
-  return renderReminderLine(T, { multi, manager });
+  return renderReminderLine(T, { multi, manager, tray: OF.tray().phrase });   // B-7960 b: the tray by its label and CURRENT place
 }
 
 /**
@@ -2746,4 +2752,5 @@ function browserSetLine(set) {
 module.exports = {
   turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, drainStashUnderCap, drainNotifsUnderCap, roomUnderCap, INLINE_CAP, INLINE_TAIL_MARGIN, JOBS_DIGEST_BUDGET, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, perTurnToolsLine, CHANNELS_REMINDER_SEG, fileToolsOf, browserIntroLine, AGENT_DOC_TOPICS, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE, BROWSER_DIALOG_LINE,
   msgPeerRow, msgGroupsAnswer, msgReadAnswer, msgSendAnswer, msgGroupOpAnswer, msgRefusalAnswer, dispatchAnswer,   // lane peer-census verify r1 / r2: the msg answers' doors, the refusal's too (test-peer-text-census drives them)
-  taskShowAnswer, taskItemAnswer, taskEntryAnswer, taskGroupBrief, contextIndexAnswer };   // verify r4 F1: the task answers' doors
+  taskShowAnswer, taskItemAnswer, taskEntryAnswer, taskGroupBrief, contextIndexAnswer,   // verify r4 F1: the task answers' doors
+  jobWhen };   // lane agent-context-owner-facts (B-7960 a): a job view's instants as the hub's words (test-task-injection drives it)

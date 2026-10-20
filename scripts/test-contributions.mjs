@@ -913,7 +913,7 @@ console.log('contributions — D. wiring pins');
   const css = read('public/style.css');
   ok(/\.gs-flyout \{[^}]*right: 100%/.test(css) && /\.gs-acc \.gs-sub \{[^}]*padding-left: 22px/.test(css) && /@media \(hover: none\) \{[\s\S]*\.gs-menu-item \{ min-height: 44px;/.test(css) && !/\.gs-flyout \{[^}]*#[0-9a-f]{3}/i.test(css),
     'CSS: the flyout opens LEFT, the accordion indents + borders its members, touch rows are ≥ 44 px, theme vars only');
-  ok(/app\._showGlobalSettings\(gear\)/.test(read('src/lib/mobile-nav.js')), 'mobile gear shares the same menu (mobile-nav → _showGlobalSettings)');
+  ok(/app\._pressGlobalSettings\(gear\)/.test(read('src/lib/mobile-nav.js')) && /_pressGlobalSettings\(anchor\) \{ unlockFirst\(\(\) => this\._showGlobalSettings\(anchor\)\); \}/.test(read('src/lib/app.js')), 'mobile gear shares the same menu (mobile-nav → _pressGlobalSettings → _showGlobalSettings; lane vault-locked-loud: a locked vault unlocks first)');
   ok(/this\._contribCtl = new AbortController\(\);/.test(ap) && /installKeybindings\(document, \{ signal: this\._contribCtl\.signal, getCtx: \(\) => \(\{ app: this \}\) \}\)/.test(ap), 'app installs ONE keybinding dispatcher under an app-lifetime AbortController');
   const gm = read('src/lib/gear-menu.js');
   ok(/^registerGearMenu\(\);/m.test(gm) && /el\.innerHTML = `<span class="gs-menu-icon">\$\{svg\}<\/span><span>\$\{escHtml\(label\)\}<\/span>`/.test(gm), 'gear-menu registers at module load; the row label is escHtml()ed (plugin window titles reach it)');

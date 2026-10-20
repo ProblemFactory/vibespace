@@ -22,7 +22,7 @@ const LIST_MAX = 4;      // actors the item's one line names; the rest are its d
 const DETAIL_ROWS = 11;  // detail lines (the store keeps ≤ 12 i18n lines: these + the «more» line)
 const HUB = 'VibeSpace';  // the hub itself — a store's own key read, a sealed file
 /** An id is never a name: a uuid, a prefixed id (sess- host- dial- …), a backend:id session key, a long hex run. */
-const ID_SHAPED = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?:sess|host|dial|webui|job|pf|ak|ut|g|c|T)-[\w-]{3,}|(?:claude|codex|opencode|gemini|webui|session|group):[\w.-]+|[0-9a-f]{12,})$/i;
+const ID_SHAPED = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?:sess|host|dial|webui|job|pf|ak|ut|g|c|T)-[\w-]{3,}|(?:claude|codex|opencode|antigravity|shell|gemini|webui|session|group):[\w.-]+|[0-9a-f]{12,})$/i;
 const clean = (s, max) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 /** A NAME a person reads, or `fallback` — an empty or id-shaped string never stands for a name. */
 function actorName(name, fallback = 'a conversation') {
@@ -32,7 +32,7 @@ function actorName(name, fallback = 'a conversation') {
 
 /** THE WORDS TOWARD AN AGENT (every agent-facing `vault_locked` refusal — the automation door, the vault doors, a channel's
  *  sign-in, the CLIs and the manuals): the owner already knows; the agent never asks. The code stays `vault_locked`. */
-const TOLD = 'the user has already been told (their For you tray names what is waiting on it) — do not ask them to unlock it or for its password: wait, or do other work, and try again later';
+const TOLD = 'the user has already been told (their tray names what is waiting on it) — do not ask them to unlock it or for its password: wait, or do other work, and try again later';   // B-7960 b: "their tray" — never a label or a place this PURE file cannot know (vibespace-vault prints the hub's words)
 const AGENT_WORDS = `the vault is locked — a person unlocks it on this instance's page; ${TOLD}`;   // lane vault-manual-and-lock: where, too
 /** `what` = what waits (`every automation waits until the user unlocks it on this instance's page`). */
 const agentWords = (what) => (what ? `the vault is locked — ${what}; ${TOLD}` : AGENT_WORDS);

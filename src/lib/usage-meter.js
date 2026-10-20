@@ -95,6 +95,7 @@ export function installUsageMeter(App, ctx = {}) {
     this._hostUsage = data?.hosts || {}; // remote hosts' own-login quota (on-demand ⟳ only)
     this._hostOwnUsage = this._hostUsage; // canonical alias the Agents machine sections read
     this._hostAccountUsage = data?.hostAccounts || {}; // host-HELD account quota ('<hostId>:<acctId>', 2.245.0)
+    this._homeAccountUsage = data?.homeAccounts || {}; // a named account's on-demand reading (Re-check — antigravity)
     this._usageEstimates = data?.estimates || {}; // dead-reckoned CURRENT utilization per account key (B-fcff v2)
     this._usageLogins = data?.logins || {}; // per-account credential state {state, usable, since} (src/login-state.js)
   },

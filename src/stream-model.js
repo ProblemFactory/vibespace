@@ -42,6 +42,11 @@
  *                                    lets in the answers to what it sent): an authenticated PING / PONG (HMAC over a counter +
  *                                    a nonce, the mac handed in — this file imports no crypto) and DATA (the browser's address +
  *                                    its datagram); relayPathOf(page, relay) = direct | udp | link (the strip's words)
+ *   legElect(el, ev)                 THE PATH ELECTION (lane stream-leg-flap): ONE per relayed session, with hysteresis — the hub
+ *                                    takes the leg once when it comes up and leaves it only when it is MEASURED dead (silent
+ *                                    for its bound), never because the device link spoke too
+ *   stallStep(w, facts)              THE STALL (lane stream-leg-flap): a playing picture that decodes nothing while the machine
+ *                                    says it sends ⇒ the window says so and offers the stream again (never «0 fps» for ever)
  *   firewallRuleCommand(program)     the admin line that opens the DIRECT path on a Windows machine (copied by its owner, never
  *                                    run by VibeSpace) · directInboundOf(probe) — the daemon's self-probe → open | blocked | none
  */
@@ -87,9 +92,17 @@ const STREAM_LIMITS = Object.freeze({
   disconnectedGraceMs: 4000,  // `disconnected` this long counts as sick (a Wi-Fi blip recovers inside it)
   relayMaxDatagram: 1500, relayMaxPeers: 4, relayQueueBytes: 262144,
   // THE UDP LEG (lane stream-relay-udp): a PING every legKeepaliveMs keeps the machine's NAT / firewall state; every
-  // legLiveMs while the leg carries the picture; an unanswered PING for legEchoMs = the leg is down (the device link carries
-  // it, re-asked every legReprobeMs; legProbeMs between the first PINGs); the hub forwards on a leg it heard within legStaleMs
-  legKeepaliveMs: 15000, legLiveMs: 2000, legEchoMs: 2000, legProbeMs: 500, legReprobeMs: 5000, legStaleMs: 35000, legTargets: 6,
+  // legLiveMs while the leg carries the picture; a PING unanswered for legEchoMs is a MISS (re-asked at once), legMissMax
+  // misses IN A ROW = the leg is down (the device link carries it, re-asked every legReprobeMs; legProbeMs between the first
+  // PINGs — a leg never up is down at its first miss: the link carried it all along). THE HUB'S ELECTION (lane
+  // stream-leg-flap — legElect): the leg it took is left only after legDeadMs without a sign of life while it carried the
+  // picture (= legMissMax × legLiveMs: three PING periods, the daemon's own verdict), legStaleMs when it carried none (an idle
+  // leg PINGs every legKeepaliveMs: two of them + 5 s)
+  legKeepaliveMs: 15000, legLiveMs: 2000, legEchoMs: 2000, legMissMax: 3, legProbeMs: 500, legReprobeMs: 5000, legDeadMs: 6000, legStaleMs: 35000, legTargets: 6,
+  // THE STALL (lane stream-leg-flap — stallStep): a PLAYING picture that decoded no frame for stallMs while the machine says it
+  // sent some = stalled ⇒ said and offered again. Longer than the leg's own way back (a dead leg: the daemon's three misses
+  // ≤ legLiveMs + legMissMax × legEchoMs ≈ 8 s, then a key frame over the device link), so it never races the election
+  stallMs: 12000,
   probeWaitMs: 300, probeMemoMs: 60000,
   inputMaxBytes: 70000, clipMaxChars: 65536, fakeMaxBytes: 8 * 1024 * 1024,
   // lane desktop-handover: one `desktop-input` op's records — the sibling input-events' 200 (fix r2: the hub chunks a longer act,
@@ -434,6 +447,45 @@ function relayPathOf(page, relay) {
   return via === 'udp' || via === 'link' ? via : 'relay';
 }
 
+/** THE PATH ELECTION of a relayed session (lane stream-leg-flap — the owner's Mac desktop went black 2026-10-20: the hub
+ *  followed whichever path the daemon LAST spoke on and flipped leg ⇄ link three times in 20 s, both displays at once).
+ *  ONE election per session, with HYSTERESIS. `el` = the hub's record { via: 'link' | 'udp', aliveAt, dataAt }; `ev` = {
+ *  type, at, why? }:
+ *    'up' / 'data'  a sign of LIFE on the leg — a PING flagged UP (the daemon hears this hub's PONGs) or DATA from its
+ *                   address: a hub on the device link takes the leg, ONCE, the moment it comes up (the better path)
+ *    'link'         the daemon spoke on the device link — NEVER a reason to leave the leg: a second path speaking says
+ *                   nothing about the first (a .330 daemon's queued frames, its one-lost-PONG detour)
+ *    'quiet'        a PING not flagged UP (the daemon heard no PONG lately) — no sign of life, no change by itself: the
+ *                   leg's silence decides
+ *    'judge'        the browser's datagram asks for a path: the elected leg is DEAD after its silence bound — legDeadMs
+ *                   when it carried the picture (DATA within a keepalive of its last sign), legStaleMs when idle
+ *  → { via, aliveAt, dataAt, changed, why } (why = the log's words for a change) */
+function legElect(el, ev, { deadMs = STREAM_LIMITS.legDeadMs, idleMs = STREAM_LIMITS.legStaleMs, keepaliveMs = STREAM_LIMITS.legKeepaliveMs } = {}) {
+  const via = el && el.via === 'udp' ? 'udp' : 'link';
+  const aliveAt = Number(el && el.aliveAt) || 0, dataAt = Number(el && el.dataAt) || 0;
+  const at = Number(ev && ev.at) || 0, type = ev && ev.type;
+  const keep = { via, aliveAt, dataAt, changed: false, why: null };
+  if (type === 'up' || type === 'data') return { via: 'udp', aliveAt: at, dataAt: type === 'data' ? at : dataAt, changed: via !== 'udp', why: via !== 'udp' ? (type === 'data' ? 'leg data' : 'leg up') : null };
+  if (type === 'judge' && via === 'udp') {
+    const bound = dataAt && aliveAt - dataAt < keepaliveMs ? deadMs : idleMs;
+    if (at - aliveAt >= bound) return { ...keep, via: 'link', changed: true, why: `the leg was silent ${Math.round((at - aliveAt) / 1000)} s` };
+  }
+  return keep;
+}
+
+/** THE STALL (lane stream-leg-flap — the owner's black «串流 · 2 个显示器 · 0 fps»: a picture PLAYING whose frames stopped while
+ *  ICE stayed connected — no rule ever acted). `w` = the watch so far { pf, af, at } (the page's decoded frames and the
+ *  machine's sent frames when the page's last advanced); `facts` = { playing, visible, pageFrames, agentFrames, now }.
+ *  STALLED = playing, visible, no frame decoded for stallMs AND the machine's sent count moved meanwhile (pictures were sent,
+ *  none arrived) — a still screen that sends nothing never stalls (a Mac repeats its picture every 0.5 s anyway); a hidden
+ *  page re-arms (a background tab is not judged). → { w, stalled, ms } */
+function stallStep(w, { playing = false, visible = true, pageFrames = null, agentFrames = null, now = 0 } = {}, { stallMs = STREAM_LIMITS.stallMs } = {}) {
+  const pf = Number.isFinite(pageFrames) ? pageFrames : null, af = Number.isFinite(agentFrames) ? agentFrames : null;
+  if (!playing || !visible || pf == null || !w || pf > w.pf || (w.af == null && af != null)) return { w: playing && pf != null ? { pf, af, at: now } : null, stalled: false, ms: 0 };
+  const ms = Math.max(0, now - w.at);
+  return { w, stalled: ms >= stallMs && af != null && af > w.af, ms };
+}
+
 /** THE STATS ROW (lane stream-window-fixes): the facts both stream windows show — `page` = statsOf's answer, `agent` = the
  *  agent's numbers (its `screen` = the source's stats: encoder, encode ms; a window's kbps + floor), `via` = relayPathOf's.
  *  → null (no numbers yet) | { rtt, jitter, fps, decode, kbps, via, encoder, encodeMs, rate: { kbps, floor } | null } */
@@ -467,5 +519,5 @@ function firewallRuleCommand(program) {
 module.exports = {
   STREAM_CODEC, STREAM_CODEC_AV1, streamCodecsOf, isMdnsCandidate, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, streamCapOf, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict, NEVER_SILENT, endingVerdict,
   videoToSource, INPUT_KINDS, inputEventOf, wheelUnitsOf, statsOf, relayFrame, relayUnframe, relayCandidates,
-  LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, streamNumbersOf, directInboundOf, firewallRuleCommand,
+  LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, legElect, stallStep, streamNumbersOf, directInboundOf, firewallRuleCommand,
 };

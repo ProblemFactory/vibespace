@@ -20,6 +20,12 @@
 //      用于… · 删除), no code before 看码 and no seed in the DOM; 看码 ⇒ the CURRENT code (RFC 6238 at this clock, 3 + 3) with
 //      NO 验证是你, its ring (--p) and seconds; at the step's boundary it is asked again and changes; 显示 ⇒ 验证是你, then the
 //      otpauth link; 全部显示 skips the seed; 用于… opens its picker; 隐藏码 hides it; every view an audit line, the seed in none
+//   L lane vault-locked-loud (the owner 2026-10-20: "如果 vault 没解锁应该直接在界面上有个显著提醒，不需要等到 agent 被 block 了"): a hub
+//      with NO vault says none of the three (no dialog, no ⚙ mark, no tray item); a locked first load opens the dialog, the ⚙
+//      button wears the red lock («Vault locked — click to unlock») and the tray holds the URGENT item (the badge's red
+//      segment); a reload after 「稍后」 asks no more (the tab's set-aside lock) while the mark and the item stay; Esc closes it;
+//      a ⚙ press while locked opens the dialog first, then the menu; the unlock clears the dialog, the mark and the item on
+//      BOTH open clients; the phone's ⚙ wears it too and the dialog fits 375×812
 // Run: node scripts/test-vault-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -89,6 +95,12 @@ const onTop = (sel) => `(() => { const e = document.querySelector(${JSON.stringi
 const splashGone = () => until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
 const integration = async () => { const r = await api('GET', '/api/integrations/cloud:browserless'); const v = r.json && r.json.integration; return { status: r.status, storeError: v && v.storeError ? (v.storeError.reason || v.storeError.code) : null, configured: !!(v && JSON.stringify(v).includes('chrome.example.net')) }; };
 
+// lane vault-locked-loud: the three things a LOCKED vault says at once, as one page sees them
+const gearMarkJs = (id = 'btn-global-settings') => `(() => { const b = document.getElementById(${JSON.stringify(id)}); const m = b && b.querySelector('.vault-gear-mark'); if (!m) return { on: false, title: b ? b.title : null }; const r = m.getBoundingClientRect(); const probe = document.createElement('span'); probe.style.color = 'var(--red)'; document.body.appendChild(probe); const red = getComputedStyle(probe).color; probe.remove(); return { on: r.width > 0 && r.height > 0, svg: !!m.querySelector('svg'), color: getComputedStyle(m).color, cog: getComputedStyle(b).color, red, title: b.title }; })()`;
+const markRed = (m) => !!m && m.on && m.svg && m.color === m.red && m.cog === m.red && m.title === 'Vault locked \u2014 click to unlock (For you names what is waiting on it)';   // int332: the chip's full words
+const trayUrgentJs = `(() => { const b = document.getElementById('taskbar-user-todos'); const u = b && b.querySelector('.ut-seg-urgent'); return { urgency: b ? b.dataset.urgency : null, urgent: u ? Number(u.textContent) : 0 }; })()`;
+const openVaultItems = async () => { const r = (await api('GET', '/api/user-todos')).json || {}; return ((r.todos && r.todos.open) || []).filter((i) => i.sessionKey === 'vault' && i.action && i.action.type === 'vault-unlock'); };
+
 startServer();
 check('the hub boots (sign-in password on)', await ready());
 
@@ -102,6 +114,14 @@ check('the app loads behind the sign-in', !!(await until(`!!(window.app && docum
 const put = await api('PUT', '/api/integrations/cloud:browserless', { values: { apiKey: 'chrome-leg-api-key', apiUrl: 'https://chrome.example.net' } });
 check('an integration key is stored (not set up: its key FILE is minted beside the data)', put.status === 200 && fs.existsSync(path.join(DATA, '.integrations-key')) && !fs.existsSync(path.join(DATA, 'vault.json')), put);
 check('the vault says not_set_up', (await api('GET', '/api/vault/state')).json?.state === 'not_set_up');
+{
+  await sleep(1000);   // the boot read has landed (the setup nag is snoozed by the suite's ONBOARDED_SOURCE)
+  const m = await evalJs(gearMarkJs());
+  check('①L lane vault-locked-loud: a hub with NO vault says none of the three — no unlock dialog, no ⚙ mark (the plain title), no vault item in the tray', !(await evalJs(`!!document.getElementById('vault-unlock-dialog')`)) && !m.on && m.title === 'Global settings' && (await openVaultItems()).length === 0, m);
+  await click('#btn-global-settings');
+  check('①L … and a ⚙ press opens the menu at once (no dialog first)', !!(await until(`!!document.querySelector('.global-settings-popover') && !document.getElementById('vault-unlock-dialog')`, { timeout: 5000 })));
+  await evalJs(`document.querySelector('.global-settings-popover')?.remove(); true`);
+}
 
 console.log('② the load-time ask (snooze cleared) — set the second password');
 await evalJs(`localStorage.removeItem('vs-vault-later')`);
@@ -128,6 +148,14 @@ check('… on top of the app (its Unlock button is what a click reaches)', !!(aw
 check('the taskbar lock chip shows', !!(await until(visible('#taskbar-vault'), { timeout: 5000 })));
 check('③ the persistent lock strip shows at the top of the workspace (owner 2026-10-20: 常驻警告)', !!(await until(visible('#vault-lock-strip'), { timeout: 5000 })));
 check('③ the strip never covers the unlock dialog\u2019s button (the dialog stays reachable)', !!(await evalJs(onTop('.vault-unlock-go'))));
+{
+  const m = await until(`(() => { const m = ${gearMarkJs()}; return m.on ? m : null; })()`, { timeout: 5000 });
+  check('③L lane vault-locked-loud: the ⚙ button wears the RED mark (a lock SVG in --red, the cog in --red) and says «Vault locked — click to unlock»', markRed(m), m);
+  const tray = await until(`(() => { const t = ${trayUrgentJs}; return t.urgent >= 1 ? t : null; })()`, { timeout: 8000 });
+  check('③L the For-you tray holds the URGENT item at once — the badge\u2019s red (urgent) segment counts it', !!tray && tray.urgency === 'urgent' && tray.urgent >= 1, tray || await evalJs(trayUrgentJs));
+  const it = await openVaultItems();
+  check('③L … the item is ONE urgent action row whose door opens the unlock dialog', it.length === 1 && it[0].kind === 'action' && it[0].urgency === 'urgent' && it[0].action.type === 'vault-unlock', it.map((i) => ({ kind: i.kind, urgency: i.urgency })));
+}
 const lockedInt = await integration();
 check('the integration answers key-unreadable:vault_locked', lockedInt.storeError === 'key-unreadable:vault_locked', lockedInt);
 // lane vault-locked-refusal-notice: the refusal IS the signal — noted (the store-key road: «VibeSpace», the store), counted
@@ -146,15 +174,57 @@ await shot('vault-3-wrong.png');
 await click('#vault-unlock-dialog .vault-later');
 check('③b 「稍后」 closes the modal; the lock chip stays (the door back)', !!(await until(`!document.getElementById('vault-unlock-dialog') && !!document.getElementById('taskbar-vault')`, { timeout: 3000 })));
 check('③b the persistent strip stays after 「稍后」 (not dismissable) and its Unlock button is now reachable (on top)', !!(await until(`!!document.getElementById('vault-lock-strip')`, { timeout: 3000 })) && !!(await evalJs(onTop('#vault-lock-strip .vls-unlock'))));
+{
+  // lane vault-locked-loud: 「稍后」 set THIS lock aside for the tab — a reload asks no more, the mark and the item stay
+  check('③L 「稍后」 wrote the set-aside lock into the tab\u2019s sessionStorage', /^\d+:\d+$/.test(await evalJs(`sessionStorage.getItem('vs-vault-unlock-later') || ''`) || ''));
+  await cdp('Page.navigate', { url: URL });
+  check('③L RELOAD after 「稍后」: the app is back, its strip drawn by the boot read', !!(await until(`!!document.getElementById('vault-lock-strip')`, { timeout: 30000 })));
+  await splashGone(); await sleep(1500);
+  check('③L … and NO dialog (the set-aside lock; the base asked at every load)', !(await evalJs(`!!document.getElementById('vault-unlock-dialog')`)));
+  check('③L … while the ⚙ mark stays red and the tray keeps the urgent item', markRed(await evalJs(gearMarkJs())) && (await evalJs(trayUrgentJs)).urgent >= 1 && (await openVaultItems()).length === 1);
+  await evalJs(`document.getElementById('vault-unlock-dialog')?.remove(); true`);   // (a base run's dialog — the legs below open their own)
+  await shot('vault-L1-reload-after-later.png');
+  // Esc closes the dialog (the door opens it; the strip stays)
+  await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);
+  await until(visible('#vault-unlock-dialog'), { timeout: 5000 });
+  await until(`document.activeElement && document.activeElement.id === 'vault-unlock-pw'`, { timeout: 3000 });
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  check('③L Esc closes the dialog; the strip and the ⚙ mark stay', !!(await until(`!document.getElementById('vault-unlock-dialog') && !!document.getElementById('vault-lock-strip') && !!document.querySelector('#btn-global-settings .vault-gear-mark')`, { timeout: 3000 })));
+  // a ⚙ press while locked: the unlock dialog FIRST (one press), the menu once it closes
+  await click('#btn-global-settings');
+  check('③L a ⚙ press while LOCKED opens the unlock dialog first — no menu yet', !!(await until(`!!document.getElementById('vault-unlock-dialog') && !document.querySelector('.global-settings-popover')`, { timeout: 5000 })));
+  await shot('vault-L2-gear-press.png');
+  await click('#vault-unlock-dialog .vault-later');
+  check('③L … then 「稍后」 ⇒ the menu opens as today (the press ends in the menu)', !!(await until(`!document.getElementById('vault-unlock-dialog') && !!document.querySelector('.global-settings-popover')`, { timeout: 5000 })));
+  await evalJs(`document.querySelector('.global-settings-popover')?.remove(); true`);
+}
 await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);
 check('③b a locked card\'s door (vs-vault-door) opens the UNLOCK modal again (lane vault-one-door: the old ⚙ dialog is gone; the door is unchanged)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
 
-console.log('④ the right password');
+console.log('④ the right password — seen by BOTH open clients (lane vault-locked-loud)');
+// a SECOND client: another tab of the same signed-in browser (its own sessionStorage — it set nothing aside)
+const tB = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+const wsB = new WebSocket(tB.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+await new Promise((r) => wsB.on('open', r));
+let seqB = 0; const pendB = new Map();
+wsB.on('message', (d) => { const m = JSON.parse(d); if (m.id && pendB.has(m.id)) { pendB.get(m.id)(m); pendB.delete(m.id); } });
+const cdpB = (method, params = {}) => new Promise((res, rej) => { const id = ++seqB; pendB.set(id, (m) => m.error ? rej(new Error(m.error.message)) : res(m.result)); wsB.send(JSON.stringify({ id, method, params })); });
+const evalB = async (expr) => { const r = await cdpB('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page B threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
+const untilB = async (expr, { timeout = 15000, step = 100 } = {}) => { const t0 = Date.now(); for (;;) { let v = null; try { v = await evalB(expr); } catch { } if (v) return v; if (Date.now() - t0 > timeout) return v; await sleep(step); } };
+await cdpB('Page.enable');
+await cdpB('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+await cdpB('Page.navigate', { url: URL });
+check('④L client B (a second tab) loads LOCKED: its own dialog opens, its ⚙ is red, its tray holds the urgent item', !!(await untilB(`(() => { const m = ${gearMarkJs()}; const t = ${trayUrgentJs}; return !!document.getElementById('vault-unlock-dialog') && m.on && m.color === m.red && t.urgent >= 1; })()`, { timeout: 30000 })));
+await untilB(`!!(window.app && window.app.ws && window.app.ws.connected)`, { timeout: 15000 });
 await typeInto('#vault-unlock-pw', SECOND); await click('.vault-unlock-go');
 check('the modal closes', !!(await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 15000 })));
 check('the lock chip goes', !!(await until(`!document.getElementById('taskbar-vault')`, { timeout: 5000 })));
 check('④ the persistent lock strip goes when the vault is unlocked', !!(await until(`!document.getElementById('vault-lock-strip')`, { timeout: 5000 })));
 check('④ lane vault-locked-refusal-notice: the unlock resolves THE item and clears the count', (await vaultItems()).length === 0 && (await api('GET', '/api/vault/state')).json?.blocked === 0);
+check('④L client A: the ⚙ mark is gone (the plain title back) and the tray\u2019s urgent segment with it', !!(await until(`(() => { const m = ${gearMarkJs()}; const t = ${trayUrgentJs}; return !m.on && m.title === 'Global settings' && !t.urgent; })()`, { timeout: 8000 })), { mark: await evalJs(gearMarkJs()), tray: await evalJs(trayUrgentJs) });
+check('④L client B follows the broadcast WITHOUT a reload: its dialog, its ⚙ mark, its strip and its urgent item are gone', !!(await untilB(`(() => { const m = ${gearMarkJs()}; const t = ${trayUrgentJs}; return !document.getElementById('vault-unlock-dialog') && !m.on && m.title === 'Global settings' && !document.getElementById('vault-lock-strip') && !t.urgent; })()`, { timeout: 10000 })), { mark: await evalB(gearMarkJs()), tray: await evalB(trayUrgentJs), dialog: await evalB(`!!document.getElementById('vault-unlock-dialog')`) });
+try { wsB.close(); await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tB.id}`); } catch { }
 const openInt = await integration();
 check('the integration\'s key opens again (the feature works)', openInt.configured && !openInt.storeError, openInt);
 
@@ -226,7 +296,7 @@ check('③c RED CONTROL: a same-startedAt broadcast opened NO new dialog (a lock
 console.log('⑤ RESTART again ⇒ locked again; a phone gets the same modal');
 await stopServer(); startServer();
 check('the hub is back', await ready());
-await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 760, deviceScaleFactor: 2, mobile: true });
+await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 2, mobile: true });
 await cdp('Page.navigate', { url: URL });
 check('locked again after the restart — the unlock modal (no auto-unlock of any kind)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })) && (await api('GET', '/api/vault/state')).json?.state === 'locked');
 await splashGone();
@@ -234,6 +304,12 @@ check('the phone\'s Unlock button is reachable (on top)', !!(await until(onTop('
 check('⑤ the persistent strip shows on the phone too, and never covers the dialog button', !!(await until(visible('#vault-lock-strip'), { timeout: 5000 })) && !!(await evalJs(onTop('.vault-unlock-go'))));
 const rect = await evalJs(`(() => { const d = document.querySelector('#vault-unlock-dialog .dialog'); const r = d.getBoundingClientRect(); const go = document.querySelector('.vault-unlock-go').getBoundingClientRect(); return { l: r.left, r: r.right, w: innerWidth, goH: go.height }; })()`);
 check(`the phone modal sits inside the screen (${Math.round(rect.l)}…${Math.round(rect.r)} of ${rect.w}) with a ≥ 36 px button (a phone target)`, rect.l >= 0 && rect.r <= rect.w && rect.goH >= 36, rect);
+{
+  const box = await evalJs(`(() => { const r = document.querySelector('#vault-unlock-dialog .dialog').getBoundingClientRect(); return { t: r.top, b: r.bottom, h: innerHeight, w: innerWidth }; })()`);
+  check(`⑤L the dialog fits 375×812 top to bottom (${Math.round(box.t)}…${Math.round(box.b)} of ${box.h})`, box.w === 375 && box.h === 812 && box.t >= 0 && box.b <= box.h, box);
+  const pm = await evalJs(gearMarkJs('mobile-nav-gear'));
+  check('⑤L the phone nav\u2019s ⚙ wears the same red mark', markRed(pm), pm);
+}
 await shot('vault-4-phone.png');
 await cdp('Emulation.clearDeviceMetricsOverride');
 
@@ -271,7 +347,7 @@ await stopServer();
   // never onVaultState's startedAt-gated re-ask). Revert BOTH; the load-time ask and the strip stay — the regression this
   // isolates is the missing RE-ASK. A bundle with the reconnect re-read in place would re-open the modal here and go red.
   const noRecon = orig.split('\n').filter((l) => !l.includes("onStateChange?.((connected) => { if (connected && vaultBooted) fetchJson('/api/vault/state')")).join('\n');
-  const prefix = noRecon.replace("if (msg && msg.type === 'vault-state') onVaultState(msg); }", "if (msg && msg.type === 'vault-state') applyVaultFacts(msg); }");
+  const prefix = noRecon.replace("if (msg && msg.type === 'vault-state') onVaultState(msg, 'broadcast'); }", "if (msg && msg.type === 'vault-state') applyVaultFacts(msg); }");
   check('③c-RED the patch reverts the reconnect re-read AND the broadcast re-ask (the control is real)', noRecon.split('\n').length === orig.split('\n').length - 1 && prefix !== noRecon);
   fs.writeFileSync(vu, prefix);
   execSync(`${wt}/node_modules/.bin/esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify`, { cwd: wt, stdio: 'ignore' });

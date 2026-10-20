@@ -84,10 +84,15 @@ const DIRECTIVES = new Set(['default-src', 'script-src', 'script-src-elem', 'scr
 const KEYWORDS = new Set(['inline', 'eval', 'wasm-eval', 'trusted-types-policy', 'trusted-types-sink', 'self', 'about', 'blob', 'data']);
 const FIELD_MAX = 200;
 const SEGMENTS = 3;
+// B-a35f (q-043 verify L4): a kept segment that LOOKS LIKE A TOKEN — ≥ 16 characters of [A-Za-z0-9_-], any segment of ≥ 32, or
+// one of the hub's own token prefixes — is cut to `<token>`: a third-party `/share/<token>/x` never reaches the report line
+// (data/csp-reports.jsonl) nor the For-you notice that prints it
+const TOKEN_SEGMENT = /^(?:[A-Za-z0-9_-]{16,}|[^]{32,}|(?:vsst_|jbt_|vsrt_|vi-)[^]*)$/;
 const clean = (s, max = FIELD_MAX) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, max);
 
 /** A URL as a report line keeps it: a keyword as is; http(s)/ws(s) ⇒ origin + the first 3 path segments (no query, no
- *  fragment, no user:pass); an extension ⇒ scheme://id; any other scheme ⇒ the scheme alone (a data: URL is its bytes). */
+ *  fragment, no user:pass; a segment that looks like a token is `<token>`); an extension ⇒ scheme://id; any other scheme ⇒
+ *  the scheme alone (a data: URL is its bytes). */
 function uriOf(u) {
   const s = clean(u, 2048);
   if (!s) return '';
@@ -100,7 +105,7 @@ function uriOf(u) {
     try {
       const x = new URL(s);
       const segs = x.pathname.split('/').filter(Boolean);
-      return clean(`${x.protocol}//${x.host}/${segs.slice(0, SEGMENTS).join('/')}${segs.length > SEGMENTS ? '/…' : ''}`);
+      return clean(`${x.protocol}//${x.host}/${segs.slice(0, SEGMENTS).map((g) => (TOKEN_SEGMENT.test(g) ? '<token>' : g)).join('/')}${segs.length > SEGMENTS ? '/…' : ''}`);
     } catch { return scheme; }
   }
   if (/-extension$/.test(scheme)) { const id = /^[a-z-]+:\/\/([a-z0-9]{1,64})/.exec(low); return id ? `${scheme}://${id[1]}` : scheme; }
@@ -163,6 +168,6 @@ function noticeWords(r) {
 
 module.exports = {
   HEADER, ENFORCE_HEADER, REPORT_PATH, APP_POLICY, policyString, appPolicy, loginPolicy,
-  DIRECTIVES, KEYWORDS, uriOf, reportOf, reportsOf, REPORT_TYPES, isReportType, FRAME_DOCUMENTS, noticeWorthy, lineKey, pairKey,
+  DIRECTIVES, KEYWORDS, TOKEN_SEGMENT, uriOf, reportOf, reportsOf, REPORT_TYPES, isReportType, FRAME_DOCUMENTS, noticeWorthy, lineKey, pairKey,
   NOTICE_TEXT, NOTICE_DETAIL, noticeWords,
 };

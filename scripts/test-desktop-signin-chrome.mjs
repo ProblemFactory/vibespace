@@ -10,7 +10,7 @@
 //   ② closed and reopened: NO dialog — 已连接 by itself; the machine took the HUB's answer (the page typed nothing)
 //   ③ the password changed on the machine: reopened ⇒ the dialog says 「上次记住的密码不对，请重输」 with the tick ON; the new
 //      password typed ⇒ 已连接 + 「已记住」 ⇒ the next window connects by itself again                    signin-refused.png
-//   ④ the vault LOCKED: reopened ⇒ the dialog says 「保险库已锁定——先解锁后可自动登录」, no tick; typed ⇒ 已连接; nothing
+//   ④ the vault LOCKED: reopened ⇒ the dialog says 「保险库已锁定——先解锁后可自动登录」 (the two facts on their own line), no tick; typed ⇒ 已连接; nothing
 //      stored (integrations.json byte-identical); unlocked ⇒ by itself again                           signin-locked.png
 //   ⑤ the machine's dialog shows 「忘掉登录」 (only while one is kept); pressed ⇒ 「已忘掉…」, the button gone, the next window
 //      asks again with no tick on                                                                   machine-dialog.png
@@ -168,7 +168,7 @@ const WIN = '.vs-win[data-type="machine-desktop"]';
 const DLG = '#machine-desktop-signin';
 const asked = (p, ms = 15000) => p.until(`!!document.querySelector('${DLG} input[type=password]')`, ms);
 const dialogFacts = (p) => p.ev(`(() => { const d = document.querySelector('${DLG}'); if (!d) return null; const k = d.querySelector('.machine-desktop-signin-keep input');
-  return { said: d.querySelector('.machine-desktop-signin-said')?.textContent || '', refused: d.querySelector('.machine-desktop-signin-refused')?.textContent || null, locked: d.querySelector('.machine-desktop-signin-locked')?.textContent || null,
+  return { said: d.querySelector('.machine-desktop-signin-said')?.textContent || '', refused: d.querySelector('.machine-desktop-signin-refused')?.textContent || null, locked: d.querySelector('.machine-desktop-signin-locked')?.textContent || null, where: d.querySelector('.machine-desktop-signin-locked-where')?.textContent || null,
     keep: k ? { checked: k.checked, label: d.querySelector('.machine-desktop-signin-keep').textContent } : null }; })()`);
 const tick = (p) => p.ev(`(() => { document.querySelector('${DLG} .machine-desktop-signin-keep input').click(); return true; })()`);
 const type = (p, pw) => p.ev(`(() => { const f = document.querySelector('${DLG} form'); f.querySelector('input[type=password]').value = ${JSON.stringify(pw)}; f.requestSubmit(); return true; })()`);
@@ -222,6 +222,7 @@ console.log('① – ⑥ zh');
   ok(await asked(p), '④ the vault LOCKED: reopened ⇒ the dialog');
   const f4 = await dialogFacts(p);
   ok(f4 && f4.locked === '保险库已锁定——先解锁后可自动登录' && f4.keep === null && f4.said === 'WIN-DESK1需要它的 VNC 密码。VibeSpace 不会保存。', '④ 「保险库已锁定——先解锁后可自动登录」, no tick, 「不会保存」', f4);
+  ok(f4 && f4.where === '页面顶部的「解锁…」；「待你处理」里写明了在等它的事', '④ …and the two facts (where to unlock, For you) on their own line beside it — the words stay verbatim (test-vault-words)', f4);
   await p.shot('signin-locked.png', `${DLG}`);
   await type(p, PW2);
   ok(await connected(p), '④ typed ⇒ 已连接');

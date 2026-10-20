@@ -206,7 +206,8 @@ window.__open();`, resolveDir: repo, loader: 'js' }, bundle: true, format: 'iife
   plugins: [{ name: 'stamp', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'stamp', namespace: 'stamp' })); b.onLoad({ filter: /.*/, namespace: 'stamp' }, () => ({ contents: 'export const BUILD_VERSION = "test";', loader: 'js' })); } }] });
 const HIST = Array.from({ length: 140 }, (_, i) => makeRecord({ adapterId: 'dr', convId: 'ops', vendorId: `h${i}`, at: Date.now() - i * 1.2 * 3600e3, author: { id: 'u-ada', name: 'Ada', isSelf: false, isBot: false }, text: `message ${i}`, mentions: [], attachments: [], replyTo: null, threadKey: 'ops', raw: {} }));
 const saved = [];
-const conv = () => ({ id: 'ops', adapterId: 'dr', title: 'Ops room', own: { access: [{ principal: AG3, authority: 'draft' }, { principal: GA, authority: 'draft' }, { principal: GB, authority: 'draft' }], watchers: [{ ...W(AG3, [PRED, ROUTE]), dailyWakeCap: 40, digestMinutes: 30 }] }, eligibleAbove: [], authorityCaps: { offersSend: false, sendWhy: 'read-only-adapter', policyRequiresReview: true }, stats: { msgs7d: 140 } });
+let convRules = null;   // lane dm-reply-infers (F): the reply rule's row instead of the two decision rules
+const conv = () => ({ id: 'ops', adapterId: 'dr', title: 'Ops room', own: { access: [{ principal: AG3, authority: 'draft' }, { principal: GA, authority: 'draft' }, { principal: GB, authority: 'draft' }], watchers: [{ ...W(AG3, convRules || [PRED, ROUTE]), dailyWakeCap: 40, digestMinutes: 30 }] }, eligibleAbove: [], authorityCaps: { offersSend: false, sendWhy: 'read-only-adapter', policyRequiresReview: true }, stats: { msgs7d: 140 } });
 const web = express();
 web.use(express.json());
 web.get('/', (req, res) => res.type('html').send(`<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/style.css"><style>body{margin:0;background:var(--bg-root)}</style></head><body><script>${req.query.lang ? `localStorage.setItem('vibespace.lang', ${JSON.stringify(String(req.query.lang))});` : ''}</script><script src="/dlg.js"></script></body></html>`));
@@ -228,7 +229,7 @@ process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 const WebSocket = require(path.join(repo, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
-async function page(w, h, lang) {
+async function page(w, h, lang, ready = `document.querySelectorAll('.chan-af-decision').length === 2`) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
@@ -241,7 +242,7 @@ async function page(w, h, lang) {
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
   const until = async (expr, n = 80) => { for (let i = 0; i < n; i++) { await sleep(150); if (await ev(expr).catch(() => false)) return true; } return false; };
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?lang=${lang}` });
-  await until(`document.querySelectorAll('.chan-af-decision').length === 2`);
+  await until(ready);
   const press = async (sel) => { const r = await ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`); if (!r) return false; for (const type of ['mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x: r[0], y: r[1], button: 'left', clickCount: 1 }); return true; };
   const shot = async (file, sel) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); await ev(`document.querySelector(${JSON.stringify(sel)}).scrollIntoView({ block: 'start' })`); await sleep(200); const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r.result.data, 'base64')); };
   return { ev, until, press, shot, close: () => { try { ws.close(); } catch {} } };
@@ -282,6 +283,43 @@ const ROW = `(() => {
   await ph.shot('phone.png', '.chan-af-decision');
   ph.close();
   D.pm.setEnabled('llm', true);
+}
+// ── F lane dm-reply-infers (B-6b4b): the reply rule's «Also judge plain replies» box — opt-in, saved as `infer`, the plugin
+//    off SAID on it (the marker road works either way) ──
+{
+  const INFER = `(() => { const b = document.querySelector('.chan-af-infer'); if (!b) return null; const tick = b.querySelector('.chan-af-infer-tick'); const note = b.querySelector('.chan-af-infer-note');
+    return { on: !!(tick && tick.checked), label: b.querySelector('.chan-af-infer-on')?.textContent || '', note: note && !note.hidden ? note.textContent : null, off: b.querySelector('.chan-dec-off')?.textContent || null, sw: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth }; })()`;
+  const saveNow = async (pg) => { await pg.ev(`(() => { const b = [...document.querySelectorAll('#chan-notify-dialog button, .chan-notify button')].find((x) => /^Save/.test(x.textContent.trim())); if (b) b.setAttribute('data-test-save', '1'); return !!b; })()`); return pg.press('[data-test-save]'); };
+  const n0 = saved.length;
+  convRules = [{ kind: 'reply-to-sent' }];
+  const pg = await page(1100, 1000, 'en', `!!document.querySelector('.chan-af-infer')`);
+  const r0 = await pg.ev(INFER);
+  ok(r0 && !r0.on && /Also judge plain replies \(LLM plugin\)/.test(r0.label) && r0.note === null && !r0.off, 'F desk (en): the reply rule\'s row carries the box — OFF by default, its note folded, nothing said about the plugin', r0);
+  await pg.press('.chan-af-infer-tick');
+  await pg.until(`document.querySelector('.chan-af-infer-tick').checked`, 10);
+  const r1 = await pg.ev(INFER);
+  ok(r1.on && /judged once: is it an answer to it\?/.test(r1.note || '') && /Settings › Channels/.test(r1.note || '') && !r1.off, 'F desk: ticked ⇒ the note says what is judged, once, and where the window is set; the plugin on ⇒ no off line', r1);
+  await pg.shot('infer.png', '.chan-af-list');
+  ok(await saveNow(pg) && await pg.until('true', 6) && saved.length === n0 + 1, 'F desk: Save sends the row', saved.length - n0);
+  const sr = saved[n0] && saved[n0].watchers && saved[n0].watchers[0] && saved[n0].watchers[0].filter;
+  ok(sr && JSON.stringify(sr.rules) === JSON.stringify([{ kind: 'reply-to-sent', infer: true }]) && F.validateFilter(sr).ok, 'F desk: the saved rule is `{kind: reply-to-sent, infer: true}` — the one grammar the CLI\'s --infer writes', sr);
+  pg.close();
+  convRules = [{ kind: 'reply-to-sent', infer: true }];
+  const p2 = await page(1100, 1000, 'en', `!!document.querySelector('.chan-af-infer')`);
+  const r2 = await p2.ev(INFER);
+  await p2.press('.chan-af-infer-tick');
+  await p2.until(`!document.querySelector('.chan-af-infer-tick').checked`, 10);
+  ok(r2 && r2.on && await saveNow(p2) && await p2.until('true', 6) && saved.length === n0 + 2 && JSON.stringify(saved[n0 + 1].watchers[0].filter.rules) === JSON.stringify([{ kind: 'reply-to-sent' }]), 'F desk: a stored `infer: true` draws ticked; unticked and saved ⇒ the rule is `{kind}` alone again (the marker-only row, byte for byte)', saved[n0 + 1] && saved[n0 + 1].watchers[0].filter);
+  p2.close();
+  D.pm.setEnabled('llm', false);
+  const p3 = await page(390, 844, 'zh', `!!document.querySelector('.chan-af-infer .chan-dec-off')`);
+  const r3 = await p3.ev(INFER);
+  ok(r3 && r3.on && /也判定普通回复/.test(r3.label) && /LLM 插件已关闭/.test(r3.off || '') && /引用和话题里的回复照常通知/.test(r3.off || '') && r3.sw <= r3.vw + 1, `F phone 390 (zh): the plugin OFF is said on the ticked box ("${r3 && r3.off}") — quotes and topic replies still notify; the dialog fits`, r3);
+  ok(await p3.press('.chan-af-infer .chan-dec-open') && await p3.until('window.__plugins >= 1', 10), 'F phone: Open Plugins on the box opens the Plugins card');
+  await p3.shot('infer-phone.png', '.chan-af-infer');
+  p3.close();
+  D.pm.setEnabled('llm', true);
+  convRules = null;
 }
 finish();
 function finish() {

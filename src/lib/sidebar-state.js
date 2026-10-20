@@ -8,6 +8,7 @@
 import { getSessionKey, backendFeatureCaps } from './agent-meta.js';
 import { showToast, showInputDialog } from './utils.js';
 import { t as tr } from './i18n.js';
+import { reportOwnerPage } from './owner-facts.js'; // lane agent-context-owner-facts (B-7960 b): what this page tells the hub about the owner's screen
 import { sessionRowOf, placeOf, settingsPolicy } from '../attention-model.js'; // PURE: THE attention list (lane attention-predicate-shared) — the rank reads a session's band
 
 export function installSidebarState(SidebarClass) {
@@ -37,6 +38,9 @@ export function installSidebarState(SidebarClass) {
         // Only after the authoritative server state has been applied may
         // migration-triggered pushes write back (see _migrateUserStateKeys).
         this._userStateFetched = true;
+        // B-7960 b: the owner's LAST page names their tray for the agents — its language (the label they read) and whether
+        // it is the phone layout (the tray is in the top bar there); written only when user-state does not already say so
+        reportOwnerPage(state, { phone: !!this.app.isMobile });
         return;
       } catch {}
     }

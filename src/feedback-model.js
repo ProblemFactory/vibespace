@@ -9,14 +9,19 @@
 //   · fold(list, record, now) → the ring: a duplicate (same normalized text + about, last seen within 24 h, any session)
 //                              bumps `count` on the existing record; past LIMITS.ring the least recently reported record
 //                              (open or handled) is dropped and counted
-//   · setStatus(record, status, {by, now}) → the owner's open / handled
+//   · setStatus(record, status, {by, now, version, note}) → the owner's open / handled — lane feedback-handled-verb: a
+//                              handled record may name the release that shipped the fix (`handledVersion`) and a note
+//                              (`handledNote`); the maintainer conversation's vibespace-api feedback.handled stamps both
+//                              through the SAME store call as the owner's PATCH (`handledBy` = its name); a reopen clears them
 //   · publicRow(record)      → what the UI and the agent's `list` get (the harness by name only, no reporter list)
 // Every string is TEXT for its readers: the owner's sheet draws it with textContent only (the XSS law), the agent's CLI
 // prints its own words back. PURE: imports nothing.
 
 const KINDS = Object.freeze(['cli', 'flow', 'ui', 'docs', 'other']);
 const STATUSES = Object.freeze(['open', 'handled']);
-const LIMITS = Object.freeze({ textMax: 2000, aboutMax: 60, name: 120, ring: 500, reporters: 50, dedupMs: 24 * 3600e3, paceMs: 10e3 });
+const LIMITS = Object.freeze({ textMax: 2000, aboutMax: 60, name: 120, ring: 500, reporters: 50, dedupMs: 24 * 3600e3, paceMs: 10e3, noteMax: 200 });
+/** a release number (2.369.330) — the one that shipped a fix (lane feedback-handled-verb) */
+const RELEASE_RE = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;
 
 /** characters as a person counts them (code points — a CJK character is one) */
 function chars(s) { let n = 0; for (const _ of String(s ?? '')) n++; return n; } // eslint-disable-line no-unused-vars
@@ -64,7 +69,7 @@ function makeRecord(value, facts = {}, { id, now }) {
     group: f.group && factId(f.group.id) ? { id: factId(f.group.id), name: factName(f.group.name) } : null,
     harness: harnessName(f.harness),
     instance: { name: factName(f.instance && f.instance.name), version: factName(f.instance && f.instance.version) },
-    status: 'open', handledAt: null, handledBy: null,
+    status: 'open', handledAt: null, handledBy: null, handledVersion: null, handledNote: null,
     count: 1, reporters: sid ? [sid] : [],
   };
 }
@@ -95,11 +100,18 @@ function fold(list, record, now) {
   return { list: L, record, duplicate: false, dropped };
 }
 
-/** the owner's verdict on one record → the new record, or a refusal by name */
-function setStatus(record, status, { by = 'owner', now }) {
+/** the owner's verdict on one record → the new record, or a refusal by name. `version` / `note` (optional, handled only):
+ *  the release that shipped the fix and a line about it — a malformed one is refused by name, never dropped */
+function setStatus(record, status, { by = 'owner', now, version = null, note = null } = {}) {
   if (!STATUSES.includes(status)) return { ok: false, code: 'status_unknown', error: `status is ${STATUSES.join(' | ')}` };
-  if (status === 'handled') return { ok: true, record: { ...record, status, handledAt: now, handledBy: factName(by) || 'owner' } };
-  return { ok: true, record: { ...record, status, handledAt: null, handledBy: null } };
+  if (status === 'handled') {
+    const v = version == null || version === '' ? null : String(version).trim();
+    if (v != null && !RELEASE_RE.test(v)) return { ok: false, code: 'version_bad', error: `the version is a release number like 2.369.330 (got ${JSON.stringify(headChars(String(version), 20))})` };
+    const n = note == null ? '' : cleanLine(note);
+    if (chars(n) > LIMITS.noteMax) return { ok: false, code: 'note_too_long', error: `the note is ${chars(n)} characters — ${LIMITS.noteMax} at most` };
+    return { ok: true, record: { ...record, status, handledAt: now, handledBy: factName(by) || 'owner', handledVersion: v, handledNote: n || null } };
+  }
+  return { ok: true, record: { ...record, status, handledAt: null, handledBy: null, handledVersion: null, handledNote: null } };
 }
 
 /** what a reader gets: the record without its reporter list */
@@ -112,6 +124,7 @@ function publicRow(r) {
     harness: harnessName(r.harness),
     instance: { name: (r.instance && r.instance.name) || null, version: (r.instance && r.instance.version) || null },
     status: r.status === 'handled' ? 'handled' : 'open', handledAt: r.handledAt || null, handledBy: r.handledBy || null,
+    handledVersion: r.handledVersion || null, handledNote: r.handledNote || null,
     count: Number(r.count) || 1,
   };
 }
@@ -130,4 +143,4 @@ function paceVerdict(lastAt, now) {
   return { code: 'paced', error: `one report per ${LIMITS.paceMs / 1000} s from a session — wait ${s} s and send it again`, retryAfterS: s };
 }
 
-module.exports = { KINDS, STATUSES, LIMITS, chars, cleanText, cleanLine, validate, makeRecord, fold, setStatus, publicRow, isMine, byNewest, openCount, paceVerdict };
+module.exports = { KINDS, STATUSES, LIMITS, RELEASE_RE, chars, cleanText, cleanLine, validate, makeRecord, fold, setStatus, publicRow, isMine, byNewest, openCount, paceVerdict };

@@ -24,6 +24,10 @@
 //     handles come back, the window returns to its size before the lock and the new main fills the pane;
 //   • BIG 1000×900 at DPR 2 (2000×1800 device px — larger than the 878 px workspace): the window keeps the app's size
 //     (never capped, never scaled, no badge), its top on the workspace; the CSS px past the bottom edge are printed.
+//     Lane app-window-fit-topleft (B-1f0b): it stands at the WORKSPACE'S TOP-LEFT (never the cascade's x), its title bar
+//     and ✕ inside the workspace (the ✕ is what a click there hits), and Scale ▸ 1× (the row, the confirm) relaunches it
+//     into a window that shows all of it; WIDE 1500×300 at DPR 2 (wider than the 1450 px workspace): the top-left too, its
+//     title bar held to the workspace so the ✕ is on screen and hit.
 //   • WORK AREA (lane desktop-workarea, the owner's 2.369.203 WeChat: 「下面有条空白」 — root 1660×1296, _NET_WORKAREA
 //     0,0,1573,973, the main window's maximum 1574×974): a resizable main that caps itself at the root's _NET_WORKAREA
 //     (fixture mode `workarea`), the window sized twice — smaller, then larger than the pane the client said hello with:
@@ -32,6 +36,9 @@
 // CONTROL = a scratch tree with the levers pulled back (the client's lone-dialog rule, the view's no-scale rule, the window's
 // onFixedSize wiring, the display packet's work-area rows), DPR 2: NORMAL leaves most of the pane blank, DIALOG is cut at the
 // bottom of a pane that is not it, BIG is scaled with the badge, WORK AREA stays at the hello's pane with a strip under the app.
+// CONTROL TOP-LEFT = a scratch tree with lane app-window-fit-topleft's two calls pulled back (window.js: the lock's and the
+// workspace reflow's _placeFixed — lane app-fit-fixed's code), DPR 2: BIG keeps the cascade's x, WIDE the cascade's y with
+// its ✕ past the workspace's right edge.
 // SKIPs with evidence without chrome / xpra / xauth / dbus-run-session / python3 + GTK 3 (gi).
 // Run: node scripts/test-desktop-app-fixed.mjs
 import { execSync, execFileSync, spawn } from 'node:child_process';
@@ -68,6 +75,10 @@ const LEVERS = [
   ['src/lib/xpra-view.js', '      } else if (minSize && !(fixedCss && fixedFollows())) {', '      } else if (minSize) { // CONTROL'],
   ['src/lib/desktop-app-window.js', 'onFixedSize: applyFixedSize, ', ''],
   ['src/lib/xpra-proto.js', "  const rowsTaken = types.includes('desktop_size') || !name;", '  const rowsTaken = !name; // CONTROL'],
+];
+const TOPLEFT_LEVERS = [ // lane app-window-fit-topleft's two calls (the lock's, the workspace reflow's) pulled back
+  ['src/lib/window.js', '    if (!this._placeFixed(win, true) && !this._mobileLayout()) {', '    if (!this._mobileLayout()) { // CONTROL'],
+  ['src/lib/window.js', '      if (win.fixedSize && this._placeFixed(win)) continue;', '      if (false) continue; // CONTROL'],
 ];
 const mkTree = (name, levers = []) => {
   const t = path.join(ROOT, name); fs.mkdirSync(t, { recursive: true }); trees.push(t);
@@ -179,6 +190,27 @@ const EDGES = (id, shot) => `(async () => { const w = ${FIND(id)}; const v = w._
     top: edge(along(L + 12, Rt - 12, 24).map((x) => [Math.round(x), Tp + 2])), bottom: edge(along(L + 12, Rt - 12, 24).map((x) => [Math.round(x), B - 3])), hiddenB: Math.max(0, B - wsB) / dpr };
 })()`;
 const near = (a, b, tol = 0.51) => Math.abs(a - b) <= tol;
+/** lane app-window-fit-topleft: the window, the workspace, OUR chrome strip (the title bar) and its ✕ — and what a click at the ✕'s centre hits */
+const STRIP = (id) => `(() => { const w = ${FIND(id)}; if (!w) return null; const R = (el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, r: r.right, b: r.bottom }; };
+  const x = w.element.querySelector('.win-close'), xr = R(x), hit = document.elementFromPoint(xr.x + xr.w / 2, xr.y + xr.h / 2);
+  const more = w.content.querySelector('.desktop-app-more'); // the app strip's ⋯ (its Scale ▸ rows; the title bar's own menu carries Scale too)
+  return { winId: w.id, win: R(w.element), ws: R(document.getElementById('workspace')), tb: R(w.titleBar), close: xr, closeHit: !!hit && (hit === x || x.contains(hit)), barMax: w.titleBar.style.maxWidth, more: more && getComputedStyle(more).display !== 'none' ? R(more) : null };
+})()`;
+const inside = (a, ws, tol = 0.51) => !!a && a.x >= ws.x - tol && a.y >= ws.y - tol && a.r <= ws.r + tol && a.b <= ws.b + tol;
+const topLeft = (s) => !!s && near(s.win.x, s.ws.x, 1) && near(s.win.y, s.ws.y, 1);
+const stripLine = (s) => `window ${fmt(s.win)} on the workspace ${fmt(s.ws)} — its top-left ${(s.win.x - s.ws.x).toFixed(1)},${(s.win.y - s.ws.y).toFixed(1)} from the workspace's; the title bar ${fmt(s.tb)}${s.barMax ? ` (held to ${s.barMax})` : ''}; the ✕ at ${(s.close.x + s.close.w / 2).toFixed(1)},${(s.close.y + s.close.h / 2).toFixed(1)} ${inside(s.close, s.ws) ? 'inside' : 'OUTSIDE'} the workspace, a click there hits ${s.closeHit ? 'it' : 'something else'}; the app strip's ⋯ ${s.more ? (inside(s.more, s.ws) ? 'inside' : 'past the edge') : 'not shown'}; hidden past the edges: right ${Math.max(0, s.win.r - s.ws.r).toFixed(1)}, bottom ${Math.max(0, s.win.b - s.ws.b).toFixed(1)} CSS px`;
+/** lane app-window-fit-topleft: Scale ▸ 1× on the window (its row, then the confirm) ⇒ the id the SAME window follows */
+const scaleOne = async (id) => {
+  const r = await ev(`(() => { const w = ${FIND(id)}; const items = w._desktopAppScaleItems(); const row = items.find((it) => String(it.label).replace(/^(✓ |\u2003)/, '') === '1×'); if (!row) return { none: items.map((x) => x.label) }; if (row.disabled) return { disabled: row.label }; row.action(); return { ok: row.label, winId: w.id }; })()`);
+  if (!r || !r.ok) return { err: r };
+  const dlg = await until(() => ev(`(() => { const o = [...document.querySelectorAll('.dialog-overlay, .modal-overlay')].pop(); const b = o && o.querySelector('.btn-create'); if (!b) return null; b.click(); return true; })()`), 5000, 100);
+  if (!dlg) return { err: 'no confirm dialog' };
+  const nid = await until(() => ev(`(() => { const w = app.wm.windows.get(${JSON.stringify(r.winId)}); return w && w._desktopAppId && w._desktopAppId !== ${JSON.stringify(id)} ? w._desktopAppId : null; })()`), 45000, 300);
+  if (!nid) return { err: 'the window never followed a relaunched app' };
+  const m = await until(async () => { const x = await ev(MEAS(nid)); return x && x.pic && x.lock && x.pic.h > 50 && x.lock.h < x.ws.h ? x : null; }, 45000, 300); // the new app's lock: a window that fits
+  return { nid, connected: !!m };
+};
+
 const framed = (m) => !!(m && m.pic && near(m.pic.x, m.pane.x) && near(m.pic.y, m.pane.y) && near(m.pic.w, m.pane.w) && near(m.pic.h, m.pane.h));
 const blankPct = (m) => (m && m.pic ? Math.round(100 * (1 - Math.min(m.pic.w, m.pane.w) * Math.min(m.pic.h, m.pane.h) / (m.pane.w * m.pane.h))) : 100);
 const settle = async (id, ms = 10000) => {
@@ -293,11 +325,37 @@ async function runConfig(origin, { dpr, lang, label, tree, control = false }) {
       out.big = m;
       const e = control ? null : await ev(EDGES(L.id, await shotOf()));
       console.log(`  ${tag} BIG: window ${fmt(m.win)} on a workspace ${fmt(m.ws)}; pane ${fmt(m.pane)} picture ${fmt(m.pic)} stage ${m.stage} badge ${JSON.stringify(m.badge)}${e ? ` — ${e.hiddenB.toFixed(1)} CSS px of the picture past the workspace's bottom edge` : ''}`);
+      let last = L.id;
       if (!control) {
         check(`${tag} BIG: a fixed window larger than the workspace keeps the app's size (pane = the 1000×900 CSS picture, stage 1, no badge), its top on the workspace`, framed(m) && near(m.pic.w, 1000) && near(m.pic.h, 900) && m.stage === 1 && m.badge === null && m.win.h > m.ws.h && near(m.win.y, m.ws.y, 1), m);
         check(`${tag} BIG: its left, right and top red edges are on screen; the bottom is past the workspace (${e.hiddenB.toFixed(1)} CSS px — movable, the Scale ▸ menu is the lever)`, ['left', 'right', 'top'].every((k) => e[k].n >= 20 && e[k].ok >= e[k].n - 1) && e.hiddenB > 0, e);
+        // lane app-window-fit-topleft (B-1f0b): the workspace's top-left, our bar and its ✕ on screen; Scale ▸ 1× shows the rest
+        const s = out.bigStrip = await ev(STRIP(L.id));
+        console.log(`  ${tag} BIG: ${stripLine(s)}`);
+        check(`${tag} BIG: it stands at the WORKSPACE'S TOP-LEFT (${(s.win.x - s.ws.x).toFixed(1)},${(s.win.y - s.ws.y).toFixed(1)} from it — never the cascade's x)`, topLeft(s), s);
+        check(`${tag} BIG: our chrome strip — the title bar — is inside the workspace and its ✕ is on screen: a click at the ✕'s centre hits the ✕`, inside(s.tb, s.ws) && inside(s.close, s.ws) && s.closeHit, s);
+        const one = await scaleOne(L.id);
+        if (one.nid) last = one.nid;
+        const m1 = one.connected ? await settle(one.nid, 12000) : null;
+        const e1 = m1 ? await ev(EDGES(one.nid, await shotOf())) : null, s1 = m1 ? await ev(STRIP(one.nid)) : null;
+        if (m1) console.log(`  ${tag} BIG after Scale ▸ 1×: window ${fmt(m1.win)} pane ${fmt(m1.pane)} picture ${fmt(m1.pic)} — ${e1.hiddenB.toFixed(1)} CSS px past the workspace's bottom edge`);
+        check(`${tag} BIG: Scale ▸ 1× (its row, the confirm) relaunches the app in the SAME window, which then shows all of it — the four red edges on screen, nothing past the workspace (${e1 ? e1.hiddenB.toFixed(1) : '?'} CSS px), the window inside it`, !!m1 && framed(m1) && ['left', 'right', 'top', 'bottom'].every((k) => e1[k].n >= 20 && e1[k].ok >= e1[k].n - 1) && e1.hiddenB === 0 && inside(s1.win, s1.ws, 1), { one, m1, e1, s1 });
       }
-      await stop(origin, L.id);
+      await stop(origin, last);
+    }
+    // ── WIDE 1500×300 at DPR 2: WIDER than the 1450 px workspace (lane app-window-fit-topleft) ──
+    if (!control) {
+      L = await launch(origin, [1500, 300, 'normal'], `${tag} WIDE`);
+      if (L) {
+        const m = await settle(L.id);
+        const s = out.wideStrip = await ev(STRIP(L.id));
+        console.log(`  ${tag} WIDE: picture ${fmt(m.pic)} stage ${m.stage}; ${stripLine(s)}`);
+        {
+          check(`${tag} WIDE: a fixed window WIDER than the workspace keeps the app's size (the 1500×300 CSS picture, stage 1) and stands at the workspace's top-left`, framed(m) && near(m.pic.w, 1500) && near(m.pic.h, 300) && m.stage === 1 && s.win.w > s.ws.w && topLeft(s), { m, s });
+          check(`${tag} WIDE: its title bar is held to the workspace (${s.barMax}) — the bar inside it, the ✕ on screen and hit by a click at its centre`, inside(s.tb, s.ws) && inside(s.close, s.ws) && s.closeHit, s);
+        }
+        await stop(origin, L.id);
+      }
     }
   }
   // ── WORK AREA (lane desktop-workarea): WeChat's main window — resizable, its MAXIMUM the root's _NET_WORKAREA, re-read as
@@ -350,6 +408,22 @@ console.log('§2 CONTROL — a tree with the levers pulled back (the client\'s l
   check(`CONTROL: BIG — scaled to fit with the badge (stage ${c.big && c.big.stage}, "${c.big && c.big.badge}")`, !!c.big && c.big.stage < 1 && !!c.big.badge, c.big);
   const cw = c.workarea && c.workarea[1];
   check(`CONTROL: WORK AREA — the pre-lane display packet (display-configure alone) leaves _NET_WORKAREA at the hello's pane after the larger resize (${cw && cw.x.wa.join(',')} on a ${cw && cw.x.root.join('×')} root) and ${cw && cw.strip} CSS px blank under the app (the owner's WeChat)`, !!cw && !cw.follows && !cw.framed && cw.strip > 1, cw);
+}
+
+console.log('§3 CONTROL TOP-LEFT — a tree with lane app-window-fit-topleft\'s two calls pulled back (window.js: the lock\'s and the workspace reflow\'s _placeFixed)');
+{
+  const Tt = mkTree('control-topleft', TOPLEFT_LEVERS);
+  const St = await bootServer(Tt, 'deskapp-fixed-thome');
+  check('CONTROL TOP-LEFT: the control tree\'s server boots', St.up);
+  await page(St.origin, { dpr: 2, lang: 'en' });
+  const tag = 'CONTROL TOP-LEFT DPR 2 (en)', out = { big: null, wide: null };
+  let L = await launch(St.origin, [1000, 900, 'normal'], `${tag} BIG`);
+  if (L) { await settle(L.id); out.big = await ev(STRIP(L.id)); console.log(`  ${tag} BIG: ${stripLine(out.big)}`); await stop(St.origin, L.id); }
+  L = await launch(St.origin, [1500, 300, 'normal'], `${tag} WIDE`);
+  if (L) { await settle(L.id); out.wide = await ev(STRIP(L.id)); console.log(`  ${tag} WIDE: ${stripLine(out.wide)}`); await stop(St.origin, L.id); }
+  const b = out.big, w = out.wide;
+  check(`CONTROL TOP-LEFT: BIG — pre-lane the window keeps the cascade's x (${b ? (b.win.x - b.ws.x).toFixed(1) : '?'} CSS px from the workspace's left), its top slid to the workspace's, ${b ? Math.max(0, b.win.b - b.ws.b).toFixed(1) : '?'} CSS px past the bottom`, !!b && !near(b.win.x, b.ws.x, 1) && near(b.win.y, b.ws.y, 1) && b.win.b > b.ws.b, b);
+  check(`CONTROL TOP-LEFT: WIDE — pre-lane it keeps the cascade's y (${w ? (w.win.y - w.ws.y).toFixed(1) : '?'} CSS px down) and its bar runs past the workspace: the ✕ ${w ? (w.close.x + w.close.w / 2 - w.ws.r).toFixed(1) : '?'} CSS px beyond the right edge, a click there never hits it`, !!w && !near(w.win.y, w.ws.y, 1) && !inside(w.close, w.ws) && !w.closeHit, w);
 }
 
 console.log(`${failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`}`);

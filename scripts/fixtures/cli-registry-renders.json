@@ -7,10 +7,10 @@
     "sha256": "512eb60f553133611609f4b69b7943720989d52b0302e67da1d6300ff0431568"
    },
    "now": {
-    "bytes": 2180,
-    "sha256": "74f4e873705455d5a484b3904ff978dac35a7478031bec27598db0d26251b741"
+    "bytes": 2174,
+    "sha256": "3af3a48e16f6600dfedab40298f5e2e0ba86f39fe80d0f6d38a660792bbf5080"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "section · one group · read": {
    "base": {
@@ -18,10 +18,10 @@
     "sha256": "5890537608128f90a0c677925d58e4ebfe0d72242c57b7f3e296097b4887d522"
    },
    "now": {
-    "bytes": 2576,
-    "sha256": "332ab16195bbbd29522eae4a6b0ae3b8906efc628ca640e601c32a72f80aa776"
+    "bytes": 2570,
+    "sha256": "1152901c861114642a2c60934d37ea316b216dd8b56e7d1b6b30adbef5e6f421"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "section · one group · request": {
    "base": {
@@ -29,10 +29,10 @@
     "sha256": "427bd4b717306a57cf7baec9f4852dbe8e2aa01d59a184e713d7a1a6abeb9760"
    },
    "now": {
-    "bytes": 2493,
-    "sha256": "b993345acb6ceb3c8e09ef902131fca05e5abbc10ed8ccb7b96a77bb31908fda"
+    "bytes": 2487,
+    "sha256": "6ba73b3a64e375f05c506996b0e017d517cd2c6bbcb088a456627db6677d8eb9"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "section · three groups": {
    "base": {
@@ -40,10 +40,10 @@
     "sha256": "cce70941274cbdf792c6cfb7789f91d06fd9f2b9174b9f944b2e3c1db4b13c52"
    },
    "now": {
-    "bytes": 2319,
-    "sha256": "914d78c42159c805cde376c3107faf03c0ef23adedce81b71de3c7a11dee35d0"
+    "bytes": 2313,
+    "sha256": "8eff863b63097db7f5556fab74290df2d38c96ce0c0d891703dbfe4dda26ce57"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "section · three groups · read": {
    "base": {
@@ -51,10 +51,10 @@
     "sha256": "c722ab16dc8f1c4f227598f9d92494fe30bde5193f74ef875535eb8033e64cab"
    },
    "now": {
-    "bytes": 2715,
-    "sha256": "4ec6fa96a939abb023d4173348aff0ecf5a7e892c271ea321c8c9bf25e0c8e9d"
+    "bytes": 2709,
+    "sha256": "5e72f674dd57ea33355faf4bdc581f52b434e5211f0430954c7c541013d2f4bc"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "section · three groups · request": {
    "base": {
@@ -62,10 +62,10 @@
     "sha256": "b43b890f7bada2baff628d3b279afedc38aa33dee4fc5666536468e1af20379f"
    },
    "now": {
-    "bytes": 2632,
-    "sha256": "869677e82a8bad4fd10e695590d97a8d340b96ca55677b8f35192a66bda45bf2"
+    "bytes": 2626,
+    "sha256": "2c9e73dab23a3d7e5ef42763b2dbf16dc8750a7f656a68d418aac70bb17d8619"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "section · status only": {
    "base": {
@@ -90,10 +90,10 @@
     "sha256": "0ff706ba83f729d77e3b25ca38f8b0f502be3b1a71f7e90d27eb0e643e4e4323"
    },
    "now": {
-    "bytes": 965,
-    "sha256": "dcf3bf00515f2287dd22c91f94b18c5e4d27ea097a00626feb907dd7cf17e12a"
+    "bytes": 912,
+    "sha256": "e209ea7720d121ee83ff79a0fe4b6ae53b6f3fb6fcaf3408e45a9cab57f23989"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "reminder · one group / none · read": {
    "base": {
@@ -101,10 +101,10 @@
     "sha256": "92bfd3f34db652460290b1a1b0fb1755acc2f3862af9f9f57dfbc837d2675507"
    },
    "now": {
-    "bytes": 1088,
-    "sha256": "9dc5942f4b6ce3d4a75fdefb331972fdcdb14bd391cf93a2be434ee97dc76766"
+    "bytes": 1035,
+    "sha256": "5afe85ca06a9d5d9d9debdbda376130d803e7f64862561bb81c577f0810e0537"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "reminder · one group / none · request": {
    "base": {
@@ -112,10 +112,10 @@
     "sha256": "e677cf377fb3fbcdf41764c715c4514132be35d0a4df86ab7e2e5d8d12a049da"
    },
    "now": {
-    "bytes": 1088,
-    "sha256": "aaeea932144aee6d417fced90880cb9d16c2e72f9a771e238622f0d7cce8fd66"
+    "bytes": 1035,
+    "sha256": "4a0bc4538d0ec3a2b859c6beed57a10f41b6fb6f9f00becda7303151457c62ea"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "reminder · several groups": {
    "base": {
@@ -123,10 +123,10 @@
     "sha256": "078423795f344cefd0af209b4b56439a9cfbfdc8f9ee6b0d0d0c50fc7c0b5e7f"
    },
    "now": {
-    "bytes": 978,
-    "sha256": "b784429c88677231789d1d0b93889378eed552ae444dd38315e0e4ee096d188c"
+    "bytes": 925,
+    "sha256": "134d939ad4ca3d7281b3f9a2ad6615443edb336d36d8a08990ae0a7beed6faf6"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "reminder · several groups · read": {
    "base": {
@@ -134,10 +134,10 @@
     "sha256": "6670eb40ca5a4fac4b66c8efafa34d887eb3677fc6e3189740ebf80d4e06ce76"
    },
    "now": {
-    "bytes": 1101,
-    "sha256": "fe1b35c6374880cffe0104b888b198adcee0508609344ab3442b638cf2e06cea"
+    "bytes": 1048,
+    "sha256": "5145c2d44a4aa1352a9158986f64ac91d43eda4daf5700b58f617e58227e9baf"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "reminder · several groups · request": {
    "base": {
@@ -145,10 +145,10 @@
     "sha256": "cdb15dd9a30ae4a435255ee0d91200922845d8265c457ab051c23aebd742fe17"
    },
    "now": {
-    "bytes": 1101,
-    "sha256": "d74d9a13e9072ffc0304bbb66a4bb35fdcc0e5e434442b1e813e4e862162ff2b"
+    "bytes": 1048,
+    "sha256": "92a40efda5d5b1869055380be8104a2833670a5da453a7abe5ef2e90620021a4"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "reminder · manager · several groups · read": {
    "base": {
@@ -156,10 +156,10 @@
     "sha256": "f82a9423735c2723d6d0a4014b29eb750c68db390ae33d1f8aa44ec33b64056e"
    },
    "now": {
-    "bytes": 1236,
-    "sha256": "fb62c4a8b59ad81863c90b162ded954a4330c8149c5ba397f45d3e1c8c451f10"
+    "bytes": 1183,
+    "sha256": "43a7c9cb91f5cd127d3aadc281d2f8e98f066012fcc6b035e7f9e7c41d15e927"
    },
-   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B)"
+   "change": "the docs pointer names every OPEN row's topic in row order: + design|exit|window|apps, channels after jobs (+24 B) · lane agent-feedback (.301): + the vibespace-feedback segment (88 B) and `feedback` in the docs pointer · lane vault-e2e-password: + `vault` in the docs pointer (vibespace-vault, index-only — 6 B) · + remote (vibespace-remote, lane device-act-audit .315: the acts the hub took on a machine for THIS conversation; index-only) (+7 B) · design q-046 (lane automation-keys-core): + `api` in the docs pointer (+4 B) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   },
   "reminder · status only": {
    "base": {
@@ -187,7 +187,12 @@
    "base": {
     "bytes": 3426,
     "sha256": "227975f9f3fe9276d8cae01025afd81238f64a915ef014fd89b4ac1633141a79"
-   }
+   },
+   "now": {
+    "bytes": 3420,
+    "sha256": "1afdc6c94bc4bc962700f905f4c3cb6ea03fd0c3460ae223472795e02b5540c9"
+   },
+   "change": "lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
   }
  }
 }

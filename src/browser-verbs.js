@@ -1273,6 +1273,7 @@ function browserCell(b) {
   const c = b.closed && typeof b.closed === 'object' && b.closed.code ? b.closed : null;
   if (c) return `${c.code === 'browser_unstable' ? 'parked' : 'closed'} (${c.code}${c.unstable ? ', ' + c.unstable : ''}) — ${c.error || 'no browser is running'}`;
   const chrome = b.browser && Number.isInteger(b.browser.pid) && b.browser.pid > 0 ? b.browser.pid : null;
+  if (b.state === 'stopped' && typeof b.note === 'string' && b.note) return b.note.startsWith('stopped') ? b.note : `stopped — ${b.note}`; // lane browser-daemon-survives-update: an ended daemon is never a silent exit — the row's words
   return `${b.state || 'unknown'}${chrome ? ' pid ' + chrome : ''}`;
 }
 module.exports = {

@@ -407,6 +407,33 @@ const CODEX_FIXTURE = {
   check('the PURE module imports nothing at all (PURE tier)', !/require\(|^import /m.test(pure));
 }
 
+{
+  // lane automation-open-permission-resolve (q-049 M2): claudeDefaultMode — the mode a spawn with no --permission-mode runs under
+  const rec = (reads) => PR.claudeRulesRecord(reads, { cwd: '/w' });
+  const Lr = (layer, file, perm) => ({ layer, file, present: true, settings: { permissions: perm } });
+  const USER = '/h/.claude/settings.json', PROJ = '/w/.claude/settings.json', LOCAL = '/w/.claude/settings.local.json', MANAGED = '/etc/claude-code/managed-settings.json';
+  const a = PR.claudeDefaultMode(rec([Lr('userSettings', USER, { defaultMode: 'acceptEdits' }), Lr('projectSettings', PROJ, { defaultMode: 'bypassPermissions' })]));
+  check('claudeDefaultMode: the LAST layer that sets permissions.defaultMode wins (project over user) and is named with its file', a.ok && a.mode === 'bypassPermissions' && a.layer.id === 'projectSettings' && a.layer.short === 'Project' && a.layer.file === PROJ && a.disabledBy === null && a.cwd === '/w', a);
+  const b = PR.claudeDefaultMode(rec([Lr('userSettings', USER, { defaultMode: 'acceptEdits' }), { layer: 'projectSettings', file: PROJ, present: false }, Lr('localSettings', LOCAL, { allow: ['Bash(ls)'] })]));
+  check('claudeDefaultMode: a project layer that is absent or sets no defaultMode leaves the user layer\'s word', b.ok && b.mode === 'acceptEdits' && b.layer.id === 'userSettings', b);
+  const c = PR.claudeDefaultMode(rec([Lr('userSettings', USER, { defaultMode: 'acceptEdits' }), Lr('localSettings', LOCAL, { defaultMode: 'plan' })]));
+  check('claudeDefaultMode: the local layer (settings.local.json) outranks the user layer', c.mode === 'plan' && c.layer.id === 'localSettings', c);
+  const d = PR.claudeDefaultMode(rec([Lr('projectSettings', PROJ, { defaultMode: 'bypassPermissions' }), Lr('policySettings', MANAGED, { disableBypassPermissionsMode: 'disable' })]));
+  check('claudeDefaultMode: disableBypassPermissionsMode "disable" in any layer turns a resolved bypassPermissions into the built-in default — both layers named', d.mode === 'default' && d.layer.id === 'projectSettings' && d.disabledBy.id === 'policySettings' && d.disabledBy.file === MANAGED, d);
+  const d2 = PR.claudeDefaultMode(rec([Lr('projectSettings', PROJ, { defaultMode: 'acceptEdits' }), Lr('policySettings', MANAGED, { disableBypassPermissionsMode: 'disable' })]));
+  check('claudeDefaultMode: …and leaves any other resolved mode alone', d2.mode === 'acceptEdits' && d2.disabledBy.id === 'policySettings', d2);
+  const e = PR.claudeDefaultMode(rec([{ layer: 'userSettings', file: USER, present: false }, Lr('projectSettings', PROJ, { allow: ['Bash(ls)'] })]));
+  check('claudeDefaultMode: no layer sets one ⇒ mode default with NO layer (the built-in default)', e.ok && e.mode === 'default' && e.layer === null && e.disabledBy === null, e);
+  const f = PR.claudeDefaultMode(rec([{ layer: 'projectSettings', file: PROJ, present: true, error: 'not valid JSON (x) — the CLI ignores a settings file it cannot parse' }, Lr('userSettings', USER, { defaultMode: 'acceptEdits' })]));
+  check('claudeDefaultMode: an unreadable layer contributes nothing (the CLI ignores it too)', f.mode === 'acceptEdits' && f.layer.id === 'userSettings', f);
+  const g = PR.claudeDefaultMode(PR.unavailable('codex', 'unsupported-harness', 'x', { cwd: '/w' }));
+  check('claudeDefaultMode: an unavailable record ⇒ ok false with its reason, mode default, no layer — nothing resolved', g.ok === false && g.reason === 'unsupported-harness' && g.mode === 'default' && g.layer === null && g.backend === 'codex', g);
+  check('claudeDefaultMode: a record of another harness ⇒ ok false (unsupported-harness); garbage ⇒ ok false', PR.claudeDefaultMode({ ...rec([]), backend: 'opencode' }).reason === 'unsupported-harness' && PR.claudeDefaultMode(null).ok === false && PR.claudeDefaultMode('x').ok === false);
+  check('claudeDefaultMode: a planted layer object with no `present` / a rule of another kind is skipped', PR.claudeDefaultMode(rec([{ layer: 'userSettings', file: USER, settings: { permissions: { defaultMode: 'plan' } } }])).mode === 'default' && PR.claudeDefaultMode({ ...rec([]), layers: [{ id: 'x', present: true, rules: [{ kind: 'allow', key: 'permissions.defaultMode', value: 'plan' }] }] }).mode === 'default');
+  const h = PR.claudeDefaultMode(rec([{ layer: 'policySettings', file: MANAGED, present: true, settings: { permissions: { defaultMode: 'plan' } }, dropIns: [{ file: '/etc/claude-code/managed-settings.d/10-team.json', settings: { permissions: { defaultMode: 'acceptEdits' } } }] }]));
+  check('claudeDefaultMode: a managed drop-in is read before its base file (the record\'s order) — the base wins', h.mode === 'plan' && h.layer.file === MANAGED, h);
+}
+
 console.log('— Part 2: the server reader + the oracle runner');
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-permrules-'));
@@ -864,6 +891,26 @@ const mod = mkModule();
   // A gate outside the gate rots (test-tool-toggles rode a stale CLI count for
   // 27 releases exactly this way).
   check('ci.mjs runs this suite', /'test-permission-rules'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')));
+}
+
+{
+  // lane automation-open-permission-resolve (q-049 M2): resolveDefaultMode — the reader + the PURE resolution over REAL files
+  const SPR = require(path.join(REPO, 'src/server/permission-rules.js'));
+  const r1 = await SPR.resolveDefaultMode({ backend: 'claude', cwd: PROJ, home: HOME });
+  check('resolveDefaultMode: the user layer sets acceptEdits, the project none ⇒ acceptEdits by the user file', r1.ok && r1.mode === 'acceptEdits' && r1.layer.id === 'userSettings' && r1.layer.file === path.join(HOME, '.claude/settings.json') && r1.cwd === PROJ, r1);
+  const P2 = path.join(TMP, 'proj-bypass'); fs.mkdirSync(path.join(P2, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(P2, '.claude/settings.json'), JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }));
+  const r2 = await SPR.resolveDefaultMode({ backend: 'claude', cwd: P2, home: HOME });
+  check('resolveDefaultMode: a project file that says bypassPermissions wins over the user layer and is named', r2.ok && r2.mode === 'bypassPermissions' && r2.layer.id === 'projectSettings' && r2.layer.file === path.join(P2, '.claude/settings.json'), r2);
+  const H2 = path.join(TMP, 'home-empty'); fs.mkdirSync(H2, { recursive: true });
+  const P3 = path.join(TMP, 'proj-none'); fs.mkdirSync(P3, { recursive: true });
+  const r3 = await SPR.resolveDefaultMode({ backend: 'claude', cwd: P3, home: H2 });
+  check('resolveDefaultMode: no settings file anywhere ⇒ default with no layer', r3.ok && r3.mode === 'default' && r3.layer === null, r3);
+  const r4 = await SPR.resolveDefaultMode({ backend: 'codex', cwd: PROJ, home: HOME });
+  const r5 = await SPR.resolveDefaultMode({ backend: 'shell', cwd: PROJ, home: HOME });
+  check('resolveDefaultMode: a harness whose rules are not settings files (codex, shell) ⇒ ok false unsupported-harness — nothing resolved, judged by the caps row never a backend id', r4.ok === false && r4.reason === 'unsupported-harness' && r4.backend === 'codex' && r5.ok === false && r5.reason === 'unsupported-harness', { r4, r5 });
+  const src = fs.readFileSync(path.join(REPO, 'src/server/permission-rules.js'), 'utf8');
+  check('resolveDefaultMode reads the hierarchy through the ONE reader (readClaudeRules) and resolves through the PURE claudeDefaultMode — no second parser, no process', /defaultModeReader\.readClaudeRules\(/.test(src) && /PR\.claudeDefaultMode\(/.test(src) && (src.match(/child = spawn\(cmd, o\.argv\.slice\(\)/g) || []).length === 1 && !/JSON\.parse/.test(src.slice(src.indexOf('let defaultModeReader'))));
 }
 
 console.log('— Part 3: headless chrome at 375×667');

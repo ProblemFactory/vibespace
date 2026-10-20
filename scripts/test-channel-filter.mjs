@@ -1164,5 +1164,95 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
 }
 
+console.log('⑲ lane dm-reply-infers (B-6b4b): reply-to-sent `infer` — the scope (PURE), the judged road, off = the marker road byte for byte');
+{
+  const T = NOW - 3 * H;
+  const clock = (at) => new Date(at).toISOString().slice(11, 16) + ' UTC';
+  // userW's p2p Lark chat (the backlog's fixture): agent A sent at T; userW answers 2 h later with NO quote, NO 话题
+  const A = new Map([['om_a1', { at: T, words: 'Can you send the signed contract?', subject: '', id: 'om_a1', text: 'Can you send the signed contract by Friday?' }]]);
+  const plainKind = () => ({ kind: 'plain', topic: null, quotes: null });
+  const ctxOf = (extra = {}) => ({ sentByMe: A, convKind: 'dm', kindOf: plainKind, ownerMine: new Set(), threadOf: () => [], ...extra });
+  const userW = (vendorId, dt, more = {}) => ({ id: 'r-' + vendorId, vendorId, at: T + dt, text: 'Signed — sending it now.', author: { id: 'ou_userw', name: 'userW' }, replyTo: null, root: null, threadKey: null, ...more });
+  const R0 = { kind: 'reply-to-sent' }, RI = { kind: 'reply-to-sent', infer: true };
+  const plain2h = userW('om_w1', 2 * H);
+  ok(!F.matchRecord({ rules: [R0] }, plain2h, ctxOf()).hit, 'THE RED CONTROL (the backlog): the marker-only rule misses userW\'s plain answer 2 h after the send');
+  // ── THE SCOPE ──
+  const c = F.inferCandidate(plain2h, ctxOf());
+  ok(c && c.sent.id === 'om_a1' && c.key === 'r-om_w1|om_a1' && c.key === F.inferKeyOf(plain2h, A.get('om_a1')) && c.gapMin === 120, 'scope: the 2 h plain DM answer IS a candidate — the newest send before it; key = record id | sent id; the gap in minutes', J2(c));
+  const OUT = [
+    ['25 h after (the default span 24 h)', userW('om_w2', 25 * H)],
+    ['before the send', userW('om_w3', -60e3)],
+    ['a quote of the send (the marker road — unjudged)', userW('om_w4', 60e3, { replyTo: 'om_a1' }), { kindOf: () => ({ kind: 'quote', topic: null, quotes: 'om_a1' }) }],
+    ['a quote of ANOTHER message', userW('om_w5', 60e3, { replyTo: 'om_x' }), { kindOf: () => ({ kind: 'quote', topic: null, quotes: 'om_x' }) }],
+    ['a topic reply under another root', userW('om_w6', 60e3, { root: 'om_y', threadKey: 'omt_y' }), { kindOf: () => ({ kind: 'topic-reply', topic: 'omt_y', quotes: null }) }],
+    ['the send itself (its echo)', userW('om_a1', 60e3)],
+    ['a mail thread (marker (c) reads it)', userW('m_1', 60e3), { convKind: 'thread' }],
+    ['a principal that never sent here', userW('om_w7', 60e3), { sentByMe: new Map() }],
+    ['a Slack message under another thread_ts', userW('171.9', 60e3, { threadKey: '170.1' }), { threadOnly: true }],
+    ['a message with no words', userW('om_w13', 60e3, { text: '  ' })],
+    ['a vendor system notice', makeRecord({ adapterId: 'lark', convId: 'oc_w', vendorId: 'om_sys', at: T + 60e3, kind: 'system', systemKind: 'recall', author: {}, text: 'userW recalled a message' })],
+  ];
+  const outLegs = (F0) => OUT.filter(([, r, x]) => F0.inferCandidate(r, ctxOf(x || {})) !== null).map(([n]) => n);
+  ok(!outLegs(F).length, `scope: NEVER a candidate (never judged — no call): ${OUT.map(([n]) => n).join(' · ')}`, J2(outLegs(F)));
+  ok(F.inferCandidate(userW('om_w9', 25 * H), ctxOf({ inferHours: 48 })) && !F.inferCandidate(userW('om_w9', 3 * H), ctxOf({ inferHours: 2 })) && F.INFER.hours.def === 24, 'scope: the span is the setting (48 h takes the 25 h message, 2 h refuses the 3 h one; default 24)');
+  // never "the next message is the reply": EVERY candidate is judged, each against the newest send BEFORE it
+  const two = new Map([...A, ['om_a2', { at: T + H, words: 'Also the invoice?', subject: '', id: 'om_a2', text: 'Also the invoice?' }]]);
+  const k1 = F.inferCandidate(userW('om_w10', 30 * 60e3), ctxOf({ sentByMe: two })), k2 = F.inferCandidate(plain2h, ctxOf({ sentByMe: two })), k3 = F.inferCandidate(userW('om_w11', 2 * H + 60e3), ctxOf({ sentByMe: two }));
+  ok(k1.sent.id === 'om_a1' && k2.sent.id === 'om_a2' && k3.sent.id === 'om_a2' && k2.key !== k3.key, 'two sends, three plain messages: each is its OWN candidate, asked about the newest send before it (never only "the next message")', J2([k1.key, k2.key, k3.key]));
+  // a GROUP member is judged for its OWN sends: member B's send is B's question, never A's
+  const B = new Map([['om_b1', { at: T + 30 * 60e3, words: 'Lunch?', subject: '', id: 'om_b1', text: 'Lunch?' }]]);
+  ok(F.inferCandidate(plain2h, ctxOf({ sentByMe: B })).key === 'r-om_w1|om_b1' && F.inferCandidate(plain2h, ctxOf()).key === 'r-om_w1|om_a1', 'a group\'s members: the same message is A\'s candidate against A\'s send and B\'s against B\'s (two keys — the fan-out keeps per-member sends)');
+  const fo = F.fanOutWatchers({ access: [], watchers: [{ watcher: { principal: { kind: 'group', id: 'g1', name: 'Work' }, mode: 'filtered', filterId: 'f1', notify: 'wake' }, source: 'conversation' }] }, [{ cid: 'A', name: 'a', groups: ['g1'] }, { cid: 'B', name: 'b', groups: ['g1'] }], { filterOf: () => ({ match: 'any', rules: [RI, { kind: 'keyword', value: 'x' }] }) });
+  ok(J2(fo.watchers.map((x) => F.principalKey(x.watcher.principal) + '/' + x.split)) === J2(['group:g1/rest', 'group:g1>A/sent', 'group:g1>B/sent']) && F.inferRuleOf(F.splitFilter({ match: 'any', rules: [RI, { kind: 'keyword', value: 'x' }] }, 'sent')) && !F.inferRuleOf(F.splitFilter({ match: 'any', rules: [RI, { kind: 'keyword', value: 'x' }] }, 'rest')), 'a group row with `infer`: one item per member carries it (the sent half), the group\'s own item never does (the engine asks only for the members\' sends)');
+  // ── THE JUDGED ROAD ──
+  const said = (p) => new Map([['r-om_w1|om_a1', p === null ? { name: 'answers_sent', type: 'predicate', refused: true, why: 'missing' } : { name: 'answers_sent', type: 'predicate', probability: p }]]);
+  const yes = F.matchRecord({ rules: [RI] }, plain2h, ctxOf({ inferred: said(0.86) }));
+  ok(yes.hit && J2(yes.why) === J2([`judged an answer to your message of ${clock(T)}`]) && yes.sent.score === 0.86 && yes.sent.at === T && F.INFER.threshold === 0.8, 'judged YES (0.86 ≥ 0.80) ⇒ a hit: the why names the answered message\'s clock, the score rides `sent` (the pending row and the hand-over keep it)', J2(yes));
+  const lowLegs = (F0) => [0.79, null].map((p) => F0.matchRecord({ rules: [RI] }, plain2h, ctxOf({ inferred: said(p) })).hit).concat([F0.matchRecord({ rules: [RI] }, plain2h, ctxOf()).hit]);
+  ok(lowLegs(F).every((h) => !h), 'judged NO (0.79 < 0.80), a refused answer, or no answer at all (a cap, no key) ⇒ NO hit — fail closed', J2(lowLegs(F)));
+  ok(!F.matchRecord({ rules: [R0] }, plain2h, ctxOf({ inferred: said(0.99) })).hit, 'a YES handed to a rule WITHOUT infer ⇒ no hit (opt-in per rule)');
+  const qCtx = ctxOf({ kindOf: () => ({ kind: 'quote', topic: null, quotes: 'om_a1' }), inferred: new Map([['r-om_q1|om_a1', { probability: 0.01 }]]) });
+  const mq = F.matchRecord({ rules: [RI] }, userW('om_q1', 60e3, { replyTo: 'om_a1' }), qCtx);
+  ok(mq.hit && /^quotes your message of /.test(mq.why[0]) && mq.sent.score === undefined, 'a QUOTE of the send with infer on ⇒ the marker why, no score — a marker hit never reads a judgment', J2(mq));
+  const blk = F.renderWakeBlock({ adapterLabel: 'Lark', title: 'userW', convId: 'oc_w', hits: [{ record: plain2h, why: yes.why, sent: yes.sent }] });
+  ok(/\nReply to your message \([^)]*, "Can you send the signed contract\?", judged 0\.86\): from userW at /.test(blk) && blk.includes(`matched: judged an answer to your message of ${clock(T)}`), 'the hand-over: the line names the answered message and the score; the why line says it was judged', blk.split('\n').slice(0, 3).join(' | '));
+  // review r1: a judgment that CANNOT change the filter's answer is never bought
+  const KW = { kind: 'keyword', value: 'signed' }, GRP = { kind: 'sender-in-group', members: ['ou_someone_else'] };
+  const worth = [F.inferWorth({ match: 'any', rules: [RI] }, plain2h, ctxOf()), F.inferWorth({ match: 'any', rules: [KW, RI] }, plain2h, ctxOf()), F.inferWorth({ match: 'any', rules: [{ kind: 'keyword', value: 'zzz' }, RI] }, plain2h, ctxOf()), F.inferWorth({ match: 'every', rules: [RI, GRP] }, plain2h, ctxOf()), F.inferWorth({ match: 'every', rules: [RI, KW] }, plain2h, ctxOf())];
+  ok(J2(worth) === J2([true, false, true, false, true]), 'worth a judgment? infer alone ⇒ yes; `any` + a keyword that already hits ⇒ NO (it notifies anyway); `any` + a keyword that misses ⇒ yes; `every` + a rule that misses ⇒ NO (it never can); `every` + a rule that hits ⇒ yes', J2(worth));
+  // ── THE RULE'S DOOR: one grammar, one validator ──
+  ok(J2(F.validateRule(RI).rule) === J2(RI) && J2(F.validateRule({ kind: 'reply-to-sent', infer: false }).rule) === J2(R0) && J2(F.validateRule(R0).rule) === J2(R0) && F.validateRule({ kind: 'reply-to-sent', infer: 'yes' }).code === 'infer-flag' && F.filterProblemText(F.validateRule({ kind: 'reply-to-sent', infer: 1 })) === 'judging plain replies is either on or off', 'the validator: infer true is kept; false / absent store `{kind}` alone (the old row, byte for byte); a non-boolean is refused by name and worded');
+  const WS = require(path.join(REPO, 'src/channel-watch-spec.js'));
+  const on = WS.watchSpecFromArgs(['--reply-to-sent', '--infer']), off = WS.watchSpecFromArgs(['--reply-to-sent']), lone = WS.watchSpecFromArgs(['--keyword', 'x', '--infer']);
+  ok(on.ok && J2(on.spec.filter.rules) === J2([RI]) && off.ok && J2(off.spec.filter.rules) === J2([R0]) && lone.code === 'infer-without-reply-to-sent' && lone.flag === '--infer' && F.ruleWhy(RI) !== F.ruleWhy(R0), 'the agent\'s door (vibespace-channels watch): --reply-to-sent --infer = the dialog\'s row; --infer alone is refused by name; the rule in words says it', J2({ on: on.spec && on.spec.filter, lone }));
+  // ── OFF = BYTE-IDENTICAL: a copy WITHOUT the judged road answers every fixture exactly as the rule without infer ──
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const MM = mutantCopies('chan-filter-infer', REPO);
+  const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+  const ROAD1 = '    if (rule.kind === \'reply-to-sent\' && !sent) { const s = sentHit(record, ctx) || (rule.infer === true ? inferHit(record, ctx) : null); if (s) { sent = s.sent; if (s.score !== undefined) score = s.score; } }';
+  const ROAD2 = '  if (rule && rule.kind === \'reply-to-sent\') { const s = sentHit(rec, ctx) || (rule.infer === true ? inferHit(rec, ctx) : null); return s ? s.why : null; }';
+  const SPAN = '  const span = inferSpanMs(ctx);', MARK = '  if (str(rec.replyTo) || str(rec.root)) return null;', KIND = "  if (String(c.kind || 'plain') !== 'plain' || c.quotes || c.topic) return null;", EDGE = '  if (p === null || p < INFER.threshold) return null;';
+  ok([ROAD1, ROAD2, SPAN, MARK, KIND, EDGE].every((x) => FSRC.split(x).length === 2), 'control setup: the two road reads, the span, the two unmarked checks and the threshold are each one line');
+  const BASE = MM.load('src/channel-filter.js', FSRC.replace(ROAD1, '    if (rule.kind === \'reply-to-sent\' && !sent) { const s = sentHit(record, ctx); if (s) sent = s.sent; }').replace(ROAD2, '  if (rule && rule.kind === \'reply-to-sent\') { const s = sentHit(rec, ctx); return s ? s.why : null; }'), 'marker-only');
+  const fixtures = [plain2h, userW('om_q2', 60e3, { replyTo: 'om_a1' }), userW('om_t2', 90e3, { replyTo: 'om_a1', root: 'om_a1', threadKey: 'om_a1' }), userW('om_w12', 5 * 60e3), userW('m_r9', H)];
+  const kinds = { om_q2: { kind: 'quote', topic: null, quotes: 'om_a1' }, om_t2: { kind: 'topic-reply', topic: 'om_a1', quotes: null } };
+  const fctx = (k) => ctxOf({ convKind: k, kindOf: (r) => kinds[r.vendorId] || plainKind(), inferred: new Map(fixtures.map((r) => [F.inferKeyOf(r, A.get('om_a1')), { probability: 0.99 }])) });
+  const same = ['dm', 'group', 'thread'].flatMap((k) => fixtures.map((r) => J2(F.matchRecord({ rules: [R0] }, r, fctx(k))) === J2(BASE.matchRecord({ rules: [R0] }, r, fctx(k)))));
+  ok(same.every(Boolean) && same.length === 15, `infer OFF ⇒ the marker road byte for byte: ${same.length} fixtures (plain / quote / topic reply / mail × dm, group, thread) answer exactly as a copy without the judged road — even with a YES for every one of them handed in`);
+  ok(BASE.matchRecord({ rules: [RI] }, plain2h, ctxOf({ inferred: said(0.99) })).hit === false && F.matchRecord({ rules: [RI] }, plain2h, ctxOf({ inferred: said(0.99) })).hit === true, 'CONTROL ⑧: the marker-only copy misses the 2 h plain answer even with infer on — the judged road is what wakes userW\'s agent');
+  const S1 = MM.load('src/channel-filter.js', FSRC.replace(SPAN, '  const span = Infinity;'), 'no-span');
+  const S2 = MM.load('src/channel-filter.js', FSRC.replace(MARK, '').replace(KIND, ''), 'marked-judged');
+  const S3 = MM.load('src/channel-filter.js', FSRC.replace(EDGE, '  if (p === null) return null;'), 'no-threshold');
+  ok(outLegs(S1).includes('25 h after (the default span 24 h)'), 'CONTROL ⑨: a copy without the span judges the 25 h message — the scope leg goes RED', J2(outLegs(S1)));
+  ok(outLegs(S2).includes('a quote of ANOTHER message') && outLegs(S2).includes('a topic reply under another root'), 'CONTROL ⑩: a copy without the unmarked checks judges a quote of another message and a topic reply — the scope leg goes RED', J2(outLegs(S2)));
+  ok(lowLegs(S3)[0] === true, 'CONTROL ⑪: a copy without the threshold hits at 0.79 — the judged-no leg goes RED');
+  for (const x of copiesCensus(MM.files, MM.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
+  // ── THE WORDS ──
+  const WORDS = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
+  const keys = ['judged an answer to your message of {when}', 'Also judge plain replies (LLM plugin)', 'judging plain replies is either on or off', 'Plain replies', 'Judge a plain reply to an agent\'s message for (hours)'];
+  const tables = ['i18n-zh.js', 'i18n-ja.js'].map((n) => fs.readFileSync(path.join(REPO, 'src/lib', n), 'utf-8'));
+  ok(keys.every((k) => tables.every((tb) => tb.includes(JSON.stringify(k) + ':'))) && WORDS.includes('/^judged an answer to your message of (.+)$/') && F.INFER_WHY === keys[0], 'zh + ja carry the judged road\'s words (the why, the dialog row, the refusal, the readout, the setting); channel-words wakeWhyText reads the why');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -40,6 +40,7 @@ import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openDesktop as openDesktopFn } from './desktop-window.js';
 import { openDesktopApp as openDesktopAppFn } from './desktop-app-window.js';
 import { agentWindowPlacement } from './desktop-app-placement.js';
+import { setHubZone } from './owner-facts.js'; // B-7960 a: the zone the hub resolved for the owner — the board prints in it
 import { installDesktopAppLauncher } from './desktop-app-launcher.js';
 import { installOpenWith } from './open-with.js'; // §7.9: app.openWithDesktopApp (the ONE door) + the file-changed relay
 import { openBrowserLive as openBrowserLiveFn, openBrowserLiveBeside as openBrowserLiveBesideFn, installBrowserLive } from './browser-live-window.js'; // agent browser P2 (§4.4): the live view window; P7 (§4.6): auto-bind
@@ -71,11 +72,11 @@ import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser
 import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
 import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27: a browser session's replay (window type browser-replay)
 import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
-import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly } from './agent-meta.js';
+import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly, accountDefaultsOf } from './agent-meta.js';
 import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
 import { noteVoicePlugins } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off)
 import { enterSubmits } from './chat-enter-keys.js';
-import { initVault, maybeNagVault } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set
+import { initVault, maybeNagVault, unlockFirst } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -306,7 +307,7 @@ class App {
         this._applyCustomThemesFromServer(msg.themes);
       }
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
-        this._accounts = { ...(this._accounts || {}), accounts: msg.accounts, defaultAccountId: msg.defaultAccountId || null, defaultCodexAccountId: msg.defaultCodexAccountId || null };
+        this._accounts = { ...(this._accounts || {}), accounts: msg.accounts, ...accountDefaultsOf(msg) }; // every harness's default field (agent-meta)
         // Live-re-render an OPEN Manage Agents surface — without this the
         // roster only updated on the next manual reopen, so adding an account
         // (esp. one never logged in) left the page unchanged (inc-msl890ua).
@@ -377,7 +378,7 @@ class App {
     });
 
     // Anthropic accounts (subscription ↔ API key, per-session billing identity)
-    this._accounts = { accounts: [], defaultAccountId: null, subscription: {}, cliKey: {} };
+    this._accounts = { accounts: [], ...accountDefaultsOf(null), subscription: {}, cliKey: {} };
     this.refreshAccounts();
     this.refreshBrowserProfiles(); // agent browser P1: null when the server has no keeper ⇒ every pin surface hides itself
 
@@ -505,6 +506,7 @@ class App {
     }).then(d => {
       document.getElementById('input-cwd').placeholder = d.home;
       this._localHome = d.home; // restored as the cwd hint when host → Local (B-0d70)
+      setHubZone(d.zone);
       this._authEnabled = !!d.authEnabled;
       this._ssoEnabled = !!d.ssoEnabled; // Clerk SSO on → password step/import ignored
       initVault(this); // THE VAULT (lane vault-e2e-password): locked ⇒ the unlock modal now, behind the sign-in this page just passed
@@ -1124,7 +1126,7 @@ class App {
     this._customize = new CustomizeMode(this);
 
     const btn = document.getElementById('btn-global-settings');
-    btn.onclick = (e) => { e.stopPropagation(); this._showGlobalSettings(btn); };
+    btn.onclick = (e) => { e.stopPropagation(); this._pressGlobalSettings(btn); };
     // UI scale re-apply on viewport resize (review F9): applyUiPrefs only ran
     // at boot + gs-menu change, so crossing the 768px mobile boundary either
     // stranded the saved scale (narrow-at-boot) or left the zoom active under
@@ -1144,6 +1146,10 @@ class App {
       }, 250);
     });
   }
+
+  /** The ⚙ press — the toolbar's and the phone nav's (lane vault-locked-loud): while the vault is LOCKED the unlock dialog
+   *  first, then the menu as today once it closes; otherwise the menu at once. */
+  _pressGlobalSettings(anchor) { unlockFirst(() => this._showGlobalSettings(anchor)); }
 
   _showGlobalSettings(anchor) {
     const pop = createPopover(anchor, 'global-settings-popover');
@@ -2289,7 +2295,7 @@ class App {
   // list fresh between refreshes.
   refreshAccounts() {
     return fetchJson('/api/accounts').then(d => {
-      if (d) this._accounts = { accounts: d.accounts || [], defaultAccountId: d.defaultAccountId || null, defaultCodexAccountId: d.defaultCodexAccountId || null, subscription: d.subscription || {}, cliKey: d.cliKey || {} };
+      if (d) this._accounts = { accounts: d.accounts || [], ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {} }; // every harness's default field (agent-meta)
       if (d?.hostNames) this._hostNamesKnown = d.hostNames; // id→name for chips (2.244.1)
       return this._accounts;
     }).catch(() => this._accounts);

@@ -102,7 +102,7 @@ function askCredentials(m, types, auth, sign = null) {
     const user = wantUser ? field('text', t('User name')) : null;
     const pass = field('password', t('Password'));
     let keep = null;
-    if (s.locked) { const w = el('p', NOTE, `${t('The vault is locked — unlock it to sign in automatically')} — ${t('Unlock… at the top of the page; For you names what is waiting on it')}`); w.className = 'machine-desktop-signin-locked'; form.append(w); }
+    if (s.locked) { const w = el('p', NOTE, t('The vault is locked — unlock it to sign in automatically')); w.className = 'machine-desktop-signin-locked'; const where = el('p', NOTE, t('Unlock… at the top of the page; For you names what is waiting on it')); where.className = 'machine-desktop-signin-locked-where'; form.append(w, where); } // the owner's words verbatim (test-desktop-signin-chrome ④), the two facts on their own line beside them (test-vault-words)
     else if (s.can) {
       const lab = el('label', 'margin:6px 0'); lab.className = 'dialog-check-row machine-desktop-signin-keep'; // the house checkbox row (the box beside its words)
       keep = document.createElement('input'); keep.type = 'checkbox'; keep.checked = !!s.refused; // a refused one was remembered before: the tick stays on
@@ -507,6 +507,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   const note = (text, title, ms = 0) => { clearTimeout(noteTimer); noteEl.textContent = text; noteEl.title = title || text; noteEl.hidden = !text; if (ms) noteTimer = setTimeout(() => { noteEl.hidden = true; }, ms); };
   const STREAM_WHY = {
     ice_failed: () => t('the connection failed'), ice_disconnected: () => t('the connection dropped'), connect_timeout: () => t('it did not connect in time'),
+    stalled: () => t('the picture stopped arriving'), // lane stream-leg-flap: THE STALL (stream-view — frames sent, none decoded)
     answer_failed: () => t('the browser and the machine could not agree'), restart_failed: () => t('it could not reconnect'), link_lost: () => t('the machine’s link dropped'),
     agent_too_old: () => t('the machine’s agent cannot stream yet — update it'), no_screen_source: () => t('the machine’s agent cannot capture its screen yet'),
     too_many_streams: (i) => (i && Number.isInteger(i.cap) ? t('the machine already streams {live} pictures — at most {cap} for its {n} displays (one per display + one)', { live: i.live, cap: i.cap, n: i.displays }) : t('the machine already streams to two windows')), // lane desktop-display-modes: THE PER-MACHINE CAP names its count (an older agent: two)
@@ -562,22 +563,33 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   winInfo._handover = handover;
   // lane desktop-display-modes: a remembered display the machine no longer shows (or cannot capture) ⇒ its main display, once
   const DISPLAY_GONE = ['display_gone', 'display_other_gpu', 'display_unmapped', 'bad_source'];
-  /** ② one display's end — said in its pane with 「重试」, the other displays keep streaming. → true when `v` was one of them. */
+  /** ② one display's end — said in its pane, the other displays keep streaming. NEVER SILENT per pane (lane stream-leg-flap —
+   *  the owner's two displays sat black at 0 fps): a pane that PLAYED is offered again by itself, once (「串流中断：…——正在重新
+   *  连接…」 until its picture plays); then — or a pane that never played — 「重试」. → true when `v` was one of them. */
+  const paneLadder = new Map(); // ② display id → endingVerdict's { step, at }
   const paneEnd = (v, code, why, info) => {
     const hit = [...many].find(([, x]) => x === v);
     if (!hit) return false;
-    many.delete(hit[0]);
-    panes.say(hit[0], t('Not streamed: {why}', { why: STREAM_WHY[code] ? streamWords(code, info) : why || streamWords(code) }), { label: t('Try again'), run: () => { panes.say(hit[0], ''); startMany(hit[0]); } });
+    const did = hit[0];
+    many.delete(did);
+    const words = STREAM_WHY[code] ? streamWords(code, info) : why || streamWords(code);
+    const lad = paneLadder.get(did) || { step: 0, at: 0 };
+    const nv = endingVerdict({ played: v.played, step: lad.step, at: lad.at, now: Date.now() });
+    if (v.played) paneLadder.set(did, { step: nv.step, at: nv.at });
+    if (nv.act === 'retry') {
+      panes.say(did, t('Stream interrupted: {why} — reconnecting…', { why: words }));
+      setTimeout(() => { if (!closed && mode === 'all' && !many.has(did) && !folded.has(did)) startMany(did, { said: true }); }, NEVER_SILENT.retryMs);
+    } else panes.say(did, t('Not streamed: {why}', { why: words }), { label: t('Try again'), run: () => { panes.say(did, ''); startMany(did); } });
     drawChip();
     return true;
   };
   /** ② a display's own stream, in its pane. */
-  const startMany = (did, { still = null } = {}) => {
+  const startMany = (did, { still = null, said = false } = {}) => {
     let v = null;
     const share = shareNow();
     v = createStreamView(panes.pane(did), { hostId: m.hostId, hostPlatform: m.setup || null, source: { kind: 'display', id: did, ...(share > 1 ? { share } : {}) },
       onSource: (src) => { if (src && src.tcc && src.tcc.accessibility === 'granted') tccGranted(); drawScaled(); },
-      onStatus: (state) => { if (state === 'playing' && still) { still.remove(); still = null; } drawChip(); }, onStats: () => drawChip(), onInput: inputWords,
+      onStatus: (state) => { if (state === 'playing' && still) { still.remove(); still = null; } if (state === 'playing' && said) { said = false; panes.say(did, ''); } drawChip(); }, onStats: () => drawChip(), onInput: inputWords, // lane stream-leg-flap: the re-offer's words stay until its picture plays
       onFallback: (code, why, taken, info) => { if (still) { still.remove(); still = null; } paneEnd(v, code, why, info); } });
     v._share = share;
     many.set(did, v);

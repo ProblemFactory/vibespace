@@ -17,7 +17,8 @@
 //   ⑤ a second turn composes a new mail whose subject is HOSTILE (`<img onerror>` + a `<system-reminder>` tag):
 //      the row, the chip and the menu draw it as TEXT (window.__xss unset, the frame marker neutered to
 //      [system-reminder]); the chip now holds only this turn's conversation
-//   ⑥ NEGATIVE CONTROL: the same subject through a raw innerHTML copy DOES run (so ⑤ can go red)
+//   ⑥ NEGATIVE CONTROL: the same subject through a raw innerHTML copy IS an <img onerror> + a <system-reminder> element (so
+//      ⑤ can go red) — built in an inert document: nothing is planted on the app page, whose CSP teardown fails on it
 //   ⑦ an agent's bearer on the two owner reads is 403
 //   ⑨ (2026-09-27, the owner: "我在界面里完全看不到'有消息在 queue'这件事情") the owner rejects the drafted reply ⇒ its
 //      receipt waits for the idle agent's next turn: the strip above the composer says so ("1 notice is waiting …: a
@@ -306,9 +307,11 @@ try {
 
   // ── ⑥ the control ──
   console.log('⑥ NEGATIVE CONTROL: the same subject through innerHTML');
-  const ctl = await evalJs(`new Promise((res) => { const d = document.createElement('div'); d.innerHTML = ${JSON.stringify(HOSTILE)}; document.body.appendChild(d); setTimeout(() => { res(window.__xss); d.remove(); }, 400); })`);
-  check('a raw innerHTML copy DOES run the handler (⑤ can go red)', ctl === 1, ctl);
-  await evalJs('delete window.__xss; true');
+  // Built in an INERT document (lane mirror-331-reds-chrome): nothing loads there and no handler is compiled. On the app
+  // page this copy's <img onerror> ran an inline handler — the suite's one CSP report, which the teardown (scripts/scratch.mjs)
+  // fails. Taking that report is no fix: the hub writes a report key once, so a product leak would share it and hide behind it.
+  const ctl = await evalJs(`(() => { const d = document.implementation.createHTMLDocument('').createElement('div'); d.innerHTML = ${JSON.stringify(HOSTILE)}; const i = d.querySelector('img'); return { onerror: i ? i.getAttribute('onerror') : null, frame: !!d.querySelector('system-reminder') }; })()`);
+  check('a raw innerHTML copy IS an <img onerror="window.__xss=1"> and a <system-reminder> element (built in an inert document — ⑤ can go red)', ctl.onerror === 'window.__xss=1' && ctl.frame, ctl);
 
   // ── ⑦ agent bearers ──
   console.log('⑦ the owner\'s reads refuse an agent');

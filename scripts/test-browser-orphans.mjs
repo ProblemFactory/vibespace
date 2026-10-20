@@ -5,11 +5,18 @@
 // ② the process-table reader's shape (Xvfb by child and by -auth, a client verb is not a daemon, the launch mark)
 // ③ the REAL keeper over a fixture process table (ended by pid + starttime, leased / recent / running kept, unmarked
 //    reported once, the boot sweep once, the row's words) ④ the browser-serve op + the agent's capability gate.
+// LANE BROWSER-DAEMON-SURVIVES-UPDATE (B-1574, userW's four freezes after server auto-updates): THE OTHER HALF — a daemon no
+// live record keeps whose browser ENDED (gone, or its endpoint silent) for the bound is ended whoever leases it; a SERVER
+// RESTART re-owns each daemon of ours whose page answers and ends the rest. ① the table (kept / not kept × the bound) + the
+// pre-fix control ⑤ the other half over time on a fake clock (a silent endpoint, a Chrome gone; the row + the journal say it;
+// CONTROL the pre-fix verdict keeps both) ⑥ the boot (a stopped record's daemon whose page answers RE-OWNED, a silent one
+// ENDED with its Chrome, a live record whose page answers nothing ENDED at adoption; CONTROL the pre-fix boot leaves them).
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
+import { deadPorts } from './scratch.mjs';
 import { fileURLToPath } from 'url';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -28,31 +35,43 @@ const MIN = 60000, H = 60 * MIN, NOW = 1_800_000_000_000;
 console.log('— ① the verdict table');
 function table(V) {
   const bad = [];
+  const E = V.BROWSER_ENDED_MS || 60000;
   const d = (x = {}) => ({ pid: 7, starttime: 70, owned: true, stoppedIdleAt: NOW - 2 * H, noBrowserSince: NOW - 2 * H, ...x });
   const row = (want, inp, label) => { const v = V.daemonVerdict({ now: NOW, graceMs: O.GRACE_MS, ...inp }); if (v.act !== want) bad.push(`${label}: ${v.act} (${v.why})`); };
+  // NO LIVE RECORD KEEPS IT (a stopped record, or none — `stoppedIdleAt` set): its browser ENDED ≥ the bound ⇒ ended, whoever
+  // leases it and however recent its last command (lane browser-daemon-survives-update); inside the bound the old rules
   for (const conv of ['gone', 'running', null]) {
-    for (const [age, past] of [[O.GRACE_MS - 1, false], [O.GRACE_MS, true], [2 * H, true]]) {
+    for (const [age, past] of [[E - 1, false], [E, true], [O.GRACE_MS, true], [2 * H, true]]) {
       const base = { daemon: d({ noBrowserSince: NOW - age, stoppedIdleAt: NOW - age }), conversationAlive: conv };
-      const endNow = past && conv !== 'running';
-      row(endNow ? 'end' : 'keep', base, `${conv} no-browser ${age}`);
+      row(past ? 'end' : 'keep', base, `${conv} no-browser ${age}`);
       row('keep', { ...base, browserAlive: true }, `${conv} chrome alive ${age}`);
-      row('keep', { ...base, leases: 1 }, `${conv} leased ${age}`);
-      row('keep', { ...base, lastVerbAt: NOW - O.GRACE_MS + 1 }, `${conv} verb within grace ${age}`);
-      row('keep', { ...base, lastViewerAt: NOW - 1000 }, `${conv} viewer within grace ${age}`);
+      row(past ? 'end' : 'keep', { ...base, leases: 1 }, `${conv} leased ${age}`);
+      row(past ? 'end' : 'keep', { ...base, lastVerbAt: NOW - 1000 }, `${conv} a command 1 s ago ${age}`);
+      row(past ? 'end' : 'keep', { ...base, lastViewerAt: NOW - 1000 }, `${conv} a viewer 1 s ago ${age}`);
       row('report', { ...base, daemon: { ...base.daemon, owned: false } }, `${conv} unmarked ${age}`);
       row('keep', { ...base, daemon: { ...base.daemon, starttime: null } }, `${conv} no starttime ${age}`);
+      row(past ? 'end' : 'keep', { ...base, browserAlive: true, silentSince: NOW - age, leases: 1 }, `${conv} chrome alive, its endpoint silent ${age}`);
+      row('keep', { ...base, browserAlive: true, silentSince: null, leases: 1 }, `${conv} chrome alive and answering ${age}`);
     }
   }
-  // a stopped-idle daemon of a RUNNING conversation: kept for the next verb, ended past the 6 h cap
-  row('keep', { daemon: d({ stoppedIdleAt: NOW - 5 * H, noBrowserSince: NOW - 5 * H }), conversationAlive: 'running', lastVerbAt: NOW - 5 * H }, 'running, idle 5 h');
-  row('end', { daemon: d({ stoppedIdleAt: NOW - 7 * H, noBrowserSince: NOW - 7 * H }), conversationAlive: 'running', lastVerbAt: NOW - 7 * H }, 'running, idle 7 h');
-  row('keep', { daemon: d({ stoppedIdleAt: null }), conversationAlive: 'running' }, 'running, live record');
-  row('keep', { daemon: d({ stoppedIdleAt: null }), conversationAlive: null }, 'named profile, live record (the idle clock owns it)');
-  row('end', { daemon: d({ stoppedIdleAt: null }), conversationAlive: 'gone' }, 'archived conversation, live record');
+  // A LIVE RECORD KEEPS IT (`stoppedIdleAt` null — the tick's: healed in place while leased, closed by name, its hang the
+  // unresponsive verdict's — never ended here): the daemon-orphan-end rules
+  const k = (x = {}) => d({ stoppedIdleAt: null, ...x });
+  for (const conv of ['gone', 'running', null]) {
+    for (const [age, pastGrace] of [[O.GRACE_MS - 1, false], [O.GRACE_MS, true], [2 * H, true]]) {
+      const base = { daemon: k({ noBrowserSince: NOW - age }), conversationAlive: conv };
+      row(pastGrace && conv === 'gone' ? 'end' : 'keep', base, `kept ${conv} no-browser ${age}`);
+      row('keep', { ...base, browserAlive: true, silentSince: NOW - 2 * H }, `kept ${conv} chrome silent 2 h ${age}`);
+      row('keep', { ...base, leases: 1 }, `kept ${conv} leased ${age}`);
+      row('keep', { ...base, lastVerbAt: NOW - O.GRACE_MS + 1 }, `kept ${conv} verb within grace ${age}`);
+      row('keep', { ...base, lastViewerAt: NOW - 1000 }, `kept ${conv} viewer within grace ${age}`);
+    }
+  }
   return bad;
 }
 const bad = table(O);
-ok(bad.length === 0, `the table holds (${3 * 3 * 7 + 5} rows: running / archived / none × the grace × every input)`, bad);
+ok(bad.length === 0, `the table holds (${3 * 4 * 9 + 3 * 3 * 5} rows: not kept / kept by a live record × running / archived / none × the bound and the grace × every input)`, bad);
+ok(O.BROWSER_ENDED_MS === 60000 && O.SCAN_MS === 60000, 'the bound: 60 s after its browser ended (the census every 60 s ⇒ ended within 2 min)');
 ok(O.rowNote(130 * MIN) === 'stopped — the daemon was ended after 2.2 h idle (restarts on the next command)', 'the row\'s words', O.rowNote(130 * MIN));
 function mutant(from, to, name) {
   const src = fs.readFileSync(path.join(REPO, 'src/browser-orphans.js'), 'utf8');
@@ -64,6 +83,8 @@ const m1 = mutant("  if (num(leases) > 0) return { act: 'keep', why: 'a lease ho
 ok(m1 && m1.some((x) => /leased/.test(x)), 'CONTROL: a patched copy that ends a daemon under a live lease is RED', m1);
 const m2 = mutant("if (!d.owned) return { act: 'report'", "if (false) return { act: 'report'", 'unmarked');
 ok(m2 && m2.some((x) => /unmarked/.test(x)), 'CONTROL: a patched copy that ends an unmarked daemon is RED', m2);
+const m3 = mutant('  if (d.stoppedIdleAt != null && d.starttime != null && !d.cdp) {\n', '  if (false) {\n', 'outlives');
+ok(m3 && m3.some((x) => /^(gone|running|null) leased 600000: keep/.test(x)) && m3.some((x) => /endpoint silent/.test(x)), 'CONTROL: the pre-fix verdict (no other half) keeps a leased daemon whose browser ended 10 min ago, and one whose browser has not answered for 2 h — RED', m3 && m3.slice(0, 3));
 
 // ═══ ② THE PROCESS TABLE ═══
 console.log('— ② the process table');
@@ -78,6 +99,8 @@ const dmn = (pid, st, ago, env = {}) => ({ pid, ppid: 1, starttime: st, startedA
   ok(ds.length === 2 && !ds.some((x) => x.pid === 30), 'a client verb (no AGENT_BROWSER_DAEMON=1) is not a daemon', ds.map((x) => x.pid));
   ok(ds[0].xvfb.map((x) => x.pid).join() === '11' && ds[0].chrome.length === 0, 'the Xvfb whose -auth file the daemon\'s env names goes with it (not its child)', ds[0]);
   ok(ds[1].xvfb.map((x) => x.pid).join() === '21' && ds[1].chrome.map((x) => x.pid).join() === '22', 'its child Xvfb goes with it; its Chrome is the --type-less child (a renderer is not counted)', ds[1]);
+  const ep = O.daemonsFromRows([dmn(40, 400, H), { pid: 41, ppid: 40, starttime: 410, argv: ['/usr/bin/google-chrome', '--remote-debugging-port=42173', '--user-data-dir=/tmp/x/agent-browser-chrome-1', 'about:blank'] }])[0];
+  ok(ep.chrome[0].port === 42173 && ep.chrome[0].dir === '/tmp/x/agent-browser-chrome-1', 'lane browser-daemon-survives-update: its Chrome\'s endpoint is read off the Chrome\'s own argv (the main process\'s is NUL-separated — measured; a child rewrites its title)', ep.chrome);
   ok(JSON.stringify(O.daemonMark({ AGENT_BROWSER_CONFIG: path.join(CFG, 'machine-ephemeral-bk-0000000d.json') }, [CFG])) === '{"kind":"ephemeral","mark":"bk-0000000d"}'
     && O.daemonMark({ AGENT_BROWSER_CONFIG: path.join(CFG, 'machine.json') }, [CFG]) === null && O.daemonMark({ AGENT_BROWSER_CONFIG: '/elsewhere/machine-bp-00000001.json' }, [CFG]) === null,
   'the launch mark is read from the keeper\'s own config file (an unmarked machine.json / another directory is not ours)');
@@ -107,18 +130,126 @@ console.log('— ③ the keeper');
   await keeper.boot();
   ok(reads === 1, 'the boot sweep read the process table once', reads);
   ok(ended.includes('9002:222') && ended.includes('9004:444') && ended.includes('9005:555'), 'ENDED by pid + starttime: the stopped-idle record\'s daemon (no lease, no verb for 2 h) and the archived conversation\'s daemon WITH its Xvfb', ended);
-  ok(!ended.some((x) => /^900[13678]:/.test(x)), 'KEPT: the leased one, the recently-used one, the running conversation\'s, the one with a Chrome — and the unmarked one is never ended', ended);
+  // lane browser-daemon-survives-update (the other half): no live record keeps them and their browser ended 3 h ago ⇒ ended
+  // too, the leased one, the recently-used one and the running conversation's (each one's next command starts a fresh one)
+  ok(['9001:111', '9003:333', '9007:777'].every((x) => ended.includes(x)), 'ENDED (the other half): the LEASED one, the recently-used one, the running conversation\'s — no live record keeps them and their browser ended 3 h ago', ended);
+  ok(!ended.some((x) => /^900[68]:/.test(x)), 'KEPT: the one with a Chrome — and the unmarked one is never ended', ended);
   ok(lines.filter((l) => /pid 9006 .*reported, left running/.test(l)).length === 1, 'the unmarked daemon is REPORTED, once', lines.filter((l) => /9006/.test(l)));
-  ok(lines.some((l) => /ended the browser daemon pid 9004 \(its conversation is gone; no browser for 3 h; conversation bk-0000000d\): ended; its Xvfb pid 9005 ended/.test(l)), 'ONE journal line per ending names the why, the conversation and its Xvfb', lines.filter((l) => /9004/.test(l)));
+  ok(lines.some((l) => /ended the browser daemon pid 9004 \(its browser ended 3 h ago and no live record keeps it; no browser for 3 h; conversation bk-0000000d\): ended; its Xvfb pid 9005 ended/.test(l)), 'ONE journal line per ending names the why, the conversation and its Xvfb', lines.filter((l) => /9004/.test(l)));
   const rb = JSON.parse(fs.readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8')).browsers['bp-0000000b'];
-  ok(rb && rb.note === 'stopped — the daemon was ended after 2 h idle (restarts on the next command)', 'the profile row says how long it idled and that the next command restarts it', rb && rb.note);
+  ok(rb && rb.note === 'stopped — its browser daemon was ended at 08:00 UTC: its browser ended 3 h ago and no live record keeps it (the next command starts a fresh one)', 'the profile row says why it was ended and that the next command starts a fresh one', rb && rb.note);
+  ok(require('../src/browser-verbs.js').browserCell(keeper.browserOf('bp-0000000a')) === keeper.browserOf('bp-0000000a').note, '`status` says it too (its browser cell is the row\'s words — never a silent exit)', require('../src/browser-verbs.js').browserCell(keeper.browserOf('bp-0000000a')));
   await keeper.tick();
   ok(reads === 1, 'a tick inside the scan interval does not re-walk (the boot sweep ran once)', reads);
-  clock = NOW + 7 * H; await keeper.tick();
-  ok(reads === 2 && ended.includes('9007:777') && !ended.some((x) => /^9006:|^9001:|^9008:/.test(x)), 'idle past 6 h, a running conversation\'s stopped daemon is ended (the next verb restarts it); the leased, the unmarked and the one with a Chrome are not', { reads, ended });
+  clock = NOW + 7 * H; const n0 = ended.length; await keeper.tick();
+  ok(reads === 2 && ended.length === n0 && !ended.some((x) => /^9006:|^9008:/.test(x)), 'a later census ends nothing more: the unmarked one and the one with a Chrome (no endpoint to ask) stay', { reads, ended });
   ok(lines.filter((l) => /pid 9006 .*reported/.test(l)).length === 1, 'the report is not repeated tick after tick');
   keeper.shutdown();
 }
+
+// ═══ ⑤ lane browser-daemon-survives-update: THE OTHER HALF over time (a fake clock, a real silent endpoint) ═══
+console.log('— ⑤ the other half: a daemon nobody keeps whose browser ended / stopped answering');
+const net = require('net');
+const silent = net.createServer((sk) => { sk.on('error', () => { }); }); // accepts, never answers (the measured wedged Chrome)
+await new Promise((r) => silent.listen(0, '127.0.0.1', r));
+const SILENT = silent.address().port;
+const SRCDIR = path.join(REPO, 'src');
+const absReq = (src, dir, map = {}) => src.replace(/require\((['"])(\.\.?\/[^'"]+)\1\)/g, (m, q, rel) => 'require(' + JSON.stringify(map[rel] || path.resolve(dir, rel)) + ')');
+function keeperCopy(name, patches = [], orphans = null) {
+  let ks = fs.readFileSync(path.join(SRCDIR, 'server/browser-keeper.js'), 'utf8');
+  for (const [a, b] of patches) { if (!ks.includes(a)) return null; ks = ks.replace(a, b); }
+  const f = path.join(ROOT, `keeper-${name}.js`); fs.writeFileSync(f, absReq(ks, path.join(SRCDIR, 'server'), orphans ? { '../browser-orphans.js': orphans } : {}));
+  return require(f);
+}
+async function otherHalf(Kmod, tag) {
+  const dataDir = path.join(ROOT, 'oh-' + tag, 'data'); const cfg = path.join(dataDir, 'browser-env'); fs.mkdirSync(cfg, { recursive: true });
+  const T1 = NOW + 5 * MIN;
+  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+    profiles: [{ id: 'bp-000000e1', label: 'Wedged', dir: path.join(ROOT, 'prof-h'), createdAt: NOW - 9 * H, lastVerbAt: T1 - 10000 }, { id: 'bp-000000e2', label: 'Gone', dir: path.join(ROOT, 'prof-i'), createdAt: NOW - 9 * H, lastVerbAt: T1 - 10000 }],
+    leases: [{ profileId: 'bp-000000e1', browserKey: 'bk-000000e1', at: NOW - H }, { profileId: 'bp-000000e2', browserKey: 'bk-000000e2', at: NOW - H }],
+    browsers: { 'bp-000000e1': { profileId: 'bp-000000e1', ns: 'vs-bp-000000e1', pid: 9101, starttime: 1101, state: 'stopped', lastError: 'the recorded daemon is alive but its namespace no longer answers', endedAt: NOW - H, hostId: null, external: false, cdpUrl: `ws://127.0.0.1:${SILENT}/devtools/browser/aaaaaaaa-0000` },
+      'bp-000000e2': { profileId: 'bp-000000e2', ns: 'vs-bp-000000e2', pid: 9199, starttime: 1199, state: 'stopped', endedAt: NOW - H, hostId: null, external: false } } }));
+  let rows = []; let clock = NOW; const ended = [], lines = [];
+  const log = { log: (l) => lines.push(l), warn: (l) => lines.push(l), error: (l) => lines.push(l) };
+  const kk = Kmod.create({ dataDir, homeDir: ROOT, env: () => ({ PATH: path.join(ROOT, 'nobin'), HOME: ROOT }), liveKeys: () => new Set(['bk-000000e1', 'bk-000000e2']), install: false, log, now: () => clock, tickMs: 3600e3, answerAskMs: 200,
+    daemonTable: async () => rows, endIdentity: async (pid, st) => { ended.push(`${pid}:${st}`); rows = rows.filter((r) => !(r.pid === pid && r.starttime === st)); return 'ended'; } });
+  await kk.boot();
+  // a wedged Chrome under a stopped record's daemon (its endpoint accepts and never answers), and a daemon of profile i's mark
+  // whose Chrome has gone — both LEASED, a command 10 s ago
+  rows = [{ ...dmn(9101, 1101, 2 * H), env: { AGENT_BROWSER_DAEMON: '1' } }, { pid: 9102, ppid: 9101, starttime: 1102, argv: ['/usr/bin/google-chrome', `--remote-debugging-port=${SILENT}`, '--user-data-dir=/tmp/x/agent-browser-chrome-h'] },
+    { ...dmn(9103, 1103, 30000, { AGENT_BROWSER_CONFIG: path.join(cfg, 'machine-bp-000000e2.json') }), startedAt: T1 - 30000 }];
+  clock = T1; await kk.tick();
+  const at1 = ended.slice();
+  clock = T1 + 61000; await kk.tick();
+  const r = { at1, ended: ended.slice(), lines: lines.filter((l) => /ended the browser daemon pid 910/.test(l)), notes: { h: (kk.browserOf('bp-000000e1') || {}).note, i: (kk.browserOf('bp-000000e2') || {}).note }, cell: require('../src/browser-verbs.js').browserCell(kk.browserOf('bp-000000e1')) };
+  kk.shutdown();
+  return r;
+}
+{
+  const oh = await otherHalf(K, 'fixed');
+  ok(oh.at1.length === 0, '⑤ inside the bound: the wedged one (first seen silent) and the one whose browser went 30 s ago are KEPT', oh.at1);
+  ok(oh.ended.includes('9101:1101') && oh.ended.includes('9102:1102') && oh.ended.includes('9103:1103'), '⑤ 61 s later: the daemon whose Chrome has not answered CDP for 61 s is ENDED WITH that Chrome, and the one whose browser ended 91 s ago is ended — each LEASED, a command 10 s before', oh.ended);
+  ok(oh.lines.some((l) => /pid 9101 \(its browser has not answered CDP for 1 min and no live record keeps it; its browser not answering\): ended; its browser pid 9102 ended/.test(l)) && oh.lines.some((l) => /pid 9103 \(its browser ended \d+ min ago and no live record keeps it; no browser for \d+ min\): ended/.test(l)), '⑤ the journal says each ending and why (never a silent exit)', oh.lines);
+  ok(/^stopped — its browser daemon was ended at \d\d:\d\d UTC: its browser has not answered CDP for 1 min/.test(oh.notes.h || '') && /^stopped — its browser daemon was ended at \d\d:\d\d UTC: its browser ended \d+ min ago/.test(oh.notes.i || '') && oh.cell === oh.notes.h, '⑤ …and so do the rows and `status` (the record that named it; the mark\'s profile row for the one no record named)', oh.notes);
+  const pre = path.join(ROOT, 'orphans-pre-fix.js');
+  const osrc = fs.readFileSync(path.join(SRCDIR, 'browser-orphans.js'), 'utf8');
+  fs.writeFileSync(pre, osrc.replace('  if (d.stoppedIdleAt != null && d.starttime != null && !d.cdp) {\n', '  if (false) {\n'));
+  const Kpre = keeperCopy('pre-other-half', [], pre);
+  const ctl = Kpre ? await otherHalf(Kpre, 'pre') : null;
+  ok(ctl && !ctl.ended.some((x) => /^910[123]:/.test(x)), '⑤ CONTROL: the pre-fix verdict (no other half) keeps both — the wedged Chrome under a lease and the daemon whose browser is gone — the legs above can go red', ctl && ctl.ended);
+}
+
+// ═══ ⑥ lane browser-daemon-survives-update: A SERVER RESTART RE-OWNS OR ENDS (never leaves) ═══
+console.log('— ⑥ a server restart re-owns the daemons whose page answers and ends the rest');
+const [PJ, PK, PL, PM] = await deadPorts(4); // never answered: the page asks are the seam's (§81: no literal endpoint)
+async function bootLeg(Kmod, tag) {
+  const dataDir = path.join(ROOT, 'boot-' + tag, 'data'); fs.mkdirSync(path.join(dataDir, 'browser-env'), { recursive: true });
+  const dirJ = path.join(ROOT, 'boot-' + tag, 'chrome-j'), dirK = path.join(ROOT, 'boot-' + tag, 'chrome-k'); fs.mkdirSync(dirJ, { recursive: true }); fs.mkdirSync(dirK, { recursive: true });
+  fs.writeFileSync(path.join(dirJ, 'DevToolsActivePort'), `${PJ}\n/devtools/browser/aaaaaaaa-1111-jjjj\n`); fs.writeFileSync(path.join(dirK, 'DevToolsActivePort'), `${PK}\n/devtools/browser/aaaaaaaa-2222-kkkk\n`);
+  // two REAL processes standing for two daemons whose records are LIVE (adoption judges pid + starttime on /proc)
+  const sl = spawn('/bin/sleep', ['300'], { argv0: 'agent-browser-linux-x64', env: { AGENT_BROWSER_DAEMON: '1' }, stdio: 'ignore' });
+  const sm = spawn('/bin/sleep', ['300'], { argv0: 'agent-browser-linux-x64', env: { AGENT_BROWSER_DAEMON: '1' }, stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 150));
+  const ID = { j: 'f1', k: 'f2', l: 'f3', m: 'f4' }; const P = (n) => ({ id: `bp-000000${ID[n]}`, label: n.toUpperCase(), dir: path.join(ROOT, 'prof-' + n), createdAt: NOW - 9 * H });
+  const R = (n, pid, st, x = {}) => ({ profileId: `bp-000000${ID[n]}`, ns: `vs-bp-000000${ID[n]}`, pid, starttime: st, hostId: null, external: false, ...x });
+  fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1,
+    profiles: ['j', 'k', 'l', 'm'].map(P), leases: ['j', 'k', 'l', 'm'].map((n) => ({ profileId: `bp-000000${ID[n]}`, browserKey: `bk-0000000${n === 'j' ? 'a' : n === 'k' ? 'b' : n === 'l' ? 'c' : 'd'}`, at: NOW - H })),
+    browsers: { 'bp-000000f1': R('j', 9201, 2201, { state: 'stopped', endedAt: NOW - H, lastError: 'the recorded daemon is alive but its namespace no longer answers' }),
+      'bp-000000f2': R('k', 9301, 3301, { state: 'stopped', endedAt: NOW - H }),
+      'bp-000000f3': R('l', sl.pid, F.procStart(sl.pid), { state: 'ready', cdpUrl: `ws://127.0.0.1:${PL}/devtools/browser/aaaaaaaa-3333-llll` }),
+      'bp-000000f4': R('m', sm.pid, F.procStart(sm.pid), { state: 'ready', cdpUrl: `ws://127.0.0.1:${PM}/devtools/browser/aaaaaaaa-4444-mmmm` }) } }));
+  const daemonOf = { 'vs-bp-000000f1': 9201, 'vs-bp-000000f2': 9301, 'vs-bp-000000f3': sl.pid, 'vs-bp-000000f4': sm.pid };
+  const page = (answered) => ({ list: true, pages: [{ targetId: 'T0000001', url: 'https://app.example/', answered, reached: answered }] });
+  const asks = { [`ws://127.0.0.1:${PJ}/devtools/browser/aaaaaaaa-1111-jjjj`]: page(true), [`ws://127.0.0.1:${PK}/devtools/browser/aaaaaaaa-2222-kkkk`]: page(false), [`ws://127.0.0.1:${PL}/devtools/browser/aaaaaaaa-3333-llll`]: { list: false, error: 'timeout', pages: [] }, [`ws://127.0.0.1:${PM}/devtools/browser/aaaaaaaa-4444-mmmm`]: page(true) };
+  const rt0 = F.createBrowserRuntime({ env: { PATH: path.join(ROOT, 'nobin') } });
+  const runtime = Object.assign(Object.create(rt0), { info: async (ns) => (daemonOf[ns] ? { ok: true, active: true, pid: daemonOf[ns], raw: { code: 0 } } : { ok: false, active: false, pid: null, raw: { code: 1, error: 'timeout' } }) });
+  let rows = [dmn(9201, 2201, 2 * H), { pid: 9202, ppid: 9201, starttime: 2202, argv: ['/usr/bin/google-chrome', `--user-data-dir=${dirJ}`] }, dmn(9301, 3301, 2 * H), { pid: 9302, ppid: 9301, starttime: 3302, argv: ['/usr/bin/google-chrome', `--user-data-dir=${dirK}`] }];
+  const ended = [], lines = [], asked = [];
+  const log = { log: (l) => lines.push(l), warn: (l) => lines.push(l), error: (l) => lines.push(l) };
+  const kk = Kmod.create({ dataDir, homeDir: ROOT, env: () => ({ PATH: path.join(ROOT, 'nobin'), HOME: ROOT }), liveKeys: () => new Set(['bk-0000000a', 'bk-0000000b', 'bk-0000000c', 'bk-0000000d']), install: false, log, now: () => NOW, tickMs: 3600e3, runtime,
+    pageAsk: async (url) => { asked.push(url); return asks[url] || { list: false, error: 'timeout', pages: [] }; },
+    daemonTable: async () => rows, endIdentity: async (pid, st) => { ended.push(`${pid}:${st}`); rows = rows.filter((r) => !(r.pid === pid && r.starttime === st)); return 'ended'; } });
+  await kk.boot();
+  const v = (n) => kk.browserOf(`bp-000000${ID[n]}`) || {};
+  const r = { j: { state: v('j').state, pid: v('j').pid }, k: { state: v('k').state, note: v('k').note }, l: { state: v('l').state, lastError: v('l').lastError, alive: F.pidAlive(sl.pid) }, m: { state: v('m').state, alive: F.pidAlive(sm.pid) },
+    ended: ended.slice(), lines: lines.filter((l) => /boot: the browser daemon/.test(l)), asked: asked.length, cdpJ: (JSON.parse(fs.readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8')).browsers['bp-000000f1'] || {}).cdpUrl };
+  kk.shutdown();
+  for (const c of [sl, sm]) { try { c.kill('SIGKILL'); } catch { /* gone */ } }
+  return r;
+}
+{
+  const b = await bootLeg(K, 'fixed');
+  ok(b.j.state === 'ready' && b.j.pid === 9201 && b.cdpJ === `ws://127.0.0.1:${PJ}/devtools/browser/aaaaaaaa-1111-jjjj`, '⑥ a STOPPED record\'s daemon still running, its page answering: RE-OWNED — the record ready again on that daemon, its endpoint read from its Chrome\'s DevToolsActivePort', { j: b.j, cdpJ: b.cdpJ });
+  ok(b.k.state === 'stopped' && b.ended.includes('9301:3301') && b.ended.includes('9302:3302') && /^stopped — its browser daemon was ended at 08:00 UTC: none of its 1 page\(s\) answered within the bound/.test(b.k.note || ''), '⑥ a stopped record\'s daemon whose page answers NOTHING: ENDED with its Chrome, by identity; its row says why and that the next command starts a fresh one', { k: b.k, ended: b.ended });
+  ok(b.l.state === 'stopped' && !b.l.alive && /its browser does not answer CDP \(the page list: timeout\) — its daemon was ended at the restart \(ended\)/.test(b.l.lastError || ''), '⑥ a LIVE record whose daemon answers `session info` while its browser answers nothing: ENDED at the adoption (it was adopted ready before)', b.l);
+  ok(b.m.state === 'ready' && b.m.alive, '⑥ a live record whose page answers: adopted (re-owned), left running', b.m);
+  ok(b.lines.length === 4 && b.lines.filter((l) => /RE-OWNED/.test(l)).length === 2 && b.lines.filter((l) => /ENDED/.test(l)).length === 2, '⑥ ONE journal line per daemon the boot judged (2 re-owned, 2 ended), each with why', b.lines);
+  const P1 = ['        if (cliAsked(i)) {\n', '        if (false) {\n'], P2 = ["        if (seenBy === 'boot' && unkept && browserAlive && p) {\n", '        if (false) {\n'];
+  const Kpre = keeperCopy('pre-boot', [P1, P2]);
+  const c = Kpre ? await bootLeg(Kpre, 'pre') : null;
+  ok(c && c.l.state === 'ready' && c.l.alive && c.j.state === 'stopped' && !c.ended.some((x) => /^9301:|^9302:/.test(x)), '⑥ CONTROL: the pre-fix boot ADOPTS the live record whose browser answers nothing (ready on `session info` alone — the incident), leaves the answering daemon under its stopped record unowned and keeps the silent one\'s daemon + Chrome — the legs above can go red', c && { j: c.j, l: c.l, ended: c.ended });
+}
+silent.close();
 
 // ═══ ④ THE SERVE OP + THE CAPABILITY GATE ═══
 console.log('— ④ browser-serve end-daemon + the capability gate');

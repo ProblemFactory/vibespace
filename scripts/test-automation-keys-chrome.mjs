@@ -17,6 +17,8 @@
 //      until then): a folder picked in the hub's file tree (type a path, open a subfolder, ↑, 加入这个文件夹), the CLI's own
 //      login, 跳过确认 beside CLI 自己的设置 ⇒ the row's limits line and the hub's record; 边界… edits them (another folder, 终端);
 //      a key minted before limits reads as folderless 「未设边界」 (refuses every open) and its first 边界… sets them; the CLI's open outside ⇒ refused naming the
+//      — q-049 M2 (lane automation-open-permission-resolve): the picker's `default` row says 「CLI 自己的设置（现在是 X）」 — 铸造… resolved for the
+//      hub's own folder (内置默认), 边界… for the key's first folder (its project settings say acceptEdits ⇒ 自动接受编辑, the file as its title)
 //      limits; 审计… lists that refused open with its code
 // Run: node scripts/test-automation-keys-chrome.mjs   (AK_SHOTS=<dir> keeps the 1280×800 screenshots; SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
@@ -142,7 +144,7 @@ try {
   console.log('③ the Vault window: 铸造… an automation key');
   check('the window opens on «自动化 key» (a group head with 铸造…)', !!(await openWindow()) && (await textOf('.vw-group[data-purpose="automation"] .vw-group-name')) === '自动化 key' && (await textOf('.vw-ak-mint')) === '铸造…');
   await click('.vw-ak-mint');
-  check('铸造… opens its dialog: a name and the closed table of verbs (开一个对话 says it bills)', !!(await until(visible('#vault-ak-mint'), 5000)) && /（会开始一个计费回合）/.test(await textOf('#vault-ak-mint')) && (await evalJs(`document.querySelectorAll('#vault-ak-mint .vw-ak-verbs .vw-ak-pick input[type=checkbox]').length`)) === 6 && !(await evalJs(visible('#vault-ak-mint .vw-ak-limwrap')))); // lane automation-verbs: + conversations.status (a read)
+  check('铸造… opens its dialog: a name and the closed table of verbs (开一个对话 says it bills)', !!(await until(visible('#vault-ak-mint'), 5000)) && /（会开始一个计费回合）/.test(await textOf('#vault-ak-mint')) && (await evalJs(`document.querySelectorAll('#vault-ak-mint .vw-ak-verbs .vw-ak-pick input[type=checkbox]').length`)) === 8 && !(await evalJs(visible('#vault-ak-mint .vw-ak-limwrap')))); // lane automation-verbs: + conversations.status (a read); lane feedback-handled-verb: + feedback.handled, feedback.list
   await typeInto('#vault-ak-mint .vw-ak-name', 'Lane dispatch');
   await evalJs(`(() => { const c = document.querySelector('#vault-ak-mint input[value="conversations.rename"]'); c.checked = true; return true; })()`);
   await click('.vw-ak-mint-go');
@@ -231,11 +233,16 @@ try {
   console.log('⑨b THE LIMITS — mint with limits, 边界…, 「未设边界」 (q-049 M1 fail closed), the refused open in 审计…');
   const SUB = path.join(CWD, 'lane-sub');
   fs.mkdirSync(SUB, { recursive: true });
+  // q-049 M2: the conversation folder's own project settings say acceptEdits — what a key's `default` IS there
+  fs.mkdirSync(path.join(CWD, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(CWD, '.claude/settings.json'), JSON.stringify({ permissions: { defaultMode: 'acceptEdits' } }));
   await closeWindows(); await openWindow();
   await click('.vw-ak-mint');
   await until(visible('#vault-ak-mint'), 5000);
   await typeInto('#vault-ak-mint .vw-ak-name', 'Opener');
   await evalJs(`document.querySelector('#vault-ak-mint input[value="conversations.open"]').click()`);
+  const mintDefaultRow = await until(`(() => { const i = document.querySelector('#vault-ak-mint .vw-ak-perms input[value="default"]'); return i ? { words: i.parentNode.textContent, title: i.parentNode.title, now: i.parentNode.dataset.now } : null; })()`, 5000);
+  check('铸造…: the `default` row says what the CLI\'s own setting is NOW for the hub\'s own folder — no settings file there ⇒ 「CLI 自己的设置（现在是 内置默认）」', mintDefaultRow && mintDefaultRow.words === 'CLI 自己的设置（现在是 内置默认）' && mintDefaultRow.now === 'default' && /没有设置文件/.test(mintDefaultRow.title), mintDefaultRow);
   check('ticking 开一个对话 shows the limits (folders · accounts · permission modes · models · modes) — absent before',
     !!(await until(visible('#vault-ak-mint .vw-ak-limwrap'), 3000)) && (await textOf('#vault-ak-mint .vw-ak-limwrap')).includes('它开的对话能用什么') && (await evalJs(`[...document.querySelectorAll('#vault-ak-mint .vw-ak-limits .vw-ak-sec')].map((e) => e.textContent).join('|')`)) === '文件夹|账号|权限模式|模型|模式');
   // the folder picker over the hub's file tree: type a path ⇒ its subfolders; open one; ↑ back; 加入这个文件夹
@@ -268,6 +275,8 @@ try {
   // 边界… — another folder, terminal too
   await click(OPENER + ' .vw-ak-limits-edit');
   check('边界… opens on the key\'s own limits (its folder chip, its checks)', !!(await until(`!!document.querySelector('#vault-ak-limits .vw-ak-root[data-root="${CWD}"]') && document.querySelector('#vault-ak-limits .vw-ak-perms input[value="bypassPermissions"]').checked`, 5000)));
+  const editDefaultRow = await until(`(() => { const i = document.querySelector('#vault-ak-limits .vw-ak-perms input[value="default"]'); return i ? { words: i.parentNode.textContent, title: i.parentNode.title, now: i.parentNode.dataset.now } : null; })()`, 5000);
+  check('边界…: the `default` row is resolved for the key\'s FIRST folder — its project settings say acceptEdits ⇒ 「CLI 自己的设置（现在是 自动接受编辑）」, the file as its title', editDefaultRow && editDefaultRow.words === 'CLI 自己的设置（现在是 自动接受编辑）' && editDefaultRow.now === 'acceptEdits' && editDefaultRow.title === `设在 ${CWD}/.claude/settings.json`, editDefaultRow);
   await clickWait(`#vault-ak-limits .vw-ak-root[data-root="${CWD}"] .vw-ak-x`); await until(`!document.querySelector('#vault-ak-limits .vw-ak-root[data-root="${CWD}"]')`);
   await evalJs(`(() => { const i = document.querySelector('#vault-ak-limits .vw-ak-path'); i.value = ${JSON.stringify(SUB)}; return true; })()`);
   await clickWait('#vault-ak-limits .vw-ak-add-root'); await until(`!!document.querySelector('#vault-ak-limits .vw-ak-root[data-root="${SUB}"]')`);

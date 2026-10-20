@@ -20,7 +20,7 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth, engine,
   serverSetting, recordUsageAttribution, liveAccountIdSet, broadcastActiveSessions = () => { }, broadcastAll = () => { },
   buildClaudeSubscriptionLoginCommand, getAccounts, getHosts, getMounts, getModels = () => ({}), refreshModels = () => { }, getIntegrations = () => null,
-  getTelemetry, getUsageHistory, getLoginExpiryWatch }) {
+  getTelemetry, getUsageHistory, getLoginExpiryWatch, getCliCmds = () => null }) {
   const { clearSealedOrders } = engine;
   // r4: a conversation whose cold restart is already in flight is never handed to
   // a client again (a second request resumes it twice) — the engine's ONE rule
@@ -916,9 +916,23 @@ app.post('/api/accounts/home-subscription/:id/login', (req, res) => {
 app.post('/api/accounts/home-subscription/:id/finalize', (req, res) => {
   try {
     // no login-expiry sweep / pool wake here: the login declares no deadline (creds.loginState absent) and there
-    // is no pool yet — the quota commit wakes its own reader
+    // is no pool — the usage reading below is its own press
     res.json({ success: true, ...accounts.finalizeHomeSubscription(req.params.id) });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// THE ON-DEMAND USAGE READING of a named account whose harness declares one (quota.onDemand — antigravity's
+// `agy -p /usage`; lane antigravity-card-fixes): Manage agents' ⋯ Re-check, a PERSON'S press only (an agent bearer is
+// refused), once a minute per account, in the account's own HOME root — never a timer (src/server/cli-usage-door.js)
+const usageDoor = require('./cli-usage-door.js').createCliUsageDoor({
+  accounts, harnessOf: (id) => { try { return require('../harnesses').get(id); } catch { return null; } },
+  cliCmds: { check: (...a) => (getCliCmds() ? getCliCmds().check(...a) : Promise.resolve(null)) },
+  cacheDir: path.join(rootDir, 'data', 'usage-cache'), agentEnv: () => require('../ws-handler').agentEnv(),
+  setting: (k) => serverSetting(k),
+});
+app.post('/api/accounts/home-subscription/:id/usage', async (req, res) => {
+  let r;
+  try { r = await usageDoor.read(req.params.id, { person: !isAgentBearer(req) }); } catch (e) { r = { ok: false, status: 500, error: e.message }; }
+  res.status(r.status || (r.ok ? 200 : 500)).json(r);
 });
 
 }

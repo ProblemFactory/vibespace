@@ -38,6 +38,7 @@ const WORDS = Object.freeze({
   permission_not_allowed: 'that permission mode is not one of this key\'s', model_not_allowed: 'that model is not one of this key\'s',
   mode_not_allowed: 'that mode is not one of this key\'s',
   ask_unknown: 'that question is gone', ask_settled: 'already answered',
+  write_failed: 'the change could not be written on the server — nothing changed; try again in a minute',   // lane feedback-handled-verb
   session_only: 'only a conversation uses automation keys (a job does not, yet)',
   human_only: 'only a person mints, grants, revokes or answers — an agent never writes a grant',
   cross_site: 'these doors answer this instance\'s own page only',
@@ -51,9 +52,10 @@ const STATUS = Object.freeze({ ...A.CODES, vault_not_set_up: 409, ask_unknown: 4
  * @param {(token: string) => object|null} o.callerOf  a vsst_ → its conversation ({conversationId, sessionKey, name, live, groups})
  * @param {() => {sessions: object[], groups: object[]}} [o.subjects]  the grant picker's choices (live conversations + Task Groups)
  * @param {() => {accounts: object[], permissionModes: object[], models: object[]}} [o.limitChoices]  the limit pickers' choices
+ * @param {(cwd: string|null) => Promise<object|null>} [o.permissionNow]  q-049 M2: the CLI's own permission mode resolved for a folder (null = the hub's own folder)
  * @param {(req) => string|null} [o.who]  the sign-in handle (the `by` of a person's act)
  */
-function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ sessions: [], groups: [] }), limitChoices = () => ({ accounts: [], permissionModes: [], models: [] }), who = () => null }) {
+function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ sessions: [], groups: [] }), limitChoices = () => ({ accounts: [], permissionModes: [], models: [] }), permissionNow = null, who = () => null }) {
   const answer = (res, r) => {
     if (r && r.ok) return res.json(r);
     const code = (r && r.code) || 'failed';
@@ -69,7 +71,15 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
   const body = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
 
   // ── people ──
-  app.get('/api/automation/keys', person(() => ({ ...engine.list(), verbs: A.SCOPES.map((s) => ({ verb: s.verb, label: s.label, billed: s.billed })), subjects: subjects(), limitChoices: limitChoices() })));
+  // lane automation-open-permission-resolve (q-049 M2): what a key's `default` IS right now — the CLI's own permission mode
+  // resolved for the key's first folder (the hub's own folder for the mint dialog), so the picker's row can say
+  // 「CLI 自己的设置（现在是 X）」; null when the hub cannot say (no resolver, another harness) — the row then says no more than before
+  const nowOf = async (cwd) => { if (typeof permissionNow !== 'function') return null; try { const r = await permissionNow(cwd || null); return r && r.ok ? { mode: String(r.mode || 'default'), layer: r.layer ? { short: r.layer.short, file: r.layer.file } : null, disabledBy: r.disabledBy ? { short: r.disabledBy.short, file: r.disabledBy.file } : null, cwd: r.cwd || cwd || null } : null; } catch { return null; } };
+  app.get('/api/automation/keys', person(async () => {
+    const l = engine.list();
+    for (const k of l.keys) if (k.scopes.includes('conversations.open')) k.permissionNow = await nowOf(k.limits && Array.isArray(k.limits.cwdRoots) ? k.limits.cwdRoots[0] : null);
+    return { ...l, verbs: A.SCOPES.map((s) => ({ verb: s.verb, label: s.label, billed: s.billed })), subjects: subjects(), limitChoices: { ...limitChoices(), permissionNow: await nowOf(null) } };
+  }));
   app.post('/api/automation/keys', person((req) => engine.mint({ name: body(req).name, scopes: body(req).scopes, limits: body(req).limits, by: byOf(req) })));
   app.post('/api/automation/keys/:id/limits', person((req) => engine.setLimits(String(req.params.id), body(req).limits, { by: byOf(req) })));
   app.get('/api/automation/keys/:id/audit', person((req) => engine.auditOfKey(String(req.params.id), { limit: req.query && req.query.limit })));

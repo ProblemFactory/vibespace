@@ -249,7 +249,7 @@ The user gives you two DIFFERENT things, in this order:
   someone else is woken too, coordinate instead of both answering. A digest
   for a whole account or rule lists several conversations in ONE block.
 - A row marked `requestable` is one you may ASK for: `vibespace-channels
-  request <conv> "why"` files ONE item in the user's For you tray (bottom right) with your
+  request <conv> "why"` files ONE item in the user's For you tray with your
   reason; approval grants YOU visibility on that ONE conversation and
   touches no group default.
 - **Not visible is the user's to change.** A conversation outside the reach the
@@ -298,7 +298,14 @@ The user gives you two DIFFERENT things, in this order:
     `--in-thread-with-me` · `--reply-to-sent` (a quote of a message YOU sent,
     a reply in its thread, or a reply in its mail thread — the vendor's own
     reply marker, never "any message after yours"; refused as
-    `not-on-this-version` where the server lacks it).
+    `not-on-this-version` where the server lacks it). `--reply-to-sent --infer`
+    (opt-in) ALSO has a PLAIN message after your send (no quote, no thread)
+    judged ONCE by the LLM plugin — is it an answer to your newest message
+    before it? — only inside the user's reply-judging window after your send
+    (Settings › Channels) and only where the plugin and its `rules` switch are
+    on (paid from THEIR daily budget). A yes notifies you like a quote does,
+    its `why` = `judged an answer to your message of <time>` and the score; a
+    no is remembered and never asked again.
   - judged by the LLM plugin (only where the user turned the plugin and its
     `rules` switch on; each judgment is paid from THEIR daily budget):
     `--kind decision --condition "words" [--choice a,b,c] [--threshold 0.7]

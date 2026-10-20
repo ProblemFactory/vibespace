@@ -25,9 +25,21 @@
 //       STUN / DTLS / RTP first byte); the hub's half over a stand-in daemon socket — a forged PING and a replayed counter
 //       dropped and counted, an authenticated one answered (PONG) and its address learned, the browser's datagrams go to it as
 //       DATA once it says UP, its DATA reach only a browser that wrote first, a stray address is dropped, device-link frames
-//       turn the hub back to the link, a muted hub never answers; the daemon's half on an injected clock — UP at the first
-//       PONG, a PING every 15 s idle / 2 s while it carries the picture, DOWN 2 s after an unanswered PING, back UP on a PONG;
+//       reach the browser and never turn the hub from its leg (lane stream-leg-flap), a muted hub never answers; the daemon's
+//       half on an injected clock — UP at the first PONG, a PING every 15 s idle / 2 s while it carries the picture, a PING
+//       unanswered 2 s = a miss (re-asked at once, a late PONG still counts), DOWN at three in a row, back UP on a PONG;
 //       the firewall line (only a plain .exe path, no shell character), the direct-inbound verdict, the self-probe on this box
+//   §14b THE PATH ELECTION (lane stream-leg-flap — the owner's Mac desktop went black 2026-10-20, the hub's journal: «relay via
+//       the device link (the daemon spoke on the device link)» ⇄ «… udp leg (leg up)» three times in 20 s, both displays): a
+//       FLAPPING fake daemon over real loopback UDP + a stand-in device link, the hub on an injected clock — the leg carries the
+//       picture while the device link speaks too and the daemon says it heard no answer ⇒ ONE election, every browser datagram
+//       on the leg; the leg dies ⇒ the device link after legDeadMs (6 s), one change; it returns ⇒ taken once; every datagram
+//       of the daemon reaches the browser either way — RED CONTROL: the .330 rule (the path the daemon LAST spoke on) through
+//       the same hub flips ≥ 3 times in the same 20 s; legElect's own table (PURE)
+//   §14c THE DAEMON'S HYSTERESIS (lane stream-leg-flap): a lossy leg (every third PONG lost, a socket error) stays UP for a
+//       minute while it carries the picture — RED CONTROL: one miss = DOWN (the .330 daemon: missMax 1) goes DOWN ≥ 3 times
+//   §14d THE STALL (lane stream-leg-flap): stallStep — a playing picture that decodes nothing for stallMs while the machine
+//       sends ⇒ stalled; a still screen (the machine sends nothing), a hidden page, a picture still decoding ⇒ never
 import fs from 'node:fs';
 import path from 'node:path';
 import dgram from 'node:dgram';
@@ -370,13 +382,14 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   la.fwd[0].onData(Buffer.from(SM.relayFrame('127.0.0.1', br.address().port, new Uint8Array([5]))));
   await waitFor(() => toBr.length === 2);
   br.send(Buffer.from([0x00, 0x01, 0x00, 0x02]), spec.port, '127.0.0.1');
-  await waitFor(() => la.fwd[0].written.length);
+  await waitFor(() => fromHub.length === 4);
   const r3 = await rf();
-  ok(r3.via === 'link' && la.fwd[0].written.length === 1 && fromHub.length === 3 && r3.leg.changes.map((c) => c.via).join(',') === 'udp,link', 'the daemon spoke on the device link ⇒ the hub answers on the device link (the path it last spoke on); both changes on the record', r3);
+  const asLeg = fromHub[3] ? SM.legParse(new Uint8Array(fromHub[3].m)) : null;
+  ok(r3.via === 'udp' && toBr.length === 2 && la.fwd[0].written.length === 0 && asLeg && asLeg.type === 'data' && same([...asLeg.payload], [0, 1, 0, 2]) && r3.leg.held === 1 && r3.leg.changes.map((c) => c.via).join(',') === 'udp', 'the daemon spoke on the device link ⇒ its frame reaches the browser, and the hub STILL answers on the leg (lane stream-leg-flap: a second path speaking is never a reason to leave the first) — counted (held 1), no change on the record', r3);
   muted = true;
   dmn.send(Buffer.from(SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP, counter: 3, nonce, mac: lmac })), spec.port, '127.0.0.1');
   await sleep(60);
-  ok(fromHub.length === 3 && (await rf()).via === 'link', 'a muted hub (the suites\' unreachable hub) leaves an authenticated PING unanswered');
+  ok(fromHub.length === 4 && (await rf()).via === 'udp', 'a muted hub (the suites\' unreachable hub) leaves an authenticated PING unanswered (the election unchanged)');
   muted = false;
   await wrL.stop(sL.key); wrL.shutdown(); dmn.close(); br.close(); stray.close();
   const wrN = DW.create({ access: ACC.create({ hosts: { get: (h) => ({ id: h, name: 'PC' }), isLocal: () => false, deviceBounded: async () => la, connectedDevice: () => la }, install: false, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: FIXTURE }), log: { log() { }, warn() { } } }), log: { log() { }, warn() { } }, ips: () => ['127.0.0.1'], udpLeg: false });
@@ -410,17 +423,29 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   ok(g.send('192.168.1.5', 50000, new Uint8Array([1])) === true && SM.legParse(sent[sent.length - 1].b).type === 'data', 'up: werift\'s datagram leaves as leg DATA to the hub');
   const n1 = sent.length;
   clock += 2100; g.tick();
-  ok(sent.length === n1 + 1 && SM.legParse(sent[sent.length - 1].b, hmac).type === 'ping', 'while it carries the picture: a PING every 2 s (a dead leg is found within 2 s + 2 s)');
+  ok(sent.length === n1 + 1 && SM.legParse(sent[sent.length - 1].b, hmac).type === 'ping', 'while it carries the picture: a PING every 2 s');
+  const p1 = sent[sent.length - 1];
   clock += 1000; g.tick();
-  const stillUp = g.state === 'up';
+  const quietWait = g.state === 'up' && sent.length === n1 + 1;
   clock += 1100; g.tick();
-  ok(stillUp && g.state === 'down' && g.why === 'no_echo' && same(changes, ['up', 'down']) && g.send('1.2.3.4', 1, new Uint8Array([1])) === false, 'that PING unanswered for 2 s: DOWN (no_echo) — send() refuses, the device link carries the datagrams', g.facts());
+  const p2 = sent[sent.length - 1];
+  ok(quietWait && g.state === 'up' && g.facts().misses === 1 && sent.length === n1 + 2 && SM.legParse(p2.b, hmac).flags === SM.LEG.UP && g.send('1.2.3.4', 1, new Uint8Array([1])) === true, 'that PING unanswered for 2 s: a MISS, not a verdict (lane stream-leg-flap) — the leg stays UP and carries the picture, the next PING (flagged UP) goes at once', g.facts());
+  clock += 500; answer(p1.b);
+  ok(g.state === 'up' && g.facts().misses === 0 && g.facts().missed === 1 && same(changes, ['up']), 'its PONG arriving 2.6 s late still counts: the run of misses ends (missed 1 on the record)', g.facts());
+  const nm = sent.length;
+  clock += 1600; g.tick(); // the PING asked at the miss, now 2.1 s old: miss 1 → the next at once
+  clock += 2100; g.tick(); // miss 2
+  const twoMisses = g.state === 'up' && g.facts().misses === 2 && sent.length === nm + 2;
+  clock += 2100; g.tick(); // miss 3
+  ok(twoMisses && g.state === 'down' && g.why === 'no_echo' && same(changes, ['up', 'down']) && g.send('1.2.3.4', 1, new Uint8Array([1])) === false, 'THREE PINGs in a row unanswered (legMissMax, 2 s each): DOWN (no_echo) — send() refuses, the device link carries the datagrams', g.facts());
   const n2 = sent.length;
   clock += 2000; g.tick(); // 4.1 s after the unanswered PING
   const waitReprobe = sent.length === n2;
   clock += 1000; g.tick(); // 5.1 s
   answer(sent[sent.length - 1].b);
   ok(waitReprobe && sent.length >= n2 + 1 && g.state === 'up' && same(changes, ['up', 'down', 'up']), 'down: re-asked 5 s after the last PING; a PONG brings the leg back UP (fail-back without a new session)');
+  handlers.error(Object.assign(new Error('send ENOBUFS'), { code: 'ENOBUFS' }));
+  ok(g.state === 'up' && g.facts().sendErrors === 1 && same(changes, ['up', 'down', 'up']), 'a socket error (a Mac\'s ENOBUFS under a burst) drops one datagram — counted, never a verdict: the leg stays UP', g.facts());
   g.close();
   // a fresh leg that never hears a PONG: DOWN 2 s after its first PING (the device link from the start)
   let c2 = 5e6; const s2 = [];
@@ -439,6 +464,148 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   const mine = Object.values(os.networkInterfaces()).flat().filter((a) => a && (a.family === 'IPv4' || a.family === 4) && !a.internal).map((a) => a.address);
   const pr = await SH.selfProbe([...mine, '127.0.0.1']);
   ok(mine.length ? pr.verdict === 'open' && pr.addrs === mine.length && pr.reached === mine.length : pr.verdict === 'none', `the self-probe on this box (no firewall in the way): ${pr.verdict} — ${pr.reached} of ${pr.addrs} host addresses reached in ${pr.ms} ms (loopback never counts)`, pr);
+}
+
+console.log('§14b THE PATH ELECTION (lane stream-leg-flap — the owner\'s Mac desktop went black 2026-10-20: the hub flipped leg ⇄ link 3× in 20 s)');
+{
+  const crypto = require('node:crypto');
+  const macOf = (key) => (b) => crypto.createHmac('sha256', key).update(b).digest().subarray(0, 16);
+  // THE .330 RULE (the RED control): the hub forwards on the path the daemon LAST spoke on — a device-link frame or a PING
+  // without UP leaves the leg, a PING flagged UP or leg DATA takes it back (src/server/desktop-webrtc.js at 2.369.330)
+  const lastSpoke = (el, ev) => {
+    const via = el && el.via === 'udp' ? 'udp' : 'link', keep = { via, aliveAt: (el && el.aliveAt) || 0, dataAt: (el && el.dataAt) || 0, changed: false, why: null };
+    if (ev.type === 'up' || ev.type === 'data') return { ...keep, via: 'udp', aliveAt: ev.at, changed: via !== 'udp', why: ev.type === 'data' ? 'leg data' : 'leg up' };
+    if (via === 'udp' && ev.type === 'link') return { ...keep, via: 'link', changed: true, why: 'the daemon spoke on the device link' };
+    if (via === 'udp' && ev.type === 'quiet') return { ...keep, via: 'link', changed: true, why: 'the daemon hears no answer on its leg' };
+    if (via === 'udp' && ev.type === 'judge' && ev.at - keep.aliveAt >= 35000) return { ...keep, via: 'link', changed: true, why: 'stale' };
+    return keep;
+  };
+  const flapAgent = () => {
+    const calls = []; const fwd = [];
+    return { calls, fwd, _conn: null, status: () => ({ connected: true, info: { platform: 'darwin', capabilities: ['display-facts', 'stream-offer', 'input-events'] } }), desktopServe: async () => ({}),
+      streamOffer: async (p) => { calls.push(['offer', p]); return { ok: true, sid: 'sid-F', offer: { type: 'offer', sdp: 'v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n' }, source: { kind: 'fake', origin: { x: 0, y: 0 } }, relayPort: 4244, codec: { mimeType: 'video/H264' } }; },
+      streamAnswer: async () => ({ ok: true }), streamStop: async () => ({ stopped: true }),
+      tcpForward: async (port) => { const h = { port, written: [], write(b) { h.written.push(Buffer.from(b)); return true; }, close() { h.closed = true; } }; fwd.push(h); return h; } };
+  };
+  const waitFor = async (f) => { for (let i = 0; i < 300 && !f(); i++) await sleep(2); return f(); };
+  /** THE FLAPPING FAKE DAEMON (the journal's Mac, 2 × 4K over a lossy leg): real loopback UDP for the leg and the browser, a
+   *  stand-in device link, the hub on an injected clock in 250 ms steps. `plan(i)` = { leg: send leg DATA, link: send a
+   *  device-link frame, ping: 'up' | 'quiet' | null }. → per step: the path that carried the browser's datagram to the daemon;
+   *  the hub's «relay via» lines (step, text); what reached the browser. */
+  async function flapRun(steps, plan, opts = {}) {
+    let clock = 7e6, step = -1;
+    const lines = [];
+    const fa = flapAgent();
+    const wr = DW.create({ access: ACC.create({ hosts: { get: (h) => ({ id: h, name: 'Mac' }), isLocal: () => false, deviceBounded: async () => fa, connectedDevice: () => fa }, install: false, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: FIXTURE }), log: { log() { }, warn() { } } }),
+      log: { log: (m) => { if (/ relay via /.test(m)) lines.push([step, m]); }, warn() { } }, ips: () => ['127.0.0.1'], pollMaxMs: 120000, idleMs: 1e12, now: () => clock, ...opts });
+    const s = await wr.start('mac-f');
+    const spec = fa.calls[0][1].relayLeg, lmac = macOf(Buffer.from(spec.key, 'base64'));
+    const dmn = dgram.createSocket('udp4'); await new Promise((r) => dmn.bind(0, '127.0.0.1', r));
+    const br = dgram.createSocket('udp4'); await new Promise((r) => br.bind(0, '127.0.0.1', r));
+    const path = []; let pongs = 0; const toBr = { leg: 0, link: 0 }; let linkSeen = 0;
+    dmn.on('message', (m) => { const p = SM.legParse(new Uint8Array(m), lmac); if (p && p.type === 'pong') pongs++; else if (p && p.type === 'data' && p.payload[0] === 0xee) path[(p.payload[1] << 8) | p.payload[2]] = 'leg'; });
+    br.on('message', (m) => { if (m[0] === 0xdd) toBr.leg++; else if (m[0] === 0xdc) toBr.link++; });
+    const linkLanded = () => { const h = fa.fwd[0]; if (!h) return; for (; linkSeen < h.written.length; linkSeen++) { const u = SM.relayUnframe(new Uint8Array(h.written[linkSeen])); for (const f of u.frames) if (f.payload[0] === 0xee) path[(f.payload[1] << 8) | f.payload[2]] = 'link'; } };
+    let counter = 0, sentLeg = 0, sentLink = 0;
+    for (let i = 0; i < steps; i++) {
+      step = i; clock += 250;
+      const p = plan(i);
+      br.send(Buffer.from([0xee, i >> 8, i & 255]), spec.port, '127.0.0.1'); // the browser's datagram (RTCP / STUN / input) first
+      await waitFor(() => { linkLanded(); return path[i] !== undefined; });
+      if (p.ping) { const want = pongs + 1; dmn.send(Buffer.from(SM.legControl(SM.LEG.PING, { flags: p.ping === 'up' ? SM.LEG.UP : 0, counter: ++counter, nonce: crypto.randomBytes(8), mac: lmac })), spec.port, '127.0.0.1'); await waitFor(() => pongs >= want); }
+      if (p.leg) { sentLeg++; dmn.send(Buffer.from(SM.legData('127.0.0.1', br.address().port, new Uint8Array([0xdd, i >> 8, i & 255]))), spec.port, '127.0.0.1'); }
+      if (p.link) { sentLink++; fa.fwd[0].onData(Buffer.from(SM.relayFrame('127.0.0.1', br.address().port, new Uint8Array([0xdc, i >> 8, i & 255])))); }
+      await waitFor(() => toBr.leg === sentLeg && toBr.link === sentLink);
+    }
+    const facts = (await wr.poll(s.key, 0, -1, 0)).relay;
+    await wr.stop(s.key); wr.shutdown(); dmn.close(); br.close();
+    return { path, lines, toBr, sentLeg, sentLink, facts };
+  }
+  // the plan: 0 — the leg comes up (a PING, then one flagged UP); 1–79 (20 s) THE FLAP — the leg carries the picture (DATA every
+  // step, a PING flagged UP every 2 s) and three times the daemon drops to its device link for 2.5 s (link frames; the first
+  // step BOTH paths), then a PING not flagged UP and one flagged UP — the .330 daemon's one-lost-PONG round trip; 80–119 THE LEG
+  // DIES (only the device link speaks); 120–159 THE LEG RETURNS (a PING flagged UP, DATA, PINGs every 2 s) while stale device-
+  // link frames still arrive every third step
+  const DOWN = [[16, 26], [40, 50], [64, 74]];
+  const plan = (i) => {
+    if (i === 0) return { leg: false, link: false, ping: 'quiet' };
+    if (i < 80) {
+      const w = DOWN.find(([a, b]) => i >= a && i < b);
+      if (w) return { leg: i === w[0], link: true, ping: null };
+      if (DOWN.some(([, b]) => i === b)) return { leg: false, link: false, ping: 'quiet' };
+      return { leg: true, link: false, ping: i === 1 || DOWN.some(([, b]) => i === b + 1) || i % 8 === 0 ? 'up' : null };
+    }
+    if (i < 120) return { leg: false, link: true, ping: null };
+    return { leg: true, link: i % 3 === 0, ping: i === 120 || i % 8 === 0 ? 'up' : null };
+  };
+  const A = await flapRun(160, plan);
+  const B = await flapRun(80, plan, { elect: lastSpoke });
+  const via = (r, a, b) => r.path.slice(a, b + 1);
+  const count = (xs, v) => xs.filter((x) => x === v).length;
+  const flapLines = (r) => r.lines.filter(([i]) => i >= 2 && i < 80);
+  ok(B.lines.length >= 1 && flapLines(B).length >= 3 && count(via(B, 2, 79), 'link') >= 10, `RED CONTROL — the .330 rule (the path the daemon LAST spoke on) through the same hub: ${flapLines(B).length} «relay via» flips in 20 s after the election (≥ 3), ${count(via(B, 2, 79), 'link')} of the browser's 78 datagrams went over the device link`, B.lines.map(([i, m]) => `${i}: ${m.replace(/^.*relay via /, '')}`));
+  ok(A.lines.length >= 1 && A.lines[0][0] === 1 && /udp leg 127\.0\.0\.1:\d+ \(leg up\)$/.test(A.lines[0][1]) && flapLines(A).length === 0 && count(via(A, 2, 79), 'leg') === 78, `THE FLAP ⇒ ONE election: the leg taken at its first PING flagged UP, then ${flapLines(A).length} flips in 20 s while the device link spoke three times and the daemon three times said it heard no answer — all 78 of the browser's datagrams rode the leg`, A.lines.map(([i, m]) => `${i}: ${m.replace(/^.*relay via /, '')}`));
+  const died = A.lines.filter(([i]) => i >= 80 && i < 120), dieAt = 79 + SM.STREAM_LIMITS.legDeadMs / 250;
+  ok(died.length === 1 && died[0][0] === dieAt && / the device link \(the leg was silent 6 s\)$/.test(died[0][1]) && count(via(A, 80, dieAt - 1), 'leg') === dieAt - 80 && count(via(A, dieAt, 119), 'link') === 120 - dieAt, `THE LEG DIES ⇒ the device link after the silence bound (legDeadMs ${SM.STREAM_LIMITS.legDeadMs} ms = 3 × the 2 s PING of a leg carrying the picture): the browser's datagrams rode the leg ${dieAt - 80} more steps, then the link — one change`, died);
+  const back = A.lines.filter(([i]) => i >= 120);
+  ok(back.length === 1 && back[0][0] === 120 && /\(leg up\)$/.test(back[0][1]) && count(via(A, 121, 159), 'leg') === 39 && A.lines.length === 3, 'THE LEG RETURNS ⇒ taken ONCE at its PING flagged UP; the stale device-link frames every third step change nothing — 3 changes in 40 s on the whole record', A.lines.map(([i, m]) => `${i}: ${m.replace(/^.*relay via /, '')}`));
+  ok(A.toBr.leg === A.sentLeg && A.toBr.link === A.sentLink && A.sentLink > 50, `frames keep flowing: every datagram the daemon sent reached the browser — ${A.toBr.leg} over the leg, ${A.toBr.link} over the device link — whichever way the hub answers`, { toBr: A.toBr, sentLeg: A.sentLeg, sentLink: A.sentLink });
+  ok(A.facts && A.facts.via === 'udp' && A.facts.leg.held >= 20 && A.facts.leg.quiet === 4, `the record: via udp; the device link spoke ${A.facts && A.facts.leg.held} times while the leg stayed elected (held), 4 PINGs not flagged UP (quiet) — counted, never obeyed`, A.facts && A.facts.leg);
+}
+
+console.log('§14c THE DAEMON\'S HYSTERESIS (lane stream-leg-flap — a lossy leg is not a dead one)');
+{
+  const crypto = require('node:crypto');
+  const SH = require(path.join(REPO, 'src/agentd/stream-host.js'));
+  const macOf = (key) => (b) => crypto.createHmac('sha256', key).update(b).digest().subarray(0, 16);
+  const HP = await deadPort();
+  /** A minute of the picture on the leg (a datagram every 250 ms), every third PONG lost, one socket error at 25 s. */
+  function lossyMinute(missMax) {
+    let clock = 3e6; const sent = [], handlers = {}, changes = [];
+    const sock = { on: (ev, f) => { handlers[ev] = f; }, send: (b, port, ip) => sent.push({ b: new Uint8Array(b), port, ip }), close() { }, address: () => ({ port: 1 }) };
+    const key = crypto.randomBytes(32), hmac = macOf(key);
+    const g = SH.createLeg({ port: HP, key: key.toString('base64'), hosts: ['10.0.0.9'] }, { socket: sock, timer: false, now: () => clock, onChange: (x) => changes.push(x.state), ...(missMax ? { missMax } : {}) });
+    const answer = (pkt) => { const q = SM.legParse(pkt, hmac); handlers.message(Buffer.from(SM.legControl(SM.LEG.PONG, { counter: q.counter, nonce: q.nonce, mac: hmac })), { address: '10.0.0.9', port: HP }); };
+    answer(sent[0].b);
+    let pings = 0, onLeg = 0, offLeg = 0, seen = 1;
+    for (let i = 0; i < 240; i++) {
+      clock += 250;
+      if (g.send('192.168.1.5', 50000, new Uint8Array([1]))) onLeg++; else offLeg++;
+      if (i === 100) handlers.error(Object.assign(new Error('send ENOBUFS'), { code: 'ENOBUFS' }));
+      g.tick();
+      for (; seen < sent.length; seen++) { const p = SM.legParse(sent[seen].b, hmac); if (p && p.type === 'ping' && ++pings % 3 !== 0) answer(sent[seen].b); }
+    }
+    g.close();
+    return { downs: changes.filter((c) => c === 'down').length, onLeg, offLeg, pings, facts: g.facts() };
+  }
+  const M = lossyMinute(1), S = lossyMinute(0);
+  ok(M.downs >= 3 && M.offLeg > 0, `RED CONTROL — one miss = DOWN (the .330 daemon: missMax 1): ${M.downs} DOWNs in a minute of every third PONG lost, ${M.offLeg} of 240 datagrams went over the device link`, M.facts);
+  ok(S.downs === 0 && S.offLeg === 0 && S.onLeg === 240 && S.facts.missed >= 10 && S.facts.misses <= 1 && S.facts.sendErrors === 1 && S.facts.state === 'up' && SM.STREAM_LIMITS.legMissMax === 3, `THE SAME LOSSY MINUTE (${S.facts.missed} of ${S.pings} PONGs lost, a socket error): the leg stays UP and carries all 240 datagrams — a miss is re-asked at once, three in a row never came`, S.facts);
+}
+
+console.log('§14d legElect (PURE) · THE STALL (lane stream-leg-flap): stallStep');
+{
+  const E = SM.legElect, D = SM.STREAM_LIMITS.legDeadMs, I = SM.STREAM_LIMITS.legStaleMs;
+  const up = E({ via: 'link' }, { type: 'up', at: 1000 }), dat = E({ via: 'link' }, { type: 'data', at: 1000 });
+  ok(up.via === 'udp' && up.changed && up.why === 'leg up' && dat.via === 'udp' && dat.why === 'leg data' && !E(up, { type: 'up', at: 1500 }).changed, 'the device link ⇒ the leg at its first sign of life (a PING flagged UP: «leg up», its DATA: «leg data»), ONCE — the next sign changes nothing');
+  const carrying = E(E({ via: 'link' }, { type: 'data', at: 1000 }), { type: 'up', at: 3000 });
+  const held = ['link', 'quiet'].map((t) => E(carrying, { type: t, at: 3100 }));
+  ok(held.every((x) => x.via === 'udp' && !x.changed && x.aliveAt === 3000), 'the leg elected: the device link speaking and a PING not flagged UP leave it where it is (no sign of life either — the clock keeps 3000)');
+  const j1 = E(carrying, { type: 'judge', at: 3000 + D - 1 }), j2 = E(carrying, { type: 'judge', at: 3000 + D });
+  ok(D === 6000 && D === SM.STREAM_LIMITS.legMissMax * SM.STREAM_LIMITS.legLiveMs && !j1.changed && j2.via === 'link' && j2.changed && j2.why === 'the leg was silent 6 s', `a leg that carried the picture: dead after legDeadMs (${D} ms = legMissMax × legLiveMs: three of its PING periods) of silence — not a millisecond before`);
+  const idle = E({ via: 'link' }, { type: 'up', at: 1000 });
+  ok(!E(idle, { type: 'judge', at: 1000 + D }).changed && E(idle, { type: 'judge', at: 1000 + I }).via === 'link' && I > 2 * SM.STREAM_LIMITS.legKeepaliveMs, `an idle leg (PINGs every ${SM.STREAM_LIMITS.legKeepaliveMs / 1000} s, no DATA): never judged on the carrying bound — dead after legStaleMs (${I / 1000} s, two keepalives + 5 s)`);
+  ok(['link', 'quiet', 'judge'].every((t) => !E({ via: 'link', aliveAt: 0 }, { type: t, at: 1e9 }).changed), 'on the device link: nothing but a sign of life on the leg changes the election');
+  const T = SM.STREAM_LIMITS.stallMs;
+  const s0 = SM.stallStep(null, { playing: true, pageFrames: 10, agentFrames: 100, now: 0 });
+  const s1 = SM.stallStep(s0.w, { playing: true, pageFrames: 10, agentFrames: 400, now: T - 1 }), s2 = SM.stallStep(s0.w, { playing: true, pageFrames: 10, agentFrames: 460, now: T });
+  ok(T === 12000 && !s1.stalled && s2.stalled && s2.ms === T, `a PLAYING picture that decoded nothing for stallMs (${T} ms) while the machine sent 360 pictures: STALLED — not a millisecond before`);
+  const still = SM.stallStep(s0.w, { playing: true, pageFrames: 10, agentFrames: 100, now: T * 5 }), moved = SM.stallStep(s0.w, { playing: true, pageFrames: 11, agentFrames: 460, now: T - 1 });
+  const after = SM.stallStep(moved.w, { playing: true, pageFrames: 11, agentFrames: 470, now: T + 50 });
+  ok(!still.stalled && !moved.stalled && moved.w.at === T - 1 && !after.stalled, 'a still screen (the machine sent nothing either) never stalls; a decoded frame re-arms the watch (12 s from it)');
+  const hid = SM.stallStep(s0.w, { playing: true, visible: false, pageFrames: 10, agentFrames: 460, now: T * 2 }), off = SM.stallStep(s0.w, { playing: false, pageFrames: 10, agentFrames: 460, now: T * 2 });
+  const noAgent = SM.stallStep(SM.stallStep(null, { playing: true, pageFrames: 10, agentFrames: null, now: 0 }).w, { playing: true, pageFrames: 10, agentFrames: null, now: T * 2 });
+  ok(!hid.stalled && hid.w.at === T * 2 && !off.stalled && off.w === null && !noAgent.stalled, 'a hidden page re-arms (a background tab is not judged); not playing = no watch; no machine numbers yet = never stalled');
 }
 
 console.log('§4b NEVER SILENT (lane stream-fallback-never-silent — incident inc-mvf7z2a3-9sxi): endingVerdict');

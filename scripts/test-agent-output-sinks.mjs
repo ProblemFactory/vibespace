@@ -155,21 +155,66 @@ if (!HAVE_VR) {
 }
 
 // ---------------------------------------------------------------------------
-console.log('§3 the JOB LOG — the real job-wrapper masks a fake child’s output (shapes, chunk-split)');
+console.log('§3 the JOB LOG — the real job-wrapper masks a fake child’s output (shapes, chunk-split), its spec handed the engine’s way');
 {
-  const ctl = scratch('aos-job');
-  fs.mkdirSync(ctl, { recursive: true });
+  // lane mirror-331-reds-security (the .331 mirror's red): job-spec-off-argv (.331) moved the spec off argv into a 0600
+  // FILE of the run's ctl dir — `[wrapper, ctlDir, specPath]` (src/jobs.js). This leg still handed it base64 on argv:
+  // the wrapper REFUSED the run by name and two of the three checks passed on the refusal line. The leg now writes the
+  // spec as the engine does, a run that did not RUN is red, and the engine's own road + a stripped masker are legs.
   // the fake child prints a shape, then the same shape split across two writes (chunk-split residual is documented,
   // but a whole-chunk shape must be caught)
   const childScript = `process.stdout.write('out token=' + ${JSON.stringify(KVMAT)} + '\\n'); process.stdout.write('split tok' + 'en=' + ${JSON.stringify(KVMAT)} + '\\n');`;
-  const spec = { argv: [process.execPath, '-e', childScript], cwd: ctl, env: { PATH: process.env.PATH }, logCapBytes: 1 << 20, stdinOpen: false };
   const wrapper = path.join(REPO, 'data', 'bin', 'job-wrapper.js');
-  const res = spawnSync(process.execPath, [wrapper, ctl, Buffer.from(JSON.stringify(spec)).toString('base64')], { timeout: 15000 });
-  // the wrapper is detached-style but spawnSync waits for it; the child is tiny
-  const log = (() => { try { return fs.readFileSync(path.join(ctl, 'current.log'), 'utf8'); } catch { return ''; } })();
-  ok(log.length > 0, 'the job log was written');
-  ok(!leaks(log, 'token=' + KVMAT), 'a whole-chunk shape in the child output is masked in the job log');
-  ok(leaks(log, '«redacted»'), 'the job log shows «redacted» where the secret was');
+  const readLog = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
+  const runWrapper = (wrapperPath, tag, { onArgv = false } = {}) => {
+    const ctl = scratch('aos-job-' + tag);
+    fs.mkdirSync(ctl, { recursive: true });
+    const spec = { argv: [process.execPath, '-e', childScript], cwd: ctl, env: { PATH: process.env.PATH }, logCapBytes: 1 << 20, stdinOpen: false };
+    let arg = Buffer.from(JSON.stringify(spec)).toString('base64'), specPath = null;
+    if (!onArgv) { // the engine's way: 0600 at open, O_EXCL, a fresh name per start, in the ctl dir
+      specPath = arg = path.join(ctl, `spec.${Date.now()}.json`);
+      const fd = fs.openSync(specPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+      try { fs.writeSync(fd, JSON.stringify(spec)); } finally { fs.closeSync(fd); }
+    }
+    // the wrapper is detached-style but spawnSync waits for it; the child is tiny
+    spawnSync(process.execPath, [wrapperPath, ctl, arg], { timeout: 15000, env: { PATH: process.env.PATH } });
+    return { log: readLog(path.join(ctl, 'current.log')), specLeft: !!specPath && fs.existsSync(specPath) };
+  };
+  // the run RAN: the child's own words are in the log and no refusal line (a refused spec writes ONE named line)
+  const ran = (log) => log.includes('out ') && log.includes('split ') && !log.includes('[job-wrapper] refused');
+  const real = runWrapper(wrapper, 'file');
+  ok(real.log.length > 0, 'the job log was written');
+  ok(ran(real.log) && !real.specLeft, 'the run RAN: the child’s own lines are in the log, no refusal line, the spec file consumed (read once, unlinked)');
+  ok(!leaks(real.log, 'token=' + KVMAT), 'a whole-chunk shape in the child output is masked in the job log');
+  ok(leaks(real.log, '«redacted»'), 'the job log shows «redacted» where the secret was');
+  // CONTROL — the base's call (the spec base64 on argv, the pre-.331 contract): refused BY NAME, and the RAN check is red
+  const old = runWrapper(wrapper, 'argv', { onArgv: true });
+  ok(old.log.includes('[job-wrapper] refused: the spec path names no file of the ctl dir') && !ran(old.log), 'CONTROL: the spec on argv (the base’s call) is refused by name — the RAN check is red on it, so the leg can no longer pass on a refusal');
+  // MUTANT 3 — the wrapper's maskChunk returns the raw chunk (its shape census still required from this tree): the log LEAKS
+  const W0 = fs.readFileSync(wrapper, 'utf8');
+  const REQ = "require(path.join(__dirname, '..', '..', 'src', 'secret-shapes.js'))", RET = "return out === text ? buf : Buffer.from(out, 'utf8');";
+  const mutDir = scratch('aos-job-mut'); fs.mkdirSync(mutDir, { recursive: true });
+  const mutPath = path.join(mutDir, 'job-wrapper.js');
+  fs.writeFileSync(mutPath, W0.replace(REQ, `require(${JSON.stringify(path.join(REPO, 'src', 'secret-shapes.js'))})`).replace(RET, 'return buf;'));
+  const mut = W0.split(REQ).length === 2 && W0.split(RET).length === 2 ? runWrapper(mutPath, 'mut') : { log: '' };
+  ok(ran(mut.log) && leaks(mut.log, 'token=' + KVMAT), 'MUTANT 3: a wrapper whose masker returns the raw chunk LEAKS the shape into the job log (so the masker is what stops it)');
+  // THE ENGINE'S OWN ROAD: a task the real JobManager starts — src/jobs.js writes the spec file and spawns
+  // <dataDir>/bin/job-wrapper.js, here a SYMLINK to this tree's wrapper (production: dataDir is <repo>/data, so the
+  // wrapper's own `../../src` is this tree; a COPY elsewhere loses its masker) — prints the shape; its run's log is masked
+  const { JobManager } = r('src/jobs.js');
+  const dd = scratch('aos-jobs-engine');
+  fs.mkdirSync(path.join(dd, 'bin'), { recursive: true });
+  fs.symlinkSync(wrapper, path.join(dd, 'bin', 'job-wrapper.js'));
+  const E = new JobManager({ dataDir: dd, broadcast: () => {}, notifyUser: () => {}, log: () => {} });
+  E.init();
+  const owner = { conversation: { backend: 'claude', id: 'conv-aos' }, sessionId: 'sess-aos', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
+  const made = E.create({ kind: 'task', name: 'aos-shape', cmd: { argv: [process.execPath, '-e', childScript], cwd: dd }, owner }, { conversationId: 'conv-aos', sessionId: 'sess-aos', sessionCreatedAt: 1, groups: new Set() });
+  const job = made.job && E.jobs.get(made.job.id);
+  const runLog = job && job.runs && job.runs.length ? job.runs[job.runs.length - 1].log : null;
+  let elog = '';
+  for (let i = 0; i < 75 && runLog; i++) { elog = readLog(runLog); if (elog.includes('[job-wrapper] exit')) break; await new Promise((res) => setTimeout(res, 200)); }
+  ok(!made.error && ran(elog) && !leaks(elog, 'token=' + KVMAT) && leaks(elog, '«redacted»'), 'THE ENGINE’S ROAD: a job the real JobManager starts prints the shape — its run’s log ran, is masked and shows «redacted»', made.error || elog.slice(0, 300));
+  try { E.shutdown(); for (const t of E._timers || []) clearInterval(t); } catch { }
 }
 
 // ---------------------------------------------------------------------------

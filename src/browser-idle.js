@@ -18,12 +18,28 @@ const IDLE_PAINT_PROOF = Object.freeze({
   frozenThenFlip: { gpu: 0, frames10s: 0, resumeMs: 23, fpsAfter: 60, undo: 'active + a blank tab opened and closed in front + the page activated' },
   minimized: { gpu: 100.5, frames10s: 600, why: 'no window manager on the Xvfb: the window is never iconified' },
   focusOff: { gpu: 96.6, frames10s: 600 },
+  // lane idle-paint-default-on (2026-10-20): the same acts on the FLEET image, the reason the switch is on by default
+  fleet: Object.freeze({
+    measured: '2026-10-20', image: 'vibespace:3.7.0', chrome: '154.0.8037.92', agentBrowser: '0.38.1', set: 'the shipped hidden-window args',
+    dashboard: { gpu: 99.8, frozenGpu: 0, frozenFrames10s: 0, resumeMs: 31, fpsAfter: 60, page: 'a chart + WebGL + an iframe' },
+    light: { gpu: 4, frozenGpu: 0, frozenFrames10s: 0, resumeMs: 43, fpsAfter: 60, page: 'a CSS spinner + two shimmer bars' },
+  }),
 });
 
 /**
- * Should this browser draw right now? `enabled` = the owner's switch `browser.idlePaintFreeze` (OFF by default, read at
- * each sweep — lane browser-swiftshader-cpu-r2: an unproven thaw never runs by default; off ⇒ never a freeze, and a
- * browser frozen before the switch went off is thawed), `viewers` = live views on it, `lastVerbAt` / `lastViewerAt` = the
+ * THE DEFAULT of the owner's switch `browser.idlePaintFreeze`: ON since 2.369.332 (lane idle-paint-default-on — the owner's
+ * 2026-10-20 「可以」 on IDLE_PAINT_PROOF.fleet: a page nobody watches burns the fleet image's GPU process at 99.8 % / 4 %,
+ * frozen 0 %, back within a frame of the next verb or viewer). ONE value: the schema row (src/lib/settings-schema.js) and the
+ * keeper's read (sweepIdlePaint) both take it, never a literal of their own. A default never rewrites a stored value: an
+ * instance whose owner set the switch keeps what it set.
+ */
+const IDLE_PAINT_DEFAULT = true;
+
+/**
+ * Should this browser draw right now? `enabled` = the owner's switch `browser.idlePaintFreeze` (ON by default since
+ * 2.369.332 — IDLE_PAINT_DEFAULT; read at each sweep — lane browser-swiftshader-cpu-r2: off ⇒ never a freeze, and a
+ * browser frozen before the switch went off is thawed; an ABSENT `enabled` here is off: the keeper always passes the value
+ * it read), `viewers` = live views on it, `lastVerbAt` / `lastViewerAt` = the
  * last verb / the last viewer (ms, 0 = never), `driving` = a verb in flight or a person driving it, `busy` = something a
  * frozen page would hide (a dialog open, a navigation pending), `frozen` = what was done last.
  * → `{paint, act: 'freeze' | 'thaw' | null, why}` — `act` is the change to make (null = leave it as it is).
@@ -47,4 +63,4 @@ function unseenRung(display) {
   return display.headed === false || !!(display.fallback && display.fallback.rung === 'hidden-window');
 }
 
-module.exports = { IDLE_PAINT_MS, IDLE_PAINT_PROOF, idlePaintVerdict, unseenRung };
+module.exports = { IDLE_PAINT_MS, IDLE_PAINT_PROOF, IDLE_PAINT_DEFAULT, idlePaintVerdict, unseenRung };

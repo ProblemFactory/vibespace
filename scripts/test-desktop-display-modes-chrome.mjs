@@ -32,6 +32,11 @@
 //     and the same display again; ended again within the minute ⇒ 「串流中断：…」 over the last picture with 「重试」 「显示 VNC 画面」
 //     and NOTHING by itself; the VNC picture only on that press; a display really gone ⇒ the main one; a switch = one session
 //     (`switched` in the hub's log) — RED CONTROL: the pre-lane fallback opens the VNC picture by itself      never-silent*.png
+//   ⑥ THE STALL (lane stream-leg-flap — the owner's Mac, 2026-10-20: both displays black at «串流 · 2 个显示器 · 0 fps» while ICE
+//     stayed connected): ② over a relay-only hub whose device-link half drops the machine's RTP (a black hole — STUN, DTLS,
+//     RTCP pass) ⇒ the chip reads the owner's 0 fps; within stallMs each pane says 「串流中断：画面不再传过来——正在重新连接…」,
+//     both sessions end «stopped (stalled)» on the hub's record, the window offers both displays again BY ITSELF and they
+//     play — RED CONTROL: the view without the rule sits on «0 fps» past stallMs + 6 s, nothing said    stall.png
 // PNGs when `--shots <dir>`.
 import fs from 'node:fs';
 import net from 'node:net';
@@ -173,6 +178,10 @@ const STILL = "const still = stillOf(stream, panes.pane(''));";
 const noStill = { name: 'no-still', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(STILL)) throw new Error('the still line moved'); return { contents: src.replace(STILL, 'const still = null;'), loader: 'js' }; }); } };
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page.js'), loader: { '.css': 'empty' }, logLevel: 'error' });
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-nostill.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [noStill] });
+// ⑥'s RED CONTROL (lane stream-leg-flap): the view without THE STALL rule (a playing picture whose frames stopped is never acted on)
+const STALL_ACT = "    if (sv.stalled && st.state === 'playing') { why = null; step('ended', 'stalled'); }\n";
+const noStall = { name: 'no-stall', setup(b) { b.onLoad({ filter: /stream-view\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(STALL_ACT)) throw new Error('the stall line moved'); return { contents: src.replace(STALL_ACT, ''), loader: 'js' }; }); } };
+await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-nostall.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [noStall] });
 // ⑤ RED CONTROL: the pre-lane fallback — a played stream's ending shows the VNC picture by itself (the ladder never asked)
 const LADDER = "if (nv.act !== 'fallback') {";
 const oldFallback = { name: 'old-fallback', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(LADDER)) throw new Error('the ladder line moved'); return { contents: src.replace(LADDER, 'if (false) {'), loader: 'js' }; }); } };
@@ -183,11 +192,13 @@ const CSS = ['style', 'viewers', 'chat', 'fonts'].filter((n) => fs.existsSync(pa
 for (const n of CSS) web.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
 web.get('/page.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page.js'))));
 web.get('/page-nostill.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-nostill.js'))));
+web.get('/page-nostall.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-nostall.js'))));
 web.get('/page-oldfallback.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-oldfallback.js'))));
 web.get('/novnc.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(NOVNC)));
 const HTML = `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-root);height:100vh;overflow:hidden}</style></head><body><script src="/page.js"></script></body></html>`;
 web.get('/', (q, s) => s.type('text/html').send(HTML));
 web.get('/nostill', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-nostill.js')));
+web.get('/nostall', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-nostall.js')));
 web.get('/oldfallback', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-oldfallback.js')));
 const PORT = await freePort();
 srv = http.createServer(web);
@@ -603,5 +614,60 @@ console.log('⑤ RED CONTROL: the pre-lane fallback');
 }
 ok((await live()).length === 0, 'every window closed ⇒ no stream session left on the hub');
 hub.shutdown();
+console.log('⑥ THE STALL (lane stream-leg-flap — the owner\'s two displays sat black at «串流 · 2 个显示器 · 0 fps», 2026-10-20)');
+{
+  await untilN(async () => (await live()).length === 0, 5000);
+  const SM = require(path.join(REPO, 'src/stream-model.js'));
+  // THE BLACK HOLE: a relay-only hub over the device link whose links opened BEFORE it is armed drop the machine's RTP once it
+  // is (STUN, DTLS, RTCP pass — ICE stays connected and the machine keeps sending: the owner's black «0 fps» on this box);
+  // a session offered after it is whole. The hub module is the shipped one; only its device handle's onData is wrapped.
+  const isRtp = (q) => q.length > 1 && (q[0] & 0xc0) === 0x80 && !(q[1] >= 192 && q[1] <= 223);
+  async function stallRun(at) {
+    const hole = { armed: false, dropped: 0 };
+    const holed = (h) => {
+      const mine = !hole.armed;
+      let fn = null, rest = new Uint8Array(0);
+      const filtered = (d) => {
+        const all = new Uint8Array(rest.length + d.length); all.set(rest); all.set(d, rest.length);
+        const u = SM.relayUnframe(all); rest = new Uint8Array(u.rest);
+        const keep = u.frames.filter((f) => { if (mine && hole.armed && isRtp(f.payload)) { hole.dropped++; return false; } return true; });
+        if (fn && keep.length) fn(Buffer.concat(keep.map((f) => Buffer.from(SM.relayFrame(f.ip, f.port, f.payload)))));
+      };
+      const own = Object.getOwnPropertyDescriptor(h, 'onData'); // the link's handle keeps its reader in a setter (src/agentd/client.js tcpForward)
+      Object.defineProperty(h, 'onData', { configurable: true, get: () => fn, set: (f) => { fn = f; own.set.call(h, f ? filtered : f); } });
+      return h;
+    };
+    const holeAccess = { streamRung: async (...a) => { const v = await access.streamRung(...a); return v && v.take && v.dm ? { ...v, dm: new Proxy(v.dm, { get: (o, k) => (k === 'tcpForward' ? async (...x) => holed(await o.tcpForward(...x)) : typeof o[k] === 'function' ? o[k].bind(o) : o[k]) }) } : v; } };
+    const stallHub = DW.create({ access: holeAccess, direct: false, udpLeg: false, log: rec });
+    R.setup({ access, stream: bridge, vnc: { status: async () => ({ available: true, running: false }) }, webrtc: stallHub });
+    const p = await page(1280, 800, DESK, { at });
+    const chip = () => p.ev(`(document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || ''`);
+    const says = () => p.ev(`[...document.querySelectorAll('${WIN} .desktop-display-say span')].map((s) => s.textContent)`);
+    await p.ev(`window.__open(${JSON.stringify(M)}, { mode: 'all' })`);
+    const both = (await playingIn(p, WIN, 2)) && (await untilN(async () => (await live()).length === 2, 10000));
+    const first = (await live()).map((s) => s.key);
+    const vncAt = vnc.seen.conns, l0 = hubLines.length;
+    hole.armed = true; const t0 = Date.now();
+    const black = await p.until(`/^串流 · 2 个显示器 · 0 fps$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || '')`, 9000);
+    const blackChip = await chip();
+    const said = await p.until(`[...document.querySelectorAll('${WIN} .desktop-display-say span')].filter((s) => /^串流中断：画面不再传过来——正在重新连接…$/.test(s.textContent)).length === 2`, SM.STREAM_LIMITS.stallMs + 6000);
+    const saidMs = Date.now() - t0, saidWords = await says();
+    const again = said && (await untilN(async () => { const l = await live(); return l.length === 2 && l.every((s) => !first.includes(s.key)); }, 15000)) && (await p.until(`[...document.querySelectorAll('${WIN} .stream-video')].filter((v) => v.videoWidth === 1280 && v.currentTime > 0.2).length === 2 && !document.querySelector('${WIN} .desktop-display-say')`, 25000));
+    if (again) await p.until(`/^串流 · 2 个显示器 · [1-9]\\d* fps$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || '')`, 8000); // the new views' first second of numbers
+    const lines = hubLines.slice(l0);
+    const r = { both, black, blackChip, said, saidMs, saidWords, again, stalled: lines.filter((l) => / stopped \(stalled\)$/.test(l)).length, offered: lines.filter((l) => / offered \(/.test(l)).length, dropped: hole.dropped, vnc: vnc.seen.conns - vncAt, chip: await chip() };
+    if (at === '/') await p.shot('stall.png', WIN);
+    await p.close(); stallHub.shutdown();
+    R.setup({ access, stream: bridge, vnc: { status: async () => ({ available: true, running: false }) }, webrtc: hub });
+    return r;
+  }
+  const S = await stallRun('/');
+  ok(S.both && S.black && S.dropped > 100, `② both displays play over the relay; the machine's pictures then fall into the black hole (${S.dropped} RTP datagrams dropped, ICE still connected) — the chip reads the owner's «${S.blackChip}»`, S);
+  ok(S.said && S.saidMs >= SM.STREAM_LIMITS.stallMs - 2000 && S.saidMs <= SM.STREAM_LIMITS.stallMs + 6000 && S.stalled === 2, `THE STALL: ${S.saidMs} ms after the pictures stopped (stallMs ${SM.STREAM_LIMITS.stallMs}) each pane says 「串流中断：画面不再传过来——正在重新连接…」 and both sessions end «stopped (stalled)» on the hub's record`, S);
+  ok(S.again && S.offered === 2 && S.vnc === 0 && /^串流 · 2 个显示器 · [1-9]\d* fps$/.test(S.chip), `…and the window offers both displays again BY ITSELF (2 new sessions), both play, the words go — no VNC picture, nothing to press (${S.chip})`, S);
+  const C = await stallRun('/nostall');
+  ok(C.both && C.black && !C.said && C.stalled === 0 && C.offered === 0 && /^串流 · 2 个显示器 · 0 fps$/.test(C.chip), `RED CONTROL — the page without THE STALL rule in the same black hole: «${C.chip}» ${Math.round((SM.STREAM_LIMITS.stallMs + 6000) / 1000)} s on, nothing said, no session ended or offered (the owner's window)`, C);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
