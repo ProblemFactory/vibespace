@@ -330,7 +330,8 @@ function forDeps(own) { return opsOver(() => ({ ...shared, ...(own || {}) })); }
 
 /**
  * THE WIRED AUTOMATION VERBS (src/server/automation-engine.js `verbs`). Each resolves its TARGET conversation and asks the
- * engine's `reach` (the same key granted to that conversation or one of its Task Groups — or the caller itself) before it
+ * engine's `reach` — ONE PURE rule (src/automation-keys.js reachVerdict, lane conversations-archive-verb): the key OPENED
+ * it, a grant of the key names it (the conversation or one of its Task Groups), or it is the caller itself — before it
  * acts. `groupsOf(session, id)` = the Task Group ids a live session belongs to. L1 wired conversations.rename; lane
  * automation-verbs (L2) wires the rest through THE seams above, the caller named as `by` = {kind: 'automation', key,
  * subject: session:<caller>, cid, sessionKey}:
@@ -340,13 +341,23 @@ function forDeps(own) { return opsOver(() => ({ ...shared, ...(own || {}) })); }
  *   conversations.bind    bindConversation into a Task Group the CALLER belongs to
  *   conversations.end     endConversation (its device teardown names the calling conversation)
  *   groups.invite         inviteToGroup — the caller invites, quietly (no wake: a wake is a billed turn of its own)
- * A conversation THIS KEY OPENED is within its reach (`openedBy`, in memory — the worker the coordinator just opened has no
- * grant of its own); everything else needs the owner's grant.
+ *   conversations.archive (lane conversations-archive-verb — the owner 2026-10-20 「这些不用 archive 吗」): ends the target if it
+ *                         is still live, then archives it exactly as the sidebar's 归档 does (`archive(sessionKey)` = the
+ *                         persistence router's ONE archived-list write, broadcast to every client); a target whose turn is
+ *                         running ⇒ subject_busy unless `force`; a target with OPEN For-you asks (`asksOf`) ⇒ asks_open naming
+ *                         them unless `resolveAsks` dismisses them first (the memory law: never archive a worker with open
+ *                         asks); already in the archived list and nothing live to end ⇒ already_archived. A target that is
+ *                         not live is resolved by `deadOf(target)` (its session key, name and Task Groups from the stores).
+ * The opener's reach is the ENGINE's fact (the store's `opened` rows — persisted, so it survives a hub restart; the Map this
+ * module kept in memory lost it at .331: the owner's hub refused `end` on workers its key had opened).
  */
 const OPEN_ID_WAIT_MS = 20 * 1000;     // a claude CLI reports its conversation id within seconds of the spawn
-function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, waitMs = OPEN_ID_WAIT_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+const BUSY_TURNS = ['running', 'waiting'];   // turn-facts' non-idle states: mid-turn, or paused on the user (requires_action)
+function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, waitMs = OPEN_ID_WAIT_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  archive = null, asksOf = () => [], resolveAsks = () => ({ changed: [], unknown: [] }), turnOf = () => 'idle', deadOf = () => null } = {}) {
   const O = () => ops || sharedOps;
   const idOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
+  const keyOf = (s) => { const cid = idOf(s); return cid ? `${(s && s.backend) || 'claude'}:${cid}` : null; };
   /** A target as the caller names it: a conversation id, a session key (`<backend>:<id>`) or a webui id. */
   function findSession(target) {
     const t = String(target || '');
@@ -355,18 +366,15 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
     for (const [id, s] of activeSessions) { const cid = idOf(s); if (cid && (cid === t || `${s.backend || 'claude'}:${cid}` === t)) return [s, id]; }
     return null;
   }
-  const openedBy = new Map();   // webui id → the key that opened it
   const byOf = (caller, keyId) => ({ kind: 'automation', key: keyId, subject: `session:${caller.conversationId}`, cid: caller.conversationId, sessionKey: caller.sessionKey || `claude:${caller.conversationId}` });
-  /** The target, if the key reaches it → [s, id] | a named refusal. */
-  function reached(target, { caller, keyId, reach }) {
+  const groupsOfLive = (s, id) => { try { return groupsOf(s, id) || []; } catch { return []; } };
+  /** The target, if the key reaches it → [s, id] | a named refusal (carrying the target's name for the owner's notice). */
+  function reached(target, { caller, reach }) {
     const hit = findSession(target || caller.conversationId);
-    if (!hit) return { ok: false, code: 'not_found', why: 'no live conversation by that id' };
+    if (!hit) return { ok: false, code: 'not_found', why: 'no live conversation by that id', target: target || null };
     const [s, id] = hit;
-    const opener = openedBy.get(id);
-    if (opener && opener === keyId) return { ok: true, s, id }; // a conversation THIS key opened
-    let groups = [];
-    try { groups = groupsOf(s, id) || []; } catch { groups = []; }
-    if (!reach(idOf(s), groups)) return { ok: false, code: 'not_granted', why: 'the key is not granted to that conversation (nor to one of its Task Groups)' };
+    const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id) });   // ONE rule: opener / grant / self
+    if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // lane key-instance-scope: the refusal names the grant's reach
     return { ok: true, s, id };
   }
   return {
@@ -375,7 +383,6 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       for (const [from, to] of [['backend', 'backend'], ['mode', 'mode'], ['name', 'name'], ['model', 'model'], ['effort', 'effort'], ['permission', 'permissionMode'], ['task', 'taskId'], ['pool', 'accountId']]) if (args[from] != null) spec[to] = args[from];
       const r = await O().openConversation(spec, byOf(caller, keyId));
       if (!r || !r.ok) return r;
-      openedBy.set(r.sessionId, keyId);
       let st = O().conversationStatus({ webuiId: r.sessionId });
       for (let t = 0; st.ok && st.pending && t < waitMs; t += 250) { await sleep(250); st = O().conversationStatus({ webuiId: r.sessionId }); }
       return { ...r, ...(st.ok ? { claudeSessionId: st.claudeSessionId, sessionKey: st.sessionKey, pending: st.pending } : {}) };
@@ -407,8 +414,39 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       const t = reached(args.target, ctx);
       if (!t.ok) return t;
       const r = await O().endConversation({ webuiId: t.id }, byOf(ctx.caller, ctx.keyId));
-      if (r && r.ok) openedBy.delete(t.id);
       return r && r.ok ? { ok: true, target: idOf(t.s) || t.id } : r;
+    },
+    // lane conversations-archive-verb: the opener's lifecycle ends with the sidebar's 归档
+    'conversations.archive': async (args, ctx) => {
+      const { caller, keyId, reach } = ctx;
+      if (typeof archive !== 'function') return { ok: false, code: 'not_ready', why: 'the archive path is not wired yet' };
+      const hit = findSession(args.target);
+      let f;   // the target's facts: { s?, id?, conversationId, sessionKey, name, groups }
+      if (hit) { const [s, id] = hit; f = { s, id, conversationId: idOf(s), sessionKey: keyOf(s), name: s.name || null, groups: groupsOfLive(s, id) }; }
+      else {
+        let d = null; try { d = deadOf(args.target); } catch { d = null; }
+        if (!d || !d.conversationId) return { ok: false, code: 'not_found', why: 'no conversation by that id — live, or ended on this machine', target: args.target };
+        f = { s: null, id: null, conversationId: d.conversationId, sessionKey: d.sessionKey || `claude:${d.conversationId}`, name: d.name || null, groups: Array.isArray(d.groups) ? d.groups : [] };
+      }
+      const label = f.name || args.target;
+      if (!f.sessionKey) return { ok: false, code: 'pending', why: 'the conversation has not reported its id yet — poll conversations.status, then archive', target: label };
+      const v = reach({ conversationId: f.conversationId, webuiId: f.id, groups: f.groups });
+      if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v.reach ? { reach: v.reach } : {}) };
+      const asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean);
+      if (asks.length && !args.resolveAsks) return { ok: false, code: 'asks_open', why: `${asks.length} open For-you ask${asks.length === 1 ? '' : 's'} of that conversation (${asks.join(', ')}) — the owner answers them, or pass resolveAsks`, asks, target: label };
+      if (f.s && !args.force) { const turn = turnOf(f.s); if (BUSY_TURNS.includes(turn)) return { ok: false, code: 'subject_busy', why: `that conversation has a turn ${turn} — wait for it, or pass force`, turn, target: label }; }
+      let resolved = [];
+      if (asks.length) { try { resolved = (resolveAsks(asks, `automation:${keyId}`) || {}).changed || []; } catch { resolved = []; } }
+      let ended = false;
+      if (f.s) {
+        const r = await O().endConversation({ webuiId: f.id }, byOf(caller, keyId));
+        if (!r || !r.ok) return { ok: false, code: (r && r.code) || 'failed', why: (r && r.why) || 'the conversation could not be ended', target: label };
+        ended = true;
+      }
+      const a = archive(f.sessionKey);   // the sidebar's own store write (persistence router archiveSession)
+      if (!a || !a.ok) return { ok: false, code: (a && a.code) || 'failed', why: (a && a.why) || 'the archived list could not be written', target: label };
+      if (a.already && !ended) return { ok: false, code: 'already_archived', why: 'that conversation is already in the archived list', target: label };
+      return { ok: true, target: f.conversationId, sessionKey: f.sessionKey, ended, archived: true, already: !!a.already, resolvedAsks: resolved };
     },
     'groups.invite': async (args, ctx) => {
       const t = reached(args.target, ctx);

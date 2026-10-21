@@ -894,8 +894,10 @@ export function installUserTodos(app) {
     }
     if (exitBtn) {
       // lane-pairing ⑥: an exit's "ask me" answered where it appears (Allow / Deny)
+      // lane key-instance-scope: an automation card's answer carries the REACH the owner picked (the card's radios; absent = opened)
+      const reachPick = exitBtn.closest('.ut-item')?.querySelector('.ut-ak-reach input:checked');
       exitBtn.disabled = true;
-      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), exitBtn.dataset.answer)).finally(() => { exitBtn.disabled = false; });
+      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), exitBtn.dataset.answer, reachPick ? { reach: reachPick.value } : {})).finally(() => { exitBtn.disabled = false; });
       return;
     }
     if (e.target.closest('.ut-done')) setStatus(id, 'done');

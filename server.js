@@ -187,7 +187,7 @@ registerWebdav(app, { tokens: mountTokens });
 // consuming a proxied JSON POST forwarded a body-less request that hung the
 // target on Content-Length (inc-mt2bpw2f: page rendered, every button dead).
 // Skip here rather than mount unblocker earlier: auth must keep covering /proxy/. lane webhook-l1-server: /hook/<slug> + the pairing read their OWN raw bytes after their refusals.
-const jsonBody = express.json({ limit: '50mb' }), OWN_BODY_RE = /^\/(?:proxy\/|hook\/|api\/channels\/webhook\/[^/]+\/pair$)/;
+const jsonBody = express.json({ limit: '50mb' }), OWN_BODY_RE = /^\/(?:proxy\/|hook\/|api\/channels\/webhook\/[^/]+\/pair$|api\/feedback\/forward$)/; // lane feedback-forward: the hub's forward door reads ≤ 64 KB AFTER its token
 app.use((req, res, next) => (OWN_BODY_RE.test(req.path) ? next() : jsonBody(req, res, next)));
 
 app.get('/xterm.css', (req, res) => {

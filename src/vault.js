@@ -240,6 +240,7 @@ const SECRETS_AT_REST = Object.freeze([
   { what: 'the device side of a pairing', where: 'a device\'s state/token + state/dial.json · the hub\'s own ~/.vibespace/agentd/state/token', exception: 'the device holds its own key (design q-042 D3 retires it)' },
   { what: 'the frpc admin password', where: '~/.vibespace/plugins/frp/admin.pw', exception: 'a loopback-only password for the hub\'s own frpc child' },
   { what: 'the OTLP ingest token', where: 'data/usage-history/otel-token', exception: 'opens only the hub\'s own loopback telemetry door; the surviving sessions\' exporters hold it (a per-boot one would 403 them)' },
+  { what: 'the feedback origin key (fk_, lane feedback-forward)', where: 'data/feedback-outbox.json key (0600)', exception: 'it names THIS instance to the maintainer hub (the fleet shares ONE forward token) and opens only the marks on the reports this instance forwarded (ids, a release, a note); the forward and its boot pull run before any unlock — the hub keeps its sha256 only' },
   { what: 'an ssh install\'s staged token', where: '$TMPDIR/vs-agentd-stage-* (removed after the tar)', exception: 'transient: the tar that carries it rides ssh stdin, the stage is removed in the same call' },
 ]);
 

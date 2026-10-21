@@ -46,7 +46,15 @@ let voicePlugin = { peek: () => ({}), update: () => {}, settings: () => ({}), wr
 // AGENT FEEDBACK (lane agent-feedback — the owner 2026-10-18: agents report what felt wrong; ⚙ System ▸ Agent feedback… shows
 // it): data/feedback.json + the server-owned `feedback` StateSync mirror (src/server/feedback-store.js) and the routes
 // (src/routes/feedback.js). The caller's Task Group and the instance are facts the ROUTE fills, never the body.
-const feedback = require('./feedback-store.js').create({ dataDir: path.join(rootDir, 'data'), wss, log: (...a) => console.warn(...a) });
+// lane feedback-forward: every NEW report goes to the maintainer hub when this instance has a telemetry forward target
+// (src/server/feedback-forward.js: the outbox data/feedback-outbox.json, the pull of the maintainer's marks at boot + 6 h);
+// the hub's two doors are the routes' (the collector's token, as /api/telemetry/ingest)
+const feedbackForward = require('./feedback-forward.js').create({
+  dataDir: path.join(rootDir, 'data'), log: (...a) => console.warn(...a), applyMarks: (marks) => feedback.applyMarks(marks), backlog: () => feedback.list().reports,
+  target: () => { const t = getTelemetry && getTelemetry(); return t && typeof t.forwardTarget === 'function' ? t.forwardTarget() : {}; },
+  instance: () => ({ name: process.env.VIBESPACE_INSTANCE_NAME || os.hostname(), version: require('../../package.json').version }),
+});
+const feedback = require('./feedback-store.js').create({ dataDir: path.join(rootDir, 'data'), wss, log: (...a) => console.warn(...a), onNew: (row) => feedbackForward.enqueue(row) });
 if (syncStores) syncStores.feedback = feedback.sync;
 require('../routes/feedback.js').registerFeedbackRoutes(app, {
   store: feedback, activeSessions, getJobs,
@@ -57,7 +65,9 @@ require('../routes/feedback.js').registerFeedbackRoutes(app, {
     return g ? { id: g.id, name: g.title || null } : null;
   },
   instance: () => ({ name: process.env.VIBESPACE_INSTANCE_NAME || os.hostname(), version: require('../../package.json').version }),
+  collectorToken: () => process.env.VIBESPACE_TELEMETRY_INGEST_TOKEN || '', selfKeyId: () => feedbackForward.keyId(),
 });
+feedbackForward.start();
 // THE VAULT (lane vault-e2e-password): the ONE holder of the DEK (memory only) and the provider of every store key under data/
 // (secret-box `lawfulKey` asks it; a key read before this line answers exactly as the engine would — the files before the
 // setup, locked after). LOCKED after every start: only a person's door (src/routes/vault.js) unlocks it.
@@ -121,7 +131,31 @@ const conversationSubjects = () => { const tasks = getTasks && getTasks(); const
 const vaultAttention = require('./vault-hooks.js').createVaultAttention({ userTodos });
 const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, log: (m) => console.log('[automation]', m),
   // lane feedback-handled-verb: + feedback.handled / feedback.list over THE feedback store (the owner's PATCH's own call)
-  verbs: { ...require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
+  // lane conversations-archive-verb: the archive verb's seams on conversation-ops' automationVerbs — the sidebar's own archived-list
+  // write, the For-you store's open asks of a conversation (its own: by agent, not a notice) and their dismissal, the turn fact, and
+  // an ENDED conversation's facts (its session key from the stores that still name it — the sidebar's names, the Task Groups — else claude:<id>)
+  verbs: { ...require('./conversation-ops.js').automationVerbs({ activeSessions, groupsOf: automationGroupsOf,
+    archive: (key) => persistenceRouter.archiveSession(key),
+    asksOf: (key) => { try { return userTodos.forSession([key]).filter((i) => i && i.by === 'agent' && i.kind !== 'notice' && i.kind !== 'page'); } catch { return []; } },
+    resolveAsks: (ids, by) => userTodos.setStatusMany(ids, 'dismissed', by),
+    turnOf: require('./turn-facts.js').turnOf,
+    deadOf: (target) => {
+      const t = String(target || '');
+      if (!t || /^sess-/.test(t)) return null;   // a dead webui id names nothing durable
+      const cid = t.includes(':') ? t.slice(t.indexOf(':') + 1) : t;
+      let backend = t.includes(':') ? t.slice(0, t.indexOf(':')) : null, name = null;
+      const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {};
+      const keyed = (o) => Object.keys(o || {}).find((k) => k.endsWith(`:${cid}`));
+      const known = keyed(st.customNames) || keyed(st.sessionConfigs) || keyed(st.sessionModes) || null;
+      if (!backend && known) backend = known.slice(0, known.indexOf(':'));
+      const tasks = getTasks && getTasks();
+      if (!backend && tasks) { try { for (const g of tasks.list()) { const hit = (g.sessions || []).map((x) => String((x && x.sessionKey) || x)).find((k) => k.endsWith(`:${cid}`)); if (hit) { backend = hit.slice(0, hit.indexOf(':')); break; } } } catch { } }
+      const sessionKey = `${backend || 'claude'}:${cid}`;
+      if (st.customNames && st.customNames[sessionKey]) name = String(st.customNames[sessionKey]);
+      let groups = [];
+      try { groups = tasks ? tasks.groupsForSession({ sessionKey }).map((g) => g.id) : []; } catch { groups = []; }
+      return { conversationId: cid, sessionKey, name, groups };
+    } }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
   openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }),
     // lane automation-open-permission-resolve (q-049 M2): the CLI's own permission mode for the judged folder (its project layer follows it)
     permissionDefault: (cwd, backend) => require('./permission-rules.js').resolveDefaultMode({ backend, cwd }) } });

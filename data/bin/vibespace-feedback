@@ -3,8 +3,9 @@
 // missing or surprising (lane agent-feedback, the owner 2026-10-18). ONE report per thing; the user reads every report
 // in ⚙ System ▸ Agent feedback… and the maintainers read data/feedback.json to improve the system. Scoped by the
 // per-session token in the env — WHO reported is the server's fact, never an argument. Run with NO arguments to see the
-// usage and your own reports. The text is TEXT for its readers (drawn as text in the user's sheet); nothing is sent
-// anywhere but this VibeSpace.
+// usage and your own reports. The text is TEXT for its readers (drawn as text in the user's sheet); it is sent to this
+// VibeSpace only — which forwards it to the maintainers' instance when it has a telemetry forward target (lane
+// feedback-forward; the maintainer's «handled in 2.369.NNN» comes back to `list`).
 const API = process.env.VIBESPACE_API;
 const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
 if (!API || !TOKEN) { console.error('vibespace-feedback: not running inside a VibeSpace session (missing env)'); process.exit(2); }

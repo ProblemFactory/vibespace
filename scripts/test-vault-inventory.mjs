@@ -435,8 +435,28 @@ console.log('⑧ THE PURPOSES AND THE PROVENANCE (lane vault-window-v2, design q
   const f3 = VI.useFailVerdict(f2.next, { code: 'ask_expired', at: 1000 + H });
   ok(f1.fresh && f1.next.n === 1 && f1.next.causes.locked === 1 && !f2.fresh && f2.next.n === 2 && f2.next.causes['not-granted'] === 1 && f2.next.since === 1000 && f3.fresh && f3.next.n === 1 && f3.next.causes.expired === 1,
     'one card per entry per hour: the first failure files, the hour\'s next ones count on it, the next hour files again', [f1, f2, f3]);
-  ok(['ask_denied', 'ask_quiet', 'caller_gone', 'unknown_verb', 'failed', 'vault_not_set_up'].every((c) => !VI.useFailVerdict(null, { code: c, at: 1 }).counted) && Object.keys(VI.USE_FAIL_CAUSES).sort().join() === 'ask_expired,key_revoked,not_granted,once_spent,subject_ended,vault_locked,verb_not_in_scope',
-    'only a cause the owner can act on is a failure (locked / not granted / expired) — the owner\'s own refusal, a caller gone, a mistake in the call are not');
+  ok(['ask_denied', 'ask_quiet', 'caller_gone', 'unknown_verb', 'failed', 'vault_not_set_up', 'subject_busy', 'already_archived', 'bad_args'].every((c) => !VI.useFailVerdict(null, { code: c, at: 1 }).counted) && Object.keys(VI.USE_FAIL_CAUSES).sort().join() === 'ask_expired,asks_open,key_revoked,not_granted,once_spent,subject_ended,vault_locked,verb_not_in_scope',
+    'only a cause the owner can act on is a failure (locked / not granted / expired / the target\'s open asks — lane conversations-archive-verb) — the owner\'s own refusal, a caller gone, a mistake in the call, a retry the caller holds (subject_busy, already_archived) are not');
+  // lane conversations-archive-verb: THE SENTENCE — the key, the verb, the target, the reason, the door; one hour per (key, verb, reason) keeps its FIRST target
+  const g1 = VI.useFailVerdict(null, { code: 'not_granted', at: 5000, who: 'Coordinator', target: 'lane a' });
+  const g2 = VI.useFailVerdict(g1.next, { code: 'not_granted', at: 5001, who: 'Coordinator', target: 'lane b' });
+  const c1 = VI.useFailCard({ name: 'dispatch', verb: 'conversations.end', code: 'not_granted', next: g2.next });
+  ok(g2.next.target === 'lane a' && g2.next.lastTarget === 'lane b' && c1.text.key === VI.USE_FAIL_LINES.not_granted && c1.text.params.name === 'dispatch' && c1.text.params.verb === 'conversations.end' && c1.text.params.target === 'lane a'
+    && /could not \{verb\} \{target\}: the key is not granted to that conversation .* — grant it to that conversation or its Task Group in the Vault window/.test(c1.text.key) && c1.detail[0].params.n === 2 && c1.detail[1].key === 'Last: {target}' && c1.detail[1].params.target === 'lane b' && c1.detail[2].params.who === 'Coordinator',
+    'useFailCard: «“<key>” could not <verb> <target>: <reason> — <door>» (one line per cause, the owner\'s words), the hour\'s count, the last target when it differs, who asked', c1);
+  ok(Object.keys(VI.USE_FAIL_LINES).sort().join() === Object.keys(VI.USE_FAIL_CAUSES).sort().join() && Object.values(VI.USE_FAIL_LINES).every((l) => /^“\{name\}” could not \{verb\} \{target\}: .+ — .+$/.test(l)) && Object.values(VI.USE_FAIL_NAMELESS).every((l) => /^An automation key could not \{verb\} \{target\}: .+ — .+$/.test(l)),
+    'every cause has its sentence (reason — door), and the two refusals met before a key is picked have a nameless twin');
+  const c0 = VI.useFailCard({ name: null, verb: 'conversations.open', target: 'x', code: 'vault_locked', next: VI.useFailVerdict(null, { code: 'vault_locked', at: 1 }).next });
+  ok(c0.text.key === VI.USE_FAIL_NAMELESS.vault_locked && /Unlock… at the top of the page/.test(c0.text.key) && !('name' in c0.text.params), 'no key picked yet (locked before the pick) ⇒ the nameless line, the door in a person\'s words (Unlock…)');
+  // lane key-instance-scope: a REACH refusal's line names the reach the grant has (opened / its Task Groups) and the door that widens it
+  ok(Object.keys(VI.USE_FAIL_REACH_LINES).sort().join() === 'groups,opened' && Object.values(VI.USE_FAIL_REACH_LINES).every((l) => /^“\{name\}” could not \{verb\} \{target\}: .+ — .+$/.test(l) && /Vault window/.test(l)), 'USE_FAIL_REACH_LINES: one sentence per reach kind a refusal can name (opened / groups), the same shape as every cause, each with its door');
+  const cr = VI.useFailCard({ name: 'dispatch', verb: 'conversations.end', target: 'lane c', code: 'not_granted', reach: 'opened', next: { n: 1 } });
+  const cg = VI.useFailCard({ name: 'dispatch', verb: 'conversations.end', target: 'lane c', code: 'not_granted', reach: 'groups', next: { n: 1 } });
+  const cn = VI.useFailCard({ name: 'dispatch', verb: 'conversations.end', target: 'lane c', code: 'not_granted', next: { n: 1 } });
+  const cx = VI.useFailCard({ name: 'dispatch', verb: 'conversations.end', target: 'lane c', code: 'vault_locked', reach: 'opened', next: { n: 1 } });
+  const cu = VI.useFailCard({ name: 'dispatch', verb: 'conversations.end', target: 'lane c', code: 'not_granted', reach: 'instance', next: { n: 1 } });
+  ok(cr.text.key === VI.USE_FAIL_REACH_LINES.opened && cg.text.key === VI.USE_FAIL_REACH_LINES.groups && cn.text.key === VI.USE_FAIL_LINES.not_granted && cx.text.key === VI.USE_FAIL_LINES.vault_locked && cu.text.key === VI.USE_FAIL_LINES.not_granted && cr.text.params.target === 'lane c' && cr.text.params.name === 'dispatch',
+    'not_granted with a reach ⇒ that reach\'s line (opened / groups); without one, or a kind no line names ⇒ the grant line; another code ignores the reach');
   // MUTANTS — compiled in memory at the real path (nothing written under src/)
   const Mod = require('module'), mf = path.join(REPO, 'src/vault-inventory.js'), srcI = fs.readFileSync(mf, 'utf8');
   const compile = (code) => { const m = new Mod(mf); m.filename = mf; m.paths = Mod._nodeModulePaths(path.dirname(mf)); m._compile(code, mf); return m.exports; };

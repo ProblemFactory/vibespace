@@ -71,7 +71,7 @@ const G = (o = {}) => ({ id: 'ag-00000000000' + (o.n || 1), keyId: 'ak-000000000
 
 console.log('① the closed table, the record and the grant');
 {
-  eq(A.VERBS, ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'groups.invite', 'conversations.status', 'feedback.handled', 'feedback.list'], 'the closed table: the five verbs the dispatcher needs, in order (+ lane automation-verbs\' conversations.status, a READ: the ids an open reports a moment later; + lane feedback-handled-verb\'s feedback.handled and feedback.list, a READ)');
+  eq(A.VERBS, ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'groups.invite', 'conversations.status', 'conversations.archive', 'feedback.handled', 'feedback.list'], 'the closed table: the five verbs the dispatcher needs, in order (+ lane automation-verbs\' conversations.status, a READ: the ids an open reports a moment later; + lane feedback-handled-verb\'s feedback.handled and feedback.list, a READ; + lane conversations-archive-verb\'s conversations.archive, the opener\'s lifecycle\'s end)');
   ok(A.SCOPES.every((s) => (['conversations.status', 'feedback.list'].includes(s.verb) ? s.layer === 'read' : s.layer === 'act') && typeof s.args === 'function' && typeof s.label === 'string') && A.SCOPES.filter((s) => s.billed).map((s) => s.verb).join() === 'conversations.open' && Object.isFrozen(A.SCOPES), 'each row {verb, layer act, billed, args validator, label}; only conversations.open is billed (a turn nobody typed — L2 wires it through the spend guard)');
   eq([A.CODES.vault_locked, A.CODES.not_granted, A.CODES.verb_not_wired, A.CODES.bad_args, A.CODES.session_only], [423, 403, 501, 400, 403], 'the door\'s statuses: locked 423 · a refusal 403 · not wired 501 · bad args 400');
   const planted = A.keyOf({ ...K(), value: 'vsak_' + 'x'.repeat(43), secret: 'y' });
@@ -79,6 +79,13 @@ console.log('① the closed table, the record and the grant');
   const pub = A.publicKey(K());
   ok(pub && !('digest' in pub) && pub.name === 'dispatch', 'publicKey (what a page / an agent sees) carries no digest');
   ok(A.grantOf(G()) && !A.grantOf(G({ subject: 'everyone' })) && !A.grantOf(G({ mode: 'forever' })) && A.isSubject('group:T-1') && A.isSubject('external') && !A.isSubject('session:'), 'a grant names a subject session:<id> | group:<task id> | external and a mode always | once — anything else is no grant');
+  // lane key-instance-scope: THE GRANT'S REACH — absent ⇒ opened (the narrowest), instance, {taskGroups}; an unknown reach ⇒ NO grant
+  ok(A.grantOf(G()).reach === 'opened' && A.grantOf(G({ reach: 'instance' })).reach === 'instance' && JSON.stringify(A.grantOf(G({ reach: { taskGroups: ['T-1', 'T-1'] } })).reach) === '{"taskGroups":["T-1"]}'
+    && !A.grantOf(G({ reach: 'everything' })) && !A.grantOf(G({ reach: { taskGroups: [] } })) && !A.grantOf(G({ reach: { taskGroups: ['T-1'], more: 1 } })) && !A.grantOf(G({ reach: ['instance'] })) && !A.grantOf(G({ reach: { taskGroups: ['has space'] } })),
+    'a grant\'s REACH (lane key-instance-scope): absent ⇒ opened (the narrowest), instance, {taskGroups} (deduped, ids only); an unknown reach ⇒ NO grant — refused whole, never read as wider');
+  ok(A.REACHES.join() === 'opened,groups,instance' && A.reachKind('instance') === 'instance' && A.reachKind({ taskGroups: ['T-1'] }) === 'groups' && A.reachKind('opened') === 'opened' && A.reachKind(null) === 'opened'
+    && A.widestReach(['opened', { taskGroups: ['T-1'] }, { taskGroups: ['T-2', 'T-1'] }]).taskGroups.join() === 'T-1,T-2' && A.widestReach([{ taskGroups: ['T-1'] }, 'instance']) === 'instance' && A.widestReach([]) === 'opened' && A.widestReach(['nope']) === 'opened',
+    'the kinds, narrowest first; widestReach = instance › the groups\' union › opened (an unknown reach counts for nothing)');
   eq(A.SCOPES[1].args({ name: '  Lane X  ', target: 'claude:abc' }), { ok: true, args: { name: 'Lane X', target: 'claude:abc' } }, 'conversations.rename args: the name trimmed, an optional target id');
   ok(A.SCOPES[1].args({ name: 'x', extra: 1 }).code === 'bad_args' && A.SCOPES[1].args({}).code === 'bad_args' && A.SCOPES[1].args({ name: 'x'.repeat(121) }).code === 'bad_args', 'unknown arguments, a missing name, an over-long name: refused by name (bad_args)');
   eq(A.identityOf('ak-000000000001'), 'automation:ak-000000000001', 'identityOf = the spend identity a billed verb will be charged to (L2)');
@@ -110,6 +117,9 @@ const runTable = (mod) => T.filter(([, input, want]) => verdictWord(mod.useVerdi
   const bad = runTable(A);
   ok(!bad.length, `the ${T.length}-row table: every code and every allowed shape, in the verdict's order (vault › key › scope › caller › grant)`, bad);
   ok(A.useVerdict(T[11][1]).spend === true && A.useVerdict(T[10][1]).spend === false, 'a once grant is SPENT by the use it lets through (spend: true); an always grant is not');
+  ok(A.useVerdict(T[10][1]).reach === 'opened' && A.useVerdict({ key: K(), grants: [G(), G({ n: 2, subject: 'group:T-7', reach: 'instance' })], subject: 'session:conv-1', subjectGroups: ['T-7'], verb: 'conversations.rename', vaultState: 'unlocked' }).reach === 'instance'
+    && A.useVerdict({ key: K(), grants: [G({ mode: 'once', reach: { taskGroups: ['T-1'] } })], subject: 'session:conv-1', verb: 'conversations.rename', vaultState: 'unlocked' }).reach.taskGroups.join() === 'T-1',
+    'lane key-instance-scope: the verdict carries the REACH the use rides — the widest of the caller\'s always-grants (its own, its Task Group\'s), else the once-grant\'s');
   // THE WALL, generated: an outside caller is never let through by a conversation's or a group's grant, and the reverse
   let seed = 7; const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
   const SUBJ = ['session:conv-1', 'session:conv-2', 'group:T-7', 'group:T-8', 'external'];
@@ -178,7 +188,7 @@ const mkWorld = async (tag, { timers, verbs = null } = {}) => {
   let clock = NOW;
   const userTodos = new UserTodoManager({ dataDir: dir, expirySweepMs: 3600e3, now: () => clock });   // ONE clock: the card's 60 s is the store's too
   const renamed = [];
-  const engine = ENG.create({ dataDir: dir, vault, userTodos, now: () => clock, timers, verbs: verbs || { 'conversations.rename': (args, ctx) => { renamed.push({ args, key: ctx.keyId, reach: ctx.reach('conv-1', []) }); return { ok: true, name: args.name }; } } });
+  const engine = ENG.create({ dataDir: dir, vault, userTodos, now: () => clock, timers, verbs: verbs || { 'conversations.rename': (args, ctx) => { renamed.push({ args, key: ctx.keyId, reach: ctx.reach({ conversationId: 'conv-1' }).ok }); return { ok: true, name: args.name }; } } });
   return { dir, vault, userTodos, engine, renamed, tick: (ms) => { clock += ms; }, now: () => clock };
 };
 const caller = (o = {}) => ({ conversationId: 'conv-1', sessionKey: 'claude:conv-1', name: 'Worker one', live: true, groups: [], ...o });
@@ -427,10 +437,10 @@ console.log('⑨ THE RENAME SEAM — the ws case\'s body, moved whole; the verb\
   OPS.provide({ rename: (data) => OPS.renameSession(deps, data) });
   const V = OPS.automationVerbs({ activeSessions: sessions, groupsOf: (s) => (s.backendSessionId === 'conv-2' ? ['T-9'] : []) });
   const ctx = (reach) => ({ caller: { conversationId: 'conv-1' }, reach });
-  ok(V['conversations.rename']({ name: 'Self' }, ctx(() => true)).ok && sessions.get('w1').name === 'Self', 'the verb renames the CALLER by default');
-  ok(V['conversations.rename']({ name: 'Other', target: 'conv-2' }, ctx((cid, groups) => cid === 'conv-1' || groups.includes('T-9'))).ok && sessions.get('w2').name === 'Other', 'another conversation the key reaches (here through its Task Group) is renamed');
-  const no = V['conversations.rename']({ name: 'Nope', target: 'conv-2' }, ctx((cid) => cid === 'conv-1'));
-  ok(no.code === 'not_granted' && sessions.get('w2').name === 'Other', 'one the key does NOT reach ⇒ not_granted, untouched');
+  ok(V['conversations.rename']({ name: 'Self' }, ctx(() => ({ ok: true, by: 'self' }))).ok && sessions.get('w1').name === 'Self', 'the verb renames the CALLER by default');
+  ok(V['conversations.rename']({ name: 'Other', target: 'conv-2' }, ctx((t) => ({ ok: t.conversationId === 'conv-1' || (t.groups || []).includes('T-9') }))).ok && sessions.get('w2').name === 'Other', 'another conversation the key reaches (here through its Task Group — the engine\'s reach answers the ONE rule\'s verdict) is renamed');
+  const no = V['conversations.rename']({ name: 'Nope', target: 'conv-2' }, ctx((t) => (t.conversationId === 'conv-1' ? { ok: true, by: 'self' } : { ok: false, code: 'not_granted', why: 'no' })));
+  ok(no.code === 'not_granted' && no.target === 'Other' && sessions.get('w2').name === 'Other', 'one the key does NOT reach ⇒ not_granted, untouched (the refusal names the target for the owner\'s notice)');
   OPS.provide(null);
   ok(OPS.callOp('rename', {}).code === 'not_ready', 'before the ws handler registered ⇒ not_ready');
 }
@@ -749,7 +759,7 @@ console.log('⑫d B-dbba — `conversations open --name` names the conversation 
   const p = e.use({ caller: caller({ conversationId: 'conv-8', sessionKey: 'claude:conv-8', name: 'Worker eight' }), verb: 'conversations.open', args: { cwd: IN, name: 'lane foo' }, want: k.key.id });
   await new Promise((r2) => setImmediate(r2));
   const c = cards(w);
-  ok(c.length === 1 && c[0].detail.startsWith(`This call would open "lane foo" in ${IN}.\n`) && c[0].i18n.detail.length === 2 && c[0].i18n.detail[0].params.name === 'lane foo' && c[0].i18n.detail[0].params.cwd === IN && /^Allow once/.test(c[0].i18n.detail[1].key),
+  ok(c.length === 1 && c[0].detail.startsWith(`This call would open "lane foo" in ${IN}.\n`) && c[0].i18n.detail.length === 3 && c[0].i18n.detail[0].params.name === 'lane foo' && c[0].i18n.detail[0].params.cwd === IN && /^Allow once/.test(c[0].i18n.detail[1].key) && /^The reach says/.test(c[0].i18n.detail[2].key),
     'the card\'s words say the name and the folder (its first detail line, i18n with params), then the three answers', c[0] && { detail: c[0].detail, i18n: c[0].i18n.detail });
   e.answer(c[0].action.askId, { answer: 'deny' });
   ok((await p).code === 'ask_denied', '…denied as before');
@@ -859,6 +869,159 @@ console.log('⑭ THE WINDOW + THE CLI (text pins) — the 「未设边界」 chi
     'lane vault-locked-refusal-notice: the CLI\'s usage and header say the user was already told (never "tell the user")');
 }
 
+console.log('⑮ THE ARCHIVE VERB (lane conversations-archive-verb) — the row, its args, the CLI\'s typed verb and its usage line');
+{
+  const row = A.scopeOf('conversations.archive');
+  ok(row && row.layer === 'act' && row.billed === false && row.label === 'Archive a conversation' && A.VERBS.includes('conversations.archive'), 'the row: act, billed false, «Archive a conversation» — in the closed table (conversations.archive; the feedback verbs stay last of the table)');
+  ok(row.args({ target: 'c-1' }).ok && !('force' in row.args({ target: 'c-1' }).args) && row.args({ target: 'c-1', force: true, resolveAsks: 'yes' }).args.force === true && row.args({ target: 'c-1', resolveAsks: 'yes' }).args.resolveAsks === true && row.args({ target: 'c-1', force: 'no' }).ok && !('force' in row.args({ target: 'c-1', force: 'no' }).args),
+    'args: target required; force / resolveAsks yes-or-no (absent / no ⇒ not set)');
+  ok(row.args({}).code === 'bad_args' && row.args({ target: 'c-1', force: 'maybe' }).code === 'bad_args' && /yes or no/.test(row.args({ target: 'c-1', force: 'maybe' }).why) && row.args({ target: 'c-1', wake: true }).code === 'bad_args', 'no target / a force that is not yes-or-no / an unknown field ⇒ bad_args by name');
+  ok(A.CODES.subject_busy === 409 && A.CODES.asks_open === 409 && A.CODES.already_archived === 409, 'the three answers an archive adds: subject_busy · asks_open · already_archived (409)');
+  ok(JSON.stringify(A.argsSummary('conversations.archive', { target: 'c-1', force: true, resolveAsks: true })) === '{"target":"c-1","force":"true","resolveAsks":"true"}', 'the audit line keeps the flags');
+  const CLI = R('data/bin/vibespace-api');
+  const t1 = CLI.typed(['conversations', 'archive', 'c-1']), t2 = CLI.typed(['conversations', 'archive', 'c-1', '--force', '--resolve-asks']), t3 = CLI.typed(['conversations', 'archive', 'c-1', '--force', 'yes']), t4 = CLI.typed(['conversations', 'archive', '--force', 'c-1', '--force']);
+  ok(t1.verb === 'conversations.archive' && JSON.stringify(t1.args) === '{"target":"c-1"}' && t2.args.target === 'c-1' && t2.args.force === true && t2.args.resolveAsks === true && Object.keys(t2.args).length === 3 && /stray word "yes"/.test(t3.error) && /given twice/.test(t4.error),
+    'the CLI: `conversations archive <target> [--force] [--resolve-asks]` — the two flags take NO value (a value after one is a stray word; a flag twice is refused)', { t1, t2, t3, t4 });
+  ok(/vibespace-api conversations archive <target> \[--force\] \[--resolve-asks\]   end it if still live, then archive it as the sidebar's 归档 does/.test(CLI.USAGE) && /subject_busy unless --force; its open For-you asks ⇒ asks_open naming them, unless --resolve-asks dismisses them; archived already ⇒ already_archived/.test(CLI.USAGE),
+    'the usage line, by hand (vibespace-api ships alone): the verb, its two flags, the three refusals');
+}
+
+console.log('⑯ THE REACH — ONE PURE rule for every verb that names another conversation: opener / grant (the conversation, its Task Group) / self / other');
+{
+  const K = 'ak-0000000000a1', K2 = 'ak-0000000000a2';
+  const grants = [{ id: 'ag-000000000001', keyId: K, subject: 'session:w-granted', mode: 'always', at: 1 }, { id: 'ag-000000000002', keyId: K, subject: 'group:T-9', mode: 'always', at: 1 }, { id: 'ag-000000000003', keyId: K2, subject: 'session:w-other-key', mode: 'always', at: 1 }];
+  const opened = [{ keyId: K, webuiId: 'sess-1-1', conversationId: 'w-opened', at: 1 }, { keyId: K, webuiId: 'sess-1-2', conversationId: null, at: 2 }, { keyId: K2, webuiId: 'sess-2-1', conversationId: 'w-other-opened', at: 3 }];
+  const REACH = [
+    ['the caller itself', { conversationId: 'coord' }, 'self'],
+    ['a conversation THIS key opened (by its conversation id)', { conversationId: 'w-opened' }, 'opener'],
+    ['…by its webui id, before its conversation id was known', { webuiId: 'sess-1-2', conversationId: 'w-young' }, 'opener'],
+    ['…after it ENDED (no webui id — the row names the conversation)', { conversationId: 'w-opened', webuiId: null, groups: [] }, 'opener'],
+    ['a conversation the key is granted to', { conversationId: 'w-granted' }, 'grant'],
+    ['a conversation in a Task Group the key is granted to', { conversationId: 'w-in-group', groups: ['T-1', 'T-9'] }, 'grant'],
+    ['another conversation — no row, no grant', { conversationId: 'w-stranger', groups: ['T-1'] }, 'not_granted'],
+    ['one ANOTHER key opened', { conversationId: 'w-other-opened', webuiId: 'sess-2-1' }, 'not_granted'],
+    ['one ANOTHER key is granted to', { conversationId: 'w-other-key' }, 'not_granted'],
+    ['a webui id nobody opened', { webuiId: 'sess-9-9' }, 'not_granted'],
+    ['nothing named', {}, 'not_found'],
+  ];
+  const runReach = (Mod) => REACH.filter(([, target, want]) => { const v = Mod.reachVerdict({ keyId: K, caller: 'coord', target, grants, opened }); return !(v.ok ? v.by === want : v.code === want); }).map(([n]) => n);
+  const red = runReach(A);
+  ok(!red.length, `the table (${REACH.length} rows): opener / grant / self allowed by name, the rest refused by name`, red);
+  const nope = A.reachVerdict({ keyId: K, caller: 'coord', target: { conversationId: 'w-stranger' }, grants, opened });
+  ok(nope.reach === 'opened' && /did not open that conversation and is not granted to it \(nor to one of its Task Groups\)/.test(nope.why) && /reaches only what the key opened/.test(nope.why) && /Vault window/.test(nope.why), 'the refusal names all three doors, the REACH the grant has (opened) and where to widen it (lane key-instance-scope)');
+  ok(A.openedOf({ keyId: K, webuiId: 'sess-1-1', conversationId: 'w', at: 5 }).at === 5 && A.openedOf({ keyId: 'nope', webuiId: 'sess-1-1' }) === null && A.openedOf({ keyId: K }) === null && A.openedOf({ keyId: K, conversationId: 'w' }).webuiId === null, 'openedOf: a row needs a key id and one of the two ids; anything else is not a row');
+  const needle = "  if (rows.some((o) => (cid && o.conversationId && o.conversationId === cid) || (wid && o.webuiId && o.webuiId === wid))) return { ok: true, by: 'opener' };";
+  ok(SRC.split(needle).length === 2, 'ANCHOR: the opener clause is spelled once');
+  const Mx = M.load('src/automation-keys.js', SRC.replace(needle, ''), 'no-opener');
+  const redM = runReach(Mx);
+  ok(redM.length === 3 && redM.every((n) => /opened|webui id, before|ENDED/.test(n)), 'MUTANT RED: without (a) the opener loses what it opened — the three opener rows go red, nothing else moves', redM);
+  // THE GRANT'S REACH (lane key-instance-scope — the owner: 「key 应该可以被授权在整个 vibe space 上工作」): ONE more row of the table
+  const REACH2 = [
+    ['instance: a stranger', { conversationId: 'w-stranger', groups: ['T-1'] }, 'instance', 'instance'],
+    ['instance: a webui id nobody opened', { webuiId: 'sess-9-9' }, 'instance', 'instance'],
+    ['instance: one ANOTHER key opened', { conversationId: 'w-other-opened' }, 'instance', 'instance'],
+    ['instance: the caller itself still answers self', { conversationId: 'coord' }, 'instance', 'self'],
+    ['instance: what the key opened still answers opener', { conversationId: 'w-opened' }, 'instance', 'opener'],
+    ['instance: nothing named is still not_found', {}, 'instance', 'not_found'],
+    ['groups: a conversation in one of them', { conversationId: 'w-in-t1', groups: ['T-1'] }, { taskGroups: ['T-1', 'T-2'] }, 'groups'],
+    ['groups: a conversation in none of them', { conversationId: 'w-in-t3', groups: ['T-3'] }, { taskGroups: ['T-1', 'T-2'] }, 'not_granted'],
+    ['groups: a conversation in no group at all', { conversationId: 'w-alone' }, { taskGroups: ['T-1'] }, 'not_granted'],
+    ['opened (the default): a stranger', { conversationId: 'w-stranger', groups: ['T-1'] }, 'opened', 'not_granted'],
+    ['an unknown reach reads as opened', { conversationId: 'w-stranger' }, 'everything', 'not_granted'],
+  ];
+  const runReach2 = (Mod) => REACH2.filter(([, target, reach, want]) => { const v = Mod.reachVerdict({ keyId: K, caller: 'coord', target, grants, opened, reach }); return !(v.ok ? v.by === want : v.code === want); }).map(([n]) => n);
+  ok(!runReach2(A).length, `the REACH table (${REACH2.length} rows): instance reaches every conversation (self / opener / not_found still answer first), groups one of theirs, opened adds nothing, an unknown reach is the narrowest`, runReach2(A));
+  const gv = A.reachVerdict({ keyId: K, caller: 'coord', target: { conversationId: 'w-in-t3', groups: ['T-3'] }, grants, opened, reach: { taskGroups: ['T-1', 'T-2'] } });
+  ok(gv.reach === 'groups' && /T-1, T-2/.test(gv.why) && /Vault window/.test(gv.why), 'a groups refusal names the Task Groups the grant reaches and the door');
+  const needle2 = "  if (r === 'instance') return { ok: true, by: 'instance' };";
+  ok(SRC.split(needle2).length === 2, 'ANCHOR: the instance clause is spelled once');
+  const My = M.load('src/automation-keys.js', SRC.replace(needle2, "  if (r === 'instance' || r === 'opened') return { ok: true, by: 'instance' };"), 'instance-for-opened');
+  const redY = [...runReach(My), ...runReach2(My)];
+  ok(redY.length === 6 && redY.every((n) => /no row, no grant|ANOTHER key|nobody opened|opened \(the default\)|unknown reach/.test(n)), 'MUTANT RED: a table that lets `instance` through for an `opened` grant — the four refused rows of the base table and the two opened rows of the reach table go red, nothing else moves', redY);
+}
+
+console.log('⑰ THE OPENER\'S LIFECYCLE on the real engine — the store\'s opened rows, a restart, end + archive through the verbs');
+{
+  const sessions = new Map([['sess-5-1', { name: 'coordinator', backend: 'claude', backendSessionId: 'coord-5', mode: 'chat' }]]);
+  const archived = [], ends = [];
+  const fakeOps = {
+    openConversation: async (spec) => { sessions.set('sess-5-2', { name: spec.name, backend: 'claude', backendSessionId: null, claudeSessionId: null, mode: 'chat' }); return { ok: true, sessionId: 'sess-5-2', name: spec.name, cwd: spec.cwd, mode: 'chat' }; },
+    conversationStatus: ({ webuiId }) => { const s = sessions.get(webuiId); return s ? { ok: true, sessionId: webuiId, claudeSessionId: s.claudeSessionId, sessionKey: s.claudeSessionId ? `claude:${s.claudeSessionId}` : null, pending: !s.claudeSessionId } : { ok: false, code: 'not_found' }; },
+    endConversation: async ({ webuiId }, by) => { ends.push([webuiId, by.key]); sessions.delete(webuiId); return { ok: true, sessionId: webuiId }; },
+  };
+  let ticks = 0;
+  const verbs = OPS.automationVerbs({ activeSessions: sessions, groupsOf: () => [], ops: fakeOps, waitMs: 2000, sleep: async () => { ticks++; if (ticks === 2) { const s = sessions.get('sess-5-2'); s.backendSessionId = s.claudeSessionId = 'worker-5'; } },
+    archive: (k) => { const already = archived.includes(k); if (!already) archived.push(k); return { ok: true, already }; }, asksOf: () => [], resolveAsks: () => ({ changed: [] }), turnOf: () => 'idle',
+    deadOf: (t) => (/worker-5$/.test(String(t)) ? { conversationId: 'worker-5', sessionKey: 'claude:worker-5', name: 'worker five', groups: [] } : null) });
+  const w = await mkWorld('opener', { verbs });
+  const m = w.engine.mint({ name: 'dispatch5', scopes: ['conversations.open', 'conversations.end', 'conversations.archive', 'conversations.status'], limits: OPEN_LIMITS, by: 'user' });
+  w.engine.grant(m.key.id, ['session:coord-5'], { by: 'user' });
+  const C5 = () => caller({ conversationId: 'coord-5', sessionKey: 'claude:coord-5', name: 'coordinator' });
+  const o = await w.engine.use({ caller: C5(), verb: 'conversations.open', args: { cwd: '/tmp', name: 'worker five' } });
+  const st = JSON.parse(fs.readFileSync(path.join(w.dir, A.STORE_FILE), 'utf8'));
+  ok(o.ok && o.result.sessionId === 'sess-5-2' && o.result.claudeSessionId === 'worker-5' && Array.isArray(st.opened) && st.opened.length === 1 && st.opened[0].keyId === m.key.id && st.opened[0].webuiId === 'sess-5-2' && st.opened[0].conversationId === 'worker-5',
+    'a successful open writes the OPENER\'s row to the store (the key, the webui id, the conversation id the open waited for)', { o, opened: st.opened });
+  // a RESTART: a fresh engine over the same store — the opener still reaches the worker (a Map in memory is gone; the row is not)
+  const engine2 = ENG.create({ dataDir: w.dir, vault: w.vault, userTodos: w.userTodos, now: w.now, verbs });
+  const s2 = await engine2.use({ caller: C5(), verb: 'conversations.status', args: { target: 'worker-5' } });
+  ok(s2.ok && s2.result.claudeSessionId === 'worker-5', 'after a RESTART the opener still reaches what it opened (status by the conversation id — the persisted row, reachVerdict (a))', s2);
+  const a1 = await engine2.use({ caller: C5(), verb: 'conversations.archive', args: { target: 'worker-5' } });
+  ok(a1.ok && a1.result.ended === true && a1.result.archived === true && a1.result.sessionKey === 'claude:worker-5' && ends.at(-1)[0] === 'sess-5-2' && ends.at(-1)[1] === m.key.id && archived.includes('claude:worker-5') && !sessions.has('sess-5-2'),
+    'archive on the LIVE worker: ended by the key, then archived (the sidebar\'s own store write) — through the ONE door, audited', a1);
+  const a2 = await engine2.use({ caller: C5(), verb: 'conversations.archive', args: { target: 'worker-5' } });
+  ok(a2.ok === false && a2.code === 'already_archived', 'a second archive (the worker is gone, its key already listed) ⇒ already_archived', a2);
+  ok((await engine2.use({ caller: C5(), verb: 'conversations.end', args: { target: 'worker-5' } })).code === 'not_found', 'end on the ended worker ⇒ not_found (no live conversation by that id)');
+  const lines = auditOf(w).filter((l) => l.verb === 'conversations.archive');
+  ok(lines.length === 2 && lines[0].ok && lines[0].args.target === 'worker-5' && !lines[1].ok && lines[1].code === 'already_archived', 'both archives audited (ok, then already_archived)', lines);
+  // ANOTHER key, granted to the coordinator too, did not open the worker: it does not reach it (the row is the OPENER's)
+  const m2 = engine2.mint({ name: 'other5', scopes: ['conversations.archive', 'conversations.status'], limits: OPEN_LIMITS, by: 'user' });   // on engine2: the two engines share the file, not their memory
+  ok(m2.ok && engine2.grant(m2.key.id, ['session:coord-5'], { by: 'user' }).ok, 'a second key, granted to the coordinator (no open by it)');
+  const x = await engine2.use({ caller: C5(), verb: 'conversations.archive', args: { target: 'worker-5' }, want: 'other5' });
+  ok(x.code === 'not_granted' && /did not open that conversation/.test(x.why) && x.reach === 'opened' && /reaches only what the key opened/.test(x.why), 'another key the coordinator holds did not open the worker ⇒ not_granted (the opener\'s row is the key\'s, not the caller\'s) — naming the reach the grant has (opened) and the door', x);
+  // THE INSTANCE REACH (lane key-instance-scope): the owner widens the second key's grant on the window's chip ⇒ it reaches a worker it never opened
+  const g5 = engine2.list().keys.find((k) => k.id === m2.key.id).grants[0];
+  ok(g5 && g5.reach === 'opened', 'a grant row carries its reach (opened by default — the list says so)');
+  ok(engine2.setReach(g5.id, 'everything').code === 'bad_args' && engine2.setReach('ag-000000000000', 'instance').code === 'not_found', 'setReach refuses an unknown reach by name (bad_args) and an unknown grant (not_found)');
+  const sr = engine2.setReach(g5.id, 'instance', { by: 'user' });
+  ok(sr.ok && sr.grant.reach === 'instance' && JSON.parse(fs.readFileSync(path.join(w.dir, A.STORE_FILE), 'utf8')).grants.find((g) => g.id === g5.id).reach === 'instance', 'the window\'s reach chip: the grant row\'s reach written to the store (the same write the card makes)');
+  sessions.set('sess-5-9', { name: 'old road', backend: 'claude', backendSessionId: 'stranger-5', mode: 'chat' });   // a conversation the OLD road opened: nobody's opened row, no grant
+  const y = await engine2.use({ caller: C5(), verb: 'conversations.status', args: { target: 'stranger-5' }, want: 'other5' });
+  ok(y.ok && y.result.sessionId === 'sess-5-9', 'with instance reach the key reaches a conversation it never opened and no grant names (status on the old road\'s worker)', y);
+  const kf = engine2.keysFor(C5());
+  ok(kf.find((k) => k.id === m2.key.id).reach === 'instance' && kf.find((k) => k.id === m.key.id).reach === 'opened' && kf.find((k) => k.id === m2.key.id).via[0].reach === 'instance', 'keysFor (the CLI\'s `keys`): each key\'s effective reach — instance on the widened one, opened on the dispatcher — and each via\'s');
+  const back = engine2.setReach(g5.id, 'opened');
+  const z = await engine2.use({ caller: C5(), verb: 'conversations.status', args: { target: 'stranger-5' }, want: 'other5' });
+  ok(back.ok && z.code === 'not_granted' && z.reach === 'opened', 'narrowed back to opened ⇒ the same call is not_granted again, naming the reach', z);
+  const ra = auditOf(w).filter((l) => l.verb === 'key.reach');
+  ok(ra.length === 2 && ra[0].args.reach === 'instance' && ra[1].args.reach === 'opened' && ra[0].subject === 'session:coord-5', 'both reach changes audited (key.reach · the kind · the grant\'s subject)', ra);
+}
+
+console.log('⑰b THE CARD\'S REACH (lane key-instance-scope) — the first-use card names the caller\'s Task Groups; its answer carries the reach the owner picked');
+{
+  const w = await mkWorld('reach-card');
+  const m = w.engine.mint({ name: 'dr', scopes: ['conversations.rename'], limits: OPEN_LIMITS, by: 'user' });
+  const CG = () => caller({ conversationId: 'conv-g', sessionKey: 'claude:conv-g', name: 'Grouped', groups: ['T-7', 'T-8'] });
+  const p1 = w.engine.use({ caller: CG(), verb: 'conversations.rename', args: { name: 'x' } });
+  await new Promise((r) => setImmediate(r));
+  const c = cards(w)[0];
+  ok(c && c.action.groups === 'T-7 T-8' && c.i18n.detail.length === 2 && /The reach says which other conversations/.test(c.i18n.detail[1].key), 'the card carries the caller\'s Task Group ids (action.groups, space-joined) and its words say what the reach is', c && c.action);
+  ok(w.engine.answer(c.action.askId, { answer: 'always', reach: 'everything' }).code === 'bad_args' && cards(w).length === 1, 'an unknown reach ⇒ bad_args, the card still up');
+  const a1 = w.engine.answer(c.action.askId, { answer: 'always', reach: 'groups', answeredBy: 'user' });
+  const g1 = w.engine.list().keys[0].grants[0];
+  ok(a1.ok && (await p1).ok && g1.subject === 'session:conv-g' && JSON.stringify(g1.reach) === '{"taskGroups":["T-7","T-8"]}', 'Always + 这些岗位的会话 ⇒ an always-grant whose reach is the caller\'s Task Groups; the call ran', { a1, g1 });
+  // a caller in NO group: the groups choice is refused; instance on a once-answer rides that one grant
+  const CA = () => caller({ conversationId: 'conv-a', sessionKey: 'claude:conv-a', name: 'Alone' });
+  const p2 = w.engine.use({ caller: CA(), verb: 'conversations.rename', args: { name: 'y' } });
+  await new Promise((r) => setImmediate(r));
+  const c2 = cards(w).find((i) => i.action.subject === 'session:conv-a');
+  ok(c2 && c2.action.groups === '' && w.engine.answer(c2.action.askId, { answer: 'once', reach: 'groups' }).code === 'bad_args', 'a caller in no Task Group: no groups on the card; 这些岗位的会话 answered anyway ⇒ bad_args');
+  const a2 = w.engine.answer(c2.action.askId, { answer: 'once', reach: 'instance' });
+  const r2 = await p2;   // the waiting call resumes after the answer: it spends the grant before it runs
+  const g2 = w.engine.list().keys[0].grants.find((g) => g.subject === 'session:conv-a');
+  ok(a2.ok && r2.ok && g2.mode === 'once' && g2.spentAt && g2.reach === 'instance', 'Allow once + 整个 VibeSpace ⇒ that once-grant carries instance (spent by the call)', g2);
+  ok(auditOf(w).filter((l) => l.verb === 'key.grant').map((l) => l.args.reach).join() === 'groups,instance', 'each grant\'s audit line names its reach kind');
+}
+
 console.log('⑩ wiring pins');
 {
   const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
@@ -871,7 +1034,7 @@ console.log('⑩ wiring pins');
   ok(VE.isSecretName('apikey:ak-000000000001') && R('src/vault.js').SECRETS_AT_REST.some((r) => r.entry === 'apikey:<key id>') && R('src/vault-inventory.js').GROUP_IDS.includes('automation') && R('src/vault-inventory.js').revealableOf('automation', 'apikey:ak-000000000001'),
     'the vault: apikey:<id> is a secret entry, SECRETS_AT_REST names it, the window lists «Automation keys» (revealable — only to hand to an outside party)');
   const routes = read('src/routes/automation.js');
-  ok(!/app\.(post|delete|put|patch)\('\/api\/agent\/automation\/[^']*grant/.test(routes) && (routes.match(/app\.(get|post|delete)\('\/api\/automation\//g) || []).length === 8 && (routes.match(/person\(/g) || []).length >= 8, 'NO agent route writes a grant; the eight owner doors (+ 边界…, 审计… — lane automation-open-limits) are person-only');
+  ok(!/app\.(post|delete|put|patch)\('\/api\/agent\/automation\/[^']*grant/.test(routes) && (routes.match(/app\.(get|post|delete)\('\/api\/automation\//g) || []).length === 9 && (routes.match(/person\(/g) || []).length >= 9 && /app\.post\('\/api\/automation\/grants\/:grantId\/reach', person\(/.test(routes), 'NO agent route writes a grant; the nine owner doors (+ 边界…, 审计… — lane automation-open-limits; + a grant\'s reach — lane key-instance-scope) are person-only');
   ok(/name: 'test-automation-keys', tier: 'fast'/.test(read('scripts/ci.mjs')), 'this suite has its tier row');
 }
 
@@ -987,7 +1150,7 @@ console.log('⑮ THE FEEDBACK VERBS (lane feedback-handled-verb — the owner 20
   const mr = await FX.automationVerbs({ store: mstore })['feedback.handled']({ id: m1.report.id, version: '2.369.330' }, { caller: me });
   const mx = effects(mstore, mdir, m1.report.id);
   ok(mr.ok && mx.disk === SAYS && !allSay(mx), `MUTANT RED: the direct write says handled ON DISK only — the live store (${mx.live}) and the mirror every sheet draws (${mx.mirror}) never moved`, mx);
-  ok(/verbs: \{ \.\.\.require\('\.\/conversation-ops\.js'\)\.automationVerbs\(\{ activeSessions, groupsOf: automationGroupsOf \}\), \.\.\.require\('\.\/feedback-store\.js'\)\.automationVerbs\(\{ store: feedback \}\) \}/.test(fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8')), 'WIRING: the hub hands the engine the feedback verbs over THE store the owner\'s routes use (the same `feedback` instance)');
+  ok(/verbs: \{ \.\.\.require\('\.\/conversation-ops\.js'\)\.automationVerbs\(\{ activeSessions, groupsOf: automationGroupsOf[\s\S]*?\}\), \.\.\.require\('\.\/feedback-store\.js'\)\.automationVerbs\(\{ store: feedback \}\) \}/.test(fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8')), 'WIRING: the hub hands the engine the feedback verbs over THE store the owner\'s routes use (the same `feedback` instance)');
   const CLI = R('data/bin/vibespace-api');
   ok(CLI.USAGE.includes('vibespace-api call feedback.list') && CLI.USAGE.includes('vibespace-api call feedback.handled --id <fb-…> --version <2.369.NNN> [--note "…"]'), 'the CLI\'s usage names the two calls (`call` is generic: the hub\'s table judges every verb)');
   ok(A.CODES.write_failed === 503 && /write_failed: 'the change could not be written on the server/.test(fs.readFileSync(path.join(ROOT, 'src/routes/automation.js'), 'utf8')), 'a store that could not write ⇒ 503 write_failed, worded at the door');

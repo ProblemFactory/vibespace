@@ -197,6 +197,7 @@
   "/api/exits/asks",
   "/api/exits/audit",
   "/api/feedback",
+  "/api/feedback/forward/marks",
   "/api/file/binary",
   "/api/file/content",
   "/api/file/csv",

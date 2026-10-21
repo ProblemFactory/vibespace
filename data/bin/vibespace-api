@@ -27,8 +27,11 @@ const USAGE = [
   '      a billed open (the spend ceiling decides first); answers sessionId + the conversation id, or pending',
   '  vibespace-api conversations status <target>              its ids (pending until its CLI reported one)',
   '  vibespace-api conversations rename <target> "<name>"     ·  bind <target> <T-…>  ·  end <target>',
+  '  vibespace-api conversations archive <target> [--force] [--resolve-asks]   end it if still live, then archive it as the sidebar\'s 归档 does',
+  '                (a running turn ⇒ subject_busy unless --force; its open For-you asks ⇒ asks_open naming them, unless --resolve-asks dismisses them; archived already ⇒ already_archived)',
   '  vibespace-api groups invite <g-…|group name> <target>    into an agent group you are in (no wake)',
   '  <target> = a conversation id, <backend>:<id> or a session id (sess-…); a conversation the key opened is within its reach',
+  '  the grant\'s REACH (`keys` prints it): opened = only what the key opened (+ what a grant names, yourself) · groups: <T-…> = those Task Groups\' conversations too · instance = every conversation here; outside it ⇒ not_granted naming the reach (the user widens it on the key\'s row in the Vault window)',
   'no grant yet ⇒ the call asks the user in For you (≤ 60 s) and waits; a refusal is final for 10 minutes. Full manual: vibespace-docs api',
   'the vault locked ⇒ every call answers vault_locked (exit 3): the user has already been told and a person unlocks it on this instance\'s page — never ask them to unlock; wait, or do other work',
   'an open stays inside its key\'s LIMITS (folders · accounts · permission modes · models · modes — `keys` prints them); outside ⇒ refused by name',
@@ -39,6 +42,12 @@ function limitsWords(l) {
   if (!l || typeof l !== 'object') return 'none set — every open is refused until the user sets them in the Vault window';
   const any = (v) => (v === 'any' ? 'any' : Array.isArray(v) && v.length ? v.join(', ') : 'none');
   return `folders ${any(l.cwdRoots)} · accounts ${any(l.accounts)} · permission modes ${any(l.permissionModes)} · models ${any(l.models)} · modes ${any(l.modes)}`;
+}
+/** A grant's reach in words (lane key-instance-scope): opened (the default) · groups: <ids> · instance. */
+function reachWords(r) {
+  if (r === 'instance') return 'instance (every conversation here)';
+  if (r && typeof r === 'object' && Array.isArray(r.taskGroups)) return `groups: ${r.taskGroups.join(', ')} (their conversations, and what the key opened)`;
+  return 'opened (only what the key opened, what a grant names, and yourself)';
 }
 async function call(method, route, body) {
   const res = await fetch(API + route, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
@@ -69,6 +78,8 @@ const TYPED = {
   'conversations rename': { verb: 'conversations.rename', pos: ['target', 'name'], flags: [] },
   'conversations bind': { verb: 'conversations.bind', pos: ['target', 'task'], flags: [] },
   'conversations end': { verb: 'conversations.end', pos: ['target'], flags: [] },
+  // lane conversations-archive-verb: `bool` flags take NO value (--force / --resolve-asks ⇒ force / resolveAsks: true)
+  'conversations archive': { verb: 'conversations.archive', pos: ['target'], flags: [], bool: ['force', 'resolve-asks'] },
   'groups invite': { verb: 'groups.invite', pos: ['group', 'target'], flags: [] },
 };
 function typed(argv) {
@@ -81,6 +92,7 @@ function typed(argv) {
     const a = rest[i];
     if (!a.startsWith('--')) { pos.push(a); continue; }
     const k = a.slice(2), v = rest[i + 1];
+    if ((row.bool || []).includes(k)) { const name = k.replace(/-([a-z])/g, (m, c) => c.toUpperCase()); if (name in args) return { error: `--${k} given twice` }; args[name] = true; continue; }
     if (k !== 'key' && !row.flags.includes(k)) return { error: `--${k} is not a flag of ${g} ${sub}` };
     if (v === undefined || v.startsWith('--')) return { error: `--${k} needs a value` };
     if (k === 'key') key = v; else if (k in args) return { error: `--${k} given twice` }; else args[k] = v;
@@ -106,7 +118,7 @@ async function main() {
     if (more.length) { console.error(USAGE); process.exit(2); }
     const d = await call('GET', '/api/agent/automation/keys');
     if (!d.keys.length) { console.log('no key is granted to this conversation yet — calling a verb asks the user (For you), or they grant one in the Vault window'); return; }
-    for (const k of d.keys) console.log(`${k.name} (${k.id}) — ${k.scopes.join(', ')} — via ${k.via.map((v) => `${v.subject}${v.mode === 'once' ? ' (once)' : ''}`).join(', ')}${k.scopes.includes('conversations.open') ? `\n  limits: ${limitsWords(k.limits)}` : ''}`);
+    for (const k of d.keys) console.log(`${k.name} (${k.id}) — ${k.scopes.join(', ')} — via ${k.via.map((v) => `${v.subject}${v.mode === 'once' ? ' (once)' : ''}`).join(', ')} — reach: ${reachWords(k.reach)}${k.scopes.includes('conversations.open') ? `\n  limits: ${limitsWords(k.limits)}` : ''}`);
     return;
   }
   if (cmd === 'audit') {
@@ -137,4 +149,4 @@ async function main() {
   process.exit(2);
 }
 if (require.main === module) main().catch((e) => { console.error('vibespace-api:', e.message); process.exit(1); });
-module.exports = { typed, TYPED, USAGE, limitsWords };
+module.exports = { typed, TYPED, USAGE, limitsWords, reachWords };

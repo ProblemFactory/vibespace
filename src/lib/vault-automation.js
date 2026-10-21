@@ -11,11 +11,16 @@
 // M1). 审计… lists the key's audit lines (a refused open with its code). Lane automation-open-permission-resolve (q-049 M2): the
 // picker's `default` row says what the CLI's own setting is NOW (the hub resolves it per folder) — the hub refuses an open whose
 // resolved mode the key does not list.
+// Lane key-instance-scope (the owner 2026-10-20 「key 应该可以被授权在整个 vibe space 上工作」): every 授权给 chip carries the grant's REACH
+// as a chip of its own — 只有它开的会话 (the default) · 这些岗位的会话 (its Task Groups) · 整个 VibeSpace (RED, its title: this key may
+// act on every conversation here, including yours); a click opens the reach dialog (the same store write the first-use
+// card makes — POST /api/automation/grants/:id/reach); 授权给… picks the reach of the grants it adds.
 import { t } from './i18n.js';
 import { fetchJson, showToast, showConfirmDialog, createModalShell } from './utils.js';
 import { SCOPES } from '../automation-keys.js'; // PURE: the closed table of verbs (their words)
 import { BACKEND_META } from './agent-meta.js';
 import { enterSubmits } from './chat-enter-keys.js'; // an Enter that ends an IME composition never submits
+import { REACH_CHOICES, reachWord, reachTitle, kindOf, groupsOf } from './automation-reach.js'; // lane key-instance-scope: ONE spelling of the reach's words
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const verbWord = (verb) => { const s = SCOPES.find((x) => x.verb === verb); return s ? t(s.label) : verb; };
@@ -232,6 +237,14 @@ export function automationExtras(row, data, { refresh } = {}) {
       const chip = el('span', 'vw-ak-chip');
       chip.dataset.subject = g.subject;
       chip.append(el('span', null, subjectName(g.subject, data) + (g.mode === 'once' ? ` (${t('once')}${g.spentAt ? ', ' + t('used') : ''})` : '')));
+      // lane key-instance-scope: the grant's REACH chip — a click changes it (整个 VibeSpace red, its title says what it means)
+      const kind = kindOf(g.reach), ids = groupsOf(g.reach);
+      const rc = el('button', `vw-ak-reach vw-ak-reach-${kind}`, reachWord(kind));
+      rc.type = 'button'; rc.dataset.reach = kind;
+      rc.title = kind === 'instance' ? reachTitle(kind) : `${reachTitle(kind, ids.map((id) => subjectName(`group:${id}`, data)).join(', '))} — ${t('Change the reach…')}`;
+      rc.setAttribute('aria-label', `${t('Reach')}: ${reachWord(kind)}`);
+      rc.onclick = () => showReachDialog(key, g, data, { refresh });
+      chip.append(rc);
       const x = el('button', 'vw-ak-x', '✕');
       x.type = 'button'; x.title = t('Take this grant back'); x.setAttribute('aria-label', x.title);
       x.onclick = async () => { const r = await fetchJson(`/api/automation/grants/${encodeURIComponent(g.id)}`, { method: 'DELETE' }); if (!r || !r.ok) showToast(failWords(r), { type: 'error' }); refresh?.(); };
@@ -272,6 +285,63 @@ export function automationExtras(row, data, { refresh } = {}) {
   return { box, doors: [grantB, ...(limB ? [limB] : []), auditB, revokeB] };
 }
 
+/** The three reach rows (radios) + the Task Groups list the groups row opens — `initial` = a stored reach (the dialog) or
+ *  null (the picker: opened). → { node, value() } where value() = 'opened' | 'instance' | { taskGroups } | null (groups, none picked). */
+function reachRows(initial, data, { id }) {
+  const box = el('div', 'vw-ak-reach-rows');
+  const kind = initial ? kindOf(initial) : 'opened', had = initial ? groupsOf(initial) : [];
+  const groups = ((data && data.subjects && data.subjects.groups) || []).map((g) => ({ id: String(g.subject).replace(/^group:/, ''), name: g.name }));
+  for (const h of had) if (!groups.some((g) => g.id === h)) groups.push({ id: h, name: h });   // a group the store names that the picker no longer lists
+  const radios = [], gboxes = [];
+  const glist = el('div', 'vw-ak-reach-groups');
+  for (const r of REACH_CHOICES) {
+    if (r === 'groups' && !groups.length) continue;
+    const lab = el('label', `vw-ak-pick vw-ak-reach-row vw-ak-reach-${r}`);
+    const rb = el('input'); rb.type = 'radio'; rb.name = `vw-ak-reach-${id}`; rb.value = r; rb.checked = r === kind;
+    lab.title = reachTitle(r, had.map((h) => (groups.find((g) => g.id === h) || { name: h }).name).join(', '));
+    lab.append(rb, el('span', null, reachWord(r)));
+    box.append(lab);
+    radios.push(rb);
+    if (r === 'groups') {
+      for (const g of groups) {
+        const gl = el('label', 'vw-ak-pick vw-ak-reach-group');
+        const cb = el('input'); cb.type = 'checkbox'; cb.value = g.id; cb.checked = had.includes(g.id);
+        gl.append(cb, el('span', null, g.name));
+        glist.append(gl); gboxes.push(cb);
+      }
+      box.append(glist);
+    }
+  }
+  const sync = () => { glist.hidden = !radios.some((r) => r.value === 'groups' && r.checked); };
+  for (const r of radios) r.addEventListener('change', sync);
+  sync();
+  const value = () => { const k = (radios.find((r) => r.checked) || {}).value || 'opened'; if (k !== 'groups') return k; const ids = gboxes.filter((b) => b.checked).map((b) => b.value); return ids.length ? { taskGroups: ids } : null; };
+  return { node: box, value };
+}
+/** The reach dialog (lane key-instance-scope): one grant's reach, changed — the key row's chip opens it; 保存 writes it. */
+export function showReachDialog(key, g, data, { refresh } = {}) {
+  const { body, close } = createModalShell({ id: 'vault-ak-reach', title: t('Reach of "{name}" for {subject}', { name: key.name, subject: subjectName(g.subject, data) }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true });
+  body.append(el('div', 'vw-ak-hint', t('Which other conversations that conversation may rename, end or archive with this key. What it opened, what a grant names and itself are always within reach.')));
+  const rows = reachRows(g.reach, data, { id: g.id });
+  body.append(rows.node);
+  const f = el('div', 'dialog-footer');
+  const cancel = el('button', 'btn-cancel', t('Cancel'));
+  const save = el('button', 'btn-create vw-ak-reach-save', t('Save'));
+  cancel.type = save.type = 'button';
+  cancel.onclick = () => close();
+  save.onclick = async () => {
+    const v = rows.value();
+    if (v === null) { showToast(t('Pick at least one Task Group'), { type: 'error' }); return; }
+    const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/reach`, { reach: v });
+    if (!r || !r.ok) { showToast(failWords(r), { type: 'error' }); return; }
+    showToast(t('Saved'));
+    close();
+    refresh?.();
+  };
+  f.append(cancel, save);
+  body.parentNode.append(f);
+}
+
 /** 授权给…: every live conversation and Task Group, multi-select; checked = granted (unchecking takes a grant back). */
 export function showGrantPicker(key, data, { refresh } = {}) {
   const { body, close } = createModalShell({ id: 'vault-ak-grant', title: t('Grant "{name}" to', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true });
@@ -293,6 +363,10 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   section(t('Conversations'), subjects.sessions || []);
   section(t('Task groups'), subjects.groups || []);
   if (!boxes.length) body.append(el('div', 'vw-empty', t('Nothing to pick: no conversation is running and there is no task group')));
+  // lane key-instance-scope: the reach of the grants this save ADDS (an existing grant's reach is its chip's)
+  body.append(el('div', 'vw-ak-sec', t('Reach of the grants you add')));
+  const rows = reachRows(null, data, { id: 'picker' });
+  body.append(rows.node);
   body.append(el('div', 'vw-ak-hint', t('A conversation granted the key uses it with its own session — it never sees the key\'s value.')));
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
@@ -302,8 +376,10 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   save.onclick = async () => {
     const add = boxes.filter((b) => b.checked && !had.has(b.value)).map((b) => b.value);
     const drop = boxes.filter((b) => !b.checked && had.has(b.value)).map((b) => had.get(b.value));
+    const reach = rows.value();
+    if (add.length && reach === null) { showToast(t('Pick at least one Task Group'), { type: 'error' }); return; }
     let bad = null;
-    if (add.length) { const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/grants`, { subjects: add }); if (!r || !r.ok) bad = r || {}; }
+    if (add.length) { const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/grants`, { subjects: add, reach }); if (!r || !r.ok) bad = r || {}; }
     for (const gid of drop) { const r = await fetchJson(`/api/automation/grants/${encodeURIComponent(gid)}`, { method: 'DELETE' }); if (!r || !r.ok) bad = r || {}; }
     if (bad) showToast(failWords(bad), { type: 'error' }); else showToast(t('Saved'));
     close();

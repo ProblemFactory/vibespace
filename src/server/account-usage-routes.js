@@ -164,13 +164,9 @@ const wakeOnLoginSuccess = (id, r, why, memberId = null) => {
 // events: names/stacks/metrics only, never content. ──
 const TELEMETRY_INGEST_TOKEN = (process.env.VIBESPACE_TELEMETRY_INGEST_TOKEN || '').trim();
 app.post('/api/telemetry/ingest', (req, res) => {
-  if (!TELEMETRY_INGEST_TOKEN) return res.status(404).json({ error: 'collector disabled' });
-  const crypto = require('crypto');
-  const got = Buffer.from(String(req.headers.authorization || ''));
-  const want = Buffer.from(`Bearer ${TELEMETRY_INGEST_TOKEN}`);
-  if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) {
-    return res.status(403).json({ error: 'bad token' });
-  }
+  // THE COLLECTOR'S VERDICT (src/telemetry.js) — one gate for this door and the maintainer hub's feedback doors
+  const gate = require('../telemetry').collectorVerdict(req.headers.authorization, TELEMETRY_INGEST_TOKEN);
+  if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
   try {
     const n = telemetry.ingestRemote(req.body?.instance, req.body?.events);
     res.json({ success: true, n });

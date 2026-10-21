@@ -78,6 +78,10 @@ class Telemetry {
     this._forward(batch);
   }
 
+  /** the forward target as configured (settings first, then the deployment env) — lane feedback-forward: an agent's
+   *  feedback report rides the same target to the maintainer hub (src/server/feedback-forward.js) */
+  forwardTarget() { return { url: String(this._getForwardUrl() || ''), token: String(this._getForwardToken() || '').trim() }; }
+
   // Optional central collector (company rollout): fire-and-forget batches.
   _forward(batch) {
     const url = this._getForwardUrl();
@@ -253,4 +257,16 @@ class Telemetry {
   }
 }
 
-module.exports = { Telemetry };
+/** THE COLLECTOR'S VERDICT — the telemetry ingest door's, and (lane feedback-forward) the maintainer hub's two feedback
+ *  doors': the shared Bearer token is both the on-switch and the whole gate. No token configured ⇒ 404 `collector disabled`;
+ *  anything but `Bearer <token>` (timing-safe) ⇒ 403 `bad token`. */
+function collectorVerdict(authorization, token) {
+  const tok = String(token || '').trim();
+  if (!tok) return { ok: false, status: 404, error: 'collector disabled' };
+  const got = Buffer.from(String(authorization || ''));
+  const want = Buffer.from(`Bearer ${tok}`);
+  if (got.length !== want.length || !require('crypto').timingSafeEqual(got, want)) return { ok: false, status: 403, error: 'bad token' };
+  return { ok: true };
+}
+
+module.exports = { Telemetry, collectorVerdict };

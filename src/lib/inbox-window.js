@@ -29,6 +29,7 @@ import { UI_ICONS } from './icons.js';
 import { pressVerdict } from './press-arm.js'; // verify-r6 V1: an Allow counts only once its pane has been shown ARM_MS
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
+import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: an automation card's reach choices in the pane
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts
 import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml, askChipEls, linkifyInto } from './user-todos-row.js'; // THE keyed reconciler + the row words
@@ -280,6 +281,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     const replied = mk('div', 'iw-replied');
     const cutLine = mk('div', 'iw-detail-cut'); // "showing the first N characters — loading the rest…" / the load's failure, by name
     const opts = mk('div', 'iw-opts');
+    const reach = mk('div', 'iw-reach'); // lane key-instance-scope: an automation card's REACH radios (只有它开的会话 / 这些岗位的会话 / 整个 VibeSpace), above its answers
+    reach.setAttribute('role', 'radiogroup');
     const reply = mk('div', 'iw-reply');
     const ta = mk('textarea', 'iw-reply-input');
     ta.rows = 3;
@@ -290,8 +293,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     reply.append(why, voiceField(ta, attachDictation(ta)));
     const actions = mk('div', 'iw-actions');
     const arts = mk('div', 'iw-arts'); // lane foryou-attachments: the ask's --artifact chips, under the question
-    el.append(head, title, arts, detail, cutLine, replied, opts, reply, actions);
-    return { el, id, dot, sess, ld, nm, board, meta, title, arts, detail, cutLine, replied, opts, reply, ta, why, actions, sig: {} };
+    el.append(head, title, arts, detail, cutLine, replied, opts, reach, reply, actions);
+    return { el, id, dot, sess, ld, nm, board, meta, title, arts, detail, cutLine, replied, opts, reach, reply, ta, why, actions, sig: {} };
   };
   /** A previewed detail (a resolved item's snapshot carries 300 chars): load the rest ONCE
    *  through the model; a failure lands on the pane as its sentence, never silently. */
@@ -469,6 +472,20 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       c.sig.opts = optSig;
     }
     c.opts.style.display = v.options.length ? '' : 'none';
+    // lane key-instance-scope: an open automation card's reach choices (keyed by the ask — a re-render never drops the pick)
+    const rk = v.hubAsk && v.hubAsk.type === 'automation-ask' && !v.resolved ? v.hubAsk : null;
+    const reachSig = rk ? rk.askId + '\u0000' + rk.groups.join(',') : '';
+    if (c.sig.reach !== reachSig) {
+      c.reach.setAttribute('aria-label', t('Reach'));
+      c.reach.replaceChildren(...(rk ? [mk('span', 'iw-reach-lbl', t('Reach')), ...REACH_CHOICES.filter((r) => r !== 'groups' || rk.groups.length).map((r) => {
+        const lab = mk('label', `iw-reach-opt iw-reach-${r}`); lab.title = reachTitle(r, rk.groups.join(', '));
+        const rb = mk('input'); rb.type = 'radio'; rb.name = `iw-ak-reach-${rk.askId}`; rb.value = r; rb.checked = r === 'opened';
+        lab.append(rb, mk('span', null, reachWord(r)));
+        return lab;
+      })] : []));
+      c.sig.reach = reachSig;
+    }
+    c.reach.style.display = rk ? '' : 'none';
     // the reply box exists while the item has a reply surface; its node is never replaced
     c.reply.style.display = v.reply.show ? '' : 'none';
     // the action row, keyed by the verdict's action list
@@ -664,7 +681,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always' || a === 'pool-always' || a === 'shape-always' || a === 'grant-8h') {
       // lane hub-act-ask: the same arm as every Allow (a pane shown ARM_MS ago or less is not the one the user read)
       if (a !== 'hub-deny') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again')); return; } }
-        if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a === 'grant-8h' ? '8h' : a.slice(4))) advance(id);
+        const reachPick = st.cur && st.cur.id === id ? st.cur.reach.querySelector('input:checked') : null;   // lane key-instance-scope: the pane's picked reach rides an automation answer
+        if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a === 'grant-8h' ? '8h' : a.slice(4), reachPick ? { reach: reachPick.value } : {})) advance(id);
       return;
     }
     if (a === 'exit-allow' || a === 'exit-deny') {

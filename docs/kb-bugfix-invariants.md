@@ -642,6 +642,7 @@
 - (2026-10-20) A MAIN WINDOW TITLE WENT MISSING UNDER LOAD (lane xpra-title-election, B-a566): a window re-announced at the same wid lost its fresh title metadata at xpra-client's `if (!win) return`. 不变量 = a title is a fact of the RECORD, held for an absent window (kb-bugfix-invariants)
 - (2026-10-20) A WEBDAV / SFTP MOUNT PASSWORD RODE `rclone obscure <plain>` ON ARGV, readable in /proc/<pid>/cmdline (lane mount-password-off-argv, B-d752). FIX = rclone's public obscure computed in-process (src/rclone-obscure.js). 不变量 = a secret never rides argv (kb-bugfix-invariants)
 - (2026-10-20) A JOB'S SECRETS + jbt_ TOKEN RODE ARGV (job-spec-off-argv): base64 in /proc/<pid>/cmdline for the job's life. FIX = a 0600 spec file, read once, unlinked; the wrapper's env built. 不变量 = a secret never rides argv — the process list is public to every local user (kb-bugfix-invariants)
+- (2026-10-20) A JOB STARTED IN AN UPDATE'S WINDOW WAS REPORTED FAILED (fb-7f7be1e24e): the old server spawned the new wrapper on disk (.330 argv spec → .331 wrapper: refused, exit 2). FIX = a said protocol + update_window. 不变量 = a helper on disk may be newer than its server (kb-bugfix-invariants)
 - (2026-10-20) A POD'S INSTANCE URL NEVER CAME BACK AFTER A RESTART (.330 canary): instance-url asked status(providerId?.('relay')) of an object with no providerId ⇒ «not configured» since .214. FIX = plugins.relayStatus(). 不变量 = an injected object carries what is read on it (kb-bugfix-invariants)
 - (2026-10-20) A HUNG PAGE COULD NOT BE RESTARTED AFTER A SERVER UPDATE (B-1574, userW): the verdict read the endpoint, the boot adopted on the daemon's word. 不变量 = a restart judges the page's answers, never the helper's; an orphan is re-owned or ended, never left (kb-bugfix-invariants)
 - (2026-10-20) A LOCKED VAULT WAS SAID FIRST AT A REFUSAL (owner; vault-locked-loud): FIX = one PURE table: the dialog at load (once per lock), a red ⚙, ONE urgent For-you item the moment it locks. 不变量 = a locked vault is said at the first screen, never first at a refusal (kb-bugfix-invariants)
@@ -651,6 +652,7 @@
 - (2026-10-20) A JOB-LOG LEG PASSED ON A REFUSED RUN, THEN WENT RED (.331 mirror): test-agent-output-sinks §3 still put the job's spec on argv; .331's wrapper refuses that by name. FIX = the engine's spec file + a RAN check. 不变量 = a leg proves its subject ran (kb-bugfix-invariants)
 - (2026-10-20) THE GRADUATION SUITE'S FAKE SSH LOST ITS MACHINE (.331 mirror): it read VS_FAKE_ROOT from the env the hub hands ssh, which .331 rightly cut to hosts.sshEnv(). FIX = its world baked in + an ssh-env pin. 不变量 = a fake reads nothing from the road it tests (kb-bugfix-invariants)
 - (2026-10-20) 3 CHROME SUITES RED ON 1 CSP REPORT EACH (.331 mirror): not the product — each negative control put a raw <img onerror> on the app page. FIX = the controls parse in an inert document. 不变量 = the app page carries no inline handler — the CSP teardown is the fence (kb-bugfix-invariants)
+- (2026-10-20) AN AUTOMATION KEY COULD NOT END THE WORKERS IT OPENED AFTER A RESTART (the opener's reach was a Map in memory). 不变量 = a fact a verdict needs is persisted beside its other facts (the key store's `opened` rows), judged by ONE PURE rule (reachVerdict) with a mutant that drops it.
 
 ## THREE CHROME SUITES ENDED RED ON ONE CSP REPORT EACH — THEIR OWN NEGATIVE CONTROL'S INLINE HANDLER ON THE APP PAGE (the .331 CI mirror, Actions run 39489998424; lane mirror-331-reds-chrome, 2026-10-20)
 
@@ -677,6 +679,44 @@ The job engine (src/jobs.js `_spawn`) started each run as `node data/bin/job-wra
 **FIX.** The spec rides a FILE: `<ctlDir>/spec.<runTs>.json`, created O_EXCL with mode 0600 in a ctl dir made 0700; argv carries only its path. The wrapper reads it once and unlinks it before anything else; nothing re-reads it (a job back after a restart is adopted by its stamp or re-spawned through `_spawn`, which writes a fresh file from the store). The wrapper's own env is built from an allowlist (PATH HOME LANG TMPDIR + VIBESPACE_JOB_ID — measured, it needs none of it), and a spec without env is refused with a named line, never run on the wrapper's own.
 
 **不变量 / Gates.** A secret never rides argv — the process list is public to every local user; it rides a file only its owner can read, or an env a builder made. A child's env is built, never inherited, and a missing env is a refusal, never a fallback. test-jobs-engine §12 reads the REAL wrapper's /proc/<pid>/cmdline and environ under a planted shell; each mutant control (the spec on argv again, the wrapper spawned with no env, the fallback restored) turns its named rows red.
+
+## A JOB STARTED IN AN UPDATE'S WINDOW WAS REPORTED FAILED: THE NEW WRAPPER ON DISK, THE OLD SERVER STILL SPAWNING (agent feedback fb-7f7be1e24e, 2026-10-20; lane job-wrapper-update-window, .333)
+
+**Symptom.** A cron child's run (jb-6f23c3de of cron jb-dfac2435) started at 21:46:02.68Z while the owner's hub updated .330 → .331. Its log held one line, «[job-wrapper] refused: the spec path names no file of the ctl dir»; exit 2; a failure notice reached the agent at 21:46:05Z. The runs before (21:29Z) and after (22:04Z) exited 0. The agent's reading («wrapper 收尾阶段的 ctl 路径问题») was close but wrong: the job never started.
+
+**Cause.** scripts/update.sh pulls first, which changes the tracked data/bin/job-wrapper.js on disk at once (21:45:24Z on the hub). It then installs and builds, and restarts last (21:46:09Z). For those 45 s the OLD server spawns whatever wrapper is on disk.
+- job-spec-off-argv (.331) moved the spec from argv (base64) into a 0600 file of the ctl dir, and made the wrapper refuse anything else by name.
+- The .330 server still sent argv.
+- The old server both spawned the run and judged it. The run's ctl dir is 0775, and a .331 server chmods it to 0700. The notice went out at 21:46:05, 4 s before the stop, from the engine's 5 s sweep.
+- So nothing a NEW server reads could have saved this run. Only the wrapper could.
+
+**Fix.**
+1. The protocol is versioned. The server says `--proto=2` (src/jobs.js WRAPPER_PROTO, pinned equal to the wrapper's PROTO). An older server is known by its shape: a file of the ctl dir = 2 (.331/.332), a base64 JSON spec = 1 (≤ .330).
+2. Protocol 1 is read, loudly:
+   - The job runs; its log opens with «[job-wrapper] warning: started by an older server during an update — …»; the exit is the child's.
+   - Only an old caller sends this. No server of this tree does: §12 M1 is RED on one that does. The compat reads; it never writes.
+   - It expires at .340: test-job-model goes RED there.
+3. A protocol the wrapper does not speak never starts the job. exit.json carries reason update_window (exit 75), and the spec file is removed unread.
+4. A server from .333 on judges that end. It is a WINDOW when an older server generation started the run, or the wrapper changed on disk after this server booted and less than 15 min ago. Then:
+   - a task is interrupted (cause update_window), with no failure notice and no user inbox;
+   - the restarted server runs a one-shot task again at boot;
+   - a cron child waits for its next fire;
+   - a service is down, never counted as a crash, and the boot replay starts it.
+   Outside a window the mismatch is the install's own fault: failed (wrapper-mismatch), and said.
+
+**Roads measured.**
+- The in-app Update (update.sh, on the hub and in a pod) has the window.
+- The BOOT auto-update has none: server.js pulls and builds before jobs-wiring creates the engine.
+- A new image restarts the server and the wrapper together.
+
+update.sh is unchanged. An old server cannot be taught to wait; the protocol makes the window harmless.
+
+**Residuals.**
+- The hub's own .330 → .331 window has passed, and that run stays failed in its record.
+- A .331/.332 server reads no reason. If the protocol moves again while one is updating, it files exit 75 as failed.
+- After the .340 expiry, a run in a ≤ .330 hub's window ends «not started», and its old server says failed (once).
+
+**Invariant.** A helper on disk may be newer, or older, than the server that starts it. The protocol between them is versioned and said, never assumed. A reader of an older caller is loud and has a stated expiry. A mismatch is NAMED (update_window), so the side that judges can tell an update's window from a fault.
 
 ## A FLEET POD'S INSTANCE URL NEVER CAME BACK AFTER A RESTART: «THE FRP RELAY IS NOT CONFIGURED» WHILE FRPC RAN (a fleet canary red 2026-10-20, a pod updated .288 → .330; lane fleet-instance-publish, .331)
 

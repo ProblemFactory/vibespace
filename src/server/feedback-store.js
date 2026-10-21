@@ -6,10 +6,18 @@
 // SERVER-OWNED: a client's state-set into it is refused (src/ws-handler.js reads `clientWrites`), its version is persisted
 // here so it only ever grows across restarts (a client never sees a rollback). flush() writes a change a failed write left
 // behind — server.js's shutdown / crash belts call it through the mirror like every SyncStore. ORCH tier.
+// THE FORWARD (lane feedback-forward; the rules src/feedback-forward-model.js): a NEW report (never a repeat's count bump)
+// is handed to `onNew` once written — the origin's forwarder queues it for the maintainer hub (src/server/feedback-forward.js).
+// On the hub, `receive` keeps a FORWARDED report beside the own ones with `origin {instance, id, version, key}` (key = the
+// origin key's hash): its words are PEER text — another instance's agent wrote them — so they are stored through the belt
+// (src/peer-text.js); the same origin's same report again is the record already made. A status change on a forwarded
+// report stamps `markedAt` (strictly increasing) and `marks` answers that origin — and only it — the marks since its
+// cursor; on the origin, `applyMarks` applies them to its OWN reports (the hub's note / name through the belt).
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const M = require('../feedback-model.js');
+const FF = require('../feedback-forward-model.js');   // lane feedback-forward: the forward's rules (PURE)
 const PT = require('../peer-text.js');   // the belt: another agent's words toward an agent (feedback.list)
 const { SyncStore } = require('../sync-store.js');
 
@@ -25,7 +33,7 @@ class FeedbackSync extends SyncStore {
   flush() { this.owner.flush(); }
 }
 
-function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(), log = () => { } }) {
+function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(), log = () => { }, onNew = null }) {
   const file = path.join(dataDir, 'feedback.json');
   let state = { v: 1, records: [], dropped: 0, syncVersion: 0 };
   try {
@@ -38,6 +46,9 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
   const sync = new FeedbackSync(wss, api);
   sync.version = state.syncVersion;
   for (const r of state.records) sync.data[r.id] = M.publicRow(r);
+  let lastMark = state.records.reduce((m, r) => Math.max(m, Number(r.markedAt) || 0), 0);
+  const nextMark = () => (lastMark = Math.max(now(), lastMark + 1));   // strictly increasing: the origin's cursor never skips a tie
+  const belt = (s, max, kind = 'line') => (s == null || s === '' ? null : PT.toAgentText(s, { kind, max }));
 
   const save = () => {
     state.syncVersion = sync.version;
@@ -64,6 +75,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     sync.set(f.record.id, M.publicRow(f.record));
     if (!save()) return { ok: false, code: 'write_failed', error: 'the report could not be written on the server — try again in a minute' };
     if (sid) lastPost.set(sid, at);
+    if (!f.duplicate && onNew) { try { onNew(M.publicRow(f.record)); } catch (e) { log('[feedback] the forward did not take report', f.record.id, e.message); } }
     return { ok: true, report: M.publicRow(f.record), duplicate: f.duplicate, chars: M.chars(v.value.text) };
   };
   /** the owner's open / handled — THE one call (the owner's PATCH and the maintainer's feedback.handled); `version` /
@@ -73,10 +85,51 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     if (i < 0) return { ok: false, code: 'not_found', error: `no report ${String(id).slice(0, 40)}` };
     const s = M.setStatus(state.records[i], status, { by, now: now(), version, note });
     if (!s.ok) return s;
+    if (s.record.origin) s.record.markedAt = nextMark();   // lane feedback-forward: the mark goes back when its origin next asks
     state.records[i] = s.record;
     sync.set(id, M.publicRow(s.record));
     if (!save()) return { ok: false, code: 'write_failed', error: 'the change could not be written on the server — try again in a minute' };
     return { ok: true, report: M.publicRow(s.record) };
+  };
+  /** THE HUB: a report another instance FORWARDED (POST /api/feedback/forward; `key` = its origin key's hash) → the record */
+  api.receive = (body, { key } = {}) => {
+    if (!FF.KEY_ID_RE.test(String(key || ''))) return { ok: false, code: 'origin_key_bad', error: 'the origin key is missing' };
+    const at = now();
+    const v = FF.validateForward(body, at);
+    if (!v.ok) return v;
+    const had = state.records.find((r) => r.origin && r.origin.key === key && r.origin.id === v.value.origin.id);
+    if (had) return { ok: true, duplicate: true, report: M.publicRow(had) };
+    // THE BELT: another instance's agent wrote these words (and its server named the rest) — peer text, stored inert
+    const f = v.value.facts, N = 2 * M.LIMITS.name;
+    const value = { text: belt(v.value.text, 2 * M.LIMITS.textMax, 'block'), about: belt(v.value.about, 2 * M.LIMITS.aboutMax) || '', kind: v.value.kind };
+    const facts = { session: { id: f.session.id, name: belt(f.session.name, N) }, group: f.group ? { id: f.group.id, name: belt(f.group.name, N) } : null, harness: f.harness, instance: { name: belt(f.instance.name, N), version: f.instance.version } };
+    const made = M.makeRecord(value, facts, { id: mintId(), now: at });
+    const rec = { ...made, at: v.value.at, lastAt: at, count: v.value.count, reporters: [], origin: { instance: made.instance.name, id: v.value.origin.id, version: v.value.origin.version, key }, markedAt: null };
+    const a = FF.admit(state.records, rec);
+    state.records = a.list;
+    state.dropped += a.dropped.length;
+    for (const id of a.dropped) sync.delete(id);
+    sync.set(rec.id, M.publicRow(rec));
+    if (!save()) return { ok: false, code: 'write_failed', error: 'the report could not be written on the hub — the origin tries again' };
+    return { ok: true, duplicate: false, report: M.publicRow(rec) };
+  };
+  /** THE HUB: the marks ONE origin may read — its own forwarded reports, marked after `since` */
+  api.marks = (key, since) => FF.marksAnswer(state.records, key, since);
+  /** THE ORIGIN: the maintainer's marks (src/server/feedback-forward.js's pull), each applied to the OWN report it names */
+  api.applyMarks = (marks) => {
+    let applied = 0;
+    for (const m of Array.isArray(marks) ? marks : []) {
+      if (!m || typeof m !== 'object' || typeof m.id !== 'string') continue;
+      const i = state.records.findIndex((r) => r.id === m.id && !r.origin);
+      if (i < 0) continue;
+      const a = FF.applyMark(state.records[i], { status: m.status, version: m.version, note: belt(m.note, 2 * M.LIMITS.noteMax), by: belt(m.by, 2 * M.LIMITS.name) }, now());
+      if (!a.ok || !a.changed) continue;
+      state.records[i] = a.record;
+      sync.set(m.id, M.publicRow(a.record));
+      applied++;
+    }
+    if (applied && !save()) return { ok: false, applied };
+    return { ok: true, applied };
   };
   /** every report, newest first, as the owner reads them */
   api.list = () => ({ reports: state.records.slice().sort(M.byNewest).map(M.publicRow), open: M.openCount(state.records), dropped: state.dropped });
@@ -110,11 +163,13 @@ function automationVerbs({ store }) {
     session: { id: r.session.id, name: piece(r.session.name, 2 * M.LIMITS.name) },
     group: r.group ? { id: r.group.id, name: piece(r.group.name, 2 * M.LIMITS.name) } : null,
     instance: { name: piece(r.instance.name, 2 * M.LIMITS.name), version: piece(r.instance.version, 2 * M.LIMITS.name) },
+    origin: r.origin ? piece(r.origin.instance, 2 * M.LIMITS.name) : null,   // lane feedback-forward: forwarded from that instance
   });
   return {
     'feedback.handled': (args, { caller }) => {
       const r = store.setStatus(args.id, 'handled', { by: caller.name || caller.sessionKey || caller.conversationId, version: args.version, note: args.note });
-      return r.ok ? { ok: true, id: r.report.id, status: r.report.status, version: r.report.handledVersion, by: r.report.handledBy } : { ok: false, code: r.code, why: r.error };
+      // lane feedback-forward: a FORWARDED report's mark goes back to its origin on that instance's next pull (≤ 6 h)
+      return r.ok ? { ok: true, id: r.report.id, status: r.report.status, version: r.report.handledVersion, by: r.report.handledBy, ...(r.report.origin ? { markBack: piece(r.report.origin.instance, 2 * M.LIMITS.name) } : {}) } : { ok: false, code: r.code, why: r.error };
     },
     'feedback.list': () => {
       const open = store.list().reports.filter((r) => r.status !== 'handled');

@@ -13,7 +13,9 @@
 //                              handled record may name the release that shipped the fix (`handledVersion`) and a note
 //                              (`handledNote`); the maintainer conversation's vibespace-api feedback.handled stamps both
 //                              through the SAME store call as the owner's PATCH (`handledBy` = its name); a reopen clears them
-//   · publicRow(record)      → what the UI and the agent's `list` get (the harness by name only, no reporter list)
+//   · publicRow(record)      → what the UI and the agent's `list` get (the harness by name only, no reporter list; a
+//                              forwarded report's `origin` — its instance + version, never the origin key's hash — lane
+//                              feedback-forward); isMine never counts a forwarded report (another instance's conversation)
 // Every string is TEXT for its readers: the owner's sheet draws it with textContent only (the XSS law), the agent's CLI
 // prints its own words back. PURE: imports nothing.
 
@@ -126,11 +128,12 @@ function publicRow(r) {
     status: r.status === 'handled' ? 'handled' : 'open', handledAt: r.handledAt || null, handledBy: r.handledBy || null,
     handledVersion: r.handledVersion || null, handledNote: r.handledNote || null,
     count: Number(r.count) || 1,
+    origin: r.origin ? { instance: r.origin.instance || null, version: r.origin.version || null } : null,   // lane feedback-forward: forwarded from
   };
 }
 
 /** a session's OWN reports (it filed the record, or repeated it): the agent's `list` */
-const isMine = (r, ids) => { const want = (ids || []).filter(Boolean); return !!r && want.some((id) => (r.session && r.session.id === id) || (Array.isArray(r.reporters) && r.reporters.includes(id))); };
+const isMine = (r, ids) => { const want = (ids || []).filter(Boolean); return !!r && !r.origin && want.some((id) => (r.session && r.session.id === id) || (Array.isArray(r.reporters) && r.reporters.includes(id))); };
 /** newest report first (a repeated report counts as new) */
 const byNewest = (a, b) => (Number(b.lastAt) || 0) - (Number(a.lastAt) || 0) || (Number(b.at) || 0) - (Number(a.at) || 0);
 const openCount = (list) => (list || []).filter((r) => r && r.status !== 'handled').length;

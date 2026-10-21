@@ -7767,6 +7767,20 @@ button.vw-chip { cursor: pointer; }
 .vw-ak-audit-line { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 3px 0; border-bottom: 1px solid var(--border); }
 .vw-ak-audit-line .vw-ak-when, .vw-ak-arg { color: var(--text-dim); overflow-wrap: anywhere; }
 .vw-ak-refused .vw-ak-outcome { color: var(--bad-text); font-weight: 600; }
+/* lane key-instance-scope: a grant's REACH — the chip beside each 授权给 chip (整个 VibeSpace red-tinted; its title says what it means), the
+   reach dialog's rows, and the first-use card's three choices (the tray's row + the For-you window's pane) */
+.vw-ak-reach { border: 1px solid var(--border); border-radius: 10px; background: none; color: var(--text-secondary); cursor: pointer; padding: 0 6px; font: inherit; font-size: 11px; line-height: 16px; }
+.vw-ak-reach:hover { border-color: var(--text-dim); color: var(--text); }
+.vw-ak-reach.vw-ak-reach-instance, .vw-ak-reach-row.vw-ak-reach-instance, .ut-ak-reach-instance, .iw-reach-instance { color: var(--bad-text); }
+.vw-ak-reach.vw-ak-reach-instance { border-color: var(--bad-text); }
+.vw-ak-reach-rows { display: flex; flex-direction: column; gap: 4px; }
+.vw-ak-reach-groups { display: flex; flex-direction: column; gap: 2px; margin-left: 24px; }
+.vw-ak-reach-groups[hidden] { display: none; }
+.ut-ak-reach, .iw-reach { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin: 4px 0; font-size: 11px; color: var(--text-secondary); }
+.iw-reach { font-size: 12px; }
+.ut-ak-reach-lbl, .iw-reach-lbl { color: var(--text-dim); }
+.ut-ak-reach label, .iw-reach label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+@media (max-width: 600px) { .ut-ak-reach label, .iw-reach label, .vw-ak-reach { min-height: 36px; } }
 @media (max-width: 600px) { .vw-ak-x { min-width: 36px; min-height: 36px; } .vw-ak-pick { min-height: 36px; } .vw-ak-dir, .vw-ak-up { min-height: 36px; } }
 .sys-vault-line { border-top: 1px solid var(--border); }
 @media (max-width: 600px) {

@@ -79,6 +79,14 @@ function wrapperEnv(jobId, base = process.env) {
   env.VIBESPACE_JOB_ID = String(jobId);
   return env;
 }
+// THE WRAPPER'S PROTOCOL (lane job-wrapper-update-window, fb-7f7be1e24e): the server SAYS which one it speaks — an update
+// writes the new data/bin/job-wrapper.js minutes before it restarts the server, and this process spawns whatever is on
+// disk. Equal to the wrapper's own PROTO (test-jobs-engine §12 pins the pair): bump BOTH when the spec's road changes.
+// A wrapper that does not speak it never starts the job and says so (exit.json reason update_window) — _finalizeRun.
+const WRAPPER_PROTO = 2;
+// how long after the wrapper changed on disk a mismatch is still the update's window (its restart is on the way: 45 s
+// measured on the owner's hub; an install + build bounded at minutes) — past it, the install itself is broken: a fault
+const UPDATE_WINDOW_MS = 15 * 60 * 1000;
 const now = () => Date.now();
 const rid = () => 'jb-' + crypto.randomBytes(4).toString('hex');
 // triage archive (design §13): newest ARCHIVE_CAP records kept; the sweep
@@ -149,6 +157,7 @@ class JobManager {
       }
       this._load();
       this._loadNotifs();
+      this._bootAt = now(); // this server generation's start: a run begun before it was an older generation's (update window)
       this._adoptAndReplay();
       // boot sweep (triage §13 rule 5): housekeeping happens as soon as the
       // store is trustworthy again, isolated like every other init step
@@ -1007,7 +1016,7 @@ class JobManager {
     let child;
     try {
       try { fs.writeFileSync(fd, JSON.stringify(spec)); } finally { fs.closeSync(fd); }
-      child = spawn(process.execPath, [wrapper, ctl, specPath], { detached: true, stdio: 'ignore', env: wrapperEnv(job.id) });
+      child = spawn(process.execPath, [wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO], { detached: true, stdio: 'ignore', env: wrapperEnv(job.id) });
     } catch (e) { try { fs.unlinkSync(specPath); } catch { } throw e; } // a failed write or spawn leaves no spec behind
     child.unref();
     job.state = 'up';
@@ -1204,6 +1213,9 @@ class JobManager {
     for (const job of this.jobs.values()) {
       try {
         if (job.kind === 'service' && job.desiredUp && job.state === 'down' && !(job.supervise && job.supervise.parkedAt)) this._spawn(job, 'boot');
+        // lane job-wrapper-update-window: a one-shot task an update's window interrupted NEVER RAN — the restarted server
+        // runs it once; a cron child waits for its next fire (its schedule owns when it runs)
+        else if (job.kind === 'task' && !job.cronParent && job.state === 'interrupted' && (job.runs || []).length && job.runs[job.runs.length - 1].cause === 'update_window') this._spawn(job, 'update-rerun');
       } catch (e) { this.d.log(`[jobs] replay failed for ${job.id}:`, e.message); }
     }
   }
@@ -1211,16 +1223,33 @@ class JobManager {
     if (!run) return null;
     try { return JSON.parse(fs.readFileSync(path.join(this._ctlDir(job, run.startedAt), 'exit.json'), 'utf-8')); } catch { return null; }
   }
+  /** Was a run's protocol mismatch the update's WINDOW (lane job-wrapper-update-window)? Yes when an older server generation
+   *  started it (this one is the restart), or the wrapper changed on disk after this server booted and not long ago (the
+   *  restart is on its way). Otherwise the mismatch is this install's own — a fault. */
+  _inUpdateWindow(run) {
+    if ((Number(run.startedAt) || 0) < (this._bootAt || 0)) return true;
+    let at = 0;
+    try { at = fs.statSync(path.join(this.d.dataDir, 'bin', 'job-wrapper.js')).mtimeMs; } catch { }
+    return at > (this._bootAt || 0) && now() - at < UPDATE_WINDOW_MS;
+  }
   _finalizeRun(job, run, exit, why) {
     run.endedAt = exit.endedAt || now();
     // lane jobs-browser (B-dbc1): the run is over — what it held as its conversation (its browser lease + window) is released
     try { this.d.onRunEnded?.(job, run); } catch { }
     run.exit = exit.code;
     const untilHit = job._untilHit;
-    run.cause = untilHit ? 'ok(until-output)' : exit.signal === 'SIGKILL' && why === 'oom' ? 'oom'
-      : job._stopRequested ? 'interrupted' : exit.code === 0 ? 'ok' : job._timedOut ? 'timeout' : 'error';
+    // AN UPDATE'S WINDOW IS NOT A FAILURE (lane job-wrapper-update-window, fb-7f7be1e24e): the wrapper on disk spoke another
+    // protocol than the server that started the run, so the job never started (exit.json reason update_window) — said as
+    // an interruption, no failure notice; a mismatch outside a window is the install's own fault, said as one
+    const proto = exit.reason === 'update_window' && !job._stopRequested ? (this._inUpdateWindow(run) ? 'update_window' : 'wrapper-mismatch') : null;
+    if (proto === 'update_window') run.exit = null; // no process of the job ever exited
+    run.cause = proto || (untilHit ? 'ok(until-output)' : exit.signal === 'SIGKILL' && why === 'oom' ? 'oom'
+      : job._stopRequested ? 'interrupted' : exit.code === 0 ? 'ok' : job._timedOut ? 'timeout' : 'error');
     delete job._stopRequested; delete job._timedOut; delete job._untilHit;
-    if (job.kind === 'service') {
+    const windowEnd = run.cause === 'update_window';
+    if (job.kind === 'service' && windowEnd) {
+      job.state = 'down'; this._touch(job, { what: 'down (update_window: it started while VibeSpace was updating itself and never ran — the restarted server starts it again)' }); // never a crash of the supervisor's count: the boot replay starts a desiredUp service
+    } else if (job.kind === 'service') {
       const dec = M.onServiceExit(job, { uptimeMs: run.endedAt - run.startedAt, now: now() });
       job.supervise = dec.supervise || job.supervise;
       if (dec.park) {
@@ -1235,7 +1264,7 @@ class JobManager {
         t.unref?.();
       } else { job.state = 'down'; this._touch(job); }
     } else {
-      job.state = run.cause === 'interrupted' ? 'interrupted' : run.cause.startsWith('ok') ? 'done' : 'failed';
+      job.state = run.cause === 'interrupted' || windowEnd ? 'interrupted' : run.cause.startsWith('ok') ? 'done' : 'failed';
       // the LAST NON-EMPTY log line, computed ONCE here (triage §13 rule 4):
       // the one actionable fact a failed row can show without a detail fetch —
       // unless the clear COVERED this run (it started before the clear; verify
@@ -1248,9 +1277,11 @@ class JobManager {
       // --notify-ok (job.notifyOk, inherited by the cron child via the
       // embedded task spec)
       const routineCronOk = job.cronParent && job.state === 'done' && !job.notifyOk;
-      const evText = `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`;
+      const evText = windowEnd ? `interrupted (update_window: it started while VibeSpace was updating itself and never ran — ${job.cronParent ? 'its next fire runs it' : 'the restarted server runs it again'})`
+        : run.cause === 'wrapper-mismatch' ? `failed: it never started — data/bin/job-wrapper.js speaks another protocol than this server (restart VibeSpace to finish its update)`
+          : `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`;
       this._touch(job, routineCronOk ? null : { what: evText });
-      if (job.notifyUser) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { } }
+      if (job.notifyUser && !windowEnd) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { } }
       // owner auto-notify honors the same quiet-success law: routine scheduled
       // success never messages anyone; agent-stopped ('interrupted') skips too
       // — the owner just did it and a message would echo their own action.
@@ -1674,4 +1705,4 @@ class JobManager {
   _hum(ms) { const m = Math.round(Math.abs(ms) / 60000); return m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; }
 }
 
-module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS, jobEnv, wrapperEnv, WRAPPER_ENV_KEEP };
+module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS, jobEnv, wrapperEnv, WRAPPER_ENV_KEEP, WRAPPER_PROTO, UPDATE_WINDOW_MS };

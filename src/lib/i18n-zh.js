@@ -9212,6 +9212,7 @@ export default {
   "Click to show it all": "点击展开全文",
   "handled {when}": "{when} 已处理",
   "handled in {version} by {who}, {when}": "{who} 于 {when} 标为已处理（{version} 修复）", // lane feedback-handled-verb
+  "Forwarded from {instance}": "转自 {instance}", // lane feedback-forward
   "Could not load the feedback list": "反馈列表加载失败",
   "What agents reported with vibespace-feedback — a command, a flow, a screen or a manual that felt wrong. Newest first; a repeat within a day is counted on its row.": "agent 用 vibespace-feedback 报告的问题——用着不顺手的命令、流程、界面或手册。最新的在最上面；一天内重复的报告记在同一行的次数上。",
   "Open ({n})": "未处理（{n}）",
@@ -9568,6 +9569,7 @@ export default {
   "Look up a conversation's ids": "查看对话的 id", // design q-046 (lane automation-verbs)
   "Mark an agent's feedback handled": "把 agent 的反馈标为已处理", // lane feedback-handled-verb
   "Read the agents' open feedback": "读 agent 未处理的反馈", // lane feedback-handled-verb
+  "Archive a conversation": "归档一个对话", // lane conversations-archive-verb
   "(starts a billed turn)": "（会开始一个计费回合）", // design q-046 (lane automation-keys-core)
   "The key's value is sealed in the vault — nobody sees it. Grant it to a conversation or a task group next.": "这把 key 的值封存在保险库里——谁都看不到。接下来把它授权给一个会话或一个任务组。", // design q-046 (lane automation-keys-core)
   "Mint": "铸造", // design q-046 (lane automation-keys-core)
@@ -9706,11 +9708,21 @@ export default {
   "System · never shown": "系统 · 永不显示", // lane vault-window-v2
   "Minted by an agent": "agent 铸造", // lane vault-window-v2
   "An agent saw it": "agent 见过明文", // lane vault-window-v2
-  "Using “{name}” failed": "「{name}」使用失败", // lane vault-window-v2
-  "An automation key could not be used": "一个自动化 key 用不了", // lane vault-window-v2
-  "{n} refused within the hour — the vault was locked: {locked} · not granted: {granted} · expired: {expired}": "一小时内被拒 {n} 次——保险库锁着：{locked} · 未授权：{granted} · 已过期：{expired}", // lane vault-window-v2
+  "“{name}” could not {verb} {target}: the vault is locked — Unlock… at the top of the page": "「{name}」无法 {verb} {target}：保险库已锁——在页面顶部点「解锁…」", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: the key is not granted to that conversation (nor to one of its Task Groups) and did not open it — grant it to that conversation or its Task Group in the Vault window (授权给…), or answer the card next time": "「{name}」无法 {verb} {target}：这把 key 没有授权给那个会话（也没授权给它所在的任务组），也不是它开的——在保险库窗口把 key 授权给那个会话或它的任务组（授权给…），或者下次回答卡片", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: the key does not hold that verb — mint a key that holds it in the Vault window (铸造…)": "「{name}」无法 {verb} {target}：这把 key 不含这个动词——在保险库窗口铸造一把含它的 key（铸造…）", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: the one use you allowed was spent — answer the next card with 一直, or grant the key in the Vault window": "「{name}」无法 {verb} {target}：你允许的那一次已经用掉了——下次卡片选「一直」，或在保险库窗口授权这把 key", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: the key was revoked — mint a new one in the Vault window and grant it": "「{name}」无法 {verb} {target}：这把 key 已撤销——在保险库窗口铸造一把新的并授权", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: the calling conversation is not running any more — nothing to do": "「{name}」无法 {verb} {target}：发起的会话已经不在运行——无需处理", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: nobody answered its card in 60 s — answer the card next time, or grant the key in the Vault window": "「{name}」无法 {verb} {target}：卡片 60 秒内没人回答——下次回答卡片，或在保险库窗口授权这把 key", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: that conversation still has open For-you asks — answer its cards, or let the caller pass --resolve-asks": "「{name}」无法 {verb} {target}：那个会话还有未处理的「待你处理」提问——先回答它的卡片，或让调用方加 --resolve-asks", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "An automation key could not {verb} {target}: the vault is locked — Unlock… at the top of the page": "自动化 key 无法 {verb} {target}：保险库已锁——在页面顶部点「解锁…」", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "An automation key could not {verb} {target}: no key is granted to that conversation — grant one in the Vault window (授权给…), or answer the card next time": "自动化 key 无法 {verb} {target}：没有任何 key 授权给那个会话——在保险库窗口授权一把（授权给…），或者下次回答卡片", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}": "「{name}」无法 {verb} {target}", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "An automation key could not {verb} {target}": "自动化 key 无法 {verb} {target}", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "{n} refused within the hour": "一小时内被拒 {n} 次", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "Last: {target}": "最近一次：{target}", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
   "Last asked by {who}": "最近一次来自 {who}", // lane vault-window-v2
-  "Open the Vault window to see the row. A locked vault answers every use «locked» until a person unlocks it; a grant is given in the row.": "打开保险库窗口看这一行。锁着的保险库对每次使用都答「已锁」，直到有人解锁；授权在这一行里给。", // lane vault-window-v2
   "“{name}” was stored by an agent that saw its value — rotate it": "「{name}」由 agent 存入、它见过明文——建议轮换", // lane vault-window-v2
   "Stored by {who}": "由 {who} 存入", // lane vault-window-v2
   "Renew it where it was issued, then store the new value; until then the agent's transcript holds the old one.": "去签发它的地方换新，再存入新值；在那之前 agent 的转录里留着旧值。", // lane vault-window-v2
@@ -9881,4 +9893,20 @@ export default {
   "An IANA zone such as America/Los_Angeles or Asia/Shanghai. Every time an agent reads — the Task Group board, the Activity log, TASK.md, the context a session starts with, the backlog and the tools' answers — is printed in this zone and named (16:16 PT), so the time an agent tells you is your clock. Empty = this server's own zone: its TZ setting, else the system's.": "IANA 时区名，例如 America/Los_Angeles 或 Asia/Shanghai。agent 读到的每个时间——任务组看板、活动记录、TASK.md、会话开始时的上下文、待办和工具的回答——都按这个时区打印并标出时区（16:16 PT），所以 agent 告诉你的时间就是你的时钟。留空 = 这台服务器自己的时区：它的 TZ 设置，否则系统时区。", // lane agent-context-owner-facts
   "{n} conversations are asking to use stored secrets": "{n} 个会话正在请求使用保险库里的密钥", // B-4934: the vault's «N conversations are asking» notice
   "Each conversation asks on its own card in For you. This line goes when 8 or fewer are asking.": "每个会话的请求都是「待你处理」里单独的一张卡片。请求中的会话不超过 8 个时，这一行会消失。", // B-4934: the vault's «N conversations are asking» notice
+  "Reach": "作用范围", // lane key-instance-scope: a grant's reach
+  "Only the conversations it opens": "只有它开的会话", // lane key-instance-scope: a grant's reach
+  "The conversations of its Task Groups": "这些岗位的会话", // lane key-instance-scope: a grant's reach
+  "The whole VibeSpace": "整个 VibeSpace", // lane key-instance-scope: a grant's reach
+  "This key may act on every conversation here, including yours": "这把 key 可以对这里的每一个会话动手，包括你自己的", // lane key-instance-scope: a grant's reach
+  "Rename, end or archive the conversations of: {groups}": "可以改名、结束或归档这些岗位的会话：{groups}", // lane key-instance-scope: a grant's reach
+  "Rename, end or archive only the conversations it opens with this key (and itself)": "只能改名、结束或归档它用这把 key 开的会话（以及它自己）", // lane key-instance-scope: a grant's reach
+  "Change the reach…": "改作用范围…", // lane key-instance-scope: a grant's reach
+  "Reach of \"{name}\" for {subject}": "「{name}」对 {subject} 的作用范围", // lane key-instance-scope: a grant's reach
+  "Which other conversations that conversation may rename, end or archive with this key. What it opened, what a grant names and itself are always within reach.": "那个会话能用这把 key 改名、结束或归档哪些别的会话。它开的、授权点名的和它自己，始终在范围内。", // lane key-instance-scope: a grant's reach
+  "Pick at least one Task Group": "至少选一个岗位", // lane key-instance-scope: a grant's reach
+  "Reach of the grants you add": "新加授权的作用范围", // lane key-instance-scope: a grant's reach
+  "Granted — the key now reaches every conversation here from that conversation (the Vault window lists it)": "已授权——那个会话现在能用这把 key 触及这里的每一个会话（保险库窗口里列着）", // lane key-instance-scope: a grant's reach
+  "The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key's row in the Vault window.": "作用范围决定它能用这把 key 改名、结束或归档哪些别的会话：只有它开的会话（默认）、这些岗位的会话，或这个 VibeSpace 上的每一个会话——之后可在保险库窗口该 key 的行里改。", // lane key-instance-scope: a grant's reach
+  "“{name}” could not {verb} {target}: the key did not open that conversation and its grant reaches only what it opened — widen the reach on the key's row in the Vault window (这些岗位的会话 / 整个 VibeSpace), or grant the key to that conversation": "「{name}」无法 {verb} {target}：这把 key 没有开过那个会话，而授权只触及它开的会话——在保险库窗口该 key 的行里扩大作用范围（这些岗位的会话 / 整个 VibeSpace），或把 key 授权给那个会话", // lane key-instance-scope: a grant's reach
+  "“{name}” could not {verb} {target}: that conversation is not in the Task Groups the grant reaches — widen the reach on the key's row in the Vault window (整个 VibeSpace), or grant the key to that conversation": "「{name}」无法 {verb} {target}：那个会话不在授权触及的岗位里——在保险库窗口该 key 的行里扩大作用范围（整个 VibeSpace），或把 key 授权给那个会话", // lane key-instance-scope: a grant's reach
 };

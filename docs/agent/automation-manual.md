@@ -43,7 +43,15 @@ vibespace-api call conversations.rename --name "Worker 2" --target <conversation
   by name (`bad_args`).
 - **Another conversation (`--target`).** It must be one the same key is granted to, directly or through one of its Task
   Groups. Otherwise the call is refused `not_granted`, and nothing happens.
-- **Another conversation the key opened** is within its reach too: the worker you open is yours to name, bind, invite and end.
+- **Another conversation the key opened** is within its reach too: the worker you open is yours to name, bind, invite, end
+  and archive — across a hub restart (the hub remembers which key opened what).
+- **The grant's reach** (`keys` prints it as `reach: …`) says how far beyond that your calls go. The user picks it when they
+  answer the first-use card (beside Allow once / Always) or on the key's row in the Vault window:
+  - `opened` (the default): only what the key opened, what a grant names, and yourself;
+  - `groups: <T-…>`: the conversations of those Task Groups too;
+  - `instance`: every conversation on this VibeSpace, present and later.
+  A target outside the reach answers `not_granted`, naming the reach the grant has and where the user widens it. The verbs'
+  own refusals stay whatever the reach: a running turn (`subject_busy`), open asks (`asks_open`), an archived conversation.
 - **The answer.** `call` prints `ok — <verb> with key "<name>"`, then the hub's answer as JSON (a read's data: `feedback.list`'s reports).
 - **The verbs.** The table is closed; a new verb arrives with its own release:
 
@@ -54,6 +62,7 @@ vibespace-api call conversations.rename --name "Worker 2" --target <conversation
 | `conversations.rename` | `name`, `target?` | no |
 | `conversations.bind` | `target`, `task` (a Task Group this conversation is in) | no |
 | `conversations.end` | `target` | no |
+| `conversations.archive` | `target`, `force?`, `resolveAsks?` — ends it if still live, then archives it exactly as the sidebar's 归档 does (the owner's list no longer shows it); a running turn ⇒ `subject_busy` unless `force`; its open For-you asks ⇒ `asks_open` (their ids) unless `resolveAsks` dismisses them; archived already ⇒ `already_archived` | no |
 | `groups.invite` | `group`, `target` (an agent group this conversation is in; added without a wake) | no |
 | `feedback.handled` | `id` (`fb-…`), `version` (the release that shipped the fix, `2.369.NNN`), `note?` (≤ 200 characters) | no |
 | `feedback.list` | — | no (a read) |
@@ -81,6 +90,7 @@ vibespace-api conversations status <target>
 vibespace-api conversations rename <target> "<name>"
 vibespace-api conversations bind <target> <T-…>
 vibespace-api conversations end <target>
+vibespace-api conversations archive <target> [--force] [--resolve-asks]
 vibespace-api groups invite <g-…|group name> <target>
 ```
 
@@ -114,6 +124,7 @@ vibespace-api conversations bind <sess-…> <T-…>                    the Task 
 vibespace-api groups invite <g-…> <sess-…>                          the lane group (no wake — brief it with vibespace-msg)
 …the lane's work…
 vibespace-api conversations end <sess-…>
+vibespace-api conversations archive <conversation id>                 when the lane is accepted: end + archive (the sidebar's 归档)
 ```
 
 ## The answers
@@ -121,7 +132,7 @@ vibespace-api conversations end <sess-…>
 | code | means |
 |---|---|
 | `vault_locked` (423) | the vault is locked — every call waits until the user unlocks it on the page. The user has already been told (For you names this conversation and the verb): never ask them to unlock it or for the password — wait, or do other work (exit code 3) |
-| `not_granted` | no grant lets this conversation use the key (or a `--target` the key does not reach) |
+| `not_granted` | no grant lets this conversation use the key, or a `--target` is outside the grant's reach (the message names the reach and the door that widens it) |
 | `key_revoked` / `verb_not_in_scope` | the user revoked the key / the key does not hold this verb |
 | `ask_denied` / `ask_expired` / `ask_quiet` | the user refused / nobody answered in 60 s / a refusal is still in its 10 minutes |
 | `once_spent` | a one-time grant was used; the next call asks again |
@@ -130,6 +141,7 @@ vibespace-api conversations end <sess-…>
 | `session_only` | a background job's token was used — only conversations use automation keys for now |
 | `spend_refused` (429) | the spend ceiling is full — `bucket` names it (`hour-cap`, `day-cap`, `instance-cap`, …), `retryAfter` when it frees; nothing was opened |
 | `pending` (409) | the conversation has not reported its id yet — poll `conversations status` |
+| `subject_busy` / `asks_open` / `already_archived` (409) | an archive met a running turn (`--force` ends it anyway) / the target's open For-you asks (the answer lists their ids; `--resolve-asks` dismisses them) / a conversation already archived |
 | `bad_args` / `unknown_field` / `bad_cwd` / `bad_name` / `bad_model` / `bad_effort` / `bad_permission_mode` / … | the argument it names is malformed or not allowed |
 | `cwd_outside_roots` / `account_not_allowed` / `permission_not_allowed` / `model_not_allowed` / `mode_not_allowed` (403) | an open outside its key's limits (the table under «The typed verbs») — nothing was charged or opened; the answer prints the key's limits |
 

@@ -18,6 +18,16 @@
  *     grant table says whether that subject may use the key, the key's scopes whether the verb is in it, the vault's state
  *     whether anything may happen at all — an agent never holds a value (q-043's 「用而不见」 holds by construction).
  *   · `identityOf(keyId)` = `automation:<keyId>` — the spend identity a billed verb (conversations.open, L2) is charged to.
+ *   · REACH (lane conversations-archive-verb, the owner 2026-10-20 「这些不用 archive 吗」): a verb that names ANOTHER conversation
+ *     is judged by ONE rule, `reachVerdict` — the key OPENED it (the store's `opened` rows), a grant of the key names it (the
+ *     conversation or one of its Task Groups), or it is the caller itself. The opener's lifecycle (rename / bind / end /
+ *     archive / status) covers what it opened, across a hub restart — the fact is persisted, never a Map in memory.
+ *   · THE GRANT'S REACH (lane key-instance-scope — the owner 2026-10-20 23:2xZ 「key 应该可以被授权在整个 vibe space 上工作」): a grant
+ *     row carries `reach` — 'opened' (the default and the NARROWEST: what the key opened, what a grant names, the caller),
+ *     {taskGroups: [ids]} (every conversation of those Task Groups too) or 'instance' (EVERY conversation of this instance,
+ *     present and later — the owner's choice, red-tinted wherever it is offered). ONE more row of reachVerdict's table; the
+ *     verbs' own refusals (subject_busy / asks_open / already_archived) stay whatever the reach. A missing field reads
+ *     'opened'; a damaged one is NO grant at all (fail closed — a bad value never widens a key).
  *   · LIMITS (lane automation-open-limits — the q-048 verify's M2, q-046 §2 「key 的 limits」): WHAT a key's
  *     conversations.open may ask for — `{cwdRoots, accounts, permissionModes, models, modes}`, picked by the owner when
  *     the key is minted, edited in the Vault window (边界…). `openLimitsVerdict` judges the EFFECTIVE open (the folder's
@@ -42,6 +52,9 @@ const RELEASE_RE = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;   // a release (2.369.330) —
 const NOTE_MAX = 200;                       // feedback.handled's note
 const SUBJECT_RE = /^(?:session:[\w.:-]{1,200}|group:[\w.:-]{1,120}|external)$/;
 const MODES = Object.freeze(['always', 'once']);
+const REACHES = Object.freeze(['opened', 'groups', 'instance']);   // lane key-instance-scope: the KINDS of a grant's reach, narrowest first
+const GROUP_ID_RE = /^[\w.:-]{1,120}$/;                            // a Task Group id as the subjects name it (group:<id>)
+const REACH_GROUPS_MAX = 50;
 const ASK_TTL_MS = 60e3;                    // the first-use card: 60 s, then refused (hub-act-ask's discipline)
 const ASK_QUIET_MS = 10 * 60e3;             // a refusal silences that (key, subject) pair for 10 minutes
 const AUDIT_FILE = 'automation-audit.jsonl';
@@ -67,6 +80,15 @@ const shapeArg = (v, what, re, words) => {
   if (v == null || v === '') return bad(`${what} is required`);
   const s = str(v).trim();
   return re.test(s) ? { ok: true, value: s } : bad(`${what} must be ${words}`);
+};
+/** A yes/no argument: true / 'true' / 'yes' / '1' / 'on' ⇒ true; absent / false / 'no' / '0' / 'off' ⇒ none (the verb's default). */
+const boolArg = (v, what) => {
+  if (v == null || v === '' || v === false) return { ok: true, value: null };
+  if (v === true) return { ok: true, value: true };
+  const t = str(v).trim().toLowerCase();
+  if (['true', 'yes', '1', 'on'].includes(t)) return { ok: true, value: true };
+  if (['false', 'no', '0', 'off'].includes(t)) return { ok: true, value: null };
+  return bad(`${what} is yes or no`);
 };
 /** Validate an args object against named fields: `spec` = { field: (v) => {ok, value} }; unknown fields are refused by name. */
 function argsOf(raw, spec) {
@@ -97,6 +119,11 @@ const SCOPES = Object.freeze([
   // conversation id) — a READ, nothing acts; a key holds it like any verb
   Object.freeze({ verb: 'conversations.status', layer: 'read', billed: false, label: "Look up a conversation's ids",
     args: (a) => argsOf(a, { target: (v) => idArg(v, 'target') }) }),
+  // lane conversations-archive-verb (the owner 2026-10-20 「这些不用 archive 吗」): the opener's lifecycle ENDS with the sidebar's
+  // 归档 — ends the conversation if it is still live, then archives it exactly as the sidebar does (the ONE user-state write);
+  // a running turn ⇒ subject_busy unless `force`; open For-you asks of the target ⇒ asks_open (their ids) unless `resolveAsks`
+  Object.freeze({ verb: 'conversations.archive', layer: 'act', billed: false, label: 'Archive a conversation',
+    args: (a) => argsOf(a, { target: (v) => idArg(v, 'target'), force: (v) => boolArg(v, 'force'), resolveAsks: (v) => boolArg(v, 'resolveAsks') }) }),
   // lane feedback-handled-verb: the owner's «Mark handled» on an agent's feedback report, naming the release that shipped
   // the fix (+ a note); and the OPEN reports with their ids — a READ (another agent's words: belted at the hub)
   Object.freeze({ verb: 'feedback.handled', layer: 'act', billed: false, label: "Mark an agent's feedback handled",
@@ -122,6 +149,9 @@ const CODES = Object.freeze({
   cwd_outside_roots: 403, account_not_allowed: 403, permission_not_allowed: 403, model_not_allowed: 403, mode_not_allowed: 403,
   // lane feedback-handled-verb: the feedback store could not write the change (data/feedback.json) — nothing changed
   write_failed: 503,
+  // lane conversations-archive-verb: the target's turn is running (`force` ends it anyway) · the target has open For-you asks
+  // (the answer lists their ids; `resolveAsks` closes them first) · the target is already in the sidebar's archived list
+  subject_busy: 409, asks_open: 409, already_archived: 409,
 });
 
 /** A key record off disk → its shape (null = not a record). Copies NAMED fields only — never a spread. */
@@ -142,22 +172,86 @@ function publicKey(k) {
   const r = keyOf(k);
   return r ? { id: r.id, name: r.name, scopes: r.scopes.slice(), createdAt: r.createdAt, createdBy: r.createdBy, revokedAt: r.revokedAt, lastUsedAt: r.lastUsedAt, limits: r.limits } : null;
 }
-/** A grant record → its shape (null = not one). */
+/** A grant's REACH (lane key-instance-scope) → 'opened' | 'instance' | { taskGroups: [ids] } | null (not a reach). Absent /
+ *  null ⇒ 'opened', the narrowest (a missing field never widens a grant — q-049 M1's law); anything else unknown ⇒ null. */
+function reachOf(raw) {
+  if (raw === undefined || raw === null) return 'opened';
+  if (raw === 'opened' || raw === 'instance') return raw;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) && Array.isArray(raw.taskGroups) && Object.keys(raw).length === 1) {
+    const ids = [...new Set(raw.taskGroups.map(str))];
+    if (ids.length && ids.length <= REACH_GROUPS_MAX && ids.every((g) => GROUP_ID_RE.test(g))) return { taskGroups: ids };
+  }
+  return null;
+}
+/** The KIND of a reach ('opened' | 'groups' | 'instance'); anything unknown reads as the narrowest. */
+const reachKind = (r) => (r === 'instance' ? 'instance' : r && typeof r === 'object' && Array.isArray(r.taskGroups) ? 'groups' : 'opened');
+/** The WIDEST of several reaches (a caller holding a key by two roads acts by the wider): instance › groups (their union) › opened. */
+function widestReach(list) {
+  const rs = (Array.isArray(list) ? list : []).map(reachOf).filter(Boolean);
+  if (rs.some((r) => r === 'instance')) return 'instance';
+  const groups = rs.filter((r) => reachKind(r) === 'groups').flatMap((r) => r.taskGroups).filter((g, i, a) => a.indexOf(g) === i);
+  return groups.length ? { taskGroups: groups } : 'opened';
+}
+/** A grant record → its shape (null = not one). Its `reach` (lane key-instance-scope): absent ⇒ 'opened'; unknown ⇒ NO grant. */
 function grantOf(raw) {
   if (!raw || typeof raw !== 'object' || !KEY_ID_RE.test(str(raw.keyId)) || !SUBJECT_RE.test(str(raw.subject)) || !MODES.includes(raw.mode)) return null;
+  const reach = reachOf(raw.reach);
+  if (reach === null) return null;   // a damaged reach is refused whole — never read as wider (nor quietly as narrower)
   const num = (v) => (Number.isFinite(Number(v)) && v !== null ? Number(v) : null);
-  return { id: /^ag-[0-9a-f]{12}$/.test(str(raw.id)) ? raw.id : null, keyId: raw.keyId, subject: raw.subject, mode: raw.mode, at: num(raw.at), by: clean(raw.by, 60) || null, spentAt: num(raw.spentAt) };
+  return { id: /^ag-[0-9a-f]{12}$/.test(str(raw.id)) ? raw.id : null, keyId: raw.keyId, subject: raw.subject, mode: raw.mode, at: num(raw.at), by: clean(raw.by, 60) || null, spentAt: num(raw.spentAt), reach };
 }
 const isSubject = (s) => SUBJECT_RE.test(str(s));
 /** The subjects a CALLER is: its own conversation and each Task Group it belongs to. */
 const callerSubjects = (conversationId, groupIds = []) => [`session:${conversationId}`, ...(Array.isArray(groupIds) ? groupIds : []).filter(Boolean).map((g) => `group:${g}`)];
 
+/** A conversation a key OPENED (the store's `opened` rows — src/server/automation-engine.js writes one per successful
+ *  conversations.open: the webui id at once, the conversation id when the CLI has reported it). null = not a row. */
+function openedOf(raw) {
+  if (!raw || typeof raw !== 'object' || !KEY_ID_RE.test(str(raw.keyId))) return null;
+  const webuiId = ID_RE.test(str(raw.webuiId)) ? raw.webuiId : null;
+  const conversationId = ID_RE.test(str(raw.conversationId)) ? raw.conversationId : null;
+  if (!webuiId && !conversationId) return null;
+  const at = Number(raw.at);
+  return { keyId: raw.keyId, webuiId, conversationId, at: Number.isFinite(at) ? at : null };
+}
+/**
+ * THE REACH OF ONE VERB (lane conversations-archive-verb) — may a use of `keyId` by `caller` (a conversation id) touch
+ * `target`? ONE rule for rename / bind / end / archive / status / invite (design q-046: a grant is key × conversation, and
+ * the OPENER is the natural holder of the lifecycle of what it opened): the target is within reach when
+ *   (a) THE KEY OPENED IT — an `opened` row of this key names its webui id or its conversation id, or
+ *   (b) a grant of this key names it — the target conversation itself, or one of its Task Groups, or
+ *   (c) the target IS the caller, or
+ *   (d) THE GRANT'S REACH says so (lane key-instance-scope): `reach` = the reach of the grant this use rides — 'instance'
+ *       reaches EVERY conversation; {taskGroups} reaches one in those Task Groups; 'opened' (the default) adds nothing.
+ * `target` = { conversationId, webuiId?, groups? }. → { ok: true, by: 'self' | 'opener' | 'grant' | 'instance' | 'groups' }
+ * | { ok: false, code, why, reach? } (the refusal names the reach the grant has, and the door that widens it).
+ */
+function reachVerdict({ keyId = '', caller = '', target = {}, grants = [], opened = [], reach = 'opened' } = {}) {
+  const t = target && typeof target === 'object' ? target : {};
+  const cid = str(t.conversationId) || null, wid = str(t.webuiId) || null;
+  if (!cid && !wid) return { ok: false, code: 'not_found', why: 'no conversation named' };
+  if (cid && caller && cid === str(caller)) return { ok: true, by: 'self' };
+  const rows = (Array.isArray(opened) ? opened : []).map(openedOf).filter((o) => o && o.keyId === keyId);
+  if (rows.some((o) => (cid && o.conversationId && o.conversationId === cid) || (wid && o.webuiId && o.webuiId === wid))) return { ok: true, by: 'opener' };
+  const groups = (Array.isArray(t.groups) ? t.groups : []).filter(Boolean).map(String);
+  const subjects = new Set([...(cid ? [`session:${cid}`] : []), ...groups.map((g) => `group:${g}`)]);
+  if ((Array.isArray(grants) ? grants : []).map(grantOf).some((g) => g && g.keyId === keyId && subjects.has(g.subject))) return { ok: true, by: 'grant' };
+  const r = reachOf(reach) || 'opened';   // an unknown reach reads as the narrowest
+  if (r === 'instance') return { ok: true, by: 'instance' };
+  if (reachKind(r) === 'groups' && groups.some((g) => r.taskGroups.includes(g))) return { ok: true, by: 'groups' };
+  const kind = reachKind(r);
+  return { ok: false, code: 'not_granted', reach: kind, why: kind === 'groups'
+    ? `that conversation is not in the Task Groups this grant reaches (${r.taskGroups.join(', ')}), the key did not open it and is not granted to it — widen the grant's reach on the key's row in the Vault window (整个 VibeSpace), or grant the key to that conversation`
+    : 'the key did not open that conversation and is not granted to it (nor to one of its Task Groups) — this grant reaches only what the key opened; widen its reach on the key\'s row in the Vault window (这些岗位的会话 / 整个 VibeSpace), or grant the key to that conversation' };
+}
+
 /**
  * THE JUDGMENT OF ONE USE (on the hub, before anything runs). `key` = the key named / chosen (null = none), `grants` =
  * every grant of the store, `subject` = the caller (`session:<id>` or `external`), `subjectGroups` = the Task Group ids the
  * caller belongs to (a session), `subjectLive` = the caller's conversation still runs, `vaultState` = the vault's state.
- * → { ok: true, grant, spend } (`spend` = a once-grant this use consumes) | { ok: false, code } — in this order: the vault
- * (everything stops while it is locked), the key, its scope, the caller, the grant.
+ * → { ok: true, grant, spend, reach } (`spend` = a once-grant this use consumes; `reach` = the reach this use rides — the
+ * widest of the caller's always-grants, else the once-grant's — lane key-instance-scope) | { ok: false, code } — in this
+ * order: the vault (everything stops while it is locked), the key, its scope, the caller, the grant.
  */
 function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [], subjectLive = true, verb = '', vaultState = 'locked' } = {}) {
   if (vaultState !== 'unlocked') return { ok: false, code: 'vault_locked' };
@@ -172,10 +266,10 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
   const mine = external ? ['external'] : callerSubjects(str(subject).slice('session:'.length), subjectGroups);
   const cands = (Array.isArray(grants) ? grants : []).map(grantOf).filter((g) => g && g.keyId === k.id && mine.includes(g.subject));
   if (!cands.length) return { ok: false, code: 'not_granted' };
-  const always = cands.find((g) => g.mode === 'always');
-  if (always) return { ok: true, grant: always, spend: false };
+  const always = cands.filter((g) => g.mode === 'always');
+  if (always.length) return { ok: true, grant: always[0], spend: false, reach: widestReach(always.map((g) => g.reach)) };
   const once = cands.find((g) => g.mode === 'once' && !g.spentAt);
-  if (once) return { ok: true, grant: once, spend: true };
+  if (once) return { ok: true, grant: once, spend: true, reach: once.reach };
   return { ok: false, code: 'once_spent' };
 }
 
@@ -379,7 +473,7 @@ function permissionResolvedVerdict(limits, resolved) {
 function argsSummary(verb, args) {
   const a = args && typeof args === 'object' ? args : {};
   const out = {};
-  for (const k of ['target', 'task', 'group', 'backend', 'mode', 'model', 'effort', 'permission', 'pool', 'id', 'version']) if (a[k] != null) out[k] = clean(a[k], 200);   // a feedback note is a text body: never kept
+  for (const k of ['target', 'task', 'group', 'backend', 'mode', 'model', 'effort', 'permission', 'pool', 'id', 'version', 'force', 'resolveAsks', 'reach']) if (a[k] != null) out[k] = clean(a[k], 200);   // a feedback note is a text body: never kept; `reach`: an owner's key.grant / key.reach line (lane key-instance-scope)
   if (a.name != null) out.name = clean(a.name, 80);
   if (verb === 'conversations.open' && a.cwd != null) out.cwd = clean(a.cwd, 200);
   return out;
@@ -391,8 +485,8 @@ function auditLine({ at, keyId = null, subject = '', verb = '', args = null, ok 
 }
 
 module.exports = {
-  KEY_ID_RE, VALUE_PREFIX, VALUE_RE, ENTRY_PREFIX, NAME_MAX, SUBJECT_RE, MODES, ASK_TTL_MS, ASK_QUIET_MS, AUDIT_FILE, STORE_FILE, FEEDBACK_ID_RE, RELEASE_RE, NOTE_MAX,
-  SCOPES, VERBS, scopeOf, CODES, keyOf, publicKey, grantOf, isSubject, callerSubjects,
+  KEY_ID_RE, VALUE_PREFIX, VALUE_RE, ENTRY_PREFIX, NAME_MAX, SUBJECT_RE, MODES, REACHES, ASK_TTL_MS, ASK_QUIET_MS, AUDIT_FILE, STORE_FILE, FEEDBACK_ID_RE, RELEASE_RE, NOTE_MAX,
+  SCOPES, VERBS, scopeOf, CODES, keyOf, publicKey, grantOf, reachOf, reachKind, widestReach, isSubject, callerSubjects, openedOf, reachVerdict,
   useVerdict, pickKey, mintPlan, entryOf, keyIdOfEntry, identityOf, argsSummary, auditLine,
   LIMIT_FIELDS, LIMIT_CODES, OPEN_MODES, HARNESS_DEFAULT, SUBSCRIPTION, DEFAULT_LIMITS, normPath, limitsOf, limitsPlan, limitsWords, openLimitsVerdict, permissionResolvedVerdict,
 };

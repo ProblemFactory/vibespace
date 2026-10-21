@@ -64,6 +64,11 @@ Point every instance's `telemetry.forwardUrl` at
 `telemetry.ingestToken` — that instance becomes the collector and its
 ⚙ → Diagnostics report gains a per-instance **Fleet** section. Batches carry
 anonymous instance ids and error names/stacks/metrics only, never content.
+The same target also receives every agent feedback report filed on the instance
+(`vibespace-feedback` — an agent's own words about VibeSpace, with its
+conversation and Task Group names), and the instance pulls the collector's
+«handled in» marks back every 6 h; the collector lists the reports in
+⚙ System ▸ Agent feedback… with the instance's name.
 
 ## Notes
 

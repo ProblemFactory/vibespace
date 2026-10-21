@@ -3,7 +3,10 @@
 //   · A PERSON (this instance's own page, its sign-in; every bearer refused `human_only`): the keys and their grants
 //     (GET /api/automation/keys — never a value, never a digest), 铸造 (POST /api/automation/keys {name, scopes}), 撤销
 //     (POST …/keys/:id/revoke), 授权给 (POST …/keys/:id/grants {subjects}), take a grant back (DELETE
-//     /api/automation/grants/:grantId), and the answer to a first-use card (POST /api/automation/asks/:askId {answer}).
+//     /api/automation/grants/:grantId), and the answer to a first-use card (POST /api/automation/asks/:askId {answer, reach?}).
+//     Lane key-instance-scope: a grant carries its REACH — 授权给 takes `reach` ('opened' | 'instance' | {taskGroups}), the
+//     card's answer `reach` ('opened' | 'groups' | 'instance'), and the key row's reach chip writes an existing grant's
+//     (POST /api/automation/grants/:grantId/reach {reach}) — every one a person's door, audited key.grant / key.reach.
 //     Lane automation-open-limits (the q-048 verify's M2): 铸造 carries the key's LIMITS ({…, limits}), 边界… sets them
 //     (POST …/keys/:id/limits {limits}), 审计… reads one key's audit lines (GET …/keys/:id/audit); the list carries the
 //     pickers' choices (`limitChoices`: the accounts, the harness tables' permission modes and models).
@@ -17,7 +20,7 @@ const { personVerdict } = require('./vault.js');
 const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
 
 const WORDS = Object.freeze({
-  not_granted: 'no grant lets this conversation use that key — the owner grants it in the Vault window (or answers the For-you card)',
+  not_granted: 'no grant lets this conversation use that key, or the key does not reach that target — the owner grants it (or widens the grant\'s reach) in the Vault window, or answers the For-you card',
   key_revoked: 'that key was revoked',
   verb_not_in_scope: 'that key does not hold this verb',
   vault_locked: VB.agentWords('every automation waits until a person unlocks it on this instance\'s page'),   // lane vault-locked-refusal-notice: the owner was told (For you names this conversation) — the agent never asks
@@ -84,9 +87,10 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
   app.post('/api/automation/keys/:id/limits', person((req) => engine.setLimits(String(req.params.id), body(req).limits, { by: byOf(req) })));
   app.get('/api/automation/keys/:id/audit', person((req) => engine.auditOfKey(String(req.params.id), { limit: req.query && req.query.limit })));
   app.post('/api/automation/keys/:id/revoke', person((req) => engine.revoke(String(req.params.id), { by: byOf(req) })));
-  app.post('/api/automation/keys/:id/grants', person((req) => engine.grant(String(req.params.id), body(req).subjects, { by: byOf(req) })));
+  app.post('/api/automation/keys/:id/grants', person((req) => engine.grant(String(req.params.id), body(req).subjects, { by: byOf(req), ...(body(req).reach !== undefined ? { reach: body(req).reach } : {}) })));
   app.delete('/api/automation/grants/:grantId', person((req) => engine.ungrant(String(req.params.grantId), { by: byOf(req) })));
-  app.post('/api/automation/asks/:askId', person((req) => engine.answer(String(req.params.askId), { answer: body(req).answer, answeredBy: byOf(req) })));
+  app.post('/api/automation/grants/:grantId/reach', person((req) => engine.setReach(String(req.params.grantId), body(req).reach, { by: byOf(req) })));   // lane key-instance-scope: the key row's reach chip
+  app.post('/api/automation/asks/:askId', person((req) => engine.answer(String(req.params.askId), { answer: body(req).answer, answeredBy: byOf(req), ...(body(req).reach !== undefined ? { reach: body(req).reach } : {}) })));
 
   // ── agents: THEIR conversation's token names the caller ──
   const callerFrom = (req, res) => {

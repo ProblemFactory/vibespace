@@ -166,13 +166,13 @@ console.log('§3 the JOB LOG — the real job-wrapper masks a fake child’s out
   const childScript = `process.stdout.write('out token=' + ${JSON.stringify(KVMAT)} + '\\n'); process.stdout.write('split tok' + 'en=' + ${JSON.stringify(KVMAT)} + '\\n');`;
   const wrapper = path.join(REPO, 'data', 'bin', 'job-wrapper.js');
   const readLog = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
-  const runWrapper = (wrapperPath, tag, { onArgv = false } = {}) => {
+  const runWrapper = (wrapperPath, tag, { onArgv = false, outside = false } = {}) => {
     const ctl = scratch('aos-job-' + tag);
     fs.mkdirSync(ctl, { recursive: true });
     const spec = { argv: [process.execPath, '-e', childScript], cwd: ctl, env: { PATH: process.env.PATH }, logCapBytes: 1 << 20, stdinOpen: false };
     let arg = Buffer.from(JSON.stringify(spec)).toString('base64'), specPath = null;
     if (!onArgv) { // the engine's way: 0600 at open, O_EXCL, a fresh name per start, in the ctl dir
-      specPath = arg = path.join(ctl, `spec.${Date.now()}.json`);
+      specPath = arg = path.join(outside ? path.dirname(ctl) : ctl, `spec.${Date.now()}.json`); // outside: a path the wrapper never reads nor removes
       const fd = fs.openSync(specPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
       try { fs.writeSync(fd, JSON.stringify(spec)); } finally { fs.closeSync(fd); }
     }
@@ -187,9 +187,13 @@ console.log('§3 the JOB LOG — the real job-wrapper masks a fake child’s out
   ok(ran(real.log) && !real.specLeft, 'the run RAN: the child’s own lines are in the log, no refusal line, the spec file consumed (read once, unlinked)');
   ok(!leaks(real.log, 'token=' + KVMAT), 'a whole-chunk shape in the child output is masked in the job log');
   ok(leaks(real.log, '«redacted»'), 'the job log shows «redacted» where the secret was');
-  // CONTROL — the base's call (the spec base64 on argv, the pre-.331 contract): refused BY NAME, and the RAN check is red
-  const old = runWrapper(wrapper, 'argv', { onArgv: true });
-  ok(old.log.includes('[job-wrapper] refused: the spec path names no file of the ctl dir') && !ran(old.log), 'CONTROL: the spec on argv (the base’s call) is refused by name — the RAN check is red on it, so the leg can no longer pass on a refusal');
+  // CONTROL — a refused run (a spec path outside the ctl dir): refused BY NAME, and the RAN check is red on it. The base's
+  // call (the spec base64 on argv) RUNS since lane job-wrapper-update-window — the wrapper reads a ≤ .330 server's spec
+  // once, loudly (an update's window) — and that run is masked the same way: the row after.
+  const old = runWrapper(wrapper, 'outside', { outside: true });
+  ok(old.log.includes('[job-wrapper] refused: the spec path names no file of the ctl dir') && !ran(old.log), 'CONTROL: a spec path outside the ctl dir is refused by name — the RAN check is red on it, so the leg can no longer pass on a refusal');
+  const v330 = runWrapper(wrapper, 'argv', { onArgv: true });
+  ok(ran(v330.log) && v330.log.startsWith('[job-wrapper] warning: started by an older server during an update') && !leaks(v330.log, 'token=' + KVMAT) && leaks(v330.log, '«redacted»'), 'a .330 server’s call (the spec base64 on argv — an update’s window) RUNS, says so first, and its log is masked the same way');
   // MUTANT 3 — the wrapper's maskChunk returns the raw chunk (its shape census still required from this tree): the log LEAKS
   const W0 = fs.readFileSync(wrapper, 'utf8');
   const REQ = "require(path.join(__dirname, '..', '..', 'src', 'secret-shapes.js'))", RET = "return out === text ? buf : Buffer.from(out, 'utf8');";

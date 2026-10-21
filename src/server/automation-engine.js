@@ -74,15 +74,28 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   // ── THE STORE ──
   function read() {
     let raw = null;
-    try { raw = JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch (e) { if (!(e && e.code === 'ENOENT')) log(`automation-keys.json could not be read (${e.code || e.message}) — no key is usable until it is fixed`); return { keys: [], grants: [], bad: !(e && e.code === 'ENOENT') }; }
+    try { raw = JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch (e) { if (!(e && e.code === 'ENOENT')) log(`automation-keys.json could not be read (${e.code || e.message}) — no key is usable until it is fixed`); return { keys: [], grants: [], opened: [], bad: !(e && e.code === 'ENOENT') }; }
     const keys = (raw && Array.isArray(raw.keys) ? raw.keys : []).map(A.keyOf).filter(Boolean);
     const grants = (raw && Array.isArray(raw.grants) ? raw.grants : []).map(A.grantOf).filter((g) => g && g.id && keys.some((k) => k.id === g.keyId));
-    return { keys, grants, bad: false };
+    // lane conversations-archive-verb: the conversations each key OPENED (PURE reachVerdict's (a)) — persisted here, so the
+    // opener still ends / archives its workers after a hub restart (a Map in memory lost them: the owner's hub, .331)
+    const opened = (raw && Array.isArray(raw.opened) ? raw.opened : []).map(A.openedOf).filter((o) => o && keys.some((k) => k.id === o.keyId));
+    return { keys, grants, opened, bad: false };
   }
   let db = read();
   function write(next) {
-    writeJsonAtomic(FILE, { v: 1, keys: next.keys, grants: next.grants });
-    db = { keys: next.keys, grants: next.grants, bad: false };
+    const opened = Array.isArray(next.opened) ? next.opened : db.opened || [];
+    writeJsonAtomic(FILE, { v: 1, keys: next.keys, grants: next.grants, opened });
+    db = { keys: next.keys, grants: next.grants, opened, bad: false };
+  }
+  const OPENED_MAX = 2000;   // rows kept, newest last (a dispatcher's workers over months — a few hundred)
+  /** A successful open's row — or the conversation id learned later for a row that had only the webui id. Never throws. */
+  function noteOpened({ keyId, webuiId = null, conversationId = null }) {
+    if (!keyId || (!webuiId && !conversationId)) return;
+    const had = db.opened.find((o) => o.keyId === keyId && webuiId && o.webuiId === webuiId);
+    if (had && (had.conversationId || !conversationId)) return;   // known already
+    const next = had ? db.opened.map((o) => (o === had ? { ...o, conversationId } : o)) : [...db.opened, { keyId, webuiId, conversationId, at: now() }].slice(-OPENED_MAX);
+    try { write({ keys: db.keys, grants: db.grants, opened: next }); } catch (e) { log(`the opened row of ${keyId} could not be written (${e.code || e.message})`); }
   }
   const keyById = (id) => db.keys.find((k) => k.id === id) || null;
   function audit(line) {
@@ -121,8 +134,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     audit({ keyId: k.id, subject: 'owner', verb: 'key.revoke', ok: true, by });
     return { ok: true, key: A.publicKey(next) };
   }
-  /** Grant a key to subjects (a conversation `session:<id>` / a Task Group `group:<id>`) — `always` unless a card's once. */
-  function grant(keyId, subjects, { by = 'user', mode = 'always', fromAsk = false } = {}) {
+  /** Grant a key to subjects (a conversation `session:<id>` / a Task Group `group:<id>`) — `always` unless a card's once.
+   *  `reach` (lane key-instance-scope): 'opened' (the default) | 'instance' | {taskGroups: [ids]} — PURE reachOf, refused by name. */
+  function grant(keyId, subjects, { by = 'user', mode = 'always', fromAsk = false, reach = 'opened' } = {}) {
     const k = keyById(keyId);
     if (!k) return named('not_found');
     if (k.revokedAt) return named('key_revoked');
@@ -131,16 +145,18 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     const badOne = list.find((s) => !A.isSubject(s) || s === 'external');
     if (badOne) return named('bad_args', badOne === 'external' ? 'an outside caller (external) is not grantable yet — L3' : `not a conversation or task group: "${String(badOne).slice(0, 80)}"`);
     if (!A.MODES.includes(mode)) return named('bad_args', 'mode is always or once');
+    const rch = A.reachOf(reach);
+    if (rch === null) return named('bad_args', 'reach is opened, instance or {taskGroups: [task ids]}');
     const t = now(), added = [];
     const grants = db.grants.slice();
     for (const s of list) {
       if (mode === 'always' && grants.some((g) => g.keyId === k.id && g.subject === s && g.mode === 'always')) continue;
-      const g = { id: newId('ag'), keyId: k.id, subject: s, mode, at: t, by: String(by).slice(0, 60), spentAt: null };
+      const g = { id: newId('ag'), keyId: k.id, subject: s, mode, at: t, by: String(by).slice(0, 60), spentAt: null, reach: rch };
       grants.push(g); added.push(g);
     }
     if (!added.length) return { ok: true, added: [], already: true };
     try { write({ keys: db.keys, grants }); } catch (e) { return named('failed', `the grants could not be written (${e.code || e.message})`); }
-    for (const g of added) audit({ keyId: k.id, subject: g.subject, verb: 'key.grant', ok: true, by, ask: mode === 'once' ? 'once' : null });
+    for (const g of added) audit({ keyId: k.id, subject: g.subject, verb: 'key.grant', ok: true, by, ask: mode === 'once' ? 'once' : null, args: { reach: A.reachKind(g.reach) } });
     // a card up for a pair an ALWAYS grant now covers (the owner granted in the WINDOW meanwhile) settles allowed — a card's
     // own answer (once or always) settles only that card, in answer() (q-048 verify M3: one card per verb)
     if (mode === 'always' && !fromAsk) for (const q of [...asks.values()]) if (q.keyId === k.id && added.some((g) => g.subject === q.subject || q.groups.includes(g.subject))) settle(q, 'always', { answeredBy: by, why: 'granted' });
@@ -163,6 +179,20 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     audit({ keyId: k.id, subject: 'owner', verb: 'key.limits', ok: true, by });
     return { ok: true, key: A.publicKey(next) };
   }
+  /** THE REACH OF A GRANT, changed (lane key-instance-scope — the Vault window's reach chip on a 授权给 chip): the same store
+   *  write the first-use card makes, on an existing row; audited `key.reach`. → { ok, grant } | a named refusal. */
+  function setReach(grantId, reach, { by = 'user' } = {}) {
+    const g = db.grants.find((x) => x.id === grantId);
+    if (!g) return named('not_found');
+    const k = keyById(g.keyId);
+    if (!k || k.revokedAt) return named('key_revoked');
+    const rch = A.reachOf(reach);
+    if (rch === null) return named('bad_args', 'reach is opened, instance or {taskGroups: [task ids]}');
+    const next = { ...g, reach: rch };
+    try { write({ keys: db.keys, grants: db.grants.map((x) => (x.id === g.id ? next : x)) }); } catch (e) { return named('failed', `the grants could not be written (${e.code || e.message})`); }
+    audit({ keyId: g.keyId, subject: g.subject, verb: 'key.reach', ok: true, by, args: { reach: A.reachKind(rch) } });
+    return { ok: true, grant: { id: next.id, subject: next.subject, mode: next.mode, at: next.at, by: next.by, spentAt: next.spentAt, reach: next.reach } };
+  }
   /** Take a grant back (the window's ✕ on a 授权给 chip). */
   function ungrant(grantId, { by = 'user' } = {}) {
     const g = db.grants.find((x) => x.id === grantId);
@@ -174,7 +204,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** The window's list: every key (public fields) with its grants (never a value, never a digest). */
   function list() {
     db = read();
-    return { ok: true, state: vaultState(), keys: db.keys.map((k) => ({ ...A.publicKey(k), grants: db.grants.filter((g) => g.keyId === k.id).map((g) => ({ id: g.id, subject: g.subject, mode: g.mode, at: g.at, by: g.by, spentAt: g.spentAt })) })), asks: listAsks() };
+    return { ok: true, state: vaultState(), keys: db.keys.map((k) => ({ ...A.publicKey(k), grants: db.grants.filter((g) => g.keyId === k.id).map((g) => ({ id: g.id, subject: g.subject, mode: g.mode, at: g.at, by: g.by, spentAt: g.spentAt, reach: g.reach })) })), asks: listAsks() };
   }
   /** The Vault window's inventory rows (src/server/vault-contents.js, group «Automation keys»): one row per live key —
    *  names and dates only; `vaultReveal` = its value, ONE per reveal (the contents' door audits it `vault-reveal`). */
@@ -243,10 +273,12 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
           const it = userTodos.add(caller.sessionKey || 'vault', {
             origin: 'vault', urgency: 'urgent', kind: 'action', by: 'agent', sessionName: who, expiresAt: q.askedAt + A.ASK_TTL_MS,
             text: `${who} wants to use the automation key "${key.name}" (${verbWord})`,
-            detail: [openLine ? fill(openLine.key, openLine.params) : null, D1].filter(Boolean).join('\n'),
+            detail: [openLine ? fill(openLine.key, openLine.params) : null, D1, 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.'].filter(Boolean).join('\n'),
             i18n: { text: { key: '{who} wants to use the automation key "{key}" ({verb})', params: { who, key: key.name, verb: verbWord } },
-              detail: [...(openLine ? [openLine] : []), { key: D1 }] },
-            action: { type: 'automation-ask', askId, keyId: key.id, key: String(key.name).slice(0, 60), verb, subject },
+              detail: [...(openLine ? [openLine] : []), { key: D1 },
+                // lane key-instance-scope: the card offers the grant's REACH beside its answers (the client draws the three choices off action.groups)
+                { key: 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.' }] },
+            action: { type: 'automation-ask', askId, keyId: key.id, key: String(key.name).slice(0, 60), verb, subject, groups: q.groups.map((g) => g.slice('group:'.length)).slice(0, 8).join(' ') },   // the caller's Task Group ids, space-joined (an action field is a string; ids hold no space)
           });
           q.todoId = it && it.id;
         } catch (e) {
@@ -262,16 +294,21 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     });
   }
   /** A PERSON's answer (the cookie route): once ⇒ a once-grant spent by the waiting call(s) · always ⇒ an always-grant to
-   *  the conversation · deny. → { ok, state } | a named refusal (ask_unknown / ask_settled / ask_expired). */
-  function answer(askId, { answer: a, answeredBy = 'user' } = {}) {
+   *  the conversation · deny. `reach` (lane key-instance-scope): 'opened' (the default) | 'groups' (the caller's Task Groups
+   *  — the card named them) | 'instance'. → { ok, state } | a named refusal (ask_unknown / ask_settled / ask_expired). */
+  function answer(askId, { answer: a, answeredBy = 'user', reach = 'opened' } = {}) {
     const id = String(askId || '');
     const q = asks.get(id);
     if (!q) return named(settled.get(id) === 'expired' ? 'ask_expired' : settled.has(id) ? 'ask_settled' : 'ask_unknown');
     if (now() - q.askedAt >= A.ASK_TTL_MS) { settle(q, 'expired', { why: 'timeout' }); return named('ask_expired'); }
     if (!['once', 'always', 'deny'].includes(a)) return named('bad_args', 'the answer is once, always or deny');
     if (a === 'deny') { settle(q, 'denied', { answeredBy, why: 'answered' }); return { ok: true, state: 'denied' }; }
+    const rk = reach == null || reach === '' ? 'opened' : reach;
+    if (!A.REACHES.includes(rk)) return named('bad_args', 'the reach is opened, groups or instance');
+    const groups = q.groups.map((s) => s.slice('group:'.length));
+    if (rk === 'groups' && !groups.length) return named('bad_args', 'that conversation is in no Task Group — the reach is opened or instance');
     if (vaultState() !== 'unlocked') { settle(q, 'vault_locked', { answeredBy }); return named('vault_locked'); }
-    const g = grant(q.keyId, [q.subject], { by: answeredBy, mode: a === 'always' ? 'always' : 'once', fromAsk: true });
+    const g = grant(q.keyId, [q.subject], { by: answeredBy, mode: a === 'always' ? 'always' : 'once', fromAsk: true, reach: rk === 'groups' ? { taskGroups: groups } : rk });
     if (!g.ok) { settle(q, 'denied', { answeredBy, why: g.code }); return g; }
     settle(q, a === 'always' ? 'always' : 'allowed', { answeredBy, why: 'answered' });   // THIS card only (verify M3: another verb's card waits for its own answer)
     return { ok: true, state: a === 'always' ? 'always' : 'allowed' };
@@ -357,7 +394,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       audit({ keyId, subject: subject || 'unknown', verb, args: r.args || extra.args || null, ok: r.ok, code: r.code, ...(extra.ask ? { ask: extra.ask } : {}) });
       // lane vault-window-v2 (design q-047 §3.4): a refusal the owner can act on (locked / not granted / expired) is a 「使用失败」
       // notice in For you — ONE per key per hour (src/server/vault-hooks.js createVaultAttention; the rule PURE in vault-inventory)
-      if (!r.ok && attention && typeof attention.useFailed === 'function') { try { const k = keyId ? keyById(keyId) : null; attention.useFailed({ entry: keyId ? `apikey:${keyId}` : null, name: k ? k.name : null, code: r.code, who: caller && caller.name }); } catch { } }
+      // lane conversations-archive-verb: the notice names the VERB, the TARGET (its name when the verb found it, else the id the
+      // caller gave, else the caller itself) and the REASON — one notice per key × verb × reason per hour
+      if (!r.ok && attention && typeof attention.useFailed === 'function') { try { const k = keyId ? keyById(keyId) : null; attention.useFailed({ entry: keyId ? `apikey:${keyId}` : null, name: k ? k.name : null, code: r.code, who: caller && caller.name, verb, target: (r.target != null ? String(r.target) : null) || (args && args.target != null ? String(args.target) : null) || (caller && caller.name) || null, why: r.why || null, reach: r.reach || null }); } catch { } }   // lane key-instance-scope: a reach refusal names the reach
       return r;
     };
     if (!subject || !A.isSubject(subject)) return done(named('unauthorized', 'the calling conversation has no id yet — send it one message first'));
@@ -406,14 +445,17 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       write({ keys: db.keys.map((k) => (k.id === key.id ? { ...k, lastUsedAt: t } : k)), grants: verdict.spend ? db.grants.map((g) => (g.id === verdict.grant.id ? { ...g, spentAt: t } : g)) : db.grants });
     } catch (e) { return done({ ...named('failed', `the key list could not be written (${e.code || e.message}) — nothing ran`), args: v0.args }, key.id); }
     let result;
-    // REACH: a verb that names ANOTHER conversation may touch it only when the same key is granted to it (or to one of its
-    // Task Groups) — the owner's grants bound what a key reaches, never the caller's say-so
-    const reach = (conversationId, targetGroups = []) => !!conversationId && (conversationId === caller.conversationId
-      || db.grants.some((g) => g.keyId === key.id && (g.subject === `session:${conversationId}` || (Array.isArray(targetGroups) && targetGroups.some((tg) => g.subject === `group:${tg}`)))));
+    // REACH (lane conversations-archive-verb): a verb that names ANOTHER conversation may touch it by ONE PURE rule — the key
+    // OPENED it (the store's rows), a grant of the key names it (the conversation or one of its Task Groups), or it is the
+    // caller itself (A.reachVerdict) — the owner's grants and the key's own opens bound what it reaches, never the caller's say-so
+    // + the GRANT'S REACH this use rides (lane key-instance-scope: the widest of the caller's always-grants, else the once-grant's — useVerdict)
+    const reach = (target) => { const v = A.reachVerdict({ keyId: key.id, caller: caller.conversationId, target, grants: db.grants, opened: db.opened, reach: verdict.reach }); if (v.ok && v.by === 'opener' && target && target.webuiId && target.conversationId) noteOpened({ keyId: key.id, webuiId: target.webuiId, conversationId: target.conversationId }); return v; };
     try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); }
     catch (e) { return done({ ...named('failed', String((e && e.message) || e).slice(0, 200)), args: v0.args }, key.id, asked ? { ask: asked } : {}); }
+    // THE OPENER'S ROW: a successful open is remembered by the key that made it (the webui id now, the conversation id when known)
+    if (verb === 'conversations.open' && result && result.ok && result.sessionId) noteOpened({ keyId: key.id, webuiId: String(result.sessionId), conversationId: result.claudeSessionId ? String(result.claudeSessionId) : null });
     // lane automation-verbs: a refusal keeps what the caller can act on — the spend bucket and when it frees, the field it names
-    const keep = result && typeof result === 'object' ? Object.fromEntries(['bucket', 'retryAfter', 'field'].filter((k) => result[k] != null).map((k) => [k, result[k]])) : {};
+    const keep = result && typeof result === 'object' ? Object.fromEntries(['bucket', 'retryAfter', 'field', 'reach'].filter((k) => result[k] != null).map((k) => [k, result[k]])) : {};   // `reach`: a reach refusal's kind (lane key-instance-scope)
     if (!result || result.ok === false) return done({ ...named((result && result.code) || 'failed', result && result.why), ...keep, args: v0.args }, key.id, asked ? { ask: asked } : {});
     done({ ok: true, args: v0.args }, key.id, asked ? { ask: asked } : {});
     return { ok: true, keyId: key.id, key: key.name, verb, result, ms: now() - t0 };
@@ -427,7 +469,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     const mine = A.callerSubjects(caller.conversationId, caller.groups || []);
     return db.keys.filter((k) => !k.revokedAt).map((k) => {
       const gs = db.grants.filter((g) => g.keyId === k.id && mine.includes(g.subject) && !(g.mode === 'once' && g.spentAt));
-      return gs.length ? { id: k.id, name: k.name, scopes: k.scopes.slice(), via: gs.map((g) => ({ subject: g.subject, mode: g.mode })), limits: k.limits } : null;
+      const always = gs.filter((g) => g.mode === 'always');
+      return gs.length ? { id: k.id, name: k.name, scopes: k.scopes.slice(), via: gs.map((g) => ({ subject: g.subject, mode: g.mode, reach: g.reach })), limits: k.limits,
+        reach: always.length ? A.widestReach(always.map((g) => g.reach)) : gs[0].reach } : null;   // lane key-instance-scope: the reach a use would ride (useVerdict's)
     }).filter(Boolean);
   }
   /** THIS caller's audit lines (its own conversation's), newest last — names and ids only. */
@@ -453,7 +497,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     return { ok: true, lines: lines.slice(-Math.max(1, Math.min(200, Number(limit) || 50))).reverse() };
   }
 
-  return { list, mint, revoke, grant, ungrant, setLimits, use, answer, reconcile, keysFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
+  return { list, mint, revoke, grant, ungrant, setReach, setLimits, use, answer, reconcile, keysFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
 }
 
 module.exports = { create, ACTION_TYPE };

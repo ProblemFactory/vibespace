@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Background Work job wrapper (STATIC tracked; docs/design-background-work.md §5).
-// argv: node job-wrapper.js <ctlDir> <specPath>
+// argv: node job-wrapper.js <ctlDir> <specPath> --proto=2 (the protocol the server speaks — below)
 //   ctlDir holds: pid.json (OUR first act — the identity stamp), current.log,
 //   exit.json (written on child exit), answers.jsonl (tailed → child stdin when
 //   stdinOpen). specPath = <ctlDir>/spec.<runTs>.json = {argv, cwd, env,
@@ -21,10 +21,35 @@ const crypto = require('crypto');
 
 const ctlDir = process.argv[2];
 const specPath = process.argv[3];
+const protoArg = process.argv[4];
 if (!ctlDir) { process.stderr.write('[job-wrapper] refused: no ctl dir on argv\n'); process.exit(2); }
+// THE PROTOCOL BETWEEN THE SERVER AND THIS FILE IS VERSIONED, NEVER ASSUMED (lane job-wrapper-update-window,
+// fb-7f7be1e24e): an update writes the new wrapper to disk BEFORE it restarts the server (scripts/update.sh: pull →
+// install → build → restart; 45 s on the owner's hub, 2026-10-20) and the server still running spawns whatever wrapper
+// is on disk — a .330 server's cron fire met .331's wrapper, was refused by name, and the agent was told of a failure
+// that never happened. A server from 2.369.333 on SAYS its protocol (`--proto=N`); an older one is known by its shape: a
+// file of the ctl dir = 2 (.331/.332), a base64 JSON spec = 1 (≤ .330: the spec on argv). Protocol 1 is READ, loudly,
+// for that window only — the old caller already put the spec on argv; no server of this tree sends one (test-jobs-engine
+// §12 M1 is RED on a server that does). COMPAT_PROTO_1 EXPIRES AT 2.369.340: test-job-model goes RED there — remove it,
+// or re-decide with evidence and move the date. A protocol this wrapper does not speak never starts the job: reason
+// update_window (exit 75), which a server from 2.369.333 on judges an interruption of its update, not a failure.
+const PROTO = 2;
+const COMPAT_PROTO_1 = true;
+const ofCtl = !!specPath && path.dirname(path.resolve(specPath)) === path.resolve(ctlDir);
+function argvSpec(a) { // the ≤ .330 caller's spec: base64 JSON carrying an argv — anything else is not one
+  try { const s = JSON.parse(Buffer.from(String(a), 'base64').toString('utf-8')); return s && typeof s === 'object' && Array.isArray(s.argv) ? s : null; } catch { return null; }
+}
+const said = /^--proto=(\d{1,6})$/.exec(protoArg || '');
+const old = !said && specPath && !ofCtl ? argvSpec(specPath) : null;
+const proto = said ? Number(said[1]) : ofCtl ? PROTO : old ? 1 : 0;
 // the spec file is read ONCE, then unlinked — and only a file of OUR ctl dir (a path elsewhere is never read nor removed)
-let spec = null, refusal = '';
-if (!specPath || path.dirname(path.resolve(specPath)) !== path.resolve(ctlDir)) refusal = 'the spec path names no file of the ctl dir';
+let spec = null, refusal = '', windowEnd = false, warning = '';
+if (protoArg !== undefined && !said) { refusal = 'the protocol argument is unreadable'; if (ofCtl) { try { fs.unlinkSync(specPath); } catch { } } }
+else if (proto === 1 && old && COMPAT_PROTO_1) { spec = old; warning = '[job-wrapper] warning: started by an older server during an update — the spec rode argv once (protocol 1); restart the server if this line repeats\n'; }
+else if (proto && proto !== PROTO) { // never read: the spec file of another protocol is removed unread (it holds the job's secrets)
+  windowEnd = true; refusal = `the server speaks protocol ${proto}, this wrapper ${PROTO} (an update in flight, or a server not restarted after one)`;
+  if (ofCtl) { try { fs.unlinkSync(specPath); } catch { } }
+} else if (!ofCtl) refusal = 'the spec path names no file of the ctl dir';
 else {
   try { spec = JSON.parse(fs.readFileSync(specPath, 'utf-8')); } catch (e) { refusal = `the spec file is unreadable (${e.code || e.name})`; } // never e.message: a parse error quotes the text
   try { fs.unlinkSync(specPath); } catch { }
@@ -59,13 +84,14 @@ function writeExit(exit) {
     fs.renameSync(path.join(ctlDir, 'exit.json.tmp'), path.join(ctlDir, 'exit.json'));
   } catch { }
 }
-// a refused spec ENDS the run where the engine reads it: the named line in the job's log, exit.json, a non-zero exit
+// a refused spec ENDS the run where the engine reads it: the named line in the job's log, exit.json, a non-zero exit —
+// a protocol mismatch says so in exit.json (reason update_window, exit 75): the job was never started
 if (refusal) {
-  const line = `[job-wrapper] refused: ${refusal}\n`;
+  const line = windowEnd ? `[job-wrapper] not started: ${refusal}\n` : `[job-wrapper] refused: ${refusal}\n`;
   try { process.stderr.write(line); } catch { }
   try { fs.appendFileSync(logPath, line); } catch { }
-  writeExit({ code: 2, signal: null, endedAt: Date.now() });
-  process.exit(2);
+  writeExit(windowEnd ? { code: 75, signal: null, endedAt: Date.now(), reason: 'update_window', proto: { server: proto, wrapper: PROTO } } : { code: 2, signal: null, endedAt: Date.now() });
+  process.exit(windowEnd ? 75 : 2);
 }
 
 let logFd = fs.openSync(logPath, 'a');
@@ -79,6 +105,7 @@ function writeLog(buf) {
     fs.writeSync(logFd, buf); logSize += buf.length;
   } catch { }
 }
+if (warning) writeLog(Buffer.from(warning, 'utf8')); // the job's log says how it was started, before the job's own first line
 
 // lane agent-output-sinks (design q-043 D3 ③): a secret an agent's job prints never lands in the log in the clear —
 // every chunk passes the SHAPE census (src/secret-shapes.js R1–R8: a bearer, a known prefix, a PEM block, a JWT, a

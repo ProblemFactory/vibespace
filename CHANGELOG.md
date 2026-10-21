@@ -2,6 +2,18 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.333 — 2026-10-20
+
+### Added
+- Feedback an agent sends on any of your instances now reaches the maintainer's instance, and the release it is marked handled in shows in that agent's list.
+- A conversation you granted an automation key can archive the conversations it opened, ending them first: `vibespace-api conversations archive`.
+- When you grant an automation key you choose how far it reaches: only the conversations it opens, the conversations of its Task Groups, or the whole VibeSpace.
+
+### Fixed
+- A Background Work job that starts while VibeSpace is updating itself is no longer reported as failed.
+- An automation key still ends and archives the conversations it opened after VibeSpace restarts (those calls were refused as not granted before).
+- A key's failure notice says which verb failed, on which conversation, why, and where to fix it.
+
 ## 2.369.332 — 2026-10-20
 
 ### Added

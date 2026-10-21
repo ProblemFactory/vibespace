@@ -9211,6 +9211,7 @@ export default {
   "Click to show it all": "クリックで全文を表示",
   "handled {when}": "{when} に対応済み",
   "handled in {version} by {who}, {when}": "{who} が {when} に対応済み（{version} で修正）", // lane feedback-handled-verb
+  "Forwarded from {instance}": "{instance} から転送", // lane feedback-forward
   "Could not load the feedback list": "フィードバック一覧を読み込めませんでした",
   "What agents reported with vibespace-feedback — a command, a flow, a screen or a manual that felt wrong. Newest first; a repeat within a day is counted on its row.": "エージェントが vibespace-feedback で報告した、使いにくかったコマンド・流れ・画面・マニュアルです。新しい順。1 日以内の同じ報告はその行の回数に数えます。",
   "Open ({n})": "未対応（{n}）",
@@ -9567,6 +9568,7 @@ export default {
   "Look up a conversation's ids": "会話の ID を確かめる", // design q-046 (lane automation-verbs)
   "Mark an agent's feedback handled": "エージェントのフィードバックを対応済みにする", // lane feedback-handled-verb
   "Read the agents' open feedback": "エージェントの未対応フィードバックを読む", // lane feedback-handled-verb
+  "Archive a conversation": "会話をアーカイブする", // lane conversations-archive-verb
   "(starts a billed turn)": "（課金されるターンを開始します）", // design q-046 (lane automation-keys-core)
   "The key's value is sealed in the vault — nobody sees it. Grant it to a conversation or a task group next.": "キーの値は保管庫に封印され、誰にも見えません。次に会話かタスクグループに付与してください。", // design q-046 (lane automation-keys-core)
   "Mint": "発行", // design q-046 (lane automation-keys-core)
@@ -9705,11 +9707,21 @@ export default {
   "System · never shown": "システム · 表示しない", // lane vault-window-v2
   "Minted by an agent": "エージェントが生成", // lane vault-window-v2
   "An agent saw it": "エージェントが平文を見た", // lane vault-window-v2
-  "Using “{name}” failed": "「{name}」の利用に失敗しました", // lane vault-window-v2
-  "An automation key could not be used": "自動化キーを利用できませんでした", // lane vault-window-v2
-  "{n} refused within the hour — the vault was locked: {locked} · not granted: {granted} · expired: {expired}": "1 時間で {n} 回拒否——保管庫がロック中：{locked} · 未許可：{granted} · 期限切れ：{expired}", // lane vault-window-v2
+  "“{name}” could not {verb} {target}: the vault is locked — Unlock… at the top of the page": "「{name}」は {target} を {verb} できませんでした：保管庫がロック中——ページ上部の「解除…」から解除してください", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: the key is not granted to that conversation (nor to one of its Task Groups) and did not open it — grant it to that conversation or its Task Group in the Vault window (授权给…), or answer the card next time": "「{name}」は {target} を {verb} できませんでした：このキーはその会話（またはそのタスクグループ）に許可されておらず、その会話を開いたのでもありません——保管庫ウィンドウでその会話かタスクグループに許可する（授权给…）か、次回カードに答えてください", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: the key does not hold that verb — mint a key that holds it in the Vault window (铸造…)": "「{name}」は {target} を {verb} できませんでした：このキーはその動詞を持っていません——保管庫ウィンドウでそれを含むキーを作ってください（铸造…）", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: the one use you allowed was spent — answer the next card with 一直, or grant the key in the Vault window": "「{name}」は {target} を {verb} できませんでした：許可した 1 回分は使い切りました——次のカードで「一直」を選ぶか、保管庫ウィンドウでこのキーを許可してください", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: the key was revoked — mint a new one in the Vault window and grant it": "「{name}」は {target} を {verb} できませんでした：このキーは失効しています——保管庫ウィンドウで新しいキーを作って許可してください", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: the calling conversation is not running any more — nothing to do": "「{name}」は {target} を {verb} できませんでした：呼び出した会話はもう動いていません——対応は不要です", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: nobody answered its card in 60 s — answer the card next time, or grant the key in the Vault window": "「{name}」は {target} を {verb} できませんでした：カードに 60 秒以内の回答がありませんでした——次回はカードに答えるか、保管庫ウィンドウでこのキーを許可してください", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}: that conversation still has open For-you asks — answer its cards, or let the caller pass --resolve-asks": "「{name}」は {target} を {verb} できませんでした：その会話にはまだ未回答の「あなた宛て」の質問があります——先にそのカードに答えるか、呼び出し側に --resolve-asks を付けさせてください", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "An automation key could not {verb} {target}: the vault is locked — Unlock… at the top of the page": "自動化キーは {target} を {verb} できませんでした：保管庫がロック中——ページ上部の「解除…」から解除してください", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "An automation key could not {verb} {target}: no key is granted to that conversation — grant one in the Vault window (授权给…), or answer the card next time": "自動化キーは {target} を {verb} できませんでした：その会話に許可されたキーがありません——保管庫ウィンドウで許可する（授权给…）か、次回カードに答えてください", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "“{name}” could not {verb} {target}": "「{name}」は {target} を {verb} できませんでした", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "An automation key could not {verb} {target}": "自動化キーは {target} を {verb} できませんでした", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "{n} refused within the hour": "1 時間で {n} 回拒否", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
+  "Last: {target}": "最後の対象：{target}", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
   "Last asked by {who}": "最後の要求：{who}", // lane vault-window-v2
-  "Open the Vault window to see the row. A locked vault answers every use «locked» until a person unlocks it; a grant is given in the row.": "保管庫ウィンドウでその行を確認してください。ロック中の保管庫は、誰かが解除するまですべての利用に「ロック中」と答えます。許可はその行で与えます。", // lane vault-window-v2
   "“{name}” was stored by an agent that saw its value — rotate it": "「{name}」はエージェントが平文を見て保存しました——更新を推奨します", // lane vault-window-v2
   "Stored by {who}": "{who} が保存", // lane vault-window-v2
   "Renew it where it was issued, then store the new value; until then the agent's transcript holds the old one.": "発行元で新しくして、新しい値を保存してください。それまではエージェントの記録に古い値が残ります。", // lane vault-window-v2
@@ -9880,4 +9892,20 @@ export default {
   "An IANA zone such as America/Los_Angeles or Asia/Shanghai. Every time an agent reads — the Task Group board, the Activity log, TASK.md, the context a session starts with, the backlog and the tools' answers — is printed in this zone and named (16:16 PT), so the time an agent tells you is your clock. Empty = this server's own zone: its TZ setting, else the system's.": "IANA のゾーン名（America/Los_Angeles、Asia/Shanghai など）。エージェントが読むすべての時刻——タスクグループのボード、アクティビティログ、TASK.md、セッション開始時のコンテキスト、バックログ、ツールの回答——はこのゾーンで表示され、ゾーン名が付きます（16:16 PT）。エージェントが伝える時刻があなたの時計になります。空欄 = このサーバー自身のゾーン：TZ 設定、なければシステムのゾーン。", // lane agent-context-owner-facts
   "{n} conversations are asking to use stored secrets": "{n} 件の会話が保管庫のシークレットの使用を求めています", // B-4934: the vault's «N conversations are asking» notice
   "Each conversation asks on its own card in For you. This line goes when 8 or fewer are asking.": "会話ごとの依頼は「あなた宛て」のそれぞれのカードにあります。依頼中の会話が 8 件以下になると、この行は消えます。", // B-4934: the vault's «N conversations are asking» notice
+  "Reach": "対象範囲", // lane key-instance-scope: a grant's reach
+  "Only the conversations it opens": "この鍵が開いた会話だけ", // lane key-instance-scope: a grant's reach
+  "The conversations of its Task Groups": "所属タスクグループの会話", // lane key-instance-scope: a grant's reach
+  "The whole VibeSpace": "VibeSpace 全体", // lane key-instance-scope: a grant's reach
+  "This key may act on every conversation here, including yours": "このキーは、あなた自身の会話を含め、ここにあるすべての会話を操作できます", // lane key-instance-scope: a grant's reach
+  "Rename, end or archive the conversations of: {groups}": "次のタスクグループの会話を改名・終了・アーカイブできます：{groups}", // lane key-instance-scope: a grant's reach
+  "Rename, end or archive only the conversations it opens with this key (and itself)": "このキーで自分が開いた会話（と自分自身）だけを改名・終了・アーカイブできます", // lane key-instance-scope: a grant's reach
+  "Change the reach…": "対象範囲を変える…", // lane key-instance-scope: a grant's reach
+  "Reach of \"{name}\" for {subject}": "{subject} における「{name}」の対象範囲", // lane key-instance-scope: a grant's reach
+  "Which other conversations that conversation may rename, end or archive with this key. What it opened, what a grant names and itself are always within reach.": "その会話がこのキーで改名・終了・アーカイブできる他の会話。自分が開いた会話、許可で名指しされた会話、自分自身は常に範囲内です。", // lane key-instance-scope: a grant's reach
+  "Pick at least one Task Group": "タスクグループを少なくとも 1 つ選んでください", // lane key-instance-scope: a grant's reach
+  "Reach of the grants you add": "追加する許可の対象範囲", // lane key-instance-scope: a grant's reach
+  "Granted — the key now reaches every conversation here from that conversation (the Vault window lists it)": "許可しました——その会話はこのキーでここにあるすべての会話に届きます（保管庫ウィンドウに載っています）", // lane key-instance-scope: a grant's reach
+  "The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key's row in the Vault window.": "対象範囲は、このキーで改名・終了・アーカイブできる他の会話を決めます：自分が開いた会話だけ（既定）、所属タスクグループの会話、またはこの VibeSpace のすべての会話。あとから保管庫ウィンドウのキーの行で変えられます。", // lane key-instance-scope: a grant's reach
+  "“{name}” could not {verb} {target}: the key did not open that conversation and its grant reaches only what it opened — widen the reach on the key's row in the Vault window (这些岗位的会话 / 整个 VibeSpace), or grant the key to that conversation": "「{name}」は {target} を {verb} できませんでした：このキーはその会話を開いておらず、許可の対象範囲は自分が開いた会話だけです——保管庫ウィンドウのキーの行で対象範囲を広げる（这些岗位的会话 / 整个 VibeSpace）か、その会話にキーを許可してください", // lane key-instance-scope: a grant's reach
+  "“{name}” could not {verb} {target}: that conversation is not in the Task Groups the grant reaches — widen the reach on the key's row in the Vault window (整个 VibeSpace), or grant the key to that conversation": "「{name}」は {target} を {verb} できませんでした：その会話は許可の対象タスクグループにありません——保管庫ウィンドウのキーの行で対象範囲を広げる（整个 VibeSpace）か、その会話にキーを許可してください", // lane key-instance-scope: a grant's reach
 };

@@ -19,6 +19,13 @@
 //      list says handled in that release by the coordinator, the note kept; a call without --version is refused by name
 //   ⑤ a conversation WITHOUT a grant opens ⇒ the first-use card in For you (action automation-ask); the person denies ⇒
 //      ask_denied (exit 1), nothing spawned, nothing charged
+//   ⑤b THE ARCHIVE (lane conversations-archive-verb — the owner 2026-10-20 「这些不用 archive 吗」): a live worker with an open
+//      For-you ask (the real vibespace-ask) ⇒ `conversations archive` refuses asks_open naming the ask; with --resolve-asks the
+//      ask is dismissed, the worker ended, then archived — the sidebar's archived list (user-state) holds claude:<worker>
+//   ⑤c THE GRANT'S REACH (lane key-instance-scope — the owner 2026-10-20 「key 应该可以被授权在整个 vibe space 上工作」): a worker the
+//      OLD road opened (the owner's own create — no key opened it, no grant names it): with the grant's `opened` reach the
+//      coordinator's archive is not_granted NAMING the reach and the door; the owner widens the grant to `instance` (the key
+//      row's door, POST …/grants/:id/reach) ⇒ the same call ends and archives it; `vibespace-api keys` prints the reach
 //   ⑥ LOCKED ⇒ 423 vault_locked on every verb of the door, and the CLI exits 3
 //   lane automation-open-permission-resolve: B-dbba — `open --name` names the worker AT its create (the list, the answer, status
 //   say it before any rename) and the card says what it would open; q-049 M2 — a [default] key + a folder whose project
@@ -123,8 +130,8 @@ try {
   const GROUP = gr.json && gr.json.group && (gr.json.group.id || gr.json.group);
   check(`the coordinator's agent group (${GROUP})`, gr.status === 200 && /^g-/.test(String(GROUP)), gr);
 
-  console.log('② a key with the six verbs, granted to the coordinator');
-  const SCOPES = ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'groups.invite', 'conversations.status'];
+  console.log('② a key with the seven verbs, granted to the coordinator');
+  const SCOPES = ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'groups.invite', 'conversations.status', 'conversations.archive'];
   // lane automation-open-limits: an opening key carries the owner's limits — the coordinator's folder, its permission mode
   const mk = await req('POST', '/api/automation/keys', { name: 'dispatch', scopes: SCOPES, limits: { cwdRoots: [CWD], accounts: 'any', permissionModes: ['default', 'bypassPermissions'], models: 'any', modes: ['chat'] } });
   const KEY = mk.json && mk.json.key && mk.json.key.id;
@@ -155,12 +162,21 @@ try {
   const en = await cli(['conversations', 'end', W.sessionId], C.token);
   const gone = await until(async () => !(await active()).some((s) => s.id === W.sessionId));
   check('conversations end: exit 0 and the worker is gone from the live list', en.code === 0 && !!gone, en);
+  // lane conversations-archive-verb: the opener's lifecycle ends with the sidebar's 归档 — AFTER the end, by the conversation id (the key opened it; no grant of its own)
+  const ar = await cli(['conversations', 'archive', W.claudeSessionId], C.token);
+  const ust = (await req('GET', '/api/user-state')).json || {};
+  check('conversations archive (after the end, by the conversation id): exit 0, ended false, archived — the sidebar\'s archived list (user-state archivedSessions) holds claude:<worker>',
+    ar.code === 0 && ar.json && ar.json.archived === true && ar.json.ended === false && ar.json.sessionKey === `claude:${W.claudeSessionId}` && Array.isArray(ust.archivedSessions) && ust.archivedSessions.includes(`claude:${W.claudeSessionId}`), { ar, archived: ust.archivedSessions });
+  const ar2 = await cli(['conversations', 'archive', W.claudeSessionId], C.token);
+  check('a second archive ⇒ exit 1 already_archived', ar2.code === 1 && /\(already_archived\)/.test(ar2.err), ar2);
 
   console.log('④ the audit, the spend');
   const audit = fs.readFileSync(path.join(wt, 'data', 'automation-audit.jsonl'), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
   const mine = audit.filter((l) => l.subject === `session:${C.sid}` && l.verb !== 'key.grant');
-  check(`the audit: one ok line per verb for the coordinator (${mine.map((l) => l.verb).join(', ')}), names and ids only`,
-    JSON.stringify(mine.map((l) => l.verb)) === JSON.stringify(['conversations.open', 'conversations.status', 'conversations.rename', 'conversations.bind', 'groups.invite', 'conversations.end']) && mine.every((l) => l.ok && l.key === KEY) && !audit.some((l) => /vsak_/.test(JSON.stringify(l))), mine);
+  const okMine = mine.filter((l) => l.ok);
+  check(`the audit: one ok line per verb for the coordinator (${okMine.map((l) => l.verb).join(', ')}) + the refused second archive (already_archived), names and ids only`,
+    JSON.stringify(okMine.map((l) => l.verb)) === JSON.stringify(['conversations.open', 'conversations.status', 'conversations.rename', 'conversations.bind', 'groups.invite', 'conversations.end', 'conversations.archive']) && okMine.every((l) => l.key === KEY)
+    && mine.filter((l) => !l.ok).length === 1 && mine.find((l) => !l.ok).code === 'already_archived' && !audit.some((l) => /vsak_/.test(JSON.stringify(l))), mine);
   const spend = await until(() => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')); return (j.budget && j.budget.identities && j.budget.identities[`automation:${KEY}`]) || null; } catch { return null; } }, 5000);
   check('the spend: ONE automation-open stamp charged to the key (automation:<keyId>)', Array.isArray(spend) && spend.length === 1 && spend[0].reason === 'automation-open', spend);
 
@@ -239,10 +255,55 @@ try {
   const spend2 = (() => { try { return JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')).budget.identities[`automation:${KEY}`]; } catch { return null; } })();
   check('the person denies ⇒ the CLI exits 1 with ask_denied; nothing spawned, nothing charged', an && an.status === 200 && dr.code === 1 && /ask_denied/.test(dr.err) && (await active()).length === nBefore && Array.isArray(spend2) && spend2.length === 1, { an: an && an.status, dr, spend2 });
 
+  console.log('⑤b THE ARCHIVE of a LIVE worker with an open For-you ask (lane conversations-archive-verb)');
+  const op2 = await cli(['conversations', 'open', '--cwd', CWD, '--name', 'worker two'], C.token);
+  const W2 = op2.json || {};
+  const w2Stub = W2.claudeSessionId && stubs().find((x) => x.sid === W2.claudeSessionId);
+  check('a second worker opened by the key (live, with its own token)', op2.code === 0 && !!W2.claudeSessionId && !!(w2Stub && w2Stub.token), op2);
+  const askRun = w2Stub && await new Promise((resolve) => {
+    const p = spawn(process.execPath, [path.join(wt, 'data/bin/vibespace-ask'), 'May I delete the scratch folder?'], { env: { PATH: process.env.PATH, VIBESPACE_API: BASE, VIBESPACE_SESSION_TOKEN: w2Stub.token }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.on('close', (code) => resolve({ code, out, err }));
+  });
+  const askItem = await until(async () => { const t = (await req('GET', '/api/user-todos')).json; return ((t && t.todos && t.todos.open) || []).find((i) => i.sessionKey === `claude:${W2.claudeSessionId}` && /scratch folder/.test(i.text)) || null; }, 8000);
+  check('the worker filed an ask in For you through the real vibespace-ask', !!askRun && askRun.code === 0 && !!askItem, { askRun, askItem: askItem && askItem.id });
+  const arBusy = await cli(['conversations', 'archive', W2.sessionId], C.token);
+  check('archive ⇒ exit 1 asks_open, naming the ask; the worker still live, the ask still open (the memory law: never archive a worker with open asks)',
+    arBusy.code === 1 && /\(asks_open\)/.test(arBusy.err) && !!askItem && arBusy.err.includes(askItem.id) && (await active()).some((s) => s.id === W2.sessionId), arBusy);
+  const arOk = await cli(['conversations', 'archive', W2.sessionId, '--resolve-asks'], C.token);
+  const gone2 = await until(async () => !(await active()).some((s) => s.id === W2.sessionId));
+  const ust2 = (await req('GET', '/api/user-state')).json || {};
+  const afterT = (await req('GET', '/api/user-todos')).json;
+  const stillOpen = ((afterT && afterT.todos && afterT.todos.open) || []).some((i) => askItem && i.id === askItem.id);
+  check('archive --resolve-asks ⇒ exit 0: the ask dismissed (named in resolvedAsks), the worker ended, then archived — claude:<worker two> in the archived list',
+    arOk.code === 0 && arOk.json && arOk.json.ended === true && arOk.json.archived === true && !!askItem && JSON.stringify(arOk.json.resolvedAsks) === JSON.stringify([askItem.id]) && !!gone2 && !stillOpen && Array.isArray(ust2.archivedSessions) && ust2.archivedSessions.includes(`claude:${W2.claudeSessionId}`), { arOk, gone2: !!gone2, stillOpen });
+
+  console.log('⑤c THE GRANT\'S REACH (lane key-instance-scope) — a worker the OLD road opened: opened ⇒ not_granted naming the reach; instance ⇒ archived');
+  const E = await liveConversation('av-old-road', { name: 'old road worker' });   // the owner's own create: no key opened it, no grant names it
+  check('a conversation the OLD road opened (live; in no grant, in no opened row)', E.live && !!E.sid, { ...E, token: !!E.token });
+  const k0 = await cli(['keys'], C.token);
+  check('`vibespace-api keys` prints the dispatcher\'s reach: opened (only what the key opened…)', k0.code === 0 && /dispatch \(ak-[0-9a-f]+\) — .* — via session:[^\n]* — reach: opened \(only what the key opened/.test(k0.out), k0);
+  const no = await cli(['conversations', 'archive', E.sid], C.token);
+  check('with the `opened` reach: archive ⇒ exit 1 not_granted, the message naming the reach and the door (the Vault window); the worker still live', no.code === 1 && /\(not_granted\)/.test(no.err) && /reaches only what the key opened/.test(no.err) && /Vault window/.test(no.err) && (await active()).some((s) => s.id === E.wid), no);
+  const list = (await req('GET', '/api/automation/keys')).json;
+  const grant = list && list.keys.find((k) => k.id === KEY).grants.find((g) => g.subject === `session:${C.sid}`);
+  check('the grant row carries reach: opened (GET /api/automation/keys)', !!grant && grant.reach === 'opened', grant);
+  const widen = grant && await req('POST', `/api/automation/grants/${grant.id}/reach`, { reach: 'instance' });
+  const bad = grant && await req('POST', `/api/automation/grants/${grant.id}/reach`, { reach: 'everything' });
+  const agentDoor = grant && await req('POST', `/api/automation/grants/${grant.id}/reach`, { reach: 'instance' }, { bearer: C.token });
+  check('the owner widens it to instance (POST …/grants/:id/reach — the key row\'s chip); an unknown reach ⇒ 400 bad_args; an agent\'s bearer ⇒ 403 human_only', widen && widen.status === 200 && widen.json.grant.reach === 'instance' && bad && bad.status === 400 && bad.json.code === 'bad_args' && agentDoor && agentDoor.status === 403 && agentDoor.json.code === 'human_only', { widen: widen && widen.json, bad: bad && bad.status, agentDoor: agentDoor && agentDoor.status });
+  const k1 = await cli(['keys'], C.token);
+  check('`keys` now prints reach: instance (every conversation here)', k1.code === 0 && /— reach: instance \(every conversation here\)/.test(k1.out), k1);
+  const yes = await cli(['conversations', 'archive', E.sid], C.token);
+  const goneE = await until(async () => !(await active()).some((s) => s.id === E.wid));
+  const ust3 = (await req('GET', '/api/user-state')).json || {};
+  check('with instance reach the SAME call archives the old road\'s worker: ended by the key, then claude:<id> in the archived list', yes.code === 0 && yes.json && yes.json.ended === true && yes.json.archived === true && !!goneE && Array.isArray(ust3.archivedSessions) && ust3.archivedSessions.includes(`claude:${E.sid}`), { yes, goneE: !!goneE });
+  const rAudit = fs.readFileSync(path.join(wt, 'data', 'automation-audit.jsonl'), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((l) => l && l.verb === 'key.reach');
+  check('the widening is audited (key.reach · instance · the grant\'s subject)', rAudit.length === 1 && rAudit[0].args.reach === 'instance' && rAudit[0].subject === `session:${C.sid}`, rAudit);
+
   console.log('⑥ LOCKED ⇒ 423 on every verb');
   await req('POST', '/api/vault/lock');
   const answers = [];
-  for (const [verb, args] of [['conversations.open', { cwd: CWD }], ['conversations.status', { target: C.sid }], ['conversations.rename', { name: 'x' }], ['conversations.bind', { target: C.sid, task: TASK }], ['conversations.end', { target: C.sid }], ['groups.invite', { group: GROUP, target: D.sid }], ['feedback.list', {}], ['feedback.handled', { id: 'fb-ffffffffff', version: '2.369.330' }]]) {
+  for (const [verb, args] of [['conversations.open', { cwd: CWD }], ['conversations.status', { target: C.sid }], ['conversations.rename', { name: 'x' }], ['conversations.bind', { target: C.sid, task: TASK }], ['conversations.end', { target: C.sid }], ['conversations.archive', { target: C.sid }], ['groups.invite', { group: GROUP, target: D.sid }], ['feedback.list', {}], ['feedback.handled', { id: 'fb-ffffffffff', version: '2.369.330' }]]) {
     const r = await req('POST', `/api/agent/automation/${verb}`, args, { bearer: C.token });
     answers.push([verb, r.status, r.json && r.json.code]);
   }

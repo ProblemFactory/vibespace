@@ -30,10 +30,14 @@ TXT
 
 ## What happens to it
 
-- It lands on THIS VibeSpace only (data/feedback.json) — nothing is sent
-  anywhere else. The user sees it under ⚙ System ▸ Agent feedback… (newest
+- It lands on THIS VibeSpace (data/feedback.json). When this VibeSpace sends
+  its diagnostics to a maintainers' instance (a company deployment's telemetry
+  forward), the report is forwarded there too — its words and the facts below,
+  nothing else. The user sees it under ⚙ System ▸ Agent feedback… (newest
   first) and marks it handled when it is dealt with — or the maintainer
-  conversation does, naming the release that shipped the fix.
+  conversation does, naming the release that shipped the fix. A mark made on
+  the maintainers' instance comes back here within 6 hours, so
+  `vibespace-feedback list` says `handled in 2.369.NNN` either way.
 - WHO sent it is the server's fact: this conversation's name, its Task Group,
   the harness and the VibeSpace version are added for you — never pass them.
 - The same report (same words, same `--about`) seen in the last 24 hours —

@@ -129,6 +129,7 @@ const RANDOM32 = new Map([
   ['src/server/desktop-webrtc.js', [1, 'a stream session\'s UDP-leg HMAC key (lane stream-relay-udp — memory only; handed to the daemon in stream-offer over the device link, never on UDP)']],
   ['src/agentd/client.js', [1, 'lane device-bundle-signing: the single-use LOCAL PROOF of an upgrade of this machine\'s own daemon (<root>/state/upgrade-proof, 0600; the daemon deletes it on any read) — a nonce, never a key']],
   ['src/server/sealed-json.js', [1, 'a sealed JSON file\'s key — minted INTO the vault as its `file:<name>` entry (secretPut), never a file (lane vault-e2e-password-fix-r2)']],
+  ['src/server/feedback-forward.js', [1, 'the feedback ORIGIN KEY (fk_, lane feedback-forward): names this instance to the maintainer hub and opens only the marks on its own forwarded reports — data/feedback-outbox.json 0600, a named exception in src/vault.js SECRETS_AT_REST (never a store key); the hub keeps its sha256']],
   ['src/relay-token.js', [1, 'tokenOf: an instance\'s OWN relay token (vsrt_, design q-051) — the owner\'s named exception in src/vault.js SECRETS_AT_REST (data/relay-token.json, 0600, never in the vault so a restart re-publishes without the second password); never a store key']], // lane relay-token-per-instance
 ]);
 const KEYNAME_RE = /^(\.[a-z0-9][a-z0-9._-]*[-.]key|[a-z0-9][a-z0-9._-]*\.key)$/; // a dotfile ending -key / .key, or any *.key (key-file-law-fix: dots too — '.vault.key')

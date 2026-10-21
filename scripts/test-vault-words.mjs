@@ -48,8 +48,9 @@ const ROWS = {
     ['Unlock the vault first', 'label', 'the provider-config dialog\'s own save-time verdict shown while the person is in the dialog (lane provider-record) — a field verdict, not a background tool refusal (the two-facts rule is for refusals)'],
   ],
   'src/vault-inventory.js': [
-    ['refused within the hour', 'label', 'the 使用失败 For-you card\'s count DETAIL (lane vault-window-v2 useFailCard) — how many uses were refused in the hour and why; the card\'s own text line is the telling'],
-    ['Open the Vault window to see the row', 'label', 'the 使用失败 card\'s hint detail (lane vault-window-v2) — where to see the row and what a locked vault does; informational, not a refusal sentence'],
+    // lane conversations-archive-verb: the 使用失败 notice is ONE sentence per cause (the key, the verb, the target, the reason, the door) —
+    // its locked line says WHERE in a person's words (Unlock…); the nameless twin (a use refused before any key was picked) the same
+    ['the vault is locked — Unlock… at the top of the page', 'foryou', 'THE 使用失败 For-you card\'s locked line (useFailCard, lane conversations-archive-verb): the key could not <verb> <target> — the vault is locked, and the door', { count: 2 }],
   ],
   'src/lib/vault-unlock.js': [
     ['The vault is locked — {n} waiting on it', 'person', 'THE STRIP (place 1) — how many the lock stopped; its Unlock… button beside the words'],

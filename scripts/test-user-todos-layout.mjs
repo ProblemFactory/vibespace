@@ -1117,24 +1117,32 @@ console.log('㉓ THE VAULT\'S TWO PRODUCERS (lane vault-window-v2, design q-047 
     const m = new UserTodoManager({ dataDir: dir, expirySweepMs: 0, now: () => clock });
     const att = H.createVaultAttention({ userTodos: m, now: () => clock, log: { warn() {} } });
     const open = () => m.snapshot().open.filter((i) => i.origin === 'vault');
-    const a = att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'vault_locked', who: 'Release helper' });
-    ok(a && a.origin === 'vault' && a.kind === 'notice' && a.sessionKey === 'vault' && a.action.type === 'vault-use-failed' && a.action.entry === 'apikey:ak-1' && a.text === 'Using “release-bot” failed'
-      && a.i18n.text.key === 'Using “{name}” failed' && a.i18n.text.params.name === 'release-bot' && a.i18n.detail[0].params.n === 1 && a.i18n.detail[0].params.locked === 1 && /Last asked by Release helper/.test(a.detail),
-      '使用失败: a locked refusal files ONE notice — origin vault, kind notice, the key named, the words as structure (the count, the cause, who asked)', a);
+    // lane conversations-archive-verb: the notice names the KEY, the VERB, the TARGET, the REASON and the DOOR — one per key × verb × reason per hour
+    const a = att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'vault_locked', who: 'Release helper', verb: 'conversations.open', target: 'lane a' });
+    ok(a && a.origin === 'vault' && a.kind === 'notice' && a.sessionKey === 'vault' && a.action.type === 'vault-use-failed' && a.action.entry === 'apikey:ak-1' && a.action.verb === 'conversations.open' && a.action.code === 'vault_locked'
+      && a.text === '“release-bot” could not conversations.open lane a: the vault is locked — Unlock… at the top of the page' && a.i18n.text.key === VI.USE_FAIL_LINES.vault_locked && a.i18n.text.params.name === 'release-bot' && a.i18n.text.params.verb === 'conversations.open' && a.i18n.text.params.target === 'lane a'
+      && a.i18n.detail[0].key === '{n} refused within the hour' && a.i18n.detail[0].params.n === 1 && /Last asked by Release helper/.test(a.detail),
+      '使用失败: a locked refusal files ONE notice — origin vault, kind notice: «“<key>” could not <verb> <target>: <reason> — <door>», the words as structure (the count, who asked)', a);
     clock += 10 * 60e3;
-    const b = att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'not_granted', who: 'Release helper' });
-    ok(b && b.id === a.id && open().length === 1 && m.get(a.id).i18n.detail[0].params.n === 2 && m.get(a.id).i18n.detail[0].params.granted === 1, 'a second failure inside the hour COUNTS on the same card (one item; 2 · not granted 1)', m.get(a.id).i18n.detail[0]);
-    ok(att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'ask_denied' }) === null && m.get(a.id).i18n.detail[0].params.n === 2, 'the owner\'s own refusal (ask_denied) is no failure: nothing counted, nothing filed');
+    const b = att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'vault_locked', who: 'Release helper', verb: 'conversations.open', target: 'lane b' });
+    ok(b && b.id === a.id && open().length === 1 && m.get(a.id).i18n.detail[0].params.n === 2 && m.get(a.id).i18n.detail[1].key === 'Last: {target}' && m.get(a.id).i18n.detail[1].params.target === 'lane b' && m.get(a.id).text === a.text,
+      'a second failure of the SAME key × verb × reason inside the hour COUNTS on the same card (2; the card keeps its first target, the last one is a detail line)', m.get(a.id).i18n.detail);
+    const b2 = att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'not_granted', who: 'Release helper', verb: 'conversations.open', target: 'lane a' });
+    const b3 = att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'vault_locked', who: 'Release helper', verb: 'conversations.end', target: 'lane a' });
+    ok(b2 && b2.id !== a.id && b3 && b3.id !== a.id && b3.id !== b2.id && open().length === 3 && b2.i18n.text.key === VI.USE_FAIL_LINES.not_granted && /grant it to that conversation or its Task Group in the Vault window/.test(b2.text) && b3.i18n.text.params.verb === 'conversations.end',
+      'another REASON (not granted — the door: grant it to that Task Group) and another VERB (end) are their own cards — one notice per (key, verb, reason)', { b2: b2 && b2.text, b3: b3 && b3.text });
+    ok(att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'ask_denied', verb: 'conversations.open', target: 'lane a' }) === null && m.get(a.id).i18n.detail[0].params.n === 2, 'the owner\'s own refusal (ask_denied) is no failure: nothing counted, nothing filed');
     m.setStatus(a.id, 'done', 'user');
     clock += 10 * 60e3;
-    ok(att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'vault_locked' }) === null && m.get(a.id).status === 'done' && open().length === 0 && att._hours.get('apikey:ak-1').next.n === 3,
+    ok(att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'vault_locked', verb: 'conversations.open', target: 'lane a' }) === null && m.get(a.id).status === 'done' && open().length === 2 && att._hours.get('apikey:ak-1|conversations.open|vault_locked').next.n === 3,
       'ANSWERED inside the hour: the hour\'s next failure is counted, never re-filed (the card stays done)');
     clock += 61 * 60e3;
-    const c = att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'ask_expired' });
-    ok(c && c.id === a.id && m.get(a.id).status === 'open' && m.get(a.id).i18n.detail[0].params.n === 1 && m.get(a.id).i18n.detail[0].params.expired === 1, 'the NEXT hour files again (the same item reopened, a fresh count: expired 1)', m.get(a.id).i18n.detail[0]);
-    const d = att.useFailed({ entry: 'apikey:ak-2', name: 'deploy-key', code: 'key_revoked' });
-    const e = att.useFailed({ entry: null, code: 'vault_locked' });
-    ok(d && d.id !== a.id && e && e.action.entry === 'apikey:*' && e.text === 'An automation key could not be used' && open().length === 3, 'another key = its own card; a locked refusal before any key was picked = one card for the automation door (apikey:*)');
+    const c = att.useFailed({ entry: 'apikey:ak-1', name: 'release-bot', code: 'vault_locked', verb: 'conversations.open', target: 'lane a' });
+    ok(c && c.id === a.id && m.get(a.id).status === 'open' && m.get(a.id).i18n.detail[0].params.n === 1, 'the NEXT hour files again (the same sentence = the same item reopened, a fresh count)', m.get(a.id).i18n.detail[0]);
+    const d = att.useFailed({ entry: 'apikey:ak-2', name: 'deploy-key', code: 'key_revoked', verb: 'conversations.rename', target: 'worker' });
+    const e = att.useFailed({ entry: null, code: 'vault_locked', verb: 'conversations.open', target: 'lane x' });
+    ok(d && d.id !== a.id && /“deploy-key” could not conversations.rename worker: the key was revoked — mint a new one/.test(d.text) && e && e.action.entry === 'apikey:*' && e.text === 'An automation key could not conversations.open lane x: the vault is locked — Unlock… at the top of the page' && open().length === 5,
+      'another key = its own card; a locked refusal before any key was picked = the nameless line for the automation door (apikey:*)');
     const r = att.agentPut({ entry: 'agent:github-token', name: 'github-token', who: 'Release helper' });
     ok(r && r.origin === 'vault' && r.kind === 'notice' && r.action.type === 'vault-rotate' && r.action.entry === 'agent:github-token' && r.i18n.text.key === '“{name}” was stored by an agent that saw its value — rotate it' && /Stored by Release helper/.test(r.detail),
       '建议轮换: an agent\'s put files ONE notice naming the entry and who stored it', r);
@@ -1142,16 +1150,16 @@ console.log('㉓ THE VAULT\'S TWO PRODUCERS (lane vault-window-v2, design q-047 
     clock += 3 * 3600e3;
     ok(m.get(r.id).status === 'done' && !open().some((i) => i.id === r.id), '…answered, it never comes back by itself (no timer re-files it)');
     const band = VI.bandItemsOf(m.snapshot().open);
-    ok(band.total === 3 && band.items.map((i) => i.id).sort().join() === [a.id, d.id, e.id].sort().join() && band.items.every((i) => i.origin === 'vault'), 'the window\'s 「需要你」 = exactly these open vault items (the band is the store\'s list, filtered)');
-    ok(H.createVaultAttention({ userTodos: null }).useFailed({ entry: 'apikey:x', code: 'vault_locked' }) === null, 'no store (a suite, a tool) ⇒ files nothing, throws nothing');
-    // THE REAL ENGINE: a use refused while the vault is locked files the card (src/server/automation-engine.js done())
+    ok(band.total === 5 && band.items.map((i) => i.id).sort().join() === [a.id, b2.id, b3.id, d.id, e.id].sort().join() && band.items.every((i) => i.origin === 'vault'), 'the window\'s 「需要你」 = exactly these open vault items (the band is the store\'s list, filtered)');
+    ok(H.createVaultAttention({ userTodos: null }).useFailed({ entry: 'apikey:x', code: 'vault_locked', verb: 'conversations.open' }) === null, 'no store (a suite, a tool) ⇒ files nothing, throws nothing');
+    // THE REAL ENGINE: a use refused while the vault is locked files the card (src/server/automation-engine.js done()) — the verb named
     const AE = require(path.join(ROOT, 'src/server/automation-engine.js'));
     const att2 = H.createVaultAttention({ userTodos: m, now: () => clock, log: { warn() {} } });
     const eng = AE.create({ dataDir: dir, vault: { state: () => 'locked', onLock() {}, secretPut() { return { ok: false, code: 'vault_locked' }; } }, userTodos: m, attention: att2, now: () => clock, verbs: { 'conversations.rename': () => ({ ok: true }) } });
     const u = await eng.use({ caller: { conversationId: 'c-0a1b2c3d4e5f', sessionKey: 'claude:c-0a1b2c3d4e5f', name: 'Release helper', live: true, groups: [] }, verb: 'conversations.rename', args: { name: 'x' } });
-    const fromEngine = open().find((i) => i.action && i.action.entry === 'apikey:*' && i.id !== e.id) || m.get(e.id);
-    ok(u && u.ok === false && u.code === 'vault_locked' && att2._hours.get('apikey:*') && att2._hours.get('apikey:*').next.causes.locked === 1 && fromEngine && fromEngine.status === 'open',
-      'THE REAL automation engine: a use refused locked reaches the producer (the automation door\'s card, counted)', { u, h: att2._hours.get('apikey:*') });
+    const fromEngine = open().find((i) => i.action && i.action.entry === 'apikey:*' && i.action.verb === 'conversations.rename');
+    ok(u && u.ok === false && u.code === 'vault_locked' && att2._hours.get('apikey:*|conversations.rename|vault_locked') && att2._hours.get('apikey:*|conversations.rename|vault_locked').next.causes.locked === 1 && fromEngine && fromEngine.status === 'open' && fromEngine.i18n.text.params.target === 'Release helper',
+      'THE REAL automation engine: a use refused locked reaches the producer (the automation door\'s card, the verb and the caller as the target — a rename of itself)', { u, h: att2._hours.get('apikey:*|conversations.rename|vault_locked') });
     const src = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8'), wiring = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
     ok(/if \(!r\.ok && attention && typeof attention\.useFailed === 'function'\)/.test(src) && /const vaultAttention = require\('\.\/vault-hooks\.js'\)\.createVaultAttention\(\{ userTodos \}\);/.test(wiring) && /userTodos, attention: vaultAttention,/.test(wiring),
       'the wiring: the engine\'s ONE audit exit hands every refusal to the producer; the hub builds the producer over the For-you store and gives it to the engine');

@@ -372,6 +372,20 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return true;
   };
 
+  // lane conversations-archive-verb: ONE archive from the server (the automation verb conversations.archive) through the same
+  // store + broadcast the sidebar's own 归档 PATCHes — `archivedSessions` holds `<backend>:<conversation id>` keys (older
+  // entries a bare id); a key already there writes nothing and says so
+  router.archiveSession = (key) => {
+    const k = String(key || '');
+    if (!k || !k.includes(':')) return { ok: false, code: 'bad_args', why: 'an archive key is <backend>:<conversation id>' };
+    const cur = readUserState();
+    const list = Array.isArray(cur.archivedSessions) ? cur.archivedSessions : [];
+    const bare = k.slice(k.indexOf(':') + 1);
+    if (list.some((x) => String(x) === k || String(x) === bare)) return { ok: true, already: true };
+    writeUserState({ ...cur, archivedSessions: [...list, k] });
+    return { ok: true, already: false };
+  };
+
   // ── Bookmarks ──
   const BOOKMARKS_FILE = path.join(dataDir, 'bookmarks.json');
   function readBookmarks() {

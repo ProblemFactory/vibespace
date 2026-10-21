@@ -20,6 +20,11 @@
 //      — q-049 M2 (lane automation-open-permission-resolve): the picker's `default` row says 「CLI 自己的设置（现在是 X）」 — 铸造… resolved for the
 //      hub's own folder (内置默认), 边界… for the key's first folder (its project settings say acceptEdits ⇒ 自动接受编辑, the file as its title)
 //      limits; 审计… lists that refused open with its code
+//   THE GRANT'S REACH (lane key-instance-scope — the owner 2026-10-20 「key 应该可以被授权在整个 vibe space 上工作」): ④ the card offers
+//      作用范围 beside its answers — 只有它开的会话 (checked) · 整个 VibeSpace (red, its title says it reaches your own conversations
+//      too; no Task Group row for a conversation in none); ⑥ the key row's 授权给 chip carries the reach as a chip — a click opens
+//      the reach dialog, 整个 VibeSpace + 保存 ⇒ the chip is red with its title and the hub's grant row says instance; a grant the
+//      picker adds reads 只有它开的会话; ⑩ the chip's Japanese word
 // Run: node scripts/test-automation-keys-chrome.mjs   (AK_SHOTS=<dir> keeps the 1280×800 screenshots; SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -144,7 +149,7 @@ try {
   console.log('③ the Vault window: 铸造… an automation key');
   check('the window opens on «自动化 key» (a group head with 铸造…)', !!(await openWindow()) && (await textOf('.vw-group[data-purpose="automation"] .vw-group-name')) === '自动化 key' && (await textOf('.vw-ak-mint')) === '铸造…');
   await click('.vw-ak-mint');
-  check('铸造… opens its dialog: a name and the closed table of verbs (开一个对话 says it bills)', !!(await until(visible('#vault-ak-mint'), 5000)) && /（会开始一个计费回合）/.test(await textOf('#vault-ak-mint')) && (await evalJs(`document.querySelectorAll('#vault-ak-mint .vw-ak-verbs .vw-ak-pick input[type=checkbox]').length`)) === 8 && !(await evalJs(visible('#vault-ak-mint .vw-ak-limwrap')))); // lane automation-verbs: + conversations.status (a read); lane feedback-handled-verb: + feedback.handled, feedback.list
+  check('铸造… opens its dialog: a name and the closed table of verbs (开一个对话 says it bills)', !!(await until(visible('#vault-ak-mint'), 5000)) && /（会开始一个计费回合）/.test(await textOf('#vault-ak-mint')) && (await evalJs(`document.querySelectorAll('#vault-ak-mint .vw-ak-verbs .vw-ak-pick input[type=checkbox]').length`)) === 9 && !(await evalJs(visible('#vault-ak-mint .vw-ak-limwrap')))); // lane automation-verbs: + conversations.status (a read); lane feedback-handled-verb: + feedback.handled, feedback.list; lane conversations-archive-verb: + conversations.archive (re-pinned by lane key-instance-scope)
   await typeInto('#vault-ak-mint .vw-ak-name', 'Lane dispatch');
   await evalJs(`(() => { const c = document.querySelector('#vault-ak-mint input[value="conversations.rename"]'); c.checked = true; return true; })()`);
   await click('.vw-ak-mint-go');
@@ -157,9 +162,12 @@ try {
   console.log('④ THE FIRST USE — the real CLI, no grant ⇒ the card ⇒ 一直');
   const call = cli(['call', 'conversations.rename', '--name', '自动改名'], { token });
   await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`);
-  const card = await until(`(() => { const b = document.querySelector('#user-todos-popup .ut-item .ut-hub-always'); if (!b) return null; const it = b.closest('.ut-item'); return { always: b.textContent, once: (it.querySelector('.ut-hub-once') || {}).textContent, deny: (it.querySelector('.ut-hub-deny') || {}).textContent, text: (it.querySelector('.ut-text') || {}).textContent }; })()`, 20000);
+  const card = await until(`(() => { const b = document.querySelector('#user-todos-popup .ut-item .ut-hub-always'); if (!b) return null; const it = b.closest('.ut-item'); return { always: b.textContent, once: (it.querySelector('.ut-hub-once') || {}).textContent, deny: (it.querySelector('.ut-hub-deny') || {}).textContent, text: (it.querySelector('.ut-text') || {}).textContent,
+    lbl: (it.querySelector('.ut-ak-reach-lbl') || {}).textContent, reach: [...it.querySelectorAll('.ut-ak-reach label')].map((l) => ({ text: l.textContent.trim(), value: l.querySelector('input').value, checked: l.querySelector('input').checked, red: l.classList.contains('ut-ak-reach-instance'), title: l.title })) }; })()`, 20000);
   const early = card ? null : await Promise.race([call, sleep(3000).then(() => 'still waiting')]);
   check('ONE urgent card in For you — 「允许一次 / 一直（授权给这个会话） / 拒绝」, naming the key and the verb', card && card.always === '一直（授权给这个会话）' && card.once === '允许一次' && card.deny === '拒绝' && /Lane dispatch/.test(card.text) && /conversations\.rename/.test(card.text), card || { cli: early, items: await api('GET', '/api/user-todos') });
+  check('the card offers the REACH beside its answers (lane key-instance-scope): 作用范围 — 只有它开的会话 (checked) · 整个 VibeSpace (red; its title says it reaches your own conversations too); no Task Group row for a conversation in none',
+    card && card.lbl === '作用范围' && card.reach.length === 2 && card.reach[0].text === '只有它开的会话' && card.reach[0].value === 'opened' && card.reach[0].checked && !card.reach[0].red && card.reach[1].text === '整个 VibeSpace' && card.reach[1].value === 'instance' && card.reach[1].red && card.reach[1].title === '这把 key 可以对这里的每一个会话动手，包括你自己的', card && { lbl: card.lbl, reach: card.reach });
   if (!card) throw new Error('no card — the legs below need it');
   await shot('ak-2-card.png');
   await sleep(1100);   // the press-arm: an Allow shown less than 700 ms ago is not the one the person read
@@ -184,6 +192,19 @@ try {
   console.log('⑥ 授权给… — the picker');
   await closeWindows(); await openWindow();
   check('the row lists the grant: 授权给： + the conversation\'s name', !!(await until(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-chip')}); return c && /自动改名/.test(c.textContent); })()`, 10000)));
+  // lane key-instance-scope: the grant's REACH chip on the 授权给 chip — a click opens the reach dialog; 整个 VibeSpace is red and says what it means
+  const chip0 = await evalJs(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-chip .vw-ak-reach')}); return c ? { text: c.textContent, reach: c.dataset.reach, red: c.classList.contains('vw-ak-reach-instance') } : null; })()`);
+  check('…and its REACH chip: 只有它开的会话 (the card\'s default)', chip0 && chip0.text === '只有它开的会话' && chip0.reach === 'opened' && !chip0.red, chip0);
+  await click(ROW + ' .vw-ak-chip .vw-ak-reach');
+  const dlgRows = (await until(visible('#vault-ak-reach'), 5000)) ? await evalJs(`[...document.querySelectorAll('#vault-ak-reach .vw-ak-reach-row')].map((r) => r.querySelector('span').textContent + ':' + r.querySelector('input').checked + ':' + r.classList.contains('vw-ak-reach-instance')).join('|')`) : null;
+  check('the chip opens the reach dialog: 只有它开的会话 checked · 整个 VibeSpace red (no Task Group row — there is no Task Group here)', dlgRows === '只有它开的会话:true:false|整个 VibeSpace:false:true', dlgRows);
+  await evalJs(`document.querySelector('#vault-ak-reach input[value="instance"]').click()`);
+  await shot('ak-3b-reach-dialog.png');
+  await click('.vw-ak-reach-save');
+  const chip1 = await until(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-chip .vw-ak-reach-instance')}); return c ? { text: c.textContent, title: c.title, reach: c.dataset.reach } : null; })()`, 10000);
+  const grantNow = (((await api('GET', '/api/automation/keys')).json || {}).keys || []).find((k) => k.name === 'Lane dispatch');
+  check('整个 VibeSpace + 保存 ⇒ the chip is RED and its title says what it means; the hub\'s grant row holds reach: instance', chip1 && chip1.text === '整个 VibeSpace' && chip1.reach === 'instance' && chip1.title === '这把 key 可以对这里的每一个会话动手，包括你自己的' && grantNow && grantNow.grants[0] && grantNow.grants[0].reach === 'instance', { chip1, grants: grantNow && grantNow.grants });
+  await shot('ak-3c-reach-chip.png');
   await click(ROW + ' .vw-ak-grant');
   const sel = `#vault-ak-grant input[value="session:${LIVE_SID}"]`;
   check('the picker lists the live conversation, checked', !!(await until(`(() => { const c = document.querySelector(${JSON.stringify(sel)}); return c && c.checked; })()`, 8000)));
@@ -196,6 +217,7 @@ try {
   await evalJs(`(() => { document.querySelector(${JSON.stringify(sel)}).checked = true; return true; })()`);
   await click('.vw-ak-save');
   check('checked + 保存 ⇒ it is back', !!(await until(`!!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-chip')})`, 10000)));
+  check('…a grant the picker adds reads 只有它开的会话 (the picker\'s default reach — lane key-instance-scope)', !!(await until(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-chip .vw-ak-reach')}); return c && c.dataset.reach === 'opened' && c.textContent === '只有它开的会话'; })()`, 10000)));
 
   console.log('⑦ 显示 ⇒ 验证是你 ⇒ the value, only to hand to an outside party');
   await click(ROW + ' .vw-show');
@@ -323,6 +345,7 @@ try {
   await openWindow();
   check('「自動化キー」 + 「発行…」', (await textOf('.vw-group[data-purpose="automation"] .vw-group-name')) === '自動化キー' && (await textOf('.vw-ak-mint')) === '発行…');
   check('「制限…」 + 「監査ログ…」 on a key that opens (lane automation-open-limits)', !!(await until(`[...document.querySelectorAll('.vw-ak-limits-edit')].some((b) => b.textContent === '制限…') && [...document.querySelectorAll('.vw-ak-audit')].some((b) => b.textContent === '監査ログ…')`, 8000)));
+  check('the reach chip in Japanese: 「この鍵が開いた会話だけ」 (lane key-instance-scope)', !!(await until(`[...document.querySelectorAll('.vw-ak-reach')].some((b) => b.textContent === 'この鍵が開いた会話だけ')`, 8000)));
   await shot('ak-5-ja.png');
 } catch (e) {
   failed++;

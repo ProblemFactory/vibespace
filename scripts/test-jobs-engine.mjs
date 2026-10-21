@@ -527,7 +527,7 @@ try {
     const crypto = require('crypto');
     const { spawnSync } = require('child_process');
     const { mutantCopies } = await import('./mutant-copy.mjs');
-    const { WRAPPER_ENV_KEEP } = require('../src/jobs.js');
+    const { WRAPPER_ENV_KEEP, WRAPPER_PROTO } = require('../src/jobs.js');
     const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
     const sha = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
     const rnd = () => crypto.randomBytes(12).toString('hex');
@@ -591,7 +591,7 @@ setInterval(() => { }, 1000);
     const argsOf = (buf) => buf.toString('latin1').split('\0').filter(Boolean);
     const rides = (buf, n) => argsOf(buf).some((a) => a.includes(n) || Buffer.from(a, 'base64').toString('latin1').includes(n)); // raw OR base64 (the pre-fix spec rode base64)
     const R = {
-      argv: 'wrapper argv = [node, wrapper, ctlDir, specPath] — the spec rides a FILE of the ctl dir',
+      argv: 'wrapper argv = [node, wrapper, ctlDir, specPath, --proto=N] — the spec rides a FILE of the ctl dir; the server says its protocol',
       secret: 'the wrapper\'s cmdline carries NO byte of the job\'s secret (raw or base64)',
       jbt: 'the wrapper\'s cmdline carries no jbt_ token (raw or base64)',
       wallow: 'the wrapper\'s env is the allowlist (PATH HOME LANG TMPDIR) + VIBESPACE_JOB_ID',
@@ -608,7 +608,7 @@ setInterval(() => { }, 1000);
       const rows = [], row = (k, good, why) => rows.push({ k, name: R[k], good: !!good, why });
       if (f.error || !f.cmdline) { row('exit', false, f.error || 'no wrapper measured'); return rows; }
       const args = argsOf(f.cmdline);
-      row('argv', args.length === 4 && args[2] === f.ctl && path.dirname(args[3]) === f.ctl && /^spec\.\d+\.json$/.test(path.basename(args[3])), JSON.stringify(args.slice(1).map((a) => a.slice(0, 48))));
+      row('argv', args.length === 5 && args[2] === f.ctl && path.dirname(args[3]) === f.ctl && /^spec\.\d+\.json$/.test(path.basename(args[3])) && args[4] === '--proto=' + WRAPPER_PROTO, JSON.stringify(args.slice(1).map((a) => a.slice(0, 48))));
       row('secret', !rides(f.cmdline, SECRET));
       row('jbt', !rides(f.cmdline, 'jbt_'));
       const wenv = Object.fromEntries(argsOf(f.environ).map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]));
@@ -656,6 +656,41 @@ setInterval(() => { }, 1000);
     const out = direct('outside', WRAP, { env: { PATH: process.env.PATH } }, { outside: true });
     ok(out.status === 2 && /refused: the spec path names no file of the ctl dir/.test(out.stderr) && out.specLeft && out.child === null, 'spec-off-argv: a spec path outside the ctl dir is neither read nor removed — refused, named', JSON.stringify({ status: out.status, stderr: out.stderr.slice(0, 120) }));
 
+    // ── lane job-wrapper-update-window (fb-7f7be1e24e): THE PROTOCOL IS VERSIONED, NEVER ASSUMED. An update writes the new
+    // wrapper to disk before it restarts the server, and the server still running spawns it: on the owner's hub a .330
+    // server's cron fire (the spec base64 on argv) met .331's wrapper — refused by name, exit 2, a failure notice for a job
+    // that never ran. The wrapper by hand as each server generation calls it; the job exits 3 — its OWN code.
+    function byHand(tag, wrapperSrc, argsOf) {
+      const D = path.join(sdir, 'proto-' + tag), ctl = path.join(D, 'ctl'), mark = path.join(D, 'ran');
+      fs.mkdirSync(ctl, { recursive: true, mode: 0o700 });
+      const wrapper = path.join(D, 'job-wrapper.js'); fs.writeFileSync(wrapper, wrapperSrc);
+      const spec = { argv: [process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(mark)}, ''); console.log('the job ran'); process.exit(3)`], cwd: D, env: { PATH: process.env.PATH } };
+      const file = () => { const p = path.join(ctl, 'spec.1.json'); fs.writeFileSync(p, JSON.stringify(spec), { mode: 0o600 }); return p; };
+      const b64 = () => Buffer.from(JSON.stringify(spec)).toString('base64'); // the .330 server's own call: src/jobs.js before lane job-spec-off-argv
+      const r = spawnSync(process.execPath, [wrapper, ctl, ...argsOf({ file, b64 })], { env: { PATH: process.env.PATH }, encoding: 'utf8', timeout: 15000 });
+      const read = (p, j) => { try { const t = fs.readFileSync(p, 'utf8'); return j ? JSON.parse(t) : t; } catch { return j ? null : ''; } };
+      return { status: r.status, log: read(path.join(ctl, 'current.log')), exit: read(path.join(ctl, 'exit.json'), true), ran: fs.existsSync(mark), specLeft: fs.readdirSync(ctl).filter((n) => /^spec\./.test(n)).length };
+    }
+    const WARN = /^\[job-wrapper\] warning: started by an older server during an update — the spec rode argv once \(protocol 1\)/;
+    const pNew = byHand('new', WRAP, ({ file }) => [file(), '--proto=' + WRAPPER_PROTO]);
+    ok(pNew.ran && pNew.status === 3 && pNew.exit && pNew.exit.code === 3 && !/warning/.test(pNew.log) && !pNew.specLeft, `protocol: THIS server's call (a spec file + --proto=${WRAPPER_PROTO}) runs the job; its exit is the job's (3)`, JSON.stringify(pNew));
+    const p331 = byHand('331', WRAP, ({ file }) => [file()]);
+    ok(p331.ran && p331.status === 3 && p331.exit && p331.exit.code === 3 && !/warning/.test(p331.log), 'protocol: a .331/.332 server\'s call (a spec file, no protocol said) runs the job — known by its shape', JSON.stringify(p331));
+    const p330 = byHand('330', WRAP, ({ b64 }) => [b64()]);
+    ok(p330.ran && p330.status === 3 && p330.exit && p330.exit.code === 3 && !p330.exit.reason, 'protocol: a .330 server\'s call (the spec base64 on argv — the update window of fb-7f7be1e24e) RUNS the job; the run\'s exit is the CHILD\'s (3), never the wrapper\'s refusal', JSON.stringify({ status: p330.status, exit: p330.exit, ran: p330.ran }));
+    ok(WARN.test(p330.log) && p330.log.split('\n')[1] === 'the job ran', 'protocol: …loudly — the job\'s log OPENS with the named warning line, the job\'s own output follows', JSON.stringify(p330.log.slice(0, 200)));
+    const pFut = byHand('future', WRAP, ({ file }) => [file(), '--proto=' + (WRAPPER_PROTO + 1)]);
+    ok(!pFut.ran && pFut.status === 75 && pFut.exit && pFut.exit.reason === 'update_window' && pFut.exit.code === 75 && pFut.exit.proto && pFut.exit.proto.server === WRAPPER_PROTO + 1 && pFut.exit.proto.wrapper === WRAPPER_PROTO && /^\[job-wrapper\] not started: the server speaks protocol \d+, this wrapper \d+/.test(pFut.log) && !pFut.specLeft,
+      'protocol: a protocol this wrapper does not speak never starts the job — exit.json says update_window (exit 75, both protocols), the named line, the spec file removed UNREAD', JSON.stringify({ status: pFut.status, exit: pFut.exit, ran: pFut.ran, specLeft: pFut.specLeft }));
+    const pBad = byHand('garbage', WRAP, ({ file }) => [file(), '--proto=two']);
+    ok(!pBad.ran && pBad.status === 2 && /refused: the protocol argument is unreadable/.test(pBad.log) && !pBad.specLeft, 'protocol: an unreadable protocol argument is refused by name — the spec file removed unread', JSON.stringify(pBad));
+    const protoOf = (/^const PROTO = (\d+);$/m.exec(WRAP) || [])[1];
+    ok(Number(protoOf) === WRAPPER_PROTO, `protocol: the server's WRAPPER_PROTO (${WRAPPER_PROTO}) is the wrapper's own PROTO (${protoOf}) — the pair moves together`);
+    // the CONTROL: the wrapper without its compat (the base's behaviour) — the .330 call is NOT run: the leg above sees the difference
+    const COMPAT = 'else if (proto === 1 && old && COMPAT_PROTO_1) {';
+    const pNo = byHand('no-compat', swap(WRAP, COMPAT, 'else if (false) {'), ({ b64 }) => [b64()]);
+    ok(!pNo.ran && pNo.status !== 3 && !(pNo.exit && pNo.exit.code === 3), 'NEGATIVE CONTROL: the wrapper WITHOUT its protocol-1 compat ⇒ the .330 call never runs the job (the update window\'s false failure) — the leg above is RED on it', JSON.stringify({ status: pNo.status, exit: pNo.exit, ran: pNo.ran }));
+
     // O_EXCL: a name already at the next run's spec path (here a planted link) refuses the start — never written through
     // (an open that followed it would write the job's token into whatever it names), never removed. The engine in-process,
     // its clock held at T for the one start.
@@ -685,14 +720,15 @@ setInterval(() => { }, 1000);
     // ── RED controls: each mutant copy turns ITS rows red (and the build above held them green) ──
     const MC = mutantCopies('jobs-spec', ROOT);
     const reds = (rows) => rows.filter((r) => !r.good).map((r) => r.k);
-    // M1 — the spec rides argv again (the pre-fix transport): the engine passes it base64, the wrapper decodes argv[3]
+    // M1 — the spec rides argv again (the pre-fix transport, the .330 server's very call): the engine passes it base64 and
+    // the REAL wrapper runs it (its protocol-1 compat READS an old caller — lane job-wrapper-update-window); the cmdline
+    // rows are RED all the same: a server of this tree never WRITES one
     const m1 = await measure('m1-argv', {
-      jobsJs: MC.write('src/jobs.js', swap(JS, '[wrapper, ctl, specPath]', "[wrapper, ctl, Buffer.from(JSON.stringify(spec)).toString('base64')]"), 'argv'),
-      wrapperSrc: swap(WRAP, "if (!specPath || path.dirname(path.resolve(specPath)) !== path.resolve(ctlDir)) refusal = 'the spec path names no file of the ctl dir';", "spec = JSON.parse(Buffer.from(specPath, 'base64').toString('utf-8')); if (true) refusal = '';"),
+      jobsJs: MC.write('src/jobs.js', swap(JS, "[wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO]", "[wrapper, ctl, Buffer.from(JSON.stringify(spec)).toString('base64')]"), 'argv'),
     });
     const m1r = reds(judgeRun(m1));
     if (m1.cmdline) { const a = argsOf(m1.cmdline)[3] || ''; console.log(`    wrapper cmdline (M1): node <wrapper> <ctl> <${a.length} base64 chars> — decodes to a spec carrying ${['PROBE_SECRET', 'VIBESPACE_JOB_TOKEN'].filter((k) => Buffer.from(a, 'base64').toString('utf8').includes(k)).join(' + ')}; rows red: ${m1r.join(' ')}`); }
-    ok(['argv', 'secret', 'jbt'].every((k) => m1r.includes(k)), 'NEGATIVE CONTROL M1: the spec on argv again ⇒ the cmdline rows go RED (the secret and the jbt_ token read back out of /proc/<pid>/cmdline)', m1r.join(' ') || m1.error);
+    ok(['argv', 'secret', 'jbt'].every((k) => m1r.includes(k)) && !m1r.includes('exit'), 'NEGATIVE CONTROL M1: the spec on argv again (the .330 call; the real wrapper still runs it) ⇒ the cmdline rows go RED (the secret and the jbt_ token read back out of /proc/<pid>/cmdline)', m1r.join(' ') || m1.error);
     // M2 — the wrapper inherits the hub's env again (the spawn passes no env)
     const m2r = reds(judgeRun(await measure('m2-inherit', { jobsJs: MC.write('src/jobs.js', swap(JS, ", env: wrapperEnv(job.id) }", ' }'), 'inherit') })));
     ok(['wallow', 'wplant'].every((k) => m2r.includes(k)) && !m2r.includes('cplant'), 'NEGATIVE CONTROL M2: the wrapper spawned with no env ⇒ the planted tokens are in ITS /proc/<pid>/environ (the job stays clean: jobEnv strips them)', m2r.join(' '));
@@ -703,6 +739,117 @@ setInterval(() => { }, 1000);
     // M4 — the spec opened with a plain 'w' (no O_EXCL): the planted link is followed and the job's token lands in its target
     const m4 = await exclLeg(MC.load('src/jobs.js', swap(JS, 'fs.openSync(specPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600)', "fs.openSync(specPath, 'w', 0o600)"), 'no-excl').JobManager, 'm4');
     ok(!m4.error && m4.bait.includes('jbt_'), 'NEGATIVE CONTROL M4: no O_EXCL ⇒ the start goes through the planted link and writes the job token into its target', JSON.stringify({ error: m4.error, bait: m4.bait.slice(0, 20) }));
+  }
+  // 13. lane job-wrapper-update-window (fb-7f7be1e24e): AN UPDATE'S WINDOW IS NOT A FAILURE. The REAL engine over scratch
+  //     dataDirs whose bin/job-wrapper.js speaks ANOTHER protocol (a copy, PROTO + 1). Written after the engine booted (an
+  //     update in flight) ⇒ the run is interrupted (cause update_window), no failure notice, no user inbox; the restarted
+  //     engine runs the one-shot task again and its success clears it; a cron child waits for its next fire; a service is
+  //     down, never a crash. Already on disk at boot — or changed long ago and never restarted — ⇒ the install's own
+  //     fault: failed, said. The ≤ .332 judgment (a mutant engine without the window) files the failure: the control.
+  {
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const { UPDATE_WINDOW_MS } = require('../src/jobs.js');
+    const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+    const WRAP = fs.readFileSync(path.join(ROOT, 'data/bin/job-wrapper.js'), 'utf8'), JS = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+    const p = Number((/^const PROTO = (\d+);$/m.exec(WRAP) || [])[1]);
+    const FUTURE = WRAP.replace(/^const PROTO = \d+;$/m, `const PROTO = ${p + 1};`);
+    ok(p > 0 && FUTURE !== WRAP, 'update-window: the other protocol\'s wrapper is built from this tree\'s (PROTO + 1)');
+    const exitOf = (j) => path.join(path.dirname(j.runs[j.runs.length - 1].log), 'exit.json');
+    function world(tag, JM = JobManager) {
+      const D = path.join(dir, 'uw-' + tag), bin = path.join(D, 'bin', 'job-wrapper.js');
+      fs.mkdirSync(path.dirname(bin), { recursive: true });
+      fs.writeFileSync(bin, WRAP);
+      const w = { D, bin, told: [], inbox: [], engines: [] };
+      w.deps = { dataDir: D, broadcast() { }, log() { }, notifyGlobal: () => true, notifyUser: (n) => w.inbox.push(n), deliverToConversation: async (cid, text) => { w.told.push(text); return { ok: true, lane: 'message' }; } };
+      w.boot = () => { try { fs.rmSync(path.join(D, 'jobs.lock'), { force: true }); } catch { } const X = new JM(w.deps); X.init(); for (const t of X._timers || []) clearInterval(t); w.engines.push(X); return X; };
+      w.wrapper = (src, mtimeMs) => { fs.writeFileSync(bin, src); if (mtimeMs) fs.utimesSync(bin, new Date(), new Date(mtimeMs)); };
+      w.end = () => { for (const X of w.engines) { try { for (const j of X.jobs.values()) if (['up', 'starting'].includes(j.state)) X.stop(j); } catch { } try { X.shutdown(); } catch { } } };
+      return w;
+    }
+    const task = (X, name, extra = {}) => X.jobs.get(X.create({ kind: 'task', name, cmd: { argv: [process.execPath, '-e', 'process.exit(0)'] }, restart: 'never', notifyUser: true, owner, ...extra }, caller).job.id);
+    const settle = async (X, j) => { await until(() => fs.existsSync(exitOf(j)), 15000); await X._sweep(); await sleep(300); }; // the notice ladder is async
+    const lastRun = (j) => j.runs[j.runs.length - 1];
+    const evOf = (X, j) => X.events.filter((e) => e.jobId === j.id).map((e) => e.what || '');
+
+    // ── a one-shot task in the window, then the restart ──
+    const A = world('task'), XA = A.boot();
+    A.wrapper(FUTURE, XA._bootAt + 2000); // the update wrote the new wrapper after this server booted
+    const ja = task(XA, 'uw-task');
+    await settle(XA, ja);
+    const ra = lastRun(ja), exA = (() => { try { return JSON.parse(fs.readFileSync(exitOf(ja), 'utf8')); } catch { return null; } })();
+    ok(exA && exA.reason === 'update_window' && exA.code === 75, 'update-window: the wrapper of another protocol ended the run BEFORE the job started (exit.json reason update_window)', JSON.stringify(exA));
+    ok(ja.state === 'interrupted' && ra.cause === 'update_window' && ra.exit === null, 'update-window: the run is INTERRUPTED (cause update_window, no exit — no process of the job ran), never failed', JSON.stringify({ state: ja.state, cause: ra.cause, exit: ra.exit }));
+    ok(A.told.length === 0 && A.inbox.length === 0, 'update-window: NO failure notice — the owner conversation is not told, the user inbox gets nothing (fb-7f7be1e24e)', JSON.stringify({ told: A.told, inbox: A.inbox }));
+    ok(evOf(XA, ja).some((t) => /^interrupted \(update_window: it started while VibeSpace was updating itself and never ran — the restarted server runs it again\)$/.test(t)), 'update-window: the job\'s event names the window and what follows it', JSON.stringify(evOf(XA, ja)));
+    XA.shutdown();
+    A.wrapper(WRAP); // the update's restart: the new server and the wrapper on disk agree again
+    const YA = A.boot(), ya = YA.jobs.get(ja.id);
+    ok(ya && lastRun(ya).trigger === 'update-rerun' && ya.runs.length === 2, 'update-window: the restarted server runs the one-shot task AGAIN at boot (trigger update-rerun)', JSON.stringify(ya && ya.runs.map((r) => r.trigger)));
+    if (ya) await settle(YA, ya);
+    ok(ya && ya.state === 'done' && lastRun(ya).cause === 'ok' && A.told.length === 1 && /: done exit=0 ok /.test(A.told[0]), 'update-window: …and its success clears the window (done, cause ok) — the owner hears the job\'s REAL end, never a failure', JSON.stringify(ya && { state: ya.state, cause: lastRun(ya).cause, told: A.told }));
+    A.end();
+
+    // ── a cron child in the window: interrupted, said nowhere; NOT re-run at boot; its next fire runs it ──
+    const C2 = world('cron'), XC = C2.boot();
+    const rc = XC.create({ kind: 'cron', name: 'uw-cron', schedule: { at: Date.now() + 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: [process.execPath, '-e', 'process.exit(0)'] } } }, owner }, caller);
+    const jc = XC.jobs.get(rc.job.id); jc.schedule = { everyMs: 3600e3 }; jc.nextFireAt = Date.now() - 1000;
+    C2.wrapper(FUTURE, XC._bootAt + 2000);
+    await XC._cronTick();
+    const kc = [...XC.jobs.values()].find((x) => x.cronParent === jc.id);
+    if (kc) await settle(XC, kc);
+    ok(kc && kc.state === 'interrupted' && lastRun(kc).cause === 'update_window' && C2.told.length === 0 && evOf(XC, kc).some((t) => /its next fire runs it\)$/.test(t)), 'update-window: a cron child fired in the window is interrupted (update_window), no failure notice — its event says its next fire runs it', JSON.stringify(kc && { state: kc.state, cause: lastRun(kc).cause, told: C2.told }));
+    XC.shutdown();
+    C2.wrapper(WRAP);
+    const YC = C2.boot(), yk = kc && YC.jobs.get(kc.id);
+    ok(yk && yk.state === 'interrupted' && yk.runs.length === 1, 'update-window: the restarted server does NOT re-run a cron child — its schedule owns when it runs', JSON.stringify(yk && { state: yk.state, runs: yk.runs.length }));
+    const yc = YC.jobs.get(jc.id); if (yc) yc.nextFireAt = Date.now() - 1000;
+    await YC._cronTick();
+    if (yk) await settle(YC, yk);
+    ok(yk && yk.state === 'done' && yk.runs.length === 2 && C2.told.length === 0, 'update-window: …the next fire runs it (done)', JSON.stringify(yk && { state: yk.state, runs: yk.runs.length }));
+    C2.end();
+
+    // ── a service in the window: down, never a crash of the supervisor's count; the restarted server starts it ──
+    const S = world('service'), XS = S.boot();
+    S.wrapper(FUTURE, XS._bootAt + 2000);
+    const js = XS.jobs.get(XS.create({ kind: 'service', name: 'uw-svc', cmd: { argv: ['sh', '-c', 'sleep 30'] }, owner }, caller).job.id);
+    const supBefore = JSON.stringify(js.supervise || null);
+    await settle(XS, js);
+    ok(js.state === 'down' && lastRun(js).cause === 'update_window' && JSON.stringify(js.supervise || null) === supBefore && S.told.length === 0 && S.inbox.length === 0, 'update-window: a service in the window is DOWN (update_window) — not a crash: the supervisor\'s count unchanged, nothing said', JSON.stringify({ state: js.state, cause: lastRun(js).cause, sup: js.supervise, told: S.told }));
+    XS.shutdown();
+    S.wrapper(WRAP);
+    const YS = S.boot(), ys = YS.jobs.get(js.id);
+    ok(ys && ['up', 'starting'].includes(ys.state) && lastRun(ys).trigger === 'boot', 'update-window: the restarted server starts the service again (the boot replay)', JSON.stringify(ys && { state: ys.state, trigger: lastRun(ys).trigger }));
+    S.end();
+
+    // ── the install's own fault: the mismatch was on disk when the server booted ──
+    const F = world('fault');
+    F.wrapper(FUTURE, Date.now() - 60e3);
+    const XF = F.boot(), jf = task(XF, 'uw-fault');
+    await settle(XF, jf);
+    await until(() => F.told.length > 0, 3000);
+    ok(jf.state === 'failed' && lastRun(jf).cause === 'wrapper-mismatch' && F.told.length === 1 && /never started — data\/bin\/job-wrapper\.js speaks another protocol than this server/.test(F.told[0]), 'update-window: a mismatch with the wrapper the server BOOTED with is no window — failed (wrapper-mismatch), said once, naming the cause', JSON.stringify({ state: jf.state, cause: lastRun(jf).cause, told: F.told }));
+    F.end();
+    // …and a wrapper changed after the boot but longer ago than the window (a pull never restarted)
+    const G2 = world('stale'), XG = G2.boot();
+    XG._bootAt = Date.now() - UPDATE_WINDOW_MS - 10 * 60e3;
+    G2.wrapper(FUTURE, Date.now() - UPDATE_WINDOW_MS - 60e3);
+    const jg = task(XG, 'uw-stale');
+    await settle(XG, jg);
+    await until(() => G2.told.length > 0, 3000);
+    ok(jg.state === 'failed' && lastRun(jg).cause === 'wrapper-mismatch' && G2.told.length === 1, `update-window: a wrapper changed on disk more than ${Math.round(UPDATE_WINDOW_MS / 60e3)} min ago with no restart since is no window either — failed, said`, JSON.stringify({ state: jg.state, cause: lastRun(jg).cause, told: G2.told.length }));
+    G2.end();
+
+    // ── NEGATIVE CONTROL: the ≤ .332 judgment (no window) — the incident's shape ──
+    const NOWIN = "const proto = exit.reason === 'update_window' && !job._stopRequested ? (this._inUpdateWindow(run) ? 'update_window' : 'wrapper-mismatch') : null;";
+    const swapU = (src, from, to) => { if (src.split(from).length !== 2) throw new Error('update-window mutant: anchor not found once: ' + from.slice(0, 70)); return src.replace(from, to); };
+    const JMno = mutantCopies('jobs-uw', ROOT).load('src/jobs.js', swapU(JS, NOWIN, 'const proto = null;'), 'no-window').JobManager;
+    const N = world('mutant', JMno), XN = N.boot();
+    N.wrapper(FUTURE, XN._bootAt + 2000);
+    const jn = task(XN, 'uw-mutant');
+    await settle(XN, jn);
+    await until(() => N.told.length > 0, 3000);
+    ok(jn.state === 'failed' && N.told.length === 1 && /: failed exit=75 error /.test(N.told[0]) && N.inbox.length === 1, 'NEGATIVE CONTROL: an engine WITHOUT the window (the ≤ .332 judgment) ⇒ failed exit=75 + a failure notice + the user inbox — the legs above are RED on it', JSON.stringify({ state: jn.state, told: N.told, inbox: N.inbox.length }));
+    N.end();
   }
 } finally {
   try { const all = JSON.parse(fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8')); } catch { }

@@ -232,7 +232,7 @@ export function inboxModel(app) {
   const menuFor = (id) => { const it = byId(id); return it && !isCleared(it) ? [{ label: t('Clear content…'), action: () => { clearContent(id); } }] : []; };
   /** A PRODUCER'S ACTION (design-reset-credits p2): the client maps the item's
    *  `action.type` to a verb it owns. Today: the reset-credit confirm dialog. */
-  const runAction = async (rec, answer = null) => {
+  const runAction = async (rec, answer = null, extra = {}) => {   // `extra.reach` (lane key-instance-scope): an automation card's picked reach
     if (rec && rec.action && rec.action.type === 'channel-reauth') {
       // lane channel-names-readable: the account's sign-in lacks a permission — ITS Re-authorize dialog (the channels
       // engine resolves the item once the permission works)
@@ -301,8 +301,10 @@ export function inboxModel(app) {
     if (rec && rec.action && rec.action.type === 'automation-ask') {
       // design q-046 (lane automation-keys-core): THE person's answer to an automation call held for a grant (cookie route;
       // any bearer is refused human_only) — once (this call) / always (the key granted to that conversation) / deny.
-      const r = await fetchJson(`/api/automation/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) });
-      if (r && r.ok) { showToast(r.state === 'always' ? t('Granted — the key is listed with this conversation in the Vault window') : r.state === 'allowed' ? t('allowed') : t('denied')); return true; }
+      // lane key-instance-scope: + the grant's REACH the card offered (opened / groups / instance; absent = opened)
+      const reach = extra && typeof extra.reach === 'string' && extra.reach ? extra.reach : null;
+      const r = await fetchJson(`/api/automation/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer, ...(reach ? { reach } : {}) }) });
+      if (r && r.ok) { showToast(r.state === 'always' ? (reach === 'instance' ? t('Granted — the key now reaches every conversation here from that conversation (the Vault window lists it)') : t('Granted — the key is listed with this conversation in the Vault window')) : r.state === 'allowed' ? t('allowed') : t('denied')); return true; }
       const code = r && r.code;
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone') : (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;

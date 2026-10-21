@@ -298,6 +298,11 @@ class Auth {
       // with the shared Bearer token — the ROUTE enforces it (404 when the
       // collector is off, 403 on a bad token); no cookie exists on the sender.
       if (p === '/api/telemetry/ingest') return next();
+      // The maintainer hub's feedback doors (lane feedback-forward): another instance forwards an agent's report and pulls
+      // the maintainer's marks back with the SAME shared Bearer token + its own origin key — the ROUTE judges both
+      // (src/routes/feedback.js: the collector's verdict, 404 off / 403 bad token); no cookie exists on the sender. The
+      // method is exact: PATCH /api/feedback/:id (the owner's) stays the cookie's. Pinned by test-auth's DOORS row.
+      if ((req.method === 'POST' && p === '/api/feedback/forward') || (req.method === 'GET' && p === '/api/feedback/forward/marks')) return next();
       // CSP reports (lane app-page-csp, design q-043 D6): a browser posts what the app page's report-only policy would
       // block with NO cookie, and a sandboxed frame's report with `Origin: null` — so neither the cookie nor the same-origin
       // rule can judge it. The ROUTE judges its own (src/server/csp-reports.js): a report content type only (a page on

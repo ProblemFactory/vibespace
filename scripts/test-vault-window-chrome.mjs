@@ -73,7 +73,7 @@ const SEED = {};
   const VH = require(path.join(wt, 'src/server/vault-hooks.js'));
   const ut = new UserTodoManager({ dataDir: DATA, expirySweepMs: 0 });
   const att = VH.createVaultAttention({ userTodos: ut });
-  SEED.fail = att.useFailed({ entry: 'apikey:ak-release', name: 'release-bot', code: 'vault_locked', who: 'Release helper' }).id;
+  SEED.fail = att.useFailed({ entry: 'apikey:ak-release', name: 'release-bot', code: 'vault_locked', who: 'Release helper', verb: 'conversations.open', target: 'lane a' }).id;   // lane conversations-archive-verb: the notice names the verb, the target, the reason, the door
   SEED.rotate = att.agentPut({ entry: 'agent:github-token', name: 'github-token', who: 'Release helper' }).id;
   ut.stop();
 }
@@ -231,7 +231,7 @@ await shot('vw-v2-list.png');
 console.log('②c 「需要你」 — For you\'s own vault items: answered in one place, gone from both');
 const b0 = await until(`(() => { const r = [...document.querySelectorAll('.vw-band .vw-band-row')]; return r.length === 2 ? r.map((x) => ({ id: x.dataset.id, type: x.dataset.type, text: x.querySelector('.vw-band-txt').textContent, doors: [...x.querySelectorAll('[data-door]')].map((b) => b.dataset.door).join() })) : null; })()`, { timeout: 8000 });
 check('the band at the top shows the two cards the producers filed, with 2 in its head', !!b0 && b0.some((x) => x.id === SEED.rotate && x.type === 'vault-rotate') && b0.some((x) => x.id === SEED.fail && x.type === 'vault-use-failed') && (await evalJs(`document.querySelector('.vw-band-n').textContent`)) === '2', b0);
-check('their words and doors: «Using “release-bot” failed» — 打开行 + 知道了; «“github-token” was stored by an agent that saw its value — rotate it» — 换新… + 知道了', !!b0 && b0.find((x) => x.id === SEED.fail).text === 'Using “release-bot” failed' && b0.find((x) => x.id === SEED.fail).doors === 'open,ack' && /github-token/.test(b0.find((x) => x.id === SEED.rotate).text) && b0.find((x) => x.id === SEED.rotate).doors === 'renew,ack', b0);
+check('their words and doors: «“release-bot” could not conversations.open lane a: the vault is locked — Unlock… at the top of the page» — 打开行 + 知道了; «“github-token” was stored by an agent that saw its value — rotate it» — 换新… + 知道了', !!b0 && b0.find((x) => x.id === SEED.fail).text === '“release-bot” could not conversations.open lane a: the vault is locked — Unlock… at the top of the page' && b0.find((x) => x.id === SEED.fail).doors === 'open,ack' && /github-token/.test(b0.find((x) => x.id === SEED.rotate).text) && b0.find((x) => x.id === SEED.rotate).doors === 'renew,ack', b0);
 const trayOpen = (id) => `!!document.querySelector('#user-todos-popup .ut-item[data-id="${id}"]:not(.ut-item-resolved)')`;
 await click('#taskbar-user-todos');
 await until(visible('#user-todos-popup'), { timeout: 5000 });

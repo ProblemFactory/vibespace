@@ -121,7 +121,11 @@ const real = census(libFiles);
 ok(!real.problems.length && real.calls.length === SURFACES.length + EXEMPT.length, `every principal picker in src/lib is a census row: ${real.calls.length} calls = ${SURFACES.length} surfaces offering ALL AGENTS + ${EXEMPT.length} exempt with a reason`, real.problems);
 // the models
 const MODEL_RE = /\b(PRINCIPAL_KINDS|WHO_KINDS|OWNER_KINDS)\s*=/;
-const candidates = tracked.filter((f) => MODEL_RE.test(read(f)) || /(^|\/|-)(acl|reach)\.js$/.test(f));
+// int333: lane key-instance-scope's src/lib/automation-reach.js matches *-reach.js by NAME but is not an agent-principal / ALL
+// AGENTS surface — it is the words of a KEY GRANT's reach over conversations (opened | its Task Groups | the whole instance;
+// the "all" here is 整个 VibeSpace), the rule PURE src/automation-keys.js (reachOf / reachVerdict). Exempt, with the reason.
+const MODEL_EXEMPT = { 'src/lib/automation-reach.js': "a key grant's reach over CONVERSATIONS (opened | its Task Groups | the whole instance), not an agent-principal surface — the rule is PURE automation-keys (lane key-instance-scope)" };
+const candidates = tracked.filter((f) => (MODEL_RE.test(read(f)) || /(^|\/|-)(acl|reach)\.js$/.test(f)) && !MODEL_EXEMPT[f]);
 const unlisted = candidates.filter((f) => !MODELS.some((m) => m.file === f));
 ok(!unlisted.length && candidates.length === MODELS.length, `every reach / ACL model is a row (${candidates.length} grep-derived: ${candidates.join(', ')})`, unlisted.length ? `no row: ${unlisted.join(', ')}` : MODELS.filter((m) => !candidates.includes(m.file)).map((m) => m.file));
 const loaded = {};
@@ -154,6 +158,7 @@ console.log('\n  surface · model · had "everyone" before this lane · how it i
 for (const r of SURFACES) console.log(`  · ${r.surface} · ${r.model} · ${r.before} · ${r.spelled}`);
 for (const r of EXEMPT) console.log(`  · ${r.surface} · EXEMPT — ${r.why}`);
 for (const m of MODELS) console.log(`  · [model] ${m.file} · ${m.model} · ${m.before} · ${m.spelled}`);
+for (const [f, why] of Object.entries(MODEL_EXEMPT)) console.log(`  · [model EXEMPT] ${f} — ${why}`);
 for (const n of NOT_SURFACES) console.log(`  · [not a surface] ${n.what} — ${n.why}`);
 console.log('  · [inherits] the raw-API tier rows (SharedContext/vibespace-channel-raw-api-design.md) — the access row\'s everyone principal; default tier under All = read\n');
 // CONTROLS
@@ -166,7 +171,7 @@ console.log('  · [inherits] the raw-API tier rows (SharedContext/vibespace-chan
   ok(census(plantedNew).problems.some((p) => /planted-share\.js/.test(p) && /no census row names/.test(p)), 'CONTROL (1b): a NEW picker call no row names is RED (a new permission surface must say how it offers All agents)');
   // (2) a NEW model file declaring a principal kind list is a candidate with no row ⇒ red; a REAL model whose kinds
   // lose `everyone` (a patched copy of channel-acl, loaded) fails its own spelling check ⇒ red
-  const unlistedOf = (texts) => Object.entries(texts).filter(([f, src]) => (MODEL_RE.test(src) || /(^|\/|-)(acl|reach)\.js$/.test(f)) && !MODELS.some((m) => m.file === f)).map(([f]) => f);
+  const unlistedOf = (texts) => Object.entries(texts).filter(([f, src]) => (MODEL_RE.test(src) || /(^|\/|-)(acl|reach)\.js$/.test(f)) && !MODEL_EXEMPT[f] && !MODELS.some((m) => m.file === f)).map(([f]) => f);
   const realTexts = Object.fromEntries(tracked.map((f) => [f, read(f)]));
   ok(!unlistedOf(realTexts).length && J(unlistedOf({ ...realTexts, 'src/planted-thing.js': "const PRINCIPAL_KINDS = Object.freeze(['agent', 'group']);\n" })) === J(['src/planted-thing.js']), 'CONTROL (2a): a planted model declaring PRINCIPAL_KINDS (without a census row) is RED');
   const aclSrc = read('src/channel-acl.js');

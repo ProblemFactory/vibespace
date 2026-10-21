@@ -306,17 +306,21 @@ console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `
   W.activeSessions.set('sess-0-8', { name: 'stranger', backend: 'claude', backendSessionId: 'dd44', claudeSessionId: 'dd44', clients: new Map() });
   let ticks = 0;
   const V = OPS.automationVerbs({ activeSessions: W.activeSessions, groupsOf: () => [], ops: opsW, waitMs: 2000, sleep: async () => { ticks++; if (ticks === 3) for (const s of W.activeSessions.values()) if (!s.backendSessionId) { s.backendSessionId = s.claudeSessionId = 'ee55'; } } });
-  const reachSelf = (cid) => cid === 'c0ffee';
+  // the engine's reach (ONE PURE rule — src/automation-keys.js reachVerdict): the caller itself, or what the key OPENED (the engine's
+  // store rows stand in here as `opened`; test-automation-keys ⑰ proves the real store across a restart)
+  const opened = new Set();
+  const reachSelf = (t) => (t.conversationId === 'c0ffee' || opened.has(t.webuiId) || opened.has(t.conversationId) ? { ok: true, by: t.conversationId === 'c0ffee' ? 'self' : 'opener' } : { ok: false, code: 'not_granted', why: 'the key is not granted to that conversation (nor to one of its Task Groups), and did not open it' });
   const ctx = { caller, keyId: 'ak-000000000001', reach: reachSelf, identity: 'automation:ak-000000000001' };
   const o = await V['conversations.open']({ cwd: '/var/tmp/vibespace-lanes', name: 'worker', model: 'opus', effort: 'xhigh', permission: 'bypassPermissions', task: 'T-1-x', pool: 'pool-a' }, ctx);
   ok(o.ok && o.claudeSessionId === 'ee55' && o.sessionKey === 'claude:ee55' && o.pending === false && ticks === 3 && W.lastFrame.permissionMode === 'bypassPermissions' && W.lastFrame.taskId === 'T-1-x' && W.lastFrame.accountId === 'pool-a' && W.log[0][2] === 'automation:ak-000000000001',
     "open: the door's arguments → the spec (permission → permissionMode, task → taskId, pool → accountId), charged to the key, and it WAITS for the conversation id", { o, ticks });
   const id = o.sessionId;
+  opened.add(id);
   OPS.provide({ rename: W.rename }); // the rename verb reaches L1's body through the shared `rename` the ws handler provides
   const st = V['conversations.status']({ target: id }, ctx);
   const rn = V['conversations.rename']({ target: id, name: 'worker one' }, ctx);
-  ok(st.ok && st.sessionKey === 'claude:ee55' && rn.ok && rn.target === 'ee55' && W.renames.at(-1).webuiId === id, 'a conversation THIS key opened is within its reach (status, rename) — no grant of its own needed', { st, rn });
-  const other = { ...ctx, keyId: 'ak-000000000002' };
+  ok(st.ok && st.sessionKey === 'claude:ee55' && rn.ok && rn.target === 'ee55' && W.renames.at(-1).webuiId === id, 'a conversation THIS key opened is within its reach (status, rename) — no grant of its own needed (the engine\'s opened row answers the ONE rule)', { st, rn });
+  const other = { ...ctx, keyId: 'ak-000000000002', reach: () => ({ ok: false, code: 'not_granted', why: 'another key' }) };
   ok(V['conversations.rename']({ target: id, name: 'x' }, other).code === 'not_granted' && V['conversations.end']({ target: 'dd44' }, ctx) instanceof Promise, 'another key does not reach it; a stranger conversation needs a grant');
   const strangerEnd = await V['conversations.end']({ target: 'dd44' }, ctx);
   ok(strangerEnd.code === 'not_granted' && !W.ends.some((e) => e.d.sessionId === 'sess-0-8'), 'end on a conversation the key does not reach ⇒ not_granted, nothing ended', strangerEnd);
@@ -327,11 +331,40 @@ console.log('⑥ THE WIRED AUTOMATION VERBS (automationVerbs — the engine\'s `
   const iv = await V['groups.invite']({ group: 'g-1', target: id }, ctx);
   ok(iv.ok && W.ge.calls.at(-1).by === 'c0ffee' && JSON.stringify(W.ge.calls.at(-1).members) === JSON.stringify(['ee55']) && W.ge.calls.at(-1).quiet === true, 'invite: the caller invites the conversation\'s id, QUIETLY (no wake — a billed turn of its own)', W.ge.calls.at(-1));
   W.activeSessions.set('sess-0-7', { name: 'young', backend: 'claude', backendSessionId: null, claudeSessionId: null, clients: new Map() });
-  const denied = await V['groups.invite']({ group: 'g-1', target: 'sess-0-7' }, { ...ctx, reach: () => false });
-  const young = await V['groups.invite']({ group: 'g-1', target: 'sess-0-7' }, { ...ctx, reach: () => true });
+  const denied = await V['groups.invite']({ group: 'g-1', target: 'sess-0-7' }, { ...ctx, reach: () => ({ ok: false, code: 'not_granted' }) });
+  const young = await V['groups.invite']({ group: 'g-1', target: 'sess-0-7' }, { ...ctx, reach: () => ({ ok: true, by: 'grant' }) });
   ok(denied.code === 'not_granted' && young.code === 'pending' && W.ge.calls.length === 1, 'invite: a conversation the key does not reach ⇒ not_granted; one that has no id yet ⇒ pending — the engine is never asked', { denied, young });
   const en = await V['conversations.end']({ target: id }, ctx);
   ok(en.ok && en.target === 'ee55' && W.ends.at(-1).d.sessionId === id && W.ends.at(-1).actBy === 'agent:claude:c0ffee', 'end: the conversation ends, its teardown names the calling conversation', en);
+  // ⑥b lane conversations-archive-verb: THE ARCHIVE VERB over the seams — asks_open / resolveAsks, subject_busy / force, end then archive, a dead target, already_archived
+  const archived = [], dismissed = [];
+  const asks = new Map([['claude:dd44', [{ id: 'ut-1' }, { id: 'ut-2' }]]]);
+  const V2 = OPS.automationVerbs({ activeSessions: W.activeSessions, ops: opsW, groupsOf: () => [],
+    archive: (k) => { const already = archived.includes(k); if (!already) archived.push(k); return { ok: true, already }; },
+    asksOf: (k) => asks.get(k) || [], resolveAsks: (ids, by) => { dismissed.push([ids, by]); asks.delete('claude:dd44'); return { changed: ids, unknown: [] }; },
+    turnOf: (s) => s._turn || 'idle',
+    deadOf: (t) => (/^(claude:)?gone1$/.test(t) ? { conversationId: 'gone1', sessionKey: 'claude:gone1', name: 'old worker', groups: ['T-1-x'] } : /^(claude:)?dd44$/.test(t) ? { conversationId: 'dd44', sessionKey: 'claude:dd44', name: 'stranger', groups: [] } : null) });
+  const any = { ...ctx, reach: (t) => (t.conversationId === 'nope' ? { ok: false, code: 'not_granted' } : { ok: true, by: 'grant' }) };
+  W.activeSessions.get('sess-0-8')._turn = 'running';
+  const openAsks = await V2['conversations.archive']({ target: 'dd44' }, any);
+  ok(openAsks.code === 'asks_open' && JSON.stringify(openAsks.asks) === '["ut-1","ut-2"]' && /ut-1, ut-2/.test(openAsks.why) && openAsks.target === 'stranger' && !dismissed.length && !W.ends.some((e) => e.d.sessionId === 'sess-0-8'),
+    'archive: the target\'s OPEN For-you asks refuse it by their ids (asks_open — the memory law) before anything is touched; the refusal names the target', openAsks);
+  const busy = await V2['conversations.archive']({ target: 'dd44', resolveAsks: true }, any);
+  ok(busy.code === 'subject_busy' && busy.turn === 'running' && asks.has('claude:dd44') && !dismissed.length, 'a running turn ⇒ subject_busy (judged before the asks are dismissed — a refusal changes nothing)', busy);
+  const done = await V2['conversations.archive']({ target: 'dd44', resolveAsks: true, force: true }, any);
+  ok(done.ok && done.ended === true && done.archived === true && done.already === false && done.sessionKey === 'claude:dd44' && JSON.stringify(done.resolvedAsks) === '["ut-1","ut-2"]' && dismissed[0][1] === 'automation:ak-000000000001' && W.ends.at(-1).d.sessionId === 'sess-0-8' && W.ends.at(-1).actBy === 'agent:claude:c0ffee' && archived.includes('claude:dd44'),
+    'archive --resolve-asks --force: the asks dismissed by the key, the conversation ended (its teardown names the caller), then archived — the sidebar\'s own store write, once', done);
+  W.activeSessions.delete('sess-0-8');
+  const again = await V2['conversations.archive']({ target: 'claude:dd44' }, any);
+  ok(again.code === 'already_archived' && archived.filter((k) => k === 'claude:dd44').length === 1, 'a second archive (the conversation gone, its key already listed) ⇒ already_archived', again);
+  const dead = await V2['conversations.archive']({ target: 'gone1' }, any);
+  ok(dead.ok && dead.ended === false && dead.archived === true && dead.target === 'gone1' && archived.includes('claude:gone1'), 'an ENDED conversation (not live) is archived by the stores\' facts (deadOf: its key, name, Task Groups) — the opener\'s lifecycle outlives the session', dead);
+  const reachSeen = [];
+  await V2['conversations.archive']({ target: 'claude:gone1' }, { ...ctx, reach: (t) => { reachSeen.push(t); return { ok: false, code: 'not_granted', why: 'no' }; } });
+  ok((await V2['conversations.archive']({ target: 'nowhere' }, any)).code === 'not_found' && reachSeen.length === 1 && reachSeen[0].conversationId === 'gone1' && reachSeen[0].webuiId === null && JSON.stringify(reachSeen[0].groups) === '["T-1-x"]',
+    'unknown ⇒ not_found; the ONE rule is asked with the dead conversation\'s id and Task Groups (no webui id) — out of reach ⇒ not_granted', reachSeen);
+  const noArch = OPS.automationVerbs({ activeSessions: W.activeSessions, ops: opsW });
+  ok((await noArch['conversations.archive']({ target: 'c0ffee' }, any)).code === 'not_ready', 'no archive seam wired ⇒ not_ready');
   OPS.provide(null);
   const W3 = world({ guard: 'refuse' });
   const V3 = OPS.automationVerbs({ activeSessions: W3.activeSessions, ops: W3.ops });

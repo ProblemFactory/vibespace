@@ -54,6 +54,8 @@ function paintRow(node, r, act) {
   if (r.group && r.group.name) head.append(el('span', 'fb-group', r.group.name));
   head.append(el('span', 'fb-chip fb-kind', r.kind || 'other'));
   if (r.about) head.append(el('span', 'fb-chip fb-about', r.about));
+  // lane feedback-forward: a report another instance forwarded wears that instance's name (the maintainer's ONE inbox)
+  if (r.origin && r.origin.instance) { const o = el('span', 'fb-chip fb-origin', r.origin.instance); o.title = t('Forwarded from {instance}', { instance: r.origin.instance }); head.append(o); }
   if ((Number(r.count) || 1) > 1) { const c = el('span', 'fb-count', `×${r.count}`); c.title = t('Reported {n} times', { n: r.count }); head.append(c); }
   const btn = el('button', 'btn-cancel fb-act', r.status === 'handled' ? t('Reopen') : t('Mark handled'));
   btn.type = 'button';

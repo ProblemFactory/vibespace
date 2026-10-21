@@ -292,11 +292,11 @@ for (const mode of ['password', 'clerk', 'open']) {
   ok(bearer.status === 200 && bearer.json && bearer.json.reached, `${mode}: a Bearer token is not the cookie's authority ⇒ the origin rule does not judge it (the route judges the token)`, bearer.status);
   // the doors: their own credential, never this rule (their refusals are their own)
   const doors = [];
-  for (const p of ['/hook/ci', '/api/agent/channels/proposals/p-1/withdraw', '/api/editor/open', '/api/telemetry/ingest', '/dav/x', '/svc/app/x', '/otel/v1/logs', '/p/pg0123456789', '/api/channels/webhook/ci/pair', '/api/csp-report']) {
+  for (const p of ['/hook/ci', '/api/agent/channels/proposals/p-1/withdraw', '/api/editor/open', '/api/telemetry/ingest', '/api/feedback/forward', '/dav/x', '/svc/app/x', '/otel/v1/logs', '/p/pg0123456789', '/api/channels/webhook/ci/pair', '/api/csp-report']) {
     const r = await hit(I, p, { headers: XS });
     doors.push(`${p} ${r.status}`);
   }
-  ok(doors.every((d) => / 200$/.test(d)), `${mode}: the doors (webhook, agent, editor bridge, telemetry, dav, svc, otel, published pages, pairing, CSP reports) are not the cookie's — a cross-site call reaches their own judge`, doors);
+  ok(doors.every((d) => / 200$/.test(d)), `${mode}: the doors (webhook, agent, editor bridge, telemetry, the feedback forward, dav, svc, otel, published pages, pairing, CSP reports) are not the cookie's — a cross-site call reaches their own judge`, doors);
   // the auth routes stand behind it now
   const login = await hit(I, '/api/login', { headers: XS, body: { password: I.pw } });
   const logout = await hit(I, '/api/logout', { headers: { ...C, ...XS } });
@@ -446,6 +446,7 @@ const DOORS = [
   [/^\/api\/agent\//, 'agent sessions (vsst_) and Background Work jobs (jbt_): the route judges the token'],
   [/^\/api\/editor\/open$/, 'the Ctrl+G bridge in a session shell: the route judges its vsst_ token'],
   [/^\/api\/telemetry\/ingest$/, 'remote instances: the collector\'s shared Bearer token'],
+  [/^\/api\/feedback\/forward(\/marks)?$/, 'remote instances forwarding an agent\'s feedback report / pulling the maintainer\'s marks (lane feedback-forward): the collector\'s shared Bearer token (the ingest door\'s verdict), then the caller\'s origin key — POST / GET exactly (src/routes/feedback.js)'],
   [/^\/hook(\/|$)/, 'webhook callers: their own token / signature (src/routes/webhook.js)'],
   [/^\/api\/channels\/webhook\/[a-z0-9][a-z0-9-]{0,62}\/pair$/, 'the pairing completion: the pairing code is the credential'],
   [/^\/dav(\/|$)/, 'WebDAV: scoped Bearer mount tokens'],

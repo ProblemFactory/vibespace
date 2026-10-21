@@ -129,30 +129,32 @@ function wireVaultHooks({ vault, auth = null, wss = null, hostTokens = null, plu
 
 // THE VAULT WINDOW'S 「需要你」 (lane vault-window-v2, design q-047 §3.4) — the band at the window's top is the For-you list's
 // own items of origin 'vault' (filtered — never a second queue). Two producers file them here:
-//   · useFailed({ entry, name, code, who }) — a use door refused a caller by a cause the owner can act on (locked / not
-//     granted / expired — PURE useFailVerdict): ONE notice per entry per hour; while it is open each later failure of the
-//     hour updates its count; once answered, the hour's later failures are counted, never re-filed (the next hour files again)
+//   · useFailed({ entry, name, code, who, verb, target, why, reach }) — a use door refused a caller by a cause the owner can act on
+//     (locked / not granted / expired / the target's open asks — PURE useFailVerdict): ONE notice per key × VERB × REASON per
+//     hour (lane conversations-archive-verb: the notice says which verb, on what, why, and where to fix it); while it is open
+//     each later failure of the hour updates its count; once answered, the hour's later failures are counted, never re-filed
 //   · agentPut({ entry, name, who }) — an agent stored a value it had SEEN (q-043 §9 `put`: its door calls this): ONE
 //     notice per store act; nothing re-files it once answered
 // The words ride as STRUCTURE (the client says them in its language); the English is the store's dedupe key.
 const fillKey = (l) => String(l.key).replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
 function createVaultAttention({ userTodos = null, now = () => Date.now(), log = console } = {}) {
-  const hours = new Map();   // entry → { next, itemId }
+  const hours = new Map();   // `entry|verb|code` → { next, itemId } (lane conversations-archive-verb: one hour per key × verb × reason)
   const file = (words, action) => userTodos.add(VAULT_INBOX_KEY, {
     origin: 'vault', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Vault',
     text: fillKey(words.text), detail: words.detail.map(fillKey).join('\n'), i18n: { text: words.text, detail: words.detail }, action,
   });
   /** → the item filed / updated, or null (no cause the owner is told about, a merged failure, no store). */
-  function useFailed({ entry = null, name = null, code, who = null } = {}) {
+  function useFailed({ entry = null, name = null, code, who = null, verb = null, target = null, why = null, reach = null } = {}) {   // `why` = the door's own words (audited; the card says the owner's); `reach` = the grant's reach a refusal names (lane key-instance-scope)
     if (!userTodos) return null;
-    const key = String(entry || 'apikey:*').slice(0, 200);
+    const entryKey = String(entry || 'apikey:*').slice(0, 200);
+    const key = `${entryKey}|${String(verb || 'use').slice(0, 40)}|${String(code || '').slice(0, 40)}`;
     const prev = hours.get(key) || null;
-    const v = VI.useFailVerdict(prev && prev.next, { code, at: now(), who });
+    const v = VI.useFailVerdict(prev && prev.next, { code, at: now(), who, target });
     if (!v.counted) return null;
     const open = prev && !v.fresh && prev.itemId ? userTodos.get(prev.itemId) : null;
     if (!v.fresh && !(open && open.status === 'open')) { hours.set(key, { next: v.next, itemId: prev && prev.itemId }); return null; }   // answered inside the hour: counted, never re-filed
     try {
-      const it = file(VI.useFailCard({ name, next: v.next }), { type: 'vault-use-failed', entry: key });
+      const it = file(VI.useFailCard({ name, verb, target, code, reach, next: v.next }), { type: 'vault-use-failed', entry: entryKey, verb: verb || null, code: code || null });
       hours.set(key, { next: v.next, itemId: it && it.id });
       while (hours.size > 256) hours.delete(hours.keys().next().value);
       return it;

@@ -138,7 +138,11 @@ fuse:
 # ⚙ → Diagnostics report). Point forwardUrl at
 #   https://<collector-host>/api/telemetry/ingest
 # and use ONE shared token as both the collector's ingestToken and every
-# sender's forwardToken.
+# sender's forwardToken. The same target also receives every agent FEEDBACK
+# report filed on THIS instance (`vibespace-feedback` — the words an agent
+# wrote about VibeSpace, with its conversation / Task Group names) and this
+# instance pulls the collector's «handled in» marks back every 6 h; the
+# collector's ingestToken opens its two feedback doors too.
 telemetry:
   forwardUrl: ""
   forwardToken: ""

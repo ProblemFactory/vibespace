@@ -31,6 +31,7 @@
 import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
+import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: the first-use card's reach choices (one spelling with the For-you window and the Vault window)
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
@@ -117,9 +118,20 @@ const HUB_ANSWERS = ['once', 'always', 'deny'];
   const hubAnswerWord = (a, t, type = 'hub-act-ask') => (a === 'once' ? t('Allow once') : a === '8h' ? t('For 8 hours') : a === 'always' ? (type === 'automation-ask' ? t('Always for this conversation') : type === 'pool-cross-provider' ? t('Always for this pool') : type === 'vault-run-ask' ? t('Always for this shape') : t('Always on this machine')) : t('Deny'));
   const heldAnswers = (i) => (i.action.type === 'vault-grant-ask' ? GRANT_ANSWERS : HUB_ANSWERS.filter((a) => a !== 'always' || !(i.action.type === 'vault-run-ask' && i.action.always === false)));
 // lane vault-scrub-forms (q-043 verify M1): a RUN card says what the scrubbing does not promise — the owner reads the command
+// lane key-instance-scope: an AUTOMATION card offers the grant's REACH beside its answers — 只有它开的会话 (the default) · 这些岗位的会话
+// (only when the caller is in one: action.groups) · 整个 VibeSpace (red, its title says it reaches the owner's own conversations too);
+// the panel reads the checked choice when an answer is pressed (data-reach never rides the button: the radios are the state)
+const reachPickHtml = (i, t) => {
+  const groups = String(i.action.groups || '').split(' ').filter(Boolean);   // the caller's Task Group ids (space-joined by the engine)
+  const name = `ut-ak-reach-${String(i.id || i.action.askId || '')}`;
+  return `<div class="ut-ak-reach" role="radiogroup" aria-label="${escHtml(t('Reach'))}"><span class="ut-ak-reach-lbl">${escHtml(t('Reach'))}</span>`
+    + REACH_CHOICES.filter((r) => r !== 'groups' || groups.length).map((r) => `<label class="ut-ak-reach-opt ut-ak-reach-${r}" title="${escHtml(reachTitle(r, groups.join(', ')))}"><input type="radio" name="${escHtml(name)}" value="${r}"${r === 'opened' ? ' checked' : ''}> ${escHtml(reachWord(r))}</label>`).join('')
+    + '</div>';
+};
 const hubAskHtml = (i, t, detail) => (i && i.action && HELD_ASKS.includes(i.action.type)
   ? `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
     + (i.action.type === 'vault-run-ask' ? `<div class="ut-exit-note">${escHtml(t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.'))}</div>` : '')
+    + (i.action.type === 'automation-ask' && i.action.askId ? reachPickHtml(i, t) : '')
     + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${heldAnswers(i).map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : '')
   : '');
 
@@ -398,6 +410,7 @@ export function patchRow(el, entry, ctx) {
   const p = partsOf(entry, ctx);
   if (el.dataset.sig !== p.sig) {
     const detailOpen = !!el.querySelector(':scope > .ut-body > .ut-detail-exp[open]');
+    const reachPicked = (el.querySelector('.ut-ak-reach input:checked') || {}).value || null;   // lane key-instance-scope: a re-render keeps the owner's pick
     let body = el.querySelector(':scope > .ut-body');
     const box = body && body.querySelector(':scope > .ut-reply');
     // an open row keeps its box; a resolved row keeps it only while in use
@@ -416,6 +429,7 @@ export function patchRow(el, entry, ctx) {
       keep.before(...freshBody.childNodes);
     }
     if (detailOpen) { const d = body.querySelector(':scope > .ut-detail-exp'); if (d) d.open = true; }
+    if (reachPicked) { const r = body.querySelector(`.ut-ak-reach input[value="${reachPicked}"]`); if (r) r.checked = true; }
     el.dataset.sig = p.sig;
   }
   applyLive(el, entry.item, ctx);
