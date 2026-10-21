@@ -16,7 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { BACKEND_CAPS } = require('../backend-caps');
-const { AgyAdapter } = require('../adapters/agy');
+const { AgyAdapter, AGY_EFFORTS } = require('../adapters/agy');
 const { AcpMessageManager, AcpSessionMessages } = require('../acp-message-manager');
 const { NULL_QUOTA } = require('./null-quota');
 const AGY_USAGE = require('./antigravity-usage');
@@ -205,8 +205,10 @@ module.exports = {
   // verb exists; AGY_QUOTA classifies no limit (NULL_QUOTA's signal), so nothing can arm it (derived: never offered)
   resume: { form: 'prompt', deliver: (session, text, deps) => !!deps.sendChatInput(session, text) },
   // the billing row: a Google login per account (its HOME root), no API keys / long-lived token; the usage of a named
-  // account rides /api/usage's homeAccounts map (the Re-check reading), not a billing-row store
-  ui: { billing: { globalLogin: 'Google login', cliLogin: 'Google login', pickLogin: 'Google login (Antigravity CLI)', pickLoginHost: 'Google login (on the host)', planSuffix: '', switchLogin: 'Google login', accountLogin: 'Google', defaultIdField: 'defaultAntigravityAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: null, globalUsageKey: null, estimates: false }, effortReport: null, effortLevels: null, modelLock: true, legacyIds: false, resumeResend: false },
+  // account rides /api/usage's homeAccounts map (the Re-check reading), not a billing-row store. effortLevels = agy's own
+  // --effort list (the adapter's AGY_EFFORTS, the one place) and NO effortExtras: the menu offers exactly these (lane
+  // effort-menu-per-harness — it used to offer claude's ultracode); effortReport null = no turn reports its effort.
+  ui: { billing: { globalLogin: 'Google login', cliLogin: 'Google login', pickLogin: 'Google login (Antigravity CLI)', pickLoginHost: 'Google login (on the host)', planSuffix: '', switchLogin: 'Google login', accountLogin: 'Google', defaultIdField: 'defaultAntigravityAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: null, globalUsageKey: null, estimates: false }, effortReport: null, effortLevels: AGY_EFFORTS, modelLock: true, legacyIds: false, resumeResend: false },
   creds,
   billingIdentity: agyBillingIdentity,
   settingsPrefix: 'antigravity',

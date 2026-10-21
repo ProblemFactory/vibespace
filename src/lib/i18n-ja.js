@@ -873,6 +873,8 @@ export default {
   "{effort} (multi-agent \u00b7 reasoning {level})": "{effort}（マルチエージェント \u00b7 推論強度 {level}）",
   "{effort} is still in effect until the next turn starts": "次のターンが始まるまでは {effort} が有効です",
   "Reasoning effort not set/reported — click to change": "推論強度は未設定/未報告 — クリックで変更",
+  "Reasoning effort as asked at start (the CLI reports no per-turn effort) — click to change": "推論強度（起動時に指定した値 — この CLI はターンごとの強度を報告しません）— クリックで変更",
+  "No effort was asked at start and the CLI reports none — its own default applies. Click to change": "起動時に推論強度の指定はなく、CLI も報告しません — CLI 自身の既定値が使われます。クリックで変更",
   "Recent": "最近",
   "Reconnected": "再接続しました",
   "Reinstall": "再インストール",
@@ -9960,4 +9962,6 @@ export default {
   "Today's LLM budget is spent ({day}) — judged notification rules paused": "今日の LLM 予算を使い切りました（{day}）— モデルが判定する通知ルールは一時停止中", // lane judged-watch-state
   "Paused today: {names}": "今日止まったもの：{names}", // lane judged-watch-state
   "They resume with tomorrow's budget, or now if you raise the daily budget (Settings › Plugins › LLM). The messages they skipped are judged then.": "明日の予算で再開します。設定 › プラグイン › LLM で1日の予算を上げればすぐ再開。飛ばしたメッセージはその時に判定します。", // lane judged-watch-state
+  "Agent feedback stays on this instance: {target} has no feedback door": "エージェントのフィードバックはこのインスタンスに残ります：{target} にはフィードバックの受け口がありません", // lane feedback-forward-404
+  "The telemetry forward target in Settings (Forward diagnostics to a central collector) answered {status} at its feedback door: it takes diagnostics, not agent feedback. The reports stay here, in ⚙ System ▸ Agent feedback… — {n} waiting to be forwarded (past {max} the oldest is dropped). VibeSpace asks the target again once a day and sends them when it takes them.": "設定のテレメトリ転送先（診断データを中央コレクターへ転送）がフィードバックの受け口で {status} を返しました。診断データは受け取りますが、エージェントのフィードバックは受け取りません。レポートはここ（⚙ システム ▸ エージェントのフィードバック…）に残ります — 転送待ち {n} 件（{max} 件を超えると古いものから削除）。VibeSpace は1日に1回この転送先を再確認し、受け取れるようになったら送ります。", // lane feedback-forward-404
 };

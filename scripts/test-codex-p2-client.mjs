@@ -56,7 +56,8 @@ const { BACKEND_META } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
   // generic, so the row carries {signal, resume, supported} DERIVED from the
   // descriptor's two hooks, and every surface gates on `supported` + the verb
   // FORM rather than on a truthy flag that only claude and codex could have.
-  ok(c.fork === true && c.effort === true && c.review === true && c.autoResume?.supported === true && c.autoResume?.resume === 'turn-start' && c.accounts === true && BACKEND_META.codex.caps.quotaRefresh === 'session-rpc'
+  // lane effort-menu-per-harness: caps.effort is gone — the effort menu is the declared ui.effortLevels (hasEffortMenu)
+  ok(c.fork === true && !('effort' in c) && BACKEND_META.codex.ui.effortLevels === 'model-catalog' && c.review === true && c.autoResume?.supported === true && c.autoResume?.resume === 'turn-start' && c.accounts === true && BACKEND_META.codex.caps.quotaRefresh === 'session-rpc'
     && c.responseStyle?.live === true && JSON.stringify(c.responseStyle?.values) === JSON.stringify(['none', 'friendly', 'pragmatic']) && !('outputStyle' in c),
     'client META: codex caps.fork is true (the fork button/menu shows) + a LIVE responseStyle row', JSON.stringify(c));
 }

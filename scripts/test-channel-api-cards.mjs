@@ -3,7 +3,9 @@
 // and For you (PURE src/channel-api-card.js), resolved together (ORCH src/server/channel-api-cards.js over a fake
 // orchestrator + fake For-you store + fake delivery ladder): the For-you item per proposal, the decision answering it
 // with the outcome, the receipt on the agent's next turn, the 24 h expiry and the withdrawal by name. ⑤ = patched-copy
-// controls: each rule taken out of a mutant copy turns its row red.
+// controls: each rule taken out of a mutant copy turns its row red. ④ (lane inline-receipts-compose-api): a proposal whose
+// CLI waits on it (`api … --wait` / `api wait`) is read INLINE — its receipt message is never filed; a CLI that stopped
+// waiting leaves it to the message road (the fallback).
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -45,7 +47,7 @@ const R = pureRows(C);
 for (const k of Object.keys(WORDS)) ok(R[k], WORDS[k]);
 
 // ── ORCH over fakes ──
-function harness(cardsPath = path.join(ROOT, 'src/server/channel-api-cards.js')) {
+function harness(cardsPath = path.join(ROOT, 'src/server/channel-api-cards.js'), opts = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-apicards-'));
   fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
   let clock = T0;
@@ -64,7 +66,7 @@ function harness(cardsPath = path.join(ROOT, 'src/server/channel-api-cards.js'))
   const deliver = { deliverToConversation: async (cid, text, opts) => { delivered.push({ cid, text, opts }); return refuse ? { ok: false } : { ok: true }; }, stashFor: (cid, env) => { stash.push({ cid, env }); } };
   const { create } = require(cardsPath);
   const names = (adapterId, convId) => (adapterId === 'lark-1' && convId === 'oc_known' ? 'Product room' : null);   // the channel store's name ladder
-  const cards = create({ dataDir: dir, api, userTodos, deliver, names, now: () => clock, timer: false, log: { warn() {}, log() {} } });
+  const cards = create({ dataDir: dir, api, userTodos, deliver, names, now: () => clock, timer: false, log: { warn() {}, log() {} }, ...(opts.collectWindowMs ? { collectWindowMs: opts.collectWindowMs } : {}) });
   const add = (o) => { const p = base({ bodySha: undefined, headers: undefined, tier: undefined, shape: undefined, ...o }); props[p.id] = p; writeFrozen(); return p; };
   return { dir, api, cards, add, todos, answered, delivered, stash, creds, granted, setClock: (t) => { clock = t; }, refuse: (v) => { refuse = v; } };
 }
@@ -100,6 +102,64 @@ console.log('② ORCH over fakes (src/server/channel-api-cards.js)');
 const O = await orchRows(harness());
 for (const k of Object.keys(OWORDS)) ok(O[k], OWORDS[k], O);
 
+// ── ④ lane inline-receipts-compose-api: the CLI that waits on a proposal reads its outcome INLINE ──
+const MIN = 60 * 1000;
+async function inlineRows(h) {
+  const R = {};
+  const mine = (id) => h.delivered.filter((d) => d.text.includes(id)).length + h.stash.filter((x) => x.env.ref === id).length;
+  // A — `api … --wait`: the CLI waits from the moment the proposal is filed; the user decides; its next poll reads it
+  h.add({ id: 'api-w1', at: T0 }); await h.cards.sync();
+  const c0 = await h.cards.collect('api-w1');
+  h.setClock(T0 + 5000); h.api.ran('api-w1'); await h.cards.sync();   // inside the window (the CLI polls every 2 s)
+  R.held = c0.collecting === true && mine('api-w1') === 0;
+  const c1 = await h.cards.collect('api-w1');
+  R.readInline = c1.collected === true && c1.messaged === false && /the user approved it and it RAN — HTTP 200, 1\.2 KB\.$/.test(c1.receiptText || '');
+  h.setClock(T0 + 30 * MIN); await h.cards.sync(); await h.cards.sync();
+  R.neverFiled = mine('api-w1') === 0 && h.cards.records().find((r) => r.id === 'api-w1').receipt.how === 'inline';
+  const it = h.todos.find((t) => t.action.id === 'api-w1');
+  R.cardKept = !!it && it.status === 'done' && it.resolvedFact.apiOutcome.key === 'Ran · {status} · {size}';
+  // B — the CLI stopped waiting (its --timeout) before the decision: the hold lapses ⇒ the receipt MESSAGES
+  h.add({ id: 'api-w2', at: T0 + 30 * MIN }); await h.cards.sync(); await h.cards.collect('api-w2');
+  h.setClock(T0 + 31 * MIN); h.api.ran('api-w2'); await h.cards.sync();
+  R.lapsed = mine('api-w2') === 1 && h.delivered.some((d) => d.text.includes('api-w2') && d.opts.spendReason === 'channel-receipt' && d.opts.noWake === true);
+  // C — decided while held, then the CLI died before reading: once the window ends the receipt MESSAGES (the fallback)
+  h.add({ id: 'api-w3', at: T0 + 31 * MIN }); await h.cards.sync(); await h.cards.collect('api-w3');
+  h.api.ran('api-w3'); await h.cards.sync();
+  const heldC = mine('api-w3') === 0;
+  h.setClock(T0 + 32 * MIN); await h.cards.sync();
+  R.fallback = heldC && mine('api-w3') === 1;
+  // D — no CLI waits (no --wait): the approval-gated proposal keeps its card AND its receipt message (the base road)
+  h.add({ id: 'api-w4', at: T0 + 32 * MIN }); await h.cards.sync(); h.api.ran('api-w4'); await h.cards.sync();
+  R.gatedMessages = mine('api-w4') === 1;
+  // E — `api wait <id>` after the message went: it still reads the outcome, and says the message went
+  const c4 = await h.cards.collect('api-w4');
+  R.messagedAfter = c4.messaged === true && c4.collected === false && /RAN/.test(c4.receiptText || '') && mine('api-w4') === 1;
+  return R;
+}
+const IWORDS = {
+  held: 'a decision landing while its CLI waits (api … --wait) is HELD — no receipt message, no stash',
+  readInline: 'the CLI\'s next poll reads it INLINE: the card\'s words (RAN — HTTP 200, 1.2 KB), with no pointer back to `api wait`',
+  neverFiled: 'the receipt read inline is never filed as a message (the bookkeeping says inline)',
+  cardKept: 'the card stays: its For-you item is answered with the outcome',
+  lapsed: 'a CLI that stopped waiting before the decision leaves the receipt to the MESSAGE road (no wake, channel-receipt)',
+  fallback: 'decided while held, then the CLI died: once the window ends the receipt MESSAGES (the fallback)',
+  gatedMessages: 'an approval-gated proposal no CLI waits on keeps its receipt message',
+  messagedAfter: '`api wait` after the message went still reads the outcome — and says it went (messaged)',
+};
+console.log('④ lane inline-receipts-compose-api: a proposal its CLI waits on is read inline — no second receipt message');
+const IR = await inlineRows(harness());
+for (const k of Object.keys(IWORDS)) ok(IR[k], IWORDS[k], IR);
+{
+  // the fallback's own timer (a real clock, a 60 ms window): nobody syncs — the receipt still goes once the window ends
+  const h = harness(undefined, { collectWindowMs: 60 });
+  h.setClock(Date.now()); h.add({ id: 'api-t1', at: Date.now() }); await h.cards.sync(); await h.cards.collect('api-t1');
+  h.api.ran('api-t1'); await h.cards.sync();
+  const held = h.delivered.length === 0;
+  h.setClock(Date.now() + 100); await new Promise((z) => setTimeout(z, 300));
+  ok(held && h.delivered.length === 1 && /api-t1/.test(h.delivered[0].text), 'the fallback is its OWN one-shot timer — a held receipt whose CLI never reads it goes as a message after the window, with no other sync', JSON.stringify(h.delivered.map((d) => d.text.slice(0, 40))));
+  h.cards.stop();
+}
+
 // ── ③ patched-copy controls ──
 console.log('③ patched-copy controls (each rule taken out ⇒ its row red)');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-apicards-mut-'));
@@ -109,6 +169,7 @@ function mutant(rel, from, to) {
   if (!src.includes(from)) return null;
   const d = path.join(tmp, `m${++mutN}`, path.dirname(rel)); fs.mkdirSync(d, { recursive: true });
   let s = src.replace(from, to).replace(/require\('\.\.\/channel-api(-card)?\.js'\)/g, (m0, g) => `require(${JSON.stringify(path.join(ROOT, `src/channel-api${g || ''}.js`))})`)
+    .replace(/require\('\.\.\/channel-policy\.js'\)/g, () => `require(${JSON.stringify(path.join(ROOT, 'src/channel-policy.js'))})`)
     .replace(/require\('\.{1,2}\/api-call-words\.js'\)/g, () => `require(${JSON.stringify(path.join(ROOT, 'src/api-call-words.js'))})`);
   const f = path.join(d, path.basename(rel)); fs.writeFileSync(f, s); return f;
 }
@@ -122,6 +183,12 @@ await om("userTodos.resolveAnswered([st.todoId], 'channel-api', C.resolvedFactOf
 await om("if (st.todoId || !userTodos", 'if (!userTodos', 'oneItem');
 await om("{ await receiptFor(p, st); dirty = true; }", '{ dirty = true; }', 'receipt');
 await om("try { deliver.stashFor(p.conv,", 'try { if (0) deliver.stashFor(p.conv,', 'expired');
+{
+  // RED CONTROL (the base): without the hold a decision its CLI waits on is ALSO filed as a receipt message
+  const f = mutant('src/server/channel-api-cards.js', ' && heldInline(p)) continue;', ' && false) continue;');
+  const R0 = f ? await inlineRows(harness(f)) : null;
+  ok(!!R0 && R0.held === false && R0.neverFiled === false, 'CONTROL (the base): without the hold, the outcome the CLI read inline ALSO arrives as a "[Channels · API]" receipt message — the ④ rows would be RED', R0);
+}
 await om("todoId: (state.items[p.id] || {}).todoId || null, receipt: (state.items[p.id] || {}).receipt || null, ...objectOf(p),", 'todoId: (state.items[p.id] || {}).todoId || null, receipt: (state.items[p.id] || {}).receipt || null,', 'objectNamed');
 
 console.log(fail ? `FAILED: ${fail} of ${pass + fail}` : `ALL PASS (${pass})`);

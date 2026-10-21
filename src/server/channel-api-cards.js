@@ -10,6 +10,9 @@
  * words) and hands the drafting conversation its receipt on its next turn (the outbox receipts' ladder: delivered
  * without a wake, else stashed); a pending one past 24 h is EXPIRED, one whose account was removed or whose tier was
  * withdrawn is WITHDRAWN by name — both through the orchestrator's own reject (nothing ran, the audit line says who).
+ * lane inline-receipts-compose-api: a decided proposal whose CLI is WAITING on it (`api … --wait` / `api wait <id>`, each
+ * poll a `collect`) is read INLINE — the outbox's receiptRoad says so, and the receipt message is never filed; a CLI that
+ * stops polling before the decision leaves it to the message road (the one-shot fallback after the window).
  */
 const fs = require('fs');
 const path = require('path');
@@ -17,11 +20,12 @@ const crypto = require('crypto');
 const C = require('../channel-api-card.js');
 const F = require('../channel-api.js');
 const W = require('../api-call-words.js');
+const P = require('../channel-policy.js');   // receiptRoad + COLLECT_WINDOW_MS — the outbox's one verdict on a receipt's road
 
 const INBOX_KEY = 'channels';          // the channels engine's For-you key (src/server/channels-engine.js INBOX_KEY)
 const SWEEP_EVERY_MS = 60 * 1000;
 
-function create({ dataDir, api, userTodos = null, deliver = null, names = null, now = () => Date.now(), log = console, timer = true } = {}) {
+function create({ dataDir, api, userTodos = null, deliver = null, names = null, now = () => Date.now(), log = console, timer = true, collectWindowMs = P.COLLECT_WINDOW_MS } = {}) {
   if (!dataDir) throw new Error('channel-api-cards: dataDir is required');
   const A = () => (typeof api === 'function' ? api() : api);
   const dir = path.join(dataDir, 'channels');
@@ -79,6 +83,42 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
     st.receipt = { at: now(), how: r && r.ok ? (r.stashed ? 'stashed' : 'delivered') : 'undelivered', fate: C.fateOf(p) };
   }
 
+  // ── lane inline-receipts-compose-api: THE CLI READS IT INLINE (the owner: a command that performs an action answers
+  // with its outcome; a message carries only what the actor could not learn from its own command) ──────────────────
+  const waiting = new Map();   // proposal id → until when a CLI waits on it (each `collect` poll renews it)
+  const fallbacks = new Map();   // proposal id → the one-shot sync that hands a held receipt to the message road
+  /** A decided proposal's receipt is HELD while its CLI waits (receiptRoad `collecting` ⇒ inline); the fallback re-asks
+   *  once the window would end — a CLI that stopped polling leaves it to the message road. */
+  function heldInline(p) {
+    const until = waiting.get(p.id) || 0;
+    if (P.receiptRoad({ draftedBy: p.principal, kind: 'api' }, { collecting: until > now() }).road !== 'inline') return false;
+    if (!fallbacks.has(p.id)) {
+      const t = setTimeout(() => { fallbacks.delete(p.id); sync(); }, Math.max(0, until - now()) + 50);
+      if (t.unref) t.unref();
+      fallbacks.set(p.id, t);
+    }
+    return true;
+  }
+  /** THE COLLECT DOOR (GET /api/agent/channels/api/proposals/:id?collect=1 — the route asked the orchestrator first that
+   *  the proposal is the caller's own): pending ⇒ the CLI waits (the hold renews); decided ⇒ read inline now, the card's
+   *  words with it (`messaged` = the message road took it already). Serialized behind the sync. */
+  function collect(id) {
+    const r = chain.then(() => {
+      const k = String(id || '');
+      const p = records().find((x) => x.id === k);
+      if (!p) return {};
+      if (p.status === 'pending' || p.status === 'running') { waiting.set(k, now() + collectWindowMs); return { collecting: true }; }
+      const st = state.items[k] || (state.items[k] = { at: p.at });
+      const how = st.receipt ? st.receipt.how : null;
+      if (!how) { st.receipt = { at: now(), how: 'inline', fate: C.fateOf(p) }; save(); }
+      waiting.delete(k);
+      const t = fallbacks.get(k); if (t) { clearTimeout(t); fallbacks.delete(k); }
+      return { collected: !how || how === 'inline', messaged: how === 'delivered' || how === 'stashed', receiptText: C.receiptText(p, { inline: true }) };
+    });
+    chain = r.catch(() => {});
+    return r;
+  }
+
   let stopped = false, chain = Promise.resolve();
   async function doSync() {
     const a = A();
@@ -102,6 +142,7 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
         try { userTodos.resolveAnswered([st.todoId], 'channel-api', C.resolvedFactOf(p)); } catch {}
         st.answered = true; dirty = true;
       }
+      if (!st.receipt && now() - (p.decidedAt || p.at || 0) < C.TTL_MS && heldInline(p)) continue;   // its CLI is reading it inline
       if (!st.receipt && now() - (p.decidedAt || p.at || 0) < C.TTL_MS) { await receiptFor(p, st); dirty = true; }
       else if (!st.receipt) { st.receipt = { at: now(), how: 'too-old', fate: C.fateOf(p) }; dirty = true; }
     }
@@ -115,7 +156,7 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
   const tick = timer ? setInterval(sync, SWEEP_EVERY_MS) : null;
   if (tick && tick.unref) tick.unref();
   if (timer) setTimeout(sync, 0);
-  return { records, sync, onUpdate, stop: () => { stopped = true; if (tick) clearInterval(tick); } };
+  return { records, sync, onUpdate, collect, stop: () => { stopped = true; if (tick) clearInterval(tick); for (const t of fallbacks.values()) clearTimeout(t); fallbacks.clear(); } };
 }
 
 module.exports = { create, INBOX_KEY };

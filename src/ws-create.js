@@ -664,6 +664,14 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             data._placementModelHint = data.model || instDefault('defaultModel') || null;
             if (isResume) console.log(continuityLogLine(backend, data.resumeId, picks));
           }
+          // A REASONING EFFORT THE HARNESS'S CLI CANNOT TAKE (lane effort-menu-per-harness) is refused BY NAME before
+          // anything spawns — never dropped (agy started a picked «ultracode» as no effort at all, without a word). The
+          // adapter names its levels (agy: AGY_EFFORTS); the menus never offer such a value, so this is the fence behind them.
+          const effortNo = typeof adapter.effortRefusal === 'function' ? adapter.effortRefusal(data.effort) : null;
+          if (effortNo) {
+            ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, scope: 'action', code: effortNo.code, effort: effortNo.effort, levels: effortNo.levels, message: effortNo.message }));
+            break;
+          }
           const sessionSpec = adapter.buildSessionArgs({
             cwd,
             model: data.model,

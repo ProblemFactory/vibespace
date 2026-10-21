@@ -55,6 +55,10 @@ console.log('— ① the descriptor, re-derived from what agy 1.4.3 measured');
   const all = agyFlags({ model: 'm', effort: 'max', permissionMode: 'plan', resumeId: 'c-1' });
   ok('every flag the adapter passes is one agy 1.4.3 --help lists', ['--model', '--effort', '--mode', '--conversation', '--dangerously-skip-permissions', '--prompt-interactive', '--input-format', '--output-format'].every((f) => helpFlags.includes(f)) && all.filter((a) => a.startsWith('--')).every((f) => helpFlags.includes(f)), all);
   ok('effort values = the binary\'s low|medium|high|xhigh|max (the docs said three)', AGY_EFFORTS.join('|') === 'low|medium|high|xhigh|max' && /low\|medium\|high\|xhigh\|max/.test(FX.help.flags['--effort']));
+  // lane effort-menu-per-harness: a level agy does not have is REFUSED BY NAME (it used to ride as no --effort at all, without a word)
+  { let e = null; try { agyFlags({ effort: 'ultracode' }); } catch (x) { e = x; }
+    ok('an effort agy does not have (claude\'s ultracode) THROWS effort_not_supported naming agy\'s levels — never dropped', e?.code === 'effort_not_supported' && JSON.stringify(e.levels) === JSON.stringify([...AGY_EFFORTS]) && /"ultracode"/.test(e.message), e?.message);
+    ok('the descriptor declares the SAME array as its effort menu (ui.effortLevels), no extras', g.ui.effortLevels === AGY_EFFORTS && !g.ui.effortExtras); }
   ok('our modes onto agy\'s: accept-edits / auto / plan = --mode (the binary\'s values), bypass = --dangerously-skip-permissions', AGY_MODES.filter((m) => m !== 'bypassPermissions').every((m) => FX.help.flags['--mode'].includes(m))
     && JSON.stringify(agyFlags({ permissionMode: 'bypassPermissions' })) === '["--dangerously-skip-permissions"]' && JSON.stringify(agyFlags({ permissionMode: 'default' })) === '[]');
   const ad = new AgyAdapter(g.adapterConfig({ acpCommands: { antigravity: '/opt/agy' }, acpWrapper: '/w/acp-wrapper.js', ptyWrapper: '/w/pty' }));

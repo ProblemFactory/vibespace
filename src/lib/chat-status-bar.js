@@ -4,7 +4,7 @@ import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model
 import { UI_ICONS } from './icons.js';
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
 import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (lane pages-chip-groups): the Pages chip's two groups
-import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, billingRow } from './agent-meta.js';
+import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, billingRow } from './agent-meta.js';
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
 // THE PHONE BAR (lane phone-chat-composer): ≤ 768 px the bar is ONE 40-px row — see _fold
@@ -646,38 +646,50 @@ export class ChatStatusBar {
         ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : escHtml(this._statusModel || '?'))
         : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : (known ? escHtml(this._statusModel) : t('model: ?')));
       chip('model', `chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}`, title + lockTip, label);
-      const eKnown = !!this._statusEffort;
-      // The DELEGATION mode reads as a downgrade unless the tooltip names the
-      // level the model really reasons at (2.369.62 — codex 'ultra' runs the
-      // model at the catalog's multi_agent_reasoning_effort, and every other
-      // readout honestly says that level). The chip keeps the picked word.
-      const eShown = effortDisplay(this._backend, this._statusEffort, { model: this._servedModel || this._statusModel });
-      const eLive = this._statusEffortLive && this._statusEffortLive !== this._statusEffort
-        ? effortDisplay(this._backend, this._statusEffortLive, { model: this._servedModel || this._statusModel })
-        : '';
-      const eTitle = eKnown
-        ? (uiRow(this._backend).effortReport === 'per-turn'
-          ? t('Reasoning effort (as reported per turn) — click to change (applies from the next turn)')
-          : t('Reasoning effort (as last commanded — the CLI does not report it back) — click to change'))
-        : t('Reasoning effort not set/reported — click to change');
-      // Two lines, never one blended sentence: what the chip's value MEANS,
-      // then what is actually in effect. The wording must be true whether or
-      // not a turn is running (this bar has no streaming flag): a pick applies
-      // from the NEXT turn, so the previous value stays in effect until one
-      // starts — that is the same sentence in both states.
-      // WHERE the value came from (B-6b6d), stated by the server at spawn —
-      // 'conversation' is the whole point of the resume ladder and is invisible
-      // otherwise (the conversation's own value and the instance default are
-      // frequently the same string, so the chip alone cannot tell you).
-      const eOriginLine = {
-        conversation: () => t('Carried over from this conversation\u2019s last turn (the instance default applies to new sessions only)'),
-        instance: () => t('From the instance default \u2014 this conversation had no recorded value'),
-        harness: () => t('Not set by VibeSpace \u2014 the agent\u2019s own config decides'),
-      }[(this._spawnOrigin && this._spawnOrigin.effort) || ''];
-      const eFull = (eShown && eShown !== this._statusEffort ? eShown + ' · ' : '') + eTitle
-        + (eLive ? '\n' + t('{effort} is still in effect until the next turn starts', { effort: eLive }) : '')
-        + (eOriginLine ? '\n' + eOriginLine() : '');
-      chip('effort', `chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}`, eFull, eKnown ? escHtml(this._statusEffort) : t('effort: ?'));
+      // NO effort menu ⇒ NO effort chip (lane effort-menu-per-harness): a harness whose CLI takes no effort
+      // (ui.effortLevels null — opencode) shows nothing, never a «?» that opens another harness's ladder.
+      if (hasEffortMenu(this._backend)) {
+        const eKnown = !!this._statusEffort;
+        // The DELEGATION mode reads as a downgrade unless the tooltip names the
+        // level the model really reasons at (2.369.62 — codex 'ultra' runs the
+        // model at the catalog's multi_agent_reasoning_effort, and every other
+        // readout honestly says that level). The chip keeps the picked word.
+        const eShown = effortDisplay(this._backend, this._statusEffort, { model: this._servedModel || this._statusModel });
+        const eLive = this._statusEffortLive && this._statusEffortLive !== this._statusEffort
+          ? effortDisplay(this._backend, this._statusEffortLive, { model: this._servedModel || this._statusModel })
+          : '';
+        // THREE ways a harness knows its effort (ui.effortReport): per turn (codex), the last COMMAND (claude), or nothing
+        // at all (antigravity, null) — there the chip is what the session ASKED its CLI for at start (the create's --effort
+        // or a later pick, which restarts agy with it), and «?» only when nothing was asked either (lane effort-menu-per-harness).
+        const eReport = uiRow(this._backend).effortReport;
+        const eTitle = eKnown
+          ? (eReport === 'per-turn'
+            ? t('Reasoning effort (as reported per turn) — click to change (applies from the next turn)')
+            : eReport === 'commanded'
+              ? t('Reasoning effort (as last commanded — the CLI does not report it back) — click to change')
+              : t('Reasoning effort as asked at start (the CLI reports no per-turn effort) — click to change'))
+          : (eReport
+            ? t('Reasoning effort not set/reported — click to change')
+            : t('No effort was asked at start and the CLI reports none — its own default applies. Click to change'));
+        // Two lines, never one blended sentence: what the chip's value MEANS,
+        // then what is actually in effect. The wording must be true whether or
+        // not a turn is running (this bar has no streaming flag): a pick applies
+        // from the NEXT turn, so the previous value stays in effect until one
+        // starts — that is the same sentence in both states.
+        // WHERE the value came from (B-6b6d), stated by the server at spawn —
+        // 'conversation' is the whole point of the resume ladder and is invisible
+        // otherwise (the conversation's own value and the instance default are
+        // frequently the same string, so the chip alone cannot tell you).
+        const eOriginLine = {
+          conversation: () => t('Carried over from this conversation\u2019s last turn (the instance default applies to new sessions only)'),
+          instance: () => t('From the instance default \u2014 this conversation had no recorded value'),
+          harness: () => t('Not set by VibeSpace \u2014 the agent\u2019s own config decides'),
+        }[(this._spawnOrigin && this._spawnOrigin.effort) || ''];
+        const eFull = (eShown && eShown !== this._statusEffort ? eShown + ' · ' : '') + eTitle
+          + (eLive ? '\n' + t('{effort} is still in effect until the next turn starts', { effort: eLive }) : '')
+          + (eOriginLine ? '\n' + eOriginLine() : '');
+        chip('effort', `chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}`, eFull, eKnown ? escHtml(this._statusEffort) : t('effort: ?'));
+      }
     }
 
     // TURN STATE, third value (§2.5). idle/running are ALREADY said by the
@@ -1810,25 +1822,28 @@ export class ChatStatusBar {
       } else {
         // Async population: show a Loading row immediately (a bare empty box
         // reads as a dead click), and NEVER vanish on fetch failure — the
-        // effort enum is stable, so fall back to the hardcoded ladder.
-        const claudeLadder = (levels, extras) => effortOptions(this._backend, levels, extras ?? uiRow(this._backend).effortExtras, { head: { value: '', label: t('Default (reset)') }, capitalize: false });
+        // effort enum is stable, so fall back to THIS harness's seed ladder.
+        // ASKED PER BACKEND (lane effort-menu-per-harness): the answer used to be
+        // claude's for every backend, so an Antigravity conversation offered
+        // ultracode — agy has no such level and the pick was dropped silently.
+        const ladder = (levels, extras) => effortOptions(this._backend, levels, extras ?? uiRow(this._backend).effortExtras, { head: { value: '', label: t('Default (reset)') }, capitalize: false });
         const loading = document.createElement('div');
         loading.className = 'chat-status-dropdown-item chat-status-dim';
         loading.textContent = t('Loading…');
         dropdown.appendChild(loading);
-        fetch('/api/session-options').then(r => r.json()).then(data => {
+        fetch(`/api/session-options?backend=${encodeURIComponent(this._backend || 'claude')}`).then(r => r.json()).then(data => {
           if (!dropdown.isConnected) return;
           loading.remove();
           // "ultracode" isn't an effortLevel — it's a separate mode (xhigh +
-          // dynamic-workflow orchestration) the harness DECLARES (ui.effortExtras);
-          // the server answers it gated on the CLI, appended after the levels
-          // the way the CLI's own /effort UI does. The adapter wires it via the
-          // ultracode settings key, not effortLevel.
-          addItems(claudeLadder(data?.effortLevels || ['low', 'medium', 'high', 'xhigh', 'max'], data?.effortExtras));
+          // dynamic-workflow orchestration) claude DECLARES (ui.effortExtras);
+          // the server answers it gated on the CLI, for claude only, appended
+          // after the levels the way the CLI's own /effort UI does. The adapter
+          // wires it via the ultracode settings key, not effortLevel.
+          addItems(ladder(data?.effortLevels?.length ? data.effortLevels : effortSeedLevels(this._backend), data?.effortExtras));
         }).catch(() => {
           if (!dropdown.isConnected) return;
           loading.remove();
-          addItems(claudeLadder(['low', 'medium', 'high', 'xhigh', 'max']));
+          addItems(ladder(effortSeedLevels(this._backend)));
         });
       }
       return;

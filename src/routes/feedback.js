@@ -7,7 +7,9 @@
  *   POST /api/agent/feedback {text, about?, kind?} → {ok, report, duplicate, chars} — one report per 10 s per session
  *                                                     (429 `paced`, refused by name); a repeat of a report seen within
  *                                                     24 h bumps its count (`duplicate: true`)
- *   GET  /api/agent/feedback/mine                  → {reports} — this conversation's own reports (`vibespace-feedback list`)
+ *   GET  /api/agent/feedback/mine                  → {reports} — this conversation's own reports (`vibespace-feedback list`);
+ *                                                     lane feedback-forward-404: a report still on this instance carries
+ *                                                     `forward` paused | waiting | dropped (the forwarder's `forwardOf`)
  * OWNER (the cookie — auth.middleware + the write-origin gate stand before every route; an agent's bearer is refused
  * by name: the sheet is the owner's):
  *   GET   /api/feedback                            → {reports (newest first), open, dropped}
@@ -41,8 +43,9 @@ const answer = (res, r) => {
 
 /** deps: store (feedback-store), activeSessions (Map), getJobs, groupOf(session, sessionId) → {id, name} | null,
  *  instance() → {name, version}; collectorToken() → the hub's VIBESPACE_TELEMETRY_INGEST_TOKEN ('' ⇒ the doors are off);
- *  selfKeyId() → this instance's own origin id (a forward from itself is answered `self` and kept once) */
-function registerFeedbackRoutes(app, { store, activeSessions, getJobs = () => null, groupOf = () => null, instance = () => ({}), collectorToken = () => '', selfKeyId = () => null }) {
+ *  selfKeyId() → this instance's own origin id (a forward from itself is answered `self` and kept once);
+ *  forwardOf(id) → the report's forward state on this instance (lane feedback-forward-404) */
+function registerFeedbackRoutes(app, { store, activeSessions, getJobs = () => null, groupOf = () => null, instance = () => ({}), collectorToken = () => '', selfKeyId = () => null, forwardOf = () => null }) {
   // the name the user's sidebar shows for a live session (src/session-name.js's ladder, the user's own rename aside): a
   // name GIVEN at creation / by a rename, else the harness's own title, else the live name ('Session N')
   const nameOf = (s) => (s && ((s._nameExplicit && s.name) || s._cliTitle || s.name || s.webuiName)) || null;
@@ -86,7 +89,7 @@ function registerFeedbackRoutes(app, { store, activeSessions, getJobs = () => nu
   app.get('/api/agent/feedback/mine', (req, res) => {
     const c = agentCaller(req, res);
     if (!c) return;
-    res.json({ reports: store.mine(c.ids) });
+    res.json({ reports: store.mine(c.ids).map((r) => { const f = forwardOf(r.id); return f ? { ...r, forward: f } : r; }) });
   });
   // ── owner ──
   app.get('/api/feedback', (req, res) => {
@@ -100,7 +103,7 @@ function registerFeedbackRoutes(app, { store, activeSessions, getJobs = () => nu
   // ── the maintainer hub: another instance (lane feedback-forward) — the collector's token, then the caller's origin key ──
   const collector = (req, res) => {
     const v = collectorVerdict(req.headers && req.headers.authorization, collectorToken());
-    if (v.ok) return true;
+    if (v.ok) { const ver = (instance() || {}).version; if (ver) res.set(FF.VERSION_HEADER, String(ver)); return true; }   // lane feedback-forward-404: the release, to a caller holding the token
     res.status(v.status).json({ error: v.error, code: v.status === 404 ? 'collector_disabled' : 'bad_token' });
     return false;
   };

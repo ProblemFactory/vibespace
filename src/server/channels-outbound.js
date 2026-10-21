@@ -666,7 +666,7 @@ function create(engineCtx) {
       OF.commit(store.dir, staged, created.id);
       staged = null;
       auditOutbox(created, 'propose', { mode: decision.mode, reasons: decision.reasons });
-      if (guards && guards.collect && decision.mode === 'direct') await store.outbox.update((ob) => { const q = ob.proposals[created.id]; if (q) q.receiptCollect = true; });   // lane channel-direct-send-sync: a DIRECT send whose caller waits to read the receipt inline (a review proposal is never held)
+      await markCollect(created.id, guards, decision);   // lane channel-direct-send-sync: a DIRECT send whose caller waits to read the receipt inline (a review proposal is never held)
       if (decision.mode === 'direct') {
         await transition(created.id, 'sending', 'policy', (p) => { p.approvedBy = 'policy'; });
         await sendNow(created.id);
@@ -684,16 +684,23 @@ function create(engineCtx) {
       notify([convId]);
     }
     const fresh = store.outbox.snapshot().proposals[created.id];
-    // lane channel-direct-send-sync: a direct send whose caller is waiting gets the receipt WORDS back with the
-    // command, to print INLINE — ready now, or `receiptPending` (a held send; the CLI polls the collect door). The
-    // CLI then CONFIRMS it read them (GET status?id&collect=1 → collectReceipt), which is what keeps the message road
-    // from firing; a CLI that never confirms is covered by armCollect's fallback (the message road after the window).
-    let receiptText = null, receiptPending = false;
-    if (guards && guards.collect && decision.mode === 'direct') {
-      if (fresh && fresh.receipt) { try { receiptText = renderReceiptText(fresh, fresh.receipt); } catch { receiptText = null; } }
-      else receiptPending = true;
-    }
-    return { ok: true, proposal: agentProposalView(ctx, fresh), decision, ...(guards && guards.collect && decision.mode === 'direct' ? { receiptText, receiptPending } : {}) };
+    return { ok: true, proposal: agentProposalView(ctx, fresh), decision, ...inlineReceiptOf(fresh, guards, decision) };
+  }
+  // lane channel-direct-send-sync (+ inline-receipts-compose-api: `compose` takes the same pair): a DIRECT send whose
+  // caller waits (`collect`) is marked BEFORE the send — `receipt()` then holds the message road — and gets the receipt
+  // WORDS back with the command, to print INLINE: ready now, or `receiptPending` (a held send; the CLI polls the collect
+  // door). The CLI then CONFIRMS it read them (GET status?id&collect=1 → collectReceipt), which is what keeps the message
+  // road from firing; a CLI that never confirms is covered by armCollect's fallback (the message road after the window).
+  const collectsInline = (guards, decision) => !!(guards && guards.collect && decision && decision.mode === 'direct');
+  async function markCollect(id, guards, decision) {
+    if (collectsInline(guards, decision)) await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) q.receiptCollect = true; });
+  }
+  function inlineReceiptOf(fresh, guards, decision) {
+    if (!collectsInline(guards, decision)) return {};
+    if (!fresh || !fresh.receipt) return { receiptText: null, receiptPending: true, collectWindowMs: collectWindowMs() };   // the CLI polls as long as the hold lasts
+    let receiptText = null;
+    try { receiptText = renderReceiptText(fresh, fresh.receipt); } catch { receiptText = null; }
+    return { receiptText, receiptPending: false };
   }
 
   /**
@@ -917,6 +924,7 @@ function create(engineCtx) {
     }).catch((err) => { OF.discard(staged); throw err; });
     OF.commit(store.dir, staged, created.id);
     auditOutbox(created, 'propose', { mode: decision.mode, reasons: decision.reasons, compose: true });
+    await markCollect(created.id, guards, decision);   // lane inline-receipts-compose-api: a NEW mail sent directly is read inline by the CLI that waits, as a reply is
     if (decision.mode === 'direct') {
       await transition(created.id, 'sending', 'policy', (p) => { p.approvedBy = 'policy'; });
       await sendNow(created.id);
@@ -926,7 +934,7 @@ function create(engineCtx) {
       notifyOutbox([created.id]);
     }
     const fresh = store.outbox.snapshot().proposals[created.id];
-    return { ok: true, proposal: agentProposalView(ctx, fresh), decision };
+    return { ok: true, proposal: agentProposalView(ctx, fresh), decision, ...inlineReceiptOf(fresh, guards, decision) };
   }
   /** The For-you pointer for COMPOSED messages awaiting approval — one per
    *  account (a composed message has no conversation to hang one on), its

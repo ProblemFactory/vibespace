@@ -167,6 +167,7 @@ app.post('/api/telemetry/ingest', (req, res) => {
   // THE COLLECTOR'S VERDICT (src/telemetry.js) — one gate for this door and the maintainer hub's feedback doors
   const gate = require('../telemetry').collectorVerdict(req.headers.authorization, TELEMETRY_INGEST_TOKEN);
   if (!gate.ok) return res.status(gate.status).json({ error: gate.error });
+  res.set(require('../feedback-forward-model.js').VERSION_HEADER, require('../../package.json').version);   // lane feedback-forward-404: a paused feedback forward asks again when its hub's release moves
   try {
     const n = telemetry.ingestRemote(req.body?.instance, req.body?.events);
     res.json({ success: true, n });

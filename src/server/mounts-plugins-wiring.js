@@ -53,7 +53,11 @@ const feedbackForward = require('./feedback-forward.js').create({
   dataDir: path.join(rootDir, 'data'), log: (...a) => console.warn(...a), applyMarks: (marks) => feedback.applyMarks(marks), backlog: () => feedback.list().reports,
   target: () => { const t = getTelemetry && getTelemetry(); return t && typeof t.forwardTarget === 'function' ? t.forwardTarget() : {}; },
   instance: () => ({ name: process.env.VIBESPACE_INSTANCE_NAME || os.hostname(), version: require('../../package.json').version }),
+  // lane feedback-forward-404: a target with no feedback door pauses the outbox; the owner's ONE low For-you notice only
+  // when a PERSON set telemetry.forwardUrl here (the setting wins over the cluster's env — an env target logs a line only)
+  personSet: () => { try { return !!String(serverSetting('telemetry.forwardUrl') || '').trim(); } catch { return false; } }, userTodos: () => userTodos,
 });
+{ const tel = getTelemetry && getTelemetry(); if (tel) tel.onForwardAnswer = (url, res) => feedbackForward.noteAnswer(url, res); }   // the target's release off the telemetry forward's own answers
 const feedback = require('./feedback-store.js').create({ dataDir: path.join(rootDir, 'data'), wss, log: (...a) => console.warn(...a), onNew: (row) => feedbackForward.enqueue(row) });
 if (syncStores) syncStores.feedback = feedback.sync;
 require('../routes/feedback.js').registerFeedbackRoutes(app, {
@@ -66,6 +70,7 @@ require('../routes/feedback.js').registerFeedbackRoutes(app, {
   },
   instance: () => ({ name: process.env.VIBESPACE_INSTANCE_NAME || os.hostname(), version: require('../../package.json').version }),
   collectorToken: () => process.env.VIBESPACE_TELEMETRY_INGEST_TOKEN || '', selfKeyId: () => feedbackForward.keyId(),
+  forwardOf: (id) => feedbackForward.forwardOf(id),   // lane feedback-forward-404: `vibespace-feedback list` says a report stayed here
 });
 feedbackForward.start();
 // THE VAULT (lane vault-e2e-password): the ONE holder of the DEK (memory only) and the provider of every store key under data/

@@ -171,6 +171,7 @@ const server = http.createServer((req, res) => {
     }
     if (url.pathname === '/api/agent/channels/status') {
       // lane channel-direct-send-sync: the collect door — the drafting CLI confirms it read a direct send's receipt inline
+      if (url.searchParams.get('collect') === '1' && url.searchParams.get('id') === 'p-h') return send(200, { ok: true, pending: true, state: 'sending', proposal: { id: 'p-h', state: 'sending' } });   // lane inline-receipts-compose-api: still held
       if (url.searchParams.get('collect') === '1') return send(200, { ok: true, collected: true, receiptText: "Channel receipt — fake-poll · Ops room\nproposal p-d: SENT (vendor id om_d1)", proposal: { id: url.searchParams.get('id') || 'p-d', state: 'sent' } });
       const p = { id: 'p-1', state: 'sent', adapterId: 'fake-poll', convId: 'ops', title: 'Ops room', at: 1, updatedAt: 2, text: 'hello', policy: { mode: 'review', reasons: [] }, receipt: { status: 'edited', edited: true, sentAs: 'user', vendorMessageId: 'v-9', identityMarking: 'marked', identityMarkingText: 'The channel shows this message as sent by Example App' }, replyTo: 'om_t2', placement: 'thread', placementText: P.placementWords('thread'), inThread: true, threadKey: 'omt_t1' };
       if (url.searchParams.get('id')) return url.searchParams.get('id') === 'p-1' ? send(200, { ok: true, proposal: p }) : send(404, { ok: false, code: 'not-found', error: 'no such proposal (not found, or not yours)' });
@@ -180,8 +181,24 @@ const server = http.createServer((req, res) => {
         { adapterId: 'gmail', adapter: 'Work mail', grain: 'account', via: 'agent', as: { kind: 'agent', id: 'me' }, authority: 'send', watched: { notify: 'wake', mode: 'filtered', digestMinutes: 30, dailyWakeCap: 40, receiptWake: false, wakes24h: 3 } },
       ] });
     }
+    // lane inline-receipts-compose-api: the raw API's call (a write under "ask each" ⇒ a proposal) and its collect door —
+    // the outcome with the card's words (src/channel-api-card.js receiptText, inline); `…slow` is still pending
+    if (url.pathname === '/api/agent/channels/api' && req.method === 'POST') return send(202, { ok: false, code: 'api_pending', error: 'this call waits for the user\'s approval (a write under "ask each") — proposal api-0000000000c1; `vibespace-channels api wait api-0000000000c1` prints the outcome', proposal: { id: 'api-0000000000c1', status: 'pending' } });
+    const apw = /^\/api\/agent\/channels\/api\/proposals\/([^/]+)$/.exec(url.pathname);
+    if (apw) {
+      const id = decodeURIComponent(apw[1]);
+      if (id === 'api-00000000slow') return send(200, { ok: true, proposal: { id, status: 'pending', result: null, reason: null }, collecting: true });
+      if (id === 'api-0000000fail1') return send(200, { ok: true, proposal: { id, status: 'failed', result: { code: 'api_vendor_unreachable', error: 'the vendor could not be reached (timed out after 30 s)' }, reason: null }, collected: true, messaged: false, receiptText: `API proposal ${id} (POST open.feishu.cn/open-apis/im/v1/messages on Lark): approved but NOT run — the vendor could not be reached (timed out after 30 s).` });
+      return send(200, { ok: true, proposal: { id, status: 'ran', result: { status: 200, headers: {}, json: { code: 0 }, bytes: 11, truncated: false }, reason: null }, collected: true, messaged: false, receiptText: `API proposal ${id} (POST open.feishu.cn/open-apis/docx/v1/documents on Lark): the user approved it and it RAN — HTTP 200, 11 B.` });
+    }
     // R4 (B-6acc): compose — a NEW message; the stub answers the engine's shapes
     if (url.pathname === '/api/agent/channels/compose') {
+      // lane inline-receipts-compose-api: a NEW mail sent DIRECTLY answers SENT + the receipt WORDS (the engine's
+      // inlineReceiptOf); `gmail-held` = a held send (no receipt yet, the hold's window said); `--caller` = one per caller
+      const mail = { to: String(body.to || '').split(','), cc: [], subject: body.subject };
+      if (body.account === 'gmail-direct') return send(200, { ok: true, proposal: { id: 'p-c', state: 'sent', adapterId: 'gmail-direct', convId: null, compose: mail, policy: { mode: 'direct', reasons: [] }, sendAs: 'user', result: { sentAs: 'user', vendorMessageId: 'gm_c1' }, identity: { marking: 'marked', text: 'Mail sent through the Gmail API carries a Received: header naming gmailapi.google.com' } }, decision: { mode: 'direct', reasons: [] }, receiptText: "Channel receipt — Work mail · Weekly numbers\nproposal p-c: SENT (vendor id gm_c1)\nsent as: user\nthe recipient sees: an application marker — Mail sent through the Gmail API", receiptPending: false });
+      if (body.account === 'gmail-held') return send(200, { ok: true, proposal: { id: 'p-h', state: 'sending', adapterId: 'gmail-held', convId: null, compose: mail, policy: { mode: 'direct', reasons: [] }, sendAs: 'user', identity: { marking: 'none', text: null } }, decision: { mode: 'direct', reasons: [] }, receiptText: null, receiptPending: true, collectWindowMs: 1200 });
+      if (body.caller !== undefined) return send(200, { ok: true, proposals: [{ recipient: 'c1', ok: true, proposal: { id: 'p-w1', state: 'sent', adapterId: 'webhook', convId: 'hooks' }, decision: { mode: 'direct', reasons: [] }, receiptText: 'Channel receipt — webhook · hooks\nproposal p-w1: SENT (vendor id wh_1)', receiptPending: false }], skipped: [] });
       if (body.account === 'lark') return send(409, { ok: false, code: 'compose-not-available', error: 'Lark cannot start a new conversation from here — its adapter declares no compose; reply inside an existing conversation instead' });
       if (body.account !== 'gmail') return send(404, { ok: false, code: 'not-found', error: 'no such account (not found, or you have no access to the whole account) — `vibespace-channels status` shows your access' });
       return send(200, { ok: true, proposal: { id: 'p-9', state: 'awaiting-approval', adapterId: 'gmail', convId: null, compose: { to: String(body.to).split(','), cc: [], subject: body.subject }, policy: { mode: 'review', reasons: ['channel-policy'] }, sendAs: 'user', identity: { marking: 'marked', text: 'Mail sent through the Gmail API carries a Received: header naming gmailapi.google.com' } } });
@@ -756,6 +773,46 @@ console.log('\n㉑ lane channels-proposals-recall: proposals [--all] · recall <
   const d = await run(['reply', 'fake-poll/direct', 'the deploy is done']);
   ok(d.code === 0 && /sent directly \(policy: direct\)/.test(d.out) && /SENT \(vendor id om_d1\)/.test(d.out) && /sent as: user/.test(d.out) && /the recipient sees: NOT VERIFIED/.test(d.out), 'a direct send prints the receipt INLINE — SENT · vendor id · sent as · what the recipient sees — so no second "[Channels · Outbox]" message waits in the queue', d.out + ' | ' + d.err);
   ok(!/note: on this channel the recipient sees/.test(d.out), 'the separate identity note is dropped when the full inline receipt is shown (it already carries it)');
+}
+{
+  // lane inline-receipts-compose-api: the two siblings — a NEW mail (compose) and a raw API call (api) — answer with
+  // their outcome too; no second receipt message waits in the queue for the next turn
+  calls.length = 0;
+  const c = await run(['compose', 'gmail-direct', '--to', 'bob@example.com', '--subject', 'Weekly numbers', 'the numbers are in']);
+  const col = calls.find((x) => x.path === '/api/agent/channels/status' && x.query.collect === '1');
+  ok(c.code === 0 && /sent directly \(policy: direct\) — proposal p-c, a NEW message to bob@example\.com/.test(c.out) && /SENT \(vendor id gm_c1\)/.test(c.out) && /sent as: user/.test(c.out) && /the recipient sees: an application marker/.test(c.out), 'compose: a NEW mail sent directly prints its receipt INLINE — SENT · vendor id · sent as · what the recipient sees', c.out + ' | ' + c.err);
+  ok(calls[0].body.collect === true && !!col && col.query.id === 'p-c', 'compose: the command says it waits (collect) and confirms its read through the collect door — so the hub files no receipt message', JSON.stringify(calls.map((x) => [x.path, x.query, x.body && x.body.collect])));
+  ok(!/note: on this channel the recipient sees/.test(c.out), 'compose: the separate identity note is dropped when the full inline receipt is shown');
+  calls.length = 0;
+  const w = await run(['compose', 'webhook/hooks', '--caller', 'c1', 'the build is green']);
+  ok(w.code === 0 && /sent directly \(policy: direct\) — proposal p-w1 to c1/.test(w.out) && /proposal p-w1: SENT \(vendor id wh_1\)/.test(w.out) && calls[0].body.collect === true && calls.some((x) => x.query.collect === '1' && x.query.id === 'p-w1'), 'compose --caller: each caller\'s direct send prints its receipt inline (collect, the collect door per proposal)', w.out + ' | ' + w.err);
+  // the timeout road: a held send whose receipt does not come within the hub's window ⇒ the command says it will come as a message
+  calls.length = 0;
+  const t0 = Date.now();
+  const h = await run(['compose', 'gmail-held', '--to', 'bob@example.com', '--subject', 'Later', 'held by the vendor']);
+  const polls = calls.filter((x) => x.query.collect === '1' && x.query.id === 'p-h').length;
+  ok(h.code === 0 && /sending — the receipt will come as a message \(the vendor had not answered within 1s\)/.test(h.out) && polls >= 1 && Date.now() - t0 >= 1100, 'compose: a held send polls the collect door for the HUB\'s window (said with the answer), then says the receipt will come as a message — the fallback the hub sends', JSON.stringify({ out: h.out, polls, ms: Date.now() - t0 }));
+  // api: the command waits on its proposal (--wait) and prints the outcome with the card's words
+  calls.length = 0;
+  const a = await run(['api', 'lark-1', 'POST', '/open-apis/docx/v1/documents', '--json', '{"title":"x"}', '--wait']);
+  let shown = null; try { shown = JSON.parse(a.out); } catch { }
+  ok(a.code === 0 && !!shown && shown.outcome === 'ran' && shown.status === 200 && shown.bytes === 11 && /the user approved it and it RAN — HTTP 200, 11 B\.$/.test(shown.receipt || ''), 'api … --wait: the outcome is the command\'s own answer — status, bytes and the card\'s words (stdout stays one JSON)', a.out + ' | ' + a.err);
+  ok(calls[0].body.collect === true && calls.filter((x) => /^\/api\/agent\/channels\/api\/proposals\//.test(x.path)).every((x) => x.query.collect === '1'), 'api … --wait: the call says it waits (collect) and every poll is the collect door (?collect=1)', JSON.stringify(calls.map((x) => [x.path, x.query])));
+  const f = await run(['api', 'wait', 'api-0000000fail1']);
+  ok(f.code === 1 && /approved but NOT run — the vendor could not be reached/.test(f.err) && /\[api_vendor_unreachable\]/.test(f.err), 'api wait on a call that did not run: the card\'s words, then the code (exit 1)', f.err);
+  calls.length = 0;
+  const sl = await run(['api', 'wait', 'api-00000000slow', '--timeout', '1']);
+  let ss = null; try { ss = JSON.parse(sl.out); } catch { }
+  ok(sl.code === 0 && !!ss && ss.outcome === 'pending' && ss.receipt === undefined && calls.length >= 1 && calls.every((x) => x.query.collect === '1'), 'api wait --timeout: the user has not decided ⇒ the command says pending (the receipt comes as a message once they do)', sl.out + ' | ' + sl.err);
+  // RED CONTROL (the base): a CLI copy whose compose neither says it waits nor reads the receipt — the hub would hold
+  // nothing, so the same outcome arrives again as a message on the next turn; the compose legs above would be RED
+  const SRC = fs.readFileSync(CLI, 'utf-8');
+  const W1 = "const body = { account, to, subject, text, collect: true };", W2 = 'message waits in your queue (a review proposal still gets its receipt in the next turn)\n    const shownReceipt = await showInlineReceipt(r, p);';   // compose's own (reply's comment differs)
+  ok(SRC.split(W1).length === 2 && SRC.split(W2).length === 2, 'the control drops exactly compose\'s collect and its inline read');
+  const baseCli = mutantCopies('chan-agent-cli-compose', REPO).write('data/bin/vibespace-channels', SRC.replace(W1, 'const body = { account, to, subject, text };').replace(W2, 'message waits in your queue (a review proposal still gets its receipt in the next turn)\n    const shownReceipt = false;'), 'base-compose');
+  calls.length = 0;
+  const b = await new Promise((resolve) => execFile(process.execPath, [baseCli, 'compose', 'gmail-direct', '--to', 'bob@example.com', '--subject', 'Weekly numbers', 'the numbers are in'], { encoding: 'utf-8', env: { PATH: process.env.PATH, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: 'vsst_test' }, timeout: 15000 }, (e, so) => resolve({ out: so || '' })));
+  ok(/sent directly/.test(b.out) && !/SENT \(vendor id gm_c1\)/.test(b.out) && calls[0].body.collect === undefined && !calls.some((x) => x.query.collect === '1'), 'CONTROL (the base): the base compose sends no collect and reads no receipt — its outcome would come again as a "[Channels · Outbox]" message', JSON.stringify({ out: b.out.slice(0, 200), calls: calls.map((x) => [x.path, x.query]) }));
 }
 // ── ㉒ lane channels-search-says-hidden (a field miss 2026-10-21) ─────────────────────────────────────────────────────
 // An ops agent ran `search "<two words>" --full --account gmail`, read «the account's own search found nothing you can see

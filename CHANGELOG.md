@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.338 — 2026-10-21
+
+### Fixed
+- A conversation's effort menu lists only the levels its CLI really has — an Antigravity conversation no longer offers ultracode.
+- You can pick an Antigravity conversation's effort in the New Session dialog; its status bar then shows that effort instead of a question mark.
+- An instance whose telemetry target cannot take agent feedback no longer retries every hour: it pauses, says so once, checks daily and catches up.
+- When an agent sends a new mail directly, or waits while you approve its API call, its command now returns the outcome — no second receipt message waits for it.
+
 ## 2.369.337 — 2026-10-21
 
 ### Fixed

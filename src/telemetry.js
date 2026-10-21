@@ -95,7 +95,7 @@ class Telemetry {
         headers,
         body: JSON.stringify({ instance: this._instanceId(), events: batch }),
         signal: AbortSignal.timeout(5000),
-      }).catch(() => {});
+      }).then((res) => { if (typeof this.onForwardAnswer === 'function') this.onForwardAnswer(url, res); }).catch(() => {});   // lane feedback-forward-404: the feedback forward reads its target's release off this answer
     } catch {}
   }
 

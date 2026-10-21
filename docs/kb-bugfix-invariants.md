@@ -666,6 +666,45 @@
 - (2026-10-21) THE PHONE'S FOR-YOU TRAY CLOSED UNDER A DICTATED REPLY (inc-mvhzgiq8-bs3j): a tap was judged at its lift by a span the mic's repaint had removed ⇒ «outside». FIX = facts measured at DOWN; voice UI never outside. 不变量 = a dictation is part of the box it fills (kb-bugfix-invariants)
 - (2026-10-21) A JUDGED RULE THAT COULD NOT RUN SAID NOTHING (B-f42e): switch off / budget spent ⇒ «simply not a hit». FIX = ONE PURE judgedRoadState for the gate + every door; a skip said once a day, re-judged. 不变量 = a rule that cannot run says so to who set it and who pays (kb-bugfix-invariants)
 - (2026-10-21) NEW SESSION SAID CLAUDE, LISTED ANTIGRAVITY'S ACCOUNTS (inc-mvi2cv4b-hdwv): the row was filled from the select's old value, then the open set it (no change). FIX = ONE applyBackend. 不变量 = a row derived from a choice is filled by the ONE function that applies it (kb-bugfix-invariants)
+- (2026-10-21) THE ANTIGRAVITY EFFORT MENU OFFERED CLAUDE'S ULTRACODE (effort-menu-per-harness): /api/session-options answered claude's rows to every backend; agy dropped the pick. 不变量 = a harness's choices are its own rows, per backend; one its CLI cannot take is never offered, never dropped
+- (2026-10-21) FLEET PODS RETRIED FEEDBACK HOURLY FOR EVER (feedback-forward-404): the target was the telemetry collector, no feedback door; 404 meant retry. 不变量 = a door that answers «not here» is not retried on a timer; the pause is said once, re-probed on a schedule, nothing queued lost silently
+
+## THE ANTIGRAVITY EFFORT MENU OFFERED CLAUDE'S ULTRACODE — ONE ANSWER MADE FOR CLAUDE, SERVED TO EVERY BACKEND (the owner 2026-10-21 13:4xZ on an Antigravity conversation, 推理强度: ?: «antigravity 也是这几个档位吗？»; lane effort-menu-per-harness, .338)
+
+The owner opened the effort menu of an Antigravity conversation (gemini-4-argon-high) and read 默认(重置) / low / medium / high / xhigh / max / ultracode. agy --effort takes low|medium|high|xhigh|max (agy --help); ultracode is Claude Code's own mode (`--effort xhigh` + the ultracode settings key).
+
+**The cause.**
+- `GET /api/session-options` answered `{ effortLevels: EFFORT_LEVELS, effortExtras: EFFORT_EXTRAS }`: the claude CLI's parsed levels and claude's gated extras, whatever conversation asked.
+- The bar's menu fetched it with no backend and built `effortOptions(backend, levels, extras ?? uiRow(backend).effortExtras)`. The `??` fallback to the harness's own row never fired, because claude's extras were always in the answer.
+- agy has no ultracode. agyFlags and the chat spawn passed `--effort` only for agy's five, so a carried ultracode started agy with NO effort, without a word. Mid-session, agy-wrapper did say "not applied", but the hub had already stored ultracode as the session's effort.
+- opencode (no effort levels at all) got the same chip, the same «?» and claude's ladder.
+
+**The «?» was honest.** The owner's session meta (read-only) holds `effort: null, effortOrigin: 'chosen'`: nothing was asked. The New Session dialog had no effort row for Antigravity (the client-only `caps.effort: false`), so nothing could be asked there.
+
+**The fix.**
+- Each harness DECLARES its rows, and `src/harness-efforts.js` (PURE) answers them per backend: `?backend=<id>` → `{ effortLevels, effortExtras }`.
+  - `ui.effortLevels`: antigravity = the adapter's AGY_EFFORTS (one array); claude = 'cli-help' (the parsed levels); codex = 'model-catalog'; opencode = null.
+  - `ui.effortExtras` is that harness's own or [].
+- The bar and the dialog ask with their backend. `hasEffortMenu` (the declared row) replaces `caps.effort`: no levels ⇒ no chip, no dialog row, no Properties row.
+- A level the CLI does not take is REFUSED BY NAME, `effort_not_supported` with the levels: agyFlags, the chat spawn, the mid-session pick (ws set-effort, before anything is written or remembered) and ws-create (before anything spawns).
+- The chip's title names its fact: per turn (codex), as last commanded (claude), or as asked at start (antigravity, whose CLI reports none). «?» only when nothing was asked, and its title says the CLI's own default applies.
+
+不变量:
+- A harness's choices are the harness's rows, answered per backend. One harness's answer is never served for another; a fallback reads the asking harness's own row.
+- A choice the CLI cannot take is never offered and never dropped silently. If it arrives anyway, it is refused by name, with the levels the CLI does take.
+- A harness without a choice shows no control for it, not a «?» that opens another harness's list.
+
+## EVERY FLEET POD RETRIED EACH AGENT REPORT HOURLY, FOR EVER — ITS FORWARD TARGET WAS THE TELEMETRY COLLECTOR, WHICH HAS NO FEEDBACK DOOR (measured 2026-10-21; backlog B-9bcc; lane feedback-forward-404, .338)
+
+.333's feedback forward sends every new report to `<telemetry forward target>/api/feedback/forward`. On the fleet that target is the cluster's telemetry COLLECTOR — a small app with `/api/telemetry/ingest` and nothing else — so every pod got 404 for every report. `sendVerdict` read 404 as «a hub before this door: retry», so the outbox backed off 1 min … 1 h and then asked every hour, for ever (on loopback: 29 requests in a day for ONE report). The waste was bounded (one request an hour per pod, ≤ 200 reports kept) and never said: the owner of an instance whose own setting pointed there was not told that agents' feedback stayed local, and the filing agent's `vibespace-feedback list` showed nothing either. The owner decided (2026-10-21) that fleet feedback is read from the cluster side; the forward stays for a target that IS a hub.
+
+**The fix:** `no-door` is its own verdict (404 / 405 / 501). It PAUSES the outbox for that target, persisted (`pausedUntil`, the reason): no request until the next day, then ONE re-probe; a new URL, or a new release the target answers (`X-VibeSpace-Version`, read off the telemetry forward's answers too), re-probes at once. The marks pull obeys the same pause, and its own 404 pauses too. The reports stay queued and catch up when the door appears; past the bound the oldest is dropped by id, in the log and in the filer's list. Said once: the log line per pause; ONE low For-you notice when a person set the target on that instance (a cluster-env target is the fleet admin's: the line only); «forward paused» beside the agent's unsent reports.
+
+不变量 = a door that answers «not here» is not retried on a timer; the pause is said once and re-probed on a schedule, and nothing queued is lost silently.
+- A verdict table maps answers to ACTIONS, and «not here» is not «not now»: 404 / 405 / 501 is a fact about the target that no backoff changes. Retrying it pays every hour for a fact already known.
+- The pause is said where its owner reads: the instance's owner only for a target they set, the fleet admin's target in the log, the filing agent beside its own records.
+- The re-probe is ONE request, claimed before it is sent: the pump and the pull share the pause, so neither probes twice.
+- Gate: test-feedback-forward ⑪ (a loopback fake collector: 23 hourly passes with no request, the catch-up, the once-only words; RED CONTROL the base verdict, 29 requests vs 1).
 
 ## A TICK THE OWNER MADE IN NOTIFY… VANISHED ON ✕ — EIGHTEEN SAVE DIALOGS DROPPED A CHANGE WITHOUT A WORD (the owner 2026-10-21: ticked «也判断普通回复» on a 回复了它发过的消息 rule, closed the dialog without 保存, and a colleague's plain reply woke nobody; backlog B-bc31, lane dialog-unsaved-guard, .337)
 

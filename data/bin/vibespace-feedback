@@ -52,10 +52,12 @@ async function call(method, route, body) {
   return data;
 }
 const when = (at) => { try { return new Date(at).toISOString().slice(0, 16).replace('T', ' '); } catch { return '?'; } };
+// lane feedback-forward-404: a report this VibeSpace has not forwarded yet says why (the route's `forward`)
+const FORWARD = { paused: 'forward paused: the target has no door — it stays here, asked again daily', waiting: 'waiting to be forwarded', dropped: 'not forwarded: the outbox was full — it stays on this instance' };
 function printReports(list) {
   if (!list.length) { console.log('  (no reports from this conversation yet)'); return; }
   for (const r of list) {
-    console.log(`  ${r.id}  ${when(r.lastAt || r.at)}  [${r.kind}${r.about ? ' · ' + r.about : ''}] ${r.status}${r.status === 'handled' && /^\d+\.\d+\.\d+$/.test(String(r.handledVersion || '')) ? ' in ' + r.handledVersion : ''}${r.count > 1 ? ' ×' + r.count : ''}`);
+    console.log(`  ${r.id}  ${when(r.lastAt || r.at)}  [${r.kind}${r.about ? ' · ' + r.about : ''}] ${r.status}${r.status === 'handled' && /^\d+\.\d+\.\d+$/.test(String(r.handledVersion || '')) ? ' in ' + r.handledVersion : ''}${r.count > 1 ? ' ×' + r.count : ''}${FORWARD[r.forward] ? ' · ' + FORWARD[r.forward] : ''}`);
     console.log('      ' + String(r.text).split('\n').join('\n      '));
   }
 }

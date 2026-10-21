@@ -676,6 +676,9 @@ local copy. Both, in two tiers — use the free one first:
   bot marker (the exact sentence is included); `unknown` means this has
   not been verified for that channel yet. Do not claim in chat that a
   message "looks like it came from the user" unless the receipt says `none`.
+- A message sent DIRECTLY (`reply` or `compose` under a direct policy) prints its receipt with the command itself — no
+  "Channel receipt" for it arrives later. If the vendor holds the send past the wait, the command says the receipt will
+  come as a message.
 - Receipts arrive in your NEXT turn as a "Channel receipt" block — unless
   the user chose "wake the agent now" on that Approve / Reject (a turn
   started for you). Poll with `status` only when you need the answer now.
@@ -791,7 +794,9 @@ vibespace-channels api log <cred>                # your own calls on that creden
 - Tiers: `read` (GET/HEAD + the vendor's read-by-POST paths), `write-ask` (every write is a proposal the user approves),
   `write-auto` (writes run). DELETE, permission / member / transfer paths, a body over 256 KiB and an upload ALWAYS
   ask, whatever the tier. A proposal answers `api_pending <id>` (exit 4): stop and `api wait <id>` — what the user
-  approves is exactly the request you sent.
+  approves is exactly the request you sent. `--wait` / `api wait` print the outcome once the user decides, with the
+  card's words in `"receipt"`, and no receipt message follows; a proposal you did not wait on reaches you as a receipt
+  message in your next turn.
 - Refusals name the next step: `api_not_granted` (ask the user to grant API access on the account), `api_tier_read`,
   `api_budget` (30 calls a minute, 1 000 a day per conversation, and the account's own minute — wait the seconds it
   names), `api_host_refused`, `api_header_refused`, `api_body_too_large`, `api_cred_expired`.

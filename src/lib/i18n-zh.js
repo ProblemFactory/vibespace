@@ -874,6 +874,8 @@ export default {
   "{effort} (multi-agent \u00b7 reasoning {level})": "{effort}（多智能体 \u00b7 推理强度 {level}）",
   "{effort} is still in effect until the next turn starts": "下一轮开始前仍以 {effort} 生效",
   "Reasoning effort not set/reported — click to change": "推理强度未设置/未报告 — 点击修改",
+  "Reasoning effort as asked at start (the CLI reports no per-turn effort) — click to change": "推理强度（启动时指定的值 — 该 CLI 不报告每轮的强度）— 点击修改",
+  "No effort was asked at start and the CLI reports none — its own default applies. Click to change": "启动时未指定推理强度，CLI 也不报告 — 使用它自己的默认值。点击修改",
   "Recent": "最近",
   "Reconnected": "已重新连接",
   "Reinstall": "重新安装",
@@ -9961,4 +9963,6 @@ export default {
   "Today's LLM budget is spent ({day}) — judged notification rules paused": "今天的 LLM 预算用完了（{day}）——由模型判断的通知规则已暂停", // lane judged-watch-state
   "Paused today: {names}": "今天暂停的：{names}", // lane judged-watch-state
   "They resume with tomorrow's budget, or now if you raise the daily budget (Settings › Plugins › LLM). The messages they skipped are judged then.": "明天预算恢复后继续；在 设置 › 插件 › LLM 调高每日预算则立即恢复。被跳过的消息届时再判断。", // lane judged-watch-state
+  "Agent feedback stays on this instance: {target} has no feedback door": "Agent 反馈留在本实例：{target} 没有接收反馈的入口", // lane feedback-forward-404
+  "The telemetry forward target in Settings (Forward diagnostics to a central collector) answered {status} at its feedback door: it takes diagnostics, not agent feedback. The reports stay here, in ⚙ System ▸ Agent feedback… — {n} waiting to be forwarded (past {max} the oldest is dropped). VibeSpace asks the target again once a day and sends them when it takes them.": "设置里的遥测转发目标（诊断数据转发到中央收集端）在反馈入口回答了 {status}：它接收诊断数据，不接收 agent 反馈。这些报告留在这里，见 ⚙ 系统 ▸ Agent 反馈…——{n} 条等待转发（超过 {max} 条时丢弃最旧的）。VibeSpace 每天再问一次该目标，它能接收时就发送。", // lane feedback-forward-404
 };

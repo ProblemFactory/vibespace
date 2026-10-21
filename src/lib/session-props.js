@@ -2,7 +2,7 @@ import { UI_ICONS } from './icons.js';
 import { escHtml, copyText, showConfirmDialog, stripCwdHostLabel, taskGroupColor, fetchJson, showToast, showContextMenu } from './utils.js';
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a status entry's menu + the cleared sentence
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
-import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow } from './agent-meta.js';
+import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow, hasEffortMenu } from './agent-meta.js';
 import { loadInto, renderInto } from './permission-rules-view.js';
 import { t, deviceLocale } from './i18n.js';
 import { placementNote } from './pool-priority-model.js'; // 2026-09-28 (PURE)
@@ -474,7 +474,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
           { wrap: true });
       };
       originRow(t('Model'), s.spawnModel || '', cfg.model, s.modelOrigin);
-      if (getBackendMeta(s.backend || 'claude')?.caps?.effort !== false) {
+      if (hasEffortMenu(s.backend || 'claude')) { // the declared ui.effortLevels (lane effort-menu-per-harness)
         originRow(t('Effort'), s.effort || '', cfg.effort, s.effortOrigin,
           (v) => effortDisplay(s.backend || 'claude', v, { model: s.spawnModel || '' }));
       }

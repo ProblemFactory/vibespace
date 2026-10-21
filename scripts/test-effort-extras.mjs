@@ -26,7 +26,7 @@ const require = createRequire(import.meta.url);
 let passed = 0, failed = 0;
 const ok = (c, n, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + JSON.stringify(e) : ''}`); } };
 const am = await import(path.join(REPO, 'src/lib/agent-meta.js'));
-const { effortExtrasFor } = require(path.join(REPO, 'src/server/cli-env.js'));
+const { effortExtrasFor } = require(path.join(REPO, 'src/server/cli-env.js')); // re-exported from the PURE src/harness-efforts.js
 const HARNESS = require(path.join(REPO, 'src/harnesses/claude.js'));
 const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const DECLARED = am.BACKEND_META.claude.ui.effortExtras;
@@ -51,7 +51,8 @@ ok(!('requiresLevel' in (effortExtrasFor(DECLARED, LEVELS)[0] || {})), 'the answ
 
 console.log('③ the real app.js fetch block');
 const APP = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
-const blockOf = (src) => { const i = src.indexOf("fetchJson('/api/session-options').then("); return i < 0 ? null : src.slice(i, src.indexOf('\n});\n', i) + 4); };
+// claude's fetch asks FOR claude since lane effort-menu-per-harness (the route answers each backend its own rows)
+const blockOf = (src) => { const i = src.indexOf("fetchJson('/api/session-options?backend=claude').then("); return i < 0 ? null : src.slice(i, src.indexOf('\n});\n', i) + 4); };
 const runBlock = async (block, data) => {
   const BSO = { claude: { efforts: [] } }, SCHEMA = { 'claude.defaultEffort': { options: [] }, 'claude.defaultPermissionMode': { options: [] } };
   const t = (s) => s;

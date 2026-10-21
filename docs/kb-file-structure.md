@@ -7,6 +7,10 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
 
 ```
+src/harness-efforts.js — THE EFFORT ROWS OF ONE HARNESS (PURE, lane effort-menu-per-harness): sessionOptionsAnswer(?backend=) → that harness's ui.effortLevels (array / 'cli-help' / 'model-catalog' / null) + its OWN effortExtras (gated); never claude's for another backend ⇒
+src/adapters/agy.js — AGY_EFFORTS = THE ONE list (the descriptor's ui.effortLevels); agyEffortRefusal: a level agy lacks THROWS effort_not_supported with the five (agyFlags, the chat spawn, formatSetEffort, effortRefusal for ws-create) — never dropped ⇒ src/harness-efforts.js
+scripts/test-chat-status-bar-effort.mjs — fast: the rows per harness, the route's answer per backend, the client builder, the real bar's chip (fake DOM), the refusal through the real ws-create, two base mutants ⇒ src/harness-efforts.js
+scripts/test-effort-menu-chrome.mjs — heavy: the REAL bar in Chrome (zh) opens the effort menu per backend against the route's own answer (antigravity 默认+five, claude +ultracode, opencode no chip) + a mutant; base RED ⇒ src/harness-efforts.js
 src/spawn/line.js — THE SESSION SPAWN LINE (PURE, lane antigravity-spawn-argv): sessionSpawnLine → { argv: node <wrapper> <buf> <meta> <ONE executable> …args, env: base + pairs }; exeRefusal throws on a launcher / an assignment / nothing; the names ride the env, never argv ⇒
 src/ws-create.js — the local line = sessionSpawnLine({ …, env: r6Base, pairs: r6Pairs, exe: spawnCmd, args: spawnArgs }); r6Pairs = EDITOR, the session id, PATH, the display … (the token rides r6Base); no ENV_CMD in server.js / ws-handler / boot-restore ⇒ src/spawn/line.js
 data/bin/agy-wrapper.js + acp-wrapper.js — commandRefusal: argv[4] is ONE executable (agy: absolute; acp: absolute or on the env's PATH), a launcher (`env`) refused; the sentence is the session's ONE error line, nothing spawns ⇒ src/spawn/line.js
@@ -25,9 +29,9 @@ src/routes/feedback.js — POST /api/agent/feedback + GET /api/agent/feedback/mi
 src/lib/feedback-sheet.js — ⚙ System ▸ Agent feedback… (the open count) + its sheet: keyed rows newest first, Open / Handled / All, Mark handled (applied at once), «handled in <release> by <conversation>» + its note, every agent string textContent; the `feedback` StateSync store
 data/bin/vibespace-feedback — the agent CLI (tracked): a report (ONE text — agent-cli-text), --about / --kind, `list`; usage + its own reports with no argument; manual docs/agent/feedback-manual.md
 src/sync-store.js — `clientWrites: false` = a server-owned mirror (ws-handler refuses a client's state-set into it); filePath null = no file (its owner persists) — lane agent-feedback; a client set is answered `state-ack` to its sender, broadcast with `from` + `basedOn` (B-cede)
-src/feedback-forward-model.js — PURE the forward's rules (lane feedback-forward): forwardDoors (off the telemetry forward URL), wireBody, validateForward (the hub's judgment), outboxPush (≤ 200), backoffMs (1 min … 1 h), sendVerdict, admit (≤ 200 per origin), marksAnswer (keyed, paged), applyMark
-src/server/feedback-forward.js — ORCH the origin's forward: data/feedback-outbox.json (origin key fk_…, queue, marks cursor), enqueue (no target ⇒ nothing; the open backlog once), pump (one per pass, hold 1 min … 1 h), pullMarks (boot + 1 min, every 6 h), keyIdOf; wired in mounts-plugins-wiring
-scripts/test-feedback-forward.mjs — fast, in-process: fake instances (real auth / store / routes / forwarder), one fake clock — forward + origin, the mark-back pull + the real CLI, restart, dedupe, the belt, refusals, keyed marks, no target, bounds; CONTROLS no belt / no dedupe / no key filter
+src/feedback-forward-model.js — PURE the forward's rules (lane feedback-forward): forwardDoors, wireBody, validateForward, outboxPush (≤ 200, the gone ids), backoffMs, sendVerdict (+ no-door 404/405/501), pauseHolds + pauseWords (lane feedback-forward-404), admit, marksAnswer, applyMark
+src/server/feedback-forward.js — ORCH the origin's forward: data/feedback-outbox.json (key, queue, cursor, pause), enqueue, pump (1 min … 1 h), pullMarks (6 h); the NO-DOOR PAUSE (re-probed daily or on a new URL / version, said once, a person-set target's ONE For-you notice), forwardOf
+scripts/test-feedback-forward.mjs — fast, in-process: fake instances (real auth / store / routes / forwarder), one fake clock — forward, mark-back pull + the real CLI, restart, dedupe, belt, refusals, keyed marks, no target, bounds; ⑪ the no-door pause (a loopback collector); CONTROLS
 scripts/test-feedback-model.mjs / test-feedback-routes.mjs (fast) + test-feedback-ui.mjs (heavy chrome: two clients, an XSS plant, a real session's CLI report landing live) — lane agent-feedback
 src/agent-cli-registry.js — PURE THE agent CLI registry (lane cli-registry): ONE row per CLI on PATH (name, topic, summary ≤ 140 B, manual, gate, teach) → renderSessionStartTools / renderReminderLine / renderIndex / AGENT_DOC_TOPICS + CAPS; a new CLI = a row (test-cli-registry)
 scripts/test-cli-registry.mjs — lane cli-registry gate (fast, 0.3 s): every data/bin name a row or an EXCLUDED reason, the rows, the byte caps + mutants, 18 teaching shapes pinned (fixtures/cli-registry-renders.json), index-manual's block; --write-index rewrites it
@@ -1132,6 +1136,34 @@ scripts/test-agentd-upgrade-signature.mjs (fast, 5 s) — truth table + chain + 
 | `broadcastActiveSessions()` | server.js | Pushes session list to all WebSocket clients |
 
 ## ESSAYS (one `### path` section per file)
+
+### src/harness-efforts.js — THE EFFORT ROWS OF ONE HARNESS (lane effort-menu-per-harness, 2026-10-21)
+
+PURE, shared by the route and the suites.
+- `effortLevelsOf(ui, { cliLevels, catalogModels, model })` reads the descriptor's `ui.effortLevels`:
+  - an array ⇒ itself (antigravity: src/adapters/agy.js AGY_EFFORTS, the one place);
+  - 'cli-help' ⇒ the CLI's parsed --effort levels (claude; src/server/cli-env.js parses them);
+  - 'model-catalog' ⇒ the asked model's catalog levels, else the union, ranked (codex);
+  - null ⇒ no effort menu (opencode, shell, an unknown harness).
+- `effortExtrasFor(declared, levels)` is the effort-ultracode gate, moved here (cli-env re-exports it): a declared extra rides only when the CLI parsed the level it spawns as.
+- `effortAnswerFor(harness)` → `{ effortLevels, effortExtras }`, the extras being that harness's OWN.
+- `sessionOptionsAnswer(query, deps)` IS `GET /api/session-options`. An ask without a backend is the old claude ask; `permissionModes` stays the claude CLI's parse (the dialog applies it to claude only).
+
+**Why:** the route used to answer the claude CLI's levels + claude's ultracode to every backend, so an Antigravity conversation was offered ultracode, which agy does not have and dropped without a word.
+
+**The client side:**
+- `src/lib/agent-meta.js` `hasEffortMenu(backend)` (= the declared row; the client-only caps.effort is gone) gates the bar's chip, the New Session dialog's row and Session Properties' row.
+- `effortSeedLevels(backend)` is the menu's levels before / without an answer.
+- `effortOptions` stays the ONE builder.
+
+**The refusal by name:** agy's adapter throws `effort_not_supported` with its five (agyFlags, the chat spawn, formatSetEffort, `effortRefusal`). ws-create answers a create by name before anything spawns; ws set-effort answers the client before anything is written or remembered.
+
+**Gates:**
+- test-chat-status-bar-effort (fast);
+- test-effort-menu-chrome (heavy);
+- test-effort-extras (claude's dialog block, asked `?backend=claude`);
+- test-agy-harness (the refusal);
+- test-harness-contract (the ui row mirror; 'effort' left CLIENT_ONLY_OK).
 
 ### src/spawn/line.js — THE SESSION SPAWN LINE (lane antigravity-spawn-argv, 2026-10-21)
 

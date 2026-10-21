@@ -27,6 +27,13 @@
 //      keeps its report once (`self`); the collector's ONE verdict (the ingest door's)
 //   ⑩ CONTROLS (scripts/mutant-copy.mjs, never src/): the receive without the belt stores a live frame; without the dedupe
 //      a retry is a second record; marks without the key filter hand A's marks to another origin. The wiring pins.
+//   ⑪ THE NO-DOOR PAUSE (lane feedback-forward-404 — the fleet's target is the cluster's telemetry COLLECTOR, no feedback
+//      door; a loopback fake, never the real one): 404 ⇒ the outbox PAUSES for that target — one request, then none for a
+//      day (the pull too), persisted over a restart, re-probed ONCE a day; said once (the log line; ONE low For-you item
+//      only when a person set the target here); `vibespace-feedback list` says «forward paused» beside the unsent records;
+//      the door appears ⇒ the re-probe (the day's, or at once when the target's answered version moves) catches up; a new
+//      target URL ends the pause; the marks door's 404 pauses too; the bound drops the OLDEST by id, said, and the filer's
+//      list says it stayed here. RED CONTROL = the base verdict (404 retried): ~30 requests in the day vs 1
 // Run: node scripts/test-feedback-forward.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -45,6 +52,7 @@ const FW = require(path.join(REPO, 'src/server/feedback-forward.js'));
 const FFM = require(path.join(REPO, 'src/feedback-forward-model.js'));
 const PT = require(path.join(REPO, 'src/peer-text.js'));
 const { collectorVerdict } = require(path.join(REPO, 'src/telemetry.js'));
+const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 const { registerFeedbackRoutes } = require(path.join(REPO, 'src/routes/feedback.js'));
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const MUT = mutantCopies('feedback-forward', REPO);
@@ -67,7 +75,7 @@ const PW = 'pw-feedback-forward';
 const TOK = 'tok-' + crypto.randomBytes(24).toString('hex');
 const INGEST = (I) => I.base + '/api/telemetry/ingest';
 
-async function instance(name, { collector = '', target = null, dir = null, port = 0, version = '2.369.331' } = {}) {
+async function instance(name, { collector = '', target = null, dir = null, port = 0, version = '2.369.331', personSet = false, todos = null } = {}) {
   const dataDir = dir || path.join(scratchDir('feedback-forward-' + name), 'data');
   if (!dir) { fs.mkdirSync(dataDir, { recursive: true }); dirs.push(path.dirname(dataDir)); }
   const I = { name, dataDir, version, logs: [] };
@@ -77,11 +85,11 @@ async function instance(name, { collector = '', target = null, dir = null, port 
   app.use(auth.middleware());
   const json = express.json({ limit: '50mb' });
   app.use((req, res, next) => (OWN_BODY_RE.test(req.path) ? next() : json(req, res, next)));
-  I.fw = FW.create({ dataDir, target: () => (target ? target(I) : {}), instance: () => ({ name, version: I.version }), applyMarks: (m) => I.store.applyMarks(m), backlog: () => I.store.list().reports, fetch: counting(name), now: () => clock, ...fakeT, log: (...a) => I.logs.push(a.join(' ')) });
+  I.fw = FW.create({ dataDir, target: () => (target ? target(I) : {}), instance: () => ({ name, version: I.version }), applyMarks: (m) => I.store.applyMarks(m), backlog: () => I.store.list().reports, personSet: () => personSet, userTodos: todos, fetch: counting(name), now: () => clock, ...fakeT, log: (...a) => I.logs.push(a.join(' ')) });
   I.store = FS.create({ dataDir, now: () => clock, onNew: (row) => I.fw.enqueue(row) });
   I.token = 'vsst_' + crypto.createHash('sha256').update(name).digest('hex');
   const sessions = new Map([['w-' + name, { agentToken: I.token, name: 'lane ' + name, _nameExplicit: true, backend: 'claude', claudeSessionId: 'cid-' + name, cwd: '/w', _initialGroupId: 'T-1' }]]);
-  registerFeedbackRoutes(app, { store: I.store, activeSessions: sessions, groupOf: () => ({ id: 'T-1', name: 'VibeSpace 车道' }), instance: () => ({ name, version: I.version }), collectorToken: () => collector, selfKeyId: () => I.fw.keyId() });
+  registerFeedbackRoutes(app, { store: I.store, activeSessions: sessions, groupOf: () => ({ id: 'T-1', name: 'VibeSpace 车道' }), instance: () => ({ name, version: I.version }), collectorToken: () => collector, selfKeyId: () => I.fw.keyId(), forwardOf: (id) => I.fw.forwardOf(id) });
   I.verbs = FS.automationVerbs({ store: I.store });
   I.srv = app.listen(port, '127.0.0.1');
   await new Promise((r) => I.srv.once('listening', r));
@@ -288,8 +296,11 @@ console.log('⑨ the bounds (PURE) and the hub that forwards to itself');
   ok(over.queue.length === FFM.LIMITS.outboxMax && over.dropped === 1 && over.queue[0].id === 'fb-0000000001' && over.queue.at(-1).id === 'fb-ffffffffff' && FFM.outboxPush(q, { id: 'fb-0000000005' }).queue.length === FFM.LIMITS.outboxMax, `the outbox holds ${FFM.LIMITS.outboxMax} unsent reports: the ${FFM.LIMITS.outboxMax + 1}st drops the OLDEST (counted); a report already queued is not queued twice`);
   const waits = [1, 2, 3, 4, 5, 6, 7, 8, 50].map((n) => FFM.backoffMs(n) / 60e3);
   ok(waits.join() === '1,2,4,8,16,32,60,60,60', 'the hold after consecutive failed passes: 1, 2, 4 … 32 min, then 1 h at most', waits);
-  const v = [200, 201, 400, 413, 422, 401, 403, 404, 408, 429, 500, 503, 0].map((s) => `${s}:${FFM.sendVerdict(s)}`).join(' ');
-  ok(v === '200:sent 201:sent 400:drop 413:drop 422:drop 401:retry 403:retry 404:retry 408:retry 429:retry 500:retry 503:retry 0:retry', 'the send verdicts: 2xx sent; 400 / 413 / 422 dropped (the hub judged THIS report); a token being fixed, a hub before this door, a pace, a crash or no answer retried', v);
+  const v = [200, 201, 400, 413, 422, 401, 403, 404, 405, 501, 408, 429, 500, 502, 503, 0].map((s) => `${s}:${FFM.sendVerdict(s)}`).join(' ');
+  ok(v === '200:sent 201:sent 400:drop 413:drop 422:drop 401:retry 403:retry 404:no-door 405:no-door 501:no-door 408:retry 429:retry 500:retry 502:retry 503:retry 0:retry', 'the send verdicts: 2xx sent; 400 / 413 / 422 dropped (the hub judged THIS report); 404 / 405 / 501 NO DOOR (a collector, a hub before this door or with its collector off — the pause, ⑪); a token being fixed, a pace, a crash or no answer retried on the backoff', v);
+  const PH = { door: 'https://c.example/api/feedback/forward', version: null, pausedUntil: 5000 };
+  const ph = [[PH, { door: PH.door }, 4999], [PH, { door: PH.door }, 5000], [PH, { door: 'https://hub.example/api/feedback/forward' }, 10], [PH, { door: PH.door, version: '2.369.338' }, 10], [{ ...PH, version: '2.369.338' }, { door: PH.door, version: '2.369.338' }, 10], [null, { door: PH.door }, 10]].map(([p, t, n]) => FFM.pauseHolds(p, t, n));
+  ok(ph.join() === 'true,false,false,false,true,false', 'the pause holds for the same door and the same answered version until the day ends — the day\'s end, another URL, another version ⇒ ONE request (the re-probe)', ph);
   const doors = ['https://hub.example/api/telemetry/ingest', 'https://hub.example/vs/api/telemetry/ingest/', 'http://10.0.0.5:3000', 'https://hub.example/collector?x=1', 'ftp://hub.example/api/telemetry/ingest', 'not a url', ''].map((u) => { const d = FFM.forwardDoors(u); return d ? d.forward + ' | ' + d.marks.replace(/^.*\/api/, '/api') : null; });
   ok(JSON.stringify(doors) === JSON.stringify(['https://hub.example/api/feedback/forward | /api/feedback/forward/marks', 'https://hub.example/vs/api/feedback/forward | /api/feedback/forward/marks', 'http://10.0.0.5:3000/api/feedback/forward | /api/feedback/forward/marks', 'https://hub.example/api/feedback/forward | /api/feedback/forward/marks', null, null, null]), 'the doors off the telemetry forward URL: …/api/telemetry/ingest names the hub (a prefix kept), any other path its origin; not http(s) ⇒ none', doors);
   const rec = (id, key, lastAt) => ({ id, lastAt, at: lastAt, origin: key ? { key } : undefined });
@@ -346,6 +357,167 @@ console.log('⑩ controls (patched copies) and the wiring');
   ok(/onNew: \(row\) => feedbackForward\.enqueue\(row\)/.test(wiring) && /^feedbackForward\.start\(\);$/m.test(wiring) && /selfKeyId: \(\) => feedbackForward\.keyId\(\)/.test(wiring) && /collectorToken: \(\) => process\.env\.VIBESPACE_TELEMETRY_INGEST_TOKEN \|\| ''/.test(wiring) && /t\.forwardTarget\(\)/.test(wiring) && /applyMarks: \(marks\) => feedback\.applyMarks\(marks\), backlog: \(\) => feedback\.list\(\)\.reports,/.test(wiring),
     'the wiring: a new report → the forwarder; started at boot; the target is the telemetry forward target (settings, then env); the hub\'s doors are on with VIBESPACE_TELEMETRY_INGEST_TOKEN; the marks land in the store; the backfill reads the store\'s reports');
   ok(/req\.method === 'POST' && p === '\/api\/feedback\/forward'\) \|\| \(req\.method === 'GET' && p === '\/api\/feedback\/forward\/marks'\)\) return next\(\);/.test(read('src/auth.js')), 'the auth layer\'s doors: POST /api/feedback/forward and GET /api/feedback/forward/marks, method-exact');
+}
+
+console.log('⑪ THE NO-DOOR PAUSE (lane feedback-forward-404): the target is a telemetry collector with no feedback door');
+{
+  const http = await import('node:http');
+  // a loopback COLLECTOR (never the real one): /api/telemetry/ingest answers, every other path 404 — until `door`: then its
+  // /api/feedback/* requests go to B (the real routes), the door that appears later
+  let door = false;
+  const COL = http.createServer((req, res) => {
+    if (door && req.url.startsWith('/api/feedback/')) {
+      const p = http.request(new URL(req.url, B.base), { method: req.method, headers: req.headers }, (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res); });
+      req.pipe(p);
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/api/telemetry/ingest') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"success":true}'); return; }
+    req.resume();
+    res.writeHead(404, { 'content-type': 'text/html' }); res.end(`Cannot ${req.method} ${req.url.split('?')[0]}`);
+  });
+  await new Promise((r) => COL.listen(0, '127.0.0.1', r));
+  const colBase = `http://127.0.0.1:${COL.address().port}`;
+  const colTarget = { url: colBase + '/api/telemetry/ingest', token: TOK };
+  const tray = (tag) => { const d = scratchDir('feedback-forward-todos-' + tag); dirs.push(d); return new UserTodoManager({ dataDir: d, onChange: () => { }, expirySweepMs: 0 }); };
+  const allItems = (t) => t._state.items;   // every item the store holds, open and resolved
+  const sentBy = (tag) => requests.filter(([t]) => t === tag).length;
+  const pausedLines = (I) => I.logs.filter((l) => /^feedback forward paused: /.test(l));
+  const DAY = FFM.LIMITS.reprobeMs;
+
+  // P: a fleet pod — the target is the cluster's env (no person set it); Q: the owner set telemetry.forwardUrl here
+  const trayP = tray('p'), trayQ = tray('q');
+  let P = await instance('pod-fleet', { target: () => colTarget, todos: trayP });
+  const Q = await instance('pod-own', { target: () => colTarget, todos: trayQ, personSet: true });
+  const p1 = (await file(P, 'vibespace-task: the board shows a stale state after a restart')).body.report.id;
+  const p2 = (await file(P, 'vibespace-ask: the For you item says nothing about the attachment')).body.report.id;
+  const q1 = (await file(Q, 'vibespace-job: poll prints the old exit code')).body.report.id;
+  const pp = await P.fw.pump(), qp = await Q.fw.pump();
+  const f0 = P.fw.facts();
+  const at0 = clock;
+  ok(pp.paused === 1 && pp.retry === 0 && sentBy('pod-fleet') === 1 && f0.queued === 2 && f0.paused && f0.paused.status === 404 && f0.paused.pausedUntil === at0 + DAY && f0.fails === 0 && f0.nextAt === at0 + DAY,
+    'the collector answers 404 at the feedback door ⇒ ONE request, the outbox PAUSED for that target until the same time tomorrow (no backoff, the two reports kept)', { pp, f0 });
+  const disk0 = JSON.parse(fs.readFileSync(P.fw.file, 'utf8')).pause;
+  ok(disk0 && disk0.reason === 'no-door' && disk0.pausedUntil === at0 + DAY && disk0.status === 404 && disk0.door === colBase + '/api/feedback/forward', 'the pause is persisted in data/feedback-outbox.json: the door, the reason (no-door), the status, pausedUntil', disk0);
+  ok(pausedLines(P).join('\n') === `feedback forward paused: ${colBase} has no feedback door (404) — re-probed daily; 2 records waiting`, 'the instance\'s log says it ONCE: «feedback forward paused: <target> has no feedback door (404) — re-probed daily; 2 records waiting»', P.logs);
+  ok(allItems(trayP).length === 0, 'a target from the cluster\'s env (the fleet admin\'s, not the user\'s) files NO For-you item — the log line only', allItems(trayP));
+  const qi = allItems(trayQ);
+  ok(qp.paused === 1 && qi.length === 1 && qi[0].origin === 'server' && qi[0].kind === 'notice' && qi[0].urgency === 'low' && qi[0].status === 'open' && qi[0].text === `Agent feedback stays on this instance: ${colBase} has no feedback door` && qi[0].i18n.text.key === FFM.PAUSE_TEXT && /answered 404 at its feedback door/.test(qi[0].detail) && /1 waiting to be forwarded/.test(qi[0].detail),
+    'the owner SET telemetry.forwardUrl on Q ⇒ ONE low For-you notice (origin server): «Agent feedback stays on this instance: <target> has no feedback door», the detail naming the answer and what waits', qi);
+
+  const nP = sentBy('pod-fleet'), nQ = sentBy('pod-own');
+  let pulls = [];
+  for (let h = 1; h <= 23; h++) {
+    clock = at0 + h * 3600e3;
+    if (h === 5) await file(P, 'vibespace-msg: the group name is cut in the header');
+    await P.fw.pump(); await Q.fw.pump();
+    pulls.push((await P.fw.pullMarks()).why);
+  }
+  ok(sentBy('pod-fleet') === nP && sentBy('pod-own') === nQ && P.fw.facts().queued === 3 && pulls.every((w) => w === 'paused') && pausedLines(P).length === 1 && allItems(trayQ).length === 1,
+    'the next 23 hours: NO request (the hourly passes, the 6-hourly marks pull, a third report filed at hour 5 — queued, said nothing again)', { sent: sentBy('pod-fleet') - nP, pulls: [...new Set(pulls)], facts: P.fw.facts() });
+  ok(timers.some((t) => t.live && t.at === at0 + DAY), 'the pump is armed for the re-probe at pausedUntil (one timer, not one per hour)');
+  const cliP = await runCli(P, ['list']);
+  const unsentLines = cliP.out.split('\n').filter((l) => /^ {2}fb-/.test(l));
+  ok(cliP.code === 0 && unsentLines.length === 3 && unsentLines.every((l) => l.includes('· forward paused: the target has no door')), 'the filing agent\'s `vibespace-feedback list` says «forward paused: the target has no door» beside each unsent report — it knows its report stayed local', cliP.out + cliP.err);
+
+  await P.close();
+  P = await instance('pod-fleet', { dir: P.dataDir, target: () => colTarget, todos: trayP });
+  await P.fw.pump(); await P.fw.pullMarks();
+  ok(sentBy('pod-fleet') === nP && P.fw.facts().paused && P.fw.facts().paused.pausedUntil === at0 + DAY && P.fw.facts().queued === 3, 'restarted over the same data dir: still paused (the persisted pausedUntil) — the restart asks nothing', P.fw.facts());
+
+  clock = at0 + DAY;
+  const pr = await P.fw.pump();
+  ok(pr.paused === 1 && sentBy('pod-fleet') === nP + 1 && requests.filter(([t]) => t === 'pod-fleet').at(-1).join(' ') === 'pod-fleet POST /api/feedback/forward' && P.fw.facts().paused.pausedUntil === clock + DAY && P.fw.facts().paused.probes === 1 && pausedLines(P).length === 0,
+    'the day ends ⇒ ONE re-probe (the oldest report); still 404 ⇒ paused one more day — said nothing again (the same pause; the restarted log is empty)', { pr, facts: P.fw.facts(), logs: P.logs });
+
+  // the door appears (the target is a hub now) — the pause still holds until its day or a new answered version
+  door = true;
+  const n2 = sentBy('pod-fleet');
+  clock += 3600e3;
+  await P.fw.pump();
+  ok(sentBy('pod-fleet') === n2, 'the door appears: within the day nothing is sent yet (the re-probe is daily)');
+  ok(P.fw.noteAnswer(colTarget.url, { headers: new Headers() }) === false && P.fw.noteAnswer('https://elsewhere.example/api/telemetry/ingest', { headers: new Headers({ [FFM.VERSION_HEADER]: '2.369.338' }) }) === false, 'a telemetry answer naming no version, or from another target, changes nothing');
+  ok(P.fw.noteAnswer(colTarget.url, { headers: new Headers({ [FFM.VERSION_HEADER]: '2.369.338' }) }) === true, 'the telemetry forward\'s answer from the SAME target names a new release ⇒ the pause no longer holds');
+  const pc = await P.fw.pump();
+  const onB = (await list(B)).filter((r) => r.origin && r.origin.instance === 'pod-fleet');
+  ok(pc.sent === 3 && P.fw.facts().queued === 0 && !P.fw.facts().paused && onB.length === 3 && onB.map((r) => r.text).reverse()[0] === 'vibespace-task: the board shows a stale state after a restart',
+    'CATCH-UP: the re-probe is taken, the pause ends and every waiting report goes, oldest first — nothing queued was lost', { pc, facts: P.fw.facts(), onB: onB.map((r) => r.text) });
+  ok(P.logs.filter((l) => /^feedback forward resumed: /.test(l)).join() === `feedback forward resumed: ${colBase} took a report — 3 records waiting`, 'the resume is said once in the log', P.logs);
+  const cliP2 = await runCli(P, ['list']);
+  ok(cliP2.code === 0 && !cliP2.out.includes('forward paused') && [p1, p2].every((id) => cliP2.out.includes(id)), '… and the filer\'s list no longer says «forward paused»', cliP2.out);
+
+  clock = Q.fw.facts().paused.pausedUntil;
+  const qc = await Q.fw.pump();
+  const qi2 = trayQ.get(qi[0].id);
+  ok(qc.sent === 1 && !Q.fw.facts().paused && qi2 && qi2.status === 'done' && allItems(trayQ).length === 1, 'Q\'s daily re-probe finds the door: its report is sent and THE For-you item is resolved (one item, never re-filed)', { qc, item: qi2 && qi2.status });
+
+  // a new target URL ends the pause at once; the marks door's 404 pauses too
+  door = false;
+  let rt = colTarget;
+  const R = await instance('pod-move', { target: () => rt });
+  await file(R, 'a report from pod-move');
+  await R.fw.pump();
+  const nR = sentBy('pod-move');
+  rt = { url: INGEST(B), token: TOK };
+  const rm = await R.fw.pump();
+  ok(rm.sent === 1 && sentBy('pod-move') === nR + 1 && !R.fw.facts().paused && R.logs.some((l) => l === `feedback forward: ${colBase} is no longer the target — its pause ends; 1 record waiting`), 'the target URL changes (the setting moved to a hub) ⇒ the pause ends at once and the report goes', { rm, logs: R.logs });
+  const S = await instance('pod-empty', { target: () => colTarget });
+  const s1 = await S.fw.pullMarks(), s2 = await S.fw.pullMarks();
+  ok(s1.why === 'no-door' && s1.status === 404 && s2.why === 'paused' && sentBy('pod-empty') === 1 && requests.filter(([t]) => t === 'pod-empty')[0].join(' ') === 'pod-empty GET /api/feedback/forward/marks' && pausedLines(S).join() === `feedback forward paused: ${colBase} has no feedback door (404) — re-probed daily; 0 records waiting`,
+    'an instance with nothing queued: the marks pull\'s 404 pauses the same way (one GET, then none) — said once', { s1, s2, logs: S.logs });
+
+  // the bound while paused: the 201st report drops the OLDEST — by id, said; the filer's list says it stayed here
+  {
+    const X = await instance('pod-full', { target: () => colTarget });
+    const x0 = (await file(X, 'the oldest report, filed first')).body.report.id;
+    await X.fw.pump();
+    await X.close();
+    const box = JSON.parse(fs.readFileSync(X.fw.file, 'utf8'));
+    for (let i = 1; i < FFM.LIMITS.outboxMax; i++) box.queue.push({ id: 'fb-' + (0xa000000000 + i).toString(16), body: { text: 'filler ' + i, origin: { instance: 'pod-full', id: 'fb-' + (0xa000000000 + i).toString(16) } }, tries: 0, firstAt: clock + i });
+    fs.writeFileSync(X.fw.file, JSON.stringify(box));
+    const X2 = await instance('pod-full', { dir: X.dataDir, target: () => colTarget });
+    const x1 = (await file(X2, 'the 201st report')).body.report.id;
+    const cliX = await runCli(X2, ['list']);
+    const lineOf = (id) => cliX.out.split('\n').find((l) => l.includes(id)) || '';
+    ok(X2.fw.facts().queued === FFM.LIMITS.outboxMax && X2.fw.facts().dropped === 1 && X2.fw.forwardOf(x0) === 'dropped' && X2.logs.some((l) => l === `[feedback] the forward outbox is full (${FFM.LIMITS.outboxMax}): 1 oldest unsent report(s) dropped — ${x0} stay on this instance only`),
+      `paused with ${FFM.LIMITS.outboxMax} waiting, one more report drops the OLDEST — by id, in the log`, { facts: X2.fw.facts(), logs: X2.logs });
+    ok(lineOf(x0).includes('· not forwarded: the outbox was full — it stays on this instance') && lineOf(x1).includes('· forward paused: the target has no door'), 'the filer\'s list says the dropped one stays on this instance, the new one waits paused', cliX.out);
+    await X2.close();
+  }
+
+  // the hub answers its release after the token (a paused origin learns it was updated), never before
+  {
+    const okH = await fetch(B.base + '/api/feedback/forward/marks?since=0', { headers: { authorization: 'Bearer ' + TOK, [FW.HEADER]: keyOf(A) } });
+    const badH = await fetch(B.base + '/api/feedback/forward/marks?since=0', { headers: { authorization: 'Bearer tok-wrong', [FW.HEADER]: keyOf(A) } });
+    ok(okH.status === 200 && okH.headers.get(FFM.VERSION_HEADER) === '2.369.331' && badH.status === 403 && badH.headers.get(FFM.VERSION_HEADER) === null, `the hub's forward doors answer ${FFM.VERSION_HEADER} after the collector's token — never to a bad token`, [okH.status, okH.headers.get(FFM.VERSION_HEADER), badH.status]);
+    ok(/res\.set\(require\('\.\.\/feedback-forward-model\.js'\)\.VERSION_HEADER, require\('\.\.\/\.\.\/package\.json'\)\.version\);/.test(read('src/server/account-usage-routes.js').split("app.post('/api/telemetry/ingest'")[1].split('\n').slice(0, 5).join('\n')) && /\.then\(\(res\) => \{ if \(typeof this\.onForwardAnswer === 'function'\) this\.onForwardAnswer\(url, res\); \}\)/.test(read('src/telemetry.js')),
+      'the telemetry ingest door answers the same header after its gate, and the telemetry forward hands each answer to onForwardAnswer');
+    const wiring = read('src/server/mounts-plugins-wiring.js');
+    ok(/personSet: \(\) => \{ try \{ return !!String\(serverSetting\('telemetry\.forwardUrl'\) \|\| ''\)\.trim\(\); \} catch \{ return false; \} \}, userTodos: \(\) => userTodos,/.test(wiring) && /tel\.onForwardAnswer = \(url, res\) => feedbackForward\.noteAnswer\(url, res\)/.test(wiring) && /forwardOf: \(id\) => feedbackForward\.forwardOf\(id\)/.test(wiring),
+      'the wiring: a person\'s target = the SETTING (not the env), the For-you store, the telemetry answers → noteAnswer, the route\'s forwardOf');
+  }
+
+  // RED CONTROL = the base verdict (a 404 answers retry): the same day against the same collector
+  {
+    const modelSrc = read('src/feedback-forward-model.js'), fwSrc = read('src/server/feedback-forward.js');
+    const NODOOR = "  if (s === 404 || s === 405 || s === 501) return 'no-door';\n";
+    const mm = MUT.write('src/feedback-forward-model.js', modelSrc.replace(NODOOR, ''), 'no-door', { name: 'ffm-no-door' });
+    const BASE = MUT.load('src/server/feedback-forward.js', fwSrc.replace("require('../feedback-forward-model.js')", `require(${JSON.stringify(mm)})`), 'no-door');
+    const day = async (Mod, tag) => {
+      const d = path.join(scratchDir('feedback-forward-ctl-' + tag), 'data');
+      fs.mkdirSync(d, { recursive: true }); dirs.push(path.dirname(d));
+      const F = Mod.create({ dataDir: d, target: () => colTarget, instance: () => ({ name: tag, version: '2.369.331' }), fetch: counting(tag), now: () => clock, ...fakeT, log: () => { } });
+      F.enqueue({ id: 'fb-00000000f1', text: 'one report', at: clock });
+      const t0c = clock;
+      for (; clock < t0c + DAY - 60e3; clock += 60e3) await F.pump();
+      F.stop();
+      return sentBy(tag);
+    };
+    const nBase = await day(BASE, 'ctl-base'), nReal = await day(FW, 'ctl-real');
+    ok(modelSrc.includes(NODOOR) && nBase >= 20 && nReal === 1, `RED CONTROL — the base verdict (404 retried on the backoff) sends ${nBase} requests in the day to a target with no door; the real one ${nReal}`, { nBase, nReal });
+  }
+  for (const I of [P, Q, R, S]) await I.close();
+  trayP.stop(); trayQ.stop();
+  await new Promise((r) => COL.close(r));
 }
 
 for (const I of [A, B, C, D]) await I.close();

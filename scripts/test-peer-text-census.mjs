@@ -883,6 +883,11 @@ const PRINTS = {
     'r.proposal': `${V}:the proposal record printProposal prints (its fields p.* — each its own row)`, 'j.proposal': `${V}:the same, on a refusal's answer`, 'r.proposals': `${V}:the proposal records (status; p.*)`, 'p': `${V}:the proposal record handed to printProposal (its fields p.* — rows)`, 'p.receipt': `${V}:the receipt record (its fields rc.* — rows)`,
     // lane channel-direct-send-sync: the server's rendered receipt block, read inline by the drafting CLI
     'r.receiptText': `${V}:the server's rendered receipt block (src/channel-policy.js renderReceiptBlock — inertFrames + safeInline at every vendor piece: the vendor id, title, sentAs, the honesty line)`, 'cr.receiptText': `${V}:the same block, re-read from the collect door (GET status?id&collect=1)`,
+    // lane inline-receipts-compose-api: compose --caller hands each caller's answer row to showInlineReceipt; a held send waits the hub's
+    // own window; a decided API proposal the CLI waited on prints the card's receipt words
+    'x': `${V}:one caller's answer row handed to showInlineReceipt (its receiptText — the rendered receipt block above; its proposal — p.* rows)`,
+    'r.collectWindowMs': `${V}:the hub's collect window in ms (a number the engine sends)`, 'windowMs': `${V}:that window, a number (the fallback line prints its seconds)`,
+    'r.receipt': `${V}:the API card's receipt words (PURE src/channel-api-card.js receiptText — the agent's OWN frozen request: method, host, path, the credential label; the status + byte count; the user's reject reason; our refusal sentence) — the words the "[Channels · API]" receipt message carries`,
     'r': `${V}:the route's answer handed to printReplaced (its fields r.replaces / r.replaceError / r.replaceCode — rows)`,
     'r.conversations': `${V}:the conversation rows (c.* — rows)`, 'r.results': `${V}:the search hits (m.* — rows)`, 'r.access': `${V}:the access rows (a.* — rows)`, 'r.records': `${V}:the record rows (m.* — rows)`, 'c.access': `${V}:the access record (acc.* — rows)`, 'c.assigned': `${V}:a flag`, 'c.assignedVia': `${V}:an enum`, 'c.authority': `${V}:the authority enum`, 'm.placeText': `${V}:the place record (pl.* — rows)`, 'm.attachments': `${V}:the attachment rows (a.* — rows)`,
     'REPLY_USAGE': `${V}:usage text`, 'USAGE': `${V}:usage text`, 'how': `${V}:the placement flags table`,

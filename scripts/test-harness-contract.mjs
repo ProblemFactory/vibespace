@@ -349,7 +349,7 @@ const deepEq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // compare below enforces the mirror instead of grandfathering it. That is the
 // law working: a client-only flag is allowed only while nothing on the server
 // answers for it.
-const CLIENT_ONLY_OK = new Set(['effort', 'accounts', 'quotaRefresh']);
+const CLIENT_ONLY_OK = new Set(['accounts', 'quotaRefresh']); // 'effort' LEFT (lane effort-menu-per-harness): the declared ui.effortLevels answers it (hasEffortMenu) — one fact, not a chrome flag
 for (const id of chatHarnessIds()) {
   const srv = capsOf(id), cli = BACKEND_META[id].caps || {};
   const drift = Object.keys(cli).filter((k) => (k in srv ? !deepEq(srv[k], cli[k]) : !CLIENT_ONLY_OK.has(k)));

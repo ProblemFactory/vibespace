@@ -2572,5 +2572,141 @@ async function primeDirect(eng) {
   ok(/^### Messages that arrived while this conversation was unreachable/.test(plain), 'a batch with no cause keeps the default heading (the hand-over of a session that had truly gone)');
 }
 
+// ── lane inline-receipts-compose-api: the two siblings of the reply road — a NEW mail (`compose`) and a raw API call
+// (`api`). The owner's rule: a command that performs an action answers with the action's outcome; a message carries only
+// what the actor could not have learned from its own command. ONE verdict (receiptRoad) for all three.
+console.log('§C lane inline-receipts-compose-api: the road table — reply · compose · api (PURE receiptRoad, one verdict)');
+{
+  const ag = { kind: 'agent', id: 'c1' };
+  const mail = { to: ['bob@example.com'], cc: [], subject: 'Numbers' };
+  const ROWS = [
+    ['reply — a direct send, its CLI waiting', { draftedBy: ag }, { collecting: true }, 'inline'],
+    ['compose — a NEW mail sent directly, its CLI waiting', { draftedBy: ag, compose: mail }, { collecting: true }, 'inline'],
+    ['compose — read through the collect door', { draftedBy: ag, compose: mail, receipt: { road: 'inline' } }, {}, 'inline'],
+    ['compose — no CLI waiting (a job), or its CLI timed out', { draftedBy: ag, compose: mail }, {}, 'message'],
+    ['api — a gated proposal its CLI waits on (api … --wait / api wait)', { draftedBy: ag, kind: 'api' }, { collecting: true }, 'inline'],
+    ['api — a gated proposal decided while no CLI waits', { draftedBy: ag, kind: 'api' }, {}, 'message'],
+    ['api — nobody\'s agent drafted it', { draftedBy: { kind: 'user' }, kind: 'api' }, { collecting: true }, 'none'],
+  ];
+  for (const [what, prop, ev, road] of ROWS) ok(P.receiptRoad(prop, ev).road === road, `receiptRoad: ${what} ⇒ ${road}`, P.receiptRoad(prop, ev));
+}
+
+console.log('§C the real engine: compose — a NEW mail sent directly is read inline; no CLI ⇒ the message; the base queues one');
+const MAIL = { to: 'bob@example.com', subject: 'Weekly numbers', text: 'the numbers are in' };
+async function primeCompose(eng, authority = 'send') {
+  await prime(eng);
+  await eng.setAccountPolicy(A, 'direct');
+  await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, authority }] });
+}
+{
+  const W = mkEngine({ name: 'compose-inline' });
+  const { eng, delivered, stash } = W;
+  await primeCompose(eng);
+  const r = await eng.compose(AGENT, A, MAIL, { collect: true });
+  ok(r.ok && r.proposal.state === 'sent' && r.receiptPending === false && /SENT/.test(r.receiptText || '') && /sent as: user/.test(r.receiptText || ''), 'compose: a NEW mail sent directly whose CLI waits gets the receipt WORDS back with the command (SENT · sent as · what the recipient sees)', JSON.stringify([r.code, r.proposal && r.proposal.state, (r.receiptText || '').slice(0, 80)]));
+  ok(delivered.length === 0 && stash.length === 0, 'compose: NOTHING went to the message road — no delivery, no stash, no queue row');
+  const q0 = eng.store.outbox.snapshot().proposals[r.proposal.id];
+  ok(q0.receiptCollect === true && q0.receiptDelivery && q0.receiptDelivery.road === 'inline' && q0.receiptDelivery.collecting === true, 'compose: the proposal records the receipt is held for an inline read');
+  const cr = await eng.collectReceipt(AGENT, r.proposal.id);
+  ok(cr.ok && cr.collected === true && /SENT/.test(cr.receiptText || '') && eng.store.outbox.snapshot().proposals[r.proposal.id].receipt.road === 'inline', 'compose: the collect door (the CLI confirming its read) marks it read inline');
+  ok(delivered.length === 0 && stash.length === 0, 'compose: still no message after the collection — the receipt lived only inline');
+  eng.stop();
+}
+{
+  // a NEW mail whose CLI never reads it ⇒ after the window the receipt falls back to the MESSAGE road (reply's fallback)
+  const W = mkEngine({ name: 'compose-timeout', settings: { 'channels.collectWindowMs': 30 } });
+  const { eng, delivered } = W;
+  await primeCompose(eng);
+  const r = await eng.compose(AGENT, A, MAIL, { collect: true });
+  ok(r.ok && delivered.length === 0, 'compose: held at first — the window is open');
+  await new Promise((z) => setTimeout(z, 160));
+  ok(delivered.length === 1 && delivered[0].opts.spendReason === 'channel-receipt' && delivered[0].opts.noWake === true, 'compose: the CLI timed out / died before reading ⇒ the receipt fell back to the MESSAGE road (noWake, its own spend reason)', JSON.stringify(delivered.map((d) => d.opts && d.opts.spendReason)));
+  eng.stop();
+}
+{
+  // no collect (a Background Work job / another door) ⇒ the message road; a REVIEW compose ⇒ never held, its receipt messages
+  const W = mkEngine({ name: 'compose-job' });
+  const { eng, delivered } = W;
+  await primeCompose(eng);
+  const r = await eng.compose(AGENT, A, MAIL);
+  ok(r.ok && r.proposal.state === 'sent' && r.receiptText === undefined && delivered.length === 1 && delivered[0].opts.spendReason === 'channel-receipt', 'compose: a NEW mail no CLI waited on still travels as a message (a job / another door)');
+  eng.stop();
+  const W2 = mkEngine({ name: 'compose-review' });
+  await primeCompose(W2.eng, 'draft');   // the agent may only draft on the account ⇒ the card waits for the user (authority)
+  const pr = await W2.eng.compose(AGENT, A, MAIL, { collect: true });
+  ok(pr.ok && pr.proposal.state === 'awaiting-approval' && pr.decision.reasons.includes('authority') && pr.receiptText === undefined && W2.eng.store.outbox.snapshot().proposals[pr.proposal.id].receiptCollect === undefined, 'compose: an approval-gated mail is no direct send — never held, no inline receipt', JSON.stringify(pr).slice(0, 400));
+  const a = pr.ok ? await W2.eng.approve(pr.proposal.id) : pr;
+  ok(a.ok && W2.delivered.length === 1 && W2.delivered[0].opts.spendReason === 'channel-receipt', 'compose: …and its receipt still MESSAGES (the person decided it later — new to the agent)');
+  W2.eng.stop();
+}
+{
+  // RED CONTROL (the base): compose without the collect mark ⇒ the direct send QUEUES a second receipt message
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('chan-outbox-compose', REPO);
+  const esrc = engineSource(REPO);
+  const MARKC = "    await markCollect(created.id, guards, decision);   // lane inline-receipts-compose-api: a NEW mail sent directly is read inline by the CLI that waits, as a reply is\n";
+  ok(esrc.split(MARKC).length === 2, 'compose\'s collect mark is present once (the control drops exactly it)');
+  const base = MC.load('src/server/channels-engine.js', esrc.replace(MARKC, ''), 'compose-unmarked');
+  const W = mkEngine({ name: 'compose-ctl', engine: base });
+  const { eng, delivered, stash } = W;
+  await primeCompose(eng);
+  await eng.compose(AGENT, A, MAIL, { collect: true });
+  ok(delivered.length + stash.length >= 1, 'CONTROL (the base): a compose with no collect mark QUEUES a receipt message next to the command\'s answer — the inline compose leg above would be RED', JSON.stringify(delivered.length + stash.length));
+  eng.stop();
+}
+
+console.log('§C THE SEND-VERB CENSUS (grep-derived): every CLI verb that sends threads `collect` to its door — reply · compose · api');
+/** The doors that SEND (an agent route — or a helper it calls — reaching the engine's propose / compose / composeEach or the
+ *  raw API's call; a reaction / recall is no send: its receipt is a next-turn line by receiptRoad), each READING the CLI's
+ *  `collect`; then every CLI POST to one of those routes, each CARRYING `collect` in the body it sends. */
+function sendCensus(cli, routes) {
+  const SEND = /\b(?:eng\.(?:propose|compose|composeEach)|api\.call)\(/;
+  const chunks = routes.split(/\n(?=app\.[a-z]+\(|async function |function )/);
+  const pathOf = (c) => (/^app\.post\('([^']+)'/.exec(c) || [])[1] || null;
+  const fnOf = (c) => (/^(?:async )?function (\w+)\(/.exec(c) || [])[1] || null;
+  const doors = chunks.filter((c) => SEND.test(c)).map((c) => {
+    const fn = fnOf(c);
+    let route = pathOf(c);
+    if (!route && fn) { const caller = chunks.find((x) => pathOf(x) && x.includes(`${fn}(`)); route = caller ? pathOf(caller) : null; }
+    return { route, door: fn || route, reads: /\bb\.collect === true\b/.test(c) };
+  });
+  const sendRoutes = [...new Set(doors.map((d) => d.route))].sort();
+  const lines = cli.split('\n');
+  const posts = [];
+  lines.forEach((l, i) => {
+    for (const m of l.matchAll(/(?:call|apiReq)\('POST', '([^']+)',|fetch\(API \+ '([^']+)', \{ method: 'POST'/g)) {
+      const route = m[1] || m[2];
+      if (!sendRoutes.includes(route)) continue;
+      const rest = l.slice(m.index + m[0].length).trim();
+      let carries;
+      if (rest.startsWith('{')) carries = /\bcollect\b/.test(rest);
+      else {
+        const id = m[2] ? ((/body: JSON\.stringify\((\w+)\)/.exec(rest) || [])[1]) : (/^(\w+)/.exec(rest) || [])[1];
+        let decl = null;
+        for (let j = i - 1; j >= Math.max(0, i - 60) && !decl; j--) if (new RegExp(`\\b(?:const|let) ${id} = \\{`).test(lines[j])) decl = lines[j];
+        carries = !!decl && /\bcollect\b/.test(decl);
+      }
+      posts.push({ line: i + 1, route, carries });
+    }
+  });
+  return { doors, sendRoutes, posts };
+}
+const CLI_SRC = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf-8');
+const ROUTES_SRC = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+const sendRed = (c) => [...c.doors.filter((d) => !d.reads).map((d) => `door ${d.door} does not read b.collect`), ...c.posts.filter((x) => !x.carries).map((x) => `vibespace-channels:${x.line} POST ${x.route} carries no collect`)];
+{
+  const c = sendCensus(CLI_SRC, ROUTES_SRC);
+  ok(JSON.stringify(c.sendRoutes) === JSON.stringify(['/api/agent/channels/api', '/api/agent/channels/compose', '/api/agent/channels/reply']), 'the send routes, derived from the agent routes: api · compose · reply (a NEW route that sends lands here — and in the rows below)', c.sendRoutes);
+  ok(c.doors.length >= 4 && c.doors.every((d) => d.reads), `every send door reads the CLI's collect (${c.doors.map((d) => d.door).join(', ')})`, c.doors);
+  ok(c.posts.length >= 4 && c.posts.every((x) => x.carries), `every CLI POST to a send route carries collect (${c.posts.length}: ${c.posts.map((x) => `${x.route.split('/').pop()}@${x.line}`).join(', ')})`, c.posts);
+  // CONTROLS — the census reds each way a send can skip the inline road
+  const baseCompose = CLI_SRC.replace("const body = { account, to, subject, text, collect: true };", "const body = { account, to, subject, text };");
+  ok(baseCompose !== CLI_SRC && sendRed(sendCensus(baseCompose, ROUTES_SRC)).some((x) => /POST \/api\/agent\/channels\/compose carries no collect/.test(x)), 'CONTROL (the base): a compose that sends no collect is RED by its line');
+  const planted = CLI_SRC.replace("  if (verb === 'search') {", "  if (verb === 'send2') { const r = await call('POST', '/api/agent/channels/reply', { conv: args[1], text: args[2] }); console.log(r.ok); return; }\n  if (verb === 'search') {");
+  ok(planted !== CLI_SRC && sendRed(sendCensus(planted, ROUTES_SRC)).length === 1, 'CONTROL: a NEW send verb with no collect is RED', sendRed(sendCensus(planted, ROUTES_SRC)));
+  const deaf = ROUTES_SRC.replace(", { collect: b.collect === true });   // lane inline-receipts-compose-api: each caller's direct send read inline", ");");
+  ok(deaf !== ROUTES_SRC && sendRed(sendCensus(CLI_SRC, deaf)).some((x) => /door composeCallers does not read b\.collect/.test(x)), 'CONTROL: a send door that drops the CLI\'s collect (compose --caller) is RED by name');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

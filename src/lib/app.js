@@ -73,7 +73,7 @@ import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser
 import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
 import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27: a browser session's replay (window type browser-replay)
 import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
-import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly, accountDefaultsOf } from './agent-meta.js';
+import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, hasEffortMenu, uiRow, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly, accountDefaultsOf } from './agent-meta.js';
 import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
 import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off); lane voice-follows-focus: dictation follows the focus
 import { enterSubmits } from './chat-enter-keys.js';
@@ -107,18 +107,19 @@ const BACKEND_SESSION_OPTIONS = {
   },
   // OpenCode over ACP (S8): models come from the agent at session start
   // (/api/available-models fills them in once one has run); "permission" =
-  // the agent's session mode; no effort ladder (META caps.effort false hides the row).
+  // the agent's session mode; no effort ladder (ui.effortLevels null hides the row — hasEffortMenu).
   opencode: {
     models: [{ id: '', label: t('Default') }],
     permissions: permissionModeOptions('opencode', ['', 'build', 'plan'], t),
     efforts: [{ value: '', label: t('Auto (model default)') }],
   },
   // Antigravity CLI (lane antigravity-harness): the docs' model slugs arrive through /api/available-models;
-  // "permission" = agy's --mode (or bypass); effort rides the Settings default (no ladder row yet)
+  // "permission" = agy's --mode (or bypass); effort = agy's OWN --effort list, its declared ui.effortLevels (the row the
+  // server answers for ?backend=antigravity) — no claude extras (lane effort-menu-per-harness)
   antigravity: {
     models: [{ id: '', label: t('Default') }],
     permissions: permissionModeOptions('antigravity', ['', 'accept-edits', 'auto', 'plan', 'bypassPermissions'], t),
-    efforts: [{ value: '', label: t('Auto (model default)') }],
+    efforts: effortOptions('antigravity', uiRow('antigravity').effortLevels, uiRow('antigravity').effortExtras, { head: { value: '', label: t('Auto (model default)') } }),
   },
 };
 
@@ -151,11 +152,12 @@ fetchJson('/api/available-models').then(data => {
     }
   }
 });
-// Fetch effort levels + permission modes from server (parsed from claude --help).
+// Fetch claude's effort levels + permission modes from server (parsed from claude --help),
+// ASKED FOR claude (lane effort-menu-per-harness: the route answers each backend its own rows).
 // The pickers are the parsed levels + the declared extras (the server's gated
 // effortExtras; the META seed from an older server) — APPENDED, never replaced:
 // swapping the parsed list in dropped ultracode the moment this landed (lane effort-ultracode).
-fetchJson('/api/session-options').then(data => {
+fetchJson('/api/session-options?backend=claude').then(data => {
   if (!data) return;
   if (data.effortLevels?.length) {
     const efforts = effortOptions('claude', data.effortLevels, data.effortExtras ?? BACKEND_META.claude.ui.effortExtras, { head: { value: '', label: t('Auto (model default)') } });
@@ -1647,7 +1649,7 @@ class App {
     const isShell = terminalOnly(backend);
     for (const [id, hide] of [
       ['row-mode', isShell], ['row-model', isShell], ['custom-model-row', isShell],
-      ['row-permission', isShell], ['row-effort', isShell || BACKEND_META[backend]?.caps?.effort === false], ['row-extra-args', isShell],
+      ['row-permission', isShell], ['row-effort', isShell || !hasEffortMenu(backend)], ['row-extra-args', isShell],
       // Per-session git worktree (owner ruling 9): gated on the CAPS ROW, not
       // on a backend id — a harness without the flag simply has no row, and
       // the box is cleared so a stale tick can never ride a create.

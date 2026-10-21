@@ -2135,7 +2135,8 @@ app.post('/api/agent/channels/compose', async (req, res) => {
   const ownC = ownConversationIdOf(s);
   if (!ownC.cid) return res.status(409).json({ error: ownC.why, code: 'bad-member' });   // verify r2: no `webui:` drafter; r3: no borrowed (pending fork) id
   const ctxC = channelPrincipal(s, id);
-  const makeC = () => eng.compose(ctxC, account, { to: b.to, cc: b.cc, bcc: b.bcc, replyTo: b.replyTo, subject: b.subject, text: b.text, why: b.why, attachments: b.attachments });
+  // lane inline-receipts-compose-api: `collect` as reply's — a NEW mail sent directly is read inline by the waiting CLI
+  const makeC = () => eng.compose(ctxC, account, { to: b.to, cc: b.cc, bcc: b.bcc, replyTo: b.replyTo, subject: b.subject, text: b.text, why: b.why, attachments: b.attachments }, { collect: b.collect === true });
   const repC = replacesOf(b);
   if (!repC.ok) return res.status(400).json({ error: repC.error, code: 'bad-request' });
   try {
@@ -2153,7 +2154,7 @@ async function composeCallers(req, res, eng, s, id, b) {
   const own = ownConversationIdOf(s);
   if (!own.cid) return res.status(409).json({ error: own.why, code: 'bad-member' });
   try {
-    const r = await eng.composeEach(channelPrincipal(s, id), key.adapterId, key.convId, { text: b.text, why: b.why, recipients: b.caller });
+    const r = await eng.composeEach(channelPrincipal(s, id), key.adapterId, key.convId, { text: b.text, why: b.why, recipients: b.caller }, { collect: b.collect === true });   // lane inline-receipts-compose-api: each caller's direct send read inline
     for (const x of (r && r.proposals) || []) if (x.ok && x.proposal) touchChannel(id, [{ op: 'compose', adapterId: key.adapterId, convId: key.convId, title: x.proposal.title, account: x.proposal.adapterLabel, proposalId: x.proposal.id }]);
     if (r && Array.isArray(r.proposals) && r.proposals.length) return res.json({ ...r, chars: cliText.chars(b.text) });   // one answer per caller (a refused one says so on its row); lane cli-one-text-arg: the text, counted
     chanAnswer(res, r);
@@ -2344,6 +2345,8 @@ app.get('/api/agent/channels/watches', (req, res) => {
 // every await), the fence, the budget, the ONE fetch, the belt and the audit ring. A write under "ask each" and every
 // sensitive call is a proposal the user approves (the frozen bytes run). The call row rides the §26 witness.
 const rawApi = () => { const c = channelsEngine(); return c && c.rawApi ? c.rawApi : null; };
+// lane inline-receipts-compose-api: the API proposals' cards (src/server/channel-api-cards.js) — `collect` = the CLI waiting on one
+const apiCardsOf = () => { const c = channelsEngine(); return c && c.apiCards && typeof c.apiCards.collect === 'function' ? c.apiCards : null; };
 const API_STATUS = Object.freeze({ api_not_granted: 403, api_tier_read: 403, api_pending: 202, api_host_refused: 400, api_header_refused: 400, api_bad_request: 400, api_body_too_large: 413, api_budget: 429, api_redirect_unjudged: 502, api_redirect_loop: 502, api_cred_expired: 409, api_cred_unsupported: 409, api_vendor_unreachable: 502, 'not-found': 404 });
 const apiAnswer = (res, r) => {
   const { touch, ...out } = r || {};
@@ -2366,6 +2369,9 @@ app.post('/api/agent/channels/api', async (req, res) => {
   try { r = await api.call(channelPrincipal(s, id), { cred: b.cred, method: b.method, host: b.host, path: b.path, query: b.query, headers: b.headers, body, why: typeof b.why === 'string' ? b.why : null }); }
   catch (e) { return res.status(500).json({ error: e.message }); }
   if (r && r.touch) touchChannel(id, [r.touch]);
+  // lane inline-receipts-compose-api: `collect` (`api … --wait`) on a call that filed a proposal = the CLI waits on it now —
+  // its receipt is held for the CLI to read inline (the poll below renews the hold); no `collect` ⇒ the receipt message
+  if (r && r.code === 'api_pending' && r.proposal && b.collect === true && apiCardsOf()) { try { await apiCardsOf().collect(r.proposal.id); } catch {} }
   apiAnswer(res, r);
 });
 app.get('/api/agent/channels/api/creds', (req, res) => {
@@ -2382,12 +2388,17 @@ app.get('/api/agent/channels/api/docs', (req, res) => {
   if (!api) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   apiAnswer(res, api.docs(channelPrincipal(hit[0], hit[1]), String(req.query.cred || '')));
 });
-app.get('/api/agent/channels/api/proposals/:id', (req, res) => {
+app.get('/api/agent/channels/api/proposals/:id', async (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
   const api = rawApi();
   if (!api) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
-  apiAnswer(res, api.proposalFor(channelPrincipal(hit[0], hit[1]), String(req.params.id)));
+  const r = api.proposalFor(channelPrincipal(hit[0], hit[1]), String(req.params.id));
+  // lane inline-receipts-compose-api: `?collect=1` = the CLI waiting on ITS proposal (`api … --wait` / `api wait <id>`; the
+  // orchestrator's own-proposal answer above is the gate) — still pending: the receipt stays held while it polls; decided:
+  // the outcome is read HERE, with the card's words, and the receipt message is never filed (`messaged` = it went already)
+  if (r && r.ok && req.query.collect === '1' && apiCardsOf()) { try { Object.assign(r, await apiCardsOf().collect(String(req.params.id))); } catch {} }
+  apiAnswer(res, r);
 });
 app.get('/api/agent/channels/api/log', (req, res) => {
   const hit = agentSession(req, res);

@@ -691,6 +691,113 @@ console.log('⑧ the API log (lane channel-api-log-blank): one line at each run 
   ok(rr.length === 20 && rr[0] === 14 && rr.slice(-3).join() === '101,102,103', 'a ring rolled a moment ago lends its newest lines: the log stays the last 20, oldest first', rr);
 }
 
+// ── ⑨ lane inline-receipts-compose-api: THE API RECEIPT ROAD — the CLI that waits on its proposal reads the outcome
+// INLINE (the card's words), and no "[Channels · API]" receipt message is filed for it; a proposal no CLI waits on keeps
+// its card AND its receipt message; a CLI that stops waiting leaves it to the message road (the fallback after the
+// window). The REAL orchestrator + the REAL cards (src/server/channel-api-cards.js) behind a loopback copy of the two
+// agent routes (src/agent-routes.js: POST api's `collect` and GET api/proposals/:id?collect=1); the delivery ladder is a fake.
+console.log('⑨ the API receipt road (lane inline-receipts-compose-api): api … --wait reads it inline · no CLI ⇒ the message · the fallback');
+{
+  const CARDS = require(path.join(REPO, 'src/server/channel-api-cards.js'));
+  async function roadServer({ windowMs = 20000 } = {}) {
+    const eng = fakeEngine();
+    const delivered = [], stash = [], calls = [];
+    const deliver = { deliverToConversation: async (cid, text, opts) => { delivered.push({ cid, text, opts }); return { ok: true }; }, stashFor: (cid, env) => { stash.push({ cid, env }); } };
+    let cards = null;
+    const dir = fs.mkdtempSync(path.join(tmpRoot, 'road-'));
+    const api = ORCH.create({ dataDir: dir, engine: eng, fetchFn, broadcast: (m) => { if (cards) cards.onUpdate(m); } });
+    cards = CARDS.create({ dataDir: dir, api, userTodos: null, deliver, timer: false, collectWindowMs: windowMs, log: { warn() {}, log() {} } });
+    await api.setTiers('lark-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }]);
+    const srv = http.createServer((req, res) => {
+      const chunks = []; req.on('data', (c) => chunks.push(c));
+      req.on('end', async () => {
+        const u = new URL(req.url, 'http://x');
+        const send = (r) => { const { touch, ...o } = r; res.writeHead(o.ok ? 200 : o.code === 'api_pending' ? 202 : 400, { 'content-type': 'application/json' }); res.end(JSON.stringify(o.ok ? o : { ...o, error: o.error || 'refused' })); };
+        if (u.pathname === '/api/agent/channels/api' && req.method === 'POST') {
+          const b = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+          calls.push({ post: true, collect: b.collect });
+          const r = await api.call(A, { ...b, body: b.bodyBase64 ? Buffer.from(b.bodyBase64, 'base64') : null });
+          if (r && r.code === 'api_pending' && r.proposal && b.collect === true) await cards.collect(r.proposal.id);   // the route's line
+          return send(r);
+        }
+        const m = /^\/api\/agent\/channels\/api\/proposals\/([^/]+)$/.exec(u.pathname);
+        if (m) {
+          calls.push({ poll: true, collect: u.searchParams.get('collect') });
+          const r = api.proposalFor(A, decodeURIComponent(m[1]));
+          if (r && r.ok && u.searchParams.get('collect') === '1') Object.assign(r, await cards.collect(decodeURIComponent(m[1])));   // the route's line
+          return send(r);
+        }
+        res.writeHead(404); res.end('{"error":"not found"}');
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const env = { ...process.env, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_test' };
+    const run = (cli, args, input) => new Promise((resolve) => { const p = spawn(process.execPath, [cli, ...args], { env }); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.stdin.end(input === undefined ? '' : input); p.on('close', (code) => resolve({ code, out, err })); });
+    const approveSoon = (ms) => setTimeout(() => { const pd = api.ownerView().proposals.find((x) => x.status === 'pending'); if (pd) api.approve(pd.id, { digest: pd.digest }); }, ms);
+    const receiptsOf = (id) => delivered.filter((d) => d.text.includes(id)).length + stash.filter((x) => x.env.ref === id).length;
+    return { api, cards, srv, run, approveSoon, receiptsOf, calls, delivered };
+  }
+  const CLI = path.join(REPO, 'data/bin/vibespace-channels');
+  const WRITE = ['api', 'lark-1', 'POST', '/open-apis/docx/v1/documents', '--body', '-'];
+  const pidOf = (c) => (/"proposal": "(api-[0-9a-f]{12})"/.exec(c.out) || /(api-[0-9a-f]{12})/.exec(c.err) || [])[1];
+  const settle = () => new Promise((z) => setTimeout(z, 150));
+  const legInline = async (ok) => {
+    // A — `api … --wait`: the user approves while the command waits ⇒ the outcome is the command's own answer
+    const S = await roadServer();
+    S.approveSoon(300);
+    const c = await S.run(CLI, [...WRITE, '--wait', '--timeout', '30'], '{"title":"inline"}');
+    await settle(); await S.cards.sync(); await settle();
+    const pid = pidOf(c);
+    ok(c.code === 0 && /"outcome": "ran"/.test(c.out) && /"status": 200/.test(c.out) && /"bytes": \d+/.test(c.out) && /"receipt": "API proposal api-[0-9a-f]{12} \(POST open\.feishu\.cn\/open-apis\/docx\/v1\/documents on Lark \(test\)\): the user approved it and it RAN — HTTP 200, [\d.]+ (B|KB)\."/.test(c.out), 'api … --wait: the approved call\'s outcome is the command\'s own answer — status, bytes and the card\'s words («the user approved it and it RAN — HTTP 200, …»)', c);
+    ok(!!pid && S.receiptsOf(pid) === 0, 'api … --wait: NO "[Channels · API]" receipt message is filed for the outcome the command already printed (no delivery, no stash)', { pid, delivered: S.delivered.map((d) => d.text.slice(0, 80)) });
+    ok(S.calls[0].post && S.calls[0].collect === true && S.calls.filter((x) => x.poll).every((x) => x.collect === '1'), 'the command says it waits (`collect` on the call) and every poll is the collect door (?collect=1)', S.calls);
+    const rec = S.cards.records().find((r) => r.id === pid);
+    ok(!!rec && rec.status === 'ran' && rec.receipt && rec.receipt.how === 'inline', 'the card stays (the record, ran) and says its receipt was read inline', rec && rec.receipt);
+    S.srv.close();
+  };
+  const legNoWait = async (ok) => {
+    // B — no --wait: the approval-gated proposal keeps its card AND its receipt message (the agent learns it next turn)
+    const S = await roadServer();
+    const c = await S.run(CLI, WRITE, '{"title":"later"}');
+    const pid = pidOf(c);
+    ok(c.code === 4 && !!pid && S.calls[0].collect === false, 'api … (no --wait): api_pending, exit 4 — the command does not wait (collect false)', c);
+    const pd = S.api.ownerView().proposals.find((x) => x.id === pid);
+    await S.api.approve(pid, { digest: pd.digest }); await settle(); await S.cards.sync();
+    ok(S.receiptsOf(pid) === 1 && S.delivered.some((d) => d.text.includes(pid) && d.opts.spendReason === 'channel-receipt' && d.opts.noWake === true), 'no CLI waited ⇒ the decision reaches the agent as ONE receipt message (no wake, channel-receipt)', S.delivered.map((d) => d.text.slice(0, 80)));
+    S.srv.close();
+  };
+  const legTimeout = async (ok) => {
+    // C — the timeout road: the command stops waiting (--timeout) before the user decides ⇒ the message after the window
+    const S = await roadServer({ windowMs: 1000 });
+    const c = await S.run(CLI, [...WRITE, '--wait', '--timeout', '1'], '{"title":"slow"}');
+    const pid = pidOf(c);
+    ok(c.code === 0 && /"outcome": "pending"/.test(c.out) && !!pid, 'api … --wait --timeout 1: the command stops waiting and says the call is still pending', c);
+    const pd = S.api.ownerView().proposals.find((x) => x.id === pid);
+    await S.api.approve(pid, { digest: pd.digest }); await settle(); await S.cards.sync();
+    const heldNow = S.receiptsOf(pid);
+    await new Promise((z) => setTimeout(z, 1300));
+    ok(heldNow === 0 && S.receiptsOf(pid) === 1, 'the hold ends with the window — the CLI is gone, so the receipt MESSAGES (the fallback; never lost, never twice)', { heldNow, after: S.receiptsOf(pid) });
+    S.srv.close();
+  };
+  const legBase = async (ok) => {
+    // RED CONTROL (the base): the base CLI's wait (no collect on the call, no collect door) ⇒ the outcome it printed ALSO
+    // arrives as a receipt message on the next turn
+    const CLI_SRC = fs.readFileSync(CLI, 'utf-8');
+    const baseCli = CLI_SRC.replace(", collect: args.includes('--wait') });", ' });').replace("/api/agent/channels/api/proposals/${encodeURIComponent(pid)}?collect=1`", '/api/agent/channels/api/proposals/${encodeURIComponent(pid)}`');
+    ok(baseCli.split('collect').length < CLI_SRC.split('collect').length - 1, 'the control CLI drops exactly the api verb\'s two collect points');
+    const S = await roadServer();
+    S.approveSoon(300);
+    const c = await S.run(MUT.write('data/bin/vibespace-channels', baseCli, 'api-no-collect'), [...WRITE, '--wait', '--timeout', '30'], '{"title":"twice"}');
+    await settle(); await S.cards.sync(); await settle();
+    const pid = pidOf(c);
+    ok(/"outcome": "ran"/.test(c.out) && !!pid && S.receiptsOf(pid) === 1, 'CONTROL (the base): the command printed the outcome AND a receipt message for it was filed — the ⑨ A legs would be RED', { out: c.out.slice(0, 120), receipts: pid && S.receiptsOf(pid) });
+    S.srv.close();
+  };
+  // the four legs wait on real CLI polls (every 2 s) — run them side by side (each has its own server), report in order
+  const rowsOf = await Promise.all([legInline, legNoWait, legTimeout, legBase].map(async (leg) => { const rows = []; await leg((c, n, i) => rows.push([c, n, i])); return rows; }));
+  for (const rows of rowsOf) for (const [c, n, i] of rows) ok(c, n, i);
+}
+
 for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 20, label: '' })) ok(c.pass, c.name, c.detail);
 vendor.close();
 fs.rmSync(tmpRoot, { recursive: true, force: true });

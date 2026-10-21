@@ -611,8 +611,16 @@ function registerWsHandler(wss, ctx) {
           if (session?.pty && session.mode === 'chat' && data.effort != null) {
             const adapter = adapterRegistry.get(session.backend);
             if (adapter?.formatSetEffort) {
+              // A level the harness's CLI does not have is REFUSED BY NAME (lane effort-menu-per-harness): the adapter
+              // throws effort_not_supported with its levels — never written, never remembered as this session's effort.
+              let effortLine;
+              try { effortLine = adapter.formatSetEffort(data.effort); }
+              catch (e) {
+                if (e?.code === 'effort_not_supported') { try { ws.send(JSON.stringify({ type: 'error', code: e.code, scope: 'action', sessionId: data.sessionId, effort: e.effort, levels: e.levels, error: e.message, message: e.message })); } catch { } }
+                break;
+              }
               try {
-                session.pty.write(adapter.formatSetEffort(data.effort) + '\n');
+                session.pty.write(effortLine + '\n');
                 // remembered for attach restore — the CLI never reports effort
                 // back (claude), so the last COMMANDED value is what we show.
                 // Persisted in session meta so it survives server restarts.

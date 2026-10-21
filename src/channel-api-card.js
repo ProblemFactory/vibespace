@@ -146,12 +146,14 @@ function forYouOf(p) {
 /** The resolved For-you row's fact (user-todos resolveAnswered) — the outcome, not "done". */
 function resolvedFactOf(p) { const o = outcomeOf(p); return { apiOutcome: { key: o.key, params: o.params } }; }
 
-/** THE RECEIPT the agent reads on its next turn (the outbox receipts' stash) — `api wait` is a convenience, not the only way. */
-function receiptText(p) {
+/** THE RECEIPT the agent reads on its next turn (the outbox receipts' stash) — `api wait` is a convenience, not the only way.
+ *  `inline` (lane inline-receipts-compose-api): the SAME words read by the CLI that waited on it (`api … --wait`), which
+ *  prints the full answer beside them — so no pointer to `api wait`. */
+function receiptText(p, { inline = false } = {}) {
   const f = fateOf(p), r = p.result || {};
   const what = `API proposal ${p.id} (${p.method} ${p.host}${p.path} on ${p.credLabel || p.cred})`;
   const tail = `\`vibespace-channels api wait ${p.id}\` prints the full answer`;
-  if (f === 'ran') return `${what}: the user approved it and it RAN — HTTP ${r.status || 0}, ${sizeText(r.bytes)}. ${tail}.`;
+  if (f === 'ran') return `${what}: the user approved it and it RAN — HTTP ${r.status || 0}, ${sizeText(r.bytes)}.${inline ? '' : ` ${tail}.`}`;
   if (f === 'rejected') return `${what}: REJECTED by ${p.decidedBy && p.decidedBy !== 'user' ? p.decidedBy : 'the user'}${p.reason ? ` — "${String(p.reason).slice(0, 300)}"` : ''}. Nothing ran.`;
   if (f === 'expired') return `${what}: EXPIRED — unanswered for 24 h. Nothing ran; ask again if it is still needed.`;
   if (f === 'withdrawn') return `${what}: WITHDRAWN — ${p.reason || 'access ended'}. Nothing ran.`;

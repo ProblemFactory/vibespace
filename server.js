@@ -82,7 +82,7 @@ const NODE_CMD = process.execPath; // no ENV_CMD (lane antigravity-spawn-argv): 
 const { X_ENV, detectXDisplay, refreshXEnv, stabilizeXAuth, adapterRegistry,
   CLAUDE_CMD, CODEX_CMD, CODEX_LINUX_SANDBOX_CMD, CODEX_SANDBOX_SUPPORTED,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, CLAUDE_SUPPORTS_NAME, PERMISSION_MODES,
-  EFFORT_LEVELS, EFFORT_EXTRAS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
+  EFFORT_LEVELS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
   noteModelSeen, refreshAvailableModels, harnessAvailability, noteHarnessModels, cliCmds,
 } = require('./src/server/cli-env.js').create({
   rootDir: __dirname, CLAUDE_CMD_RAW, CODEX_CMD_RAW, resolveCmd,
@@ -1489,8 +1489,8 @@ app.locals.harnessAvailability = harnessAvailability; app.get('/api/available-mo
   refreshHarnessModels(); // mtime-guarded local reads — stay current despite old-CLI cache rewrites
   res.json(AVAILABLE_MODELS);
 });
-app.get('/api/session-options', (req, res) => {
-  res.json({ effortLevels: EFFORT_LEVELS, effortExtras: EFFORT_EXTRAS, permissionModes: PERMISSION_MODES });
+app.get('/api/session-options', (req, res) => { // ?backend=<id>[&model=]: each harness's OWN effort levels + extras (src/harness-efforts.js) — never claude's ultracode for another backend (lane effort-menu-per-harness)
+  res.json(require('./src/harness-efforts.js').sessionOptionsAnswer(req.query, { harnessOf: (id) => require('./src/harnesses').get(id), cliLevels: EFFORT_LEVELS, permissionModes: PERMISSION_MODES, catalog: AVAILABLE_MODELS }));
 });
 
 // ── WebSocket Terminal Handler (extracted to src/ws-handler.js) ──

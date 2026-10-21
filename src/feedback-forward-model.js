@@ -13,7 +13,10 @@
 //                                  validate as a local report, the facts as the store keeps them, the origin's id shape
 //   · outboxPush(queue, item)    → the bounded outbox (≤ LIMITS.outboxMax unsent; the OLDEST goes, counted)
 //   · backoffMs(fails)           → the outbox's hold after consecutive failed passes: 1 min, 2, 4 … 1 h
-//   · sendVerdict(status)        → sent | drop (the hub refused THIS record for good) | retry
+//   · sendVerdict(status)        → sent | drop (the hub refused THIS record for good) | no-door (the target has no feedback
+//                                  door — lane feedback-forward-404: the outbox PAUSES for it) | retry
+//   · pauseHolds(pause, target, now) → the no-door pause still holds (the same door, the same answered version, the day)
+//   · pauseWords(facts)          → the pause in words: the log line and the owner's ONE low For-you notice
 //   · admit(list, record)        → the hub's bound per origin (LIMITS.perOrigin) and the ring (the model's)
 //   · marksAnswer(records, key, since) → the marks ONE origin may read (its own forwarded records), paged by `markedAt`
 //   · markOf(record) / applyMark(record, mark) → the mark the hub answers / the origin's record with it applied
@@ -33,7 +36,11 @@ const LIMITS = Object.freeze({
   marksPages: 10,               // … at most 10 pages per pull
   perOrigin: 200,               // forwarded reports the hub keeps per origin (past it THAT origin's least recently reported goes)
   bodyMax: 64 * 1024,           // the forward door's body, read only after the token is judged
+  reprobeMs: 24 * 3600e3,       // lane feedback-forward-404: a target with NO feedback door is asked again once a day
 });
+/** lane feedback-forward-404: the header a hub answers its release in, after the collector's token (the forward doors and
+ *  the telemetry ingest) — a paused origin asks again at once when the version its target answers changes */
+const VERSION_HEADER = 'X-VibeSpace-Version';
 /** an origin key: `fk_` + 32 random bytes base64url — minted once on the origin (data/feedback-outbox.json) */
 const KEY_RE = /^fk_[A-Za-z0-9_-]{43}$/;
 /** the hub's name for an origin: the key's sha256, 16 hex digits (the key itself is never stored on the hub) */
@@ -92,14 +99,15 @@ function validateForward(body, now) {
   };
 }
 
-/** the bounded outbox: an item already queued (same report id) is kept as it is; past outboxMax the OLDEST unsent goes */
+/** the bounded outbox: an item already queued (same report id) is kept as it is; past outboxMax the OLDEST unsent goes
+ *  (`gone` = their ids, so the drop is said by id) */
 function outboxPush(queue, item) {
   const Q = Array.isArray(queue) ? queue.slice() : [];
-  if (Q.some((x) => x && x.id === item.id)) return { queue: Q, dropped: 0 };
+  if (Q.some((x) => x && x.id === item.id)) return { queue: Q, dropped: 0, gone: [] };
   Q.push(item);
-  let dropped = 0;
-  while (Q.length > LIMITS.outboxMax) { Q.shift(); dropped++; }
-  return { queue: Q, dropped };
+  const gone = [];
+  while (Q.length > LIMITS.outboxMax) gone.push(Q.shift().id);
+  return { queue: Q, dropped: gone.length, gone };
 }
 
 /** the hold after the `fails`-th consecutive failed pass: 1 min doubling, capped at 1 h */
@@ -109,12 +117,40 @@ function backoffMs(fails) {
 }
 
 /** an answer's status → 'sent' | 'drop' (400 / 413 / 422: the hub judged THIS report and refused it — a retry is the same
- *  answer) | 'retry' (no answer, 403 a token being fixed, 404 a hub before this door or its collector off, 429, 5xx) */
+ *  answer) | 'no-door' (404 / 405 / 501: the target has NO feedback door — the fleet's telemetry collector, a hub before
+ *  this door or with its collector off. lane feedback-forward-404: an hourly retry of «not here» is the same answer for
+ *  ever, so the outbox PAUSES for that target — re-probed daily, the reports kept) | 'retry' (no answer, 403 a token being
+ *  fixed, 408, 429, 5xx: the backoff) */
 function sendVerdict(status) {
   const s = Number(status) || 0;
   if (s >= 200 && s < 300) return 'sent';
   if (s === 400 || s === 413 || s === 422) return 'drop';
+  if (s === 404 || s === 405 || s === 501) return 'no-door';
   return 'retry';
+}
+
+/** lane feedback-forward-404: the no-door pause holds while the door is the one that answered «not here», the target
+ *  answers the version it answered then, and the day is not over — a new URL, a new version or the day's end lets ONE
+ *  request through (the re-probe). pause = {door, version, pausedUntil}; target = {door (its forward door), version} */
+function pauseHolds(pause, { door, version } = {}, now) {
+  if (!pause || !door || pause.door !== door) return false;
+  if ((pause.version || null) !== (version || null)) return false;
+  return Number(now) < (Number(pause.pausedUntil) || 0);
+}
+
+const i18nKey = (s) => s;   // the extraction marker (scripts/i18n-extract.mjs) — the client words the notice through t()
+const PAUSE_TEXT = i18nKey('Agent feedback stays on this instance: {target} has no feedback door');
+const PAUSE_DETAIL = i18nKey('The telemetry forward target in Settings (Forward diagnostics to a central collector) answered {status} at its feedback door: it takes diagnostics, not agent feedback. The reports stay here, in ⚙ System ▸ Agent feedback… — {n} waiting to be forwarded (past {max} the oldest is dropped). VibeSpace asks the target again once a day and sends them when it takes them.');
+/** the pause in words → { log (the instance's line, once per pause), text / detail / i18n (the owner's For-you notice —
+ *  `text` stays the same for one target: the store's dedupe key) } */
+function pauseWords({ target, status, waiting } = {}) {
+  const p = { target: String(target || ''), status: String(status || ''), n: Math.max(0, Number(waiting) || 0), max: LIMITS.outboxMax };
+  const fill = (t) => t.replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m));
+  return {
+    log: `feedback forward paused: ${p.target} has no feedback door (${p.status}) — re-probed daily; ${p.n} record${p.n === 1 ? '' : 's'} waiting`,
+    text: fill(PAUSE_TEXT), detail: fill(PAUSE_DETAIL),
+    i18n: { text: { key: PAUSE_TEXT, params: { target: p.target } }, detail: [{ key: PAUSE_DETAIL, params: { status: p.status, n: p.n, max: p.max } }] },
+  };
 }
 
 const lastOf = (r) => Number(r && (r.lastAt || r.at)) || 0;
@@ -162,4 +198,4 @@ function applyMark(record, mark, now) {
   return s.ok ? { ok: true, record: s.record, changed: true } : s;
 }
 
-module.exports = { LIMITS, KEY_RE, KEY_ID_RE, ID_RE, forwardDoors, wireBody, validateForward, outboxPush, backoffMs, sendVerdict, admit, markOf, marksAnswer, applyMark };
+module.exports = { LIMITS, KEY_RE, KEY_ID_RE, ID_RE, VERSION_HEADER, forwardDoors, wireBody, validateForward, outboxPush, backoffMs, sendVerdict, pauseHolds, pauseWords, PAUSE_TEXT, PAUSE_DETAIL, admit, markOf, marksAnswer, applyMark };
