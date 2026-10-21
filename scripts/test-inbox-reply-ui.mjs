@@ -717,7 +717,15 @@ try {
       JSON.stringify(x17.groups.map((g) => [g.o, g.name, g.n, g.shown])) === JSON.stringify([['spend', 'Spending', '3', true], ['login', 'Login expiry', '1', true], ['channels', 'Channels', '1', true], ['agent', 'Agents', String(agentN.length), true]]), x17.groups);
     const byO = Object.fromEntries(x17.groups.map((g) => [g.o, g.ids]));
     check('each group lists exactly its producer\'s notices — the LEGACY spend notice (no origin) under Spending, the forged origin under Agents', Object.entries(want).every(([o, ids]) => (byO[o] || []).length === ids.length && ids.every((id) => byO[o].includes(id))), { byO, want });
-    check('the forged origin string painted nothing (window.__xss undefined, no data-origin carries markup)', x17.xss === undefined && await evalJs(`[...document.querySelectorAll('[data-origin]')].every((e) => /^[a-z]+$/.test(e.dataset.origin))`), x17.xss);
+    // lane ci-337-reds: `data-origin` is not For-you's alone — the New Session dialog's browser-profile <select> keeps its
+    // provenance word there ('' | 'task-group' | 'instance' | 'chosen', the client's own), filled at BOOT since the .337
+    // pick new-session-account-follows-backend (applyBackend 'boot'). So: For-you's origin attributes are plain keys, and
+    // NO data-origin anywhere carries markup; an offender is printed (tag, id, the value, its outerHTML).
+    const SWEEP = `(() => { const all = [...document.querySelectorAll('[data-origin]')]; const show = (e) => ({ tag: e.tagName, id: e.id, cls: String(e.className), origin: JSON.stringify(e.dataset.origin), html: e.outerHTML.slice(0, 200) }); const fy = all.filter((e) => e.matches('.ut-chip, .ut-notice-group')); return { fy: fy.length, fyBad: fy.filter((e) => !/^[a-z]+$/.test(e.dataset.origin)).map(show), markup: all.filter((e) => /[<>"'=]|onerror|__xss/i.test(e.dataset.origin)).map(show) }; })()`;
+    const o17 = await evalJs(SWEEP);
+    check('the forged origin string painted nothing (window.__xss undefined, no data-origin carries markup; For-you\'s origin attributes are plain keys)', x17.xss === undefined && o17.fy >= x17.chips.length + x17.groups.length && x17.chips.length > 0 && !o17.fyBad.length && !o17.markup.length, { xss: x17.xss, sweep: JSON.stringify(o17) });
+    const c17 = await evalJs(`(() => { const d = document.createElement('div'); d.dataset.origin = ${JSON.stringify('"><img src=z onerror=window.__xss=7>')}; document.body.appendChild(d); const r = ${SWEEP}; d.remove(); return r.markup.length; })()`);
+    check('CONTROL: the same sweep catches a data-origin that carries the forged string (one planted element ⇒ 1 offender) — the check above can go red', c17 === 1, c17);
     const tabSpan = (tabId, k) => `document.querySelector('${P} > .ut-tabs > .ut-tab[data-tab="${tabId}"] > .ut-tab-n[data-n="${k}"]')`;
     const openActs = (() => { const t = Date.now(); const all = st.open.filter((i) => i.kind !== 'notice'); const ids = new Set(AM.badgeRows(all.map((i) => AM.rowOf(i, t)), t).map((r) => r.id)); return all.filter((i) => ids.has(i.id)); })(); // lane foryou-folds: the Inbox tab = the badge = bands 1–4
     const WORSTSEG = { urgent: 'ut-seg-urgent', high: 'ut-seg-high', normal: 'ut-seg-norm', low: 'ut-seg-norm' }[WORST(openActs)];

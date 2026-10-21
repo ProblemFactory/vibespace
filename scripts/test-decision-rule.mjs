@@ -114,7 +114,8 @@ async function world(name, { watchers, decisionEngine = D.eng, ENGM = ENG }) {
   };
   const ladder = { calls: [], stash: [],
     async deliverToConversation(cid, text, opts) { ladder.calls.push({ cid, text, opts }); return { ok: true, lane: 'message' }; },
-    stashFor(cid, env) { ladder.stash.push({ cid, ...env }); } };
+    stashFor(cid, env) { ladder.stash.push({ cid, ...env }); },
+    registerStashGate(fn) { ladder.gate = fn; return () => { ladder.gate = null; }; } };   // the real ladder asks this gate at every read of the stash
   const lines = [];
   const log = { log: (s) => lines.push(String(s)), warn: (s) => lines.push(String(s)), error: (s) => lines.push(String(s)) };
   const dataDir = path.join(ROOT, name);
@@ -217,6 +218,8 @@ console.log('G a judged rule that cannot run is SAID and never a "no" (lane judg
   ok(got.length === n && !w.ladder.calls.length, 'the Rules switch off: 0 calls, no wake');
   ok(told.length === 1 && /^1 message matched nothing today because your judged rules could not run: the LLM plugin's Rules switch is off\./.test(told[0].text) && told[0].kind === 'notification' && /not a "no"/.test(told[0].text),
     'the agent that armed the rule gets ONE line through its next-turn stash (never a wake); the second skip the same day is counted, not said again', w.ladder.stash.map((s) => s.text));
+  ok(told[0].source === 'channel' && JSON.stringify(told[0].about && told[0].about.keys) === JSON.stringify(['dr/ops']) && w.ladder.gate('agent-3', told[0]) === null,
+    'lane ci-337-reds: the line files `about` like the engine\'s other stash producers — the conversation its count came from (dr/ops) — and the stash gate keeps it while agent 3 still sees ops', told[0].about);
   const rd = w.e.judgedRoadFor({ match: 'any', rules: [PRED] }, { cid: 'agent-3' });
   ok(rd && !rd.state.live && rd.state.why === 'rules-off' && /— 2 messages matched nothing today because of it$/.test(rd.line), 'the door reads the same road: rules-off, with today\'s 2 skips', rd);
   ok(!todos.openItems().some((i) => i.plugin === 'llm'), 'a switch the owner turned off is no budget pause: nothing in For you');
@@ -226,6 +229,11 @@ console.log('G a judged rule that cannot run is SAID and never a "no" (lane judg
   ok(handed === 2 && got.length === n + 2 && c3.some((c) => /Invoice 21/.test(c.text)) && c3.some((c) => /Invoice 22/.test(c.text)), `the switch on ⇒ the owed look judges BOTH skipped messages (${got.length - n} calls) and their hits wake agent 3 — a skip was never a "no"`, { handed, c3: c3.map((c) => c.text.slice(0, 300)) });
   const again = await w.e.owedPass();
   ok(again === 0 && got.length === n + 2 && w.e.judgedRoadFor({ rules: [PRED] }).state.live, 'nothing is owed twice (0 handed back, 0 calls); the road reads live');
+  // lane ci-337-reds: the owner removes agent 3 from ops before its next turn ⇒ the waiting line is withheld (the gate reads `about`)
+  const rv = await w.e.setAccess('dr', { kind: 'conversation', convId: 'ops' }, [{ principal: GA, authority: 'draft' }, { principal: GB, authority: 'draft' }]);
+  const gone = w.ladder.gate('agent-3', told[0]);
+  ok(rv && rv.ok && gone && gone.drop === true, 'agent 3\'s access to ops removed ⇒ the stash gate withholds its waiting judged-rules line (the count of a conversation it no longer sees)', { rv: rv && rv.ok, gone });
+  ok(w.ladder.gate('agent-3', { ...told[0], about: undefined }) === null, 'RED CONTROL (the cut 4da1464c): the same line without `about` is KEPT by the gate — the revoked agent would read it on its next turn');
   w.stop();
   // the day's budget spent: the judge refuses (its journal line), the agent is told once, the owner ONCE in For you
   D.pm.setConfig('llm', { dailyBudgetCents: 0 });

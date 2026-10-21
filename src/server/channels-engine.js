@@ -7144,7 +7144,9 @@ function create(deps = {}) {
         for (const id of ids) if (d.ids.size < 1000) d.ids.add(id);
         if (d.said || !deliver || typeof deliver.stashFor !== 'function') continue;
         d.said = true;   // ONE line a day per cause — the next-turn road (the free stash), never a wake
-        try { deliver.stashFor(cid, { source: 'channel', kind: 'notification', fromName: 'Channels · judged rules', text: DM.judgedSkipLine(d.ids.size, why, { windowHours: inferHoursSetting() }) }); }
+        // `about` = the conversation the count came from (lane ci-337-reds: the 7th producer filed none, so the stash gate
+        // kept it whole for an agent whose access was removed before its next turn — the census of ⑲c)
+        try { deliver.stashFor(cid, { source: 'channel', kind: 'notification', fromName: 'Channels · judged rules', text: DM.judgedSkipLine(d.ids.size, why, { windowHours: inferHoursSetting() }), about: stashAbout({ keys: [`${rec.id}/${convId}`], cid }) }); }
         catch (err) { d.said = false; log.warn(`[channels] ${rec.id}/${convId}: the judged rules' not-a-hit line for ${cid} could not be stashed: ${(err && err.message) || err}`); }
       }
     }
