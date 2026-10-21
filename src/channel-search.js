@@ -26,6 +26,7 @@
  *                               for nothing
  */
 const { peerName } = require('./channel-record.js');
+const CT = require('./agent-cli-text.js');   // lane search-no-group-log: the agent search answer's WORDS render CLI-side (ONE place), from a saidKind KEY + the caller's own q
 
 /** The snippet as shown: ≤ 400 characters (the agent line's own bound). */
 const SNIPPET_MAX = 400;
@@ -399,9 +400,9 @@ function matchParts(text, q) {
 //     account, no title, no sender — and the door; «nothing» only when nothing matched where it looked;
 //   · several words match a record holding EVERY one of them, anywhere (src/channel-store.js `search`). ──────────────────
 /** The user's door the words name (the Channels row menus: the conversation's ⋯ and the account's ⋯ hold the item). */
-const SHARE_DOOR = "Channels › the conversation's ⋯ or the account's ⋯ → Grant access…";
+const SHARE_DOOR = CT.SEARCH_SHARE_DOOR;
 /** THE ONE SENTENCE for hits the caller may not read — the same bytes whatever matched, however much, wherever. */
-const HIDDEN_TEXT = `matches exist that you cannot read — ask the user to share them with you (${SHARE_DOOR}).`;
+const HIDDEN_TEXT = CT.SEARCH_HIDDEN_TEXT;
 /** How the stored copy matches several words (the answer's `match`; the CLI's trailer names it). */
 const STORE_MATCH = 'every-word';
 /**
@@ -414,23 +415,28 @@ const STORE_MATCH = 'every-word';
  *   capped        the store road read the conversations it cannot read only in part (a byte cap) ⇒ no «nothing» claim
  *   accounts      the store road: how many accounts were searched (0 ⇒ nothing of the connected channels reaches it)
  */
-function searchAnswer({ hitsSeen = 0, hiddenMatch = false, adds = null, saved = null, q = '', capped = false, accounts = 1 } = {}) {
-  const words = `"${String(q)}"`;
+/**
+ * THE KEY of an agent's search answer (lane search-no-group-log): WHICH sentence the CLI prints — never the caller's
+ * typed query. The server body carries this KEY (and `hiddenMatch` as a flag), no user words, so a cleared record's word
+ * can never ride back in an answer (test-record-clear-walk). The CLI words the key with its OWN `q` (searchSaid). The
+ * facts are exactly the old `searchAnswer`'s inputs, minus `q` (the words live CLI-side now).
+ */
+function searchSaidKind({ hitsSeen = 0, hiddenMatch = false, adds = null, saved = null, capped = false, accounts = 1 } = {}) {
   const seen = Math.max(0, Math.floor(Number(hitsSeen) || 0));
-  const hid = hiddenMatch === true ? [HIDDEN_TEXT] : [];
   if (SEARCH_ADDS.includes(adds)) {
-    if (seen) return hid;
+    if (seen) return 'hits';
     const n = saved === null || saved === undefined || saved === '' ? null : Math.max(0, Math.floor(Number(saved) || 0));
-    const head = n === null ? `the account's own search added nothing you can read to what is saved here for ${words}.`
-      : n > 0 ? `the account's own search added nothing beyond the ${n} saved ${n === 1 ? 'hit' : 'hits'} above.`
-        : `the account's own search found nothing you can read for ${words} either.`;
-    return [head, ...hid];
+    return n === null ? 'full-added-unknown' : n > 0 ? 'full-added-beyond' : 'full-none-either';
   }
-  if (seen) return hid;
-  if (!(Number(accounts) > 0)) return [`nothing you can read matches ${words} — no conversation of the connected channels is shared with you (ask the user to grant access).`];
-  if (hid.length || capped) return [`nothing you can read matches ${words}.`, ...hid];
-  return [`nothing matches ${words}.`];
+  if (seen) return 'hits';
+  if (!(Number(accounts) > 0)) return 'none-not-shared';
+  if (hiddenMatch === true || capped) return 'none-readable';
+  return 'none';
 }
+/** THE AGENT'S ANSWER WORDS (PURE): the key worded with the caller's `q` by the ONE place (src/agent-cli-text.js
+ *  searchSaid). The server no longer calls this (it answers `saidKind`); this is the keys table rendered, for the
+ *  module's own consumers and the suites. */
+function searchAnswer(facts = {}) { return CT.searchSaid(searchSaidKind(facts), { q: facts.q, saved: facts.saved, hiddenMatch: facts.hiddenMatch }); }
 
 module.exports = {
   matchParts,
@@ -438,5 +444,5 @@ module.exports = {
   snippetOf, snippetShape, holdsQuery, isCjk, mergeVendorHits, coverageOf, fullSearchVerdict, coverageText, statusText, sectionHead,
   SEARCH_MEMO_MAX, SEARCH_MEMO_BYTES, SEARCH_MEMO_FAN, MEMO_ALL, memoQuery, memoScope, memoConv, isMemoScope, searchMemo, memoToDisk, memoFromDisk,
   memoWhen, memoText, forgottenText,
-  searchAnswer, SHARE_DOOR, HIDDEN_TEXT, STORE_MATCH, unshownOf,
+  searchAnswer, searchSaidKind, SHARE_DOOR, HIDDEN_TEXT, STORE_MATCH, unshownOf,
 };

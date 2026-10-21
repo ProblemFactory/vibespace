@@ -940,11 +940,14 @@ const PRINTS = {
     'e.to': 'judged:agentEnvelope — the To the answered message\'s headers gave, a line piece (agentIdsOf)', 'e.cc': 'judged:agentEnvelope — its Cc, a line piece (agentIdsOf)',
     'e.added': `${O}:the plain addresses the agent itself added with --cc (validated, lower-cased)`,
     'pl.line': 'judged:agentPlaceLine — the parent\'s peerName author + a bounded first line, the line rule (channel-thread.js)', 'pl.tag': 'judged:agentPlaceLine — the thread tag (key + count) under the line rule',
-    // lane channels-search-says-hidden: `--full` prints the plain search FIRST (r.*), then the account's own search's answer (f.*);
-    // the words after the rows are the SERVER's (`said`, PURE SR.searchAnswer) — a hit where the caller cannot read is HIDDEN_TEXT,
-    // the same bytes whatever matched (existence only: never a count, an account, a title or a word of it)
-    'x.said': `${V}:the server's search words (PURE SR.searchAnswer: «nothing», what --full added beyond the saved hits, HIDDEN_TEXT — existence only; the caller's own words quoted)`,
-    'l': `${V}:one line of x.said (the said helper's loop)`, 'r.match': `${V}:the stored copy's match enum (SR.STORE_MATCH)`, 'full': `${O}:the caller's own --full flag`,
+    // lane channels-search-says-hidden / search-no-group-log: `--full` prints the plain search FIRST (r.*), then the account's
+    // own search's answer (f.*); the words after the rows are RENDERED CLI-SIDE from the server's KEY (`x.saidKind`) + this CLI's
+    // OWN `q` (TX.searchSaid, the ONE place) — the server body carries no typed query (test-record-clear-walk), and a hit where
+    // the caller cannot read is HIDDEN_TEXT, the same bytes whatever matched (existence only: never a count/account/title/word)
+    'x.saidKind': `${V}:the answer's KEY (an enum: none / none-readable / none-not-shared / full-added-unknown / full-added-beyond / full-none-either / hits — PURE SR.searchSaidKind; never a user word)`,
+    'x.hiddenMatch': `${V}:a flag — a hit matched where the caller cannot read (the existence sentence is appended CLI-side)`,
+    'TX.searchSaid': `${V}:the agent search answer's words (src/agent-cli-text.js searchSaid words the saidKind KEY with the caller's OWN q — the ONE place; the same sentences the server used to send)`,
+    'l': `${V}:one line of TX.searchSaid's answer (the said helper's loop)`, 'r.match': `${V}:the stored copy's match enum (SR.STORE_MATCH)`, 'full': `${O}:the caller's own --full flag`,
     'f.results': `${V}:the --full additions (m.* — rows)`, 'f.note': `${V}:the route's note (no account you can see offers its own search)`, 'f.adds': `${V}:the search row's adds enum (older / unsaved)`,
     'r.covered': `${V}:a count (design 010: the conversations the free search read)`, 'r.namesNote': `${V}:the server's sentence naming the owner's account labels (lane channel-names-readable)`, 'r.fullOffered': `${V}:a flag (design 010)`,
     // design 008 S6 (lane channels-followups): the bounded `list` — how many more it may see / request, the bound

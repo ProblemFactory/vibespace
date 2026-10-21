@@ -612,7 +612,7 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
   };
   const AH = { kind: 'agent', id: 'agent-H', name: 'H', groups: [] };
   const LEAKS = ['Acmenet circuit order', 'Vendor Ops', 'October', 'srch-announce', 'sh-ann-1', 'announce'];
-  const noLeak = (r, q) => { const said = (r.said || []).join('\n').split(`"${q}"`).join(''); const j = JSON.stringify(r); return !/\d/.test(said) && !/srch/.test(said) && !LEAKS.some((w) => j.includes(w)) && !('hidden' in r) && typeof r.hiddenMatch === 'boolean'; };
+  const noLeak = (r, q) => { const j = JSON.stringify(r); return typeof r.saidKind === 'string' && !('said' in r) && !j.includes(q) && !LEAKS.some((w) => j.includes(w)) && !('hidden' in r) && typeof r.hiddenMatch === 'boolean'; };
   const k = await rig('eng-said');
   const st = await k.eng.store.search('srch', 'Wren NID', { limit: 50 });
   const st2 = await k.eng.store.search('srch', 'circuit october', { limit: 50 });
@@ -620,16 +620,16 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
   ok(st.results.map((x) => x.vendorId).join() === 'sh-ops-1', 'EVERY WORD: «Wren NID» finds the message whose SENDER holds one word and whose TEXT the other (the field miss: one substring found nothing)', JSON.stringify(st.results.map((x) => x.vendorId)));
   ok(st2.results.map((x) => x.vendorId).join() === 'sh-ann-1' && st3.results.length === 0, '…a word only in the conversation\'s TITLE counts (a mail thread\'s subject); words spread over two messages of two conversations match neither', JSON.stringify([st2.results.map((x) => x.vendorId), st3.results.length]));
   const a1 = await k.eng.searchFor(AH, 'Wren NID');
-  ok(a1.ok && a1.results.length === 1 && a1.match === 'every-word' && a1.hiddenMatch === false && JSON.stringify(a1.said) === '[]', 'the agent: its two-word hit shown, the answer names the match (every-word), nothing hidden, no extra words', JSON.stringify({ n: a1.results.length, said: a1.said, m: a1.match }));
+  ok(a1.ok && a1.results.length === 1 && a1.match === 'every-word' && a1.hiddenMatch === false && a1.saidKind === 'hits' && !('said' in a1), 'the agent: its two-word hit shown, the answer names the match (every-word), nothing hidden, a KEY not words (saidKind hits; no query in the body)', JSON.stringify({ n: a1.results.length, saidKind: a1.saidKind, m: a1.match }));
   const a2 = await k.eng.searchFor(AH, 'Acmenet install');
-  ok(a2.ok && a2.results.length === 0 && a2.hiddenMatch === true && JSON.stringify(a2.said) === JSON.stringify(['nothing you can read matches "Acmenet install".', H]), 'ALL HIDDEN: no row, and the words say that matches EXIST where it cannot read + the door — not «nothing»', JSON.stringify(a2.said));
+  ok(a2.ok && a2.results.length === 0 && a2.hiddenMatch === true && a2.saidKind === 'none-readable' && !JSON.stringify(a2).includes('Acmenet install'), 'ALL HIDDEN: no row; the answer keys «matches exist where you cannot read» (none-readable + hiddenMatch), NEVER the query text — not «nothing»', JSON.stringify({ saidKind: a2.saidKind, hiddenMatch: a2.hiddenMatch }));
   ok(noLeak(a2, 'Acmenet install'), 'NO LEAK: no digit and no account in the words; the whole answer holds no title, sender, word, conversation or message id of the hidden match (existence only)', JSON.stringify(a2));
   // the brief's rule 2, measured (no change): `list --all` already lists the hidden conversation among the titles it may
   // REQUEST (the account's directory) — the door an agent can use itself; the search's words never name it
   const la = k.eng.listFor(AH, { all: true });
   ok(la.ok && la.conversations.some((c) => c.key === 'srch/srch-announce' && c.level === 'requestable' && c.directory === true), '`list --all` lists the conversation it cannot read among the titles it may REQUEST (unchanged — lane channel-agent-watch W2)', JSON.stringify(la.conversations.map((c) => [c.key, c.level])));
   const a3 = await k.eng.searchFor(AH, 'zzqq nothing');
-  ok(a3.ok && a3.hiddenMatch === false && JSON.stringify(a3.said) === '["nothing matches \\"zzqq nothing\\"."]', 'TRULY NOTHING: «nothing matches» — only when nothing matched where it looked', JSON.stringify(a3.said));
+  ok(a3.ok && a3.hiddenMatch === false && a3.saidKind === 'none', 'TRULY NOTHING: the «nothing matches» key (none) — only when nothing matched where it looked', JSON.stringify(a3.saidKind));
   // an agent that reads nothing here but may REQUEST titles (the account's directory lists group conversations — the
   // default) is told the same existence; with the directory off it has NO reach in the account: total (§8), never searched
   const AZ = { kind: 'agent', id: 'agent-Z', name: 'Z', groups: [] };
@@ -637,7 +637,7 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
   await k.eng.setAgentDirectory('srch', { groups: false, singles: false });
   const a5 = await k.eng.searchFor(AZ, 'Acmenet install');
   await k.eng.setAgentDirectory('srch', { groups: true, singles: false });
-  ok(a4.ok && a4.hiddenMatch === true && noLeak(a4, 'Acmenet install') && a5.ok && a5.hiddenMatch === false && /no conversation of the connected channels is shared with you/.test(a5.said[0]), 'an agent that may only REQUEST titles here (the directory) learns the existence; with NO reach in the account it stays total (§8) — never searched for it', JSON.stringify([a4.said, a5.said]));
+  ok(a4.ok && a4.hiddenMatch === true && a4.saidKind === 'none-readable' && noLeak(a4, 'Acmenet install') && a5.ok && a5.hiddenMatch === false && a5.saidKind === 'none-not-shared', 'an agent that may only REQUEST titles here (the directory) learns the existence (none-readable + hiddenMatch); with NO reach in the account it stays total (§8: none-not-shared) — never searched for it', JSON.stringify([a4.saidKind, a5.saidKind]));
   // --full: a vendor hit in the hidden conversation (one it answered, one already stored) ⇒ existence, never its words
   k.tick(31000);
   k.S.inject.extra = { convId: 'srch-announce', vendorId: 'sh-ann-new', at: Date.now() - 60e3, fromId: null, threadKey: null, snippet: 'Acmenet install moved to October 25' };
@@ -646,8 +646,8 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
   k.S.inject.extra = { convId: 'srch-announce', vendorId: 'sh-ann-1', at: Date.now() - 3600e3, fromId: null, threadKey: null, snippet: 'Acmenet install date is October 24' };
   const f2 = await k.eng.searchFor(AH, 'Acmenet order', { full: true, adapterId: 'srch', saved: 0 });
   k.S.inject.extra = null;
-  ok(f1.ok && f1.results.length === 0 && f1.hiddenMatch === true && JSON.stringify(f1.said) === JSON.stringify(['the account\'s own search found nothing you can read for "Acmenet install" either.', H]) && noLeak(f1, 'Acmenet install'), '--full: the vendor\'s hit in a conversation it may not read ⇒ existence only, nothing of it (snippet, id, title)', JSON.stringify(f1));
-  ok(f2.ok && f2.hiddenMatch === true && noLeak(f2, 'Acmenet order'), '--full: a vendor hit the merge drops as ALREADY STORED, in a conversation it may not read ⇒ existence too (the field\'s shape: every vendor hit was saved)', JSON.stringify({ h: f2.hiddenMatch, said: f2.said }));
+  ok(f1.ok && f1.results.length === 0 && f1.hiddenMatch === true && f1.saidKind === 'full-none-either' && noLeak(f1, 'Acmenet install'), '--full: the vendor\'s hit in a conversation it may not read ⇒ existence only (full-none-either + hiddenMatch), nothing of it (snippet, id, title), no query in the body', JSON.stringify(f1));
+  ok(f2.ok && f2.hiddenMatch === true && noLeak(f2, 'Acmenet order'), '--full: a vendor hit the merge drops as ALREADY STORED, in a conversation it may not read ⇒ existence too (the field\'s shape: every vendor hit was saved)', JSON.stringify({ h: f2.hiddenMatch, saidKind: f2.saidKind }));
   k.eng.stop && k.eng.stop();
   // CONTROLS — each rule removed from a copy ⇒ its leg RED
   const kc1 = patched('src/channel-store.js', "      const rest = pred ? [] : words.filter((w) => !title.includes(w));\n", "      const rest = pred ? [] : [needle];\n", 'one-substring');
@@ -662,13 +662,19 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
   const HID = '        hidden.match = h.results.some((x) => kept.has(String(x.convId)) && !stillSees(ctx, rec.id, String(x.convId)));\n';
   const kb = await rig('eng-said-blind', engCopy([[HID, '        hidden.match = false;\n']], 'no-hidden'));
   const b2 = await kb.eng.searchFor(AH, 'Acmenet install');
-  ok(JSON.stringify(b2.said) === '["nothing matches \\"Acmenet install\\"."]', 'CONTROL (the base\'s answer): an engine that never looks where the caller cannot read says «nothing matches» while the mail is stored — the ALL HIDDEN leg would be RED', JSON.stringify(b2.said));
+  ok(b2.saidKind === 'none', 'CONTROL (the base\'s answer): an engine that never looks where the caller cannot read keys «nothing matches» (none) while the mail is stored — the ALL HIDDEN leg (none-readable) would be RED', JSON.stringify(b2.saidKind));
   kb.eng.stop && kb.eng.stop();
-  const RET = '    return { ok: true, results, truncated, covered, fullOffered, match: SR.STORE_MATCH, hiddenMatch: hidden.match, said, ...namesNoteOf(blind) };\n';
-  const km = await rig('eng-said-count', engCopy([[HID, HID + '        if (hidden.match) hidden.leak = `${h.results.length} hit in 1 conversation you cannot read (account ${rec.label}: ${(store.index.live()[`${rec.id}/${h.results[0].convId}`] || {}).title})`;\n'], [RET, RET.replace('said, ', 'said: hidden.leak ? [hidden.leak, ...said] : said, ')]], 'count-leak'));
+  const RET = '    return { ok: true, results, truncated, covered, fullOffered, match: SR.STORE_MATCH, hiddenMatch: hidden.match, saidKind, ...namesNoteOf(blind) };\n';
+  const km = await rig('eng-said-count', engCopy([[HID, HID + '        if (hidden.match) hidden.leak = `${h.results.length} hit in 1 conversation you cannot read (account ${rec.label}: ${(store.index.live()[`${rec.id}/${h.results[0].convId}`] || {}).title})`;\n'], [RET, RET.replace('saidKind, ', 'saidKind, leak: hidden.leak, ')]], 'count-leak'));
   const m2a = await km.eng.searchFor(AH, 'Acmenet install');
-  ok(m2a.hiddenMatch === true && !noLeak(m2a, 'Acmenet install'), 'MUTANT: a copy that words the hidden match with its count, account and title fails the NO LEAK leg (RED)', JSON.stringify(m2a.said));
+  ok(m2a.hiddenMatch === true && !noLeak(m2a, 'Acmenet install'), 'MUTANT: a copy that puts the hidden match\'s count, account and title in the body fails the NO LEAK leg (RED)', JSON.stringify(m2a.leak));
   km.eng.stop && km.eng.stop();
+  // lane search-no-group-log: the base's shape before this lane — a copy that WORDS the answer server-side (SR.searchAnswer
+  // with q) echoes the caller's query back into the body; the no-query leg (test-record-clear-walk's fence) goes RED
+  const kmq = await rig('eng-said-q', engCopy([[RET, RET.replace('saidKind, ', 'saidKind, said: SR.searchAnswer({ hitsSeen: results.length, hiddenMatch: hidden.match, q: query, accounts }), ')]], 'q-echo'));
+  const mq = await kmq.eng.searchFor(AH, 'Acmenet install');
+  ok(mq.hiddenMatch === true && JSON.stringify(mq).includes('Acmenet install') && !noLeak(mq, 'Acmenet install'), 'MUTANT (the base before this lane): a copy that words the answer server-side echoes the caller\'s query in the body — the no-query leg goes RED', JSON.stringify(mq.saidKind));
+  kmq.eng.stop && kmq.eng.stop();
 }
 for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 6 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 

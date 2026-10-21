@@ -453,7 +453,7 @@ function create(engineCtx) {
    * Lane channels-search-says-hidden (a field incident 2026-10-21 — an agent read «nothing» and reported the sync
    * broken): a hit the reach filtered is answered as EXISTENCE only (`hiddenMatch`, a boolean — the owner: a count
    * leaks too) in an account the caller reads or may request something of; an account it has no reach in at all stays
-   * total (§8: hidden is not searchable). `said` = PURE `SR.searchAnswer`'s words; `match` = how several words match.
+   * total (§8: hidden is not searchable). `saidKind` = the answer's KEY (PURE `SR.searchSaidKind`; the CLI words it with the caller's own `q`, never the server); `match` = how several words match.
    */
   async function searchFor(ctx, q, { adapterId = null, limit = 50, full = false, saved = null } = {}) {
     const query = String(q || '').trim();
@@ -507,8 +507,8 @@ function create(engineCtx) {
     }
     results.sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
     const fullOffered = adapterRecords().adapters.some((r) => r.enabled !== false && (!adapterId || r.id === adapterId) && searchRowOf(registry.capsOf(r.kind)));
-    const said = SR.searchAnswer({ hitsSeen: results.length, hiddenMatch: hidden.match, q: query, capped: hidden.capped && !hidden.match, accounts });
-    return { ok: true, results, truncated, covered, fullOffered, match: SR.STORE_MATCH, hiddenMatch: hidden.match, said, ...namesNoteOf(blind) };
+    const saidKind = SR.searchSaidKind({ hitsSeen: results.length, hiddenMatch: hidden.match, capped: hidden.capped && !hidden.match, accounts });   // lane search-no-group-log: a KEY, never the caller's query
+    return { ok: true, results, truncated, covered, fullOffered, match: SR.STORE_MATCH, hiddenMatch: hidden.match, saidKind, ...namesNoteOf(blind) };
   }
   /** The built-in Agents adapter answers reach with msg-acl (other sessions — `vibespace-msg`'s door): not a channel the
    *  user shares through Channels, so a search never answers that something matched in its conversations. */
@@ -519,8 +519,8 @@ function create(engineCtx) {
    * vendor is asked over the account; every hit is then judged by the caller's REACH — after the await (`stillSees`) —
    * exactly like a local hit: one outside it is never shown. `truncated` speaks of the visible hits only (the agent's
    * own limit), never of the vendor's page or its token (V2). Snippets through the belt. Lane channels-search-says-hidden:
-   * a hit in a STORED conversation it may not read is answered as EXISTENCE only (`hiddenMatch`); `said` words what the
-   * vendor added beyond the `saved` hits the CLI printed first (its own plain search).
+   * a hit in a STORED conversation it may not read is answered as EXISTENCE only (`hiddenMatch`); `saidKind` names which
+   * answer the CLI words (what the vendor added beyond the `saved` hits the CLI printed first) — the server sends no query.
    */
   const agentHitAt = new Map();   // `${ctx.id}\0${adapter}\0${conv}\0${msg}` → the hit's instant (the `--around` read's)
   async function searchFullFor(ctx, query, { adapterId = null, limit = 50, saved = null } = {}) {
@@ -560,8 +560,8 @@ function create(engineCtx) {
       if (results.length >= limit) break;
     }
     const adds = searchRowOf(registry.capsOf(rec.kind)).adds;
-    const said = SR.searchAnswer({ hitsSeen: results.length, hiddenMatch: hid, adds, saved, q: query });
-    return { ok: true, results, truncated: results.length >= limit, full: true, adapterId: rec.id, adds, hiddenMatch: hid, said, memoScope: scope, ...(r.memo ? { remembered: { ageSec: Math.floor(r.memo.ageMs / 1000) } } : {}) };   // F2: the CLI words its line by the row; `memoScope` = the card row's key (the route keeps it off the answer)
+    const saidKind = SR.searchSaidKind({ hitsSeen: results.length, hiddenMatch: hid, adds, saved });   // lane search-no-group-log: a KEY, never the caller's query
+    return { ok: true, results, truncated: results.length >= limit, full: true, adapterId: rec.id, adds, hiddenMatch: hid, saidKind, memoScope: scope, ...(r.memo ? { remembered: { ageSec: Math.floor(r.memo.ageMs / 1000) } } : {}) };   // F2: the CLI words its line by the row; `memoScope` = the card row's key (the route keeps it off the answer)
   }
   /** THE AGENT'S `read <conv> --around <msg>` (design 010): reach first (the uniform not-found), the message's instant
    *  from the log (a stored one) or from this agent's own `--full` answer, the agents' share, ONE `around` read (two

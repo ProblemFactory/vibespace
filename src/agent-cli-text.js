@@ -159,4 +159,32 @@ function oneText({ tool, what, positional, strays, after = null, detail = false,
   return t.error ? { error: `${tool}: refused — ${t.error}` } : t;
 }
 
-module.exports = { STRAY_EXIT, chars, trimOnce, takeDoors, readDoor, textOf, positionals, strayRefusal, sentLine, oneText };
+// ── THE AGENT CHANNEL SEARCH ANSWER'S WORDS (lane search-no-group-log, a gate red 2026-10-21) ─────────────────────────
+// The agent search door answers FACTS and a `saidKind` KEY (src/channel-search.js SR.searchSaidKind), never the caller's
+// typed query — so a cleared record's word can never ride back in the answer (test-record-clear-walk). The CLI words the
+// key HERE with its OWN local `q` (its argv): the same sentences the server used to send. ONE place, rendered CLI-side
+// (src/channel-search.js re-exports searchSaid / HIDDEN_TEXT / SHARE_DOOR; its PURE searchAnswer = searchSaid(kind, f)).
+const SEARCH_SHARE_DOOR = "Channels › the conversation's ⋯ or the account's ⋯ → Grant access…";
+/** THE ONE SENTENCE for hits the caller may not read — the same bytes whatever matched, however much, wherever. */
+const SEARCH_HIDDEN_TEXT = `matches exist that you cannot read — ask the user to share them with you (${SEARCH_SHARE_DOOR}).`;
+/**
+ * THE WORDS of an agent's search, from the server's `saidKind` KEY + the caller's OWN `q` (never the server's) →
+ * `[line…]`, printed after the rows it may read. `hiddenMatch` (a flag on the answer) appends the existence sentence —
+ * never a count, an account, a title or a word of it. `saved` = the saved hits the CLI printed first (`--full`).
+ */
+function searchSaid(kind, { q = '', saved = null, hiddenMatch = false } = {}) {
+  const words = `"${String(q)}"`;
+  const hid = hiddenMatch === true ? [SEARCH_HIDDEN_TEXT] : [];
+  switch (kind) {
+    case 'none': return [`nothing matches ${words}.`];
+    case 'none-readable': return [`nothing you can read matches ${words}.`, ...hid];
+    case 'none-not-shared': return [`nothing you can read matches ${words} — no conversation of the connected channels is shared with you (ask the user to grant access).`];
+    case 'full-added-unknown': return [`the account's own search added nothing you can read to what is saved here for ${words}.`, ...hid];
+    case 'full-added-beyond': { const n = Math.max(0, Math.floor(Number(saved) || 0)); return [`the account's own search added nothing beyond the ${n} saved ${n === 1 ? 'hit' : 'hits'} above.`, ...hid]; }
+    case 'full-none-either': return [`the account's own search found nothing you can read for ${words} either.`, ...hid];
+    case 'hits': return hid;
+    default: return hid;
+  }
+}
+
+module.exports = { STRAY_EXIT, chars, trimOnce, takeDoors, readDoor, textOf, positionals, strayRefusal, sentLine, oneText, searchSaid, SEARCH_HIDDEN_TEXT, SEARCH_SHARE_DOOR };

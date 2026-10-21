@@ -750,9 +750,10 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     // lane channels-search-says-hidden (a field miss 2026-10-21: `--full` printed only what the vendor ADDED and «found
     // nothing … not saved here» read as nothing, while the plain search listed the three stored messages): the SAVED hits
     // come first, always — `--full` prints exactly the plain search, then the account's own search's additions. The
-    // server's words (`said`) follow the rows: «nothing» only for nothing; a hit where you cannot read = that it exists
+    // lane search-no-group-log: the server answers a KEY (`saidKind`) + `hiddenMatch`, NEVER the typed query; THIS CLI
+    // words the key with its OWN `q` (TX.searchSaid, the ONE place) — «nothing» only for nothing; a hit it cannot read = exists
     const told = new Set();
-    const said = (x, old) => { if (Array.isArray(x.said)) { for (const l of x.said) if (!told.has(String(l))) { told.add(String(l)); console.log(String(l)); } } else if (old) console.log(old); };
+    const said = (x, old, saved) => { const lines = x && x.saidKind && TX && typeof TX.searchSaid === 'function' ? TX.searchSaid(x.saidKind, { q, saved, hiddenMatch: x.hiddenMatch }) : null; if (lines) { for (const l of lines) if (!told.has(String(l))) { told.add(String(l)); console.log(String(l)); } } else if (old) console.log(old); };
     const r = await call('GET', '/api/agent/channels/search?' + qs);
     const rows = r.results || [];
     for (const m of rows) console.log(`${m.key} — ${m.title}  [${when(m.at)}] ${(m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, ' ').slice(0, 200)}`);
@@ -768,7 +769,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const added = f.results || [];
     for (const m of added) console.log(`${m.key} — ${m.title}  [${when(m.at)}] (not saved here): ${String(m.text || '').replace(/\n/g, ' ').slice(0, 200)}  (id ${m.vendorId})`);
     if (added.length) console.log(`context: vibespace-channels read <conv> --around <id>  (two requests; not saved)`);
-    said(f, added.length ? null : f.adds === 'unsaved' ? `the account's own search found nothing you can see that is not saved here for "${q}".` : `the account's own search found nothing older that you can see for "${q}".`);   // F2: an older server's words by the row
+    said(f, added.length ? null : f.adds === 'unsaved' ? `the account's own search found nothing you can see that is not saved here for "${q}".` : `the account's own search found nothing older that you can see for "${q}".`, rows.length);   // the local `old` is the fallback for a server that sends no key; `saved` words «beyond the N saved hits»
     if (f.remembered) console.log(`(the account's own search answered these ${f.remembered.ageSec < 60 ? 'less than a minute' : `${Math.floor(f.remembered.ageSec / 60)} min`} ago — remembered for 10 min, not asked again)`);   // lane vendor-search-memo
     else console.log(`(asked the account's own search — one page per call within your share; narrow the words for more)`);
     return;
