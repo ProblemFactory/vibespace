@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Leaving the desktop alone — screen off, lock screen, window covered — no longer files an automatic freeze incident; only a freeze you could feel is captured.
 - If you moved the For-you button, the Vault locked chip now sits beside it, and at start the unlock dialog, the lock strip and the ⚙ mark show again.
 - Filling the second password from your browser's saved passwords no longer causes an error on the page.
+- A job that a VibeSpace older than 2.369.331 starts mid-update no longer reads its settings from the command line: it does not start, and its log says why.
 
 ## 2.369.339 — 2026-10-21
 

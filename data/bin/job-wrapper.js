@@ -28,25 +28,24 @@ if (!ctlDir) { process.stderr.write('[job-wrapper] refused: no ctl dir on argv\n
 // install → build → restart; 45 s on the owner's hub, 2026-10-20) and the server still running spawns whatever wrapper
 // is on disk — a .330 server's cron fire met .331's wrapper, was refused by name, and the agent was told of a failure
 // that never happened. A server from 2.369.333 on SAYS its protocol (`--proto=N`); an older one is known by its shape: a
-// file of the ctl dir = 2 (.331/.332), a base64 JSON spec = 1 (≤ .330: the spec on argv). Protocol 1 is READ, loudly,
-// for that window only — the old caller already put the spec on argv; no server of this tree sends one (test-jobs-engine
-// §12 M1 is RED on a server that does). COMPAT_PROTO_1 EXPIRES AT 2.369.340: test-job-model goes RED there — remove it,
-// or re-decide with evidence and move the date. A protocol this wrapper does not speak never starts the job: reason
-// update_window (exit 75), which a server from 2.369.333 on judges an interruption of its update, not a failure.
+// file of the ctl dir = 2 (.331/.332), a base64 JSON argument = 1 (≤ .330: the spec — the job's secrets — on argv). A
+// protocol this wrapper does not speak never starts the job: reason update_window (exit 75), which a server from
+// 2.369.333 on judges an interruption of its update, not a failure. PROTOCOL 1 IS NEVER READ (lane
+// job-wrapper-proto1-retire, 2026-10-21, 2.369.340 — the expiry test-job-model set at .333): the compat that read a ≤ .330
+// caller's spec off argv for the update's window was removed as scheduled — every hub of the fleet is ≥ .331. Such an
+// argument is judged by its SHAPE alone (base64 of a JSON object), never decoded, never kept, and the run ends «not
+// started», update_window; test-job-model pins the removal.
 const PROTO = 2;
-const COMPAT_PROTO_1 = true;
 const ofCtl = !!specPath && path.dirname(path.resolve(specPath)) === path.resolve(ctlDir);
-function argvSpec(a) { // the ≤ .330 caller's spec: base64 JSON carrying an argv — anything else is not one
-  try { const s = JSON.parse(Buffer.from(String(a), 'base64').toString('utf-8')); return s && typeof s === 'object' && Array.isArray(s.argv) ? s : null; } catch { return null; }
-}
 const said = /^--proto=(\d{1,6})$/.exec(protoArg || '');
-const old = !said && specPath && !ofCtl ? argvSpec(specPath) : null;
-const proto = said ? Number(said[1]) : ofCtl ? PROTO : old ? 1 : 0;
+const v1 = !said && !ofCtl && /^eyJ[A-Za-z0-9+/]*={0,2}$/.test(specPath || '') && specPath.length % 4 === 0; // `{"` in base64 — a ≤ .330 caller
+const proto = said ? Number(said[1]) : ofCtl ? PROTO : v1 ? 1 : 0;
 // the spec file is read ONCE, then unlinked — and only a file of OUR ctl dir (a path elsewhere is never read nor removed)
-let spec = null, refusal = '', windowEnd = false, warning = '';
+let spec = null, refusal = '', windowEnd = false;
 if (protoArg !== undefined && !said) { refusal = 'the protocol argument is unreadable'; if (ofCtl) { try { fs.unlinkSync(specPath); } catch { } } }
-else if (proto === 1 && old && COMPAT_PROTO_1) { spec = old; warning = '[job-wrapper] warning: started by an older server during an update — the spec rode argv once (protocol 1); restart the server if this line repeats\n'; }
-else if (proto && proto !== PROTO) { // never read: the spec file of another protocol is removed unread (it holds the job's secrets)
+else if (v1) { // nothing read, nothing removed: the argument is no file, and its bytes are the job's secrets
+  windowEnd = true; refusal = `the server spoke protocol 1 (a server older than 2.369.331) — this wrapper speaks ${PROTO}; an update in flight, or a server not restarted after one`;
+} else if (proto && proto !== PROTO) { // never read: the spec file of another protocol is removed unread (it holds the job's secrets)
   windowEnd = true; refusal = `the server speaks protocol ${proto}, this wrapper ${PROTO} (an update in flight, or a server not restarted after one)`;
   if (ofCtl) { try { fs.unlinkSync(specPath); } catch { } }
 } else if (!ofCtl) refusal = 'the spec path names no file of the ctl dir';
@@ -105,7 +104,6 @@ function writeLog(buf) {
     fs.writeSync(logFd, buf); logSize += buf.length;
   } catch { }
 }
-if (warning) writeLog(Buffer.from(warning, 'utf8')); // the job's log says how it was started, before the job's own first line
 
 // lane agent-output-sinks (design q-043 D3 ③): a secret an agent's job prints never lands in the log in the clear —
 // every chunk passes the SHAPE census (src/secret-shapes.js R1–R8: a bearer, a known prefix, a PEM block, a JWT, a

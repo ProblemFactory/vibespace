@@ -120,6 +120,26 @@ This file is the engineers' record of every release: the lanes, the verification
   - test-incident-recorder (new, fast).
   - test-csp-report ⑨: the map in public/ answers 404 on every spelling; MUTANT: the guard cut serves it.
 
+### lane job-wrapper-proto1-retire — the job wrapper's protocol-1 compat is removed as scheduled: a ≤ .330 server's spec on the command line is never read again (the expiry test-job-model set at .333 — lane job-wrapper-update-window, agent feedback fb-7f7be1e24e; base 609993e2 = int340 on the 2.369.339 cut)
+- **What was due.** .333 kept a second door in data/bin/job-wrapper.js. A ≤ .330 server put the job's spec — argv, cwd and env, the job's secrets — on the wrapper's command line as base64 JSON (protocol 1), and the wrapper READ it, loudly, for an update's window (`COMPAT_PROTO_1` + `argvSpec()` + a warning line). Its expiry was 2.369.340: test-job-model went RED there while the flag was live, which int340's scratch .340 bump showed.
+- **Why retire rather than move the date.** Every hub of the fleet is ≥ .331 (主开发's reading for this lane; the owner's 18 instances were measured ≥ .318 on 2026-10-15 and update through the product). A ≤ .330 server spawning a .340 wrapper is a hub that skipped nine releases in the middle of an update.
+- **The wrapper.** COMPAT_PROTO_1, argvSpec and the warning line are gone.
+  - An argument that is no file of the ctl dir, with no `--proto=`, is judged by its SHAPE only: base64 of a JSON object (`eyJ…`, a length that is a multiple of 4) = a ≤ .330 caller.
+  - That run ends «[job-wrapper] not started: the server spoke protocol 1 (a server older than 2.369.331) — this wrapper speaks 2; an update in flight, or a server not restarted after one»: exit 75, exit.json reason update_window with proto {server 1, wrapper 2}. That is the road a protocol-3 spec takes.
+  - The argument is never decoded, never echoed and never written; the ctl dir holds only the run's pid.json, exit.json and current.log.
+  - Any other shape keeps «the spec path names no file of the ctl dir» (exit 2).
+- **Who judges that end — measured with the REAL 2.369.330 engine (a scratch worktree at the .330 release) over this wrapper.**
+  - Its 5 s sweep usually runs before its restart in a 45 s window. That engine predates update_window: it reads exit 75 as an error and files the run failed — «failed exit=75 error» to the agent, «Task …: failed (error)» to For you. That is fb-7f7be1e24e's false failure, now worded «not started … an update in flight» in the job's log. A cron child's next fire runs it.
+  - When the restart comes first, this tree's engine judges the exit.json at boot: update_window (the run started before its boot), interrupted, no failure notice, and the one-shot task runs again (update-rerun → done, exit 0).
+  - The .333 essay listed this residual («its old server says failed (once)»). An old server cannot be taught; the false failure stays possible only on a hub that skipped nine releases, and the fleet has none.
+- **Tests.**
+  - test-job-model: the expiry row is now the PIN of the removal — the wrapper's code holds no COMPAT_PROTO_1, no argvSpec, no base64 decode and no atob (its header records the removal in words). CONTROL: the ≤ .339 compat patched back whole, the flag alone, and one decode in the branch are each RED.
+  - test-jobs-engine §12: the .330 call on the REAL wrapper, with a canary in the spec's env, gets exit 75, update_window (1 → 2). Its stderr and log are exactly the named line. No byte of the spec (the canary, its name, any 16 chars of the argument) is on stderr or in the ctl dir. NEGATIVE CONTROL: the read patched back in runs the job with the canary.
+  - test-jobs-engine §12 M1 (the spec on argv again) now ends «not started» too. Its cmdline rows read the wrapper's own /proc/self through the front script, because the wrapper is gone by then.
+  - test-agent-output-sinks §3: the .330 call is not run, and no word of the job reaches the log.
+  - The new tests over the base wrapper are RED at each of those rows.
+- Gates: the fast gate on a scratch copy bumped to .340 (never committed: package.json, package-lock.json, src/agentd/version.js and release/agentd/manifest.json stay .339) + test-job-model ×3, test-jobs-engine, test-agent-output-sinks, test-jobs-browser, test-record-clear-census and test-architecture (the lane report has the counts). No version bump — integrated, signed and cut by 主开发.
+
 ## 2.369.339 — 2026-10-21
 
 ### lane werift-lite-multihomed — a desktop stream stayed black once the viewer's browser was allowed the microphone on a multi-homed computer: werift wrote a=ice-lite where no browser reads it, and kept its FIRST nomination for good (backlog B-c7d7, found by lane stream-mic-road 2026-10-21; base c1aba74c = 2.369.337)

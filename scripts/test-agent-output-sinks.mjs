@@ -188,12 +188,13 @@ console.log('§3 the JOB LOG — the real job-wrapper masks a fake child’s out
   ok(!leaks(real.log, 'token=' + KVMAT), 'a whole-chunk shape in the child output is masked in the job log');
   ok(leaks(real.log, '«redacted»'), 'the job log shows «redacted» where the secret was');
   // CONTROL — a refused run (a spec path outside the ctl dir): refused BY NAME, and the RAN check is red on it. The base's
-  // call (the spec base64 on argv) RUNS since lane job-wrapper-update-window — the wrapper reads a ≤ .330 server's spec
-  // once, loudly (an update's window) — and that run is masked the same way: the row after.
+  // call (the spec base64 on argv — a ≤ .330 server's) is NEVER RUN since lane job-wrapper-proto1-retire (2.369.340: the
+  // protocol-1 compat lane job-wrapper-update-window kept for an update's window is gone): «not started», and the job's
+  // words never reach the log — the row after.
   const old = runWrapper(wrapper, 'outside', { outside: true });
   ok(old.log.includes('[job-wrapper] refused: the spec path names no file of the ctl dir') && !ran(old.log), 'CONTROL: a spec path outside the ctl dir is refused by name — the RAN check is red on it, so the leg can no longer pass on a refusal');
   const v330 = runWrapper(wrapper, 'argv', { onArgv: true });
-  ok(ran(v330.log) && v330.log.startsWith('[job-wrapper] warning: started by an older server during an update') && !leaks(v330.log, 'token=' + KVMAT) && leaks(v330.log, '«redacted»'), 'a .330 server’s call (the spec base64 on argv — an update’s window) RUNS, says so first, and its log is masked the same way');
+  ok(!ran(v330.log) && v330.log.startsWith('[job-wrapper] not started: the server spoke protocol 1 (a server older than 2.369.331)') && !leaks(v330.log, KVMAT), 'a .330 server’s call (the spec base64 on argv — an update’s window) is NOT run: the log says «not started» by name, and no word of the job (nor its secret) reaches it');
   // MUTANT 3 — the wrapper's maskChunk returns the raw chunk (its shape census still required from this tree): the log LEAKS
   const W0 = fs.readFileSync(wrapper, 'utf8');
   const REQ = "require(path.join(__dirname, '..', '..', 'src', 'secret-shapes.js'))", RET = "return out === text ? buf : Buffer.from(out, 'utf8');";

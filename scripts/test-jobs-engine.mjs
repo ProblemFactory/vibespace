@@ -544,6 +544,7 @@ const t0 = Date.now(); setInterval(() => { if (fs.existsSync(process.argv[3])) p
     const FRONT = `const fs = require('fs'), path = require('path'), rec = {};
 try { const st = fs.lstatSync(process.argv[3]); rec.spec = { mode: st.mode & 0o777, file: st.isFile(), nlink: st.nlink }; } catch (e) { rec.spec = { err: e.code }; }
 try { rec.ctlMode = fs.statSync(process.argv[2]).mode & 0o777; } catch (e) { rec.ctlMode = e.code; }
+try { rec.cmdline = fs.readFileSync('/proc/self/cmdline').toString('base64'); rec.environ = fs.readFileSync('/proc/self/environ').toString('base64'); } catch { }
 fs.writeFileSync(path.join(process.argv[2], 'front.json'), JSON.stringify(rec));
 require('./job-wrapper.real.js');
 `;
@@ -573,12 +574,13 @@ setInterval(() => { }, 1000);
         const o = JSON.parse(fs.readFileSync(out, 'utf8'));
         if (!o.id) { f.error = o.error || 'no job'; return f; }
         Object.assign(f, o);
-        if (!(await until(() => fs.existsSync(path.join(o.ctl, 'pid.json')) && fs.existsSync(dump), 15000))) { f.error = 'the job never ran'; return f; }
+        if (!(await until(() => fs.existsSync(path.join(o.ctl, 'pid.json')) && (fs.existsSync(dump) || fs.existsSync(path.join(o.ctl, 'exit.json'))), 15000))) { f.error = 'the job never ran'; return f; }
         const stamp = JSON.parse(fs.readFileSync(path.join(o.ctl, 'pid.json'), 'utf8'));
-        f.cmdline = fs.readFileSync(`/proc/${stamp.pid}/cmdline`); // the wrapper is alive: its job waits for the release file
-        f.environ = fs.readFileSync(`/proc/${stamp.pid}/environ`);
-        f.child = JSON.parse(fs.readFileSync(dump, 'utf8'));
         try { f.front = JSON.parse(fs.readFileSync(path.join(o.ctl, 'front.json'), 'utf8')); } catch { f.front = null; }
+        const ran = fs.existsSync(dump); // else the run ended before its job (M1): the wrapper is gone — its own /proc/self, as the front script read it
+        f.cmdline = ran ? fs.readFileSync(`/proc/${stamp.pid}/cmdline`) : Buffer.from((f.front && f.front.cmdline) || '', 'base64'); // the wrapper is alive: its job waits for the release file
+        f.environ = ran ? fs.readFileSync(`/proc/${stamp.pid}/environ`) : Buffer.from((f.front && f.front.environ) || '', 'base64');
+        f.child = ran ? JSON.parse(fs.readFileSync(dump, 'utf8')) : null;
         f.ctlMode = fs.statSync(o.ctl).mode & 0o777;
         f.specLeft = fs.readdirSync(o.ctl).filter((n) => /^spec\./.test(n));
       } finally {
@@ -616,7 +618,7 @@ setInterval(() => { }, 1000);
       row('wallow', Object.keys(wenv).every((k) => allowed.has(k)) && wenv.VIBESPACE_JOB_ID === f.id, Object.keys(wenv).filter((k) => !allowed.has(k)).length + ' more names');
       row('wplant', Object.keys(PLANT).every((k) => !(k in wenv)) && !Object.values(PLANT).some((v) => f.environ.includes(v)));
       row('wsecret', !f.environ.includes(SECRET) && !f.environ.includes('jbt_'));
-      const cenv = f.child.env, planted = Object.values(PLANT).map(sha);
+      const cenv = (f.child && f.child.env) || {}, planted = Object.values(PLANT).map(sha);
       row('cplant', Object.keys(PLANT).every((k) => !(k in cenv)) && !Object.values(cenv).some((h) => planted.includes(h)));
       row('csecret', cenv.PROBE_SECRET === sha(SECRET));
       row('ctoken', !!f.tokenHash && cenv.VIBESPACE_JOB_TOKEN === f.tokenHash);
@@ -660,25 +662,35 @@ setInterval(() => { }, 1000);
     // wrapper to disk before it restarts the server, and the server still running spawns it: on the owner's hub a .330
     // server's cron fire (the spec base64 on argv) met .331's wrapper — refused by name, exit 2, a failure notice for a job
     // that never ran. The wrapper by hand as each server generation calls it; the job exits 3 — its OWN code.
-    function byHand(tag, wrapperSrc, argsOf) {
+    function byHand(tag, wrapperSrc, argsOf, canary = '') {
       const D = path.join(sdir, 'proto-' + tag), ctl = path.join(D, 'ctl'), mark = path.join(D, 'ran');
       fs.mkdirSync(ctl, { recursive: true, mode: 0o700 });
       const wrapper = path.join(D, 'job-wrapper.js'); fs.writeFileSync(wrapper, wrapperSrc);
-      const spec = { argv: [process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(mark)}, ''); console.log('the job ran'); process.exit(3)`], cwd: D, env: { PATH: process.env.PATH } };
+      const spec = { argv: [process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(mark)}, process.env.PROBE_SECRET || ''); console.log('the job ran'); process.exit(3)`], cwd: D, env: { PATH: process.env.PATH, ...(canary ? { PROBE_SECRET: canary } : {}) } };
       const file = () => { const p = path.join(ctl, 'spec.1.json'); fs.writeFileSync(p, JSON.stringify(spec), { mode: 0o600 }); return p; };
       const b64 = () => Buffer.from(JSON.stringify(spec)).toString('base64'); // the .330 server's own call: src/jobs.js before lane job-spec-off-argv
       const r = spawnSync(process.execPath, [wrapper, ctl, ...argsOf({ file, b64 })], { env: { PATH: process.env.PATH }, encoding: 'utf8', timeout: 15000 });
       const read = (p, j) => { try { const t = fs.readFileSync(p, 'utf8'); return j ? JSON.parse(t) : t; } catch { return j ? null : ''; } };
-      return { status: r.status, log: read(path.join(ctl, 'current.log')), exit: read(path.join(ctl, 'exit.json'), true), ran: fs.existsSync(mark), specLeft: fs.readdirSync(ctl).filter((n) => /^spec\./.test(n)).length };
+      return { status: r.status, stderr: r.stderr || '', log: read(path.join(ctl, 'current.log')), exit: read(path.join(ctl, 'exit.json'), true), ran: fs.existsSync(mark), jobSaw: read(mark), specLeft: fs.readdirSync(ctl).filter((n) => /^spec\./.test(n)).length,
+        b64: b64(), files: fs.readdirSync(ctl).sort().map((n) => [n, fs.readFileSync(path.join(ctl, n), 'latin1')]) };
     }
-    const WARN = /^\[job-wrapper\] warning: started by an older server during an update — the spec rode argv once \(protocol 1\)/;
     const pNew = byHand('new', WRAP, ({ file }) => [file(), '--proto=' + WRAPPER_PROTO]);
     ok(pNew.ran && pNew.status === 3 && pNew.exit && pNew.exit.code === 3 && !/warning/.test(pNew.log) && !pNew.specLeft, `protocol: THIS server's call (a spec file + --proto=${WRAPPER_PROTO}) runs the job; its exit is the job's (3)`, JSON.stringify(pNew));
     const p331 = byHand('331', WRAP, ({ file }) => [file()]);
     ok(p331.ran && p331.status === 3 && p331.exit && p331.exit.code === 3 && !/warning/.test(p331.log), 'protocol: a .331/.332 server\'s call (a spec file, no protocol said) runs the job — known by its shape', JSON.stringify(p331));
-    const p330 = byHand('330', WRAP, ({ b64 }) => [b64()]);
-    ok(p330.ran && p330.status === 3 && p330.exit && p330.exit.code === 3 && !p330.exit.reason, 'protocol: a .330 server\'s call (the spec base64 on argv — the update window of fb-7f7be1e24e) RUNS the job; the run\'s exit is the CHILD\'s (3), never the wrapper\'s refusal', JSON.stringify({ status: p330.status, exit: p330.exit, ran: p330.ran }));
-    ok(WARN.test(p330.log) && p330.log.split('\n')[1] === 'the job ran', 'protocol: …loudly — the job\'s log OPENS with the named warning line, the job\'s own output follows', JSON.stringify(p330.log.slice(0, 200)));
+    // lane job-wrapper-proto1-retire (2.369.340 — the expiry test-job-model set): PROTOCOL 1 IS NEVER READ. A ≤ .330
+    // server's call (the spec base64 on argv) meets this wrapper only on a hub that skipped nine releases mid-update: the
+    // run ends «not started» (exit 75, update_window — the road of any protocol this wrapper does not speak), the argument
+    // judged by its SHAPE alone — never decoded, never echoed, never written. Its spec's env carries a planted canary.
+    const CANARY = 'canary-' + rnd();
+    const LINE330 = `[job-wrapper] not started: the server spoke protocol 1 (a server older than 2.369.331) — this wrapper speaks ${WRAPPER_PROTO}; an update in flight, or a server not restarted after one\n`;
+    const notStarted = (p) => !p.ran && p.status === 75 && !!p.exit && p.exit.code === 75 && p.exit.reason === 'update_window' && !!p.exit.proto && p.exit.proto.server === 1 && p.exit.proto.wrapper === WRAPPER_PROTO;
+    const specBytes = (p, t) => t.includes(CANARY) || t.includes('PROBE_SECRET') || [...Array(Math.max(0, p.b64.length - 15)).keys()].some((i) => t.includes(p.b64.slice(i, i + 16))); // the canary, its name, or any 16 chars of the argument
+    const quiet = (p) => p.stderr === LINE330 && p.log === LINE330 && !specBytes(p, p.stderr) && JSON.stringify(p.files.map(([n]) => n)) === '["current.log","exit.json","pid.json"]' && !p.files.some(([, t]) => specBytes(p, t));
+    const p330 = byHand('330', WRAP, ({ b64 }) => [b64()], CANARY);
+    console.log(`    a .330 call (node <wrapper> <ctl> <${p330.b64.length} base64 chars>, a canary in its env) — stderr: ${JSON.stringify(p330.stderr)}; the ctl dir: ${p330.files.map(([n]) => n).join(' ')}`);
+    ok(notStarted(p330), `protocol: a .330 server's call (the spec base64 on argv) never starts the job — exit 75, exit.json reason update_window (server 1, wrapper ${WRAPPER_PROTO}): the road of any protocol this wrapper does not speak`, JSON.stringify({ status: p330.status, exit: p330.exit, ran: p330.ran }));
+    ok(quiet(p330), 'protocol: …said by name, the spec never read — stderr and the job\'s log are exactly «not started: the server spoke protocol 1 …», no byte of the spec (the canary, its name, any 16 chars of the argument) on stderr or in the ctl dir, which holds only the run\'s pid.json, exit.json and current.log', JSON.stringify({ stderr: p330.stderr, files: p330.files.map(([n, t]) => [n, t.slice(0, 80)]) }));
     const pFut = byHand('future', WRAP, ({ file }) => [file(), '--proto=' + (WRAPPER_PROTO + 1)]);
     ok(!pFut.ran && pFut.status === 75 && pFut.exit && pFut.exit.reason === 'update_window' && pFut.exit.code === 75 && pFut.exit.proto && pFut.exit.proto.server === WRAPPER_PROTO + 1 && pFut.exit.proto.wrapper === WRAPPER_PROTO && /^\[job-wrapper\] not started: the server speaks protocol \d+, this wrapper \d+/.test(pFut.log) && !pFut.specLeft,
       'protocol: a protocol this wrapper does not speak never starts the job — exit.json says update_window (exit 75, both protocols), the named line, the spec file removed UNREAD', JSON.stringify({ status: pFut.status, exit: pFut.exit, ran: pFut.ran, specLeft: pFut.specLeft }));
@@ -686,10 +698,11 @@ setInterval(() => { }, 1000);
     ok(!pBad.ran && pBad.status === 2 && /refused: the protocol argument is unreadable/.test(pBad.log) && !pBad.specLeft, 'protocol: an unreadable protocol argument is refused by name — the spec file removed unread', JSON.stringify(pBad));
     const protoOf = (/^const PROTO = (\d+);$/m.exec(WRAP) || [])[1];
     ok(Number(protoOf) === WRAPPER_PROTO, `protocol: the server's WRAPPER_PROTO (${WRAPPER_PROTO}) is the wrapper's own PROTO (${protoOf}) — the pair moves together`);
-    // the CONTROL: the wrapper without its compat (the base's behaviour) — the .330 call is NOT run: the leg above sees the difference
-    const COMPAT = 'else if (proto === 1 && old && COMPAT_PROTO_1) {';
-    const pNo = byHand('no-compat', swap(WRAP, COMPAT, 'else if (false) {'), ({ b64 }) => [b64()]);
-    ok(!pNo.ran && pNo.status !== 3 && !(pNo.exit && pNo.exit.code === 3), 'NEGATIVE CONTROL: the wrapper WITHOUT its protocol-1 compat ⇒ the .330 call never runs the job (the update window\'s false failure) — the leg above is RED on it', JSON.stringify({ status: pNo.status, exit: pNo.exit, ran: pNo.ran }));
+    // the CONTROL: the protocol-1 read patched back in (the ≤ .339 compat: the argument decoded into the spec) — the .330
+    // call RUNS, the canary reaches the job: both legs above are RED on it
+    const V1 = 'else if (v1) { // nothing read, nothing removed: the argument is no file, and its bytes are the job\'s secrets';
+    const pOld = byHand('compat-back', swap(WRAP, V1, "else if (v1) { spec = JSON.parse(Buffer.from(specPath, 'base64').toString('utf-8')); } else if (false) {"), ({ b64 }) => [b64()], CANARY);
+    ok(pOld.ran && pOld.status === 3 && pOld.jobSaw === CANARY && !notStarted(pOld) && !quiet(pOld), 'NEGATIVE CONTROL: the protocol-1 read patched back in ⇒ the .330 call RUNS the job (exit 3) with the canary from the command line — both legs above are RED on it', JSON.stringify({ status: pOld.status, exit: pOld.exit, ran: pOld.ran }));
 
     // O_EXCL: a name already at the next run's spec path (here a planted link) refuses the start — never written through
     // (an open that followed it would write the job's token into whatever it names), never removed. The engine in-process,
@@ -721,14 +734,15 @@ setInterval(() => { }, 1000);
     const MC = mutantCopies('jobs-spec', ROOT);
     const reds = (rows) => rows.filter((r) => !r.good).map((r) => r.k);
     // M1 — the spec rides argv again (the pre-fix transport, the .330 server's very call): the engine passes it base64 and
-    // the REAL wrapper runs it (its protocol-1 compat READS an old caller — lane job-wrapper-update-window); the cmdline
-    // rows are RED all the same: a server of this tree never WRITES one
+    // the REAL wrapper ends the run «not started», update_window (protocol 1 is never read — lane job-wrapper-proto1-retire);
+    // the cmdline rows — the wrapper's own /proc/self, as the front script read it — are RED: a server of this tree never
+    // WRITES one
     const m1 = await measure('m1-argv', {
       jobsJs: MC.write('src/jobs.js', swap(JS, "[wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO]", "[wrapper, ctl, Buffer.from(JSON.stringify(spec)).toString('base64')]"), 'argv'),
     });
     const m1r = reds(judgeRun(m1));
     if (m1.cmdline) { const a = argsOf(m1.cmdline)[3] || ''; console.log(`    wrapper cmdline (M1): node <wrapper> <ctl> <${a.length} base64 chars> — decodes to a spec carrying ${['PROBE_SECRET', 'VIBESPACE_JOB_TOKEN'].filter((k) => Buffer.from(a, 'base64').toString('utf8').includes(k)).join(' + ')}; rows red: ${m1r.join(' ')}`); }
-    ok(['argv', 'secret', 'jbt'].every((k) => m1r.includes(k)) && !m1r.includes('exit'), 'NEGATIVE CONTROL M1: the spec on argv again (the .330 call; the real wrapper still runs it) ⇒ the cmdline rows go RED (the secret and the jbt_ token read back out of /proc/<pid>/cmdline)', m1r.join(' ') || m1.error);
+    ok(['argv', 'secret', 'jbt', 'exit'].every((k) => m1r.includes(k)) && !m1.child && !!m1.exit && m1.exit.reason === 'update_window' && m1.exit.code === 75, 'NEGATIVE CONTROL M1: the spec on argv again (the .330 call) ⇒ the cmdline rows go RED (the secret and the jbt_ token read back out of the wrapper\'s cmdline), and the real wrapper never starts the job (exit 75, update_window)', m1r.join(' ') + ' ' + JSON.stringify(m1.exit || m1.error));
     // M2 — the wrapper inherits the hub's env again (the spawn passes no env)
     const m2r = reds(judgeRun(await measure('m2-inherit', { jobsJs: MC.write('src/jobs.js', swap(JS, ", env: wrapperEnv(job.id) }", ' }'), 'inherit') })));
     ok(['wallow', 'wplant'].every((k) => m2r.includes(k)) && !m2r.includes('cplant'), 'NEGATIVE CONTROL M2: the wrapper spawned with no env ⇒ the planted tokens are in ITS /proc/<pid>/environ (the job stays clean: jobEnv strips them)', m2r.join(' '));

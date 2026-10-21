@@ -463,20 +463,26 @@ console.log('B-70f9 ② ownedJobsView — the jobs a conversation OWNS, attentio
     'G2 PIN: the view carries clearedAt, the row paints clearedText() for a cleared job, the window drops the memo on jobs-updated');
 }
 
-// lane job-wrapper-update-window (fb-7f7be1e24e): THE PROTOCOL-1 COMPAT HAS A STATED EXPIRY. data/bin/job-wrapper.js reads
-// a ≤ .330 server's spec off argv (an update's window: the new wrapper on disk, the old server still running) — a second
-// door that takes a job's secrets from a command line, kept for hubs still updating from ≤ .330. Due at 2.369.340: remove
-// it (the branch + COMPAT_PROTO_1: the old caller's run then ends «not started», update_window), or re-decide with
-// evidence and move the date here and in the wrapper's header. One incident never decides for ever.
+// lane job-wrapper-update-window (fb-7f7be1e24e) gave the job wrapper's protocol-1 compat — a ≤ .330 server's spec (the
+// job's secrets) READ off argv for an update's window, a second door — an expiry at 2.369.340, and this row went RED there.
+// Lane job-wrapper-proto1-retire (2026-10-21) removed it as scheduled: THE PIN OF THE REMOVAL. data/bin/job-wrapper.js
+// holds no COMPAT_PROTO_1 and builds no spec from argv (no argvSpec, no base64 decode, no atob): a ≤ .330 caller is
+// judged by its argument's SHAPE and the run ends «not started», update_window (test-jobs-engine §12 runs it on the real
+// file, a canary in the spec). CONTROL: the ≤ .339 compat patched back into a copy — whole, or as one decode — is RED.
 {
-  const COMPAT_DUE = '2.369.340';
-  const ver = JSON.parse(fs.readFileSync(path.join(__dirname_jm, '..', 'package.json'), 'utf8')).version;
   const wrap = fs.readFileSync(path.join(__dirname_jm, '..', 'data', 'bin', 'job-wrapper.js'), 'utf8');
-  const atLeast = (v, due) => { const a = String(v).split('.').map(Number), b = due.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== b[i]) return (a[i] || 0) > b[i]; return true; };
-  const overdue = (v, src) => atLeast(v, COMPAT_DUE) && /^const COMPAT_PROTO_1 = true;$/m.test(src);
-  ok(!overdue(ver, wrap), `the job wrapper's protocol-1 compat (a ≤ .330 server's spec on argv) is due to go at ${COMPAT_DUE} — this tree is ${ver}: remove it from data/bin/job-wrapper.js, or re-decide with evidence and move the date (here + the wrapper's header)`);
-  const live = 'const COMPAT_PROTO_1 = true;';
-  ok(overdue('2.369.340', live) && overdue('2.370.0', live) && !overdue('2.369.339', live) && !overdue('2.369.340', 'const COMPAT_PROTO_1 = false;'), 'CONTROL: the expiry row is RED from 2.369.340 on while the compat is live, green before it and once it is gone');
+  const code = (src) => src.split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '').replace(/\s\/\/ .*$/, '')).join('\n'); // comments out: the header RECORDS the removal
+  const removed = (src) => !/\bCOMPAT_PROTO_1\b|\bargvSpec\b|\batob\(|Buffer\.from\([^\n]*?['"]base64['"]\)/.test(code(src));
+  ok(removed(wrap), 'the job wrapper reads no protocol-1 spec — no COMPAT_PROTO_1, no argvSpec, no base64 decode of an argument (removed at 2.369.340 as scheduled; a ≤ .330 call ends «not started», update_window)');
+  const AT = 'const PROTO = 2;\n';
+  const OLD = "const COMPAT_PROTO_1 = true;\nfunction argvSpec(a) { // the ≤ .330 caller's spec: base64 JSON carrying an argv — anything else is not one\n  try { const s = JSON.parse(Buffer.from(String(a), 'base64').toString('utf-8')); return s && typeof s === 'object' && Array.isArray(s.argv) ? s : null; } catch { return null; }\n}\n";
+  const V1 = 'else if (v1) {';
+  const plants = [
+    ['the ≤ .339 compat whole (COMPAT_PROTO_1 + argvSpec)', wrap.split(AT).length === 2 ? wrap.replace(AT, AT + OLD) : ''],
+    ['the flag alone', wrap.split(AT).length === 2 ? wrap.replace(AT, AT + 'const COMPAT_PROTO_1 = true;\n') : ''],
+    ['one decode of the argument in the protocol-1 branch', wrap.split(V1).length === 2 ? wrap.replace(V1, "else if (v1) { spec = JSON.parse(Buffer.from(specPath, 'base64').toString('utf-8')); } else if (false) {") : ''],
+  ];
+  ok(plants.every(([, src]) => src && src !== wrap && !removed(src)), `CONTROL: each patched copy is RED — ${plants.map(([n, src]) => `${n}: ${!src ? 'ANCHOR GONE' : removed(src) ? 'GREEN (WRONG)' : 'red'}`).join('; ')}`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

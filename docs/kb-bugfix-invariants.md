@@ -1000,7 +1000,7 @@ The job engine (src/jobs.js `_spawn`) started each run as `node data/bin/job-wra
 2. Protocol 1 is read, loudly:
    - The job runs; its log opens with «[job-wrapper] warning: started by an older server during an update — …»; the exit is the child's.
    - Only an old caller sends this. No server of this tree does: §12 M1 is RED on one that does. The compat reads; it never writes.
-   - It expires at .340: test-job-model goes RED there.
+   - It expires at .340: test-job-model goes RED there. Retired at .340 as scheduled (lane job-wrapper-proto1-retire, 2026-10-21): the compat is gone, and a ≤ .330 call is judged by its argument's shape, never read, and ends «not started», update_window.
 3. A protocol the wrapper does not speak never starts the job. exit.json carries reason update_window (exit 75), and the spec file is removed unread.
 4. A server from .333 on judges that end. It is a WINDOW when an older server generation started the run, or the wrapper changed on disk after this server booted and less than 15 min ago. Then:
    - a task is interrupted (cause update_window), with no failure notice and no user inbox;
