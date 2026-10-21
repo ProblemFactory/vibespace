@@ -1306,7 +1306,7 @@ export function installSidebarMounts(Sidebar) {
         note.className = 'agents-note';
         note.textContent = tr('Stored securely on the server. If the key is passphrase-protected, enter the passphrase below — it unlocks the key once and is never saved.');
 
-        const ta = document.createElement('textarea');
+        const ta = document.createElement('textarea'); ta.dataset.noDictation = '1'; // a private key: never a dictation's context (lane voice-follows-focus)
         ta.id = 'mounts-key-paste';
         ta.placeholder = '-----BEGIN OPENSSH PRIVATE KEY-----';
         ta.style.cssText = 'min-height:130px;font-size:10px;font-family:monospace';
@@ -1926,7 +1926,7 @@ export function installSidebarMounts(Sidebar) {
       const hint = document.createElement('div');
       hint.className = 'mounts-field-hint';
       hint.textContent = tr('Paste the contents of your rclone.conf (from `rclone config file` — usually ~/.config/rclone/rclone.conf). Every remote inside it becomes a mount you can pick.');
-      const ta = document.createElement('textarea');
+      const ta = document.createElement('textarea'); ta.dataset.noDictation = '1'; // an rclone.conf holds tokens: never a dictation's context (lane voice-follows-focus)
       ta.placeholder = '[gdrive]\ntype = drive\ntoken = {…}\n\n[b2]\ntype = b2\naccount = …\nkey = …';
       ta.style.minHeight = '120px'; ta.style.fontSize = '11px'; ta.style.fontFamily = 'monospace';
       const parseBtn = document.createElement('button');

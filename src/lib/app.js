@@ -75,7 +75,7 @@ import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27
 import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
 import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, effortOptions, noteModelCatalog, worktreeCapsFor, backendFeatureCaps, billingRow, terminalOnly, accountDefaultsOf } from './agent-meta.js';
 import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
-import { noteVoicePlugins } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off)
+import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off); lane voice-follows-focus: dictation follows the focus
 import { enterSubmits } from './chat-enter-keys.js';
 import { initVault, maybeNagVault, unlockFirst } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
 
@@ -454,6 +454,7 @@ class App {
     // (opencode → 'opencode-serve'): enable/disable/"asked once" are instance
     // state, so every client learns them from the same broadcast (multi-client
     // law) and the sidebar's "history is hidden" row follows.
+    followFocus(); // lane voice-follows-focus (the owner: 「编辑或者拒绝 Agent 要发的消息」 had no Dropline): ANY text field the person focuses gets the microphone — ONE document focusin, the PURE predicate src/voice-focus.js decides
     this.ws.onGlobal((msg) => {
       if (msg.type === 'plugins-updated') noteVoicePlugins(msg.plugins); // voice input off / no Dropline ⇒ no microphone on any box
       if (msg.type !== 'plugins-updated' || !msg.services) return;

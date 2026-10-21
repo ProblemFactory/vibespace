@@ -19,9 +19,14 @@
 // 没法改变"能做什么"」): 编辑… on every key changes its verbs (the mint's checkboxes) and — while 开一个对话 is ticked — its
 // limits, through the mint's own rules (POST …/keys/:id/edit); the folders offer 「所有路径」 (exactly `['/']`, red-tinted)
 // or 「只有这些文件夹（含子文件夹）」 (the browser), and every folder says it covers its subfolders.
+// Lane vault-key-row-compact (the owner 2026-10-21 05:4xZ: 「授权很多的时候，这个界面需要优化一下」 — two grants already made the row
+// a wall of text): the row is a HEAD + folds, bounded. The head's chips COUNT — 「N 个动作」 (the verbs open as a popover grouped
+// by family, 编辑… beside) and 「授权给 N 个」 (the grants open IN PLACE as a bounded list: about five rows, the rest scroll, a
+// filter past eight, ended conversations dim with ONE 清理已结束的授权 — remembered per key for this page); the limits are ONE
+// line of words where an unrestricted set says 任何 and more than three picks say 「N 种」 (the names in its title).
 import { t } from './i18n.js';
-import { fetchJson, showToast, showConfirmDialog, createModalShell } from './utils.js';
-import { SCOPES, ALL_PATHS } from '../automation-keys.js'; // PURE: the closed table of verbs (their words); `/` = 「所有路径」
+import { fetchJson, showToast, showConfirmDialog, createModalShell, createPopover } from './utils.js';
+import { SCOPES, ALL_PATHS, limitSetView, verbFamilies, grantOrder } from '../automation-keys.js'; // PURE: the closed table of verbs (their words); `/` = 「所有路径」; lane vault-key-row-compact: a limit's set in words, the verbs' families, the grants' order
 import { BACKEND_META } from './agent-meta.js';
 import { enterSubmits } from './chat-enter-keys.js'; // an Enter that ends an IME composition never submits
 import { REACH_CHOICES, reachWord, reachTitle, kindOf, groupsOf } from './automation-reach.js'; // lane key-instance-scope: ONE spelling of the reach's words
@@ -63,15 +68,27 @@ const choiceWord = (r) => (r.value === 'default' ? t("The CLI's own setting") : 
 const modeWord = (mode, ch) => { if (mode === 'default') return t('its built-in default'); const r = choiceRows((ch && ch.permissionModes) || [], []).find((x) => x.value === mode); return r ? t(r.label) : mode; };
 const pickWord = (r, now, ch) => (r.value !== 'default' ? t(r.label) : now && now.mode ? t("The CLI's own setting (now {mode})", { mode: modeWord(now.mode, ch) }) : t("The CLI's own setting"));
 const nowTitle = (now) => (now.layer && now.layer.file ? t('Set in {file}', { file: now.layer.file }) : t('No settings file sets a permission mode — the CLI runs its built-in default'));
-/** A key's limits in words (the row's line), one part per field — names only: folders, account names, the table's words. */
+/** A key's limits in words (the row's ONE line), one part per field — names only: folders, account names, the table's
+ *  words. Lane vault-key-row-compact: a set equal to everything the tables offer now says 任何 (PURE limitSetView — its
+ *  names in the title), more than three picks say 「N 种」 (the names in the title); never the full enumeration. → [<span>]. */
 function limitsParts(limits, data) {
   const ch = (data && data.limitChoices) || {};
-  const list = (v, word) => (v === 'any' ? t('any') : Array.isArray(v) && v.length ? v.map(word).join(', ') : t('none'));
   const acct = (id) => (id === SUBSCRIPTION ? t("The CLI's own login") : ((ch.accounts || []).find((a) => a.id === id) || {}).name || id);
   const perm = (v) => { const r = choiceRows(ch.permissionModes, [v]).find((x) => x.value === v); return r ? choiceWord(r) : v; };
+  const tables = { accounts: [SUBSCRIPTION, ...(ch.accounts || []).map((a) => a.id)], permissionModes: choiceRows(ch.permissionModes, []).map((r) => r.value), models: choiceRows(ch.models, []).map((r) => r.value) };
+  const part = (field, label, v, table, word) => {
+    const w = limitSetView(v, table);
+    const names = w.names.map(word);
+    const span = el('span', 'vw-ak-lim', `${label}: ${w.any ? t('any') : w.count ? t('{n} kinds', { n: w.n }) : names.join(', ') || t('none')}`);
+    span.dataset.field = field;
+    if ((w.any && names.length) || w.count) span.title = names.join(', ');
+    return span;
+  };
+  const folders = el('span', 'vw-ak-lim', `${t('Folders')}: ${folderWords(limits.cwdRoots || [])}`);
+  folders.dataset.field = 'cwdRoots';
   return [
-    `${t('Folders')}: ${folderWords(limits.cwdRoots || [])}`, `${t('Accounts')}: ${list(limits.accounts, acct)}`, `${t('Permission modes')}: ${list(limits.permissionModes, perm)}`,
-    `${t('Models')}: ${list(limits.models, (x) => (x === 'default' ? t("The CLI's own setting") : x))}`, `${t('Modes')}: ${list(limits.modes, (m) => (MODE_WORDS[m] ? MODE_WORDS[m]() : m))}`,
+    folders, part('accounts', t('Accounts'), limits.accounts, tables.accounts, acct), part('permissionModes', t('Permission modes'), limits.permissionModes, tables.permissionModes, perm),
+    part('models', t('Models'), limits.models, tables.models, (x) => (x === 'default' ? t("The CLI's own setting") : x)), part('modes', t('Modes'), limits.modes, ['chat', 'terminal'], (m) => (MODE_WORDS[m] ? MODE_WORDS[m]() : m)),
   ];
 }
 
@@ -263,6 +280,7 @@ export async function showAuditDialog(key, data) {
     if (own) { if (l.subject && l.subject !== 'owner') row.append(el('span', 'vw-ak-arg', '→ ' + subjectName(l.subject, data))); }
     else row.append(el('span', 'vw-ak-outcome', l.ok ? t('Allowed') : l.code));
     if (l.args && l.args.cwd) row.append(el('span', 'vw-ak-arg', l.args.cwd));
+    if (own && l.note) row.append(el('span', 'vw-ak-arg', l.note));   // lane vault-key-row-compact: what an owner's act changed (key.scopes) or took back (key.prune)
     list.append(row);
   }
 }
@@ -280,39 +298,151 @@ function subjectName(subject, data) {
   return String(subject).replace(/^session:/, '').replace(/^group:/, t('Task group') + ' ');
 }
 
-/** The extras an «Automation keys» row carries: the verbs, the grants (chips with ✕), last used, and its doors. */
+// lane vault-key-row-compact: the grants fold and its filter, per key, for this page — a row drawn again keeps them
+const grantsOpen = new Set();
+const grantsQuery = new Map();
+const GRANT_FILTER_PAST = 8;   // a filter box appears when a key has more grants than this
+const SVG_NS = 'http://www.w3.org/2000/svg';
+/** A 16-unit stroke glyph built node by node (a Task Group's 岗位 sheet / a conversation's bubble). */
+function glyph(shapes) {
+  const g = document.createElementNS(SVG_NS, 'svg');
+  for (const [k, v] of Object.entries({ viewBox: '0 0 16 16', width: 12, height: 12, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', class: 'vw-ak-gico' })) g.setAttribute(k, String(v));
+  for (const [tag, attrs] of shapes) { const c = document.createElementNS(SVG_NS, tag); for (const [k, v] of Object.entries(attrs)) c.setAttribute(k, String(v)); g.append(c); }
+  return g;
+}
+const GROUP_GLYPH = [['rect', { x: 2, y: 2, width: 12, height: 12, rx: 1.5 }], ['path', { d: 'M5 6h6M5 9h6M5 12h3' }]];
+const CHAT_GLYPH = [['path', { d: 'M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z' }]];
+/** A grant's name: the conversation's / the Task Group's own (the picker's live list), an ended conversation's the name the
+ *  sidebar kept (the hub sends it), else the id — a conversation's shortened to 8 characters. */
+function grantName(g, data) {
+  const all = [...((data && data.subjects && data.subjects.sessions) || []), ...((data && data.subjects && data.subjects.groups) || [])];
+  const hit = all.find((s) => s.subject === g.subject);
+  if (hit) return hit.name;
+  if (g.name) return g.name;
+  const s = String(g.subject);
+  if (s.startsWith('group:')) return `${t('Task group')} ${s.slice(6)}`;
+  const id = s.replace(/^session:/, '');
+  return id.length > 12 ? `${id.slice(0, 8)}…` : id;
+}
+/** ONE grant's row: its name (a Task Group with its 岗位 glyph, a conversation with its state), the reach chip (a click
+ *  changes it — lane key-instance-scope), ✕ (takes it back). → { node, words } (`words` = what the filter matches). */
+function grantRow(g, key, data, { refresh } = {}) {
+  const isGroup = String(g.subject).startsWith('group:');
+  const r = el('div', `vw-ak-g${g.ended ? ' vw-ak-g-ended' : ''}`);
+  r.dataset.subject = g.subject; r.setAttribute('role', 'listitem');
+  const nm = el('span', 'vw-ak-gname', g.name + (g.mode === 'once' ? ` (${t('once')}${g.spentAt ? ', ' + t('used') : ''})` : ''));
+  nm.title = isGroup ? `${t('Task group')} · ${g.name}` : g.name === String(g.subject).replace(/^session:/, '') ? g.name : `${g.name} · ${String(g.subject).replace(/^session:/, '')}`;
+  r.append(glyph(isGroup ? GROUP_GLYPH : CHAT_GLYPH), nm);
+  if (!isGroup) r.append(el('span', `vw-ak-gstate${g.ended ? ' vw-ak-gstate-ended' : ''}`, g.ended ? t('ended') : t('Live')));
+  const kind = kindOf(g.reach), ids = groupsOf(g.reach);
+  const rc = el('button', `vw-ak-reach vw-ak-reach-${kind}`, reachWord(kind));
+  rc.type = 'button'; rc.dataset.reach = kind;
+  rc.title = kind === 'instance' ? reachTitle(kind) : `${reachTitle(kind, ids.map((id) => subjectName(`group:${id}`, data)).join(', '))} — ${t('Change the reach…')}`;
+  rc.setAttribute('aria-label', `${t('Reach')}: ${reachWord(kind)}`);
+  rc.onclick = () => showReachDialog(key, g, data, { refresh });
+  const x = el('button', 'vw-ak-x', '✕');
+  x.type = 'button'; x.title = t('Take this grant back'); x.setAttribute('aria-label', x.title);
+  x.onclick = async () => { const res = await fetchJson(`/api/automation/grants/${encodeURIComponent(g.id)}`, { method: 'DELETE' }); if (!res || !res.ok) showToast(failWords(res), { type: 'error' }); refresh?.(); };
+  r.append(rc, x);
+  return { node: r, words: `${g.name} ${g.subject} ${g.ended ? t('ended') : ''}`.toLowerCase() };
+}
+/** THE GRANTS, BOUNDED (lane vault-key-row-compact): one row per grant — Task Groups, then running conversations, then ended
+ *  ones (dim, 已结束), each by name (PURE grantOrder); about five rows show and the rest SCROLL inside the row (never a 显示更多);
+ *  a filter box past eight grants; ended grants get ONE door, 清理已结束的授权, with their count beside it (POST
+ *  …/keys/:id/prune-ended — a grant to a conversation that is gone can never be used; the audit line says what went). */
+function grantsFold(key, data, { refresh } = {}) {
+  const fold = el('div', 'vw-ak-gfold');
+  fold.id = `vw-ak-gfold-${key.id}`;
+  fold.hidden = !grantsOpen.has(key.id);
+  const rows = grantOrder(key.grants.map((g) => ({ ...g, name: grantName(g, data) })));
+  const list = el('div', 'vw-ak-glist');
+  list.setAttribute('role', 'list'); list.setAttribute('aria-label', t('Granted to'));
+  const items = rows.map((g) => { const it = grantRow(g, key, data, { refresh }); list.append(it.node); return it; });
+  const none = el('div', 'vw-ak-gnone');
+  none.hidden = true;
+  if (rows.length > GRANT_FILTER_PAST) {
+    const q = el('input', 'vw-ak-gfilter');
+    q.type = 'search'; q.spellcheck = false; q.placeholder = t('Filter the grants…'); q.setAttribute('aria-label', q.placeholder);
+    const apply = () => {
+      const v = q.value.trim().toLowerCase();
+      grantsQuery.set(key.id, q.value);
+      let shown = 0;
+      for (const it of items) { it.node.hidden = !!v && !it.words.includes(v); if (!it.node.hidden) shown++; }
+      none.textContent = t('No grant matches “{q}”', { q: q.value.trim() });
+      none.hidden = shown > 0;
+    };
+    q.value = grantsQuery.get(key.id) || '';
+    q.oninput = apply;
+    fold.append(q);
+    if (q.value) apply();
+  }
+  fold.append(list, none);
+  const ended = rows.filter((g) => g.ended);
+  if (ended.length) {
+    const foot = el('div', 'vw-ak-gfoot');
+    const prune = el('button', 'vw-btn vw-ak-prune', t('Clean up ended grants'));
+    prune.type = 'button';
+    prune.title = t('Takes back every grant to a conversation that is not running — such a grant can never be used; if that conversation comes back, its next use asks you again');
+    const n = el('span', 'vw-chip vw-ak-ended-n', String(ended.length));
+    n.title = t('{n} grants to conversations that ended', { n: ended.length });
+    prune.onclick = async () => {
+      if (prune._vwBusy) return;   // a re-entry guard, never a greyed control
+      prune._vwBusy = true;
+      try {
+        const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/prune-ended`);
+        if (!r || !r.ok) { showToast(failWords(r), { type: 'error' }); return; }
+        showToast(t('Took back {n} grants to ended conversations', { n: (r.removed || []).length }));
+        refresh?.();
+      } finally { prune._vwBusy = false; }
+    };
+    foot.append(prune, n);
+    fold.append(foot);
+  }
+  return fold;
+}
+/** 「N 个动作」's popover: the key's verbs grouped by family (the closed table's own groups — PURE verbFamilies), a billed
+ *  verb says so, 编辑… beside (lane vault-key-row-compact: the run-on sentence is gone). */
+function showVerbs(anchor, key, data, { refresh } = {}) {
+  const pop = createPopover(anchor, 'vw-ak-verbs-pop');
+  if (pop._closedByAnchor) return;   // the chip pressed again: closed
+  pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', t('What it may do'));
+  for (const f of verbFamilies(key.scopes)) {
+    const sec = el('div', 'vw-ak-vfam');
+    sec.dataset.family = f.id;
+    sec.append(el('div', 'vw-ak-vfam-name', t(f.label)));
+    for (const v of f.verbs) { const s = SCOPES.find((x) => x.verb === v); sec.append(el('div', 'vw-ak-vrow', verbWord(v) + (s && s.billed ? ' ' + t('(starts a billed turn)') : ''))); }
+    pop.append(sec);
+  }
+  const edit = el('button', 'vw-btn vw-ak-vedit', t('Edit…'));
+  edit.type = 'button';
+  edit.onclick = () => { pop.remove(); showEditDialog(key, data, { refresh }); };
+  pop.append(edit);
+}
+
+/** The extras an «Automation keys» row carries (lane vault-key-row-compact — a HEAD + folds, bounded): `chips` for the row's
+ *  head (「N 个动作」 · 「授权给 N 个」), `box` under it (the limits in ONE line, the grants fold), and its doors. */
 export function automationExtras(row, data, { refresh } = {}) {
   const id = String(row.entry || '').replace(/^apikey:/, '');
   const key = ((data && data.keys) || []).find((k) => k.id === id) || null;
   const box = el('div', 'vw-ak');
   box.dataset.key = id;
-  if (!key) return { box, doors: [] };
-  box.append(el('div', 'vw-ak-scopes', key.scopes.map(verbWord).join(' · ')));
-  const grants = el('div', 'vw-ak-grants');
-  if (!key.grants.length) grants.append(el('span', 'vw-ak-none', t('Not granted to anything yet')));
+  if (!key) return { box, doors: [], chips: [] };
+  const chips = [];
+  const verbsB = el('button', 'vw-chip vw-ak-verbs-chip', key.scopes.length === 1 ? t('1 thing it may do') : t('{n} things it may do', { n: key.scopes.length }));
+  verbsB.type = 'button'; verbsB.title = t('What it may do'); verbsB.setAttribute('aria-haspopup', 'dialog');
+  verbsB.onclick = () => showVerbs(verbsB, key, data, { refresh });
+  chips.push(verbsB);
+  let fold = null;
+  if (!key.grants.length) chips.push(el('span', 'vw-ak-none', t('Not granted to anything yet')));
   else {
-    grants.append(el('span', 'vw-ak-to', t('Granted to:')));
-    for (const g of key.grants) {
-      const chip = el('span', 'vw-ak-chip');
-      chip.dataset.subject = g.subject;
-      chip.append(el('span', null, subjectName(g.subject, data) + (g.mode === 'once' ? ` (${t('once')}${g.spentAt ? ', ' + t('used') : ''})` : '')));
-      // lane key-instance-scope: the grant's REACH chip — a click changes it (整个 VibeSpace red, its title says what it means)
-      const kind = kindOf(g.reach), ids = groupsOf(g.reach);
-      const rc = el('button', `vw-ak-reach vw-ak-reach-${kind}`, reachWord(kind));
-      rc.type = 'button'; rc.dataset.reach = kind;
-      rc.title = kind === 'instance' ? reachTitle(kind) : `${reachTitle(kind, ids.map((id) => subjectName(`group:${id}`, data)).join(', '))} — ${t('Change the reach…')}`;
-      rc.setAttribute('aria-label', `${t('Reach')}: ${reachWord(kind)}`);
-      rc.onclick = () => showReachDialog(key, g, data, { refresh });
-      chip.append(rc);
-      const x = el('button', 'vw-ak-x', '✕');
-      x.type = 'button'; x.title = t('Take this grant back'); x.setAttribute('aria-label', x.title);
-      x.onclick = async () => { const r = await fetchJson(`/api/automation/grants/${encodeURIComponent(g.id)}`, { method: 'DELETE' }); if (!r || !r.ok) showToast(failWords(r), { type: 'error' }); refresh?.(); };
-      chip.append(x);
-      grants.append(chip);
-    }
+    fold = grantsFold(key, data, { refresh });
+    const ended = key.grants.filter((g) => g.ended).length;
+    const gb = el('button', `vw-chip vw-ak-grants-chip${ended ? ' vw-ak-has-ended' : ''}`, t('Granted to {n}', { n: key.grants.length }));
+    gb.type = 'button'; gb.setAttribute('aria-controls', fold.id); gb.setAttribute('aria-expanded', fold.hidden ? 'false' : 'true');
+    gb.title = ended ? t('{n} grants to conversations that ended', { n: ended }) : t('Show the grants');
+    gb.onclick = () => { const open = fold.hidden; fold.hidden = !open; if (open) grantsOpen.add(key.id); else grantsOpen.delete(key.id); gb.setAttribute('aria-expanded', open ? 'true' : 'false'); };
+    chips.push(gb);
   }
-  box.append(grants);
-  box.append(el('div', 'vw-ak-used', key.lastUsedAt ? t('Last used {when}', { when: whenText(key.lastUsedAt) }) : t('Never used')));
   // lane automation-open-limits: what the conversations it opens may use — or 「Limits not set」 on a folderless key (q-049 M1)
   const opens = key.scopes.includes(OPEN_VERB);
   if (opens) {
@@ -322,11 +452,13 @@ export function automationExtras(row, data, { refresh } = {}) {
       chip.title = t('No folders are set — every conversation it would open is refused until you set them with Edit…');
       line.append(chip);
     } else {
-      line.append(...limitsParts(key.limits, data).map((p) => el('div', 'vw-ak-lim', p)));   // one line per field (the row's column is narrow)
+      // lane vault-key-row-compact: ONE line of words (was one line per field) — 任何 for an unrestricted set, 「N 种」 past three
+      limitsParts(key.limits, data).forEach((p, i) => { if (i) line.append(el('span', 'vw-ak-sep', ' · ')); line.append(p); });
       if (key.limits.cwdRoots.includes(ALL_PATHS)) { const fl = line.firstChild; fl.classList.add('vw-ak-allpaths'); fl.title = t('Any folder on this VibeSpace, including your home'); }   // 「所有路径」 red-tinted
     }
     box.append(line);
   }
+  if (fold) box.append(fold);
   // lane key-folder-picker-all: 编辑… on EVERY key — its verbs (a verb a later release added) and, when it opens, its limits
   const editB = el('button', 'vw-btn vw-ak-edit', t('Edit…'));
   editB.type = 'button';
@@ -346,7 +478,7 @@ export function automationExtras(row, data, { refresh } = {}) {
     showToast(t('Revoked'));
     refresh?.();
   };
-  return { box, doors: [grantB, editB, auditB, revokeB] };
+  return { box, doors: [grantB, editB, auditB, revokeB], chips };
 }
 
 /** The three reach rows (radios) + the Task Groups list the groups row opens — `initial` = a stored reach (the dialog) or

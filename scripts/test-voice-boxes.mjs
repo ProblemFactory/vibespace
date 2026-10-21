@@ -6,6 +6,10 @@
 // or left out with its one-line reason (not a message box: a settings / form field, a key or config paste, a stored
 // record's field, an off-screen copy helper, a keyboard proxy…). A new textarea without a row is RED, a row whose box
 // is gone is RED (a dead row), a file whose attach calls do not match its attached rows is RED.
+// Since lane voice-follows-focus (2.369.335) this is the census of the boxes whose microphone stands IN the box, always
+// shown: a box left out here still takes dictation when it is focused — the focus follower (src/lib/voice-input.js
+// followFocus) judges every input / textarea / contenteditable by the ONE predicate (src/voice-focus.js; its census of all
+// of them is scripts/test-voice-focus.mjs).
 // + the source pins of the attach point: the mic never focuses (no .focus() in voice-input.js; pointerdown + mousedown
 //   cancelled; out of the phone's tab order), ONE implementation (one MediaRecorder, one dictate fetch), absent when
 //   off (html.voice-absent + the plugins-updated broadcast), an idle mic holds no document listener.
@@ -135,15 +139,15 @@ const pins = (src) => ({
   oneRecorder: (src.match(/new MediaRecorder\(/g) || []).length === 1 && (src.match(/fetch\('\/api\/voice\/dictate'/g) || []).length === 1,
   noFocus: !/\.focus\(/.test(src),
   pressHeld: /btn\.addEventListener\('pointerdown', hold\);/.test(src) && /btn\.addEventListener\('mousedown', hold\);/.test(src) && /const hold = \(e\) => e\.preventDefault\(\);/.test(src),
-  phoneTab: /matchMedia\('\(max-width: 768px\)'\)\.matches\) btn\.tabIndex = -1/.test(src),
+  phoneTab: /if \(followed \|\| \(window\.matchMedia && window\.matchMedia\('\(max-width: 768px\)'\)\.matches\)\) btn\.tabIndex = -1/.test(src),
   escWhileRecording: (src.match(/document\.addEventListener\('keydown', onKey, true\)/g) || []).length === 1 && /rec\.start\(250\);\n\s*document\.addEventListener\('keydown', onKey, true\)/.test(src) && /function release\(\) \{\n\s*document\.removeEventListener\('keydown', onKey, true\);/.test(src),
-  docListeners: (src.match(/document\.addEventListener\(/g) || []).length === 2,
+  docListeners: (src.match(/document\.addEventListener\(/g) || []).length === 4 && /document\.addEventListener\('visibilitychange'/.test(src) && /document\.addEventListener\('focusin', /.test(src) && /document\.addEventListener\('focusout', /.test(src),
   absentClass: /classList\.toggle\('voice-absent', !voiceOn\)/.test(src),
   neverFocusedEnd: /stopSel = everFocused \?/.test(src),
 });
 const P = pins(V);
-for (const [k, v] of Object.entries(P)) ok(v, `voice-input.js: ${({ oneAttach: 'ONE attachDictation', chatFlavour: 'createVoiceInput = attachDictation(…, placement chat)', oneRecorder: 'one MediaRecorder, one dictate request', noFocus: 'no .focus() anywhere — the mic never focuses the box (nor the chip\'s Undo)', pressHeld: 'pointerdown + mousedown cancelled on the button (no focus moves on the press)', phoneTab: 'the phone: tabIndex −1 (never a focus stop)', escWhileRecording: 'Esc is bound when recording starts and unbound at release', docListeners: 'two document listeners in the file: Esc (while recording) + ONE page-lifetime visibilitychange', absentClass: 'the plugin off / not connected ⇒ html.voice-absent', neverFocusedEnd: 'a box never focused takes the words at its end' })[k]}`);
-ok(pins(V.replace('stopSel = null;\n    const before', 'stopSel = null; textarea.focus();\n    const before')).noFocus === false, 'RED: a planted textarea.focus() in insert() is caught');
+for (const [k, v] of Object.entries(P)) ok(v, `voice-input.js: ${({ oneAttach: 'ONE attachDictation', chatFlavour: 'createVoiceInput = attachDictation(…, placement chat)', oneRecorder: 'one MediaRecorder, one dictate request', noFocus: 'no .focus() anywhere — the mic never focuses the box (nor the chip\'s Undo)', pressHeld: 'pointerdown + mousedown cancelled on the button (no focus moves on the press)', phoneTab: 'the phone: tabIndex −1 (never a focus stop); a focus follower\'s mic never is either', escWhileRecording: 'Esc is bound when recording starts and unbound at release', docListeners: 'four document listeners in the file: Esc (while recording) + ONE page-lifetime visibilitychange + the focus follower\'s ONE focusin / focusout pair (lane voice-follows-focus; its scroll / resize / press guard bind only while a followed mic shows)', absentClass: 'the plugin off / not connected ⇒ html.voice-absent', neverFocusedEnd: 'a box never focused takes the words at its end' })[k]}`);
+ok(pins(V.replace('stopSel = null;\n    // never focus', 'stopSel = null; textarea.focus();\n    // never focus')).noFocus === false, 'RED: a planted textarea.focus() in insert() is caught');
 const CSS = read('public/style.css');
 ok(/html\.voice-absent \.chat-voice-btn \{ display: none !important; \}/.test(CSS), 'style.css (app-wide, not chat.css — a surface may load style.css alone): html.voice-absent hides every microphone (absent, never greyed)');
 const APP = read(`${LIB}/app.js`);

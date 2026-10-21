@@ -33,7 +33,9 @@ const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…"
 
 /** `{text:{key,params}, detail?:[{key,params}…], source?:{key}}` → the same,
  *  clamped, or null; a shape that is not that throws by name. Params are
- *  strings/numbers only (they are interpolated into a sentence, never HTML). */
+ *  strings/numbers only (they are interpolated into a sentence, never HTML) —
+ *  or WORDS, `{key}` (lane vault-key-row-compact: an i18n key the client says
+ *  in its language before it fills the sentence — a verb's own words). */
 function normalizeI18n(x) {
   if (x == null) return null;
   if (typeof x !== 'object' || Array.isArray(x)) throw new Error('i18n must be an object');
@@ -43,7 +45,7 @@ function normalizeI18n(x) {
     if (l.params != null) {
       if (typeof l.params !== 'object' || Array.isArray(l.params)) throw new Error(`i18n.${what}.params must be an object`);
       out.params = {};
-      for (const [k, v] of Object.entries(l.params)) { if (typeof v === 'string') out.params[k] = v.slice(0, 600); else if (typeof v === 'number' && Number.isFinite(v)) out.params[k] = v; }
+      for (const [k, v] of Object.entries(l.params)) { if (typeof v === 'string') out.params[k] = v.slice(0, 600); else if (typeof v === 'number' && Number.isFinite(v)) out.params[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.key === 'string' && v.key.trim()) out.params[k] = { key: v.key.slice(0, 400) }; }
     }
     return out;
   };

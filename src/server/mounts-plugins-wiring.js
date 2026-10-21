@@ -162,7 +162,9 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
 require('../routes/automation.js').registerAutomationRoutes(app, { engine: automation, who: (req) => require('../auth.js').Auth.signInHandle(req),
   limitChoices: () => require('./conversation-ops.js').limitChoices({ accounts: getAccounts() }),   // lane automation-open-limits: the limit pickers
   permissionNow: (cwd) => require('./permission-rules.js').resolveDefaultMode({ backend: 'claude', cwd: cwd || process.cwd() }),   // q-049 M2: the picker's 「CLI 自己的设置（现在是 X）」 — the key's first folder, else the hub's own
-  callerOf: sessionCallerOf, subjects: conversationSubjects });
+  callerOf: sessionCallerOf, subjects: conversationSubjects,
+  // lane vault-key-row-compact: an ended grant's words — the names the sidebar kept (user-state customNames, keyed <backend>:<id>)
+  conversationNames: () => { const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {}; const out = {}; for (const [k, v] of Object.entries(st.customNames || {})) if (k.includes(':') && v) out[k.slice(k.indexOf(':') + 1)] = String(v); return out; } });
 setTimeout(() => { try { const n = automation.reconcile(); if (n) console.log(`[automation] ${n} first-use card(s) from before the restart resolved expired`); } catch { } }, 3000).unref?.();
 // r2 (verify r1): THE GATE the credential doors registered before this line ask (the account key, the mount config, the export)
 app.locals.vaultGate = require('../routes/vault.js').vaultGate({ vault, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req) });

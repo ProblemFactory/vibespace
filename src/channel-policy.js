@@ -1408,6 +1408,53 @@ function receiptDeliveryVerdict(choice, proposal, session = {}) {
   if (p.receiptWake) return { deliver: 'next-turn', why: 'already-woken' };
   return { deliver: 'wake-now', why: 'chosen' };
 }
+/** How long (ms) the engine HOLDS a direct send's receipt for the drafting CLI to read it inline before
+ *  it falls back to the message road — the outbox's own bounded send window (lane channel-direct-send-sync). */
+const COLLECT_WINDOW_MS = 20000;
+/**
+ * WHICH ROAD a receipt takes back to the drafting AGENT (§9.3, lane channel-direct-send-sync; the owner
+ * 2026-10-21: 「如果 agent 被允许通过 VibeSpace channel 自动发送消息的话，它那一次发送指令的返回结果应该告诉它已经发出去
+ * 了，而不是再产生一条在队列中的消息等着我下一次发消息来处理」). An agent that sends DIRECTLY learns the outcome from
+ * its OWN command: the CLI (`vibespace-channels reply` / an `api` write whose policy is direct) waits for the
+ * vendor and reads the receipt INLINE; the engine then never files that same outcome as a message.
+ *   inline   the CLI read it (`proposal.receipt.road === 'inline'`), or a CLI is STILL waiting within the
+ *            collect window (`event.collecting`): the message road is NOT consulted — no stash, no wake, no
+ *            queue row. (A mutant that returns `message` for an inline-collected receipt reds.)
+ *   message  the outcome is NEW to the agent and must travel as a message (stash or wake): an approval-gated
+ *            proposal the person decided later, a direct send no CLI waited on (a Background Work job / another
+ *            door) or whose CLI timed out or died before collecting, a reaction / recall (one line, next turn),
+ *            a later FATE change (the vendor recalled it, a delivery failure after the fact).
+ *   none     nothing is owed to an agent (the user drafted it, or the drafting agent withdrew it).
+ * PURE. `event`: { collecting?: a CLI declared collect and its window is still open; collected?: this call IS
+ * the collection — the CLI just read it. } A reaction / recall is always `message` here (its own next-turn,
+ * no-wake verdict is receiptDeliveryVerdict's); only a message send is ever collected inline.
+ */
+function receiptRoad(proposal, event = {}) {
+  const p = proposal || {};
+  const d = p.draftedBy || {};
+  if (d.kind !== 'agent' || !d.id) return { road: 'none', why: 'user-draft' };
+  if (p.state === 'withdrawn') return { road: 'none', why: 'withdrawn' };
+  const r = p.receipt || null;
+  if (r && r.road === 'inline') return { road: 'inline', why: 'read' };
+  if (event.collected) return { road: 'inline', why: 'collect' };
+  if (event.collecting && p.kind !== 'reaction' && p.kind !== 'recall') return { road: 'inline', why: 'collecting' };
+  return { road: 'message', why: 'message' };
+}
+/**
+ * THE HEADING a HELD batch of messages reaches the agent under (lane channel-direct-send-sync; the owner
+ * 2026-10-21: 「你所有的那个通知上面都写着说它 unreachable，这个有点不 make sense」). The hub HELD them for a reason
+ * it already knows — word it as itself, never "unreachable" (kept ONLY for a conversation that truly could
+ * not be reached). Agent-facing words (no t()).
+ *   busy         a turn was running — no free lane for this conversation (they arrived during the previous turn)
+ *   paced        the conversation was idle and a delivery would have opened a billed wake (held for this turn)
+ *   unreachable  the conversation could not be reached (ended, its CLI gone) — the only honest "unreachable"
+ */
+const STASH_HEADINGS = Object.freeze({
+  busy: '### Messages that arrived during your previous turn',
+  paced: '### Messages held until this turn (a delivery earlier would have cost a wake)',
+  unreachable: '### Messages that arrived while this conversation was unreachable',
+});
+function stashHeading(why) { return STASH_HEADINGS[why] || STASH_HEADINGS.unreachable; }
 /** Is this receipt the OWNER'S EXPLICIT FEEDBACK — an edit before the send,
  *  or a rejection with words of their own? (The receipt then carries what
  *  changed / why, and the guidance sentence.) PURE. */
@@ -1437,6 +1484,8 @@ function receiptFateOf(p) {
   const who = d.name || d.id || null;
   const del = q.receiptDelivery;
   if (!del) return { kind: 'recorded', who, at: null, woke: false };
+  // lane channel-direct-send-sync: the drafting CLI read this receipt inline from its own command — never "waiting"
+  if (del.road === 'inline') return { kind: 'inline', who, at: Number(del.at) || null, woke: false, collected: del.collected !== false };
   // the cap dropped it before any message picked it up (recorded when it happened, so it wins over a later guess)
   if (q.receiptEvictedAt) return { kind: 'evicted', who, at: Number(q.receiptEvictedAt) || null, woke: false, held: Number(q.receiptEvictedHeld) || null };
   // `reconciled` (verify): its stash entry was found gone at a boot — handed
@@ -1464,6 +1513,7 @@ function receiptFateText(f, { t = defaultT, stamp = (ms) => new Date(Number(ms))
     case 'gone': return t('{agent} is gone — receipt kept', { agent });
     case 'evicted': return t('Not delivered — {agent}\'s queue was full; the receipt is kept here', { agent });
     case 'undelivered': return t('Receipt not delivered: {why}', { why: (f.refused && refusalText(f.refused)) || f.why || '' });
+    case 'inline': return f.collected ? t('{agent} read the receipt with its own command', { agent }) : t('Being read by {agent} inline', { agent });
     case 'recorded': return t('Receipt recorded');
     default: return '';
   }
@@ -1610,6 +1660,7 @@ module.exports = {
   OUTBOX_STATES, TRANSITIONS, TERMINAL_STATES, POLICY_MODES, DECISION_REASONS, RECEIPT_STATUSES, PROPOSAL_TTL_MS, TEXT_MAX_BYTES, HONESTY_LINE_DEFAULT, IDEMPOTENCY_MODES,
   WITHDRAWABLE_STATES, WITHDRAWN_DEFAULT_REASON, withdrawVerdict, withdrawWhy, withdrawReason,
   RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,
+  COLLECT_WINDOW_MS, receiptRoad, STASH_HEADINGS, stashHeading,   // lane channel-direct-send-sync: a direct send's receipt road + the held-batch heading by cause
   canTransition, isTerminal, policyMode, policyModesOf, policyRowModel, policyWhereText, GUARD_KEYS, GUARD_REASONS, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   ACCESS_REMOVED_NOTE, withheldReceiptLine,
   REACTION_POLICIES, reactionPolicyOf, REACTION_OPS, validateReaction, reactionQuote, decideReaction, decideRecall, recallVerdict,

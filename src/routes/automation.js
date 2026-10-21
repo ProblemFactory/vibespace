@@ -12,6 +12,8 @@
 //     pickers' choices (`limitChoices`: the accounts, the harness tables' permission modes and models).
 //     Lane key-folder-picker-all: 编辑… changes a minted key's verbs and limits (POST …/keys/:id/edit {scopes, limits} — the
 //     mint's own rules and store write; the value never changes).
+//     Lane vault-key-row-compact: the list marks a grant whose conversation is not running `ended` (+ the name the sidebar
+//     kept), and 清理已结束的授权 takes every such grant of a key back at once (POST …/keys/:id/prune-ended — one audit line).
 //   · AN AGENT (its own conversation's vsst_ — a job's jbt_ is refused `session_only`: L1 grants conversations and
 //     Task Groups only): POST /api/agent/automation/:verb (the body = the verb's arguments; `?key=` names a key), GET
 //     /api/agent/automation/keys (the keys THIS conversation may use: names + scopes), GET /api/agent/automation/audit
@@ -58,9 +60,10 @@ const STATUS = Object.freeze({ ...A.CODES, vault_not_set_up: 409, ask_unknown: 4
  * @param {() => {sessions: object[], groups: object[]}} [o.subjects]  the grant picker's choices (live conversations + Task Groups)
  * @param {() => {accounts: object[], permissionModes: object[], models: object[]}} [o.limitChoices]  the limit pickers' choices
  * @param {(cwd: string|null) => Promise<object|null>} [o.permissionNow]  q-049 M2: the CLI's own permission mode resolved for a folder (null = the hub's own folder)
+ * @param {() => object} [o.conversationNames]  lane vault-key-row-compact: { <conversation id>: the name the sidebar kept } (an ended grant's words)
  * @param {(req) => string|null} [o.who]  the sign-in handle (the `by` of a person's act)
  */
-function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ sessions: [], groups: [] }), limitChoices = () => ({ accounts: [], permissionModes: [], models: [] }), permissionNow = null, who = () => null }) {
+function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ sessions: [], groups: [] }), limitChoices = () => ({ accounts: [], permissionModes: [], models: [] }), permissionNow = null, conversationNames = () => ({}), who = () => null }) {
   const answer = (res, r) => {
     if (r && r.ok) return res.json(r);
     const code = (r && r.code) || 'failed';
@@ -80,10 +83,16 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
   // resolved for the key's first folder (the hub's own folder for the mint dialog), so the picker's row can say
   // 「CLI 自己的设置（现在是 X）」; null when the hub cannot say (no resolver, another harness) — the row then says no more than before
   const nowOf = async (cwd) => { if (typeof permissionNow !== 'function') return null; try { const r = await permissionNow(cwd || null); return r && r.ok ? { mode: String(r.mode || 'default'), layer: r.layer ? { short: r.layer.short, file: r.layer.file } : null, disabledBy: r.disabledBy ? { short: r.disabledBy.short, file: r.disabledBy.file } : null, cwd: r.cwd || cwd || null } : null; } catch { return null; } };
+  // lane vault-key-row-compact: the running conversations' subjects — a `session:` grant outside them is ENDED (PURE grantEnded)
+  const liveOf = (subj) => new Set((((subj || {}).sessions) || []).map((x) => x && x.subject).filter(Boolean));
   app.get('/api/automation/keys', person(async () => {
     const l = engine.list();
     for (const k of l.keys) if (k.scopes.includes('conversations.open')) k.permissionNow = await nowOf(k.limits && Array.isArray(k.limits.cwdRoots) ? k.limits.cwdRoots[0] : null);
-    return { ...l, verbs: A.SCOPES.map((s) => ({ verb: s.verb, label: s.label, billed: s.billed })), subjects: subjects(), limitChoices: { ...limitChoices(), permissionNow: await nowOf(null) } };
+    const subj = subjects(), live = liveOf(subj);
+    // lane vault-key-row-compact: an ENDED grant says so (dim, 已结束) and carries the conversation's name when the sidebar kept one
+    let names = null;
+    for (const k of l.keys) for (const g of k.grants) if (A.grantEnded(g, live)) { g.ended = true; if (!names) { try { names = conversationNames() || {}; } catch { names = {}; } } const n = names[String(g.subject).slice(8)]; if (n) g.name = String(n).slice(0, 120); }
+    return { ...l, verbs: A.SCOPES.map((s) => ({ verb: s.verb, label: s.label, billed: s.billed })), subjects: subj, limitChoices: { ...limitChoices(), permissionNow: await nowOf(null) } };
   }));
   app.post('/api/automation/keys', person((req) => engine.mint({ name: body(req).name, scopes: body(req).scopes, limits: body(req).limits, by: byOf(req) })));
   app.post('/api/automation/keys/:id/edit', person((req) => engine.edit(String(req.params.id), { scopes: body(req).scopes, limits: body(req).limits }, { by: byOf(req) })));
@@ -92,6 +101,7 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
   app.post('/api/automation/keys/:id/revoke', person((req) => engine.revoke(String(req.params.id), { by: byOf(req) })));
   app.post('/api/automation/keys/:id/grants', person((req) => engine.grant(String(req.params.id), body(req).subjects, { by: byOf(req), ...(body(req).reach !== undefined ? { reach: body(req).reach } : {}) })));
   app.delete('/api/automation/grants/:grantId', person((req) => engine.ungrant(String(req.params.grantId), { by: byOf(req) })));
+  app.post('/api/automation/keys/:id/prune-ended', person((req) => engine.pruneEnded(String(req.params.id), liveOf(subjects()), { by: byOf(req) })));   // lane vault-key-row-compact: 清理已结束的授权
   app.post('/api/automation/grants/:grantId/reach', person((req) => engine.setReach(String(req.params.grantId), body(req).reach, { by: byOf(req) })));   // lane key-instance-scope: the key row's reach chip
   app.post('/api/automation/asks/:askId', person((req) => engine.answer(String(req.params.askId), { answer: body(req).answer, answeredBy: byOf(req), ...(body(req).reach !== undefined ? { reach: body(req).reach } : {}) })));
 

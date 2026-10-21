@@ -31,6 +31,15 @@
 //      name (verb_not_in_scope) · ⑨c 「所有路径」: 铸造… offers it above the browser (red, its title says your home is in it) ⇒
 //      the record holds exactly ['/'], the row says 「文件夹: 所有路径」, the first-use card says 所有路径; 编辑… round-trips it
 //      (一个文件夹 及子文件夹 ⇔ 所有路径); a folder chip and the row say 及子文件夹
+//   ⑪ MANY GRANTS (lane vault-key-row-compact — the owner 2026-10-21 05:4xZ: 「授权很多的时候，这个界面需要优化一下」): a key holding every
+//      verb and unrestricted limits, granted to 2 then 12 (8 Task Groups, the live conversation, 3 ended conversations) — the row
+//      does not grow (measured desk / phone, 2 vs 12), folded ≤ 120 px, never names the permission modes (任何, the names in the title),
+//      the head counts (「9 个动作」 · 「授权给 12 个」; two lines in the 980-px window, ONE maximized), the limits in ONE line; the list
+//      opens in place (groups › running › ended, dim 已结束, a kept name), scrolls inside the row (≤ 400 px opened), a filter past
+//      eight, 清理已结束的授权 takes EXACTLY the 3 (one audit line), stays open; the verbs popover by family + 编辑…; the 需要你 band's
+//      head «<who> 用 key「Fleet」做「归档一个对话」被拒» over its cause (the count under ONE fold) and the tray's same head; phones 390×844
+//      and 375×812: two head lines, every door ≥ 36 px on screen, the list scrolls inside the row. RED CONTROL: this leg on the base
+//      tree (the lane's base.sh) — 818 px, the modes named, every grant drawn
 // Run: node scripts/test-automation-keys-chrome.mjs   (AK_SHOTS=<dir> keeps the 1280×800 screenshots; SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -159,8 +168,8 @@ try {
   await typeInto('#vault-ak-mint .vw-ak-name', 'Lane dispatch');
   await evalJs(`(() => { const c = document.querySelector('#vault-ak-mint input[value="conversations.rename"]'); c.checked = true; return true; })()`);
   await click('.vw-ak-mint-go');
-  const row = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW)}); return r ? { label: r.querySelector('.vw-label').textContent, why: (r.querySelector('.vw-show') || {}).title, line: r.querySelectorAll('.vw-ak-why').length, none: (r.querySelector('.vw-ak-none') || {}).textContent, scopes: (r.querySelector('.vw-ak-scopes') || {}).textContent } : null; })()`, 15000);
-  check('the row: the key\'s name, its verb, the reason as 「显示」\'s HELP (lane vault-window-v2 — the owner read the old line beside it as the key\'s state), no grant yet', row && row.label === 'Lane dispatch' && row.why === '显示密钥值——只在要交给外部系统时；内部 agent 按授权使用，不需要看到值' && row.line === 0 && row.scopes === '给对话改名' && row.none === '还没有授权给任何会话或任务组', row);
+  const row = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW)}); return r ? { label: r.querySelector('.vw-label').textContent, why: (r.querySelector('.vw-show') || {}).title, line: r.querySelectorAll('.vw-ak-why').length, none: (r.querySelector('.vw-ak-none') || {}).textContent, scopes: (r.querySelector('.vw-ak-verbs-chip') || {}).textContent } : null; })()`, 15000);
+  check('the row: the key\'s name, its verbs COUNTED in the head (「1 个动作」 — lane vault-key-row-compact), the reason as 「显示」\'s HELP (lane vault-window-v2 — the owner read the old line beside it as the key\'s state), no grant yet', row && row.label === 'Lane dispatch' && row.why === '显示密钥值——只在要交给外部系统时；内部 agent 按授权使用，不需要看到值' && row.line === 0 && row.scopes === '1 个动作' && row.none === '还没有授权给任何会话或任务组', row);
   check('no value anywhere in the page (markup + every input)', !/vsak_/.test(await pageText()));
   await evalJs(`(() => { document.querySelector('.vw-group[data-purpose="automation"]').scrollIntoView({ block: 'start' }); return true; })()`);
   await shot('ak-1-window.png');
@@ -197,17 +206,18 @@ try {
 
   console.log('⑥ 授权给… — the picker');
   await closeWindows(); await openWindow();
-  check('the row lists the grant: 授权给： + the conversation\'s name', !!(await until(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-chip')}); return c && /自动改名/.test(c.textContent); })()`, 10000)));
+  // lane vault-key-row-compact: the head says 「授权给 1 个」; a press opens the grants list in place (one row per grant)
+  check('the head counts the grant (「授权给 1 个」) and opens the list in place: the conversation\'s name', !!(await until(`(() => { const b = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-grants-chip')}); if (!b || b.textContent !== '授权给 1 个') return false; const f = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-gfold')}); if (f.hidden) b.click(); const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g')}); return !f.hidden && c && /自动改名/.test(c.textContent); })()`, 10000)));
   // lane key-instance-scope: the grant's REACH chip on the 授权给 chip — a click opens the reach dialog; 整个 VibeSpace is red and says what it means
-  const chip0 = await evalJs(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-chip .vw-ak-reach')}); return c ? { text: c.textContent, reach: c.dataset.reach, red: c.classList.contains('vw-ak-reach-instance') } : null; })()`);
+  const chip0 = await evalJs(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g .vw-ak-reach')}); return c ? { text: c.textContent, reach: c.dataset.reach, red: c.classList.contains('vw-ak-reach-instance') } : null; })()`);
   check('…and its REACH chip: 只有它开的会话 (the card\'s default)', chip0 && chip0.text === '只有它开的会话' && chip0.reach === 'opened' && !chip0.red, chip0);
-  await click(ROW + ' .vw-ak-chip .vw-ak-reach');
+  await click(ROW + ' .vw-ak-g .vw-ak-reach');
   const dlgRows = (await until(visible('#vault-ak-reach'), 5000)) ? await evalJs(`[...document.querySelectorAll('#vault-ak-reach .vw-ak-reach-row')].map((r) => r.querySelector('span').textContent + ':' + r.querySelector('input').checked + ':' + r.classList.contains('vw-ak-reach-instance')).join('|')`) : null;
   check('the chip opens the reach dialog: 只有它开的会话 checked · 整个 VibeSpace red (no Task Group row — there is no Task Group here)', dlgRows === '只有它开的会话:true:false|整个 VibeSpace:false:true', dlgRows);
   await evalJs(`document.querySelector('#vault-ak-reach input[value="instance"]').click()`);
   await shot('ak-3b-reach-dialog.png');
   await click('.vw-ak-reach-save');
-  const chip1 = await until(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-chip .vw-ak-reach-instance')}); return c ? { text: c.textContent, title: c.title, reach: c.dataset.reach } : null; })()`, 10000);
+  const chip1 = await until(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g .vw-ak-reach-instance')}); return c ? { text: c.textContent, title: c.title, reach: c.dataset.reach } : null; })()`, 10000);
   const grantNow = (((await api('GET', '/api/automation/keys')).json || {}).keys || []).find((k) => k.name === 'Lane dispatch');
   check('整个 VibeSpace + 保存 ⇒ the chip is RED and its title says what it means; the hub\'s grant row holds reach: instance', chip1 && chip1.text === '整个 VibeSpace' && chip1.reach === 'instance' && chip1.title === '这把 key 可以对这里的每一个会话动手，包括你自己的' && grantNow && grantNow.grants[0] && grantNow.grants[0].reach === 'instance', { chip1, grants: grantNow && grantNow.grants });
   await shot('ak-3c-reach-chip.png');
@@ -217,13 +227,13 @@ try {
   await shot('ak-3-picker.png');
   await evalJs(`(() => { document.querySelector(${JSON.stringify(sel)}).checked = false; return true; })()`);
   await click('.vw-ak-save');
-  check('unchecked + 保存 ⇒ the grant goes (no chip)', !!(await until(`!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-chip')}) && !!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-none')})`, 10000)));
+  check('unchecked + 保存 ⇒ the grant goes (no chip)', !!(await until(`!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g')}) && !!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-none')})`, 10000)));
   await click(ROW + ' .vw-ak-grant');
   await until(visible(sel), 8000);
   await evalJs(`(() => { document.querySelector(${JSON.stringify(sel)}).checked = true; return true; })()`);
   await click('.vw-ak-save');
-  check('checked + 保存 ⇒ it is back', !!(await until(`!!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-chip')})`, 10000)));
-  check('…a grant the picker adds reads 只有它开的会话 (the picker\'s default reach — lane key-instance-scope)', !!(await until(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-chip .vw-ak-reach')}); return c && c.dataset.reach === 'opened' && c.textContent === '只有它开的会话'; })()`, 10000)));
+  check('checked + 保存 ⇒ it is back', !!(await until(`!!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g')})`, 10000)));
+  check('…a grant the picker adds reads 只有它开的会话 (the picker\'s default reach — lane key-instance-scope)', !!(await until(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g .vw-ak-reach')}); return c && c.dataset.reach === 'opened' && c.textContent === '只有它开的会话'; })()`, 10000)));
 
   console.log('⑥b 编辑… — the key\'s verbs after minting (lane key-folder-picker-all: a verb a later release added, given to a key already granted)');
   const auditLines = () => fs.readFileSync(path.join(wt, 'data', 'automation-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
@@ -234,8 +244,10 @@ try {
   await evalJs(`(() => { for (const v of ['feedback.handled', 'feedback.list']) document.querySelector('#vault-ak-edit input[value="' + v + '"]').click(); return true; })()`);
   await shot('ak-3b-edit-verbs.png');
   await clickWait('.vw-ak-edit-save');
-  const scopesNow = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW)}); const x = r && r.querySelector('.vw-ak-scopes'); return x && /反馈/.test(x.textContent) ? x.textContent : null; })()`, 10000);
-  check('保存 ⇒ the row says the new verbs', scopesNow === '给对话改名 · 把 agent 的反馈标为已处理 · 读 agent 未处理的反馈', scopesNow);
+  // lane vault-key-row-compact: the head counts them (「3 个动作」); the chip's popover lists them by family
+  const scopesNow = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW)}); const x = r && r.querySelector('.vw-ak-verbs-chip'); if (!x || x.textContent !== '3 个动作') return null; if (!document.querySelector('.vw-ak-verbs-pop')) x.click(); const p = document.querySelector('.vw-ak-verbs-pop'); return p ? [...p.querySelectorAll('.vw-ak-vrow')].map((v) => v.textContent).join(' · ') : null; })()`, 10000);
+  check('保存 ⇒ the row says the new verbs (「3 个动作」; its popover lists them)', scopesNow === '给对话改名 · 把 agent 的反馈标为已处理 · 读 agent 未处理的反馈', scopesNow);
+  await evalJs(`(() => { const p = document.querySelector('.vw-ak-verbs-pop'); if (p) p.remove(); return true; })()`);
   const fl = await cli(['call', 'feedback.list'], { token });
   const flLines = auditLines().filter((l) => l.verb === 'feedback.list');
   check('a call with a verb ADDED runs at once on the existing grant: the real CLI prints ok — NO first-use card (its audit line was never asked)', fl.code === 0 && /^ok — feedback\.list with key "Lane dispatch"/.test(fl.out) && flLines.length === 1 && flLines[0].ok && !flLines[0].ask, { fl, flLines });
@@ -245,7 +257,7 @@ try {
   check('编辑… again: the added verbs are ticked now', (await until(`(() => { const d = document.querySelector('#vault-ak-edit'); return d ? [...d.querySelectorAll('.vw-ak-verbs input')].filter((c) => c.checked).map((c) => c.value).join() : null; })()`, 8000)) === 'conversations.rename,feedback.handled,feedback.list');
   await evalJs(`(() => { document.querySelector('#vault-ak-edit input[value="feedback.list"]').click(); return true; })()`);
   await clickWait('.vw-ak-edit-save');
-  await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW)}); const x = r && r.querySelector('.vw-ak-scopes'); return !!x && !/读 agent/.test(x.textContent); })()`, 10000);
+  await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW)}); const x = r && r.querySelector('.vw-ak-verbs-chip'); return !!x && x.textContent === '2 个动作'; })()`, 10000);
   const fl2 = await cli(['call', 'feedback.list'], { token });
   check('a verb taken away ⇒ the NEXT call is refused by name: exit 1, verb_not_in_scope, the key named', fl2.code === 1 && /\(verb_not_in_scope\)/.test(fl2.err) && /\(Lane dispatch\) does not hold feedback\.list/.test(fl2.err), fl2);
 
@@ -364,7 +376,7 @@ try {
   // the CLI's open outside the limits ⇒ refused naming them; 审计… lists it with its code
   await api('POST', `/api/automation/keys/${opener.id}/grants`, { subjects: [`session:${LIVE_SID}`] });
   const outside = await cli(['conversations', 'open', '--key', 'Opener', '--cwd', '/etc', '--name', 'nope'], { token });
-  check('the conversation\'s open outside the key\'s folder ⇒ exit 1, cwd_outside_roots, the key\'s limits printed by name', outside.code === 1 && /\(cwd_outside_roots\)/.test(outside.err) && outside.err.includes(`this key's limits: folders ${SUB} (with subfolders) · accounts subscription · permission modes default, bypassPermissions · models any · modes chat, terminal`), outside);
+  check('the conversation\'s open outside the key\'s folder ⇒ exit 1, cwd_outside_roots, the key\'s limits printed by name (chat + terminal = every mode ⇒ «modes any» — lane vault-key-row-compact)', outside.code === 1 && /\(cwd_outside_roots\)/.test(outside.err) && outside.err.includes(`this key's limits: folders ${SUB} (with subfolders) · accounts subscription · permission modes default, bypassPermissions · models any · modes any`), outside);
   await closeWindows(); await openWindow();
   await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => (x.querySelector('.vw-label') || {}).textContent === 'Opener'); const b = r && r.querySelector('.vw-ak-audit'); if (!b) return false; b.click(); return true; })()`);
   const refusedLine = await until(`(() => { const l = document.querySelector('#vault-ak-audit .vw-ak-audit-line.vw-ak-refused[data-code="cwd_outside_roots"]'); return l ? { outcome: l.querySelector('.vw-ak-outcome').textContent, verb: l.querySelector('.vw-ak-verb').textContent, arg: (l.querySelector('.vw-ak-arg') || {}).textContent } : null; })()`, 8000);
@@ -421,6 +433,122 @@ try {
   const backAll = await (async () => { for (let i = 0; i < 40; i++) { const k = (await keysNow()).find((x) => x.name === 'Anywhere'); if (k && k.limits.cwdRoots[0] === '/') return k.limits.cwdRoots; await sleep(250); } return null; })();
   check('…所有路径 again ⇒ exactly ["/"] (the round trip)', JSON.stringify(backAll) === '["/"]', backAll);
   check('no greyed control anywhere in the automation section or its dialogs', (await evalJs(`document.querySelectorAll('.vw-row[data-store="automation"] [disabled], .vw-ak [disabled], .vw-ak-dialog [disabled]').length`)) === 0);
+
+  console.log('⑪ MANY GRANTS — the row stays short (lane vault-key-row-compact — the owner 2026-10-21 05:4xZ: 「授权很多的时候，这个界面需要优化一下」)');
+  // THE CAPS (1280×800): the row with its grants FOLDED — one head line + the limits line + 技术细节; OPENED — + the bounded list
+  // (about five rows, a filter, the cleanup door). The base row with the same twelve grants stacks a chip per grant and lists every
+  // permission mode: taller than the folded cap (the RED control runs this leg on the base tree)
+  const CAP_FOLDED = 120, CAP_OPEN = 400;
+  await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); for (const t of document.querySelectorAll('.toast')) t.remove(); return true; })()`);
+  const kc = ((await api('GET', '/api/automation/keys')).json || {}).limitChoices || {};
+  const ALL_PERMS = [...new Set((kc.permissionModes || []).map((r) => r.value))];
+  const ALL_VERBS = ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'groups.invite', 'conversations.status', 'conversations.archive', 'feedback.handled', 'feedback.list'];
+  const fleet = await api('POST', '/api/automation/keys', { name: 'Fleet', scopes: ALL_VERBS, limits: { cwdRoots: ['/'], accounts: 'any', permissionModes: ALL_PERMS, models: 'any', modes: ['chat', 'terminal'] } });
+  const FLEET = fleet.json && fleet.json.key && fleet.json.key.id;
+  const GROUP_NAMES = ['ops', 'web', 'data', 'infra', 'docs', 'qa', 'ml', 'sec'].map((x, i) => `岗位 ${String(i + 1).padStart(2, '0')} ${x}`);
+  const groupIds = [];
+  for (const title of GROUP_NAMES) { const r = await api('POST', '/api/tasks', { title }); if (r.json && r.json.task) groupIds.push(r.json.task.id); }
+  const ENDED = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+  const us = ((await api('GET', '/api/user-state')).json) || {};
+  await api('PATCH', '/api/user-state', { customNames: { ...(us.customNames || {}), [`claude:${ENDED[0]}`]: '旧车道 alpha' } });   // the sidebar kept one ended conversation's name
+  const FROW = `[...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => (x.querySelector('.vw-label') || {}).textContent === 'Fleet')`;
+  // THE MEASURES (the report's before / after — this leg runs on the base tree too): the row's height with its grants as the
+  // window first draws them, in the default 980-px window (1280×800) and on a phone (390×844), with 2 grants and then with 12
+  const rowH = `(() => { const r = ${FROW}; if (!r) return null; r.scrollIntoView({ block: 'start' }); return Math.round(r.getBoundingClientRect().height); })()`;
+  const measure = async () => {
+    await closeWindows(); await openWindow();
+    const desk = await until(rowH, 10000);
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await load(); await openWindow();
+    const phone = await until(rowH, 10000);
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    await load(); await openWindow();
+    return { desk, phone };
+  };
+  const gr2 = await api('POST', `/api/automation/keys/${FLEET}/grants`, { subjects: [`group:${groupIds[0]}`, `session:${LIVE_SID}`] });
+  const H2 = await measure();
+  const gr = await api('POST', `/api/automation/keys/${FLEET}/grants`, { subjects: [...groupIds.slice(1).map((g) => `group:${g}`), ...ENDED.map((c) => `session:${c}`)] });
+  const H12 = await measure();
+  console.log(`  · measured: the row with 2 grants — ${H2.desk} px (980-px window) / ${H2.phone} px (phone 390×844); with 12 grants — ${H12.desk} px / ${H12.phone} px`);
+  check('the fixture: a key holding every verb and every limit unrestricted (all paths, any account, EVERY permission mode, any model, chat + terminal) granted to 2, then to 12 — 8 Task Groups, the live conversation, 3 conversations that ended',
+    !!FLEET && ALL_PERMS.length >= 5 && groupIds.length === 8 && gr2.json && gr2.json.added && gr2.json.added.length === 2 && gr.json && gr.json.added && gr.json.added.length === 10, { FLEET, perms: ALL_PERMS.length, groups: groupIds.length, gr: gr.json });
+  check(`the row does not grow with its grants: 12 grants draw it no taller than 2 (desk ${H2.desk} → ${H12.desk} px, phone ${H2.phone} → ${H12.phone} px)`, !!H2.desk && H12.desk === H2.desk && !!H2.phone && H12.phone === H2.phone, { H2, H12 });
+  await closeWindows(); await openWindow();
+  const m0 = await until(`(() => { const r = ${FROW}; if (!r) return null; r.scrollIntoView({ block: 'start' }); const txt = r.innerText; return { h: Math.round(r.getBoundingClientRect().height), enumerated: ['跳过确认', '规划模式', '自动接受编辑', '只读'].filter((w) => txt.includes(w)), grantsShown: [...r.querySelectorAll('[data-subject]')].filter((x) => x.getBoundingClientRect().height > 0).length }; })()`, 10000);
+  await shot('ak-13-many-folded.png');
+  check(`THE ROW WITH 12 GRANTS IS SHORT: folded, ≤ ${CAP_FOLDED} px tall at 1280×800 (no grant drawn until 「授权给 12 个」 opens them)`, !!m0 && m0.h <= CAP_FOLDED && m0.grantsShown === 0, m0);
+  check('…and it never enumerates the permission modes (every mode allowed ⇒ 任何; the names only in the title)', !!m0 && m0.enumerated.length === 0, m0 && m0.enumerated);
+  const head = await evalJs(`(() => { const r = ${FROW}; if (!r) return null; const l = r.querySelector('.vw-ak-limits-line'); const perm = l && l.querySelector('[data-field="permissionModes"]'); return { verbs: (r.querySelector('.vw-ak-verbs-chip') || {}).textContent || null, grants: (r.querySelector('.vw-ak-grants-chip') || {}).textContent || null, line: l ? l.innerText.replace(/\\s+/g, ' ').trim() : null, lineH: l ? Math.round(l.getBoundingClientRect().height) : 0, permTitle: perm ? perm.title : null, meta: !!r.querySelector('.vw-meta'), used: (r.querySelector('.vw-used') || {}).textContent, scopesLine: !!r.querySelector('.vw-ak-scopes') }; })()`);
+  check('THE HEAD counts: 「9 个动作」 · 「授权给 12 个」 · 从未使用 — no run-on verbs line, no meta line (the kind is the chip)', !!head && head.verbs === '9 个动作' && head.grants === '授权给 12 个' && head.used === '从未使用' && !head.meta && !head.scopesLine, head);
+  check('THE LIMITS in ONE line of words: 「文件夹: 所有路径 · 账号: 任何 · 权限模式: 任何 · 模型: 任何 · 模式: 任何」 (one visual line); 权限模式\'s title names every mode', !!head && head.line === '文件夹: 所有路径 · 账号: 任何 · 权限模式: 任何 · 模型: 任何 · 模式: 任何' && head.lineH <= 22 && /CLI 自己的设置/.test(head.permTitle || '') && /跳过确认/.test(head.permTitle || ''), head);
+  // the head in lines: the distinct rows the name, the chips, the last use and the doors sit on (the default 980-px window: two — name · chips · last use, then the doors; maximized: ONE)
+  const headLines = `(() => { const r = ${FROW}; const items = [r.querySelector('.vw-label'), ...r.querySelectorAll('.vw-chips > *'), r.querySelector('.vw-used'), ...r.querySelectorAll('.vw-act .vw-btn:not([hidden])')].filter(Boolean); const mids = items.map((e) => { const q = e.getBoundingClientRect(); return Math.round(q.top + q.height / 2); }).sort((a, b) => a - b); return { lines: mids.filter((m, i) => i === 0 || m - mids[i - 1] > 12).length, h: Math.round(r.getBoundingClientRect().height), w: Math.round(r.getBoundingClientRect().width) }; })()`;
+  const hl980 = await evalJs(headLines);
+  await evalJs(`(() => { for (const [id, w] of app.wm.windows) if (w && w.type === 'vault' && !w.isMaximized) app.wm.toggleMaximize(id); return true; })()`);
+  await sleep(400);
+  const hlMax = await until(`(() => { const x = ${headLines}; return x && x.w > 900 ? x : null; })()`, 5000);
+  await shot('ak-13b-many-maximized.png');
+  await evalJs(`(() => { for (const [id, w] of app.wm.windows) if (w && w.type === 'vault' && w.isMaximized) app.wm.toggleMaximize(id); return true; })()`);
+  await sleep(400);
+  console.log(`  · measured: the head — ${hl980 && hl980.lines} line(s), the row ${hl980 && hl980.h} px (980-px window); maximized ${hlMax && hlMax.lines} line(s), ${hlMax && hlMax.h} px`);
+  check('THE HEAD: two lines in the default 980-px window (name · kind · 9 个动作 · 授权给 12 个 · last use, then 显示 and the doors); ONE line in a maximized window', !!hl980 && hl980.lines === 2 && !!hlMax && hlMax.lines === 1 && hlMax.h <= CAP_FOLDED, { hl980, hlMax });
+  if (!(head && head.grants)) check('the head has its 「授权给 N 个」 chip (the legs below need it)', false);
+  else {
+    await evalJs(`(() => { const r = ${FROW}; const open = r.querySelector('.vw-ak-gfold'); if (open && open.hidden) r.querySelector('.vw-ak-grants-chip').click(); return true; })()`);
+    const g1 = await until(`(() => { const r = ${FROW}; const f = r && r.querySelector('.vw-ak-gfold'); if (!f || f.hidden) return null; const l = f.querySelector('.vw-ak-glist'); const rows = [...l.querySelectorAll('.vw-ak-g')]; return { expanded: r.querySelector('.vw-ak-grants-chip').getAttribute('aria-expanded'), order: rows.map((x) => x.dataset.subject), names: rows.map((x) => x.querySelector('.vw-ak-gname').textContent), states: rows.map((x) => (x.querySelector('.vw-ak-gstate') || {}).textContent || ''), ended: rows.filter((x) => x.classList.contains('vw-ak-g-ended')).length, ch: l.clientHeight, sh: l.scrollHeight, rowH: Math.round(rows[0].getBoundingClientRect().height), filter: !!f.querySelector('.vw-ak-gfilter'), n: (f.querySelector('.vw-ak-ended-n') || {}).textContent, prune: (f.querySelector('.vw-ak-prune') || {}).textContent, h: Math.round(r.getBoundingClientRect().height) }; })()`, 8000);
+    await shot('ak-14-many-open.png');
+    console.log(`  · measured: the row with its 12 grants OPENED — ${g1 && g1.h} px (the list ${g1 && g1.ch} px of ${g1 && g1.sh} px, rows ${g1 && g1.rowH} px)`);
+    const ord = g1 && g1.order;
+    check('「授权给 12 个」 opens the grants IN PLACE (aria-expanded): one row per grant — the 8 Task Groups by name, then the live conversation (运行中), then the 3 ended ones (dim, 已结束) — each by name',
+      !!g1 && g1.expanded === 'true' && ord.length === 12 && ord.slice(0, 8).every((x) => x.startsWith('group:')) && g1.names.slice(0, 8).join('|') === GROUP_NAMES.join('|') && ord[8] === `session:${LIVE_SID}` && g1.states[8] === '运行中' && ENDED.every((c) => ord.slice(9).includes(`session:${c}`)) && g1.ended === 3 && g1.states.slice(9).every((x) => x === '已结束'), g1);
+    check('an ended conversation is named by what the sidebar kept (旧车道 alpha), else its id shortened to 8 characters — never a raw id', !!g1 && g1.names.includes('旧车道 alpha') && ENDED.slice(1).every((c) => g1.names.includes(`${c.slice(0, 8)}…`)), g1 && g1.names);
+    check(`THE LIST IS BOUNDED: about five rows show and the rest SCROLL inside the row (client ${g1 && g1.ch} px < content ${g1 && g1.sh} px); the opened row stays ≤ ${CAP_OPEN} px`, !!g1 && g1.ch <= g1.rowH * 5.5 && g1.sh > g1.ch + g1.rowH && g1.h <= CAP_OPEN, g1);
+    check('past eight grants a filter box appears; the ended ones get ONE door 「清理已结束的授权」 with their count (3) beside it', !!g1 && g1.filter && g1.prune === '清理已结束的授权' && g1.n === '3', g1);
+    const filt = async (q) => { await evalJs(`(() => { const i = ${FROW}.querySelector('.vw-ak-gfilter'); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`); return evalJs(`(() => { const f = ${FROW}.querySelector('.vw-ak-gfold'); const none = f.querySelector('.vw-ak-gnone'); return { shown: [...f.querySelectorAll('.vw-ak-g')].filter((x) => !x.hidden).map((x) => x.querySelector('.vw-ak-gname').textContent), none: none.hidden ? null : none.textContent }; })()`); };
+    const fa = await filt('岗位 03'), fb = await filt('zzz'), fc = await filt('已结束'), fd = await filt('');
+    check('the filter narrows the list by name (岗位 03 ⇒ one Task Group), says when nothing matches, finds the ended ones by 已结束; cleared ⇒ all 12', fa.shown.join() === GROUP_NAMES[2] && fb.shown.length === 0 && fb.none === '没有匹配「zzz」的授权' && fc.shown.length === 3 && fd.shown.length === 12 && fd.none === null, { fa, fb, fc, fd });
+    await evalJs(`${FROW}.querySelector('.vw-ak-prune').click()`);
+    const after = await (async () => { for (let i = 0; i < 40; i++) { const k = (await keysNow()).find((x) => x.id === FLEET); if (k && k.grants.length === 9) return k; await sleep(250); } return null; })();
+    const pruned = auditLines().filter((l) => l.verb === 'key.prune' && l.key === FLEET);
+    check('清理已结束的授权 takes back EXACTLY the 3 ended grants — the 8 Task Groups and the live conversation stay; ONE audit line names what went', !!after && after.grants.every((g) => !ENDED.some((c) => g.subject === `session:${c}`)) && after.grants.some((g) => g.subject === `session:${LIVE_SID}`) && after.grants.filter((g) => g.subject.startsWith('group:')).length === 8
+      && pruned.length === 1 && ENDED.every((c) => pruned[0].note.includes(c)) && /^took back 3 grants to ended conversations: /.test(pruned[0].note), { after: after && after.grants.map((g) => g.subject), pruned });
+    const g2 = await until(`(() => { const r = ${FROW}; const f = r && r.querySelector('.vw-ak-gfold'); const c = r && r.querySelector('.vw-ak-grants-chip'); return c && c.textContent === '授权给 9 个' ? { open: !f.hidden, expanded: c.getAttribute('aria-expanded'), prune: !!f.querySelector('.vw-ak-prune'), rows: f.querySelectorAll('.vw-ak-g').length, filter: !!f.querySelector('.vw-ak-gfilter') } : null; })()`, 10000);
+    check('…the row says 「授权给 9 个」, the cleanup door is gone, and the list STAYS open (remembered per key for this page)', !!g2 && g2.open && g2.expanded === 'true' && !g2.prune && g2.rows === 9 && g2.filter, g2);
+    // the verbs: 「9 个动作」 ⇒ a popover grouped by family, 编辑… beside
+    await evalJs(`${FROW}.querySelector('.vw-ak-verbs-chip').click()`);
+    const vp = await until(`(() => { const p = document.querySelector('.vw-ak-verbs-pop'); if (!p || !p.getBoundingClientRect().height) return null; return { fams: [...p.querySelectorAll('.vw-ak-vfam')].map((f) => f.querySelector('.vw-ak-vfam-name').textContent + ':' + f.querySelectorAll('.vw-ak-vrow').length).join('|'), first: (p.querySelector('.vw-ak-vrow') || {}).textContent, edit: (p.querySelector('.vw-ak-vedit') || {}).textContent }; })()`, 5000);
+    await shot('ak-15-verbs.png');
+    check('「9 个动作」 opens the verbs as a popover grouped by family — 对话 6 · Agent 群组 1 · 反馈 2 (a billed verb says so) — with 编辑… beside', !!vp && vp.fams === '对话:6|Agent 群组:1|反馈:2' && vp.first === '开一个对话 （会开始一个计费回合）' && vp.edit === '编辑…', vp);
+    await evalJs(`document.querySelector('.vw-ak-verbs-pop .vw-ak-vedit').click()`);
+    check('…its 编辑… opens the key\'s edit dialog (the popover closes)', !!(await until(`!!document.querySelector('#vault-ak-edit') && !document.querySelector('.vw-ak-verbs-pop')`, 5000)) && (await textOf('#vault-ak-edit h3')) === '编辑「Fleet」');
+    await evalJs(`(() => { const b = document.querySelector('#vault-ak-edit .btn-cancel'); if (b) b.click(); return true; })()`);
+    // THE NOTICE HEAD SPEAKS: the live conversation archives a conversation the key never opened ⇒ refused (the grant reaches only what it opened)
+    const who = ((await live()) || {}).name;
+    const ar = await cli(['conversations', 'archive', 'lane-zz', '--key', 'Fleet'], { token });
+    const band = await until(`(() => { const r = [...document.querySelectorAll('.vw-band-row[data-type="vault-use-failed"]')].find((x) => /Fleet/.test(x.querySelector('.vw-band-txt').textContent)); if (!r) return null; const more = r.querySelector('.vw-band-more'); return { head: r.querySelector('.vw-band-txt').textContent, cause: (r.querySelector('.vw-band-cause') || {}).textContent, foldOpen: more ? more.open : null, fold: more ? more.querySelector('.vw-band-more-body').textContent : null, summary: more ? more.querySelector('summary').textContent : null, doors: [...r.querySelectorAll('[data-door]')].map((b) => b.dataset.door).join() }; })()`, 15000);
+    await evalJs(`(() => { const b = document.querySelector('.vw-band'); if (b) b.scrollIntoView({ block: 'start' }); return true; })()`);
+    await shot('ak-16-band.png');
+    check(`THE 需要你 NOTICE'S HEAD SPEAKS: «${who} 用 key「Fleet」做「归档一个对话」被拒» (actor · the key · the verb in the table's words) — the CLI was refused not_granted`, ar.code === 1 && /\(not_granted\)/.test(ar.err) && !!band && band.head === `${who} 用 key「Fleet」做「归档一个对话」被拒`, { ar, band, who });
+    check('…the cause is its SECOND line (the reach it has + the door); the count and the rest under ONE closed fold (详情); 打开行 / 知道了 stay', !!band && band.cause === '这把 key 没有开过 lane-zz，而授权只触及它开的会话——在保险库窗口该 key 的行里扩大作用范围（这些岗位的会话 / 整个 VibeSpace），或把 key 授权给那个会话' && band.foldOpen === false && band.summary === '详情' && /1/.test(band.fold || '') && band.doors === 'open,ack', band);
+    await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`);
+    const tray = await until(`(() => { const it = [...document.querySelectorAll('#user-todos-popup .ut-item')].find((x) => /Fleet/.test((x.querySelector('.ut-text') || {}).textContent || '')); return it ? it.querySelector('.ut-text').textContent : null; })()`, 10000);
+    check('…and For you\'s row says the same head (the same item, the verb a param that IS words)', tray === `${who} 用 key「Fleet」做「归档一个对话」被拒`, tray);
+    await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`);
+    // THE PHONE (390×844 · 375×812): the head wraps to two lines, every door reachable, the grants list scrolls inside the row
+    for (const [W, H] of [[390, 844], [375, 812]]) {
+      await cdp('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 2, mobile: true });
+      await load();
+      await openWindow();
+      await until(`(() => { const r = ${FROW}; if (!r) return false; const c = r.querySelector('.vw-ak-grants-chip'); const f = r.querySelector('.vw-ak-gfold'); if (f && f.hidden) c.click(); r.scrollIntoView({ block: 'start' }); return true; })()`, 10000);
+      const ph = await until(`(() => { const r = ${FROW}; const f = r && r.querySelector('.vw-ak-gfold'); if (!f || f.hidden) return null; const rr = r.getBoundingClientRect(); const items = [r.querySelector('.vw-label'), ...r.querySelectorAll('.vw-chips > *'), r.querySelector('.vw-used'), ...r.querySelectorAll('.vw-act .vw-btn:not([hidden])')].filter(Boolean); const tops = [...new Set(items.map((e) => Math.round(e.getBoundingClientRect().top)))].sort((a, b) => a - b); const lines = tops.filter((t, i) => i === 0 || t - tops[i - 1] > 12).length; const doors = [...r.querySelectorAll('.vw-show, .vw-ak-grant, .vw-ak-edit, .vw-ak-audit, .vw-ak-revoke')].map((b) => { const q = b.getBoundingClientRect(); return { cls: b.className.split(' ').pop(), l: Math.round(q.left), r: Math.round(q.right), h: Math.round(q.height) }; }); const l = f.querySelector('.vw-ak-glist'); return { rowW: Math.round(rr.width), right: Math.round(rr.right), lines, items: items.map((e) => { const q = e.getBoundingClientRect(); return [e.className.split(' ').pop(), Math.round(q.left), Math.round(q.width), Math.round(q.top), e.textContent.slice(0, 20), getComputedStyle(e).flexBasis, getComputedStyle(e).display]; }), doors, ch: l.clientHeight, sh: l.scrollHeight, pageScroll: document.documentElement.scrollWidth }; })()`, 10000);
+      await evalJs(`(() => { const r = ${FROW}; r.scrollIntoView({ block: 'start' }); return true; })()`);
+      await shot(`ak-17-phone-${W}.png`);
+      console.log(`  · measured: phone ${W}×${H} — the head ${ph && ph.lines} line(s), the grants list ${ph && ph.ch} px of ${ph && ph.sh} px, the row ${ph && ph.rowW} px wide`);
+      check(`PHONE ${W}×${H}: the head wraps to TWO lines (name + chips · the doors); every door reachable (inside the screen, ≥ 36 px); the grants list scrolls INSIDE the row; nothing runs off the side`,
+        !!ph && ph.lines <= 2 && ph.doors.length === 5 && ph.doors.every((d) => d.l >= 0 && d.r <= W && d.h >= 36) && ph.sh > ph.ch && ph.right <= W && ph.pageScroll <= W, ph);
+    }
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  }
 
   console.log('⑩ the words in Japanese');
   await evalJs(`(() => { localStorage.setItem('vibespace.lang', 'ja'); return true; })()`);

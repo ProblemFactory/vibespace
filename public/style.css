@@ -1528,11 +1528,24 @@ html:not(.voice-absent) .voice-field > textarea { padding-right: 32px; min-heigh
 .voice-field > textarea:disabled + .voice-btn { display: none; }
 .voice-field-grip > .voice-btn { right: 16px; } /* a resizable box: its bottom-right drag grip stays free */
 html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
-.voice-chip-float { position: fixed; left: auto; z-index: 10070; max-width: min(420px, calc(100vw - 16px)); box-sizing: border-box; }
+/* lane voice-follows-focus: the floating chip is `.voice-chip.voice-chip-float` — chat.css (loaded after this file) draws the
+   composer's chip `.voice-chip { position: absolute; left: 0; z-index: 20 }`, which won the cascade at one class each: a
+   field's "Inserted · Undo" sat at the page's LEFT edge, under any dialog. It floats above its microphone, over an app modal
+   (99998) and a popover (99999). */
+.voice-chip.voice-chip-float { position: fixed; left: auto; z-index: 100001; max-width: min(420px, calc(100vw - 16px)); box-sizing: border-box; }
+/* DICTATION FOLLOWS THE FOCUS (lane voice-follows-focus, src/lib/voice-input.js followFocus): any other text field the person
+   focuses gets the microphone in a fixed host BESIDE its box (placed by src/voice-focus.js followPlace — never over the
+   field, the keyboard-yield strip or the buttons next to it); the field's own layout never changes. No transition: it
+   appears with the focus and goes with it. */
+.voice-follow { position: fixed; z-index: 100001; display: flex; box-sizing: border-box; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-dialog); box-shadow: 0 1px 4px color-mix(in srgb, var(--text) 18%, transparent); }
+.voice-follow[hidden], html.voice-absent .voice-follow { display: none; }
+.voice-follow > .voice-btn { position: static; }
+.voice-follow > .voice-btn:hover { color: var(--text); }
 @media (max-width: 768px) {
   .voice-btn { min-width: 40px; height: 40px; right: 2px; bottom: 2px; border-radius: 20px; }
   .voice-btn svg { width: 20px; height: 20px; }
   html:not(.voice-absent) .voice-field > textarea { padding-right: 46px; min-height: 44px; }
+  .voice-follow { border-radius: 21px; }
 }
 .ut-reply-send { display: inline-flex; align-items: center; justify-content: center; padding: 0; height: 22px; width: 22px; color: var(--accent); }
 .ut-reply-send[data-reopen="1"] { width: auto; gap: 4px; padding: 0 8px; white-space: nowrap; font-size: 11px; } /* "Reopen and send" — its words beside the icon */
@@ -7721,8 +7734,8 @@ button.vw-chip { cursor: pointer; }
 .vw-band[hidden] { display: none; }
 .vw-band-head { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: 11px; font-weight: 700; }
 .vw-band-n { font-weight: normal; color: var(--text-dim); }
-.vw-band-rows { display: flex; flex-direction: column; gap: 2px; }
-.vw-band-row { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.vw-band-rows { display: flex; flex-direction: column; gap: 2px; max-height: min(40vh, 240px); overflow-y: auto; overscroll-behavior: contain; }   /* lane vault-key-row-compact: a notice now says its cause under its head — the band stays bounded (the list below keeps its room) */
+.vw-band-row { flex: none; display: flex; align-items: center; gap: 8px; min-height: 28px; }
 .vw-band-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .vw-band-doors { display: flex; flex-wrap: wrap; gap: 6px; }
 /* locked (design q-047 §3.5): one sentence + 解锁… — no 添加…, nothing greyed */
@@ -7788,6 +7801,46 @@ button.vw-chip { cursor: pointer; }
 .vw-ak-some { display: flex; flex-direction: column; gap: 4px; }
 .vw-ak-some[hidden] { display: none; }
 .vw-ak-sub { color: var(--text-dim); }
+/* lane vault-key-row-compact (the owner 2026-10-21: 「授权很多的时候，这个界面需要优化一下」): a key's row = a HEAD + folds, bounded — the head's
+   chips count (「N 个动作」 opens the verbs popover, 「授权给 N 个」 the grants list in place); under it the limits in ONE line and the
+   grants list (about five rows, the rest scroll INSIDE the row — never a 显示更多; a filter past eight; ended conversations dim + one cleanup door) */
+.vw-row > .vw-ak { grid-column: 1 / -1; margin-top: 0; min-width: 0; }
+/* the key's HEAD: name · chips · last use, the value and its doors under it (a window of the default 980 px); ONE line from a
+   1180-px-wide window; a phone: two lines (the name and its chips · the doors) */
+.vw-row[data-store="automation"] { grid-template-columns: fit-content(40%) minmax(0, 1fr) max-content; }
+.vw-row[data-store="automation"] > .vw-act { grid-column: 1 / -1; justify-content: flex-start; }
+@container vw (min-width: 1180px) {
+  .vw-row[data-store="automation"] { grid-template-columns: fit-content(30%) minmax(0, 1fr) max-content max-content; }
+  .vw-row[data-store="automation"] > .vw-act { grid-column: auto; justify-content: flex-end; }
+}
+.vw-ak:empty { display: none; }
+.vw-ak-verbs-chip, .vw-ak-grants-chip { color: var(--text); }
+.vw-ak-grants-chip[aria-expanded="true"] { background: var(--accent-dim); border-color: transparent; }
+.vw-ak-has-ended::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); }
+.vw-ak-sep { color: var(--text-dim); }
+.vw-ak-gfold { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); }
+.vw-ak-glist { display: flex; flex-direction: column; max-height: 150px; overflow-y: auto; overscroll-behavior: contain; }
+.vw-ak-g { flex: none; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 2px; border-bottom: 1px solid var(--border); }
+.vw-ak-g:last-child { border-bottom: 0; }
+.vw-ak-gico { flex: none; color: var(--text-dim); }
+.vw-ak-gname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.vw-ak-gstate { flex: none; font-size: 11px; color: var(--ok-text); }
+.vw-ak-g-ended .vw-ak-gname, .vw-ak-gstate-ended { color: var(--text-dim); }   /* dim words; its doors stay doors */
+.vw-ak-gfilter { padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-window); color: var(--text); font: inherit; }
+.vw-ak-gnone { color: var(--text-dim); padding: 2px 0; }
+.vw-ak-gfoot { display: flex; align-items: center; gap: 6px; }
+.vw-ak-verbs-pop { min-width: 220px; max-width: min(360px, calc(100vw - 16px)); max-height: min(60vh, 480px); overflow: auto; padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 8px; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-window); font-size: 12px; color: var(--text); }
+.vw-ak-vfam { display: flex; flex-direction: column; gap: 2px; }
+.vw-ak-vfam-name { font-size: 11px; font-weight: 600; color: var(--text-dim); }
+.vw-ak-vrow { padding-left: 8px; }
+.vw-ak-vedit { align-self: flex-start; }
+@media (max-width: 600px) { .vw-ak-g { min-height: 40px; } .vw-ak-glist { max-height: 200px; } .vw-ak-gfilter { min-height: 36px; font-size: 16px; } }
+/* the band's row (the card grammar): the head, a use failure's cause under it, the rest under ONE fold */
+.vw-band-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.vw-band-cause { color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+.vw-band-more { color: var(--text-dim); font-size: 11px; }
+.vw-band-more summary { cursor: pointer; width: max-content; }
+.vw-band-more-body { white-space: pre-line; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .vw-ak-x { min-width: 36px; min-height: 36px; } .vw-ak-pick { min-height: 36px; } .vw-ak-dir, .vw-ak-up { min-height: 36px; } }
 .sys-vault-line { border-top: 1px solid var(--border); }
 @media (max-width: 600px) {
@@ -7809,5 +7862,14 @@ button.vw-chip { cursor: pointer; }
   .vw-used { order: 4; }
   .vw-tech { order: 5; }
   .vw-band-row { flex-wrap: wrap; padding: 4px 0; }
-  .vw-band-txt { flex: 1 0 100%; white-space: normal; }
+  .vw-band-words { flex: 1 0 100%; }
+  .vw-band-txt { white-space: normal; }
+  /* lane vault-key-row-compact: a key's head in TWO lines — the name, its chips (the source as its glyph) and its last use · 显示 and the doors */
+  .vw-row[data-store="automation"] { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .vw-row[data-store="automation"] > .vw-main { min-width: 0; max-width: 100%; }
+  .vw-row[data-store="automation"] > .vw-used { order: 1; }
+  .vw-row[data-store="automation"] > .vw-act { order: 2; flex: 1 0 100%; justify-content: flex-start; }
+  .vw-row[data-store="automation"] > .vw-ak { order: 3; flex: 1 0 100%; }
+  .vw-row[data-store="automation"] > .vw-tech { order: 4; flex: 1 0 100%; }
+  .vw-row[data-store="automation"] .vw-mask, .vw-row[data-store="automation"] .vw-chip-prov .vw-chip-words { display: none; }
 }

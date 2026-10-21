@@ -74,8 +74,12 @@ export function inboxModel(app) {
   // device's language and has no detail: the store dropped its words, its i18n and its detail
   // card grammar (lane card-grammar-exceptions): a raw-API proposal says its CARD's title (`card.head`, the words the
   // chat card and the Outbox row say — never the raw path), worded here like the card does
-  const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.card && i.card.kind === 'api-call' && i.card.head ? titleWords(i.card.head, { t, lang: resolveLang() }) : i && i.i18n && i.i18n.text ? t(i.i18n.text.key, i.i18n.text.params || {}) : (i && i.text) || '');
-  const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map((l) => t(l.key, l.params || {})).join('\n') : (i && i.detail) || '');
+  // lane vault-key-row-compact: a param may be WORDS (`{key}` — a verb's own words): said in this language before the sentence is filled
+  const said = (l) => t(l.key, Object.fromEntries(Object.entries(l.params || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key) : v])));
+  const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.card && i.card.kind === 'api-call' && i.card.head ? titleWords(i.card.head, { t, lang: resolveLang() }) : i && i.i18n && i.i18n.text ? said(i.i18n.text) : (i && i.text) || '');
+  /** The detail as LINES (the Vault window's band: its first line is a use failure's cause, the rest sit under one fold). */
+  const detailLinesOf = (i) => (isCleared(i) ? [] : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map(said) : String((i && i.detail) || '').split('\n').filter(Boolean));
+  const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? detailLinesOf(i).join('\n') : (i && i.detail) || '');
   const nameFor = (key, items) => {
     const s = sessionFor(key);
     const spoken = items.find((i) => i.i18n && i.i18n.source && i.i18n.source.key);
@@ -539,7 +543,7 @@ export function inboxModel(app) {
   const model = {
     get todos() { return todos; },
     get loaded() { return loaded; },
-    byId, sessionFor, displayName, wordsOf, detailOf, nameFor, jump, setStatus, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
+    byId, sessionFor, displayName, wordsOf, detailOf, detailLinesOf, nameFor, jump, setStatus, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
     ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts,
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */

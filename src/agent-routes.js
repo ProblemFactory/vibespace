@@ -27,6 +27,7 @@ const { sameToken } = require('./pairing-token.js'); // B-8dda: every vsst_ look
 // drain — never dropped. The injection channel wraps at 10 KiB upstream and
 // the whole context is capped at INLINE_CAP, hence the section budget.
 const { BLOCK_MAX_BYTES: MSG_STASH_BLOCK_MAX_BYTES } = require('./channel-filter.js');
+const { stashHeading } = require('./channel-policy.js'); // lane channel-direct-send-sync: a held batch's heading by cause (busy / paced / unreachable), the ONE speller
 const { searchTouches } = require('./channel-touch.js'); // §26 (B-099e): a search's hits → one touch per conversation (PURE)
 // the backlog's ONE read order (priority, then newest) + its closed priority set
 const { PRIORITIES: BACKLOG_PRIORITIES, sortBacklog, nudgeThreshold, backlogNudge, nudgeText } = require('./backlog-select.js');
@@ -261,7 +262,11 @@ function drainStashUnderCap(deliver, cid, ahead, log = console.log) {
   const room = roomUnderCap(ahead);
   const needOf = (p) => Buffer.byteLength(p.text, 'utf-8') + (ahead > 0 ? 2 : 0);
   let budget = Math.min(MSG_STASH_MAX_BYTES, Math.max(0, room));
-  let pm = renderMsgStash(waiting, { maxBytes: budget });
+  // lane channel-direct-send-sync: a drain rides THIS turn, so the conversation was never "unreachable" — the hub
+  // HELD these (a turn was running ⇒ busy; idle, a delivery would have cost a wake ⇒ paced). Word the cause; a batch
+  // whose entries carry no cause keeps renderMsgStash's default (reserved for a session that truly could not be reached).
+  const heldCause = (() => { let busy = false, paced = false; for (const e of waiting) { const w = e && e.held && e.held.why; if (w === 'busy') busy = true; else if (w === 'paced') paced = true; } return busy ? stashHeading('busy') : paced ? stashHeading('paced') : null; })();
+  let pm = renderMsgStash(waiting, { maxBytes: budget, heading: heldCause });
   let need = needOf(pm);
   // the render budgets its ROWS; the head, the held line and the hints ride on top of them — so a fill that reached
   // the room overshoots it by that much and the whole section waited (verify r6: 37 % of a sweep held everything
@@ -269,7 +274,7 @@ function drainStashUnderCap(deliver, cid, ahead, log = console.log) {
   // the newest always shows, and only when even IT does not fit does the section wait whole.
   while (need > room && pm.shown.length > 1) {
     budget -= need - room;
-    pm = renderMsgStash(waiting, { maxBytes: Math.max(0, budget) });
+    pm = renderMsgStash(waiting, { maxBytes: Math.max(0, budget), heading: heldCause });
     need = needOf(pm);
   }
   if (!pm.shown.length || need > room) {
@@ -2052,7 +2057,7 @@ app.post('/api/agent/channels/reply', async (req, res) => {
   // 2026-09-28: `placement` (chat | quote | thread | thread+chat) — the CLI's --to / --in-thread / --also-in-chat; none
   // with a message = the vendor's norm; an undeclared one is `placement-not-offered` (409, worded) and creates nothing
   // B-a085 (mail): `replyAll` = everyone on the message it answers, `cc` = addresses the agent adds — resolved at propose, on the card
-  const makeR = () => eng.propose(ctxR, key.adapterId, key.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments, ...(b.replyAll !== undefined ? { replyAll: b.replyAll } : {}), ...(b.cc !== undefined ? { cc: b.cc } : {}), ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}) }, { mayWake: cidR ? wakeFloorFor(cidR) : null });
+  const makeR = () => eng.propose(ctxR, key.adapterId, key.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments, ...(b.replyAll !== undefined ? { replyAll: b.replyAll } : {}), ...(b.cc !== undefined ? { cc: b.cc } : {}), ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}) }, { mayWake: cidR ? wakeFloorFor(cidR) : null, collect: b.collect === true });
   // 2026-09-27: `replaces` = withdraw that proposal of yours + this new one, atomic (the old one goes only if the new one is accepted)
   const repR = replacesOf(b);
   if (!repR.ok) return res.status(400).json({ error: repR.error, code: 'bad-request' });
@@ -2213,6 +2218,11 @@ app.get('/api/agent/channels/status', (req, res) => {
   if (!eng) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   const [s, id] = hit;
   const ctx = channelPrincipal(s, id);
+  // lane channel-direct-send-sync: `?collect=1` on one proposal is the drafting CLI reading its direct send's
+  // receipt INLINE — mark it read (the message road never fires for it); `pending` ⇒ the send is not out yet, poll on
+  if (req.query.collect === '1' && req.query.id && typeof eng.collectReceipt === 'function') {
+    return Promise.resolve().then(() => eng.collectReceipt(ctx, String(req.query.id))).then((cr) => chanAnswer(res, cr), (e) => res.status(500).json({ error: e.message }));
+  }
   const r = eng.statusFor(ctx, req.query.id ? String(req.query.id) : null);
   // R4: WHAT YOU WERE GIVEN — every grain naming you (or a group of yours):
   // its access authority and whether a notification wakes you

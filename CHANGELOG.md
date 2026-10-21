@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.335 — 2026-10-21
+
+### Fixed
+- You can dictate with Dropline into any text box you focus — editing or rejecting a message an agent proposed included — not only the chat box.
+- After you dictate, the "Inserted · Undo" note shows beside the microphone, over a dialog too, instead of at the page's left edge.
+- An automation key's row in the Vault stays short however many conversations it is granted to, and a limit that allows everything says any.
+- When an automation key is refused, the Vault's notice says who used which key for what, with the reason on the line below.
+- When an agent may send a message directly, its send command now returns the delivery receipt itself, so no second receipt message waits or wakes it.
+
 ## 2.369.334 — 2026-10-21
 
 ### Fixed

@@ -7879,7 +7879,7 @@ function create(deps = {}) {
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
     approve, reject, onProposal, withdrawProposal, replaceProposal, noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces,
-    receipt, expireSweep, pointerSync, learnSentFiles, filesOfferFor, releaseHeld, stopHeld,
+    receipt, expireSweep, pointerSync, learnSentFiles, filesOfferFor, releaseHeld, stopHeld, collectReceipt, stopCollect,
   } = Object.assign(engineCtx, ChannelsOutbound.create(engineCtx));
   const {
     clientFor, resolverFor, credentialFactsFor, credentialFacts, offeredCredentials, defaultCredentialKey, credentialLabelFor, connectableFor,
@@ -8109,6 +8109,7 @@ function create(deps = {}) {
     // were persisted before the timer existed), so the next boot delivers them.
     for (const key of [...wakeTimers.keys()]) clearWakeTimer(key);
     stopHeld();   // lane lark-send-hold: a held send's release timer (its stamp stays — the next boot re-arms it)
+    stopCollect();   // lane channel-direct-send-sync: the collect fallback timers (a receipt held in memory re-delivers at the next boot sweep)
     for (const e of live.values()) {
       disarmPush(e, 'engine stopped');
       if (e.pushTimer) { clearTimeout(e.pushTimer); e.pushTimer = null; }
@@ -8271,6 +8272,7 @@ function create(deps = {}) {
     withdrawProposal, replaceProposal, reconcileReceiptFates,
     // P4: reconcile / the boot sweep / the per-channel honesty switch
     reconcile: (id, o) => onProposal(id, () => reconcile(id, o)), sweepSending, sweepReplaces, releaseHeld, setSenderHonesty, honestyLineFor, deprecatedReceiptWakes,   // verify r2: two Check-outcome presses ask the adapter ONCE
+    collectReceipt,   // lane channel-direct-send-sync: the drafting CLI reads a direct send's receipt inline (GET status?id&collect=1)
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
     agentWatch, agentUnwatch, agentWatchesFor, setAgentDirectory, directoryLists,   // lane channel-agent-watch
     attention, setJudge, labelJudged,   // lane decision-attention: the judged rows' scan, the account's "never judge", a label

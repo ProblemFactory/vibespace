@@ -5419,6 +5419,8 @@ export default {
   "Handed to {agent} with an earlier message": "已随更早的一条消息交给 {agent}",
   "Waiting for {agent}'s next message — waking it was refused: {why}": "等待 {agent} 的下一条消息 —— 唤醒被拒绝: {why}",
   "Waiting for {agent}'s next message": "等待 {agent} 的下一条消息",
+  "{agent} read the receipt with its own command": "{agent} 已随自己的命令读到回执",
+  "Being read by {agent} inline": "{agent} 正在内联读取回执",
   "{agent} is gone — receipt kept": "{agent} 已不在 —— 回执已保留",
   "Approve edited and wake the agent now (starts a turn)": "批准修改后的版本并立即唤醒 agent（会开始一轮）",
   "Approve and wake the agent now (starts a turn)": "批准并立即唤醒 agent（会开始一轮）",
@@ -9598,7 +9600,6 @@ export default {
   "Every grant of it stops at once and its value leaves the vault. What it already did stays in the audit.": "它的每项授权立即失效，值也从保险库中删除。它已做过的事仍留在审计记录里。", // design q-046 (lane automation-keys-core)
   "Revoked": "已撤销", // design q-046 (lane automation-keys-core)
   "Not granted to anything yet": "还没有授权给任何会话或任务组", // design q-046 (lane automation-keys-core)
-  "Granted to:": "授权给：", // design q-046 (lane automation-keys-core)
   "once": "一次", // design q-046 (lane automation-keys-core)
   "used": "已用", // design q-046 (lane automation-keys-core)
   "Take this grant back": "收回这项授权", // design q-046 (lane automation-keys-core)
@@ -9728,18 +9729,6 @@ export default {
   "System · never shown": "系统 · 永不显示", // lane vault-window-v2
   "Minted by an agent": "agent 铸造", // lane vault-window-v2
   "An agent saw it": "agent 见过明文", // lane vault-window-v2
-  "“{name}” could not {verb} {target}: the vault is locked — Unlock… at the top of the page": "「{name}」无法 {verb} {target}：保险库已锁——在页面顶部点「解锁…」", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
-  "“{name}” could not {verb} {target}: the key is not granted to that conversation (nor to one of its Task Groups) and did not open it — grant it to that conversation or its Task Group in the Vault window (授权给…), or answer the card next time": "「{name}」无法 {verb} {target}：这把 key 没有授权给那个会话（也没授权给它所在的任务组），也不是它开的——在保险库窗口把 key 授权给那个会话或它的任务组（授权给…），或者下次回答卡片", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
-  "“{name}” could not {verb} {target}: the key does not hold that verb — mint a key that holds it in the Vault window (铸造…)": "「{name}」无法 {verb} {target}：这把 key 不含这个动词——在保险库窗口铸造一把含它的 key（铸造…）", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
-  "“{name}” could not {verb} {target}: the one use you allowed was spent — answer the next card with 一直, or grant the key in the Vault window": "「{name}」无法 {verb} {target}：你允许的那一次已经用掉了——下次卡片选「一直」，或在保险库窗口授权这把 key", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
-  "“{name}” could not {verb} {target}: the key was revoked — mint a new one in the Vault window and grant it": "「{name}」无法 {verb} {target}：这把 key 已撤销——在保险库窗口铸造一把新的并授权", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
-  "“{name}” could not {verb} {target}: the calling conversation is not running any more — nothing to do": "「{name}」无法 {verb} {target}：发起的会话已经不在运行——无需处理", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
-  "“{name}” could not {verb} {target}: nobody answered its card in 60 s — answer the card next time, or grant the key in the Vault window": "「{name}」无法 {verb} {target}：卡片 60 秒内没人回答——下次回答卡片，或在保险库窗口授权这把 key", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
-  "“{name}” could not {verb} {target}: that conversation still has open For-you asks — answer its cards, or let the caller pass --resolve-asks": "「{name}」无法 {verb} {target}：那个会话还有未处理的「待你处理」提问——先回答它的卡片，或让调用方加 --resolve-asks", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
-  "An automation key could not {verb} {target}: the vault is locked — Unlock… at the top of the page": "自动化 key 无法 {verb} {target}：保险库已锁——在页面顶部点「解锁…」", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
-  "An automation key could not {verb} {target}: no key is granted to that conversation — grant one in the Vault window (授权给…), or answer the card next time": "自动化 key 无法 {verb} {target}：没有任何 key 授权给那个会话——在保险库窗口授权一把（授权给…），或者下次回答卡片", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
-  "“{name}” could not {verb} {target}": "「{name}」无法 {verb} {target}", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
-  "An automation key could not {verb} {target}": "自动化 key 无法 {verb} {target}", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
   "{n} refused within the hour": "一小时内被拒 {n} 次", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
   "Last: {target}": "最近一次：{target}", // lane conversations-archive-verb (the 使用失败 notice: key · verb · target · reason · door)
   "Last asked by {who}": "最近一次来自 {who}", // lane vault-window-v2
@@ -9927,6 +9916,34 @@ export default {
   "Reach of the grants you add": "新加授权的作用范围", // lane key-instance-scope: a grant's reach
   "Granted — the key now reaches every conversation here from that conversation (the Vault window lists it)": "已授权——那个会话现在能用这把 key 触及这里的每一个会话（保险库窗口里列着）", // lane key-instance-scope: a grant's reach
   "The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key's row in the Vault window.": "作用范围决定它能用这把 key 改名、结束或归档哪些别的会话：只有它开的会话（默认）、这些岗位的会话，或这个 VibeSpace 上的每一个会话——之后可在保险库窗口该 key 的行里改。", // lane key-instance-scope: a grant's reach
-  "“{name}” could not {verb} {target}: the key did not open that conversation and its grant reaches only what it opened — widen the reach on the key's row in the Vault window (这些岗位的会话 / 整个 VibeSpace), or grant the key to that conversation": "「{name}」无法 {verb} {target}：这把 key 没有开过那个会话，而授权只触及它开的会话——在保险库窗口该 key 的行里扩大作用范围（这些岗位的会话 / 整个 VibeSpace），或把 key 授权给那个会话", // lane key-instance-scope: a grant's reach
-  "“{name}” could not {verb} {target}: that conversation is not in the Task Groups the grant reaches — widen the reach on the key's row in the Vault window (整个 VibeSpace), or grant the key to that conversation": "「{name}」无法 {verb} {target}：那个会话不在授权触及的岗位里——在保险库窗口该 key 的行里扩大作用范围（整个 VibeSpace），或把 key 授权给那个会话", // lane key-instance-scope: a grant's reach
+  "Granted to {n}": "授权给 {n} 个", // lane vault-key-row-compact
+  "Granted to": "授权给", // lane vault-key-row-compact
+  "Show the grants": "看看授权给了谁", // lane vault-key-row-compact
+  "{n} grants to conversations that ended": "有 {n} 个授权的会话已结束", // lane vault-key-row-compact
+  "Filter the grants…": "筛选授权…", // lane vault-key-row-compact
+  "No grant matches “{q}”": "没有匹配「{q}」的授权", // lane vault-key-row-compact
+  "Clean up ended grants": "清理已结束的授权", // lane vault-key-row-compact
+  "Takes back every grant to a conversation that is not running — such a grant can never be used; if that conversation comes back, its next use asks you again": "收回所有给已不在运行的会话的授权——这样的授权永远用不上；那个会话如果再回来，它下次使用时会再问你", // lane vault-key-row-compact
+  "Took back {n} grants to ended conversations": "已收回 {n} 个给已结束会话的授权", // lane vault-key-row-compact
+  "{n} kinds": "{n} 种", // lane vault-key-row-compact
+  "Agent groups": "Agent 群组", // lane vault-key-row-compact
+  "Feedback": "反馈", // lane vault-key-row-compact
+  "{who} used “{name}” for “{verb}” — refused": "{who} 用 key「{name}」做「{verb}」被拒", // lane vault-key-row-compact
+  "“{name}” was refused for “{verb}”": "key「{name}」做「{verb}」被拒", // lane vault-key-row-compact
+  "{who} used an automation key for “{verb}” — refused": "{who} 用自动化 key 做「{verb}」被拒", // lane vault-key-row-compact
+  "An automation key was refused for “{verb}”": "自动化 key 做「{verb}」被拒", // lane vault-key-row-compact
+  "The vault is locked — Unlock… at the top of the page": "保险库已锁——在页面顶部点「解锁…」", // lane vault-key-row-compact
+  "The key is not granted to {target} (nor to one of its Task Groups) and did not open it — grant it there in the Vault window (授权给…), or answer the card next time": "这把 key 没有授权给 {target}（也没授权给它所在的任务组），也不是它开的——在保险库窗口把 key 授权过去（授权给…），或者下次回答卡片", // lane vault-key-row-compact
+  "The key does not hold that verb — add it with Edit… on the key's row in the Vault window": "这把 key 不含这个动作——在保险库窗口该 key 的行里用「编辑…」加上", // lane vault-key-row-compact
+  "The one use you allowed was spent — answer the next card with 一直, or grant the key in the Vault window": "你允许的那一次已经用掉了——下次卡片选「一直」，或在保险库窗口授权这把 key", // lane vault-key-row-compact
+  "The key was revoked — mint a new one in the Vault window and grant it": "这把 key 已撤销——在保险库窗口铸造一把新的并授权", // lane vault-key-row-compact
+  "The calling conversation is not running any more — nothing to do": "发起的会话已经不在运行——无需处理", // lane vault-key-row-compact
+  "Nobody answered its card in 60 s — answer the card next time, or grant the key in the Vault window": "卡片 60 秒内没人回答——下次回答卡片，或在保险库窗口授权这把 key", // lane vault-key-row-compact
+  "{target} still has open For-you asks — answer its cards, or let the caller pass --resolve-asks": "{target} 还有未处理的「待你处理」提问——先回答它的卡片，或让调用方加 --resolve-asks", // lane vault-key-row-compact
+  "The key did not open {target} and its grant reaches only what it opened — widen the reach on the key's row in the Vault window (这些岗位的会话 / 整个 VibeSpace), or grant the key to that conversation": "这把 key 没有开过 {target}，而授权只触及它开的会话——在保险库窗口该 key 的行里扩大作用范围（这些岗位的会话 / 整个 VibeSpace），或把 key 授权给那个会话", // lane vault-key-row-compact
+  "{target} is not in the Task Groups the grant reaches — widen the reach on the key's row in the Vault window (整个 VibeSpace), or grant the key to that conversation": "{target} 不在授权触及的岗位里——在保险库窗口该 key 的行里扩大作用范围（整个 VibeSpace），或把 key 授权给那个会话", // lane vault-key-row-compact
+  "No key is granted to {target} — grant one in the Vault window (授权给…), or answer the card next time": "没有任何 key 授权给 {target}——在保险库窗口授权一把（授权给…），或者下次回答卡片", // lane vault-key-row-compact
+  "1 thing it may do": "1 个动作", // lane vault-key-row-compact
+  "{n} things it may do": "{n} 个动作", // lane vault-key-row-compact
+  "No key granted to {target} holds that verb — add it with Edit… on a key's row in the Vault window": "授权给 {target} 的 key 都不含这个动作——在保险库窗口某把 key 的行里用「编辑…」加上", // lane vault-key-row-compact
 };

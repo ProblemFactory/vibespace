@@ -137,6 +137,8 @@ const server = http.createServer((req, res) => {
       return send(200, { ok: true, appended: 3, polledAt: 2000 });
     }
     if (url.pathname === '/api/agent/channels/reply') {
+      // lane channel-direct-send-sync: a DIRECT send answers SENT + the receipt WORDS inline (the CLI reads them from its own command)
+      if (body.conv === 'fake-poll/direct') { const rcTxt = "Channel receipt — fake-poll · Ops room\nproposal p-d: SENT (vendor id om_d1)\nsent as: user\nthe recipient sees: NOT VERIFIED — this channel's attribution has not been measured"; return send(200, { ok: true, proposal: { id: 'p-d', state: 'sent', adapterId: 'fake-poll', convId: 'ops', title: 'Ops room', sendAs: 'user', result: { sentAs: 'user', vendorMessageId: 'om_d1' }, identity: { marking: 'unknown', text: null }, policy: { mode: 'direct', reasons: [] } }, decision: { mode: 'direct', reasons: [] }, receiptText: rcTxt, receiptPending: false, gotCollect: body.collect === true }); }
       if (body.conv === READONLY.key) return send(409, { ok: false, code: 'send-not-available', error: 'sending is not available on this conversation (read-only-mailbox)', why: 'read-only-mailbox' });
       if (body.conv !== VISIBLE.key) return send(404, notFound());
       // 2026-09-27: --replaces — the engine's replace answers (accepted / the old one decided first)
@@ -163,6 +165,8 @@ const server = http.createServer((req, res) => {
       return send(200, { ok: true, proposal: { id: 'p-1', state: 'withdrawn', withdrawal: { why: body.why || null } } });
     }
     if (url.pathname === '/api/agent/channels/status') {
+      // lane channel-direct-send-sync: the collect door — the drafting CLI confirms it read a direct send's receipt inline
+      if (url.searchParams.get('collect') === '1') return send(200, { ok: true, collected: true, receiptText: "Channel receipt — fake-poll · Ops room\nproposal p-d: SENT (vendor id om_d1)", proposal: { id: url.searchParams.get('id') || 'p-d', state: 'sent' } });
       const p = { id: 'p-1', state: 'sent', adapterId: 'fake-poll', convId: 'ops', title: 'Ops room', at: 1, updatedAt: 2, text: 'hello', policy: { mode: 'review', reasons: [] }, receipt: { status: 'edited', edited: true, sentAs: 'user', vendorMessageId: 'v-9', identityMarking: 'marked', identityMarkingText: 'The channel shows this message as sent by Example App' }, replyTo: 'om_t2', placement: 'thread', placementText: P.placementWords('thread'), inThread: true, threadKey: 'omt_t1' };
       if (url.searchParams.get('id')) return url.searchParams.get('id') === 'p-1' ? send(200, { ok: true, proposal: p }) : send(404, { ok: false, code: 'not-found', error: 'no such proposal (not found, or not yours)' });
       // R4: what the agent was given — access (with its authority) and, separately, whether it is watched
@@ -740,6 +744,12 @@ console.log('\n㉑ lane channels-proposals-recall: proposals [--all] · recall <
   }
 }
 
+{
+  // lane channel-direct-send-sync: a direct send prints its receipt INLINE and queues no second message
+  const d = await run(['reply', 'fake-poll/direct', 'the deploy is done']);
+  ok(d.code === 0 && /sent directly \(policy: direct\)/.test(d.out) && /SENT \(vendor id om_d1\)/.test(d.out) && /sent as: user/.test(d.out) && /the recipient sees: NOT VERIFIED/.test(d.out), 'a direct send prints the receipt INLINE — SENT · vendor id · sent as · what the recipient sees — so no second "[Channels · Outbox]" message waits in the queue', d.out + ' | ' + d.err);
+  ok(!/note: on this channel the recipient sees/.test(d.out), 'the separate identity note is dropped when the full inline receipt is shown (it already carries it)');
+}
 server.close();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -440,14 +440,33 @@ function limitsPlan(raw, scopes = []) {
   }
   return { ok: true, limits: lim };
 }
-/** The limits in words (the CLI's refusal, the audit view): names only. */
-function limitsWords(limits) {
+/**
+ * ONE LIMIT'S SET IN WORDS (lane vault-key-row-compact — the owner 2026-10-21 05:4xZ on the key row: 「授权很多的时候，这个界面需
+ * 要优化一下」; its 权限模式 line named all eleven modes while 账号 / 模型 said 任何 for the same situation). `value` = the stored
+ * pick (a list, or 'any'); `table` = every choice there is NOW (the harness tables' permission modes, the roster's
+ * accounts, the tables' models; the modes are OPEN_MODES), null when the caller cannot say. → { any, names, n, count }:
+ * 'any' — or a list holding every row of a table of two or more — is ANY (an unrestricted set is never enumerated); up to
+ * NAMED_MAX picks are NAMED; more are COUNTED (the window's 「N 种」, the names in its title). Names only — the caller words
+ * each one; `names` is the stored list (empty for a literal 'any').
+ */
+const NAMED_MAX = 3;
+function limitSetView(value, table = null) {
+  const list = Array.isArray(value) ? value.map(str).filter(Boolean) : [];
+  const rows = Array.isArray(table) ? [...new Set(table.map(str).filter(Boolean))] : null;
+  const any = value === 'any' || (!!rows && rows.length > 1 && rows.every((x) => list.includes(x)));   // a one-row table is NAMED (one name says more than «any»)
+  return { any, names: list, n: list.length, count: !any && list.length > NAMED_MAX };
+}
+/** The limits in words (the CLI's refusal, the audit view): names only — an unrestricted set says «any» (lane
+ *  vault-key-row-compact: `tables` = {permissionModes, accounts, models} — the choices there are now, when the caller has
+ *  them; the modes' table is OPEN_MODES). An agent reads the names of a narrower set (it must stay inside them). */
+function limitsWords(limits, tables = null) {
   const L = limitsOf(limits);
   if (!L) return 'no bounds set — every open is refused until you set them in the Vault window';
-  const any = (v) => (v === 'any' ? 'any' : v.join(', ') || 'none');
+  const tb = tables && typeof tables === 'object' ? tables : {};
+  const said = (v, table) => { const w = limitSetView(v, table); return w.any ? 'any' : w.names.join(', ') || 'none'; };
   // lane key-folder-picker-all: `/` is said as all paths, never a bare slash; a root covers its subfolders and says so
   const folders = L.cwdRoots.includes(ALL_PATHS) ? 'all paths' : L.cwdRoots.length ? `${L.cwdRoots.join(', ')} (with subfolders)` : 'none';
-  return `folders ${folders} · accounts ${any(L.accounts)} · permission modes ${any(L.permissionModes)} · models ${any(L.models)} · modes ${any(L.modes)}`;
+  return `folders ${folders} · accounts ${said(L.accounts, tb.accounts)} · permission modes ${said(L.permissionModes, tb.permissionModes)} · models ${said(L.models, tb.models)} · modes ${said(L.modes, OPEN_MODES)}`;
 }
 /**
  * THE JUDGMENT OF AN OPEN AGAINST ITS KEY'S LIMITS (on the hub — src/server/automation-engine.js use(): after the grant,
@@ -510,6 +529,50 @@ function permissionResolvedVerdict(limits, resolved) {
   return { ok: false, code: LIMIT_CODES.permissionModes, field: 'permissionModes', why: `the CLI's own setting (${where}) is ${clean(mode, 40)}; this key allows ${L.permissionModes.join(', ')}`, resolved: r };
 }
 
+// ── THE KEY ROW, BOUNDED (lane vault-key-row-compact — the owner 2026-10-21: two grants already made a wall of text; twelve
+// would be a screen tall). The row's head counts (「N 个动作」 · 「授权给 N 个」), the verbs open grouped by FAMILY, the grants
+// open as a bounded list (groups, then running conversations, then ended ones — each by name) with ONE cleanup door.
+/** The verbs' FAMILIES — the closed table's own groups, by a verb's first word (the verbs popover's heads). */
+const FAMILIES = Object.freeze([
+  Object.freeze({ id: 'conversations', label: 'Conversations' }),
+  Object.freeze({ id: 'groups', label: 'Agent groups' }),
+  Object.freeze({ id: 'feedback', label: 'Feedback' }),
+]);
+const familyOf = (verb) => { const f = str(verb).split('.')[0]; return FAMILIES.some((x) => x.id === f) ? f : 'other'; };
+/** A key's verbs grouped by family, in the table's order → [{ id, label, verbs: [verb…] }] (a family it holds none of is absent). */
+function verbFamilies(scopes) {
+  const held = SCOPES.map((s) => s.verb).filter((v) => (Array.isArray(scopes) ? scopes : []).includes(v));
+  return [...FAMILIES, { id: 'other', label: 'Other' }].map((f) => ({ id: f.id, label: f.label, verbs: held.filter((v) => familyOf(v) === f.id) })).filter((f) => f.verbs.length);
+}
+/** A grant is ENDED when it names ONE conversation (`session:<id>`) that is not running here — `live` = the running
+ *  conversations' subjects (a Set or a list). A use needs that conversation's own live session token, so the grant can
+ *  never be used while the conversation is gone; a Task Group's grant never ends here. */
+function grantEnded(g, live) {
+  const s = str(g && g.subject);
+  if (!/^session:/.test(s)) return false;
+  return !(live instanceof Set ? live.has(s) : Array.isArray(live) && live.includes(s));
+}
+/** The grants list's ORDER: Task Groups, then running conversations, then ended ones — each by its name (the caller's
+ *  words, else the subject). `rows` = [{ subject, name?, ended? }] → a new sorted list. */
+function grantOrder(rows) {
+  const rank = (r) => (/^group:/.test(str(r && r.subject)) ? 0 : r && r.ended ? 2 : 1);
+  const nameOf = (r) => str((r && r.name) || (r && r.subject));
+  return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => rank(a) - rank(b) || nameOf(a).localeCompare(nameOf(b)) || str(a.subject).localeCompare(str(b.subject)));
+}
+/** The audit note of 清理已结束的授权: what went, by subject — within the audit's 300 characters («+N more» past them). */
+function pruneWords(subjects) {
+  const list = (Array.isArray(subjects) ? subjects : []).map(str);
+  const head = `took back ${list.length} grant${list.length === 1 ? '' : 's'} to ended conversations: `;
+  let out = head;
+  for (let i = 0; i < list.length; i++) {
+    const more = list.length - i - 1;
+    const next = `${i ? ', ' : ''}${list[i]}`;
+    if ((out + next).length + (more ? ` +${more} more`.length : 0) > 300) return `${out} +${list.length - i} more`;
+    out += next;
+  }
+  return out;
+}
+
 /** A call's arguments as the AUDIT keeps them: names and ids only — never a text body (a rename's new name IS a name). */
 function argsSummary(verb, args) {
   const a = args && typeof args === 'object' ? args : {};
@@ -530,4 +593,5 @@ module.exports = {
   SCOPES, VERBS, scopeOf, CODES, keyOf, publicKey, grantOf, reachOf, reachKind, widestReach, isSubject, callerSubjects, openedOf, reachVerdict,
   useVerdict, pickKey, mintPlan, scopesPlan, editPlan, scopesChangeWords, entryOf, keyIdOfEntry, identityOf, argsSummary, auditLine,
   LIMIT_FIELDS, LIMIT_CODES, OPEN_MODES, HARNESS_DEFAULT, SUBSCRIPTION, DEFAULT_LIMITS, ALL_PATHS, allPaths, normPath, limitsOf, limitsPlan, limitsWords, openLimitsVerdict, permissionResolvedVerdict,
+  NAMED_MAX, limitSetView, FAMILIES, familyOf, verbFamilies, grantEnded, grantOrder, pruneWords,   // lane vault-key-row-compact
 };

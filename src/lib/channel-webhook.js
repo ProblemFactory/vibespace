@@ -321,7 +321,7 @@ export function showJoinDialog(app) {
   let seq = 0, ck = null, slugTouched = false, timer = null;
   const box = el('textarea', 'chan-opt-input chan-wh-paste');
   box.rows = 3; box.spellcheck = false; box.autocapitalize = 'off'; box.placeholder = 'vswp_…'; box.setAttribute('autocomplete', 'off');
-  box.dataset.whJoinCode = '1';
+  box.dataset.whJoinCode = '1'; box.dataset.noDictation = '1'; // a pairing code is a credential: never a dictation's context (lane voice-follows-focus)
   const m = createModalShell({ id: 'chan-wh-join', title: t('Join another VibeSpace'), dialogClass: 'chan-wh-dialog', escapeToClose: true, onClose: () => { box.value = ''; seq++; clearTimeout(timer); } });
   m.dialog.dataset.whJoin = '1';
   const intro = whNote(t('Paste the pairing code the other VibeSpace\'s owner gave you. It starts vswp_, works once and lives 10 minutes.'));

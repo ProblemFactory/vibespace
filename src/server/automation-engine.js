@@ -212,6 +212,19 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     audit({ keyId: g.keyId, subject: g.subject, verb: 'key.ungrant', ok: true, by });
     return { ok: true };
   }
+  /** 清理已结束的授权 (lane vault-key-row-compact — the key row's ONE cleanup door): take back EVERY grant of this key whose
+   *  conversation is not running (PURE grantEnded over `live`, the running conversations' subjects the route read at the
+   *  press — a grant to a conversation that is gone can never be used) — ONE store write and ONE audit line naming what
+   *  went (`key.prune`, its note). → { ok, removed: [subjects] } (none ended ⇒ removed: []). */
+  function pruneEnded(keyId, live, { by = 'user' } = {}) {
+    const k = keyById(keyId);
+    if (!k) return named('not_found');
+    const gone = db.grants.filter((g) => g.keyId === k.id && A.grantEnded(g, live));
+    if (!gone.length) return { ok: true, removed: [] };
+    try { write({ keys: db.keys, grants: db.grants.filter((g) => !gone.includes(g)) }); } catch (e) { return named('failed', `the grants could not be written (${e.code || e.message})`); }
+    audit({ keyId: k.id, subject: 'owner', verb: 'key.prune', ok: true, by, note: A.pruneWords(gone.map((g) => g.subject)) });
+    return { ok: true, removed: gone.map((g) => g.subject) };
+  }
   /** The window's list: every key (public fields) with its grants (never a value, never a digest). */
   function list() {
     db = read();
@@ -514,7 +527,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     return { ok: true, lines: lines.slice(-Math.max(1, Math.min(200, Number(limit) || 50))).reverse() };
   }
 
-  return { list, mint, revoke, grant, ungrant, setReach, edit, setLimits, use, answer, reconcile, keysFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
+  return { list, mint, revoke, grant, ungrant, pruneEnded, setReach, edit, setLimits, use, answer, reconcile, keysFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
 }
 
 module.exports = { create, ACTION_TYPE };

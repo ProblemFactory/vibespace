@@ -666,6 +666,7 @@ function create(engineCtx) {
       OF.commit(store.dir, staged, created.id);
       staged = null;
       auditOutbox(created, 'propose', { mode: decision.mode, reasons: decision.reasons });
+      if (guards && guards.collect && decision.mode === 'direct') await store.outbox.update((ob) => { const q = ob.proposals[created.id]; if (q) q.receiptCollect = true; });   // lane channel-direct-send-sync: a DIRECT send whose caller waits to read the receipt inline (a review proposal is never held)
       if (decision.mode === 'direct') {
         await transition(created.id, 'sending', 'policy', (p) => { p.approvedBy = 'policy'; });
         await sendNow(created.id);
@@ -683,7 +684,16 @@ function create(engineCtx) {
       notify([convId]);
     }
     const fresh = store.outbox.snapshot().proposals[created.id];
-    return { ok: true, proposal: agentProposalView(ctx, fresh), decision };
+    // lane channel-direct-send-sync: a direct send whose caller is waiting gets the receipt WORDS back with the
+    // command, to print INLINE — ready now, or `receiptPending` (a held send; the CLI polls the collect door). The
+    // CLI then CONFIRMS it read them (GET status?id&collect=1 → collectReceipt), which is what keeps the message road
+    // from firing; a CLI that never confirms is covered by armCollect's fallback (the message road after the window).
+    let receiptText = null, receiptPending = false;
+    if (guards && guards.collect && decision.mode === 'direct') {
+      if (fresh && fresh.receipt) { try { receiptText = renderReceiptText(fresh, fresh.receipt); } catch { receiptText = null; } }
+      else receiptPending = true;
+    }
+    return { ok: true, proposal: agentProposalView(ctx, fresh), decision, ...(guards && guards.collect && decision.mode === 'direct' ? { receiptText, receiptPending } : {}) };
   }
 
   /**
@@ -1940,6 +1950,64 @@ function create(engineCtx) {
    * is DEPRECATED: the engine no longer reads it (a stored `true` is ignored;
    * `start()` logs how many watchers still carry it).
    */
+  // ── lane channel-direct-send-sync: a direct send's receipt read INLINE by the drafting CLI ────────────────
+  // The owner 2026-10-21: an agent allowed to send directly should learn the outcome from its OWN command, not
+  // from a second message queued for its next turn. `receiptCollect` (set when the caller passed `collect`) makes
+  // `receipt()` HOLD the message road; the CLI reads the receipt from the reply response or by polling the collect
+  // door (GET status?id&collect=1), and `collectReceipt` marks `receipt.road:'inline'`. A CLI that times out or
+  // dies before collecting: `armCollect`'s one-shot timer (bounded by the send window) delivers the message after all.
+  const collectTimers = new Map();   // proposalId → the fallback timer
+  const COLLECT_SLACK_MS = 50;
+  function collectWindowMs() { let v; try { v = Number(serverSetting('channels.collectWindowMs')); } catch { v = NaN; } return Number.isFinite(v) && v > 0 ? v : P.COLLECT_WINDOW_MS; }
+  function armCollect(id) {
+    const k = String(id);
+    if (collectTimers.has(k) || engineCtx.stopped) return;
+    const timer = setTimeout(() => { collectTimers.delete(k); track(collectExpire(k)); }, collectWindowMs() + COLLECT_SLACK_MS);
+    if (timer.unref) timer.unref();
+    collectTimers.set(k, timer);
+  }
+  function disarmCollect(id) { const k = String(id); const t = collectTimers.get(k); if (t) { clearTimeout(t); collectTimers.delete(k); } }
+  function stopCollect() { for (const t of collectTimers.values()) clearTimeout(t); collectTimers.clear(); }
+  /** The drafting CLI never read the receipt (it timed out or died) — the outcome is NEW to the agent now: deliver
+   *  it as a message after all (the road the base always took). */
+  async function collectExpire(id) {
+    if (engineCtx.stopped) return;
+    const p = store.outbox.snapshot().proposals[id];
+    if (!p || !p.receipt || !p.draftedBy || p.draftedBy.kind !== 'agent' || !p.draftedBy.id) return;
+    if (!p.receiptDelivery || p.receiptDelivery.road !== 'inline' || p.receiptDelivery.collected) return;   // collected inline, or already a message
+    const cid = p.draftedBy.id;
+    const cf = p.convId ? convFor(p.adapterId, p.convId) : { en: null, rec: null };
+    const rec = cf.rec || adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
+    const key = p.convId ? `${p.adapterId}/${p.convId}` : null;
+    log.log(`[channels] receipt ${id} → ${cid}: the drafting CLI did not read it inline — delivering as a message`);
+    return billedWake({ conv: key || `proposal:${id}`, scopeOf: null }, () => receiptNow(id, p, p.receipt, cid, rec, key));
+  }
+  /** THE RECEIPT BLOCK an agent reads — the SAME words the message road carries (so inline and message agree). */
+  function renderReceiptText(p, rc) {
+    const cf = p.convId ? convFor(p.adapterId, p.convId) : { en: null, rec: null };
+    const rec = cf.rec || adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
+    const withheld = !drafterSees(p);
+    const rTitle = conversationName(p.adapterId, p.convId) || p.title || p.convId || '';
+    return P.renderReceiptBlock(rc, { adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, title: rTitle, text: p.text, proposed: p.originalText, withheld });
+  }
+  /** THE COLLECT DOOR (GET /api/agent/channels/status?id=<id>&collect=1, and propose's own inline read): the
+   *  drafting agent reads its direct send's receipt. No receipt yet ⇒ `pending` (keep polling). A receipt that has
+   *  not already gone as a message is marked `receipt.road:'inline'` — the message road never fires for it. */
+  async function collectReceipt(ctx, id) {
+    const p = store.outbox.snapshot().proposals[id];
+    if (!p || !p.draftedBy || p.draftedBy.kind !== 'agent' || !p.draftedBy.id) return ACL.notFound();
+    if (!ctx || ctx.kind !== 'agent' || String(ctx.id) !== String(p.draftedBy.id)) return ACL.notFound();   // only the drafter — uniform not-found
+    if (!p.receipt) return { ok: true, pending: true, state: p.state, proposal: agentProposalView(ctx, p) };
+    const already = !!(p.receiptDelivery && p.receiptDelivery.road && p.receiptDelivery.road !== 'inline');   // the message road already took it
+    if (!already && p.receipt.road !== 'inline') {
+      const t = now();
+      await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q && q.receipt) { q.receipt = { ...q.receipt, road: 'inline', collectedAt: t }; q.receiptDelivery = { at: t, road: 'inline', collecting: false, collected: true, choice: q.receiptChoice || 'next-turn' }; } });
+      disarmCollect(id);
+      notifyOutbox([id]);
+    }
+    const fresh = store.outbox.snapshot().proposals[id];
+    return { ok: true, collected: !already, messaged: already, receiptText: renderReceiptText(fresh, fresh.receipt), proposal: agentProposalView(ctx, fresh) };
+  }
   async function receipt(id) {
     const p = store.outbox.snapshot().proposals[id];
     if (!p) return null;
@@ -1952,6 +2020,18 @@ function create(engineCtx) {
     const rec = cf.rec || adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
     // the conversation's chain (a composed message has none yet: its own)
     const key = p.convId ? `${p.adapterId}/${p.convId}` : null;
+    // lane channel-direct-send-sync: a DIRECT send whose CLI is waiting reads this receipt INLINE from its own
+    // command — the message road is NOT consulted. Hold it for the collect window; the CLI's collect door marks it
+    // read, or armCollect's fallback delivers the message if it never collects.
+    const collecting = !!p.receiptCollect && !(p.receipt && p.receipt.road) && (now() - (Number(p.at) || 0) <= collectWindowMs());
+    if (P.receiptRoad({ ...p, receipt: rc }, { collecting }).road === 'inline') {
+      const t = now();
+      await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) q.receiptDelivery = { at: t, road: 'inline', collecting: true, collected: false, choice: q.receiptChoice || 'next-turn' }; });
+      notifyOutbox([id]);
+      armCollect(id);
+      log.log(`[channels] receipt ${id} → ${cid}: held for the drafting CLI to read inline (${Math.round(collectWindowMs() / 1000)}s window)`);
+      return rc;
+    }
     return billedWake({ conv: key || `proposal:${id}`, scopeOf: null }, () => receiptNow(id, p, rc, cid, rec, key));
   }
   /** The receipt's delivery, inside its serial section: the verdict, the ONE
@@ -1988,8 +2068,11 @@ function create(engineCtx) {
       try { r = await deliver.deliverToConversation(cid, text, { kind: 'notification', noWake: !wake, spendReason: 'channel-receipt', fromName, cardText, ...(channel ? { channel } : {}) }); }
       catch (err) { r = { ok: false, reason: `ladder threw: ${(err && err.message) || err}`, refused: 'error' }; }
       if (!(r && r.ok) && typeof deliver.stashFor === 'function') {
+        // lane channel-direct-send-sync: WHY the hub held it (for the drain's heading, not "unreachable") — a turn
+        // was running (`no free lane`) ⇒ busy; the conversation was idle and a delivery would open a billed turn ⇒ paced
+        const stashWhy = (r && r.refused === 'no-wake') ? (/no free lane|running one|after the running/.test(String(r.reason || '')) ? 'busy' : 'paced') : null;
         // verify r4: a stash whose disk write failed THROWS (the entry is not stored) — the card says that, never "waiting"
-        try { deliver.stashFor(cid, { source: 'channel-receipt', kind: 'notification', fromName, text, ref: id, about: stashAbout({ keys: key ? [key] : [], account: key ? null : p.adapterId, cid, groups: live ? null : (Array.isArray(cur.drafterGroups) ? cur.drafterGroups : []) }) }); stashed = true; } catch (err) { stashErr = String((err && err.message) || err).slice(0, 200); log.warn(`[channels] receipt ${id} stash failed — the receipt stays on the proposal, not stored for the next turn: ${stashErr}`); }
+        try { deliver.stashFor(cid, { source: 'channel-receipt', kind: 'notification', fromName, text, ref: id, ...(stashWhy ? { held: { kind: 'notice', why: stashWhy } } : {}), about: stashAbout({ keys: key ? [key] : [], account: key ? null : p.adapterId, cid, groups: live ? null : (Array.isArray(cur.drafterGroups) ? cur.drafterGroups : []) }) }); stashed = true; } catch (err) { stashErr = String((err && err.message) || err).slice(0, 200); log.warn(`[channels] receipt ${id} stash failed — the receipt stays on the proposal, not stored for the next turn: ${stashErr}`); }
       }
     }
     // a stashed receipt for a drafter whose session is not live is KEPT for when it comes back — the card says so
@@ -2094,6 +2177,7 @@ function create(engineCtx) {
     noteReceiptStash, reconcileReceiptFates, reconcile, sweepSending, sweepReplaces, receipt, expireSweep, pointerSync, learnSentFiles,
     filesOfferFor,   // lane owner-composer-attach: the owner's composer judges its chips by the same offer the send reads
     releaseHeld, stopHeld,   // lane lark-send-hold: the held sends of an account go out at its reset; stop drops the timers
+    collectReceipt, stopCollect,   // lane channel-direct-send-sync: the drafting CLI reads a direct send's receipt inline; stop drops the collect timers
   };
 }
 

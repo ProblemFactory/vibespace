@@ -42,6 +42,9 @@
 //      · the door (a person's; an agent's token human_only) · 「所有路径」 = exactly ['/'] said as all paths (the summary
 //      words, the CLI, the first-use card) and a folder «with subfolders»; THE VERDICT UNCHANGED (`/` admits any folder, an
 //      opening key with no folder refused)
+//   ⑱ THE KEY ROW, BOUNDED (lane vault-key-row-compact): PURE limitSetView (任何 for every field — a whole table of ≥ 2; 「N 种」 past
+//      three), limitsWords with the tables + the CLI twin, verbFamilies, grantEnded, grantOrder, pruneWords; the engine's pruneEnded
+//      (exactly the ended grants, ONE key.prune line) and its person-only door with the list's `ended` / `name` marks; the window's text pins
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1048,8 +1051,8 @@ console.log('⑩ wiring pins');
   ok(VE.isSecretName('apikey:ak-000000000001') && R('src/vault.js').SECRETS_AT_REST.some((r) => r.entry === 'apikey:<key id>') && R('src/vault-inventory.js').GROUP_IDS.includes('automation') && R('src/vault-inventory.js').revealableOf('automation', 'apikey:ak-000000000001'),
     'the vault: apikey:<id> is a secret entry, SECRETS_AT_REST names it, the window lists «Automation keys» (revealable — only to hand to an outside party)');
   const routes = read('src/routes/automation.js');
-  ok(!/app\.(post|delete|put|patch)\('\/api\/agent\/automation\/[^']*grant/.test(routes) && (routes.match(/app\.(get|post|delete)\('\/api\/automation\//g) || []).length === 10 && (routes.match(/person\(/g) || []).length >= 10 && /app\.post\('\/api\/automation\/grants\/:grantId\/reach', person\(/.test(routes) && /app\.post\('\/api\/automation\/keys\/:id\/edit', person\(\(req\) => engine\.edit\(String\(req\.params\.id\), \{ scopes: body\(req\)\.scopes, limits: body\(req\)\.limits \}, \{ by: byOf\(req\) \}\)\)\);/.test(routes),
-    'NO agent route writes a grant; the ten owner doors (+ 边界…, 审计… — lane automation-open-limits; + a grant\'s reach — lane key-instance-scope; + 编辑… — lane key-folder-picker-all) are person-only');
+  ok(!/app\.(post|delete|put|patch)\('\/api\/agent\/automation\/[^']*grant/.test(routes) && (routes.match(/app\.(get|post|delete)\('\/api\/automation\//g) || []).length === 11 && (routes.match(/person\(/g) || []).length >= 11 && /app\.post\('\/api\/automation\/keys\/:id\/prune-ended', person\(\(req\) => engine\.pruneEnded\(String\(req\.params\.id\), liveOf\(subjects\(\)\), \{ by: byOf\(req\) \}\)\)\);/.test(routes) && /app\.post\('\/api\/automation\/grants\/:grantId\/reach', person\(/.test(routes) && /app\.post\('\/api\/automation\/keys\/:id\/edit', person\(\(req\) => engine\.edit\(String\(req\.params\.id\), \{ scopes: body\(req\)\.scopes, limits: body\(req\)\.limits \}, \{ by: byOf\(req\) \}\)\)\);/.test(routes),
+    'NO agent route writes a grant; the eleven owner doors (+ 边界…, 审计… — lane automation-open-limits; + a grant\'s reach — lane key-instance-scope; + 编辑… — lane key-folder-picker-all; + 清理已结束的授权 — lane vault-key-row-compact) are person-only');
   ok(/name: 'test-automation-keys', tier: 'fast'/.test(read('scripts/ci.mjs')), 'this suite has its tier row');
 }
 
@@ -1270,6 +1273,85 @@ console.log('⑰ 编辑… — a minted key\'s verbs and limits after minting (l
     'the first-use card of an all-paths key says 「所有路径」 (its own line, i18n — never a bare `/`)', c[0] && c[0].i18n.detail);
   e.answer(c[0].action.askId, { answer: 'deny' });
   ok((await pc).code === 'ask_denied' && !rig.calls.length, '…denied: nothing opened');
+}
+
+console.log('⑱ THE KEY ROW, BOUNDED (lane vault-key-row-compact — the owner 2026-10-21 05:4xZ: 「授权很多的时候，这个界面需要优化一下」) — 任何 for an unrestricted set, 「N 种」 past three, the verbs\' families, the grants\' order, 清理已结束的授权');
+{
+  const V = A.limitSetView;
+  const PERMS = ['default', 'auto', 'bypassPermissions', 'plan', 'acceptEdits', 'read-only', 'safe-yolo', 'yolo', 'build', 'accept-edits'];   // production's key holds these ten (the harness tables' whole set)
+  // THE 任何 RULE, EVERY FIELD
+  ok(V('any').any && V('any', ['a', 'b']).any && V('any').names.length === 0, "a literal 'any' ⇒ ANY, with or without a table");
+  ok(V(PERMS, PERMS).any && V([...PERMS, 'retired-mode'], PERMS).any && !V(PERMS.slice(1), PERMS).any && V(PERMS, PERMS).names.length === 10,
+    'PERMISSION MODES: a list holding every row of the table ⇒ ANY (its names kept for the title; a stored pick no table lists any more changes nothing); one row short ⇒ not any');
+  ok(V(['chat', 'terminal'], A.OPEN_MODES).any && !V(['chat'], A.OPEN_MODES).any && V(['chat'], A.OPEN_MODES).names.join() === 'chat', 'MODES: chat + terminal = the whole table (OPEN_MODES) ⇒ ANY; chat alone is named');
+  ok(V(['subscription', 'acct-1', 'acct-2'], ['subscription', 'acct-1', 'acct-2']).any && !V(['acct-1', 'acct-2'], ['subscription', 'acct-1', 'acct-2']).any, 'ACCOUNTS alike: every account there is now (the CLI\'s own login + the roster) ⇒ ANY; a narrower pick is not');
+  ok(V(['opus', 'sonnet', 'default'], ['opus', 'sonnet', 'default']).any && !V(['opus'], ['opus', 'sonnet']).any, 'MODELS alike: the tables\' whole set ⇒ ANY');
+  ok(!V(['subscription'], ['subscription']).any && V(['subscription'], ['subscription']).names.join() === 'subscription' && !V([], ['a', 'b']).any && !V(['a', 'b'], null).any,
+    'a ONE-row table never collapses to any (one name says more); an empty pick is never any; no table ⇒ only a literal any is any');
+  // THE 「N 种」 RULE
+  const four = V(['a', 'b', 'c', 'd'], ['a', 'b', 'c', 'd', 'e']);
+  ok(A.NAMED_MAX === 3 && !four.any && four.count && four.n === 4 && four.names.join() === 'a,b,c,d' && !V(['a', 'b', 'c'], ['a', 'b', 'c', 'd']).count && !V(PERMS, PERMS).count,
+    '「N 种」: more than three picks are COUNTED (the names kept for the title); three are named; an unrestricted set is any, never counted', four);
+  // THE WORDS (PURE limitsWords + the CLI's twin)
+  const OWNER = { cwdRoots: ['/'], accounts: 'any', permissionModes: PERMS, models: 'any', modes: ['chat', 'terminal'] };
+  const CLI = R('data/bin/vibespace-api');
+  ok(A.limitsWords(OWNER, { permissionModes: PERMS }) === 'folders all paths · accounts any · permission modes any · models any · modes any',
+    'THE OWNER\'S KEY (production\'s shape: all paths, any account, every permission mode, any model, chat + terminal) with the tables ⇒ «any» for every field — never the ten modes', A.limitsWords(OWNER, { permissionModes: PERMS }));
+  ok(A.limitsWords(OWNER) === `folders all paths · accounts any · permission modes ${PERMS.join(', ')} · models any · modes any` && CLI.limitsWords(OWNER) === A.limitsWords(OWNER),
+    'without a table the permission modes stay NAMED (an agent reads what it may ask for); the modes\' table is the module\'s own — the CLI\'s twin agrees (chat + terminal ⇒ any)', [A.limitsWords(OWNER), CLI.limitsWords(OWNER)]);
+  // THE VERBS' FAMILIES (the popover's heads)
+  ok(JSON.stringify(A.verbFamilies(A.VERBS).map((f) => [f.id, f.verbs.length])) === '[["conversations",6],["groups",1],["feedback",2]]' && A.FAMILIES.map((f) => f.label).join() === 'Conversations,Agent groups,Feedback'
+    && A.verbFamilies(['feedback.list', 'conversations.rename']).map((f) => f.verbs.join()).join('|') === 'conversations.rename|feedback.list' && A.VERBS.every((v) => A.familyOf(v) !== 'other'),
+    'the verbs grouped by FAMILY (the table\'s own groups, in its order): 对话 6 · Agent 群组 1 · 反馈 2; a key\'s own verbs only; every verb has its family (a new family = a FAMILIES row)');
+  // ENDED + THE ORDER
+  const live = new Set(['session:c-live']);
+  ok(!A.grantEnded({ subject: 'session:c-live' }, live) && A.grantEnded({ subject: 'session:c-gone' }, live) && !A.grantEnded({ subject: 'group:T-1' }, live) && A.grantEnded({ subject: 'session:x' }, []) && !A.grantEnded({ subject: 'session:c-live' }, ['session:c-live']) && !A.grantEnded(null, live),
+    'grantEnded: a conversation\'s grant is ENDED when that conversation is not running (a Set or a list of the running subjects); a Task Group\'s never');
+  const order = A.grantOrder([{ subject: 'session:b', name: 'beta' }, { subject: 'session:z', name: 'Aardvark', ended: true }, { subject: 'group:T-2', name: 'zeta group' }, { subject: 'session:a', name: 'Alpha' }, { subject: 'group:T-1', name: 'ops' }]).map((r) => r.subject).join();
+  ok(order === 'group:T-1,group:T-2,session:a,session:b,session:z', 'grantOrder: Task Groups, then running conversations, then ENDED ones — each by name', order);
+  // 清理已结束的授权 — THE ENGINE
+  const w = await mkWorld('prune-ended');
+  const m = w.engine.mint({ name: 'many', scopes: ['conversations.rename'] });
+  w.engine.grant(m.key.id, ['session:c-live', 'session:c-gone-1', 'session:c-gone-2', 'session:c-gone-3', 'group:T-1']);
+  const other = w.engine.mint({ name: 'other', scopes: ['conversations.rename'] });
+  w.engine.grant(other.key.id, ['session:c-gone-1']);
+  const pr = w.engine.pruneEnded(m.key.id, new Set(['session:c-live']));
+  const st = JSON.parse(fs.readFileSync(path.join(w.dir, A.STORE_FILE), 'utf8'));
+  ok(pr.ok && pr.removed.join() === 'session:c-gone-1,session:c-gone-2,session:c-gone-3' && st.grants.filter((g) => g.keyId === m.key.id).map((g) => g.subject).join() === 'session:c-live,group:T-1' && st.grants.some((g) => g.keyId === other.key.id && g.subject === 'session:c-gone-1'),
+    '清理已结束的授权: EXACTLY this key\'s ended grants go (3) — the running conversation, the Task Group and ANOTHER key\'s grant to the same ended conversation stay', { pr, grants: st.grants.map((g) => [g.keyId === m.key.id ? 'many' : 'other', g.subject]) });
+  const pl = auditOf(w).filter((l) => l.verb === 'key.prune');
+  ok(pl.length === 1 && pl[0].note === 'took back 3 grants to ended conversations: session:c-gone-1, session:c-gone-2, session:c-gone-3' && pl[0].subject === 'owner' && pl[0].key === m.key.id && pl[0].ok, 'ONE audit line says what went (key.prune, its note)', pl);
+  ok(w.engine.pruneEnded(m.key.id, new Set(['session:c-live'])).removed.length === 0 && auditOf(w).filter((l) => l.verb === 'key.prune').length === 1 && w.engine.pruneEnded('ak-ffffffffffff', new Set()).code === 'not_found',
+    'nothing ended ⇒ nothing removed and no audit line; an unknown key ⇒ not_found');
+  const many = Array.from({ length: 9 }, (_, i) => `session:${'c'.repeat(36)}${i}`);
+  ok(A.pruneWords(many).length <= 300 && /\+\d+ more$/.test(A.pruneWords(many)) && A.pruneWords(['session:a']) === 'took back 1 grant to ended conversations: session:a', 'the note fits the audit line (≤ 300 characters, «+N more» past them)', A.pruneWords(many));
+  // THE DOOR + THE LIST'S MARKS (a person's; the running conversations read at the press)
+  w.engine.grant(m.key.id, ['session:c-gone-9', 'session:c-gone-8']);
+  const express = require(path.join(ROOT, 'node_modules/express'));
+  const app = express(); app.use(express.json());
+  require(path.join(ROOT, 'src/routes/automation.js')).registerAutomationRoutes(app, { engine: w.engine, callerOf: (t) => (t === 'vsst_pr' ? caller() : null),
+    subjects: () => ({ sessions: [{ subject: 'session:c-live', name: 'live one' }], groups: [{ subject: 'group:T-1', name: 'ops' }] }), conversationNames: () => ({ 'c-gone-9': 'the named one' }) });
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const page = { 'Content-Type': 'application/json', origin: base, 'sec-fetch-site': 'same-origin' };
+  const go = async (method, u, { headers = {} } = {}) => { const r = await fetch(base + u, { method, headers: { 'Content-Type': 'application/json', ...headers } }); return { status: r.status, body: await r.json().catch(() => null) }; };
+  const ls = await go('GET', '/api/automation/keys', { headers: page });
+  const gs = ((ls.body && ls.body.keys) || []).find((k) => k.id === m.key.id).grants;
+  const by = (s) => gs.find((g) => g.subject === s) || {};
+  ok(ls.status === 200 && by('session:c-gone-9').ended === true && by('session:c-gone-9').name === 'the named one' && by('session:c-gone-8').ended === true && !('name' in by('session:c-gone-8')) && !by('session:c-live').ended && !by('group:T-1').ended,
+    'the list marks an ENDED grant (+ the name the sidebar kept, when it kept one); a running conversation\'s and a Task Group\'s are not marked', gs);
+  const asAgent = await go('POST', `/api/automation/keys/${m.key.id}/prune-ended`, { headers: { ...page, Authorization: 'Bearer vsst_pr' } });
+  const asPerson = await go('POST', `/api/automation/keys/${m.key.id}/prune-ended`, { headers: page });
+  ok(asAgent.status === 403 && asAgent.body.code === 'human_only' && asPerson.status === 200 && asPerson.body.removed.join() === 'session:c-gone-9,session:c-gone-8',
+    'the door (POST …/keys/:id/prune-ended): an agent\'s token ⇒ 403 human_only; a person ⇒ the two ended grants go', { asAgent: asAgent.body, asPerson: asPerson.body });
+  srv.close();
+  // THE WINDOW'S WORDS (text pins — the chrome suite renders them)
+  const va = fs.readFileSync(path.join(ROOT, 'src/lib/vault-automation.js'), 'utf8'), zhSrc = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), jaSrc = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
+  ok(/const w = limitSetView\(v, table\);/.test(va) && /w\.any \? t\('any'\) : w\.count \? t\('\{n\} kinds', \{ n: w\.n \}\) : names\.join\(', '\)/.test(va) && !/vw-ak-scopes/.test(va) && /const GRANT_FILTER_PAST = 8;/.test(va) && /grantOrder\(key\.grants\.map/.test(va),
+    'the row\'s words go through PURE limitSetView (任何 / the names / 「N 种」); the run-on verbs line is gone; the filter past eight; the grants in PURE grantOrder');
+  ok(zhSrc.includes('"{n} kinds": "{n} 种"') && zhSrc.includes('"Granted to {n}": "授权给 {n} 个"') && zhSrc.includes('"{n} things it may do": "{n} 个动作"') && zhSrc.includes('"Clean up ended grants": "清理已结束的授权"') && zhSrc.includes('"any": "任何"')
+    && jaSrc.includes('"{n} kinds": "{n} 種類"') && jaSrc.includes('"Granted to {n}": "{n} 件に許可"') && jaSrc.includes('"Clean up ended grants": "終了した会話の許可を整理"') && !zhSrc.includes('"Granted to:"') && !zhSrc.includes('could not {verb}'),
+    'zh 「N 种」 · 「授权给 N 个」 · 「N 个动作」 · 「清理已结束的授权」 · 任何 — ja the same; the old 授权给： label and the «could not <verb>» sentences are gone from the dictionaries');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

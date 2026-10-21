@@ -48,9 +48,10 @@ const ROWS = {
     ['Unlock the vault first', 'label', 'the provider-config dialog\'s own save-time verdict shown while the person is in the dialog (lane provider-record) — a field verdict, not a background tool refusal (the two-facts rule is for refusals)'],
   ],
   'src/vault-inventory.js': [
-    // lane conversations-archive-verb: the 使用失败 notice is ONE sentence per cause (the key, the verb, the target, the reason, the door) —
-    // its locked line says WHERE in a person's words (Unlock…); the nameless twin (a use refused before any key was picked) the same
-    ['the vault is locked — Unlock… at the top of the page', 'foryou', 'THE 使用失败 For-you card\'s locked line (useFailCard, lane conversations-archive-verb): the key could not <verb> <target> — the vault is locked, and the door', { count: 2 }],
+    // lane conversations-archive-verb → lane vault-key-row-compact: the 使用失败 notice's HEAD says who · the key · the verb; its CAUSE line
+    // (one per cause) says the reason + the door — the locked cause says WHERE in a person's words (Unlock…), ONE line shared by the
+    // named card and the nameless one (a use refused before any key was picked)
+    ['The vault is locked — Unlock… at the top of the page', 'foryou', 'THE 使用失败 For-you card\'s locked CAUSE line (useFailCard, lanes conversations-archive-verb / vault-key-row-compact): under the head «<who> used “<key>” for “<verb>” — refused» — the vault is locked, and the door'],
   ],
   'src/lib/vault-unlock.js': [
     ['The vault is locked — {n} waiting on it', 'person', 'THE STRIP (place 1) — how many the lock stopped; its Unlock… button beside the words'],

@@ -377,52 +377,73 @@ const USE_FAIL_CAUSES = Object.freeze({
   asks_open: 'asks-open',   // lane conversations-archive-verb: an archive refused by the target's open For-you asks — the owner answers them
 });
 // lane conversations-archive-verb (the owner 2026-10-20: the notice «Using “…” failed» named neither the verb nor the reason nor
-// the door): ONE sentence per cause in the OWNER's words — the key, the verb, the target, the reason, the door — i18n keys the
-// client words (the vault_locked line says WHERE in a person's words: Unlock… — test-vault-words' foryou class)
+// the door) → lane vault-key-row-compact (the owner 2026-10-21: the 需要你 band's head still read a raw sentence; the card
+// grammar: actor + verb + NAMED object in the head, the cause as the second line, the details under ONE fold): the card's
+// TEXT is the HEAD — who used which key for which verb, refused (the verb in the closed table's own words: a param that IS
+// words, `{key}` — the client says it in its language); its FIRST detail line is the CAUSE in the owner's words with the
+// door (ONE i18n sentence per cause — a param is never translated); the rest (the hour's count, the last target, the last
+// caller) sit under the fold. The English sentence the store dedupes by = the head + the cause, so one hour's failures of
+// one (key, verb, reason) stay ONE item, as before. The locked line says WHERE in a person's words: Unlock… (test-vault-words).
+const USE_FAIL_HEADS = Object.freeze({
+  named: i18nKey('{who} used “{name}” for “{verb}” — refused'),
+  key: i18nKey('“{name}” was refused for “{verb}”'),
+  who: i18nKey('{who} used an automation key for “{verb}” — refused'),
+  none: i18nKey('An automation key was refused for “{verb}”'),
+});
 const USE_FAIL_LINES = Object.freeze({
-  vault_locked: '“{name}” could not {verb} {target}: the vault is locked — Unlock… at the top of the page',
-  not_granted: '“{name}” could not {verb} {target}: the key is not granted to that conversation (nor to one of its Task Groups) and did not open it — grant it to that conversation or its Task Group in the Vault window (授权给…), or answer the card next time',
-  verb_not_in_scope: '“{name}” could not {verb} {target}: the key does not hold that verb — mint a key that holds it in the Vault window (铸造…)',
-  once_spent: '“{name}” could not {verb} {target}: the one use you allowed was spent — answer the next card with 一直, or grant the key in the Vault window',
-  key_revoked: '“{name}” could not {verb} {target}: the key was revoked — mint a new one in the Vault window and grant it',
-  subject_ended: '“{name}” could not {verb} {target}: the calling conversation is not running any more — nothing to do',
-  ask_expired: '“{name}” could not {verb} {target}: nobody answered its card in 60 s — answer the card next time, or grant the key in the Vault window',
-  asks_open: '“{name}” could not {verb} {target}: that conversation still has open For-you asks — answer its cards, or let the caller pass --resolve-asks',
+  vault_locked: i18nKey('The vault is locked — Unlock… at the top of the page'),
+  not_granted: i18nKey('The key is not granted to {target} (nor to one of its Task Groups) and did not open it — grant it there in the Vault window (授权给…), or answer the card next time'),
+  verb_not_in_scope: i18nKey('The key does not hold that verb — add it with Edit… on the key\'s row in the Vault window'),
+  once_spent: i18nKey('The one use you allowed was spent — answer the next card with 一直, or grant the key in the Vault window'),
+  key_revoked: i18nKey('The key was revoked — mint a new one in the Vault window and grant it'),
+  subject_ended: i18nKey('The calling conversation is not running any more — nothing to do'),
+  ask_expired: i18nKey('Nobody answered its card in 60 s — answer the card next time, or grant the key in the Vault window'),
+  asks_open: i18nKey('{target} still has open For-you asks — answer its cards, or let the caller pass --resolve-asks'),
 });
 // lane key-instance-scope: a reach refusal names the REACH the grant has (opened / its Task Groups) and the door that widens it
 const USE_FAIL_REACH_LINES = Object.freeze({
-  opened: '“{name}” could not {verb} {target}: the key did not open that conversation and its grant reaches only what it opened — widen the reach on the key\'s row in the Vault window (这些岗位的会话 / 整个 VibeSpace), or grant the key to that conversation',
-  groups: '“{name}” could not {verb} {target}: that conversation is not in the Task Groups the grant reaches — widen the reach on the key\'s row in the Vault window (整个 VibeSpace), or grant the key to that conversation',
+  opened: i18nKey('The key did not open {target} and its grant reaches only what it opened — widen the reach on the key\'s row in the Vault window (这些岗位的会话 / 整个 VibeSpace), or grant the key to that conversation'),
+  groups: i18nKey('{target} is not in the Task Groups the grant reaches — widen the reach on the key\'s row in the Vault window (整个 VibeSpace), or grant the key to that conversation'),
 });
-/** The two refusals a use can meet BEFORE a key is picked (no name to say): the vault locked, no key granted at all. */
+/** The refusals a use can meet BEFORE a key is picked (no name to say): the vault locked (the same line), no key granted at
+ *  all, no granted key holding the verb (pickKey names the held keys to the caller). Any other code says the named line. */
 const USE_FAIL_NAMELESS = Object.freeze({
-  vault_locked: 'An automation key could not {verb} {target}: the vault is locked — Unlock… at the top of the page',
-  not_granted: 'An automation key could not {verb} {target}: no key is granted to that conversation — grant one in the Vault window (授权给…), or answer the card next time',
+  vault_locked: USE_FAIL_LINES.vault_locked,
+  not_granted: i18nKey('No key is granted to {target} — grant one in the Vault window (授权给…), or answer the card next time'),
+  verb_not_in_scope: i18nKey('No key granted to {target} holds that verb — add it with Edit… on a key\'s row in the Vault window'),
 });
 const USE_FAIL_MERGE_MS = 60 * 60e3;   // one card per key × verb × reason per hour: the failures inside it are counted on that card
 /** prev = this (key, verb, reason)'s running hour (or null) → { counted, fresh (a new hour: file the card), next }. The hour
- *  keeps the FIRST target (the card's words — the store's dedupe key) and the last one (a detail line). */
+ *  keeps the FIRST target and the FIRST caller (the card's words — the store's dedupe key) and the last ones (detail lines). */
 function useFailVerdict(prev, { code, at, who = null, target = null } = {}) {
   const cause = USE_FAIL_CAUSES[code];
   if (!cause || !Number.isFinite(at)) return { counted: false, fresh: false, next: prev || null };
   const fresh = !prev || !Number.isFinite(prev.since) || at < prev.since || at - prev.since >= USE_FAIL_MERGE_MS;
-  const base = fresh ? { since: at, n: 0, causes: {}, target: target ? String(target).slice(0, 80) : null } : prev;
-  return { counted: true, fresh, next: { since: base.since, n: base.n + 1, causes: { ...base.causes, [cause]: (base.causes[cause] || 0) + 1 }, lastAt: at, lastWho: who ? String(who).slice(0, 80) : null,
-    target: base.target || (target ? String(target).slice(0, 80) : null), lastTarget: target ? String(target).slice(0, 80) : base.lastTarget || null } };
+  const cut = (x) => (x ? String(x).slice(0, 80) : null);
+  const base = fresh ? { since: at, n: 0, causes: {}, target: cut(target), who: cut(who) } : prev;
+  return { counted: true, fresh, next: { since: base.since, n: base.n + 1, causes: { ...base.causes, [cause]: (base.causes[cause] || 0) + 1 }, lastAt: at, lastWho: cut(who),
+    target: base.target || cut(target), lastTarget: cut(target) || base.lastTarget || null, who: base.who || cut(who) } };
 }
-/** The use-failure card's words as STRUCTURE (the client words them with t(); the English is the store's dedupe key — the
- *  text names the key, the verb, the hour's first target, the reason and the door, so one hour's failures of one (key,
- *  verb, reason) stay ONE item). `verb` = the verb id (language-neutral), `target` = the conversation's name or id. */
-function useFailCard({ name = null, verb = null, target = null, code = null, reach = null, next }) {
+/** A sentence filled in English (the store's dedupe text): a param that is words (`{key}`) gives its own key. */
+const fillWords = (l) => String(l.key).replace(/\{(\w+)\}/g, (m, k) => { const v = l.params && l.params[k]; return v == null ? m : typeof v === 'object' ? String(v.key || '') : String(v); });
+/** The use-failure card's words as STRUCTURE (the client words them with t()): `text` = the HEAD (who · the key · the verb ·
+ *  refused), `detail[0]` = the CAUSE with its door, then the hour's count / last target / last caller; `english` = the head
+ *  + the cause filled in English (the store's dedupe key: the hour's FIRST caller and target, so it stays ONE item).
+ *  `verb` = the verb id (language-neutral); `verbLabel` = the closed table's words for it (the producer reads them —
+ *  this module imports nothing), else the id is said; `target` = the conversation's name or id; `who` = the caller. */
+function useFailCard({ name = null, verb = null, verbLabel = null, target = null, code = null, reach = null, who = null, next }) {
   const v = String(verb || 'use').slice(0, 40);
-  const t = String((next && next.target) || target || '—').slice(0, 80);
-  const line = name && code === 'not_granted' && USE_FAIL_REACH_LINES[reach] ? USE_FAIL_REACH_LINES[reach] : name && USE_FAIL_LINES[code] ? USE_FAIL_LINES[code] : !name && USE_FAIL_NAMELESS[code] ? USE_FAIL_NAMELESS[code] : null;
-  const text = line ? { key: i18nKey(line), params: { ...(name ? { name: String(name).slice(0, 80) } : {}), verb: v, target: t } }
-    : name ? { key: i18nKey('“{name}” could not {verb} {target}'), params: { name: String(name).slice(0, 80), verb: v, target: t } } : { key: i18nKey('An automation key could not {verb} {target}'), params: { verb: v, target: t } };
-  const detail = [{ key: i18nKey('{n} refused within the hour'), params: { n: (next && next.n) || 0 } }];
-  if (next && next.lastTarget && next.lastTarget !== t) detail.push({ key: i18nKey('Last: {target}'), params: { target: next.lastTarget } });
-  if (next && next.lastWho) detail.push({ key: i18nKey('Last asked by {who}'), params: { who: next.lastWho } });
-  return { text, detail };
+  const tg = String((next && next.target) || target || '—').slice(0, 80);
+  const caller = String((next && next.who) || who || '').slice(0, 80);
+  const verbWords = verbLabel ? { key: String(verbLabel).slice(0, 120) } : v;
+  const head = { key: name ? (caller ? USE_FAIL_HEADS.named : USE_FAIL_HEADS.key) : caller ? USE_FAIL_HEADS.who : USE_FAIL_HEADS.none,
+    params: { ...(caller ? { who: caller } : {}), ...(name ? { name: String(name).slice(0, 80) } : {}), verb: verbWords } };
+  const line = name && code === 'not_granted' && USE_FAIL_REACH_LINES[reach] ? USE_FAIL_REACH_LINES[reach] : !name && USE_FAIL_NAMELESS[code] ? USE_FAIL_NAMELESS[code] : USE_FAIL_LINES[code] || null;
+  const cause = line ? { key: line, params: { target: tg } } : null;
+  const detail = [...(cause ? [cause] : []), { key: i18nKey('{n} refused within the hour'), params: { n: (next && next.n) || 0 } }];
+  if (next && next.lastTarget && next.lastTarget !== tg) detail.push({ key: i18nKey('Last: {target}'), params: { target: next.lastTarget } });
+  if (next && next.lastWho && next.lastWho !== caller) detail.push({ key: i18nKey('Last asked by {who}'), params: { who: next.lastWho } });
+  return { text: head, detail, english: cause ? `${fillWords(head)}. ${fillWords(cause)}` : fillWords(head) };
 }
 /** The rotate suggestion's words: an agent stored a value it had seen (q-043 §9 put) — ONE card per entry, filed when it
  *  is stored; once answered it never comes back by itself. */
@@ -474,5 +495,5 @@ module.exports = {
   inventoryOf, searchRows, SORTS, sortRows, REVEAL_MS, REVEAL_PACE_MAX, REVEAL_PACE_CEILING, REVEAL_PACE_MS, CLIPBOARD_CLEAR_MS, PAGE_RE, revealVerdict, paceVerdict, countdownText,
   // lane vault-window-v2 (design q-047 §3): the purposes, the provenance, the state chips, the window's view, the band, the two producers' rules
   ORIGINS, PURPOSES, PURPOSE_IDS, purposeOf, groupByPurpose, PROVENANCES, PROVENANCE_IDS, PROVENANCE_FILTERS, provenanceOf, provenanceFilterOf, EXPIRY_WARN_MS, stateChipsOf, viewOf,
-  BAND_MAX, bandItemsOf, bandDoorsOf, USE_FAIL_CAUSES, USE_FAIL_MERGE_MS, USE_FAIL_LINES, USE_FAIL_REACH_LINES, USE_FAIL_NAMELESS, useFailVerdict, useFailCard, rotateCard,
+  BAND_MAX, bandItemsOf, bandDoorsOf, USE_FAIL_CAUSES, USE_FAIL_MERGE_MS, USE_FAIL_HEADS, USE_FAIL_LINES, USE_FAIL_REACH_LINES, USE_FAIL_NAMELESS, useFailVerdict, useFailCard, rotateCard,
 };

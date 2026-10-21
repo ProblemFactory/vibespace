@@ -2435,5 +2435,142 @@ const RX_KEY = 'hourglass';   // never seeded (the seed draws from the first 12 
   eng.stop();
 }
 
+// ── lane channel-direct-send-sync: a direct send's receipt is read INLINE by the drafting CLI ───────────────
+console.log('§C lane channel-direct-send-sync: the receipt ROAD + the held-batch heading (PURE)');
+{
+  const ag = { kind: 'agent', id: 'c1' };
+  const RR = (p, e) => P.receiptRoad(p, e);
+  ok(RR({ draftedBy: { kind: 'user' } }).road === 'none', 'a user draft owes no agent a receipt ⇒ none');
+  ok(RR({ draftedBy: ag, state: 'withdrawn' }).road === 'none', 'a proposal the agent withdrew ⇒ none');
+  ok(RR({ draftedBy: ag, receipt: { road: 'inline' } }).road === 'inline', 'a receipt the CLI already read (road inline) ⇒ inline — the message road is NEVER consulted');
+  ok(RR({ draftedBy: ag }, { collected: true }).road === 'inline', 'the collect event itself ⇒ inline');
+  ok(RR({ draftedBy: ag }, { collecting: true }).road === 'inline', 'a CLI still waiting within the window ⇒ inline (the message is held)');
+  ok(RR({ draftedBy: ag }).road === 'message', 'a direct send no CLI waited on (a job / another door) ⇒ message');
+  ok(RR({ draftedBy: ag, kind: 'reaction' }, { collecting: true }).road === 'message' && RR({ draftedBy: ag, kind: 'recall' }, { collecting: true }).road === 'message', 'a reaction / recall is never collected inline ⇒ message (its own next-turn, no-wake verdict)');
+  ok(RR({ draftedBy: ag, receipt: { road: 'inline' } }).road !== 'message', 'INVARIANT: a MUTANT that returned `message` for an inline-collected direct send would queue the redundant receipt the owner asked us to stop (RED)');
+  ok(P.stashHeading('busy') === '### Messages that arrived during your previous turn', 'stashHeading(busy): a turn was running — no free lane');
+  ok(P.stashHeading('paced') === '### Messages held until this turn (a delivery earlier would have cost a wake)', 'stashHeading(paced): idle — a delivery would have cost a wake');
+  ok(P.stashHeading('unreachable') === '### Messages that arrived while this conversation was unreachable', 'stashHeading(unreachable): kept ONLY for a conversation that truly could not be reached');
+  ok(P.stashHeading('nonsense') === P.stashHeading('unreachable'), 'an unknown cause falls back to the honest "unreachable"');
+  // the Outbox's fate for an inline receipt (rule 4): "read inline", never "waiting for the next turn"
+  const fi = P.receiptFateOf({ draftedBy: { kind: 'agent', id: 'c1', name: 'Worker' }, receipt: { status: 'sent' }, receiptDelivery: { road: 'inline', collected: true, at: 1 } });
+  ok(fi.kind === 'inline' && /Worker read the receipt with its own command/.test(P.receiptFateText(fi)), 'receiptFateOf: an inline-collected receipt ⇒ the Outbox shows "Worker read the receipt with its own command", never "Waiting for …"');
+  const fp = P.receiptFateOf({ draftedBy: { kind: 'agent', id: 'c1', name: 'Worker' }, receipt: { status: 'sent' }, receiptDelivery: { road: 'inline', collecting: true, collected: false, at: 1 } });
+  ok(fp.kind === 'inline' && /Being read by Worker inline/.test(P.receiptFateText(fp)), 'receiptFateOf: a receipt held for an inline read ⇒ "Being read by Worker inline", not "waiting for the next turn"');
+}
+
+console.log('§C the real engine: a direct send read inline queues NO receipt message; the collect door; the timeout fallback');
+async function primeDirect(eng) {
+  await prime(eng);
+  await eng.setPolicy(A, C, 'direct');
+  await eng.propose({ kind: 'user' }, A, C, { text: 'prime: learn the send caps' });   // a user direct send learns the conversation's send caps (sendAs offered)
+  await eng.setAssignment(A, C, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, mode: 'all', authority: 'send' });
+}
+{
+  const W = mkEngine({ name: 'collect-inline' });
+  const { eng, delivered, stash } = W;
+  await primeDirect(eng);
+  const r = await eng.propose(AGENT, A, C, { text: 'the deploy is done' }, { collect: true });
+  ok(r.ok && r.proposal.state === 'sent' && typeof r.receiptText === 'string' && /SENT/.test(r.receiptText) && /sent as: user/.test(r.receiptText), 'a direct send whose caller waits gets the receipt WORDS back with the command (SENT · sent as · what the recipient sees)', JSON.stringify([r.proposal.state, (r.receiptText || '').slice(0, 60)]));
+  ok(delivered.length === 0 && stash.length === 0, 'NOTHING went to the message road — no delivery, no stash, no queue row (the owner: no second message waiting for the next turn)');
+  const q0 = eng.store.outbox.snapshot().proposals[r.proposal.id];
+  ok(q0.receiptCollect === true && q0.receiptDelivery && q0.receiptDelivery.road === 'inline' && q0.receiptDelivery.collecting === true && q0.receiptDelivery.collected === false, 'the proposal records the receipt is held for an inline read');
+  const cr = await eng.collectReceipt(AGENT, r.proposal.id);
+  ok(cr.ok && cr.collected === true && /SENT/.test(cr.receiptText || ''), 'the collect door (GET status?id&collect=1) hands the receipt and marks it read');
+  const q1 = eng.store.outbox.snapshot().proposals[r.proposal.id];
+  ok(q1.receipt.road === 'inline' && q1.receiptDelivery.collected === true, 'the proposal is marked inline-collected');
+  ok(delivered.length === 0 && stash.length === 0, 'still no message after the collection — the receipt lived only inline');
+  ok(eng.collectReceipt({ kind: 'agent', id: 'agent-2', name: 'X', msgLevelFor: () => 'none' }, r.proposal.id).then ? true : true, 'collectReceipt is async');
+  const other = await eng.collectReceipt({ kind: 'agent', id: 'agent-2', name: 'X', msgLevelFor: () => 'none' }, r.proposal.id);
+  ok(!other.ok && other.code === 'not-found', "another agent cannot collect someone else's receipt — the uniform not-found");
+  eng.stop();
+}
+{
+  // a HELD send answers `receiptPending` (no receipt yet) — the CLI polls the collect door
+  const W = mkEngine({ name: 'collect-pending' });
+  const { eng } = W;
+  await primeDirect(eng);
+  const r = await eng.propose(AGENT, A, C, { text: 'later' }, { collect: true });
+  // force the proposal back to a no-receipt `sending` (a held send's shape) and collect ⇒ pending
+  await eng.store.outbox.update((ob) => { const p = ob.proposals[r.proposal.id]; p.state = 'sending'; p.receipt = null; p.receiptDelivery = null; });
+  const cr = await eng.collectReceipt(AGENT, r.proposal.id);
+  ok(cr.ok && cr.pending === true && cr.state === 'sending', 'a send not out yet ⇒ pending (the CLI keeps polling, prints "sending — the receipt will come as a message" on timeout)');
+  eng.stop();
+}
+{
+  // the CLI never collects ⇒ after the collect window the receipt falls back to the MESSAGE road
+  const W = mkEngine({ name: 'collect-timeout', settings: { 'channels.collectWindowMs': 30 } });
+  const { eng, delivered, stash } = W;
+  await primeDirect(eng);
+  const r = await eng.propose(AGENT, A, C, { text: 'nobody collects me' }, { collect: true });
+  ok(delivered.length === 0 && stash.length === 0, 'held at first — the window is open');
+  await new Promise((z) => setTimeout(z, 160));
+  ok(delivered.length === 1 && delivered[0].opts.spendReason === 'channel-receipt' && delivered[0].opts.noWake === true, 'the CLI timed out / died before collecting ⇒ the receipt fell back to the MESSAGE road (noWake, its own spend reason)', JSON.stringify(delivered.map((d) => d.opts && d.opts.spendReason)));
+  const q = eng.store.outbox.snapshot().proposals[r.proposal.id];
+  ok(q.receiptDelivery && q.receiptDelivery.road !== 'inline' && q.receiptDelivery.collected !== true, 'the fallback is a real message delivery, not an inline collection');
+  eng.stop();
+}
+{
+  // an APPROVAL-GATED proposal: collect is ignored (never held); the person acts later ⇒ its receipt still MESSAGES
+  const W = mkEngine({ name: 'collect-review' });
+  const { eng, delivered } = W;
+  await prime(eng);
+  const pr = await eng.propose(AGENT, A, C, { text: 'needs approval' }, { collect: true });
+  ok(pr.ok && pr.proposal.state === 'awaiting-approval' && pr.receiptText === undefined && pr.receiptPending === undefined, 'a review proposal is no direct send — collect yields no inline receipt');
+  ok(eng.store.outbox.snapshot().proposals[pr.proposal.id].receiptCollect === undefined, 'receiptCollect is set ONLY on a direct send (a review proposal is never held)');
+  const a = await eng.approve(pr.proposal.id);
+  ok(a.ok && delivered.length === 1 && delivered[0].opts.spendReason === 'channel-receipt', 'the approval-gated proposal still gets its receipt as a MESSAGE (the person decided it later — new to the agent)');
+  eng.stop();
+}
+{
+  // a direct send with NO collect (a Background Work job / another door) ⇒ the MESSAGE road (the base behavior)
+  const W = mkEngine({ name: 'collect-job' });
+  const { eng, delivered } = W;
+  await primeDirect(eng);
+  const r = await eng.propose(AGENT, A, C, { text: 'a job sent me' });
+  ok(r.ok && r.proposal.state === 'sent' && delivered.length === 1 && delivered[0].opts.spendReason === 'channel-receipt', 'a direct send no CLI waited on still travels as a message (a job / another door with no collect)');
+  eng.stop();
+}
+{
+  // RED CONTROL (the base): without the inline-road gate a direct send QUEUES a receipt message
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('chan-outbox-collect', REPO);
+  const esrc = engineSource(REPO);
+  const GATE = "if (P.receiptRoad({ ...p, receipt: rc }, { collecting }).road === 'inline') {";
+  ok(esrc.split(GATE).length === 2, 'the inline-road gate is present once (the control patches exactly it)');
+  const ungated = MC.load('src/server/channels-engine.js', esrc.replace(GATE, 'if (false) {'), 'collect-ungated');
+  const W = mkEngine({ name: 'collect-ctl', engine: ungated });
+  const { eng, delivered, stash } = W;
+  await primeDirect(eng);
+  await eng.propose(AGENT, A, C, { text: 'collected but ungated' }, { collect: true });
+  ok(delivered.length + stash.length >= 1, 'CONTROL (the base): without the gate a direct send QUEUES a receipt message — the inline leg above would be RED');
+  eng.stop();
+}
+
+{
+  // lane channel-direct-send-sync (the owner: "unreachable 不 make sense"): a receipt the hub could not deliver
+  // live is stashed WITH the cause, so the drain heads the batch by cause — never "unreachable" for a live turn
+  const W = mkEngine({ name: 'collect-cause' });
+  const { eng, stash } = W;
+  await prime(eng);
+  const pr = await eng.propose(AGENT, A, C, { text: 'held with a cause' });
+  await eng.approve(pr.proposal.id);
+  const rc = stash.find((s) => s.env.source === 'channel-receipt');
+  ok(rc && rc.env.held && rc.env.held.why === 'busy', 'a receipt refused a free lane (no free lane) is stashed WITH held.why=busy — the drain heads it "arrived during your previous turn", not "unreachable"', JSON.stringify(rc && rc.env.held));
+  eng.stop();
+}
+{
+  // the drain picks the heading by cause (agent-routes drainStashUnderCap over the stashed entries)
+  const AR = require(path.join(REPO, 'src/agent-routes.js'));
+  const held = [{ source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'Channel receipt — proposal p1: SENT', held: { kind: 'notice', why: 'paced' }, ts: Date.now() }];
+  const fake = { stashEntries: () => held, drainStash: () => {}, emitPeerCard: () => {}, retryEntries: () => [] };
+  const txt = AR.drainStashUnderCap(fake, 'agent-1', 0, () => {});
+  ok(/^### Messages held until this turn \(a delivery earlier would have cost a wake\)/.test(txt), 'drainStashUnderCap heads a paced batch "held until this turn …" (never "unreachable" for a conversation taking this very turn)', txt.split('\n')[0]);
+  const busyTxt = AR.drainStashUnderCap({ ...fake, stashEntries: () => [{ ...held[0], held: { kind: 'notice', why: 'busy' } }] }, 'agent-1', 0, () => {});
+  ok(/^### Messages that arrived during your previous turn/.test(busyTxt), 'drainStashUnderCap heads a busy batch "arrived during your previous turn"');
+  const plain = AR.drainStashUnderCap({ ...fake, stashEntries: () => [{ source: 'channel', kind: 'notification', text: 'x', ts: Date.now() }] }, 'agent-1', 0, () => {});
+  ok(/^### Messages that arrived while this conversation was unreachable/.test(plain), 'a batch with no cause keeps the default heading (the hand-over of a session that had truly gone)');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

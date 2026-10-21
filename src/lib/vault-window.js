@@ -316,8 +316,10 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   // a row's signature leaves its last use out: a reveal moves the store key's last use, and an open value must survive the
   // next refresh — the 「最近使用」 cell is patched in place instead
   const sigOf = (row) => JSON.stringify([{ ...row, lastUsed: null }, autoOf(row), row.store === 'automation' ? !!st.auto : 0]);
-  const usedText = (row) => (row.lastUsed ? (row.lastUsed.by === 'human' ? t('{when} · you', { when: whenShort(row.lastUsed.at) }) : t('{when} · VibeSpace', { when: whenShort(row.lastUsed.at) })) : '');
-  const usedHelp = (row) => (row.lastUsed ? (row.lastUsed.by === 'human' ? t('last opened {when} by you', { when: whenText(row.lastUsed.at) }) : t('key last used {when} by VibeSpace', { when: whenText(row.lastUsed.at) })) : '');
+  // lane vault-key-row-compact: an automation key's 最近使用 is its last USE by a conversation (the head's one — the old extra line went)
+  const keyUsed = (row) => { const k = autoOf(row); return k ? (k.lastUsedAt ? whenShort(k.lastUsedAt) : t('Never used')) : null; };
+  const usedText = (row) => keyUsed(row) ?? (row.lastUsed ? (row.lastUsed.by === 'human' ? t('{when} · you', { when: whenShort(row.lastUsed.at) }) : t('{when} · VibeSpace', { when: whenShort(row.lastUsed.at) })) : '');
+  const usedHelp = (row) => { const k = autoOf(row); if (k) return k.lastUsedAt ? t('Last used {when}', { when: whenText(k.lastUsedAt) }) : ''; return row.lastUsed ? (row.lastUsed.by === 'human' ? t('last opened {when} by you', { when: whenText(row.lastUsed.at) }) : t('key last used {when} by VibeSpace', { when: whenText(row.lastUsed.at) })) : ''; };
   /** lane vault-run-door (design q-043 decision ⑤): «Usable by agent runs» — OFF by default; ON asks 验证是你 FIRST (in the
    *  press's own task), OFF never asks. The hub refuses a row with its own door by name whatever the page sends. */
   async function setRun(row, box) {
@@ -339,19 +341,24 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     const purpose = purposeOf(row) || 'other', prov = provenanceOf(row) || 'me';
     e.dataset.id = row.id; e.dataset.store = row.store; e.dataset.purpose = purpose; e.dataset.prov = prov;
     const main = vwEl('div', 'vw-main');
-    main.append(vwEl('div', 'vw-label', labelWord(row)));
+    const label = vwEl('div', 'vw-label', labelWord(row));
+    main.append(label);
     const meta = [];
     if (row.detail && row.store !== 'automation') meta.push(WORDED.has(row.store) ? t(row.detail) : row.detail);   // an integration's field label is an English key (the registry's); an automation key's why is its 显示's help, never a line beside it (the owner's confusion note)
     meta.push(kindWord(row.kind));
     if (!(row.store === 'secrets' && row.size === 'unknown')) meta.push(t('length: {size}', { size: (SIZE_WORDS[row.size] || SIZE_WORDS.unknown)() }));   // a hub secret: names and dates only
     if (row.createdAt) meta.push(t('saved {when}', { when: whenShort(row.createdAt) }));
-    main.append(vwEl('div', 'vw-meta', meta.join(' · ')));
+    // lane vault-key-row-compact: an automation key's head is ONE line — its kind is the chip and a minted value's length says
+    // nothing, so the meta line goes; the name's title keeps when it was made
+    if (row.store === 'automation') label.title = row.createdAt ? `${labelWord(row)} · ${t('saved {when}', { when: whenText(row.createdAt) })}` : labelWord(row);
+    else main.append(vwEl('div', 'vw-meta', meta.join(' · ')));
     // THE CHIPS: kind · provenance · state (a fact the row holds — never a hint, never a greyed control)
     const chips = vwEl('div', 'vw-chips');
     chips.append(vwEl('span', 'vw-chip vw-chip-kind', kindWord(row.kind)));
     const pc = vwEl('span', `vw-chip vw-chip-prov vw-prov-${prov}`);
     pc.dataset.prov = prov; pc.title = PROV_HELP[prov] ? PROV_HELP[prov]() : '';
-    pc.append(glyph(PROV_ICON[prov] || 'person', 11), document.createTextNode(provWord(prov)));
+    pc.append(glyph(PROV_ICON[prov] || 'person', 11), vwEl('span', 'vw-chip-words', provWord(prov)));   // lane vault-key-row-compact: the words in a span (a phone's key row shows the glyph; aria-label keeps them)
+    pc.setAttribute('aria-label', provWord(prov));
     chips.append(pc);
     for (const c of stateChipsOf(row, Date.now())) { const s = vwEl('span', 'vw-chip vw-chip-state'); s.dataset.state = c.id; s.append(glyph('warn', 11), document.createTextNode(stateWord(c))); chips.append(s); }
     const used = vwEl('div', 'vw-used', usedText(row));
@@ -384,7 +391,8 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     } else if (row.revealable === false) val.append(mask);   // int317: a machine's link token / a sealed file's key — never shown (the hub refuses it by name): no 显示 at all
     else val.append(mask, show, copy);
     const doors = vwEl('div', 'vw-doors');
-    if (row.store === 'automation' && st.auto) { const ex = automationExtras(row, st.auto, { refresh }); main.append(ex.box); doors.append(...ex.doors); }
+    let wide = null;   // lane vault-key-row-compact: an automation key's head chips count, its limits line + grants fold sit UNDER the head (full width)
+    if (row.store === 'automation' && st.auto) { const ex = automationExtras(row, st.auto, { refresh }); chips.append(...(ex.chips || [])); wide = ex.box; doors.append(...ex.doors); }
     if (totpTx) { main.append(totpTx.box); doors.append(...totpTx.doors); }   // design q-047 L1: the code's grant chips + 用于…
     if (row.doors && row.doors.rotate) { const b = btnEl(t('Renew…'), 'vw-renew'); b.onclick = () => doRenew(row); doors.append(b); }
     if (row.doors && row.doors.delete) { const b = btnEl(t('Delete'), 'vw-del'); b.onclick = () => doDelete(row); doors.append(b); }
@@ -394,7 +402,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     tech.append(vwEl('summary', null, t('Technical details')), vwEl('div', 'vw-tech-body', `${row.store} · ${row.entry} · ${row.field}`));
     const act = vwEl('div', 'vw-act');
     act.append(val, doors);
-    e.append(main, chips, used, act, tech);
+    e.append(main, chips, used, act, ...(wide ? [wide] : []), tech);
     return x;
   }
   /** The rows after a refresh: a row whose facts did not change KEEPS its element (an open value stays open); a changed one
@@ -524,12 +532,21 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
         const el = vwEl('div', 'vw-band-row');
         el.dataset.id = it.id;
         if (it.action && it.action.type) el.dataset.type = it.action.type;
-        const txt = vwEl('span', 'vw-band-txt', inbox.wordsOf(it));
-        const det = inbox.detailOf(it);
-        if (det) txt.title = det;
+        // lane vault-key-row-compact (the card grammar): the HEAD speaks (a use failure: who · the key · the verb · refused), a
+        // use failure's CAUSE is the second line (its first detail line, with the door), the rest under ONE fold — nothing raw
+        const words = vwEl('div', 'vw-band-words');
+        const head = inbox.wordsOf(it);
+        const txt = vwEl('span', 'vw-band-txt', head);
+        txt.title = head;
+        words.append(txt);
+        const lines = inbox.detailLinesOf ? inbox.detailLinesOf(it) : String(inbox.detailOf(it) || '').split('\n').filter(Boolean);
+        const failed = !!(it.action && it.action.type === 'vault-use-failed');
+        if (failed && lines[0]) words.append(vwEl('div', 'vw-band-cause', lines[0]));
+        const rest = failed ? lines.slice(1) : lines;
+        if (rest.length) { const more = vwEl('details', 'vw-band-more'); more.append(vwEl('summary', null, t('Details')), vwEl('div', 'vw-band-more-body', rest.join('\n'))); words.append(more); }
         const doors = vwEl('span', 'vw-band-doors');
         for (const d of bandDoorsOf(it)) doors.append(bandDoor(it, d));
-        el.append(txt, doors);
+        el.append(words, doors);
         r = { el, sig: sigB };
         bandEls.set(it.id, r);
       }

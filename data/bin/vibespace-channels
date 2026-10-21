@@ -129,6 +129,30 @@ async function call(method, p, body) {
   if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + (/^attachments?-/.test(String(j.why || '')) ? ': ' + j.why : '') + ']' : '')); callerRows(j); placementHint(j); process.exit(1); }
   return j;
 }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const indentBlock = (s) => String(s || '').split('\n').map((l) => '  ' + l).join('\n');
+// lane channel-direct-send-sync: a DIRECT send's RECEIPT, read inline from this command — the agent learns the
+// outcome now (vendor id · sent as · what the recipient sees), and no second "[Channels · Outbox]" message waits in
+// its queue for the next turn. `r.receiptText` = the send completed with the command (the common case); `r.receiptPending`
+// = a HELD send (the vendor asked to slow down) — poll the collect door, bounded by the send window, then fall back to
+// the message road. Answers whether it printed the receipt (so the caller drops the now-redundant identity note).
+async function showInlineReceipt(r, p) {
+  if (!r || !p) return false;
+  if (r.receiptText) {
+    console.log(indentBlock(r.receiptText));
+    try { await call('GET', `/api/agent/channels/status?id=${encodeURIComponent(p.id)}&collect=1`); } catch { /* best-effort: the fallback still delivers a message if the hub did not record the read */ }
+    return true;
+  }
+  if (!r.receiptPending) return false;
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    await sleep(500);
+    let cr; try { cr = await call('GET', `/api/agent/channels/status?id=${encodeURIComponent(p.id)}&collect=1`); } catch { cr = null; }
+    if (cr && cr.receiptText && !cr.pending) { console.log(indentBlock(cr.receiptText)); return true; }
+  }
+  console.log('  sending — the receipt will come as a message (the vendor had not answered within 20s)');
+  return true;
+}
 // THE NAIVE-USER PASS (2026-09-28): a `placement-not-offered` refusal names what IS offered in the placement's own
 // words ("offered here: chat, quote") — the agent asks for those with FLAGS, so it is told which flags, for what this
 // channel offers (a quote has no flag of its own: it is what --to alone gives where the channel quotes by default)
@@ -517,7 +541,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const text = chText(2);   // lane cli-one-text-arg: ONE text (or --text-file / --text -) — a stray word ⇒ exit 2
     const REPLY_USAGE = 'usage: vibespace-channels reply <conv> "text" [--why "…"] [--to <msg id> [--in-thread] [--also-in-chat]] [--all] [--cc <addr>[,<addr>]] [--attach <path>]… [--replaces <proposalId>]';
     if (!conv || !text || ['--why', '--reply-to', '--to', '--replaces', '--in-thread', '--also-in-chat', '--all', '--cc', '--attach'].includes(text)) { console.error(REPLY_USAGE); process.exit(1); }
-    const body = { conv, text };
+    const body = { conv, text, collect: true };   // lane channel-direct-send-sync: wait for and read a direct send's receipt inline
     const att = attachmentsFrom();
     if (att.error) { console.error(`${att.error}\n${REPLY_USAGE}`); process.exit(1); }
     if (att.files) body.attachments = att.files;
@@ -556,7 +580,10 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (attLine) console.log(attLine);
     printRecipients(p);
     printReplaced(r);
-    if (p.identity && p.identity.marking !== 'none') console.log(`note: on this channel the recipient sees ${p.identity.marking === 'unknown' ? 'an UNVERIFIED sender identity' : 'an application marker'}${p.identity.text ? ' — ' + p.identity.text : ''}`);
+    // lane channel-direct-send-sync: a direct send's receipt is read INLINE here — no second "[Channels · Outbox]"
+    // message waits in your queue for the next turn (a review proposal still gets its receipt in the next turn)
+    const shownReceipt = await showInlineReceipt(r, p);
+    if (!shownReceipt && p.identity && p.identity.marking !== 'none') console.log(`note: on this channel the recipient sees ${p.identity.marking === 'unknown' ? 'an UNVERIFIED sender identity' : 'an application marker'}${p.identity.text ? ' — ' + p.identity.text : ''}`);
     return;
   }
   // lane channel-threads (spec §5.3): a reaction is a PROPOSAL — the account's reaction policy decides (propose by

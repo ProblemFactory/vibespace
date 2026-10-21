@@ -262,6 +262,8 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
     proposeRecall: 'the agent\'s own recall proposal (the message id + a quote of the user\'s own message through the belt; agentIdsOf)',
     // lane channel-attach-read (B-d6b9)
     attachment: 'the bytes of a part a message of a readable conversation carries — never its role:body part (not-found, even cached); the sender / title / type through the belt; driven below and in test-channels-images ③b',
+    // lane channel-direct-send-sync
+    collectReceipt: 'the drafting agent reads its OWN direct send\'s receipt inline (receiptText = the rendered block; marks receipt.road:\'inline\') — a caller who is not the drafter = the uniform not-found',
   };
   ok(handlers.length >= 9 && called.every((k) => k in JUDGED) && Object.keys(JUDGED).every((k) => called.includes(k)), `THE ROUTE CENSUS: every engine method the ${handlers.length} agent channel handlers call is judged for what it hands an agent (${called.join(', ')})`, JSON.stringify({ called, unjudged: called.filter((k) => !(k in JUDGED)), dead: Object.keys(JUDGED).filter((k) => !called.includes(k)) }));
   // the fake world's mail room is read from process.env by the adapter (the server's own seam)

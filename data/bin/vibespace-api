@@ -43,7 +43,9 @@ function limitsWords(l) {
   const any = (v) => (v === 'any' ? 'any' : Array.isArray(v) && v.length ? v.join(', ') : 'none');
   // lane key-folder-picker-all: `/` is all paths (never a bare slash); a folder covers its subfolders and says so
   const folders = Array.isArray(l.cwdRoots) && l.cwdRoots.includes('/') ? 'all paths' : Array.isArray(l.cwdRoots) && l.cwdRoots.length ? `${l.cwdRoots.join(', ')} (with subfolders)` : 'none';
-  return `folders ${folders} · accounts ${any(l.accounts)} · permission modes ${any(l.permissionModes)} · models ${any(l.models)} · modes ${any(l.modes)}`;
+  // lane vault-key-row-compact: an unrestricted set says any — the modes' whole table is chat + terminal (the hub's OPEN_MODES)
+  const modes = Array.isArray(l.modes) && ['chat', 'terminal'].every((m) => l.modes.includes(m)) ? 'any' : any(l.modes);
+  return `folders ${folders} · accounts ${any(l.accounts)} · permission modes ${any(l.permissionModes)} · models ${any(l.models)} · modes ${modes}`;
 }
 /** A grant's reach in words (lane key-instance-scope): opened (the default) · groups: <ids> · instance. */
 function reachWords(r) {
