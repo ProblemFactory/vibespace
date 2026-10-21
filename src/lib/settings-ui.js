@@ -9,8 +9,10 @@ import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { ATTENTION_RULES, attentionPolicy, presetOf, presetSwitches } from './channel-focus.js';   // lane attention-policy
 import { paintDecisionLine, liveDecisionLine } from './decision-readout.js';   // lane decision-spend-readout: the judge's money (ONE PURE line)
+import { mountSuggestionList } from './voice-teach-ui.js';   // lane voice-dictionary-nag: 「词典建议」's words, each 加入 / 忽略
 import { mountLearnDraft } from './learn-card.js';   // lane rule-learning: 「从我的判定起草」 — the text model's proposal card (only with an OpenRouter key)
 const DECISION_BUDGET_PATH = 'plugin.llm.dailyBudgetUsd';   // src/plugin-settings.js: the judge's daily cap row
+const VOICE_SUGGEST_PATH = 'plugin.voice-input.suggest';     // src/plugin-settings.js: 「词典建议」 — its row lists the words suggested now
 
 // lane attention-policy: A PLUGIN'S FEATURE SWITCH shown as a settings row (`store: {plugin, feature}`) — read from GET
 // /api/plugins (the plugin row's own `decision` / `config` answer), written through POST /api/plugins/<id>/config, the
@@ -425,6 +427,7 @@ class SettingsUI {
     if (schema.fact === 'browser-display') this._renderDisplayFact(info);
     if (schema.fact === 'attention-today') this._renderAttentionToday(info);
     if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);   // the cap's row says what today cost against it
+    if (path === VOICE_SUGGEST_PATH) mountSuggestionList(info);            // every word suggested now, each with 加入 / 忽略 (the door)
     if (schema.fact === 'https-address') { row.classList.add('has-wide-fact'); this._renderHttpsFact(row); } // the full row's width (a phone's label column is too narrow for an address)
 
     const controlWrap = document.createElement('div');

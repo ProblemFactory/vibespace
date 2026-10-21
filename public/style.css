@@ -7781,6 +7781,13 @@ button.vw-chip { cursor: pointer; }
 .ut-ak-reach-lbl, .iw-reach-lbl { color: var(--text-dim); }
 .ut-ak-reach label, .iw-reach label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 @media (max-width: 600px) { .ut-ak-reach label, .iw-reach label, .vw-ak-reach { min-height: 36px; } }
+/* lane key-folder-picker-all: the folders' two choices above the browser — 「所有路径」 (red-tinted like 整个 VibeSpace; its title says
+   your home is in it) / 「只有这些文件夹（含子文件夹）」 — a root chip's «及子文件夹», and the row's 「所有路径」 line */
+.vw-ak-seg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.dialog-body label.vw-ak-allpaths, .vw-ak-allpaths, .vw-ak-lim.vw-ak-allpaths { color: var(--bad-text); }
+.vw-ak-some { display: flex; flex-direction: column; gap: 4px; }
+.vw-ak-some[hidden] { display: none; }
+.vw-ak-sub { color: var(--text-dim); }
 @media (max-width: 600px) { .vw-ak-x { min-width: 36px; min-height: 36px; } .vw-ak-pick { min-height: 36px; } .vw-ak-dir, .vw-ak-up { min-height: 36px; } }
 .sys-vault-line { border-top: 1px solid var(--border); }
 @media (max-width: 600px) {

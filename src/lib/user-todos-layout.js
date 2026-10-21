@@ -102,7 +102,7 @@ export function sortGroups(open) {
     if ((a[0] === 'jobs') !== (b[0] === 'jobs')) return a[0] === 'jobs' ? 1 : -1;
     const newest = (items) => Math.max(...items.map((i) => i.createdAt));
     // THE PIN (lane foryou-plugin-notices): urgent groups first, then each plugin's reminders (the plugin with the newest
-    // item first, whatever its urgency), then the rest exactly as before
+    // item first, normal or high — one filed LOW is no pin: lane voice-dictionary-nag), then the rest exactly as before
     const ba = trayBand(a[1]), bb = trayBand(b[1]);
     if (ba !== bb) return ba - bb;
     if (ba === 1) return newest(b[1]) - newest(a[1]);
@@ -117,11 +117,12 @@ export function sortGroups(open) {
  *  key or the words. */
 export function pluginOf(item) { return item && item.origin === 'plugin' && typeof item.plugin === 'string' && item.plugin ? item.plugin : null; }
 /** A group's BAND in the For-you window's session order: 0 = it holds an URGENT item (urgent stays first, whoever filed it), 1 = a plugin's reminders
- *  (one group per plugin — a plugin files under its own id), 2 = everything else. */
+ *  (one group per plugin — a plugin files under its own id; a reminder filed `low` is none — lane voice-dictionary-nag, the
+ *  dictionary suggestion), 2 = everything else. */
 export function trayBand(items) {
   const list = (items || []).filter(Boolean);
   if (list.some((i) => (i.urgency || 'normal') === 'urgent')) return 0;
-  return list.some((i) => pluginOf(i)) ? 1 : 2;
+  return list.some((i) => pluginOf(i) && (i.urgency || 'normal') !== 'low') ? 1 : 2;
 }
 /** THE WHOLE DETAIL THIS CLIENT ALREADY SAW (2026-09-27, the For-you window's
  *  verify round). A snapshot carries a RESOLVED item's detail as a 300-char

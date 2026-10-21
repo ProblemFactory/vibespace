@@ -8,6 +8,7 @@ import { keyboardOwned, keyboardYielded, onKeyboardChange } from './keyboard-own
 import { EnterGuard, imeOwnsKey, IME_HINT_MS, sendKeyName } from './chat-enter-keys.js'; // lane chat-enter-ime: an Enter meant for the input method never sends
 import { createVoiceInput } from './voice-input.js'; // Dropline voice input (q-029 P0): the microphone beside attach
 import { createStashStrip } from './stash-strip.js'; // 2026-09-27: what waits for this agent's next turn + Hand over now
+import { createAgentCards } from './agent-card.js'; // lane agent-window-no-pop: the card an agent's window leaves where nothing opened
 
 /**
  * ChatInput — input area for chat mode sessions.
@@ -448,6 +449,9 @@ export class ChatInput {
     // "Hand over now". Above the queue strip: those were sent by YOU; these wait FOR the agent. Keyed, patched in
     // place from the session's `stash` fact (ChatView _onActiveSessions → setStash); hidden when nothing waits.
     this._stashStrip = createStashStrip({ sessionId });
+    // THE AGENT'S CARDS (lane agent-window-no-pop, inc-mvhebl4n-rkvr): an agent's Design for a chat the person is not looking
+    // at opens NO window — its card waits here (title + Open, the person's door); first in the input area, above the stash.
+    this._agentCards = createAgentCards();
 
     // SEND-MODE HINT: one line UNDER the textarea while a turn runs, saying
     // what the two send keys do on THIS harness. Last child + width:100% ⇒ the
@@ -476,6 +480,7 @@ export class ChatInput {
     this._textarea.addEventListener('blur', renderKbdLine);
 
     inputArea.append(this._stashStrip.el, this._queueStrip, this._attachArea, this._todoDisplay, this._streamStatus, this._kbdLine, inputWrap, this._steerBtn, sendCol, this._sendHint, this._imeHint);
+    inputArea.prepend(this._agentCards.el); // lane agent-window-no-pop: the agent's cards come first, above the stash strip
   }
 
   /** The .chat-input-area wrapper element */
@@ -1422,6 +1427,8 @@ export class ChatInput {
    *  `queueVerbs` is the table, `steer`/`queueOps` its derived view. */
   /** 2026-09-27: the session's `stash` fact ({count, items} | null) + its turn — the strip patches in place. */
   setStash(summary, opts = {}) { this._stashStrip?.set(summary || null, opts); }
+  /** lane agent-window-no-pop: `{key, title, open}` — the card an agent's window leaves (src/lib/agent-card.js). */
+  showAgentCard(card) { return this._agentCards?.show(card) || null; }
 
   setQueue(items, caps) {
     this._queue = Array.isArray(items) ? items : [];

@@ -193,7 +193,7 @@ try {
   for (const where of [SIB, `${LANE}/../lane-b`, path.join(LANE, 'out')]) outs.push(await cli(['conversations', 'open', '--key', 'one-root', '--cwd', where, '--name', 'outside'], C.token));
   await sleep(500);
   check("open OUTSIDE it (a sibling, `..`, a link out) ⇒ exit 1 with cwd_outside_roots, the CLI printing the key's limits by name",
-    outs.every((o) => o.code === 1 && /\(cwd_outside_roots\)/.test(o.err) && o.err.includes(`this key's limits: folders ${LANE} · accounts any · permission modes default · models any · modes chat`)), outs.map((o) => [o.code, o.err.slice(0, 300)]));
+    outs.every((o) => o.code === 1 && /\(cwd_outside_roots\)/.test(o.err) && o.err.includes(`this key's limits: folders ${LANE} (with subfolders) · accounts any · permission modes default · models any · modes chat`)), outs.map((o) => [o.code, o.err.slice(0, 300)]));
   const lAudit = fs.readFileSync(path.join(wt, 'data', 'automation-audit.jsonl'), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((l) => l && l.key === LKEY && l.verb === 'conversations.open');
   const lSpend = (() => { try { return JSON.parse(fs.readFileSync(path.join(wt, 'data', 'spend-budget.json'), 'utf8')).budget.identities[`automation:${LKEY}`] || null; } catch { return null; } })();
   check('…each audited with its code (three refused opens), NOTHING spawned (no new CLI), nothing charged to the key',

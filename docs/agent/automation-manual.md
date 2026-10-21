@@ -106,14 +106,14 @@ vibespace-api groups invite <g-…|group name> <target>
 
 | refusal | means |
 |---|---|
-| `cwd_outside_roots` | the folder is not inside one of the key's folders. It counts by its REAL path: `..` and a link out of a folder are outside; a folder that does not exist is refused too. Inside, the conversation opens in the real folder |
+| `cwd_outside_roots` | the folder is not inside one of the key's folders (a folder covers its subfolders; `folders all paths` = any folder here). It counts by its REAL path: `..` and a link out of a folder are outside; a folder that does not exist is refused too. Inside, the conversation opens in the real folder |
 | `account_not_allowed` | the account is not one of the key's. With no `--pool`, the account judged is the default one the open would bill (`subscription` = the CLI's own login) |
 | `permission_not_allowed` | the permission mode is not one of the key's. No `--permission` = the CLI's own setting for that folder (its `permissions.defaultMode` across the user / project / managed settings files, `disableBypassPermissionsMode` honoured): the hub resolves it and the RESOLVED mode must be in the key's list — the refusal names it and the layer: «the CLI's own setting (project, <file>) is bypassPermissions; this key allows default». Name a mode the key lists, or ask the user to change the key or that folder's settings |
 | `model_not_allowed` | the model is not one of the key's; no `--model` = the instance's default model, else `default` |
 | `mode_not_allowed` | the mode is not one of the key's (a key opens chat unless the user ticked terminal) |
 
   Example: `vibespace-api: that folder is outside this key's folders: "/etc" is outside this key's folders (/var/tmp/lanes) (cwd_outside_roots)`
-  then `  this key's limits: folders /var/tmp/lanes · accounts pool-… · permission modes default, bypassPermissions · models any · modes chat` (exit 1).
+  then `  this key's limits: folders /var/tmp/lanes (with subfolders) · accounts pool-… · permission modes default, bypassPermissions · models any · modes chat` (exit 1).
 
 **Opening a worker (the coordinator's road):**
 
@@ -133,7 +133,7 @@ vibespace-api conversations archive <conversation id>                 when the l
 |---|---|
 | `vault_locked` (423) | the vault is locked — every call waits until the user unlocks it on the page. The user has already been told (For you names this conversation and the verb): never ask them to unlock it or for the password — wait, or do other work (exit code 3) |
 | `not_granted` | no grant lets this conversation use the key, or a `--target` is outside the grant's reach (the message names the reach and the door that widens it) |
-| `key_revoked` / `verb_not_in_scope` | the user revoked the key / the key does not hold this verb |
+| `key_revoked` / `verb_not_in_scope` | the user revoked the key / the key does not hold this verb — the keys granted to this conversation are named; the user adds a verb to a key with Edit… on its row in the Vault window (its grants then cover it, no new question) |
 | `ask_denied` / `ask_expired` / `ask_quiet` | the user refused / nobody answered in 60 s / a refusal is still in its 10 minutes |
 | `once_spent` | a one-time grant was used; the next call asks again |
 | `caller_gone` (410) | the audit's word for a call that stopped waiting on its card — it was withdrawn and nothing ran |

@@ -88,7 +88,8 @@ console.log('③ THE BAND TABLE — rule → fixture (facts only; the words are 
   const T = [
     ['urgent (a login ending, a hub card, a device alert)', item({ urgency: 'urgent' }), 1],
     ['an urgent PLUGIN reminder: urgent first, whoever filed it', item({ urgency: 'urgent', origin: 'plugin', plugin: 'zz' }), 1],
-    ['a plugin\'s reminder (the owner\'s pin: 「urgent 之下」)', item({ origin: 'plugin', plugin: 'zz', urgency: 'low' }), 2],
+    ['a plugin\'s reminder (the owner\'s pin: 「urgent 之下」)', item({ origin: 'plugin', plugin: 'zz' }), 2],
+    ['a plugin\'s reminder filed LOW (lane voice-dictionary-nag: the dictionary suggestion, its two chips): band 5 — no pin, no badge', item({ origin: 'plugin', plugin: 'zz', urgency: 'low', options: ['Add to dictionary', 'Ignore'] }), 5],
     ['an agent BLOCKED on the board for this ask (the facts)', item(facts({ state: 'blocked', askedAt: NOW - H })), 2],
     ['a main conversation\'s ask held 60 s (main-ask)', item({ urgency: 'high', action: { type: 'main-ask', requestId: 'r' } }), 2],
     ['a helper\'s permission ask held 60 s (helper-ask)', item({ urgency: 'high', action: { type: 'helper-ask', requestId: 'r' } }), 2],

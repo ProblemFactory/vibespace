@@ -9,7 +9,9 @@
  * `needsMe`; lane ③ phone-first-screen draws it as the phone's first page).
  *
  *   band 1 urgent   — urgency `urgent` (a login ending, a hub act card, a device alert)                  newest first
- *   band 2 waiting  — a plugin's reminder (pinned at the head — owner 2026-10-19 「urgent 之下」), an agent BLOCKED on the
+ *   band 2 waiting  — a plugin's reminder (pinned at the head — owner 2026-10-19 「urgent 之下」; one filed `low` waits in
+ *                     band 5 instead — lane voice-dictionary-nag: Dropline's dictionary suggestion, 20 in 8 days above a
+ *                     fleet user's real asks, in the badge all day), an agent BLOCKED on the
  *                     board for this ask (the facts' state), a permission / helper ask nobody answered in 60 s
  *                     (WAIT_ACTIONS), a person's direct / @-you row (`waitedBy: 'person'`, lane ②)     longest waiting first
  *   band 3 dated    — a `due` inside DUE_WINDOW_MS (ahead, or passed less than that ago), or the attention judge's
@@ -131,6 +133,7 @@ function rowOf(item, now = 0) {
 function bandOfRow(r, now = 0) {
   if (!r || r.notice || r.kind === 'notice') return 0;
   if (r.urgency === 'urgent') return 1;
+  if (r.plugin && r.urgency === 'low') return 5; // lane voice-dictionary-nag: a plugin's LOW reminder (the dictionary suggestion) — never pinned, no badge, no toast
   if (r.plugin || r.blocked || r.waitedBy === 'person' || (r.action && WAIT_ACTIONS.includes(r.action))) return 2;
   if (r.deadlineMoney || (num(r.due) !== null && r.due - Number(now) <= DUE_WINDOW_MS && Number(now) - r.due <= DUE_WINDOW_MS)) return 3;
   if (r.options > 0 || r.action || r.card) return 4;

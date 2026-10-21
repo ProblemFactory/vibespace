@@ -19,6 +19,7 @@
 //   POST /api/voice/teach/seen {conv, title, cwd, messages, uiLang}  → {proposal, auto, preview, context}  (after a dictation)
 //   POST /api/voice/teach/proposal/:id {verb:'add', terms} | {verb:'ignore'}
 //   POST /api/voice/teach/preview/:id {send}   (the first-time context preview's 发送 / 不发)
+//   POST /api/voice/teach/word {term, verb:'add'|'ignore'}   (lane voice-dictionary-nag: the settings list's per-word 加入 / 忽略)
 const express = require('express');
 const multer = require('multer');
 const VM = require('../voice-model.js');
@@ -51,7 +52,8 @@ function create({ client, prefs = () => ({}), oauth = null, teach = null, log = 
   }
   if (teach) {
     router.get('/api/voice/teach', owner(async () => teach.view()));
-    router.post('/api/voice/teach/settings', owner(async (b) => teach.setSettings({ teach: b.teach, context: b.context, autoProject: b.autoProject })));
+    router.post('/api/voice/teach/settings', owner(async (b) => teach.setSettings({ teach: b.teach, context: b.context, suggest: b.suggest, suggestionsMode: b.suggestionsMode, autoProject: b.autoProject })));
+    router.post('/api/voice/teach/word', owner(async (b) => teach.answerWord(typeof b.term === 'string' ? b.term : '', b.verb)));
     router.post('/api/voice/teach/seen', owner(async (b) => teach.seen({ conv: b.conv, title: typeof b.title === 'string' ? b.title : '', cwd: typeof b.cwd === 'string' ? b.cwd : '', messages: Array.isArray(b.messages) ? b.messages.slice(-40) : [], groupName: typeof b.groupName === 'string' ? b.groupName : '', uiLang: b.uiLang })));
     router.post('/api/voice/teach/proposal/:id', owner(async (b, req) => (b.verb === 'add' ? teach.confirm(req.params.id, b.terms) : b.verb === 'ignore' ? teach.ignore(req.params.id) : Promise.reject(Object.assign(new Error('verb must be add or ignore'), { status: 400, code: 'bad-request' })))));
     router.post('/api/voice/teach/preview/:id', owner(async (b, req) => teach.answerPreview(req.params.id, b.send === true)));

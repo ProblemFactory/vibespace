@@ -5133,6 +5133,8 @@ export default {
   "Pinch-zoom works while you watch — hand back to zoom the picture": "双指缩放只在观看时可用 — 交还控制后即可缩放画面",
   "Watch mode — the agent is driving; pinch to zoom, press Take over to send input": "观看模式 — agent 正在操作；双指可缩放，点“接管”后才能发送输入",
   "The agent opened its browser — it is shown here": "Agent 打开了它的浏览器 — 已在这里显示",
+  "The agent wants to show you this design": "Agent 想给你看这个设计",
+  "Open the Design window": "打开设计窗口",
   "Back to the chat": "回到聊天",
   // lane S1 (B-6e95): a helper's permission ask — the waiting chip, the helper's card, the For-you item
   "Helper “{name}”": "帮手「{name}」",
@@ -8636,7 +8638,7 @@ export default {
   "A Flatpak or Snap app, and a browser, asks a desktop portal for its file dialogs; VibeSpace starts one on the app's own display, so the dialog opens inside its window, not on your main desktop (3 more processes per app, gone with it). Every app: GTK apps too. Off: as before. Applies to apps started after the change.": "Flatpak、Snap 应用和浏览器通过桌面门户打开文件对话框；VibeSpace 在应用自己的显示上启动一个门户，对话框就开在它的窗口里，而不是你的主桌面（每个应用多 3 个进程，随应用结束）。所有应用：GTK 应用也一样。关闭：同以前。对更改之后启动的应用生效。",
   "file dialogs in this window (3 processes)": "文件对话框在本窗口内（3 个进程）",
   "file dialogs on your main desktop — {why}": "文件对话框在你的主桌面 — {why}",
-  "OFF (the default): a window an agent opens — its own browser, an app it starts, a second window of that app, its live view, a Design it opens — is placed beside the agent's chat (or on that chat's desktop), behind what you are doing, and its taskbar entry pulses; it never takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.": "关闭（默认）：agent 打开的窗口——它自己的浏览器、它启动的应用、该应用的第二个窗口、它的实况窗口、它打开的设计——放在该 agent 的对话旁边（或那个对话所在的桌面），在你正在做的事情后面，任务栏条目闪一下；它从不夺走你的焦点，也不切换你的桌面。开启：像以前一样切到前台并获得焦点。",
+  "OFF (the default): a window an agent opens — its own browser, an app it starts, its live view, a Design it opens — opens beside the agent's chat only while you are in that chat (or on that chat's desktop when it is another one); anywhere else nothing on your desk moves — the chat gets a card and a taskbar badge, and the window opens when you press Open. A second window of an app it started is placed behind what you are doing. None of them takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.": "关闭（默认）：agent 打开的窗口——它自己的浏览器、它启动的应用、它的实况窗口、它打开的设计——只有在你正处于该 agent 的对话时才在对话旁边打开（或在那个对话所在的另一个桌面上打开）；其他情况下你桌面上的东西都不会动——对话里留一张卡片、任务栏上显示标记，按「打开」时窗口才打开。它启动的应用的第二个窗口放在你正在做的事情后面。它们都不会夺走你的焦点，也不切换你的桌面。开启：像以前一样切到前台并获得焦点。",
   "This page is not https, so the browser gives it no microphone — open it over https, or on this computer at {url}": "这个页面不是 https，浏览器不给麦克风——用 https 打开，或在这台电脑上打开 {url}",
   "The browser refused the microphone — allow it in the site permissions in the address bar": "浏览器拒绝了麦克风——在地址栏的站点权限里允许",
   "No microphone was found on this device": "这台设备上没有找到麦克风",
@@ -9277,6 +9279,18 @@ export default {
   "{name} drives {machine}’s desktop — any key or click of yours pauses it": "{name} 正在操作 {machine} 的桌面——你按任何键或点击都会让它暂停", // lane desktop-handover
   "No agent conversation is running — start one, then come back.": "没有正在运行的 agent 会话——先开一个再回来。", // lane desktop-handover
   "Add these words to your Dropline dictionary": "把这些词加入 Dropline 词库", // lane foryou-plugin-notices
+  "Dictionary suggestions": "词典建议", // lane voice-dictionary-nag
+  "On: words Dropline did not know in your dictations are suggested — listed here, each with Add and Ignore. Ignore (or ✕ on the For you item) means not now: the word comes back only when you say it again. Off: nothing is suggested.": "开着：你口述里 Dropline 不认识的词会被建议——列在这里，每个都有「加入词库」和「忽略」。「忽略」（或在「待你处理」那一条上点 ✕）= 先不要：只有你再次说到这个词时才会再建议。关掉：什么都不建议。", // lane voice-dictionary-nag
+  "Where dictionary suggestions wait": "词典建议放在哪里", // lane voice-dictionary-nag
+  "One item in For you (the default): at most one at a time, never above urgent asks — a later batch joins it. Only here in Settings: never a For you item; the words wait in the list above.": "「待你处理」里的一条（默认）：同时最多一条，绝不排在紧急事项之上——之后的建议并进这一条。只在设置里：从不放进「待你处理」，词留在上面的列表里。", // lane voice-dictionary-nag
+  "One item in For you": "「待你处理」里的一条", // lane voice-dictionary-nag
+  "Only here in Settings": "只在设置里", // lane voice-dictionary-nag
+  "Suggested words ({n})": "建议的词（{n}）", // lane voice-dictionary-nag
+  "No word is suggested now — words Dropline did not know in your dictations appear here.": "现在没有建议的词——你口述里 Dropline 不认识的词会出现在这里。", // lane voice-dictionary-nag
+  "Add to dictionary": "加入词库", // lane voice-dictionary-nag
+  "Ignore": "忽略", // lane voice-dictionary-nag
+  "“{term}” was added to your Dropline dictionary": "「{term}」已加入你的 Dropline 词库", // lane voice-dictionary-nag
+  "“{term}” comes back only when you say it again": "「{term}」只有你再次说到时才会再建议", // lane voice-dictionary-nag
   "That plugin is not on this instance any more": "这个插件已经不在本实例上了", // lane foryou-plugin-notices
   "That suggestion was already added or ignored. Nothing waits for it.": "这批建议已经加入或忽略过了，没有要处理的。", // lane foryou-plugin-notices
   "Direct path": "直连", // lane stream-stats-popup
@@ -9606,12 +9620,10 @@ export default {
   "Modes": "模式", // lane automation-open-limits
   "No folder yet": "还没有文件夹", // lane automation-open-limits
   "Parent folder": "上一级文件夹", // lane automation-open-limits
-  "Add this folder": "加入这个文件夹", // lane automation-open-limits
   "A folder is an absolute path": "文件夹要写绝对路径", // lane automation-open-limits
   "Any account": "任何账号", // lane automation-open-limits
   "Any model": "任何模型", // lane automation-open-limits
   "Another model id": "另一个模型 id", // lane automation-open-limits
-  "Limits of \"{name}\"": "「{name}」的边界", // lane automation-open-limits
   "This key has no folders yet — what you save here becomes its bounds. Until you set at least one folder, every conversation it would open is refused.": "这把 key 还没有文件夹——你在这里保存的就是它的边界。在你至少设定一个文件夹之前，它想开的每个对话都会被拒。", // lane automation-open-limits (q-049 M1)
   "Audit of \"{name}\"": "「{name}」的审计记录", // lane automation-open-limits
   "No audit line for this key yet": "这把 key 还没有审计记录", // lane automation-open-limits
@@ -9623,8 +9635,16 @@ export default {
   "No settings file sets a permission mode — the CLI runs its built-in default": "没有设置文件指定权限模式 —— CLI 用内置默认",
   "This call would open \"{name}\" in {cwd}.": "这次调用会在 {cwd} 开一个叫「{name}」的对话。",
   "This call would open a conversation in {cwd}.": "这次调用会在 {cwd} 开一个对话。",
-  "No folders are set — every conversation it would open is refused until you set them with Limits…": "未设边界：它想开的每个对话都会被拒，直到你用「边界…」设定", // lane automation-open-limits (q-049 M1)
-  "Limits…": "边界…", // lane automation-open-limits
+  "All paths": "所有路径", // lane key-folder-picker-all
+  "Any folder on this VibeSpace, including your home": "这台 VibeSpace 上的任何文件夹，包括你的主目录", // lane key-folder-picker-all
+  "Only these folders (with their subfolders)": "只有这些文件夹（含子文件夹）", // lane key-folder-picker-all
+  "Add this folder and its subfolders": "加入这个文件夹及其子文件夹", // lane key-folder-picker-all
+  "and its subfolders": "及子文件夹", // lane key-folder-picker-all
+  "Edit \"{name}\"": "编辑「{name}」", // lane key-folder-picker-all
+  "A verb you add works at once wherever this key is granted — a grant is for the key and a conversation, not for each verb; a verb you take away is refused from its next call.": "新勾上的能力在这把 key 已经授权的地方立刻能用——授权是按「key × 会话」给的，不按能力；去掉的能力从下一次调用起就被拒绝。", // lane key-folder-picker-all
+  "No folders are set — every conversation it would open is refused until you set them with Edit…": "未设边界：它想开的每个对话都会被拒，直到你用「编辑…」设定", // lane key-folder-picker-all
+  "The key's folders: all paths — any folder on this VibeSpace.": "这把 key 的文件夹：所有路径——这台 VibeSpace 上的任何文件夹。", // lane key-folder-picker-all
+  "The key's folders: {roots} (with their subfolders).": "这把 key 的文件夹：{roots}（含子文件夹）。", // lane key-folder-picker-all
   "Audit…": "审计…", // lane automation-open-limits
   "What the conversations it opens may use": "它开的对话能用什么", // lane automation-open-limits
   "waiting for the relay admin to register it": "等待中继管理员登记", // lane relay-token-per-instance

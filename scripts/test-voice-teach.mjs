@@ -11,6 +11,14 @@
 //     first send is a PREVIEW, 发送 ⇒ ONE /v1/context with exactly the previewed text, then the 10-minute cadence.
 //   ③ RED CONTROLS: a schedule copy that POSTs terms without a confirmation, and one that sends the context without the
 //     first-time preview — each turns the matching check above red.
+//   ④ THE NAG (lane voice-dictionary-nag — a fleet user 2026-10-21: 「一天到晚有这个 Dropline 让我发信息的消息, 站在我的 inbox
+//     里」): on the REAL store with a movable clock and the ledger FILE — two conversations' batches = ONE open item (merged
+//     in place, same id), filed low (band 5: no pin, no badge); × CONSUMES the words' evidence (nothing sent, the cards leave
+//     the sheet, the file 0600 remembers); a new ITEM waits a day (the card does not); the SAME messages read again never
+//     re-earn a word, a NEW dictation does; 加入 sends exactly the merged words and they are known at once; the settings
+//     list (view().candidates) with per-word 加入 / 忽略; 「词典建议」 off ⇒ nothing proposed; mode settings-only ⇒ no item;
+//     a restart reads the ledger and unpins an open item; CONTROL the pre-fix listener (× unheard) ⇒ the dismissed words
+//     come back from the same messages the next day — RED
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -258,11 +266,12 @@ console.log('③ THE TRAY\'S DOOR (lane foryou-plugin-notices): the suggestion i
     const r = realRig();
     const a = await r.E.seen(seenArgs({ conv: 'conv-a' })), b = await r.E.seen(seenArgs({ conv: 'conv-b', messages: [{ role: 'user', content: [{ type: 'text', text: 'rename fooBarQux in zeta_notes.md, then fooBarQux again' }] }] }));
     const ids = [a, b].map((o) => o.proposal && o.proposal.itemId).filter(Boolean);
-    r.ut.setStatusMany(ids, 'done', 'user');   // 「全部标为已看」 on the plugin's section head
+    r.ut.setStatusMany([...new Set(ids)], 'done', 'user');   // 「全部标为已看」 on the plugin's section head
     await settle();
-    ok('「全部标为已看」 on the section (a batch) ⇒ nothing sent, both batches still wait on the sheet', ids.length === 2 && r.writes().length === 0 && r.E.view().proposals.length === 2, { ids, w: r.writes() });
+    // lane voice-dictionary-nag: the second conversation's batch MERGED into the one open item; a batch marked seen is «not now»
+    ok('「全部标为已看」 on the section (a batch) ⇒ nothing sent; the ONE item (both conversations\' batches merged into it) is «not now» — both cards leave the sheet', ids.length === 2 && ids[0] === ids[1] && r.writes().length === 0 && r.E.view().proposals.length === 0, { ids, w: r.writes() });
     const c = await (async () => { const rr = realRig(); const o = await rr.E.seen(seenArgs()); rr.ut.setStatus(o.proposal.itemId, 'dismissed', 'user'); await settle(); return { rr, o }; })();
-    ok('× (dismissed) ⇒ nothing sent, the batch still waits on the sheet', c.rr.writes().length === 0 && c.rr.E.view().proposals.length === 1);
+    ok('× (dismissed) ⇒ nothing sent; «not now» — the batch leaves the sheet (the evidence of its words consumed: ④)', c.rr.writes().length === 0 && c.rr.E.view().proposals.length === 0);
   }
   {
     const r = realRig();
@@ -288,17 +297,129 @@ console.log('③ THE TRAY\'S DOOR (lane foryou-plugin-notices): the suggestion i
   {
     // CONTROLS: the pre-fix listener (only a reply was a press) ⇒ the ✓ sends nothing; a listener blind to `batch` ⇒ 「全部标为已看」 sends
     const src = fs.readFileSync(ENGINE, 'utf8');
-    const needle = "      const tick = !reply && ev.status === 'done' && ev.by === 'user' && !ev.batch;";
+    const needle = "      const tick = !reply && ev.status === 'done' && byUser && !ev.batch;";
     ok('the controls\' needle occurs exactly once', src.split(needle).length === 2);
     const noTick = MC.write('src/server/voice-teach-engine.js', src.replace(needle, '      const tick = false;'), 'notick');
     const c1 = await tickLeg(noTick);
     ok('CONTROL RED: the pre-fix engine (only a reply is a press) ⇒ the owner\'s ✓ sends NOTHING (the words wait for ever behind a done row)', c1.r.writes().length === 0);
-    const blind = MC.write('src/server/voice-teach-engine.js', src.replace(needle, "      const tick = !reply && ev.status === 'done' && ev.by === 'user';"), 'blind');
+    const blind = MC.write('src/server/voice-teach-engine.js', src.replace(needle, "      const tick = !reply && ev.status === 'done' && byUser;"), 'blind');
     const r = realRig(blind);
     const a = await r.E.seen(seenArgs());
     r.ut.setStatusMany([a.proposal.itemId], 'done', 'user');
     await settle();
     ok('CONTROL RED: a listener blind to `batch` ⇒ 「全部标为已看」 sends the words (a whole section marked seen would add to the dictionary)', r.writes().length === 1);
+  }
+
+  console.log('④ THE NAG (lane voice-dictionary-nag): ONE open item, low; × consumes the evidence (the ledger file); the day\'s pace; only a NEW dictation re-earns; the settings list; 加入 = known');
+  {
+    const AM = require(path.join(path.dirname(ENGINE), '..', 'attention-model.js'));
+    const D = 24 * H;
+    const say = (...texts) => texts.map((text) => ({ role: 'user', content: [{ type: 'text', text }] }));
+    const quiet = { warn() { }, log() { } };
+    const nagRig = ({ settings = { teach: true }, enginePath = ENGINE } = {}) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-nag-')); dirs.push(dir);
+      const ut = new UT.UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
+      ut.setPluginGate((id) => id === VP.id && VP.provides.includes('reminders'));
+      const r = { calls: [], rec: { enabled: true, config: { ...settings } }, clock: 1e12, ut, file: path.join(dir, 'voice-suggestions.json') };
+      r.make = () => {
+        delete require.cache[require.resolve(enginePath)];
+        return require(enginePath).create({ client: { connected: () => true, vocabulary: async () => { r.calls.push(['vocabulary']); return ['VibeSpace']; }, terms: async (l) => { r.calls.push(['terms', l.slice()]); return { added: l.slice(), skipped: [] }; }, context: async (b) => { r.calls.push(['context', b]); return { ok: true }; } },
+          plugin: { peek: () => r.rec, update: (fn) => fn(r.rec), settings: () => r.rec.config || {}, writeSettings: (pp) => { r.rec.config = { ...(r.rec.config || {}), ...pp }; } }, userTodos: ut, now: () => r.clock, log: quiet, ledgerFile: r.file });
+      };
+      r.E = r.make();
+      r.writes = () => r.calls.filter((c) => c[0] !== 'vocabulary');
+      r.open = () => ut.openItems().filter((i) => i.sessionKey === VP.id);
+      r.seen = (conv, ...texts) => r.E.seen({ conv, title: conv, cwd: '/w/p', messages: say(...texts), uiLang: 'en' });
+      r.disk = () => JSON.parse(fs.readFileSync(r.file, 'utf8'));
+      return r;
+    };
+    const has = (it, w) => !!it && it.text.slice(it.text.indexOf(':') + 1).split(',').map((x) => x.trim()).includes(w);
+    const A1 = 'rename fooBarQux in zeta_notes.md, then fooBarQux again';
+    // A — ONE open item: the second conversation's batch merges into it IN PLACE (same id), deduped; filed low ⇒ band 5
+    const r = nagRig();
+    const a = await r.seen('conv-a', A1);
+    r.clock += 5 * MIN;
+    const b = await r.seen('conv-b', 'wire quuxFrobnicate into gamma_widget.md, then quuxFrobnicate again, and fooBarQux');
+    const it1 = r.open()[0];
+    const row = AM.rowOf(it1, r.clock);
+    ok('two conversations\' batches ⇒ ONE open For-you item: the second MERGED into it in place (the same id), its words joined and deduped (fooBarQux once)',
+      r.open().length === 1 && a.proposal.itemId === it1.id && b.proposal.itemId === it1.id && ['fooBarQux', 'zeta_notes.md', 'quuxFrobnicate', 'gamma_widget.md'].every((w) => has(it1, w)) && it1.text.split('fooBarQux').length === 2, { open: r.open(), a: a.proposal, b: b.proposal });
+    ok('…filed LOW — band 5 with the other asks (never the plugin pin under urgent), no badge, no toast; the sheet still holds both cards', it1.urgency === 'low' && row.band === 5 && !AM.toastWorthy(row) && !AM.badgeRows([row], r.clock).length && r.E.view().proposals.length === 2, { it1, row });
+    // B — × CONSUMES the evidence: nothing sent, the cards leave the sheet, the ledger FILE (0600) holds it
+    r.ut.setStatus(it1.id, 'dismissed', 'user');
+    await settle();
+    const disk1 = r.disk();
+    ok('× ⇒ nothing sent; the batch\'s cards leave the sheet; the ledger FILE (0600, the plugin\'s own store) holds each word\'s CONSUMED evidence (its count back to 0)',
+      r.writes().length === 0 && r.E.view().proposals.length === 0 && (fs.statSync(r.file).mode & 0o777) === 0o600 && ['foobarqux', 'zeta_notes.md', 'quuxfrobnicate', 'gamma_widget.md'].every((k) => disk1.words[k] && disk1.words[k].consumed.length >= 1 && disk1.words[k].evidence.length === 0), disk1);
+    // C — the pace: within a day of the dismissal no For-you ITEM, even for brand-new words (their card waits on the sheet)
+    r.clock += 2 * H;
+    const c = await r.seen('conv-c', 'and plinthMarker went into delta_sheet.md, plinthMarker twice');
+    ok('a day after a dismissal: a dictation with NEW words 2 h later files NO For-you item — its card waits on the sheet (the pace: 24 h since the last dismissal on this instance)', !!c.proposal && !c.proposal.itemId && c.proposal.terms.includes('plinthMarker') && r.open().length === 0 && r.E.view().proposals.length === 1, c);
+    // D — RULE 1: the SAME messages read again never re-earn a dismissed word; a NEW dictation that says it does
+    r.clock += 23 * H;
+    const d0 = await r.seen('conv-a', A1);
+    ok('a day later the SAME conversation read again (no new dictation): the dismissed words are not proposed at all — no card, no item', !d0.proposal && r.open().length === 0, d0);
+    const d1 = await r.seen('conv-a', A1, 'and newtonBridge, twice: newtonBridge');
+    const it2 = r.open()[0];
+    ok('…a new message with a NEW word: only the new word is filed (the old evidence stays consumed)', !!d1.proposal && has(it2, 'newtonBridge') && !has(it2, 'fooBarQux') && !has(it2, 'zeta_notes.md'), it2);
+    r.clock += 10 * MIN;
+    const d2 = await r.seen('conv-a2', A1, 'and newtonBridge, twice: newtonBridge', 'please open fooBarQux again'); // another conversation (conv-a proposed 10 min ago: its hourly cadence)
+    ok('…a NEW dictation that SAYS fooBarQux re-earns it — merged into the open item; zeta_notes.md (not said again) stays out; never a blacklist', !!d2.proposal && has(r.open()[0], 'fooBarQux') && !has(r.open()[0], 'zeta_notes.md') && r.open().length === 1 && r.disk().words.foobarqux.evidence.length === 1, r.open());
+    // E — 加入 (the chip): EXACTLY the merged words, ONE /v1/terms; they leave the ledger and are KNOWN at once
+    const it5 = r.open()[0];
+    const words5 = it5.text.slice(it5.text.indexOf(':') + 1).split(',').map((x) => x.trim()).sort();
+    r.ut.resolveByReply(it5.id, T.teachWords('en', 'add'));
+    await settle();
+    const w5 = r.writes();
+    ok('加入 on the merged item ⇒ ONE POST /v1/terms with EXACTLY its words (both batches\' preselection), the item done, its cards gone', w5.length === 1 && w5[0][1].slice().sort().join() === words5.join() && r.ut.get(it5.id).status === 'done' && !r.E.view().proposals.some((x) => x.terms.some((t) => words5.includes(t))), { w5, words5 });
+    r.clock += 10 * MIN;   // inside the hour the dictionary read is cached (the fake vendor never learns: the engine must)
+    const g = await r.seen('conv-g', 'rename fooBarQux in kestrel notes, fooBarQux, and zaraGlide zaraGlide');
+    ok('the added words are KNOWN at once (the hour\'s cached dictionary does not offer them again) and out of the ledger', !!g.proposal && !g.proposal.terms.includes('fooBarQux') && g.proposal.terms.includes('zaraGlide') && !('foobarqux' in r.disk().words), g.proposal);
+    // F — THE SETTINGS LIST: every word suggested now, each 加入 / 忽略 (the route's engine door)
+    const listed = r.E.view().candidates.map((x) => x.term);
+    ok('the settings list (view().candidates) = every word suggested now (the sheet\'s cards and the open item, deduped)', listed.includes('zaraGlide') && listed.includes('plinthMarker') && new Set(listed.map((x) => x.toLowerCase())).size === listed.length, listed);
+    const before = r.writes().length;
+    const vi = await r.E.answerWord('ZARAGLIDE', 'ignore');
+    ok('忽略 on one word ⇒ nothing sent; off the list and off its card; its evidence consumed (a new dictation would bring it back)', r.writes().length === before && !vi.candidates.some((x) => x.term === 'zaraGlide') && !r.E.view().proposals.some((x) => x.terms.includes('zaraGlide')) && r.disk().words.zaraglide.consumed.length >= 1, vi.candidates);
+    const va = await r.E.answerWord('plinthMarker', 'add');
+    ok('加入 on one word ⇒ ONE POST /v1/terms with exactly that word; off the list, out of the ledger, known at once', r.writes().length === before + 1 && r.writes().slice(-1)[0][1].join() === 'plinthMarker' && !va.candidates.some((x) => x.term === 'plinthMarker') && !('plinthmarker' in r.disk().words), r.writes().slice(-1));
+    let e404 = '', e400 = '';
+    try { await r.E.answerWord('neverSuggested', 'add'); } catch (x) { e404 = x.code; }
+    try { await r.E.answerWord('delta_sheet.md', 'drop'); } catch (x) { e400 = x.code; }
+    ok('a word not suggested now is refused by name (no-candidate), a verb other than add / ignore too (bad-request)', e404 === 'no-candidate' && e400 === 'bad-request', { e404, e400 });
+    // the open item loses a word answered in the list — re-worded in place, the same id
+    r.clock += 2 * D;
+    await r.seen('conv-h', 'and orbitLatch, orbitLatch, with tallowMint and tallowMint');
+    const ith = r.open()[0];
+    await r.E.answerWord('orbitLatch', 'ignore');
+    ok('a word answered in the list leaves the OPEN item too — re-worded in place (the same id), the other word stays', r.open().length === 1 && r.open()[0].id === ith.id && !has(r.open()[0], 'orbitLatch') && has(r.open()[0], 'tallowMint'), r.open());
+    // G — 「词典建议」 off ⇒ nothing proposed; voice.suggestions.mode settings-only ⇒ the card, never a For-you item
+    const h = nagRig({ settings: { teach: true, suggest: false } });
+    const ho = await h.seen('conv-h', A1);
+    const m = nagRig({ settings: { teach: true, suggestionsMode: 'settings-only' } });
+    const mo = await m.seen('conv-m', A1);
+    ok('「词典建议」 OFF (suggest: false) ⇒ nothing is proposed (no card, no item); mode settings-only ⇒ the card and the settings list, NEVER a For-you item; setSettings flips both', !ho.proposal && h.open().length === 0 && !!mo.proposal && !mo.proposal.itemId && m.open().length === 0 && m.E.view().candidates.some((x) => x.term === 'fooBarQux')
+      && h.E.setSettings({ suggest: true }).settings.suggest === true && m.E.setSettings({ suggestionsMode: 'item' }).settings.mode === 'item', { ho, mo: mo.proposal });
+    // H — a restart: the ledger FILE is read (consumed stays consumed) and an open item an older engine filed normal is unpinned
+    const k = nagRig();
+    await k.seen('conv-k', A1);
+    k.ut.setStatus(k.open()[0].id, 'dismissed', 'user'); await settle();
+    const old = k.ut.add(VP.id, { origin: 'plugin', plugin: VP.id, text: 'an older suggestion', urgency: 'normal' });
+    k.clock += 2 * D;
+    k.E = k.make();   // a new engine instance on the same store and file (a restart)
+    const ko = await k.seen('conv-k', A1);
+    ok('a RESTART: the new engine reads the ledger file — the same messages still earn nothing; an open item an older engine filed normal is LOW at boot (unpinned)', !ko.proposal && k.ut.get(old.id).urgency === 'low' && AM.rowOf(k.ut.get(old.id), k.clock).band === 5, { ko, old: k.ut.get(old.id) });
+    // CONTROL: the pre-fix listener (× unheard — only a reply and a ✓ were answers) ⇒ the same messages re-offer the words
+    const src = fs.readFileSync(ENGINE, 'utf8');
+    const needle = "      const notNow = (!!reply && reply === model.teachWords(lang, 'ignore')) || (!reply && byUser && (ev.status === 'dismissed' || (ev.status === 'done' && ev.batch === true)));";
+    ok('the nag control\'s needle occurs exactly once', src.split(needle).length === 2);
+    const deaf = MC.write('src/server/voice-teach-engine.js', src.replace(needle, "      const notNow = !!reply && reply === model.teachWords(lang, 'ignore');"), 'deaf');
+    const x = nagRig({ enginePath: deaf });
+    await x.seen('conv-x', A1);
+    x.ut.setStatus(x.open()[0].id, 'dismissed', 'user'); await settle();
+    x.clock += 25 * H;
+    const xo = await x.seen('conv-x', A1);
+    ok('CONTROL RED: the pre-fix listener (× unheard) ⇒ the SAME messages offer the dismissed words again the next day — the checks above fail on it', !!xo.proposal && xo.proposal.terms.includes('fooBarQux'), xo.proposal);
   }
 }
 

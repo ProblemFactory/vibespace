@@ -38,6 +38,12 @@
  *     maintainer conversation the owner granted marks an agent's feedback report handled — the OWNER's own act (PATCH
  *     /api/feedback/:id), through the same store call — naming the release that shipped the fix (`feedback.handled`), and
  *     reads the open reports it acts on (`feedback.list`, a READ). Their doors: src/server/feedback-store.js automationVerbs.
+ *   · EDITED AFTER MINTING (lane key-folder-picker-all — the owner 2026-10-21: 「我之前授权给你的 key 似乎没法改变"能做什么"」):
+ *     a key's verbs and limits change through `editPlan` — the SAME scope rules as `mintPlan` (`scopesPlan`: ⊆ the table, at
+ *     least one) and the same `limitsPlan`; its value and its grants never change. A verb added rides the grants the key
+ *     already has (a grant is per key × conversation, not per verb); a verb removed is refused from the next call
+ *     (`verb_not_in_scope` — `pickKey` says it by name when the caller's granted keys lack the verb). A folder root covers
+ *     its subfolders; `/` (ALL_PATHS) is 「所有路径」 — any folder on this instance, the words say so (`limitsWords`).
  */
 
 const KEY_ID_RE = /^ak-[0-9a-f]{12}$/;
@@ -295,7 +301,12 @@ function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGro
     return { ok: true, key: pick, ask: false };
   }
   if (live.length === 1) return { ok: true, key: live[0], ask: true };
-  if (!live.length) return { ok: false, code: 'not_granted' };
+  if (!live.length) {
+    // lane key-folder-picker-all: a verb the owner took off the keys THIS caller holds is refused by name (verb_not_in_scope,
+    // the keys named) — never a not_granted that reads as «ask for a grant»
+    const held = all.filter((k) => !k.revokedAt && useVerdict({ key: k, grants, subject, subjectGroups, verb: k.scopes[0], vaultState: 'unlocked' }).ok);
+    return held.length ? { ok: false, code: 'verb_not_in_scope', names: held.map((k) => k.name).slice(0, 20) } : { ok: false, code: 'not_granted' };
+  }
   return { ok: false, code: 'key_ambiguous', names: live.map((k) => k.name).slice(0, 20) };
 }
 
@@ -309,17 +320,41 @@ function mintPlan({ name, scopes, limits, by = 'user', now = 0, randomBytes, sha
   const n = clean(name, NAME_MAX + 1);
   if (!n) return bad('a key needs a name');
   if (n.length > NAME_MAX) return bad(`a key's name is at most ${NAME_MAX} characters`);
-  const sc = (Array.isArray(scopes) ? scopes : []).filter((v, i, a) => a.indexOf(v) === i);
-  if (!sc.length) return bad('a key needs at least one verb');
-  const unknown = sc.find((v) => !VERBS.includes(v));
-  if (unknown) return bad(`no such verb "${clean(unknown, 60)}" (one of: ${VERBS.join(', ')})`);
-  const lim = limitsPlan(limits === undefined ? {} : limits, sc);   // a fresh key: the owner picks (no folder, no account until he does)
+  const sc = scopesPlan(scopes);
+  if (!sc.ok) return sc;
+  const lim = limitsPlan(limits === undefined ? {} : limits, sc.scopes);   // a fresh key: the owner picks (no folder, no account until he does)
   if (!lim.ok) return lim;
   const id = 'ak-' + Buffer.from(randomBytes(6)).toString('hex');
   const value = VALUE_PREFIX + Buffer.from(randomBytes(32)).toString('base64url');
   const digest = str(sha256(value));
-  return { ok: true, value, entry: entryOf(id), record: { id, name: n, scopes: VERBS.filter((v) => sc.includes(v)), createdAt: Number(now) || 0, createdBy: clean(by, 60) || 'user', revokedAt: null, lastUsedAt: null, digest, limits: lim.limits } };
+  return { ok: true, value, entry: entryOf(id), record: { id, name: n, scopes: sc.scopes, createdAt: Number(now) || 0, createdBy: clean(by, 60) || 'user', revokedAt: null, lastUsedAt: null, digest, limits: lim.limits } };
 }
+/** THE SCOPE RULE of a mint AND an edit: the verbs a key holds are ⊆ the closed table, at least one, each once → { ok,
+ *  scopes } in the table's order | bad_args naming the verb (never dropped — what is stored is what the owner picked). */
+function scopesPlan(scopes) {
+  const sc = (Array.isArray(scopes) ? scopes : []).filter((v, i, a) => a.indexOf(v) === i);
+  if (!sc.length) return bad('a key needs at least one verb');
+  const unknown = sc.find((v) => !VERBS.includes(v));
+  if (unknown) return bad(`no such verb "${clean(unknown, 60)}" (one of: ${VERBS.join(', ')})`);
+  return { ok: true, scopes: VERBS.filter((v) => sc.includes(v)) };
+}
+/**
+ * 编辑… — A KEY EDITED AFTER MINTING (lane key-folder-picker-all): `scopes` / `limits` undefined = the key's own. The SAME
+ * rules as the mint (scopesPlan + limitsPlan over the new scopes: a key that now opens conversations names its folders);
+ * the value, the digest and the grants are not the plan's to touch. → { ok, scopes, limits, added, removed } (added /
+ * removed in the table's order) | bad_args.
+ */
+function editPlan(key, { scopes, limits } = {}) {
+  const k = keyOf(key);
+  if (!k) return bad('not a key');
+  const sc = scopes === undefined ? { ok: true, scopes: k.scopes } : scopesPlan(scopes);
+  if (!sc.ok) return sc;
+  const lim = limitsPlan(limits === undefined ? k.limits : limits, sc.scopes);
+  if (!lim.ok) return lim;
+  return { ok: true, scopes: sc.scopes, limits: lim.limits, added: sc.scopes.filter((v) => !k.scopes.includes(v)), removed: k.scopes.filter((v) => !sc.scopes.includes(v)) };
+}
+/** The audit line's words for an edit of the verbs: «scopes changed by the owner: +feedback.handled +feedback.list -x». */
+const scopesChangeWords = ({ added = [], removed = [] } = {}) => `scopes changed by the owner: ${[...added.map((v) => `+${v}`), ...removed.map((v) => `-${v}`)].join(' ')}`.trim();
 const entryOf = (keyId) => `${ENTRY_PREFIX}${keyId}`;
 const keyIdOfEntry = (entry) => { const s = str(entry); return s.startsWith(ENTRY_PREFIX) && KEY_ID_RE.test(s.slice(ENTRY_PREFIX.length)) ? s.slice(ENTRY_PREFIX.length) : null; };
 /** The spend identity of a key (a billed verb is charged to it — src/server/spend-guard.js, L2). */
@@ -337,6 +372,10 @@ const ROOTS_MAX = 20, LIMIT_LIST_MAX = 50, PATH_MAX = 4096;
 const ACCOUNT_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;            // an account / pool id (src/conversation-spec.js)
 const LIMIT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:\-[\]]{0,79}$/;      // a model / permission-mode id (conversation-spec.js MODEL_RE)
 const PATH_BAD_RE = /[\u0000-\u001f\u007f\u2028\u2029]/;
+/** 「所有路径」 (lane key-folder-picker-all): the root `/` — any folder on this instance, the owner's home included. Not a new
+ *  verdict: `/` was always a valid root (a root covers its subfolders); the window writes exactly `['/']` for it. */
+const ALL_PATHS = '/';
+const allPaths = (limits) => { const L = limitsOf(limits); return !!L && L.cwdRoots.includes(ALL_PATHS); };
 /** A FRESH key's limits: no folder and no account until the owner picks them; the harness's own permission mode; any
  *  model; chat only. */
 const DEFAULT_LIMITS = Object.freeze({ cwdRoots: Object.freeze([]), accounts: Object.freeze([]), permissionModes: Object.freeze([HARNESS_DEFAULT]), models: 'any', modes: Object.freeze(['chat']) });
@@ -406,7 +445,9 @@ function limitsWords(limits) {
   const L = limitsOf(limits);
   if (!L) return 'no bounds set — every open is refused until you set them in the Vault window';
   const any = (v) => (v === 'any' ? 'any' : v.join(', ') || 'none');
-  return `folders ${any(L.cwdRoots)} · accounts ${any(L.accounts)} · permission modes ${any(L.permissionModes)} · models ${any(L.models)} · modes ${any(L.modes)}`;
+  // lane key-folder-picker-all: `/` is said as all paths, never a bare slash; a root covers its subfolders and says so
+  const folders = L.cwdRoots.includes(ALL_PATHS) ? 'all paths' : L.cwdRoots.length ? `${L.cwdRoots.join(', ')} (with subfolders)` : 'none';
+  return `folders ${folders} · accounts ${any(L.accounts)} · permission modes ${any(L.permissionModes)} · models ${any(L.models)} · modes ${any(L.modes)}`;
 }
 /**
  * THE JUDGMENT OF AN OPEN AGAINST ITS KEY'S LIMITS (on the hub — src/server/automation-engine.js use(): after the grant,
@@ -478,15 +519,15 @@ function argsSummary(verb, args) {
   if (verb === 'conversations.open' && a.cwd != null) out.cwd = clean(a.cwd, 200);
   return out;
 }
-/** ONE audit line (data/automation-audit.jsonl): {at, key, subject, verb, args, ok, code, by?}. */
-function auditLine({ at, keyId = null, subject = '', verb = '', args = null, ok = false, code = null, by = null, ask = null } = {}) {
+/** ONE audit line (data/automation-audit.jsonl): {at, key, subject, verb, args, ok, code, by?, ask?, note?}. */
+function auditLine({ at, keyId = null, subject = '', verb = '', args = null, ok = false, code = null, by = null, ask = null, note = null } = {}) {
   return { at: new Date(Number(at) || 0).toISOString(), key: KEY_ID_RE.test(str(keyId)) ? keyId : null, subject: isSubject(subject) ? subject : clean(subject, 80) || null,
-    verb: VERBS.includes(verb) ? verb : clean(verb, 60), args: argsSummary(verb, args), ok: !!ok, code: ok ? null : clean(code, 40) || 'failed', ...(by ? { by: clean(by, 60) } : {}), ...(ask ? { ask: clean(ask, 20) } : {}) };
+    verb: VERBS.includes(verb) ? verb : clean(verb, 60), args: argsSummary(verb, args), ok: !!ok, code: ok ? null : clean(code, 40) || 'failed', ...(by ? { by: clean(by, 60) } : {}), ...(ask ? { ask: clean(ask, 20) } : {}), ...(note ? { note: clean(note, 300) } : {}) };   // note: an owner's edit in words (key.scopes)
 }
 
 module.exports = {
   KEY_ID_RE, VALUE_PREFIX, VALUE_RE, ENTRY_PREFIX, NAME_MAX, SUBJECT_RE, MODES, REACHES, ASK_TTL_MS, ASK_QUIET_MS, AUDIT_FILE, STORE_FILE, FEEDBACK_ID_RE, RELEASE_RE, NOTE_MAX,
   SCOPES, VERBS, scopeOf, CODES, keyOf, publicKey, grantOf, reachOf, reachKind, widestReach, isSubject, callerSubjects, openedOf, reachVerdict,
-  useVerdict, pickKey, mintPlan, entryOf, keyIdOfEntry, identityOf, argsSummary, auditLine,
-  LIMIT_FIELDS, LIMIT_CODES, OPEN_MODES, HARNESS_DEFAULT, SUBSCRIPTION, DEFAULT_LIMITS, normPath, limitsOf, limitsPlan, limitsWords, openLimitsVerdict, permissionResolvedVerdict,
+  useVerdict, pickKey, mintPlan, scopesPlan, editPlan, scopesChangeWords, entryOf, keyIdOfEntry, identityOf, argsSummary, auditLine,
+  LIMIT_FIELDS, LIMIT_CODES, OPEN_MODES, HARNESS_DEFAULT, SUBSCRIPTION, DEFAULT_LIMITS, ALL_PATHS, allPaths, normPath, limitsOf, limitsPlan, limitsWords, openLimitsVerdict, permissionResolvedVerdict,
 };

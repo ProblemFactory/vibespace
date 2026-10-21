@@ -252,7 +252,7 @@ const SETTINGS_SCHEMA = {
   // lane agent-window-no-steal: the person's opt-in to the old behaviour (app.js agentWindowPlacement `front`)
   'desktop.agentWindowsFront': {
     type: 'boolean', default: false, label: t('Agent-opened windows come to the front'),
-    description: t('OFF (the default): a window an agent opens — its own browser, an app it starts, a second window of that app, its live view, a Design it opens — is placed beside the agent\'s chat (or on that chat\'s desktop), behind what you are doing, and its taskbar entry pulses; it never takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.'),
+    description: t('OFF (the default): a window an agent opens — its own browser, an app it starts, its live view, a Design it opens — opens beside the agent\'s chat only while you are in that chat (or on that chat\'s desktop when it is another one); anywhere else nothing on your desk moves — the chat gets a card and a taskbar badge, and the window opens when you press Open. A second window of an app it started is placed behind what you are doing. None of them takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.'),
     when: { fact: 'desktopApps' },
     category: t('Desktop apps'), liveApply: true,
   },

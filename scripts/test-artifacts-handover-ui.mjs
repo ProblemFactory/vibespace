@@ -13,7 +13,8 @@
 //     carry handedTo
 //   ③ refusals through the real CLI: a path helper does not own / the outsider (no shared group) / 21 paths ⇒ refused
 //     by name, nothing sent (lead's chat unchanged)
-//   ④ `vibespace-design open <dir> --for lead` from helper = ②'s design part (card + window + home)
+//   ④ `vibespace-design open <dir> --for lead` from helper = ②'s design part (card + window + home) — the person back in
+//     lead's conversation first (an agent's Design opens beside a chat only where the person looks: agent-window-no-pop)
 //   ⑤ zh at 390 px: the hand-over and subagent cards say 移交自 / 子代理, the chip and every card inside the viewport, no
 //     card word clipped (rect census)
 // Run: node scripts/test-artifacts-handover-ui.mjs   (SKIPs without chrome)
@@ -248,6 +249,9 @@ try {
   check('lead\'s chat unchanged by the refusals (no new card)', (await cardsNow()).length === before3, await cardsNow());
 
   console.log('④ vibespace-design open <dir> --for lead = the same design hand-over');
+  // lane agent-window-no-pop: the person goes back to lead's conversation (② ended in the Design home, which took the focus) —
+  // an agent's Design opens beside a chat only where the person looks at it, else the chat gets a card
+  check('the person is back in lead\'s conversation (its window active)', await evalJs(`(() => { const w = (${VIEW})?.winInfo; if (!w) return false; app.wm.focusWindow(w.id); return app.wm.activeWindowId === w.id; })()`));
   check('helper\'s open --for turn played', await turn('helper', 'b4'));
   const r4 = runs('b4')[0] || {};
   check('the CLI says the poster was handed over to "lead"', r4.rc === 0 && new RegExp(`handed ${POSTER} over to "lead"`).test(r4.out), r4);

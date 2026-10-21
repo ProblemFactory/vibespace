@@ -20,12 +20,18 @@
 //   ⑥ the per-project tier ⇒ a later identifier goes without a card and lands in the journal
 //   ⑦ phone 390
 //   ⑧ RETIRED (int263 seam c3): the polished card body it judged was deleted by plugin-settings-p0 (the Plugins list row)
-//   ⑨ THE FOR-YOU TRAY (lane foryou-plugin-notices, owner 2026-10-19): the REAL tray over the REAL store — the suggestion
-//     pinned right under an urgent ask (above a high one); its ✓ says what it does; a click on its BODY opens the plugin's
-//     sheet on that suggestion with its words chosen (a MUTANT bundle without the door line stays shut — RED); ✓ ⇒ ONE
-//     POST /v1/terms with exactly its words; × ⇒ nothing sent, dismissed, the batch still waits on the sheet
+//   ⑨ THE FOR-YOU TRAY (lane foryou-plugin-notices, owner 2026-10-19; lane voice-dictionary-nag 2026-10-21): the REAL tray
+//     over the REAL store — ONE suggestion item: a second conversation's batch MERGES into it (the same id, the same keyed
+//     row patched in place); filed LOW it waits in band 5 under the urgent ask (never the plugin pin); its ✓ says what it
+//     does; a click on its BODY opens the plugin's sheet on the newest card with its words chosen (a MUTANT bundle without
+//     the door line stays shut — RED); ✓ ⇒ ONE POST /v1/terms with exactly the item's (merged) words
+//   ⑩ «NOT NOW» (lane voice-dictionary-nag — a fleet user: 「一天到晚有这个 Dropline 让我发信息的消息」; the user: no «never
+//     again», no timers): × ⇒ nothing sent, its card leaves the sheet; the SAME conversation read again a day later brings
+//     nothing back; a NEW dictation that says the word does; the REAL All Settings window (zh): 「词典建议」 ON by default
+//     with every word suggested now, 忽略 / 加入词库 per word over the REAL route (the open item re-worded in place);
+//     voice.suggestions.mode 只在设置里 ⇒ a card, never a For-you item; 「词典建议」 off ⇒ nothing proposed
 // PNGs: VIBESPACE_VOICE_PNG_DIR (default: the scratch dir) → door-row, door-sheet, door-card, door-card-connected,
-//   connect, proposal, preview, journal, phone, tray, door
+//   connect, proposal, preview, journal, phone, tray, door, tray-merged, settings-words
 //   (card-fold / card-key / card-phone retired with ⑧)
 import fs from 'node:fs';
 import http from 'node:http';
@@ -133,13 +139,18 @@ const oauth = DO.create({ client, flows: require(path.join(REPO, 'src/oauth-loop
 require(path.join(REPO, 'src/server/oauth-doors.js')).register('dropline', { landing: oauth.landing, page: oauth.page });
 store.registerTest('dropline', client.testRunner);
 // lane plugin-settings-p0: the teach / context switches are SETTINGS rows — this harness's settings store is rec.config
-teach = require(path.join(REPO, 'src/server/voice-teach-engine.js')).create({ client, plugin: { peek: () => rec, update: (fn) => fn(rec), settings: () => rec.config || {}, writeSettings: (p) => { rec.config = { ...(rec.config || {}), ...p }; } }, userTodos, log: quiet });
+// lane voice-dictionary-nag: the engine's clock is the wall clock + CLOCK_SKEW (⑩ moves it by days), its ledger a real file
+let CLOCK_SKEW = 0;
+const LEDGER = path.join(root, 'data', 'voice-suggestions.json');
+teach = require(path.join(REPO, 'src/server/voice-teach-engine.js')).create({ client, plugin: { peek: () => rec, update: (fn) => fn(rec), settings: () => rec.config || {}, writeSettings: (p) => { rec.config = { ...(rec.config || {}), ...p }; } }, userTodos, log: quiet, now: () => Date.now() + CLOCK_SKEW, ledgerFile: LEDGER });
 const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
 const entry = `import { ChatInput } from ${JSON.stringify(path.join(REPO, 'src/lib/chat-input.js'))};
 import { renderVoiceSheet } from ${JSON.stringify(path.join(REPO, 'src/lib/voice-plugin-card.js'))};
 import { installPluginsUI } from ${JSON.stringify(path.join(REPO, 'src/lib/plugins-ui.js'))};
 import { openIntegrationsWindow } from ${JSON.stringify(path.join(REPO, 'src/lib/integrations-window.js'))};
 import { installUserTodos } from ${JSON.stringify(path.join(REPO, 'src/lib/user-todos-panel.js'))};
+import { SettingsUI } from ${JSON.stringify(path.join(REPO, 'src/lib/settings-ui.js'))};
+import { SETTINGS_SCHEMA } from ${JSON.stringify(path.join(REPO, 'src/lib/settings-schema.js'))};
 // lane dropline-connect-door: the REAL Plugins list + Integrations window on a fake App (a one-window manager, a silent ws)
 function App() { }
 installPluginsUI(App);
@@ -159,6 +170,20 @@ window.__tray = () => {
 };
 window.__pushTodos = async () => { const d = await (await fetch('/api/user-todos')).json(); for (const fn of window.__wsFns) fn({ type: 'user-todos-updated', todos: d.todos }); return d.todos.open.length; };
 window.__plugins = () => app.openPluginsDialog({ container: document.getElementById('plugins') });
+// lane voice-dictionary-nag (⑩): THE All Settings window (the REAL SettingsUI) over a fake settings store (the row-layout
+// suite's recipe); a write of 「词典建议」 reaches the engine through the teach settings door (the server reads settings.json)
+window.__settingsOpen = () => {
+  const vals = {}, ls = {};
+  const def = (k) => (SETTINGS_SCHEMA[k] ? SETTINGS_SCHEMA[k].default : undefined);
+  const settings = { get: (k) => (k in vals ? vals[k] : def(k)), set: (k, v) => { vals[k] = v; if (k === 'plugin.voice-input.suggest') window.__set({ suggest: v }); if (k === 'voice.suggestions.mode') window.__set({ suggestionsMode: v }); for (const f of [...(ls[k] || [])]) f(v); },
+    isModified: (k) => k in vals && vals[k] !== def(k), reset: (k) => { delete vals[k]; }, resetAll() { }, on: (k, f) => { (ls[k] = ls[k] || new Set()).add(f); }, off: (k, f) => { if (ls[k]) ls[k].delete(f); } };
+  const sapp = { settings, isMobile: false, ws: { onGlobal: () => () => { }, offGlobal() { }, onStateChange() { }, offStateChange() { } },
+    wm: { windows: new Map(), createWindow: () => ({ id: 'settings-1', content: document.getElementById('win') }), revealWindow() { } } };
+  new SettingsUI(sapp).open();
+  return true;
+};
+// the route the microphone calls after a dictation (teachAfterDictation) — ⑨ / ⑩ file later batches through it directly
+window.__seen = (conv, ...texts) => fetch('/api/voice/teach/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conv, title: conv, cwd: window.__cwd, uiLang: 'zh', messages: texts.map((text) => ({ role: 'user', content: [{ type: 'text', text }] })) }) }).then((r) => r.json());
 const ws = { send() {}, on() {}, off() {}, onMessage() {}, isConnected: () => true };
 window.__cwd = '/home/u/projects/vibespace';
 window.__facts = { conv: 'conv-0', title: 'Doc comments', messages: [
@@ -503,18 +528,20 @@ try {
   // ⑧ (lane voice-card-polish, rel262: the card's header chip + switch, 账号 / 语言 grid, the folded key) RETIRED by int263 seam (c3):
   // plugin-settings-p0 deleted the card body — the Voice row of the Plugins list (chip · switch · ⚙) is judged by
   // test-plugin-settings / test-plugins-grammar, the key lives in Integrations, language + teach are All Settings rows
-  console.log('⑨ the For-you tray (lane foryou-plugin-notices): the suggestion pinned under urgent; a body click opens the sheet with its words chosen; ✓ adds, × dismisses');
+  console.log('⑨ the For-you tray (lane foryou-plugin-notices; lane voice-dictionary-nag): ONE suggestion, merged in place, band 5 under urgent; a body click opens the sheet with its words chosen; ✓ adds, × dismisses');
   { // ⑨ its own scope (the legs above declare the same short names)
   // beside the voice reminders: an urgent ask, a high one and a plain one (agents' items, the store's own add)
   userTodos.add('claude:u9', { origin: 'agent', text: 'Approve the deploy?', urgency: 'urgent', sessionName: 'deploy' });
   userTodos.add('claude:h9', { origin: 'agent', text: 'Pick a name', urgency: 'high', sessionName: 'naming' });
   userTodos.add('claude:n9', { origin: 'agent', text: 'Read the report', sessionName: 'report' });
+  // lane voice-dictionary-nag: ④'s 忽略 was a dismissal — a new For-you item waits a day after one, so ⑨ starts a day later
+  CLOCK_SKEW += 25 * 3600e3;
   const t9 = await page(1280, 860);
   await dictate(t9, 'conv-9', [{ role: 'user', content: [{ type: 'text', text: 'wire quuxFrobnicate into gamma_widget.md, then quuxFrobnicate again' }] }]);
-  await dictate(t9, 'conv-10', [{ role: 'user', content: [{ type: 'text', text: 'rename zorbleMint in delta_sheet.md, zorbleMint twice' }] }]);
   const voiceOpen = () => userTodos.openItems().filter((i) => i.sessionKey === VPD.id).sort((a, b) => b.createdAt - a.createdAt);
-  const vIds = voiceOpen().map((i) => i.id);
-  ok('two suggestions are open as the voice PLUGIN\'s reminders (origin plugin, under its id, each with its door)', vIds.length >= 2 && voiceOpen().every((i) => i.origin === 'plugin' && i.plugin === VPD.id && i.open && i.open.kind === 'plugin-settings' && i.open.prefill.terms.length > 0), voiceOpen());
+  const wordsOf = (it) => it.text.slice(it.text.indexOf('：') + 1).split(',').map((x) => x.trim()).filter(Boolean);
+  const vId = voiceOpen()[0] && voiceOpen()[0].id;
+  ok('ONE suggestion is open as the voice PLUGIN\'s reminder (origin plugin, under its id, with its door) — filed LOW (lane voice-dictionary-nag)', voiceOpen().length === 1 && voiceOpen().every((i) => i.origin === 'plugin' && i.plugin === VPD.id && i.urgency === 'low' && i.open && i.open.kind === 'plugin-settings' && i.open.prefill.terms.length > 0), voiceOpen());
   const trayOpen = async (pg) => {
     if (!(await pg.ev('!!document.getElementById("taskbar-user-todos")'))) await pg.ev('window.__tray()');
     await pg.ev('window.__pushTodos()');
@@ -522,53 +549,108 @@ try {
     return pg.until('!!document.querySelector("#user-todos-popup:not(.hidden) .ut-item")', 6000);
   };
   ok('the tray opens on the REAL store\'s snapshot', await trayOpen(t9));
-  // lane foryou-folds: the tray is the attention list — flat rows in bands; THE PIN = a plugin's reminders head band 2
+  const row0 = `#user-todos-popup .ut-item[data-id="${vId}"]`;
+  await t9.ev(`(() => { window.__row9 = document.querySelector('${row0}'); return !!window.__row9; })()`);
+  // a SECOND conversation's batch while the item is open (the route the microphone calls) ⇒ the SAME item, re-worded in place
+  await t9.ev(`window.__seen('conv-10', 'rename zorbleMint in delta_sheet.md, zorbleMint twice')`);
+  const merged = voiceOpen();
+  ok('a second conversation\'s batch MERGES into the open item — still ONE, the same id, both batches\' words', merged.length === 1 && merged[0].id === vId && ['quuxFrobnicate', 'zorbleMint'].every((w) => wordsOf(merged[0]).includes(w)), merged);
+  await t9.ev('window.__pushTodos()');
+  const patched = await t9.until(`(() => { const r = document.querySelector('${row0}'); return !!r && r === window.__row9 && r.textContent.includes('zorbleMint') && r.textContent.includes('quuxFrobnicate'); })()`, 5000);
+  ok('the tray PATCHES its keyed row in place: the same DOM node (data-id), now carrying both batches\' words — no second row', patched && (await t9.ev(`document.querySelectorAll('#user-todos-popup .ut-item[data-id="${vId}"]').length`)) === 1, await t9.ev(`(document.querySelector('${row0}') || {}).textContent`));
+  // lane foryou-folds' bands: the urgent ask heads band 1; the LOW suggestion waits in band 5 (never the plugin pin of band 2)
   const order = await t9.ev('[...document.querySelectorAll("#user-todos-popup .ut-bands .ut-item")].map((r) => [r.dataset.id, r.closest(".ut-band").dataset.band])');
   const keyOf = new Map(userTodos.openItems().map((i) => [i.id, i.sessionKey]));
   const keys = order.map(([id, b]) => `${b}:${keyOf.get(id)}`).filter((k, i, a) => k !== a[i - 1]);
   const fold5 = await t9.ev('(() => { const f = document.querySelector("#user-todos-popup .ut-band[data-band=\\"5\\"] .ut-fold"); return f ? f.textContent : ""; })()');
-  // the first screen is 6 rows: a band-5 ask past it waits in band 5's fold (its head counts it) — still BELOW the reminders
-  const below = (k) => keys.indexOf(k) > 1 || (keys.indexOf(k) < 0 && /\d+/.test(fold5));
-  ok('THE PIN: the urgent ask first (band 1), the voice plugin\'s reminders RIGHT UNDER it (heading band 2) — above the high ask and the plain one (band 5, drawn below or folded)', keys[0] === '1:claude:u9' && keys[1] === `2:${VPD.id}` && below('5:claude:h9') && below('5:claude:n9') && keys.every((k, i) => !k.startsWith('5:') || i > 1), { keys, fold5 });
-  const row0 = `#user-todos-popup .ut-item[data-id="${vIds[0]}"]`;
+  ok('NOT PINNED: the urgent ask heads band 1; the suggestion waits in band 5 with the other asks (newest first) — no band-2 pin under urgent', keys[0] === '1:claude:u9' && keys.includes(`5:${VPD.id}`) && !keys.some((k) => k.startsWith('2:')), { keys, fold5 });
   const tickTitle = await t9.ev(`(document.querySelector('${row0} .ut-done') || {}).title`);
   ok('the reminder\'s ✓ says what it does (the door\'s `done` through t()): 把这些词加入 Dropline 词库', tickTitle === '把这些词加入 Dropline 词库', tickTitle);
-  await t9.shot('tray.png', '#user-todos-popup');
-  const it0 = userTodos.get(vIds[0]);
-  // THE DOOR PROBE: a click on the row's BODY ⇒ the plugin's sheet on THIS suggestion (marked), its words chosen
+  await t9.shot('tray-merged.png', '#user-todos-popup');
+  const it0 = userTodos.get(vId);
+  // THE DOOR PROBE: a click on the row's BODY ⇒ the plugin's sheet on the newest card of the batch (marked), its words chosen
   const doorProbe = async (pg, id) => {
     await pg.clickSel(`#user-todos-popup .ut-item[data-id="${id}"] .ut-text`);
     const pid = userTodos.get(id).open.prefill.proposal;
     const opened = await pg.until(`!!document.querySelector('#voice-sheet .voice-proposal.voice-proposal-focus[data-id="${pid}"]')`, 5000);
     return { opened, sheet: await pg.ev(`(() => { const c = document.querySelector('#voice-sheet .voice-proposal-focus'); return c ? { on: [...c.querySelectorAll('.voice-term[aria-pressed="true"]')].map((x) => x.dataset.term), all: [...c.querySelectorAll('.voice-term')].length, add: c.querySelector('.voice-proposal-add').textContent, focus: document.activeElement === c.querySelector('.voice-proposal-add'), trayHidden: document.getElementById('user-todos-popup').classList.contains('hidden') } : null; })()`) };
   };
-  const dr = await doorProbe(t9, vIds[0]);
+  const dr = await doorProbe(t9, vId);
   const want0 = it0.open.prefill.terms.slice().sort().join();
-  ok('a click on the reminder\'s BODY opens the voice plugin\'s sheet on THAT suggestion (marked), its words already chosen — one press of 加入所选 adds them; the tray closed', dr.opened && dr.sheet && dr.sheet.on.slice().sort().join() === want0 && dr.sheet.add === `加入所选 (${it0.open.prefill.terms.length})` && dr.sheet.trayHidden, dr);
+  ok('a click on the reminder\'s BODY opens the voice plugin\'s sheet on the newest card of the batch (marked), its words already chosen; the tray closed', dr.opened && dr.sheet && dr.sheet.on.slice().sort().join() === want0 && dr.sheet.add === `加入所选 (${it0.open.prefill.terms.length})` && dr.sheet.trayHidden, dr);
   await t9.shot('door.png', '#voice-sheet .dialog');
   await t9.clickSel('#voice-sheet .dialog-close');
   await t9.until('!document.getElementById("voice-sheet")');
   // CONTROL: the same click on a bundle WITHOUT the door line (m3) stays shut — the probe can go red
   const tm = await page(1280, 860, 'm3');
   await trayOpen(tm);
-  const dm = await doorProbe(tm, vIds[0]);
+  const dm = await doorProbe(tm, vId);
   ok('CONTROL (mutant m3 — the tray without the door line, its anchor patched once): the same body click opens NO sheet — the probe is RED', mutantOnce['src/lib/user-todos-actions.js'] === true && !dm.opened && !dm.sheet, dm);
   tm.close();
-  // ✓ on the reminder ⇒ ONE POST /v1/terms with exactly its words
+  // ✓ on the reminder ⇒ ONE POST /v1/terms with exactly the item's words (both batches)
+  const wantAll = wordsOf(userTodos.get(vId)).sort().join();
   const w0 = writes().length;
   await trayOpen(t9);
   await t9.clickSel(`${row0} .ut-done`);
   for (let i = 0; i < 60 && writes().length === w0; i++) await sleep(100);
   await sleep(200);
   const tw = writes().slice(w0);
-  ok('✓ on the reminder ⇒ ONE POST /v1/terms with EXACTLY its words; the row is done and its card gone from the sheet', tw.length === 1 && tw[0].p === '/v1/terms' && tw[0].body.terms.map((x) => x.term).sort().join() === want0 && userTodos.get(vIds[0]).status === 'done' && !teach.view().proposals.some((x) => x.id === it0.open.prefill.proposal), { tw, st: userTodos.get(vIds[0]).status });
-  // × on the other ⇒ nothing sent, dismissed, its batch still waits on the sheet
-  const it1 = userTodos.get(vIds[1]);
-  await t9.clickSel(`#user-todos-popup .ut-item[data-id="${vIds[1]}"] .ut-dismiss`);
-  for (let i = 0; i < 40 && userTodos.get(vIds[1]).status === 'open'; i++) await sleep(100);
-  await sleep(300);
-  ok('× on a reminder ⇒ nothing sent; it is dismissed and its batch still waits on the sheet (忽略这批 lives there)', writes().length === w0 + 1 && userTodos.get(vIds[1]).status === 'dismissed' && teach.view().proposals.some((x) => x.id === it1.open.prefill.proposal));
+  ok('✓ on the merged reminder ⇒ ONE POST /v1/terms with EXACTLY its words (both batches); the row is done and both cards gone from the sheet', tw.length === 1 && tw[0].p === '/v1/terms' && tw[0].body.terms.map((x) => x.term).sort().join() === wantAll && userTodos.get(vId).status === 'done' && !teach.view().proposals.some((x) => x.terms.includes('quuxFrobnicate') || x.terms.includes('zorbleMint')), { tw, wantAll, st: userTodos.get(vId).status });
   ok('no page error on the tray legs', (await t9.ev('window.__errs')).length === 0, await t9.ev('window.__errs'));
+
+  console.log('⑩ «not now» (lane voice-dictionary-nag): × consumes the evidence — the same conversation brings nothing back, a NEW dictation does; All Settings 「词典建议」 + its words, 加入 / 忽略');
+  const D = 24 * 3600e3;
+  const PLINTH = 'and plinthMarker goes into epsilon_page.md, plinthMarker twice';
+  await t9.ev(`window.__seen('conv-11', ${JSON.stringify(PLINTH)})`);
+  const it1 = voiceOpen()[0];
+  ok('after the ✓ a new batch files a new item (no dismissal ⇒ no wait)', !!it1 && it1.id !== vId && wordsOf(it1).includes('plinthMarker'), voiceOpen());
+  await trayOpen(t9);
+  const w1 = writes().length;
+  await t9.clickSel(`#user-todos-popup .ut-item[data-id="${it1.id}"] .ut-dismiss`);
+  for (let i = 0; i < 40 && userTodos.get(it1.id).status === 'open'; i++) await sleep(100);
+  await sleep(300);
+  ok('× ⇒ nothing sent; dismissed — «not now»: its card left the sheet and the ledger file holds the words\' CONSUMED evidence', writes().length === w1 && userTodos.get(it1.id).status === 'dismissed' && !teach.view().proposals.some((x) => x.terms.includes('plinthMarker')) && JSON.parse(fs.readFileSync(LEDGER, 'utf8')).words.plinthmarker.consumed.length >= 1);
+  CLOCK_SKEW += D + 3600e3;   // a day and an hour later
+  const q = await t9.ev(`window.__seen('conv-11', ${JSON.stringify(PLINTH)})`);
+  ok('THE SAME conversation read again a day later (no new dictation) ⇒ no For-you item and no card for its words — the evidence was consumed', !q.proposal && voiceOpen().length === 0 && !teach.view().proposals.some((x) => x.terms.includes('plinthMarker')), q);
+  const back = await t9.ev(`window.__seen('conv-12', ${JSON.stringify(PLINTH)}, 'please put plinthMarker in again, with quasarTrellis and quasarTrellis')`);
+  const it2 = voiceOpen()[0];
+  ok('a NEW dictation that SAYS plinthMarker brings it back (with the new quasarTrellis); epsilon_page.md, not said again, stays out', !!back.proposal && !!it2 && ['plinthMarker', 'quasarTrellis'].every((w) => wordsOf(it2).includes(w)) && !wordsOf(it2).includes('epsilon_page.md'), it2);
+  // THE SETTINGS DOOR: the REAL All Settings window — 「插件：Voice input · Dropline」 › 「词典建议」 ON by default, its words listed
+  const ts = await page(1280, 900);
+  await ts.ev('window.__settingsOpen()');
+  const ROW = (p) => `[...document.querySelectorAll('#win .settings-row')].find((r) => (r.querySelector('.settings-row-path') || {}).textContent === ${JSON.stringify(p)})`;
+  const SUG = ROW('plugin.voice-input.suggest'), MODE = ROW('voice.suggestions.mode');
+  const sRow = await ts.until(`(() => { const r = ${SUG}; return !!r && !!r.querySelector('.voice-cand[data-term="plinthMarker"]'); })()`, 8000);
+  const sv = await ts.ev(`(() => { const r = ${SUG}, m = ${MODE}; return r ? { label: r.querySelector('.settings-row-label').textContent, on: r.querySelector('.settings-toggle input').checked, head: (r.querySelector('.voice-cands-head') || {}).textContent, words: [...r.querySelectorAll('.voice-cand')].map((c) => c.dataset.term), btns: [...r.querySelectorAll('.voice-cand[data-term="plinthMarker"] button')].map((x) => x.textContent), mode: m ? m.querySelector('select').value : null, modeLabel: m ? m.querySelector('.settings-row-label').textContent : null } : null; })()`);
+  ok('All Settings › Voice input: 「词典建议」 is ON by default, its row lists every word suggested now (the open item\'s plinthMarker, quasarTrellis), each with 「加入词库」/「忽略」; 「词典建议放在哪里」 = 「待你处理」里的一条 (voice.suggestions.mode = item)',
+    sRow && sv && sv.label.startsWith('词典建议') && sv.on === true && sv.head === `建议的词（${sv.words.length}）` && ['plinthMarker', 'quasarTrellis'].every((w) => sv.words.includes(w)) && sv.btns.join() === '加入词库,忽略' && sv.mode === 'item' && sv.modeLabel.startsWith('词典建议放在哪里'), sv);
+  await ts.ev(`${SUG}.scrollIntoView({ block: 'center' })`);
+  await ts.shot('settings-words.png', '#win');
+  // 忽略 on one word ⇒ off the list, its evidence consumed, the open For-you item re-worded IN PLACE without it
+  const w2 = writes().length;
+  await ts.clickSel(`.voice-cand[data-term="plinthMarker"] .voice-cand-ignore`);
+  const goneI = await ts.until(`!document.querySelector('.voice-cand[data-term="plinthMarker"]')`, 5000);
+  await sleep(200);
+  ok('忽略 on a word (the REAL route POST /api/voice/teach/word) ⇒ nothing sent; off the list; the open item re-worded IN PLACE (the same id) without it', goneI && writes().length === w2 && voiceOpen().length === 1 && voiceOpen()[0].id === it2.id && !wordsOf(voiceOpen()[0]).includes('plinthMarker') && wordsOf(voiceOpen()[0]).includes('quasarTrellis'), voiceOpen());
+  await ts.clickSel(`.voice-cand[data-term="quasarTrellis"] .voice-cand-add`);
+  for (let i = 0; i < 50 && writes().length === w2; i++) await sleep(100);
+  await sleep(200);
+  const tw2 = writes().slice(w2);
+  ok('加入词库 on a word ⇒ ONE POST /v1/terms with exactly that word; the item it emptied is closed', tw2.length === 1 && tw2[0].body.terms.map((x) => x.term).join() === 'quasarTrellis' && userTodos.get(it2.id).status === 'done' && (await ts.until(`!document.querySelector('.voice-cand[data-term="quasarTrellis"]')`, 3000)), tw2);
+  // voice.suggestions.mode = 只在设置里 ⇒ a batch is a card + the list, NEVER a For-you item
+  await ts.ev(`(() => { const sel = ${MODE}.querySelector('select'); sel.value = 'settings-only'; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  for (let i = 0; i < 40 && rec.config.suggestionsMode !== 'settings-only'; i++) await sleep(100);   // the write reaches the engine
+  CLOCK_SKEW += 2 * D;
+  const so = await ts.ev(`window.__seen('conv-13', 'and ravelPoint lands in sigma_list.md, ravelPoint twice')`);
+  ok('「只在设置里」 (voice.suggestions.mode = settings-only) ⇒ the batch is a card and in the settings list — NO For-you item', rec.config.suggestionsMode === 'settings-only' && !!so.proposal && !so.proposal.itemId && voiceOpen().length === 0 && teach.view().candidates.some((x) => x.term === 'ravelPoint'), { cfg: rec.config, so: so.proposal });
+  // 「词典建议」 off ⇒ nothing is proposed at all
+  await ts.ev(`${SUG}.querySelector('.settings-toggle input').click()`);
+  for (let i = 0; i < 40 && rec.config.suggest !== false; i++) await sleep(100);   // the write reaches the engine
+  const off = await ts.ev(`window.__seen('conv-14', 'and vellumTrack in kappa_doc.md, vellumTrack twice')`);
+  ok('「词典建议」 OFF ⇒ nothing is proposed — no card, no item', rec.config.suggest === false && !off.proposal && voiceOpen().length === 0, { cfg: rec.config, off });
+  ok('no page error on the settings legs', (await ts.ev('window.__errs')).length === 0, await ts.ev('window.__errs'));
+  ts.close();
   t9.close();
   }
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e && e.stack || e)); }

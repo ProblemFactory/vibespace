@@ -89,6 +89,17 @@ const PLUGIN_SETTINGS = {
       { key: 'teach', type: 'boolean', default: false, apply: 'server',
         label: t('Suggest words for my Dropline dictionary (I confirm each batch)'),
         description: t('Example: you keep saying “LarkClient” — it is proposed for your dictionary; the Voice row in the Plugins list shows “{n} waiting” until you add or ignore the batch. Only what you confirm is sent.') },
+      // lane voice-dictionary-nag (a fleet user 2026-10-21: 「一天到晚有这个 Dropline 让我发信息的消息, 站在我的 inbox 里」):
+      // 「词典建议」 (ON by default — `teach` still decides whether Dropline is taught at all): off ⇒ nothing is proposed; its
+      // row lists every word suggested now with 加入 / 忽略 (settings-ui → voice-teach-ui mountSuggestionList); and WHERE
+      // they wait — voice.suggestions.mode: item (ONE For-you item) | settings-only (never a For-you item)
+      { key: 'suggest', type: 'boolean', default: true, apply: 'server',
+        label: t('Dictionary suggestions'),
+        description: t('On: words Dropline did not know in your dictations are suggested — listed here, each with Add and Ignore. Ignore (or ✕ on the For you item) means not now: the word comes back only when you say it again. Off: nothing is suggested.') },
+      { key: 'suggestionsMode', path: 'voice.suggestions.mode', type: 'enum', default: 'item', apply: 'server',
+        options: [{ value: 'item', label: t('One item in For you') }, { value: 'settings-only', label: t('Only here in Settings') }],
+        label: t('Where dictionary suggestions wait'),
+        description: t('One item in For you (the default): at most one at a time, never above urgent asks — a later batch joins it. Only here in Settings: never a For you item; the words wait in the list above.') },
       { key: 'context', type: 'boolean', default: false, apply: 'server',
         label: t("Send the conversation to Dropline's two-week memory (shows the text the first time)"),
         description: t('Dropline then knows the names and terms of the conversation you dictate into. The first time, the exact text is shown before anything is sent.') },

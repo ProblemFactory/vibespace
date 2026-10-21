@@ -122,6 +122,7 @@
 // XSS: page titles and URLs are page-controlled and sync to every client —
 // textContent / escHtml only. Theme vars only, SVG icons only.
 import { t, tc, resolveLang } from './i18n.js';
+import { LIVE_START } from './desktop-app-placement.js'; // lane agent-window-no-pop: the live view's push shape for the ONE placement verdict
 import { pinChipText } from '../desktop-pin.js'; // lane launch-picture-size: a FIXED picture size's chip = the pin's own words
 import { pinSizeItems } from './pin-size-ui.js'; // lane launch-picture-size: Pin size… — the ONE size table's rows + Custom… + Auto
 import { claimWords, backendName, dismissOutcomeWords } from './browser-switcher-model.js'; // the rebuilt switch dialog: the claim's words, a backend's name, the Dismiss answer (PURE)
@@ -2739,21 +2740,27 @@ export function autoBindLiveViews(app, prev, digest) {
   for (const l of digest.leases) {
     if (!l || !l.sessionId || !l.profileId || l.child || before.has(`${l.profileId}|${l.sessionId}`)) continue;
     const host = sessionWindowFor(app, l.sessionId);
-    if (!host || host._hiddenByDesktop || host.isMinimized) continue;           // "its chat window is open" = on the desktop you are looking at
+    if (!host) continue;
     const existing = [...app.wm.windows.values()].find((w) => w.type === 'browser-live' && w._browserLive && w._browserLive.state().sessionId === l.sessionId);
     // lane H: the session's view is already here — greyed when its browser stopped (an ephemeral that idled out is
     // refused `browser_stopped`, never relaunched by a view); the browser holding again ⇒ that view reconnects
     if (existing) { try { if (!existing._browserLive.state().connected) existing._browserLive.reconnect(); } catch { /* window going */ } continue; }
     const syncId = 'win-blive-' + l.sessionId;                                   // deterministic: two clients open ONE window, layout-sync sees the same id
     if (app.wm.windows.has(syncId)) continue;
+    // lane agent-window-no-pop (inc-mvhebl4n-rkvr): WHERE is the agent's act — the SAME PURE verdict the Design window and the
+    // desktop-app browser read (agentWindowPlacement, `browser-live-start`): the view is born beside the chat only where the
+    // person looks at that chat (the active window / its split frame); a chat he is not looking at — shown, minimized, on
+    // another desk — opens NOTHING: the chat's taskbar badge, and its status-bar Agent browser chip ("Open live view") is the
+    // person's door. lane agent-window-no-steal: never focused, unless Settings → Desktop apps → "Agent-opened windows come
+    // to the front" (the verdict's `front` = the old answer: beside any chat on screen, focused).
+    const p = app.agentPlacement ? app.agentPlacement({ type: LIVE_START, sessionId: l.sessionId }) : { act: 'none' };
+    if (p.act === 'card') { app.wm.markArrived(p.fromWin); continue; }       // nothing moves on the desk the person is using
+    if (p.act !== 'beside') continue;
     // MULTIVIEW D5 (a)/(b): beside the chat only while the chat is NOT yet in a split (one pane ⇒ chat | browser);
     // a chat already split gets the browser as a quiet TAB (browser side, else its own) — nothing on screen moves
     const place = livePlacement(host._tabChain, host.id, (x) => app.wm._paneFacts?.(x) || {});
     const intoChain = place.mode === 'split' ? { hostId: host.id, split: true, side: 'right' } : { hostId: host.id, quiet: true, side: place.side };
-    // lane agent-window-no-steal: the agent's browser starting is an AGENT's act — the view is placed beside the chat, never
-    // focused (the chat's frame keeps its place in the stack, the person's caret stays), unless Settings → Desktop apps →
-    // "Agent-opened windows come to the front"
-    const quiet = app.settings?.get('desktop.agentWindowsFront') !== true;
+    const quiet = !p.focus;
     const w = openBrowserLive(app, { sessionId: l.sessionId, profileId: l.ephemeral ? EPHEMERAL_REF : l.profileId, syncId, intoChain, quiet });
     if (w && quiet) app.wm.markArrived(w.id);
     if (w) opened.push(w.id);

@@ -2,6 +2,18 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.334 — 2026-10-21
+
+### Fixed
+- You can change what an automation key may do after minting it (Edit… on its row), so actions a later release adds can go to a key you already granted.
+- When you mint or edit an automation key you can allow every path with one click, and a folder you add is shown as covering its subfolders.
+- An agent's Design or browser window no longer rearranges your desk: its conversation shows a card and a badge, and it opens when you press Open or are in it.
+- Voice input no longer re-suggests dictionary words you dismissed — a word comes back only when you say it again in a new dictation.
+- Voice input keeps one dictionary suggestion in For you at most, below urgent asks; its settings list each word with Add / Ignore, or keep them out of For you.
+
+### Maintenance
+- Test and release tooling only; nothing changes for you.
+
 ## 2.369.333 — 2026-10-20
 
 ### Added

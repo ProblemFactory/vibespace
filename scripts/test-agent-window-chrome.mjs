@@ -3,9 +3,11 @@
 // HEAVY: a scratch worktree server (private HOME, fake claude: two live chats) + headless Chrome clients. No xpra: the
 // placement leg feeds `desktop-app-opened {sessionId, appId, origin:'agent-browser'}` straight into the page's global ws
 // handlers (the record GETs of the fake app ids are held, so the pane stays a pane). Desk 1100: the person's editor on desk 1
-// holds the caret ⇒ an agent's browser for a chat on desk 1 is placed BEHIND the editor (activeWindowId, document.activeElement,
-// elementFromPoint at the pane's centre), its taskbar entry pulses; one for a chat on desk 2 ⇒ no desktop switch, the pane
-// lives on desk 2; the person presses the taskbar entry ⇒ front + focus; the setting ON ⇒ today's behaviour (front + focus).
+// holds the caret ⇒ an agent's browser for chat A, SHOWING on desk 1 behind the editor ⇒ NO pane (lane agent-window-no-pop,
+// inc-mvhebl4n-rkvr: nothing moves on the desk the person is using) — chat A's box unchanged, its taskbar entry carries the
+// badge; one for a chat on desk 2 ⇒ no desktop switch, the pane lives on desk 2; the person IN chat A (its window active) ⇒
+// the pane is born beside it (its chain), chat A stays the active window; the person presses chat A's taskbar entry ⇒ front
+// + focus; the setting ON ⇒ today's behaviour (front + focus).
 // Phone 390: the shown window is unchanged, the title carries the badge. PNGs: $VIBESPACE_AWNS_PNG_DIR/{desk,phone}.png.
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -131,26 +133,36 @@ try {
     return { d1: window.__d1, d2: window.__d2, aDesk: a._desktopId, bDesk: b._desktopId, bHidden: !!b._hiddenByDesktop, active: app.wm.activeWindowId === ed.id, caret: document.activeElement === ta };
   })()`);
   check('desk 1: chat A behind the editor, which is active and holds the caret; chat B on desk 2', setup && setup.active && setup.caret && setup.aDesk === setup.d1 && setup.bDesk === setup.d2 && setup.bHidden, setup);
+  const aBox = () => D.ev(`(() => { const r = app.wm.windows.get(window.__a).content.getBoundingClientRect(); /* the chat's PANE: a split keeps the frame, halves the pane */ return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)].join(','); })()`);
+  const box0 = await aBox();
   await D.ev(fire(SA, 'da-awns1'));
-  await sleep(3600); // past the pane's 3 s pending (unseen) grace — the covered check must judge a painted pane
+  await sleep(3600); // past the pane's 3 s pending (unseen) grace — a pane, if any, would be painted by now
   const f1 = await D.ev(facts('da-awns1'));
-  check('an agent browser for chat A (desk 1) ⇒ the pane exists, BESIDE chat A (in its chain)', f1 && f1.exists && f1.inChain && f1.chainHost === (await D.ev('window.__a')), f1);
-  check('… the editor is still the active window and still holds the caret', f1 && f1.active === f1.ed && f1.caret, f1);
-  check('… the pane is BEHIND the editor (elementFromPoint at its centre is the editor; z frame < z editor)', f1 && f1.coveredByEditor && f1.zFrame < f1.zEd, f1);
-  check('… its taskbar entry pulses (window-arrived ⇒ .taskbar-item.arrived)', f1 && f1.arrived && f1.itemArrived, f1);
+  const a1 = await D.ev(`(() => { const a = app.wm.windows.get(window.__a); const item = document.querySelector('.taskbar-item[data-win-id="' + a.id + '"]'); return { arrived: a.element.classList.contains('window-arrived'), itemArrived: !!(item && item.classList.contains('arrived')) }; })()`);
+  check('an agent browser for chat A — SHOWING on desk 1, the person in the editor ⇒ NO pane opens (the base placed one beside chat A)', f1 && !f1.exists, f1);
+  check('… chat A\'s pane keeps its exact box (nothing re-arranged under the person\'s hand; the base split it) and the editor still holds the active window and the caret', f1 && f1.active === f1.ed && f1.caret && (await aBox()) === box0, { f1, box0 });
+  check('… chat A\'s taskbar entry carries the badge (window-arrived ⇒ .taskbar-item.arrived) — its window chip opens the browser', a1 && a1.arrived && a1.itemArrived, a1);
   await D.ev(fire(SB, 'da-awns2'));
   await sleep(800);
   const f2 = await D.ev(facts('da-awns2'));
   const d2 = await D.ev('window.__d2'), d1 = await D.ev('window.__d1');
   check('an agent browser for chat B (desk 2) ⇒ NO desktop switch (desk 1 still shown), the pane lives on desk 2, hidden', f2 && f2.exists && f2.desk === d1 && f2.winDesk === d2 && f2.hiddenByDesk, f2);
   check('… the editor still active with the caret', f2 && f2.active === f2.ed && f2.caret, f2);
+  // the person IN chat A (its window the active one) ⇒ the agent's browser is born beside it, never focused
+  await D.ev('(app.wm.focusWindow(window.__a), true)');
+  await D.ev(fire(SA, 'da-awns5'));
+  await sleep(3600);
+  const f5 = await D.ev(facts('da-awns5'));
+  check('the person IN chat A ⇒ the agent browser\'s pane is born BESIDE chat A (in its chain), chat A stays the active window', f5 && f5.exists && f5.inChain && f5.chainHost === (await D.ev('window.__a')) && f5.active === f5.chainHost, f5);
+  check('… its taskbar entry pulses (window-arrived ⇒ .taskbar-item.arrived)', f5 && f5.arrived && f5.itemArrived, f5);
   const deskPng = await shot(D.S, 'desk.png');
   if (deskPng) console.log(`  · ${deskPng}`);
-  // the person presses the taskbar entry ⇒ front + focus, as any window
+  // the person goes back to the editor, then presses chat A's taskbar entry ⇒ front + focus, as any window
+  await D.ev('(app.wm.focusWindow(window.__ed), window.__ta.focus(), true)');
   const box = await D.ev(`(() => { const host = app.wm.windows.get(window.__a); const el = document.querySelector('.taskbar-item[data-win-id="' + host.id + '"]'); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   if (box) { for (const type of ['mousePressed', 'mouseReleased']) await D.S('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 }); }
   await sleep(500);
-  const f3 = await D.ev(facts('da-awns1'));
+  const f3 = await D.ev(facts('da-awns5'));
   check('the person presses the taskbar entry ⇒ that group comes to the front and takes the focus; the pulse is spent', !!box && f3 && f3.active !== f3.ed && f3.zFrame > f3.zEd && !f3.arrived && !f3.itemArrived, { box, f3 });
 
   console.log('phone 390 — the shown window stays');

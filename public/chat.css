@@ -745,6 +745,29 @@
 .chat-stash-parts { unicode-bidi: isolate; } /* a peer's name is its own — isolated so an RTL override in it never re-orders the head or the button */
 /* the phone folds the parts and the held count — NEVER the money word on the button (verify r4: a press that bills says so where it is pressed) */
 @media (max-width: 768px) { .chat-stash-parts, .chat-stash-held { display: none; } .chat-stash-go { min-height: 32px; } }
+/* THE AGENT'S CARDS (lane agent-window-no-pop, src/lib/agent-card.js): an agent's Design for a chat the person is not looking at
+   opened NO window — its card waits above the composer, the title + Open (the person's door) + ✕ */
+.chat-agent-cards { width: 100%; display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.chat-agent-cards[hidden] { display: none; }
+.chat-agent-card {
+  display: flex; align-items: center; gap: 8px; box-sizing: border-box; padding: 5px 8px; font-size: 12px; color: var(--text-secondary);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-input));
+}
+.chat-agent-card.arrived { animation: chat-agent-card-in 1.2s ease-out 1; }
+@keyframes chat-agent-card-in { 0% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.chat-agent-card-ic { flex-shrink: 0; display: inline-flex; color: var(--accent); }
+.chat-agent-card-ic svg { width: 16px; height: 16px; }
+.chat-agent-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.chat-agent-card-title { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-agent-card-why { color: var(--text-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-agent-card-open { flex-shrink: 0; padding: 2px 10px; font: inherit; font-size: 12px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.chat-agent-card-open:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.chat-agent-card-x { flex-shrink: 0; display: inline-flex; padding: 3px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-dim); cursor: pointer; }
+.chat-agent-card-x:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
+.chat-agent-card-x svg { width: 12px; height: 12px; }
+@media (max-width: 768px) { .chat-agent-card-open, .chat-agent-card-x { min-height: 32px; min-width: 32px; } }
+@media (prefers-reduced-motion: reduce) { .chat-agent-card.arrived { animation: none; } }
 
 /* ── WHERE THE KEYS ARE (lane takeover-keyboard, userW inc-mum339id-1zsb): you drive the agent's browser and pressed
    THIS composer — your keys come here, the browser is still yours. One line right above the box, the takeover's colour;
@@ -1863,6 +1886,13 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .voice-account-words { font-size: 12px; overflow-wrap: anywhere; }
 .voice-teach { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 .voice-teach-head { font-weight: 600; color: var(--text); font-size: 12px; }
+/* lane voice-dictionary-nag: the words suggested now under 「词典建议」 (All Settings › Voice input), each 加入 / 忽略 */
+.voice-cands { margin-top: 6px; }
+.voice-cands-head { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+.voice-cands-none { font-size: 12px; color: var(--text-dim); }
+.voice-cands-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.voice-cand { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border: 1px solid var(--border); border-radius: 12px; }
+.voice-cand-term { font-size: 12px; color: var(--text); margin-right: 2px; }
 @container (max-width: 440px) {
   .voice-row { grid-template-columns: minmax(0, 1fr); }
   .voice-row-label { line-height: 1.4; }

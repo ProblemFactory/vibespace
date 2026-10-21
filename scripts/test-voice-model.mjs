@@ -12,6 +12,12 @@
 //      the SHAPE_EXCLUSIONS census (each row's term + a copy without that row lets it through), the preselection rule;
 //      lane voice-teach-ids-allowed (owner 2026-10-13: ids are what dictation gets wrong): identifier NAMES are candidates
 //      again (RED = a copy with the old field-tail row), the census is four rows, a secret VALUE is never proposed
+//   ⑧ THE EVIDENCE LEDGER (lane voice-dictionary-nag — a fleet user 2026-10-21: 20 suggestions in 8 days, «CLAUDE.md» 7×
+//      re-offered from the same messages after their dismissals; the user: no «never again», no timers): a dismissal
+//      CONSUMES the evidence (the occurrences shown so far never count again); a NEW dictation re-earns a word; 加入 ⇒ out of
+//      the ledger; ≤ 2 000 words, oldest out; RULE 1 is ONE function (evidenceRule); the PACING clock (one open item ⇒
+//      merge; a day after a dismissal; no clock ⇒ wait); THE MEASURED FIXTURE replayed — before 20 items / CLAUDE.md 7×,
+//      after (no new dictation between) CLAUDE.md ONCE; MUTANT a copy that subtracts only `known` ⇒ RED
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -253,6 +259,109 @@ console.log('⑦ proposalCandidates — words a person SAYS (lane voice-teach-ca
   const pk = Object.fromEntries(P.map((x) => [x.term, x.pick]));
   ok('preselection: byPerson (jane.doe) and seen ≥ 2 file / PascalCase / identifier (voice-model.js, TeachEngine, thread_id — ids included) start selected; an agent-only Capitalized word (Settings) does not', pk['jane.doe'] === true && pk['voice-model.js'] === true && pk.TeachEngine === true && pk.thread_id === true && pk.Settings === false, P);
   ok('…a word seen once and not by the person is no candidate at all (Plugins); the dictionary drops a known word', !('Plugins' in pk) && !VM.proposalCandidates({ messages: [user('ask jane.doe')], known: ['JANE.DOE'] }).length);
+}
+
+console.log('⑧ the evidence ledger (lane voice-dictionary-nag) — a dismissal consumes the evidence; only a NEW dictation re-earns a word');
+{
+  const D = 24 * 3600e3, MIN = 60e3, SL = VM.SUGGEST_LIMITS;
+  const u = (text) => ({ role: 'user', content: [{ type: 'text', text }] });
+  const a = (text) => ({ role: 'assistant', content: [{ type: 'text', text }] });
+  const terms = (cs) => cs.map((c) => c.term);
+  ok('the bounds are said: a new item waits 24 h after a dismissal, ≤ 2 000 words, ≤ 32 evidence / ≤ 64 consumed keys a word, ≤ 24 words an item — and NO quiet period or retire count exists',
+    SL.afterDismissMs === D && SL.ledgerMax === 2000 && SL.evidenceMax === 32 && SL.consumedMax === 64 && SL.itemTerms === 24 && !('quietMs' in SL) && !('retireAfter' in SL) && !VM.retiredOf && !VM.ledgerRestore, SL);
+  const k1 = VM.messageKey({ role: 'user', text: 'we use CLAUDE.md here' });
+  ok('messageKey: the same message read again is the SAME evidence; another role or text is another', k1 === VM.messageKey({ role: 'user', text: 'we use CLAUDE.md here' }) && k1 !== VM.messageKey({ role: 'agent', text: 'we use CLAUDE.md here' }) && k1 !== VM.messageKey({ role: 'user', text: 'we use CLAUDE.md here.' }));
+  const OLD = [u('we use CLAUDE.md here'), a('Sure — CLAUDE.md is read first.')];
+  const c0 = VM.proposalCandidates({ messages: OLD });
+  const cm = c0.find((c) => c.term === 'CLAUDE.md');
+  ok('a candidate carries its occurrences (occ: the message keys, who said it) — the evidence', !!cm && cm.occ.length === 2 && cm.occ.some((o) => o.byPerson) && cm.occ.every((o) => typeof o.key === 'string'), cm);
+  let L = VM.ledgerSuggested(null, c0, 1000);
+  ok('shown ⇒ its occurrences become the word\'s evidence (evidenceOf = the count since the last dismissal)', VM.evidenceOf(L, 'claude.md') === 2);
+  L = VM.ledgerDismissed(L, ['CLAUDE.md'], 2000);
+  const again = VM.proposalCandidates({ messages: [...OLD, u('and Zorble twice: Zorble')], ledger: L });
+  ok('a DISMISSAL consumes the evidence: the count is 0, and the SAME messages read again (no new dictation) never re-earn it — at any hour, a year later too', VM.evidenceOf(L, 'CLAUDE.md') === 0 && !terms(again).includes('CLAUDE.md') && terms(again).includes('Zorble') && !terms(VM.proposalCandidates({ messages: OLD, ledger: L })).length, terms(again));
+  const fresh = VM.proposalCandidates({ messages: [...OLD, u('please open CLAUDE.md again')], ledger: L });
+  const cf = fresh.find((c) => c.term === 'CLAUDE.md');
+  ok('a NEW dictation that says it re-earns the word — counted from the new message ONLY (seen 1, byPerson 1), preselected', !!cf && cf.seen === 1 && cf.byPerson === 1 && cf.pick && cf.occ.length === 1, cf);
+  ok('an agent\'s new mention alone (weight 1) does not re-earn it — the same ≥ 2 the first suggestion needed', !terms(VM.proposalCandidates({ messages: [...OLD, a('I touched CLAUDE.md.')], ledger: L })).includes('CLAUDE.md'));
+  let L2 = VM.ledgerSuggested(L, fresh, 3000);
+  L2 = VM.ledgerDismissed(L2, ['claude.MD'], 4000);
+  ok('dismissed again ⇒ that new evidence is consumed too (case-insensitive) — never a blacklist: a third new mention re-earns it', !terms(VM.proposalCandidates({ messages: [...OLD, u('please open CLAUDE.md again')], ledger: L2 })).includes('CLAUDE.md') && terms(VM.proposalCandidates({ messages: [...OLD, u('CLAUDE.md, third time')], ledger: L2 })).includes('CLAUDE.md'));
+  ok('加入 (ledgerAdded) takes the words out of the ledger — the vendor\'s dictionary (`known`) holds them from then on', !('claude.md' in VM.ledgerAdded(L2, ['CLAUDE.MD']).words));
+  ok('RULE 1 is ONE function: evidenceRule(candidates, ledger) is what proposalCandidates applies — the same answer called directly', JSON.stringify(VM.evidenceRule(VM.proposalCandidates({ messages: [...OLD, u('and Zorble twice: Zorble')] }), L)) === JSON.stringify(again));
+  ok('ledgerOf drops junk (a key that is not its term\'s lower case, a non-object, non-string keys, non-number stamps)', (() => { const j = VM.ledgerOf({ words: { 'claude.md': { term: 'CLAUDE.md', evidence: ['m1', 7, 'm1'], consumed: null, suggestedAt: [1, 'x'] }, wrong: { term: 'Other' }, bad: 7 } }); return Object.keys(j.words).join() === 'claude.md' && j.words['claude.md'].evidence.join() === 'm1' && j.words['claude.md'].suggestedAt.join() === '1'; })());
+  let big = null;
+  for (let i = 0; i < SL.ledgerMax + 5; i++) big = VM.ledgerSuggested(big, ['w' + i + 'x'], 1000 + i);
+  ok('the bound: 2 005 words ⇒ 2 000 kept, the least recently touched out', Object.keys(big.words).length === SL.ledgerMax && !('w0x' in big.words) && !('w4x' in big.words) && 'w5x' in big.words && 'w2004x' in big.words);
+  let many = null;
+  for (let i = 0; i < 80; i++) { many = VM.ledgerSuggested(many, [{ term: 'Zed', occ: [{ key: 'k' + i, byPerson: true }] }], 10 + i); if (i % 10 === 9) many = VM.ledgerDismissed(many, ['Zed'], 20 + i); }
+  ok('a word\'s lists are bounded: ≤ 32 evidence, ≤ 64 consumed keys (the oldest out), ≤ 8 stamps', many.words.zed.consumed.length === 64 && many.words.zed.consumed[63] === 'k79' && many.words.zed.suggestedAt.length === 8);
+  // THE PACING (rule 2): one open item ⇒ update; a day after a dismissal ⇒ wait; never a clock read inside
+  ok('pacing: a suggestion item OPEN ⇒ update (its words merge in place — never a second item)', VM.suggestionPace({ open: true, ledger: L, now: 10 }).act === 'update');
+  const pw = VM.suggestionPace({ ledger: L, now: 2000 + D - 1 }), pf = VM.suggestionPace({ ledger: L, now: 2000 + D });
+  ok('pacing: a dismissal on this instance less than 24 h ago ⇒ wait (until = that dismissal + 24 h); at 24 h ⇒ file; an empty ledger ⇒ file; no clock ⇒ wait',
+    pw.act === 'wait' && pw.why === 'after-dismissal' && pw.until === 2000 + D && pf.act === 'file' && VM.suggestionPace({ now: 0 }).act === 'file' && VM.suggestionPace({ ledger: L }).act === 'wait', { pw, pf });
+  ok('mergeTerms: the item\'s words first, deduped case-insensitively, ≤ 24', VM.mergeTerms(['Lark', 'Notion'], ['lark', 'Zed']).join() === 'Lark,Notion,Zed' && VM.mergeTerms(Array.from({ length: 30 }, (_, i) => 'a' + i), []).length === 24);
+  const ledgerSrc = (() => { const t = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8'); return t.slice(t.indexOf('THE EVIDENCE LEDGER'), t.indexOf('function mergeTerms')); })();
+  ok('the clock is injected: the ledger + pacing code reads no Date.now / new Date', ledgerSrc.length > 2000 && !/Date\.now|new Date/.test(ledgerSrc));
+
+  // THE MEASURED FIXTURE (the fleet user's instance, 2.369.318, data/user-todos.json): 20 suggestions in 8 days — 10 on one
+  // day, 4 on the last — «CLAUDE.md» 7×, «Claude» 5, «Lark» 4, «DocuSign» 3, «Confidential» / «Finance» / «Notion» / «GitHub» 2
+  // (the brief's own 2× words, one swapped for a product name). The SAME words came back with NO new dictation of them: a
+  // conversation's old messages were read again at each later dictation. Six conversations, each with its old message;
+  // each row = one dictation [hour since day 0 09:00, conversation] that adds ONE new message with a new word.
+  const CONVS = { A: 'we use CLAUDE.md here', B: 'ask Claude about it', C: 'post it in Lark first', D: 'the DocuSign flow, Confidential for Finance', E: 'DocuSign it, then GitHub and Notion', F: 'mirror GitHub into Notion' };
+  const EV = [[0, 'A'], [3, 'B'], [25, 'A'], [26, 'C'], [27, 'B'], [28, 'A'], [29, 'D'], [30, 'C'], [31, 'B'], [32, 'A'], [33, 'D'], [34, 'C'],
+    [50, 'B'], [75, 'A'], [122, 'E'], [146, 'C'], [170, 'A'], [172, 'B'], [174, 'A'], [176, 'F']];
+  const NEW = ['Quillon', 'Brasko', 'Ferrand', 'Gattle', 'Hobson', 'Ivrey', 'Jasker', 'Kelvane', 'Lorrin', 'Mavrin', 'Nolton', 'Orsby', 'Pellam', 'Quorra', 'Rendle', 'Stavik', 'Tolvar', 'Ulmer', 'Varden', 'Wexley'];
+  const H = 3600e3, T0 = Date.UTC(2026, 9, 13, 16);
+  const windows = () => { const w = {}; for (const k of Object.keys(CONVS)) w[k] = [u(CONVS[k])]; return w; };
+  const tally = (rows) => { const n = {}; for (const ws of rows) for (const x of ws) n[x] = (n[x] || 0) + 1; return n; };
+  // BEFORE (the shipped engine: a card + a For-you item per conversation, the vendor's dictionary the only subtraction)
+  const wb = windows();
+  const before = EV.map(([, cv], i) => { wb[cv].push(u(`and ${NEW[i]} twice: ${NEW[i]}`)); return VM.proposalCandidates({ messages: wb[cv] }).filter((c) => c.pick).map((c) => c.term); });
+  const nb = tally(before);
+  ok('the measured fixture reproduces the incident on the shipped rule: 20 items in 8 days (10 on one day, 4 on the last), CLAUDE.md 7× · Claude 5 · Lark 4 · DocuSign 3 · Confidential / Finance / Notion / GitHub 2 — none of them dictated again',
+    before.filter((x) => x.length).length === 20 && EV.filter(([h]) => h >= 24 && h < 48).length === 10 && EV.filter(([h]) => h >= 168).length === 4 && Math.floor(EV[EV.length - 1][0] / 24) + 1 === 8
+    && nb['CLAUDE.md'] === 7 && nb.Claude === 5 && nb.Lark === 4 && nb.DocuSign === 3 && ['Confidential', 'Finance', 'Notion', 'GitHub'].every((w) => nb[w] === 2), nb);
+  // AFTER: the same dictations through the ledger + the pacing; the person dismisses each item 20 minutes after it is filed
+  const replay = (V) => {
+    const w = windows();
+    let led = V.ledgerOf(null), open = null, filed = 0, maxOpen = 0;
+    const items = [];
+    EV.forEach(([h, cv], i) => {
+      const at = T0 + h * H;
+      if (open && at >= open.answerAt) { led = V.ledgerDismissed(led, open.terms, open.answerAt); open = null; }
+      w[cv].push(u(`and ${NEW[i]} twice: ${NEW[i]}`));
+      const cands = V.proposalCandidates({ messages: w[cv], ledger: led });
+      const pick = cands.filter((c) => c.pick);
+      if (!pick.length) return;
+      const pace = V.suggestionPace({ open: !!open, ledger: led, now: at });
+      led = V.ledgerSuggested(led, pick, at);   // shown — on the sheet's card at least
+      if (pace.act === 'wait') return;
+      if (pace.act === 'update') open.terms = V.mergeTerms(open.terms, pick.map((c) => c.term));
+      else { open = { terms: pick.map((c) => c.term), answerAt: at + 20 * MIN }; filed++; items.push(open); }
+      maxOpen = Math.max(maxOpen, 1);
+    });
+    return { n: tally(items.map((x) => x.terms)), filed, maxOpen, led };
+  };
+  const after = replay(VM);
+  const REPEATED = ['CLAUDE.md', 'Claude', 'Lark', 'DocuSign', 'Confidential', 'Finance', 'Notion', 'GitHub'];
+  ok(`AFTER (the evidence ledger + the pacing, every item dismissed, no new dictation of the words): CLAUDE.md in ${after.n['CLAUDE.md']} item (ONCE); every repeated word at most once; ${after.filed} items in the 8 days (was 20), never two open`,
+    after.n['CLAUDE.md'] === 1 && REPEATED.every((x) => (after.n[x] || 0) <= 1) && after.filed < 20 && after.maxOpen <= 1, after.n);
+  const reEarn = VM.proposalCandidates({ messages: [u(CONVS.A), u('open CLAUDE.md again please')], ledger: after.led });
+  ok('…and once the person DICTATES it again (a new message), CLAUDE.md is a candidate again — never a blacklist', terms(reEarn).includes('CLAUDE.md'), terms(reEarn));
+  // THE MUTANT: a voice-model copy whose candidate rule subtracts only `known` (rule 1 dropped) ⇒ the same replay is RED
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-vm-ledger-'));
+  try {
+    fs.copyFileSync(path.join(REPO, 'src/assistant-note.js'), path.join(dir, 'assistant-note.js')); // voice-model requires it (PURE → PURE)
+    const src = fs.readFileSync(path.join(REPO, 'src/voice-model.js'), 'utf8');
+    const needle = '  return ledger ? evidenceRule(ranked, ledger) : ranked;';
+    ok('the mutant\'s needle occurs exactly once', src.split(needle).length === 2);
+    fs.writeFileSync(path.join(dir, 'vm.js'), src.replace(needle, '  return ranked; // (mutant: only `known` is subtracted)'));
+    const mut = replay(require(path.join(dir, 'vm.js')));
+    ok(`CONTROL RED: the candidate rule that subtracts only \`known\` ⇒ CLAUDE.md in ${mut.n['CLAUDE.md']} items on the same fixture (> 1) — the check above fails on it`, mut.n['CLAUDE.md'] > 1, mut.n);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

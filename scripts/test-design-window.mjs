@@ -26,6 +26,9 @@
 //       questions sheet up over the canvas (a question carrying markup + a frame tag drawn as text), real taps on a pill,
 //       Other… + typed words, Continue ⇒ exactly ONE `[Design answers]` line on the stub's stdin and the sheet closes;
 //       a second ask: Later folds it to a pill, Skip ⇒ one "skipped" line.
+//   A①c (lane agent-window-no-pop) the owner's incident inc-mvhebl4n-rkvr replayed: the agent's `new` for a chat that SHOWS
+//       but is not the active window, the ⚙ menu open ⇒ no window, no box moves, the menu stays, the chat's card (title +
+//       Open) + its taskbar badge; the person's Open opens + focuses. B③ starts from the conversation (the person in it).
 //   B — the adversarial round, each leg against the built tree:
 //       ① XSS — a hostile artboard (another agent's): `top.document`, cookies / storage, a forged `design-pick` carrying
 //       markup and a 2 MB text, a message outside the closed set, a `design-key` flood, `window.open`, a form POST, an
@@ -391,6 +394,49 @@ try {
   await ev(`app.openDesign({ host: '', dir: ${S(DIR)}, sessionId: ${S(SIDW)} }); return true;`);
   const redAfter = await until(() => ev(`return app.wm.activeWindowId === ${W}.id ? true : null;`), 4000);
   ok(redBefore === place0.chatId && redAfter === true, 'RED CONTROL: openDesign called directly (the pre-fix handler / a person\'s own door) raises the Design to the ACTIVE window — so the "active window unchanged" assert above has teeth (the WM never moves the DOM caret on a raise, so the composer keeps it either way)');
+
+  // ── A①c (lane agent-window-no-pop, owner incident inc-mvhebl4n-rkvr 2026-10-21 「design还是被强行弹出了」): THE INCIDENT REPLAYED ──
+  section('A①c the incident replayed: a design-open for a chat SHOWING but not active, a menu open ⇒ no window, the menu stays, a card + a badge; Open opens + focuses');
+  {
+    // the incident's facts: the conversation SHOWS on this desk (its left half — not minimized, not active), the person works
+    // elsewhere on the same desk (the Design window dw is the active one) with the ⚙ menu open under his hand
+    // the chat stands in a FREE box (A①b left it snapped to the left half, where a second snap would change nothing to see)
+    await ev(`const c = ${chatWinE}; Object.assign(c.element.style, { left: '24px', top: '48px', width: '560px', height: '520px' }); app.wm.focusWindow(${W}.id); return true;`);
+    await sleep(200);
+    await click(await rectOf('#btn-global-settings', 'document'));
+    const menuOpen = () => ev(`const m = document.querySelector('.gs-menu'); return !!(m && m.offsetParent !== null);`);
+    const D2 = path.join(fs.realpathSync(PROJ), 'designs', 'dw2');
+    const W2 = `[...app.wm.windows.values()].find((x) => x._design && x._design.dir === ${S(D2)})`;
+    const snap = () => ev(`const c = ${chatWinE}, w = ${W}; const r = (x) => { const b = x.element.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)]; }; return { ids: [...app.wm.windows.keys()].sort(), aw: app.wm.activeWindowId, chatId: c.id, chat: r(c), dw: r(w), shown: !c.isMinimized && !c._hiddenByDesktop };`);
+    const before = await snap();
+    const m0 = await menuOpen();
+    ok(m0 && before.shown && before.aw !== before.chatId && before.aw === (await ev(`return ${W}.id;`)), 'the incident\'s facts: the chat SHOWS (not minimized, not active), another window on the same desk is active, the ⚙ menu is open', { m0, before });
+    const rInc = await stub({ kind: 'sh', cmd: 'vibespace-design', args: ['new', 'dw2', '--title', 'Pre-sign check v2'], cwd: PROJ });
+    const CARD = `[...(${chatWinE}).element.querySelectorAll('.chat-agent-card')].find((x) => /\\/designs\\/dw2$/.test(x.dataset.key || ''))`;
+    const landed = await until(() => ev(`return ${CARD} || ${W2} ? true : null;`), 12000, 200); // the base opens a window; the fix leaves a card
+    await sleep(900);
+    const after = await snap();
+    const inc = await ev(`const c = ${chatWinE}; const k = ${CARD}; const ti = document.querySelector('.taskbar-item[data-win-id="' + c.id + '"], .taskbar-group[data-win-id="' + c.id + '"]'); return { win2: !!(${W2}), card: k ? { title: k.querySelector('.chat-agent-card-title').textContent, open: k.querySelector('.chat-agent-card-open').textContent } : null, chatArrived: c.element.classList.contains('window-arrived'), taskArrived: !!(ti && ti.classList.contains('arrived')) };`);
+    evidence.incident = { rInc: { status: rInc.status, stdout: rInc.stdout }, before, after, inc, landed };
+    ok(rInc.status === 0 && !!landed, 'the agent ran `vibespace-design new dw2` (the design-open push reached this client)', rInc);
+    ok(!inc.win2 && S(after.ids) === S(before.ids), 'NO window opened for the agent\'s design (the base opened a fresh half window here)', { before: before.ids.length, after: after.ids.length, win2: inc.win2 });
+    ok(S(after.chat) === S(before.chat) && S(after.dw) === S(before.dw), 'the desk is NOT re-arranged: the chat and the active window keep their exact boxes (the base snapped the chat to the left half, the new Design to the right)', { before: [before.chat, before.dw], after: [after.chat, after.dw] });
+    ok(after.aw === before.aw && (await menuOpen()), 'the active window is unchanged and the ⚙ menu STAYS open under the person\'s hand', { aw: [before.aw, after.aw] });
+    ok(!!inc.card && inc.card.title === 'Pre-sign check v2' && inc.card.open === 'Open', 'the chat carries the CARD: the design\'s title + Open', inc.card);
+    ok(inc.chatArrived && inc.taskArrived, 'the chat\'s taskbar entry carries the badge (the arrived mark)', inc);
+    ok(/no Design window confirmed it on the user's screen/.test(rInc.stdout || '') && !/the Design window is open on the user's screen/.test(rInc.stdout || ''), 'the agent is told the truth: no Design window confirmed it on the user\'s screen (never "open on the user\'s screen")', rInc.stdout);
+    // THE PERSON'S PRESS — the one origin that opens + focuses: Esc closes the menu, a real click on the card's Open
+    await call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await sleep(300);
+    const openAt = await ev(`const b = ${CARD}?.querySelector('.chat-agent-card-open'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
+    if (openAt) await click(openAt);
+    const pressed = await until(() => ev(`const w = ${W2}; return w && app.wm.activeWindowId === w.id ? { id: w.id, card: !!(${CARD}) } : null;`), 8000, 200);
+    evidence.incidentOpen = pressed;
+    ok(!(await menuOpen()) && !!openAt && !!pressed && pressed.card === false, 'the person presses Open ⇒ the Design window opens AND takes the focus (the active window); the card is gone', { openAt, pressed });
+    if (pressed) await ev(`app.wm.closeWindow(${S(pressed.id)}); return true;`); // later legs count this socket's watches (B③)
+    await sleep(400);
+  }
 
   // ── A② ──
   section('A② a file write under the folder repaints ONE frame in place (no sync: the hub\'s 2 s watch)');
@@ -779,6 +825,7 @@ try {
   const ledgerBefore = fs.existsSync(path.join(WT, 'data/spend-budget.json')) ? fs.readFileSync(path.join(WT, 'data/spend-budget.json'), 'utf8') : null;
   await ev('window.__acks.length = 0; return true;');
   const names = Array.from({ length: 17 }, (_, i) => 'w' + String(i + 1).padStart(2, '0'));
+  ok(await ev(focusComposer), 'the person is in the conversation (its composer active) — an agent\'s Design opens beside a chat only there (lane agent-window-no-pop)');
   for (const n of names) await stub({ kind: 'sh', cmd: 'vibespace-design', args: ['new', n], cwd: PROJ });
   const opened = await until(() => ev(`const n = [...app.wm.windows.values()].filter((w) => w._design && /\\/designs\\/w\\d\\d$/.test(w._design.dir)).length; return n === 17 ? n : null;`), 30000, 300);
   ok(opened === 17, '17 more design windows opened by the agent\'s `new` (the design-open push, one window per folder)', opened);

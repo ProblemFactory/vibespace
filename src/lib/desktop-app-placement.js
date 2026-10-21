@@ -17,29 +17,51 @@ export function agentBrowserPlacement({ msg = null, chats = [], phone = false, v
 }
 
 // THE PERSON'S SIDE OF D3 (lane agent-window-no-steal, owner 2026-10-11: six agent Chromes in a day, each jumped in front of
-// his work): AN AGENT'S ACTION MAY PLACE A WINDOW; ONLY A PERSON'S ACTION MAY FOCUS ONE. Every `desktop-app-opened` carries a
-// non-human origin (the agent's own browser today; any origin that is not 'user'), so the verdict never says focus:true and
-// never switches a desktop — unless the person opted in (Settings → Desktop apps → "Agent-opened windows come to the front",
-// `front`, default OFF), which is exactly D3's old answer with focus. Facts in, cells out (PURE, no DOM):
-//   chats [{winId, sessionId, minimized, hidden, deskId}] — this client's chat windows; `desk` the shown desktop id;
-//   `active` the active window id (null on an empty desk); `interacting` a drag / resize or a text box holding the caret.
-// Cells: act 'beside' (in the chat's chain, behind the active window) | 'desk' (created on the chat's desktop, hidden by the
-// desktop model like any off-desk window) | 'own' (a free window behind the active one; on a phone never the shown one) |
-// 'none'; focus; deskSwitch (always false); behind (stack it under the active window); minimize (the person is mid-act: it
-// waits on the taskbar); badge (the taskbar entry pulses once — no toast, no For-you: a browser an agent opens is routine).
-// THE TWO BROADCASTS THAT PLACE A WINDOW (an agent's doing, told apart by shape — no door a PERSON drives reaches here):
+// his work): AN AGENT'S ACTION MAY PLACE A WINDOW; ONLY A PERSON'S ACTION MAY FOCUS ONE. Lane agent-window-no-pop (owner
+// incident inc-mvhebl4n-rkvr, 2026-10-21 「design还是被强行弹出了」 — a repeat: the Design opened beside a chat that was only
+// SHOWING, and his desk was re-arranged under his hand while he worked in the ⚙ menu): AN AGENT NEVER CHANGES THE ARRANGEMENT
+// OF THE DESK A PERSON IS USING. It opens a window beside its chat only where the person is already looking (that chat is
+// the active window, or the active window shares its split frame) or where he is not (the chat lives on another desk);
+// everywhere else NO window opens — the chat gets a card and its taskbar entry the badge, and the person's press on the
+// card (Open) is the one origin that opens + focuses. Facts in, cells out (PURE, no DOM):
+//   chats [{winId, sessionId, minimized, hidden, deskId, looking}] — this client's chat windows (`hidden` = held off screen
+//   by the desktop model; `looking` = the active window is this chat or a pane of the split frame that shows it); `desk`
+//   the shown desktop id; `active` the active window id (null on an empty desk; equal to winId reads as looking too).
+// Cells: act · focus · deskSwitch (always false) · badge (the taskbar entry pulses once and keeps its mark until the person
+// focuses it — no toast, no For-you: a window an agent opens is routine) · fromWin (the chat window) · deskId.
+// THE TABLE (an agent's push, Settings → Desktop apps → "Agent-opened windows come to the front" OFF, the page visible):
+//   the chat on this client                          phone  act     why                 what the person sees
+//   no window of that chat                           any    none    not-here            nothing (D3: a client without it opens nothing)
+//   shown, looking (active / its split partner)      no     beside  looking             the window beside it, never focused; it pulses
+//   shown, not looking (inc-mvhebl4n-rkvr)           no     card    showing-quiet       no window: the chat's card + the chat's badge
+//   minimized                                        no     card    minimized-chat      no window: the chat's card + the chat's badge
+//   hidden on ANOTHER desk — a Design / an app       no     desk    other-desk          created on that desk (hidden there), no switch; it pulses
+//   hidden on another desk — the live view           no     card    other-desk-live     no window (a live view is born only into a chain on screen)
+//   hidden, not on another desk (no desk id)         no     card    hidden-chat         no window: the chat's card + the chat's badge
+//   shown                                            yes    own     phone-quiet         its own window, never the shown one; the title badge
+//   minimized / hidden                               yes    none    phone-not-showing   nothing
+//   any — the page hidden                            any    none    hidden              nothing
+//   any — the setting ON                             any    D3's old answer (agentBrowserPlacement) WITH focus: beside / own / none
+// The doors carry the cells out: beside = the Design snapped to the right half (the chat left), the browser in the chat's
+// split; desk = created, then moved to the chat's desk; own = a free window under the active one; card = nothing opens — the
+// Design's card says its title + Open (chat-input.js agentCard), the agent browser's is the chat's status-bar chip.
+// THE THREE PUSHES THAT PLACE A WINDOW (an agent's doing, told apart by shape — no door a PERSON drives reaches here):
 //   · `desktop-app-opened` {origin≠'user', appId, sessionId} — the agent's desktop-app browser / app (lane e2a)
-//   · `design-open` {openSpec.action:'openDesign', dir, sessionId} — the agent's `vibespace-design new|open|add|sync`
+//   · `design-open` {openSpec.action:'openDesign', dir, sessionId} — the agent's `vibespace-design new|open|add|sync|ask`
 //     (design-window.js installDesignWindow; a chat card / the home / the gear / a layout replay call openDesign direct)
-// Returns the chat's sessionId to place beside, or null when the broadcast is neither (D3: a person's origin opens nothing).
+//   · `browser-live-start` {sessionId} — the agent's browser started (a NEW holder row in the digest:
+//     browser-live-window.js autoBindLiveViews; the person's "Open live view" calls openBrowserLive direct)
+// Returns the chat's sessionId to place beside, or null when the push is none of them (D3: a person's origin opens nothing).
+export const LIVE_START = 'browser-live-start';
 export function agentPlacedSession(msg) {
   if (!msg) return null;
   if (msg.type === 'desktop-app-opened') return msg.origin && msg.origin !== 'user' && msg.appId && msg.sessionId ? String(msg.sessionId) : null;
   if (msg.type === 'design-open') { const s = msg.openSpec; const sid = msg.sessionId || (s && s.sessionId); return s && s.action === 'openDesign' && s.dir && sid ? String(sid) : null; }
+  if (msg.type === LIVE_START) return msg.sessionId ? String(msg.sessionId) : null;
   return null;
 }
-export function agentWindowPlacement({ msg = null, chats = [], active = null, desk = null, phone = false, visible = true, interacting = false, front = false } = {}) {
-  const base = { focus: false, deskSwitch: false, behind: false, minimize: false, badge: false };
+export function agentWindowPlacement({ msg = null, chats = [], active = null, desk = null, phone = false, visible = true, front = false } = {}) {
+  const base = { focus: false, deskSwitch: false, badge: false };
   const sid = agentPlacedSession(msg);
   if (!sid) return { ...base, act: 'none', why: 'not-agent' };
   if (front) { const old = agentBrowserPlacement({ msg: { ...msg, type: 'desktop-app-opened', origin: AGENT_BROWSER_ORIGIN, appId: msg.appId || 'design', sessionId: sid }, chats, phone, visible }); return { ...base, ...old, focus: old.act !== 'none', why: old.why + '+front' }; }
@@ -48,9 +70,12 @@ export function agentWindowPlacement({ msg = null, chats = [], active = null, de
   if (!chat) return { ...base, act: 'none', why: 'not-here' }; // D3: a client without that chat opens nothing
   const shown = !chat.minimized && !chat.hidden;
   if (phone) return shown ? { ...base, act: 'own', fromWin: chat.winId, badge: true, why: 'phone-quiet' } : { ...base, act: 'none', why: 'phone-not-showing' };
-  if (chat.hidden) return chat.deskId && chat.deskId !== desk ? { ...base, act: 'desk', fromWin: chat.winId, deskId: chat.deskId, badge: true, why: 'other-desk' } : { ...base, act: 'none', why: 'hidden-chat' };
-  if (chat.minimized) return { ...base, act: 'own', fromWin: chat.winId, behind: !!active, minimize: !!interacting, badge: true, why: interacting ? 'minimized-chat-busy' : 'minimized-chat' };
-  return { ...base, act: 'beside', fromWin: chat.winId, behind: !!active && active !== chat.winId, badge: true, why: 'showing-quiet' };
+  const card = (why) => ({ ...base, act: 'card', fromWin: chat.winId, badge: true, why });
+  if (chat.hidden && chat.deskId && chat.deskId !== desk) return msg.type === LIVE_START ? card('other-desk-live') : { ...base, act: 'desk', fromWin: chat.winId, deskId: chat.deskId, badge: true, why: 'other-desk' };
+  if (chat.hidden) return card('hidden-chat');
+  if (chat.minimized) return card('minimized-chat');
+  if (chat.looking === true || (!!active && active === chat.winId)) return { ...base, act: 'beside', fromWin: chat.winId, badge: true, why: 'looking' };
+  return card('showing-quiet'); // inc-mvhebl4n-rkvr: shown, the person elsewhere on this desk — nothing moves under his hand
 }
 
 // Rule 3 — a SECOND top-level of a running app (a Chrome popup, a new Chrome window: the `fresh` satellite): an app a person

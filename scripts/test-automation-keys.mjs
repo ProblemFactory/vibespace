@@ -35,6 +35,13 @@
 //      key that lacks the verb ⇒ refused, the grant round trip (one card per verb) over a REAL feedback store, THE SAME
 //      store call as the owner's PATCH (a spy) · ⑮b MUTANT: a verb that writes data/feedback.json directly ⇒ the live store
 //      and the mirror never move ⇒ RED · the belt on feedback.list (another agent's words), the CLI over a loopback door
+//   ⑰ 编辑… (lane key-folder-picker-all — the owner 2026-10-21): a minted key's verbs and limits edited through the mint's
+//      own rules (PURE editPlan: scopes ⊆ the table, at least one, the audit words) and store write — the value, the digest
+//      and the grant kept; a verb ADDED rides the existing grant (no card), a verb REMOVED refused from the next call by name
+//      (verb_not_in_scope, with and without --key) · MUTANT: an edit without the scope rule stores an unknown / no verb ⇒ RED
+//      · the door (a person's; an agent's token human_only) · 「所有路径」 = exactly ['/'] said as all paths (the summary
+//      words, the CLI, the first-use card) and a folder «with subfolders»; THE VERDICT UNCHANGED (`/` admits any folder, an
+//      opening key with no folder refused)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -521,7 +528,7 @@ const runLimits = (mod, lims = LIMS) => LT.filter(([, spec, want]) => limWord(mo
   const mp2 = A.mintPlan({ name: 'opener', scopes: ['conversations.open'], limits: LIMS, randomBytes: crypto.randomBytes, sha256 });
   ok(mp.code === 'bad_args' && /at least one folder/.test(mp.why) && mp2.ok && JSON.stringify(mp2.record.limits) === JSON.stringify(A.limitsOf(LIMS)), 'mintPlan: a fresh opening key without a pick ⇒ refused by name (the owner picks); with one ⇒ the record carries it', { mp, lim: mp2.record && mp2.record.limits });
   ok(A.mintPlan({ name: 'x', scopes: ['conversations.open'], limits: null, randomBytes: crypto.randomBytes, sha256 }).code === 'bad_args', 'a NEW opening key can never be minted with no bounds (limits: null ⇒ bad_args — the owner must pick a folder)');
-  ok(A.limitsWords(LIMS) === `folders ${LROOT} · accounts ${POOL} · permission modes default, bypassPermissions · models opus, default · modes chat` && /refused until/.test(A.limitsWords(null)), 'limitsWords: names only; a null (pre-limits) key words the fail-closed state', A.limitsWords(LIMS));
+  ok(A.limitsWords(LIMS) === `folders ${LROOT} (with subfolders) · accounts ${POOL} · permission modes default, bypassPermissions · models opus, default · modes chat` && /refused until/.test(A.limitsWords(null)), 'limitsWords: names only; a null (pre-limits) key words the fail-closed state', A.limitsWords(LIMS));
 }
 console.log('⑪b MUTANTS — a lexical-only folder check; a root prefix without its slash');
 {
@@ -759,8 +766,9 @@ console.log('⑫d B-dbba — `conversations open --name` names the conversation 
   const p = e.use({ caller: caller({ conversationId: 'conv-8', sessionKey: 'claude:conv-8', name: 'Worker eight' }), verb: 'conversations.open', args: { cwd: IN, name: 'lane foo' }, want: k.key.id });
   await new Promise((r2) => setImmediate(r2));
   const c = cards(w);
-  ok(c.length === 1 && c[0].detail.startsWith(`This call would open "lane foo" in ${IN}.\n`) && c[0].i18n.detail.length === 3 && c[0].i18n.detail[0].params.name === 'lane foo' && c[0].i18n.detail[0].params.cwd === IN && /^Allow once/.test(c[0].i18n.detail[1].key) && /^The reach says/.test(c[0].i18n.detail[2].key),
-    'the card\'s words say the name and the folder (its first detail line, i18n with params), then the three answers', c[0] && { detail: c[0].detail, i18n: c[0].i18n.detail });
+  ok(c.length === 1 && c[0].detail.startsWith(`This call would open "lane foo" in ${IN}.\nThe key's folders: ${LROOT} (with their subfolders).\n`) && c[0].i18n.detail.length === 4 && c[0].i18n.detail[0].params.name === 'lane foo' && c[0].i18n.detail[0].params.cwd === IN
+    && c[0].i18n.detail[1].key === "The key's folders: {roots} (with their subfolders)." && c[0].i18n.detail[1].params.roots === LROOT && /^Allow once/.test(c[0].i18n.detail[2].key) && /^The reach says/.test(c[0].i18n.detail[3].key),
+    'the card\'s words say the name and the folder, the KEY\'s folders with their subfolders (lane key-folder-picker-all), then the three answers, then the reach (lane key-instance-scope)', c[0] && { detail: c[0].detail, i18n: c[0].i18n.detail });
   e.answer(c[0].action.askId, { answer: 'deny' });
   ok((await p).code === 'ask_denied', '…denied as before');
   const p2 = e.use({ caller: caller({ conversationId: 'conv-9', sessionKey: 'claude:conv-9' }), verb: 'conversations.open', args: { cwd: IN }, want: k.key.id });
@@ -852,17 +860,23 @@ console.log('⑭ THE WINDOW + THE CLI (text pins) — the 「未设边界」 chi
   const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
   const va = read('src/lib/vault-automation.js');
   ok(/if \(!key\.limits\.cwdRoots\.length\) \{\n\s+const chip = el\('span', 'vw-ak-unbounded', t\('Limits not set'\)\);/.test(va), 'THE CHIP (q-049 M1): an open key with no folders draws 「Limits not set」 (vw-ak-unbounded) — a pre-limits key reads as folderless and refuses every open');
-  ok(/const limB = opens \? el\('button', 'vw-btn vw-ak-limits-edit', t\('Limits…'\)\) : null;/.test(va) && /const syncLim = \(\) => \{ limWrap\.hidden = !\(openCb && openCb\.checked\); \};/.test(va), '边界… on a key that opens; the mint dialog\'s limits shown only while 开一个对话 is ticked (absent, never greyed)');
+  ok(/const editB = el\('button', 'vw-btn vw-ak-edit', t\('Edit…'\)\);/.test(va) && /const syncLim = \(\) => \{ limWrap\.hidden = !\(openCb && openCb\.checked\); \};/.test(va) && /const \{ node: verbs, boxes \} = verbPicks\(\[\]\);/.test(va) && /const vp = verbPicks\(key\.scopes\);/.test(va) && /limitsFollowOpen\(boxes, limWrap\);/.test(va) && /limitsFollowOpen\(vp\.boxes, limWrap\);/.test(va),
+    'lane key-folder-picker-all: 编辑… on EVERY key; 铸造… and 编辑… draw the SAME verb checkboxes (verbPicks — the key\'s own ticked) and show the limits only while 开一个对话 is ticked (absent, never greyed)');
+  ok(/const r = await post\(`\/api\/automation\/keys\/\$\{encodeURIComponent\(key\.id\)\}\/edit`, \{ scopes, \.\.\.\(scopes\.includes\(OPEN_VERB\) \? \{ limits: ed\.value\(\) \} : \{\}\) \}\);/.test(va) && /value: \(\) => \(\{ cwdRoots: allPick\.rb\.checked \? \[ALL_PATHS\] : roots\.slice\(\),/.test(va) && /if \(\/\^\\\/\+\$\/\.test\(p\)\) \{ allPick\.rb\.checked = true; syncSeg\(\); return; \}/.test(va),
+    '编辑… saves the verbs (+ the limits while it opens) through the edit door; 「所有路径」 writes exactly [\'/\'] — and adding `/` in the browser IS 「所有路径」, never a bare-slash chip');
   ok(!/\.disabled\s*=|setAttribute\('disabled'/.test(va), 'no control in the automation section is ever disabled (the owner\'s rule: no greyed controls)');
   const zhSrc = read('src/lib/i18n-zh.js'), jaSrc = read('src/lib/i18n-ja.js');
-  ok(zhSrc.includes('"Limits not set": "未设边界"') && zhSrc.includes('"Limits…": "边界…"') && jaSrc.includes('"Limits not set": "制限未設定"') && jaSrc.includes('"Limits…": "制限…"'), 'zh 「未设边界」/「边界…」 · ja 「制限未設定」/「制限…」');
+  ok(zhSrc.includes('"Limits not set": "未设边界"') && zhSrc.includes('"Edit…": "编辑…"') && jaSrc.includes('"Limits not set": "制限未設定"') && jaSrc.includes('"Edit…": "編集…"') && !zhSrc.includes('"Limits…"') && !jaSrc.includes('"Limits…"'), 'zh 「未设边界」/「编辑…」 · ja 「制限未設定」/「編集…」 (边界… is gone: 编辑… holds the limits)');
+  ok(zhSrc.includes('"All paths": "所有路径"') && zhSrc.includes('"Only these folders (with their subfolders)": "只有这些文件夹（含子文件夹）"') && zhSrc.includes('"Add this folder and its subfolders": "加入这个文件夹及其子文件夹"') && zhSrc.includes('"and its subfolders": "及子文件夹"') && zhSrc.includes('"Any folder on this VibeSpace, including your home": "这台 VibeSpace 上的任何文件夹，包括你的主目录"')
+    && jaSrc.includes('"All paths": "すべてのパス"') && jaSrc.includes('"Add this folder and its subfolders": "このフォルダーとそのサブフォルダーを追加"') && jaSrc.includes('"and its subfolders": "とそのサブフォルダー"') && zhSrc.includes('"The key\'s folders: all paths — any folder on this VibeSpace.": "这把 key 的文件夹：所有路径——这台 VibeSpace 上的任何文件夹。"'),
+    'zh 「所有路径」 / 「只有这些文件夹（含子文件夹）」 / 「加入这个文件夹及其子文件夹」 / 「及子文件夹」 (its title: 这台 VibeSpace 上的任何文件夹，包括你的主目录), the card\'s 「所有路径」 line · ja the same');
   // lane automation-open-permission-resolve (q-049 M2): the picker's `default` row says what the CLI's own setting IS now
   ok(/const pickWord = \(r, now, ch\) => \(r\.value !== 'default' \? t\(r\.label\) : now && now\.mode \? t\("The CLI's own setting \(now \{mode\}\)", \{ mode: modeWord\(now\.mode, ch\) \}\) : t\("The CLI's own setting"\)\);/.test(va) && /limitsEditor\(key\.limits, data, key\.permissionNow \|\| \(\(data && data\.limitChoices\) \|\| \{\}\)\.permissionNow \|\| null\)/.test(va) && /limitsEditor\(null, data, \(\(data && data\.limitChoices\) \|\| \{\}\)\.permissionNow \|\| null\)/.test(va),
     'THE PICKER (q-049 M2): its `default` row says 「CLI 自己的设置（现在是 X）」 — 边界… from the key\'s own resolution, 铸造… from the hub\'s folder; the plain words when the hub cannot say');
   ok(zhSrc.includes('"The CLI\'s own setting (now {mode})": "CLI 自己的设置（现在是 {mode}）"') && jaSrc.includes('"The CLI\'s own setting (now {mode})": "CLI 自身の設定（現在は {mode}）"') && zhSrc.includes('"its built-in default": "内置默认"') && jaSrc.includes('"its built-in default": "組み込みの既定"') && zhSrc.includes('"This call would open \\"{name}\\" in {cwd}.": "这次调用会在 {cwd} 开一个叫「{name}」的对话。"') && jaSrc.includes('"This call would open \\"{name}\\" in {cwd}.": "この呼び出しは {cwd} に「{name}」という対話を開きます。"') && zhSrc.includes('"This call would open a conversation in {cwd}."') && jaSrc.includes('"This call would open a conversation in {cwd}."'),
     'zh / ja: 「CLI 自己的设置（现在是 X）」, 「内置默认」, the card\'s open line (named and unnamed)');
   const CLI = R('data/bin/vibespace-api');
-  ok(CLI.limitsWords(LIM_OPEN) === `folders ${LROOT} · accounts any · permission modes default · models any · modes chat` && /refused until/.test(CLI.limitsWords(null)), 'the CLI words a key\'s limits (names only); a pre-limits key words the fail-closed state');
+  ok(CLI.limitsWords(LIM_OPEN) === `folders ${LROOT} (with subfolders) · accounts any · permission modes default · models any · modes chat` && /refused until/.test(CLI.limitsWords(null)), 'the CLI words a key\'s limits (names only); a pre-limits key words the fail-closed state');
   ok(/\\n  this key's limits: \$\{limitsWords\(data\.limits\)\}/.test(read('data/bin/vibespace-api')), 'the CLI\'s refusal line carries "this key\'s limits: …" whenever the hub sent them');
   const apiCli = read('data/bin/vibespace-api');
   ok(apiCli.includes("'the vault locked ⇒ every call answers vault_locked (exit 3): the user has already been told and a person unlocks it on this instance\\'s page — never ask them to unlock; wait, or do other work',") && !/tell the user; never ask for the password/.test(apiCli),
@@ -1034,7 +1048,8 @@ console.log('⑩ wiring pins');
   ok(VE.isSecretName('apikey:ak-000000000001') && R('src/vault.js').SECRETS_AT_REST.some((r) => r.entry === 'apikey:<key id>') && R('src/vault-inventory.js').GROUP_IDS.includes('automation') && R('src/vault-inventory.js').revealableOf('automation', 'apikey:ak-000000000001'),
     'the vault: apikey:<id> is a secret entry, SECRETS_AT_REST names it, the window lists «Automation keys» (revealable — only to hand to an outside party)');
   const routes = read('src/routes/automation.js');
-  ok(!/app\.(post|delete|put|patch)\('\/api\/agent\/automation\/[^']*grant/.test(routes) && (routes.match(/app\.(get|post|delete)\('\/api\/automation\//g) || []).length === 9 && (routes.match(/person\(/g) || []).length >= 9 && /app\.post\('\/api\/automation\/grants\/:grantId\/reach', person\(/.test(routes), 'NO agent route writes a grant; the nine owner doors (+ 边界…, 审计… — lane automation-open-limits; + a grant\'s reach — lane key-instance-scope) are person-only');
+  ok(!/app\.(post|delete|put|patch)\('\/api\/agent\/automation\/[^']*grant/.test(routes) && (routes.match(/app\.(get|post|delete)\('\/api\/automation\//g) || []).length === 10 && (routes.match(/person\(/g) || []).length >= 10 && /app\.post\('\/api\/automation\/grants\/:grantId\/reach', person\(/.test(routes) && /app\.post\('\/api\/automation\/keys\/:id\/edit', person\(\(req\) => engine\.edit\(String\(req\.params\.id\), \{ scopes: body\(req\)\.scopes, limits: body\(req\)\.limits \}, \{ by: byOf\(req\) \}\)\)\);/.test(routes),
+    'NO agent route writes a grant; the ten owner doors (+ 边界…, 审计… — lane automation-open-limits; + a grant\'s reach — lane key-instance-scope; + 编辑… — lane key-folder-picker-all) are person-only');
   ok(/name: 'test-automation-keys', tier: 'fast'/.test(read('scripts/ci.mjs')), 'this suite has its tier row');
 }
 
@@ -1154,6 +1169,107 @@ console.log('⑮ THE FEEDBACK VERBS (lane feedback-handled-verb — the owner 20
   const CLI = R('data/bin/vibespace-api');
   ok(CLI.USAGE.includes('vibespace-api call feedback.list') && CLI.USAGE.includes('vibespace-api call feedback.handled --id <fb-…> --version <2.369.NNN> [--note "…"]'), 'the CLI\'s usage names the two calls (`call` is generic: the hub\'s table judges every verb)');
   ok(A.CODES.write_failed === 503 && /write_failed: 'the change could not be written on the server/.test(fs.readFileSync(path.join(ROOT, 'src/routes/automation.js'), 'utf8')), 'a store that could not write ⇒ 503 write_failed, worded at the door');
+}
+
+console.log('⑰ 编辑… — a minted key\'s verbs and limits after minting (lane key-folder-picker-all); 「所有路径」 and «with subfolders» in words');
+{
+  // THE EDIT VERDICT (PURE editPlan — the mint's own scope rule + limitsPlan over the NEW verbs)
+  const k0 = A.keyOf(K({ scopes: ['conversations.rename'] }));
+  const e1 = A.editPlan(k0, { scopes: ['feedback.list', 'conversations.rename', 'feedback.handled', 'feedback.list'] });
+  ok(e1.ok && e1.scopes.join() === 'conversations.rename,feedback.handled,feedback.list' && e1.added.join() === 'feedback.handled,feedback.list' && !e1.removed.length && JSON.stringify(e1.limits) === JSON.stringify(k0.limits),
+    'editPlan: the new verbs ⊆ the table, each once, in the table\'s order; added / removed named; the limits the key\'s own when none came', e1);
+  eq(A.scopesChangeWords(e1), 'scopes changed by the owner: +feedback.handled +feedback.list', 'the audit words of the change');
+  eq(A.scopesChangeWords(A.editPlan(k0, { scopes: ['feedback.list'] })), 'scopes changed by the owner: +feedback.list -conversations.rename', '…a removal says -verb');
+  const bads = [[[], /a key needs at least one verb/], [['files.delete'], /no such verb "files\.delete"/], [['conversations.rename', 'nope'], /no such verb "nope"/], ['conversations.rename', /a key needs at least one verb/], [null, /a key needs at least one verb/]];
+  const missed = bads.filter(([sc, re]) => { const r = A.editPlan(k0, { scopes: sc }); return r.ok || r.code !== 'bad_args' || !re.test(r.why); }).map(([sc]) => JSON.stringify(sc));
+  ok(!missed.length, `editPlan refuses BY NAME (bad_args) what the mint refuses: no verb, an unknown verb, not a list (${bads.length} picks)`, missed);
+  const toOpen = A.editPlan(k0, { scopes: ['conversations.rename', 'conversations.open'] });
+  const toOpenAll = A.editPlan(k0, { scopes: ['conversations.rename', 'conversations.open'], limits: { ...LIM_OPEN, cwdRoots: ['/'] } });
+  ok(toOpen.code === 'bad_args' && /at least one folder/.test(toOpen.why) && toOpenAll.ok && JSON.stringify(toOpenAll.limits.cwdRoots) === '["/"]' && toOpenAll.added.join() === 'conversations.open',
+    'a key that NOW opens conversations names its folders (limitsPlan over the new verbs — fail closed); 「所有路径」 is exactly ["/"]', { toOpen, roots: toOpenAll.limits && toOpenAll.limits.cwdRoots });
+  ok(/const sc = scopesPlan\(scopes\);\n  if \(!sc\.ok\) return sc;\n  const lim = limitsPlan\(limits === undefined \? \{\} : limits, sc\.scopes\);/.test(SRC) && /const sc = scopes === undefined \? \{ ok: true, scopes: k\.scopes \} : scopesPlan\(scopes\);/.test(SRC),
+    'mintPlan and editPlan call THE scope rule (scopesPlan) — one rule, two doors');
+  // MUTANT: an edit that takes the verbs raw (no scope rule) ⇒ an unknown verb and an empty key are stored ⇒ the rows above RED
+  const MX = M.load('src/automation-keys.js', SRC.replace('const sc = scopes === undefined ? { ok: true, scopes: k.scopes } : scopesPlan(scopes);', 'const sc = { ok: true, scopes: scopes === undefined ? k.scopes : scopes };'), 'edit-raw');
+  const mxBad = bads.filter(([sc, re]) => { let r; try { r = MX.editPlan(k0, { scopes: sc }); } catch { return true; } return r.ok || r.code !== 'bad_args' || !re.test(r.why); }).length;   // a throw is no refusal by name either
+  ok(mxBad >= 3 && MX.editPlan(k0, { scopes: ['files.delete'] }).ok, `MUTANT RED: an edit without the mint's scope rule lets ${mxBad} of ${bads.length} refused picks through (an unknown verb stored as ${JSON.stringify(MX.editPlan(k0, { scopes: ['files.delete'] }).scopes)})`);
+  // PURE pickKey: the keys THIS caller holds lack the verb ⇒ verb_not_in_scope naming them (never a not_granted that reads as «ask
+  // for a grant»); a caller holding no key ⇒ not_granted as before
+  const kA = K({ scopes: ['conversations.rename'] });
+  const pk = A.pickKey({ keys: [kA], grants: [G()], subject: 'session:conv-1', verb: 'feedback.list' });
+  ok(pk.code === 'verb_not_in_scope' && pk.names.join() === 'dispatch' && A.pickKey({ keys: [kA], grants: [], subject: 'session:conv-1', verb: 'feedback.list' }).code === 'not_granted' && A.pickKey({ keys: [kA], grants: [G({ mode: 'once', spentAt: NOW })], subject: 'session:conv-1', verb: 'feedback.list' }).code === 'not_granted' && A.pickKey({ keys: [kA], grants: [G({ subject: 'session:conv-2' })], subject: 'session:conv-1', verb: 'feedback.list' }).code === 'not_granted',
+    'pickKey: a granted key that lacks the verb ⇒ verb_not_in_scope, the key named; no live grant for this caller ⇒ not_granted as before', pk);
+
+  // THE ENGINE — the owner's case: a key granted BEFORE .332's feedback verbs gets them
+  const listed = [];
+  const w = await mkWorld('edit', { verbs: { 'conversations.rename': (args) => ({ ok: true, name: args.name }), 'feedback.list': () => { listed.push(1); return { ok: true, open: 0, reports: [] }; }, 'feedback.handled': () => ({ ok: true }) } });
+  const m = w.engine.mint({ name: 'maintainer', scopes: ['conversations.rename'], by: 'user' });
+  const STORE = path.join(w.dir, A.STORE_FILE);
+  const value0 = w.vault.secretGet(`apikey:${m.key.id}`).value.toString();
+  const digest0 = JSON.parse(fs.readFileSync(STORE, 'utf8')).keys[0].digest;
+  w.engine.grant(m.key.id, ['session:conv-1'], { by: 'user' });
+  const before = await w.engine.use({ caller: caller(), verb: 'feedback.list', args: {} });
+  ok(before.code === 'verb_not_in_scope' && /"?maintainer"?\) does not hold feedback\.list — the owner adds it with Edit… in the Vault window/.test(before.why) && !listed.length && !cards(w).length, 'BEFORE: the key granted to this conversation lacks feedback.list ⇒ verb_not_in_scope naming the key and the door (no card — nothing to grant)', before);
+  const ed = w.engine.edit(m.key.id, { scopes: ['conversations.rename', 'feedback.handled', 'feedback.list'] }, { by: 'user' });
+  const st = JSON.parse(fs.readFileSync(STORE, 'utf8'));
+  ok(ed.ok && ed.key.scopes.join() === 'conversations.rename,feedback.handled,feedback.list' && st.keys[0].scopes.join() === ed.key.scopes.join() && st.keys[0].digest === digest0 && w.vault.secretGet(`apikey:${m.key.id}`).value.toString() === value0 && st.grants.length === 1 && (fs.statSync(STORE).mode & 0o777) === 0o600,
+    'edit: the record holds the new verbs (0600, the same store write as the mint); its digest, its vault VALUE and its grant unchanged', { ed, keys: st.keys });
+  const sl = auditOf(w).filter((l) => l.verb === 'key.scopes');
+  ok(sl.length === 1 && sl[0].note === 'scopes changed by the owner: +feedback.handled +feedback.list' && sl[0].key === m.key.id && sl[0].subject === 'owner' && sl[0].ok && sl[0].by === 'user' && !auditOf(w).some((l) => l.verb === 'key.limits'),
+    'ONE audit line «scopes changed by the owner: +feedback.handled +feedback.list» (no key.limits line — no limits came)', sl);
+  const added = await w.engine.use({ caller: caller(), verb: 'feedback.list', args: {} });
+  ok(added.ok && listed.length === 1 && !cards(w).length, 'a verb ADDED rides the existing Always grant — it runs at once, NO new first-use card (a grant is per key × conversation)', added);
+  const ed2 = w.engine.edit(m.key.id, { scopes: ['conversations.rename', 'feedback.handled'] });
+  const gone1 = await w.engine.use({ caller: caller(), verb: 'feedback.list', args: {} });
+  const gone2 = await w.engine.use({ caller: caller(), verb: 'feedback.list', args: {}, want: 'maintainer' });
+  ok(ed2.ok && ed2.removed.join() === 'feedback.list' && gone1.code === 'verb_not_in_scope' && gone2.code === 'verb_not_in_scope' && /the key "maintainer" does not hold feedback\.list/.test(gone2.why) && listed.length === 1 && !cards(w).length,
+    'a verb REMOVED ⇒ refused from the NEXT call by name (verb_not_in_scope — the hub\'s pick and --key alike); nothing ran, no card', { gone1, gone2 });
+  ok(auditOf(w).filter((l) => l.verb === 'key.scopes').pop().note === 'scopes changed by the owner: -feedback.list', '…its audit line says the removal');
+  const disk = fs.readFileSync(STORE, 'utf8');
+  ok(w.engine.edit(m.key.id, { scopes: [] }).code === 'bad_args' && w.engine.edit(m.key.id, { scopes: ['files.delete'] }).code === 'bad_args' && w.engine.edit('ak-ffffffffffff', { scopes: ['conversations.rename'] }).code === 'not_found' && fs.readFileSync(STORE, 'utf8') === disk,
+    'an edit to no verb / an unknown verb ⇒ bad_args by name (the store untouched); an unknown key ⇒ not_found');
+  const noLim = w.engine.edit(m.key.id, { scopes: ['conversations.rename', 'conversations.open'] });
+  const allLim = w.engine.edit(m.key.id, { scopes: ['conversations.rename', 'conversations.open'], limits: { ...LIM_OPEN, cwdRoots: ['/'] } });
+  ok(noLim.code === 'bad_args' && /at least one folder/.test(noLim.why) && allLim.ok && JSON.stringify(allLim.key.limits.cwdRoots) === '["/"]' && auditOf(w).slice(-2).map((l) => l.verb).join() === 'key.scopes,key.limits',
+    'opening added: refused without a folder; with 「所有路径」 ⇒ stored exactly ["/"], audited key.scopes + key.limits', { noLim, roots: allLim.key && allLim.key.limits.cwdRoots });
+  // THE DOOR — a person's (POST /api/automation/keys/:id/edit); an agent's token never edits a key
+  const express = require(path.join(ROOT, 'node_modules/express'));
+  const app = express(); app.use(express.json());
+  require(path.join(ROOT, 'src/routes/automation.js')).registerAutomationRoutes(app, { engine: w.engine, callerOf: (t) => (t === 'vsst_ed' ? caller() : null) });
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const page = { 'Content-Type': 'application/json', origin: base, 'sec-fetch-site': 'same-origin' };
+  const go = async (method, u, { headers = {}, body } = {}) => { const r = await fetch(base + u, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; };
+  const asAgent = await go('POST', `/api/automation/keys/${m.key.id}/edit`, { headers: { ...page, Authorization: 'Bearer vsst_ed' }, body: { scopes: ['conversations.rename', 'feedback.list'] } });
+  const asPerson = await go('POST', `/api/automation/keys/${m.key.id}/edit`, { headers: page, body: { scopes: ['conversations.rename', 'feedback.list'] } });
+  const badPick = await go('POST', `/api/automation/keys/${m.key.id}/edit`, { headers: page, body: { scopes: [] } });
+  ok(asAgent.status === 403 && asAgent.body.code === 'human_only' && asPerson.status === 200 && asPerson.body.key.scopes.join() === 'conversations.rename,feedback.list' && JSON.stringify(asPerson.body.key.limits.cwdRoots) === '["/"]' && badPick.status === 400 && /at least one verb/.test(badPick.body.error),
+    '编辑…\'s door: an agent\'s token ⇒ 403 human_only; a person\'s edit ⇒ 200 (no limits sent ⇒ the key\'s own kept); no verb ⇒ 400 naming it', { asAgent: asAgent.body, asPerson: asPerson.body, badPick: badPick.body });
+  srv.close();
+  const m2 = w.engine.mint({ name: 'gone', scopes: ['conversations.rename'] });
+  w.engine.revoke(m2.key.id);
+  ok(w.engine.edit(m2.key.id, { scopes: ['feedback.list'] }).code === 'key_revoked', 'a revoked key is not editable (key_revoked)');
+  w.vault.lock('door');
+  ok(w.engine.edit(m.key.id, { scopes: ['conversations.rename'] }).code === 'vault_locked', 'LOCKED ⇒ an edit answers vault_locked (like the mint)');
+
+  // 「所有路径」 IN WORDS — the summary, the CLI, the first-use card; THE VERDICT UNCHANGED
+  const ALL = { ...LIM_OPEN, cwdRoots: ['/'] };
+  const CLI = R('data/bin/vibespace-api');
+  ok(A.ALL_PATHS === '/' && A.allPaths(ALL) && !A.allPaths(LIM_OPEN) && A.limitsWords(ALL) === 'folders all paths · accounts any · permission modes default · models any · modes chat' && A.limitsWords(LIM_OPEN).startsWith(`folders ${LROOT} (with subfolders) · `) && CLI.limitsWords(ALL) === A.limitsWords(ALL) && CLI.limitsWords(LIM_OPEN) === A.limitsWords(LIM_OPEN),
+    'the summary words (PURE limitsWords and the CLI\'s twin): `/` ⇒ «all paths», never a bare slash; a folder ⇒ «(with subfolders)»', [A.limitsWords(ALL), CLI.limitsWords(LIM_OPEN)]);
+  ok(A.openLimitsVerdict(ALL, { cwd: TMP }, { realpath: (q) => fs.realpathSync(q) }).ok && A.openLimitsVerdict(ALL, { cwd: '/etc' }, { realpath: (q) => fs.realpathSync(q) }).ok && A.limitsPlan({ ...LIM_OPEN, cwdRoots: [] }, ['conversations.open']).code === 'bad_args' && A.openLimitsVerdict({ ...LIM_OPEN, cwdRoots: [] }, { cwd: TMP }).code === 'cwd_outside_roots',
+    'THE VERDICT IS UNCHANGED: `/` admits any folder (a root covers its subfolders); an opening key with NO folder is refused at the door and at the open (q-049 M1, fail closed)');
+  const rig = judgeRig();
+  const w2 = await mkWorld('edit-card');
+  const e = judgeEngine(ENG, w2, rig);
+  const ka = e.mint({ name: 'anywhere', scopes: ['conversations.open'], limits: ALL });
+  const pc = e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN, name: 'w' }, want: ka.key.id });
+  await new Promise((r2) => setImmediate(r2));
+  const c = cards(w2);
+  ok(c.length === 1 && c[0].i18n.detail.length === 4 && /^The reach says/.test(c[0].i18n.detail[3].key) && c[0].i18n.detail[1].key === "The key's folders: all paths — any folder on this VibeSpace." && !c[0].i18n.detail[1].params && c[0].detail.includes("\nThe key's folders: all paths — any folder on this VibeSpace.\n"),
+    'the first-use card of an all-paths key says 「所有路径」 (its own line, i18n — never a bare `/`)', c[0] && c[0].i18n.detail);
+  e.answer(c[0].action.askId, { answer: 'deny' });
+  ok((await pc).code === 'ask_denied' && !rig.calls.length, '…denied: nothing opened');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

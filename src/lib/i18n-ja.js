@@ -5132,6 +5132,8 @@ export default {
   "Pinch-zoom works while you watch — hand back to zoom the picture": "ピンチズームは閲覧中のみ使えます — 戻すと画面を拡大縮小できます",
   "Watch mode — the agent is driving; pinch to zoom, press Take over to send input": "閲覧モード — エージェントが操作中。ピンチで拡大縮小、入力するには「引き継ぐ」を押してください",
   "The agent opened its browser — it is shown here": "エージェントがブラウザを開きました — ここに表示しています",
+  "The agent wants to show you this design": "エージェントがこのデザインを見せようとしています",
+  "Open the Design window": "デザインウィンドウを開く",
   "Back to the chat": "チャットに戻る",
   // lane S1 (B-6e95): a helper's permission ask — the waiting chip, the helper's card, the For-you item
   "Helper “{name}”": "ヘルパー「{name}」",
@@ -8635,7 +8637,7 @@ export default {
   "A Flatpak or Snap app, and a browser, asks a desktop portal for its file dialogs; VibeSpace starts one on the app's own display, so the dialog opens inside its window, not on your main desktop (3 more processes per app, gone with it). Every app: GTK apps too. Off: as before. Applies to apps started after the change.": "Flatpak や Snap のアプリとブラウザはファイルダイアログをデスクトップポータルに頼みます。VibeSpace はアプリ自身のディスプレイにポータルを起動するので、ダイアログはメインデスクトップではなくそのウィンドウ内に開きます（アプリごとに 3 プロセス、アプリと一緒に終了）。すべてのアプリ：GTK アプリも。オフ：従来どおり。変更後に起動したアプリに適用されます。",
   "file dialogs in this window (3 processes)": "ファイルダイアログはこのウィンドウ内（3 プロセス）",
   "file dialogs on your main desktop — {why}": "ファイルダイアログはメインデスクトップに — {why}",
-  "OFF (the default): a window an agent opens — its own browser, an app it starts, a second window of that app, its live view, a Design it opens — is placed beside the agent's chat (or on that chat's desktop), behind what you are doing, and its taskbar entry pulses; it never takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.": "オフ（既定）：agent が開くウィンドウ（自分のブラウザ、起動したアプリ、そのアプリの 2 つ目のウィンドウ、ライブビュー、開いたデザイン）は、その agent のチャットの横（またはそのチャットのデスクトップ）に、作業中のウィンドウの後ろに置かれ、タスクバーの項目が点滅します。フォーカスを奪うこともデスクトップを切り替えることもありません。オン：以前どおり前面に出てフォーカスを取ります。",
+  "OFF (the default): a window an agent opens — its own browser, an app it starts, its live view, a Design it opens — opens beside the agent's chat only while you are in that chat (or on that chat's desktop when it is another one); anywhere else nothing on your desk moves — the chat gets a card and a taskbar badge, and the window opens when you press Open. A second window of an app it started is placed behind what you are doing. None of them takes your focus or switches your desktop. ON: it comes to the front and takes the focus, as before.": "オフ（既定）：agent が開くウィンドウ（自分のブラウザ、起動したアプリ、ライブビュー、開いたデザイン）は、あなたがその agent のチャットにいるときだけチャットの横に開きます（そのチャットが別のデスクトップにあるときはそのデスクトップに開きます）。それ以外のときはデスクの配置は変わりません — チャットにカードが残り、タスクバーにバッジが付き、「開く」を押したときにウィンドウが開きます。起動したアプリの 2 つ目のウィンドウは作業中のウィンドウの後ろに置かれます。どれもフォーカスを奪わず、デスクトップも切り替えません。オン：以前どおり前面に出てフォーカスを取ります。",
   "This page is not https, so the browser gives it no microphone — open it over https, or on this computer at {url}": "このページは https ではないため、ブラウザーがマイクを渡しません——https で開くか、このコンピューターで {url} を開いてください",
   "The browser refused the microphone — allow it in the site permissions in the address bar": "ブラウザーがマイクを拒否しました——アドレスバーのサイトの権限で許可してください",
   "No microphone was found on this device": "このデバイスにマイクが見つかりません",
@@ -9276,6 +9278,18 @@ export default {
   "{name} drives {machine}’s desktop — any key or click of yours pauses it": "{name} が {machine} のデスクトップを操作中 — あなたのキー操作やクリックで一時停止します", // lane desktop-handover
   "No agent conversation is running — start one, then come back.": "実行中のエージェントの会話がありません — 始めてから戻ってください。", // lane desktop-handover
   "Add these words to your Dropline dictionary": "これらの語を Dropline の辞書に追加", // lane foryou-plugin-notices
+  "Dictionary suggestions": "辞書の提案", // lane voice-dictionary-nag
+  "On: words Dropline did not know in your dictations are suggested — listed here, each with Add and Ignore. Ignore (or ✕ on the For you item) means not now: the word comes back only when you say it again. Off: nothing is suggested.": "オン：口述の中で Dropline が知らなかった語を提案します——ここに一覧し、それぞれ「辞書に追加」と「無視」があります。「無視」（または「あなた宛て」の項目で ✕）= 今はしない：その語はもう一度話したときにだけ再び提案されます。オフ：何も提案しません。", // lane voice-dictionary-nag
+  "Where dictionary suggestions wait": "辞書の提案を置く場所", // lane voice-dictionary-nag
+  "One item in For you (the default): at most one at a time, never above urgent asks — a later batch joins it. Only here in Settings: never a For you item; the words wait in the list above.": "「あなた宛て」の 1 件（既定）：同時に最大 1 件、緊急の項目より上には出ず、後の提案はその 1 件に加わります。設定だけ：「あなた宛て」には出さず、語は上の一覧で待ちます。", // lane voice-dictionary-nag
+  "One item in For you": "「あなた宛て」の 1 件", // lane voice-dictionary-nag
+  "Only here in Settings": "設定だけ", // lane voice-dictionary-nag
+  "Suggested words ({n})": "提案中の語（{n}）", // lane voice-dictionary-nag
+  "No word is suggested now — words Dropline did not know in your dictations appear here.": "いま提案中の語はありません——口述の中で Dropline が知らなかった語がここに出ます。", // lane voice-dictionary-nag
+  "Add to dictionary": "辞書に追加", // lane voice-dictionary-nag
+  "Ignore": "無視", // lane voice-dictionary-nag
+  "“{term}” was added to your Dropline dictionary": "「{term}」を Dropline の辞書に追加しました", // lane voice-dictionary-nag
+  "“{term}” comes back only when you say it again": "「{term}」はもう一度話したときにだけ再び提案されます", // lane voice-dictionary-nag
   "That plugin is not on this instance any more": "このプラグインはもうこのインスタンスにありません", // lane foryou-plugin-notices
   "That suggestion was already added or ignored. Nothing waits for it.": "この候補は追加済みか無視済みです。待っているものはありません。", // lane foryou-plugin-notices
   "Direct path": "直接接続", // lane stream-stats-popup
@@ -9605,12 +9619,10 @@ export default {
   "Modes": "モード", // lane automation-open-limits
   "No folder yet": "まだフォルダーがありません", // lane automation-open-limits
   "Parent folder": "親フォルダー", // lane automation-open-limits
-  "Add this folder": "このフォルダーを追加", // lane automation-open-limits
   "A folder is an absolute path": "フォルダーは絶対パスで指定します", // lane automation-open-limits
   "Any account": "任意のアカウント", // lane automation-open-limits
   "Any model": "任意のモデル", // lane automation-open-limits
   "Another model id": "別のモデル ID", // lane automation-open-limits
-  "Limits of \"{name}\"": "「{name}」の制限", // lane automation-open-limits
   "This key has no folders yet — what you save here becomes its bounds. Until you set at least one folder, every conversation it would open is refused.": "このキーにはまだフォルダーがありません——ここで保存した内容が制限になります。フォルダーを 1 つ以上設定するまで、このキーで開こうとする会話はすべて拒否されます。", // lane automation-open-limits (q-049 M1)
   "Audit of \"{name}\"": "「{name}」の監査ログ", // lane automation-open-limits
   "No audit line for this key yet": "このキーの監査ログはまだありません", // lane automation-open-limits
@@ -9622,8 +9634,16 @@ export default {
   "No settings file sets a permission mode — the CLI runs its built-in default": "権限モードを設定するファイルはありません —— CLI は組み込みの既定で動きます",
   "This call would open \"{name}\" in {cwd}.": "この呼び出しは {cwd} に「{name}」という対話を開きます。",
   "This call would open a conversation in {cwd}.": "この呼び出しは {cwd} に対話を開きます。",
-  "No folders are set — every conversation it would open is refused until you set them with Limits…": "フォルダーが未設定です——「制限…」で設定するまで、このキーで開こうとする会話はすべて拒否されます", // lane automation-open-limits (q-049 M1)
-  "Limits…": "制限…", // lane automation-open-limits
+  "All paths": "すべてのパス", // lane key-folder-picker-all
+  "Any folder on this VibeSpace, including your home": "この VibeSpace 上のどのフォルダーでも（あなたのホームを含む）", // lane key-folder-picker-all
+  "Only these folders (with their subfolders)": "これらのフォルダーだけ（サブフォルダーを含む）", // lane key-folder-picker-all
+  "Add this folder and its subfolders": "このフォルダーとそのサブフォルダーを追加", // lane key-folder-picker-all
+  "and its subfolders": "とそのサブフォルダー", // lane key-folder-picker-all
+  "Edit \"{name}\"": "「{name}」を編集", // lane key-folder-picker-all
+  "A verb you add works at once wherever this key is granted — a grant is for the key and a conversation, not for each verb; a verb you take away is refused from its next call.": "追加した操作は、このキーが許可されている所ですぐに使えます——許可はキーと会話の組に対するもので、操作ごとではありません。外した操作は次の呼び出しから拒否されます。", // lane key-folder-picker-all
+  "No folders are set — every conversation it would open is refused until you set them with Edit…": "フォルダーが未設定です——「編集…」で設定するまで、このキーで開こうとする会話はすべて拒否されます", // lane key-folder-picker-all
+  "The key's folders: all paths — any folder on this VibeSpace.": "このキーのフォルダー：すべてのパス——この VibeSpace 上のどのフォルダーでも。", // lane key-folder-picker-all
+  "The key's folders: {roots} (with their subfolders).": "このキーのフォルダー：{roots}（サブフォルダーを含む）。", // lane key-folder-picker-all
   "Audit…": "監査ログ…", // lane automation-open-limits
   "What the conversations it opens may use": "開く会話が使えるもの", // lane automation-open-limits
   "waiting for the relay admin to register it": "リレー管理者の登録待ち", // lane relay-token-per-instance

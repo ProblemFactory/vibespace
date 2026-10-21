@@ -9,7 +9,7 @@ module.exports = {
   id: 'voice-input',
   label: 'Voice input · Dropline',
   description: 'Dictate into the chat box with your own Dropline: click the microphone, speak, click again — the text lands at your cursor, written with your Dropline dictionary. Connect your Fish Audio account (or paste a Dropline key) to turn it on.',
-  provides: ['dictation', 'reminders'], // reminders (lane foryou-plugin-notices): its dictionary suggestions file For-you items, pinned under urgent
+  provides: ['dictation', 'reminders'], // reminders (lane foryou-plugin-notices): its dictionary suggestions file For-you items — ONE at a time, filed low, never pinned (lane voice-dictionary-nag)
   create(h) {
     const keyed = () => {
       const st = typeof h.opts.integrations === 'function' ? h.opts.integrations() : h.opts.integrations;

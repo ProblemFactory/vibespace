@@ -15,9 +15,13 @@
 // as a chip of its own — 只有它开的会话 (the default) · 这些岗位的会话 (its Task Groups) · 整个 VibeSpace (RED, its title: this key may
 // act on every conversation here, including yours); a click opens the reach dialog (the same store write the first-use
 // card makes — POST /api/automation/grants/:id/reach); 授权给… picks the reach of the grants it adds.
+// Lane key-folder-picker-all (the owner 2026-10-21: 「这个不能选"所有路径"嘛？或者至少"所有子文件夹"吧。」 and 「我之前授权给你的 key 似乎
+// 没法改变"能做什么"」): 编辑… on every key changes its verbs (the mint's checkboxes) and — while 开一个对话 is ticked — its
+// limits, through the mint's own rules (POST …/keys/:id/edit); the folders offer 「所有路径」 (exactly `['/']`, red-tinted)
+// or 「只有这些文件夹（含子文件夹）」 (the browser), and every folder says it covers its subfolders.
 import { t } from './i18n.js';
 import { fetchJson, showToast, showConfirmDialog, createModalShell } from './utils.js';
-import { SCOPES } from '../automation-keys.js'; // PURE: the closed table of verbs (their words)
+import { SCOPES, ALL_PATHS } from '../automation-keys.js'; // PURE: the closed table of verbs (their words); `/` = 「所有路径」
 import { BACKEND_META } from './agent-meta.js';
 import { enterSubmits } from './chat-enter-keys.js'; // an Enter that ends an IME composition never submits
 import { REACH_CHOICES, reachWord, reachTitle, kindOf, groupsOf } from './automation-reach.js'; // lane key-instance-scope: ONE spelling of the reach's words
@@ -32,6 +36,9 @@ const FRESH_LIMITS = { cwdRoots: [], accounts: [], permissionModes: ['default'],
 const MODE_WORDS = { chat: () => t('Chat'), terminal: () => t('Terminal') };
 const SUBSCRIPTION = 'subscription';
 const joinPath = (dir, name) => (dir === '/' ? '/' + name : `${dir}/${name}`);
+let akFolderSeq = 0;   // the folders' two radios get a group name of their own per editor
+/** A key's folders in words: 「所有路径」 for `/`, else each root «及子文件夹» (a root always covered its subfolders). */
+const folderWords = (roots) => (roots.includes(ALL_PATHS) ? t('All paths') : roots.length ? roots.map((r) => `${r} ${t('and its subfolders')}`).join(', ') : t('none'));
 /** A labelled checkbox (the window's multi-select rows) → { node, cb }. */
 function limitPick(value, words, checked, cls = 'vw-ak-pick') {
   const lab = el('label', cls);
@@ -63,19 +70,32 @@ function limitsParts(limits, data) {
   const acct = (id) => (id === SUBSCRIPTION ? t("The CLI's own login") : ((ch.accounts || []).find((a) => a.id === id) || {}).name || id);
   const perm = (v) => { const r = choiceRows(ch.permissionModes, [v]).find((x) => x.value === v); return r ? choiceWord(r) : v; };
   return [
-    `${t('Folders')}: ${list(limits.cwdRoots, (x) => x)}`, `${t('Accounts')}: ${list(limits.accounts, acct)}`, `${t('Permission modes')}: ${list(limits.permissionModes, perm)}`,
+    `${t('Folders')}: ${folderWords(limits.cwdRoots || [])}`, `${t('Accounts')}: ${list(limits.accounts, acct)}`, `${t('Permission modes')}: ${list(limits.permissionModes, perm)}`,
     `${t('Models')}: ${list(limits.models, (x) => (x === 'default' ? t("The CLI's own setting") : x))}`, `${t('Modes')}: ${list(limits.modes, (m) => (MODE_WORDS[m] ? MODE_WORDS[m]() : m))}`,
   ];
 }
 
-/** THE LIMITS EDITOR (铸造… and 边界…) → { node, value() }. `initial` null = a fresh mint: the editor starts from a fresh
+/** THE LIMITS EDITOR (铸造… and 编辑…) → { node, value() }. `initial` null = a fresh mint: the editor starts from a fresh
  *  key's limits and NOTHING changes until the owner saves (a pre-limits key now reads as those same folderless limits). */
 function limitsEditor(initial, data, now = null) {
   const ch = (data && data.limitChoices) || { accounts: [], permissionModes: [], models: [] };
   const L = initial || FRESH_LIMITS;
   const box = el('div', 'vw-ak-limits');
-  // FOLDERS — a picker over the hub's file tree (GET /api/files, the file explorer's door), multi: each added folder a chip
-  const roots = [...(L.cwdRoots || [])];
+  // FOLDERS — lane key-folder-picker-all: two choices ABOVE the browser — 「所有路径」 (exactly `['/']`: any folder here, your
+  // home included — red-tinted, its title says so) and 「只有这些文件夹（含子文件夹）」: a picker over the hub's file tree (GET
+  // /api/files, the file explorer's door), multi — each added folder a chip that says it covers its subfolders
+  const roots = (L.cwdRoots || []).filter((r) => r !== ALL_PATHS);
+  const seg = el('div', 'vw-ak-seg');
+  const segName = `vw-ak-folders-${++akFolderSeq}`;
+  const segPick = (value, words, cls) => { const lab = el('label', `vw-ak-pick ${cls}`); const rb = el('input'); rb.type = 'radio'; rb.name = segName; rb.value = value; lab.append(rb, el('span', null, words)); seg.append(lab); return { node: lab, rb }; };
+  const allPick = segPick('all', t('All paths'), 'vw-ak-allpaths');
+  allPick.node.title = t('Any folder on this VibeSpace, including your home');
+  const somePick = segPick('some', t('Only these folders (with their subfolders)'), 'vw-ak-somepaths');
+  allPick.rb.checked = (L.cwdRoots || []).includes(ALL_PATHS);
+  somePick.rb.checked = !allPick.rb.checked;
+  const some = el('div', 'vw-ak-some');
+  const syncSeg = () => { some.hidden = allPick.rb.checked; };
+  allPick.rb.onchange = syncSeg; somePick.rb.onchange = syncSeg;
   const chips = el('div', 'vw-ak-roots');
   const drawRoots = () => chips.replaceChildren(...(roots.length ? roots.map((r) => {
     const c = el('span', 'vw-ak-chip vw-ak-root');
@@ -83,7 +103,7 @@ function limitsEditor(initial, data, now = null) {
     const x = el('button', 'vw-ak-x', '✕');
     x.type = 'button'; x.title = t('Remove'); x.setAttribute('aria-label', x.title);
     x.onclick = () => { roots.splice(roots.indexOf(r), 1); drawRoots(); };
-    c.append(el('span', null, r), x);
+    c.append(el('span', null, r), el('span', 'vw-ak-sub', t('and its subfolders')), x);
     return c;
   }) : [el('span', 'vw-ak-none', t('No folder yet'))]));
   drawRoots();
@@ -92,7 +112,7 @@ function limitsEditor(initial, data, now = null) {
   up.type = 'button'; up.title = t('Parent folder'); up.setAttribute('aria-label', up.title);
   const pathIn = el('input', 'vw-ak-path');
   pathIn.type = 'text'; pathIn.spellcheck = false; pathIn.setAttribute('aria-label', t('Folder'));
-  const add = el('button', 'vw-btn vw-ak-add-root', t('Add this folder'));
+  const add = el('button', 'vw-btn vw-ak-add-root', t('Add this folder and its subfolders'));
   add.type = 'button';
   here.append(up, pathIn, add);
   const dirs = el('div', 'vw-ak-dirs');
@@ -110,8 +130,15 @@ function limitsEditor(initial, data, now = null) {
   };
   up.onclick = () => go(cur.replace(/\/[^/]+\/?$/, '') || '/');
   pathIn.onkeydown = (e) => { if (enterSubmits(e)) { e.preventDefault(); go(pathIn.value.trim()); } };
-  add.onclick = () => { const p = pathIn.value.trim() || cur; if (!p.startsWith('/')) { showToast(t('A folder is an absolute path'), { type: 'error' }); return; } if (!roots.includes(p)) { roots.push(p); drawRoots(); } };
-  box.append(el('div', 'vw-ak-sec', t('Folders')), chips, here, dirs);
+  add.onclick = () => {
+    const p = pathIn.value.trim() || cur;
+    if (!p.startsWith('/')) { showToast(t('A folder is an absolute path'), { type: 'error' }); return; }
+    if (/^\/+$/.test(p)) { allPick.rb.checked = true; syncSeg(); return; }   // the root itself IS 「所有路径」 — said as such, never a bare `/` chip
+    if (!roots.includes(p)) { roots.push(p); drawRoots(); }
+  };
+  some.append(chips, here, dirs);
+  syncSeg();
+  box.append(el('div', 'vw-ak-sec', t('Folders')), seg, some);
   go(roots[0] || '');
   // ACCOUNTS — any, or a multi-select of the roster (+ the CLI's own login); a fresh key has none until the owner picks
   const acctAny = limitPick('any', t('Any account'), L.accounts === 'any', 'vw-ak-pick vw-ak-acct-any');
@@ -155,23 +182,55 @@ function limitsEditor(initial, data, now = null) {
   const checked = (list) => list.filter((b) => b.checked).map((b) => b.value);
   return {
     node: box,
-    value: () => ({ cwdRoots: roots.slice(), accounts: acctAny.cb.checked ? 'any' : checked(acctBoxes), permissionModes: checked(permBoxes), models: modelAny.cb.checked ? 'any' : checked(modelBoxes), modes: checked(modeBoxes) }),
+    value: () => ({ cwdRoots: allPick.rb.checked ? [ALL_PATHS] : roots.slice(), accounts: acctAny.cb.checked ? 'any' : checked(acctBoxes), permissionModes: checked(permBoxes), models: modelAny.cb.checked ? 'any' : checked(modelBoxes), modes: checked(modeBoxes) }),
   };
 }
 
-/** 边界…: the key's limits edited — a key minted before limits gets its FIRST ones here (nothing changes until 保存). */
-export function showLimitsDialog(key, data, { refresh } = {}) {
-  const { body, close } = createModalShell({ id: 'vault-ak-limits', title: t('Limits of "{name}"', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true });
-  if (!key.limits.cwdRoots.length) body.append(el('div', 'vw-ak-hint vw-ak-first', t('This key has no folders yet — what you save here becomes its bounds. Until you set at least one folder, every conversation it would open is refused.')));
+/** 能做什么: the closed table's verbs as checkboxes (a billed verb says so) — 铸造… (none ticked) and 编辑… (the key's own;
+ *  a verb a later release added shows unticked). → { node, boxes }. */
+function verbPicks(held = []) {
+  const verbs = el('div', 'vw-ak-verbs');
+  const boxes = [];
+  for (const s of SCOPES) {
+    const lab = el('label', 'vw-ak-pick');
+    const cb = el('input');
+    cb.type = 'checkbox'; cb.value = s.verb; cb.checked = held.includes(s.verb);
+    lab.append(cb, el('span', null, t(s.label) + (s.billed ? ' ' + t('(starts a billed turn)') : '')));
+    verbs.append(lab);
+    boxes.push(cb);
+  }
+  return { node: verbs, boxes };
+}
+/** The limits shown while 开一个对话 is ticked (absent, never greyed, otherwise) — 铸造… and 编辑… alike. */
+function limitsFollowOpen(boxes, limWrap) {
+  const openCb = boxes.find((b) => b.value === OPEN_VERB);
+  const syncLim = () => { limWrap.hidden = !(openCb && openCb.checked); };
+  if (openCb) openCb.addEventListener('change', syncLim);
+  syncLim();
+}
+
+/** 编辑… (lane key-folder-picker-all): a minted key's verbs and — while 开一个对话 is ticked — its limits (a key minted before
+ *  limits gets its FIRST ones here). Nothing changes until 保存; the key's value never changes; a verb added rides the
+ *  key's grants (the hint says so — no new first-use card); a verb taken away is refused from its next call. */
+export function showEditDialog(key, data, { refresh } = {}) {
+  const { body, close } = createModalShell({ id: 'vault-ak-edit', title: t('Edit "{name}"', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true });
+  const vp = verbPicks(key.scopes);
+  body.append(el('div', 'vw-ak-sec', t('What it may do')), vp.node,
+    el('div', 'vw-ak-hint vw-ak-grant-hint', t('A verb you add works at once wherever this key is granted — a grant is for the key and a conversation, not for each verb; a verb you take away is refused from its next call.')));
+  const limWrap = el('div', 'vw-ak-limwrap');
+  if (!key.limits.cwdRoots.length) limWrap.append(el('div', 'vw-ak-hint vw-ak-first', t('This key has no folders yet — what you save here becomes its bounds. Until you set at least one folder, every conversation it would open is refused.')));
   const ed = limitsEditor(key.limits, data, key.permissionNow || ((data && data.limitChoices) || {}).permissionNow || null);   // q-049 M2: resolved for the key's first folder
-  body.append(ed.node);
+  limWrap.append(el('div', 'vw-ak-sec', t('What the conversations it opens may use')), ed.node);
+  body.append(limWrap);
+  limitsFollowOpen(vp.boxes, limWrap);
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
-  const save = el('button', 'btn-create vw-ak-limits-save', t('Save'));
+  const save = el('button', 'btn-create vw-ak-edit-save', t('Save'));
   cancel.type = save.type = 'button';
   cancel.onclick = () => close();
   save.onclick = async () => {
-    const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/limits`, { limits: ed.value() });
+    const scopes = vp.boxes.filter((b) => b.checked).map((b) => b.value);
+    const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/edit`, { scopes, ...(scopes.includes(OPEN_VERB) ? { limits: ed.value() } : {}) });
     if (!r || !r.ok) { showToast(failWords(r), { type: 'error' }); return; }
     showToast(t('Saved'));
     close();
@@ -260,13 +319,18 @@ export function automationExtras(row, data, { refresh } = {}) {
     const line = el('div', 'vw-ak-limits-line');
     if (!key.limits.cwdRoots.length) {
       const chip = el('span', 'vw-ak-unbounded', t('Limits not set'));
-      chip.title = t('No folders are set — every conversation it would open is refused until you set them with Limits…');
+      chip.title = t('No folders are set — every conversation it would open is refused until you set them with Edit…');
       line.append(chip);
-    } else line.append(...limitsParts(key.limits, data).map((p) => el('div', 'vw-ak-lim', p)));   // one line per field (the row's column is narrow)
+    } else {
+      line.append(...limitsParts(key.limits, data).map((p) => el('div', 'vw-ak-lim', p)));   // one line per field (the row's column is narrow)
+      if (key.limits.cwdRoots.includes(ALL_PATHS)) { const fl = line.firstChild; fl.classList.add('vw-ak-allpaths'); fl.title = t('Any folder on this VibeSpace, including your home'); }   // 「所有路径」 red-tinted
+    }
     box.append(line);
   }
-  const limB = opens ? el('button', 'vw-btn vw-ak-limits-edit', t('Limits…')) : null;
-  if (limB) { limB.type = 'button'; limB.onclick = () => showLimitsDialog(key, data, { refresh }); }
+  // lane key-folder-picker-all: 编辑… on EVERY key — its verbs (a verb a later release added) and, when it opens, its limits
+  const editB = el('button', 'vw-btn vw-ak-edit', t('Edit…'));
+  editB.type = 'button';
+  editB.onclick = () => showEditDialog(key, data, { refresh });
   const auditB = el('button', 'vw-btn vw-ak-audit', t('Audit…'));
   auditB.type = 'button';
   auditB.onclick = () => showAuditDialog(key, data);
@@ -282,7 +346,7 @@ export function automationExtras(row, data, { refresh } = {}) {
     showToast(t('Revoked'));
     refresh?.();
   };
-  return { box, doors: [grantB, ...(limB ? [limB] : []), auditB, revokeB] };
+  return { box, doors: [grantB, editB, auditB, revokeB] };
 }
 
 /** The three reach rows (radios) + the Task Groups list the groups row opens — `initial` = a stored reach (the dialog) or
@@ -396,26 +460,14 @@ export function showMintDialog({ refresh, data = null } = {}) {
   const name = el('input', 'vw-ak-name');
   name.type = 'text'; name.maxLength = 60; name.placeholder = t('Name'); name.setAttribute('aria-label', t('Name')); name.spellcheck = false;
   body.append(name, el('div', 'vw-ak-sec', t('What it may do')));
-  const verbs = el('div', 'vw-ak-verbs');
-  const boxes = [];
-  for (const s of SCOPES) {
-    const lab = el('label', 'vw-ak-pick');
-    const cb = el('input');
-    cb.type = 'checkbox'; cb.value = s.verb;
-    lab.append(cb, el('span', null, t(s.label) + (s.billed ? ' ' + t('(starts a billed turn)') : '')));
-    verbs.append(lab);
-    boxes.push(cb);
-  }
+  const { node: verbs, boxes } = verbPicks([]);
   body.append(verbs);
   // the limits — shown while 开一个对话 is ticked (absent, never greyed, otherwise)
   const ed = limitsEditor(null, data, ((data && data.limitChoices) || {}).permissionNow || null);   // q-049 M2: a fresh key — the hub's own folder
   const limWrap = el('div', 'vw-ak-limwrap');
   limWrap.append(el('div', 'vw-ak-sec', t('What the conversations it opens may use')), ed.node);
   body.append(limWrap);
-  const openCb = boxes.find((b) => b.value === OPEN_VERB);
-  const syncLim = () => { limWrap.hidden = !(openCb && openCb.checked); };
-  if (openCb) openCb.addEventListener('change', syncLim);
-  syncLim();
+  limitsFollowOpen(boxes, limWrap);
   body.append(el('div', 'vw-ak-hint', t('The key\'s value is sealed in the vault — nobody sees it. Grant it to a conversation or a task group next.')));
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));

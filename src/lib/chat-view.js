@@ -3984,6 +3984,9 @@ class ChatView {
 
   // Edit an existing message → re-render in place
   // ── LANE ARTIFACTS-MODEL: the deliverables (src/artifacts.js rows; the server's registry) ──
+  /** lane agent-window-no-pop: the card an agent's window leaves in THIS chat where the verdict opened nothing (`card`) —
+   *  `{key, title, open}`, drawn above the composer (chat-input.js); Open is the person's door. */
+  showAgentCard(card) { return this._chatInput?.showAgentCard?.(card) || null; }
   /** Open a deliverable in its kind's viewer BESIDE this chat (`from` — the Cmd+click door). lane artifacts-registries: a
    *  published page opens its /p/ link (an unpublished one its source file), a design the Design window. */
   _openArtifact(b, { quiet = false } = {}) {

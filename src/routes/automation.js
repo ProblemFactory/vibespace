@@ -10,6 +10,8 @@
 //     Lane automation-open-limits (the q-048 verify's M2): 铸造 carries the key's LIMITS ({…, limits}), 边界… sets them
 //     (POST …/keys/:id/limits {limits}), 审计… reads one key's audit lines (GET …/keys/:id/audit); the list carries the
 //     pickers' choices (`limitChoices`: the accounts, the harness tables' permission modes and models).
+//     Lane key-folder-picker-all: 编辑… changes a minted key's verbs and limits (POST …/keys/:id/edit {scopes, limits} — the
+//     mint's own rules and store write; the value never changes).
 //   · AN AGENT (its own conversation's vsst_ — a job's jbt_ is refused `session_only`: L1 grants conversations and
 //     Task Groups only): POST /api/agent/automation/:verb (the body = the verb's arguments; `?key=` names a key), GET
 //     /api/agent/automation/keys (the keys THIS conversation may use: names + scopes), GET /api/agent/automation/audit
@@ -84,6 +86,7 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
     return { ...l, verbs: A.SCOPES.map((s) => ({ verb: s.verb, label: s.label, billed: s.billed })), subjects: subjects(), limitChoices: { ...limitChoices(), permissionNow: await nowOf(null) } };
   }));
   app.post('/api/automation/keys', person((req) => engine.mint({ name: body(req).name, scopes: body(req).scopes, limits: body(req).limits, by: byOf(req) })));
+  app.post('/api/automation/keys/:id/edit', person((req) => engine.edit(String(req.params.id), { scopes: body(req).scopes, limits: body(req).limits }, { by: byOf(req) })));
   app.post('/api/automation/keys/:id/limits', person((req) => engine.setLimits(String(req.params.id), body(req).limits, { by: byOf(req) })));
   app.get('/api/automation/keys/:id/audit', person((req) => engine.auditOfKey(String(req.params.id), { limit: req.query && req.query.limit })));
   app.post('/api/automation/keys/:id/revoke', person((req) => engine.revoke(String(req.params.id), { by: byOf(req) })));

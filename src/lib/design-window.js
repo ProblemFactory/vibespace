@@ -566,12 +566,21 @@ export function installDesignWindow(app) {
     // right half beside its chat (which snaps to the left) -- the Design canvas, a size-fit canvas, renders as a free half
     // window where a hidden tab-chain guest would not; an EXISTING one re-pulses without raising.
     // `shows` is the verdict's job now: no chat window on this client ⇒ act 'none', nothing opens (D3 unchanged).
+    // lane agent-window-no-pop (inc-mvhebl4n-rkvr): a chat the person is NOT looking at ⇒ act 'card' — no window, no snap:
+    // the chat's card (the design's title + Open) and the chat's taskbar badge; Open is the person's door (openDesign: front
+    // + focus), never the agent's push. A window of that design ALREADY on the desk keeps its place: its watch is
+    // re-asserted (accept-fixes F3) and its taskbar entry pulses — never revealed, never a tab switched.
     const h = hostKey(spec.host || '');
-    const existed = [...app.wm.windows.values()].some((w) => w._design && w._design.host === h && foldPath(w._design.dir) === foldPath(spec.dir));
+    const existing = [...app.wm.windows.values()].find((w) => w._design && w._design.host === h && foldPath(w._design.dir) === foldPath(spec.dir));
+    const title = String((m.design && m.design.title) || spec.dir.replace(/\/+$/, '').split('/').pop() || '');
+    const open = () => app.openDesign({ host: spec.host || '', dir: spec.dir, sessionId: sid }); // the PERSON's door: front + focus
     app.placeAgentWindow(m, (p, { focus }) => ({
       win: openDesign(app, { host: spec.host || '', dir: spec.dir, sessionId: sid, quiet: !focus }),
-      fresh: !existed,
-    }));
+      fresh: !existing,
+    }), (p) => {
+      if (existing) { existing._designRewatch?.(); app.wm.markArrived(existing.id); }
+      app.sessions?.get?.(p.fromWin)?.showAgentCard?.({ key: `${h}|${foldPath(spec.dir)}`, title, open });
+    });
   });
 }
 

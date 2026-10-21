@@ -9,6 +9,10 @@
 //   · `context` (/v1/context, its OWN switch, default OFF): the FIRST send per conversation is a PREVIEW the person
 //     answers (发送 / 不发); later sends go at most once per 10 minutes and only when the text changed.
 //   · per instance: terms 6 calls/h, context 6 calls/h. The journal keeps the last 50 sends.
+//   · lane voice-dictionary-nag: a proposal's preselected words wait in ONE For-you item at a time (`state.item` —
+//     {id, terms, lang}; a later batch merges into it in place), filed `low` (never pinned under urgent); `suggest`
+//     (「词典建议」, default ON) off ⇒ no proposal; `mode` (voice.suggestions.mode: item | settings-only) settings-only ⇒
+//     never a For-you item; what the person dismissed is voice-model's EVIDENCE LEDGER.
 // The engine (src/server/voice-teach-engine.js) holds the state in the plugin record and calls the vendor module.
 const TEACH_LIMITS = Object.freeze({
   proposalEveryMs: 3600e3, ignoreMs: 30 * 24 * 3600e3, contextEveryMs: 600e3, hourMs: 3600e3,
@@ -21,8 +25,10 @@ const arr = (x) => (Array.isArray(x) ? x : []);
 /** the plugin record's config → the teach switches (both default OFF) + the per-project opt-ins */
 function settingsOf(config) {
   const c = obj(config);
-  return { teach: c.teach === true, context: c.context === true, autoProjects: arr(c.autoProjects).filter((p) => typeof p === 'string' && p.startsWith('/')).slice(0, TEACH_LIMITS.projectsMax) };
+  return { teach: c.teach === true, context: c.context === true, suggest: c.suggest !== false, mode: c.suggestionsMode === 'settings-only' ? 'settings-only' : 'item', autoProjects: arr(c.autoProjects).filter((p) => typeof p === 'string' && p.startsWith('/')).slice(0, TEACH_LIMITS.projectsMax) };
 }
+/** THE ONE open suggestion item's facts (lane voice-dictionary-nag): {id, terms, lang} or null */
+const itemOf = (x) => (x && typeof x.id === 'string' && x.id && Array.isArray(x.terms) ? { id: x.id, terms: x.terms.filter((t) => typeof t === 'string' && t).slice(0, 24), lang: ['zh', 'ja'].includes(x.lang) ? x.lang : 'en' } : null);
 function stateOf(raw) {
   const r = obj(raw);
   const calls = obj(r.calls);
@@ -31,6 +37,7 @@ function stateOf(raw) {
     calls: { terms: arr(calls.terms).filter(Number.isFinite), context: arr(calls.context).filter(Number.isFinite) },
     autoSent: arr(r.autoSent).filter((x) => x && Number.isFinite(x.at) && Number.isFinite(x.n)),
     journal: arr(r.journal).slice(-TEACH_LIMITS.journalMax), proposals: arr(r.proposals).slice(-TEACH_LIMITS.proposalsMax),
+    item: itemOf(r.item),
   };
 }
 /** drop what has run out: ignores past 30 d, calls / auto counts past the hour, the oldest conversations' marks */
@@ -115,9 +122,9 @@ function journalAdd(state, { at, kind, title = '', chars = 0, added = 0, skipped
 
 // the For-you item's words (the hub files it; the person's UI language picked by the browser that saw the terms)
 const TEACH_WORDS = Object.freeze({
-  en: { proposal: 'Dropline suggests adding to your dictionary: {terms}', add: 'Add to dictionary', ignore: 'Ignore', detail: '✓ sends exactly these words to your Dropline (Fish Audio). Click this item to untick some first.' },
-  zh: { proposal: 'Dropline 建议加入词库：{terms}', add: '加入词库', ignore: '忽略', detail: '✓ = 把这些词发给你的 Dropline（Fish Audio）。想先去掉个别词，点这一条。' },
-  ja: { proposal: 'Dropline の辞書への追加候補：{terms}', add: '辞書に追加', ignore: '無視', detail: '✓ でこれらの語をあなたの Dropline（Fish Audio）に送ります。語を外すには、この項目をクリック。' },
+  en: { proposal: 'Dropline suggests adding to your dictionary: {terms}', add: 'Add to dictionary', ignore: 'Ignore', detail: '✓ sends exactly these words to your Dropline (Fish Audio). Click this item to untick some first. ✕ = not now: these words come back only when you say them again.' },
+  zh: { proposal: 'Dropline 建议加入词库：{terms}', add: '加入词库', ignore: '忽略', detail: '✓ = 把这些词发给你的 Dropline（Fish Audio）。想先去掉个别词，点这一条。✕ = 先不要：这些词只有你再次说到时才会再建议。' },
+  ja: { proposal: 'Dropline の辞書への追加候補：{terms}', add: '辞書に追加', ignore: '無視', detail: '✓ でこれらの語をあなたの Dropline（Fish Audio）に送ります。語を外すには、この項目をクリック。✕ = 今はしない：これらの語は、もう一度話したときにだけ再び提案されます。' },
 });
 function teachWords(lang, key, params = {}) {
   const L = TEACH_WORDS[lang] || TEACH_WORDS.en;

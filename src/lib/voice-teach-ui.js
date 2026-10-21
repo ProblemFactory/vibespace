@@ -33,6 +33,39 @@ const whyWords = (w) => (!w ? '' : w.byPerson > 1 ? t('You wrote this {n} times'
   : w.why === 'file' ? t('A file name') : t('Seen {n} times here', { n: w.seen }));
 const projectName = (cwd) => String(cwd || '').replace(/\/+$/, '').split('/').pop() || cwd;
 
+/** lane voice-dictionary-nag: EVERY WORD SUGGESTED NOW under the 「词典建议」 row of All Settings, each with 加入 / 忽略
+ *  (POST /api/voice/teach/word) — the refusal's door: 加入 sends that word to the person's Dropline, 忽略 means not now (it
+ *  comes back only from a new dictation). Nothing suggested ⇒ one line saying what would appear; no teach route ⇒ absent. */
+export async function mountSuggestionList(box) {
+  const wrap = el('div', 'voice-cands');
+  box.appendChild(wrap);
+  const draw = (v) => {
+    const list = v && Array.isArray(v.candidates) ? v.candidates : [];
+    wrap.replaceChildren(el('div', 'voice-cands-head', t('Suggested words ({n})', { n: list.length })));
+    if (!list.length) { wrap.appendChild(el('div', 'voice-cands-none', t('No word is suggested now — words Dropline did not know in your dictations appear here.'))); return; }
+    const rows = el('div', 'voice-cands-list');
+    for (const c of list) {
+      const chip = el('span', 'voice-cand');
+      chip.dataset.term = c.term;
+      if (c.why) chip.title = whyWords({ why: c.why });
+      const answer = (verb) => async () => {
+        for (const x of chip.querySelectorAll('button')) x.disabled = true;
+        try {
+          draw(await voiceApi('/api/voice/teach/word', { term: c.term, verb }));
+          showToast(verb === 'add' ? t('“{term}” was added to your Dropline dictionary', { term: c.term }) : t('“{term}” comes back only when you say it again', { term: c.term }));
+        } catch (e) { for (const x of chip.querySelectorAll('button')) x.disabled = false; showToast(e.message, { type: 'error' }); }
+      };
+      const add = el('button', 'settings-link-btn voice-cand-add', t('Add to dictionary'));
+      const ign = el('button', 'settings-link-btn voice-cand-ignore', t('Ignore'));
+      add.onclick = answer('add'); ign.onclick = answer('ignore');
+      chip.append(el('span', 'voice-cand-term', c.term), add, ign);
+      rows.appendChild(chip);
+    }
+    wrap.appendChild(rows);
+  };
+  try { draw(await voiceApi('/api/voice/teach')); } catch { wrap.remove(); }
+}
+
 /** the teach section (shown once connected): switches + sentence, proposals, projects, journal. `focus` (lane
  *  foryou-plugin-notices — the For-you reminder's door, `{proposal, terms}`): that proposal's card is marked and scrolled to,
  *  its chips start as the reminder's words, so ONE press of 加入所选 adds them; a proposal already handled says so */

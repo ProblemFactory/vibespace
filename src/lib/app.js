@@ -40,6 +40,7 @@ import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openDesktop as openDesktopFn } from './desktop-window.js';
 import { openDesktopApp as openDesktopAppFn } from './desktop-app-window.js';
 import { agentWindowPlacement } from './desktop-app-placement.js';
+import { displayedPanes } from './chain-layout.js'; // lane agent-window-no-pop: the panes a split frame shows (the person looks at both)
 import { setHubZone } from './owner-facts.js'; // B-7960 a: the zone the hub resolved for the owner — the board prints in it
 import { installDesktopAppLauncher } from './desktop-app-launcher.js';
 import { installOpenWith } from './open-with.js'; // §7.9: app.openWithDesktopApp (the ONE door) + the file-changed relay
@@ -469,22 +470,20 @@ class App {
     // lane e2a (design-agent-browser-v2 §E2.1 Placement, D3): the agent's own desktop-app browser opens BESIDE its chat —
     // only on a client that has that chat, through lane F's split door. lane agent-window-no-steal (THE PERSON'S SIDE of D3:
     // an agent's action may PLACE a window; only a person's action may FOCUS one — PURE agentWindowPlacement): placed quiet
-    // (never focused, no desktop switch) beside the chat / on the chat's desktop / behind the active window, its taskbar entry
-    // pulses; Settings → Desktop apps → "Agent-opened windows come to the front" (default OFF) is D3's old front + focus
+    // (never focused, no desktop switch), its taskbar entry pulses; Settings → Desktop apps → "Agent-opened windows come to
+    // the front" (default OFF) is D3's old front + focus. lane agent-window-no-pop: beside ONLY where the person looks at
+    // that chat, on the chat's desktop when it is another one — else `card`: no window, the chat's badge (its window chip
+    // and the launcher's running list open it)
     this.ws.onGlobal((msg) => {
       if (msg.type !== 'desktop-app-opened') return;
-      const dm = this.desktopManager;
-      const chats = [...(this.sessions?.entries?.() || [])].map(([winId, v]) => { const w = this.wm.windows.get(winId); const top = w && w._tabChain ? this.wm.windows.get(w._tabChain.tabs[0]) || w : w; return { winId, sessionId: v?.sessionId, minimized: !top || !!top.isMinimized, hidden: !top || !!top._hiddenByDesktop, deskId: top?._desktopId || null }; });
-      const ae = document.activeElement;
-      const interacting = !!document.querySelector('.window.dragging, .window.resizing') || !!(ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)));
-      const p = agentWindowPlacement({ msg, chats, active: this.wm.activeWindowId || null, desk: dm?.activeDesktopId || null, phone: !!this.isMobile, visible: document.visibilityState !== 'hidden', interacting, front: this.settings?.get('desktop.agentWindowsFront') === true });
+      const p = this.agentPlacement(msg);
       if (p.act === 'none') return;
+      if (p.act === 'card') { this.wm.markArrived(p.fromWin); return; } // nothing moves on the desk the person is using
       if (p.focus) { if (p.act === 'beside') this.openDesktopApp(msg.appId, { intoChain: this.linkPlacement(p.fromWin) }); else this.openDesktopApp(msg.appId); return; }
       const w = this.openDesktopApp(msg.appId, { intoChain: p.act === 'beside' ? this.linkPlacement(p.fromWin) : undefined, quiet: true });
       if (!w) return;
-      if (p.act === 'desk') dm?.moveWindowToDesktop(w.id, p.deskId); // created on the chat's desktop: hidden there, no switch
+      if (p.act === 'desk') this.desktopManager?.moveWindowToDesktop(w.id, p.deskId); // created on the chat's desktop: hidden there, no switch
       else if (!w._tabChain) this.wm.placeBehind(w.id); // a free window goes under the active one (a chain guest is drawn by the chat's frame, which keeps its place)
-      if (p.minimize) this.wm.minimize(w.id); // the person is mid-act: it waits on the taskbar
       if (p.badge) this.wm.markArrived(w.id);
     });
     // lane e2a r3 (verify r1 #3/#10): its conversation ended while the user drives / views it — it waits, and says so once here
@@ -2302,30 +2301,41 @@ class App {
   }
 
   openWorkflowDetail(runId, opts) { return openWorkflowDetailFn(this, runId, opts); }
+  /** lane agent-window-no-pop — THE FACTS every door that places an agent's window hands the PURE verdict (the desktop-app
+   *  browser, the Design window, the live view): this client's chat windows (`looking` = the active window is that chat or
+   *  a pane its split frame shows — the person is in that conversation), the active window, the shown desk, the phone, the
+   *  page's visibility, the front setting → agentWindowPlacement's cell. */
+  agentPlacement(msg) {
+    const active = this.wm.activeWindowId || null;
+    const chats = [...(this.sessions?.entries?.() || [])].map(([winId, v]) => {
+      const w = this.wm.windows.get(winId); const ch = w && w._tabChain; const top = ch ? this.wm.windows.get(ch.tabs[0]) || w : w;
+      const looking = !!active && (active === winId || !!(ch && ch.tabs.includes(active) && displayedPanes(ch).includes(String(winId))));
+      return { winId, sessionId: v?.sessionId, minimized: !top || !!top.isMinimized, hidden: !top || !!top._hiddenByDesktop, deskId: top?._desktopId || null, looking };
+    });
+    return agentWindowPlacement({ msg, chats, active, desk: this.desktopManager?.activeDesktopId || null, phone: !!this.isMobile, visible: document.visibilityState !== 'hidden', front: this.settings?.get('desktop.agentWindowsFront') === true });
+  }
   /** lane design-window-placement — PLACE a window a non-human opened (today the `design-open` push), the agent-window-no-steal
    *  rule: an agent's action may PLACE a window, only a person's may FOCUS one. The PURE verdict (the same the agent browser
    *  asks) decides; then `open(p, { focus })` MAKES (or, for an already-open design, re-pulses) the window and returns
    *  `{ win, fresh }`. A FRESH window is positioned here — beside its chat (snapped: the conversation to the left half, the
    *  Design to the right), on the chat's desktop (no switch), or behind the active window — and its taskbar entry pulses; an
    *  EXISTING one placed itself (markArrived + its tab, never raised), so it is left where the person put it. The front
-   *  setting restores the old front + focus. (The desktop-app-opened handler keeps its own inline mechanics above — its
-   *  already-open case restacks rather than re-pulses — so this serves the Design window; both read ONE verdict.) */
-  placeAgentWindow(msg, open) {
-    const dm = this.desktopManager;
-    const chats = [...(this.sessions?.entries?.() || [])].map(([winId, v]) => { const w = this.wm.windows.get(winId); const top = w && w._tabChain ? this.wm.windows.get(w._tabChain.tabs[0]) || w : w; return { winId, sessionId: v?.sessionId, minimized: !top || !!top.isMinimized, hidden: !top || !!top._hiddenByDesktop, deskId: top?._desktopId || null }; });
-    const ae = document.activeElement;
-    const interacting = !!document.querySelector('.window.dragging, .window.resizing') || !!(ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)));
-    const p = agentWindowPlacement({ msg, chats, active: this.wm.activeWindowId || null, desk: dm?.activeDesktopId || null, phone: !!this.isMobile, visible: document.visibilityState !== 'hidden', interacting, front: this.settings?.get('desktop.agentWindowsFront') === true });
+   *  setting restores the old front + focus. lane agent-window-no-pop: `card` (the chat is not where the person looks) opens
+   *  NOTHING — `card(p)` leaves the chat's card, and the chat's taskbar entry gets the badge; the person's Open is the door.
+   *  (The desktop-app-opened handler keeps its own inline mechanics above — its already-open case restacks rather than
+   *  re-pulses — so this serves the Design window; both read ONE verdict.) */
+  placeAgentWindow(msg, open, card = null) {
+    const p = this.agentPlacement(msg);
     if (p.act === 'none') return null;
+    if (p.act === 'card') { this.wm.markArrived(p.fromWin); if (card) card(p); return null; } // nothing moves on the desk the person is using
     const r = open(p, { focus: !!p.focus }) || {};
     const w = r.win;
     if (!w || p.focus) return w || null; // the front setting (or a person's door inside `open`) already focused it
     if (r.fresh) { // an EXISTING window placed itself (never raised); only a FRESH one is positioned + pulsed here
       const host = p.fromWin && this.wm.windows.get(p.fromWin);
-      if (p.act === 'beside' && host) { this.wm.snapToHalf(p.fromWin, 'left'); this.wm.snapToHalf(w.id, 'right'); } // the owner's picture: the conversation LEFT, the Design RIGHT, same desktop — a geometry change, never a focus change
-      else if (p.act === 'desk') dm?.moveWindowToDesktop(w.id, p.deskId); // created on the chat's desktop: hidden there, no switch
+      if (p.act === 'beside' && host) { this.wm.snapToHalf(p.fromWin, 'left'); this.wm.snapToHalf(w.id, 'right'); } // the owner's picture: the conversation LEFT, the Design RIGHT, same desktop — a geometry change, never a focus change (the person is in that conversation)
+      else if (p.act === 'desk') this.desktopManager?.moveWindowToDesktop(w.id, p.deskId); // created on the chat's desktop: hidden there, no switch
       else if (!w._tabChain) this.wm.placeBehind(w.id); // a free window goes under the active one
-      if (p.minimize) this.wm.minimize(w.id); // the person is mid-act: it waits on the taskbar
       if (p.badge) this.wm.markArrived(w.id);
     }
     return w;

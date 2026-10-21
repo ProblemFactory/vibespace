@@ -814,20 +814,26 @@ console.log('⑩b/⑩c one list, one writer: three renders in flight; a rebuild\
     const at = { scrollTop: list.scrollTop, tall: list.scrollHeight > list.clientHeight + 40, before: list.querySelectorAll('.chanmsg').length };
     let scrolls = 0;
     list.addEventListener('scroll', () => { scrolls++; });
+    // WAIT FOR THE EFFECT, NOT A FIXED COUNT (inc cwr-10-rebuild-race, 2026-10-21): renderNow awaits renderBar (a
+    // server round-trip) BEFORE it clears the list and re-reads, so under build-server load the reconnect's own
+    // rebuild starts seconds late. The old 300×10 ms / 400×25 ms count polls sampled the clear before it ran — ⑩c
+    // was red under the .333 chain's load and green alone. Poll the fact each assert needs on a wall-clock deadline
+    // (<= 10 s); a timeout leaves the fact unmet and the assert below names it («never … within 10 s»).
+    const waitFor = async (pred, ms) => { const t = Date.now(); while (!pred()) { if (Date.now() - t > ms) return false; await sleep(10); } return true; };
     window.app.ws._notifyState(true);   // the rebuild (a reconnect's re-read)
-    for (let i = 0; i < 300 && list.querySelectorAll('.chanmsg').length; i++) await sleep(10);
-    const cleared = list.querySelectorAll('.chanmsg').length === 0, topAfterClear = list.scrollTop;
+    const cleared = await waitFor(() => list.querySelectorAll('.chanmsg').length === 0, 10000);
+    const topAfterClear = list.scrollTop;
     // the scroll event the clear causes (a visible page dispatches it at its next frame; dispatched here too, so a
     // background page — which runs no frames — judges the same event)
     list.dispatchEvent(new Event('scroll'));
-    for (let i = 0; i < 400 && !(spy.started >= 1 && spy.parsed === spy.started); i++) await sleep(25);
-    await sleep(1200);
+    await waitFor(() => spy.started >= 1 && spy.parsed === spy.started, 10000);
+    await sleep(300);
     const rows = [...list.querySelectorAll('.chanmsg')].map((r) => r.dataset.vid);
     return { ...at, cleared, topAfterClear, scrolls, started: spy.started, parsed: spy.parsed, urls: spy.urls, older: spy.older, rows: rows.length, uniq: new Set(rows).size, atBottom: list.scrollHeight - list.scrollTop - list.clientHeight < 40 };
   })()`);
-  ok(REPAINT.tall && REPAINT.scrollTop > 4 && REPAINT.before === 24 && REPAINT.cleared && REPAINT.topAfterClear === 0, 'FIXTURE: the room is taller than its window, the reader at its bottom; the rebuild\'s clear dropped scrollTop to 0', J(REPAINT));
+  ok(REPAINT.tall && REPAINT.scrollTop > 4 && REPAINT.before === 24 && REPAINT.cleared && REPAINT.topAfterClear === 0, REPAINT.cleared ? 'FIXTURE: the room is taller than its window, the reader at its bottom; the rebuild\'s clear dropped scrollTop to 0' : 'FIXTURE: the reconnect\'s rebuild never cleared the list within 10 s under load (a wait-for-effect timeout, not a page read)', J(REPAINT));
   ok(REPAINT.rows === 24 && REPAINT.uniq === 24 && REPAINT.atBottom, '⑨b the rebuild draws its 24 messages ONCE and the reader is at the newest again', J(REPAINT));
-  ok(REPAINT.started >= 1 && REPAINT.parsed === REPAINT.started && !REPAINT.urls.some((u) => /[?&]before=/.test(u)) && REPAINT.older === 0, `…and the scroll event its own clear caused read NO page upward and asked the vendor for nothing (pages read: ${REPAINT.urls.join(' ')}; POST /older: ${REPAINT.older})`, J(REPAINT));
+  ok(REPAINT.started >= 1 && REPAINT.parsed === REPAINT.started && !REPAINT.urls.some((u) => /[?&]before=/.test(u)) && REPAINT.older === 0, REPAINT.started >= 1 ? `…and the scroll event its own clear caused read NO page upward and asked the vendor for nothing (pages read: ${REPAINT.urls.join(' ')}; POST /older: ${REPAINT.older})` : '…the rebuild never started its re-read within 10 s under load (a wait-for-effect timeout — the fixture no longer samples before the reconnect runs)', J(REPAINT));
   // the person's OWN scroll to the top still pages (the guard is about who scrolled, not about paging)
   const UP = await p1.evaljs(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

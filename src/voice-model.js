@@ -271,30 +271,33 @@ const SHAPE_EXCLUSIONS = Object.freeze([                         // [row, reject
 const exclusionOf = (term, c = {}) => { for (const [row, rejects] of SHAPE_EXCLUSIONS) if (rejects(str(term), c)) return row; return null; };
 const NAME_RE = /\b[A-Z][a-z]{2,}\b/g;
 const sentenceStart = (text, i) => { const pre = text.slice(Math.max(0, i - 4), i); return (i === pre.length && /^\s*$/.test(pre)) || /(?:[.!?。！？:：*#>•-]|\n)\s*$/.test(pre); };
-/** PURE `proposalCandidates` — the words worth a card, ranked: [{term, score, why, seen, byPerson, kind, pick}] (why =
- *  person | file | name | seen; kind = file | name | ident); minus `known` (case-insensitive); every term ≥ weight 2. */
-function proposalCandidates({ messages = [], files = [], cwd = '', known = [], groupName = '' } = {}) {
+/** PURE `proposalCandidates` — the words worth a card, ranked: [{term, score, why, seen, byPerson, kind, pick, occ}] (why =
+ *  person | file | name | seen; kind = file | name | ident; occ = its occurrences [{key, byPerson}], `key` = the message's
+ *  messageKey); minus `known` (case-insensitive); every term ≥ weight 2; and — given the EVIDENCE ledger below (lane
+ *  voice-dictionary-nag) — through RULE 1 (`evidenceRule`): never only what the vendor knows. */
+function proposalCandidates({ messages = [], files = [], cwd = '', known = [], groupName = '', ledger = null } = {}) {
   const have = new Set((Array.isArray(known) ? known : []).map((k) => str(k).toLowerCase()));
   const root = str(cwd).replace(/[\\/]+$/, '');
   const ownFiles = new Set((Array.isArray(files) ? files : []).map(str).filter((f) => root && f.startsWith(root + '/')).map(baseName));
   const unfence = (t) => t.replace(CODE_SPAN_RE, (all, fenced, inline) => (inline != null ? ` ${inline} ` : ' ')); // inline spans stay words
-  const prose = dictationMessagesOf(messages).map((m) => ({ role: m.role, text: scrubSecrets(unfence(m.text).replace(/\bhttps?:\/\/\S+/g, ' ')) }));
+  const prose = dictationMessagesOf(messages).map((m) => ({ role: m.role, key: messageKey(m), text: scrubSecrets(unfence(m.text).replace(/\bhttps?:\/\/\S+/g, ' ')) }));
   const lower = new Set();
   for (const m of prose) for (const w of m.text.match(/\b[a-z]{3,}\b/g) || []) lower.add(w);
-  const tally = new Map();                                       // term → {seen, byPerson, first}
-  const count = (w, byPerson) => {
+  const tally = new Map();                                       // term → {seen, byPerson, first, occ}
+  const count = (w, byPerson, key) => {
     if (w.length < 3 || w.length > TERM_MAX || /^\d/.test(w) || /^(?:e\.g|i\.e|etc)\b/i.test(w)) return;
-    const c = tally.get(w) || { seen: 0, byPerson: 0, first: tally.size };
+    const c = tally.get(w) || { seen: 0, byPerson: 0, first: tally.size, occ: [] };
     c.seen += 1; if (byPerson) c.byPerson += 1;
+    c.occ.push({ key, byPerson: !!byPerson });
     tally.set(w, c);
   };
   for (const m of prose) {
     const mine = m.role === 'user';
-    for (const x of m.text.match(IDENT_RE) || []) count(x.includes('/') ? x.slice(x.lastIndexOf('/') + 1) : x, mine);
-    for (const x of m.text.matchAll(NAME_RE)) if (!sentenceStart(m.text, x.index) && !lower.has(x[0].toLowerCase())) count(x[0], mine);
+    for (const x of m.text.match(IDENT_RE) || []) count(x.includes('/') ? x.slice(x.lastIndexOf('/') + 1) : x, mine, m.key);
+    for (const x of m.text.matchAll(NAME_RE)) if (!sentenceStart(m.text, x.index) && !lower.has(x[0].toLowerCase())) count(x[0], mine, m.key);
   }
   const group = head(str(groupName).replace(/\s+/g, ' ').trim(), TERM_MAX);
-  if (group.length >= 3 && !tally.has(group)) tally.set(group, { seen: 1, byPerson: 1, first: tally.size }); // the person named their Task Group
+  if (group.length >= 3 && !tally.has(group)) tally.set(group, { seen: 1, byPerson: 1, first: tally.size, occ: [{ key: 'group:' + group.toLowerCase(), byPerson: true }] }); // the person named their Task Group
   const out = [];
   for (const [term, c] of tally) {
     if (c.seen + c.byPerson < 2 || have.has(term.toLowerCase()) || exclusionOf(term, c)) continue;
@@ -305,10 +308,116 @@ function proposalCandidates({ messages = [], files = [], cwd = '', known = [], g
     const sayable = /[aeiouy]/i.test(stem) && stem.length >= 4 && stem.length <= 24 && letters >= 0.7 * stem.length;
     const tier = (kind === 'file' && (KNOWN_EXT_RE.test(term) || ownFiles.has(term))) || (kind === 'name' && /[a-z][A-Z]/.test(term)) ? 2 : kind === 'ident' ? 0 : 1;
     const why = c.byPerson ? 'person' : kind === 'file' ? 'file' : kind === 'name' ? 'name' : 'seen';
-    out.push({ term, score: tier * 1000 + Math.min(c.seen + c.byPerson, 99) * 10 + (sayable ? 1 : 0), why, seen: c.seen, byPerson: c.byPerson, kind, pick: c.byPerson > 0 || (c.seen >= 2 && (tier === 2 || kind === 'ident')), first: c.first });
+    out.push({ term, score: tier * 1000 + Math.min(c.seen + c.byPerson, 99) * 10 + (sayable ? 1 : 0), why, seen: c.seen, byPerson: c.byPerson, kind, pick: c.byPerson > 0 || (c.seen >= 2 && (tier === 2 || kind === 'ident')), first: c.first, occ: c.occ });
   }
-  return out.sort((a, b) => b.score - a.score || a.first - b.first).map(({ first, ...c }) => c);
+  const ranked = out.sort((a, b) => b.score - a.score || a.first - b.first).map(({ first, ...c }) => c);
+  return ledger ? evidenceRule(ranked, ledger) : ranked; // lane voice-dictionary-nag: RULE 1 — a dismissal consumed its evidence
 }
+// ── THE EVIDENCE LEDGER (lane voice-dictionary-nag — a fleet user 2026-10-21: 「一天到晚有这个 Dropline 让我发信息的消息,
+// 站在我的 inbox 里」: 20 suggestions in 8 days, «CLAUDE.md» 7×, re-offered from the SAME messages after each dismissal,
+// because the candidate rule above subtracted only what the VENDOR knows. The user (02:04Z / 02:06Z): no «never again», no
+// timers — 「忽略过的永不再提也太极端了」 / 「你这逻辑也不太合理」). Per instance, per word (its lower case is the key):
+// {term, evidence[], consumed[], suggestedAt[], dismissedAt[]} — `evidence` = the occurrences (message keys) it was shown
+// on since its last dismissal; a DISMISSAL consumes them (they never count again), so a word comes back ONLY from NEW
+// dictations — a message after the dismissal that says it. No quiet period, no retire count, no blacklist. 加入 ⇒ the word
+// leaves the ledger (`known` holds it). Bounded: 2 000 words (the least recently touched out), ≤ 32 evidence keys and ≤ 64
+// consumed keys a word (the oldest out). RULE 1 is ONE swappable function (`evidenceRule`) — the user's A/B/C answer is
+// pending. The clock is handed in (`now`), never read here.
+const SUGGEST_LIMITS = Object.freeze({ afterDismissMs: 24 * 3600e3, ledgerMax: 2000, evidenceMax: 32, consumedMax: 64, stampsMax: 8, itemTerms: 24 });
+/** a message's identity for the ledger (PURE FNV-1a over role + text): the same message read again is the SAME evidence */
+function messageKey(m) {
+  const t = `${str(m && m.role)}\n${str(m && m.text)}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return 'm' + h.toString(16).padStart(8, '0') + t.length.toString(36);
+}
+const keysOf = (xs, max) => { const out = []; for (const x of Array.isArray(xs) ? xs : []) if (typeof x === 'string' && x && !out.includes(x)) out.push(x); return out.slice(-max); };
+const stampsOf = (xs) => (Array.isArray(xs) ? xs.filter((x) => Number.isFinite(x)).slice(-SUGGEST_LIMITS.stampsMax) : []);
+const wordKey = (t) => str(t).trim().toLowerCase();
+const touchedAt = (w) => Math.max(0, ...w.suggestedAt, ...w.dismissedAt);
+function boundLedger(L) {
+  const keys = Object.keys(L.words);
+  if (keys.length <= SUGGEST_LIMITS.ledgerMax) return L;
+  const keep = keys.sort((a, b) => touchedAt(L.words[b]) - touchedAt(L.words[a])).slice(0, SUGGEST_LIMITS.ledgerMax);
+  return { words: Object.fromEntries(keep.map((k) => [k, L.words[k]])) };
+}
+/** a stored ledger (any shape — the plugin's own store file) → {words: {key: {term, evidence, consumed, suggestedAt,
+ *  dismissedAt}}}; junk dropped, every list bounded */
+function ledgerOf(raw) {
+  const src = raw && typeof raw === 'object' && raw.words && typeof raw.words === 'object' && !Array.isArray(raw.words) ? raw.words : {};
+  const words = {};
+  for (const [k, w] of Object.entries(src)) {
+    if (!w || typeof w !== 'object') continue;
+    const term = head(str(w.term).trim(), TERM_MAX);
+    if (!term || wordKey(term) !== k) continue;
+    words[k] = { term, evidence: keysOf(w.evidence, SUGGEST_LIMITS.evidenceMax), consumed: keysOf(w.consumed, SUGGEST_LIMITS.consumedMax), suggestedAt: stampsOf(w.suggestedAt), dismissedAt: stampsOf(w.dismissedAt) };
+  }
+  return boundLedger({ words });
+}
+/** RULE 1 — THE ONE SWAPPABLE FUNCTION: ranked candidates (with their `occ`) + the ledger → the candidates the person has
+ *  not put off. Today: an occurrence a dismissal CONSUMED never counts again — a word's weight (seen + byPerson ≥ 2, as
+ *  proposalCandidates asks) is re-earned only from messages it was not dismissed on; `pick` follows the fresh counts. */
+function evidenceRule(candidates, ledger) {
+  const L = ledgerOf(ledger);
+  const out = [];
+  for (const c of Array.isArray(candidates) ? candidates : []) {
+    const w = c && L.words[wordKey(c.term)];
+    if (!w || !w.consumed.length) { out.push(c); continue; }
+    const fresh = (Array.isArray(c.occ) ? c.occ : []).filter((o) => !w.consumed.includes(o.key));
+    const seen = fresh.length, byPerson = fresh.filter((o) => o.byPerson).length;
+    if (seen + byPerson < 2) continue;
+    out.push({ ...c, seen, byPerson, pick: !!c.pick && (byPerson > 0 || seen >= 2), occ: fresh });
+  }
+  return out;
+}
+/** the evidence a word holds now — its occurrences shown since its last dismissal (the counts a dismissal resets) */
+function evidenceOf(ledger, term) { const w = ledgerOf(ledger).words[wordKey(term)]; return w ? w.evidence.length : 0; }
+const termsIn = (terms) => { const out = []; for (const t of Array.isArray(terms) ? terms : []) { const s = head(str(t).trim(), TERM_MAX); if (s && !out.some((x) => wordKey(x) === wordKey(s))) out.push(s); } return out; };
+const entryOf = (L, term) => L.words[wordKey(term)] || (L.words[wordKey(term)] = { term, evidence: [], consumed: [], suggestedAt: [], dismissedAt: [] });
+/** a batch was SHOWN (a For-you item filed or re-worded, a card on the sheet): candidates [{term, occ}] (or bare terms) —
+ *  their occurrences become each word's evidence, at `now` */
+function ledgerSuggested(ledger, candidates, now) {
+  const L = ledgerOf(ledger);
+  if (!Number.isFinite(now)) return L;
+  const seenNow = new Set();
+  for (const c of Array.isArray(candidates) ? candidates : []) {
+    const term = head(str(typeof c === 'string' ? c : c && c.term).trim(), TERM_MAX);
+    if (!term || seenNow.has(wordKey(term))) continue;
+    seenNow.add(wordKey(term));
+    const w = entryOf(L, term);
+    w.evidence = keysOf([...w.evidence, ...(c && Array.isArray(c.occ) ? c.occ.map((o) => o.key) : [])], SUGGEST_LIMITS.evidenceMax);
+    w.suggestedAt = stampsOf([...w.suggestedAt, now]);
+  }
+  return boundLedger(L);
+}
+/** the person DISMISSED these words (✕, 忽略, 全部标为已看, a word's 忽略 in Settings): their evidence is CONSUMED — those
+ *  occurrences never count again; the count starts from zero */
+function ledgerDismissed(ledger, terms, now) {
+  const L = ledgerOf(ledger);
+  if (!Number.isFinite(now)) return L;
+  for (const t of termsIn(terms)) {
+    const w = entryOf(L, t);
+    w.consumed = keysOf([...w.consumed, ...w.evidence], SUGGEST_LIMITS.consumedMax);
+    w.evidence = [];
+    w.dismissedAt = stampsOf([...w.dismissedAt, now]);
+  }
+  return boundLedger(L);
+}
+/** 加入: the words went to the vendor's dictionary — they leave the ledger (`known` holds them from now on) */
+function ledgerAdded(ledger, terms) { const L = ledgerOf(ledger); for (const t of termsIn(terms)) delete L.words[wordKey(t)]; return L; }
+/** THE PACING of the For-you item (PURE, the clock handed in): a suggestion item OPEN ⇒ 'update' (its words merge into it
+ *  in place — never a second item); else a dismissal on this instance less than a day ago ⇒ 'wait' (+ `until`); else
+ *  'file'. No clock ⇒ 'wait' (fail closed). */
+function suggestionPace({ open = false, ledger = null, now } = {}) {
+  if (open) return { act: 'update', why: 'one-open' };
+  if (!Number.isFinite(now)) return { act: 'wait', why: 'no-clock' };
+  let last = null;
+  for (const w of Object.values(ledgerOf(ledger).words)) for (const d of w.dismissedAt) if (last == null || d > last) last = d;
+  if (last != null && now - last < SUGGEST_LIMITS.afterDismissMs) return { act: 'wait', why: 'after-dismissal', until: last + SUGGEST_LIMITS.afterDismissMs };
+  return { act: 'file', why: null };
+}
+/** the open item's words + a new batch's → ONE list (the item's first, deduped case-insensitively), ≤ itemTerms */
+function mergeTerms(a, b) { return termsIn([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])]).slice(0, SUGGEST_LIMITS.itemTerms); }
 /** PURE `teachContextOf` — the /v1/context body: title = the conversation title (≤ 200), source = VibeSpace, text = the
  *  last agent message + the person's last 3 + the working directory + its file names (≤ 6 000) — the never-list holds:
  *  text blocks of THIS conversation only (no tool rows, attachments, other sessions), frames stripped, secrets cut. */
@@ -331,4 +440,5 @@ module.exports = {
   stripFrames, scrubSecrets, dictationMessagesOf, identifiersOf, contextText, beforeOf, contextBytes, dictationContext,
   contextFromClient, localeOf, languageOf, dictateRequestOf, dictateAnswerOf, failureCodeOf, voiceWords,
   TEACH_TEXT_MAX, termKind, termsOf, autoSourcesOf, teachContextOf, SHAPE_EXCLUSIONS, exclusionOf, proposalCandidates,
+  SUGGEST_LIMITS, messageKey, ledgerOf, evidenceRule, evidenceOf, ledgerSuggested, ledgerDismissed, ledgerAdded, suggestionPace, mergeTerms,
 };

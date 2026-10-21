@@ -897,7 +897,8 @@ console.log('⑬ THE PIN (lane foryou-plugin-notices, owner 2026-10-19: 「这�
   process.on('exit', () => { for (const f of cleanup) { try { fs.rmSync(f, { recursive: true, force: true }); } catch { } } });
   const tmpdir = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-pin-')); cleanup.push(d); return d; };
   // THE FIXTURE: an urgent ask, a high one, a decision (options), a plain normal ask, a low one, Background Work (urgent),
-  // and two plugins' reminders (one older with two items, one newer and LOW) — the plugin ids are not Dropline's on purpose
+  // and two plugins' reminders (one older with two items, one newer and HIGH — a LOW one is no pin since lane
+  // voice-dictionary-nag, its own block below) — the plugin ids are not Dropline's on purpose
   const P = (id, plugin, extra = {}) => it(id, plugin, { origin: 'plugin', plugin, ...extra });
   const open = [
     it('n1', 'claude:n', { createdAt: 100 }),                                 // the NEWEST item of all: a plain normal ask
@@ -907,7 +908,7 @@ console.log('⑬ THE PIN (lane foryou-plugin-notices, owner 2026-10-19: 「这�
     it('l1', 'claude:l', { urgency: 'low', createdAt: 95 }),
     it('j1', 'jobs', { urgency: 'urgent', createdAt: 99 }),
     P('p1', 'zz-older', { createdAt: 30 }), P('p2', 'zz-older', { createdAt: 50 }),
-    P('q1', 'aa-newer', { urgency: 'low', createdAt: 60 }),
+    P('q1', 'aa-newer', { urgency: 'high', createdAt: 60 }),
   ];
   /** THE VERDICT: the For-you WINDOW's session order (sortGroups) and the TRAY's attention list (lane foryou-folds — the
    *  bands in order, each band's ids in its order; `now` 1000 ms: nothing is old enough to park) */
@@ -922,8 +923,8 @@ console.log('⑬ THE PIN (lane foryou-plugin-notices, owner 2026-10-19: 「这�
     bands: ['1:j1+u1', '2:q1+p2+p1', '4:d1', '5:n1+l1+h1'],
   };
   const v = verdict(L);
-  eq(v.off, want.off, 'the WINDOW (sortGroups): urgent first · the plugins next (the one with the NEWEST item first, a LOW one too) · then the rest exactly as before (high · normal/low by newest) · Background Work last');
-  eq(v.bands, want.bands, 'the TRAY (the attention list): band 1 = the urgent rows · band 2 HEADED by the plugins\' reminders (newest first — a LOW one and an option-less one included; the judge never moves them) · band 4 the decision · band 5 the rest newest first');
+  eq(v.off, want.off, 'the WINDOW (sortGroups): urgent first · the plugins next (the one with the NEWEST item first, normal or high) · then the rest exactly as before (high · normal/low by newest) · Background Work last');
+  eq(v.bands, want.bands, 'the TRAY (the attention list): band 1 = the urgent rows · band 2 HEADED by the plugins\' reminders (newest first — an option-less one included; the judge never moves them) · band 4 the decision · band 5 the rest newest first');
   const lay = L.bandLayout({ open, resolved: [] }, { now: 1000 });
   eq(lay.bands.map((b) => `${b.band}:${b.ids.join('+')}`), want.bands, '…and the tray\'s held layout opens in exactly that order (bandLayout = needsMe)');
   ok(L.pluginOf({ origin: 'plugin', plugin: 'x' }) === 'x' && L.pluginOf({ origin: 'server', plugin: 'x', sessionKey: 'x' }) === null && L.pluginOf({ sessionKey: 'voice-input', sessionName: 'Voice input · Dropline' }) === null && L.pluginOf(null) === null,
@@ -937,6 +938,18 @@ console.log('⑬ THE PIN (lane foryou-plugin-notices, owner 2026-10-19: 「这�
     const late = P('p9', 'zz-older', { createdAt: 2000 });
     const lay1 = L.bandLayout({ open: [...open, late], resolved: [] }, { now: 2100, prev: lay });
     eq(lay1.bands.find((b) => b.band === 2).ids, ['q1', 'p2', 'p1', 'p9'], 'a reminder ARRIVING while the popup is open: band 2, appended at its end (the slot law — nothing moves under the pointer)');
+  }
+  // lane voice-dictionary-nag (a fleet user 2026-10-21: Dropline's dictionary suggestion pinned above their real asks, 20 in 8
+  // days, in the badge all day): a plugin's reminder filed LOW — the suggestion's own shape, two chips — is NO pin: band 5
+  // (newest first with the other asks; no badge, no toast) and in the window it ranks with the rest; the same at normal pins
+  {
+    const sug = P('v1', 'voice-x', { urgency: 'low', options: ['Add to dictionary', 'Ignore'], createdAt: 97 });
+    const vl = verdict(L, [...open, sug]);
+    eq(vl, { off: ['claude:u:u1', 'aa-newer:q1', 'zz-older:p1+p2', 'claude:h:h1', 'claude:n:n1', 'voice-x:v1', 'claude:l:l1', 'claude:d:d1', 'jobs:j1'], bands: ['1:j1+u1', '2:q1+p2+p1', '4:d1', '5:n1+v1+l1+h1'] },
+      'a LOW plugin reminder with two chips (the dictionary suggestion): band 5 by its newest-first place — not band 2, not band 4 — and the window ranks it with the rest (by newest)');
+    const row = A.rowOf(sug, 1000), row2 = A.rowOf({ ...sug, urgency: 'normal' }, 1000);
+    ok(row.band === 5 && !A.toastWorthy(row) && !A.badgeRows([row], 1000).length && row2.band === 2 && L.trayBand([sug]) === 2 && L.trayBand([{ ...sug, urgency: 'normal' }]) === 1,
+      'a LOW reminder never toasts and never counts in the badge; the same reminder at normal is band 2 + the window\'s pin (trayBand 1)', { row, row2 });
   }
   // the 3-day fold: a reminder nobody clicked in PLUGIN_FOLD_DAYS folds into 搁置 (an ask waits 7)
   {

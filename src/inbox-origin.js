@@ -64,7 +64,7 @@ const ORIGIN_LABELS = Object.freeze({
   machines: i18nKey('Machines'), // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (src/exit-proxy.js)
   vault: i18nKey('Vault'), // design q-046: "<conversation> wants to use the automation key <name>" — Allow once / Always / Deny (src/server/automation-engine.js)
   apps: i18nKey('Apps'), // Layer 0 apps: "<conversation> wants to install <app>?" — Install / Not now (src/server/apps-engine.js)
-  plugin: i18nKey('Plugins'), // lane foryou-plugin-notices: a plugin's reminder (Dropline's dictionary suggestion), pinned under urgent
+  plugin: i18nKey('Plugins'), // lane foryou-plugin-notices: a plugin's reminder (Dropline's dictionary suggestion — filed low since lane voice-dictionary-nag: band 5, no pin)
   agent: i18nKey('Agents'),
   server: i18nKey('This machine'), // lane browser-resource-care: memory pressure — ONE item per episode naming who started each top process (src/memory-pressure.js)
 });

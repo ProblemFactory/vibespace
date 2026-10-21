@@ -32,6 +32,12 @@
  *     mode and the layer. A read that throws refuses too (fail closed); no resolver wired = the harness's own, as before.
  *   · B-dbba: an open's first-use card says WHAT it would open — the name the caller gave and the folder (the name rides
  *     the create frame's `sessionName`, src/conversation-spec.js wireOf, so the conversation carries it from the start).
+ *   · 编辑… (lane key-folder-picker-all — the owner 2026-10-21: a verb a later release added could not be given to a key
+ *     minted before it): `edit(keyId, {scopes, limits})` = the SAME rules (PURE editPlan: mintPlan's scopesPlan + limitsPlan)
+ *     and the SAME store write as 铸造…; the value, the digest and the grants never change. A verb removed is refused from
+ *     the next call (`verb_not_in_scope`, by name); a verb added rides the key's existing grants (a grant is per key ×
+ *     conversation) — no new card. Audited `key.scopes` («scopes changed by the owner: +… -…») and `key.limits`. An open's
+ *     card names the key's folders too (「所有路径」 for `/`).
  */
 const fs = require('fs');
 const path = require('path');
@@ -162,22 +168,25 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     if (mode === 'always' && !fromAsk) for (const q of [...asks.values()]) if (q.keyId === k.id && added.some((g) => g.subject === q.subject || q.groups.includes(g.subject))) settle(q, 'always', { answeredBy: by, why: 'granted' });
     return { ok: true, added };
   }
-  /** 边界… (lane automation-open-limits — the owner's edit): the key's limits become his pick (PURE limitsPlan — refused by
-   *  name, never trimmed); a key minted before limits gets its first ones HERE, never by a default. Audited `key.limits`. */
-  function setLimits(keyId, limits, { by = 'user' } = {}) {
+  /** 编辑… (lane key-folder-picker-all — the owner's edit after minting): the key's verbs and limits become his pick through
+   *  the mint's own rules (PURE editPlan — refused by name, never trimmed) and the mint's own store write; `scopes` / `limits`
+   *  undefined = the key's own; a key minted before limits gets its first ones HERE, never by a default. The value, the
+   *  digest and the grants are untouched. Audited `key.scopes` (the change in words) and `key.limits` (when limits came). */
+  function edit(keyId, { scopes, limits } = {}, { by = 'user' } = {}) {
     if (vaultState() !== 'unlocked') return named(vaultState() === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
     db = read();
     if (db.bad) return named('failed', 'data/automation-keys.json could not be read — nothing is written over it');
     const k = keyById(keyId);
     if (!k) return named('not_found');
     if (k.revokedAt) return named('key_revoked');
-    const plan = A.limitsPlan(limits, k.scopes);
+    const plan = A.editPlan(k, { scopes, limits });
     if (!plan.ok) return plan;
-    const next = { ...k, limits: plan.limits };
+    const next = { ...k, scopes: plan.scopes, limits: plan.limits };
     try { write({ keys: db.keys.map((x) => (x.id === k.id ? next : x)), grants: db.grants }); }
     catch (e) { return named('failed', `the key list could not be written (${e.code || e.message})`); }
-    audit({ keyId: k.id, subject: 'owner', verb: 'key.limits', ok: true, by });
-    return { ok: true, key: A.publicKey(next) };
+    if (plan.added.length || plan.removed.length) audit({ keyId: k.id, subject: 'owner', verb: 'key.scopes', ok: true, by, note: A.scopesChangeWords(plan) });
+    if (limits !== undefined) audit({ keyId: k.id, subject: 'owner', verb: 'key.limits', ok: true, by });
+    return { ok: true, key: A.publicKey(next), added: plan.added, removed: plan.removed };
   }
   /** THE REACH OF A GRANT, changed (lane key-instance-scope — the Vault window's reach chip on a 授权给 chip): the same store
    *  write the first-use card makes, on an existing row; audited `key.reach`. → { ok, grant } | a named refusal. */
@@ -193,6 +202,8 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     audit({ keyId: g.keyId, subject: g.subject, verb: 'key.reach', ok: true, by, args: { reach: A.reachKind(rch) } });
     return { ok: true, grant: { id: next.id, subject: next.subject, mode: next.mode, at: next.at, by: next.by, spentAt: next.spentAt, reach: next.reach } };
   }
+  /** 边界… (lane automation-open-limits): the limits alone — the edit with the key's own verbs (limits are required here). */
+  const setLimits = (keyId, limits, opts = {}) => edit(keyId, { limits: limits === undefined ? null : limits }, opts);
   /** Take a grant back (the window's ✕ on a 授权给 chip). */
   function ungrant(grantId, { by = 'user' } = {}) {
     const g = db.grants.find((x) => x.id === grantId);
@@ -268,14 +279,19 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
           // the folder, as the audit line keeps them (names only, bounded); another verb's card is as before
           const openArgs = verb === 'conversations.open' && args && typeof args === 'object' ? { name: args.name ? String(args.name).slice(0, 60) : '', cwd: String(args.cwd || '').slice(0, 200) } : null;
           const openLine = openArgs ? (openArgs.name ? { key: 'This call would open "{name}" in {cwd}.', params: { name: openArgs.name, cwd: openArgs.cwd } } : { key: 'This call would open a conversation in {cwd}.', params: { cwd: openArgs.cwd } }) : null;
+          // lane key-folder-picker-all: an open's card names the KEY's folders as well — 「所有路径」 for `/`, else each root
+          // covering its subfolders (the owner decides with the bounds in view)
+          const roots = openArgs ? ((A.limitsOf(key.limits) || {}).cwdRoots || []) : [];
+          const rootsLine = !openArgs ? null : A.allPaths(key.limits) ? { key: "The key's folders: all paths — any folder on this VibeSpace." }
+            : { key: "The key's folders: {roots} (with their subfolders).", params: { roots: roots.join(', ').slice(0, 300) } };
           const fill = (k, p) => k.replace(/\{(\w+)\}/g, (_, n) => (p && p[n] != null ? String(p[n]) : `{${n}}`));
           const D1 = 'Allow once lets this call go ahead. Always grants the key to this conversation (the Vault window lists it; take it back there). Deny refuses it and asks no more for 10 minutes. No answer in 60 s: refused. The key\'s value is never shown to the conversation.';
           const it = userTodos.add(caller.sessionKey || 'vault', {
             origin: 'vault', urgency: 'urgent', kind: 'action', by: 'agent', sessionName: who, expiresAt: q.askedAt + A.ASK_TTL_MS,
             text: `${who} wants to use the automation key "${key.name}" (${verbWord})`,
-            detail: [openLine ? fill(openLine.key, openLine.params) : null, D1, 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.'].filter(Boolean).join('\n'),
+            detail: [openLine ? fill(openLine.key, openLine.params) : null, rootsLine ? fill(rootsLine.key, rootsLine.params) : null, D1, 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.'].filter(Boolean).join('\n'),
             i18n: { text: { key: '{who} wants to use the automation key "{key}" ({verb})', params: { who, key: key.name, verb: verbWord } },
-              detail: [...(openLine ? [openLine] : []), { key: D1 },
+              detail: [...(openLine ? [openLine] : []), ...(rootsLine ? [rootsLine] : []), { key: D1 },
                 // lane key-instance-scope: the card offers the grant's REACH beside its answers (the client draws the three choices off action.groups)
                 { key: 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.' }] },
             action: { type: 'automation-ask', askId, keyId: key.id, key: String(key.name).slice(0, 60), verb, subject, groups: q.groups.map((g) => g.slice('group:'.length)).slice(0, 8).join(' ') },   // the caller's Task Group ids, space-joined (an action field is a string; ids hold no space)
@@ -410,7 +426,8 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     db = read();
     const groups = Array.isArray(caller.groups) ? caller.groups : [];
     const pick = A.pickKey({ keys: db.keys, grants: db.grants, want, subject, subjectGroups: groups, verb });
-    if (!pick.ok) return done({ ...named(pick.code, pick.code === 'key_ambiguous' ? `several keys hold ${verb} — name one with --key (${pick.names.join(', ')})` : null), args: v0.args });
+    // lane key-folder-picker-all: the keys this conversation holds lack the verb (the owner took it off, or never gave it) ⇒ said by name
+    if (!pick.ok) return done({ ...named(pick.code, pick.code === 'key_ambiguous' ? `several keys hold ${verb} — name one with --key (${pick.names.join(', ')})` : pick.code === 'verb_not_in_scope' ? `the key${pick.names.length > 1 ? 's' : ''} granted to this conversation (${pick.names.join(', ')}) do${pick.names.length > 1 ? '' : 'es'} not hold ${verb} — the owner adds it with Edit… in the Vault window` : null), args: v0.args });
     const key = pick.key;
     let verdict = A.useVerdict({ key, grants: liveGrants(), subject, subjectGroups: groups, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
     let asked = null;
@@ -428,7 +445,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       verdict = A.useVerdict({ key: keyById(key.id), grants: liveGrants(), subject, subjectGroups: groups, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
       // once: the grant the answer wrote — spent by THIS call (a joined call finds it spent and asks again)
     }
-    if (!verdict.ok) return done({ ...named(verdict.code), args: v0.args }, key.id, asked ? { ask: asked } : {});
+    if (!verdict.ok) return done({ ...named(verdict.code, verdict.code === 'verb_not_in_scope' ? `the key "${key.name}" does not hold ${verb} — the owner adds it with Edit… in the Vault window` : null), args: v0.args }, key.id, asked ? { ask: asked } : {});
     // THE LIMITS (lane automation-open-limits — the q-048 verify's M2): WHAT an open asks for, against its key's limits as
     // they stand NOW (re-read — the owner may have edited them while a card waited): AFTER the grant, BEFORE the grant is
     // spent, the spend authorizer runs and anything spawns (impl → conversation-ops openConversation). A refused open is
@@ -497,7 +514,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     return { ok: true, lines: lines.slice(-Math.max(1, Math.min(200, Number(limit) || 50))).reverse() };
   }
 
-  return { list, mint, revoke, grant, ungrant, setReach, setLimits, use, answer, reconcile, keysFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
+  return { list, mint, revoke, grant, ungrant, setReach, edit, setLimits, use, answer, reconcile, keysFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
 }
 
 module.exports = { create, ACTION_TYPE };

@@ -41,7 +41,9 @@ const USAGE = [
 function limitsWords(l) {
   if (!l || typeof l !== 'object') return 'none set — every open is refused until the user sets them in the Vault window';
   const any = (v) => (v === 'any' ? 'any' : Array.isArray(v) && v.length ? v.join(', ') : 'none');
-  return `folders ${any(l.cwdRoots)} · accounts ${any(l.accounts)} · permission modes ${any(l.permissionModes)} · models ${any(l.models)} · modes ${any(l.modes)}`;
+  // lane key-folder-picker-all: `/` is all paths (never a bare slash); a folder covers its subfolders and says so
+  const folders = Array.isArray(l.cwdRoots) && l.cwdRoots.includes('/') ? 'all paths' : Array.isArray(l.cwdRoots) && l.cwdRoots.length ? `${l.cwdRoots.join(', ')} (with subfolders)` : 'none';
+  return `folders ${folders} · accounts ${any(l.accounts)} · permission modes ${any(l.permissionModes)} · models ${any(l.models)} · modes ${any(l.modes)}`;
 }
 /** A grant's reach in words (lane key-instance-scope): opened (the default) · groups: <ids> · instance. */
 function reachWords(r) {

@@ -78,6 +78,10 @@
 //      ("The user took over your browser; 1 operation was interrupted: wait." —
 //      nothing delivered), the command ends [browser_interrupted] and the Hand back
 //      reminds "Re-run what was interrupted: wait" once.
+//   ③b+ lane agent-window-no-pop (owner incident inc-mvhebl4n-rkvr): the agent browser's twin row — the
+//      same lane H world with the person in ANOTHER window of this desk when the
+//      agent's browser starts ⇒ no live view, the chat's box unchanged, the chat's
+//      taskbar badge; the status-bar chip's "Open live view" opens it + focuses it.
 // Heavy: chrome + a worktree server + (optionally) a real chromium; free ports,
 // per-pid scratch paths only.
 import fs from 'node:fs';
@@ -937,7 +941,7 @@ else await (async () => {
  * copy (a scratch checkout, never this one) so its holder rows drop the ephemeral: the negative control.
  * Returns the observations; asserts nothing itself (the caller judges both runs).
  */
-async function ephemeralLeg({ tag, mutate = false, clientPrefix = false }) {
+async function ephemeralLeg({ tag, mutate = false, clientPrefix = false, away = false }) {
   // an ASYNC predicate (a CDP evaluate) — `until` would take the pending promise itself for a yes
   const untilA = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
   const obs = { tag };
@@ -1045,6 +1049,12 @@ async function ephemeralLeg({ tag, mutate = false, clientPrefix = false }) {
     if (!obs.chatUp) return obs;
     obs.chatId = await W('return chat().id;');
     obs.liveBefore = await W('return byType("browser-live").length;');
+    // lane agent-window-no-pop (inc-mvhebl4n-rkvr): `away` — the person works in ANOTHER window of this desk (the chat SHOWS,
+    // not minimized, not active) when the agent's browser starts: nothing may open or move; the chat gets the badge
+    if (away) {
+      obs.away = await W("const pw = app.wm.createWindow({ title: 'away', type: 'probe' }); window.__awayWin = pw.id; app.wm.focusWindow(pw.id); const c = chat(); return app.wm.activeWindowId === pw.id && !c.isMinimized && !c._hiddenByDesktop;");
+      obs.chatBox0 = await W('const r = chat().content.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round).join(",");'); // the chat's PANE (a split keeps the frame, halves the pane)
+    }
     // the agent's tool call starts (the card the Browser actions row rides), then the agent runs the SHIPPED CLI
     const emit = (lines) => { const f = path.join(AB2, `emit-${claudePid}-${Date.now()}-${Math.random().toString(16).slice(2)}`); fs.writeFileSync(f + '.part', lines.map((l) => JSON.stringify(l)).join('\n') + '\n'); fs.renameSync(f + '.part', f); };
     const URL1 = 'https://example.com/lane-h-' + tag;
@@ -1062,6 +1072,10 @@ async function ephemeralLeg({ tag, mutate = false, clientPrefix = false }) {
     // within 5 s of the CLI starting: the live view, born in the chat's chain
     obs.bound = await untilA(() => W(`const l = live(); return !!(l && l._tabChain && l._tabChain.layout === 'split');`), Math.max(500, 5000 - (Date.now() - t0)), 100);
     obs.boundMs = Date.now() - t0;
+    if (away) {
+      obs.liveAtWait = await W('return byType("browser-live").length;');
+      obs.awayAfter = await W(`const c = chat(); const r = c.content.getBoundingClientRect(); const it = document.querySelector('.taskbar-item[data-win-id="' + c.id + '"]'); return { active: app.wm.activeWindowId === window.__awayWin, box: [r.left, r.top, r.width, r.height].map(Math.round).join(','), arrived: c.element.classList.contains('window-arrived'), itemArrived: !!(it && it.classList.contains('arrived')) };`);
+    }
     if (obs.bound) {
       obs.chain = await W(`const l = live(), c = chat(); const ch = c._tabChain; return { same: l._tabChain === ch, host: ch.tabs[0], pair: ch.split && ch.split.pair, liveId: l.id, syncId: l.id, target: l._browserLive.state().target, spec: l._openSpec || null };`);
       obs.frames = await untilA(() => W('const l = live(); return !!(l && l._browserLive.state().frames >= 1 && l._browserLive.img().naturalWidth === 1280);'), 10000, 150);
@@ -1175,6 +1189,16 @@ else await (async () => {
   ok(u.clientMutated && u.rebuilt && u.booted && u.chatUp && u.bound, `CONTROL (naive study 2): the same world with the PRE-FIX live-view client (a manual open always creates; no stopped state), its bundle rebuilt in the leg's own worktree (rebuild ${u.rebuildMs} ms, chrome up in ${u.chromeMs} ms on DevToolsActivePort ${u.cdpPort}, deadline ${chromeDeadline(u.rebuildMs)} ms)`, JSON.stringify(u).slice(0, 600));
   ok(u.menuFound && u.liveAfterOpens >= 3, `CONTROL: …"Open live view" twice opens ${u.liveAfterOpens} windows (the auto-bound one + one per click) — the finding-2 leg can go red`);
   ok(u.stoppedView && u.stoppedView.badge === 'Agent is driving' && !u.stoppedView.stopped, `CONTROL: …and the stopped browser's view says "${u.stoppedView && u.stoppedView.badge}" — the finding-3 leg can go red`, JSON.stringify(u.stoppedView));
+  // lane agent-window-no-pop (owner incident inc-mvhebl4n-rkvr) — THE AGENT BROWSER'S TWIN ROW: the same world, the person in
+  // ANOTHER window of this desk when the agent's browser starts (the chat shows, not active) ⇒ no live view, nothing moves,
+  // the chat's badge; the status-bar chip's "Open live view" (the person's press) opens it and focuses it
+  const q = await ephemeralLeg({ tag: 'away', away: true });
+  ok(q.booted && q.created && q.appBooted && q.chatUp && q.away === true && q.cli && q.cli.status === 0, 'agent-window-no-pop: the same world; the chat SHOWS but another window of this desk is the active one; the agent ran `vibespace-browser open`', JSON.stringify(q).slice(0, 600));
+  ok(!q.bound && q.liveAtWait === 0, `…NO live view opened within 5 s (lane H's row, the chat active, opened one in ${o.boundMs} ms; the base opened one here too)`, JSON.stringify({ bound: q.bound, live: q.liveAtWait }));
+  ok(q.awayAfter && q.awayAfter.active && q.awayAfter.box === q.chatBox0, '…nothing moved: the other window is still the active one, the chat\'s pane keeps its exact box (the base split it in half)', JSON.stringify({ before: q.chatBox0, after: q.awayAfter }));
+  ok(q.awayAfter && q.awayAfter.arrived && q.awayAfter.itemArrived, '…the chat\'s taskbar entry carries the badge (the arrived mark)', JSON.stringify(q.awayAfter));
+  ok(q.statusChip === 'Agent browser · no profile (temporary browser)', `…the chat's status-bar chip names the browser: "${q.statusChip}"`);
+  ok(q.menuFound && q.liveAfterOpens === 1 && q.activeIsLive, '…the person\'s "Open live view" on that chip opens ONE live view and it takes the focus (the human origin)', JSON.stringify({ menu: q.menuFound, windows: q.liveAfterOpens, active: q.activeIsLive }));
 })().catch((e) => ok(false, 'the lane H leg threw', e && (e.stack || e.message)));
 
 // ═══ ④ the REAL binary ═══════════════════════════════════════════════════

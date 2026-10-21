@@ -653,6 +653,48 @@
 - (2026-10-20) THE GRADUATION SUITE'S FAKE SSH LOST ITS MACHINE (.331 mirror): it read VS_FAKE_ROOT from the env the hub hands ssh, which .331 rightly cut to hosts.sshEnv(). FIX = its world baked in + an ssh-env pin. 不变量 = a fake reads nothing from the road it tests (kb-bugfix-invariants)
 - (2026-10-20) 3 CHROME SUITES RED ON 1 CSP REPORT EACH (.331 mirror): not the product — each negative control put a raw <img onerror> on the app page. FIX = the controls parse in an inert document. 不变量 = the app page carries no inline handler — the CSP teardown is the fence (kb-bugfix-invariants)
 - (2026-10-20) AN AUTOMATION KEY COULD NOT END THE WORKERS IT OPENED AFTER A RESTART (the opener's reach was a Map in memory). 不变量 = a fact a verdict needs is persisted beside its other facts (the key store's `opened` rows), judged by ONE PURE rule (reachVerdict) with a mutant that drops it.
+- (2026-10-21) AN AGENT'S DESIGN RE-ARRANGED THE OWNER'S DESK (inc-mvhebl4n-rkvr, a repeat): beside a chat that only SHOWED, two halves snapped under his hand. FIX = beside only where he looks, else a card + a badge. 不变量 = an agent never changes the arrangement of the desk a person is using
+- (2026-10-21) A CHROME SUITE RED UNDER LOAD, GREEN ALONE (cwr-10-rebuild-race, ⑩c): a fixed-count poll read the reconnect rebuild before it ran (renderNow awaits renderBar, which a loaded server delays). FIX = wait-for-effect ≤10 s. 不变量 = wait for the effect, not a count (kb-bugfix-invariants)
+- (2026-10-21) DROPLINE NAGGED ALL DAY (fleet user: 20 suggestions/8 d, CLAUDE.md 7×): old messages re-offered dismissed words, × unheard, 1 item/chat, pinned. FIX = a dismissal consumes the evidence; ONE item, low; 加入/忽略 in Settings. 不变量 = only a new dictation re-earns a word (kb-bugfix-invariants)
+
+## AN AGENT'S DESIGN RE-ARRANGED THE DESK THE OWNER WAS USING — A REPEAT (owner incident inc-mvhebl4n-rkvr, 2026-10-21 00:50Z 「design还是被强行弹出了」; lane agent-window-no-pop)
+
+**What happened (measured from the bundle, client 2.369.332).** At 00:50:26.654Z the hub pushed `design-open` for the platform-dev conversation (sess-1-1791912552582 — its agent ran `vibespace-design open`) while the owner was pressing inside the ⚙ menu's flyout (the action ring: `gs-menu-item` presses at 00:50:26.036 and 00:50:34.252). That chat window was SHOWING on his active desk 「工作」 — not minimized, not the active window (seven windows on that desk, the vault window open). The PURE verdict `agentWindowPlacement` answered `act: 'beside', why: 'showing-quiet'`, and `app.placeAgentWindow` opened a FRESH Design and `snapToHalf`'d the chat to the LEFT and the Design to the RIGHT. No focus was taken (the .324 rule held) — but two windows changed their boxes under his hand. That is the pop he reports.
+
+**Why the earlier lanes did not cover it.** agent-window-no-steal (2026-10-11) fenced the FOCUS: an agent may place a window, only a person may focus one. design-window-placement (B-9674, 2026-10-20) answered the owner's 「在开始 design 的对话的右侧分屏」 by snapping beside ANY chat on screen. Both treated placement as harmless. On the desk a person is using, it is not: a layout change there is as disruptive as a stolen focus.
+
+**The rule (ONE PURE verdict, three doors).** `agentWindowPlacement` opens a window beside its chat only where the person already LOOKS: that chat is the active window, or the active window shares its split frame (the `looking` fact, app.js `agentPlacement`). It also places a window on the chat's desk when that is ANOTHER desk (unchanged — he sees nothing move). Every other row where this client has the chat is the new act **`card`**:
+- shown but not looked at (the incident);
+- minimized;
+- hidden on no other desk.
+
+`card` opens NO window. The chat's taskbar entry gets the badge, and the chat gets a card:
+- the Design: src/lib/agent-card.js above the composer — the title, **Open** and ✕;
+- the agent browser: its status-bar chip's "Open live view" / its window chip.
+
+The person's press is the only origin that opens + focuses (`app.openDesign`). Two more parts changed with it:
+- The live view's auto-bind used to judge "on screen" inline. It now asks the same verdict through a third push shape, `browser-live-start`.
+- A design whose window is already open keeps its place: its watch is re-asserted (F3) and its entry pulses — never revealed, never a tab switched.
+
+Phone rows and the front setting are unchanged. The `behind` / `minimize` cells are gone: nothing is placed on the person's desk while he looks elsewhere, so nothing waits minimized.
+
+**The agent is told the truth.** No window watches the folder, so `opened` is false and the CLI says "no Design window confirmed it on the user's screen".
+
+不变量 = an agent never changes the arrangement of the desk a person is using; it leaves a card and a badge; the person's press is the only origin that moves windows.
+
+**Gates (none can go green on the base):**
+- test-agent-window-placement — the table, the incident's row by its real ids (`card`, never `beside`), the `arrangers` census, and a MUTANT keeping `beside` for that row ⇒ RED.
+- test-design-window A①c — the incident replayed in Chrome: no window, no box moved, the ⚙ menu stays, the card + badge; a real click on Open opens + focuses.
+- test-browser-live ③b+ — the agent browser's twin: the person in another window when the agent's browser starts ⇒ no live view, the badge; the chip's "Open live view" opens + focuses.
+- test-agent-window-chrome — the desktop-app browser for a chat showing behind the editor ⇒ no pane.
+
+## DROPLINE'S DICTIONARY SUGGESTION NAGGED ALL DAY — THE SAME OLD MESSAGES RE-OFFERED A DISMISSED WORD, EVERY CONVERSATION FILED ITS OWN ITEM, PINNED UNDER URGENT (a fleet user 2026-10-21 01:48Z: 「一天到晚有这个 Dropline 让我发信息的消息, 站在我的 inbox 里」; lane voice-dictionary-nag, .334)
+
+Measured read-only on their instance (2.369.318, data/user-todos.json): 20 For-you items «Dropline suggests adding to your dictionary: …» in 8 days — 10 on one day, 4 on the day they wrote — 18 dismissed by them, 1 done, 1 open; the same words back after each dismissal: «CLAUDE.md» 7×, «Claude» 5, «Lark» 4, «DocuSign» 3. Three causes. (1) The candidate rule (src/voice-model.js `proposalCandidates`) subtracted only `known` — the VENDOR's dictionary — and read a conversation's last messages at every dictation, so the SAME old message re-offered a word long after the person had said no. (2) The teach engine listened to a chip reply and to the row's ✓; a × (status `dismissed`) and 「全部标为已看」 reached it and did nothing, so 18 dismissals were never written anywhere. (3) The hourly cadence was per CONVERSATION, so each conversation filed its own item, and lane foryou-plugin-notices pinned a plugin's reminder at the head of band 2, right under urgent — above their real asks, in the badge, with a toast.
+
+**FIX.** The user ruled out both a blacklist and timers (02:04Z 「忽略过的永不再提也太极端了」, 02:06Z 「你这逻辑也不太合理」), so a dismissal CONSUMES the evidence: a per-instance EVIDENCE LEDGER (PURE voice-model; the plugin's own file data/voice-suggestions.json, written whole through writeJsonAtomic 0600, ≤ 2 000 words) keeps per word the occurrences (message keys) it was shown on; ×, 忽略, 「全部标为已看」 and a word's 忽略 in Settings move them to `consumed`, and they never count again — a word comes back only when a NEW dictation says it. The rule is ONE swappable function (`evidenceRule`) while the user's A/B/C answer is pending. 加入 takes the words out (the vendor holds them — and the engine's cached dictionary learns them at once). ONE open item at a time: a later batch merges into it in place (the same id, the tray's keyed row patched); a new item waits 24 h after a dismissal (a PURE verdict, the clock handed in). The item is filed `low`, and a plugin's low reminder sits in band 5 — no pin, no badge, no toast. All Settings › Voice input › 「词典建议」 lists every word suggested now with 加入 / 忽略 (the door), and voice.suggestions.mode `settings-only` keeps them out of For you entirely.
+
+**不变量 / Gates.** A dismissal is remembered on that instance as consumed evidence: the same messages never re-offer a dismissed word, a new dictation can — never a blacklist, never a timer; one open suggestion at a time, never urgent and never pinned; every suggested word has a door (加入 / 忽略 in Settings). test-voice-model ⑧ replays the measured fixture (20 dictations / 8 days, six conversations whose old messages carry the repeated words, no new dictation of them): the shipped rule gives 20 items and CLAUDE.md 7×; the ledger + pace give CLAUDE.md in ONE item, every repeated word at most once, 6 items, never two open, and a new dictation re-earns it; MUTANT a candidate rule that subtracts only `known` ⇒ CLAUDE.md in 4 items ⇒ RED. test-voice-teach ④ (the real store, a movable clock, the file) and its CONTROL (the pre-fix listener, × unheard ⇒ the same messages re-offer the words); test-voice-teach-chrome ⑨ ⑩ (the merged row patched in place, band 5, the same conversation re-read ⇒ nothing, a new dictation ⇒ back, the real All Settings rows with 加入 / 忽略 over the real route, settings-only, off).
 
 ## THREE CHROME SUITES ENDED RED ON ONE CSP REPORT EACH — THEIR OWN NEGATIVE CONTROL'S INLINE HANDLER ON THE APP PAGE (the .331 CI mirror, Actions run 39489998424; lane mirror-331-reds-chrome, 2026-10-20)
 

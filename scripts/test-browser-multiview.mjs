@@ -9,7 +9,9 @@
 // profile, a desktop page 1280×900 and later a phone page. Every gesture that matters is a REAL
 // pointer event through Input.dispatchMouseEvent.
 //   1  TWO CHATS IN ONE GROUP, EACH WITH ITS BROWSER — Alpha + Bravo grouped as tabs; Alpha's
-//      browser starts ⇒ its live view is BORN beside it (one pane ⇒ chat | browser); Bravo's
+//      browser starts while Alpha is the shown tab ⇒ its live view is BORN beside it (one pane ⇒
+//      chat | browser); the person clicks Bravo (an agent's window opens only beside a chat the
+//      person looks at — lane agent-window-no-pop), Bravo's browser
 //      starts ⇒ a quiet TAB on the browser side that PULSES — the two shown panes do not move,
 //      never a third pane; a REAL click on the Bravo tab (left) ⇒ the right FOLLOWS to Bravo's
 //      browser, a real click on Alpha's browser tab (right) ⇒ the left follows to Alpha — ZERO
@@ -167,22 +169,34 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await until(() => ev(`return !!chat(${S(SIDS.A)});`), 10000);
     await ev(`app.attachSession(${S(SIDS.B)}, 'Bravo', ${S(ROOT)}, { mode: 'chat', backend: 'claude' }); return true;`);
     await until(() => ev(`return !!chat(${S(SIDS.B)});`), 10000);
-    const ids = await ev(`const A = chat(${S(SIDS.A)}), B = chat(${S(SIDS.B)}); wm.createTabChain(A, B); return { A: A.id, B: B.id };`);
+    const ids = await ev(`const A = chat(${S(SIDS.A)}), B = chat(${S(SIDS.B)}); wm.createTabChain(A, B); wm.focusWindow(A.id); return { A: A.id, B: B.id };`);
+    // lane agent-window-no-pop (inc-mvhebl4n-rkvr): an agent's browser opens beside its chat only where the person LOOKS at that
+    // chat — Alpha is the shown, active tab when its browser starts
     ok(await attach(SIDS.A, 'Alpha work'), 'Alpha attaches its browser (a new lease in the digest)');
     const born = await until(() => ev(`const L = live(${S(SIDS.A)}); return !!(L && L._tabChain && L._tabChain === chat(${S(SIDS.A)})._tabChain && L._browserLive.state().frames >= 1);`), 15000);
     const c1 = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return { layout: ch.layout, pair: ch.split && ch.split.pair, left: ch.split && ch.split.left, right: ch.split && ch.split.right };`);
     const LA = await ev(`return live(${S(SIDS.A)}).id;`);
     ok(born && c1.layout === 'split' && S(c1.pair) === S([ids.A, LA]) && S(c1.right) === S([LA]), 'D5 (b): the group was NOT split yet ⇒ Alpha\'s live view is born BESIDE it — chat | browser (the one pane became two)', S(c1));
+    // the person goes to Bravo (a REAL click on its tab — the left pane shows Bravo, the right keeps Alpha's browser: Bravo has none)
+    const tabB0 = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return rect(wm.windows.get(ch.tabs[0]).titleBar.querySelector('.tab-item[data-win-id="${ids.B}"]'));`);
+    await click(centre(tabB0));
+    const onB = await until(() => ev(`const ch = chat(${S(SIDS.A)})._tabChain; return ch.split.pair[0] === ${S(ids.B)} && app.wm.activeWindowId === ${S(ids.B)};`), 4000);
+    const pairB0 = await ev(`return chat(${S(SIDS.A)})._tabChain.split.pair;`);
+    ok(onB && pairB0[1] === LA, 'a REAL click on Bravo (left) ⇒ Bravo is shown and active; the right keeps Alpha\'s browser (Bravo has none yet)', S(pairB0));
     const rectBefore = await ev(`return rect(wm.windows.get(${S(ids.A)}).element);`);
     ok(await attach(SIDS.B, 'Bravo work'), 'Bravo attaches its browser');
     const bornB = await until(() => ev(`const L = live(${S(SIDS.B)}); return !!(L && L._tabChain && L._browserLive.state().connected);`), 15000);
     const c2 = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; const LB = live(${S(SIDS.B)}); const tab = wm.windows.get(ch.tabs[0]).titleBar.querySelector('.tab-item[data-win-id="' + LB.id + '"]'); return { pair: ch.split.pair, right: ch.split.right, left: ch.split.left, LB: LB.id, arrived: !!(tab && tab.classList.contains('tab-arrived')), hidden: LB.content.classList.contains('tab-hidden'), shownPanes: ch.tabs.filter((id) => !wm.windows.get(id).content.classList.contains('tab-hidden')).length, host: rect(wm.windows.get(ch.tabs[0]).element) };`);
     const LB = c2.LB;
-    ok(bornB && S(c2.pair) === S([ids.A, LA]) && S(c2.right) === S([LA, LB]) && c2.hidden && c2.arrived, 'D5 (a)/(b): the group is ALREADY split ⇒ Bravo\'s live view is a TAB on the browser side, hidden, PULSING — the two shown panes did not move', S(c2));
+    ok(bornB && S(c2.pair) === S([ids.B, LA]) && S(c2.right) === S([LA, LB]) && c2.hidden && c2.arrived, 'D5 (a)/(b): the group is ALREADY split ⇒ Bravo\'s live view is a TAB on the browser side, hidden, PULSING — the two shown panes did not move', S(c2));
     ok(c2.shownPanes === 2 && Math.abs(c2.host.width - rectBefore.width) <= 1 && Math.abs(c2.host.left - rectBefore.left) <= 1, 'still TWO panes (never a third), the window did not move or resize', S({ before: rectBefore, after: c2.host }));
     await ev(`window.__ws0 = { A: live(${S(SIDS.A)})._browserLive.ws(), B: live(${S(SIDS.B)})._browserLive.ws() }; return true;`);
     const conn0 = { A: U.A.connections, B: U.B.connections };
-    // a REAL click on the Bravo chat tab (left half)
+    // a REAL click on the Alpha chat tab (left) ⇒ the right follows to Alpha's browser; then on Bravo ⇒ the right FOLLOWS to Bravo's
+    const tabA = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return rect(wm.windows.get(ch.tabs[0]).titleBar.querySelector('.tab-item[data-win-id="${ids.A}"]'));`);
+    await click(centre(tabA));
+    const f0 = await until(() => ev(`const ch = chat(${S(SIDS.A)})._tabChain; return ch.split.pair[0] === ${S(ids.A)} && ch.split.pair[1] === ${S(LA)};`), 4000);
+    ok(f0, 'a REAL click on Alpha (left) ⇒ the right follows to Alpha\'s browser', S(await ev(`return chat(${S(SIDS.A)})._tabChain.split.pair;`)));
     const tabB = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; return rect(wm.windows.get(ch.tabs[0]).titleBar.querySelector('.tab-item[data-win-id="${ids.B}"]'));`);
     await click(centre(tabB));
     const f1 = await until(() => ev(`const ch = chat(${S(SIDS.A)})._tabChain; return ch.split.pair[0] === ${S(ids.B)} && ch.split.pair[1] === ${S(LB)};`), 4000);

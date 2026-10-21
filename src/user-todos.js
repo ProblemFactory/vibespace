@@ -476,7 +476,7 @@ class UserTodoManager {
     // (test-user-todos-layout ⑪ is the census beside this throw).
     origin = normalizeOrigin(origin);
     // A PLUGIN'S REMINDER (lane foryou-plugin-notices): origin 'plugin' names WHICH plugin (`plugin`, its id) and files under
-    // that id — one tray section per plugin, pinned under urgent (src/lib/user-todos-layout.js trayBand); the plugin must
+    // that id — one tray section per plugin, pinned under urgent unless filed low (src/lib/user-todos-layout.js trayBand); the plugin must
     // DECLARE 'reminders' (the gate); `plugin` on any other origin is refused, and so is a door on an item that is no plugin's
     if (origin === 'plugin') {
       if (typeof plugin !== 'string' || !PLUGIN_ID_RE.test(plugin)) throw new Error("a plugin's item names its plugin (plugin: <id>)");
