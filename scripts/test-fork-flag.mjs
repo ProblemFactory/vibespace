@@ -68,7 +68,7 @@ const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const remote = buildRemoteExec({ cwd: '/w', shq, parts: ['claude', ...t.argv.at.map(shq)] });
 ok(remote.includes(`'--resume' '${P}' '--fork-session' '--resume-session-at' '${AT}'`), 'buildRemoteExec (ssh + dial) carries the adapter\'s fork flags verbatim', remote.slice(-160));
 const wc = codeOnly(read('src/ws-create.js'));
-ok(/let spawnArgs = sessionSpec\.args \|\| \[\];/.test(wc) && /spawnCmd, \.\.\.spawnArgs,\n\s*\];/.test(wc), 'local dtach + daemon pipe: r6Argv spreads spawnArgs, seeded from the adapter\'s sessionSpec.args');
+ok(/let spawnArgs = sessionSpec\.args \|\| \[\];/.test(wc) && /exe: spawnCmd, args: spawnArgs,/.test(wc), 'local dtach + daemon pipe: the ONE line (sessionSpawnLine) runs spawnArgs, seeded from the adapter\'s sessionSpec.args');
 ok(/forkAt: data\.fork && data\.forkAtUuid \? String\(data\.forkAtUuid\) : null,/.test(wc), 'ws-create hands the fork point (data.forkAtUuid) to buildSessionArgs, only on a fork');
 const sshSrc = codeOnly(read('src/spawn/ssh.js')), dialSrc = codeOnly(read('src/spawn/dial.js'));
 ok((sshSrc.match(/spawnArgs\.map\(shq\)/g) || []).length >= 1 && (dialSrc.match(/spawnArgs\.map\(shq\)/g) || []).length >= 1, 'ssh.js / dial.js compose spawnArgs (the adapter argv) into buildRemoteExec');

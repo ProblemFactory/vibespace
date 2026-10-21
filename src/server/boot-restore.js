@@ -22,6 +22,7 @@ const { restoreMarks } = require('../seen-marks.js'); // PURE (B-86d3, lane hook
 const BUILD_VERSION = (() => { try { return require('../../package.json').version; } catch { return ''; } })(); // the build an intro mark must name to count as seen
 
 const { mk } = require('./lazy.js');
+const { sessionSpawnLine } = require('../spawn/line.js'); // PURE (lane antigravity-spawn-argv): the ONE session line, shared with ws-create
 
 /** THE CONVERSATION'S POOL PIN from a session meta (2026-09-28): {memberId, at, by} or null —
  *  the ONE expression all three restore sites use (a pin the pool no longer lists is kept: the
@@ -58,7 +59,7 @@ function persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }) {
 }
 
 function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
-  ENV_CMD, NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
+  NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
   attachToDtach, setupSessionPty, readSessionMeta, writeSessionMeta,
   deleteSessionMeta, broadcastToSession, broadcastActiveSessions,
   refreshWebuiPids, sbNoteServerOp, getHosts, getDialBridge, getExitProxy = () => null, note = () => { }, agentEnv }) {
@@ -807,11 +808,10 @@ async function readoptOrphanKeeperSessions() {
       // them — this one sets none: the remote claude holds its own) and r6Env's ambient billing names never ride it.
       const readoptEnv = { ...agentEnv(), TERM: 'xterm-256color', VIBESPACE_REMOTE_SID: id };
       for (const k of ['VIBESPACE_SESSION_TOKEN', 'VIBESPACE_API', 'VIBESPACE_TASK_ID', 'ANTHROPIC_API_KEY', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR']) delete readoptEnv[k];
-      ptyProc = pty.spawn(DTACH_CMD, ['-c', socketPath, '-E', '-r', 'none',
-        NODE_CMD, CHAT_WRAPPER, bufFile, metaFileW,
-        ENV_CMD, `CLAUDE_WEBUI_PORT=${PORT}`, `CLAUDE_WEBUI_SESSION_ID=${id}`,
-        `TERM=xterm-256color`, 'ssh', ...sshArgs,
-      ], {
+      // THE ONE LINE (lane antigravity-spawn-argv, src/spawn/line.js): the wrapper runs `ssh …`, its names ride the env
+      readoptEnv.CLAUDE_WEBUI_PORT = String(PORT); readoptEnv.CLAUDE_WEBUI_SESSION_ID = id;
+      const { argv } = sessionSpawnLine({ node: NODE_CMD, wrapper: CHAT_WRAPPER, bufFile, metaFile: metaFileW, exe: 'ssh', args: sshArgs });
+      ptyProc = pty.spawn(DTACH_CMD, ['-c', socketPath, '-E', '-r', 'none', ...argv], {
         name: 'xterm-256color', cols: 190, rows: 45, cwd: os.homedir(),
         env: readoptEnv,
       });

@@ -23,7 +23,9 @@
 //   notice becomes the permission card 「agy skipped <tool>」 whose "Allow and retry" restarts agy on the same
 //   conversation with --dangerously-skip-permissions for ONE turn and asks it to retry (a run has no per-tool grant;
 //   the card says so); an `AGY_ERROR: {...}` line becomes an error notice.
-//   argv: <bufferFile> <sidecarMetaFile> <agyCommand> [extra agy args…]
+//   argv: <bufferFile> <sidecarMetaFile> <agyCommand> [extra agy args…] — <agyCommand> is ONE executable, agy itself by its
+//         absolute path (src/spawn/line.js builds this line; the session's names ride the env, never these words);
+//         anything else is refused BY NAME before a spawn (commandRefusal below)
 //   env:  AGY_WEBUI_CWD, AGY_WEBUI_MODEL, AGY_WEBUI_EFFORT, AGY_WEBUI_MODE ('' | accept-edits | auto | plan |
 //         bypassPermissions), AGY_WEBUI_RESUME_ID (a conversation id), AGY_WEBUI_SESSION_NAME, AGY_WEBUI_BACKEND
 //         ('antigravity'), VIBESPACE_API / VIBESPACE_SESSION_TOKEN (the task-context prefix + the stop-time nudge).
@@ -63,6 +65,17 @@ const safeJsonParse = (t, f = null) => { try { return JSON.parse(t); } catch { r
 const asArray = (v) => (Array.isArray(v) ? v : []);
 const clip = (v, n = 4000) => { const s = typeof v === 'string' ? v : JSON.stringify(v ?? null); return s && s.length > n ? s.slice(0, n) + '…' : s; };
 if (!bufferFile || !metaFile || !cmd) { log('Missing required arguments (bufferFile, metaFile, agy command)'); process.exit(1); }
+// THE EXECUTABLE (lane antigravity-spawn-argv, 2026-10-21): this wrapper puts agy's flags FIRST, so argv[4] must BE agy.
+// The owner's 2.369.334 hub handed `/usr/bin/env K=V … agy` here. `env --input-format …` exited 125 with its usage, and
+// the session said only «exit code 125 — see agy-wrapper.log». A command that is not an absolute executable, or is a
+// launcher, is now refused by name: the sentence is the session's error line, and nothing is spawned.
+function commandRefusal(c) {
+  const unresolved = `agy-wrapper: the command is not an executable: ${c} — the hub's Antigravity path is unresolved; reinstall agy or set ANTIGRAVITY_CMD`;
+  if (!path.isAbsolute(c)) return unresolved;
+  if (path.basename(c) === 'env') return `agy-wrapper: the command is ${c}, a launcher, not agy — the hub put an env prefix where the executable goes (agy's flags would land in front of it); update VibeSpace`;
+  try { if (!fs.statSync(c).isFile()) return unresolved; fs.accessSync(c, fs.constants.X_OK); } catch { return unresolved; }
+  return null;
+}
 
 const state = {
   model: process.env.AGY_WEBUI_MODEL || '',
@@ -593,6 +606,8 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { shutt
 
 function boot() {
   persistMeta();
+  const refused = commandRefusal(cmd);
+  if (refused) { notice('error', refused, 'spawn-failed'); finalizeExit(1); return; }
   // THE VERSION LAW: agy updates itself in the background, so every spawn records the version it ran (the record-shape
   // fixture is pinned per version — a drift flood means it updated). `--version` makes no network call (measured).
   execFile(cmd, ['--version'], { timeout: 5000 }, (err, stdout) => {

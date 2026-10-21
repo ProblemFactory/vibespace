@@ -15,6 +15,7 @@ const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { spawnFor } = require('./spawn'); // decoupling wave 2b: the per-transport spawn ladders (local / ssh / dial)
+const { sessionSpawnLine } = require('./spawn/line'); // PURE (lane antigravity-spawn-argv): THE local session line — node <wrapper> <buf> <meta> <ONE executable> …args + the env
 const { pipePtyShim } = require('./pty-duck'); // B-ae4b: the R6 pipe duck holds a listener SET (the liveness stamp + the consumer)
 const { writerSweepOpts, forkChainEnv } = require('./resume-store'); // descriptor store hooks (writerSweep / forkChain), no id branch
 const { lockCaptureWanted, captureLockId, captureForkProof, armLockCapture, adoptCapturedId } = require('./claude-lock-capture'); // the ONE local lock capture (create + boot re-arm; a terminal fork included; the witness is the wrapper's pid, 2026-09-25)
@@ -104,7 +105,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, ownerWriteRefusal,
     sessionCounterRef, createSessionMessages, poolChooser, sbNoteServerOp,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
-    NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
+    NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload, otelEnv,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, serverNotice, autoResume,
@@ -1330,17 +1331,22 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           if (!session.host && cliCmds) spawnCmd = await cliCmds.forSpawn(backend, spawnCmd);
           let createPty;
           try {
-            const r6Argv = [
-              NODE_CMD, wrapper,
-              bufFile, metaFileW,
-              ENV_CMD, `EDITOR=${EDITOR_CMD}`, `CLAUDE_WEBUI_PORT=${PORT}`, `CLAUDE_WEBUI_SESSION_ID=${id}`,
+            // THE SESSION'S NAMES (lane antigravity-spawn-argv, 2026-10-21): every pair below rides the spawn's ENV.
+            // The wrapper is born with it (dtach and the R6 daemon pipe both pass `env`) and hands it to its CLI. It
+            // never rides the command line. Until 2.369.336 these were an `env K=V … <cli>` prefix INSIDE the
+            // wrapper's argv, which made `/usr/bin/env` the program agy-wrapper ran, with its flags in front of the
+            // assignments (env's usage exit 125: every Antigravity conversation dead at its start). It also put the
+            // session token in /proc/<pid>/cmdline, which every user can read. THE ONE LINE: src/spawn/line.js.
+            const r6Pairs = [
+              `EDITOR=${EDITOR_CMD}`, `CLAUDE_WEBUI_PORT=${PORT}`, `CLAUDE_WEBUI_SESSION_ID=${id}`,
               ...usageEnvPairs,
               // Agent-facing env: the vibespace tools (data/bin on PATH)
               // authenticate with the per-session token; Task Group belonging is
               // resolved server-side from that token (no task id in the env).
               // Integration OFF strips VIBESPACE_API + the data/bin PATH prefix
               // (the sane-PATH fallback itself stays — the systemd-minimal-env
-              // incident class); the TOKEN stays deliberately: data/bin/code
+              // incident class); the TOKEN stays deliberately (it is r6Base's —
+              // the wrapper's env carried it already): data/bin/code
               // (Ctrl+G, invoked via the absolute EDITOR path) authenticates
               // with it, it's never model-visible, and every consumer (hook,
               // tools, codex wrapper) guards on api AND token so token-alone is
@@ -1356,25 +1362,24 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // the fake `code` lives in editor/ precisely so PATH never
               // resolves it (B-b87b — it shadowed real VS Code locally)
               `PATH=${integrationOn ? AGENT_BIN_DIR + ':' : ''}${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
-              `VIBESPACE_SESSION_TOKEN=${session.agentToken}`,
               // Probed working X display (see server.js detectXDisplay) — the CLI
               // reads the clipboard itself on Ctrl+V, so it needs BOTH vars
               `DISPLAY=${X_ENV?.DISPLAY || process.env.DISPLAY || ''}`,
               ...(X_ENV?.XAUTHORITY ? [`XAUTHORITY=${X_ENV.XAUTHORITY}`] : []),
               `TERM=xterm-256color`, `COLORTERM=truecolor`,
               ...spawnEnvPairs,
-              spawnCmd, ...spawnArgs,
             ];
-            const r6Env = (() => {
+            const r6Base = (() => {
                 const env = {
                   ...agentEnv(), TERM: 'xterm-256color', COLORTERM: 'truecolor',
                   // The WRAPPER (always local, even for remote sessions) needs the
                   // agent API in its OWN env: the codex-chat-wrapper injects task
                   // context via thread/inject_items by calling /api/agent/*. The
-                  // spawned CLI gets these separately via the `env VAR=val` argv
-                  // prefix; the wrapper doesn't, hence this. Always the LOCAL port.
+                  // pairs above join this env in the ONE line (a pair wins, as the
+                  // old `env VAR=val` prefix did), so the wrapper and its CLI see
+                  // the same names. Always the LOCAL port.
                   // Integration OFF drops VIBESPACE_API (token kept — see the
-                  // argv-prefix note above; wrapper guards require api AND token).
+                  // note above; wrapper guards require api AND token).
                   ...(integrationOn ? { VIBESPACE_API: `http://127.0.0.1:${PORT}` } : {}),
                   VIBESPACE_SESSION_TOKEN: session.agentToken,
                   ...Object.fromEntries(Object.entries(sessionSpec.env || {}).map(([k, v]) => [k, v == null ? '' : String(v)])),
@@ -1414,6 +1419,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 }
                 return env;
               })();
+            // THE ONE LINE: `node <wrapper> <buf> <meta> <spawnCmd> …spawnArgs`; the names ride r6Env
+            const r6Line = sessionSpawnLine({ node: NODE_CMD, wrapper, bufFile, metaFile: metaFileW, env: r6Base, pairs: r6Pairs,
+              exe: spawnCmd, args: spawnArgs,
+            });
+            const r6Argv = r6Line.argv, r6Env = r6Line.env;
             if (r6Wanted && hosts?.device) {
               try {
                 const dm = await hosts.device(null);
@@ -1426,7 +1436,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               name: 'xterm-256color', cols: data.cols || 120, rows: data.rows || 30, cwd: spawnCwd, env: r6Env,
             });
           } catch (err) {
-            ws.send(JSON.stringify({ type: 'error', message: `Failed to spawn session: ${err.message}\ndtach=${DTACH_CMD} node=${NODE_CMD} env=${ENV_CMD} cwd=${cwd}` }));
+            ws.send(JSON.stringify({ type: 'error', message: `Failed to spawn session: ${err.message}\ndtach=${DTACH_CMD} node=${NODE_CMD} cwd=${cwd}` }));
             return;
           }
           if (ocPty) {

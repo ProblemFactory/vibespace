@@ -80,7 +80,7 @@ async function drive(mod, data, extra = {}) {
     execFileSync: require('child_process').execFileSync,
     ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
     SOCKETS_DIR: SOCK, BUFFERS_DIR: BUF, PTY_WRAPPER: '/stub/pty-wrapper.js', CHAT_WRAPPER: '/stub/chat-wrapper.js',
-    NODE_CMD: process.execPath, DTACH_CMD: '/stub/dtach', ENV_CMD: '/usr/bin/env', CLAUDE_CMD: 'claude-must-not-run',
+    NODE_CMD: process.execPath, DTACH_CMD: '/stub/dtach', CLAUDE_CMD: 'claude-must-not-run',
     EDITOR_CMD: '/stub/editor/code', AGENT_BIN_DIR: '/stub/bin', PORT: 1, X_ENV: {},
     cliCmds: { forSpawn: async (b, c) => c },
     USAGE_STATUSLINE_CMD: '/stub/vibespace-usage', userStatuslineCmd: () => '',
@@ -109,7 +109,8 @@ ok(!!created && !r.sent.some((m) => m.type === 'error'), 'the create answers `cr
 const sp = r.spawned[0];
 ok(r.spawned.length === 1 && sp.cmd === '/stub/dtach' && sp.args.includes('acme-cli') && sp.args.includes('--acme') && !sp.args.includes('claude-must-not-run'),
   'ONE pty spawn, under dtach, running the ADAPTER\'s command + args (never a claude fallthrough)', sp && sp.args.slice(-4));
-ok(!!sp && sp.args.includes('ACME_HOME=/acme-home'), 'the adapter\'s spawn env rides the argv env pairs', sp && sp.args.filter((a) => /=/.test(a)).slice(-3));
+ok(!!sp && sp.env && sp.env.ACME_HOME === '/acme-home' && !sp.args.some((a) => /^[A-Z_][A-Z0-9_]*=/.test(a)),
+  'the adapter\'s spawn env rides the spawn\'s ENV — the line carries no NAME=value word (lane antigravity-spawn-argv)', sp && sp.args.filter((a) => /=/.test(a)).slice(-3));
 ok(r.session && r.session.backend === 'acme' && r.session.mode === 'terminal', 'the live session is an acme terminal');
 ok(r.session && r.session._authAtSpawn === 'acme-global', 'its global-login guess is the DECLARED spawn.authAtSpawn row', r.session && r.session._authAtSpawn);
 ok(!!sp && sp.args.includes('--acme-status') && sp.args.includes('/stub/vibespace-usage'), 'the terminal statusline goes through the DECLARED spawn.statusline hook', sp && sp.args.slice(-4));

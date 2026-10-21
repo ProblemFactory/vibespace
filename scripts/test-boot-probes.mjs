@@ -82,7 +82,7 @@ function instance(BRm, d) {
   const SOCK = path.join(d, 'sockets'), META = path.join(d, 'meta'), BUF = path.join(d, 'buffers');
   const metaFile = (s) => path.join(META, s + '.json');
   const activeSessions = new Map(), attached = [], notes = [], broadcasts = { n: 0 }, ended = [];
-  const api = BRm.create({ rootDir: d, PORT: 0, BUFFERS_DIR: BUF, META_DIR: META, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', ENV_CMD: 'env', NODE_CMD: process.execPath, CHAT_WRAPPER: '',
+  const api = BRm.create({ rootDir: d, PORT: 0, BUFFERS_DIR: BUF, META_DIR: META, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', NODE_CMD: process.execPath, CHAT_WRAPPER: '',
     activeSessions, sessionCounterRef: { value: 0 }, attachToDtach: (id, sp, s) => { attached.push(id); s.pty = null; }, setupSessionPty: () => { },
     readSessionMeta: (s) => { try { return JSON.parse(fs.readFileSync(metaFile(s), 'utf8')); } catch { return {}; } },
     writeSessionMeta: (s, m) => fs.writeFileSync(metaFile(s), JSON.stringify(m)), deleteSessionMeta: (s) => { try { fs.unlinkSync(metaFile(s)); } catch { } },

@@ -75,8 +75,7 @@ const CODEX_CMD_RAW = process.env.CODEX_CMD || 'codex';
 // (B-a18e, the installer-window restart) ⇒ src/server/cli-cmd.js
 const { resolveCmd } = require('./src/server/cli-cmd.js');
 const DTACH_CMD = resolveCmd('dtach');
-const NODE_CMD = process.execPath;
-const ENV_CMD = resolveCmd('env');
+const NODE_CMD = process.execPath; // no ENV_CMD (lane antigravity-spawn-argv): a session's names ride its spawn's env, never an `env K=V` line (src/spawn/line.js)
 
 // ── CLI environment (src/server/cli-env.js, decomposition #14) ──
 // X display + adapter registry + CLI capability probes + model registry.
@@ -461,7 +460,7 @@ const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
   readoptOrphanKeeperSessions, probeSockets, probeFacts,
 } = require('./src/server/boot-restore.js').create({
   rootDir: __dirname, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
-  ENV_CMD, NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
+  NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
   attachToDtach, setupSessionPty, readSessionMeta, writeSessionMeta,
   deleteSessionMeta, broadcastToSession,
   broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),
@@ -1512,7 +1511,7 @@ const wsApi = registerWsHandler(wss, {
   harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, ownerWriteRefusal: refuseOwnerWrite, // harness settings (design-harness-settings §5/§6)
   sessionCounterRef, createSessionMessages,
   SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
-  NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
+  NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
   accounts, scheduleCtxSync, activeSessionsPayload, serverNotice,
   getExitProxy: () => { try { return exitProxy; } catch { return null; } }, // verify-r2 A3-r2 / ask-a: the kill path ends a dead conversation's pairs + asks
@@ -1758,7 +1757,7 @@ probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(
   // this pid; dtach sessions live in the same PID namespace and survive).
   try { fs.writeFileSync(path.join(__dirname, 'data', 'server.pid'), String(process.pid)); } catch {}
   setTimeout(() => jobsWiring.initAfterListen(), 1500); setTimeout(() => appsWiring.afterListen(), 2500); memSampler.start(); // Background Work engine: adopt-first, never blocks boot; Layer 0 apps: a rebuilt machine's apps put back (the replay marker hit = nothing)
-  console.log(`  dtach: ${DTACH_CMD}, node: ${NODE_CMD}, env: ${ENV_CMD}, claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}`);
+  console.log(`  dtach: ${DTACH_CMD}, node: ${NODE_CMD}, claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}`);
   if (process.platform === 'linux') console.log(`  X display: ${X_ENV.DISPLAY || '(none)'}${X_ENV.XAUTHORITY ? ' (xauth: ' + X_ENV.XAUTHORITY + ')' : ''} — clipboard image paste ${X_ENV.probed ? 'ready' : 'UNAVAILABLE (no working X display found)'}`);
 
   // Local sessions run through the device daemon (machine #0) — GRADUATED,

@@ -661,6 +661,37 @@
 - (2026-10-21) AN AGENT'S CHANNEL SEARCH SAID «NOTHING» WHILE THE MAIL WAS SAVED (channels-search-says-hidden): --full printed only additions, 2 words = 1 substring. FIX: saved first, every word, hidden = existence. 不变量 = a refusal by visibility says THAT, never how much (kb-bugfix-invariants)
 - THE API LOG WAS BLANK UNDER ITS HEADING (owner 2026-10-21): 199 lines on disk; a long roster squeezed the box to 0 px. 不变量 = a «still logged» promise is a line written where the act happens, read back by its credential; a section that can fail says so, never blank (kb-bugfix-invariants)
 - (2026-10-21) VAULT SUITE RED UNDER LOAD, GREEN ALONE (vault-unlock-modal-race, ⑥a/⑨L): the unlock modal is behind the serial /api/home→vault-state boot, on one 30 s from navigate. FIX = staged wait-for-effect (boot pass, then ≤10 s). 不变量 = an effect gets its own deadline (kb-bugfix-invariants)
+- (2026-10-21) EVERY ANTIGRAVITY START DIED «EXIT CODE 125» (antigravity-spawn-argv): the session line put `env K=V …` at the wrapper's executable slot; agy-wrapper's flags-first ran env. 不变量 = a wrapper's command argument is one executable; env rides the spawn's env, never a line
+
+## EVERY ANTIGRAVITY CONVERSATION DIED AT ITS START — «EXIT CODE 125»: THE SESSION LINE PUT `env K=V …` WHERE THE WRAPPER'S EXECUTABLE GOES (the owner 2026-10-21 11:4xZ; lane antigravity-spawn-argv, .336)
+
+The owner started an Antigravity conversation and read «Error: Antigravity exited (exit code 125) — see agy-wrapper.log. Resume the conversation to continue.»; the resume died the same way.
+
+agy-wrapper.log said `spawned /usr/bin/env --input-format stream-json … --dangerously-skip-permissions EDITOR=… … VIBESPACE_SESSION_TOKEN=vsst_… … /home/<user>/.local/bin/agy`, then env's own usage error.
+
+**The cause.** ws-create handed every wrapper the line `node <wrapper> <buf> <meta> /usr/bin/env K=V … <cli> <args>`.
+- A wrapper runs `argv[4] argv[5…]`.
+- chat-wrapper, codex-chat-wrapper, acp-wrapper and pty-wrapper append their own flags after that, so `env K=V … <cli> <flags>` worked for two years.
+- agy-wrapper (born in int330, 9408bc57) puts agy's flags FIRST, so it ran `env --input-format …`, and env exited 125.
+
+Its suite drove the wrapper with the stub as argv[4] directly, never through the create path, so the shape the hub really hands it was never run. Not one Antigravity chat started through the real path.
+
+**The same line was a leak.** `VIBESPACE_SESSION_TOKEN=vsst_…` sat on the dtach master's and the wrapper's argv for every local session.
+- /proc/<pid>/cmdline is readable by every user of the machine for the session's life.
+- The spawn logs that print the args wrote the token to disk (the owner's hub: codex-chat-wrapper.log 12 lines, agy-wrapper.log 2).
+
+**The fix.**
+- ONE line builder, src/spawn/line.js, makes `node <wrapper> <buf> <meta> <ONE executable> …args` for every harness.
+- The session's names (EDITOR, the id, the token, PATH, the display, the browser pairs, the adapter's env) ride the spawn's ENV; a later pair wins, as `env K=V` did, so the CLI sees the same env.
+- `exeRefusal` throws on a launcher or an assignment in the executable's place.
+- agy-wrapper and acp-wrapper refuse a command that is not one executable, BY NAME, before any spawn: «the command is not an executable: <cmd> — the hub's Antigravity path is unresolved; reinstall agy or set ANTIGRAVITY_CMD».
+- The §94 census gained an argv pass: a secret-shaped NAME= word on any site's argv is RED, with no row possible. ws-create's own session spawn became a site; it had been invisible because `pty` came from the ws ctx.
+
+不变量:
+- A wrapper's command argument is ONE executable, and its args are that executable's. Nothing else rides the slot.
+- A process's environment rides the spawn's `env`, never its command line. argv is public on the machine, and a launcher in the agent's place turns the agent's flags into the launcher's.
+- A spawn that cannot run names the missing executable and the way out. «exit code N — see the log» is not an answer.
+- A wrapper's suite runs it through the line the hub really builds (test-antigravity-session: a stub agy through the real ws-create + dtach), not only through a line the suite writes itself.
 
 ## AN AGENT'S CHANNEL SEARCH READ «NOTHING» WHILE THE MAIL WAS SAVED: `--full` PRINTED ONLY WHAT THE VENDOR ADDED, TWO WORDS WERE ONE SUBSTRING, AND A HIDDEN MATCH SAID «NOTHING» TOO (a field miss 2026-10-21; lane channels-search-says-hidden, .336)
 

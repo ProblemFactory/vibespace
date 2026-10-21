@@ -26,6 +26,12 @@
 // which keeps that call's env for ControlPersist (600 s) while every later call rides it. SSH_ROWS name the exceptions.
 // DERIVED builders (sshEnv) count as builders by name: each is defined in its home file ALONE and built over its base;
 // ENV_FUNCS pin an env built in one function and spawned in others (src/mounts.js _rcloneFor) to its builder.
+// THE ARGV PASS (lane antigravity-spawn-argv, 2026-10-21): a site's argv words (array literals, spreads, the variables they
+// name, one function deep) are read for NAME=value words. A SECRET-SHAPED name there (SECRET_ON_ARGV) is RED with no row
+// possible: /proc/<pid>/cmdline is world-readable for the child's whole life. The session line put
+// VIBESPACE_SESSION_TOKEN=… on every local session's dtach + wrapper argv until 2.369.336; the names ride the spawn's env
+// now (src/spawn/line.js). Every other NAME= word is counted (printed by §94). A `pty` handed in by a context (the ws
+// ctx's node-pty: `const { pty } = ctx`) is node-pty, so ws-create's session spawn is a SITE (it was invisible).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -34,6 +40,8 @@ import { gitEnvFrom } from './git-env.mjs';
 
 /** the four builders: an env BUILT by one of them never needs a row */
 export const BUILDERS = Object.freeze(['agentEnv', 'daemonEnv', 'serviceEnv', 'relayEnv', 'sshEnv']);
+/** a NAME on argv that is a secret's by its shape (the argv pass) — never allowed, no row */
+export const SECRET_ON_ARGV = /TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_?KEY|PRIVATE_KEY/;
 /** DERIVED builders: [name, home file, the builder it is built over, what] — a builder BY NAME, so it lives in one file */
 export const DERIVED = Object.freeze([
   ['sshEnv', 'src/hosts.js', 'serviceEnv', "HostManager.sshEnv(), every ssh road's env (beside sshArgs)"],
@@ -129,7 +137,7 @@ export function scan(repo, { patch = {}, files = filesOf(repo) } = {}) {
     };
     const isModObj = (o, at, stack) => {
       if (requireOf(o)) return MODS.test(requireOf(o));
-      if (o.type === 'Identifier') { const d = resolve(o.name, at, stack); if (!d) return /^(cp|childProcess|child_process)$/.test(o.name); if (d.param) return !!(d.param.dflt && requireOf(d.param.dflt) && MODS.test(requireOf(d.param.dflt))); if (d.init) return !!(requireOf(d.init) && MODS.test(requireOf(d.init))); return false; }
+      if (o.type === 'Identifier') { const d = resolve(o.name, at, stack); if (!d) return /^(cp|childProcess|child_process)$/.test(o.name); if (d.from && d.key === 'pty') return true; if (d.param) return !!(d.param.dflt && requireOf(d.param.dflt) && MODS.test(requireOf(d.param.dflt))); if (d.init) return !!(requireOf(d.init) && MODS.test(requireOf(d.init))); return false; }
       if (o.type === 'CallExpression' && o.callee.type === 'Identifier') { const fd = fns.find((fn) => fn.id && fn.id.name === o.callee.name); return !!(fd && /require\(['"](?:node-pty|(?:node:)?child_process)['"]\)/.test(T(fd))); }
       return false;
     };
@@ -181,7 +189,7 @@ export function scan(repo, { patch = {}, files = filesOf(repo) } = {}) {
       else if (c.type === 'MemberExpression' && !c.computed && c.property.type === 'Identifier' && (CALLS.has(c.property.name) || SYNC.has(c.property.name)) && isModObj(c.object, n.start, stack)) fn = c.property.name;
       if (!fn || !CALLS.has(fn)) continue;
       const { v, spans } = envOfCall(n, stack);
-      sites.push({ file: f, line: n.loc.start.line, call: one(T(c)), cmd: n.arguments[0] ? one(T(n.arguments[0])).slice(0, 48) : '', ...v, spans });
+      sites.push({ file: f, line: n.loc.start.line, call: one(T(c)), cmd: n.arguments[0] ? one(T(n.arguments[0])).slice(0, 48) : '', ...v, spans, argv: argvWords(n.arguments[1], n.start, stack) });
     }
     // THE SSH ROADS: any callee — the first argument names the binary (a literal, or `x.sshBin || 'ssh'`)
     for (const { n, stack } of calls) {
@@ -204,6 +212,23 @@ export function scan(repo, { patch = {}, files = filesOf(repo) } = {}) {
       const cl = (e) => classify(e, e.start, [fnN], []);
       const rc = rets.map(cl);
       defs.push({ file: f, name, line: fnN.loc.start.line, ret: rc.find((x) => x.k !== 'builder') || rc[0] || { k: 'none' }, rets: rc.length, vars: Object.fromEntries(Object.entries(vars).map(([k, e]) => [k, cl(e)])) });
+    }
+    // THE ARGV PASS: the NAME=value words a site's argv can carry (literals and template heads; arrays, spreads, branches,
+    // and the variables they name, resolved)
+    function argvWords(a, at, stack, depth = 0, out = []) {
+      if (!a || depth > 6) return out;
+      if (a.type === 'ArrayExpression') {
+        for (const el of a.elements) {
+          if (!el) continue;
+          if (el.type === 'SpreadElement') { argvWords(el.argument, at, stack, depth + 1, out); continue; }
+          const head = el.type === 'Literal' && typeof el.value === 'string' ? el.value : el.type === 'TemplateLiteral' ? el.quasis[0].value.cooked : null;
+          const m = head == null ? null : /^([A-Z_][A-Z0-9_]*)=/.exec(head);
+          if (m) out.push({ name: m[1], line: el.loc.start.line });
+        }
+      } else if (a.type === 'Identifier') { const d = resolve(a.name, at, stack); if (d && d.init) argvWords(d.init, at, stack, depth + 1, out); }
+      else if (a.type === 'ConditionalExpression') { argvWords(a.consequent, at, stack, depth + 1, out); argvWords(a.alternate, at, stack, depth + 1, out); }
+      else if (a.type === 'LogicalExpression') { argvWords(a.left, at, stack, depth + 1, out); argvWords(a.right, at, stack, depth + 1, out); }
+      return out;
     }
     function envOfCall(n, stack) {
       let opts = n.arguments.slice(1).find((a) => a.type === 'ObjectExpression') || null, optsBy = null;
@@ -382,6 +407,7 @@ export function judge({ sites, copies, errors, roads = [], defs = [], files = []
     else used.set(r, (used.get(r) || 0) + 1);
   }
   for (const r of copyRows) { const n = used.get(r) || 0; if (!n) red.push(`DEAD copy row ${r[0]} «${r[1]}»`); else if (n !== r[3]) red.push(`copy row ${r[0]} «${r[1]}»: ${n} copies, the row says ${r[3]}`); if (!KINDS.includes(r[2])) red.push(`copy row ${r[0]}: kind '${r[2]}'`); }
+  for (const x of sites) for (const w of x.argv || []) if (SECRET_ON_ARGV.test(w.name)) red.push(`SECRET ON ARGV ${x.file}:${w.line} ${w.name}=… (${x.call} ${x.cmd}) — /proc/<pid>/cmdline is world-readable for the child's life: the value rides the spawn's env (src/spawn/line.js) or a file`);
   const cls = (x) => `${x.k}${x.by ? ' ' + x.by : ''}${x.why ? ' — ' + x.why : ''}`;
   for (const [file, cmd, what, { by = 'serviceEnv', count = 1 } = {}] of fixed) {
     const s = sites.filter((x) => x.file === file && x.cmd === cmd);

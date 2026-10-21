@@ -2732,8 +2732,9 @@ console.log('§59 one outside-press closer: no document mousedown/click closer, 
 // SERVER's = the checkout, and `pdf ./data/bin/vibespace-hook.mjs` overwrote a hook every session runs; F3 MAJOR, the
 // fence was the invoking shell's cwd because NO spawn path exported VIBESPACE_SESSION_CWD). Numbered 60 at the 2.369.182 integration: master holds
 // §56–§58, lane M §59. DERIVED, each with a negative control:
-//   a. every spawn path exports the session's own cwd — the LOCAL argv (`r6Argv`, which the dtach spawn AND the R6
-//      daemon pipe both run) carries `VIBESPACE_SESSION_CWD=${spawnCwd}`; every REMOTE builder composes
+//   a. every spawn path exports the session's own cwd — the LOCAL line's env (`r6Pairs` → src/spawn/line.js, the ONE
+//      line the dtach spawn AND the R6 daemon pipe both run — lane antigravity-spawn-argv: names ride the env, never
+//      argv) carries `VIBESPACE_SESSION_CWD=${spawnCwd}`; every REMOTE builder composes
 //      buildRemoteExec (five), whose output carries the export (run, not grepped); ws-create spells the name once;
 //   b. the CLI's fence reads ONLY that variable (`sessionRoot()` names no process.cwd()), the binary is handed the
 //      IN-FRAME argv and spawned with the private cwd;
@@ -2744,9 +2745,9 @@ console.log('§60 the browser tool writes in the session\'s frame; no browser da
   const { createRequire } = await import('node:module');
   const req = createRequire(import.meta.url);
   const wc = read('src/ws-create.js');
-  const r6Block = (src) => { const a = src.indexOf('const r6Argv = ['); const b = a < 0 ? -1 : src.indexOf('spawnCmd, ...spawnArgs,', a); return a >= 0 && b > a ? src.slice(a, b) : ''; };
-  const judgeLocal = (src) => /`VIBESPACE_SESSION_CWD=\$\{spawnCwd\}`/.test(r6Block(src)) && /openPipeSession\(\{[^}]*args: r6Argv\.slice\(1\)/.test(src) && /pty\.spawn\(DTACH_CMD, \[[^\]]*\.\.\.r6Argv\]/.test(src);
-  ok(judgeLocal(wc), '§60a the LOCAL argv (r6Argv — run by the dtach spawn AND the R6 daemon pipe) exports VIBESPACE_SESSION_CWD=${spawnCwd}');
+  const r6Block = (src) => { const a = src.indexOf('const r6Pairs = ['); const b = a < 0 ? -1 : src.indexOf('...spawnEnvPairs,', a); return a >= 0 && b > a ? src.slice(a, b) : ''; };
+  const judgeLocal = (src) => /`VIBESPACE_SESSION_CWD=\$\{spawnCwd\}`/.test(r6Block(src)) && /sessionSpawnLine\(\{[^}]*pairs: r6Pairs/.test(src) && /openPipeSession\(\{[^}]*args: r6Argv\.slice\(1\)/.test(src) && /pty\.spawn\(DTACH_CMD, \[[^\]]*\.\.\.r6Argv\]/.test(src);
+  ok(judgeLocal(wc), '§60a the LOCAL line (r6Pairs → sessionSpawnLine — run by the dtach spawn AND the R6 daemon pipe) exports VIBESPACE_SESSION_CWD=${spawnCwd} in its env');
   ok(!judgeLocal(wc.replace('`VIBESPACE_SESSION_CWD=${spawnCwd}`', '`VIBESPACE_SESSION_CWDX=${spawnCwd}`')) && !judgeLocal(wc.replace('args: r6Argv.slice(1)', 'args: otherArgv.slice(1)')), '§60a NEGATIVE CONTROL: a local argv without the pair, or an R6 pipe that stops running r6Argv, is caught');
   const RS = req('../src/remote-shell.js');
   const shq = (x) => `'${String(x).replace(/'/g, `'"'"'`)}'`;
@@ -5000,7 +5001,9 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
 // the Desktop's Xvnc, its session and the remote agentd ssh bridge — are FIXED on serviceEnv. Lane spawn-env-debts
 // (2026-10-20) paid the named debts: EVERY ssh road (any callee — an ssh / rsync first argument) on hosts.sshEnv() (a
 // DERIVED builder, src/hosts.js alone), the rclone mounts (src/mounts.js _rcloneFor — an ENV FUNCTION — and the device
-// mount), tailscaled and xclip on serviceEnv, the remote chat re-adopt on agentEnv.
+// mount), tailscaled and xclip on serviceEnv, the remote chat re-adopt on agentEnv. Lane antigravity-spawn-argv (2026-10-21):
+// THE ARGV PASS — a secret-shaped NAME=value word on any site's argv is RED (no row: /proc/<pid>/cmdline is world-readable),
+// every other NAME= word is counted; ws-create's session spawn (`pty` from the ws ctx) is a site now.
 {
   const C = await import('./spawn-env-census.mjs');
   const s93 = C.scan(REPO);
@@ -5008,7 +5011,8 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
   const cls93 = {}; for (const t of j93.table) { const k = t.class.startsWith('named') ? 'named' : t.class; cls93[k] = (cls93[k] || 0) + 1; }
   for (const [file, cmd, kind, count, why] of C.ROWS.filter((r) => r[2] === 'debt')) console.log(`    debt  ${file} ${cmd} ×${count} — ${why.slice(0, 150)}`);
   const road93 = {}; for (const r of j93.roads) road93[r.class] = (road93[r.class] || 0) + 1;
-  ok(j93.red.length === 0, `§94 ${s93.sites.length} child sites + ${s93.copies.length} whole-env copies: every raw one a row with its reason ${JSON.stringify(cls93)}; ${j93.roads.length} ssh roads ${JSON.stringify(road93)}${j93.red.length ? ' — RED: ' + j93.red.join(' | ') : ''}`);
+  const argv93 = s93.sites.flatMap((x) => (x.argv || []).map((w) => w.name));
+  ok(j93.red.length === 0, `§94 ${s93.sites.length} child sites + ${s93.copies.length} whole-env copies: every raw one a row with its reason ${JSON.stringify(cls93)}; ${argv93.length} NAME=value words on argv, none secret-shaped${argv93.length ? ' (' + [...new Set(argv93)].join(' ') + ')' : ''}; ${j93.roads.length} ssh roads ${JSON.stringify(road93)}${j93.red.length ? ' — RED: ' + j93.red.join(' | ') : ''}`);
   // CONTROLS — one file scanned, judged by its own rows: the Xvnc spawn given `...process.env` / no env at all, the session
   // back on `{ ...process.env, DISPLAY }`, the ssh bridge's env taken away, a new raw probe, an env copied in one function and
   // spawned in another, a dead row ⇒ RED; a comment and a *Sync child stay quiet
@@ -5034,6 +5038,8 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
   const mClip = m93(fil93, "const clipEnv = serviceEnv(process.env, { add: { DISPLAY: xEnv.DISPLAY || process.env.DISPLAY || ':0', XAUTHORITY: xEnv.XAUTHORITY || process.env.XAUTHORITY || null } });", "const clipEnv = { ...process.env, DISPLAY: xEnv.DISPLAY || process.env.DISPLAY || ':0' };");
   const mAdopt = m93(br93, "const readoptEnv = { ...agentEnv(), TERM: 'xterm-256color', VIBESPACE_REMOTE_SID: id };", "const readoptEnv = { ...process.env, TERM: 'xterm-256color', VIBESPACE_REMOTE_SID: id };");
   const mProbe = m93(sys93, "execFile('df', ['-kP', dir]", "execFile('uptime', [], { timeout: 4000 }, () => {}); execFile('df', ['-kP', dir]");
+  // lane antigravity-spawn-argv: the 2.369.336 session line — the token back on the dtach + wrapper argv
+  const mArgv = m93(rd93('src/ws-create.js'), '            const r6Argv = r6Line.argv, r6Env = r6Line.env;\n', "            const r6Argv = [NODE_CMD, wrapper, bufFile, metaFileW, '/usr/bin/env', `VIBESPACE_SESSION_TOKEN=${session.agentToken}`, spawnCmd, ...spawnArgs], r6Env = r6Line.env;\n");
   const hid93 = "const { spawn } = require('child_process');\nfunction envOf() { const e = { ...process.env }; e.X = '1'; return e; }\nfunction start() { return spawn('daemon', [], { detached: true, env: envOf() }); }\n";
   const quiet93 = "const { execFileSync, spawn } = require('child_process');\n// spawn('x', [], { env: { ...process.env } }) — a comment\nexecFileSync('ps', ['ax']);\nspawn('x', [], { env: { PATH: '/usr/bin' } });\n";
   const red93 = (r, needle) => r.length > 0 && (!needle || r.some((x) => x.includes(needle)));
@@ -5043,6 +5049,7 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     ['MUTANT the session back on { ...process.env, DISPLAY }', !!mSess && red93(one93('src/vnc.js', mSess), 'FIXED')],
     ['MUTANT the ssh bridge with no env', !!mSsh && red93(one93('src/agentd/client.js', mSsh), 'FIXED')],
     ['MUTANT a new raw probe in sysinfo.js', !!mProbe && red93(one93('src/sysinfo.js', mProbe), 'UNLISTED')],
+    ['MUTANT the session token back on the session line (ws-create, the 2.369.336 shape)', !!mArgv && red93(one93('src/ws-create.js', mArgv), 'SECRET ON ARGV src/ws-create.js')],
     ['an env copied in one function, spawned from another', red93(one93('src/zz-hidden.js', hid93), 'UNLISTED copy')],
     ['a DEAD row', red93(C.judge(C.scan(REPO, { files: ['src/sysinfo.js'] }), { rows: [...C.ROWS.filter((r) => r[0] === 'src/sysinfo.js'), ['src/sysinfo.js', "'nope'", 'probe', 1, 'x']], copyRows: [], fixed: [] }).red, 'DEAD row')],
     ['a debt row with no next step', red93(C.judge(C.scan(REPO, { files: ['src/sysinfo.js'] }), { rows: C.ROWS.filter((r) => r[0] === 'src/sysinfo.js').map((r) => (r[1] === "'df'" ? [r[0], r[1], 'debt', r[3], 'df'] : r)), copyRows: [], fixed: [] }).red, 'next step')],

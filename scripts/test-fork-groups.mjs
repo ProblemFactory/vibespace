@@ -747,7 +747,7 @@ async function pipeReopenLeg(loadBr) {
   try {
     const br = loadBr();
     br.create({
-      rootDir: dir, PORT: 0, BUFFERS_DIR: BUF, META_DIR: META, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', ENV_CMD: 'env', NODE_CMD: process.execPath, CHAT_WRAPPER: 'none',
+      rootDir: dir, PORT: 0, BUFFERS_DIR: BUF, META_DIR: META, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', NODE_CMD: process.execPath, CHAT_WRAPPER: 'none',
       activeSessions, sessionCounterRef: { value: 0 }, attachToDtach() {}, setupSessionPty() {},
       readSessionMeta: (f) => { try { return JSON.parse(fs.readFileSync(path.join(META, f + '.json'), 'utf8')); } catch { return {}; } },
       writeSessionMeta() {}, deleteSessionMeta() {}, broadcastToSession() {}, broadcastActiveSessions() {}, refreshWebuiPids() {}, sbNoteServerOp() {},

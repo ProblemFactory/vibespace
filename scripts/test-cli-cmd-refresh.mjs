@@ -154,8 +154,8 @@ console.log('\n② wiring');
   ok(/cliCmds\.register\('claude'/.test(cliEnv) && /cliCmds\.register\('codex'/.test(cliEnv) && /for \(const id of Object\.keys\(ACP_COMMANDS\)\)[\s\S]{0,40}cliCmds\.register\(id/.test(cliEnv),
     'cli-env registers claude, codex and every ACP harness where they are resolved');
   const at = wsCreate.indexOf('spawnCmd = await cliCmds.forSpawn(backend, spawnCmd)');
-  const argv = wsCreate.indexOf('const r6Argv = [');
-  ok(at > 0 && argv > at && (wsCreate.match(/const r6Argv = \[/g) || []).length === 1 && (wsCreate.match(/cliCmds\.forSpawn\(/g) || []).length === 1,
+  const argv = wsCreate.indexOf('const r6Line = sessionSpawnLine('); // lane antigravity-spawn-argv: THE line (src/spawn/line.js)
+  ok(at > 0 && argv > at && (wsCreate.match(/const r6Line = sessionSpawnLine\(/g) || []).length === 1 && (wsCreate.match(/cliCmds\.forSpawn\(/g) || []).length === 1,
     'ws-create re-checks the command ONCE, right BEFORE the ONE local argv every local spawn runs (pty terminal, chat wrapper, daemon pipe)');
   ok(/'cliCmds'/.test(read('src/ws-handler.js')), 'cliCmds is in WS_CTX_CONTRACT');
 }

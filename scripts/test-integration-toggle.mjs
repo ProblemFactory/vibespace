@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Integration master-switch e2e (2.190.0, agents.vibespaceIntegration):
 //  1. Boot (default ON) registers the vibespace hook in BOTH CLI configs.
-//  2. A spawned session's dtach argv carries VIBESPACE_API + data/bin PATH.
+//  2. A spawned session's dtach ENV carries VIBESPACE_API + data/bin PATH (lane antigravity-spawn-argv: the names ride
+//     the spawn's env, never its argv — /proc/<pid>/environ of the dtach master, and the argv carries no NAME=value word).
 //  3. PATCH the switch OFF → hook entries stripped LIVE from both configs,
 //     /api/agent-hooks reports integrationOff, install route refuses,
 //     the delivery endpoints (task-context / prompt-context / stop-check)
@@ -101,13 +102,22 @@ const createShellSession = () => new Promise((res, rej) => {
   wsc.send(JSON.stringify({ type: 'create', reqId, backend: 'shell', mode: 'terminal', cwd: home, cols: 80, rows: 24 }));
 });
 const dtachArgv = (sessionId) => {
-  // the dtach spawn's argv contains the per-session socket path — match on it.
-  // Socket names are cw-<tail> while sessionIds are sess-<tail>.
+  // the dtach master's argv contains the per-session socket path — match on it; its ENV is the session's names
+  // (lane antigravity-spawn-argv: they ride the spawn's env). Socket names are cw-<tail> while sessionIds are sess-<tail>.
   const tail = sessionId.replace(/^sess-/, '');
   const sock = fs.readdirSync(path.join(wt, 'data', 'sockets')).find((s) => s.includes(tail));
   if (!sock) return null;
-  const out = execSync(`ps axww -o args= | grep -F ${JSON.stringify(path.join(wt, 'data', 'sockets', sock))} | grep -v grep | head -1`, { shell: '/bin/bash' }).toString();
-  return out || null;
+  const want = path.join(wt, 'data', 'sockets', sock);
+  for (const d of fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x))) {
+    let argv = [];
+    try { argv = fs.readFileSync(`/proc/${d}/cmdline`, 'utf8').split('\0'); } catch { continue; }
+    if (!argv.includes(want)) continue;
+    let env = '';
+    try { env = fs.readFileSync(`/proc/${d}/environ`, 'utf8').split('\0').join(' '); } catch { }
+    // the argv must carry no NAME=value word; the env words come back in the same "K=V" shape the checks read
+    return argv.some((w) => /^[A-Z_][A-Z0-9_]*=/.test(w)) ? 'ARGV-CARRIES-NAMES ' + argv.join(' ') : env;
+  }
+  return null;
 };
 
 // ═══ Phase 1: boot ON (default) ═════════════════════════════════════════════
@@ -122,10 +132,10 @@ await openWs();
 const sid1 = await createShellSession();
 await sleep(800);
 const argv1 = dtachArgv(sid1);
-check('ON-spawn argv has VIBESPACE_API', !!argv1 && argv1.includes('VIBESPACE_API='));
-check('ON-spawn argv has the tools PATH prefix', !!argv1 && argv1.includes(`PATH=${path.join(wt, 'data', 'bin')}`));
+check('ON-spawn env has VIBESPACE_API', !!argv1 && argv1.includes('VIBESPACE_API='));
+check('ON-spawn env has the tools PATH prefix', !!argv1 && argv1.includes(`PATH=${path.join(wt, 'data', 'bin')}`));
 const tok1 = argv1 && (argv1.match(/VIBESPACE_SESSION_TOKEN=(vsst_[\w-]+)/) || [])[1];
-check('ON-spawn argv has the session token', !!tok1);
+check('ON-spawn env has the session token', !!tok1);
 const auth = { headers: { Authorization: `Bearer ${tok1}` } };
 const ctxOn = await (await api('/api/agent/task-context', auth)).json();
 check('task-context delivers content while ON', !!(ctxOn.success && ctxOn.context && ctxOn.context.length > 50), JSON.stringify(ctxOn).slice(0, 200));
@@ -152,9 +162,9 @@ check('GET /api/agent/task refuses while OFF (steering-content read)', tOff.stat
 const sid2 = await createShellSession();
 await sleep(800);
 const argv2 = dtachArgv(sid2);
-check('OFF-spawn argv has NO VIBESPACE_API', !!argv2 && !argv2.includes('VIBESPACE_API='), (argv2 || 'no argv').slice(0, 400));
-check('OFF-spawn argv has NO tools PATH prefix', !!argv2 && !argv2.includes(`PATH=${path.join(wt, 'data', 'bin')}`));
-check('OFF-spawn argv KEEPS the session token (Ctrl+G auth)', !!argv2 && argv2.includes('VIBESPACE_SESSION_TOKEN=vsst_'));
+check('OFF-spawn env has NO VIBESPACE_API', !!argv2 && !argv2.includes('VIBESPACE_API='), (argv2 || 'no argv').slice(0, 400));
+check('OFF-spawn env has NO tools PATH prefix', !!argv2 && !argv2.includes(`PATH=${path.join(wt, 'data', 'bin')}`));
+check('OFF-spawn env KEEPS the session token (Ctrl+G auth)', !!argv2 && argv2.includes('VIBESPACE_SESSION_TOKEN=vsst_'));
 
 // ═══ Phase 3: toggle back ON ════════════════════════════════════════════════
 console.log('Phase 3: PATCH back true');

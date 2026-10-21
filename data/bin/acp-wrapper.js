@@ -94,6 +94,19 @@ if (!bufferFile || !metaFile || !cmd) {
   log('Missing required arguments (bufferFile, metaFile, agent command)');
   process.exit(1);
 }
+// THE EXECUTABLE (lane antigravity-spawn-argv, 2026-10-21 — the agy-wrapper contract, shared): argv[4] is ONE executable.
+// It is the agent by its absolute path, or a name the PATH in this env resolves (the remote roads' `ssh`). The session's
+// names ride the env (src/spawn/line.js). A command that resolves to nothing, or a launcher (`env`) in the agent's
+// place, is refused by name before a spawn: the sentence is the session's error line, not «exited before ready».
+function commandRefusal(c) {
+  const id = HARNESS.toUpperCase().replace(/-/g, '_');
+  const unresolved = `acp-wrapper: the command is not an executable: ${c} — the hub's ${HARNESS} path is unresolved; reinstall it or set ${id}_CMD`;
+  if (path.basename(c) === 'env') return `acp-wrapper: the command is ${c}, a launcher, not the agent — the hub put an env prefix where the executable goes; update VibeSpace`;
+  const runnable = (f) => { try { return fs.statSync(f).isFile() && (fs.accessSync(f, fs.constants.X_OK), true); } catch { return false; } };
+  if (path.isAbsolute(c)) return runnable(c) ? null : unresolved;
+  if (c.includes('/')) return unresolved;
+  return String(process.env.PATH || '').split(':').some((d) => d && runnable(path.join(d, c))) ? null : unresolved;
+}
 
 // ── sidecar meta (the file THIS process writes; the server's capability gate
 // reads caps from HERE — the 2.361.1/2.364.1 law) ──
@@ -906,6 +919,8 @@ async function setupSession() {
 async function boot() {
   try { fs.mkdirSync(path.dirname(bufferFile), { recursive: true }); fs.mkdirSync(path.dirname(metaFile), { recursive: true }); } catch {}
   persistMeta();
+  const refused = commandRefusal(cmd);
+  if (refused) { notice('error', refused, 'spawn-failed'); finalizeExit(1); return; }
   startChild();
   if (process.stdin.isTTY) process.stdin.setRawMode(true);
   process.stdin.setEncoding('utf8');

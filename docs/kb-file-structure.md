@@ -7,6 +7,12 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
 
 ```
+src/spawn/line.js — THE SESSION SPAWN LINE (PURE, lane antigravity-spawn-argv): sessionSpawnLine → { argv: node <wrapper> <buf> <meta> <ONE executable> …args, env: base + pairs }; exeRefusal throws on a launcher / an assignment / nothing; the names ride the env, never argv ⇒
+src/ws-create.js — the local line = sessionSpawnLine({ …, env: r6Base, pairs: r6Pairs, exe: spawnCmd, args: spawnArgs }); r6Pairs = EDITOR, the session id, PATH, the display … (the token rides r6Base); no ENV_CMD in server.js / ws-handler / boot-restore ⇒ src/spawn/line.js
+data/bin/agy-wrapper.js + acp-wrapper.js — commandRefusal: argv[4] is ONE executable (agy: absolute; acp: absolute or on the env's PATH), a launcher (`env`) refused; the sentence is the session's ONE error line, nothing spawns ⇒ src/spawn/line.js
+scripts/test-session-spawn-line.mjs — fast: the line builder per harness + the real ws-create (stub pty) for claude / codex / opencode / antigravity + two ws-create mutants (the env prefix back, the names off the env) ⇒ src/spawn/line.js
+scripts/test-antigravity-session.mjs — heavy: a stub agy through the real ws-create + dtach + agy-wrapper on a named account: its argv, HOME + bus, no NAME= word on any command line, a bare agy refused by name; base RED (exit 125) ⇒ src/spawn/line.js
+scripts/spawn-env-census.mjs — + THE ARGV PASS (lane antigravity-spawn-argv): a secret-shaped NAME= word on a site's argv is RED, no row; `pty` from a context is node-pty (ws-create's session spawn is a site) ⇒ src/spawn/line.js
 src/channel-search.js — searchAnswer (lane channels-search-says-hidden): the agent's search words — --full «added nothing beyond the N saved hits above»; a hit it cannot read = HIDDEN_TEXT, existence only (no count/account/title); unshownOf (Gmail's dropped threads, memo-kept) ⇒ kb-file-structure.md
 src/channel-store.js — search: several words match a record holding EVERY one, each anywhere (text, author, attachment name, the conversation's title); one word = the substring; the `match` road unchanged (lane channels-search-says-hidden) ⇒ kb-file-structure.md
 data/bin/vibespace-channels — `search … --full` prints the plain search FIRST (byte-equal), then the vendor's additions `(not saved here)`; the words after the rows = the server's `said`; usage «words (all must appear)» (lane channels-search-says-hidden)
@@ -1121,6 +1127,32 @@ scripts/test-agentd-upgrade-signature.mjs (fast, 5 s) — truth table + chain + 
 | `broadcastActiveSessions()` | server.js | Pushes session list to all WebSocket clients |
 
 ## ESSAYS (one `### path` section per file)
+
+### src/spawn/line.js — THE SESSION SPAWN LINE (lane antigravity-spawn-argv, 2026-10-21)
+
+PURE. `sessionSpawnLine({ node, wrapper, bufFile, metaFile, exe, args, env, pairs })` → `{ argv, env }`:
+- `argv` = `[node, wrapper, bufFile, metaFile, exe, ...args]`: the tail of dtach's `-c <sock> -E -r none` and the R6 daemon pipe's `cmd + args`.
+- `env` = `{ ...env, ...pairsEnv(pairs) }`. A later pair wins, exactly as the old `env K=V` prefix overrode the wrapper's env, so the CLI sees the same names it always did. `pairsEnv` throws on a word that is not NAME=value; a value keeps its own `=`.
+- `exeRefusal(exe)` throws before anything spawns on nothing, an assignment, or a launcher (`env`, `/usr/bin/env`) in the executable's place. That is the 2.369.336 shape that killed every Antigravity start.
+
+**Callers:**
+- ws-create (every local create: claude, codex, the ACP agents, antigravity, a shell terminal, the remote roads' local ssh / node). It builds `r6Pairs` (EDITOR, CLAUDE_WEBUI_PORT / _SESSION_ID, the usage pairs, VIBESPACE_API, VIBESPACE_SESSION_CWD, PATH, DISPLAY / XAUTHORITY, TERM, the browser and adapter pairs) and `r6Base` (agentEnv + the token + the adapter's env + the account's localEnv + OTEL).
+- boot-restore's remote re-adopt (`exe: 'ssh'`, its names on readoptEnv: the §94 FIXED row reads the literal).
+
+**THE WRAPPER CONTRACT it serves:** argv[4] is ONE executable and argv[5…] are its args.
+- chat-wrapper appends its stream flags after them; agy-wrapper puts agy's flags BEFORE the extra args.
+- agy-wrapper and acp-wrapper refuse anything else by name (`commandRefusal`): agy needs an absolute executable; acp also takes a bare name the env's PATH resolves (the remote roads' `ssh`).
+
+**Why the names left the line:**
+- argv is readable by every user of the machine (/proc/<pid>/cmdline) for the session's life, and it reaches logs that print the args. The session token rode it.
+- A launcher in the executable's place turns a flags-first wrapper's flags into the launcher's.
+
+**What still reads the session's names:** codexWriterSweep's `vs_sid_of` and the browser suites read CLAUDE_WEBUI_SESSION_ID from argv OR /proc/<pid>/environ. The wrapper and the dtach master now carry it in their environ, as the CLI always did.
+
+**Gates:**
+- test-session-spawn-line (fast: the table per harness + the real ws-create + two mutants).
+- test-antigravity-session (heavy: a stub agy through the real path).
+- test-architecture §94's argv pass (a secret-shaped NAME= word on any argv is RED) and §60a (VIBESPACE_SESSION_CWD in r6Pairs).
 
 ### src/server/conversation-ops.js + src/conversation-spec.js
 **2026-10-19 THE CONVERSATION VERBS AS SEAMS (lane automation-verbs, design q-046 §2 「动词实现」 / §4 L2 — the first half; L1 automation-keys-core builds the keys + the door).** Five functions every caller goes through: `openConversation(spec, by, {ws, attachedSessions})`, `renameConversation(target, name, by)`, `bindConversation(target, taskId, by, {note, noteSession})`, `endConversation(target, by, {reply})`, `inviteToGroup(group, members, by, opts)` (+ `conversationStatus(target)`, read-only).

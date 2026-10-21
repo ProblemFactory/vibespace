@@ -458,5 +458,33 @@ console.log('— ⑩ THE /usage READING: the judge (the brief\'s STOP rule) + th
   ok('--account on a directory that is not an account root is refused (exit 1), agy never runs', bad.code === 1 && !bad.log.some((x) => x.argv && x.argv[0] === '-p'), bad.out);
 }
 
+console.log('— ⑪ THE EXECUTABLE (lane antigravity-spawn-argv): argv[4] is agy itself, anything else is refused BY NAME');
+{
+  // the owner's 2.369.334 hub handed `/usr/bin/env K=V … agy` here: `env --input-format …` ⇒ exit 125, «see agy-wrapper.log»
+  const run = (cmd, wrapper = WRAPPER) => new Promise((res) => {
+    const dir = fs.mkdtempSync(path.join(ROOT, 'x-')), log = path.join(dir, 'stub.log');
+    const c = spawn(process.execPath, [wrapper, path.join(dir, 's.buf'), path.join(dir, 's.json'), cmd, '--extra'], { env: { ...CLEAN_ENV, AGY_WEBUI_CWD: dir, AGY_WEBUI_BACKEND: 'antigravity', AGY_STUB_LOG: log }, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = ''; c.stdout.on('data', (d) => { out += d; });
+    const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 8000);
+    c.on('exit', (code) => { clearTimeout(t); const recs = out.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      res({ code, errors: recs.filter((r) => r.kind === 'notice' && r.level === 'error').map((r) => r.text), ran: fs.existsSync(log) }); });
+    try { c.stdin.end(); } catch { }
+  });
+  const unresolved = (c) => `agy-wrapper: the command is not an executable: ${c} — the hub's Antigravity path is unresolved; reinstall agy or set ANTIGRAVITY_CMD`;
+  const plain = path.join(ROOT, 'not-executable'); fs.writeFileSync(plain, '#!/bin/sh\n', { mode: 0o644 });
+  const cases = [['agy', unresolved('agy')], ['/nope/agy', unresolved('/nope/agy')], [plain, unresolved(plain)], [ROOT, unresolved(ROOT)],
+    ['/usr/bin/env', "agy-wrapper: the command is /usr/bin/env, a launcher, not agy — the hub put an env prefix where the executable goes (agy's flags would land in front of it); update VibeSpace"]];
+  for (const [cmd, words] of cases) {
+    const r = await run(cmd);
+    ok(`argv[4] = ${cmd === plain ? '<a file that is not executable>' : cmd === ROOT ? '<a directory>' : cmd}: exit 1, the ONE error line names it, nothing spawned`, r.code === 1 && r.errors.length === 1 && r.errors[0] === words && !r.ran, r);
+  }
+  // RED copy: the refusal cut ⇒ /usr/bin/env runs and the session says only the exit code (the owner's 125)
+  const src = fs.readFileSync(WRAPPER, 'utf8'), cut = "  if (refused) { notice('error', refused, 'spawn-failed'); finalizeExit(1); return; }\n";
+  const mutated = path.join(ROOT, 'agy-wrapper-no-refusal.js');
+  fs.writeFileSync(mutated, src.replace(cut, ''));
+  const m = await run('/usr/bin/env', mutated);
+  ok('RED copy (the refusal cut): /usr/bin/env runs and the session says only «exit code 125 — see agy-wrapper.log»', src.split(cut).length === 2 && m.code === 125 && m.errors.some((t) => /exited \(exit code 125\) — see agy-wrapper\.log/.test(t)), m);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

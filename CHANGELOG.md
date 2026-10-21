@@ -9,6 +9,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An agent's channel search for several words finds a message holding all of them anywhere — its text, its sender or its conversation's title.
 - When an agent's search matches only conversations you have not shared with it, it is told that matches exist and you can share them — never what or how many.
 - The API log in an account's API access… now shows every call agents made through it — rejected and refused ones too, and calls made before this release.
+- Antigravity conversations start again: the settings a conversation starts with no longer break its start command, and one that cannot start says why.
+- A conversation's access token no longer shows in this machine's process list, where any other user of the machine could read it.
 
 ### Maintenance
 - Test and release tooling only; nothing changes for you.

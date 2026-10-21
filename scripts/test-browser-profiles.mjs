@@ -751,13 +751,13 @@ console.log('\n⑦ wiring (a pure function nobody calls is a feature nobody has)
   // several past whitelist-drift bugs in this file is exactly this shape.
   const iPush = src.indexOf('spawnEnvPairs.push(...be.pairs)');
   const iFirstRemote = src.indexOf('buildRemoteExec({');
-  const iLocal = src.indexOf('const r6Argv = [');
+  const iLocal = src.indexOf('const r6Pairs = ['); // lane antigravity-spawn-argv: the local line's names (its env)
   ok(iPush > 0 && iFirstRemote > 0 && iLocal > 0, 'setup: all three anchors exist');
   ok(iPush < iFirstRemote, 'the push happens ABOVE the first remote builder (which consumes spawnEnvPairs and then empties it)');
-  ok(iPush < iLocal, 'and above the local r6Argv');
+  ok(iPush < iLocal, 'and above the local r6Pairs');
   // …and the local composition really SPREADS the array it was pushed into.
   const r6 = src.slice(iLocal, src.indexOf('];', iLocal));
-  ok(/\.\.\.spawnEnvPairs/.test(r6), 'the local r6Argv spreads spawnEnvPairs (the push has to land somewhere)');
+  ok(/\.\.\.spawnEnvPairs/.test(r6), 'the local r6Pairs spreads spawnEnvPairs (the push has to land somewhere — the line\'s env)');
   const clears = (src.match(/spawnEnvPairs = \[\];/g) || []).length;
   ok(clears >= 5, `each remote branch clears the array after consuming it (${clears} sites) — the reason ordering is load-bearing`);
   ok(/browserKey: session\._browserKey \|\| undefined/.test(src), 'the key is recorded in session-meta (without it, every resume mints a new one)');

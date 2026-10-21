@@ -708,5 +708,26 @@ console.log('— wiring pins');
   ok('the wrapper never touches a vendor API and never puts a secret in argv (program-use billing law)', !/api\.anthropic\.com|api\.openai\.com|Authorization: 'Bearer sk-/.test(read('data/bin/acp-wrapper.js')) && /clientCapabilities: \{ fs: \{ readTextFile: false, writeTextFile: false \}, terminal: false \}/.test(read('data/bin/acp-wrapper.js')));
 }
 
+console.log('— THE EXECUTABLE (lane antigravity-spawn-argv — the agy-wrapper contract, shared): argv[4] is ONE executable');
+{
+  const run = (cmd, envExtra = {}) => new Promise((res) => {
+    const xdir = fs.mkdtempSync(path.join(os.tmpdir(), 'acp-exe-'));
+    const c = spawn(process.execPath, [WRAPPER, path.join(xdir, 's.buf'), path.join(xdir, 's.json'), cmd, 'acp'], { env: { ...CLEAN_ENV, ACP_WEBUI_CWD: xdir, ACP_WEBUI_BACKEND: 'opencode', ...envExtra }, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = ''; c.stdout.on('data', (d) => { out += d; });
+    const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 8000);
+    c.on('exit', (code) => { clearTimeout(t); try { fs.rmSync(xdir, { recursive: true, force: true }); } catch { }
+      res({ code, errors: out.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((r) => r && r.kind === 'notice' && r.level === 'error').map((r) => r.text) }); });
+    try { c.stdin.end(); } catch { }
+  });
+  const unresolved = (c) => `acp-wrapper: the command is not an executable: ${c} — the hub's opencode path is unresolved; reinstall it or set OPENCODE_CMD`;
+  for (const [cmd, words] of [['opencode-not-installed', unresolved('opencode-not-installed')], ['/nope/opencode', unresolved('/nope/opencode')],
+    ['/usr/bin/env', 'acp-wrapper: the command is /usr/bin/env, a launcher, not the agent — the hub put an env prefix where the executable goes; update VibeSpace']]) {
+    const r = await run(cmd);
+    ok(`argv[4] = ${cmd}: exit 1, the ONE error line names it (never «exited before the session was ready»)`, r.code === 1 && r.errors.length === 1 && r.errors[0] === words, JSON.stringify(r));
+  }
+  const bare = await run(path.basename(process.execPath), { PATH: path.dirname(process.execPath) });
+  ok('a bare name the env\'s PATH resolves (the remote roads\' `ssh`) is NOT refused — it runs', !bare.errors.some((t) => /is not an executable|a launcher/.test(t)), JSON.stringify(bare));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
