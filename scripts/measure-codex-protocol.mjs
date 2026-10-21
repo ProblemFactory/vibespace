@@ -13,7 +13,8 @@
 //    --experimental --out <dir>` writes the protocol's own JSON Schema to disk;
 //  ② the live half (each wrapper method sent with `{}` to read the CLI's own
 //    "missing field" words) runs ONLY inside an EMPTY network namespace
-//    (`unshare -rn`, else `sudo -n unshare -n` + setpriv back to this user),
+//    (`unshare -rn`, else `bwrap --unshare-net` — no privilege, else `sudo -n
+//    unshare -n` + setpriv back to this user),
 //    with an EMPTY throwaway CODEX_HOME (no login) and every vendor key
 //    stripped; when strace is present every connect()/sendto() is recorded and
 //    an internet-family call that SUCCEEDED aborts the run before anything is
@@ -40,9 +41,19 @@ const VENDOR_KEYS = /^(OPENAI_|CODEX_API_KEY|ANTHROPIC_|AZURE_OPENAI|CHATGPT_)/;
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !VENDOR_KEYS.test(k)));
 Object.assign(env, { HOME: HOME_DIR, CODEX_HOME, RUST_LOG: 'error' });
 
-// the network-less runner: unshare -rn, else sudo -n unshare -n + setpriv back
+// the network-less runner: unshare -rn, else bwrap --unshare-net, else sudo -n unshare -n + setpriv back.
+// lane codex-protocol-0-163: bwrap BEFORE sudo — an AppArmor-restricted box (Ubuntu 24.04's default) refuses
+// `unshare -rn` (uid_map EPERM) yet lets bwrap build the user + network namespace, so no privilege is asked.
+// bwrap brings the namespace's OWN loopback up (unshare -n leaves it down) and its child may not take it down
+// (EPERM), so a lookup to the resolver stub 127.0.0.53 is a send that "succeeds" to nobody — and the abort
+// below counts it. The namespace gets a resolver on TEST-NET-1 instead: unroutable there, every lookup fails
+// at once with ENETUNREACH, exactly as under unshare -n (the host's /etc/resolv.conf is never touched)
 function noNetRunner() {
   if (spawnSync('unshare', ['-rn', 'true']).status === 0) return ['unshare', '-rn', '--'];
+  const resolv = path.join(scratch, 'resolv.conf');
+  fs.writeFileSync(resolv, 'nameserver 192.0.2.1\n');
+  const BWRAP = ['bwrap', '--dev-bind', '/', '/', '--ro-bind', resolv, '/etc/resolv.conf', '--unshare-net', '--'];
+  if (spawnSync(BWRAP[0], [...BWRAP.slice(1), 'true']).status === 0) return BWRAP;
   const uid = String(process.getuid()), gid = String(process.getgid());
   if (spawnSync('sudo', ['-n', 'unshare', '-n', '--', 'setpriv', `--reuid=${uid}`, `--regid=${gid}`, '--init-groups', '--', 'true']).status === 0) {
     return ['sudo', '-n', 'unshare', '-n', '--', 'setpriv', `--reuid=${uid}`, `--regid=${gid}`, '--init-groups', '--', 'env', ...Object.entries(env).map(([k, v]) => `${k}=${v}`)];
@@ -63,7 +74,7 @@ console.log(`codex-cli ${version}: ${Object.keys(t.clientRequests).length} clien
 // ── the live half: each wrapper method with `{}` inside the empty netns ──
 let liveFacts = { ran: false, why: null }, errorsOnEmpty = {}, unknownMethodError = null;
 if (!live) liveFacts.why = 'skipped (--no-live)';
-else if (!NONET) liveFacts.why = 'skipped: no network-less runner here (unshare -rn refused, no passwordless sudo) — the live half never runs with network';
+else if (!NONET) liveFacts.why = 'skipped: no network-less runner here (unshare -rn and bwrap --unshare-net refused, no passwordless sudo) — the live half never runs with network';
 else {
   const straceBin = spawnSync('sh', ['-c', 'command -v strace']).stdout?.toString().trim();
   const traceLog = path.join(scratch, 'strace.log');
@@ -94,7 +105,7 @@ else {
     }
   }
   if (net.inetOk > 0) { console.error(`ABORT: ${net.inetOk} internet-family call(s) SUCCEEDED inside the namespace — nothing written`); process.exit(1); }
-  liveFacts = { ran: true, runner: NONET[0] === 'sudo' ? 'sudo -n unshare -n + setpriv (an empty network namespace, back to this user)' : 'unshare -rn', network: net };
+  liveFacts = { ran: true, runner: NONET[0] === 'sudo' ? 'sudo -n unshare -n + setpriv (an empty network namespace, back to this user)' : NONET[0] === 'bwrap' ? 'bwrap --unshare-net, resolver on TEST-NET-1 (an empty network namespace, no privilege)' : 'unshare -rn', network: net };
 }
 
 const out = {
