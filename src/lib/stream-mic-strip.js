@@ -46,7 +46,7 @@ export function createMicToggle({ hostId, strip, before = null, install = null, 
   /** Where the voice goes: the machine's own word while it writes (the stream's numbers), else the facts' verdict. */
   function road() {
     const live = view && typeof view.agent === 'function' && view.agent() ? view.agent().mic : null;
-    const now = live && live.state === 'live' ? { to: live.to, mic: live.mic } : null;
+    const now = live && live.state === 'live' ? { to: live.to, mic: live.mic } : live && live.state === 'no_target' && live.code === 'no_ffmpeg' ? { state: live.state, code: live.code } : null; // lane ci-339-reds: its refusal by name
     if (!facts && !now) return null;
     return micRoadWords(facts ? facts.state : null, now);
   }

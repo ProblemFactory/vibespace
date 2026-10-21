@@ -10028,4 +10028,5 @@ export default {
   "Your voice → the microphone of its apps: «{name}»": "あなたの声 → このマシンのアプリのマイク『{name}』",
   "The other computer plays your voice on its speakers": "相手のコンピューターのスピーカーからあなたの声が流れます",
   "The microphone reaches a Windows or macOS machine": "マイクは Windows / macOS マシン用です",
+  "The other computer has no ffmpeg to play your voice — put it on its PATH or in {dir}": "相手のコンピューターに ffmpeg がないため、あなたの声を再生できません — マシンの PATH か {dir} に置いてください",
 };

@@ -197,6 +197,9 @@ function micAskCode(name, secure = true) {
  * → { road: 'virtual' | 'speakers' | null, key, params, note: { key, params } | null }
  */
 function micRoadWords(st, live = null) {
+  // lane ci-339-reds: the machine's receiver said it has no decoder (the Windows road's ffmpeg) — said by name, never the
+  // facts' road (a virtual microphone the voice never reached)
+  if (live && live.state === 'no_target' && live.code === 'no_ffmpeg') return { road: null, refused: 'no_ffmpeg', key: i18nKey('The other computer has no ffmpeg to play your voice — put it on its PATH or in {dir}'), params: { dir: '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin' }, note: null };
   const to = live && (live.to === 'virtual' || live.to === 'speakers') ? live.to : st && st.target;
   const name = (live && live.mic && live.mic.name) || (st && st.mic && st.mic.name) || '';
   const note = st && st.state === 'reboot_owed' ? { key: i18nKey('VB-CABLE asks Windows for a restart to finish — the microphone works now'), params: {} } : null;

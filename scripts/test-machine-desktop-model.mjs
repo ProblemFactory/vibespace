@@ -84,6 +84,9 @@ console.log('§3 where the voice goes, said (Leg 4 item 3)');
   ok(w(MM.micStateOf(win(CABLE(4)))).road === 'speakers' && /turned off/.test(w(MM.micStateOf(win(CABLE(4)))).note.key), 'inactive ⇒ the speakers, with why');
   ok(w(MM.micStateOf(win([])), { to: 'virtual', mic: { name: 'CABLE Output' } }).road === 'virtual' && w(inst, { to: 'speakers' }).road === 'speakers', 'the machine\'s OWN word (the stream\'s numbers: where it IS writing) wins over the facts');
   ok(w(MM.micStateOf({ ok: true, platform: 'linux' })).road === null && w(null).road === null, 'unsupported / unknown ⇒ no road, said by name');
+  // lane ci-339-reds: the receiver's refusal (no decoder on the machine) wins over the facts' road — with where to put one
+  const noFf = w(inst, { state: 'no_target', code: 'no_ffmpeg' });
+  ok(same(noFf, { road: null, refused: 'no_ffmpeg', key: 'The other computer has no ffmpeg to play your voice — put it on its PATH or in {dir}', params: { dir: '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin' }, note: null }) && w(inst, { state: 'no_target', code: 'helper_missing' }).road === 'virtual', 'the machine has no ffmpeg (the stream\'s numbers: no_target / no_ffmpeg) ⇒ 「对方电脑没有 ffmpeg，放不出你的声音」 + where — never 「你的声音 → …CABLE Output」 it never reached; another code keeps the facts\' road', noFf);
   ok(same(MM.micTargetOf(inst), { to: 'virtual', device: { id: 'cab-in', name: 'CABLE Input (VB-Audio Virtual Cable)' }, mic: { id: 'cab-out', name: 'CABLE Output (VB-Audio Virtual Cable)' } }) && MM.micTargetOf(MM.micStateOf(win([]))).to === 'speakers' && MM.micTargetOf(MM.micStateOf(win([], { renDefault: '' }))).to === null, 'micTargetOf: the render endpoint (virtual) / the default speaker / none by name');
 }
 

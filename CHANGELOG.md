@@ -13,6 +13,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A plain reply right after your own message in a chat, a voice note too, is no longer mistaken for an answer to an agent's earlier message.
 - Re-pairing a machine retires its older installs for the same VibeSpace: their launch items are set aside, not deleted, and their agents are stopped.
 - The "a second VibeSpace agent keeps dialing in with an old token" notice names the live install and gives the exact commands that stop the others.
+- With the microphone on, the stream's strip says when the machine has no ffmpeg to play your voice, and where to put it.
 
 ## 2.369.338 — 2026-10-21
 

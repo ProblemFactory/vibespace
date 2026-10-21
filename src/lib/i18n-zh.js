@@ -10029,4 +10029,5 @@ export default {
   "Your voice → the microphone of its apps: «{name}»": "你的声音 → 本机应用的麦克风『{name}』",
   "The other computer plays your voice on its speakers": "对方电脑会从扬声器播放你的声音",
   "The microphone reaches a Windows or macOS machine": "麦克风用于 Windows 或 macOS 机器",
+  "The other computer has no ffmpeg to play your voice — put it on its PATH or in {dir}": "对方电脑没有 ffmpeg，放不出你的声音——把它放在机器的 PATH 或 {dir}",
 };

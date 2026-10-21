@@ -79,6 +79,22 @@ async function settle(eng, id = 'slack') {
   for (let i = 0; i < 200; i++) { if (eng.store.readTail(id, 'C0GENERAL', { limit: 1 }).length) return true; await new Promise((r) => setTimeout(r, 25)); }
   return false;
 }
+const SB = require(path.join(REPO, 'src/secret-box.js'));
+const SEALED_ALL = new RegExp(SB.BOX_CIPHERTEXT_RE.source, 'g');
+/** lane ci-339-reds: copies of `files` (under `from`) into ROOT/<name>, every sealed value (src/secret-box.js's iv.tag.data)
+ *  replaced by its length — a hygiene scan over random ciphertext is flaky by construction. → { dir, files, sealed } */
+function scanSealedAsLength(files, from, name) {
+  const dir = path.join(ROOT, name); let sealed = 0;
+  const out = files.map((f) => { const t = path.join(dir, path.relative(from, f)); fs.mkdirSync(path.dirname(t), { recursive: true }); fs.writeFileSync(t, fs.readFileSync(f, 'utf-8').replace(SEALED_ALL, (m) => { sealed++; return `<sealed ${m.length} chars>`; })); return t; });
+  return { dir, files: out, sealed };
+}
+/** scripts/secret-scan.mjs over `files` → { rc, found: ['<file under dir> <rule> <first 4 chars>…'] } (its --json findings) */
+function secretScan(files, dir) {
+  let rc = 0, out = '';
+  try { execFileSync(process.execPath, [path.join(REPO, 'scripts/secret-scan.mjs'), '--quiet', '--json', ...files], { stdio: 'pipe' }); } catch (e) { rc = e.status; out = String(e.stdout || ''); }
+  let found = []; try { found = JSON.parse(out || '[]'); } catch { found = [`(unreadable --json: ${out.slice(0, 80)})`]; }
+  return { rc, found: found.map((x) => (typeof x === 'string' ? x : `${path.relative(dir, x.file)} ${x.rule} ${String(x.snippet || '').slice(0, 4)}…`)) };
+}
 const filesUnder = (d) => { const out = []; const walk = (x) => { for (const e of fs.readdirSync(x, { withFileTypes: true })) { const p = path.join(x, e.name); if (e.isDirectory()) walk(p); else out.push(p); } }; if (fs.existsSync(d)) walk(d); return out; };
 
 // ── ① connect by paste ──
@@ -105,12 +121,22 @@ const W1 = await mkEngine('connect');
   const all = filesUnder(root);
   const plain = all.filter((f) => { const b = fs.readFileSync(f); return b.includes(TOKEN) || b.includes(encodeURIComponent(TOKEN)); });
   ok(all.some((f) => f.endsWith('adapters.json')) && all.some((f) => f.endsWith('C0GENERAL.ndjson')) && !plain.length, `the token is in NO file of the data dir — the account record and the message log included (${all.length} files read)`, plain.join(', '));
-  let scanRc = 0;
-  try { execFileSync(process.execPath, [path.join(REPO, 'scripts/secret-scan.mjs'), '--quiet', ...all], { stdio: 'pipe' }); } catch (e) { scanRc = e.status; }
+  // lane ci-339-reds (the 2.369.339 runner's fast red): a SEALED value is random ciphertext — its base64 read a cephx key
+  // («AQ» + 20 base64 after a `+` `/` `.`) in 8 of 2 000 fresh seals of this very record — so the scan reads every file with
+  // each sealed value replaced by its LENGTH (the census above already proves the token is in no file), and a red names
+  // its finding (file, rule, the match's first 4 chars)
+  const scanned = scanSealedAsLength(all, root, 'scan-data');
+  const scan = secretScan(scanned.files, scanned.dir);
   const probe = path.join(ROOT, 'probe.txt'); fs.writeFileSync(probe, `token=${TOKEN}\n`);
-  let probeRc = 0;
-  try { execFileSync(process.execPath, [path.join(REPO, 'scripts/secret-scan.mjs'), '--quiet', probe], { stdio: 'pipe' }); } catch (e) { probeRc = e.status; }
-  ok(scanRc === 0 && probeRc === 1, `scripts/secret-scan.mjs over the data dir finds nothing (rc ${scanRc}); POSITIVE CONTROL: the same scanner finds the token in a file that holds it (rc ${probeRc})`);
+  const probeScan = secretScan([probe], ROOT);
+  ok(scanned.sealed >= 1 && scan.rc === 0 && probeScan.rc === 1 && probeScan.found.some((x) => / slack-token /.test(x)), `scripts/secret-scan.mjs over the data dir finds nothing (rc ${scan.rc}; ${scanned.sealed} sealed value(s) read as their length); POSITIVE CONTROL: the same scanner finds the token in a file that holds it (rc ${probeScan.rc}: ${probeScan.found.join(', ')})`, { found: scan.found, sealed: scanned.sealed });
+  // RED CONTROL — the same record with a sealed value whose ciphertext happens to hold «AQ» + 20 base64 after a `+` (what a
+  // fresh seal gives once in ~250): read as bytes the scanner finds a cephx key in it; read as its length, nothing
+  const rec2 = path.join(ROOT, 'scan-ctl', 'adapters.json'); fs.mkdirSync(path.dirname(rec2), { recursive: true });
+  const unlucky = SB.encWith(Buffer.alloc(32, 7), 'x').replace(/\.[^.]*$/, '.ZmFrZQ+AQ' + 'Ab9+'.repeat(6) + 'cQ==');
+  fs.writeFileSync(rec2, fs.readFileSync(path.join(dir, 'adapters.json'), 'utf-8').replace(rec.auth.tokenEnc, unlucky));
+  const asBytes = secretScan([rec2], path.dirname(rec2)), asLength = secretScan(scanSealedAsLength([rec2], path.dirname(rec2), 'scan-ctl-len').files, path.join(ROOT, 'scan-ctl-len'));
+  ok(SB.BOX_CIPHERTEXT_RE.test(unlucky) && asBytes.rc === 1 && asBytes.found.length === 1 && / cephx-key /.test(asBytes.found[0]) && asLength.rc === 0, `RED CONTROL: a sealed value whose ciphertext holds «AQ» + 20 base64 after a \`+\` — the scanner, reading its bytes, says ${JSON.stringify(asBytes.found)}; read as its length it finds nothing`, { asBytes, asLength });
   const said = JSON.stringify([logLines, frames, st, r, c]);
   ok(!said.includes(TOKEN) && !said.includes(TOKEN.slice(5, 25)), 'no log line, broadcast frame or answer carries the token (or a piece of it)');
   const view = eng.digest().adapters.find((x) => x.id === 'slack');

@@ -24,8 +24,9 @@
 //      firewall drops its self-probe ⇒ the strip says 机器防火墙挡住直连，经 hub 中转 with the owner's admin line to copy (the
 //      netsh rule for its node.exe; the toast says where to paste it) — never on the direct path (①); the notice sits AHEAD of
 //      the numbers, its copy button wholly in the strip's view (the topmost element at its centre) — RED CONTROL (lane
-//      stream-relay-udp-ci): the old order (after the numbers) in a 900 px window puts the button past the strip's edge and a
-//      click at its centre copies nothing, THE order in the same window copies; a hub that offers no leg
+//      stream-relay-udp-ci): the old order (after the numbers) in a narrow window puts the button past the strip's edge and a
+//      click at its centre copies nothing, THE order in the same window copies (lane ci-339-reds: the window MEASURED — THE
+//      strip's own content + 24 px, a font fact; a fixed 900 px broke once the strip gained 「麦克风」); a hub that offers no leg
 //      ⇒ 经设备链路 (the relay over the device link)                                                          relay.png, relay-link.png
 //   ⑧ a hub with no fake source and a machine with no ffmpeg: its screen source is refused (no_ffmpeg) ⇒ the VNC picture at
 //      once, NO note (the chip's title says why: 需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）…)
@@ -94,7 +95,7 @@ import { createRequire } from 'node:module';
 import { freePort, scratch, endDaemonsOf, ONBOARDED_SOURCE } from './scratch.mjs';
 import { writeFakeFfmpeg, factsLine, calibrationFrame } from './fixtures/stream/screen-fakes.mjs';
 import { writeFakeWgc, writeFakeCsc } from './fixtures/stream/window-fakes.mjs';
-import { writeFakeMic, winFacts, toneRatio } from './fixtures/stream/mic-fakes.mjs'; // lane stream-mic-road ⑰: the machine's microphone, a fake sink
+import { writeFakeMic, winFacts, toneRatio, writeFakeDecoder, pcmPages, realFfmpeg } from './fixtures/stream/mic-fakes.mjs'; // lane stream-mic-road ⑰: the machine's microphone, a fake sink
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -170,10 +171,14 @@ fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.re
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
 const MM = require(path.join(REPO, 'src/mic-model.js'));
 const MIC = writeFakeMic(path.join(root, 'mic')); // ⑰: the agent's microphone helper — a fake sink (src/desktop-mic.js's seam)
+// lane ci-339-reds: a box with NO ffmpeg (the Actions runner) — the agent's decoder is the fake one, first on its PATH (each
+// Ogg page's number as its PCM); ⑰'s tone check is then skipped BY NAME (it needs a real decoder)
+const PATH0 = process.env.PATH || '', REAL_FF = realFfmpeg(PATH0), DEC = REAL_FF ? null : writeFakeDecoder(path.join(root, 'decoder'));
+if (DEC) process.env.PATH = DEC.dir + path.delimiter + PATH0;
 process.env.HOME = home; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home); process.env.WINDIR = WINDIR; process.env.LOCALAPPDATA = LAD; process.env.VIBESPACE_MIC_HELPER = MIC.exe; // ⑪: the helper's build recipe reads these
 const dataDir = path.join(home, 'hub-data'); fs.mkdirSync(dataDir, { recursive: true });
 dm = new DeviceManager({ dataDir, bundlePath: path.join(root, 'bundle', 'vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
-try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; delete process.env.WINDIR; delete process.env.LOCALAPPDATA; delete process.env.VIBESPACE_MIC_HELPER; }
+try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; delete process.env.WINDIR; delete process.env.LOCALAPPDATA; delete process.env.VIBESPACE_MIC_HELPER; process.env.PATH = PATH0; }
 ok(dm.status().info.platform === 'win32' && dm.status().info.capabilities.includes('stream-offer'), 'a real agent, Windows-shaped, says stream-offer');
 
 // ── the machine's VNC server for the fallback: a stub RFB 3.8, VNC-password sign-in, one 1280×720 green frame ─────────
@@ -481,12 +486,16 @@ console.log('⑦ relay-only ⑧ no source');
   const fw = await fwCopyAt(p);
   ok(fw.up && /^机器防火墙挡住直连，经 hub 中转/.test(fw.sf.fw || '') && fw.sf.fwCopy === '复制管理员命令' && fw.sf.fwTitle === FW_RULE && fw.reach.ahead === 0 && fw.reach.inView && fw.reach.hit && fw.copied === FW_RULE && /已复制，请粘贴到 WIN-DESK1 上以管理员身份打开的 PowerShell/.test(fw.toast), '⑦ the machine\'s firewall blocks the direct path: the strip says 机器防火墙挡住直连，经 hub 中转 (nothing long ahead of it — the numbers left the strip), its 复制管理员命令 in view (no sideways scroll), and it copies the netsh rule for its node.exe (the toast says where to paste it — VibeSpace never runs it)', fw);
   await p.shot('relay.png', WIN);
+  // lane ci-339-reds: the RED control's narrow window is MEASURED — THE strip's own content (max-content) + 24 px — so the
+  // shipped order fits by construction and a sentence of the numbers' length ahead of the notice cannot (a fixed 900 px held
+  // until the strip gained 「麦克风」: in DejaVu, the runner's sans, THE order's copy button then sat 4 px past the edge)
+  const fit = await p.ev(`(() => { const s = document.querySelector('${WIN} .desktop-strip'), w = s.getBoundingClientRect().width, o = s.style.width; s.style.width = 'max-content'; const need = s.getBoundingClientRect().width; s.style.width = o; return { w: Math.round(w), need: Math.ceil(need) }; })()`);
   await p.close();
-  // RED CONTROL — a numbers sentence back AHEAD of the notice (the strip before lane stream-relay-udp-ci) in a 900 px window: the
+  // RED CONTROL — a numbers sentence back AHEAD of the notice (the strip before lane stream-relay-udp-ci) in a narrow window: the
   // copy button is past the strip's edge and a click at its centre copies nothing; the shipped strip (the summary alone — lane
   // stream-stats-popup) in the same window copies (in DejaVu — the hosted runner's sans — the old order missed even in the
   // desk's 1100 px window: the .296 mirror red)
-  const narrow = DESK.replace('width:1100px', 'width:900px'), pair = {};
+  const narrowW = 1100 - (fit.w - fit.need) + 24, narrow = DESK.replace('width:1100px', `width:${narrowW}px`), pair = {};
   for (const [name, at] of [['order', '/'], ['old', '/fwlast']]) {
     const pc = await page(1280, 800, narrow, { at });
     await pc.ev(`window.__open(${JSON.stringify(M)})`);
@@ -494,7 +503,7 @@ console.log('⑦ relay-only ⑧ no source');
     pair[name] = await fwCopyAt(pc);
     await pc.close();
   }
-  ok(narrow !== DESK && pair.order.reach.inView && pair.order.copied === FW_RULE && pair.old.up && pair.old.reach.ahead > 200 && !pair.old.reach.inView && !pair.old.reach.hit && pair.old.copied === null, '⑦ RED CONTROL: a numbers sentence (' + pair.old.reach.ahead + ' px) back ahead of the notice in a 900 px window — the copy button past the strip\'s edge, a click at its centre copies nothing; the shipped strip in the same window copies', { order: pair.order.reach, old: pair.old.reach, oldCopied: pair.old.copied });
+  ok(narrowW < 1100 && pair.order.reach.inView && pair.order.copied === FW_RULE && pair.old.up && pair.old.reach.ahead > 200 && !pair.old.reach.inView && !pair.old.reach.hit && pair.old.copied === null, '⑦ RED CONTROL: a numbers sentence (' + pair.old.reach.ahead + ' px) back ahead of the notice in a ' + narrowW + ' px window (THE strip\'s content ' + fit.need + ' px + 24, measured) — the copy button past the strip\'s edge, a click at its centre copies nothing; the shipped strip in the same window copies', { order: pair.order.reach, old: pair.old.reach, oldCopied: pair.old.copied });
   relayOnly.shutdown();
   const linkOnly = DW.create({ access, direct: false, udpLeg: false, log: quiet });
   R.setup({ ...BASE, webrtc: linkOnly });
@@ -1163,8 +1172,12 @@ console.log('⑰ THE MICROPHONE (lane stream-mic-road): 「麦克风」 — Chro
   const s2 = await micState(p);
   ok(off && s2.tracks.every((x) => x === 'ended') && s2.words === null, '⑰ a second press ⇒ OFF: no dot, no words, the browser\'s track STOPPED', s2);
   const closed = await nodeUntil(() => MIC.ended(n0 + 1), MM.MIC_LIMITS.idleMs + 5000);
-  const pcm = MIC.binOf(n0 + 1), ratio = toneRatio(pcm);
-  ok(closed && pcm.length > 1.5 * 48000 * 4 && ratio > 20, `⑰ the machine's road ended on its own (no packet for ${MM.MIC_LIMITS.idleMs} ms); it got ${(pcm.length / 192000).toFixed(1)} s of PCM carrying Chrome's fake microphone (its 1 kHz tone: ${ratio.toFixed(0)}× the 3 kHz energy)`, { bytes: pcm.length, ratio });
+  const pcm = MIC.binOf(n0 + 1), ratio = REAL_FF ? toneRatio(pcm) : 0, runs = REAL_FF ? [] : pcmPages(pcm);
+  if (REAL_FF) ok(closed && pcm.length > 1.5 * 48000 * 4 && ratio > 20, `⑰ the machine's road ended on its own (no packet for ${MM.MIC_LIMITS.idleMs} ms); it got ${(pcm.length / 192000).toFixed(1)} s of PCM carrying Chrome's fake microphone (its 1 kHz tone: ${ratio.toFixed(0)}× the 3 kHz energy)`, { bytes: pcm.length, ratio });
+  else { // lane ci-339-reds: no ffmpeg here — the fake decoder's PCM names the Ogg pages it got (the road, not the sound)
+    ok(closed && pcm.length > 1.5 * 48000 * 4 && runs.length > 50 && runs.every((r, i) => r.seq === 2 + i && r.frames > 0), `⑰ the machine's road ended on its own (no packet for ${MM.MIC_LIMITS.idleMs} ms); it got ${(pcm.length / 192000).toFixed(1)} s of PCM through the FAKE decoder (no ffmpeg on this box): Chrome's Opus as Ogg pages 2…${runs.length + 1} in order, none lost`, { bytes: pcm.length, runs: runs.length, first: runs.slice(0, 3) });
+    console.log('  SKIP ⑰ the 1 kHz tone in the machine\'s PCM: no ffmpeg on this box (its PATH searched) — the fake decoder carries page numbers, not sound; judged where ffmpeg is');
+  }
   // a LOCK: the page hidden (a phone's lock, a minimized window) ⇒ off
   await press(p);
   await p.until(`document.querySelector('${MIC_BTN}').getAttribute('aria-pressed') === 'true'`, 8000);

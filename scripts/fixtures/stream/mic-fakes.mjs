@@ -4,8 +4,11 @@
 // `render` records what it was handed (render-<n>.json: its env names, its argv; render-<n>.bin: its stdin; render-<n>.end: the
 // byte count once stdin closed), `setdefault` rewrites facts.json's default microphone. Used by test-stream-mic-op and
 // test-desktop-webrtc-chrome ⑰.
+// lane ci-339-reds: + THE FAKE DECODER (writeFakeDecoder) — the Windows road's ffmpeg stand-in for a box without one (the
+// Actions runner has no ffmpeg): the suites put it first on the scratch agent's PATH.
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 const ROLES = ['console', 'multimedia', 'communications'];
 const SCRIPT = `#!/usr/bin/env node
@@ -63,4 +66,78 @@ export function toneRatio(pcm, { from = 0 } = {}) {
   const n = Math.floor(pcm.length / 4); if (n - from < 4800) return 0;
   const g = (f) => { const c = 2 * Math.cos(2 * Math.PI * f / 48000); let s1 = 0, s2 = 0; for (let k = from; k < n; k++) { const s0 = pcm.readInt16LE(k * 4) / 32768 + c * s1 - s2; s2 = s1; s1 = s0; } return s1 * s1 + s2 * s2 - c * s1 * s2; };
   return g(1000) / Math.max(1e-9, g(3000));
+}
+
+// ── lane ci-339-reds: THE FAKE DECODER ──
+// A script named `ffmpeg` (what src/desktop-mic.js looks for on the agent's PATH off Windows): it reads the agent's live Ogg
+// pages on stdin (OpusHead, OpusTags, then one Opus packet a page — desktop-mic.js oggOpusHead / oggPage) and writes, for each
+// packet, its duration (the TOC byte: frame size × frame count) of s16le 48 kHz stereo PCM whose every sample is the PAGE'S
+// SEQUENCE NUMBER — so a suite reads which pages reached the helper, in which order, none lost. It decodes no sound: the tone
+// is judged only through a real ffmpeg (`useReal(path)` ⇒ the script hands its stdio to that one). decode-<n>.json records
+// each run: its argv, OpusHead / OpusTags seen, pages, packets, frames, the audio pages' numbers.
+const DECODER = `#!${process.execPath}
+'use strict';
+const fs = require('fs'), path = require('path'), D = __dirname, argv = process.argv.slice(2);
+const n = fs.readdirSync(D).filter((x) => /^decode-\\d+\\.json$/.test(x)).length + 1;
+const rec = { n, argv, real: null, head: false, tags: false, pages: 0, packets: 0, frames: 0, bad: 0, seqs: [], at: Date.now() };
+const save = () => fs.writeFileSync(path.join(D, 'decode-' + n + '.json'), JSON.stringify(rec));
+let real = null; try { real = fs.readFileSync(path.join(D, 'real-ffmpeg'), 'utf8').trim() || null; } catch { }
+if (real) { rec.real = real; save(); const c = require('child_process').spawn(real, argv, { stdio: 'inherit' }); c.on('exit', (code) => process.exit(code == null ? 1 : code)); }
+else {
+  save();
+  const FR = (cfg) => (cfg < 12 ? [480, 960, 1920, 2880][cfg & 3] : cfg < 16 ? [480, 960][cfg & 1] : [120, 240, 480, 960][cfg & 3]);
+  const frames = (p) => FR(p[0] >> 3) * ((p[0] & 3) === 0 ? 1 : (p[0] & 3) < 3 ? 2 : (p[1] & 0x3f));
+  let buf = Buffer.alloc(0);
+  process.stdin.on('data', (d) => {
+    buf = Buffer.concat([buf, d]);
+    while (buf.length >= 27) {
+      if (buf.toString('latin1', 0, 4) !== 'OggS') { rec.bad++; buf = Buffer.alloc(0); break; }
+      const nseg = buf[26]; if (buf.length < 27 + nseg) break;
+      let len = 0; for (const l of buf.subarray(27, 27 + nseg)) len += l;
+      if (buf.length < 27 + nseg + len) break;
+      const seq = buf.readUInt32LE(18), body = buf.subarray(27 + nseg, 27 + nseg + len);
+      buf = buf.subarray(27 + nseg + len); rec.pages++;
+      const magic = body.toString('latin1', 0, 8);
+      if (magic === 'OpusHead') { rec.head = true; continue; }
+      if (magic === 'OpusTags') { rec.tags = true; continue; }
+      if (!rec.head || !rec.tags || !body.length) { rec.bad++; continue; }
+      const fr = frames(body), pcm = Buffer.alloc(fr * 4);
+      for (let i = 0; i < fr * 2; i++) pcm.writeInt16LE(seq & 0x7fff, i * 2);
+      rec.packets++; rec.frames += fr; rec.seqs.push(seq);
+      process.stdout.write(pcm);
+    }
+  });
+  process.stdin.on('end', () => { save(); process.stdout.end(() => process.exit(0)); });
+  process.on('SIGTERM', () => { save(); process.exit(0); });
+}
+`;
+
+/** The fake decoder in `dir` (created; put `dir` first on the agent's PATH). → { exe, dir, decodes(), useReal(path|null) } */
+export function writeFakeDecoder(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  const exe = path.join(dir, 'ffmpeg');
+  fs.writeFileSync(exe, DECODER, { mode: 0o755 });
+  const decodes = () => fs.readdirSync(dir).filter((x) => /^decode-\d+\.json$/.test(x)).map((x) => JSON.parse(fs.readFileSync(path.join(dir, x), 'utf8'))).sort((a, b) => a.n - b.n);
+  const useReal = (real) => { const f = path.join(dir, 'real-ffmpeg'); if (real) fs.writeFileSync(f, real); else fs.rmSync(f, { force: true }); };
+  return { exe, dir, decodes, useReal };
+}
+/** The fake decoder's PCM read back: [{ seq, frames }] — one run per page, in the order the helper got them. */
+export function pcmPages(pcm) {
+  const out = [];
+  for (let i = 0; i + 4 <= pcm.length; i += 4) { const v = pcm.readInt16LE(i); const last = out[out.length - 1]; if (last && last.seq === v) last.frames++; else out.push({ seq: v, frames: 1 }); }
+  return out;
+}
+/** The box's own ffmpeg: the first executable `ffmpeg` on `PATH` (dirs in `skip` passed over) — or null (the Actions runner). */
+export function realFfmpeg(PATH = process.env.PATH || '', skip = []) {
+  for (const d of String(PATH).split(path.delimiter)) {
+    if (!d || skip.includes(d)) continue;
+    const f = path.join(d, 'ffmpeg');
+    try { fs.accessSync(f, fs.constants.X_OK); if (fs.statSync(f).isFile()) return f; } catch { /* not here */ }
+  }
+  return null;
+}
+/** Without an encoder: `n` Opus-FRAMED packets — the TOC byte of a 20 ms CELT fullband stereo frame (0xFC) + seeded bytes.
+ *  Not sound (only the fake decoder and the Mac road's byte-for-byte check read them). */
+export function framedVoice(n = 60) {
+  return Array.from({ length: n }, (_, i) => Buffer.concat([Buffer.from([0xfc]), crypto.createHash('sha512').update(`voice-${i}`).digest(), crypto.createHash('sha512').update(`voice-${i}+`).digest()]));
 }

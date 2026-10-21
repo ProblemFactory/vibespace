@@ -5,12 +5,19 @@
 // receiver. The machine's audio is a FAKE microphone sink: VIBESPACE_MIC_HELPER names a script standing in for the helper
 // (its facts from a file it reads; `render` writes what it got to a file; `setdefault` rewrites its facts). A werift peer in
 // THIS process stands in for the browser and sends REAL Opus (ffmpeg's libopus, a 1 kHz tone) on the m-line.
+// lane ci-339-reds (the 2.369.339 runner: NO ffmpeg — spawnSync ffmpeg ENOENT): the agent's decoder is a FAKE `ffmpeg` first
+// on its PATH (fixtures/stream/mic-fakes.mjs writeFakeDecoder: each Ogg page's number as its 20 ms of PCM — the road, in order,
+// none lost); the tone through libopus is §2b, the box's own ffmpeg — SKIPPED BY NAME where there is none; the voice without
+// an encoder = Opus-framed packets (framedVoice).
 //   §0 the helpers' sources: the generated module is current (scripts/mic-helper-embed.mjs); what each helper reads
 //   §1 the op: stream-mic-result by id, the facts + the PURE state; PARITY — the op's answer = the module run in-process
 //   §2 THE WINDOWS ROAD: a stream asked `mic` offers an audio m-line (recvonly); the stand-in's Opus → live Ogg pages → ffmpeg →
 //      s16le PCM into the helper's `render` with VS_MIC_DEVICE = «CABLE Input»'s id (the tone is in it); the stream's numbers say
 //      where the voice IS going; no packet for 1.5 s ⇒ the helper's stdin closes; the next packet starts it again; a stream not
 //      asked has no m=audio
+//   §2b THE REAL DECODER: the same road through the box's own ffmpeg — the 1 kHz tone in the PCM (skipped by name without one)
+//   §2c NO DECODER: a machine with no ffmpeg ⇒ the stream's numbers say no_ffmpeg by name (no helper started, the agent
+//      answers on) — the RED control of the fake
 //   §3 THE SPEAKERS ROAD: no cable ⇒ `render` with VS_MIC_SPEAKERS=1 (no default changed — setdefault never ran)
 //   §4 THE MAC ROAD: a Mac-shaped fake ⇒ the helper gets the Opus packets themselves, length-framed, byte for byte
 //   §5 THE DEFAULT PAIR: 「设为默认麦克风」 remembers what it replaced, 「改回」 puts it back; nothing to restore ⇒ by name
@@ -25,7 +32,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, endDaemonsOf } from './scratch.mjs';
 import { moduleText, readTexts } from './mic-helper-embed.mjs';
-import { writeFakeMic, winFacts, macFacts, toneRatio } from './fixtures/stream/mic-fakes.mjs';
+import { writeFakeMic, winFacts, macFacts, toneRatio, writeFakeDecoder, pcmPages, realFfmpeg, framedVoice } from './fixtures/stream/mic-fakes.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -41,8 +48,8 @@ const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
 const w = require(path.join(REPO, 'node_modules/werift'));
 const BUNDLE = path.join(REPO, 'data/bin/vibespace-agentd.js');
 const FIXTURE = path.join(REPO, 'scripts/fixtures/stream/fake-desk-720p.h264');
-const homes = [scratchHome('smo-home', fs, ['.vibespace']), scratchHome('smo-old', fs, ['.vibespace'])];
-const [home, homeOld] = homes;
+const homes = [scratchHome('smo-home', fs, ['.vibespace']), scratchHome('smo-old', fs, ['.vibespace']), scratchHome('smo-nodec', fs, ['.vibespace'])];
+const [home, homeOld, homeNoDec] = homes;
 const work = scratch('smo-work'); fs.mkdirSync(work, { recursive: true });
 const rootOf = (h) => path.join(h, 'agentd-root');
 const devices = [], peers = [];
@@ -53,10 +60,15 @@ process.on('exit', cleanup);
 const FK = writeFakeMic(path.join(work, 'fake'));
 const FAKE = FK.exe, FD = FK.dir;
 const { setFacts, renders, ended, binOf } = FK;
+// lane ci-339-reds: THE FAKE DECODER, first on the scratch agents' PATH; the box's own ffmpeg (null on the Actions runner)
+const PATH0 = process.env.PATH || '';
+const DEC = writeFakeDecoder(path.join(work, 'decoder'));
+const REAL_FF = realFfmpeg(PATH0, [DEC.dir]);
 
 // ── THE VOICE: 1.2 s of a 1 kHz tone through libopus (20 ms frames, stereo), its packets read out of the Ogg pages ──
 const OPUS = path.join(work, 'tone.opus');
-execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=48000:duration=1.2', '-ac', '2', '-c:a', 'libopus', '-b:a', '64k', '-frame_duration', '20', '-application', 'voip', '-f', 'ogg', OPUS]);
+if (REAL_FF) execFileSync(REAL_FF, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=48000:duration=1.2', '-ac', '2', '-c:a', 'libopus', '-b:a', '64k', '-frame_duration', '20', '-application', 'voip', '-f', 'ogg', OPUS]);
+else console.log('  (no ffmpeg on this box — the voice is 60 Opus-FRAMED packets of 20 ms, seeded bytes, no encoder: the fake decoder and the Mac road read them; the tone is §2b\'s, skipped by name)');
 function oggPackets(buf) {
   const out = []; let cur = []; let i = 0;
   while (i + 27 <= buf.length && buf.toString('latin1', i, i + 4) === 'OggS') {
@@ -66,7 +78,7 @@ function oggPackets(buf) {
   }
   return out;
 }
-const PACKETS = oggPackets(fs.readFileSync(OPUS)).slice(2); // OpusHead + OpusTags first
+const PACKETS = REAL_FF ? oggPackets(fs.readFileSync(OPUS)).slice(2) : framedVoice(60); // OpusHead + OpusTags first
 function deviceOn(h, bundlePath = BUNDLE, env = {}) {
   process.env.HOME = h; process.env.VIBESPACE_AGENTD_ROOT = rootOf(h);
   for (const [k, v] of Object.entries(env)) process.env[k] = v;
@@ -116,9 +128,9 @@ console.log('§0 the helpers\' sources');
 
 console.log('§1 the op: the facts, by id, and PARITY with the module');
 setFacts(winFacts());
-const dm = deviceOn(home, BUNDLE, { VIBESPACE_MIC_HELPER: FAKE });
+const dm = deviceOn(home, BUNDLE, { VIBESPACE_MIC_HELPER: FAKE, PATH: DEC.dir + path.delimiter + PATH0 }); // lane ci-339-reds: the fake decoder first
 const conn = await dm.connect();
-delete process.env.VIBESPACE_MIC_HELPER;
+delete process.env.VIBESPACE_MIC_HELPER; process.env.PATH = PATH0;
 ok(conn.info.capabilities.includes('stream-mic') && capsOf(bundleText).includes('"stream-mic"') && /stream-mic-result/.test(bundleText) && /function createMic\(/.test(bundleText), 'the hello-ack names stream-mic; the bundle answers stream-mic-result and carries src/desktop-mic.js (run `npm run build:agentd` after a change)');
 const f1 = await dm.streamMic();
 ok(f1.ok && f1.platform === 'win32' && f1.state.state === 'installed' && f1.state.mic.name === 'CABLE Output (VB-Audio Virtual Cable)' && f1.state.render.id === 'cab-in' && f1.state.micIsDefault === false && f1.installedAt === null && f1.previous === null, 'stream-mic ⇒ the facts + the PURE verdict: VB-CABLE installed, the agent writes CABLE Input, apps pick CABLE Output', f1.state);
@@ -128,13 +140,13 @@ ok(JSON.stringify({ e: f1.endpoints, d: f1.defaults, s: f1.state }) === JSON.str
 const cli = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
 ok(/m\.op === 'stream-mic-result'/.test(cli) && /daemon lacks stream-mic \(capabilities gate\)/.test(cli), 'THREE-TOUCH: stream-mic-result is in the client\'s id-keyed routing set; the method is capability-gated');
 
-console.log('§2 THE WINDOWS ROAD: Opus → Ogg pages → ffmpeg → PCM → «CABLE Input»');
+console.log('§2 THE WINDOWS ROAD: Opus → Ogg pages → ffmpeg (the fake decoder) → PCM → «CABLE Input»');
 {
   const s0 = await micStream(dm);
   const sdp = s0.off.offer.sdp;
   ok(s0.off.ok && s0.off.mic === true && /m=audio [\s\S]*a=recvonly/.test(sdp) && /a=rtpmap:\d+ opus\/48000\/2/i.test(sdp) && /a=group:BUNDLE 0 1 2/.test(sdp), 'a stream asked `mic` offers an audio m-line the agent RECEIVES on (recvonly, Opus 48 kHz) inside the one BUNDLE', sdp.split(/\r?\n/).filter((l) => /^m=|recvonly|opus|BUNDLE/i.test(l)));
   ok(s0.ans.ok && s0.connected && s0.tr, 'the stand-in answered it SENDONLY and connected');
-  ok(PACKETS.length >= 55, `the voice: ${PACKETS.length} Opus packets of 20 ms (libopus)`);
+  ok(PACKETS.length >= 55, `the voice: ${PACKETS.length} Opus packets of 20 ms (${REAL_FF ? 'libopus' : 'framed — no encoder on this box'})`);
   await s0.send(PACKETS.slice(0, 50));
   const started = await until(() => renders().length === 1, 5000);
   const r1 = renders()[0] || {};
@@ -144,8 +156,8 @@ console.log('§2 THE WINDOWS ROAD: Opus → Ogg pages → ffmpeg → PCM → «C
   ok(live && ms.to === 'virtual' && ms.mic && ms.mic.name === 'CABLE Output (VB-Audio Virtual Cable)' && ms.device.name === 'CABLE Input (VB-Audio Virtual Cable)' && ms.packets > 0, 'the stream\'s numbers say where the voice IS going: the virtual microphone «CABLE Output» (the page says it)', ms);
   ok(await until(() => { const m = s0.micStats(); return m && m.packets === 50 && m.dropped === 0; }, 4000), 'every packet sent was counted, none dropped (50)', s0.micStats());
   const closed = await until(() => ended(1), MM.MIC_LIMITS.idleMs + 4000);
-  const pcm = binOf(1), ratio = toneRatio(pcm);
-  ok(closed && pcm.length >= 0.7 * 48000 * 4 && ratio > 50, `no packet for ${MM.MIC_LIMITS.idleMs} ms ⇒ the helper's stdin closed; it got ${(pcm.length / 4 / 48000).toFixed(2)} s of s16le 48 kHz stereo PCM with the 1 kHz tone in it (1 kHz / 3 kHz energy ${ratio.toFixed(0)}×)`, { bytes: pcm.length, ratio });
+  const pcm = binOf(1), runs = pcmPages(pcm), dec = DEC.decodes()[0] || {};
+  ok(closed && pcm.length === 50 * 960 * 4 && runs.length === 50 && runs.every((r, i) => r.seq === i + 2 && r.frames === 960) && dec.head && dec.tags && dec.packets === 50 && !dec.bad && JSON.stringify(dec.argv) === JSON.stringify(MM.DECODER_ARGS), `no packet for ${MM.MIC_LIMITS.idleMs} ms ⇒ the helper's stdin closed; it got ${(pcm.length / 4 / 48000).toFixed(2)} s of s16le 48 kHz stereo PCM — the decoder (the fake, asked with the receiver's own DECODER_ARGS) read OpusHead + OpusTags, then Ogg pages 2…51 IN ORDER, each packet's 20 ms reaching the helper (none lost)`, { bytes: pcm.length, runs: runs.slice(0, 4), dec: { ...dec, seqs: (dec.seqs || []).length } });
   const idle = await until(() => { const m = s0.micStats(); return m && m.state === 'idle' && m.ended && m.ended.why === 'idle'; }, 3000);
   ok(idle, 'the numbers say the road went idle (why: idle) — the stream itself plays on', s0.micStats());
   await s0.send(PACKETS.slice(0, 10));
@@ -156,6 +168,41 @@ console.log('§2 THE WINDOWS ROAD: Opus → Ogg pages → ffmpeg → PCM → «C
   const plain = await micStream(dm, { mic: false });
   ok(plain.off.ok && !/m=audio/.test(plain.off.offer.sdp) && plain.off.mic === undefined && !plain.tr, 'a stream NOT asked `mic` (an older page) has no m=audio at all');
   await dm.streamStop(plain.off.sid); plain.pc.close();
+}
+
+console.log('§2b THE REAL DECODER: the same road through the box\'s own ffmpeg (libopus) — the 1 kHz tone in the PCM');
+if (!REAL_FF) console.log('  SKIP §2b the real decoder: no ffmpeg on this box (its PATH searched) — the tone through libopus is judged where there is one; §2 proved the road with the fake');
+else {
+  DEC.useReal(REAL_FF); // the fake hands its stdio to the real one
+  const n0 = renders().length;
+  const s = await micStream(dm);
+  await s.send(PACKETS.slice(0, 50));
+  const closed = await until(() => renders().length === n0 + 1 && ended(n0 + 1), MM.MIC_LIMITS.idleMs + 6000);
+  const pcm = binOf(n0 + 1), ratio = toneRatio(pcm), dec = DEC.decodes().pop() || {};
+  ok(closed && dec.real === REAL_FF && pcm.length >= 0.7 * 48000 * 4 && ratio > 50, `the real ffmpeg (${REAL_FF}) decoded the stand-in's libopus: the helper got ${(pcm.length / 4 / 48000).toFixed(2)} s of PCM with the 1 kHz tone in it (1 kHz / 3 kHz energy ${ratio.toFixed(0)}×)`, { bytes: pcm.length, ratio, real: dec.real });
+  await dm.streamStop(s.off.sid); s.pc.close();
+  DEC.useReal(null);
+}
+
+console.log('§2c NO DECODER: a machine with no ffmpeg ⇒ said by name — the RED control of the fake');
+{
+  // an agent whose PATH holds no ffmpeg at all (the fake's dir and every dir with one left out — the Actions runner's case)
+  const noFf = [path.dirname(process.execPath), ...PATH0.split(path.delimiter).filter((d) => d && d !== DEC.dir && !realFfmpeg(d))].join(path.delimiter);
+  const dmN = deviceOn(homeNoDec, BUNDLE, { VIBESPACE_MIC_HELPER: FAKE, PATH: noFf });
+  await dmN.connect();
+  delete process.env.VIBESPACE_MIC_HELPER; process.env.PATH = PATH0;
+  setFacts(winFacts());
+  const n0 = renders().length, d0 = DEC.decodes().length;
+  const s = await micStream(dmN);
+  await s.send(PACKETS.slice(0, 15));
+  const said = await until(() => { const m = s.micStats(); return m && m.state === 'no_target' && m.code === 'no_ffmpeg'; }, 5000);
+  const m = s.micStats() || {};
+  await sleep(300);
+  const again = await dmN.streamMic();
+  ok(said && /no ffmpeg/.test(m.error || '') && renders().length === n0 && DEC.decodes().length === d0 && again.ok === true && s.pc.connectionState === 'connected', `no ffmpeg on the machine ⇒ the stream's numbers say no_ffmpeg («${m.error}») — the strip's words (MM.micRoadWords): no helper started, nothing decoded, the agent answers on and the picture plays`, { m, renders: renders().length - n0, decodes: DEC.decodes().length - d0, again: again.ok });
+  const w = MM.micRoadWords(again.state, { state: m.state, code: m.code, to: m.to });
+  ok(w.road === null && w.refused === 'no_ffmpeg' && /ffmpeg/.test(w.key) && w.params.dir === '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin', 'the strip says it by name (micRoadWords: the machine has no ffmpeg — where to put one), never the facts\' road (the virtual microphone it never reached)', w);
+  await dmN.streamStop(s.off.sid); s.pc.close();
 }
 
 console.log('§3 THE SPEAKERS ROAD: no virtual microphone ⇒ the default speaker, said');
