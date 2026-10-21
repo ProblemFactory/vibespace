@@ -703,7 +703,7 @@ console.log('⑬ owner decision A: a topic wakes, a quote chain does not, a quot
   const ED = fs.readFileSync(path.join(REPO, 'src/lib/channel-filter-editor.js'), 'utf-8'), WD = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
   ok(ED.includes(`'reply-to-mine': t('${LABEL_R}')`) && ED.includes(`'in-thread-with-me': t('${LABEL_T}')`) && ED.includes("lw.whys.map((w) => wakeWhyText(w))") && /case 'quoted your message': return t\('quoted your message'\);/.test(WD), 'WIRING: the Notify dialog labels the two rules with the quote clause and words the last wake\'s reasons (wakeWhyText)');
   const ENG = engineSource(REPO);
-  ok(/const kindOf = \(r\) => \(ix \? Thr\.placeKindOf\(r, ix\)/.test(ENG) && /return \{ ownerMine: placeBase\.owner, sentIds, sentByMe, convKind: placeBase\.convKind, threadOnly: placeBase\.threadOnly, threadOf: placeBase\.threadOf, kindOf: placeBase\.kindOf \};/.test(ENG) && /if \(!th \|\| th\.kind !== 'vendor'\) return \[\];/.test(ENG), 'WIRING: the engine hands the rules THE classifier (Thr.placeKindOf over its index) and a threadOf that answers for a topic only');
+  ok(/const kindOf = \(r\) => \(ix \? Thr\.placeKindOf\(r, ix\)/.test(ENG) && /return \{ ownerMine: placeBase\.owner, sentIds, sentByMe, convKind: placeBase\.convKind, threadOnly: placeBase\.threadOnly, threadOf: placeBase\.threadOf, kindOf: placeBase\.kindOf, turnsBetween: \(from, to\) => placeBase\.turnsBetween\(from, to, sentByMe\) \};/.test(ENG) && /if \(!th \|\| th\.kind !== 'vendor'\) return \[\];/.test(ENG), 'WIRING: the engine hands the rules THE classifier (Thr.placeKindOf over its index) and a threadOf that answers for a topic only');
   // CONTROLS (scripts/mutant-copy.mjs): (a) the PRE-DECISION rules — reply-to-mine = replyTo OR root, in-thread-with-me
   // = any thread the index keys (the engine's old threadOf: a chain included) ⇒ the chain rows wake: red
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
@@ -1229,7 +1229,7 @@ console.log('⑲ lane dm-reply-infers (B-6b4b): reply-to-sent `infer` — the sc
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
   const MM = mutantCopies('chan-filter-infer', REPO);
   const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
-  const ROAD1 = '    if (rule.kind === \'reply-to-sent\' && !sent) { const s = sentHit(record, ctx) || (rule.infer === true ? inferHit(record, ctx) : null); if (s) { sent = s.sent; if (s.score !== undefined) score = s.score; } }';
+  const ROAD1 = '    if (rule.kind === \'reply-to-sent\' && !sent) { const s = sentHit(record, ctx) || (rule.infer === true ? inferHit(record, ctx) : null); if (s) { sent = s.sent; if (s.score !== undefined) score = s.score; if (s.between) between = s.between; } }';   // + the between fact (lane reply-infer-owner-between)
   const ROAD2 = '  if (rule && rule.kind === \'reply-to-sent\') { const s = sentHit(rec, ctx) || (rule.infer === true ? inferHit(rec, ctx) : null); return s ? s.why : null; }';
   const SPAN = '  const span = inferSpanMs(ctx);', MARK = '  if (str(rec.replyTo) || str(rec.root)) return null;', KIND = "  if (String(c.kind || 'plain') !== 'plain' || c.quotes || c.topic) return null;", EDGE = '  if (p === null || p < INFER.threshold) return null;';
   ok([ROAD1, ROAD2, SPAN, MARK, KIND, EDGE].every((x) => FSRC.split(x).length === 2), 'control setup: the two road reads, the span, the two unmarked checks and the threshold are each one line');
@@ -1252,6 +1252,82 @@ console.log('⑲ lane dm-reply-infers (B-6b4b): reply-to-sent `infer` — the sc
   const keys = ['judged an answer to your message of {when}', 'Also judge plain replies (LLM plugin)', 'judging plain replies is either on or off', 'Plain replies', 'Judge a plain reply to an agent\'s message for (hours)'];
   const tables = ['i18n-zh.js', 'i18n-ja.js'].map((n) => fs.readFileSync(path.join(REPO, 'src/lib', n), 'utf-8'));
   ok(keys.every((k) => tables.every((tb) => tb.includes(JSON.stringify(k) + ':'))) && WORDS.includes('/^judged an answer to your message of (.+)$/') && F.INFER_WHY === keys[0], 'zh + ja carry the judged road\'s words (the why, the dialog row, the refusal, the readout, the setting); channel-words wakeWhyText reads the why');
+}
+
+console.log('⑳ lane reply-infer-owner-between (agent feedback fb-377439b167): the turns BETWEEN a send and a plain reply are a fact of the candidate — PURE, the judge\'s fixed line, the agent\'s why');
+{
+  // THE INCIDENT'S SHAPE: an agent sent at T (01:43Z); the person who owns the chat sent a voice note at T+7h18m (09:01Z,
+  // [audio], untranscribed); the peer's plain two words came 3 min later (09:04Z) — an answer to the voice note
+  const T = NOW - 10 * H, M = 60e3;
+  const clock = (at) => new Date(at).toISOString().slice(11, 16) + ' UTC';
+  const S = new Map([['om_s1', { at: T, words: 'Shall I book the 3pm slot?', subject: '', id: 'om_s1', text: 'Shall I book the 3pm slot for Thursday?' }]]);
+  const plainKind = () => ({ kind: 'plain', topic: null, quotes: null });
+  const ctxOf = (extra = {}) => ({ sentByMe: S, convKind: 'dm', kindOf: plainKind, ownerMine: new Set(), threadOf: () => [], ...extra });
+  const peer = (vendorId, at, more = {}) => ({ id: 'r-' + vendorId, vendorId, at, text: 'Sounds good', author: { id: 'ou_peer', name: 'Peer' }, replyTo: null, root: null, threadKey: null, ...more });
+  const reply = peer('om_p1', T + 7 * H + 21 * M);
+  const VOICE = { at: T + 7 * H + 18 * M, self: true, kind: 'voice' };
+  // the engine's reader: the records strictly between, the newest ≤ K (here a list it filters, every call recorded)
+  const reader = (list) => { const calls = []; const f = (from, to) => { calls.push([from, to]); return list.filter((x) => x.at > from && x.at < to).slice(-F.INFER.between); }; f.calls = calls; return f; };
+  const tb = reader([VOICE]);
+  const c = F.inferCandidate(reply, ctxOf({ turnsBetween: tb }));
+  ok(c && c.sent.id === 'om_s1' && c.gapMin === 441 && J2(c.between) === J2({ own: 1, ownLast: { kind: 'voice', minBefore: 3 }, others: 0, capped: false }) && J2(tb.calls) === J2([[T, reply.at]]), 'THE INCIDENT: the candidate carries `between` — the owner wrote 1 message of their own, the last a voice note 3 min before the reply, nobody else; the reader is asked ONCE for (the send\'s instant, the reply\'s)', J2({ c, calls: tb.calls }));
+  // ── THE JUDGE'S LINE: fixed words, never anybody's ──
+  const L1 = F.inferBetweenLine(c.between);
+  ok(L1 === 'Between sent and reply, the person who owns this chat wrote 1 message of their own; the last one, a voice note (not transcribed), 3 minutes before the reply.', 'the judge\'s line for the incident, word for word (the brief\'s): the count, the kind (a voice note, not transcribed), the minutes', L1);
+  const none = F.inferCandidate(reply, ctxOf({ turnsBetween: reader([]) }));
+  ok(J2(none.between) === J2({ own: 0, ownLast: null, others: 0, capped: false }) && F.inferBetweenLine(none.between) === 'Nobody else wrote between sent and reply.', 'nothing between ⇒ «Nobody else wrote between sent and reply.»', J2(none.between));
+  const plain = F.inferCandidate(reply, ctxOf());
+  ok(plain && plain.between === null && F.inferBetweenLine(plain.between) === null && J2({ ...none, between: null }) === J2(plain), 'no reader (an older caller) ⇒ `between: null` and no line — the candidate otherwise exactly as before (sent / key / gap)', J2(plain));
+  ok(F.inferCandidate(reply, ctxOf({ turnsBetween: () => null })).between === null, 'a reader that could not read (null) ⇒ no fact, no line (the engine says why) — never a guessed "nobody wrote"');
+  const othersOnly = { own: 0, ownLast: null, others: 2, capped: false };
+  ok(F.inferBetweenLine(othersOnly) === 'Between sent and reply, the person who owns this chat wrote nothing; 2 messages came from others.' && F.inferBetweenLine({ own: 2, ownLast: { kind: 'text', minBefore: 0 }, others: 1, capped: false }) === 'Between sent and reply, the person who owns this chat wrote 2 messages of their own; the last one, a text message, less than a minute before the reply. 1 message from others came between too.', 'others only ⇒ the owner wrote nothing; own + others ⇒ both counted; under a minute is said so');
+  // ── THE K BOUND: the newest ≤ INFER.between (5) — a long conversation costs five turns, never the log ──
+  const many = Array.from({ length: 8 }, (_, i) => ({ at: T + H + i * M, self: i % 2 === 0, kind: i === 6 ? 'image' : 'text' }));
+  const kb = F.inferBetween(reply, S.get('om_s1'), ctxOf({ turnsBetween: () => many }));
+  ok(F.INFER.between === 5 && J2(kb) === J2({ own: 2, ownLast: { kind: 'image', minBefore: Math.round((reply.at - many[6].at) / M) }, others: 3, capped: true }), 'the K bound: a reader handing 8 turns ⇒ the NEWEST 5 are counted (2 own, 3 others), the last own one is the newest (a picture), `capped` says older ones may exist', J2(kb));
+  const LK = F.inferBetweenLine(kb);
+  ok(/^In the last 5 messages before the reply, the person who owns this chat wrote 2 messages of their own; the last one, a picture, \d+ minutes before the reply\. 3 messages from others came between too\.$/.test(LK), 'the capped line says it saw the last 5 messages (never a count it did not read)', LK);
+  const edge = F.inferBetween(reply, S.get('om_s1'), ctxOf({ turnsBetween: () => [{ at: T, self: true, kind: 'text' }, { at: reply.at, self: true, kind: 'text' }, { at: reply.at + M, self: true, kind: 'text' }] }));
+  ok(J2(edge) === J2({ own: 0, ownLast: null, others: 0, capped: false }), 'strictly BETWEEN: a turn at the send\'s instant, at the reply\'s or after it is never counted (even when a reader hands it)', J2(edge));
+  const worst = [F.inferBetweenLine({ own: 4, ownLast: { kind: 'voice', minBefore: 99999 }, others: 1, capped: true }), F.inferBetweenLine({ own: 5, ownLast: { kind: 'voice', minBefore: 10079 }, others: 0, capped: true }), F.inferBetweenLine({ own: 0, others: 5, capped: true })];
+  ok(worst.every((l) => l.length <= 300), `the line at its longest fits the plan's part (≤ 300 characters): ${worst.map((l) => l.length).join(' / ')}`);
+  // ── THE KINDS: by what a message carries ──
+  const K = (text, mimes = []) => F.turnKindOf({ text, attachments: mimes.map((mime) => ({ id: 'f', name: null, mime })) });
+  const kinds = [K('[audio]', ['audio/*']), K('[audio]'), K('', ['audio/ogg']), K('ok, see you then'), K('[image]', ['image/*']), K('[sticker]'), K('[file: deck.pdf]'), K('[video: clip.mp4]', ['video/*']), K('', ['application/pdf']), K('look at this [image]', ['image/*']), K('[done]')];
+  ok(J2(kinds) === J2(['voice', 'voice', 'voice', 'text', 'image', 'image', 'file', 'file', 'file', 'text', 'text']) && J2(F.TURN_KINDS) === J2(['text', 'voice', 'image', 'file']), 'the kinds: a voice note (the vendor\'s [audio] / an audio attachment — never transcribed), words, a picture (image / sticker), a file (a file, a video, any other attachment); words beside a picture are words; a bracketed word is words', J2(kinds));
+  // ── THE THREAD EXCLUSION and the scope: outside it the reader is never asked ──
+  const tx = reader([VOICE]);
+  ok(F.inferCandidate(reply, ctxOf({ convKind: 'thread', turnsBetween: tx })) === null && F.inferCandidate(reply, ctxOf({ sentByMe: new Map(), turnsBetween: tx })) === null && F.inferCandidate(peer('om_p0', T - M), ctxOf({ turnsBetween: tx })) === null && tx.calls.length === 0, 'a mail thread, a principal with no sends, a message before the send ⇒ no candidate, and the turns are never read');
+  // ── THE AGENT IS TOLD: the why and the hand-over line ──
+  const RI = { kind: 'reply-to-sent', infer: true };
+  const yes = (turns) => F.matchRecord({ rules: [RI] }, reply, ctxOf({ turnsBetween: reader(turns), inferred: new Map([['r-om_p1|om_s1', { name: 'answers_sent', type: 'predicate', probability: 0.92 }]]) }));
+  const y1 = yes([VOICE]), y0 = yes([]), yO = yes([{ at: VOICE.at, self: false, kind: 'text' }]);
+  ok(y1.hit && J2(y1.why) === J2([`judged an answer to your message of ${clock(T)}; the user also wrote in between`]) && F.INFER_WHY_BETWEEN === 'judged an answer to your message of {when}; the user also wrote in between' && J2(y1.sent.between) === J2({ own: 1, ownLast: { kind: 'voice', minBefore: 3 } }) && y1.sent.score === 0.92, 'a judged YES after the owner\'s own message ⇒ the why says «the user also wrote in between» and `sent` carries the fact (the pending row, the hand-over)', J2(y1));
+  ok(y0.hit && J2(y0.why) === J2([`judged an answer to your message of ${clock(T)}`]) && y0.sent.between === undefined && yO.hit && J2(yO.why) === J2(y0.why) && yO.sent.between === undefined, 'nothing between, or only others between ⇒ the why and `sent` exactly as before (the owner\'s own turn is the one the agent must weigh)', J2({ y0: y0.why, yO: yO.why }));
+  const blk = (h) => F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Peer', convId: 'oc_p', hits: [{ record: reply, why: h.why, sent: h.sent }] });
+  const b1 = blk(y1), b0 = blk(y0);
+  const two = F.matchRecord({ rules: [RI] }, reply, ctxOf({ turnsBetween: reader([{ at: T + 7 * H, self: true, kind: 'text' }, VOICE]), inferred: new Map([['r-om_p1|om_s1', { probability: 0.92 }]]) }));
+  ok(/\nReply to your message \([^)]*, "Shall I book the 3pm slot\?", judged 0\.92; the user also wrote in between — a voice note, 3 min before this\): from Peer at /.test(b1) && b1.includes(`matched: judged an answer to your message of ${clock(T)}; the user also wrote in between`) && /, judged 0\.92\): from Peer at /.test(b0) && /judged 0\.92; the user also wrote in between — 2 messages, the last a voice note 3 min before this\): /.test(blk(two)), 'the hand-over prints it beside the score: «judged 0.92; the user also wrote in between — a voice note, 3 min before this» (2 messages: the count and the last one\'s kind); nothing between ⇒ the line as before', b1.split('\n').slice(0, 3).join(' | '));
+  // ── THE WORDS: zh + ja, the window's reader matches the longer why FIRST ──
+  const WORDS = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
+  const KEY = 'judged an answer to your message of {when}; the user also wrote in between';
+  const tables = ['i18n-zh.js', 'i18n-ja.js'].map((n) => fs.readFileSync(path.join(REPO, 'src/lib', n), 'utf-8'));
+  const iB = WORDS.indexOf('/^judged an answer to your message of (.+); the user also wrote in between$/'), iP = WORDS.indexOf('/^judged an answer to your message of (.+)$/');
+  ok(tables.every((tb) => tb.includes(JSON.stringify(KEY) + ':')) && iB > 0 && iP > iB && WORDS.includes(`t('${KEY}'`), 'zh + ja carry the between why; channel-words wakeWhyText reads it BEFORE the plain one (whose (.+) would swallow the tail)');
+  // ── CONTROLS (patched copies) ──
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const MM = mutantCopies('chan-filter-between', REPO);
+  const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+  const CAND = 'gapMin: Math.max(0, Math.round((at - Number(newest.at)) / 60000)), between: inferBetween(rec, newest, ctx) };';
+  const KCUT = '.sort((a, b) => Number(a.at) - Number(b.at)).slice(-INFER.between);';
+  ok(FSRC.split(CAND).length === 2 && FSRC.split(KCUT).length === 2, 'control setup: the candidate\'s fact and the K bound are each one line');
+  const BASE = MM.load('src/channel-filter.js', FSRC.replace(CAND, 'gapMin: Math.max(0, Math.round((at - Number(newest.at)) / 60000)) };'), 'no-between');
+  const cb = BASE.inferCandidate(reply, ctxOf({ turnsBetween: tb }));
+  ok(cb && cb.between === undefined && J2(BASE.matchRecord({ rules: [RI] }, reply, ctxOf({ turnsBetween: reader([VOICE]), inferred: new Map([['r-om_p1|om_s1', { probability: 0.92 }]]) })).why) === J2(y0.why), 'CONTROL (the base): a scope without the fact hands the judge nothing between and tells the agent nothing — the incident leg above goes RED', J2(cb));
+  const NOK = MM.load('src/channel-filter.js', FSRC.replace(KCUT, '.sort((a, b) => Number(a.at) - Number(b.at));'), 'no-k-bound');
+  const nk = NOK.inferBetween(reply, S.get('om_s1'), ctxOf({ turnsBetween: () => many }));
+  ok(nk.own + nk.others === 8, 'CONTROL: a copy without the K bound counts all 8 turns — the K-bound leg goes RED', J2(nk));
+  for (const x of copiesCensus(MM.files, MM.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

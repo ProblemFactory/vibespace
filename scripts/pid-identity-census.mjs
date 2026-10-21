@@ -94,6 +94,9 @@ export const ROWS = [
   ['src/server/exit-hook.js', "process.kill(process.pid, 'SIGTERM')", 'self', 'process.pid', 'itself'],
   ['src/server/exit-hook.js', "process.kill(process.pid, 'SIGKILL')", 'self', 'process.pid', 'itself'],
   ['src/server/mounts-plugins-wiring.js', 'pkill -f "${root}/"', 'scan', 'root', 'whatever runs out of the plugin root being removed (its own install path)'],
+  // lane stream-mic-road: a Mac's Core Audio daemon BY NAME — restarted as root inside the virtual microphone's install / removal
+  // (the plug-in loads only into a fresh coreaudiod: the probe's measured restart), after the owner's administrator password
+  ['src/mic-install.js', "const RESTART_COREAUDIO = 'launchctl kickstart -kp system/com.apple.audio.coreaudiod || killall coreaudiod';", 'scan', 'coreaudiod', 'the Mac\'s Core Audio daemon, by its name at that moment (launchd\'s kickstart first)'],
   ['src/server/ops-routes.js', 'process.kill(_selfUpdate.pid, 0); return res.json', 'probe', 'an in-flight self-update (in-memory spawn record) — answer only', 'nothing'],
   ['src/server/ops-routes.js', 'process.kill(_selfUpdate.pid, 0); running = true;', 'probe', 'the same — status only', 'nothing'],
   ['src/server/ops-routes.js', 'process.kill(row.pid, 0); live = true;', 'probe', 'a CI run record — status only', 'nothing'],

@@ -69,13 +69,17 @@ const NEEDS_PASS = new Set(['key-encrypted', 'key-bad-passphrase']);
 
 /** lane host-stale-dialer (B-6136): a second VibeSpace agent with an old token knocking while this machine's agent is in —
  *  the row NAMES it (the journal was the only reader for a day) with the platform's stop recipe to Copy: WORDS the person
- *  runs on that machine, never an op the hub runs. `dh` = the /api/hosts row's `dialHealth` (src/dial-health.js). */
+ *  runs on that machine, never an op the hub runs. `dh` = the /api/hosts row's `dialHealth` (src/dial-health.js).
+ *  lane mac-repair-retires-stale (B-06e9): + the LIVE install by name (`dh.live`, the address the current token was minted
+ *  for), a recipe that stops the agent itself (not only its launch item), and the door — a re-pair retires them. */
 function secondDialerLine(dh) {
   const line = document.createElement('div');
   line.className = 'mounts-path mounts-exit-line mounts-second-dialer';
   const since = new Date(Number(dh.since) || Date.now()).toLocaleString(deviceLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const words = document.createElement('span');
-  words.textContent = tr('Another VibeSpace agent is also dialing in from {from} with an old token (refused every {every} s since {since}) — stop the extra agent on that machine (launchd / scheduled task / a second install), or pair again', { from: dh.from || '?', every: dh.every || 30, since });
+  words.textContent = [tr('Another VibeSpace agent is also dialing in from {from} with an old token (refused every {every} s since {since}) — stop the extra agent on that machine (launchd / scheduled task / a second install), or pair again', { from: dh.from || '?', every: dh.every || 30, since }),
+    dh.live ? tr('The live install on that machine is {live}; stop the others — the stop command stops its launch item and the agent itself.', { live: dh.live }) : '',
+    tr('Re-pairing this machine from its Machines card retires the older installs of this hub for you (an install too old to know this hub is listed with its stop command).')].filter(Boolean).join(' ');
   const glyph = document.createElement('span');
   glyph.className = 'mounts-second-dialer-glyph';
   glyph.innerHTML = UI_ICONS.alert;

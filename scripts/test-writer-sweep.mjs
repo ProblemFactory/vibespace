@@ -1845,6 +1845,8 @@ if (fs.existsSync('/proc/self')) {
       why: 'ARGV READ; existence was already decided one line above by `kill -0 "$OLDPID"`, and an unreadable answer falls through to NOT killing.' },
     { file: 'scripts/vibespace-agentd-install.sh', needle: `case "$(ps -p "$P" -o command=`,
       why: 'ARGV READ gated by `kill -0 "$P" || return 1`, and daemon_up explicitly ACCEPTS the empty answer (`""` is a matching case) — a `ps` that cannot answer never reports a healthy daemon as down.' },
+    { file: 'scripts/vibespace-agentd-install.sh', needle: `case "$(ps -p "$SP" -o command=`,
+      why: 'ARGV READ (lane mac-repair-retires-stale: an older install of the same hub retired at a re-pair) gated by `kill -0 "$SP"` one line above; ONLY a command line naming vibespace-device is stopped — an empty or unreadable answer matches nothing and the pid is left alone (never a recycled pid).' },
   ];
   const isComment = (l) => /^\s*(\/\/|\*|\/\*|#)/.test(l);
   // `ps -p` HAS TWO SPELLINGS AND ONLY ONE OF THEM IS A STRING (B-eac2 residual

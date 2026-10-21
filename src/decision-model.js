@@ -275,10 +275,14 @@ const PLANS = Object.freeze({
   routing: Object.freeze({ fixed: [PART('condition', 500), PART('choices', 9 * 210, { each: 200, count: 9 })], variable: [PART('body', 2048), PART('thread', 3 * 320, { each: 300, count: 3 })], fixedCeiling: 800, recordCeiling: 1000, batch: 1, wakePath: true, memo: ['use', 'id', 'rule', 'groups'] }),
   inbox: Object.freeze({ fixed: [PART('levels', 600)], variable: [PART('facts', 240, { kind: 'line' }), PART('text', 400), PART('detail', 800), PART('session', 200, { kind: 'line' })], fixedCeiling: 200, recordCeiling: 400, batch: 1, perPass: 10, wakePath: false, memo: ['use', 'id', 'levels', 'digest'] }),
   webhook: Object.freeze({ fixed: [PART('condition', 500)], variable: [PART('payload', 4096, { json: true })], fixedCeiling: 200, recordCeiling: 1400, batch: 1, wakePath: true, memo: ['use', 'id', 'rule'] }),
-  // lane dm-reply-infers (B-6b4b): is a peer's PLAIN message (no quote / thread marker) an answer to what an agent sent? ONLY
-  // the sent text, the candidate's text and the gap between them (never another message of the conversation — cost); the
-  // memo = the candidate record + the sent message (+ the question's version): a record is judged ONCE against one send, for ever
-  'reply-infer': Object.freeze({ fixed: [], variable: [PART('sent', 1000), PART('reply', 1000), PART('gap', 60, { kind: 'line' })], fixedCeiling: 0, recordCeiling: 700, batch: 1, wakePath: true, memo: ['use', 'id', 'sent', 'question'] }),
+  // lane dm-reply-infers (B-6b4b): is a peer's PLAIN message (no quote / thread marker) an answer to what an agent sent? The
+  // sent text, the candidate's text, the gap between them and (lane reply-infer-owner-between, fb-377439b167) WHAT ELSE WAS
+  // WRITTEN BETWEEN — a fixed line (channel-filter `inferBetweenLine`: the chat owner's own messages, their kind, the minutes;
+  // never anybody's words): the turns around the candidate are a fact the judge sees, never a cost it is spared. No other
+  // message's text rides. recordCeiling 700 → 804 = + estTokens of the line at its cap («between: » + 300 + the newline =
+  // 310 characters → 104). The memo = the candidate record + the sent message (+ the question's version): a record is
+  // judged ONCE against one send, for ever
+  'reply-infer': Object.freeze({ fixed: [], variable: [PART('sent', 1000), PART('reply', 1000), PART('gap', 60, { kind: 'line' }), PART('between', 300, { kind: 'line' })], fixedCeiling: 0, recordCeiling: 804, batch: 1, wakePath: true, memo: ['use', 'id', 'sent', 'question'] }),
   test: Object.freeze({ fixed: [], variable: [PART('body', 200)], fixedCeiling: 0, recordCeiling: 120, batch: 1, wakePath: false, memo: ['use', 'id'] }),
 });
 const USES = Object.freeze(Object.keys(PLANS));
@@ -802,8 +806,10 @@ const INBOX_QUESTION = Object.freeze({ type: 'choice', name: 'inbox_need', instr
  *  THE ONE QUESTION of use `reply-infer` — fixed, never the owner's words: given what an agent SENT and a later message
  *  from someone else in the same chat (plus the gap), is the later message an answer to it. A predicate: its probability
  *  is the score; channel-filter `INFER.threshold` says yes. The judge sees no other message of the chat. */
-const REPLY_INFER_VERSION = 1;   // the question's wording — a new wording is a new memo key (review r1)
-const REPLY_INFER_QUESTION = Object.freeze({ type: 'predicate', name: 'answers_sent', instructions: 'The [record] holds a message an agent sent into a chat (sent), a later message someone else wrote in the same chat (reply) and the time between them (gap). Is the later message an answer or a reply to the agent\'s message — not a new topic, not small talk, not a message meant for someone else?', whenTrue: 'Yes — the later message answers the agent\'s message.', whenFalse: 'No — it is about something else, or it cannot be told.' });
+// v2 (lane reply-infer-owner-between, fb-377439b167): the record also says what was written BETWEEN (between) — a reply that
+// follows the chat owner's own message more closely is more likely an answer to THAT; a v1 answer (judged blind) is never reused
+const REPLY_INFER_VERSION = 2;   // the question's wording — a new wording is a new memo key (review r1)
+const REPLY_INFER_QUESTION = Object.freeze({ type: 'predicate', name: 'answers_sent', instructions: 'The [record] holds a message an agent sent into a chat (sent), a later message someone else wrote in the same chat (reply), the time between them (gap) and what else was written in the chat between the two (between: who wrote and what kind of message, never the words). Is the later message an answer or a reply to the agent\'s message — not a new topic, not small talk, not a message meant for someone else? When the person who owns this chat wrote their own message after the agent\'s, a reply that follows it more closely is more likely an answer to THAT message: score it low unless its words clearly answer the agent\'s message.', whenTrue: 'Yes — the later message answers the agent\'s message.', whenFalse: 'No — it is about something else, answers the chat owner\'s own later message, or it cannot be told.' });
 const inboxLevelsText = () => `Choices v${INBOX.version}: ${INBOX.choices.map((c) => c.value).join(' | ')} (the question describes each). Sort the For-you item below. Its facts line (age, what the agent did since the ask, a named date, re-asks) is the hub's own record: trust it over the item's words.`;
 /** Does the tray's judge sort this item at all? An OPEN action item of NORMAL urgency (a missing urgency is normal) with
  *  no option chips and no producer buttons (an item that carries its answers is a decision already) and no reply yet.

@@ -120,8 +120,17 @@ const SENT_MAX = 500;
  *  (src/server/channels-engine.js `preInfer` → decision-engine `judge('reply-infer')`: ONE fixed question, the memo =
  *  the record's id + the sent message's id — never judged twice); its answers ride `ctx.inferred` keyed `inferKeyOf`; a
  *  yes = probability ≥ INFER.threshold. No answer (a cap, no key, a switch off) ⇒ no hit: fail closed, a wake is money. */
-const INFER = Object.freeze({ hours: Object.freeze({ min: 1, max: 168, def: 24 }), threshold: 0.8, perHour: 20 });
+const INFER = Object.freeze({ hours: Object.freeze({ min: 1, max: 168, def: 24 }), threshold: 0.8, perHour: 20, between: 5 });
 const INFER_WHY = 'judged an answer to your message of {when}';
+/** lane reply-infer-owner-between (agent feedback fb-377439b167, a fleet instance on .334): a peer's plain two-word message
+ *  at 09:04Z was judged (0.90) an answer to an agent's send of 01:43Z — but the person who owns the chat had sent a voice
+ *  note ([audio], untranscribed) at 09:01Z, between the two, and the peer was answering THAT. THE TURNS BETWEEN are a fact
+ *  of the candidate (`inferBetween`): the engine's `ctx.turnsBetween(sentAt, at)` = the conversation's own records strictly
+ *  between the two instants, the newest ≤ INFER.between, each `{at, self, kind}` (`self` = the chat's owner wrote it — an
+ *  agent's send from here never is; `kind` = `turnKindOf`) → `between: {own, ownLast: {kind, minBefore} | null, others,
+ *  capped}`; no reader ⇒ null, as before. The judge is told in FIXED words (`inferBetweenLine` — counts, a kind, minutes;
+ *  never anybody's words) and a hit after the owner's own message says so to the agent (INFER_WHY_BETWEEN). */
+const INFER_WHY_BETWEEN = 'judged an answer to your message of {when}; the user also wrote in between';
 /** lane reply-to-sent (owner revision 21:50Z: "对组设置这个权限就等于对每个 agent 单独处理"): a GROUP row carrying the rule is
  *  judged PER MEMBER — `fanOutWatchers` gives each live member its own item (its own key `group:<gid>><cid>`, ledger,
  *  stash); the row's OTHER rules (match any) stay the group's one round-robin item. `splitFilter` = the two halves. */
@@ -729,8 +738,53 @@ const inferKeyOf = (record, sent) => `${str(record && record.id)}|${str(sent && 
 const inferSpanMs = (ctx) => { const h = Number(ctx && ctx.inferHours); return (Number.isFinite(h) && h >= INFER.hours.min ? Math.min(INFER.hours.max, h) : INFER.hours.def) * 3600e3; };
 /** Does a filter ask for the judged road (a `reply-to-sent` rule with `infer: true`)? The engine's pre-pass reads it. */
 function inferRuleOf(filter) { return !!filter && Array.isArray(filter.rules) && filter.rules.some((r) => r && r.kind === 'reply-to-sent' && r.infer === true); }
-/** lane dm-reply-infers: THE SCOPE — is this record a CANDIDATE to judge (see INFER)? → `{sent, key, gapMin}` (the newest
- *  send of this principal before it, within the span) or null (never judged — no vendor call). */
+/** lane reply-infer-owner-between: the KIND of one message by what it carries — a voice note (an audio attachment, or the
+ *  vendor's `[audio]` token: never transcribed here), else words (text beyond the vendor's placeholder tokens), else a
+ *  picture (an image / sticker), else a file (any other attachment or token). PURE. */
+const TURN_KINDS = Object.freeze(['text', 'voice', 'image', 'file']);
+const TOKEN_RE = /\[[^\]\n]{1,200}\]/g;
+function turnKindOf(record) {
+  const r = record || {};
+  const mimes = (Array.isArray(r.attachments) ? r.attachments : []).map((a) => lower(a && a.mime));
+  const text = str(r.text).trim();
+  const tokens = text.match(TOKEN_RE) || [];
+  if (mimes.some((m) => m.startsWith('audio/')) || tokens.some((t) => /^\[(?:audio|voice)\b/i.test(t))) return 'voice';
+  if (text.replace(TOKEN_RE, '').trim()) return 'text';
+  if (mimes.some((m) => m.startsWith('image/')) || tokens.some((t) => /^\[(?:image|sticker)\b/i.test(t))) return 'image';
+  if (mimes.length || tokens.some((t) => /^\[(?:file|video|folder|media)\b/i.test(t))) return 'file';
+  return 'text';
+}
+/** lane reply-infer-owner-between: THE TURNS BETWEEN a send and a candidate (see INFER_WHY_BETWEEN) → `{own, ownLast,
+ *  others, capped}` or null (no reader — as before). `own` = the chat owner's own messages among the newest ≤ INFER.between
+ *  strictly between the two instants, `ownLast` = the newest of them `{kind, minBefore}` (minutes before the candidate),
+ *  `others` = the rest (a peer, another agent's send), `capped` = the bound was reached (older ones may exist). */
+function inferBetween(record, sent, ctx) {
+  if (!ctx || typeof ctx.turnsBetween !== 'function') return null;
+  const from = Number(sent && sent.at), to = Number(record && record.at);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || !(from < to)) return null;
+  const got = ctx.turnsBetween(from, to);
+  if (!Array.isArray(got)) return null;   // the reader could not read: no fact (the engine said why)
+  const turns = got.filter((x) => x && Number(x.at) > from && Number(x.at) < to).sort((a, b) => Number(a.at) - Number(b.at)).slice(-INFER.between);
+  const own = turns.filter((x) => x.self === true);
+  const last = own[own.length - 1];
+  return { own: own.length, ownLast: last ? { kind: TURN_KINDS.includes(last.kind) ? last.kind : 'text', minBefore: Math.max(0, Math.round((to - Number(last.at)) / 60000)) } : null, others: turns.length - own.length, capped: turns.length >= INFER.between };
+}
+/** lane reply-infer-owner-between: the judge's `between` line — FIXED words (counts, a kind, minutes), never anybody's
+ *  words; null = no fact (no line, as before). */
+const TURN_WORDS = Object.freeze({ text: 'a text message', voice: 'a voice note (not transcribed)', image: 'a picture', file: 'a file' });
+const nOf = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+function inferBetweenLine(b) {
+  if (!b || typeof b !== 'object') return null;
+  const own = Math.max(0, Math.floor(Number(b.own) || 0)), others = Math.max(0, Math.floor(Number(b.others) || 0));
+  if (!own && !others) return 'Nobody else wrote between sent and reply.';
+  const scope = b.capped ? `In the last ${own + others} messages before the reply` : 'Between sent and reply';
+  if (!own) return `${scope}, the person who owns this chat wrote nothing; ${nOf(others, 'message')} came from others.`;
+  const l = b.ownLast || {}, m = Math.max(0, Math.round(Number(l.minBefore) || 0));
+  return `${scope}, the person who owns this chat wrote ${nOf(own, 'message')} of their own; the last one, ${TURN_WORDS[l.kind] || TURN_WORDS.text}, ${m < 1 ? 'less than a minute' : nOf(m, 'minute')} before the reply.${others ? ` ${nOf(others, 'message')} from others came between too.` : ''}`;
+}
+/** lane dm-reply-infers: THE SCOPE — is this record a CANDIDATE to judge (see INFER)? → `{sent, key, gapMin, between}` (the
+ *  newest send of this principal before it, within the span; + the turns between — lane reply-infer-owner-between) or null
+ *  (never judged — no vendor call). */
 function inferCandidate(record, ctx) {
   const rec = record || {};
   if (isSystemRecord(rec)) return null;   // a vendor notice answers nothing
@@ -751,7 +805,7 @@ function inferCandidate(record, ctx) {
   let newest = null;
   for (const s of sends.values()) { const t = Number(s && s.at); if (Number.isFinite(t) && t < at && at - t <= span && (!newest || t > Number(newest.at))) newest = s; }
   if (!newest || !str(newest.id)) return null;
-  return { sent: newest, key: inferKeyOf(rec, newest), gapMin: Math.max(0, Math.round((at - Number(newest.at)) / 60000)) };
+  return { sent: newest, key: inferKeyOf(rec, newest), gapMin: Math.max(0, Math.round((at - Number(newest.at)) / 60000)), between: inferBetween(rec, newest, ctx) };
 }
 /** lane dm-reply-infers: THE JUDGED ROAD's verdict over the pre-judged answer (`ctx.inferred`) → `{why, sent, score}` or
  *  null (no answer, a refusal, or p < INFER.threshold — no hit). */
@@ -763,7 +817,8 @@ function inferHit(record, ctx) {
   const a = (d instanceof Map ? d.get(c.key) : d[c.key]) || null;
   const p = a && !a.refused && typeof a.probability === 'number' && a.probability >= 0 && a.probability <= 1 ? a.probability : null;
   if (p === null || p < INFER.threshold) return null;
-  return { why: INFER_WHY.replace('{when}', clockOf(c.sent.at)), sent: c.sent, score: Math.round(p * 100) / 100 };
+  const own = !!c.between && c.between.own > 0;   // lane reply-infer-owner-between: the owner also wrote in between — the agent weighs it
+  return { why: (own ? INFER_WHY_BETWEEN : INFER_WHY).replace('{when}', clockOf(c.sent.at)), sent: c.sent, score: Math.round(p * 100) / 100, ...(own ? { between: { own: c.between.own, ownLast: c.between.ownLast } } : {}) };
 }
 /** lane dm-reply-infers (review r1): can the judgment CHANGE this filter's answer for this record? `any` — not when another
  *  rule already hits (the record notifies anyway); `every` — not when another rule misses (it never can). The other rules
@@ -854,9 +909,10 @@ function matchRecord(filter, record, ctx = {}) {
   let hits = 0;
   let sent = null;   // lane reply-to-sent: the sent message this record answers (the hand-over line names it)
   let score = null;  // lane dm-reply-infers: a JUDGED answer's score (the hand-over line and the pending row keep it)
+  let between = null;   // lane reply-infer-owner-between: the owner's own messages between the send and this one (a judged hit)
   for (const rule of f.rules) {
     if (!rule || !RULE_KINDS.includes(rule.kind)) continue;
-    if (rule.kind === 'reply-to-sent' && !sent) { const s = sentHit(record, ctx) || (rule.infer === true ? inferHit(record, ctx) : null); if (s) { sent = s.sent; if (s.score !== undefined) score = s.score; } }
+    if (rule.kind === 'reply-to-sent' && !sent) { const s = sentHit(record, ctx) || (rule.infer === true ? inferHit(record, ctx) : null); if (s) { sent = s.sent; if (s.score !== undefined) score = s.score; if (s.between) between = s.between; } }
     // a place rule names the clause that fired ("quoted your message" / "a reply to …" / "in a thread …")
     const placeWhy = PLACE_RULE_KINDS.includes(rule.kind) ? placeHit(rule, record, ctx) : undefined;
     const named = placeWhy !== undefined ? placeWhy : rule.kind === 'decision' ? decisionHit(rule, record, ctx) : undefined;   // lane decision-rule: the verdict's own words
@@ -864,7 +920,7 @@ function matchRecord(filter, record, ctx = {}) {
     else if (match === 'every') return { hit: false, why: [] };
   }
   const hit = match === 'every' ? hits === f.rules.length && hits > 0 : hits > 0;
-  return { hit, why: hit ? why : [], ...(hit && sent ? { sent: { at: Number(sent.at) || null, words: str(sent.words).slice(0, 80), ...(score !== null ? { score } : {}) } } : {}) };
+  return { hit, why: hit ? why : [], ...(hit && sent ? { sent: { at: Number(sent.at) || null, words: str(sent.words).slice(0, 80), ...(score !== null ? { score } : {}), ...(between ? { between } : {}) } } : {}) };
 }
 
 // ── the estimate ───────────────────────────────────────────────────────────
@@ -1629,6 +1685,16 @@ function safeInline(text, max) {
  * (`{n, seconds}`) says "N in this window" when the push lane's window
  * folded a burst (fence 12). Budgeted and frame-inert (see the header).
  */
+/** lane reply-infer-owner-between: the hand-over's words for a judged hit that came after the user's own message(s) —
+ *  fixed words (a count, a kind, minutes), '' when there were none. */
+const TURN_SHORT = Object.freeze({ text: 'a message', voice: 'a voice note', image: 'a picture', file: 'a file' });
+function betweenWords(b) {
+  const own = b && typeof b === 'object' ? Math.max(0, Math.floor(Number(b.own) || 0)) : 0;
+  if (!own) return '';
+  const l = b.ownLast || {}, m = Math.max(0, Math.round(Number(l.minBefore) || 0)), k = TURN_SHORT[l.kind] || TURN_SHORT.text;
+  const when = m < 1 ? 'under a minute before this' : `${m} min before this`;
+  return own === 1 ? `; the user also wrote in between — ${k}, ${when}` : `; the user also wrote in between — ${own} messages, the last ${k} ${when}`;
+}
 function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, coalesced = null, replyHint = true, inherited = null, others = null, factLine = null } = {}, { maxRecords = BLOCK_MAX_RECORDS, maxChars = BLOCK_MAX_CHARS, budget = BLOCK_MAX_BYTES } = {}) {
   const list = (Array.isArray(hits) ? hits : []).filter((h) => h && h.record);
   const shown = list.slice(-maxRecords);
@@ -1646,7 +1712,7 @@ function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hi
   const lineOf = (h, max) => {
     const r = h.record;
     const who = safeInline((r.author && (r.author.display || r.author.name || r.author.id)) || '(no sender)', 80);   // lane lark-system-records: never "unknown"
-    const re = h.sent && typeof h.sent === 'object' ? `Reply to your message (${h.sent.at ? stamp(h.sent.at) : 'earlier'}, "${safeInline(h.sent.words || '', 60)}"${typeof h.sent.score === 'number' ? `, judged ${h.sent.score.toFixed(2)}` : ''}): ` : '';   // + the judged score (lane dm-reply-infers)
+    const re = h.sent && typeof h.sent === 'object' ? `Reply to your message (${h.sent.at ? stamp(h.sent.at) : 'earlier'}, "${safeInline(h.sent.words || '', 60)}"${typeof h.sent.score === 'number' ? `, judged ${h.sent.score.toFixed(2)}` : ''}${betweenWords(h.sent.between)}): ` : '';   // + the judged score (lane dm-reply-infers) + the owner's turns between (lane reply-infer-owner-between)
     // verify r1 #17 (int248 r2): the facts the adapter declares for a wake (a webhook call's sender + declared fields) under the text
     const fl = typeof factLine === 'function' ? String(factLine(r) || '') : '';
     return `${re}from ${who} at ${stamp(r.at)}\n${safeLine(r.text, max)}${fl ? `\n${safeLine(fl, 300)}` : ''}`;
@@ -1744,7 +1810,7 @@ function whyText(why) {
 }
 
 module.exports = {
-  RULE_KINDS, PLACE_RULE_KINDS, SENT_WINDOW_MS, SENT_MAX, SENT_WHYS, WHY_SENT, sentHit, INFER, INFER_WHY, inferKeyOf, inferRuleOf, inferCandidate, inferHit, inferWorth, threadOnlyCaps, hasSentRule, splitFilter, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
+  RULE_KINDS, PLACE_RULE_KINDS, SENT_WINDOW_MS, SENT_MAX, SENT_WHYS, WHY_SENT, sentHit, INFER, INFER_WHY, INFER_WHY_BETWEEN, TURN_KINDS, turnKindOf, inferBetween, inferBetweenLine, inferKeyOf, inferRuleOf, inferCandidate, inferHit, inferWorth, threadOnlyCaps, hasSentRule, splitFilter, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
   DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
   BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
   validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, placeHit, PLACE_WHYS, matchRecord, estimate,

@@ -7015,8 +7015,10 @@ function create(deps = {}) {
   // 也不一定非得对方下一条就是回复，错误 trigger 还是挺贵的») ──────────────────────────────────────────────────────────────
   // A `reply-to-sent` rule with `infer: true` (opt-in): every fresh record in its SCOPE (PURE `F.inferCandidate` — a peer's
   // UNMARKED message after a send of the watcher's principal, within `channels.replyInferHours`) is judged ONCE through D1's
-  // engine (use `reply-infer`: ONE fixed question, the parts = the sent text + the candidate's text + the gap and nothing
-  // else; the memo = the record's id + the sent message's id, so a re-pass, a restart or a second watcher never re-bills),
+  // engine (use `reply-infer`: ONE fixed question, the parts = the sent text + the candidate's text + the gap + what was
+  // written BETWEEN in fixed words — lane reply-infer-owner-between: the chat owner's own messages, their kind, the minutes,
+  // read from the thread index, never anybody's words; the memo = the record's id + the sent message's id + the question's
+  // version, so a re-pass, a restart or a second watcher never re-bills),
   // BEFORE any filter runs; the answers land in `ctx.inferred`. A candidate is asked once a batch however many watchers
   // share it. Bounded by the conversation's own hour cap (F.INFER.perHour — reserved with its check, given back when no
   // call was made) inside D1's daily budget / switches / backoff; a refusal = no hit + ONE journal line per reason per
@@ -7068,7 +7070,8 @@ function create(deps = {}) {
       const sentText = String(c.sent.text || c.sent.words || c.sent.subject || '') || '(a file)';
       let res = null;
       try {
-        res = await decisionEngine.judge('reply-infer', { sent: sentText, reply: r0.text || '', gap: `${c.gapMin} minutes` }, { questions: [DM.REPLY_INFER_QUESTION], memo: { id: String(r0.id), sent: String(c.sent.id) }, accountNever: rec.judge === 'never' });
+        // + what was written between (lane reply-infer-owner-between): F's fixed line, never anybody's words — the judge sees the turns around the candidate
+        res = await decisionEngine.judge('reply-infer', { sent: sentText, reply: r0.text || '', gap: `${c.gapMin} minutes`, ...(c.between ? { between: F.inferBetweenLine(c.between) } : {}) }, { questions: [DM.REPLY_INFER_QUESTION], memo: { id: String(r0.id), sent: String(c.sent.id) }, accountNever: rec.judge === 'never' });
       } catch (err) { res = { ok: false, why: `error: ${(err && err.message) || err}`.slice(0, 160) }; }
       if (!res || !res.ok || res.memo) { const a = inferHourly.get(conv) || []; const i = a.lastIndexOf(t); if (i >= 0) a.splice(i, 1); }   // no call made: the slot goes back
       if (!res || !res.ok) { inferSay(rec, convId, (res && res.why) || 'refused', 1); skip(r0, DM.roadWhyOf(res && res.why), { items }); return; }
@@ -7259,7 +7262,30 @@ function create(deps = {}) {
           if (m.size > F.SENT_MAX) m.delete(m.keys().next().value);
           sentOut.set(String(p.draftedBy.id), m);
         }
-        placeBase = { owner, threadOf, kindOf, sentBy: en.sentBy && typeof en.sentBy === 'object' ? en.sentBy : {}, sentOut, convKind: en.kind || null, threadOnly: F.threadOnlyCaps(registry.capsOf(rec.kind)) };   // lane channel-reply-real: Slack-style thread_ts roots
+        // lane reply-infer-owner-between (fb-377439b167): THE TURNS BETWEEN a send and a plain reply (F.inferBetween) — the
+        // records the place rules read (the thread index: the newest THREAD_IX_RECORDS of the log + this batch; no vendor
+        // call), the newest ≤ F.INFER.between strictly between the two instants, each `{at, self, kind}`: `self` = the chat's
+        // owner wrote it (FO.selfRead) and it is no agent's send from here (an agent writes from the owner's account — its
+        // echo is not the owner's turn); a vendor notice is nobody's turn, and the ASKING principal's own sends (`mine` — the
+        // send asked about, its parts, its echo) are not "between" at all. No index ⇒ null: no fact, the judge as before
+        const agentSent = new Set();
+        for (const v of Object.values(en.sentBy && typeof en.sentBy === 'object' ? en.sentBy : {})) for (const x of Array.isArray(v) ? v : []) agentSent.add(String(x));
+        for (const m of sentOut.values()) for (const v of m.keys()) agentSent.add(String(v));
+        let byAt = null;
+        const turnsBetween = (from, to, mine = null) => {
+          if (!ix) return null;
+          if (!byAt) byAt = [...ix.byId.values()].filter((r) => r && !FO.systemRead(r) && Number.isFinite(Number(r.at))).sort((a, b) => Number(a.at) - Number(b.at));
+          const out = [];
+          for (let i = byAt.length - 1; i >= 0 && out.length < F.INFER.between; i--) {
+            const r = byAt[i], at = Number(r.at);
+            if (at >= to) continue;
+            if (at <= from) break;
+            if (mine && mine.has(String(r.vendorId))) continue;
+            out.push({ at, self: FO.selfRead(r, selfId) && !agentSent.has(String(r.vendorId)), kind: F.turnKindOf(r) });
+          }
+          return out.reverse();
+        };
+        placeBase = { owner, threadOf, kindOf, sentBy: en.sentBy && typeof en.sentBy === 'object' ? en.sentBy : {}, sentOut, convKind: en.kind || null, threadOnly: F.threadOnlyCaps(registry.capsOf(rec.kind)), turnsBetween };   // lane channel-reply-real: Slack-style thread_ts roots
       }
       const cids = !principal ? [] : principal.kind === 'agent' ? [String(principal.id)] : F.fanTargetOf(principal) ? [F.fanTargetOf(principal)] : principal.kind === 'everyone' ? [] : Object.keys(placeBase.sentBy).filter((k) => k.startsWith('agent:')).map((k) => k.slice(6)).filter((cid) => groupsOfSession(cid).includes(String(principal.id)));
       // lane reply-to-sent: `ctx.mine` split — the OWNER's (`ownerMine`) and THIS principal's sends (`sentByMe` from the
@@ -7267,7 +7293,7 @@ function create(deps = {}) {
       const sentIds = new Set();
       const sentByMe = new Map();
       for (const cid of cids) { for (const v of placeBase.sentBy[`agent:${cid}`] || []) sentIds.add(String(v)); for (const [v, s] of placeBase.sentOut.get(cid) || []) sentByMe.set(v, s); }
-      return { ownerMine: placeBase.owner, sentIds, sentByMe, convKind: placeBase.convKind, threadOnly: placeBase.threadOnly, threadOf: placeBase.threadOf, kindOf: placeBase.kindOf };
+      return { ownerMine: placeBase.owner, sentIds, sentByMe, convKind: placeBase.convKind, threadOnly: placeBase.threadOnly, threadOf: placeBase.threadOf, kindOf: placeBase.kindOf, turnsBetween: (from, to) => placeBase.turnsBetween(from, to, sentByMe) };
     };
     // R4 verify r5: ONE BAD RECORD (or a throw preparing one watcher) MUST NOT
     // DROP THE REST OF THIS CONVERSATION'S BATCH. onFresh is tracked per

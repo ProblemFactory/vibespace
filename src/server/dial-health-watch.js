@@ -23,14 +23,18 @@ const i18nKey = (s) => s;
 const nameOf = (s) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').trim().slice(0, 80) || 'a machine';
 const whenOf = (ms) => OF.when(Number(ms) || 0);
 
-/** The item's words — English text + the same sentences as STRUCTURE (the client words them per device). */
-function itemOf({ machine, from, since, every }) {
-  const p = { machine: nameOf(machine), from: from || '?', since: whenOf(since), every: String(every || DH.DIAL_EVERY_S) };
+/** The item's words — English text + the same sentences as STRUCTURE (the client words them per device). `live` (lane
+ *  mac-repair-retires-stale) = the install the current token was minted for (DH.liveInstallOf) — named when the record knows it. */
+function itemOf({ machine, from, since, every, live = null }) {
+  const p = { machine: nameOf(machine), from: from || '?', since: whenOf(since), every: String(every || DH.DIAL_EVERY_S), live: live || '' };
   const T = i18nKey('{machine}: a second VibeSpace agent keeps dialing in with an old token');
   const D1 = i18nKey('Another VibeSpace agent is also dialing in from {from} with an old token (refused every {every} s since {since}) — stop the extra agent on that machine (launchd / scheduled task / a second install), or pair again');
   const D2 = i18nKey('The machine’s row (Remote → {machine}) has the command to find and stop it. This item resolves itself 10 minutes after the knocking stops.');
+  const D3 = i18nKey('The live install on that machine is {live}; stop the others — the stop command stops its launch item and the agent itself.');
+  const D4 = i18nKey('Re-pairing this machine from its Machines card retires the older installs of this hub for you (an install too old to know this hub is listed with its stop command).');
   const fill = (s) => s.replace(/\{(\w+)\}/g, (m, k) => (k in p ? p[k] : m));
-  return { text: fill(T), detail: `${fill(D1)}\n${fill(D2)}`, i18n: { text: { key: T, params: p }, detail: [{ key: D1, params: p }, { key: D2, params: p }] } };
+  const ds = [D1, D2, ...(p.live ? [D3] : []), D4];
+  return { text: fill(T), detail: ds.map(fill).join('\n'), i18n: { text: { key: T, params: p }, detail: ds.map((key) => ({ key, params: p })) } };
 }
 
 function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.now(), bcast = () => {}, hosts = null, tickMs = 60000 } = {}) {
@@ -62,7 +66,7 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
       if (!rec) {
         const r = { machine: nameOf(h.name), from: v.from, since: v.since, at: t, itemId: null, text: null, clearSince: null };
         if (userTodos) {
-          const w = itemOf({ ...r, every: v.every });
+          const w = itemOf({ ...r, every: v.every, live: DH.liveInstallOf(d.mintedBase) });
           try {
             const it = userTodos.add(INBOX_KEY, { origin: 'machines', text: w.text, detail: w.detail, i18n: w.i18n, urgency: 'normal', by: 'agent', sessionName: 'Machines' });
             if (it && it.id) { r.itemId = it.id; r.text = it.text; }

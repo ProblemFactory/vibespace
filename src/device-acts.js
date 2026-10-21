@@ -18,6 +18,7 @@
  *                installed / removed / fetched, a profile browser started, text posted into a conversation, sealed
  *                pool orders, a Settings pane opened, a window pinned
  *       code     the hub replaces the device agent's code (`upgrade`)
+ *     (lane stream-mic-road: `stream-mic` is an op:action one — its facts a read, its `default` an act.)
  *     An op (or an op:action) without a row is `act` — fail closed: it needs a `by` and is audited (scripts/
  *     test-device-acts.mjs reds the missing row first).
  *   · `by` — WHO asked, spelled like window-reach's principals: `human:` + a browser sign-in's handle (never the
@@ -65,6 +66,7 @@ const TABLE = Object.freeze({
   'desktop-serve:facts': 'read', 'desktop-serve:status': 'read', 'desktop-serve:list': 'read', 'desktop-serve:windows': 'read',
   'desktop-serve:app-status': 'read', 'desktop-serve:app-plan': 'read', 'desktop-serve:app-refresh': 'read',
   'browser-serve:version': 'read', 'browser-serve:status': 'read', 'browser-serve:cdp-url': 'read', 'browser-serve:builds': 'read',
+  'stream-mic:facts': 'read', // lane stream-mic-road: the machine's microphone facts (a Mac's `prepare` builds + STAGES its plug-in under ~/.vibespace — installs nothing)
   // ── session ──
   'hello': 'session', 'open-session': 'session', 'resize-session': 'session', 'kill-session': 'session',
   'open-pipe-session': 'session', 'attach-pipe-session': 'session', 'kill-pipe-session': 'session',
@@ -84,17 +86,19 @@ const TABLE = Object.freeze({
   'browser-serve:start': 'act', 'browser-serve:remove': 'act',
   'peer-post': 'act', 'pool-orders': 'act', 'settings-open': 'act', 'window-pin': 'act',
   'desktop-grab': 'act', 'desktop-input': 'act', // lane desktop-handover's agent verbs (they land with it)
+  'stream-mic:default': 'act', // lane stream-mic-road: 「设为默认麦克风」 / 「改回」 — the machine's default microphone changes
   // ── code ──
   'upgrade': 'code',
 });
-const ACTION_OPS = Object.freeze(['fs-op', 'design-fs', 'desktop-serve', 'browser-serve']);
+const ACTION_OPS = Object.freeze(['fs-op', 'design-fs', 'desktop-serve', 'browser-serve', 'stream-mic']);
 const LOOPBACK_RE = /^(?:127\.\d{1,3}\.\d{1,3}\.\d{1,3}|::1|localhost|::ffff:127\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i;
 
 /** The client methods that can send an act / code op — THE census list (test-architecture: every call passes `by`;
  *  test-device-acts proves the list against src/agentd/client.js). `tcpForward` needs it only with a host argument. */
 const CLIENT_ACT_METHODS = Object.freeze(['runCmd', 'runShell', 'runStream', 'fsWrite', 'fsRename', 'fsMkdir', 'fsRm', 'fsCopy', 'fsMove', 'fsWriteStream',
   'placeSecret', 'inputEvents', 'tcpForward', 'serveSocks', 'serveFolder', 'desktopServe', 'browserServe', 'designFs', 'peerPost', 'poolOrders', 'settingsOpen', 'windowPin',
-  'desktopGrab', 'desktopInput']); // int315: lane desktop-handover's two (.313)
+  'desktopGrab', 'desktopInput', // int315: lane desktop-handover's two (.313)
+  'streamMic']); // lane stream-mic-road: its `default` action changes the machine's default microphone
 const HOST_ARG_METHODS = Object.freeze({ tcpForward: 1 }); // method → the index of the argument that makes it an act
 
 /** The table key of a request payload. */
@@ -170,6 +174,7 @@ function summaryOf(p) {
     case 'peer-post': return clean(`a message into ${x.cid}`) + ` · ${String(x.text || '').length} chars`; // never the text
     case 'pool-orders': return x.orders && typeof x.orders === 'object' && x.orders.clearPool ? clean(`clear pool ${x.orders.clearPool}`) : `sealed pool orders · ${Array.isArray(x.orders) ? x.orders.length : (x.orders && Array.isArray(x.orders.orders) ? x.orders.orders.length : 0)}`;
     case 'settings-open': return clean(`Settings → ${x.pane}`);
+    case 'stream-mic:default': return clean(`default microphone → ${x.to === 'restore' ? 'the one it replaced' : 'the virtual microphone'}`);
     case 'window-pin': return clean(`window ${x.wid} ${x.on ? 'on top' : 'not on top'}`);
     case 'link-token': return clean(`the link token of ${x.hostKey || '?'} → session ${x.sid || '?'} · ${Number(x.status) || 0}`); // never the token
     case 'upgrade': return clean(`agent ${x.from || '?'} → ${x.version || x.to || '?'}`) + (x.size ? ` · ${size(Number(x.size) || 0)}` : '');

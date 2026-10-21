@@ -312,7 +312,7 @@ const agentPidS = () => { try { return Number(fs.readFileSync(path.join(rootOf(h
 const ffRuns = () => (fs.existsSync(ffLog) ? fs.readFileSync(ffLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 const dms = deviceOn(homeScr, scrBundle);
 const cs = await dms.connect();
-ok(cs.info.platform === 'win32' && JSON.stringify(cs.info.capabilities.slice(-10)) === JSON.stringify(['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input']), 'the hello-ack names stream-facts and stream-screen (after stream-offer / input-events; then lane stream-p3m-build\'s stream-mac / stream-window, then lane stream-p2w-build\'s stream-windows — the picker op\'s own word, int304; then lane stream-mac-stall\'s settings-open; then lane desktop-handover\'s desktop-grab / desktop-input)');
+ok(cs.info.platform === 'win32' && JSON.stringify(cs.info.capabilities.slice(-11)) === JSON.stringify(['stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic']), 'the hello-ack names stream-facts and stream-screen (after stream-offer / input-events; then lane stream-p3m-build\'s stream-mac / stream-window, then lane stream-p2w-build\'s stream-windows — the picker op\'s own word, int304; then lane stream-mac-stall\'s settings-open; then lane desktop-handover\'s desktop-grab / desktop-input; then lane stream-mic-road\'s stream-mic)');
 /** One screen session with a fresh stand-in: offer → answer. */
 async function screenSession(pushArr) {
   const b = standIn();

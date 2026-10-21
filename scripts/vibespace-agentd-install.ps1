@@ -30,6 +30,7 @@ $ProgressPreference = 'SilentlyContinue'
 # here, before anything is fetched; the daemon's own dial (--dial-check) once the bundle is on disk.
 if ($Dial -notmatch '^wss?://') { Write-Host "x the dial address must start with ws:// or wss:// - got: $Dial"; exit 2 }
 
+$hubId = ''; $t0ms = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()   # lane mac-repair-retires-stale: the hub's id + when this run began
 $NodeVersion = if ($env:VIBESPACE_NODE_VERSION) { $env:VIBESPACE_NODE_VERSION } else { 'v22.22.0' }
 $NodeMirror  = if ($env:VIBESPACE_NODE_MIRROR)  { $env:VIBESPACE_NODE_MIRROR }  else { 'https://nodejs.org/dist' }
 
@@ -129,6 +130,8 @@ if (-not $NoCheck) {
     Write-Host "x nothing was installed - the device cannot dial ${dhost}: $(@($checkOut)[0])"
     exit $checkRc
   }
+  # lane mac-repair-retires-stale: the hub names itself in its answer (an older hub does not) — kept in dial.json below
+  foreach ($l in @($checkOut)) { if ("$l" -match '^hub id: (vh-[0-9a-f]{16})$') { $hubId = $Matches[1]; break } }
 }
 
 # THE ALLOW LIST (lane device-allow-flags): the agent's own parser writes state\policy.json — BEFORE the host token,
@@ -149,7 +152,8 @@ Remove-Item (Join-Path $root 'state\release-floor.json') -Force -ErrorAction Sil
 # Persist the dial config like the bash installer does: a 2.170+ daemon re-reads
 # it on every dial attempt, so it can be started ARGLESS (the scheduled task
 # below) and a re-pair heals a running daemon.
-$dialJson = (@{ url = $Dial; token = $DialToken } | ConvertTo-Json -Compress)
+$dialCfg = @{ url = $Dial; token = $DialToken }; if ($hubId) { $dialCfg.hub = $hubId }   # + the hub's id (lane mac-repair-retires-stale)
+$dialJson = ($dialCfg | ConvertTo-Json -Compress)
 Set-Content -NoNewline -Path (Join-Path $root 'state\dial.json') -Value $dialJson
 Write-Host "-> dial config persisted ($root\state\dial.json)"
 
@@ -237,3 +241,64 @@ Write-Host "OK vibespace device agent running (pid $($p.Id)). Restart after rebo
 Write-Host "  Log:  $root\state\agentd.out"
 Write-Host "  Stop: Stop-Process -Id $($p.Id)"
 Write-Host "  Uninstall: Remove-Item -Recurse -Force '$root'   (removes the agent AND its private Node)"
+
+# RETIRE THE OLDER INSTALLS OF THIS HUB (lane mac-repair-retires-stale, B-06e9 — the bash installer's twin): a sibling root
+# whose state\dial.json names the SAME hub (or, when neither knows its hub, the same device id) is this machine's older
+# pairing of this hub — its scheduled task is exported to ~\.vibespace\disabled-launchagents\ and unregistered (never
+# lost), the agent holding its state\agentd.lock is stopped only when that pid's command line names vibespace-device, the
+# root and its state stay. Only once THIS install is live (the dial check passed and the new daemon dialed in — its
+# state\dial-status.json connectedAt falls in this run). Another hub's install is kept; an unknown one is LISTED with its
+# exact stop command, never touched.
+function Get-VsDial([string]$dir) {
+  $o = @{ hub = ''; dev = '' }
+  try {
+    $j = Get-Content -Raw (Join-Path $dir 'state\dial.json') -ErrorAction Stop | ConvertFrom-Json
+    if ($j.hub -match '^vh-[0-9a-f]{16}$') { $o.hub = $j.hub }
+    if ($j.url -match '[?&]device=([^&]+)') { $o.dev = [uri]::UnescapeDataString($Matches[1]) }
+  } catch { }
+  return $o
+}
+function Test-VsDialedIn {
+  try { $s = Get-Content -Raw (Join-Path $root 'state\dial-status.json') -ErrorAction Stop | ConvertFrom-Json; return ([double]$s.connectedAt -ge $t0ms) } catch { return $false }
+}
+if (-not $NoCheck) {
+  $vsDir = Join-Path $env:USERPROFILE '.vibespace'
+  $sibs = @(Get-ChildItem $vsDir -Directory -Filter 'device@*' -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne (Split-Path $root -Leaf) -and $_.Name -match '^device@[A-Za-z0-9._-]+$' })
+  if ($sibs.Count -gt 0) {
+    $i = 0; while ($i -lt 20 -and -not (Test-VsDialedIn)) { Start-Sleep -Seconds 1; $i++ }
+    if (-not (Test-VsDialedIn)) {
+      Write-Host '-> older installs on this machine were NOT retired: this install has not dialed in yet - run this command again once its row reads connected'
+    } else {
+      $me = Get-VsDial $root
+      $dis = Join-Path $vsDir 'disabled-launchagents'
+      $retired = @(); $other = @(); $unknown = @()
+      foreach ($sb in $sibs) {
+        $them = Get-VsDial $sb.FullName
+        $verdict = if ($them.hub -and $me.hub) { if ($them.hub -eq $me.hub) { 'retire' } else { 'other' } } elseif (-not $them.hub -and -not $me.hub -and $them.dev -and $them.dev -eq $me.dev) { 'retire' } else { 'unknown' }
+        $x = $sb.Name.Substring(7); $tn = "VibeSpaceDevice-$x"; $lk = Join-Path $sb.FullName 'state\agentd.lock'
+        if ($verdict -eq 'retire') {
+          # the task FIRST (it would start the agent again at the next logon), its definition set aside
+          $t = Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue
+          if ($t) {
+            New-Item -ItemType Directory -Force -Path $dis | Out-Null
+            $xml = Join-Path $dis "$tn.xml"; if (Test-Path $xml) { $xml = Join-Path $dis "$tn.$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()).xml" }
+            try { Export-ScheduledTask -TaskName $tn | Set-Content -Path $xml -Encoding Unicode; Unregister-ScheduledTask -TaskName $tn -Confirm:$false } catch { Write-Host "   (could not set the task $tn aside: $_)" }
+          }
+          $sp = (Get-Content $lk -ErrorAction SilentlyContinue) -as [int]
+          if ($sp) {
+            $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$sp" -ErrorAction SilentlyContinue).CommandLine
+            if ($cl -like '*vibespace-device*') { Stop-Process -Id $sp -Force -ErrorAction SilentlyContinue }
+          }
+          $retired += $sb.Name
+        } elseif ($verdict -eq 'other') { $other += $sb.Name }
+        else { $unknown += "    $($sb.Name) - stop it with: Unregister-ScheduledTask -TaskName '$tn' -Confirm:`$false; Stop-Process -Id (Get-Content `"`$env:USERPROFILE\.vibespace\$($sb.Name)\state\agentd.lock`")" }
+      }
+      if ($retired.Count -gt 0) {
+        $w1 = if ($retired.Count -eq 1) { '1 older install' } else { "$($retired.Count) older installs" }
+        Write-Host "-> retired $w1 of this hub: $($retired -join ', ') (kept under ~\.vibespace; their scheduled tasks moved to ~\.vibespace\disabled-launchagents\)"
+      }
+      if ($unknown.Count -gt 0) { Write-Host '-> older installs I cannot attribute, not touched:'; $unknown | ForEach-Object { Write-Host $_ } }
+      if ($other.Count -gt 0) { Write-Host "-> kept: $($other -join ', ') (another VibeSpace's install on this machine)" }
+    }
+  }
+}

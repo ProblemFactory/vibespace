@@ -2,6 +2,18 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.339 — 2026-10-21
+
+### Added
+- The desktop stream has a microphone: your voice reaches the machine's apps through a virtual microphone you install once, or plays on its speakers until then.
+
+### Fixed
+- A desktop stream no longer stays black after your browser let VibeSpace use the microphone, on a computer with several network adapters (Wi-Fi, VPN, Docker).
+- A desktop stream that does not connect within 15 seconds now says so while it tries again, instead of only saying it is connecting until the VNC picture shows.
+- A plain reply right after your own message in a chat, a voice note too, is no longer mistaken for an answer to an agent's earlier message.
+- Re-pairing a machine retires its older installs for the same VibeSpace: their launch items are set aside, not deleted, and their agents are stopped.
+- The "a second VibeSpace agent keeps dialing in with an old token" notice names the live install and gives the exact commands that stop the others.
+
 ## 2.369.338 — 2026-10-21
 
 ### Fixed

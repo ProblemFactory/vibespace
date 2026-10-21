@@ -53,6 +53,8 @@ const SYS = require('../app-system.js'); // Layer 1: a sys plan's digest binds w
 const MW = require('../machine-window.js'); // lane machine-app-crop: the run's launch report (one app as its own window)
 const D = require('../desktop-display.js'); // design 014 D1: the PURE RFB greeting read of the vnc-native rung
 const AGENT_VERSION = (() => { try { return require('../../package.json').version; } catch { return ''; } })(); // lane remoteapp-r1b: the agent version that answers `remoteapp-facts` = this hub's (its agents upgrade to it)
+const MI = require('../mic-install.js'); // lane stream-mic-road: the virtual microphone's exits
+const MIC = require('../mic-model.js'); // lane stream-mic-road: the machine's microphone state (PURE)
 const RA = require('../remoteapp.js'); // lane remoteapp-r1a (design q-024 §1.2): the RemoteApp setup words, the platform verdict, the RDP port
 const SMOD = require('../stream-model.js'); // lane stream-p1a-transport: the webrtc rung's PURE verdict (the agent's capability, a source)
 const MC = require('../desktop-machines-cache.js'); // lane desktop-picker-instant: the machine rows' last known state (PURE)
@@ -302,6 +304,14 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
       const plan = row.plan({ platform: platformOfHandle(await deviceOf(hostId)) });
       return { hostId, facts: null, plan, digest: planDigest(plan) };
     }
+    if (row && row.from === 'mic') { // lane stream-mic-road: planned from the agent's `stream-mic` facts (`prepare`: a Mac builds + stages its plug-in)
+      if (row.local && isLocal(hostId)) throw named(row.local.code, row.local.error);
+      const dm = await deviceOf(hostId);
+      if (typeof dm.streamMic !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot read its microphone facts — upgrade the agent on it`);
+      const mic = await dm.streamMic({ prepare: true, by: 'system:desktop-access' });
+      const plan = row.plan({ platform: platformOfHandle(dm), mic, lang: planOpts && typeof planOpts.lang === 'string' ? planOpts.lang : null });
+      return { hostId, facts: null, mic, plan, digest: planDigest(plan) };
+    }
     if (/^app:[a-z0-9][a-z0-9:.+-]{0,80}$/.test(String(w))) {
       if (!appPlanner) throw named('host_unavailable', 'the apps engine is not wired on this instance');
       const r = await appPlanner(hostId, w, planOpts || {});
@@ -429,7 +439,11 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     let held = null;
     try {
       const { plan, facts } = await installPlan(hostId, what, planOpts);
-      if (plan && plan.uac) return await runUacInstall(hostId, plan, { onData, expectDigest, by }); // design 014 D1: Windows asks on its own screen
+      if (plan && (plan.uac || plan.adminDialog)) { // design 014 D1: Windows asks on its own screen (lane stream-mic-road: a Mac's password dialog too)
+        const done = await runUacInstall(hostId, plan, { onData, expectDigest, by });
+        if (plan.after === 'mic') done.after = (await micFacts(hostId, { force: true, by })).facts; // lane stream-mic-road: the machine's microphone facts, read again
+        return done;
+      }
       const running = facts && facts.installing && facts.installing.pid ? facts.installing : null;
       if (!running) {
         if (!plan.ok) { const e = named(plan.code, plan.error); e.plan = plan; throw e; }
@@ -631,14 +645,16 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (expectDigest != null && planDigest(plan) !== String(expectDigest)) { const e = named('plan_changed', `what would run on ${hostId} changed after it was shown — nothing ran; read the new commands, then press Install again`); e.plan = plan; e.digest = planDigest(plan); throw e; }
     const dm = await deviceOf(hostId);
     if (typeof dm.runStream !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot stream a command`);
-    log.log?.(`[desktop] installing ${plan.label} on ${hostId}: Windows asks for administrator rights on that machine's screen`);
-    const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData, timeoutMs: installMs, by });
+    log.log?.(`[desktop] installing ${plan.label} on ${hostId}: ${plan.adminDialog ? 'the Mac asks for an administrator password' : 'Windows asks for administrator rights'} on that machine's screen`);
+    const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData, timeoutMs: installMs, by, ...(plan.env ? { env: plan.env } : {}) }); // lane stream-mic-road: every name rides the env
     const fail = (code, msg) => { const e = named(code, msg); e.plan = plan; return e; };
-    if (r && r.code === M.TIGHTVNC_NO_ADMIN_EXIT) throw fail('no_admin', `Windows on ${hostId} granted no administrator rights (Yes was not clicked there) — nothing was installed; click Install again with someone at that machine, or run the commands above in an administrator PowerShell there`);
+    if (r && r.code === M.TIGHTVNC_NO_ADMIN_EXIT) throw fail('no_admin', plan.adminDialog ? `the Mac ${hostId} got no administrator password (the dialog was cancelled there) — nothing was installed; press again with someone at that Mac` : `Windows on ${hostId} granted no administrator rights (Yes was not clicked there) — nothing was installed; click Install again with someone at that machine, or run the commands above in an administrator PowerShell there`);
+    if (r && plan.adminDialog && r.code === MI.MIC_NO_PASSWORD_EXIT) throw fail('no_password', `nobody answered the administrator password dialog on the Mac ${hostId} in ${MIC.MIC_LIMITS.macWaitSec} s — it was withdrawn and nothing was installed; press again with someone at that Mac`);
     if (!r || r.code == null) throw fail(r && r.timedOut ? 'install_timeout' : 'install_link_lost', `the install on ${hostId} reported no exit (${(r && r.error) || (r && r.timedOut ? 'past its deadline' : 'the link dropped')}) — check again`);
     if (r.code !== 0) throw fail('install_failed', `the install exited ${r.code} on ${hostId} — the administrator window there said why`);
-    desktops.delete(hostId);
     installedNow(hostId, plan.label); // lane machine-desktop-apps: what our door installed is on the machine's list at once
+    if (plan.after === 'mic') return { ok: true, what: plan.what, hostId, plan, before: null, after: null, facts: null, reattached: false }; // lane stream-mic-road: installPackage reads the microphone facts again
+    desktops.delete(hostId);
     return { ok: true, what: plan.what, hostId, plan, before: null, after: await probeDesktop(hostId, dm, 'install'), facts: null, reattached: false };
   }
 
@@ -651,6 +667,30 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     const r = await dm.fsReadRange(String(absPath), 0, maxBytes);
     if (r.size != null && r.size > maxBytes) throw named('too-large', `${absPath} on ${hostId} is ${r.size} bytes (over ${maxBytes})`);
     return r.data;
+  }
+
+  // ── lane stream-mic-road (B-7af0): a Windows / macOS machine's MICROPHONE ROAD — people only (the routes) ──
+  /** The machine's microphone facts (the agent's `stream-mic` op — src/desktop-mic.js) + the PURE verdicts: the state (where the
+   *  viewer's voice goes), the 「设为默认麦克风」 / 「改回」 doors. An agent that predates the op is never asked (host_needs_daemon). */
+  async function micFacts(hostId, { force = false, by = 'system:desktop-access' } = {}) {
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'the microphone reaches a paired Windows or macOS machine — never this one');
+    const dm = await deviceOf(hostId);
+    if (typeof dm.streamMic !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot read its microphone facts — upgrade the agent on it`);
+    const f = await dm.streamMic({ force, by });
+    const state = f && f.state ? f.state : MIC.micStateOf(f);
+    return { hostId, facts: f, state, doors: MIC.micDefaultDoors(state, f && f.previous), words: MIC.micRoadWords(state) };
+  }
+  /** 「设为默认麦克风」 (`to: 'virtual'`) / 「改回」 (`to: 'restore'`) — the device remembers what it replaced. */
+  async function micDefault(hostId, to, { by = 'system:desktop-access' } = {}) {
+    if (to !== 'virtual' && to !== 'restore') throw named('bad-request', 'to = virtual | restore');
+    if (isLocal(hostId)) throw named('not_desktop_machine', 'the microphone reaches a paired Windows or macOS machine — never this one');
+    const dm = await deviceOf(hostId);
+    if (typeof dm.streamMic !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot change its default microphone — upgrade the agent on it`);
+    const r = await dm.streamMic({ action: 'default', to, by });
+    if (!r || !r.ok) throw named((r && r.code) || 'set_failed', (r && r.error) || 'the default microphone was not changed');
+    log.log?.(`[desktop] ${hostId}: the default microphone is now ${r.device && r.device.name} (${to})`);
+    const f = r.facts || null, state = f && f.state ? f.state : MIC.micStateOf(f);
+    return { hostId, to, device: r.device || null, facts: f, state, doors: MIC.micDefaultDoors(state, f && f.previous), words: MIC.micRoadWords(state) };
   }
 
   // ── lane machine-desktop-apps: a Windows / macOS machine's INSTALLED apps, listed BY WITNESS on the machine ──
@@ -966,7 +1006,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, machinesNow, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, streamFacts, streamWindows, settingsOpen, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp, signinsView, rememberSignin, forgetSignin };
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow, setAppPlanner, planDigest, probeDesktop, machinesNow, openMachineDesktop, streamRung, machineDesktopTarget, machineDesktopGone, runOnDesktop, installedApps, installedNow, deviceOf, displayFacts, streamFacts, streamWindows, settingsOpen, linkPing, remoteappSetup, remoteappForward, setRdpSetup, launchRemoteApp, remoteappSignin, remoteappFacts, remoteappSetupView, saveRemoteappSetup, trustRemoteApp, signinsView, rememberSignin, forgetSignin, micFacts, micDefault };
   if (install) installed = layer;
   return layer;
 }

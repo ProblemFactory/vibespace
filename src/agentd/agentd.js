@@ -648,7 +648,7 @@ if (process.argv.includes('--dial-check')) {
   try {
     const ws = require('./ws-min.js').connect(url, { headers: { 'x-vibespace-dial-token': token, 'x-vibespace-dial-probe': '1', 'x-vibespace-daemon': String(VERSION).slice(0, 40) }, timeoutMs });
     let lastErr = null;
-    ws.on('probe-ok', (b) => finish({ ok: true, deviceId: (b && b.deviceId) || deviceId, serverVersion: (b && b.serverVersion) || '' }));
+    ws.on('probe-ok', (b) => finish({ ok: true, deviceId: (b && b.deviceId) || deviceId, serverVersion: (b && b.serverVersion) || '', hub: (b && b.hub) || '' })); // lane mac-repair-retires-stale: + the hub's id (the installer keeps it in dial.json)
     ws.on('open', () => { try { ws.destroy(); } catch { } finish({ ok: true, serverVersion: '' }); });
     ws.on('error', (e) => { lastErr = e; });
     ws.on('close', () => { const f = DFc.dialFailureOf(lastErr, {}); finish({ ok: false, code: f.code, detail: f.detail, status: f.status }); });
@@ -1545,7 +1545,13 @@ const windowsOf = () => { const sc = streamScreenOf(); return typeof sc.windows 
 // lane mac-window-list-helper: a Mac's window look (window-track) and screen table (display-facts) are its SCREEN HELPER's facts
 // (src/agentd/stream-mac.js look / starts) — on a Mac nothing under this node reads the screen; asked only on darwin
 const macWindowLook = { facts: () => streamScreenOf().look(), displays: () => streamScreenOf().look({ force: false, windows: false }), starts: (pids) => streamScreenOf().starts(pids) };
-const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log, screen: (msg, o) => streamScreenOf().source(msg, o), window: (msg, o) => windowsOf().source(msg, o), legHosts: dialHostOf, program: process.platform === 'win32' ? process.execPath : null }));
+// lane stream-mic-road (B-7af0): THE VIEWER'S MICROPHONE on this machine — its facts, the default pair and the receiver each
+// stream's audio m-line feeds (src/desktop-mic.js, SHARED; its OWN helper per OS, never the screen / window helper). Made at
+// first use; a Windows machine decodes with the stream's own ffmpeg (the screen facts). VIBESPACE_MIC_HELPER names a fake (the suites')
+let micRoad = null;
+const micOf = () => micRoad || (micRoad = require('./../desktop-mic.js').createMic({ platform: process.platform, spawn: require('child_process').spawn, execFile: require('child_process').execFile, env: spawnEnv(), lookupEnv: process.env, fs, home: os.homedir(), log, helperPath: process.env.VIBESPACE_MIC_HELPER || null,
+  ffmpeg: async () => { if (process.platform !== 'win32') return null; const f = await streamScreenOf().facts(); return (f && f.ffmpeg && f.ffmpeg.path) || null; } }));
+const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log, screen: (msg, o) => streamScreenOf().source(msg, o), window: (msg, o) => windowsOf().source(msg, o), legHosts: dialHostOf, program: process.platform === 'win32' ? process.execPath : null, mic: micOf }));
 function unpinWindow(rec) {
   rec.pinned = false;
   const a = rec.last;
@@ -1695,7 +1701,7 @@ function orphanRunStream(rec, reason) {
   log(`run-stream pid ${child.pid}: the hub's link was lost — its output continues into ${file}`);
 }
 
-function serveConnection(sock, { dialed = false } = {}) {
+function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
   let authed = false;
   let upgrade = null;
   const sessions = new Map(); // chan → { proc, credit accounting is per-mux }
@@ -1807,6 +1813,7 @@ function serveConnection(sock, { dialed = false } = {}) {
         authed = true;
         authedServers++;
         this._countedServer = true;
+        if (dialed && typeof onAuthed === 'function') { try { onAuthed(msg); } catch { } } // lane mac-repair-retires-stale: the dial's hub, proved by the host token
         Promise.all([posixShells(), amIElevated()]).then(([shells, elevated]) => mux.control({ // verify-r2: measured now (≤ POSIX_PROBE_MS, async) — a shell installed since this agent started counts
           op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: VERSION,
           platform: process.platform, arch: process.arch, nodeVersion: process.version,
@@ -1816,7 +1823,7 @@ function serveConnection(sock, { dialed = false } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic'],
         }));
         return;
       }
@@ -2428,6 +2435,14 @@ function serveConnection(sock, { dialed = false } = {}) {
       // lane stream-p1b-screen (THREE-TOUCH: this handler, `stream-facts` / `stream-screen` in the hello-ack, the client's gated
       // streamFacts): THIS machine's screen facts — each display's HDR state + SDR white level + the DXGI output, the ffmpeg
       // found and what it can do, the primary display's plan — one bounded look (memo 30 s; `force` re-reads)
+      // lane stream-mic-road (THREE-TOUCH: this handler, `stream-mic` in the hello-ack, the client's gated streamMic): THIS
+      // machine's microphone road — `facts` (the virtual microphone's state, the defaults; `prepare` builds and stages a Mac's
+      // plug-in for the install row) or `action: 'default'` (`to: virtual | restore` — 「设为默认麦克风」 / 「改回」), answered with `op`
+      if (msg.op === 'stream-mic') {
+        const m = micOf();
+        (msg.action === 'default' ? m.setDefault({ to: msg.to }) : m.facts({ force: !!msg.force, prepare: !!msg.prepare })).then((r) => mux.control({ op: 'stream-mic-result', id: msg.id, result: r }), (e) => mux.control({ op: 'stream-mic-result', id: msg.id, error: String((e && e.message) || e) }));
+        return;
+      }
       if (msg.op === 'stream-facts') {
         streamScreenOf().facts({ force: !!msg.force }).then((r) => mux.control({ op: 'stream-facts-result', id: msg.id, result: r }), (e) => mux.control({ op: 'stream-facts-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
@@ -2870,6 +2885,17 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
   if (!cfg?.url) return;
   const wsMin = require('./ws-min.js');
   const DF = require('../dial-facts.js');
+  // lane mac-repair-retires-stale (B-06e9): THE HUB'S IDENTITY ON DISK — the hello of an ACCEPTED dial (the hub proved it
+  // holds this install's host token) names the hub (`hub`, DF.hubIdOf); it lands in dial.json beside the address it came
+  // over, so a later re-pair of this machine retires THIS install when it is the same hub's older one
+  // (scripts/vibespace-agentd-install.sh). An older hub names none ⇒ nothing written; a dial.json rewritten meanwhile (a
+  // re-pair to another address) is never written over.
+  const learnHub = (hub, url) => {
+    const h = DF.hubIdOf(hub);
+    const cur = h ? readCfg() : null;
+    if (!cur || cur.url !== url || cur.hub === h) return;
+    try { const tmp = DIAL_FILE + '.' + process.pid + '.hub.tmp'; try { fs.unlinkSync(tmp); } catch { } fs.writeFileSync(tmp, JSON.stringify({ ...cur, hub: h }), { mode: 0o600 }); fs.renameSync(tmp, DIAL_FILE); log(`dial: this install now knows its hub (${h})`); } catch { }
+  };
   let attempts = 0;
   let status = readDialStatus() || {};
   let cfgKey = cfg.url + '|' + (cfg.token || '');
@@ -2898,7 +2924,8 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
       status = DF.nextDialStatus(status, { at: upAt, outcome: 'connected', host });
       writeDialStatus(status);
       log(DF.dialLogLine({ outcome: 'connected', url: cfg.url, failedBefore }));
-      serveConnection(ws, { dialed: true }); // design q-042 D2: a dial link is never this machine's own socket
+      const via = cfg.url;
+      serveConnection(ws, { dialed: true, onAuthed: (m) => learnHub(m && m.hub, via) }); // design q-042 D2: a dial link is never this machine's own socket
     });
     ws.on('close', () => {
       // C3: a self-upgrade's re-exec ends the link on purpose — no failure recorded, no retry (this process exits;

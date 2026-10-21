@@ -22,6 +22,7 @@ const askFacts = (g) => (g && g.ask ? { ask: g.ask, ...(g.answeredBy ? { answere
 const BY_UPGRADE = 'system:device-upgrade'; // the hub's version-drift rule pushes a new agent (no person, no agent asked)
 const SIG = require('../agentd-signature.js'); // design q-042 D2: the release record a pushed bundle must carry
 const DP = require('../device-policy.js'); // lane device-allow-flags: the device's OWN allow list — asked here first, decided there
+const { MIC_CAPABILITY } = require('../mic-model.js'); // lane stream-mic-road: the hello-ack word the microphone's op + m-line are gated on (PURE)
 
 // lane windows-device-fs — THE DOOR: a POSIX shell is never asked of a WINDOWS agent THAT HAS NONE. The hub ran `sh -c …`
 // over the device link for the Files view, the home, path completion, the sweeps; a Windows machine without `sh` answered
@@ -61,10 +62,13 @@ class DeviceManager {
    *  version      release version (= daemonVersion expected)
    *  log          logger fn
    */
-  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null, onAct = null, onUpgradeRefused = null, onUpgradeTrusted = null, onPolicy = null, onElevated = null, machine = null, actGate = null } = {}) {
+  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null, onAct = null, onUpgradeRefused = null, onUpgradeTrusted = null, onPolicy = null, onElevated = null, machine = null, actGate = null, hub = '' } = {}) {
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
+    // lane mac-repair-retires-stale (B-06e9): THIS hub's id (dial-pairing.js hubId) — named in the hello of a DIALED device
+    // only (a field an older daemon ignores); the daemon keeps it in its dial.json once the host token proved the hub
+    this._hub = typeof hub === 'string' ? hub : '';
     // THE UPGRADE LEDGER (verify-r1 C1, 2026-09-28): the 2.330.0 loop breaker counted attempts ON THIS INSTANCE —
     // and the dial path builds a NEW DeviceManager for every fresh stream (the stale-stream guard), so a device
     // whose upgrade never moves its reported version re-dialed after every re-exec into a counter at 0: measured
@@ -443,7 +447,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'stream-mic-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -528,7 +532,7 @@ class DeviceManager {
         },
         onDead: () => fail(new Error('connection died during handshake')),
       });
-      const sayHello = () => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: token, serverVersion: this._version });
+      const sayHello = () => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: token, serverVersion: this._version, ...(this._hub ? { hub: this._hub } : {}) });
       // ssh stdio + a dialed-in ws stream are already connected at open; a unix
       // socket needs its 'connect' event first.
       if (this._transport.kind === 'ssh' || this._transport.kind === 'stream') sayHello();
@@ -1225,11 +1229,23 @@ class DeviceManager {
     if (onPush) this._streamWatches.set(sid, onPush);
     const forget = () => { if (fresh) this._streamWatches.delete(sid); };
     let r;
-    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, ...(params.relayLeg ? { relayLeg: params.relayLeg } : {}), ...(params.fp16 ? { fp16: true } : {}), ...(params.share ? { share: params.share } : {}), ...(params.hdr ? { hdr: true } : {}), iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
+    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, ...(params.relayLeg ? { relayLeg: params.relayLeg } : {}), ...(params.fp16 ? { fp16: true } : {}), ...(params.share ? { share: params.share } : {}), ...(params.hdr ? { hdr: true } : {}), ...(params.mic && conn.info.capabilities.includes(MIC_CAPABILITY) ? { mic: true } : {}), iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
     if (r.error) { forget(); throw new Error(r.error); }
     const res = r.result || { ok: false, code: 'offer_failed', error: 'no answer' };
     if (!res.ok) forget();
     return res;
+  }
+  /** lane stream-mic-road (THREE-TOUCH: `stream-mic-result` in the id-keyed routing set, the capability gate here, the
+   *  handler in agentd.js): THIS machine's microphone road — its facts (`force`; `prepare` builds and stages a Mac's plug-in for
+   *  the install row — a read) or `params.action` = default (`to: 'virtual' | 'restore'` — an ACT: it names its `by`). An agent that predates it is NEVER asked (`host_needs_daemon`);
+   *  `streamOffer({ mic: true })` is likewise asked of `stream-mic` agents only — an older one streams without the m-line.
+   *  → the module's answer (src/desktop-mic.js) */
+  async streamMic(params = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.(MIC_CAPABILITY)) { const e = new Error('daemon lacks stream-mic (capabilities gate) -- upgrade the agent on this machine for the microphone'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
+    const r = await this._request({ op: 'stream-mic', action: params.action === 'default' ? 'default' : 'facts', ...(params.to ? { to: String(params.to) } : {}), ...(params.force ? { force: true } : {}), ...(params.prepare ? { prepare: true } : {}), timeoutMs: params.prepare ? 300000 : 60000, by: params.by });
+    if (r.error) throw new Error(r.error);
+    return r.result || { ok: false, code: 'no_answer', error: 'no answer' };
   }
   /** The browser's SDP answer, or one trickled candidate of it, for a stream session. → { ok } | { ok: false, code, error } */
   async streamAnswer(sid, { answer = null, candidate = null } = {}) {

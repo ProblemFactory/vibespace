@@ -49,6 +49,9 @@
  *                                    says it sends ⇒ the window says so and offers the stream again (never «0 fps» for ever)
  *   firewallRuleCommand(program)     the admin line that opens the DIRECT path on a Windows machine (copied by its owner, never
  *                                    run by VibeSpace) · directInboundOf(probe) — the daemon's self-probe → open | blocked | none
+
+ *   liteSessionSdp(sdp)              lane werift-lite-multihomed: the agent's offer says `a=ice-lite` ONCE, at the session level —
+ *                                    where a browser reads it (werift 0.25 writes it inside each media section only)
  */
 const B = require('./desktop-backends.js');
 const SW = require('./stream-window.js');
@@ -74,6 +77,21 @@ const STREAM_CODEC_AV1 = Object.freeze({
  *  An ICE-LITE agent never needs one (it answers the browser's checks from wherever they come); werift resolves it by multicast
  *  with a 10 s timeout INSIDE the call that hands it over. */
 const isMdnsCandidate = (line) => /^(?:a=)?candidate:\S+ \d+ \S+ \d+ \S+\.local \d+ typ /i.test(String(line || ''));
+/** lane werift-lite-multihomed (measured: a viewer whose browser was allowed the microphone, on a computer with several network
+ *  adapters, never saw a NEW stream play): werift 0.25 writes `a=ice-lite` inside each MEDIA section only, and RFC 8839 §5.3
+ *  makes it a SESSION-level attribute — the browser reads it there only. Unaware the agent is lite, Chrome nominated pairs
+ *  (USE-CANDIDATE) before it had checked them, as it does with a full agent; the lite agent took the first nomination for good
+ *  — with every adapter offered, a pair whose answers come back from another address and never reach the browser — so its
+ *  DTLS went where the browser never listened. The offer's SDP → the same SDP with ONE `a=ice-lite`, before its first m= line
+ *  (the media sections' copies dropped); an SDP without the attribute (or without a media section) unchanged. */
+function liteSessionSdp(sdp) {
+  const text = String(sdp || '');
+  const rows = text.split(/\r?\n/);
+  const at = rows.findIndex((l) => l.startsWith('m='));
+  if (at < 0 || !rows.some((l) => l === 'a=ice-lite')) return text;
+  const head = rows.slice(0, at).filter((l) => l !== 'a=ice-lite'), media = rows.slice(at).filter((l) => l !== 'a=ice-lite');
+  return [...head, 'a=ice-lite', ...media].join('\r\n');
+}
 /** The codecs a session offers, in order: H.264 alone (the SDR road — the offer unchanged), or AV1 then H.264 (`hdr`). */
 const streamCodecsOf = ({ hdr = false } = {}) => (hdr ? [STREAM_CODEC_AV1, STREAM_CODEC] : [STREAM_CODEC]);
 const STREAM_SOURCES = Object.freeze(['screen', 'fake', 'window']); // 'window' = ONE window of the machine (lane stream-p3m-build on a Mac; stream-p2w-build on Windows)
@@ -517,7 +535,7 @@ function firewallRuleCommand(program) {
 }
 
 module.exports = {
-  STREAM_CODEC, STREAM_CODEC_AV1, streamCodecsOf, isMdnsCandidate, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, streamCapOf, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict, NEVER_SILENT, endingVerdict,
+  STREAM_CODEC, STREAM_CODEC_AV1, streamCodecsOf, isMdnsCandidate, liteSessionSdp, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, streamCapOf, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict, NEVER_SILENT, endingVerdict,
   videoToSource, INPUT_KINDS, inputEventOf, wheelUnitsOf, statsOf, relayFrame, relayUnframe, relayCandidates,
   LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, legElect, stallStep, streamNumbersOf, directInboundOf, firewallRuleCommand,
 };

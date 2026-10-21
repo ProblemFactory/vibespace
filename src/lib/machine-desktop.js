@@ -41,6 +41,8 @@ import { createDisplayPanes, rememberedMode, rememberMode, deviceTag, isPhone, m
 import { enterSubmits } from './chat-enter-keys.js';
 import { endingVerdict, NEVER_SILENT } from '../stream-model.js'; // lane stream-fallback-never-silent: a played stream never falls to the VNC picture by itself
 import { createHandover } from './machine-desktop-handover.js'; // lane desktop-handover: 「交给 agent」 — the stream to ONE agent conversation
+import { createMicToggle, createMicCard } from './stream-mic-strip.js'; // lane stream-mic-road: 「麦克风」 — the viewer's voice to the machine's apps
+import { micDefaultDoors, micRoadWords } from '../mic-model.js'; // lane stream-mic-road: the Machines card's microphone row
 import { HDR_DECODE_QUERY, DYNAMIC_RANGE_QUERY, hdrViewerVerdict, hdrMachineVerdict, HDR_KEY, hdrRemembered, rememberHdr } from '../hdr-viewer.js'; // lane stream-hdr-passthrough: 「HDR 直通」
 
 const RUNS_KEY = 'vibespace.machineDesktopRuns'; // { [hostId]: [line…] } — the owner's latest lines per machine (≤ 3)
@@ -561,6 +563,10 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   // lane desktop-handover (src/lib/machine-desktop-handover.js): 「交给 agent」 while the stream plays; the person's own input pauses it
   const handover = createHandover({ app, hostId: m.hostId, machine, strip, before: chip, pane, streamOf: () => stream });
   winInfo._handover = handover;
+  // lane stream-mic-road (src/lib/stream-mic-strip.js): 「麦克风」 — every stream asks for the microphone's m-line, the first that carries
+  // it carries the voice; nothing about it is remembered (a restored window starts it OFF — micStep's `restore`); its door installs
+  const micToggle = createMicToggle({ hostId: m.hostId, strip, before: chip, install: () => import('./desktop-app-launcher.js').then(({ showInstallDialog }) => showInstallDialog(m, { what: 'virtual-mic' })) });
+  winInfo._micToggle = micToggle;
   // lane desktop-display-modes: a remembered display the machine no longer shows (or cannot capture) ⇒ its main display, once
   const DISPLAY_GONE = ['display_gone', 'display_other_gpu', 'display_unmapped', 'bad_source'];
   /** ② one display's end — said in its pane, the other displays keep streaming. NEVER SILENT per pane (lane stream-leg-flap —
@@ -589,7 +595,8 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     const share = shareNow();
     v = createStreamView(panes.pane(did), { hostId: m.hostId, hostPlatform: m.setup || null, source: { kind: 'display', id: did, ...(share > 1 ? { share } : {}) },
       onSource: (src) => { if (src && src.tcc && src.tcc.accessibility === 'granted') tccGranted(); drawScaled(); },
-      onStatus: (state) => { if (state === 'playing' && still) { still.remove(); still = null; } if (state === 'playing' && said) { said = false; panes.say(did, ''); } drawChip(); }, onStats: () => drawChip(), onInput: inputWords, // lane stream-leg-flap: the re-offer's words stay until its picture plays
+      mic: true, onMicReady: (ok) => micToggle.ready(v, ok), // lane stream-mic-road
+      onStatus: (state, code) => { if (state === 'fallback' || state === 'stopped') micToggle.ended(v); if (state === 'playing' && still) { still.remove(); still = null; } if (state === 'restarting' && code === 'timeout') { said = true; panes.say(did, t('Stream interrupted: {why} — reconnecting…', { why: streamWords('connect_timeout') })); } if (state === 'playing' && said) { said = false; panes.say(did, ''); } drawChip(); }, onStats: () => drawChip(), onInput: inputWords, // lane stream-leg-flap: the re-offer's words stay until its picture plays (lane werift-lite-multihomed: and a connect that ran out of time is said)
       onFallback: (code, why, taken, info) => { if (still) { still.remove(); still = null; } paneEnd(v, code, why, info); } });
     v._share = share;
     many.set(did, v);
@@ -601,7 +608,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   // endingVerdict — the same display again (1 s on), the main display (it was gone), then the person's choice 「重试」 /
   // 「显示 VNC 画面」; the last picture stays (`held`) until a stream plays again or the VNC picture is chosen
   const ladder = { played: false, step: 0, at: 0 };
-  let held = null, retryTimer = null, closed = false;
+  let held = null, retryTimer = null, closed = false, slowSaid = false;
   const dropHeld = () => { if (held) { held.remove(); held = null; } };
   /** The VNC picture instead of the stream — the rung's old answer before any picture played, or the person's press. */
   const toVnc = (code, why, taken, info, pressed = false) => {
@@ -684,6 +691,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
       },
       onOwnerInput: () => handover.ownerInput(),
       onHandover: (f) => handover.facts(f),
+      mic: true, onMicReady: (ok) => micToggle.ready(v, ok), // lane stream-mic-road: the m-line asked; the toggle shows once it is there
       source, // lane stream-mac-stall: a display the switcher picked (else the machine's main one)
       onSource: (src) => {
         if (v !== stream) return;
@@ -694,8 +702,14 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
         if (mode === 'all') spreadAll();
         remember(); setSpec(); drawTitle(); drawStreamSeg(); drawHdr(); // lane stream-hdr-passthrough: the offer says whether the machine can
       },
-      onStatus: (state) => {
+      onStatus: (state, code) => {
+        if (state === 'fallback' || state === 'stopped') micToggle.ended(v); // lane stream-mic-road: the voice stops with its stream
         if (state === 'playing') { ladder.played = true; dropHeld(); } // NEVER SILENT: a picture played here
+        // lane werift-lite-multihomed: NEVER SILENT before a picture too — ICE did not reach `connected` within the connect budget
+        // (STREAM_LIMITS.connectMs) and the view asks an ICE restart: leg ⑥'s words, until a picture plays (before: 「连接中…」 for
+        // the whole restart budget, 45 s, then the VNC picture)
+        if (state === 'restarting' && code === 'timeout' && v === stream) { slowSaid = true; note(t('Stream interrupted: {why} — reconnecting…', { why: streamWords('connect_timeout') })); }
+        if (state === 'playing' && slowSaid) { slowSaid = false; note(''); }
         if (state === 'fallback' && v === stream && v.played && !held) held = stillOf(v, panes.pane('')); // its last picture stays through the ladder
         if (state === 'playing' && still) { still.remove(); still = null; } drawChip(); handover.playing(state === 'playing'); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
       onStats: () => drawChip(),
@@ -716,7 +730,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     stream.connect();
   };
   winInfo._pickDisplay = (key) => pick(key);
-  winInfo.onClose = () => { closed = true; clearTimeout(retryTimer); handover.dispose(); pill.dispose(); stats.dispose(); clearInterval(tick); clearTimeout(noteTimer); fit?.disconnect(); document.removeEventListener('fullscreenchange', onFull); hdrMq?.removeEventListener?.('change', onScreenRange); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); for (const v of many.values()) v.dispose(); many.clear(); if (view) view.dispose(); };
+  winInfo.onClose = () => { closed = true; clearTimeout(retryTimer); micToggle.dispose(); handover.dispose(); pill.dispose(); stats.dispose(); clearInterval(tick); clearTimeout(noteTimer); fit?.disconnect(); document.removeEventListener('fullscreenchange', onFull); hdrMq?.removeEventListener?.('change', onScreenRange); if (locked) { locked = false; try { navigator.keyboard.unlock(); } catch { /* gone */ } } if (stream) stream.dispose(); for (const v of many.values()) v.dispose(); many.clear(); if (view) view.dispose(); };
   // lane desktop-display-modes: the window's recipe from its first moment; a window another device opened (a replay) waits for a
   // press here — every client replaying it must not start a stream nobody watches (each takes one of the machine's streams)
   setSpec(); remember();
@@ -868,7 +882,9 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   const pickDefault = () => { const w = asWindow(); winBtn.className = w ? 'btn-create' : 'file-tool-btn'; runBtn.className = w ? 'file-tool-btn' : 'btn-create'; };
   input.addEventListener('input', pickDefault);
   runRow.append(input, winBtn, ...(raBtn ? [raBtn] : []), runBtn);
-  body.append(state, acts, scope, runHead, apps.el, presets, runRow, el('p', NOTE, t('It starts on {machine}’s desktop as you — the exact command is shown before it runs.', { machine })));
+  // lane stream-mic-road: the machine's virtual microphone — its state and its doors (install, the default pair, remove)
+  const mic = m.setup === 'win32' || m.setup === 'darwin' ? createMicCard({ hostId: m.hostId, machine, install: install ? (what) => install(m, { what, onDone: () => mic.refresh({ force: true }) }) : null }) : null;
+  body.append(state, acts, ...(mic ? [mic.el] : []), scope, runHead, apps.el, presets, runRow, el('p', NOTE, t('It starts on {machine}’s desktop as you — the exact command is shown before it runs.', { machine })));
   let asked = 0; // the newest listing asked (an older answer never overwrites a newer one)
   let signin = null; // lane desktop-vnc-remember: the hub's word on this machine's remembered sign-in (GET …/signins)
   const readSignin = async () => { const r = await fetchJson(`/api/desktop/machine-desktop/signins?host=${encodeURIComponent(m.hostId)}`); if (!body.isConnected) return; signin = r && !r.error ? r.signin : null; render(); };
@@ -949,6 +965,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   render();
   listApps(false);
   readSignin();
+  if (mic && m.code !== 'offline') mic.refresh();
   // lane desktop-picker-instant: a listing that landed elsewhere (the machine's hello, another window's Check again) is announced —
   // a newer list is read again (from the hub's store: nothing is asked of the machine)
   const offListed = app.ws && typeof app.ws.onGlobal === 'function' ? app.ws.onGlobal((msg) => {

@@ -6760,6 +6760,105 @@ console.log('\n㉖ lane lark-system-records: a vendor SYSTEM notice is never unr
   ok(cut !== src && c.marked === 2, 'CONTROL: a re-derivation without the system rule counts both notices after the read line (2) — RED', JSON.stringify(c.marked));
 }
 
+// ── ㉗ lane reply-infer-owner-between (agent feedback fb-377439b167, a fleet instance on .334): THE INCIDENT'S SHAPE over
+// the REAL ingest loop — an agent's send at T; the person who owns the chat sends a voice note ([audio], untranscribed) at
+// T+7h18m; the peer's plain two words come 3 min later (they answer the voice note). The judge is a STUB (no vendor call)
+// that records the parts it was handed and answers the incident's 0.90. It must be TOLD what came between: the owner's own
+// voice note, 3 min before the reply — read from the conversation's own records (the thread index over the stored log + the
+// batch; a RESTARTED engine reads them from the log alone), the agent's own send echoed from the owner's account never
+// counted as the owner's turn. RED CONTROL: the base's engine (a patched copy without the `between` part) hands the judge
+// sent / reply / gap only — the input the incident's 0.90 was judged on.
+console.log('\n㉗ lane reply-infer-owner-between (fb-377439b167): the judge is told the owner\'s own voice note between the send and the plain reply');
+{
+  const { makeRecord, makeConversation } = require(path.join(REPO, 'src/channel-record.js'));
+  const DM = require(path.join(REPO, 'src/decision-model.js'));
+  const A = 'fake-poll', CID = 'dm-peer', KEY = `${A}/${CID}`;
+  const H = 3600e3, M = 60e3;
+  const base = Date.now(); let offset = 0;
+  const T = base - 8 * H;   // the agent's send (01:43Z in the incident)
+  const AT_VOICE = T + 7 * H + 18 * M, AT_PEER = T + 7 * H + 21 * M;
+  const OWNER = { id: 'ou_owner', name: 'Owner', isSelf: true, isBot: false }, PEER = { id: 'ou_peer', name: 'Peer', isSelf: false, isBot: false };
+  const rec = (vendorId, at, author, text, more = {}) => makeRecord({ adapterId: A, convId: CID, vendorId, at, author, text, mentions: [], attachments: [], replyTo: null, threadKey: null, raw: {}, ...more });
+  function pollAdapter(world) {
+    return {
+      kind: A,
+      caps: { receive: 'poll', history: 'page', pollInterval: { hot: 30, cold: 300, floor: 10 }, listConversations: true, sendAs: ['user'], identityMarking: 'unknown', identityMarkingWhere: null, identityMarkingText: null, tosRisk: 'none', idempotency: 'key', threading: 'thread-id', editSent: false, readReceipts: false, attachments: 'metadata' },
+      create() {
+        return {
+          auth: { async state() { return { state: 'connected', expiresAt: null, scopes: ['fake'], why: null }; } },
+          async listConversations() { return { conversations: [makeConversation({ id: CID, vendorId: CID, title: 'Peer', kind: 'dm', participants: 'Peer', lastAt: null })], cursor: null, complete: true }; },
+          async convCaps() { return { read: 'yes', sendAs: ['user'], why: null, at: Date.now() }; },
+          async history(convId, { anchor = null, limit = 50 } = {}) {
+            world.reads++;
+            const all = world.records;
+            let idx = 0;
+            if (anchor) { const at = all.findIndex((r) => r.vendorId === anchor); idx = at >= 0 ? at + 1 : 0; }
+            const anchorFound = !anchor || idx > 0;
+            const pending = all.slice(idx), page = pending.slice(0, limit), drained = page.length === pending.length;
+            return { records: page, anchor: page.length ? page[page.length - 1].vendorId : anchor, reachedAnchor: anchorFound && drained, complete: anchorFound && drained };
+          },
+          async send() { return { ok: true, vendorMessageId: 'x', at: Date.now(), sentAs: 'user' }; },
+          async reconcile() { return { unknown: true }; },
+        };
+      },
+    };
+  }
+  // the judge STUB: every call's use + parts recorded; the incident's answer (0.90) — the judge decides, the stub only listens
+  const stubJudge = () => {
+    const calls = [];
+    return { calls, judge: async (use, parts, o) => { calls.push({ use, parts: JSON.parse(JSON.stringify(parts)), memo: o && o.memo }); return { ok: true, answers: [{ type: 'predicate', name: 'answers_sent', probability: 0.9 }] }; }, roadFacts: () => ({ pluginOn: true, rulesOn: true, keyPresent: true, budgetLeft: 1, estUsd: 0 }) };
+  };
+  async function incident(ENGM, name) {
+    const dataDir = path.join(ROOT, name);
+    const world = { records: [rec('om_old', T - H, PEER, 'see you on Thursday')], reads: 0 };
+    const ladder = { calls: [], async deliverToConversation(cid, text, opts) { ladder.calls.push({ cid, text, opts }); return { ok: true, lane: 'message' }; }, stashFor() {} };
+    const mk = (dec) => { const registry = CH.createChannelRegistry(); registry.register(pollAdapter(world)); const e = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, log: { log() {}, warn() {}, error() {} }, deliver: ladder, serverSetting: () => undefined, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }], now: () => base + offset, decisionEngine: dec }); engines.push(e); return e; };
+    const dec = stubJudge();
+    const eng = mk(dec);
+    const pass = async (e, ...recs) => { await e.pass(A, { force: true }); offset += 61e3; world.records.push(...recs); await e.pass(A, { force: true }); await e.settleWakes(); };
+    await eng.pass(A, { force: true });   // discovery + the older history
+    const P = { kind: 'agent', id: 'agent-1', name: 'Worker' };
+    const set = await eng.setGrain(A, { kind: 'conversation', convId: CID }, { access: [{ principal: P, authority: 'draft' }], watchers: [{ principal: P, delivery: 'wake', notify: 'wake', mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'reply-to-sent', infer: true }] } }] });
+    await eng.store.index.update((ix) => { if (ix.conversations[KEY]) ix.conversations[KEY].kind = 'dm'; });
+    // the agent's send at T (the outbox's sent proposal) — and its ECHO in the log, from the owner's account, the vendor's instant 0.8 s later
+    await eng.store.outbox.update((ob) => { ob.proposals['p-s1'] = { id: 'p-s1', adapterId: A, convId: CID, state: 'sent', text: 'Shall I book the 3pm slot for Thursday?', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, at: T, updatedAt: T, result: { vendorMessageId: 'om_s1', at: T } }; });
+    await pass(eng, rec('om_s1', T + 800, OWNER, 'Shall I book the 3pm slot for Thursday?'), rec('om_v1', AT_VOICE, OWNER, '[audio]', { attachments: [{ id: 'file_v1', name: 'audio', bytes: null, mime: 'audio/*' }] }));
+    const judgedBefore = dec.calls.length;   // the owner's own voice note is never a candidate
+    await pass(eng, rec('om_p1', AT_PEER, PEER, 'Sounds good'));
+    const first = dec.calls.slice();
+    // A RESTART over the same data: the next plain message is judged with the turns read from the STORED log alone
+    try { eng.stop(); } catch {}
+    const dec2 = stubJudge();
+    const eng2 = mk(dec2);
+    await pass(eng2, rec('om_p2', AT_PEER + 4 * M, PEER, 'Thanks!'));
+    try { eng2.stop(); } catch {}
+    return { set, judgedBefore, first, second: dec2.calls, ladder, world };
+  }
+  const real = await incident(ENG, 'between-real');
+  const c0 = real.first[0] || {};
+  const VOICE_LINE = 'Between sent and reply, the person who owns this chat wrote 1 message of their own; the last one, a voice note (not transcribed), 3 minutes before the reply.';
+  ok(real.set.ok && real.judgedBefore === 0 && real.first.length === 1 && c0.use === 'reply-infer' && c0.memo && c0.memo.id && c0.memo.sent === 'om_s1', 'the fixture: the agent\'s send, its echo and the owner\'s [audio] ingested (nothing judged — the owner\'s own message is never a candidate); the peer\'s plain «Sounds good» 3 min after the voice note ⇒ ONE judgment, against the agent\'s send', JSON.stringify({ set: real.set.ok, before: real.judgedBefore, calls: real.first.map((x) => x.use) }));
+  ok(JSON.stringify(Object.keys(c0.parts || {})) === JSON.stringify(['sent', 'reply', 'gap', 'between']) && c0.parts.reply === 'Sounds good' && c0.parts.gap === '441 minutes' && c0.parts.between === VOICE_LINE, 'THE JUDGE IS TOLD: its parts = sent / reply / gap (441 minutes) + «between»: the owner wrote 1 message of their own, the last a voice note (not transcribed), 3 minutes before the reply — the agent\'s own echo (the owner\'s account, 0.8 s after the send) is NOT counted as the owner\'s', JSON.stringify(c0.parts));
+  ok(!JSON.stringify(c0.parts).includes('see you on Thursday') && !/\[audio\]/.test(c0.parts.between), 'fixed words only: no other message\'s text rides (an older message, the voice note\'s own token)');
+  const after = DM.buildInput('reply-infer', c0.parts);
+  ok(/\ngap: 441 minutes\nbetween: Between sent and reply, the person who owns this chat wrote 1 message of their own; the last one, a voice note \(not transcribed\), 3 minutes before the reply\.$/.test(after.text) && !after.truncated && after.est <= after.ceiling, 'the input the model builds from those parts ends with the between line, whole', after.text);
+  console.log('    judge input (lane):\n' + after.text.split('\n').map((l) => '      | ' + l).join('\n'));
+  const wake = real.ladder.calls.find((x) => x.cid === 'agent-1');
+  ok(wake && /matched: judged an answer to your message of \d\d:\d\d UTC; the user also wrote in between/.test(wake.text) && /\nReply to your message \([^)]*, judged 0\.90; the user also wrote in between — a voice note, 3 min before this\): from Peer at /.test(wake.text), 'the stub said yes (0.90) ⇒ the wake TELLS the agent: «the user also wrote in between — a voice note, 3 min before this» beside the score', wake ? wake.text.split('\n').slice(0, 3).join(' | ') : 'no wake');
+  const c1 = real.second[0] || {};
+  ok(real.second.length === 1 && c1.parts && c1.parts.reply === 'Thanks!' && c1.parts.between === 'Between sent and reply, the person who owns this chat wrote 1 message of their own; the last one, a voice note (not transcribed), 7 minutes before the reply. 1 message from others came between too.', 'a RESTARTED engine (the same data, a cold thread index): the next plain message is told the same voice note — read from the STORED log — and the peer\'s «Sounds good» as one message from others', JSON.stringify(c1.parts));
+  // RED CONTROL: the base's engine — no `between` part
+  const src = engineSource(REPO);
+  const PART_ = ', ...(c.between ? { between: F.inferBetweenLine(c.between) } : {})';
+  const cut = src.replace(PART_, '');
+  const cp = patchPath('src/server', 'channels-engine-no-between'); writeCopy(cp, cut);
+  const red = await incident(require(cp), 'between-base');
+  const r0 = red.first[0] || {};
+  const before = DM.buildInput('reply-infer', r0.parts || {});
+  ok(src.split(PART_).length === 2 && cut !== src && red.first.length === 1 && JSON.stringify(Object.keys(r0.parts || {})) === JSON.stringify(['sent', 'reply', 'gap']) && !/\nbetween: /.test(before.text), 'RED CONTROL (the base\'s engine — a patched copy without the part): the judge gets sent / reply / gap ONLY — the voice note 3 min before the reply is invisible to it (the incident\'s 0.90) — the leg above goes RED', JSON.stringify(r0.parts));
+  console.log('    judge input (base):\n' + before.text.split('\n').map((l) => '      | ' + l).join('\n'));
+}
+
 console.log('\ntree: the patched copies never touch the tree');
 for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 30 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 

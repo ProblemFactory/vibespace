@@ -7515,6 +7515,22 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .desktop-strip-keys[aria-pressed="true"] { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }
 .desktop-strip-keys.is-locked { background: var(--accent, #3b82f6); color: #fff; }
 .desktop-strip-hdr-pass[aria-pressed="true"] { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); } /* lane stream-hdr-passthrough: 「HDR 直通」 on */
+/* lane stream-mic-road: 「麦克风」 — the viewer's voice to the machine's apps; the red dot while live, where the voice goes beside it */
+.desktop-strip-mic { display: inline-flex; align-items: center; gap: 4px; }
+.desktop-strip-mic[aria-pressed="true"] { border-color: var(--red, #e5484d); color: var(--red, #e5484d); }
+.desktop-strip-mic.is-asking { opacity: 0.7; cursor: progress; }
+.desktop-strip-mic-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red, #e5484d); flex: 0 0 auto; }
+.desktop-strip-mic-dot[hidden] { display: none; }
+.desktop-strip-mic-road { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+.desktop-strip-mic-road[hidden], .desktop-strip-mic-install[hidden] { display: none; }
+.desktop-strip-mic-road[data-road="speakers"] { color: var(--text); }
+.desktop-strip-mic-install { height: 22px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); background: none; color: var(--accent, #3b82f6); font: inherit; font-size: 12px; cursor: pointer; }
+.machine-mic-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.machine-mic-row[hidden] { display: none; }
+.machine-mic-state { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.machine-mic-state.is-bad { color: var(--warning, #d9822b); }
+.machine-mic-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.machine-mic-acts > button { width: auto; padding: 0 10px; }
 .desktop-strip-status[role="button"] { cursor: pointer; }
 .desktop-strip-rung, .desktop-strip-slow { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text-secondary); }
 .desktop-strip-rung[data-rung="sharp"], .desktop-strip-rung[data-rung="balanced"] { color: var(--text); }

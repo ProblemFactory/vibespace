@@ -98,7 +98,11 @@
  *                                     Windows window back, no focus)
  *   POST /api/desktop/machine-desktop/settings-open {host, pane}   lane stream-mac-stall: 「打开系统设置」 — the Mac shows that
  *                                     Settings pane itself (pane: screen | accessibility) — {ok, pane} | not_mac | agent_too_old
- *   POST /api/desktop/machine-desktop/stream/start {host, source?, fp16?, hdr?}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
+ *   GET  /api/desktop/machine-desktop/mic?host=[&force=1]   lane stream-mic-road: the machine's MICROPHONE ROAD — {hostId, facts, state
+ *                                     (absent | installed | reboot_owed | inactive | unsupported — where the viewer's voice goes), doors
+ *                                     {make, restore}, words} | agent_too_old · POST …/mic/default {host, to: virtual | restore} (「设为默认麦克风」 /
+ *                                     「改回」 — the device remembers what it replaced). People only
+ *   POST /api/desktop/machine-desktop/stream/start {host, source?, fp16?, hdr?, mic?}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
  *                                     (or `source: {kind:'window', id}` = ONE window — lane stream-p3m-build on a Mac,
  *                                     stream-p2w-build on Windows; `fp16` = a Windows window's FP16 road, off; `hdr` = 「HDR 直通」 —
  *                                     lane stream-hdr-passthrough: AV1 10-bit PQ where the machine can and the browser answers it)
@@ -177,7 +181,8 @@ const express = require('express');
 const { capsOf, scaleChoiceVerdict, relaunchLeaseVerdict, TIGHTVNC, machineDesktopId } = require('../desktop-apps');
 const { INSTALL_WHATS, DEFAULT_INSTALL, installRow } = require('../installs'); // THE INSTALLABLES — the routes ask the row (lane dc-apps-rows)
 /** design 014 D1: the whole-desktop refusals' statuses (by name, like every code below). */
-const D014_STATUS = Object.freeze({ human_only: 403, no_vnc: 409, not_desktop_machine: 409, not_windows: 409, no_admin: 409, run_failed: 409, empty: 400, too_long: 400, multi_line: 400, hidden_chars: 400 });
+const D014_STATUS = Object.freeze({ human_only: 403, no_vnc: 409, not_desktop_machine: 409, not_windows: 409, no_admin: 409, run_failed: 409, empty: 400, too_long: 400, multi_line: 400, hidden_chars: 400,
+  already_default: 409, not_installed: 409, nothing_to_restore: 409, set_failed: 409, unsupported: 409 }); // lane stream-mic-road: the default pair's refusals by name
 const { pinVerdict, parsePin } = require('../desktop-pin'); // lane e2b (§E2.2): the window menu's Pin size… (the user pins any window); lane launch-picture-size: the launch's pin
 const { openWithVerdict, installSpecFor, FONTS_ID } = require('../office-open'); // §7.9: the ONE open-with verdict
 const router = express.Router();
@@ -363,13 +368,13 @@ router.get('/api/desktop/install-plan', async (req, res) => {
   const row = what === null ? null : installRow(what);
   if (row && row.humanOnly && humanOnly(req, res)) return; // design 014 D1: the Windows one-time setup is people's
   if (what !== null && !row) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
-  try { res.json(what === null ? await ctx.access.installPlan(host) : await ctx.access.installPlan(host, what)); } catch (e) { fail(res, e); }
+  try { res.json(what === null ? await ctx.access.installPlan(host) : await ctx.access.installPlan(host, what, micLang(req.query.lang))); } catch (e) { fail(res, e); } // lane stream-mic-road: the Mac dialog's text in the page's language
 });
 /** THE STREAMED INSTALL (lane C2; §7.9 shares it for every `what`): the machine's slot asked BEFORE the stream starts
  *  (a busy machine answers 409), then NDJSON — `{reattached, pid, since}` first when a live install there was
  *  re-attached (verify r2 F3 + F4), `{log}` lines, then ONE `{done, …}` (from `doneOf(r)`, which may throw a coded
  *  refusal) or ONE `{error, code, plan?}`. */
-async function streamInstall(req, res, host, run, doneOf) {
+async function streamInstall(req, res, host, run, doneOf, more = null) {
   if (!ctx.access) return fail(res, { code: 'host_unavailable', message: 'the desktop access layer is not wired on this instance' });
   // ONE install per machine — the access layer owns the slot (it is held past a timed-out run until the child is
   // gone, which a per-request Set here could not see); asked BEFORE the stream starts so a busy machine answers 409
@@ -383,7 +388,7 @@ async function streamInstall(req, res, host, run, doneOf) {
     // a live install on that machine (a restarted hub, another tab's run) is RE-ATTACHED, never started twice — the
     // dialog says so before its log replays from the start (verify r2 F3 + F4)
     const onReattach = (o) => line({ reattached: true, pid: o && o.pid, since: o && o.since });
-    const r = await run({ onData, onReattach });
+    const r = await run({ onData, onReattach, ...(more || {}) });
     if (carry) { line({ log: carry }); carry = ''; }
     line(await doneOf(r));
   } catch (e) {
@@ -397,7 +402,7 @@ const xpraDone = (r) => {
   return out;
 };
 /** What the route re-checks after an install, by the row's declared `done` (src/installs.js) — never by its name. */
-const DONE = { display: () => xpraDone, catalog: (host, what) => officeDone(host, what), vnc: () => tightvncDone };
+const DONE = { display: () => xpraDone, catalog: (host, what) => officeDone(host, what), vnc: () => tightvncDone, mic: () => micDone(true), 'mic-removed': () => micDone(false) };
 // verify-r6 I1: the press names the plan it was SHOWN (`planDigest` from GET install-plan) — a plan that changed since
 // is refused plan_changed with the new one, nothing run
 const shownDigest = (req) => (req.body && typeof req.body.planDigest === 'string' && req.body.planDigest ? req.body.planDigest.slice(0, 64) : null);
@@ -423,7 +428,7 @@ router.post('/api/desktop/install', async (req, res) => {
   const row = installRow(what);
   if (row && row.humanOnly && humanOnly(req, res)) return; // design 014 D1: the Windows one-time setup is people's
   if (!row) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
-  return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req), by: actByOfReq(req) }), DONE[row.done](host, what));
+  return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what, expectDigest: shownDigest(req), by: actByOfReq(req) }), DONE[row.done](host, what), row.from === 'mic' ? { planOpts: micLang(req.query.lang) } : null); // lane stream-mic-road: the Mac dialog's language rides the run's options
 });
 // ── design 014 D1 (lane desktop-vnc-native): a Windows / macOS machine's WHOLE DESKTOP — people only ──
 /** An agent's token (a Bearer header, a token in the body or the url) is refused by name on every whole-desktop door:
@@ -571,12 +576,24 @@ function shutdownStreams() { const wr = (ctx && ctx.webrtc) || webrtc; if (wr &&
 const STREAM_STATUS = Object.freeze({ not_found: 404, 'bad-request': 400, answer_failed: 409, restart_failed: 409 });
 const streamFail = (res, e) => (e && STREAM_STATUS[e.code] ? res.status(STREAM_STATUS[e.code]).json({ error: String(e.message), code: e.code }) : fail(res, e));
 const streamKey = (req) => String((req.method === 'GET' ? req.query.key : req.body && req.body.key) || '');
+router.get('/api/desktop/machine-desktop/mic', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access || typeof ctx.access.micFacts !== 'function') return noAccess(res);
+  try { res.json(await ctx.access.micFacts(host, { force: req.query.force === '1', by: actByOfReq(req) })); } catch (e) { fail(res, e); }
+});
+router.post('/api/desktop/machine-desktop/mic/default', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access || typeof ctx.access.micDefault !== 'function') return noAccess(res);
+  try { res.json(await ctx.access.micDefault(host, req.body && req.body.to, { by: actByOfReq(req) })); } catch (e) { fail(res, e); }
+});
 router.post('/api/desktop/machine-desktop/stream/start', async (req, res) => {
   if (humanOnly(req, res)) return;
   const host = hostParam(req, res); if (!host) return;
   const wr = webrtcOf(res); if (!wr) return;
   const b = req.body || {};
-  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null, source: b.source == null ? null : b.source, fp16: b.fp16 === true, hdr: b.hdr === true, after: typeof b.after === 'string' && /^st[a-z0-9]{1,40}$/.test(b.after) ? b.after : null })); } catch (e) { streamFail(res, e); } // source: a display / ONE window (a Mac's — lane stream-p3m-build; a Windows machine's — stream-p2w-build)
+  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null, source: b.source == null ? null : b.source, fp16: b.fp16 === true, hdr: b.hdr === true, after: typeof b.after === 'string' && /^st[a-z0-9]{1,40}$/.test(b.after) ? b.after : null, mic: b.mic === true })); } catch (e) { streamFail(res, e); } // source: a display / ONE window (a Mac's — lane stream-p3m-build; a Windows machine's — stream-p2w-build)
 });
 // lane stream-p2w-build (design q-041 r3 §3 P2w): ONE application window of the machine as the stream — the picker's list (the
 // machine's application windows through its agent's `stream-windows` op) and 「还原它」 (a minimized one back, never the focus)
@@ -713,6 +730,16 @@ router.get('/api/desktop/machine-desktop/last-close', (req, res) => {
   res.json({ close: id && ctx.stream && typeof ctx.stream.lastCloseOf === 'function' ? ctx.stream.lastCloseOf(id) : null });
 });
 /** After the TightVNC install: done only once the machine's 5900 answers as a VNC server (else still-absent by name). */
+/** lane stream-mic-road: the Mac password dialog's language (zh | ja | en) — the install plan's only per-page word. */
+const micLang = (v) => (v === 'zh' || v === 'ja' || v === 'en' ? { lang: v } : null);
+/** After 「安装虚拟麦克风」 / its uninstall door: the machine's microphone facts are read again — done only when they say it
+ *  is there (installed / reboot owed) or gone; otherwise `still-absent` / `still-present` by name. */
+const micDone = (want) => (r) => {
+  const st = r.after && r.after.state ? r.after.state : null;
+  const there = !!(st && (st.state === 'installed' || st.state === 'reboot_owed'));
+  if (want !== there) { const e = new Error(want ? `the install finished, but ${r.hostId} does not show the virtual microphone yet (${(st && (st.code || st.state)) || 'no answer'}) — check again` : `the uninstall finished, but ${r.hostId} still shows the virtual microphone — finish it in the window that opened there, then check again`); e.code = want ? 'still-absent' : 'still-present'; e.plan = r.plan; throw e; }
+  return { done: true, what: r.plan.what, label: r.plan.label, hostId: r.hostId, mic: st, defaultsKept: r.plan.notes && r.plan.notes.includes('defaults_kept') };
+};
 const tightvncDone = (r) => {
   if (!r.after || !r.after.ok) { const e = new Error(`the install finished, but port 5900 on ${r.hostId} does not answer as a VNC server (${(r.after && (r.after.why || r.after.code)) || 'no answer'}) — check again`); e.code = 'still-absent'; e.plan = r.plan; throw e; }
   return { done: true, what: TIGHTVNC.id, label: r.plan.label, hostId: r.hostId, vnc: r.after };

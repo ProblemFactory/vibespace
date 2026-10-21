@@ -31,6 +31,7 @@ DIAL_URL=""
 DIAL_TOKEN="${VIBESPACE_DIAL_TOKEN:-}"; HOST_TOKEN="${VIBESPACE_HOST_TOKEN:-}"
 unset VIBESPACE_DIAL_TOKEN VIBESPACE_HOST_TOKEN
 NODE_BIN_OVERRIDE="${VIBESPACE_NODE_BIN:-}"; NODE_ONLY=""; NO_CHECK=""; ALLOW=""
+HUB_ID=""; T0=$(date +%s)   # lane mac-repair-retires-stale: the hub's id (the dial check names it) + when this run began
 while [ $# -gt 0 ]; do case "$1" in
   --dial) DIAL_URL="$2"; shift 2;;
   --no-check) NO_CHECK=1; shift;;             # skip the dial check below (lane-pairing ⑤ — ON by default)
@@ -265,6 +266,8 @@ if [ -n "$DIAL_URL" ] && [ -z "$NO_CHECK" ]; then
     echo "✗ nothing was installed — the device cannot dial $DHOST: $(printf '%s' "$CHECK_OUT" | head -1)"
     exit "$CHECK_RC"
   fi
+  # lane mac-repair-retires-stale: the hub names itself in its answer (an older hub does not) — kept in dial.json below
+  HUB_ID=$(printf '%s\n' "$CHECK_OUT" | sed -n 's/^hub id: \(vh-[0-9a-f]\{16\}\)$/\1/p' | head -1)
 fi
 
 # THE ALLOW LIST (lane device-allow-flags, design q-042 D5): written by the agent's OWN parser (`--write-policy`, PURE
@@ -329,9 +332,10 @@ rm -f "$ROOT/state/trusted-keys.json" "$ROOT/state/release-floor.json"
 export VIBESPACE_DEVICE_ROOT="$ROOT"
 export VIBESPACE_AGENTD_ROOT="$ROOT" # legacy bundle compat
 if [ -n "$DIAL_URL" ]; then
-  # the token in the writer's ENVIRONMENT (verify-r3 B-inst — it rode this node's argv); atomic at 0600
-  VIBESPACE_DIAL_TOKEN="$DIAL_TOKEN" "$NODE_BIN" -e 'const fs=require("fs"),f=process.argv[1],t=f+".tmp-"+process.pid;try{fs.unlinkSync(t)}catch{};fs.writeFileSync(t,JSON.stringify({url:process.argv[2],token:process.env.VIBESPACE_DIAL_TOKEN||""}),{mode:0o600});fs.renameSync(t,f)' \
-    "$ROOT/state/dial.json" "$DIAL_URL"
+  # the token in the writer's ENVIRONMENT (verify-r3 B-inst — it rode this node's argv); atomic at 0600; + the hub's id
+  # when the dial check learned it (lane mac-repair-retires-stale — not a secret: the address of a hub, never a key)
+  VIBESPACE_DIAL_TOKEN="$DIAL_TOKEN" "$NODE_BIN" -e 'const fs=require("fs"),f=process.argv[1],t=f+".tmp-"+process.pid,h=process.argv[3]||"";try{fs.unlinkSync(t)}catch{};fs.writeFileSync(t,JSON.stringify({url:process.argv[2],token:process.env.VIBESPACE_DIAL_TOKEN||"",...(/^vh-[0-9a-f]{16}$/.test(h)?{hub:h}:{})}),{mode:0o600});fs.renameSync(t,f)' \
+    "$ROOT/state/dial.json" "$DIAL_URL" "$HUB_ID"
   echo "→ dial config persisted ($ROOT/state/dial.json)"
 fi
 
@@ -488,3 +492,84 @@ else
   tail -c +"$((LOG_OFF + 1))" "$ROOT/state/agentd.out" 2>/dev/null | tail -20
   exit 1
 fi
+
+# RETIRE THE OLDER INSTALLS OF THIS HUB (lane mac-repair-retires-stale, B-06e9 — the owner's Macbook 2026-10-18: FOUR
+# installs, one per hub address ever paired, three re-dialing with old tokens every 30 s for ever). Each pairing installs
+# its own root keyed by the dial ADDRESS (ROOT above); installs of DIFFERENT hubs coexist by design. A sibling root whose
+# state/dial.json names the SAME hub (`hub` — learned by the dial check above, or by that install at its own accepted
+# dial) — or, when neither knows its hub, the same device id — is this machine's older pairing of this hub: its
+# supervisor is stopped, its launch item moved to ~/.vibespace/disabled-launchagents/ (never deleted; the root and its
+# state stay on disk), and the DETACHED agent holding its state/agentd.lock is stopped only when that pid's command line
+# names vibespace-device (the take-over's rule — never a recycled pid). Only once THIS install is live: the dial check
+# passed and the new daemon dialed in (its state/dial-status.json `connectedAt` falls in this run) — never before. A
+# sibling of another hub is kept; one whose hub is unknown (an install older than this rule that never learned it) is
+# LISTED with its exact stop command and not touched.
+siblings_of() { # → "<retire|other|unknown><TAB><dir name>" per sibling root
+  "$NODE_BIN" -e 'const fs=require("fs"),p=require("path"),[b,me]=process.argv.slice(1),H=/^vh-[0-9a-f]{16}$/;const rd=(n)=>{try{const j=JSON.parse(fs.readFileSync(p.join(b,n,"state","dial.json"),"utf8"));let d="";try{d=new URL(j.url).searchParams.get("device")||""}catch{}return{hub:H.test(j.hub||"")?j.hub:"",dev:d}}catch{return{hub:"",dev:""}}};const o=rd(me);for(const n of fs.readdirSync(b).sort()){if(n===me||!/^device@[A-Za-z0-9.-]+$/.test(n))continue;const s=rd(n);console.log((s.hub&&o.hub?(s.hub===o.hub?"retire":"other"):(!s.hub&&!o.hub&&s.dev&&s.dev===o.dev?"retire":"unknown"))+"\t"+n)}' \
+    "$HOME/.vibespace" "$(basename "$ROOT")" 2>/dev/null || true
+}
+dialed_in() { # the new daemon's own record: connected since this run began
+  "$NODE_BIN" -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(Number(j.connectedAt)>=Number(process.argv[2])*1000?0:1)}catch{process.exit(1)}' "$ROOT/state/dial-status.json" "$T0" 2>/dev/null
+}
+retire_siblings() {
+  [ -n "$DIAL_URL" ] && [ -z "$NO_CHECK" ] && [ "$(dirname "$ROOT")" = "$HOME/.vibespace" ] || return 0
+  SIBS=$(siblings_of)
+  [ -n "$SIBS" ] || return 0
+  i=0; while [ $i -lt 20 ] && ! dialed_in; do sleep 1; i=$((i+1)); done
+  if ! dialed_in; then
+    echo "→ older installs on this machine were NOT retired: this install has not dialed in yet — run this command again once its row reads connected"
+    return 0
+  fi
+  SIBS=$(siblings_of)   # again, now that the daemon may have learned its hub at its first accepted dial
+  DIS="$HOME/.vibespace/disabled-launchagents"; TAB=$(printf '\t'); RETIRED=""; NR=0; OTHER=""; UNKNOWN=""
+  while IFS="$TAB" read -r V N; do
+    [ -n "$N" ] || continue
+    K=$(printf '%s' "$N" | tr -c 'A-Za-z0-9.-' '-' | sed 's/-*$//')
+    P="$HOME/Library/LaunchAgents/cc.vibespace.device.$K.plist"; U="$HOME/.config/systemd/user/vibespace-device-$K.service"
+    case "$V" in
+      retire)
+        # the supervisor FIRST (a KeepAlive / Restart= one respawns the agent stopped next), its launch item set aside
+        if [ -f "$P" ]; then
+          if command -v launchctl >/dev/null 2>&1; then launchctl bootout "gui/$(id -u)/cc.vibespace.device.$K" 2>/dev/null || true; fi
+          mkdir -p "$DIS"; D="$DIS/$(basename "$P")"; if [ -e "$D" ]; then D="$D.$(date +%s)"; fi; mv "$P" "$D" || echo "  ⚠ could not move $P aside"
+        fi
+        if [ -f "$U" ]; then
+          if command -v systemctl >/dev/null 2>&1; then systemctl --user disable --now "vibespace-device-$K.service" >/dev/null 2>&1 || true; fi
+          mkdir -p "$DIS"; D="$DIS/$(basename "$U")"; if [ -e "$D" ]; then D="$D.$(date +%s)"; fi; mv "$U" "$D" || echo "  ⚠ could not move $U aside"
+          if command -v systemctl >/dev/null 2>&1; then systemctl --user daemon-reload >/dev/null 2>&1 || true; fi
+        fi
+        # the detached agent (ppid 1) holding the sibling's lock — only when its command line names vibespace-device
+        SP=$(cat "$HOME/.vibespace/$N/state/agentd.lock" 2>/dev/null || true)
+        case "$SP" in ''|*[!0-9]*) SP="";; esac
+        if [ -n "$SP" ] && kill -0 "$SP" 2>/dev/null; then
+          case "$(ps -p "$SP" -o command= 2>/dev/null || true)" in
+            *vibespace-device*)
+              kill "$SP" 2>/dev/null || true
+              j=0; while [ $j -lt 5 ] && kill -0 "$SP" 2>/dev/null; do sleep 1; j=$((j+1)); done
+              if kill -0 "$SP" 2>/dev/null; then kill -9 "$SP" 2>/dev/null || true; fi
+              ;;
+          esac
+        fi
+        RETIRED="$RETIRED${RETIRED:+, }$N"; NR=$((NR+1))
+        ;;
+      other) OTHER="$OTHER${OTHER:+, }$N" ;;
+      *)
+        if [ -f "$P" ]; then STOPW="launchctl bootout gui/\$(id -u)/cc.vibespace.device.$K; "
+        elif [ -f "$U" ]; then STOPW="systemctl --user disable --now vibespace-device-$K.service; "
+        else STOPW=""; fi
+        UNKNOWN="$UNKNOWN    $N — stop it with: ${STOPW}kill \$(cat ~/.vibespace/$N/state/agentd.lock)
+"
+        ;;
+    esac
+  done <<SIBS_EOF
+$SIBS
+SIBS_EOF
+  if [ "$NR" -gt 0 ]; then
+    if [ "$NR" -eq 1 ]; then W1="1 older install"; else W1="$NR older installs"; fi
+    echo "→ retired $W1 of this hub: $RETIRED (kept under ~/.vibespace; their launch items moved to ~/.vibespace/disabled-launchagents/)"
+  fi
+  if [ -n "$UNKNOWN" ]; then printf '%s\n%s' "→ older installs I cannot attribute, not touched:" "$UNKNOWN"; fi
+  if [ -n "$OTHER" ]; then echo "→ kept: $OTHER (another VibeSpace's install on this machine)"; fi
+  return 0
+}
+retire_siblings

@@ -8,6 +8,9 @@
 //   ② the Remote panel's row (zh + en) shows the line under the machine with the warning glyph and a Copy button;
 //     Copy says so in a toast — the recipe is WORDS the person runs, the hub never runs it; PNG (desk)
 //   CONTROL: a patched bundle without the row's paint ⇒ no line (the pre-fix row said only "connected")
+//   lane mac-repair-retires-stale (B-06e9): the REAL daemon learns the hub's id at its accepted dial (dial.json `hub` = the
+//   server's data/agentd/hub-id); the row names the LIVE install (device@<the host the command was minted for>) + the door,
+//   and Copy copies the recipe that lists only the OTHER installs and stops the agent itself by its lock pid
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -43,17 +46,20 @@ const openRemote = async (P) => { await P.evalJs(`(() => { const s = app.sidebar
 let code = 1;
 try {
   console.log('── ① the server: a refusal while the device is in');
-  await W.pairDevice('oldmac');
+  const paired = await W.pairDevice('oldmac');
   let live = null;
   for (let i = 0; i < 120 && !live; i++) { const h = await W.hostRow('oldmac'); if (h && h.online && h.dial && h.dial.lastAccept) live = h; else await sleep(250); }
   ok(!!live, 'the REAL daemon dialed in (online, lastAccept)', live && live.dial);
   const HID = live.id;
+  const hubId = await (async () => { for (let i = 0; i < 40; i++) { try { const h = fs.readFileSync(path.join(W.wt, 'data', 'agentd', 'hub-id'), 'utf8').trim(); const d = JSON.parse(fs.readFileSync(path.join(paired.root, 'state', 'dial.json'), 'utf8')); if (h && d.hub === h) return h; } catch { } await sleep(250); } return null; })();
+  ok(/^vh-[0-9a-f]{16}$/.test(hubId || ''), 'lane mac-repair-retires-stale: the REAL daemon learned the hub at its accepted dial — its dial.json `hub` is the server\'s data/agentd/hub-id', hubId);
   const k = [];
   for (let i = 0; i < 3; i++) { k.push(await knock('oldmac', 'vsdt_' + 'a'.repeat(43))); await sleep(400); }
   ok(k.every((r) => r.status === 401 && r.code === 'token-mismatch'), 'three knocks with an old token ⇒ 401 token-mismatch each', k);
   let row = null;
   for (let i = 0; i < 40 && !row; i++) { const h = await W.hostRow('oldmac'); if (h && h.dialHealth) row = h; else await sleep(250); }
   ok(row && row.online && row.dialHealth.kind === 'second-dialer-stale-token' && row.dialHealth.every === 30 && row.dialHealth.platform === process.platform && typeof row.dialHealth.recipe === 'string', 'the /api/hosts row carries dialHealth (second dialer, every 30 s, the daemon\'s platform + recipe) while the device stays online', row && row.dialHealth);
+  ok(row && row.dialHealth.live === 'device@127.0.0.1' && row.dialHealth.recipe.split('\n')[0].endsWith("| grep -vxF 'device@127.0.0.1'") && row.dialHealth.recipe.endsWith('kill $(cat ~/.vibespace/device@<x>/state/agentd.lock)'), 'lane mac-repair-retires-stale: the row names the LIVE install (device@<the host the command was minted for>); its recipe lists only the others and stops the agent itself by its lock pid', row && row.dialHealth);
   const log = W.serverLog.join('');
   const n2 = (log.match(/a SECOND agent with an old token/g) || []).length, nTold = (log.match(/\[dial-health\] oldmac: a second agent with an old token .* told the user/g) || []).length;
   ok(n2 === 1 && nTold === 1, `the journal: ONE refusal line across 3 knocks (${n2}), ONE "told the user" line (${nTold})`);
@@ -69,10 +75,16 @@ try {
     const drawn = await P.waitFor(`(${ROW(HID)}?.querySelector('.mounts-second-dialer')?.textContent || '').includes(${JSON.stringify(want)})`, 15000);
     const facts = await P.evalJs(`(() => { const l = ${ROW(HID)}?.querySelector('.mounts-second-dialer'); if (!l) return null; const b = l.querySelector('.mounts-second-dialer-copy'); const g = l.querySelector('.mounts-second-dialer-glyph svg'); const r = l.getBoundingClientRect(), rr = ${ROW(HID)}.getBoundingClientRect(); return { text: l.textContent, btn: b && b.textContent, title: b && b.title, glyph: !!g && g.getBoundingClientRect().width > 0, inRow: r.left >= rr.left - 1 && r.right <= rr.right + 1 && r.height > 0, color: getComputedStyle(l).color }; })()`);
     ok(drawn && facts && facts.glyph && facts.inRow && facts.text.includes('127.0.0.1') && /30/.test(facts.text), `${lang}: the line under the machine — glyph, the address, every 30 s, inside the row`, facts);
+    const liveW = lang === 'zh' ? '那台机器上正在用的安装是 device@127.0.0.1；把其余的停掉' : 'The live install on that machine is device@127.0.0.1; stop the others';
+    const doorW = lang === 'zh' ? '在这台机器的「机器」卡片上重新配对，会替你停用这个 hub 的旧安装' : 'Re-pairing this machine from its Machines card retires the older installs of this hub for you';
+    ok(facts && facts.text.includes(liveW) && facts.text.includes(doorW), `${lang}: the line names the live install and the door (a re-pair retires the older installs of this hub)`, facts && facts.text);
     ok(facts && facts.btn === (lang === 'zh' ? '复制停止命令' : 'Copy the stop command') && facts.title === row.dialHealth.recipe, `${lang}: the Copy button carries the ${process.platform} recipe (WORDS, never run)`, facts && [facts.btn, facts.title]);
+    await P.evalJs(`(() => { window.__copied = null; if (navigator.clipboard) navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); }; return true; })()`);
     const clicked = await P.realClick(`(${ROW(HID)}.querySelector('.mounts-second-dialer-copy'))`);
     const toast = lang === 'zh' ? '已复制 — 请在那台机器上运行' : 'Copied — run it on that machine';
     ok(clicked && await P.waitFor(`document.body.innerText.includes(${JSON.stringify(toast)})`, 5000), `${lang}: Copy ⇒ the toast "${toast}"`);
+    const copied = await P.evalJs('window.__copied');
+    ok(copied === row.dialHealth.recipe && copied.includes("grep -vxF 'device@127.0.0.1'") && /\nkill \$\(cat ~\/\.vibespace\/device@<x>\/state\/agentd\.lock\)$/.test(copied), `${lang}: Copy COPIES the recipe naming the live install (left out of the listing) + the kill line — words, never run`, copied);
     if (lang === 'zh' && SHOT) {
       await sleep(2600); // the toast fades before the picture
       await P.evalJs(`${ROW(HID)}.scrollIntoView({ block: 'center' })`);

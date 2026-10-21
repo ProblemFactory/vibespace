@@ -40,6 +40,13 @@
 //       minute while it carries the picture — RED CONTROL: one miss = DOWN (the .330 daemon: missMax 1) goes DOWN ≥ 3 times
 //   §14d THE STALL (lane stream-leg-flap): stallStep — a playing picture that decodes nothing for stallMs while the machine
 //       sends ⇒ stalled; a still screen (the machine sends nothing), a hidden page, a picture still decoding ⇒ never
+//   §15 THE BROWSER'S CHOICE (lane werift-lite-multihomed — a browser allowed the microphone offers every adapter, and every NEW
+//       stream stayed black): liteSessionSdp (PURE) puts werift's per-media a=ice-lite ONCE at the session level; the REAL stream
+//       host + werift in this process, the browser = two raw UDP sockets that nominate (USE-CANDIDATE) in turn: the agent's offer
+//       says a=ice-lite before its first m=, the first nomination is taken, and the second MOVES the agent's sending — its DTLS
+//       retransmits reach the second socket, none the first (its log says so); an older ICE generation's nomination moves
+//       nothing — RED CONTROLS: the module as werift alone runs it (a copy: the offer's SDP untouched, no pair followed) keeps a=ice-lite inside
+//       the media sections and sends to the FIRST socket for good; a copy without the generation guard moves back to the old pair
 import fs from 'node:fs';
 import path from 'node:path';
 import dgram from 'node:dgram';
@@ -620,6 +627,78 @@ console.log('§4b NEVER SILENT (lane stream-fallback-never-silent — incident i
   const acts = []; let st = { played: true, step: 0, at: 0 };
   for (const [now, gone] of [[T, false], [T + 2000, false], [T + 4000, false], [T + 6000, true]]) { const x = SM.endingVerdict({ ...st, now, gone, named: true }); acts.push(x.act); st = { played: true, step: x.step, at: x.at }; }
   ok(same(acts, ['retry', 'ask', 'ask', 'ask']) && !acts.includes('fallback'), 'a stream that keeps ending (the window carries step/at): retry once, then the ask every time — the verdict never answers fallback once a picture played', acts);
+}
+console.log('§15 THE BROWSER\'S CHOICE (lane werift-lite-multihomed — a browser allowed the microphone offers every adapter: every NEW stream stayed black)');
+{
+  // liteSessionSdp (PURE): werift's placement (a=ice-lite inside each media section — no browser reads it there) → ONE session line
+  const raw = ['v=0', 'o=- 1 0 IN IP4 0.0.0.0', 's=-', 't=0 0', 'a=group:BUNDLE 0 1', 'm=video 9 UDP/TLS/RTP/SAVPF 96', 'a=ice-lite', 'a=mid:0', 'm=application 9 UDP/DTLS/SCTP webrtc-datachannel', 'a=ice-lite', 'a=mid:1', ''].join('\r\n');
+  const lite = SM.liteSessionSdp(raw), rows = lite.split('\r\n');
+  ok(rows.filter((l) => l === 'a=ice-lite').length === 1 && rows.indexOf('a=ice-lite') === rows.findIndex((l) => l.startsWith('m=')) - 1 && lite.replace('a=ice-lite\r\n', '') === raw.split('a=ice-lite\r\n').join('') && SM.liteSessionSdp(lite) === lite, 'liteSessionSdp: werift\'s per-media a=ice-lite → ONE line at the session level, before the first m= (every other line as it was); twice = once');
+  const none = raw.split('a=ice-lite\r\n').join(''), noMedia = 'v=0\r\na=ice-lite\r\n';
+  ok(SM.liteSessionSdp(none) === none && SM.liteSessionSdp(noMedia) === noMedia && SM.liteSessionSdp(raw.split('\r\n').join('\n')).split('\r\n').indexOf('a=ice-lite') === 5 && SM.liteSessionSdp(null) === '', 'an SDP without the attribute, or without a media section, is unchanged; \\n line ends are read too');
+  // the REAL stream host + werift here; the browser: two raw UDP sockets that nominate in turn (Chrome, measured: 0.4 s apart) and
+  // a werift full agent that only WRITES the answer (closed at once; setup:passive ⇒ the agent is the DTLS client — its
+  // ClientHello and retransmits, every 0.5–1.5 s, go to the pair it sends on)
+  const w = require(path.join(REPO, 'node_modules/werift'));
+  const HOST = path.join(REPO, 'src/agentd/stream-host.js'), hostSrc = read('src/agentd/stream-host.js');
+  const FOLLOW = "  if (!msg || !Array.isArray(msg.attributesKeys) || !msg.attributesKeys.includes('USE-CANDIDATE')) return true;\n";
+  const GUARD = "    if (String(msg.getAttributeValue('USERNAME') || '').split(':')[0] !== con.localUsername) return; // an older generation's (an ICE restart changed our ufrag)\n";
+  ok(hostSrc.split(FOLLOW).length === 2 && hostSrc.split(GUARD).length === 2 && hostSrc.split('SM.liteSessionSdp(').length === 3, 'the host carries THE BROWSER\'S CHOICE, its generation guard and the two offers\' session-level a=ice-lite (the copies patch exactly those)');
+  const copyOf = (tag, src) => { const Mod = require('module'), fn = HOST.replace(/\.js$/, `.${tag}.js`), m = new Mod(fn, null); m.filename = fn; m.paths = Mod._nodeModulePaths(path.dirname(HOST)); m._compile(src, fn); return m.exports; };
+  const answerTo = async (sdp) => { const pc = new w.RTCPeerConnection({ iceServers: [{ urls: 'stun:127.0.0.1:9' }] }); await pc.setRemoteDescription({ type: 'offer', sdp }); const a = await pc.createAnswer(); await pc.close(); return a.sdp.replace(/a=setup:active/g, 'a=setup:passive'); };
+  const ice = (sdp) => ({ ufrag: /a=ice-ufrag:(\S+)/.exec(sdp)[1], pwd: /a=ice-pwd:(\S+)/.exec(sdp)[1] });
+  async function browser(SH, sid) {
+    const lines = [];
+    const host = SH.createStreamHost({ log: (l) => lines.push(l) });
+    const r = await host.offer({ sid, sourceKind: 'fake', sourceId: FIXTURE }, { control() { } });
+    host.replied(sid);
+    const sdp = r.offer.sdp, port = Number(/a=candidate:\S+ 1 udp \d+ \d+\.\d+\.\d+\.\d+ (\d+) typ host/.exec(sdp)[1]); // werift's host socket (the wildcard: loopback reaches it)
+    let them = ice(sdp), asdp = await answerTo(sdp), me = ice(asdp);
+    await host.answer({ sid, answer: { type: 'answer', sdp: asdp } });
+    const sock = async () => { const x = dgram.createSocket('udp4'), got = { stun: 0, dtls: 0 }; x.on('message', (m) => { if (m[0] < 2) got.stun++; else if (m[0] >= 20 && m[0] <= 63) got.dtls++; }); await new Promise((res) => x.bind(0, '127.0.0.1', res)); return { x, got, port: x.address().port }; };
+    const nominate = (k, cred = { them, me }) => { const m = new w.Message(w.methods.BINDING, w.classes.REQUEST); m.setAttribute('USERNAME', `${cred.them.ufrag}:${cred.me.ufrag}`).setAttribute('PRIORITY', 1853824767).setAttribute('ICE-CONTROLLING', 4242n).setAttribute('USE-CANDIDATE', null).addMessageIntegrity(Buffer.from(cred.them.pwd, 'utf8')).addFingerprint(); k.x.send(m.bytes, port, '127.0.0.1'); };
+    const restart = async () => { const old = { them, me }; const rr = await host.offer({ sid, iceRestart: true }, { control() { } }); them = ice(rr.offer.sdp); asdp = await answerTo(rr.offer.sdp); me = ice(asdp); await host.answer({ sid, answer: { type: 'answer', sdp: asdp } }); return old; };
+    return { sdp, lines, sock, nominate, restart, end: () => host.stopAll('closed') };
+  }
+  const until = async (f, ms) => { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; await sleep(25); } return f(); };
+  const sessionLite = (sdp) => { const r2 = sdp.split('\r\n'), m = r2.findIndex((l) => l.startsWith('m=')); return { session: r2.slice(0, m).filter((l) => l === 'a=ice-lite').length, media: r2.slice(m).filter((l) => l === 'a=ice-lite').length }; };
+  async function nominations(SH, sid, waitB) {
+    const b = await browser(SH, sid), A = await b.sock(), Bk = await b.sock();
+    b.nominate(A);
+    const first = await until(() => A.got.stun && A.got.dtls, 3000);
+    const a0 = A.got.dtls, b0 = Bk.got.dtls;
+    b.nominate(Bk);
+    if (waitB) await until(() => Bk.got.dtls > b0, 3000); else await sleep(1600); // ≥ one retransmit (0.5 s, then 1 s)
+    const out = { lite: sessionLite(b.sdp), first, toA: A.got.dtls - a0, toB: Bk.got.dtls - b0, answeredB: Bk.got.stun > 0, moved: b.lines.filter((l) => /the browser moved its pair/.test(l)), B: Bk.port };
+    b.end(); A.x.close(); Bk.x.close();
+    return out;
+  }
+  const HOSTMOD = require(HOST);
+  const fx = await nominations(HOSTMOD, 'mhfix', true);
+  ok(fx.lite.session === 1 && fx.lite.media === 0, 'the REAL host\'s offer says a=ice-lite ONCE, at the session level (none left in a media section)', fx.lite);
+  ok(fx.first, 'the first nomination (socket A) is answered and taken: the agent\'s DTLS ClientHello goes to A', fx);
+  ok(fx.answeredB && fx.toB >= 1 && fx.toA === 0 && fx.moved.length === 1 && fx.moved[0].endsWith(`→ 127.0.0.1:${fx.B}`), `THE BROWSER'S CHOICE: socket B nominates next ⇒ the agent's DTLS goes to B (${fx.toB} datagram${fx.toB === 1 ? '' : 's'}), none to A; its log: ${fx.moved[0]}`, fx);
+  // RED CONTROL: the module as werift alone runs it — the offer's SDP untouched, no pair followed
+  const BASE = copyOf('werift-alone', hostSrc.replace(FOLLOW, FOLLOW + '  return true;\n').split('SM.liteSessionSdp(').join('String('));
+  const bx = await nominations(BASE, 'mhbase', false);
+  ok(bx.lite.session === 0 && bx.lite.media === 2 && bx.answeredB && bx.toA >= 1 && bx.toB === 0 && bx.moved.length === 0, `RED CONTROL — the host as werift alone runs it: a=ice-lite only inside the media sections (${bx.lite.media}) and, B nominated, its DTLS still goes to A (${bx.toA}), none to B — the first nomination kept for good`, bx);
+  // an older ICE generation's nomination moves nothing (the page restarts ICE; a check of the old credentials still in flight)
+  async function oldGeneration(SH, sid) {
+    const b = await browser(SH, sid), A = await b.sock(), Bk = await b.sock();
+    b.nominate(A); await until(() => A.got.stun && A.got.dtls, 3000);
+    const old = await b.restart();
+    b.nominate(Bk); await until(() => Bk.got.stun, 2000); await sleep(50); // the new generation's first nomination: werift's own
+    const n0 = b.lines.length;
+    b.nominate(A, old); await until(() => A.got.stun > 1, 2000); await sleep(100);
+    const out = { moved: b.lines.slice(n0).filter((l) => /the browser moved its pair/.test(l)), answered: A.got.stun > 1 };
+    b.end(); A.x.close(); Bk.x.close();
+    return out;
+  }
+  const og = await oldGeneration(HOSTMOD, 'mhgen');
+  const NOGUARD = copyOf('no-guard', hostSrc.replace(GUARD, ''));
+  const ogc = await oldGeneration(NOGUARD, 'mhgenc');
+  ok(og.answered && og.moved.length === 0, 'after an ICE restart, a nomination under the OLD credentials (answered — werift keeps them) moves nothing: the sending pair stays the new generation\'s', og);
+  ok(ogc.answered && ogc.moved.length === 1, 'RED CONTROL: without the generation guard the old nomination moves the agent back to the old pair', ogc);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

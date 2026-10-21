@@ -53,6 +53,12 @@
  *
  * ICE: werift is an ICE-LITE agent with host candidates only and NO STUN/TURN server (its default asks Google's public STUN
  * server — never here); the page is the controlling full agent.
+ * THE BROWSER'S CHOICE (lane werift-lite-multihomed — a viewer whose browser was allowed the microphone, on a computer with
+ * several network adapters, saw every NEW stream stay black): the offer says `a=ice-lite` at the SESSION level, where a browser
+ * reads it (src/stream-model.js liteSessionSdp — werift 0.25 writes it per media section), so the browser nominates only a pair
+ * it has checked; and the lite agent answers every check and SENDS on the pair the browser nominated LAST (followChoice, on
+ * werift's own STUN-request hook — werift alone keeps its first nomination for good). How many addresses the viewer has is the
+ * viewer's fact, never a reason a stream stays black.
  * THE RELAY (NAT: direct first, else the hub forwards — design §2): with `relay`, a loopback TCP listener takes the hub's
  * ONE forward (dm.tcpForward) carrying framed datagrams (src/stream-model.js relayFrame); each remote address gets a local
  * UDP shim socket that talks to werift's own host candidate, so werift sees the far end as a peer-reflexive 127.0.0.1 peer
@@ -254,6 +260,26 @@ function selfProbe(addrs, { now = Date.now, waitMs = L.probeWaitMs } = {}) {
   });
 }
 
+/** THE BROWSER'S CHOICE (lane werift-lite-multihomed — measured: Chrome nominated a second pair 0.4 s after the first, as more of
+ *  its pairs passed their checks): werift 0.25's lite agent keeps the FIRST nominated pair for good (its checkComplete sets
+ *  `nominated` only while none is), so its DTLS and the picture stayed on a pair the browser had left. werift's STUN-request
+ *  hook (`iceFilterStunResponse` — asked before werift answers a check, which it then takes) → true, always (every check is
+ *  answered); a check that NOMINATES (USE-CANDIDATE) under this generation's ufrag moves the sending pair to that pair, once
+ *  werift has taken it (marked nominated) — a microtask after. `onMove(from, to)` = the two werift pairs. */
+function followChoice(pc, msg, addr, protocol, onMove = () => { }) {
+  if (!msg || !Array.isArray(msg.attributesKeys) || !msg.attributesKeys.includes('USE-CANDIDATE')) return true;
+  queueMicrotask(() => {
+    const con = pc && pc.iceTransports && pc.iceTransports[0] && pc.iceTransports[0].connection;
+    const was = con && con.nominated;
+    if (!was) return; // the first nomination: werift's own
+    if (String(msg.getAttributeValue('USERNAME') || '').split(':')[0] !== con.localUsername) return; // an older generation's (an ICE restart changed our ufrag)
+    const pair = (con.checkList || []).find((x) => x.protocol === protocol && x.remoteAddr[0] === addr[0] && x.remoteAddr[1] === addr[1]);
+    if (!pair || !pair.nominated || pair === was) return;
+    con.nominated = pair;
+    onMove(was, pair);
+  });
+  return true;
+}
 /** A host made without a screen factory (the suites' bare hosts) refuses the screen by name. */
 function screenSource() { return named('no_screen_source', 'this agent cannot capture its screen'); }
 
@@ -265,7 +291,7 @@ const SOURCES = Object.freeze({
   window: (msg, o, f) => (f.window ? f.window(msg, o) : f.screen ? f.screen(msg, o) : named('no_window_source', 'this agent cannot stream one window')),
 });
 
-function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift'), screen = null, window = null, legHosts = () => [], program = process.platform === 'win32' ? process.execPath : null, pasteBackMs = L.pasteBackMs } = {}) {
+function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift'), screen = null, window = null, legHosts = () => [], program = process.platform === 'win32' ? process.execPath : null, pasteBackMs = L.pasteBackMs, mic = null } = {}) {
   const sessions = new Map();
   let probeMemo = null; // the self-probe's answer, kept probeMemoMs (a second session within it asks nothing)
   let displaysKnown = 0; // lane desktop-display-modes: how many displays the machine's screen source last named (THE CAP's input)
@@ -284,10 +310,26 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       source: s.source ? s.source.kind : null,
       relay: s.relay ? { peers: s.relay.shims.size, forwarded: s.relay.fwd, port: s.relay.port, via: s.leg && s.leg.state === 'up' ? 'udp' : 'link', leg: s.leg ? s.leg.facts() : null } : null,
       directInbound: s.directInbound,
+      mic: s.mic ? s.mic.stats() : s.micOffered ? { state: 'idle' } : null, // lane stream-mic-road: where the viewer's voice IS going (src/desktop-mic.js)
+      ice: iceOf(s), // lane stream-mic-road: werift's own ICE view — the evidence of backlog werift-lite-multihomed (a browser holding the microphone permission gathers on every adapter)
     };
     if (s.source && typeof s.source.stats === 'function') { try { st.screen = s.source.stats(); st.encodeMs = st.screen.encodeMs; } catch { /* the source's */ } }
     s.mark = { at: t, frames: s.frames, bytes: s.bytes };
     return st;
+  }
+  /** werift's ICE as it stands (bounded; read defensively — werift 0.25's internals): its state, the browser's candidates as it
+   *  holds them, each pair's state + traffic, the nominated pair. Lane stream-mic-road: once a page holds the microphone
+   *  permission, Chrome gathers on every adapter and a NEW stream to this ICE-lite agent never connected on a multi-homed box
+   *  (measured on base c1aba74c) — these are the facts the fix lane (werift-lite-multihomed) starts from. */
+  const PAIR_STATES = ['frozen', 'waiting', 'in_progress', 'succeeded', 'failed'];
+  function iceOf(s) {
+    try {
+      const c = s.pc && s.pc.iceTransports && s.pc.iceTransports[0] && s.pc.iceTransports[0].connection;
+      if (!c) return null;
+      const at = (x) => (x ? `${x.host}:${x.port}${x.type && x.type !== 'host' ? ` ${x.type}` : ''}` : null);
+      const pairs = (c.checkList || []).slice(0, 16).map((p) => ({ local: at(p.localCandidate), remote: at(p.remoteCandidate), state: PAIR_STATES[p.state] || String(p.state), nominated: !!p.nominated, remoteNominated: !!p.remoteNominated, rx: p.packetsReceived || 0, tx: p.packetsSent || 0 }));
+      return { state: c.state || null, nominated: c.nominated ? { local: at(c.nominated.localCandidate), remote: at(c.nominated.remoteCandidate) } : null, remotes: (c.remoteCandidates || []).slice(0, 16).map(at), pairs };
+    } catch { return null; }
   }
   const stateOf = (s) => (s.pc ? s.pc.connectionState : 'closed');
   function pushStats(s) { pushTo(s, { op: 'stream-stats', sid: s.sid, stats: statsOf(s), state: stateOf(s) }); }
@@ -299,6 +341,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     clearInterval(s.statsTimer); clearTimeout(s.orphanTimer); clearTimeout(s.failTimer);
     if (s.agentQ.length || s.agentHeld.size || s.inFlight === 'agent') { dropAgent(s, 'stream_ended'); pump(s); } // the agent's rest is not typed into a desktop nobody watches
     try { s.source && s.source.stop(why); } catch { /* gone */ }
+    try { s.mic && s.mic.stop(why); } catch { /* gone */ } // lane stream-mic-road: the voice's road ends with its session
     if (s.leg) s.leg.close();
     if (s.relay) s.relay.close();
     pushTo(s, { op: 'stream-stats', sid, stats: statsOf(s), state: 'closed', ended: why });
@@ -501,7 +544,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       if (!have) return named('not_found', 'that stream session ended');
       have.owner = owner;
       await have.pc.setLocalDescription(await have.pc.createOffer({ iceRestart: true }));
-      return { ok: true, sid, offer: { type: 'offer', sdp: have.pc.localDescription.sdp }, restart: true };
+      return { ok: true, sid, offer: { type: 'offer', sdp: SM.liteSessionSdp(have.pc.localDescription.sdp) }, restart: true }; // lane werift-lite-multihomed: a=ice-lite at the session level
     }
     if (have) return named('busy', 'that stream session already exists');
     // THE PER-MACHINE CAP (lane desktop-display-modes — src/stream-model.js streamCapOf): a stream per display + one; judged
@@ -520,24 +563,35 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     let w;
     try { w = werift(); } catch (e) { try { source.stop(); } catch { } return named('stream_unsupported', `this agent cannot stream here (${(e && e.message) || e}; Node ${process.version})`); }
     const hdr = msg.hdr === true && source.offersAv1 === true; // lane stream-hdr-passthrough: AV1 first, H.264 beside it
+    const wantMic = msg.mic === true && typeof mic === 'function'; // lane stream-mic-road: the page asked for its microphone's m-line
     const pc = new w.RTCPeerConnection({
-      codecs: { video: SM.streamCodecsOf({ hdr }).map((C) => new w.RTCRtpCodecParameters({ mimeType: C.mimeType, clockRate: C.clockRate, rtcpFeedback: C.rtcpFeedback.map((f) => ({ ...f })), parameters: C.fmtp })) },
+      codecs: { video: SM.streamCodecsOf({ hdr }).map((C) => new w.RTCRtpCodecParameters({ mimeType: C.mimeType, clockRate: C.clockRate, rtcpFeedback: C.rtcpFeedback.map((f) => ({ ...f })), parameters: C.fmtp })), ...(wantMic ? { audio: [w.useOPUS()] } : {}) },
       headerExtensions: { video: [w.useTransportWideCC()] },
       // ICE-LITE, no ICE servers (measured, werift 0.25.0): its ICE agent asks stun.l.google.com:19302 for a server-reflexive
       // candidate whenever no STUN server is set — `iceServers: []` included (a hard-coded DEFAULT_STUN_SERVER) — and only
       // ice-lite (or relay-only) skips that gathering. Lite = host candidates only; the browser is the controlling full agent
       // and runs the checks — to a host candidate it can reach (LAN, a tailnet), or to the hub relay's. No public STUN/TURN.
       iceLite: true, iceServers: [], bundlePolicy: 'max-bundle', iceUseIpv6: false,
+      // THE BROWSER'S CHOICE (lane werift-lite-multihomed): every check answered; the browser's latest nomination is the pair we send on
+      iceFilterStunResponse: (m, addr, protocol) => followChoice(pc, m, addr, protocol, (a, b) => log(`[stream] ${sid} the browser moved its pair: ${a.localCandidate.port} → ${a.remoteAddr.join(':')} ⇒ ${b.localCandidate.port} → ${b.remoteAddr.join(':')}`)),
     });
     const s = { sid, owner, pc, source, maxKbps, codec: hdr ? null : 'H264', track: null, dc: null, relay: null, leg: null, directInbound: null, frames: 0, bytes: 0, dropped: 0, keyRequests: 0, bweKbps: null, congested: false, estimate: null,
       inputN: 0, inputRefused: null, inputDropped: 0, ownerQ: [], agentQ: [], agentHeld: new Map(), inFlight: null, pumping: false, releaseDue: false, acks: [], ackMs: null, sentAt: new Map(),
-      mark: { at: now(), frames: 0, bytes: 0 }, sending: false, statsTimer: null, orphanTimer: null, failTimer: null, seq: Math.floor(Math.random() * 65536), early: [], replied: false, startedAt: now() };
+      mark: { at: now(), frames: 0, bytes: 0 }, sending: false, statsTimer: null, orphanTimer: null, failTimer: null, seq: Math.floor(Math.random() * 65536), early: [], replied: false, startedAt: now(), mic: null, micOffered: wantMic };
     sessions.set(sid, s);
     try {
       s.track = new w.MediaStreamTrack({ kind: 'video' });
       const tr = pc.addTransceiver(s.track, { direction: 'sendonly' });
       tr.sender.onPictureLossIndication.subscribe(() => { s.keyRequests++; source.requestKeyframe(); });
       tr.sender.senderBWE.onCongestion.subscribe((c) => { s.congested = !!c; });
+      // lane stream-mic-road: THE VIEWER'S MICROPHONE — an audio m-line this agent RECEIVES on, offered only when the page asked
+      // (`mic`; the hub asks only an agent that says `stream-mic`). The page answers it sendonly with no track and its press is a
+      // replaceTrack — no renegotiation; the first RTP packet starts the machine's road (src/desktop-mic.js receiver). B-aec9 (the
+      // machine's sound to the viewer) turns this same m-line sendrecv
+      if (wantMic) {
+        pc.addTransceiver('audio', { direction: 'recvonly' });
+        pc.onTrack.subscribe((t) => { if (!t || t.kind !== 'audio' || s.mic) return; s.mic = mic().receiver(sid); t.onReceiveRtp.subscribe((rtp) => { if (s.mic) s.mic.onRtp(rtp); }); });
+      }
       s.dc = pc.createDataChannel('input', { ordered: true });
       s.dc.onMessage.subscribe((m) => onInput(s, m));
       const iceOut = (candidate) => { if (!s.replied) s.early.push(candidate); else pushTo(s, { op: 'stream-ice', sid, candidate }); };
@@ -591,7 +645,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       if (r.verdict === 'blocked') log(`[stream] ${sid} direct inbound UDP: blocked — none of ${r.addrs} host address${r.addrs === 1 ? '' : 'es'} reached from this machine itself (its firewall); the hub relay carries the stream`);
       pushStats(s);
     }, () => { });
-    return { ok: true, sid, offer: { type: 'offer', sdp: pc.localDescription.sdp }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null, ...(source.window ? { window: source.window } : {}), ...(source.displays ? { display: source.display, displays: source.displays } : {}), ...(source.scaled ? { scaled: source.scaled } : {}), ...(source.tcc ? { tcc: source.tcc } : {}), ...(source.hdr ? { hdr: source.hdr } : {}) }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, ...(hdr ? { codecs: SM.streamCodecsOf({ hdr }).map((C) => C.mimeType) } : {}), maxKbps };
+    return { ok: true, sid, offer: { type: 'offer', sdp: SM.liteSessionSdp(pc.localDescription.sdp) }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null, ...(source.window ? { window: source.window } : {}), ...(source.displays ? { display: source.display, displays: source.displays } : {}), ...(source.scaled ? { scaled: source.scaled } : {}), ...(source.tcc ? { tcc: source.tcc } : {}), ...(source.hdr ? { hdr: source.hdr } : {}) }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, ...(hdr ? { codecs: SM.streamCodecsOf({ hdr }).map((C) => C.mimeType) } : {}), ...(wantMic ? { mic: true } : {}), maxKbps };
   }
   /** After the offer's reply went out: the candidates gathered while it was made follow as pushes, in order. */
   function replied(sid) {

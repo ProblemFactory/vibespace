@@ -179,6 +179,7 @@
   "/api/desktop/machine-desktop/apps",
   "/api/desktop/machine-desktop/displays",
   "/api/desktop/machine-desktop/last-close",
+  "/api/desktop/machine-desktop/mic",
   "/api/desktop/machine-desktop/link",
   "/api/desktop/machine-desktop/remoteapp/facts",
   "/api/desktop/machine-desktop/remoteapp/setup",

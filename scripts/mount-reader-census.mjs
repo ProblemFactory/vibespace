@@ -129,7 +129,7 @@ export const ROWS = [
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],
   ['src/server/device-alerts.js', 'own-tree', 1, null, DATA], // lane device-act-audit: the three urgent items' dedup ledger (data/device-alerts.json)
   ['src/server/dial-health-watch.js', 'own-tree', 1, null, DATA], // lane host-stale-dialer: data/dial-health.json (the For-you ledger)
-  ['src/server/dial-pairing.js', 'own-tree', 1, null, DATA],
+  ['src/server/dial-pairing.js', 'own-tree', 2, null, DATA], // lane mac-repair-retires-stale +1: data/agentd/hub-id (this hub's id, read once)
   ['src/server/exit-hook.js', 'own-tree', 2, null, PROC], // lane usage-fold-worker-exit-hook: /proc/self/task (a worker's thread named at spawn, listed at the join)
   ['src/server/exit-routes.js', 'own-tree', 1, null, DATA],
   ['src/server/fd-gauge.js', 'own-tree', 4, null, PROC],

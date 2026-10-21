@@ -47,11 +47,12 @@ console.log('— ① the layer table');
   ok(sentOps.length >= 40 && handled.length >= 45 && unlayered(plain).length === 0, `${plain.length} ops (client sends ${sentOps.length}, the daemon answers ${handled.length}), each a row`, unlayered(plain));
   ok(DA.TABLE['tcp-connect'] === 'act' && DA.TABLE['tcp-connect:loopback'] === 'read' && DA.layerOf({ op: 'tcp-connect', port: 5900 }) === 'read' && DA.layerOf({ op: 'tcp-connect', port: 22, host: '10.0.0.2' }) === 'act' && DA.layerOf({ op: 'tcp-connect', port: 1, host: '127.0.0.1' }) === 'read', 'tcp-connect: the loopback is a read, another host an act');
   // every action of the action ops
-  const fsActs = [...new Set([...daemon.matchAll(/msg\.action === '([a-z-]+)'/g), ...client.matchAll(/action: '([a-z-]+)'/g)].map((m) => m[1]))];
+  const MIC_ACTS = ['facts', 'default']; // lane stream-mic-road: the `stream-mic` op's actions (agentd's `msg.action === 'default'`, else facts)
+  const fsActs = [...new Set([...daemon.matchAll(/msg\.action === '([a-z-]+)'/g), ...client.matchAll(/action: '([a-z-]+)'/g)].map((m) => m[1]))].filter((a) => !MIC_ACTS.includes(a));
   const dfs = [...(read('src/design-fs.js').split('const ACTIONS = Object.freeze({')[1] || '').split('});')[0].matchAll(/(?:^|[{,])\s*'?([a-z][a-z-]*)'?:/g)].map((m) => m[1]);
   const dsv = require('../src/desktop-serve.js').DESKTOP_SERVE_OPS, bsv = require('../src/browser-serve.js').BROWSER_SERVE_OPS;
-  const miss = [...fsActs.map((a) => 'fs-op:' + a), ...dfs.map((a) => 'design-fs:' + a), ...dsv.map((a) => 'desktop-serve:' + a), ...bsv.map((a) => 'browser-serve:' + a)].filter((k) => !Object.prototype.hasOwnProperty.call(DA.TABLE, k));
-  ok(fsActs.length >= 12 && dfs.length >= 4 && dsv.length >= 15 && bsv.length >= 6 && miss.length === 0, `every action of fs-op (${fsActs.length}), design-fs (${dfs.length}), desktop-serve (${dsv.length}), browser-serve (${bsv.length}) is a row`, miss);
+  const miss = [...fsActs.map((a) => 'fs-op:' + a), ...dfs.map((a) => 'design-fs:' + a), ...dsv.map((a) => 'desktop-serve:' + a), ...bsv.map((a) => 'browser-serve:' + a), ...MIC_ACTS.map((a) => 'stream-mic:' + a)].filter((k) => !Object.prototype.hasOwnProperty.call(DA.TABLE, k));
+  ok(fsActs.length >= 12 && dfs.length >= 4 && dsv.length >= 15 && bsv.length >= 6 && miss.length === 0 && DA.layerOf({ op: 'stream-mic', action: 'facts' }) === 'read' && DA.layerOf({ op: 'stream-mic', action: 'default' }) === 'act' && DA.layerOf({ op: 'stream-mic' }) === 'act', `every action of fs-op (${fsActs.length}), design-fs (${dfs.length}), desktop-serve (${dsv.length}), browser-serve (${bsv.length}), stream-mic (${MIC_ACTS.length}: facts a read, default an act, none named = act) is a row`, miss);
   ok(Object.values(DA.TABLE).every((l) => DA.LAYERS.includes(l)), `every row's layer is one of ${DA.LAYERS.join(' / ')}`);
   const tableSrc = read('src/device-acts.js').split('const TABLE = Object.freeze({')[1].split('\n});')[0];
   const keys = [...tableSrc.matchAll(/'([a-z][a-z:-]*)': '(read|session|act|code)'/g)].map((m) => m[1]);
@@ -106,7 +107,7 @@ console.log('— ② the summary redaction (sizes, never bytes)');
 }
 
 console.log('— ③ THE ONE SEND POINT (a fake daemon link)');
-const CAPS = ['run-shell', 'fs-portable', 'fs-write-stream', 'place-secret', 'input-events', 'desktop-serve', 'app-install', 'browser-serve', 'design-fs', 'peer-post', 'pool-orders', 'settings-open', 'window-pin', 'proc-list', 'sysinfo', 'display-facts', 'desktop-grab', 'desktop-input']; // int315: + lane desktop-handover's two
+const CAPS = ['run-shell', 'fs-portable', 'fs-write-stream', 'place-secret', 'input-events', 'desktop-serve', 'app-install', 'browser-serve', 'design-fs', 'peer-post', 'pool-orders', 'settings-open', 'window-pin', 'proc-list', 'sysinfo', 'display-facts', 'desktop-grab', 'desktop-input', 'stream-mic']; // int315: + lane desktop-handover's two; lane stream-mic-road
 function fakeDm() {
   const lines = [], sent = [], logs = [];
   const dm = new DeviceManager({ dataDir: tmp, bundlePath: path.join(tmp, 'no-bundle.js'), version: '0', log: (...a) => logs.push(a.join(' ')), onAct: (l) => lines.push(l) });
@@ -157,6 +158,7 @@ function fakeDm() {
     ['windowPin', (dm) => dm.windowPin('w1', true, { by: BY }), 'window-pin'],
     ['desktopGrab', (dm) => dm.desktopGrab('s1', { by: BY }), 'desktop-grab'], // int315: lane desktop-handover's two acts (.313)
     ['desktopInput', (dm) => dm.desktopInput('s1', [{ t: 'kd', c: 'KeyA' }], { by: BY }), 'desktop-input'],
+    ['streamMic default', (dm) => dm.streamMic({ action: 'default', to: 'virtual', by: BY }), 'stream-mic:default'], // lane stream-mic-road: 「设为默认麦克风」
   ];
   const bad = [];
   for (const [name, fn, op] of acts) {
@@ -174,6 +176,7 @@ function fakeDm() {
   const reads = [
     ['fsStat', (dm) => dm.fsStat('/')], ['sysinfo', (dm) => dm.sysinfo()], ['tcpForward (its loopback)', (dm) => dm.tcpForward(5900)],
     ['desktopServe status', (dm) => dm.desktopServe('status', {})], ['browserServe status', (dm) => dm.browserServe('status', {})], ['designFs read', (dm) => dm.designFs('read', { dir: '/d' })],
+    ['streamMic facts', (dm) => dm.streamMic({ prepare: true })], // lane stream-mic-road: its facts (a Mac stages its plug-in) — a read
   ];
   const rbad = [];
   for (const [name, fn] of reads) { const { dm, lines } = fakeDm(); try { await fn(dm); } catch (e) { rbad.push(`${name}: ${e.message}`); } await sleep(2); if (lines.length) rbad.push(`${name}: ${JSON.stringify(lines)}`); }

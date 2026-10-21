@@ -54,6 +54,12 @@ function hostOf(url) {
     return `${u.hostname.includes(':') && !u.hostname.startsWith('[') ? `[${u.hostname}]` : u.hostname}:${port}`;
   } catch { return ''; }
 }
+/** lane mac-repair-retires-stale (B-06e9): THE HUB'S ID — `vh-` + 16 hex, minted once per hub (src/server/dial-pairing.js
+ *  hubId) and told to a device only after it proved its pairing (the --dial-check probe's 200, an accepted dial's hello).
+ *  The device keeps it in state/dial.json (`hub`), so a re-pair retires the older installs of the SAME hub on that machine
+ *  (scripts/vibespace-agentd-install.sh). → the id, or '' for anything else (an older hub sends none). Never throws. */
+const HUB_ID_RE = /^vh-[0-9a-f]{16}$/;
+function hubIdOf(v) { const s = typeof v === 'string' ? v.trim() : ''; return HUB_ID_RE.test(s) ? s : ''; }
 /** THE dial URL of a base. */
 function dialUrlOf(base, deviceId) { return String(base).replace(/^http/, 'ws') + DIAL_PATH + '?device=' + String(deviceId || ''); }
 /** verify-r4 F1: the BASE a dial URL dials (`wss://h:8443/api/device-dial?device=x` → `https://h:8443`; no path, no
@@ -427,10 +433,11 @@ function dialLogLine({ outcome, code, detail, attempt, delay, url, failedBefore,
 
 // ── ⑤ --dial-check ──────────────────────────────────────────────────────────
 const CHECK_EXITS = Object.freeze({ ok: 0, dns: 10, tls: 11, reach: 12, 'not-vibespace': 13, refused: 14, other: 15 });
-/** `{ok, code, detail, host, deviceId, serverVersion, status}` → `{exit, lines:[…]}` (the installer prints them). */
-function dialCheckLines({ ok = false, code = 'other', detail = '', host = '', deviceId = '', serverVersion = '', status = 0 } = {}) {
+/** `{ok, code, detail, host, deviceId, serverVersion, status, hub}` → `{exit, lines:[…]}` (the installer prints them; an ok
+ *  check from a hub that names itself adds `hub id: vh-…` — the installer reads it into dial.json, lane mac-repair-retires-stale). */
+function dialCheckLines({ ok = false, code = 'other', detail = '', host = '', deviceId = '', serverVersion = '', status = 0, hub = '' } = {}) {
   const h = clean(host, 120) || 'the address';
-  if (ok) return { exit: 0, lines: [`dial-check ok — ${h} is a VibeSpace ${clean(serverVersion, 40) || '(older than this device)'} and accepts device "${clean(deviceId, 64)}"`] };
+  if (ok) return { exit: 0, lines: [`dial-check ok — ${h} is a VibeSpace ${clean(serverVersion, 40) || '(older than this device)'} and accepts device "${clean(deviceId, 64)}"`, ...(hubIdOf(hub) ? [`hub id: ${hubIdOf(hub)}`] : [])] };
   const d = clean(detail);
   const bare = h.replace(/:\d+$/, '');
   if (code === 'dns') return { exit: CHECK_EXITS.dns, lines: [`dial-check failed — dns: ${d}`, `→ this device cannot resolve ${bare}. In the pairing dialog pick another address (a LAN or Tailscale IP) and generate a new command.`] };
@@ -686,7 +693,7 @@ function sshInstallInvocation({ args = '', installer = '' } = {}) {
 module.exports = {
   DIAL_PATH, CANDIDATE_KINDS, BASE_REFUSALS, DIAL_FAIL_CODES, DIAL_REFUSAL_CODES, DIAL_ROW_STATES, DIAL_REASONS,
   UP_LOST_MS, DETAIL_MAX, HEADER_MAX, HISTORY_MAX, CHECK_EXITS,
-  hostOf, dialUrlOf, dialBaseOfUrl, DIAL_BASE_MAX, dialAddressCandidates, dialBaseVerdict, ipv4Class, isLoopbackBase, isLoopbackAddress, bindAdmits, dialDefaultChoice, baseOfDialedHost, authorityOf,
+  hostOf, HUB_ID_RE, hubIdOf, dialUrlOf, dialBaseOfUrl, DIAL_BASE_MAX, dialAddressCandidates, dialBaseVerdict, ipv4Class, isLoopbackBase, isLoopbackAddress, bindAdmits, dialDefaultChoice, baseOfDialedHost, authorityOf,
   dialFailureOf, dialHeadersOf, parseDialHeaders, refusalSentence, nextDialStatus, dialLogLine,
   dialCheckLines, dialReasonOf, dialRowState, inPlacePushVerdict, duplicateDialVerdict, DUP_NOTE_MS, refusalBudget, refusalAddressKey, REFUSAL_BUDGET,
   sshInstallInvocation, deviceIdOf, pairNameShown, pairNameVerdict, pairRequestVerdict, DAEMON_PLATFORMS, commandOsOf,

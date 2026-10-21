@@ -303,9 +303,13 @@ The user gives you two DIFFERENT things, in this order:
     judged ONCE by the LLM plugin — is it an answer to your newest message
     before it? — only inside the user's reply-judging window after your send
     (Settings › Channels) and only where the plugin and its `rules` switch are
-    on (paid from THEIR daily budget). A yes notifies you like a quote does,
-    its `why` = `judged an answer to your message of <time>` and the score; a
-    no is remembered and never asked again.
+    on (paid from THEIR daily budget). The judge is also told what the user
+    wrote in that chat between your send and the message (how many, what kind
+    — a voice note is not transcribed — and how long before; never the words).
+    A yes notifies you like a quote does, its `why` = `judged an answer to your
+    message of <time>` (+ `; the user also wrote in between` when they did —
+    the hand-over line names what and when) and the score; a no is remembered
+    and never asked again.
   - judged by the LLM plugin (only where the user turned the plugin and its
     `rules` switch on; each judgment is paid from THEIR daily budget):
     `--kind decision --condition "words" [--choice a,b,c] [--threshold 0.7]

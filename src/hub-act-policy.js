@@ -40,6 +40,7 @@ const KIND_OF = Object.freeze({
   'fs-op:write': 'files', 'fs-op:rm': 'files', 'fs-op:rename': 'files', 'fs-op:mkdir': 'files', 'fs-op:copy': 'files', 'fs-op:move': 'files', 'fs-op:write-stream': 'files',
   'place-secret': 'files', 'design-fs:write-user': 'files',
   'input-events': 'input', 'desktop-grab': 'input', 'desktop-input': 'input', 'window-pin': 'input', 'settings-open': 'input', 'peer-post': 'input',
+  'stream-mic:default': 'input', // lane stream-mic-road: 「设为默认麦克风」 / 「改回」 — the machine's default microphone, like a Settings pane
   'tcp-connect': 'forward', 'serve-socks': 'forward',
   'serve-folder': 'serve', 'browser-serve:start': 'serve', 'browser-serve:remove': 'serve',
   'desktop-serve:app-install': 'install', 'desktop-serve:app-remove': 'install', 'desktop-serve:app-fetch': 'install',

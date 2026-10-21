@@ -107,9 +107,28 @@ function refuseDial(socket, code, deviceId) {
   } catch { }
   setTimeout(() => { try { socket.destroy(); } catch { } }, 2000).unref?.();
 }
-/** The --dial-check probe's answer (§4.4): 200 + `X-VibeSpace-Dial-Probe: ok` — the device is NOT registered. */
+/** lane mac-repair-retires-stale (B-06e9): THIS hub's id (`vh-` + 16 hex, PURE rule DF.hubIdOf) — minted ONCE into
+ *  AGENTD_DIR/hub-id (O_EXCL; a racing twin's file wins), then read from memory. Told to a device only after it proved its
+ *  pairing (the probe's 200 below, the hello of an accepted dial — src/agentd/client.js); the device keeps it in its
+ *  dial.json so a re-pair retires the older installs of the SAME hub. '' when it cannot be read or written (nothing is
+ *  retired then — the safe direction). Never throws. */
+let _hubId = null;
+function hubId() {
+  if (_hubId !== null) return _hubId;
+  const f = path.join(AGENTD_DIR, 'hub-id');
+  const read = () => { try { return DF.hubIdOf(fs.readFileSync(f, 'utf8')); } catch { return ''; } };
+  let id = read();
+  if (!id) {
+    try { ensureDir(AGENTD_DIR); fs.writeFileSync(f, 'vh-' + require('crypto').randomBytes(8).toString('hex') + '\n', { flag: 'wx', mode: 0o600 }); } catch { /* EEXIST: a twin minted it first */ }
+    id = read();
+  }
+  _hubId = id;
+  return id;
+}
+/** The --dial-check probe's answer (§4.4): 200 + `X-VibeSpace-Dial-Probe: ok` — the device is NOT registered. `hub` = this
+ *  hub's id (lane mac-repair-retires-stale): the probe passed the token check, so the device holds this hub's pairing. */
 function answerProbe(socket, deviceId) {
-  const body = JSON.stringify({ ok: true, deviceId: String(deviceId || '').slice(0, 64), serverVersion: SERVER_VERSION });
+  const body = JSON.stringify({ ok: true, deviceId: String(deviceId || '').slice(0, 64), serverVersion: SERVER_VERSION, ...(hubId() ? { hub: hubId() } : {}) });
   try { socket.end(`HTTP/1.1 200 OK\r\nX-VibeSpace-Dial-Probe: ok\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`); } catch { }
   setTimeout(() => { try { socket.destroy(); } catch { } }, 2000).unref?.();
 }
@@ -281,6 +300,7 @@ async function deviceForDial(deviceId, _retried = false) {
       dataDir: path.join(rootDir, 'data'),
       bundlePath: path.join(rootDir, 'data', 'bin', 'vibespace-agentd.js'),
       version: require('../../package.json').version,
+      hub: hubId(), // lane mac-repair-retires-stale: named in the hello (the device keeps it once the host token proved this hub)
       transport: { kind: 'stream', hostToken: () => agentdHostToken('dial-' + deviceId), getStream: () => agentdDials.get(deviceId) || null },   // asked at every connect: a LOCKED vault refuses it by name (no cached copy outlives a lock)
       // lane device-upgrade-stuck: the line NAMES the device — two devices' upgrade lines read as one machine's "two versions"
       log: (...a) => console.log('[device-dial]', JSON.stringify(String(deviceId)), ...a),
@@ -366,7 +386,7 @@ const CHAT_WRAPPER = path.join(rootDir, 'data', 'bin', 'chat-wrapper.js');
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
 
   return { CHAT_WRAPPER, agentdDialDevices, agentdDials,
-    agentdMintDialPair, daemonPtyShim, deviceForDial, ensureAgentdOnHost,
+    agentdMintDialPair, daemonPtyShim, deviceForDial, ensureAgentdOnHost, hubId,
     unpairDialDevice, gateDialUpgrade, admitDial, noteDialEvent, lockOutDialHolder, upgradeLedgerFor, UPGRADE_RETRY_AFTER_MS, AUTH_FAIL_REHELLO_MS, DUP_PROBE_MS };
 }
 module.exports = { create };

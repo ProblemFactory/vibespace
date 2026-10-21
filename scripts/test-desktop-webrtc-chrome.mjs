@@ -74,6 +74,16 @@
 //   ⑬ THE ESTIMATE (lane stream-mac-rate — werift 0.25's send-side estimate counts ~one packet a picture: the owner's 300 kbps):
 //      THE fixture padded to ~3 Mbps (a filler NAL a picture — 11 packets each) through the real agent bundle to this Chrome:
 //      the agent's estimate (its own transport-cc reading) stays within 0.7–2.5 × what it sent — werift's would read ~1/11
+//   ⑲ THE MICROPHONE ALLOWED (lane werift-lite-multihomed — backlog B-c7d7: a person who pressed 「麦克风」 once; Chrome remembers
+//      it per origin and then offers EVERY adapter of the computer as a host candidate, not one mDNS name): granted to this origin
+//      BEFORE the window opens, the stream PLAYS; the browser read the agent's offer as ICE-lite (its own copy of the offer says
+//      a=ice-lite at the session level) and the picture arrives on the pair the BROWSER selected (it moves its pair as more pairs
+//      pass — the agent follows, its log says so) — RED CONTROL: the agent's offer and pair handling as werift writes them
+//      (a=ice-lite inside the media sections only — the browser drops it — and the first nomination kept for good) stays black
+//      on a computer whose browser offers ≥ 2 addresses (one address: said, not judged — the black stream needs two)
+//      NEVER SILENT before a picture: an agent that answers no check ⇒ at the connect budget (STREAM_LIMITS.connectMs) the strip
+//      says 串流中断：没能及时连上——正在重新连接… (leg ⑥'s words) — RED CONTROL: the window before this lane still says only
+//      串流 · 连接中… at that moment (it spoke at the 45 s fallback)
 import fs from 'node:fs';
 import net from 'node:net';
 import http from 'node:http';
@@ -84,6 +94,7 @@ import { createRequire } from 'node:module';
 import { freePort, scratch, endDaemonsOf, ONBOARDED_SOURCE } from './scratch.mjs';
 import { writeFakeFfmpeg, factsLine, calibrationFrame } from './fixtures/stream/screen-fakes.mjs';
 import { writeFakeWgc, writeFakeCsc } from './fixtures/stream/window-fakes.mjs';
+import { writeFakeMic, winFacts, toneRatio } from './fixtures/stream/mic-fakes.mjs'; // lane stream-mic-road ⑰: the machine's microphone, a fake sink
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -148,12 +159,21 @@ fs.mkdirSync(path.join(root, 'bundle'), { recursive: true });
 const PROBE = 'const i = tokens.findIndex((tk) => tk.equals(m));', PROGRAM = 'program: process.platform === "win32" ? process.execPath : null';
 const NODE_EXE = 'C:\\Users\\owner\\AppData\\Local\\vibespace\\node\\node.exe';
 ok(bundleText.split(PROBE).length === 2 && bundleText.split(PROGRAM).length === 2, 'the bundle carries the self-probe\'s receive line and the stream host\'s program (the copy patches exactly those)');
-fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.replace(HELLO, '$1platform: "win32",').replace(INJ, '$1platform: "win32",').replace(SCR, '$1platform: "win32",').replace(WSRC, '$1platform: "win32",').replace(PROBE, 'const i = -1;').replace(PROGRAM, `program: ${JSON.stringify(NODE_EXE)}`));
+// ⑲ (lane werift-lite-multihomed): BASE_ICE = the agent's offer and pair handling as werift writes them (the offer's SDP unchanged,
+// no pair followed — the RED CONTROL); DEAF_ICE = the agent answers no check at all (ICE never connects — the strip at the budget)
+const BASE_ICE = path.join(root, 'base-ice'), DEAF_ICE = path.join(root, 'deaf-ice');
+const LITE = 'SM.liteSessionSdp(', FOLLOW = 'if (!msg || !Array.isArray(msg.attributesKeys) || !msg.attributesKeys.includes("USE-CANDIDATE")) return true;';
+ok(bundleText.split(LITE).length === 3 && bundleText.split(FOLLOW).length === 2, 'the bundle carries the two offers\' session-level a=ice-lite and THE BROWSER\'S CHOICE (the copy patches exactly those)');
+fs.writeFileSync(path.join(root, 'bundle', 'vibespace-agentd.js'), bundleText.replace(HELLO, '$1platform: "win32",').replace(INJ, '$1platform: "win32",').replace(SCR, '$1platform: "win32",').replace(WSRC, '$1platform: "win32",').replace(PROBE, 'const i = -1;').replace(PROGRAM, `program: ${JSON.stringify(NODE_EXE)}`)
+  .split(LITE).join(`(require("fs").existsSync(${JSON.stringify(BASE_ICE)}) ? String : SM.liteSessionSdp)(`)
+  .replace(FOLLOW, `if (require("fs").existsSync(${JSON.stringify(DEAF_ICE)})) return false; if (require("fs").existsSync(${JSON.stringify(BASE_ICE)})) return true; ${FOLLOW}`));
 const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
-process.env.HOME = home; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home); process.env.WINDIR = WINDIR; process.env.LOCALAPPDATA = LAD; // ⑪: the helper's build recipe reads these
+const MM = require(path.join(REPO, 'src/mic-model.js'));
+const MIC = writeFakeMic(path.join(root, 'mic')); // ⑰: the agent's microphone helper — a fake sink (src/desktop-mic.js's seam)
+process.env.HOME = home; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home); process.env.WINDIR = WINDIR; process.env.LOCALAPPDATA = LAD; process.env.VIBESPACE_MIC_HELPER = MIC.exe; // ⑪: the helper's build recipe reads these
 const dataDir = path.join(home, 'hub-data'); fs.mkdirSync(dataDir, { recursive: true });
 dm = new DeviceManager({ dataDir, bundlePath: path.join(root, 'bundle', 'vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
-try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; delete process.env.WINDIR; delete process.env.LOCALAPPDATA; }
+try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; delete process.env.WINDIR; delete process.env.LOCALAPPDATA; delete process.env.VIBESPACE_MIC_HELPER; }
 ok(dm.status().info.platform === 'win32' && dm.status().info.capabilities.includes('stream-offer'), 'a real agent, Windows-shaped, says stream-offer');
 
 // ── the machine's VNC server for the fallback: a stub RFB 3.8, VNC-password sign-in, one 1280×720 green frame ─────────
@@ -244,7 +264,15 @@ await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }
 // frame AFTER they first showed (two rAFs), once (no resize watch): the frame the .315 mirror's 钉住 press aimed at
 const PIN_PLACE = "    requestAnimationFrame(above);\n    if (typeof ResizeObserver === 'function') { const ro = new ResizeObserver(() => { if (me.isConnected) above(); else ro.disconnect(); }); ro.observe(me); } // after createPopover's own (its viewport clamp first)\n";
 const prePin = { name: 'pre-pin', setup(b) { b.onLoad({ filter: /stream-stats\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(PIN_PLACE)) throw new Error('the details\' placement lines moved'); return { contents: src.replace(PIN_PLACE, '    requestAnimationFrame(() => requestAnimationFrame(above));\n'), loader: 'js' }; }); } };
+// ⑰'s RED control (lane stream-mic-road): the toggle's dispose WITHOUT its close verdict (the microphone outlives its window)
+const MIC_DISPOSE = "    dispose() { if (disposed) return; run(micStep(st, { type: 'close' })); disposed = true;";
+const micLeak = { name: 'mic-leak', setup(b) { b.onLoad({ filter: /stream-mic-strip\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(MIC_DISPOSE)) throw new Error('the toggle\'s dispose line moved'); return { contents: src.replace(MIC_DISPOSE, '    dispose() { if (disposed) return; disposed = true;'), loader: 'js' }; }); } };
+await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-micleak.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [micLeak] });
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-prepin.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [prePin] });
+// ⑲'s NEVER SILENT RED CONTROL (lane werift-lite-multihomed): the window before the lane — its connect-budget words gone
+const SLOW_SAID = "        if (state === 'restarting' && code === 'timeout' && v === stream) { slowSaid = true; note(t('Stream interrupted: {why} — reconnecting…', { why: streamWords('connect_timeout') })); }\n";
+const preSilent = { name: 'pre-silent', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(SLOW_SAID)) throw new Error('the connect-budget words\' line moved'); return { contents: src.replace(SLOW_SAID, ''), loader: 'js' }; }); } };
+await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-presilent.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [preSilent] });
 const app = express(); app.use(express.json());
 app.use(R.router);
 const CSS = ['style', 'viewers', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
@@ -254,6 +282,7 @@ app.get('/page-notable.js', (q, s) => s.type('text/javascript').send(fs.readFile
 app.get('/page-fwlast.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-fwlast.js'))));
 app.get('/page-prelane.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-prelane.js'))));
 app.get('/page-prepin.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-prepin.js'))));
+app.get('/page-micleak.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-micleak.js'))));
 app.get('/novnc.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(NOVNC)));
 const HTML = `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-root);height:100vh;overflow:hidden}</style></head><body><script src="/page.js"></script></body></html>`;
 app.get('/', (q, s) => s.type('text/html').send(HTML));
@@ -261,6 +290,9 @@ app.get('/notable', (q, s) => s.type('text/html').send(HTML.replace('/page.js', 
 app.get('/fwlast', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-fwlast.js')));
 app.get('/prelane', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-prelane.js')));
 app.get('/prepin', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-prepin.js')));
+app.get('/page-presilent.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-presilent.js'))));
+app.get('/presilent', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-presilent.js')));
+app.get('/micleak', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-micleak.js')));
 const PORT = await freePort();
 srv = http.createServer(app);
 srv.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head, bridge.upgradeId(new URL(req.url, 'http://x').pathname)));
@@ -271,7 +303,10 @@ const CDP_PORT = await freePort();
 const chromeHome = path.join(root, 'chrome-home'), chromeRun = path.join(root, 'chrome-run');
 fs.mkdirSync(chromeHome, { recursive: true }); fs.mkdirSync(chromeRun, { recursive: true, mode: 0o700 });
 const cenv = { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun }; delete cenv.DISPLAY; delete cenv.WAYLAND_DISPLAY;
-chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'chrome-profile')}`, 'about:blank'], { stdio: 'ignore', env: cenv, detached: true });
+// ⑰ (lane stream-mic-road): Chrome's fake microphone — 3 s of a 1 kHz tone at −20 dBFS, 48 kHz mono s16le (Chrome loops it)
+const MIC_WAV = path.join(root, 'mic-tone.wav');
+{ const n = 48000 * 3, d = Buffer.alloc(n * 2); for (let i = 0; i < n; i++) d.writeInt16LE(Math.round(3277 * Math.sin(2 * Math.PI * 1000 * i / 48000)), i * 2); const h = Buffer.alloc(44); h.write('RIFF', 0); h.writeUInt32LE(36 + d.length, 4); h.write('WAVEfmt ', 8); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(48000, 24); h.writeUInt32LE(96000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(d.length, 40); fs.writeFileSync(MIC_WAV, Buffer.concat([h, d])); }
+chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'chrome-profile')}`, '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${MIC_WAV}`, 'about:blank'], { stdio: 'ignore', env: cenv, detached: true }); // ⑰: Chrome's fake microphone = a 1 kHz tone WAV. NEVER --use-fake-ui-for-media-stream: a page holding the microphone permission makes Chrome gather on every adapter, and a new stream to werift's ICE-lite agent then never connects on a multi-homed box (measured on base c1aba74c) — ⑰ grants it only once its stream plays, and resets it
 const WebSocket = require(path.join(REPO, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 // ⑯ (lane stream-hdr-passthrough): a mocked HDR viewer — headless Chrome has no HDR screen; `screen` = (dynamic-range: high), switchable
@@ -282,7 +317,9 @@ const HDR_MOCK = (screen, decoder) => `(() => { const mq = { matches: ${!!screen
   window.__hdrScreen = (v) => { mq.matches = !!v; for (const f of [...mq.ls]) f({ matches: mq.matches, media: mq.media }); return true; };
   window.__hdrDecoder = ${JSON.stringify(decoder)};
   const mc = navigator.mediaCapabilities; if (mc) { const di = mc.decodingInfo.bind(mc); mc.decodingInfo = async (c) => (c && c.type === 'webrtc' && /av1/i.test((c.video && c.video.contentType) || '') ? { ...window.__hdrDecoder } : di(c)); } })();`;
-async function page(w, h, winCss, { at = '/', mac = false, touch = false, hdr = null } = {}) {
+// ⑲ (lane werift-lite-multihomed): every RTCPeerConnection the page makes, kept — with the candidates it gathered
+const PC_HOOK = `(() => { const R = window.RTCPeerConnection; if (!R) return; window.__pcs = []; const W = function (...a) { const pc = new R(...a); window.__pcs.push(pc); pc.__cands = []; pc.addEventListener('icecandidate', (e) => { if (e.candidate) pc.__cands.push(e.candidate.candidate); }); return pc; }; W.prototype = R.prototype; Object.setPrototypeOf(W, R); window.RTCPeerConnection = W; })();`;
+async function page(w, h, winCss, { at = '/', mac = false, touch = false, hdr = null, pcs = false } = {}) {
   const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
@@ -291,7 +328,10 @@ async function page(w, h, winCss, { at = '/', mac = false, touch = false, hdr = 
   const cdp = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   await cdp('Runtime.enable'); await cdp('Page.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+  // ⑰: every getUserMedia the page makes is counted and its tracks kept (were they asked? are they stopped?)
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "(() => { const md = navigator.mediaDevices; window.__gum = 0; window.__micTracks = []; if (!md || !md.getUserMedia) return; const g = md.getUserMedia.bind(md); md.getUserMedia = async (c) => { window.__gum++; const s = await g(c); for (const t of s.getAudioTracks()) window.__micTracks.push(t); return s; }; })();" });
   if (hdr) await cdp('Page.addScriptToEvaluateOnNewDocument', { source: HDR_MOCK(hdr.screen, hdr.decoder) });
+  if (pcs) await cdp('Page.addScriptToEvaluateOnNewDocument', { source: PC_HOOK });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); } catch {} window.__winCss = ${JSON.stringify(winCss)};${mac ? " Object.defineProperty(navigator, 'userAgentData', { value: { platform: 'macOS' }, configurable: true });" : ''}` });
   await cdp('Emulation.setFocusEmulationEnabled', { enabled: true });
   await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: w < 600 });
@@ -1081,6 +1121,222 @@ console.log('⑮ a phone: the summary\'s tap, the pill under a finger');
   ok(reAway, '⑮ …for 3 s, then it fades again');
   await p.ev('document.exitFullscreen().catch(() => {})');
   await p.close();
+}
+console.log('⑰ THE MICROPHONE (lane stream-mic-road): 「麦克风」 — Chrome\'s fake microphone over the m-line to the machine\'s virtual microphone');
+{
+  const MIC_BTN = `${WIN} .desktop-strip-mic`, ROAD = `${WIN} .desktop-strip-mic-road`;
+  const nodeUntil = async (f, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(60); } return false; };
+  const micForce = () => fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-desktop/mic?host=win-a&force=1`).then((r) => r.json());
+  MIC.setFacts(winFacts()); const f0 = await micForce();
+  ok(f0.state && f0.state.state === 'installed' && f0.words.road === 'virtual', '⑰ the hub reads the machine\'s microphone (GET …/mic): VB-CABLE installed', f0.state);
+  const micState = (p) => p.ev(`(() => { const b = document.querySelector('${MIC_BTN}'); if (!b) return null; const w = document.querySelector('${ROAD}'); const d = document.querySelector('${WIN} .desktop-strip-mic-install'); return { shown: !b.hidden, pressed: b.getAttribute('aria-pressed'), dot: !b.querySelector('.desktop-strip-mic-dot').hidden, label: b.textContent, words: w && !w.hidden ? w.textContent : null, door: !!d && !d.hidden, gum: window.__gum, tracks: (window.__micTracks || []).map((t) => t.readyState) }; })()`);
+  const grant = (p) => p.cdp('Browser.grantPermissions', { origin: `http://127.0.0.1:${PORT}`, permissions: ['audioCapture'] }); // the person's answer to Chrome's own prompt — once the stream plays (see the launch line)
+  const ungrant = (p) => p.cdp('Browser.resetPermissions', {});
+  const press = async (p) => { const at = await p.ev(`(() => { const b = document.querySelector('${MIC_BTN}').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`); await p.click(at[0], at[1]); };
+  const p = await page(1280, 800, DESK);
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  ok(await playing(p), '⑰ the stream plays');
+  const shown = await p.until(`(() => { const b = document.querySelector('${MIC_BTN}'); return !!b && !b.hidden; })()`, 8000);
+  const s0 = await micState(p);
+  ok(shown && s0.pressed === 'false' && !s0.dot && s0.label.includes('麦克风') && s0.words === null && s0.gum === 0, '⑰ the stream offered the m-line ⇒ 「麦克风」 shows on the strip — OFF (no dot, no words) and the browser was NEVER asked', s0);
+  const n0 = MIC.renders().length;
+  await sleep(1200);
+  ok(MIC.renders().length === n0, '⑰ nothing reaches the machine while it is off (no render started)');
+  await p.shot('mic-off.png', `${WIN} .desktop-strip`);
+  await grant(p);
+  await press(p);
+  const live = await p.until(`(() => { const b = document.querySelector('${MIC_BTN}'); return b.getAttribute('aria-pressed') === 'true' && !b.querySelector('.desktop-strip-mic-dot').hidden; })()`, 8000);
+  const s1 = await micState(p);
+  ok(live && s1.gum === 1 && s1.tracks.length === 1 && s1.tracks[0] === 'live', '⑰ a press asks the browser ONCE (its own prompt — granted) ⇒ live on the PLAYING stream (no renegotiation): aria-pressed and the RED DOT', s1);
+  ok(await playing(p), '⑰ …and the picture plays on (the track joined the m-line by replaceTrack)');
+  const dot = await p.ev(`(() => { const d = document.querySelector('${MIC_BTN} .desktop-strip-mic-dot'); const s = getComputedStyle(d); return { bg: s.backgroundColor, red: getComputedStyle(document.documentElement).getPropertyValue('--red').trim(), w: d.getBoundingClientRect().width }; })()`);
+  ok(/^rgb\((\d+), (\d+), (\d+)\)$/.test(dot.bg) && Number(/^rgb\((\d+)/.exec(dot.bg)[1]) > 150 && Number(/, (\d+),/.exec(dot.bg)[1]) < 120 && dot.w >= 6, `⑰ the dot is red (the theme's --red ${dot.red || '(unset — its fallback)'}: ${dot.bg})`, dot);
+  const started = await nodeUntil(() => MIC.renders().length === n0 + 1, 10000);
+  const r1 = MIC.renders()[n0] || {};
+  ok(started && r1.device === 'cab-in' && r1.speakers === false, '⑰ the machine started ONE render into «CABLE Input» (its id on the helper\'s env)', r1);
+  const said = await p.until(`((document.querySelector('${ROAD}') || {}).textContent || '').includes('你的声音 → 本机应用的麦克风『CABLE Output (VB-Audio Virtual Cable)』')`, 8000);
+  ok(said && !(await micState(p)).door, '⑰ the strip says where the voice goes: 「你的声音 → 本机应用的麦克风『CABLE Output (VB-Audio Virtual Cable)』」 (no install door)', (await micState(p)).words);
+  await p.shot('mic-live.png', `${WIN} .desktop-strip`);
+  await sleep(2500);
+  await press(p);
+  const off = await p.until(`(() => { const b = document.querySelector('${MIC_BTN}'); return b.getAttribute('aria-pressed') === 'false' && b.querySelector('.desktop-strip-mic-dot').hidden; })()`, 5000);
+  const s2 = await micState(p);
+  ok(off && s2.tracks.every((x) => x === 'ended') && s2.words === null, '⑰ a second press ⇒ OFF: no dot, no words, the browser\'s track STOPPED', s2);
+  const closed = await nodeUntil(() => MIC.ended(n0 + 1), MM.MIC_LIMITS.idleMs + 5000);
+  const pcm = MIC.binOf(n0 + 1), ratio = toneRatio(pcm);
+  ok(closed && pcm.length > 1.5 * 48000 * 4 && ratio > 20, `⑰ the machine's road ended on its own (no packet for ${MM.MIC_LIMITS.idleMs} ms); it got ${(pcm.length / 192000).toFixed(1)} s of PCM carrying Chrome's fake microphone (its 1 kHz tone: ${ratio.toFixed(0)}× the 3 kHz energy)`, { bytes: pcm.length, ratio });
+  // a LOCK: the page hidden (a phone's lock, a minimized window) ⇒ off
+  await press(p);
+  await p.until(`document.querySelector('${MIC_BTN}').getAttribute('aria-pressed') === 'true'`, 8000);
+  await p.ev(`Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); true`);
+  const locked = await p.until(`document.querySelector('${MIC_BTN}').getAttribute('aria-pressed') === 'false'`, 3000);
+  const s3 = await micState(p);
+  ok(locked && s3.tracks.every((x) => x === 'ended') && !s3.dot, '⑰ the page hidden (a lock) ⇒ OFF, the track stopped', s3);
+  await p.ev(`Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true }); true`);
+  // THE WINDOW closes while live ⇒ the track stops with it
+  await press(p);
+  await p.until(`document.querySelector('${MIC_BTN}').getAttribute('aria-pressed') === 'true'`, 8000);
+  await p.ev('window.__closeAll()'); await sleep(400);
+  const s4 = await p.ev('(window.__micTracks || []).map((t) => t.readyState)');
+  ok(s4.length === 3 && s4.every((x) => x === 'ended'), '⑰ the window closed while live ⇒ the track stopped with it', s4);
+  // A RESTORED window never re-opens it: the page reloaded, the window opened again — the browser is never asked
+  await p.cdp('Page.reload', { ignoreCache: true }); await sleep(400); await p.until('typeof window.__open === "function"', 10000);
+  const nR = MIC.renders().length;
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  await p.until(`(() => { const b = document.querySelector('${MIC_BTN}'); return !!b && !b.hidden; })()`, 10000); await sleep(1500);
+  const s5 = await micState(p);
+  ok(s5 && s5.pressed === 'false' && !s5.dot && s5.gum === 0 && MIC.renders().length === nR, '⑰ a restored window starts the microphone OFF — the browser never asked, nothing sent (micStep\'s restore row; the origin STILL holds the permission)', s5);
+  await p.ev('window.__closeAll()'); await ungrant(p); await sleep(300);
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  ok(await playing(p), '⑰ (the permission reset: the next window plays — see the launch line for why it is held only while a stream plays)');
+  // THE SPEAKERS ROAD: no virtual microphone ⇒ said every time it is in force, with the install door
+  MIC.setFacts(winFacts({ cable: false })); await micForce();
+  await grant(p);
+  await press(p);
+  const spk = await p.until(`((document.querySelector('${ROAD}') || {}).textContent || '').includes('对方电脑会从扬声器播放你的声音')`, 10000);
+  const s6 = await micState(p);
+  const r6 = MIC.renders()[MIC.renders().length - 1] || {};
+  ok(spk && s6.door && r6.speakers === true && r6.device === null, '⑰ no virtual microphone ⇒ the strip says 「对方电脑会从扬声器播放你的声音」 with 「安装虚拟麦克风…」 beside it; the machine plays it on its speakers', { s6, r6 });
+  await p.shot('mic-speakers.png', `${WIN} .desktop-strip`);
+  // THE DOOR: 「安装虚拟麦克风…」 opens THE install dialog with the plan the agent's facts give (absent ⇒ VB-CABLE); Install POSTs it with
+  // the page's language and the shown plan's digest (the answer stubbed here — the run itself is test-stream-mic-op §8's)
+  await p.ev(`document.querySelector('${WIN} .desktop-strip-mic-install').click(); true`);
+  const dlg = await p.until(`(() => { const d = document.querySelector('#desktop-install-dialog'); return !!d && /VB-CABLE/.test(d.querySelector('.desktop-install-facts')?.textContent || '') && /VBCABLE_Setup_x64\.exe/.test(d.querySelector('.desktop-install-pre')?.textContent || ''); })()`, 15000);
+  const dtext = await p.ev(`document.querySelector('#desktop-install-dialog')?.textContent || ''`);
+  ok(dlg && /安装虚拟麦克风/.test(dtext) && /vb-cable\.com/.test(dtext) && /Windows PowerShell/.test(dtext) && /b950e39f01af1d04ea623c8f6d8eb9b6ea5c477c637295fabf20631c85116bfb/.test(dtext), '⑰ the door opens THE install dialog: VB-CABLE donationware (vb-cable.com), its pinned SHA-256, the ONE UAC prompt, the commands', dtext.slice(0, 400));
+  await p.ev(`(() => { const f = window.fetch; window.__installReq = null; window.fetch = async (u, o) => { if (String(u).startsWith('/api/desktop/install?')) { window.__installReq = { url: String(u), method: o && o.method, body: o && o.body }; return new Response(JSON.stringify({ done: true, what: 'virtual-mic', label: 'VB-CABLE', defaultsKept: true }) + '\\n', { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } }); } return f(u, o); }; return true; })()`);
+  await p.ev(`document.querySelector('#desktop-install-dialog .desktop-install-actions .btn-create').click(); true`);
+  const kept = await p.until(`/已保持你原来的默认扬声器和麦克风/.test(document.querySelector('#desktop-install-dialog .desktop-install-note')?.textContent || '')`, 8000);
+  const req = await p.ev('window.__installReq');
+  let body = null; try { body = JSON.parse(req && req.body); } catch { body = null; }
+  ok(kept && req && req.method === 'POST' && /[?&]lang=zh(&|$)/.test(req.url) && body && body.what === 'virtual-mic' && body.host === 'win-a' && typeof body.planDigest === 'string' && body.planDigest.length > 8, '⑰ Install POSTs the shown plan (its digest) with the page\'s language; done ⇒ 「…已保持你原来的默认扬声器和麦克风」', { req, kept });
+  await p.ev(`document.querySelector('#desktop-install-dialog .dialog-close')?.click(); document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+  await press(p);
+  ok(MIC.setdefaults().length === 0, '⑰ no default device was ever changed by the stream');
+  await ungrant(p);
+  await p.close();
+  MIC.setFacts(winFacts()); await micForce();
+  // RED CONTROL: a toggle whose window close forgets the microphone (dispose without its `close` verdict) leaves the track LIVE
+  const pl = await page(1280, 800, DESK, { at: '/micleak' });
+  await pl.ev(`window.__open(${JSON.stringify(M)})`);
+  await playing(pl);
+  await pl.until(`(() => { const b = document.querySelector('${MIC_BTN}'); return !!b && !b.hidden; })()`, 8000);
+  await grant(pl);
+  await press(pl);
+  await pl.until(`document.querySelector('${MIC_BTN}').getAttribute('aria-pressed') === 'true'`, 8000);
+  await pl.ev('window.__closeAll()'); await sleep(400);
+  const leak = await pl.ev('(window.__micTracks || []).map((t) => t.readyState)');
+  ok(leak.length === 1 && leak[0] === 'live', '⑰ RED CONTROL: the toggle without its close verdict leaves the microphone LIVE after the window closed — the row above catches it', leak);
+  await pl.ev('(window.__micTracks || []).forEach((t) => t.stop()); true');
+  await ungrant(pl);
+  await pl.close();
+  // a PHONE: the same strip
+  const ph = await page(375, 667, PHONE, { touch: true });
+  await ph.ev(`window.__open(${JSON.stringify(M)})`);
+  ok(await playing(ph), '⑰ phone 375: it plays');
+  await ph.until(`(() => { const b = document.querySelector('${MIC_BTN}'); return !!b && !b.hidden; })()`, 8000);
+  await ph.ev(`document.querySelector('${MIC_BTN}').scrollIntoView({ inline: 'center', block: 'nearest' }); true`); await sleep(200);
+  const pat = await ph.ev(`(() => { const b = document.querySelector('${MIC_BTN}').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2), b.right <= innerWidth + 1 && b.left >= -1]; })()`);
+  await grant(ph);
+  await ph.tap(pat[0], pat[1]);
+  const phLive = await ph.until(`document.querySelector('${MIC_BTN}').getAttribute('aria-pressed') === 'true'`, 8000);
+  ok(pat[2] && phLive && (await micState(ph)).dot, '⑰ phone: 「麦克风」 is on the same strip (in view), a tap turns it on — the red dot', pat);
+  await ph.shot('phone-mic.png', `${WIN} .desktop-strip`);
+  await ungrant(ph);
+  await ph.close();
+}
+console.log('⑱ backlog B-c7d7 (found by lane stream-mic-road, fixed by lane werift-lite-multihomed): a NEW stream while the origin holds the microphone permission PLAYS');
+{
+  // A check since int339 (it was INFORMATIONAL until the fix lane landed). Measured on base c1aba74c too (the permission alone, no
+  // microphone code): Chrome then gathers on every adapter and, before lane werift-lite-multihomed, this ICE-lite agent never
+  // connected on a computer with several adapters. The agent's ICE view is printed either way
+  const p = await page(1280, 800, DESK);
+  await p.cdp('Browser.grantPermissions', { origin: `http://127.0.0.1:${PORT}`, permissions: ['audioCapture'] });
+  const before = new Set((await sessions()).map((x) => x.key));
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  const plays = await playing(p);
+  await sleep(1500);
+  const s = (await sessions()).find((x) => !before.has(x.key)) || null;
+  const ice = s && s.stats ? s.stats.ice : null;
+  ok(plays, `⑱ B-c7d7: a new stream with the microphone permission held plays (before lane werift-lite-multihomed: never, on a computer with several adapters) — the agent's ICE ${ice ? ice.state : '?'}, the browser's candidates as werift holds them: ${ice ? ice.remotes.length : 0}`, ice ? { state: ice.state, nominated: ice.nominated } : null);
+  console.log(`  INFO ⑱ the agent's ICE: state ${ice ? ice.state : '?'}, nominated ${ice && ice.nominated ? `${ice.nominated.local} → ${ice.nominated.remote}` : 'none'}`);
+  console.log(`  INFO ⑱ the browser's candidates as werift holds them (${ice ? ice.remotes.length : 0}): ${ice ? ice.remotes.join(' · ') : '?'}`);
+  for (const pr of (ice && ice.pairs) || []) console.log(`  INFO ⑱ pair ${pr.local} → ${pr.remote}: ${pr.state}${pr.nominated ? ' NOMINATED' : ''}${pr.remoteNominated ? ' (the browser nominated)' : ''} rx ${pr.rx} tx ${pr.tx}`);
+  await p.ev('window.__closeAll()'); await sleep(300);
+  await p.cdp('Browser.resetPermissions', {});
+  await p.close();
+}
+console.log('⑲ THE MICROPHONE ALLOWED (lane werift-lite-multihomed): the browser offers every adapter — the stream plays, on the pair the browser chose');
+{
+  // the browser target's CDP (a permission is the browser's, per origin) — ONE session for the whole leg: Chrome drops a
+  // DevTools permission override when the session that set it detaches (measured: a grant from a closed session left the mDNS name)
+  const bws = new WebSocket((await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).json()).webSocketDebuggerUrl);
+  await new Promise((r) => bws.on('open', r));
+  let bseq = 0; const bpend = new Map();
+  bws.on('message', (d) => { const x = JSON.parse(d); if (x.id && bpend.has(x.id)) { bpend.get(x.id)(x); bpend.delete(x.id); } });
+  const browserCdp = (method, params = {}) => new Promise((r) => { const id = ++bseq; bpend.set(id, r); bws.send(JSON.stringify({ id, method, params })); });
+  const ORIGIN = `http://127.0.0.1:${PORT}`;
+  // the browser's facts: the host addresses it offered (an mDNS name counted apart), its OWN copy of the offer (a=ice-lite where?),
+  // the pair it selected, how often it moved, the DTLS state and every pair's received bytes
+  const ICE_FACTS = `(async () => { const pc = (window.__pcs || []).slice(-1)[0]; if (!pc) return null; const r = await pc.getStats(); let sel = null, changes = null, dtls = null; const rows = {};
+    r.forEach((x) => { if (x.type === 'transport') { sel = x.selectedCandidatePairId || null; changes = x.selectedCandidatePairChanges; dtls = x.dtlsState; } if (x.type === 'candidate-pair') rows[x.id] = x.bytesReceived || 0; });
+    const hosts = [...new Set(pc.__cands.filter((c) => / typ host/.test(c)).map((c) => c.split(' ')[4]))];
+    const sdp = (pc.remoteDescription && pc.remoteDescription.sdp) || '', m = sdp.indexOf('\\nm=');
+    return { hosts: hosts.filter((a) => !/\\.local$/.test(a)), mdns: hosts.filter((a) => /\\.local$/.test(a)).length, lite: m > 0 && /\\na=ice-lite\\r?\\n/.test(sdp.slice(0, m + 1)), sel, changes, dtls, rows }; })()`;
+  const agentLogText = () => { const f = path.join(rootOf(home), 'state', 'agentd.log'); return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''; };
+  // the default origin first (no permission — the road every other leg takes): ONE mDNS name (never handed to werift) and a
+  // peer-reflexive pair; the same road with the agent as werift alone (BASE_ICE) — the mDNS road as it was, and both times
+  const road = async (base) => { if (base) fs.writeFileSync(BASE_ICE, '1'); const d = await page(1280, 800, DESK, { pcs: true }); const t = Date.now(); await d.ev(`window.__open(${JSON.stringify(M)})`); const up = await playing(d); const ms = Date.now() - t; const f = await d.ev(ICE_FACTS); await d.close(); fs.rmSync(BASE_ICE, { force: true }); return { up, ms, f }; };
+  const r1 = await road(false), r0 = await road(true);
+  ok(r1.up && r0.up && r1.f && r0.f && r1.f.hosts.length === 0 && r1.f.mdns === 1 && r0.f.mdns === 1 && r1.f.lite && !r0.f.lite, `⑲ the default origin (no microphone): the browser offers ONE mDNS name — it plays in ${r1.ms} ms, and in ${r0.ms} ms with the agent as werift alone: the mDNS road as before this lane`, { r1, r0 });
+  const moves0 = (agentLogText().match(/the browser moved its pair: [^\n]*/g) || []).length;
+  const g = await browserCdp('Browser.grantPermissions', { origin: ORIGIN, permissions: ['audioCapture'] }); // a person who pressed 「麦克风」 once
+  const p = await page(1280, 800, DESK, { pcs: true });
+  const t0 = Date.now();
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  const up = await playing(p);
+  const ms = Date.now() - t0;
+  await sleep(1000);
+  const f1 = await p.ev(ICE_FACTS);
+  await sleep(1500);
+  const f2 = await p.ev(ICE_FACTS);
+  const grew = Object.entries((f2 && f2.rows) || {}).map(([id, b]) => [id, b - (((f1 && f1.rows) || {})[id] || 0)]);
+  const total = grew.reduce((n, [, d]) => n + d, 0), onSel = (grew.find(([id]) => f2 && id === f2.sel) || [null, 0])[1];
+  const moves = (agentLogText().match(/the browser moved its pair: [^\n]*/g) || []).slice(moves0);
+  const n = f2 ? f2.hosts.length : 0;
+  console.log(`    (the browser offered ${n} host address${n === 1 ? '' : 'es'} + ${f2 ? f2.mdns : 0} mDNS name${f2 && f2.mdns === 1 ? '' : 's'}; it selected ${f2 ? f2.changes : '?'} pair${f2 && f2.changes === 1 ? '' : 's'} in turn; the agent followed ${moves.length}×${moves.length ? ': ' + moves.join(' · ') : ''})`);
+  ok(!g.error && up && f2 && n >= 1 && f2.mdns === 0 && f2.lite && f2.dtls === 'connected', `⑲ the microphone allowed for this origin: the browser offers every adapter (${n} host address${n === 1 ? '' : 'es'}, no mDNS name) — and the stream PLAYS (${ms} ms); the browser's own copy of the offer says a=ice-lite at the SESSION level`, { g: g.error, up, f2 });
+  ok(f2 && f2.sel && total > 0 && onSel >= 0.95 * total, `⑲ THE BROWSER'S CHOICE: the picture arrives on the pair the browser selected (${onSel} of ${total} bytes in 1.5 s)`, { grew, sel: f2 && f2.sel, moves });
+  await p.close();
+  // RED CONTROL: the agent as werift alone makes it — the same origin, the microphone still allowed
+  fs.writeFileSync(BASE_ICE, '1');
+  const q = await page(1280, 800, DESK, { pcs: true });
+  await q.ev(`window.__open(${JSON.stringify(M)})`);
+  const plays = await q.until(`(() => { const v = document.querySelector('${WIN} .stream-video'); return !!v && v.videoWidth === 1280 && v.currentTime > 0.2; })()`, 8000);
+  const c = await q.ev(ICE_FACTS);
+  const cn = c ? c.hosts.length : 0;
+  if (cn >= 2) ok(!plays && c && !c.lite && c.dtls !== 'connected', `⑲ RED CONTROL — the offer as werift writes it (a=ice-lite inside the media sections only: the browser's copy has none) and its first nomination kept: with ${cn} addresses offered the stream stays BLACK for 8 s (DTLS ${c && c.dtls}) — every new stream, before this lane`, { plays, c });
+  else console.log(`    (⑲ RED CONTROL not judged: this computer's browser offers ${cn} address — the black stream needs two; the stream ${plays ? 'played' : 'did not play'})`);
+  await q.close();
+  fs.rmSync(BASE_ICE, { force: true });
+  await browserCdp('Browser.resetPermissions', {}); // the origin's default again (one mDNS name — the road every other leg takes)
+  bws.close();
+}
+
+console.log('⑲ NEVER SILENT before a picture (lane werift-lite-multihomed): ICE that does not connect within the connect budget is said');
+{
+  fs.writeFileSync(DEAF_ICE, '1'); // the agent answers no check: ICE never connects
+  const a = await page(1280, 800, DESK), b = await page(1280, 800, DESK, { at: '/presilent' });
+  const t0 = Date.now();
+  await Promise.all([a.ev(`window.__open(${JSON.stringify(M)})`), b.ev(`window.__open(${JSON.stringify(M)})`)]);
+  const NOTE = `((document.querySelector('${WIN} .desktop-strip-note') || {}).hidden === false ? document.querySelector('${WIN} .desktop-strip-note').textContent : '')`;
+  const said = await a.until(`/^串流中断：没能及时连上——正在重新连接…$/.test(${NOTE})`, 25000);
+  const ms = Date.now() - t0;
+  const sa = await stripText(a), sb = await stripText(b), nb = await b.ev(NOTE);
+  ok(said && ms >= 14000 && /连接中/.test(sa.chip || '') && !(await a.ev(`!!document.querySelector('${WIN} .stream-video') && document.querySelector('${WIN} .stream-video').currentTime > 0`)), `⑲ an agent that answers no check: at the connect budget (${ms} ms) the strip says 「串流中断：没能及时连上——正在重新连接…」 (leg ⑥'s words; the view asks an ICE restart), still connecting, no picture`, { said, ms, sa });
+  ok(!nb && /连接中/.test(sb.chip || ''), '⑲ RED CONTROL: the window before this lane says only 「串流 · 连接中…」 at that same moment — nothing about why (it spoke at the 45 s fallback)', { nb, sb });
+  await a.close(); await b.close();
+  fs.rmSync(DEAF_ICE, { force: true });
 }
 ok((await sessions()).length === 0, 'every window closed ⇒ no stream session left on the hub');
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

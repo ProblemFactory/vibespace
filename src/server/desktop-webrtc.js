@@ -4,7 +4,9 @@
  * desktop window whose machine passes the rung (src/server/desktop-access.js streamRung — the agent's `stream-offer`
  * capability and a source) plays the machine's picture as WebRTC: the agent's werift offers, the PAGE's RTCPeerConnection
  * answers, and this module is only the SIGNALING relay between the page's requests and the agent's ops, plus the record:
- *   • start(hostId, {source, fp16, hdr}) the rung's verdict; when taken, `stream-offer` on the agent → the offer (+ the relay's candidates)
+ *   • start(hostId, {source, fp16, hdr, mic}) the rung's verdict; when taken, `stream-offer` on the agent → the offer (+ the relay's candidates);
+ *                            `mic` (lane stream-mic-road) = the page wants its microphone's audio m-line — asked of a `stream-mic` agent
+ *                            only (src/agentd/client.js gates it), so an older agent streams without it and the answer's `mic` says which
  *                            and a session KEY the page names from now on — `{ take: false, code, why }` otherwise (`too_many_streams`
  *                            adds the machine's `live` / `cap` / `displays` — lane desktop-display-modes' per-machine cap; the window
  *                            shows the VNC picture and says why). `source` = the page's choice (src/stream-model.js
@@ -228,7 +230,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
   }
 
   /** The rung, then the offer. → { take: false, code, why } | { take: true, key, sid, offer, source, codec, seq } */
-  async function start(hostId, { maxKbps = null, source = null, fp16 = false, hdr = false, after = null } = {}) {
+  async function start(hostId, { maxKbps = null, source = null, fp16 = false, hdr = false, after = null, mic = false } = {}) {
     if (!access || typeof access.streamRung !== 'function') throw named('host_unavailable', 'the desktop access layer is not wired on this instance');
     const src = SM.streamSourceOf(source);
     if (source != null && !src) return { take: false, code: 'bad_source', why: 'the stream names a display or a window by its id' };
@@ -243,7 +245,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     const relayLeg = s.relay && s.relay.leg ? { port: s.relay.port, key: s.relay.leg.key.toString('base64'), hosts: ips().filter((ip) => /^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip))).slice(0, L.legTargets) } : null;
     let r;
     const sourceId = v.sourceId != null ? v.sourceId : src ? src.id : null; // the verdict's own (a fake source's file), else the page's choice
-    const offer = () => v.dm.streamOffer({ sourceKind: v.source, sourceId, maxKbps, relay, ...(src && src.share ? { share: src.share } : {}), ...(relayLeg ? { relayLeg } : {}), ...(v.source === 'window' && fp16 ? { fp16: true } : {}), ...(v.source === 'screen' && hdr === true ? { hdr: true } : {}) }, { onPush: (m) => onPush(s, m) }); // fp16: a Windows window's FP16 road (lane stream-p2w-build); hdr: lane stream-hdr-passthrough
+    const offer = () => v.dm.streamOffer({ sourceKind: v.source, sourceId, maxKbps, relay, ...(src && src.share ? { share: src.share } : {}), ...(relayLeg ? { relayLeg } : {}), ...(v.source === 'window' && fp16 ? { fp16: true } : {}), ...(v.source === 'screen' && hdr === true ? { hdr: true } : {}), ...(mic === true ? { mic: true } : {}) }, { onPush: (m) => onPush(s, m) }); // fp16: a Windows window's FP16 road (lane stream-p2w-build); hdr: lane stream-hdr-passthrough
     try {
       r = await offer();
       if (r && !r.ok && r.code === 'no_helper' && r.helper) { // a Mac without its screen helper: this hub's prebuilt, then once more
@@ -264,7 +266,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     const sdp = withRelay(direct === false ? stripHosts(r.offer.sdp) : r.offer.sdp, s.relayLines);
     try { handover?.started?.(key, hostId, after != null ? String(after) : null); } catch (e) { log.warn?.(`[stream] the hand-over did not hear ${key} start (${e && e.message})`); }
     log.log?.(`[stream] ${hostId}: session ${s.sid} offered (${v.source}${s.relay ? `, relay udp ${s.relay.port}${s.relay.leg ? ' + the daemon\'s udp leg asked' : ''}` : ''})`);
-    return { take: true, key, sid: s.sid, offer: { type: 'offer', sdp }, source: s.source, codec: s.codec, seq: s.seq, platform: v.platform };
+    return { take: true, key, sid: s.sid, offer: { type: 'offer', sdp }, source: s.source, codec: s.codec, seq: s.seq, platform: v.platform, mic: r.mic === true };
   }
   const sessionOf = (key) => { const s = sessions.get(String(key || '')); if (!s) throw named('not_found', 'that stream ended'); return s; };
   async function answer(key, sdp) {

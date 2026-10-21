@@ -589,6 +589,39 @@ export function installDesktopAppLauncher(app) {
   app.ws.onStateChange?.((connected) => { if (connected && !app._desktopAppsAvailable) probe(); });
 }
 
+// ── lane stream-mic-road: 「安装虚拟麦克风」 + its uninstall door — the plan's facts above its commands (PURE words) ──
+/** The refusal words of a virtual-microphone plan / run, by code (`mac` = the plan asked a Mac's password dialog). */
+export function micInstallRefusalText(code, mac = false) {
+  if (code === 'no_admin') return mac ? t('The Mac got no administrator password — the dialog was cancelled there. Nothing was installed.') : t('Windows granted no administrator rights — nothing was installed. Press again with someone at that machine.');
+  if (code === 'no_password') return t('Nobody answered the administrator password dialog on the Mac in 5 minutes — it was withdrawn and nothing was installed.');
+  if (code === 'already_installed') return t('This machine already has a virtual microphone.');
+  if (code === 'not_installed') return t('This machine has no virtual microphone to remove.');
+  if (code === 'still-absent') return t('The install finished, but the machine does not show the virtual microphone yet — check again.');
+  if (code === 'still-present') return t('The machine still shows the virtual microphone — finish the removal in the window that opened there, then check again.');
+  if (code === 'unsupported') return t('The virtual microphone is for a paired Windows or macOS machine.');
+  if (code === 'host_needs_daemon') return t('The VibeSpace agent on that machine is too old for the microphone — reconnect it to upgrade.');
+  if (code === 'install_failed') return t('The install failed — the window on that machine said why.');
+  return '';
+}
+const MIC_PROMPT_WORDS = { uac: () => t('one Windows prompt: «Windows PowerShell — Microsoft Windows» (click Yes)'), admin_window: () => t('an administrator window for about 30 seconds'), no_driver_dialog: () => t('no driver dialog'), password: () => t('the Mac’s administrator password dialog with VibeSpace’s text (it waits at most 5 minutes)'), coreaudio_restart: () => t('every sound stops for a second or two while Core Audio restarts'), vendor_window: () => t('VB-CABLE’s own window: press «Remove Driver» there') };
+const MIC_NOTE_WORDS = { restart_owed: () => t('VB-CABLE asks Windows for a restart to finish — the microphone works now; VibeSpace never restarts the machine'), defaults_kept: () => t('Windows moves the default speaker and microphone to the cable when it installs — VibeSpace puts yours back'), no_mac_restart: () => t('The Mac does not restart') };
+const MIC_REMOVES_WORDS = { vbcable_driver: () => t('Goes away: the VB-CABLE driver and its devices «CABLE Input» / «CABLE Output»'), ours_plugin: () => t('Goes away: the «VibeSpace Microphone» device'), blackhole_plugin: () => t('Goes away: the «BlackHole 2ch» device') };
+/** The plan's facts (what, from where, its license, what the person will see) as text-only rows (PURE: the suite drives it). */
+export function micPlanRows(plan) {
+  const p = plan || {}, rows = [];
+  if (p.which === 'vbcable') rows.push(t('VB-CABLE by VB-Audio Software — donationware: if you keep using it, donate at {site}', { site: p.site || 'https://vb-cable.com' }));
+  else if (p.which === 'blackhole') rows.push(t('BlackHole 2ch by Existential Audio — free software under GPL-3, from {site}', { site: p.site || '' }));
+  else if (p.which === 'vibespace-mic') rows.push(t('«VibeSpace Microphone» — VibeSpace’s own, built on this Mac'));
+  if (p.url) rows.push(t('Downloaded from {url} at your press; its SHA-256 must be {sha}', { url: p.url, sha: p.sha256 || '' }));
+  if (p.which === 'vbcable' && p.what === 'virtual-mic') rows.push(t('Its setup must be signed by {signer}', { signer: p.signer || '' }));
+  if (p.fallbackWhy) rows.push(t('This Mac cannot build VibeSpace’s own plug-in ({why}) — BlackHole 2ch instead', { why: p.fallbackWhy }));
+  for (const k of p.removes || []) if (MIC_REMOVES_WORDS[k]) rows.push(MIC_REMOVES_WORDS[k]());
+  const seen = (p.prompts || []).filter((k) => MIC_PROMPT_WORDS[k]).map((k) => MIC_PROMPT_WORDS[k]());
+  if (seen.length) rows.push(t('What you will see on that machine: {list}', { list: seen.join(' · ') }));
+  for (const k of p.notes || []) if (MIC_NOTE_WORDS[k]) rows.push(MIC_NOTE_WORDS[k]());
+  return rows;
+}
+
 // ── lane C2: the INSTALL RUNG — the plan first, then the run with its log (never silent) ──
 /** §7.9: lifted out of the dialog and generalised by `what` — 'xpra' (the display rung; every word and route exactly as
  *  before) or a LibreOffice install by its catalog id (the plan from `GET /api/desktop/install-plan?what=`, the run
@@ -601,10 +634,11 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   const xp = what === 'xpra';
   const isApp = what === 'app';
   const tv = what === 'tightvnc'; // design 014 D1: Windows asks for administrator rights on its own screen
-  const spec = xp || isApp || tv ? null : installSpecFor(what);
+  const vm = what === 'virtual-mic' || what === 'virtual-mic-remove', vmRemove = what === 'virtual-mic-remove'; // lane stream-mic-road: the machine's own prompt too
+  const spec = xp || isApp || tv || vm ? null : installSpecFor(what);
   const appLabel = spec ? spec.label : 'LibreOffice';
   const name = xp ? machineName(m) : machineInSentence(m); // xpra's words exactly as before; a LibreOffice install names the machine inside its sentences
-  const { body: ib, close: iclose } = createModalShell({ id: 'desktop-install-dialog', title: tv ? t('Install TightVNC Server on {machine}', { machine: name }) : isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : what === FONTS_ID ? t('Install the Calibri / Cambria look-alike fonts on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true });
+  const { body: ib, close: iclose } = createModalShell({ id: 'desktop-install-dialog', title: vm ? (vmRemove ? t('Remove the virtual microphone from {machine}', { machine: name }) : t('Install a virtual microphone on {machine}', { machine: name })) : tv ? t('Install TightVNC Server on {machine}', { machine: name }) : isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : what === FONTS_ID ? t('Install the Calibri / Cambria look-alike fonts on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true });
   ib.classList.add('desktop-install-body');
   if (isApp) ib.classList.add('desktop-install-app');
   const note = document.createElement('div'); note.className = 'desktop-install-note'; note.textContent = t('Reading what {machine} runs…', { machine: name });
@@ -631,13 +665,13 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   const q = m.hostId === 'local' ? '' : `?host=${encodeURIComponent(m.hostId)}`;
   const r = isApp
     ? await fetchJson('/api/apps/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proposalId ? { proposalId } : { host: m.hostId || 'local', request }) })
-    : await fetchJson(`/api/desktop/install-plan${q}${xp ? '' : `${q ? '&' : '?'}what=${encodeURIComponent(what)}`}`);
-  if (!r || r.error) { note.textContent = (r && ((isApp && appRefusalText(r.code)) || r.error)) || t('Could not read the install plan'); note.classList.add('is-bad'); return; }
+    : await fetchJson(`/api/desktop/install-plan${q}${xp ? '' : `${q ? '&' : '?'}what=${encodeURIComponent(what)}`}${vm ? `&lang=${encodeURIComponent(resolveLang())}` : ''}`); // lane stream-mic-road: the Mac dialog's text in this page's language
+  if (!r || r.error) { note.textContent = (r && ((isApp && appRefusalText(r.code)) || (vm && micInstallRefusalText(r.code)) || r.error)) || t('Could not read the install plan'); note.classList.add('is-bad'); return; }
   let plan = r.plan || {};
   let shownDigest = r.digest || null; // verify-r6 I1: the press names the plan these commands are
   if (isApp && r.request) { const h = ib.closest('.dialog')?.querySelector('.dialog-title, h3, .modal-title'); if (h) h.textContent = appDialogTitle(r.request, name); }
   if (!plan.ok) {
-    note.textContent = isApp ? (appRefusalText(plan.code) || plan.error || '') : (installRefusalText(plan.code, what) || plan.error || ''); // design 009 §B5: ONE sentence, ours
+    note.textContent = isApp ? (appRefusalText(plan.code) || plan.error || '') : vm ? (micInstallRefusalText(plan.code) || plan.error || '') : (installRefusalText(plan.code, what) || plan.error || ''); // design 009 §B5: ONE sentence, ours
     note.classList.add('is-bad');
     if (isApp) handOff(plan.code, (r.request || request || {}).packages);
     return;
@@ -651,6 +685,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
       more.append(rootLine, facts, pre); ib.insertBefore(more, actions);
     }
   }
+  if (vm) { const rows = micPlanRows(plan); facts.replaceChildren(...rows.map((x) => { const d = document.createElement('div'); d.textContent = x; return d; })); facts.style.display = rows.length ? '' : 'none'; } // lane stream-mic-road: what, from where, its license, what the person sees
   pre.textContent = plan.commands.join('\n'); pre.style.display = '';
   copyBtn.style.display = '';
   copyBtn.onclick = async () => { const ok = await copyText(plan.commands.join('\n')); showToast(ok === false ? t('Could not copy — select the commands and copy them') : t('Commands copied'), ok === false ? { type: 'error' } : undefined); };
@@ -658,7 +693,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   // an install already running there (a restarted hub, another tab) is FOLLOWED, never started twice (verify r2 F3/F4)
   const running = !!((isApp ? r.install : r.facts) && (isApp ? r.install : r.facts).installing);
   if (!plan.canRun && !running) { note.textContent = isApp ? appRefusalText('no_sudo') : installRefusalText('no_sudo', what); note.classList.add('is-bad'); return; }
-  note.textContent = running ? t('An install is already running on {machine} — follow its log here.', { machine: name }) : tv ? t('Install asks Windows on {machine} for administrator rights: someone at that machine clicks Yes, then types the VNC password into the window that opens there (VibeSpace never sees it). It runs these commands:', { machine: name }) : isApp ? (r.card ? '' : appPlanNote(plan, name)) : t('These commands run on {machine} as root, {source}:', { machine: name, source: src });
+  note.textContent = running ? t('An install is already running on {machine} — follow its log here.', { machine: name }) : vm ? (plan.adminDialog ? t('This asks for the Mac’s administrator password on {machine}’s own screen — someone there types it. Then, as administrator, it runs:', { machine: name }) : t('This asks Windows on {machine} for administrator rights on its own screen — someone there clicks Yes. The administrator window runs:', { machine: name })) : tv ? t('Install asks Windows on {machine} for administrator rights: someone at that machine clicks Yes, then types the VNC password into the window that opens there (VibeSpace never sees it). It runs these commands:', { machine: name }) : isApp ? (r.card ? '' : appPlanNote(plan, name)) : t('These commands run on {machine} as root, {source}:', { machine: name, source: src });
   if (isApp) goBtn.textContent = appGoLabel(plan);
   if (running) goBtn.textContent = t('Follow the install');
   goBtn.style.display = '';
@@ -668,11 +703,11 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
     note.textContent = t('Installing on {machine}…', { machine: name }); note.classList.remove('is-bad');
     let res;
     try {
-      res = await fetch(isApp ? '/api/apps/install' : xp ? '/api/desktop/install-xpra' : '/api/desktop/install', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      res = await fetch(isApp ? '/api/apps/install' : xp ? '/api/desktop/install-xpra' : vm ? `/api/desktop/install?lang=${encodeURIComponent(resolveLang())}` : '/api/desktop/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, // lane stream-mic-road: a microphone install names the page's language (the Mac dialog's text)
         body: JSON.stringify(isApp ? (proposalId ? { proposalId, planDigest: shownDigest } : { host: m.hostId || 'local', request: r.request || request, planDigest: shownDigest }) : xp ? { host: m.hostId, planDigest: shownDigest } : { host: m.hostId, what, planDigest: shownDigest }) });
     }
     catch (e) { note.textContent = t('Could not start the install: {why}', { why: e.message }); note.classList.add('is-bad'); goBtn.disabled = false; return; }
-    if (!res.ok || !res.body) { let j = null; try { j = await res.json(); } catch { j = null; } note.textContent = (j && ((isApp ? appRefusalText(j.code) : installRefusalText(j.code, what)) || j.error)) || t('Could not start the install'); note.classList.add('is-bad'); goBtn.disabled = false; return; }
+    if (!res.ok || !res.body) { let j = null; try { j = await res.json(); } catch { j = null; } note.textContent = (j && ((isApp ? appRefusalText(j.code) : vm ? micInstallRefusalText(j.code, !!plan.adminDialog) : installRefusalText(j.code, what)) || j.error)) || t('Could not start the install'); note.classList.add('is-bad'); goBtn.disabled = false; return; }
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ''; let end = null;
     for (;;) {
       const { value, done } = await reader.read();
@@ -688,6 +723,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
       }
     }
     if (end && end.done && isApp) { note.textContent = appDoneText(end, installPlaceOf(m)); note.classList.remove('is-bad'); showToast(appDoneText(end, installPlaceOf(m))); goBtn.style.display = 'none'; onDone?.(end); }
+    else if (end && end.done && vm) { const w = vmRemove ? t('The virtual microphone is removed from {machine}', { machine: installPlaceOf(m) }) : t('{app} is installed on {machine}', { app: end.label || plan.label || '', machine: installPlaceOf(m) }) + (end.defaultsKept ? ` · ${t('Kept your default speaker and microphone')}` : ''); note.textContent = w; showToast(w); goBtn.style.display = 'none'; onDone?.(end); } // lane stream-mic-road
     else if (end && end.done && xp) { note.textContent = t('xpra {version} is installed on {machine}', { version: end.installed || '', machine: name }); showToast(t('xpra is installed on {machine}', { machine: name })); onDone?.(); }
     else if (end && end.done) { note.textContent = t('{app} is installed on {machine}', { app: end.label || appLabel, machine: installPlaceOf(m) }); showToast(t('{app} is installed on {machine}', { app: end.label || appLabel, machine: installPlaceOf(m) })); onDone?.(); }
     else if (end && end.code === 'plan_changed' && end.plan && Array.isArray(end.plan.commands)) {
@@ -700,7 +736,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
       showToast(installRefusalText('plan_changed', what), { type: 'error' });
       goBtn.disabled = false; copyBtn.disabled = false;
     }
-    else { note.textContent = (end && ((isApp ? appRefusalText(end.code) : installRefusalText(end.code, what)) || end.error)) || t('The install ended without an answer — the log above says what ran'); note.classList.add('is-bad'); showToast(isApp ? t('It did not finish on {machine} — the dialog says why', { machine: name }) : xp ? t('The xpra install on {machine} failed', { machine: name }) : t('The LibreOffice install on {machine} failed', { machine: name }), { type: 'error' }); goBtn.disabled = false; copyBtn.disabled = false; }
+    else { note.textContent = (end && ((isApp ? appRefusalText(end.code) : vm ? micInstallRefusalText(end.code, !!plan.adminDialog) : installRefusalText(end.code, what)) || end.error)) || t('The install ended without an answer — the log above says what ran'); note.classList.add('is-bad'); showToast(vm ? t('The virtual microphone did not finish on {machine} — the dialog says why', { machine: name }) : isApp ? t('It did not finish on {machine} — the dialog says why', { machine: name }) : xp ? t('The xpra install on {machine} failed', { machine: name }) : t('The LibreOffice install on {machine} failed', { machine: name }), { type: 'error' }); goBtn.disabled = false; copyBtn.disabled = false; }
   };
   void iclose;
 }

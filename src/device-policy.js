@@ -57,6 +57,7 @@ const FLAG_OF = Object.freeze({
   'desktop-serve:app-install': 'run', 'desktop-serve:app-remove': 'run', 'desktop-serve:app-fetch': 'run',
   'browser-serve:start': 'run', 'browser-serve:remove': 'run',
   'settings-open': 'run', 'window-pin': 'run',
+  'stream-mic:default': 'run', // lane stream-mic-road: 「设为默认麦克风」 / 「改回」 (the machine's default microphone)
   'peer-post': 'sessions', 'pool-orders': 'sessions',
   // ── code layer ──
   'upgrade': 'upgrade',

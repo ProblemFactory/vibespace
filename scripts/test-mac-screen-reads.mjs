@@ -34,6 +34,7 @@ const HELPER = 'src/agentd/mac-helper-source.js';
 /** A hit that is not a screen read — its reason. A row names the tokens it may hit, nothing else. */
 const ALLOW = Object.freeze({
   'src/routes/files.js': { tokens: ['osascript'], why: 'the HUB puts an image on its OWN clipboard (AppleScript `set the clipboard`) when the server itself runs on a Mac — a pasteboard write, never a screen or window read; the agent never runs it' },
+  'src/mic-install.js': { tokens: ['osascript'], why: 'lane stream-mic-road: a Mac\'s virtual-microphone install / removal plan — the person\'s administrator password dialog (`do shell script … with administrator privileges`), run on that Mac by the hub\'s install door through run-stream: an elevation prompt, never a screen or window read; the agent never bundles this file' },
 });
 const EXT = /\.(?:js|mjs|cjs)$/;
 

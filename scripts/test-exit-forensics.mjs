@@ -1336,6 +1336,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     // the 2.369.304 integration (int304) — the Mac screen helper (lane stream-p3m-build, .302) and the Windows window helper (lane stream-p2w-build)
     'src/agentd/stream-mac.js': [2, "device: a Mac's own screen helper (vibespace-screen capture — our spawn handle, lane stream-p3m-build): killed when the source ends by name, and 1 s after `quit` when it has not exited; never a conversation"],
     'src/agentd/stream-window-source.js': [1, "device: the window source's own children (the vibespace-wgc helper + its ffmpeg encoder — our spawn handles, lane stream-p2w-build), ended when the stream stops, when the encoder restarts at a new size, or when the other one died; never a conversation"],
+    'src/desktop-mic.js': [2, "device: the microphone road's own children (the decoder ffmpeg on Windows + the vibespace-mic helper — our spawn handles, lane stream-mic-road; declared at int339), stdin closed when the voice stops and SIGTERMed only if still alive after STOP_GRACE_MS, or the decoder when the road closed while it started; never a conversation"],
   };
   // the actor pins: the mark is set BEFORE the kill it names (the teardown reads it; the kill case deletes the session late)
   const ACTOR_PINS = [
