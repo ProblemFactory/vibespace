@@ -16,6 +16,9 @@
 //      SENDS (and each other law has its own mutant).
 //   §6 enterSubmits(e) (lane channel-enter-ime, inc-mv7mdv6b-emxq): the one rule for plain text boxes + its control;
 //      every caller is held to it by scripts/test-enter-census.mjs.
+//   §2c (lane vault-chip-zone-errors, inc-mvi50qdh-ygmh) a keydown with NO key — the browser filling a field (Chrome's
+//      autofill / saved passwords dispatch a bare Event('keydown')) — is the word "(fill)", never a throw; CONTROL: the
+//      guard removed ⇒ the incident's «reading 'length'».
 // The real textarea under CDP Input.imeSetComposition is scripts/test-chat-enter-ime-chrome.mjs (heavy).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -98,6 +101,9 @@ ok('…the IME owning it adds c:1 (a capital inside a composition)', JSON.string
 ok('Cmd+c / Ctrl+Shift+A / Alt+Shift+x keep naming the key as today ("M-c", "C-S-A", "A-S-x")', kw({ key: 'c', metaKey: true }).key === 'M-c' && kw({ key: 'A', ctrlKey: true, shiftKey: true }).key === 'C-S-A' && kw({ key: 'x', altKey: true, shiftKey: true }).key === 'A-S-x');
 ok('a modifier let go ⇒ { key, up: 1 }: Shift / Control / Alt / Meta', ['Shift', 'Control', 'Alt', 'Meta'].every((k) => JSON.stringify(M.actionKeyUpWords({ key: k })) === JSON.stringify({ key: k, up: 1 })));
 ok('…every other key up is null: a letter, a shifted letter, Enter, Escape', [{ key: 'a' }, { key: 'A', shiftKey: true }, { key: 'Enter' }, { key: 'Escape' }].every((e) => M.actionKeyUpWords(e) === null));
+// §2c lane vault-chip-zone-errors (inc-mvi50qdh-ygmh: the second password filled from the browser's saved passwords threw
+// twice — one per filled field): a keydown with no key is the fill word; its keyup (a bare Event too) stays null
+ok('§2c a keydown with NO key (a browser fill: a bare Event, no modifiers) ⇒ { key: "(fill)" }; null ⇒ the same; its bare keyup ⇒ null', JSON.stringify(M.actionKeyWords({ type: 'keydown' })) === '{"key":"(fill)"}' && JSON.stringify(M.actionKeyWords(null)) === '{"key":"(fill)"}' && M.FILL_KEY === '(fill)' && M.actionKeyUpWords({ type: 'keyup' }) === null);
 ok('k:"ime" markers on a textarea: start / end (no data ⇒ no how), no text field', JSON.stringify(M.imeMarker('compositionstart', { tagName: 'TEXTAREA' })) === '{"k":"ime","ph":"start"}' && JSON.stringify(M.imeMarker('compositionend', { tagName: 'TEXTAREA' })) === '{"k":"ime","ph":"end"}');
 ok('…and none for an input / another event', M.imeMarker('compositionend', { tagName: 'INPUT' }) === null && M.imeMarker('compositionupdate', { tagName: 'TEXTAREA' }) === null);
 
@@ -208,6 +214,11 @@ ok('enterSubmits: a plain Enter (keyCode 13) submits; Shift/Ctrl+Enter are still
 ok('enterSubmits: the input method\'s Enter never submits — isComposing (Chrome/Firefox), keyCode 229 (Safari / the ring\'s [composing]), both, a chord while composing', !ES({ key: 'Enter', isComposing: true, keyCode: 13 }) && !ES({ key: 'Enter', keyCode: 229 }) && !ES({ key: 'Enter', isComposing: true, keyCode: 229 }) && !ES({ key: 'Enter', isComposing: true, metaKey: true }));
 ok('enterSubmits: not Enter / no event ⇒ false (Tab, Escape, a letter, null)', !ES({ key: 'Tab' }) && !ES({ key: 'Escape' }) && !ES({ key: 'a' }) && !ES(null) && !ES(undefined));
 const noG = path.join(tmp, 'nog.mjs'); fs.writeFileSync(noG, sR.replace("e.key === 'Enter' && !imeOwnsKey(e);", "e.key === 'Enter';"));
+// §2c's control: the fill guard removed = the recorder that threw at the owner's unlock
+const noF = path.join(tmp, 'nof.mjs'); fs.writeFileSync(noF, sR.replace("  if (!e || typeof e.key !== 'string') return { key: FILL_KEY };\n", ''));
+let fillThrew = '';
+try { (await import(pathToFileURL(noF).href)).actionKeyWords({ type: 'keydown' }); } catch (x) { fillThrew = x.message; }
+ok('control: §2c\'s guard removed ⇒ a fill throws the incident\'s «Cannot read properties of undefined (reading \'length\')»', fs.readFileSync(noF, 'utf8') !== sR && fillThrew === "Cannot read properties of undefined (reading 'length')", fillThrew);
 ok('control: enterSubmits without imeOwnsKey ⇒ the ring\'s composing Enter SUBMITS (the incident)', (await import(pathToFileURL(noG).href)).enterSubmits({ key: 'Enter', isComposing: true, keyCode: 229 }) === true);
 fs.rmSync(tmp, { recursive: true, force: true });
 

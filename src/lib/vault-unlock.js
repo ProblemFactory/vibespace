@@ -20,6 +20,7 @@ import { UI_ICONS } from './icons.js';
 import { enterSubmits } from './chat-enter-keys.js';
 import { replayOpenSpec } from './window-types.js'; // the door (vs-vault-door) opens the Vault window while unlocked (src/lib/vault-window.js registers it)
 import { vaultLoudState, LATER_KEY } from '../vault-loud.js'; // lane vault-locked-loud: THE table — the dialog, the ⚙ mark, the item
+import { slotBeside } from './customize-mode.js'; // lane vault-chip-zone-errors: the chip sits beside For-you, in whichever zone the chrome put it
 
 const MIN = 8;
 let facts = null;
@@ -60,22 +61,33 @@ function footerOf(dialog, buttons) {
 }
 
 // ── the lock chip (taskbar + phone nav): the door back while locked ──
+// lane vault-chip-zone-errors (inc-mvi50qdh-ygmh): the chip sits BESIDE the For-you button wherever the chrome put it
+// (customize-mode.js `slotBeside` — its own zone, e.g. the toolbar's second row), else at the host's end. The old line
+// inserted into the taskbar tray before a For-you button that Customize had moved out of it: insertBefore threw «not a
+// child of this node» at every start, and the throw stopped the strip, the ⚙ mark and the load-time dialog behind it.
+// Re-seated after every arrangement (app.js → `placeVaultChip`), so the chip follows For-you when it moves.
+const CHIP_SLOTS = [['taskbar-tray', 'taskbar-user-todos', 'taskbar-vault'], ['mobile-nav', 'mobile-nav-todos', 'mobile-nav-vault']];
 function drawChip() {
   const locked = !!facts && facts.state === 'locked';
-  for (const [hostId, beforeId, id] of [['taskbar-tray', 'taskbar-user-todos', 'taskbar-vault'], ['mobile-nav', 'mobile-nav-todos', 'mobile-nav-vault']]) {
-    const host = document.getElementById(hostId);
+  for (const [hostId, besideId, id] of CHIP_SLOTS) {
     let chip = document.getElementById(id);
     if (!locked) { chip?.remove(); continue; }
-    if (!host || chip) continue;
-    chip = el('button', 'vault-chip');
-    chip.id = id; chip.type = 'button';
-    chip.innerHTML = UI_ICONS.lock || '';
-    chip.appendChild(el('span', 'vault-chip-label', t('Vault locked')));
-    chip.title = t('Vault locked — click to unlock (For you names what is waiting on it)');
-    chip.onclick = () => showUnlock();
-    host.insertBefore(chip, document.getElementById(beforeId) || null);
+    const slot = slotBeside(besideId, document.getElementById(hostId));
+    if (!slot) continue;
+    if (!chip) {
+      chip = el('button', 'vault-chip');
+      chip.id = id; chip.type = 'button';
+      chip.innerHTML = UI_ICONS.lock || '';
+      chip.appendChild(el('span', 'vault-chip-label', t('Vault locked')));
+      chip.title = t('Vault locked — click to unlock (For you names what is waiting on it)');
+      chip.onclick = () => showUnlock();
+    }
+    if (chip.parentNode !== slot.parent || chip.nextSibling !== slot.before) slot.parent.insertBefore(chip, slot.before);
   }
 }
+/** Re-seat the lock chip beside For-you — app.js calls it after the chrome applied an arrangement (Customize mode, another
+ *  client's arrangement, the settings arriving after the boot read). Nothing while not locked. */
+export const placeVaultChip = () => drawChip();
 
 // ── the persistent lock-warning strip (lane vault-relock-door, owner 2026-10-20 「那需要一个常驻的警告提醒还没解锁」): while the
 // vault is LOCKED a strip at the top of the workspace says so with an Unlock button — the maintenance banner's shape and
@@ -145,9 +157,13 @@ function dismissLock(f) { const s = vaultLoudState({ facts: f }); if (!s.lock) r
 function applyVaultFacts(f) {
   if (!f || !f.state) return;
   facts = f;
-  drawChip();
-  drawLockStrip();   // lane vault-relock-door: the persistent warning while locked (shown/removed with the state, never per restart)
-  drawGearMark(vaultLoudState({ facts: f }).mark);   // lane vault-locked-loud: the ⚙ button's red mark
+  // lane vault-chip-zone-errors: each lock sign draws on its own — one sign's throw never stops the others or the dialog
+  const signs = [
+    drawChip,
+    drawLockStrip,   // lane vault-relock-door: the persistent warning while locked (shown/removed with the state, never per restart)
+    () => { drawGearMark(vaultLoudState({ facts: f }).mark); },   // lane vault-locked-loud: the ⚙ button's red mark
+  ];
+  for (const draw of signs) { try { draw(); } catch (e) { console.error('[vault] a lock sign could not be drawn', e); } }
   if (f.state !== 'locked') document.getElementById('vault-unlock-dialog')?.remove();
   if (f.state !== 'not_set_up') document.getElementById('vault-setup-dialog')?.remove();
   for (const fn of [...factsListeners]) { try { fn(f); } catch { /* one header's error never stops another */ } }

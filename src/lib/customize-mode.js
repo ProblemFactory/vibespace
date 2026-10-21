@@ -111,6 +111,18 @@ function zoneEl(zoneId) {
   return document.querySelector(`[data-zone="${zoneId}"]`);
 }
 
+/** THE SLOT BESIDE a chrome element (lane vault-chip-zone-errors, inc-mvi50qdh-ygmh): where something that is not itself
+ *  movable but belongs WITH a movable element goes — the vault's lock chip beside For-you. A movable element lives in
+ *  exactly one zone (applyArrangement re-parents it there; Customize may have moved it to any zone, e.g. the toolbar's
+ *  second row), so the slot is the element's OWN parent with the element itself as the reference; the element absent ⇒
+ *  the end of `fallback`; neither ⇒ null. The reference is always a child of the parent, so the caller's insertBefore
+ *  cannot throw — never a document-wide id inserted into another element («not a child of this node», at every start). */
+export function slotBeside(id, fallback = null) {
+  const el = id ? document.getElementById(id) : null;
+  if (el && el.parentNode) return { parent: el.parentNode, before: el };
+  return fallback ? { parent: fallback, before: null } : null;
+}
+
 /** Fill in a complete zone→ids map from a possibly partial/stale stored one. */
 function normalizeArrangement(raw) {
   const out = {};

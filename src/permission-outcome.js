@@ -82,8 +82,10 @@ const PERMISSION_OUTCOMES = Object.freeze(['allowed', 'denied', 'cancelled', 'un
  *  2.1.281 → 2.1.288 (lane cli-2-1-288-records): re-read from the 2.1.288 dump (scripts/fixtures/claude-cli/2.1.288.json
  *  `sentences`) — the SAME 14 sentences under new minified names (Eu/gc/vP), none added, none vanished, so no row
  *  gained an `until`. A sentence a later build drops is marked `until: <last build that spoke it>`, never deleted.
- *  2.1.288 → 2.1.296 (lane record-oracle-2-1-296): the 2.1.296 dump's `sentences` — again the SAME 14 (names Hu/qc/vM), no `until`. */
-const PERMISSION_OUTCOME_CLI_VERSION = '2.1.296';
+ *  2.1.288 → 2.1.296 (lane record-oracle-2-1-296): the 2.1.296 dump's `sentences` — again the SAME 14 (names Hu/qc/vM), no `until`.
+ *  2.1.296 → 2.1.306 (lane cli-2-1-306-records): the 2.1.306 dump's `sentences` — the SAME 14 (names ep/wp/Ur), no `until`. The Dx
+ *  sentence (2.1.306 `D0`) MOVED: it now opens its line, so the extractor reads its whole declaration (scripts/claude-cli-dump.mjs). */
+const PERMISSION_OUTCOME_CLI_VERSION = '2.1.306';
 
 const row = (id, outcome, match, text, since, binary, evidence) => Object.freeze({ id, outcome, match, text, since, binary, evidence });
 

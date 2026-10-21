@@ -62,7 +62,9 @@
 // (oatInFile(version, fixture): green on oat-file, oat-file-401, oat-file-switch).
 //
 //   node scripts/measure-claude-cred-read.mjs [--variant all|oat|<name>[,<name>]] [--gap 65000] [--out file.json]
-//        [--write-fixture [--fixture path]]   the six oat variants ⇒ scripts/fixtures/oat-in-file.json
+//        [--write-fixture [--fixture path]]   the six oat variants ⇒ THIS CLI's record ADDED to
+//                                             scripts/fixtures/oat-in-file.json (cli-caps withMeasured:
+//                                             every other version's record kept — lane oat-in-file-2-1-306)
 //        [--no-netns --claude <fake script>]   no namespace: a FAKE claude only (below)
 //        [--gap ms] [--flush-ms ms] [--near-ms ms]   (the fake's fast self-test shortens the waits)
 //
@@ -103,7 +105,7 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 ? argv[i + 1] : d; };
 const flag = (k) => argv.includes('--' + k);
 const NETNS = !flag('no-netns');
-const { OAT_VARIANTS, oatInFile, cliVersionOf } = createRequire(import.meta.url)(path.join(path.dirname(SELF), '..', 'src', 'cli-caps.js'));
+const { OAT_VARIANTS, oatInFile, cliVersionOf, measuredVersions, withMeasured } = createRequire(import.meta.url)(path.join(path.dirname(SELF), '..', 'src', 'cli-caps.js'));
 // FAKE tokens, built at runtime: no token-shaped literal sits in the tree
 const OAT_PFX = ['sk', 'ant', 'oat01'].join('-');
 const ORT_PFX = ['sk', 'ant', 'ort01'].join('-');
@@ -659,6 +661,11 @@ async function main() {
   const v = opt('variant', 'all');
   const want = v === 'all' ? all : v === 'oat' ? [...OAT_VARIANTS] : v.split(',').flatMap((x) => (x === 'oat' ? OAT_VARIANTS : [x]));
   if (flag('write-fixture') && OAT_VARIANTS.some((x) => !want.includes(x))) { console.error(`REFUSED: --write-fixture needs all six oat variants in one run (--variant oat): ${OAT_VARIANTS.join(', ')}`); process.exit(2); }
+  // the fixture holds ONE record per measured version: this run's is ADDED, every other kept — refused before
+  // the run when it could not be (a version the CLI does not name, a file that is neither shape)
+  const FIXTURE = opt('fixture', path.join(path.dirname(SELF), 'fixtures', 'oat-in-file.json'));
+  const fixtureNow = () => { try { return JSON.parse(fs.readFileSync(FIXTURE, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return null; throw new Error(`${FIXTURE} does not read (${e.message})`); } };
+  if (flag('write-fixture')) { try { withMeasured(fixtureNow(), { cliVersion: cliVersionOf(version), variants: {} }); } catch (e) { console.error(`REFUSED: --write-fixture adds this CLI's record to the fixture and keeps every other version's — ${e.message}`); process.exit(2); } }
   // oat-env is a diff against oat-file: run oat-file first whatever the order asked
   want.sort((a, b) => (a === 'oat-file' ? -1 : b === 'oat-file' ? 1 : 0));
   const results = [];
@@ -687,9 +694,9 @@ async function main() {
   if (flag('write-fixture')) {
     const fx = { cliVersion: cliVersionOf(version), measuredAt: new Date().toISOString().slice(0, 10), script: 'scripts/measure-claude-cred-read.mjs', netns: NETNS, variants: {} };
     for (const name of OAT_VARIANTS) { const r = results.find((x) => x.variant === name); fx.variants[name] = { verdict: r.verdict, note: r.note }; }
-    const file = opt('fixture', path.join(path.dirname(SELF), 'fixtures', 'oat-in-file.json'));
-    fs.writeFileSync(file, JSON.stringify(fx, null, 1) + '\n');
-    process.stderr.write(`[oat] fixture ${file}: oatInFile(${fx.cliVersion}) = ${oatInFile(fx.cliVersion, fx)}\n`);
+    const next = withMeasured(fixtureNow(), fx); // re-read: every other version's record as the file holds it now
+    fs.writeFileSync(FIXTURE, JSON.stringify(next, null, 1) + '\n');
+    process.stderr.write(`[oat] fixture ${FIXTURE}: oatInFile(${fx.cliVersion}) = ${oatInFile(fx.cliVersion, next)} · it holds ${measuredVersions(next).join(', ')}\n`);
   }
   process.exit(0);
 }

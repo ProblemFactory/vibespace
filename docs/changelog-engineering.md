@@ -4,6 +4,122 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.340 — 2026-10-21
+
+### lane cli-2-1-306-records — the record oracle is pinned to claude 2.1.306: the records that build added are known, and the permission sentence it moved is read again (backlog B-42ed; base c1aba74c 2.369.337)
+- **Why:** npm's latest claude CLI is 2.1.306 (measured 2026-10-21) while the oracle was pinned up to 2.1.296. Every instance whose CLI auto-updated showed the red "New fields on a known record" card for records the oracle had not seen, and the Actions mirror's §4d went informational (B-42ed: «new sentence Pz, moved name Dx (Gd)»). The hub's CLI stays 2.1.296.
+- **The dump, STATIC:** `npm install --prefix <lane>/npm @anthropic-ai/claude-code@2.1.306 --no-save --ignore-scripts` (the registry download is the lane's only network; never on PATH, never run as a session). The binary is `<prefix>/node_modules/@anthropic-ai/claude-code-linux-x64/claude` (the native ELF; `claude-code/bin/claude.exe` is a 500-byte launcher). `node scripts/claude-cli-dump.mjs <it> scripts/fixtures/claude-cli/2.1.296.json` → scripts/fixtures/claude-cli/2.1.306.json: union 177 shapes (2.1.296: 175), helpers u/A, 63 system subtypes and 35 stream record types, the 2.1.296 sets exactly.
+- **The zod diff 2.1.296 → 2.1.306:**
+  - No new subtype and no new stream record type, so no SHAPE_SINCE row and no list decision.
+  - **21 new fields on eight declared shapes:** user 1, assistant 2, result 12 (result/success carries 11 of them, the error branch interrupted_by_shutdown), system/init 2, informational 1, turn_handoff_available 1, ui_invalidate 1, command_lifecycle 1.
+  - **Two new zod keys,** workflow_agent and workflow_phase.
+  - **Five non-record keys changed and are not judged:** the first-spelled `http` is now the HTTP hook config; sdk / sse / stdio are MCP server configs; parts is the Read tool's PDF parts.
+  - **The permission sentences:** the same 14, under new names (anchor ep, list wp, set Ur).
+- **FIELDS_306 (src/record-shape.js):** all 21 are `ignored`, each with the dump's own `.describe()` sense. A grep of src/, server.js and data/bin found no reader.
+  - The nine `process_*` fields are memory / CPU telemetry sent only by a worker Anthropic hosts.
+  - api_error_origin (assistant + result) is first_party only from Anthropic's own API.
+  - interrupted_by_shutdown is a multi-tenant worker host's shutdown; handoff_intake_phases_ms is cloud handoff latency.
+  - text_not_typed means a server or an app composed the user message.
+  - assistant.refused_message_id (2.1.296 put it on the user re-ask).
+  - init.original_cwd / additional_directories: the server reads init.cwd only.
+  - informational.prompt_submit_outcome: a hook-ended prompt; the dim card shows the line's own content.
+  - shared_message_id (handoff staging), ui_invalidate.prompts_screened (the plugin UI host, no UI surface channel attached), command_lifecycle.ran_ahead (the VS Code panel only).
+- **WORKFLOW_PROGRESS_ITEMS:** the two new keys are the entries of task_progress.workflow_progress (CORPUS_KNOWN, the live Workflow card), which 2.1.306 now PARSES through a `type`-discriminated union. 2.1.296 built the same items with no schema. They have no uuid / session_id, so they are not stream records. Both are `known`: message-manager normalizeWorkflowProgress and routes/sessions normalizeWorkflowSnapshot read them, and every field the two read is declared by the literal.
+- **THE MOVED NAME (scripts/claude-cli-dump.mjs):** the Dx row's sentence ("…To tell you how to proceed, the user said:") is 2.1.306's `D0`, still on the tool_result list.
+  - **What changed in the bundle:** the members before it moved to another chunk, so its template literal now OPENS its line, and its own newline ends it. Its closing backtick and the next member (`n2=`) begin the next line.
+  - **Why the extractor missed it:** it resolved a name only on a strings line that declares another member. D0's line declares none, so D0 went unresolved and the Dx row read as a GHOST.
+  - **The fix:** a template still open at its line's end is judged on its whole declaration, through the line its closing backtick is on (≤ 4 KB on). Its VALUE still ends at its line, because the rows are prefixes.
+  - **Checked:** re-run over the strings of 2.1.287, 2.1.288 and 2.1.296, it resolves the same 14 sentences under the same names (identical to the tracked 2.1.288 / 2.1.296 dumps).
+  - PERMISSION_OUTCOME_CLI_VERSION → 2.1.306, no `until`.
+  - B-42ed's «new sentence Pz» was on the mirror's own build (not kept); 2.1.306 has no unclassified sentence.
+- **Left red by design:** nothing; no 2.1.306 shape needs handling.
+- **Tests, test-record-shape (base 99 with no binary):**
+  - **112 with no binary** (§4e: the 2.1.306 dump judged; CONTROL without FIELDS_306 ⇒ 21 named on 2.1.306 and green on 2.1.296; FIELDS_306 = the computed dump diff; no subtype / record type added; the workflow items, the readers' fields ⊆ the literal, CONTROL: an invented field is named; the state enum vs WF_WORKING_STATES; the moved name; a synthetic 2.1.306 chunk; RED CONTROL: a copy of the extractor judging the line alone ⇒ D0 unresolved, «GHOST: Dx (Gd)»).
+  - **130 STRICT on 2.1.306** and **130 STRICT on 2.1.296.** Both run on static copies (mode 0644, so the oracle reads them and never executes them).
+  - **The mirror shape (`GITHUB_ACTIONS=true`) on 2.1.306:** STRICT 130. The base tree read it INFORMATIONAL with 5 legs skipped, B-42ed's red.
+- **Other tests:** test-helper-ask ⑱b pins 2.1.306 (243). test-agent-tool-rules ⑪ passes on 2.1.306 through a fake HOME (214).
+- **What the owner gains by updating:** the pin is the prerequisite, never the update itself. An instance already on 2.1.306 stops drawing the field-growth card for these 21 fields as soon as it runs this build. The hub's own update (`claude` 2.1.296 → 2.1.306) is the owner's to make.
+
+### lane oat-in-file-2-1-306 — the long-lived token in a pool member's file is granted on 2.1.306 too: the fixture holds ONE record per measured version, and a new measurement ADDS its record and never drops one
+- **Why.** `cliCaps.oatInFile(version, fixture)` grants the token in a member's credential file only on the EXACT CLI version the fixture measured, and scripts/fixtures/oat-in-file.json held one record (2.1.296, 2026-10-14). So on a 2.1.306 CLI every oat-only pool member was escaped as unmeasured: no token written to its folder, no new placement on it, the spawn on the env road. That is a follow-up named by lane cli-2-1-306-records.
+- **The measurement (主开发's rung, 2026-10-21 17:55–18:02Z).** `scripts/measure-claude-cred-read.mjs --variant oat --write-fixture` ran inside the loopback-only namespace with the strace watchdog, against the 2.1.306 linux-x64 ELF that lane downloaded (sha256 520bc6c1f40af466…). The verdicts are IDENTICAL to 2.1.296's: oat-file PASS, oat-env FAIL, oat-file-401 PASS, oat-file-near PASS, oat-file-switch PASS, oat-file-scopes FAIL. The notes say the same too. This lane ran no measurement, no real claude, no namespace and no sudo.
+- **The shape: `{versions: {'<exact version>': <record>}}`.** Each record is exactly the one-version file's object (cliVersion, measuredAt, script, netns, variants), keyed by its own cliVersion.
+  - **Why one file rather than one per version:** the store keeps reading ONE file (accounts.js `_oatFixture`, its read census unchanged), and the writer keeps one path.
+  - The 2.1.296 record is the old file's object, unchanged. test-cli-caps ⑥ pins the sha256 of its JSON.
+  - The committed file was produced with the writer's own rule, `withMeasured(the old file, the 2.1.306 record)`.
+- **src/cli-caps.js (PURE).**
+  - `oatInFile` reads the record keyed by the exact version. A key whose record names another version, a key in `--version` words, an inherited entry, or a versions value that is not a map grants nothing.
+  - A bare record still reads as the fixture of its one version: an older `--fixture` scratch file, and the suites' own fixtures.
+  - `measuredVersions(fixture)` lists the versions, oldest first. The store's `oatFileCaps().measured` is now `'2.1.296, 2.1.306'`, the words oat-file-sync's log says beside an unmeasured CLI.
+  - `withMeasured(fixture, record)` is THE WRITER'S ONE RULE. It adds the record under its exact version and keeps every other entry as it was (even one that is not a full record, and other top-level keys). Re-measuring a version replaces only that version's record. The map is written oldest first and the input is never touched.
+  - `withMeasured` throws on a record naming no exact version, and on a fixture that is neither shape: rewriting it could drop what it holds.
+- **The writer changed.** In scripts/measure-claude-cred-read.mjs, `--write-fixture` wrote this run's record ALONE, which would have dropped 2.1.296. It now:
+  - checks `withMeasured` over the file BEFORE the run and refuses (exit 2, no variant run) when it could not add;
+  - re-reads the file at write time;
+  - writes `withMeasured(the file now, this run's record)`;
+  - logs `it holds 2.1.296, 2.1.306, …`.
+- **The readers.** Every one goes through `accounts.oatFileCaps()`, so 2.1.306 now behaves as 2.1.296 everywhere:
+  - `_placeable` (no escape);
+  - the pool's `oat-cli-unmeasured` refusal;
+  - `_syncOatFileNow`, which writes or takes back the file;
+  - `resolveForSpawn`, which reads the file, not CLAUDE_CODE_OAUTH_TOKEN;
+  - the row's door (`written · CLI 2.1.306`);
+  - oat-file-sync.
+  - The client's words take `{cli}`. data/bin has no reader. Nothing else changes.
+- **Tests.**
+  - **test-cli-caps: 84** (base 52).
+    - ② The map legs: each version true, 2.1.300 / 2.1.307 / 2.1.306-dev.1 false, a FAIL in one record leaks nothing into the other, the key-vs-record, inherited and array cases.
+    - ②b The writer's rule: from no file, from the bare file, add-never-drop, the order, untouched input, re-measure, the refusals, `measuredVersions`. RED CONTROL: the base writer (this run's record alone) drops 2.1.296.
+    - ③ RED CONTROL: the one-version reader (the base) grants the two-version file nothing; plus the own-entry mutant.
+    - ④ The writer ADDS through `withMeasured` and refuses before the run.
+    - ⑥ The committed file: the two versions, the pinned 2.1.296 record, the 2.1.306 verdicts equal to 2.1.296's, 2.1.300 false, no path / machine / person.
+  - **test-oat-measure-fake (heavy, strace, the FAKE claude only): 20** (base 17).
+    - The fresh file is `{versions: {'9.9.9': …}}`.
+    - Over a COPY of the committed fixture, 9.9.9 is ADDED and 2.1.296 + 2.1.306 are kept byte-for-byte.
+    - A junk `--fixture` is REFUSED before the run and left as it was.
+  - **test-oat-materialize: 178** (base 176). The hub on 2.1.306 gets the archive, the file, the door `written · CLI 2.1.306` and the spawn from the file. RED CONTROL: over the base's one-version file, the same 2.1.306 is `cli-unmeasured`.
+  - **test-account-pool: 87** (base 84). Back from 2.1.300 to 2.1.306, the oat-only member is a pool candidate again and the pool dir resolves through to its token file. RED CONTROL: the base's one-version fixture escapes it.
+  - **Unchanged:** test-oat-identity 305 (it stubs the caps).
+- **What the owner gains.** Updating the hub's claude to 2.1.306 no longer takes the token files back from oat-only pool members. The pool keeps placing on them as on 2.1.296. The hub's CLI stays 2.1.296; this lane is only the measurement's record.
+
+### lane incident-paint-gap — a paint gap on an idle desktop is not a freeze: a gap is jank only with a busy main thread or a person there; an unpainted gap is a `paint-gap-s` metric, never an auto incident
+- **The report (2026-10-21).** The auto incident recorder filed two «jank storm» incidents on the owner's Windows desktop that were no jank: inc-mvi50qdh-ygmh (13:18Z «9.1 s») and inc-mvi5ggqh-1tz8 (13:30Z «620.8 s — worst frame 620 780 ms»), 2.369.336 client, Windows Chrome.
+- **The bundles (measured).** longTasks: two, 690 ms / 306 ms, both minutes before the storms. frameGaps: 9 144 ms, 71 266 ms, 620 780 ms and smaller. compStalls: 9.9 / 3.1 / 6.7 / 6.7 / 71.7 / 6.4 s — the SAME gaps, seen by the compositor-stall arm. screenEvents empty; visibility 'visible'; ws connected; the action ring's last input 13:16:55Z (a pointer on the chat input), nothing during the gaps.
+- **The cause.** The main thread was never blocked (no long task near 9 s, let alone 620 s; the 1 s timer kept ticking — that is how the "storm" was measured). rAF stopped because the window was not PAINTING — an idle Windows desktop (monitor off / lock screen / an occluded window; Chrome keeps `visibilityState` 'visible' on a lock screen, so neither the hidden gate nor the tab-return filter caught it). `jankStormVerdict` summed the one 620 s paint gap as «slow frames», `onRendererFreeze` (≥ 5 s) filed the incident, and the compositor-stall arm pushed a stall for the same gap.
+- **The fix (src/lib/telemetry-client.js).** New PURE `paintGapKind({t, gap}, {longTasks, inputs})` → `jank` (a long task overlaps ≥ half the gap, or a pointer/key during it or within 1 s after) | `unpainted`. `jankStormVerdict` counts only `jank` gaps. The compositor-stall arm files its «compositor stall» incident only for a `jank` gap (person present — the GPU/RTX-5090 case it was built for, RED control kept) and otherwise writes a `paint-gap-s` metric + a `paint-gap` event — never an incident. `installInputStamp` (pointerdown/keydown) is the "a person was there" stamp ring (`recentInputs`); `installScreenWatch` now also records window `focus`/`blur`, Page-Lifecycle `freeze`/`resume` and the Idle Detection verdict when the permission is already held (never a new prompt), stamped into `screenEvents`. incident-recorder.js is unchanged — its snapshot already carries `screenEvents`.
+- **The two incidents re-judged.** Both `unpainted` (620 s / 9 s gaps, the long tasks 690/306 ms minutes away, no input) ⇒ no storm, no auto incident — a `paint-gap-s` metric and a ring line instead. A 9 s gap with a 9 s long task ⇒ `jank`; a 6 s gap with a key 300 ms after ⇒ `jank`; a 71 s compositor stall with no input ⇒ `unpainted`.
+- **Gate.** test-freeze-probe (PURE + wiring, 48 legs — the base verdict that counts every slow frame files both incidents as the RED control). No new i18n (telemetry-client has no UI strings). CHANGELOG ×3 + docs/kb-bugfix-invariants.md (index + essay) + docs/kb-features.md + docs/kb-file-structure.md, same commit. No version bump — integrated, signed and cut by 主开发.
+
+### lane vault-chip-zone-errors — two uncaught client errors at every start, found and fixed at their causes; the console ring keeps the stack and an offline tool names the line (incidents inc-mvi50qdh-ygmh / inc-mvi5ggqh-1tz8, 2.369.336 client, Windows Chrome, 2026-10-21 13:12–13:13Z)
+- **What the bundles said.** The page loaded at 13:12:54Z. Its console ring then held `unhandled: Failed to execute 'insertBefore' on 'Node': The node before which the new node is to be inserted is not a child of this node.` twice (at load and at +5 s), then `uncaught: TypeError: Cannot read properties of undefined (reading 'length')` twice, 4 ms apart, from `bundle.js?v=…:1`. The minified bundle is one line, so `:1` named nothing.
+- **Error 1 — the lock chip, `src/lib/vault-unlock.js:76` on the base.** `drawChip` did `host.insertBefore(chip, document.getElementById(beforeId) || null)` with host `#taskbar-tray` and the For-you button found document-wide.
+  - The owner's synced `chrome.arrangement` (read-only, chrome keys only) has For-you in `toolbar-row2` between springs, and `taskbar-tray: []`. The bundle agrees: the For-you press was at y = 67 of a 1100 px viewport, the second toolbar row.
+  - So the reference was not a child of the host, and the insert threw at every apply of the vault's facts. The two `unhandled` entries are `maybeNagVault` (the onboarding check) and `initVault`'s boot read, each reaching `applyVaultFacts`. A scratch hub with the owner's shape reproduced both, with these frames.
+  - The throw stopped `drawLockStrip`, `drawGearMark`, the facts listeners and `onVaultState`'s `showUnlock`. So on the owner's desktop a locked vault showed NOTHING at start: no dialog, no strip, no ⚙ mark, no chip. The owner reached the dialog through the For-you item 12 s later.
+- **Error 2 — the incident recorder, `src/lib/chat-enter-keys.js:76` on the base** (called from `src/lib/incident-recorder.js:55`). `actionKeyWords(e)` read `e.key.length`.
+  - Chrome's autofill and saved passwords dispatch a bare `Event('keydown')` with no `key` on each field they fill, then input, change and a bare keyup. Measured through CDP `Autofill.trigger` on a card form: one keyless keydown per filled field.
+  - The action ring fits this. It shows `C-Control`/`S-Shift`-shaped words, a modifier up and a fourth key, and no «typing» marker at all, so no character was typed into the dialog. Two fields were filled at once: two throws, 4 ms apart.
+  - Right after the unlock, the owner triple-clicked the sidebar's session filter and pressed one key. That reads as clearing a user name the password manager put there (formless inputs are one synthetic form for it). This is inferred, not shipped: see the report.
+  - The brief's suspect, «a renderer reading a missing list after the unlock broadcast», was not it: the throws came 0.7 s BEFORE the Unlock press.
+- **The fix.**
+  - `customize-mode.js` `slotBeside(id, fallback)`: the slot beside a movable chrome element is its OWN parent (the zone applyArrangement put it in) before it, else the fallback's end. The reference is always a child. `drawChip` uses it for both pairs (the taskbar and the phone nav), and app.js re-seats the chip after every arrangement (`placeVaultChip`), so it follows For-you when Customize moves it.
+  - `applyVaultFacts` draws each lock sign under its own try (a `[vault]` console.error), so one sign's throw never takes the others or the dialog.
+  - `actionKeyWords` answers a keydown with no string `key` as `{ key: '(fill)' }` (FILL_KEY) — the ring says a fill happened, never what (`keyMatches` already had this guard).
+- **The ring keeps the stack.**
+  - `src/lib/incident-stack.js` (PURE) `stackHead(err, origin)`: the first 3 `at` frames, the origin cut, the bundle's `line:column` kept, whole frames only, ≤ 400 chars. A frame too long for the room keeps its location and loses its name.
+  - The recorder spreads it onto `uncaught` (`e.error`) and `unhandled` (`e.reason`) entries.
+  - A full console ring of worst-case entries is 224 KB in bundle.json (+79 KB for the stacks), against the hub's 50 MB body cap (`express.json`). Measured by test-incident-recorder ③.
+- **The map, served to nobody.**
+  - `src/server/static-public.js`: express.static for every path but `*.map`, judged decoded (`%2E` is a dot). Such a path falls through to the later routes and ends in a 404. WebDAV and proxy `.map` paths are untouched. server.js keeps one line, at the bootstrap-size cap.
+  - `scripts/symbolicate.mjs <bundle.json>` maps the ring's frames OFFLINE. The map is NEVER a file (主开发's ruling: the product keeps no map on disk; the build line is unchanged). It is rebuilt in memory (0.3–0.8 s) with the client esbuild step's flags PARSED off package.json's build script at run time — never a copied list; test-incident-recorder's census pins parsed == the script's — and refused unless the JS equals public/bundle.js byte for byte. A frame whose `?v=` is another build is refused (`--any-build` maps it anyway).
+  - The `source-map` package is not in node_modules, so a 40-line base64-VLQ decoder is in the script.
+- **Tests.**
+  - test-vault-chrome Z: the chip before For-you on a default chrome and on the owner's shape, at a load and live as Customize moves it (row 2 → the right zone → the default). The dialog, strip and ⚙ mark show at that load, and the phone pair is placed the same way. A two-field bare-Event fill and the REAL `Autofill.trigger` path throw nothing; the captured ring says `(fill)`; the unlock + 6 s throws nothing. Every page exception is captured with CDP `Runtime.exceptionThrown`.
+  - test-vault-chrome Z-RED: a patched bundle with the pre-fix chip and key words throws both errors. The ring keeps both stacks, and symbolicate names `src/lib/vault-unlock.js` (the insert) and `src/lib/chat-enter-keys.js` (the `.length`) from the real capture.
+  - test-chat-enter-ime §2c (+ control).
+  - test-incident-recorder (new, fast).
+  - test-csp-report ⑨: the map in public/ answers 404 on every spelling; MUTANT: the guard cut serves it.
+
 ## 2.369.339 — 2026-10-21
 
 ### lane werift-lite-multihomed — a desktop stream stayed black once the viewer's browser was allowed the microphone on a multi-homed computer: werift wrote a=ice-lite where no browser reads it, and kept its FIRST nomination for good (backlog B-c7d7, found by lane stream-mic-road 2026-10-21; base c1aba74c = 2.369.337)

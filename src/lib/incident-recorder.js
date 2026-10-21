@@ -17,6 +17,7 @@ import { onRendererFreeze } from './telemetry-client.js';
 import { BUILD_VERSION } from './build-version.js';
 import { actionKeyWords, actionKeyUpWords, imeMarker } from './chat-enter-keys.js';
 import { showToast, fetchJson, copyText, createModalShell, escHtml, uiScale } from './utils.js';
+import { stackHead } from './incident-stack.js'; // lane vault-chip-zone-errors: an uncaught / unhandled entry keeps its first frames (PURE)
 
 const CAP = { action: 500, ws: 700, console: 250, op: 300 };
 
@@ -117,11 +118,14 @@ export function installIncidentRecorder(app) {
       orig(...args);
     };
   }
+  // lane vault-chip-zone-errors: the error's first frames ride the entry (≤ 400 chars, the bundle's line:column kept, the
+  // origin cut) — `node scripts/symbolicate.mjs data/incidents/<id>/bundle.json` names the src/ line offline
+  const stackOf = (err) => { const s = stackHead(err, location.origin); return s ? { stack: s } : {}; };
   window.addEventListener('error', (e) => {
-    push(rings.console, CAP.console, { t: Date.now(), l: 'uncaught', m: String(e.message || '').slice(0, 400), src: `${e.filename || ''}:${e.lineno || 0}` });
+    push(rings.console, CAP.console, { t: Date.now(), l: 'uncaught', m: String(e.message || '').slice(0, 400), src: `${e.filename || ''}:${e.lineno || 0}`, ...stackOf(e.error) });
   });
   window.addEventListener('unhandledrejection', (e) => {
-    push(rings.console, CAP.console, { t: Date.now(), l: 'unhandled', m: String(e.reason?.message || e.reason || '').slice(0, 400) });
+    push(rings.console, CAP.console, { t: Date.now(), l: 'unhandled', m: String(e.reason?.message || e.reason || '').slice(0, 400), ...stackOf(e.reason) });
   });
 
   // ── full client-state snapshot at capture time ──
@@ -155,6 +159,7 @@ export function installIncidentRecorder(app) {
     try { out.frameGaps = window.__vsFrameGaps ? window.__vsFrameGaps().slice(-60) : null; } catch { }
     try { out.tickLags = window.__vsTickLags ? window.__vsTickLags().slice(-40) : null; } catch { }
     try { out.screenEvents = window.__vsScreenEvents ? window.__vsScreenEvents().slice(-40) : null; } catch { }
+    try { out.inputs = window.__vsInputs ? window.__vsInputs().slice(-40) : null; } catch { }   // pointer/key timestamps (no elements) — the paint-gap verdict's present-person evidence
     try {
       out.windows = [...app.wm.windows.values()].map((w) => ({
         id: w.id, type: w.type, title: w.titleSpan?.textContent?.slice(0, 60),

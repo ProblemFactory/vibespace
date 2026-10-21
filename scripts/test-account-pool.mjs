@@ -196,6 +196,28 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   amT.dropSessionPoolLink(PT, 'sess-7-1791900000000'); amT.dropSessionPoolLink(PT, 'sess-8-1791900000000');
   await amT.syncOatFiles();
   ck('…and the last link gone, the next sweep takes the file back', !fs.existsSync(path.join(amT.subDir(T), '.credentials.json')));
+  // lane oat-in-file-2-1-306: 2.1.306 is measured too (2026-10-21, the verdicts 2.1.296 has) ⇒ no escape on it
+  amT.noteCliVersion('2.1.306 (Claude Code)');
+  await amT.oatFileSettled();
+  ck('token slot: the hub moves on to 2.1.306 (measured) ⇒ the token is back in T\'s folder and T is a pool candidate again — not escaped', amT.readSubCreds(T).oatFile === true && amT.poolMembers(PT).some((m) => m.id === T) && amT.isPoolMember(PT, T));
+  amT.setPoolTarget(PT, T);
+  ck('…the pool dir re-points onto it and resolves through to its token file, as on 2.1.296', amT.poolCurrent(PT) === T && amT.readSubCreds(PT).oatFile === true && amT.resolveForSpawn(PT).poolTarget === T);
+}
+{
+  // RED CONTROL (lane oat-in-file-2-1-306, the base): over the one-version fixture (2.1.296 only) the same member on 2.1.306 is escaped
+  const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
+  const one = path.join(DATA, 'fx-2.1.296-only.json'); fs.writeFileSync(one, JSON.stringify(FX.versions['2.1.296']));
+  const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-base'), oatFixture: one });
+  const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
+  const X = amB.createSubscription({ name: 'Login X' }).id;
+  fs.writeFileSync(path.join(amB.subDir(X), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, ...SH } }), { mode: 0o600 });
+  const T = amB.createSubscription({ name: 'Token T' }).id;
+  fs.writeFileSync(path.join(amB.subDir(T), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 864e5, ...SH } }), { mode: 0o600 });
+  const PB = amB.createPool({ name: 'Tok pool' }).id;
+  amB.setOat(T, ['sk', '-ant-oat01-'].join('') + 'POOLfake_' + 'y'.repeat(40));
+  amB.noteCliVersion('2.1.306 (Claude Code)');
+  await amB.oatFileSettled();
+  ck('RED CONTROL (the base): over the one-version fixture (2.1.296 only) the same oat-only member on 2.1.306 stays out of the pool and its folder holds no token (today\'s escape)', !amB.poolMembers(PB).some((m) => m.id === T) && !amB.isPoolMember(PB, T) && amB.readSubCreds(T).oatFile !== true && amB.poolMembers(PB).some((m) => m.id === X));
 }
 // THE PROVIDER OF A POOL MEMBER (q-053 P0b): every member names its provider (a LABEL — readings stay the slot's); the
 // pool's crossProvider setting (never by default, the owner's decision ①) is validated and listed.

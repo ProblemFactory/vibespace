@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.340 — 2026-10-21
+
+### Fixed
+- With Claude Code 2.1.306, chats no longer show red "New fields on a known record" cards for the records that version added: VibeSpace now knows them.
+- On Claude Code 2.1.306, a pool can use a member that has only its long-lived token, as it can on 2.1.296.
+- Leaving the desktop alone — screen off, lock screen, window covered — no longer files an automatic freeze incident; only a freeze you could feel is captured.
+- If you moved the For-you button, the Vault locked chip now sits beside it, and at start the unlock dialog, the lock strip and the ⚙ mark show again.
+- Filling the second password from your browser's saved passwords no longer causes an error on the page.
+
 ## 2.369.339 — 2026-10-21
 
 ### Added

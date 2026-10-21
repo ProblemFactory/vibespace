@@ -183,7 +183,25 @@ export function installScreenWatch() {
         if (cur !== last) { noteScreen('screen-move', { from: last, to: cur, dpr: window.devicePixelRatio }); last = cur; }
       } catch { }
     }, 1000);
-    document.addEventListener('visibilitychange', () => { _screenEvents.push({ t: Date.now(), k: 'visibility', v: document.visibilityState }); if (_screenEvents.length > 40) _screenEvents.shift(); });
+    const pushScreen = (e) => { _screenEvents.push({ t: Date.now(), ...e }); if (_screenEvents.length > 40) _screenEvents.shift(); };
+    document.addEventListener('visibilitychange', () => pushScreen({ k: 'visibility', v: document.visibilityState }));
+    // THE SCREEN FACTS THE BUNDLE LACKED (2.369.339, inc-mvi5ggqh-1tz8): a paint gap
+    // on an idle desktop looked identical to a freeze until the bundle could say what
+    // the window was doing — frozen by the browser, unfocused, or the OS gone idle.
+    window.addEventListener('focus', () => pushScreen({ k: 'focus' }));
+    window.addEventListener('blur', () => pushScreen({ k: 'blur' }));
+    document.addEventListener('freeze', () => pushScreen({ k: 'freeze' }));   // Page Lifecycle: the browser froze the tab
+    document.addEventListener('resume', () => pushScreen({ k: 'resume' }));
+    try {
+      if (window.IdleDetector && navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'idle-detection' }).then((p) => {
+          if (!p || p.state !== 'granted') return;                            // NEVER a new prompt — only if already held
+          const det = new IdleDetector();
+          det.addEventListener('change', () => pushScreen({ k: 'idle', user: det.userState, screen: det.screenState }));
+          det.start({ threshold: 60000 });
+        }).catch(() => { });
+      }
+    } catch { }
   } catch { }
 }
 /** PURE: is a late 1 s tick a FREEZE, or a tab that was hidden / just returned?
@@ -199,7 +217,7 @@ export function installScreenWatch() {
  *  frames every 1–2 s — under both freeze detectors' thresholds). Over the last
  *  `windowMs` of frame intervals (ms): a storm when the slow frames (≥ slowMs)
  *  together cover ≥ `coverMs` — the page was "alive" but unusable. */
-export function jankStormVerdict(intervals, { now, visibleSince = 0, windowMs = 20000, slowMs = 500, coverMs = 6000 } = {}) {
+export function jankStormVerdict(intervals, { now, visibleSince = 0, windowMs = 20000, slowMs = 500, coverMs = 6000, longTasks = [], inputs = [] } = {}) {
   let covered = 0, slow = 0, worst = 0;
   for (const f of intervals) {
     if (!f || now - f.t > windowMs) continue;
@@ -207,7 +225,12 @@ export function jankStormVerdict(intervals, { now, visibleSince = 0, windowMs = 
     // before the page last became visible spans the hidden period — the 13.3 s
     // "storm" the auto incident captured was one such return, read 3 s later.
     if (frameGapIsReturn({ now: f.t, gap: f.gap, visibleSince })) continue;
-    if (f.gap >= slowMs) { covered += f.gap; slow++; if (f.gap > worst) worst = f.gap; }
+    if (f.gap < slowMs) continue;
+    // UNPAINTED ≠ JANK (2.369.339, inc-mvi5ggqh-1tz8): a slow "frame" with no busy
+    // main thread and nobody there was the window not painting (idle desktop / lock
+    // screen), not a storm — the base verdict counted it and filed a 620 s «freeze».
+    if (paintGapKind(f, { longTasks, inputs }) !== 'jank') continue;
+    covered += f.gap; slow++; if (f.gap > worst) worst = f.gap;
   }
   return { storm: covered >= coverMs, coveredMs: covered, slowFrames: slow, worstMs: worst };
 }
@@ -222,6 +245,48 @@ export function frameGapIsReturn({ now, gap, visibleSince = 0, hiddenAt = 0 }) {
   if (visibleSince && start < visibleSince) return true;
   if (hiddenAt && hiddenAt > start) return true;
   return false;
+}
+
+/** PURE (2.369.339, inc-mvi50qdh-ygmh / inc-mvi5ggqh-1tz8, the owner's idle Windows
+ *  desktop): classify ONE paint gap. A gap in painting is JANK only when the main
+ *  thread was BUSY (a long task overlaps ≥ half of it) or a PERSON was there (a
+ *  pointer / key landed during it or within 1 s after it ended). Otherwise it is
+ *  UNPAINTED — the window simply stopped painting (monitor off, lock screen, an
+ *  occluded or GPU-asleep window; Chrome keeps visibilityState 'visible' on a lock
+ *  screen, so neither the hidden gate nor the return filter catches it). An
+ *  unpainted gap never counts toward a jank storm and never auto-files an incident.
+ *  longTasks: [{at, ms}] (at = end time); inputs: [ms] (or [{t}]). The window's
+ *  visibility / focus now ride the bundle as screenEvents; the firm JANK tests are a
+ *  busy main thread or a person at the keyboard. */
+export function paintGapKind({ t, gap } = {}, { longTasks = [], inputs = [] } = {}) {
+  const end = t, start = t - gap;
+  for (const lt of (longTasks || [])) {
+    if (!lt) continue;
+    const le = lt.at != null ? lt.at : lt.t;
+    if (le == null) continue;
+    const lm = lt.ms != null ? lt.ms : (lt.dur != null ? lt.dur : lt.duration) || 0;
+    const overlap = Math.min(end, le) - Math.max(start, le - lm);
+    if (overlap > 0 && overlap >= gap / 2) return 'jank';   // the main thread was busy over half the gap
+  }
+  for (const it of (inputs || [])) {
+    const ts = typeof it === 'number' ? it : (it && it.t);
+    if (ts == null) continue;
+    if (ts >= start && ts <= end + 1000) return 'jank';     // a person was there (during it or ≤ 1 s after)
+  }
+  return 'unpainted';
+}
+// INPUT STAMPS (2.369.339): a lightweight ring of pointer / key timestamps so the
+// paint-gap verdict can tell a window someone is using from an idle desktop — a
+// frame gap with an input during it or just after is jank the person could feel.
+const _inputs = [];
+export function recentInputs() { return _inputs.slice(); }
+try { window.__vsInputs = recentInputs; } catch { }   // the bundle's "was anyone there?" ring — timestamps only
+function noteInput() { _inputs.push(Date.now()); if (_inputs.length > 60) _inputs.shift(); }
+export function installInputStamp() {
+  try {
+    window.addEventListener('pointerdown', noteInput, { capture: true, passive: true });
+    window.addEventListener('keydown', noteInput, { capture: true, passive: true });
+  } catch { }
 }
 const _frameGaps = [];   // {t, gap} for every frame that took ≥ 300 ms (a tab return excluded)
 const _tickLags = [];    // {t, gap, hidden, visibleAgo} for every 1 s tick ≥ 1.5 s late
@@ -263,7 +328,7 @@ export function installCompositorStallWatch() {
     // that neither the self-gap nor the rAF-dead arm can see. One event + one
     // capture per storm; the storm closes after 20 s without a slow frame.
     if (!document.hidden && tickNow - visibleSince >= 3000) {
-      const v = jankStormVerdict(_frameGaps, { now: tickNow, visibleSince });
+      const v = jankStormVerdict(_frameGaps, { now: tickNow, visibleSince, longTasks: _longTasks, inputs: _inputs });
       if (v.storm && !stormOpen) {
         stormOpen = tickNow;
         metric('jank-storm-covered-s', Math.round(v.coveredMs / 100) / 10);
@@ -280,12 +345,23 @@ export function installCompositorStallWatch() {
     const age = Date.now() - lastRaf;
     if (age > 2000 && !stallStart) stallStart = lastRaf;
     if (age <= 2000 && stallStart) {
-      const dur = Math.round((Date.now() - stallStart) / 1000 * 10) / 10;
+      const ended = Date.now();
+      const dur = Math.round((ended - stallStart) / 1000 * 10) / 10;
       _compStalls.push({ at: stallStart, s: dur });
       if (_compStalls.length > 20) _compStalls.shift();
-      metric('compositor-stall-s', dur);
-      track('event', 'compositor-stall', `${dur}s (rAF dead, timers alive — GPU/driver side)`);
-      notifyFreeze({ kind: 'compositor', s: dur, at: stallStart, longTasks: _longTasks.slice(-5) });
+      // UNPAINTED ≠ A STALL WORTH FILING (2.369.339, inc-mvi5ggqh-1tz8): the arm was
+      // built for the GPU case (the RTX-5090 verdict) where the person is THERE —
+      // keep that incident. But an idle desktop (monitor off / lock screen / an
+      // occluded window) stops painting with no busy main thread and nobody present:
+      // a metric + a ring line, never an auto incident the owner never felt.
+      if (paintGapKind({ t: ended, gap: ended - stallStart }, { longTasks: _longTasks, inputs: _inputs }) === 'jank') {
+        metric('compositor-stall-s', dur);
+        track('event', 'compositor-stall', `${dur}s (rAF dead, timers alive — GPU/driver side)`);
+        notifyFreeze({ kind: 'compositor', s: dur, at: stallStart, longTasks: _longTasks.slice(-5) });
+      } else {
+        metric('paint-gap-s', dur);
+        track('event', 'paint-gap', `${dur}s (rAF dead, timers alive — window not painting; no busy main thread, nobody present)`);
+      }
       stallStart = 0;
     }
   }, 1000);

@@ -30,6 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
 // §4d (lane S1 verify r5): THE PERMISSION-OUTCOME SENTENCE CENSUS — the binary's OWN lists of the tool_result
 //   texts it writes for a permission outcome (`Gd()` and the exact is_error set) vs src/permission-outcome.js;
@@ -486,7 +487,7 @@ console.log('§4b the CLI 2.1.280 pass (2026-09-22): the latency reason told tru
 
 console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six fields on three shapes, one new subtype routed to the fall-back card');
 {
-  ok('2.1.281 stays a PINNED build beside 2.1.288 and 2.1.296 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296' && R.SCHEMA_CLI_VERSION === '2.1.296', R.SCHEMA_CLI_VERSIONS);
+  ok('2.1.281 stays a PINNED build beside 2.1.288, 2.1.296 and 2.1.306 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296,2.1.306' && R.SCHEMA_CLI_VERSION === '2.1.306', R.SCHEMA_CLI_VERSIONS);
   const ADDED = [['system/init', 'per_turn_effort_active'], ['system/init', 'view_mode'], ['assistant', 'local_command_outcome'], ['conversation_reset', 'trigger'], ['conversation_reset', 'user_message_uuid'], ['conversation_reset', 'timestamp']];
   ok('the six fields 2.1.281 added are declared IGNORED (never known — known is the 2.1.274 dump), each with a reason naming the build', ADDED.every(([k, f]) => { const sp = R.SHAPES['claude:stream:' + k]; return !sp.known.has(f) && /2\.1\.281/.test(sp.ignored.get(f) || '') && sp.ignored.get(f).length > 60; }), ADDED.map(([k, f]) => k + '.' + f + ' = ' + R.SHAPES['claude:stream:' + k].ignored.get(f)));
   const pte = R.SHAPES['claude:stream:system/per_turn_effort_changed'];
@@ -570,7 +571,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const PO = require(path.join(REPO, 'src/permission-outcome.js'));
     for (const d of dumps) { const c = outcomeCensus(d.sentences.rows || [], PO.PERMISSION_OUTCOME_ROWS, ''); ok(`${d.version}: §4d ${(d.sentences.rows || []).length} permission sentences, none unresolved, each a row of src/permission-outcome.js`, (d.sentences.rows || []).length === 14 && d.sentences.unresolved.length === 0 && c.unclassified.length === 0, { unresolved: d.sentences.unresolved, c: c.unclassified }); }
     const texts = (d) => JSON.stringify(d.sentences.rows.map((x) => x.text).sort());
-    ok('§4d 2.1.281 → 2.1.288 → 2.1.296: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.296 (the newest pinned)', dumps.every((d) => texts(d) === texts(dumps[0])) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.296' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
+    ok('§4d 2.1.281 → 2.1.288 → 2.1.296 → 2.1.306: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.306 (the newest pinned)', dumps.every((d) => texts(d) === texts(dumps[0])) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.306' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
     // THE EIGHT DECISIONS, each on its evidence (the dump's zod literal)
     const z = dumps[1].zod || {};
     const EIGHT = ['session_metadata', 'instruction_size_warning', 'ui_invalidate', 'ui_log', 'ui_toast', 'ui_status', 'ui_scroll', 'ui_focus'];
@@ -596,6 +597,54 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const mmSrc6 = read('src/message-manager.js');
     const attBody = mmSrc6.slice(mmSrc6.indexOf('_processAttachment(raw, emit) {'), mmSrc6.indexOf('_processUser(raw, emit) {'));
     ok('…the two KNOWN ones name a reader that exists (_processAttachment branches on hook_success / hook_additional_context); async_hook_response is IGNORED and no branch reads it', /^known — message-manager _processAttachment/.test(R.ATTACHMENT_PAYLOADS.hook_success) && /^known — message-manager _processAttachment/.test(R.ATTACHMENT_PAYLOADS.hook_additional_context) && attBody.includes("a.type === 'hook_success'") && attBody.includes("a.type === 'hook_additional_context'") && /^ignored — /.test(R.ATTACHMENT_PAYLOADS.async_hook_response) && !attBody.includes('async_hook_response'));
+    // THE 2.1.306 PIN (lane cli-2-1-306-records, B-42ed) — the zod diff 2.1.296 → 2.1.306 (the npm package's linux-x64 binary in a scratch
+    // prefix, dumped STATIC), each decision on the dump
+    const d306 = dumps.find((d) => d.version === '2.1.306');
+    const z306 = d306.zod || {};
+    const shapeOf = (k) => 'claude:stream:' + (k === 'result/success' ? 'result' : k);
+    const no306 = { ...R, SHAPES: Object.fromEntries(Object.entries(R.SHAPES).map(([k, sp]) => [k, R.FIELDS_306[k] ? { ...sp, ignored: new Map([...sp.ignored].filter(([f]) => !(f in R.FIELDS_306[k]))) } : sp])) };
+    const n306 = judgeDump(no306, d306);
+    ok('CONTROL: a copy without FIELDS_306 is red on the 2.1.306 dump (21 fields named, result/success\'s twins included) and still green on 2.1.296', n306.length > 0 && n306.every((x) => x.startsWith('UNDECLARED ')) && new Set(n306.map((x) => x.replace('result/success.', 'result.'))).size === 21 && judgeDump(no306, d296).length === 0, n306);
+    const f306 = Object.entries(R.FIELDS_306).flatMap(([k, fs]) => Object.entries(fs).map(([f, note]) => [k, f, note]));
+    ok('FIELDS_306: 21 fields on eight shapes, each IGNORED with a one-line reason naming 2.1.306 (no reader in the tree), never known', f306.length === 21 && new Set(f306.map(([k]) => k)).size === 8 && f306.every(([k, f, note]) => typeof note === 'string' && /2\.1\.306/.test(note) && note.length > 60 && R.SHAPES[k].ignored.get(f) === note && !R.SHAPES[k].known.has(f)), f306.filter(([k, f, n]) => !/2\.1\.306/.test(n || '')));
+    const grown = [...new Set(Object.keys(d306.union).filter((k) => k in d296.union && R.SHAPES[shapeOf(k)]).flatMap((k) => d306.union[k].filter((f) => !d296.union[k].includes(f)).map((f) => shapeOf(k) + '.' + f)))].sort();
+    ok('…and they ARE the dump diff, computed: every field 2.1.306 added to a declared stream shape (its dump minus the 2.1.296 dump) is a FIELDS_306 row, and no row lies outside it', JSON.stringify(grown) === JSON.stringify(f306.map(([k, f]) => k + '.' + f).sort()), { grown, rows: f306.map(([k, f]) => k + '.' + f).sort() });
+    const EXPLICIT6 = new Set(['user', 'transcript_mirror', 'control_request', 'control_response', 'control_cancel_request', 'keep_alive', 'update_environment_variables', 'result', 'result/success']);
+    const sysOf = (d) => Object.keys(d.union).filter((k) => k.startsWith('system/')).sort().join();
+    const recsOf = (d) => [...new Set(Object.keys(d.union).filter((k) => !k.startsWith('system/') && ((d.union[k].includes('uuid') && d.union[k].includes('session_id')) || EXPLICIT6.has(k))).map((k) => k.replace(/\/.*$/, '')))].sort().join();
+    ok('2.1.306 adds no system subtype and no stream record type (the 2.1.296 sets exactly) — no SHAPE_SINCE row, no list decision; nothing is left red', sysOf(d306) === sysOf(d296) && recsOf(d306) === recsOf(d296) && !Object.values(R.SHAPE_SINCE).includes('2.1.306'), { sys: sysOf(d306).split(',').length, recs: recsOf(d306).split(',').length });
+    // the two new zod keys: the items of task_progress.workflow_progress (CORPUS_KNOWN — the live Workflow card), now with a schema
+    const nonRec6 = Object.keys(z306).filter((k) => !k.startsWith('system/')).sort();
+    ok('every non-system zod key of the 2.1.306 dump is a workflow_progress ITEM on WORKFLOW_PROGRESS_ITEMS (workflow_agent, workflow_phase) — none is a stream record (no uuid / session_id), neither a 2.1.296 key', nonRec6.join() === 'workflow_agent,workflow_phase' && nonRec6.every((k) => /^known — /.test(R.WORKFLOW_PROGRESS_ITEMS[k] || '') && z306[k].includes('type:A("' + k + '")') && !(d306.union[k] || []).includes('uuid') && !(k in d296.union)), nonRec6);
+    const readsOf = (seg) => [...new Set([...seg.matchAll(/\be\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]).filter((f) => f !== 'type'))];
+    const cut = (s, a, b) => { const i = s.indexOf(a), j = b ? s.indexOf(b, i + 1) : s.length; return i < 0 || j < 0 ? '' : s.slice(i, j); };
+    const mmW = read('src/message-manager.js'), ssW = read('src/routes/sessions.js');
+    const nwp = cut(mmW, 'function normalizeWorkflowProgress(list) {', 'function unknownRecordJson(raw) {'), nws = cut(ssW, 'function normalizeWorkflowSnapshot(o, runId) {', 'const phases = ordered');
+    const READ = {
+      workflow_phase: [...new Set([...readsOf(cut(nwp, "e.type === 'workflow_phase'", "e.type === 'workflow_agent'")), ...readsOf(cut(nws, "e.type === 'workflow_phase'", "e.type !== 'workflow_agent'"))])],
+      workflow_agent: [...new Set([...readsOf(cut(nwp, "e.type === 'workflow_agent'", 'if (!phases.length')), ...readsOf(cut(nws, "e.type !== 'workflow_agent'", null))])],
+    };
+    const undeclaredReads = (reads) => Object.entries(reads).flatMap(([k, fs]) => fs.filter((f) => !(d306.union[k] || []).includes(f)).map((f) => k + '.' + f));
+    ok(`the Workflow card's two readers (message-manager normalizeWorkflowProgress, routes/sessions normalizeWorkflowSnapshot) read ONLY fields the 2.1.306 literal declares — phase {${READ.workflow_phase.join(', ')}}, agent {${READ.workflow_agent.join(', ')}}`, READ.workflow_phase.length >= 2 && READ.workflow_agent.length >= 10 && undeclaredReads(READ).length === 0, undeclaredReads(READ));
+    const plantedRead = undeclaredReads({ ...READ, workflow_agent: READ.workflow_agent.concat(['progressPct']) });
+    ok('…CONTROL: a reader taking an invented field (workflow_agent.progressPct) is named by the same leg', plantedRead.join() === 'workflow_agent.progressPct', plantedRead);
+    const wfState = /state:F\(\[([^\]]*)\]\)/.exec(z306.workflow_agent || ''), wfWorking = /const WF_WORKING_STATES = new Set\(\[([^\]]*)\]\)/.exec(read('src/lib/chat-renderers.js'));
+    ok('workflow_agent.state is the literal\'s start | progress | done | error, and the card\'s working words (chat-renderers WF_WORKING_STATES) hold both working values — start and progress draw as running', !!wfState && wfState[1] === '"start","progress","done","error"' && !!wfWorking && /'start'/.test(wfWorking[1]) && /'progress'/.test(wfWorking[1]), { state: wfState && wfState[1], working: wfWorking && wfWorking[1] });
+    // §4d THE MOVED NAME — the B-42ed mirror's «GHOST: Dx (Gd)»: the feedback sentence still sits on the tool_result list (2.1.296 vD,
+    // 2.1.306 D0) but its template literal now OPENS its line; the extractor reads the whole declaration and resolves it
+    const dxRow = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'Dx');
+    const s296 = d296.sentences.rows.find((x) => x.text === dxRow.text), s306 = d306.sentences.rows.find((x) => x.text === dxRow.text);
+    ok('§4d the MOVED name: the Dx row\'s sentence (2.1.296 vD) is 2.1.306\'s D0, on the tool_result list, resolved — 14 sentences, none unresolved, the row unchanged, no GHOST', !!s296 && s296.name === 'vD' && !!s306 && s306.name === 'D0' && s306.from === 'Gd' && d306.sentences.rows.length === 14 && d306.sentences.unresolved.length === 0 && outcomeCensus(d306.sentences.rows, PO.PERMISSION_OUTCOME_ROWS, '').unclassified.length === 0, { s296, s306 });
+    const mini306 = 'var x9n="Tool loaded.";function t2(e){if(_f())return e+Gbt;return e}var D0=`The user doesn\'t want to proceed with this tool use. The user said:\n`,n2="Permission for this tool use was denied. Try a different approach.",ep="[Request interrupted by user for tool use]",bT="The user doesn\'t want to take this action right now.",_T="[Request interrupted by user]";\nvar D0=p(()=>u({hookEventName:A("SubagentStart")}));function wp(){return[D0,n2,ep,bT]}\nvar Ur=new Set([_T,ep,bT,bT+Gbt,D0]);';
+    const m6 = extractPermissionSentences(mini306), d0 = m6.sentences && m6.sentences.find((x) => x.name === 'D0');
+    ok('the extractor on a synthetic 2.1.306-shaped chunk: D0\'s template ends its line (no other member there), the next member follows its closing backtick ⇒ resolved, its value ending at the line ("…The user said:"); the reused D0=p(…) ignored', !m6.error && m6.list === 'wp' && m6.set === 'Ur' && m6.unresolved.length === 0 && m6.sentences.length === 5 && !!d0 && d0.text === "The user doesn't want to proceed with this tool use. The user said:" && d0.from === 'both', m6);
+    const dumpSrc = read('scripts/claude-cli-dump.mjs');
+    const DECL = dumpSrc.split('\n').filter((l) => l.startsWith('  const declOf = (at) => {'));
+    const Mx = mutantCopies('record-extractor', REPO);
+    const lineOnly = DECL.length === 1 ? await import(pathToFileURL(Mx.write('scripts/claude-cli-dump.mjs', dumpSrc.replace(DECL[0], '  const declOf = (at) => { const [a, b] = lineOf(at); return text.slice(a, b); };'), 'line-only')).href) : null;
+    const lo = lineOnly && lineOnly.extractPermissionSentences(mini306);
+    const loGhost = lo && outcomeCensus(lo.sentences, [{ id: 'Dx', binary: 'Gd', text: d0 ? d0.text : '?' }], '').ghosts;
+    ok('RED CONTROL: a copy of the extractor judging the LINE alone (the pre-lane rule) leaves D0 unresolved and the row a GHOST — «GHOST: Dx (Gd)», the mirror\'s red', DECL.length === 1 && !!lo && lo.unresolved.length === 1 && /^D0 \(0 candidate/.test(lo.unresolved[0]) && loGhost.join() === 'Dx (Gd)', { decl: DECL.length, unresolved: lo && lo.unresolved, loGhost });
   }
 }
 

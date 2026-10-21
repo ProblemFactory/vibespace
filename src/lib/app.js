@@ -77,7 +77,7 @@ import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, 
 import { sessionGivenName } from '../session-name.js'; // lane session-title-record: THE name ladder's given rungs (the window title)
 import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off); lane voice-follows-focus: dictation follows the focus
 import { enterSubmits } from './chat-enter-keys.js';
-import { initVault, maybeNagVault, unlockFirst } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
+import { initVault, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -715,6 +715,7 @@ class App {
     const applyArr = () => {
       if (this.isMobile) return;
       applyArrangement(this.settings.get('chrome.arrangement'), this.settings.get('chrome.springs'));
+      placeVaultChip(); // lane vault-chip-zone-errors: the vault's lock chip follows For-you into whichever zone it now sits
     };
     applyArr();
     this.settings.on('chrome.arrangement', applyArr);

@@ -671,13 +671,56 @@
 - (2026-10-21) A STREAM STAYED BLACK ONCE THE BROWSER HAD THE MIC (B-c7d7): werift put a=ice-lite per media, Chrome nominated unchecked pairs, werift kept the 1st. FIX = session-level a=ice-lite + follow the last nomination. 不变量 = a lite ICE agent follows the browser's choice (kb-bugfix-invariants)
 - (2026-10-21) A PEER'S REPLY TO THE OWNER'S VOICE NOTE WOKE AN AGENT (fb-377439b167): the judge saw sent/reply/gap, not the owner's [audio] 3 min before. FIX = the turns between ride as a fixed line, question v2. 不变量 = what the owner wrote between is a fact the judge sees (kb-bugfix-invariants)
 - (2026-10-21) FOUR INSTALLS OF ONE HUB ON A MAC, THREE STALE (B-06e9): roots keyed by address, no hub on disk, stop words stopped only the supervisor. FIX = a hub id in dial.json; a re-pair retires same-hub siblings once it dialed in. 不变量 = ONE install of a hub per machine (kb-bugfix-invariants)
+- (2026-10-21) TWO «FREEZE» INCIDENTS FOR AN IDLE DESKTOP (inc-mvi50qdh / inc-mvi5ggqh, incident-paint-gap): a 620 s / 9 s paint gap — idle main thread, nobody there — read as a jank storm. 不变量 = a paint gap is jank only with a busy thread or a person there; else a screen fact, not an incident
+- (2026-10-21) THE VAULT CHIP THREW AT EVERY START ON A CUSTOMIZED TOOLBAR (inc-mvi50qdh-ygmh): inserted before a For-you moved to row 2; a browser fill threw in the recorder. 不变量 = a chrome element finds its slot by the zone model, never a document-wide id; a ring error carries its stack
 - (2026-10-21) A HYGIENE SCAN WENT RED ON RANDOM CIPHERTEXT (lane ci-339-reds, the .339 runner): the secret-scan read a sealed token's base64 as cephx, 8 in 2 000 seals. 不变量 = a scan over sealed bytes scans their length, never their content; a scan red names its finding (kb-bugfix-invariants)
-
 ## A HYGIENE SCAN WENT RED ON RANDOM CIPHERTEXT — THE SEALED TOKEN'S BASE64 READ AS A CEPH KEY ONCE IN ~250 RUNS (lane ci-339-reds, the 2.369.339 runner's fast red, 2026-10-21)
 - THE SYMPTOM: test-channels-slack-send «scripts/secret-scan.mjs over the data dir finds nothing (rc 1)» on the Actions runner's fast job — green on the lane box and on the runner's one rerun; nothing in the scanner or the suite had changed since .338.
 - THE CAUSE: the leg ran the scanner over EVERY file of the scratch data dir, adapters.json included, whose `tokenEnc` is secret-box ciphertext (`iv.tag.data`, standard base64, 702 chars for this record). The cephx-key rule (`\bAQ[A-Za-z0-9+/]{20,}={0,2}\b`) matches «AQ» at a word boundary — after a `+`, `/`, `.` or the opening quote — followed by 20 base64 characters, which random bytes say about once per 130 000 positions. MEASURED: the suite's own record re-sealed 2 000 times with fresh keys and IVs, scanned by secret-scan's own `scanText` with the CLI's options ⇒ 8 runs with a finding (0.40 %), all cephx-key, all adapters.json.
 - THE FIX (the leg, not the scanner): the scan reads COPIES with every sealed value replaced by `<sealed N chars>` — the plaintext census above it already proves the token is in no file, so the scan is a second witness for plaintext, never a judge of ciphertext — and a red prints each finding as file + rule + the match's first 4 chars. RED control: a sealed value whose ciphertext holds «AQ» + 20 base64 after a `+` is found when read as bytes, not when read as its length.
 - 不变量: a hygiene scan over sealed bytes scans their LENGTH, never their content (a regex over random bytes is flaky by construction); a scan's red names its finding — a bare rc cannot be diagnosed from a runner log.
+||||||| parent of 609993e2 (int340: integrate four accepted lanes onto 2.369.339)
+
+## THE AUTO RECORDER FILED TWO «JANK STORM» INCIDENTS FOR AN IDLE DESKTOP THAT NEVER JANKED (the owner 2026-10-21, 2.369.336 Windows Chrome: inc-mvi50qdh-ygmh 13:18Z «9.1 s», inc-mvi5ggqh-1tz8 13:30Z «620.8 s — worst frame 620 780 ms»; lane incident-paint-gap, .339)
+
+The owner's desktop filed two freeze incidents he never felt. The bundles: `snapshot.longTasks` = two, 690 ms and 306 ms, both minutes before the storms; `frameGaps` = 9 144 ms, 71 266 ms, 620 780 ms and smaller; `compStalls` = 9.9 / 3.1 / 6.7 / 6.7 / 71.7 / 6.4 s (the SAME gaps, seen by the compositor-stall arm); `screenEvents` empty; `visibility` 'visible'; ws connected; the action ring's last input was 13:16:55Z — nothing during the gaps.
+
+**The cause.** The main thread was never blocked — no long task near 9 s, let alone 620 s, and the 1 s timer kept ticking (that is how the "storm" was measured). rAF stopped because the window was not PAINTING: a Windows desktop left alone (monitor off / lock screen / an occluded window; Chrome keeps `visibilityState` 'visible' on a lock screen, so neither the hidden gate nor the tab-return filter caught it). `jankStormVerdict` summed the one 620 s paint gap as «slow frames» and called it a storm; `onRendererFreeze` (≥ 5 s) filed the incident; the compositor-stall arm then pushed a stall for the same gap.
+
+**The fix (src/lib/telemetry-client.js).** PURE `paintGapKind({t, gap}, {longTasks, inputs})`: a gap is `jank` only when a long task overlaps ≥ half of it OR a pointer/key landed during it or within 1 s after it ended; otherwise `unpainted`. `jankStormVerdict` counts only `jank` gaps toward a storm. The compositor-stall arm files its «compositor stall» incident only for a `jank` gap (the GPU case — the RTX-5090 verdict, person present; its RED control kept) and otherwise writes a `paint-gap-s` metric + a `paint-gap` event, never an incident. A lightweight input-stamp ring (`installInputStamp`, pointerdown/keydown) is the "a person was there" signal; `installScreenWatch` now also records window `focus`/`blur`, Page-Lifecycle `freeze`/`resume`, and the Idle Detection verdict when the page already holds the permission (never a new prompt), so the next bundle says what the window was doing. incident-recorder.js is unchanged — its snapshot already carries `screenEvents`.
+
+**The two incidents re-judged.** Both `unpainted` (620 s / 9 s gaps, the long tasks 690/306 ms minutes away, no input) ⇒ no storm, no auto incident — a `paint-gap-s` metric and a ring line instead. A 9 s gap with a 9 s long task ⇒ `jank`; a 6 s gap with a key 300 ms after ⇒ `jank`; a 71 s compositor stall with no input ⇒ `unpainted`. Gate: test-freeze-probe (PURE + wiring, 48; the base verdict that counts every slow frame files both as the RED control).
+
+不变量 = a gap in painting is jank only with a busy main thread or a person at the keyboard; an unattended window that stops painting is a fact about the screen, never an incident.
+
+## THE VAULT CHIP THREW AT EVERY START ON A CUSTOMIZED TOOLBAR, AND A BROWSER FILL THREW IN THE RECORDER — TWO UNCAUGHT ERRORS THE RING COULD NOT LOCATE (incidents inc-mvi50qdh-ygmh / inc-mvi5ggqh-1tz8, 2.369.336, Windows Chrome, 2026-10-21 13:12–13:13Z; lane vault-chip-zone-errors, .339)
+
+The owner's page held a locked vault after a restart. Its console ring said `unhandled: Failed to execute 'insertBefore' … not a child of this node` twice, at load and at +5 s, then `uncaught: TypeError: Cannot read properties of undefined (reading 'length')` twice, 4 ms apart. The entries had no stack, and `bundle.js?v=…:1` names nothing in a one-line bundle.
+
+**The first cause.**
+- The lock chip inserted itself into the taskbar tray before the For-you button, looked up DOCUMENT-WIDE.
+- The owner had moved For-you (Customize) into the toolbar's second row; the tray zone was empty.
+- insertBefore with a reference that is not a child throws.
+- It threw inside `applyVaultFacts`, so it also stopped the lock strip, the ⚙ mark and the load-time unlock dialog. A locked vault said nothing at start on that desktop.
+
+**The second cause.**
+- The incident recorder's key words read `e.key.length`.
+- Chrome's autofill / saved passwords dispatch a bare `Event('keydown')` with NO key on each field they fill (measured through CDP Autofill.trigger).
+- The owner filled the second password from saved passwords: two fields, two throws. No character was typed — the ring holds no «typing» marker.
+
+**The fix.**
+- The chip's slot is the For-you button's own parent (customize-mode.js `slotBeside`), re-seated after every arrangement.
+- Each lock sign draws under its own try.
+- A keyless keydown is the ring's word `(fill)`.
+- `uncaught` / `unhandled` entries keep their first 3 frames (≤ 400 chars, the bundle's line:column).
+- `scripts/symbolicate.mjs` maps them offline. The source map is never served: express.static answers no `*.map` path.
+
+不变量:
+- A chrome element finds its slot by the zone model — beside the element it belongs with, in that element's own zone — never by a document-wide id inserted into another element.
+- A DOM insert's reference is a child of the parent it inserts into.
+- One sign's failure never takes the other signs, or the dialog, with it.
+- A handler reads an event's fields as the event may lack them: a synthetic keydown carries no key.
+- An uncaught error in a ring carries its stack, so the next incident names its line.
 
 ## A DESKTOP STREAM STAYED BLACK ONCE THE VIEWER'S BROWSER WAS ALLOWED THE MICROPHONE — werift WROTE a=ice-lite WHERE NO BROWSER READS IT AND KEPT ITS FIRST NOMINATION FOR GOOD (backlog B-c7d7, found by lane stream-mic-road 2026-10-21; lane werift-lite-multihomed, .339)
 

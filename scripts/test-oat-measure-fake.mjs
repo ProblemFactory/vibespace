@@ -7,6 +7,9 @@
 //   good        six PASS; the fixture's shape; oatInFile reads it true for 9.9.9 only; the
 //               evidence (the oat as a Bearer label, the file's bytes + inode kept); no token
 //               bytes in the record or the fixture; nothing left loopback
+//   add         (lane oat-in-file-2-1-306) over a copy of the committed fixture: 9.9.9 is ADDED, the
+//               2.1.296 + 2.1.306 records kept byte-for-byte; a file that is no fixture is REFUSED
+//               before the run and left as it was
 //   rewrite401  RED CONTROL: blanks the file on a 401 ⇒ oat-file-401 FAIL, the tmp + rename named
 //   stale       RED CONTROL: never re-reads its creds ⇒ oat-file-switch FAIL (msg2 still A)
 // THE MOCK OUTLIVES ITS CLIENTS (lane pool-oat-measure-fix: 主开发's real-CLI rung on 2.1.296 died on
@@ -48,13 +51,27 @@ if (!haveStrace) {
   try { F = JSON.parse(fs.readFileSync(fxFile, 'utf8')); R = JSON.parse(fs.readFileSync(rec, 'utf8')); } catch { }
   ok('the good fake: the run ends 0 and writes the fixture + the record', r.status === 0 && !!F && !!R, `exit ${r.status}: ${String(r.stderr).slice(-600)}`);
   if (F && R) {
-    ok('the fixture has the shape {cliVersion, measuredAt, variants: {name: {verdict, note}}}', F.cliVersion === '9.9.9' && /^\d{4}-\d\d-\d\d$/.test(F.measuredAt) && SIX.every((n) => F.variants[n] && typeof F.variants[n].note === 'string'), JSON.stringify(F).slice(0, 300));
-    ok('the good fake: all six PASS', SIX.every((n) => F.variants[n].verdict === 'PASS'), SIX.map((n) => `${n}:${F.variants[n].verdict} ${F.variants[n].note}`).join(' | ').slice(0, 900));
+    const G = F.versions?.['9.9.9'] || {};
+    ok('the fixture has the shape {versions: {"9.9.9": {cliVersion, measuredAt, variants: {name: {verdict, note}}}}}', JSON.stringify(Object.keys(F.versions || {})) === '["9.9.9"]' && G.cliVersion === '9.9.9' && /^\d{4}-\d\d-\d\d$/.test(G.measuredAt) && SIX.every((n) => G.variants?.[n] && typeof G.variants[n].note === 'string'), JSON.stringify(F).slice(0, 300));
+    ok('the good fake: all six PASS', SIX.every((n) => G.variants?.[n]?.verdict === 'PASS'), SIX.map((n) => `${n}:${G.variants?.[n]?.verdict} ${G.variants?.[n]?.note}`).join(' | ').slice(0, 900));
     ok('oatInFile reads the written fixture: true for 9.9.9, false for 2.1.296', C.oatInFile('9.9.9', F) === true && C.oatInFile('2.1.296', F) === false);
     const of = R.results.find((x) => x.variant === 'oat-file');
     ok('oat-file evidence: the oat went as a Bearer (as its label) on every request; the file kept its bytes and inode', !!of && of.heads.length > 0 && of.heads.every((h) => h.headers.authorization === 'Bearer <O oat>') && of.files.before.O.sha === of.files.after.O.sha && of.files.before.O.ino === of.files.after.O.ino && of.credOps.credWrites === 0, JSON.stringify(of && { heads: of.heads.map((h) => h.headers.authorization), files: of.files, ops: of.credOps }).slice(0, 500));
     ok('the fixture and the record carry no token bytes (labels only)', !/FAKE-O-[0-9a-f]{8}/.test(JSON.stringify(R) + JSON.stringify(F)) && !/oat01-FAKE/.test(JSON.stringify(R) + JSON.stringify(F)));
     ok('nothing left loopback (no proxy escape, no outbound connect, no abort)', R.escapes.length === 0 && !R.aborted && R.results.every((x) => x.outboundConnects.length === 0), JSON.stringify({ escapes: R.escapes, aborted: R.aborted }));
+  }
+  // ── add, never drop (lane oat-in-file-2-1-306): the run over a COPY of the committed fixture ──
+  {
+    const COMMITTED = path.join(REPO, 'scripts/fixtures/oat-in-file.json');
+    const seeded = path.join(tmp, 'fx-seeded.json'); fs.copyFileSync(COMMITTED, seeded);
+    const K = JSON.parse(fs.readFileSync(COMMITTED, 'utf8'));
+    const ra = measure(['--claude', wrap('good'), '--variant', 'oat', '--write-fixture', '--fixture', seeded, '--out', path.join(tmp, 'rec-add.json')]);
+    let A = null; try { A = JSON.parse(fs.readFileSync(seeded, 'utf8')); } catch { }
+    ok('add: over a copy of the committed fixture the run ADDS 9.9.9 and keeps every record it held, byte-for-byte (2.1.296, 2.1.306), oldest first', ra.status === 0 && !!A && JSON.stringify(Object.keys(A.versions || {})) === JSON.stringify([...Object.keys(K.versions), '9.9.9']) && Object.keys(K.versions).every((k) => JSON.stringify(A.versions[k]) === JSON.stringify(K.versions[k])) && /it holds 2\.1\.296, 2\.1\.306, 9\.9\.9/.test(ra.stderr), `exit ${ra.status}: ${A ? Object.keys(A.versions || {}).join(',') : 'unread'} ${String(ra.stderr).slice(-300)}`);
+    ok('…and oatInFile reads all three: 2.1.296 + 2.1.306 still true, 9.9.9 true, an unmeasured 2.1.300 false', !!A && C.oatInFile('2.1.296', A) && C.oatInFile('2.1.306', A) && C.oatInFile('9.9.9', A) && !C.oatInFile('2.1.300', A));
+    const junk = path.join(tmp, 'fx-junk.json'); fs.writeFileSync(junk, '{"versions": [');
+    const rj = measure(['--claude', wrap('good'), '--variant', 'oat', '--write-fixture', '--fixture', junk, '--out', path.join(tmp, 'rec-junk.json')]);
+    ok('a --fixture that does not read as a fixture is REFUSED before the run (exit 2, no variant ran) and left as it was — never rewritten to this run\'s record alone', rj.status === 2 && /REFUSED: --write-fixture adds this CLI's record/.test(rj.stderr) && !/\[measure\] oat-file …/.test(rj.stderr) && fs.readFileSync(junk, 'utf8') === '{"versions": [' && !fs.existsSync(path.join(tmp, 'rec-junk.json')), `exit ${rj.status}: ${String(rj.stderr).slice(-300)}`);
   }
   const r401 = measure(['--claude', wrap('rewrite401'), '--variant', 'oat-file-401', '--out', path.join(tmp, 'r401.json')]);
   let X = null; try { X = JSON.parse(fs.readFileSync(path.join(tmp, 'r401.json'), 'utf8')).results[0]; } catch { }

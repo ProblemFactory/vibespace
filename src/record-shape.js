@@ -29,7 +29,7 @@
 // the design's census; since 2.1.281 the minifier spells it `d({type:R(…)`, so the extractor reads the
 // helper names off an anchor instead of spelling them); the fields 2.1.280 and 2.1.281 added sit in each
 // shape's `ignored` map with a reason (a shape NEW in a later build carries that build's declaration as
-// `known`; 2.1.288's fields sit in FIELDS_288), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
+// `known`; 2.1.288's / 2.1.296's / 2.1.306's fields sit in FIELDS_288 / FIELDS_296 / FIELDS_306), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
 // the stream envelope and are omitted per row. Corpus-
 // only fields (seen live, undeclared upstream) are appended in CORPUS_KNOWN with a note.
 
@@ -253,9 +253,30 @@ const FIELDS_296 = Object.freeze({
   'claude:stream:system/task_updated': { run_id: TASK_RUN_296 },
   'claude:stream:system/turn_handoff_available': { hydrates_carried_lines: NEW_296('handoff staging (cloud worker)') },
 });
+// The 21 fields 2.1.306 added to shapes 2.1.296 already declared (2026-10-21 census, lane cli-2-1-306-records: the 2.1.306 dump — the npm
+// package's linux-x64 binary in a scratch prefix, never on PATH, never run as a session — minus the 2.1.296 dump; the dump's own
+// `.describe()` text is the evidence). A grep of src/ server.js data/bin found NO reader for any of the 21: each is an `ignored` row
+// saying why nothing reads it. No subtype and no stream record type was added; the two new `zod` keys are WORKFLOW_PROGRESS_ITEMS.
+const NEW_306 = (what) => what + ' (2.1.306) — no consumer yet (declared so no drift is recorded; move to known with the consumer)';
+const API_ORIGIN_306 = NEW_306('@internal first_party when the API error came from Anthropic\'s own API (absent behind a base-URL override, a gateway or another provider) — the error card reads the error\'s text, never its origin');
+const PROCESS_306 = NEW_306('@internal the CLI process\'s memory / CPU telemetry, sent only by a worker Anthropic hosts (never by a CLI VibeSpace runs) — nothing in VibeSpace reads process telemetry');
+const FIELDS_306 = Object.freeze({
+  'claude:stream:user': { text_not_typed: NEW_306('@internal no person typed this message\'s text (a server or an app composed it): the CLI skips slash-command dispatch and keyword reminders for it — the chat renders the text the same either way') },
+  'claude:stream:assistant': { refused_message_id: NEW_306('@internal on the assistant message that reports a refusal, the API msg_* id of the refused response (2.1.296 put it on the re-ask\'s user message) — the refusal renders from the message\'s own content'), api_error_origin: API_ORIGIN_306 },
+  'claude:stream:result': Object.fromEntries(['process_rss_mib_turn_start', 'process_anon_mib_turn_start', 'process_rss_mib_result', 'process_anon_mib_result', 'process_peak_rss_mib', 'process_cpu_ms_between_turns', 'process_wall_ms_between_turns', 'process_cpu_ms_turn', 'process_wall_ms_turn'].map((f) => [f, PROCESS_306])
+    .concat([['handoff_intake_phases_ms', NEW_306('@internal how long a handed-over turn\'s turn_handoff request waited before the input loop read it (cloud worker) — nothing in VibeSpace reads latency (see LATENCY_UNREAD)')],
+      ['api_error_origin', API_ORIGIN_306],
+      ['interrupted_by_shutdown', NEW_306('@internal the host of a multi-tenant worker shut the worker down mid-turn — VibeSpace runs the CLI itself; an interrupted turn renders from its own interrupt marker')]])),
+  'claude:stream:system/init': { original_cwd: NEW_306('@internal the folder the session\'s file permission checks are anchored at (unlike cwd it moves only on /cd, a worktree, a restore) — the server reads init.cwd (a worktree session\'s folder), never this'), additional_directories: NEW_306('@internal the folders added to the session (--add-dir, settings, a grant) — nothing in VibeSpace lists them') },
+  'claude:stream:system/informational': { prompt_submit_outcome: NEW_306('@internal how a submitted prompt ended before a model call (blocked, stopped or dropped by a hook; no verdict) — the dim card shows the line\'s own content, the CLI\'s words') },
+  'claude:stream:system/turn_handoff_available': { shared_message_id: NEW_306('handoff staging (cloud worker)') },
+  'claude:stream:system/ui_invalidate': { prompts_screened: NEW_306('@internal a plugin may change what is recorded of a typed line — the plugin UI host\'s wire, emitted only with a UI surface channel attached (VibeSpace attaches none)') },
+  'claude:stream:command_lifecycle': { ran_ahead: NEW_306('@internal only on a repeated queued frame written to the VS Code panel — the server consumer reads state + command_uuid only') },
+});
 // (filled BEFORE the CORPUS_KNOWN line: test-record-shape §5's control clears every ignored map at that line)
 for (const [key, fields] of Object.entries(FIELDS_288)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_296)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
+for (const [key, fields] of Object.entries(FIELDS_306)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(CORPUS_KNOWN)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 
 
@@ -443,6 +464,14 @@ const ATTACHMENT_PAYLOADS = Object.freeze({
   hook_additional_context: 'known — message-manager _processAttachment: the "✓ Hook context" card (the injected text, deduped against the hook\'s stdout card)',
   async_hook_response: 'ignored — an ASYNC hook\'s protocol JSON (response / command / exitCode); _processAttachment has no branch, so nothing renders and no card is made; the CLI reads only its systemMessage + additionalContext, to rebuild session-start context',
 });
+// The `workflow_progress` ITEMS a pinned dump's `zod` names (2.1.306: the CLI now PARSES the list a task_progress record carries — a
+// `type`-discriminated union over these two, its remote-session adapter's reader; 2.1.296 built the same items with no schema). They are
+// entries of task_progress.workflow_progress (CORPUS_KNOWN), not stream records (no uuid / session_id), so the union legs never judge
+// them; each is classified here, on its literal — test-record-shape §4e holds every field the two readers take to that literal.
+const WORKFLOW_PROGRESS_ITEMS = Object.freeze({
+  workflow_phase: 'known — message-manager normalizeWorkflowProgress + routes/sessions normalizeWorkflowSnapshot: the Workflow card\'s phase rows (index, title)',
+  workflow_agent: 'known — the same two readers: the Workflow card\'s agent rows (index, label, phaseIndex, phaseTitle, agentId, model, state, lastToolName, lastToolSummary, attempt, startedAt); state start | progress | done | error (chat-renderers workflowAgentState)',
+});
 
 // ── carrier + shape key ──────────────────────────────────────────────────────────────────────────
 /** Which carrier wrote this record. claude: a JSONL row wears the transcript envelope
@@ -591,12 +620,13 @@ function unknownFieldsSample(record) {
 // The claude builds the STREAM shapes are verified against — PINNED PER CLI VERSION, never to the box (lane
 // cli-2-1-288-records, B-e05e): 2.1.274 dump + the 2.1.280 additions (2026-09-22) + 2.1.281 (2026-09-23 — one new
 // subtype, six fields on three shapes) + 2.1.288 (2026-10-07 — eight new subtypes, 23 fields on six shapes) + 2.1.296 (2026-10-15 — two new
-// subtypes, 18 fields on ten shapes, three hook attachment payloads: FIELDS_296 / ATTACHMENT_PAYLOADS). Each
+// subtypes, 18 fields on ten shapes, three hook attachment payloads: FIELDS_296 / ATTACHMENT_PAYLOADS) + 2.1.306 (2026-10-21 — no new
+// subtype, 21 fields on eight shapes, the two workflow_progress items: FIELDS_306 / WORKFLOW_PROGRESS_ITEMS). Each
 // pinned build has its TRACKED dump in scripts/fixtures/claude-cli/<version>.json, judged with no binary at all;
 // test-record-shape's binary oracle runs on whichever claude is installed and expects the rows of THAT build
 // (SHAPE_SINCE excuses a newer row on an older build). STRICT on any developer box; on the Actions mirror (which
 // installs whatever npm serves today) an UNPINNED build's drift is printed and skipped, never a red gate nobody reads.
-const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296']);
+const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306']);
 const SCHEMA_CLI_VERSION = SCHEMA_CLI_VERSIONS[SCHEMA_CLI_VERSIONS.length - 1];
 
-module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, ATTACHMENT_PAYLOADS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };
+module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };

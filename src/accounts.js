@@ -1325,12 +1325,13 @@ class AccountManager {
   }
   /** { ok, known, cli, measured } — ok = cliCaps.oatInFile(the hub's CLI, the fixture) on a platform whose CLI reads
    *  the FILE (the measurement is Linux; macOS keys its keychain by the env string — the pool's own platform rule).
-   *  An answer that names no version ('unparsed', F9) is a KNOWN CLI nobody measured. */
+   *  An answer that names no version ('unparsed', F9) is a KNOWN CLI nobody measured. measured = every version the
+   *  fixture holds a record of, oldest first ('2.1.296, 2.1.306' — lane oat-in-file-2-1-306), null for none. */
   oatFileCaps() {
     const fx = this._oatFixture();
     const cli = cliCaps.cliVersionOf(this._oatCli) || (this._oatCli ? 'unparsed' : null);
     const platformOk = this._platform !== 'darwin' && this._platform !== 'win32';
-    return { ok: platformOk && cliCaps.oatInFile(this._oatCli, fx), known: !!cli, cli, measured: fx ? cliCaps.cliVersionOf(fx.cliVersion) : null };
+    return { ok: platformOk && cliCaps.oatInFile(this._oatCli, fx), known: !!cli, cli, measured: cliCaps.measuredVersions(fx).join(', ') || null };
   }
   /** ONE QUEUE for every act on a member's credential file (F13 + F7): a setOat, a clearOat and a sweep row
    *  never interleave on one file. → a promise of the row's result. */

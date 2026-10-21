@@ -72,7 +72,13 @@ export const sendKeyName = (enterSends, mac) => (enterSends === false ? (mac ? '
  *  exactly like a deliberate send. Without S-·, inc-mv7mdv6b-emxq's Shift → plain Enter could not say whether the Shift
  *  typed the message's closing 「）」 or was a Shift+Enter let go early. */
 export const SHIFTED_CHAR = 'S-·';
+/** A keydown that carries NO key (lane vault-chip-zone-errors, inc-mvi50qdh-ygmh): the browser filling a field — Chrome's
+ *  autofill / saved passwords dispatch a bare `Event('keydown')` (no `key`) on each field they fill, then input, change
+ *  and a bare keyup (measured through CDP Autofill.trigger). The ring says a fill happened, never what; reading
+ *  `e.key.length` on it threw «Cannot read properties of undefined (reading 'length')» once per filled field. */
+export const FILL_KEY = '(fill)';
 export function actionKeyWords(e) {
+  if (!e || typeof e.key !== 'string') return { key: FILL_KEY };
   const char = e.key.length === 1 && !(e.ctrlKey || e.metaKey || e.altKey);
   if (char && !e.shiftKey) return null;
   const w = { key: char ? SHIFTED_CHAR : (e.ctrlKey ? 'C-' : '') + (e.metaKey ? 'M-' : '') + (e.altKey ? 'A-' : '') + (e.shiftKey ? 'S-' : '') + e.key };

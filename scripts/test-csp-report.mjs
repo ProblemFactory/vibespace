@@ -33,6 +33,11 @@
 //      cookie (src/auth.js, GET only) serving a web file under the folder — .env, key.pem, a symlink out, ../, an unknown
 //      token never answered; the token's life and cap; THE CENSUS over src/lib: allow-same-origin and srcdoc only where a
 //      reason row names the site — MUTANTS: allow-same-origin back on the preview, srcdoc back on each of the three ⇒ RED
+//   ⑨ THE SOURCE MAP IS SERVED TO NOBODY (lane vault-chip-zone-errors): server.js's own static line (src/server/
+//      static-public.js) beside its index route, verbatim, over a public/ that HOLDS bundle.js.map — GET /bundle.js 200,
+//      GET /bundle.js.map and its escaped spellings 404 (never the map's bytes), a later route's own .map path still answers,
+//      the page names no map; the line sits after the index route and before WebDAV — MUTANT: the guard cut ⇒ the map is
+//      served (RED)
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -310,7 +315,7 @@ console.log('⑦ the frame host — a frame the page makes gets its OWN policy, 
   const MF = require(path.join(REPO, 'src/mail-frame.js'));
   const DCM = { FRAME_HOST: (/^export const FRAME_HOST = '([^']+)';$/m.exec(readRepo('src/lib/design-canvas-model.js')) || [])[1] };
   const hostLine = SRV.split('\n').find((l) => l.startsWith("require('./src/server/frame-host.js').register(app);"));
-  ok(!!hostLine && SRV.indexOf('app.use(auth.middleware());') < SRV.indexOf(hostLine) && SRV.indexOf(hostLine) < SRV.indexOf('app.use(express.static('), 'server.js registers the frame host behind the sign-in gate (a read like any other: the frame\'s navigation carries the cookie, measured)', hostLine);
+  ok(!!hostLine && SRV.indexOf('app.use(auth.middleware());') < SRV.indexOf(hostLine) && SRV.indexOf(hostLine) < SRV.indexOf("app.use(require('./src/server/static-public.js').create("), 'server.js registers the frame host behind the sign-in gate (a read like any other: the frame\'s navigation carries the cookie, measured)', hostLine);
   const dirs = (v) => new Map(String(v || '').split(';').map((x) => x.trim().split(/\s+/)).filter((a) => a[0]).map(([d, ...x]) => [d, x]));
   /** What a frame-host policy breaks: [] = it holds (always a sandbox, never a widening flag, no reporting). */
   const hostFails = (v) => {
@@ -529,6 +534,45 @@ console.log('⑧ foreign HTML in the frame host — the code editor\'s preview, 
   const M3 = mutate('src/lib/doc-window-ui.js', "f.setAttribute('sandbox', 'allow-same-origin allow-modals');", "f.setAttribute('sandbox', 'allow-modals');");
   ok(M3 && M3.some((x) => /dead allow-same-origin row/.test(x)) && census(new Map([...TEXTS, ['src/lib/new-viewer.js', "const f = document.createElement('iframe'); f.setAttribute('sandbox', ''); f.srcdoc = html;"]])).some((x) => /new-viewer\.js: 1 srcdoc/.test(x)) && census(new Map([...TEXTS, ['src/lib/new-viewer.js', '// a comment naming allow-same-origin and f.srcdoc = x stays quiet\n']])).length === 0,
     'CONTROLS: a reason row whose site is gone is RED (dead); a NEW viewer\'s srcdoc frame is RED; a comment naming either stays quiet');
+}
+
+// ── ⑨ THE SOURCE MAP IS SERVED TO NOBODY ──
+console.log('⑨ the source map beside the bundle is served to nobody (lane vault-chip-zone-errors)');
+{
+  const SP_PATH = path.join(REPO, 'src/server/static-public.js');
+  const SP = require(SP_PATH);
+  const staticLine = SRV.split('\n').find((l) => l.startsWith("app.use(require('./src/server/static-public.js').create("));
+  const at = (needle) => SRV.indexOf(needle);
+  ok(!!staticLine && /\.create\(path\.join\(__dirname, 'public'\)\)\);/.test(staticLine) && at("app.get(['/', '/index.html']") < at(staticLine) && at(staticLine) < at('registerWebdav(app, { tokens: mountTokens });') && !/express\.static\(/.test(SRV), 'server.js serves public/ through static-public.js ONLY (no bare express.static), after the index route, before WebDAV', staticLine);
+  ok(['/bundle.js.map', '/a/b.MAP', '/bundle.js%2Emap', '/bundle.js%2emap'].every(SP.buildOnly) && !['/bundle.js', '/map', '/x.map/y', '/style.css'].some(SP.buildOnly) && SP.buildOnly('/x%E0%A4%A.map') && !SP.buildOnly('/x%E0%A4%A'), 'buildOnly: a *.map path, judged decoded (%2E is a dot), any case; a malformed escape is judged as sent');
+  const MAP_BYTES = '{"version":3,"sources":["../src/client.js"],"mappings":"SECRET-MAP-BYTES"}';
+  const serve = async (mod) => {
+    const dir = path.join(ROOT, 'static-' + Math.random().toString(16).slice(2)); fs.mkdirSync(path.join(dir, 'public'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'public', 'index.html'), '<!doctype html><html><head><link rel="stylesheet" href="/style.css"></head><body><script src="/bundle.js"></script></body></html>');
+    fs.writeFileSync(path.join(dir, 'public', 'style.css'), 'b{}'); fs.writeFileSync(path.join(dir, 'public', 'bundle.js'), 'var x=1;');
+    fs.writeFileSync(path.join(dir, 'public', 'bundle.js.map'), MAP_BYTES);
+    const app = express();
+    const req = (m) => (m === './src/server/static-public.js' ? mod : require(m.startsWith('./') ? path.join(REPO, m) : m));
+    new Function('app', 'require', 'path', 'fs', '__dirname', 'cspReports', `${indexRoute}\n${staticLine}`)(app, req, path, fs, dir, { header: () => ['X-Probe', '1'] });
+    app.get('/dav/notes.map', (q, r) => r.type('text').send('a later route keeps its own .map path'));
+    const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+    return { port: srv.address().port, close: () => new Promise((c) => srv.close(c)) };
+  };
+  const P = await serve(SP);
+  const js = await get(P.port, '/bundle.js'), css = await get(P.port, '/style.css'), page = await get(P.port, '/');
+  ok(js.status === 200 && js.text === 'var x=1;' && css.status === 200, 'GET /bundle.js and /style.css: 200, the files (the static door still serves public/)', { js: js.status, css: css.status });
+  const tries = ['/bundle.js.map', '/bundle.js%2Emap', '/bundle.js%2emap', '/x/../bundle.js.map', '/./bundle.js.map'];
+  const got = []; for (const p of tries) { const r = await get(P.port, p); got.push({ p, status: r.status, leak: (r.text || '').includes('SECRET-MAP-BYTES') }); }
+  ok(got.every((g) => g.status === 404 && !g.leak), `GET ${tries.join(' · ')}: 404 each, never the map's bytes (the file IS in public/)`, got);
+  const later = await get(P.port, '/dav/notes.map');
+  ok(later.status === 200 && /keeps its own/.test(later.text), 'a later route\'s own .map path still answers (a WebDAV file, a proxied page)', later.status);
+  ok(page.status === 200 && /bundle\.js\?v=\d+/.test(page.text) && !/\.map/.test(page.text), 'the page names the bundle with its ?v= stamp and no map', page.text.slice(0, 200));
+  await P.close();
+  const cut = fs.readFileSync(SP_PATH, 'utf8').replace('return (req, res, next) => (buildOnly(req.path) ? next() : serve(req, res, next));', 'return serve;');
+  const M = await serve(load(SP_PATH, cut));
+  const leak = await get(M.port, '/bundle.js.map');
+  ok(cut !== fs.readFileSync(SP_PATH, 'utf8') && leak.status === 200 && leak.text.includes('SECRET-MAP-BYTES'), 'MUTANT (the guard cut: express.static alone) ⇒ RED — GET /bundle.js.map answers 200 with the map', leak.status);
+  await M.close();
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true }); // the reports this suite made ON PURPOSE (its own exit check reads scratch roots)

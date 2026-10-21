@@ -176,7 +176,7 @@ app.get(['/', '/index.html'], (req, res, next) => {
     res.type('html').send(html);
   } catch { next(); }
 });
-app.use(express.static(path.join(__dirname, 'public'), { etag: true, lastModified: true, maxAge: 0 }));
+app.use(require('./src/server/static-public.js').create(path.join(__dirname, 'public'))); // lane vault-chip-zone-errors: public/ through express.static — every file but a source map (served to nobody; test-csp-report ⑨)
 // WebDAV bridge — BEFORE the json body parser (PUT bodies stream to disk).
 // Auth = scoped Bearer mount tokens; see src/webdav.js for the security model.
 const { MountTokens, registerWebdav } = require('./src/webdav');

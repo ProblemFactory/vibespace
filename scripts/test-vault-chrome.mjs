@@ -26,8 +26,16 @@
 //      segment); a reload after 「稍后」 asks no more (the tab's set-aside lock) while the mark and the item stay; Esc closes it;
 //      a ⚙ press while locked opens the dialog first, then the menu; the unlock clears the dialog, the mark and the item on
 //      BOTH open clients; the phone's ⚙ wears it too and the dialog fits 375×812
+//   Z lane vault-chip-zone-errors (inc-mvi50qdh-ygmh / inc-mvi5ggqh-1tz8 — two uncaught errors at every start on a
+//      customized toolbar): the lock chip sits right before the For-you button on a DEFAULT chrome (the tray) AND on the
+//      owner's shape (For-you moved into the toolbar's second row, the tray empty) — at a load and live when Customize moves
+//      it (row 2 → the right zone → back to the default); the dialog, strip and ⚙ mark show at that load; the phone pair
+//      the same; a browser FILL (Chrome's bare keydown: two fields, and the REAL autofill path through CDP Autofill.trigger)
+//      throws nothing and the captured ring says "(fill)"; the road to the unlock + 6 s throws nothing (every page exception
+//      captured, CDP Runtime.exceptionThrown). Z-RED: the pre-fix chip + key words in a patched bundle THROW both errors,
+//      the ring keeps both stacks, and scripts/symbolicate.mjs names vault-unlock.js and chat-enter-keys.js
 // Run: node scripts/test-vault-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
-import { execSync, spawn } from 'node:child_process';
+import { execSync, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,11 +87,15 @@ const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 
 await new Promise((r) => ws.on('open', r));
 let seq = 0; const pend = new Map();
 ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+// lane vault-chip-zone-errors: every page exception (an uncaught error and an unhandled rejection alike), first line + frames
+const pageErrors = [];
+ws.on('message', (d) => { const m = JSON.parse(d); if (m.method !== 'Runtime.exceptionThrown') return; const x = m.params.exceptionDetails || {}; pageErrors.push({ text: String((x.exception && x.exception.description) || x.text || '').split('\n')[0], frames: ((x.stackTrace && x.stackTrace.callFrames) || []).slice(0, 3).map((f) => `${f.functionName || '<anon>'}@${f.lineNumber + 1}:${f.columnNumber + 1}`) }); });
 const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => m.error ? rej(new Error(m.error.message)) : res(m.result)); ws.send(JSON.stringify({ id, method, params })); });
 const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
 const until = async (expr, { timeout = 15000, step = 100 } = {}) => { const t0 = Date.now(); for (;;) { let v = null; try { v = await evalJs(expr); } catch { } if (v) return v; if (Date.now() - t0 > timeout) return v; await sleep(step); } };
 const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
 await cdp('Page.enable');
+await cdp('Runtime.enable');   // lane vault-chip-zone-errors: Runtime.exceptionThrown → pageErrors
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
 const URL = `http://127.0.0.1:${PORT}/`;
 const api = (method, p, body) => evalJs(`fetch(${JSON.stringify(p)}, { method: ${JSON.stringify(method)}, headers: { 'Content-Type': 'application/json' }${body ? `, body: ${JSON.stringify(JSON.stringify(body))}` : ''} }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }))`);
@@ -99,6 +111,8 @@ const integration = async () => { const r = await api('GET', '/api/integrations/
 const gearMarkJs = (id = 'btn-global-settings') => `(() => { const b = document.getElementById(${JSON.stringify(id)}); const m = b && b.querySelector('.vault-gear-mark'); if (!m) return { on: false, title: b ? b.title : null }; const r = m.getBoundingClientRect(); const probe = document.createElement('span'); probe.style.color = 'var(--red)'; document.body.appendChild(probe); const red = getComputedStyle(probe).color; probe.remove(); return { on: r.width > 0 && r.height > 0, svg: !!m.querySelector('svg'), color: getComputedStyle(m).color, cog: getComputedStyle(b).color, red, title: b.title }; })()`;
 const markRed = (m) => !!m && m.on && m.svg && m.color === m.red && m.cog === m.red && m.title === 'Vault locked \u2014 click to unlock (For you names what is waiting on it)';   // int332: the chip's full words
 const trayUrgentJs = `(() => { const b = document.getElementById('taskbar-user-todos'); const u = b && b.querySelector('.ut-seg-urgent'); return { urgency: b ? b.dataset.urgency : null, urgent: u ? Number(u.textContent) : 0 }; })()`;
+/** lane vault-chip-zone-errors: where the taskbar lock chip sits — its zone, the element after it, For-you's zone, its box */
+const chipAtJs = `(() => { const c = document.getElementById('taskbar-vault'); const f = document.getElementById('taskbar-user-todos'); if (!c) return null; const r = c.getBoundingClientRect(); return { zone: c.parentElement && c.parentElement.dataset.zone, next: c.nextElementSibling && c.nextElementSibling.id, forYou: f && f.parentElement && f.parentElement.dataset.zone, w: Math.round(r.width), h: Math.round(r.height) }; })()`;
 const openVaultItems = async () => { const r = (await api('GET', '/api/user-todos')).json || {}; return ((r.todos && r.todos.open) || []).filter((i) => i.sessionKey === 'vault' && i.action && i.action.type === 'vault-unlock'); };
 
 startServer();
@@ -338,6 +352,77 @@ check('signed in again ⇒ the unlock modal (the vault stayed locked)', relogin 
 const log = fs.readFileSync(path.join(SHOTS, 'server.log'), 'utf8') + fs.readFileSync(path.join(DATA, 'vault-audit.jsonl'), 'utf8');
 check('no password in the server log or the audit', ![SECOND, 'not the second password', 'wrong again!', SIGN_IN].some((p) => log.includes(p)));
 
+console.log('Z lane vault-chip-zone-errors (inc-mvi50qdh-ygmh): the chip beside For-you wherever Customize put it; a browser fill on the unlock road');
+{
+  // the owner's arrangement as a shape: For-you moved into the toolbar's second row between springs, the taskbar tray EMPTY
+  const OWNER_SHAPE = { 'chrome.arrangement': { 'toolbar-center': ['taskbar-status', 'spring-2', 'layout-presets', 'spring-6'], 'toolbar-right': ['btn-presets', 'btn-new-session', 'btn-terminal', 'btn-file-explorer', 'btn-browser', 'btn-desktop'], 'toolbar-row2': ['spring-3', 'spring-1', 'taskbar-user-todos', 'taskbar-usage', 'desktop-previews', 'spring-5', 'spring-4'], 'taskbar-tray': [], 'taskbar-row2': [] }, 'chrome.springs': { 'spring-3': { mode: 'fixed', px: 222 }, 'spring-4': { mode: 'fixed', px: 366 } } };
+  const errs = () => pageErrors.map((e) => e.text);
+  check('Z the page is locked with the unlock dialog open (⑦ left it so)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
+  const d0 = await until(`(() => { const c = ${chipAtJs}; return c && c.zone === 'taskbar-tray' ? c : null; })()`, { timeout: 5000 });
+  check('Z a DEFAULT chrome: the chip sits in the taskbar tray right before the For-you button, visible', !!d0 && d0.next === 'taskbar-user-todos' && d0.forYou === 'taskbar-tray' && d0.w > 0 && d0.h > 0, d0 || await evalJs(chipAtJs));
+  pageErrors.length = 0;
+  const pr = await api('PATCH', '/api/settings', OWNER_SHAPE);
+  const d1 = await until(`(() => { const c = ${chipAtJs}; return c && c.zone === 'toolbar-row2' && c.next === 'taskbar-user-todos' ? c : null; })()`, { timeout: 8000 });
+  check('Z Customize moves For-you into the toolbar’s second row (the owner’s shape, the tray empty) ⇒ the chip FOLLOWS it there, right before it — no reload', pr.status === 200 && !!d1 && d1.forYou === 'toolbar-row2', d1 || await evalJs(chipAtJs));
+  pageErrors.length = 0;
+  await cdp('Page.navigate', { url: URL });
+  check('Z a LOAD on the owner’s shape: the unlock dialog opens (the base threw before it)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })));
+  await splashGone();
+  await sleep(1500);   // the boot read (initVault) and the onboarding check (maybeNagVault) have both applied the facts
+  const d2 = await evalJs(chipAtJs);
+  check('Z … the chip sits in the toolbar’s second row right before For-you, visible', !!d2 && d2.zone === 'toolbar-row2' && d2.next === 'taskbar-user-todos' && d2.forYou === 'toolbar-row2' && d2.w > 0 && d2.h > 0, d2);
+  check('Z … the phone pair the same way: the phone chip right before the phone’s For-you button', await evalJs(`(() => { const c = document.getElementById('mobile-nav-vault'); return !!c && c.parentElement.id === 'mobile-nav' && c.nextElementSibling && c.nextElementSibling.id === 'mobile-nav-todos'; })()`));
+  const gm = await evalJs(gearMarkJs());
+  check('Z … the strip and the ⚙ mark show too (each lock sign draws on its own)', !!(await evalJs(visible('#vault-lock-strip'))) && gm.on && gm.svg && gm.color === gm.red, gm);
+  check('Z … and the page threw NOTHING at load (the incident: «insertBefore … not a child of this node», twice)', pageErrors.length === 0, errs());
+  // THE FILL — Chrome's autofill / saved passwords dispatch a bare Event('keydown') (no key) on each field they fill, then
+  // input, change and a bare keyup (measured, CDP Autofill.trigger): the owner's second password, two fields, two throws
+  await evalJs(`(() => { window.__vzSeen = []; document.addEventListener('keydown', (e) => window.__vzSeen.push(typeof e.key), true); return true; })()`);
+  const filled = await evalJs(`(() => { const body = document.querySelector('#vault-unlock-dialog .dialog-body') || document.querySelector('#vault-unlock-dialog .dialog'); const user = document.createElement('input'); user.id = 'vz-user'; body.appendChild(user); const fill = (el, v) => { el.dispatchEvent(new Event('keydown', { bubbles: true })); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('keyup', { bubbles: true })); }; fill(user, 'owner'); fill(document.getElementById('vault-unlock-pw'), 'filled-not-the-password'); user.remove(); return window.__vzSeen.filter((k) => k === 'undefined').length; })()`);
+  await sleep(300);
+  check('Z a browser FILL of two fields (the bare keydown Chrome dispatches, measured) ⇒ no page error (the incident: «Cannot read properties of undefined (reading \'length\')», twice)', filled === 2 && pageErrors.length === 0, { filled, errors: errs() });
+  // the REAL autofill path: Chrome fills a card field through the same code that fills a saved password (CDP Autofill.trigger)
+  {
+    await evalJs(`(() => { const body = document.querySelector('#vault-unlock-dialog .dialog-body') || document.querySelector('#vault-unlock-dialog .dialog'); const c = document.createElement('input'); c.id = 'vz-card'; c.setAttribute('autocomplete', 'cc-number'); body.appendChild(c); c.focus(); window.__vzSeen = []; return true; })()`);
+    await sleep(500);
+    let how = '';
+    try {
+      await cdp('DOM.enable'); await cdp('Autofill.enable');
+      const doc = await cdp('DOM.getDocument', {});
+      const q = await cdp('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#vz-card' });
+      const nd = await cdp('DOM.describeNode', { nodeId: q.nodeId });
+      const fr = await cdp('Page.getFrameTree');
+      await cdp('Autofill.trigger', { fieldId: nd.node.backendNodeId, frameId: fr.frameTree.frame.id, card: { number: '4444444444444444', name: 'Fill Leg', expiryMonth: '01', expiryYear: '2031', cvc: '123' } });
+    } catch (e) { how = e.message; }
+    if (how) console.log(`  · the REAL autofill leg is not available in this Chrome (${how}) — the bare-Event leg above stands`);
+    else {
+      const real = await until(`(() => { const c = document.getElementById('vz-card'); return c && c.value && window.__vzSeen.includes('undefined') ? window.__vzSeen.slice() : null; })()`, { timeout: 5000 });
+      check('Z the REAL autofill path (CDP Autofill.trigger): the field is filled, the page saw a keydown with NO key — and threw nothing', !!real && pageErrors.length === 0, { real, errors: errs() });
+    }
+    await evalJs(`document.getElementById('vz-card')?.remove(); true`);
+  }
+  // the ring the owner's next incident carries: the fills as words, no error entry
+  const incId = await evalJs(`window.app.autoCaptureIncident('test', 'vault-chip-zone-errors leg')`);
+  const ib = incId ? JSON.parse(fs.readFileSync(path.join(DATA, 'incidents', incId, 'bundle.json'), 'utf8')) : null;
+  const fills = ib ? ib.client.rings.action.filter((a) => a.k === 'key' && a.key === '(fill)') : [];
+  const errEntries = ib ? ib.client.rings.console.filter((c) => c.l === 'uncaught' || c.l === 'unhandled') : null;
+  check('Z the captured ring (the real capture road) holds each fill as the word "(fill)" on its field — never a value — and no uncaught / unhandled entry', !!ib && fills.length >= 2 && fills.some((a) => a.el === 'input#vault-unlock-pw') && !JSON.stringify(ib.client.rings).includes('filled-not-the-password') && errEntries.length === 0, { incId, fills: fills.map((a) => a.el), errEntries });
+  // Customize again while locked: For-you into the toolbar's right zone, then back to the default (the arrangement cleared)
+  const arr2 = JSON.parse(JSON.stringify(OWNER_SHAPE['chrome.arrangement']));
+  arr2['toolbar-row2'] = arr2['toolbar-row2'].filter((x) => x !== 'taskbar-user-todos'); arr2['toolbar-right'].push('taskbar-user-todos');
+  await api('PATCH', '/api/settings', { 'chrome.arrangement': arr2 });
+  const d3 = await until(`(() => { const c = ${chipAtJs}; return c && c.zone === 'toolbar-right' && c.next === 'taskbar-user-todos' ? c : null; })()`, { timeout: 8000 });
+  check('Z For-you moved into the toolbar’s right zone ⇒ the chip follows it, right before it', !!d3, await evalJs(chipAtJs));
+  await api('PATCH', '/api/settings', { 'chrome.arrangement': null, 'chrome.springs': null });
+  const d4 = await until(`(() => { const c = ${chipAtJs}; return c && c.zone === 'taskbar-tray' && c.next === 'taskbar-user-todos' ? c : null; })()`, { timeout: 8000 });
+  check('Z the arrangement cleared (the default chrome) ⇒ the chip is back in the taskbar tray before For-you', !!d4, await evalJs(chipAtJs));
+  // the unlock road to its end: the right password, the owner's 5 s, nothing thrown
+  await typeInto('#vault-unlock-pw', SECOND); await click('.vault-unlock-go');
+  check('Z the right password unlocks: the dialog and both chips go', !!(await until(`!document.getElementById('vault-unlock-dialog') && !document.getElementById('taskbar-vault') && !document.getElementById('mobile-nav-vault')`, { timeout: 15000 })));
+  await sleep(6000);
+  check('Z … and the whole road (load, fills, Customize moves, unlock + 6 s) threw nothing', pageErrors.length === 0, errs());
+}
+
 console.log('③c-RED the pre-fix client does NOT re-ask on a reconnect/broadcast — a patched worktree bundle (the fix is load-bearing)');
 await stopServer();
 {
@@ -365,6 +450,53 @@ await stopServer();
   const idleR = await api('POST', '/api/vault/idle', { hours: 0 });   // a locked broadcast carrying the NEW startedAt
   check('③c-RED the locked broadcast reaches the pre-fix tab — its chip is re-drawn (the tab is live)', idleR.status === 200 && !!(await until(visible('#taskbar-vault'), { timeout: 10000 })));
   check('③c-RED and yet the pre-fix client opened NO unlock modal (the silent bug: it re-asks only through the fix\u2019s onVaultState startedAt gate)', !(await evalJs(`!!document.getElementById('vault-unlock-dialog')`)));
+}
+
+console.log('Z-RED the pre-fix chip and key words — a patched worktree bundle (the fix is load-bearing); the ring keeps both stacks and symbolicate names both lines');
+await stopServer();
+{
+  // from the fix (③c-RED patched vault-unlock.js), then the two reverts: the document-wide reference with the unguarded
+  // drawers (the base's chip) and the unguarded key words (the base's recorder words) — the NEW ring (stacks) stays
+  for (const f of ['src/lib/vault-unlock.js', 'src/lib/chat-enter-keys.js']) fs.copyFileSync(path.join(repo, f), path.join(wt, f));
+  const vu = path.join(wt, 'src/lib/vault-unlock.js'), ck = path.join(wt, 'src/lib/chat-enter-keys.js');
+  const v0 = fs.readFileSync(vu, 'utf8'), c0 = fs.readFileSync(ck, 'utf8');
+  const v1 = v0.replace('const slot = slotBeside(besideId, document.getElementById(hostId));', 'const slot = document.getElementById(hostId) ? { parent: document.getElementById(hostId), before: document.getElementById(besideId) || null } : null;').replace("try { draw(); } catch (e) { console.error('[vault] a lock sign could not be drawn', e); }", 'draw();');
+  const c1 = c0.replace("  if (!e || typeof e.key !== 'string') return { key: FILL_KEY };\n", '');
+  check('Z-RED the patch restores the document-wide reference, the unguarded drawers and the unguarded key words (the control is real)', v1 !== v0 && c1 !== c0 && !v1.includes('slotBeside(besideId') && !v1.includes('try { draw(); }') && !c1.includes('typeof e.key !== \'string\''));
+  fs.writeFileSync(vu, v1); fs.writeFileSync(ck, c1);
+  execSync(`${wt}/node_modules/.bin/esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify`, { cwd: wt, stdio: 'ignore' });
+  startServer();
+  check('the hub is back (pre-fix chip bundle; locked)', await ready());
+  const OWNER_ARR = { 'toolbar-center': ['taskbar-status', 'spring-2', 'layout-presets', 'spring-6'], 'toolbar-right': ['btn-presets', 'btn-new-session', 'btn-terminal', 'btn-file-explorer', 'btn-browser', 'btn-desktop'], 'toolbar-row2': ['spring-3', 'spring-1', 'taskbar-user-todos', 'taskbar-usage', 'desktop-previews', 'spring-5', 'spring-4'], 'taskbar-tray': [], 'taskbar-row2': [] };
+  await until(`fetch('/api/settings').then((r) => r.ok)`, { timeout: 20000 });
+  await api('PATCH', '/api/settings', { 'chrome.arrangement': OWNER_ARR });
+  pageErrors.length = 0;
+  await cdp('Page.navigate', { url: URL });
+  await until(`!!(window.app && document.getElementById('taskbar-tray'))`, { timeout: 30000 });
+  await splashGone();
+  await sleep(2000);
+  const insertErr = pageErrors.filter((e) => /insertBefore/.test(e.text) && /not a child of this node/.test(e.text));
+  check(`Z-RED the pre-fix chip THROWS at load on the owner’s shape (${insertErr.length}× «insertBefore … not a child of this node» — the incident’s line)`, insertErr.length >= 1, pageErrors.map((e) => e.text));
+  check('Z-RED … and the throw took the load-time dialog, the chip, the strip and the ⚙ mark with it (none drawn)', !(await evalJs(`!!document.getElementById('vault-unlock-dialog') || !!document.getElementById('taskbar-vault') || !!document.getElementById('vault-lock-strip') || !!document.querySelector('#btn-global-settings .vault-gear-mark')`)));
+  await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);
+  check('Z-RED the door still opens the unlock dialog', !!(await until(visible('#vault-unlock-dialog'), { timeout: 5000 })));
+  pageErrors.length = 0;
+  await evalJs(`(() => { const el = document.getElementById('vault-unlock-pw'); el.dispatchEvent(new Event('keydown', { bubbles: true })); el.value = 'x'; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('keyup', { bubbles: true })); return true; })()`);
+  await sleep(300);
+  const lenErr = pageErrors.filter((e) => /Cannot read properties of undefined \(reading 'length'\)/.test(e.text));
+  check('Z-RED a browser fill THROWS on the pre-fix key words — «Cannot read properties of undefined (reading \'length\')», the incident’s second error', lenErr.length === 1, pageErrors.map((e) => e.text));
+  const incId = await evalJs(`window.app.autoCaptureIncident('test', 'vault-chip-zone-errors RED')`);
+  const incFile = incId ? path.join(DATA, 'incidents', incId, 'bundle.json') : '';
+  const ring = incFile ? JSON.parse(fs.readFileSync(incFile, 'utf8')).client.rings.console : [];
+  const unh = ring.find((c) => c.l === 'unhandled' && /insertBefore/.test(c.m));
+  const unc = ring.find((c) => c.l === 'uncaught' && /reading 'length'/.test(c.m));
+  check('Z-RED the ring keeps BOTH errors WITH their stacks (≤ 3 frames, ≤ 400 chars, the bundle’s line:column, no origin)', !!unh && !!unc && [unh, unc].every((c) => typeof c.stack === 'string' && c.stack.length <= 400 && c.stack.split('\n').length <= 3 && /^at .*\/bundle\.js\?v=\d+:\d+:\d+\)?$/m.test(c.stack) && !c.stack.includes('127.0.0.1')), { unh, unc });
+  let sym = '';
+  try { sym = execFileSync(process.execPath, ['--no-warnings', path.join(repo, 'scripts/symbolicate.mjs'), incFile, '--checkout', wt], { encoding: 'utf8' }); } catch (e) { sym = String(e.stdout || '') + String(e.stderr || ''); }
+  console.log(sym.split('\n').filter((l) => /insertBefore|reading 'length'|→/.test(l)).map((l) => '      ' + l).join('\n'));
+  const symLines = sym.split('\n');
+  const topOf = (re) => { const i = symLines.findIndex((l) => re.test(l)); return i >= 0 ? symLines[i + 1] || '' : ''; };
+  check('Z-RED symbolicate (the map rebuilt in memory, byte-identical) names both lines: the throw in vault-unlock.js and the `.length` read in chat-enter-keys.js', /rebuilt in memory \(byte-identical/.test(sym) && /→\s+src\/lib\/vault-unlock\.js:\d+:\d+/.test(topOf(/unhandled .*insertBefore/)) && /→\s+src\/lib\/chat-enter-keys\.js:\d+:\d+/.test(topOf(/uncaught .*reading 'length'/)), sym.slice(0, 1500));
 }
 
 await stopServer();

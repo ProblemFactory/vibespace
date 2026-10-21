@@ -60,10 +60,12 @@ export function extractZodUnion(text) {
  *  outcome. Anchor = the constant holding the interrupt marker; from it the two lists the binary keeps —
  *  `function X(){return[…,N,…]}` (the 2.1.281 `Gd()`, matched by startsWith in `Hd()`) and
  *  `Y=new Set([…,N,…])` (the exact is_error set, with `a+b` suffix forms) — name every constant; each
- *  is resolved to its string on a strings-dump line that declares at least ONE OTHER member (a chunk
- *  declares them together; a reused minified name elsewhere in the bundle is not that). Template literals
- *  end at the dump's line (a feedback tail after "the user said:" begins on the next line) — the rows are
- *  prefixes, as the binary's own matcher is. Never throws; every failure names its anchor. */
+ *  is resolved to its string on a strings-dump DECLARATION that declares at least ONE OTHER member (a chunk
+ *  declares them together; a reused minified name elsewhere in the bundle is not that). A declaration is
+ *  the definition's line — through the line its closing backtick is on when a template literal is still
+ *  open at the line's end. Template literals' VALUES end at the dump's line (a feedback tail after "the
+ *  user said:" begins on the next line) — the rows are prefixes, as the binary's own matcher is. Never
+ *  throws; every failure names its anchor. */
 export function extractPermissionSentences(text) {
   const anchor = /(?<![\w$])([\w$]+)="\[Request interrupted by user for tool use\]"/.exec(text);
   if (!anchor) return { error: 'NO ANCHOR: "[Request interrupted by user for tool use]" is not a named constant in the bundle — the interrupt marker moved or was reworded: read the binary around "Tool call did not complete" and teach extractPermissionSentences the new form' };
@@ -82,14 +84,20 @@ export function extractPermissionSentences(text) {
   const defRe = (name, flags) => new RegExp('(?<![\\w$])' + name.replace(/\$/g, '\\$') + '=(?:"((?:[^"\\\\]|\\\\.)*)"|`([^`\\n]*))', flags);
   const defsOf = (name) => { const out = []; const re = defRe(name, 'g'); let m; while ((m = re.exec(text))) out.push({ at: m.index, value: m[1] !== undefined ? m[1] : m[2] }); return out; };
   const lineOf = (at) => { const a = text.lastIndexOf('\n', at) + 1; const b = text.indexOf('\n', at); return [a, b < 0 ? text.length : b]; };
-  const declaresAnother = (name, at) => { const [a, b] = lineOf(at); const line = text.slice(a, b); return names.some((o) => o !== name && defRe(o, '').test(line)); };
+  // 2.1.306: the feedback sentence (`D0=`…the user said:`) OPENS its line — the members before it moved to another chunk — and
+  // its template's own newline ends the line; its closing backtick and the next member (`n2=`) begin the next one. The census
+  // chunk still declares them together, so a template still open at the line's end is judged on its whole declaration,
+  // through the line its closing backtick is on (≤ 4 KB on) — on the line alone it declared no other member and went
+  // unresolved, its table row a GHOST (lane cli-2-1-306-records)
+  const declOf = (at) => { const [a, b] = lineOf(at); if (!/^[\w$]+=`[^`]*$/.test(text.slice(at, b))) return text.slice(a, b); const close = text.indexOf('`', b); return close < 0 || close - b > 4096 ? text.slice(a, b) : text.slice(a, lineOf(close)[1]); };
+  const declaresAnother = (name, at) => { const line = declOf(at); return names.some((o) => o !== name && defRe(o, '').test(line)); };
   const sentences = [], unresolved = [];
   for (const name of names) {
     // 2.1.288: the anchor's own name is REUSED on a 150 KB line that also declares one other member (`Eu="net.host.connection.subtype"`
     // beside `PE=…`) — so among several candidates the one whose line declares the MOST members wins (the census chunk declares
     // them together: 9 there); a tie stays unresolved, named (lane cli-2-1-288-records)
     const cands = defsOf(name).filter((d) => d.value.length >= 20 && declaresAnother(name, d.at));
-    const members = (d) => { const [a, b] = lineOf(d.at); const line = text.slice(a, b); return names.filter((o) => o !== name && defRe(o, '').test(line)).length; };
+    const members = (d) => { const line = declOf(d.at); return names.filter((o) => o !== name && defRe(o, '').test(line)).length; };
     const ranked = cands.length > 1 ? cands.map((d) => ({ d, n: members(d) })).sort((x, y) => y.n - x.n) : null;
     const pick = cands.length === 1 ? cands[0] : (ranked && ranked[0].n > ranked[1].n ? ranked[0].d : null);
     if (pick) sentences.push({ name, from: from.get(name), text: pick.value.replace(/\\"/g, '"'), at: pick.at });

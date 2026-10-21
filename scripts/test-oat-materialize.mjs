@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // THE MATERIALIZED LONG-LIVED TOKEN (lane pool-oat-materialize, design q-035 A, B-b928;
-// measured GO on CLI 2.1.296 — scripts/fixtures/oat-in-file.json). A pooled session's CLI
+// measured GO on CLI 2.1.296, and on 2.1.306 since lane oat-in-file-2-1-306 —
+// scripts/fixtures/oat-in-file.json). A pooled session's CLI
 // reads its member's credential FILE through a symlink, so a token that lives only in
 // accounts.json can never serve it. For a member with NO usable login, accounts.setOat also
 // writes the row's oat into <member dir>/.credentials.json in the CLI's measured login shape
@@ -168,7 +169,7 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
   const r = await so(am, dead, OAT);
   ok(am.oatFileCaps().ok === false && r.oatFile === 'cli-unmeasured' && sha(credsOf(am, dead)) === deadBytes && !archives(am, dead).length, 'no CLI version known ⇒ the capability gate is shut: setOat stores the token, writes NOTHING (cli-unmeasured)', r);
   const c = await nv(am, '2.1.296 (Claude Code)');
-  ok(c.ok === true && c.cli === '2.1.296' && c.measured === '2.1.296' && c.changed === true, 'the hub\'s CLI = the measured 2.1.296 ⇒ oatInFile true (cli-caps over the committed fixture), and the rows re-sync', c);
+  ok(c.ok === true && c.cli === '2.1.296' && c.measured === '2.1.296, 2.1.306' && c.changed === true, 'the hub\'s CLI = the measured 2.1.296 ⇒ oatInFile true (cli-caps over the committed fixture, which holds 2.1.296 and 2.1.306), and the rows re-sync', c);
   const arch = archives(am, dead);
   const f = readJ(credsOf(am, dead));
   const a = am.get(dead);
@@ -252,6 +253,24 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
   ok(am3.noteCliVersion('9.9.9').ok === false, 'a fixture whose oat-file-switch FAILED grants nothing for its own version (the three gate variants)');
   const amMac = new AccountManager({ dataDir: path.join(tmp, 'data-mac'), platform: 'darwin' });
   ok(amMac.noteCliVersion('2.1.296').ok === false, 'macOS: never (its CLI keys the keychain by the env string — the measurement is Linux, the pool\'s own platform rule)');
+}
+{
+  // lane oat-in-file-2-1-306: the hub's CLI is 2.1.306 — measured 2026-10-21 with the verdicts 2.1.296 has — so a
+  // member with no usable login gets what it gets on 2.1.296; over the base's one-version file it is unmeasured
+  const COMMITTED = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/oat-in-file.json'), 'utf8'));
+  const on306 = async (tag, oatFixture) => {
+    const amV = new AccountManager({ dataDir: path.join(tmp, 'data-306-' + tag), ...(oatFixture ? { oatFixture } : {}) });
+    const m = amV.createSubscription({ name: 'Dead 306' }).id;
+    put(amV, m, login(NOW, { dead: true }));
+    const c = await nv(amV, '2.1.306 (Claude Code)');
+    const r = await so(amV, m, OAT);
+    return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
+  };
+  const now = await on306('now');
+  ok(now.c.ok === true && now.c.cli === '2.1.306' && now.c.measured === '2.1.296, 2.1.306' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.306' && now.spawn, 'the hub\'s CLI = 2.1.306 (measured 2026-10-21) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.306, the spawn reads the file — as on 2.1.296', now);
+  const one = path.join(tmp, 'fx-2.1.296-only.json'); fs.writeFileSync(one, JSON.stringify(COMMITTED.versions['2.1.296'], null, 1) + '\n');
+  const base = await on306('base', one);
+  ok(base.c.ok === false && base.c.known && base.c.measured === '2.1.296' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the base): over the one-version file (2.1.296 only) the same 2.1.306 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
 }
 {
   // our token file is not a LOGIN where a login is the question
