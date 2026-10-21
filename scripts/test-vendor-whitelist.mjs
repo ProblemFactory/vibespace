@@ -1411,7 +1411,9 @@ console.log('§14 the Channels raw API: ONE fetch site, the host table, the gran
     const call = (src.match(/\n  async function call\([\s\S]*?\n  \}\n/) || [''])[0];
     const iGate = call.indexOf('const g = c.gate();'), iRun = call.indexOf('await run(');
     if (iGate < 0 || iRun < 0 || iGate > iRun || !/if \(g\) \{/.test(call)) bad.push('THE ACCOUNT METER (c.gate) is not asked before the run');
-    if (!/const tr = tierNow\(ctx, cred\);\n    const c = tr\.tier !== 'none' \? credentialOf\(cred\) : null;\n    if \(!c\) return NOT_GRANTED\(\);/.test(call)) bad.push('THE GRANT (tierNow) is not asked before the credential is resolved');
+    // the ungranted branch returns NOT_GRANTED at once — it may write ONE thing first, the refused line in that real
+    // credential's log (lane channel-api-log-blank), nothing else (no bearer, no run)
+    if (!/const tr = tierNow\(ctx, cred\);\n    const c = tr\.tier !== 'none' \? credentialOf\(cred\) : null;\n    if \(!c\) (return NOT_GRANTED\(\);|\{ if \(tr\.tier === 'none' && allCreds\(\)\.some\(\(x\) => x\.id === cred\)\) line\(asked\(\), \{ verdict: 'refused', code: 'api_not_granted' \}\); return NOT_GRANTED\(\); \})\n/.test(call)) bad.push('THE GRANT (tierNow) is not asked before the credential is resolved');
     const runB = (src.match(/\n  async function run\([\s\S]*?\n  \}\n/) || [''])[0];
     if (!/c\.charge\(\);\n\s+res = await vendorFetch\(/.test(runB)) bad.push('a vendor request is not charged to the account meter');
     return bad;
@@ -1432,6 +1434,7 @@ console.log('§14 the Channels raw API: ONE fetch site, the host table, the gran
     ['the host gate cut', cut(" || !hosts.has(u.host)) throw", ") throw"), /HOST TABLE/],
     ['the meter cut', cut("    const g = c.gate();\n    if (g) {", "    const g = null;\n    if (g) {"), /ACCOUNT METER/],
     ['the grant cut', cut("    const c = tr.tier !== 'none' ? credentialOf(cred) : null;", "    const c = credentialOf(cred);"), /THE GRANT/],
+    ['the ungranted branch runs', cut("line(asked(), { verdict: 'refused', code: 'api_not_granted' }); return NOT_GRANTED(); }", "line(asked(), { verdict: 'refused', code: 'api_not_granted' }); return run(ctx, cred, credentialOf(cred), input); }"), /THE GRANT/],
     ['the charge cut', cut("        c.charge();\n", ""), /charged/],
   ];
   const r = ctl.map(([n, s, re]) => ({ n, red: !!s && census14(s).some((x) => re.test(x)) }));

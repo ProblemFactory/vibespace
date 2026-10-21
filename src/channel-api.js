@@ -18,6 +18,7 @@
  *  · the redirect rule (B-fc37): a vendor's 3xx target is a request again, judged by the SAME rows as the call (host,
  *    path, class, sensitive, tier) before anything is sent there — never followed blind, never off the host.
  *  · the budget (per grant per conversation: per-minute + per-day counts) and the audit line (never a body).
+ *  · the API log's tail: one credential's lines only, the last n (`logTail`, lane channel-api-log-blank).
  */
 const crypto = require('crypto');
 const ACL = require('./channel-acl.js');
@@ -273,6 +274,24 @@ function auditLine({ at, principal, conv, cred, req, status = null, bytes = 0, m
   };
 }
 
+/** THE API LOG'S TAIL (lane channel-api-log-blank) — the last `n` lines OF ONE credential, oldest first, over the rows
+ *  the ORCH read (a bounded tail of data/channels/<cred>/api.ndjson): a line naming another credential (two ids that
+ *  share a file name — `acct:1` and `acct_1` — or a hand-edited file) is never one of them; `principal` = one
+ *  conversation's own lines (the agent's `api log`). n is clamped to 1…LOG_TAIL_MAX. */
+const LOG_TAIL_MAX = 500;
+function logTail(rows, { cred, n = 50, principal = null } = {}) {
+  const k = Math.floor(Number(n));
+  const want = Math.max(1, Math.min(LOG_TAIL_MAX, Number.isFinite(k) ? k : 50));
+  const out = [];
+  for (let i = (Array.isArray(rows) ? rows.length : 0) - 1; i >= 0 && out.length < want; i--) {
+    const l = rows[i];
+    if (!l || typeof l !== 'object' || l.cred !== cred) continue;
+    if (principal && !(l.principal && l.principal.id === principal.id)) continue;
+    out.push(l);
+  }
+  return out.reverse();
+}
+
 /** ALL AGENTS (principal {kind:'everyone', id:'*'}, the access row's one spelling): the tier under everyone is Read at
  *  most by default — a write tier for every agent needs its own click (`allWrite`, the dialog's "Let every agent write
  *  through this account" tick, said on the dialog next to the All row). */
@@ -292,5 +311,5 @@ module.exports = {
   METHODS, READ_METHODS, BODY_MAX, RESPONSE_MAX, SENSITIVE_BODY, PATH_MAX, TIMEOUT_MS, REDIRECTS_MAX, REDIRECT_STATUSES, BUDGET_DEFAULT, SHOWN_BODY_MAX, PENDING_MAX,
   HEADER_ALLOW, HEADER_REFUSED, RESPONSE_HEADER_ALLOW, TIERS, EVERYONE_TIER, TIER_SAYS, REDIRECT_WHY,
   vendorRowOf, validateRequest, classOf, sensitiveOf, shapeOf, verdict, offersAlways, freeze, thaw, digestOf, urlOf,
-  callText, addressOf, redirectRequest, judgeRedirect, retarget, boundResponse, responseHeaders, budgetCheck, auditLine, apiGrant,
+  callText, addressOf, redirectRequest, judgeRedirect, retarget, boundResponse, responseHeaders, budgetCheck, auditLine, logTail, LOG_TAIL_MAX, apiGrant,
 };

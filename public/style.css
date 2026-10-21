@@ -6624,7 +6624,12 @@ label.chan-cap-row { cursor: default; }
 .chan-api-dialog .chan-api-allwrite { display: flex; gap: 6px; align-items: baseline; margin: 0 0 6px; font-size: 12px; color: var(--warning, var(--accent)); }
 .chan-api-dialog .chan-api-sensitive, .chan-api-dialog .chan-api-shape, .chan-api-dialog .chan-api-logrow { overflow-wrap: anywhere; }
 .chan-api-dialog .chan-api-shape { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 2px 0; }
-.chan-api-dialog .chan-api-log { max-height: 16em; overflow: auto; font-size: 11px; color: var(--text-secondary); }
+.chan-api-dialog .chan-api-log { flex: none; max-height: 16em; overflow: auto; font-size: 11px; color: var(--text-secondary); }
+/* lane channel-api-log-blank: `flex: none` — in .dialog-body's capped column the log (overflow: auto ⇒ min-height 0) was
+   the ONE child that could shrink, so a long roster squeezed it to 0 px: the heading with nothing under it. The body
+   scrolls instead. Its one note line: «Loading…» / «No calls yet» (dim) or why it could not be read (red). */
+.chan-api-dialog .chan-api-lognote.chan-api-logwait { color: var(--text-dim); }
+.chan-api-dialog .chan-api-lognote.chan-api-logerr { color: var(--red); overflow-wrap: anywhere; }
 .chat-channel-touch { display: flex; align-items: baseline; gap: 6px; width: 100%; min-width: 0; box-sizing: border-box; padding: 2px 8px; font: inherit; font-size: 11px; text-align: left; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 .chat-channel-touch:hover, .chat-channel-touch:focus-visible { color: var(--accent); border-color: var(--accent); }
 .chat-channel-touch.drafted { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }

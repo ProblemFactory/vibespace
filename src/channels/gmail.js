@@ -1678,8 +1678,9 @@ function create(record = {}, deps = {}) {
      * answer is judged as a page (not an object, a `messages` that is not a list, more ids than a page ⇒ refused). Then
      * the engine's two HINTS per id, BEFORE any read: `shows(convId)` false — the caller may not see that thread ⇒
      * dropped, NO read of any kind (an agent's `--full`: neither the vendor's units nor the local log, so no timing
-     * counts it); `storedAt(convId, vendorId)` > 0 — the local copy holds it ⇒ the hit at its stored instant, NO read
-     * (section one shows it; the merge drops it).
+     * counts it — the page's `unshown` names its thread, for the engine's EXISTENCE answer only); `storedAt(convId,
+     * vendorId)` > 0 — the local copy holds it ⇒ the hit at its stored instant, NO read (section one shows it; the merge
+     * drops it).
      * Every other id = ONE `messages.get format=metadata` (From only): the instant (`internalDate`), the sender's address
      * and Gmail's `snippet` through THE ONE snippet reader (`SR.snippetOf`: cut, markup, entities, the name door, ≤ 400).
      * A message gone between the list and its read (404) is counted malformed; a RATE refusal re-throws (the engine
@@ -1705,11 +1706,12 @@ function create(record = {}, deps = {}) {
       const next = !narrow && typeof d.nextPageToken === 'string' && d.nextPageToken ? d.nextPageToken : null;
       const idOk = (v) => typeof v === 'string' && v.length > 0 && v.length <= 256 && /^[A-Za-z0-9_-]+$/.test(v);
       const hits = [];
+      const unshown = new Map();   // lane channels-search-says-hidden: threadId → ids dropped unread (the engine asks only WHETHER)
       let malformed = 0;
       for (const it of items) {
         if (hits.length >= SEARCH_PAGE) break;   // a page shows ≤ SEARCH_PAGE hits (≤ that many reads) whatever the ids page
         if (!it || !idOk(it.id) || !idOk(it.threadId)) { malformed++; continue; }
-        if (typeof shows === 'function' && !shows(it.threadId)) continue;
+        if (typeof shows === 'function' && !shows(it.threadId)) { unshown.set(it.threadId, (unshown.get(it.threadId) || 0) + 1); continue; }
         const held = typeof storedAt === 'function' ? Number(storedAt(it.threadId, it.id)) || 0 : 0;
         if (held > 0) { hits.push({ convId: it.threadId, vendorId: it.id, at: held, fromId: null, threadKey: null, snippet: null }); continue; }
         let m;
@@ -1720,7 +1722,7 @@ function create(record = {}, deps = {}) {
         const from = parseAddress(header(m.payload && m.payload.headers, 'From'));
         hits.push({ convId: it.threadId, vendorId: it.id, at, fromId: from.id || null, threadKey: null, snippet: SR.snippetOf(typeof m.snippet === 'string' ? m.snippet : null) });
       }
-      return { hits, next, malformed };
+      return { hits, next, malformed, ...(unshown.size ? { unshown: [...unshown] } : {}) };
     },
 
     /**

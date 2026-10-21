@@ -2,8 +2,9 @@
 // account card's "API access…" (and from a chat's API call row): the credential (one picker, labelled by source — a
 // Channels account or a Google storage mount, D3), who may call it at which tier (a new pick starts at Read, D1), the
 // vendor's sensitive list (always asks), the call shapes the user always allowed (revocable, D2), the calls waiting for
-// the user (the proposal card: what you approve is what runs) and the API log. Every row keyed; words zh/ja.
-import { fetchJson, createModalShell, showToast } from './utils.js';
+// the user (the proposal card: what you approve is what runs) and the API log (never blank: «Loading…», the lines, «No
+// calls yet» or ONE line saying why it could not be read — lane channel-api-log-blank). Every row keyed; words zh/ja.
+import { fetchJson, api, createModalShell, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { renderApiCard } from './channel-api-card-view.js';   // B-2198 part 2: the ONE card (chat · Outbox · For you · here)
@@ -32,6 +33,59 @@ export async function showApiAccessDialog(app, cred) {
   let cur = creds.find((c) => c.id === cred) || creds[0];
   if (!cur) { showToast(t('Agents cannot call this API until you grant it')); return; }
   const { body, dialog, close } = createModalShell({ id: 'chan-api-dialog', title: t('API access'), dialogClass: 'chan-api-dialog', minWidth: 'min(560px, 96vw)' });
+  // THE API LOG (lane channel-api-log-blank, the owner: 「这个 API 日志为啥一直是空的」) — ONE box for the dialog's life,
+  // kept across re-draws, its rows keyed and patched in place. It says «Loading…» at once, then the lines (newest first),
+  // «No calls yet», or ONE line saying why the log could not be read (a failed read, a line that cannot be worded) —
+  // never nothing. The box keeps its height in the dialog's column (style.css `flex: none`): as the one shrinkable child
+  // it took the whole overflow of a long roster and showed 0 px — the heading with nothing under it.
+  const logEl = el('div', 'chan-api-log');
+  let logOf = null, logSeq = 0;
+  const logNote = (cls, text) => {
+    let n = logEl.querySelector('.chan-api-lognote');
+    if (!text) { if (n) n.remove(); return null; }
+    if (!n) n = el('div');
+    n.className = `chan-api-lognote ${cls}`; n.textContent = text;
+    if (logEl.firstChild !== n) logEl.insertBefore(n, logEl.firstChild);
+    return n;
+  };
+  const paintLog = (lines) => {
+    const want = [], dup = new Map();
+    let bad = null;
+    for (const l of lines.slice().reverse()) {
+      let words;
+      try { words = logWords(l, clock); } catch (e) { bad = bad || String((e && e.message) || e); continue; }
+      const k = `${l.at}|${l.verdict}|${l.proposal || ''}|${l.path}`, n = (dup.get(k) || 0) + 1;
+      dup.set(k, n);
+      want.push({ key: n > 1 ? `${k}#${n}` : k, words, trust: l.verdict === 'granted' || l.trust === 'write-all' });
+    }
+    const have = new Map([...logEl.querySelectorAll('.chan-api-logrow')].map((r) => [r.dataset.key, r]));
+    const keep = new Set(want.map((w) => w.key));
+    for (const [k, r] of have) if (!keep.has(k)) r.remove();
+    let prev = bad ? logNote('chan-api-logerr', t('The log could not be read: {reason}', { reason: bad })) : logNote('chan-api-logwait', want.length ? '' : t('No calls yet'));
+    for (const w of want) {
+      let r = have.get(w.key);
+      if (!r) { r = el('div', 'chan-api-logrow'); r.dataset.key = w.key; }
+      if (r.textContent !== w.words) r.textContent = w.words;
+      r.classList.toggle('chan-api-trust', w.trust);
+      const at = prev ? prev.nextSibling : logEl.firstChild;
+      if (at !== r) logEl.insertBefore(r, at);
+      prev = r;
+    }
+  };
+  const loadLog = () => {
+    const cred = cur.id, seq = ++logSeq;
+    if (logOf !== cred) { for (const r of [...logEl.querySelectorAll('.chan-api-logrow')]) r.remove(); logOf = cred; }
+    if (!logEl.querySelector('.chan-api-logrow')) logNote('chan-api-logwait', t('Loading…'));
+    api(`/api/channels/api/${encodeURIComponent(cred)}/log?n=20`).then((j) => {
+      if (seq !== logSeq) return;   // a newer read (another credential, a re-draw) owns the box
+      if (!j || !Array.isArray(j.lines)) throw new Error(t('the answer holds no lines'));
+      paintLog(j.lines);
+    }).catch((e) => {
+      if (seq !== logSeq) return;
+      for (const r of [...logEl.querySelectorAll('.chan-api-logrow')]) r.remove();
+      logNote('chan-api-logerr', t('The log could not be read: {reason}', { reason: String((e && e.message) || e) }));
+    });
+  };
   const draw = () => {
     body.textContent = '';
     // THE CREDENTIAL — one picker, labelled by source
@@ -98,15 +152,9 @@ export async function showApiAccessDialog(app, cred) {
     const mine = (view.cards || []).filter((p) => p.cred === cur.id && p.status === 'pending');
     if (!mine.length) body.appendChild(el('div', 'chat-status-dim', t('Nothing waits for you')));
     for (const p of mine) body.appendChild(renderApiCard(p));
-    // THE API LOG
-    body.appendChild(el('div', 'dialog-label', t('API log')));
-    const logEl = el('div', 'chan-api-log');
-    body.appendChild(logEl);
-    fetchJson(`/api/channels/api/${encodeURIComponent(cur.id)}/log?n=20`).then((j) => {
-      const lines = (j && j.lines) || [];
-      if (!lines.length) logEl.appendChild(el('div', 'chat-status-dim', t('No calls yet')));
-      for (const l of lines.slice().reverse()) { const r = el('div', 'chan-api-logrow'); r.dataset.key = `${l.at}|${l.proposal || ''}|${l.path}`; r.textContent = logWords(l, clock); if (l.verdict === 'granted' || l.trust === 'write-all') r.classList.add('chan-api-trust'); logEl.appendChild(r); }
-    }).catch(() => {});
+    // THE API LOG — the dialog's one box (above), re-read on every draw
+    body.append(el('div', 'dialog-label', t('API log')), logEl);
+    loadLog();
     const foot = el('div', 'dialog-footer');
     foot.append(button(t('Cancel'), () => close()), button(t('Save'), async () => {
       try { await fetchJson(`/api/channels/api/${encodeURIComponent(cur.id)}/grants`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grants: rows.map((r) => ({ principal: r.principal, tier: r.tier, perDay: r.perDay, allWrite: !!r.allWrite })) }) }); close(); }

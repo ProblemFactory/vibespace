@@ -7,7 +7,8 @@
  * OAuth token — D3) → the ONE fetch (`vendorFetch`: the credential's DECLARED hosts only, a redirect never followed by
  * itself — each target judged by the fence like the call, B-fc37 —, 30 s, bounded) → the answer
  * through secret-shapes' redaction and the peer-text belt → the audit ring (data/channels/<cred>/api.ndjson — never a
- * body) and the chat's call row (the caller's touchChannel). A write under `write-ask` and every SENSITIVE call is a
+ * body; ONE line at each run / refuse / decide point, read back by `auditTail` as a bounded tail of THAT credential's
+ * lines — the API access dialog's log) and the chat's call row (the caller's touchChannel). A write under `write-ask` and every SENSITIVE call is a
  * PROPOSAL: the frozen bytes (method, host, path, query, headers, body digest) are what the user's Approve runs.
  * The vendor facts are the credential's DECLARED row (`cred.api`: the adapter's, handed by the engine; a mount's, by
  * src/mounts.js `oauthApiRows`) — this file names no vendor (test-architecture), adding an integration never edits it.
@@ -20,6 +21,8 @@ const { toAgentText } = require('../peer-text.js');
 const { redactSecrets, REDACTED } = require('../secret-shapes.js');
 
 const AUDIT_RING_BYTES = 16 * 1024 * 1024;
+const TAIL_LINES = 2000;                 // the log's read window: the newest lines of the file (lane channel-api-log-blank)…
+const TAIL_BYTES = 4 * 1024 * 1024;      // …read backwards from its end, never the whole 16 MB ring
 const PROPOSALS_KEEP = 200;
 const TOKEN_KEYS = /^(access_token|refresh_token|id_token|tenant_access_token|app_access_token|user_access_token|client_secret|authorization|password|secret)$/i;
 
@@ -47,11 +50,34 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
       fs.appendFileSync(f, JSON.stringify(line) + '\n');
     } catch (e) { log.warn('[channel-api] audit write failed:', e && e.message); }
   }
+  /** The newest ≤ TAIL_LINES lines of one ring file, read backwards from its end (≤ TAIL_BYTES) — `whole` = the file's
+   *  start was reached (a cut first line is dropped, never half-parsed). */
+  function tailRows(f) {
+    let fd;
+    try { fd = fs.openSync(f, 'r'); } catch { return { rows: [], whole: true }; }
+    try {
+      const size = fs.fstatSync(fd).size, chunks = [];
+      let pos = size, nl = 0;
+      while (pos > 0 && size - pos < TAIL_BYTES && nl <= TAIL_LINES) {
+        const len = Math.min(64 * 1024, pos, TAIL_BYTES - (size - pos));
+        pos -= len;
+        const b = Buffer.alloc(len);
+        fs.readSync(fd, b, 0, len, pos);
+        for (let i = 0; i < len; i++) if (b[i] === 10) nl++;
+        chunks.unshift(b);
+      }
+      let text = Buffer.concat(chunks).toString('utf8');
+      if (pos > 0) text = text.slice(text.indexOf('\n') + 1);
+      return { rows: text.split('\n').filter(Boolean).slice(-TAIL_LINES).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean), whole: pos === 0 };
+    } catch { return { rows: [], whole: true }; } finally { try { fs.closeSync(fd); } catch {} }
+  }
+  /** THE API LOG the dialog and `api log` read: the last n lines OF THIS credential (PURE `logTail` — never another
+   *  credential's), from a bounded tail of its ring; a ring rolled a moment ago lends its newest lines (`.1`). */
   function auditTail(cred, { n = 50, principal = null } = {}) {
-    let lines = [];
-    try { lines = fs.readFileSync(credDir(cred), 'utf8').split('\n').filter(Boolean).slice(-2000).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch {}
-    if (principal) lines = lines.filter((l) => l.principal && l.principal.id === principal.id);
-    return lines.slice(-Math.max(1, Math.min(500, n)));
+    const f = credDir(cred);
+    const live = tailRows(f);
+    const rows = live.whole && live.rows.length < TAIL_LINES ? [...tailRows(f.replace(/\.ndjson$/, '.1.ndjson')).rows.slice(live.rows.length - TAIL_LINES), ...live.rows] : live.rows;
+    return F.logTail(rows, { cred: String(cred), n, principal });
   }
 
   /** The storage mounts' lent credentials: one `[vendor, row]` per vendor whose raw-API row the mounts DECLARE. */
@@ -228,12 +254,16 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   /** THE CALL. → the answer, `api_pending` (a proposal filed), or a refusal by name. `touch` = the chat's call row. */
   async function call(ctx, input = {}) {
     const cred = String(input.cred || '');
+    const line = (req, extra) => audit(cred, F.auditLine({ at: now(), principal: ctx, conv: ctx.id, cred, req, ...extra }));
+    const asked = () => ({ method: String(input.method || '').toUpperCase().slice(0, 8), host: null, path: String(input.path || '').slice(0, 200), query: [] });
+    // a call on a credential this conversation holds no access to is a refused call too — its line in THAT credential's
+    // log (the owner sees who asked); an id that names no credential writes nothing (no file for a made-up id), and
+    // the agent's answer is the same either way (no existence oracle). The branch only logs (test-vendor-whitelist §14).
     const tr = tierNow(ctx, cred);
     const c = tr.tier !== 'none' ? credentialOf(cred) : null;
-    if (!c) return NOT_GRANTED();
+    if (!c) { if (tr.tier === 'none' && allCreds().some((x) => x.id === cred)) line(asked(), { verdict: 'refused', code: 'api_not_granted' }); return NOT_GRANTED(); }
     const v = F.validateRequest(c, input);
-    const line = (req, extra) => audit(cred, F.auditLine({ at: now(), principal: ctx, conv: ctx.id, cred, req, ...extra }));
-    if (!v.ok) { line({ method: String(input.method || '').toUpperCase().slice(0, 8), host: null, path: String(input.path || '').slice(0, 200), query: [] }, { verdict: 'refused', code: v.code }); return v; }
+    if (!v.ok) { line(asked(), { verdict: 'refused', code: v.code }); return v; }
     const req = v.req;
     const cls = F.classOf(c, req), sensitive = F.sensitiveOf(c, req), shape = F.shapeOf(req);
     const shapes = shapesOf(ctx, cred);
@@ -314,8 +344,10 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     const req = F.thaw(p.frozen);
     const ctx = { kind: p.principal.kind, id: p.principal.id, name: p.principal.name, groups: p.principal.groups || [] };
     const c = credentialOf(p.cred);
-    if (!req || !c) { p.status = 'failed'; p.reason = !req ? 'the frozen request no longer matches its digest — nothing ran' : 'the credential is gone'; save(); notifyOwner([p.id]); return { ok: false, code: 'api_frozen_mismatch', error: p.reason }; }
-    if (tierNow(ctx, p.cred).tier === 'none') { p.status = 'failed'; p.reason = 'the agent no longer holds API access to this credential — nothing ran'; save(); notifyOwner([p.id]); return { ok: false, code: 'api_not_granted', error: p.reason }; }
+    // a decided card that runs nothing is a refused call on its log line, like any other (lane channel-api-log-blank)
+    const refused = (code) => audit(p.cred, F.auditLine({ at: now(), principal: ctx, conv: p.conv, cred: p.cred, req: req || p.frozen, verdict: 'refused', code, proposal: p.id, by }));
+    if (!req || !c) { p.status = 'failed'; p.reason = !req ? 'the frozen request no longer matches its digest — nothing ran' : 'the credential is gone'; refused('api_frozen_mismatch'); save(); notifyOwner([p.id]); return { ok: false, code: 'api_frozen_mismatch', error: p.reason }; }
+    if (tierNow(ctx, p.cred).tier === 'none') { p.status = 'failed'; p.reason = 'the agent no longer holds API access to this credential — nothing ran'; refused('api_not_granted'); save(); notifyOwner([p.id]); return { ok: false, code: 'api_not_granted', error: p.reason }; }
     p.status = 'running'; p.decidedAt = now(); p.decidedBy = by;
     if (always && p.offersAlways) state.shapes.push({ id: `shape-${crypto.randomBytes(5).toString('hex')}`, cred: p.cred, principal: `${ctx.kind}:${ctx.id}`, principalName: ctx.name || null, groups: ctx.groups, shape: F.shapeOf(req), at: now(), by });
     save();
@@ -360,7 +392,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     if (!p) return { ok: false, code: 'not-found', error: 'no such API proposal' };
     if (p.status !== 'pending') return { ok: false, code: 'not-pending', error: `this proposal is ${p.status} already` };
     p.status = 'rejected'; p.decidedAt = now(); p.decidedBy = by; p.reason = reason ? String(reason).slice(0, 500) : null;
-    audit(p.cred, F.auditLine({ at: now(), principal: p.principal, conv: p.conv, cred: p.cred, req: F.thaw(p.frozen), verdict: 'rejected', proposal: p.id, by }));
+    audit(p.cred, F.auditLine({ at: now(), principal: p.principal, conv: p.conv, cred: p.cred, req: F.thaw(p.frozen) || p.frozen, verdict: 'rejected', proposal: p.id, by }));
     save(); notifyOwner([p.id]);
     return { ok: true, proposal: proposalView(p) };
   }
@@ -375,4 +407,4 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   return { creds, docs, call, proposalFor, logFor, ownerView, setTiers, approve, resubmit, reject, revokeShape, auditTail, pending };
 }
 
-module.exports = { create, AUDIT_RING_BYTES };
+module.exports = { create, AUDIT_RING_BYTES, TAIL_LINES, TAIL_BYTES };

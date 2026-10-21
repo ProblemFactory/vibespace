@@ -9945,4 +9945,6 @@ export default {
   "1 thing it may do": "1 件の操作", // lane vault-key-row-compact
   "{n} things it may do": "{n} 件の操作", // lane vault-key-row-compact
   "No key granted to {target} holds that verb — add it with Edit… on a key's row in the Vault window": "{target} に許可されたキーはどれもその操作を持っていません——保管庫ウィンドウでキーの行の「編集…」から追加してください", // lane vault-key-row-compact
+  "The log could not be read: {reason}": "API ログを読み込めませんでした：{reason}", // lane channel-api-log-blank
+  "the answer holds no lines": "応答にログ行がありません", // lane channel-api-log-blank
 };

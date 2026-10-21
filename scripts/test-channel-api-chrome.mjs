@@ -22,6 +22,12 @@
 //      a grant line in the API log; its sensitive call (chat.delete) RUNS with no card, its log line + chat row say
 //      完全信任 · 敏感; the dialog row in the warning colour + its note; the All row's option refused, saying why
 //      (PNGs dialog-desk.png / dialog-phone.png)
+//   ⑩ THE API LOG IS NEVER BLANK (lane channel-api-log-blank, the owner: 「这个 API 日志为啥一直是空的」): the hub's shape
+//      (199 lines: 152 ran, 20 asked you — 15 approved, 5 rejected —, 7 refused) under a roster at the picker's cap — the
+//      log keeps its height and its rows are on screen; «Loading…» while the read is held; ONE error line for a 500, a
+//      failed fetch and a line that cannot be worded; «No calls yet»; a re-draw patches the keyed rows in place
+//      (PNG api-log-hub-shape.png). RED CONTROL = the base: the box squeezed to 0 px, nothing while loading, «No calls
+//      yet» for a 500
 // PNGs (for the owner): $API_CHROME_SHOTS (default: the scratch dir) api-dialog-zh.png, api-card-chat-zh.png,
 // api-card-phone-zh.png, foryou-api-row-zh.png (the For-you row: the card's title, the call folded). Run: node scripts/test-channel-api-chrome.mjs
 import { execSync, spawn } from 'node:child_process';
@@ -181,7 +187,7 @@ async function newPage({ lang = 'zh', width = 1400, height = 1000, control = fal
     if (r.result && r.result.data) fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r.result.data, 'base64'));
     return !!(r.result && r.result.data);
   };
-  return { cdp, evaljs, shot, loaded, close: () => { try { ws.close(); } catch {} } };
+  return { cdp, on, evaljs, shot, loaded, close: () => { try { ws.close(); } catch {} } };
 }
 const CHAT = (sidSel) => `[...document.querySelectorAll('.chat-api-cards')].filter((b) => b.closest(${JSON.stringify(sidSel)}))`;
 const openChat = (p) => p.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const s = (app.sidebar._webuiSessions || []).find((x) => x.id === ${JSON.stringify(sessionId)}); if (s) { app.attachSession(s.id, s.name, s.cwd, { mode: 'chat', backend: 'claude' }); return true; } await new Promise((r) => setTimeout(r, 250)); } return false; })()`);
@@ -350,6 +356,81 @@ ok(d10 && d10.note && d10.noteRight <= d10.vw + 0.5, `390 px: the 完全信任 r
 ok(await p10.shot('dialog-phone.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *'), 'dialog-phone.png');
 p10.close();
 ok(!fs.readFileSync(path.join(STUB, 'calls.ndjson'), 'utf-8').split('\n').filter(Boolean).some((l) => !/"host":"slack.com"/.test(l)), 'every intercepted vendor call went to the stub (slack.com only)');
+
+// ⑩ THE API LOG IS NEVER BLANK (lane channel-api-log-blank) — the hub's shape, a roster at the picker's cap
+console.log('⑩ the API log is never blank: the hub\'s shape under a full roster, «Loading…», the error line, the empty state, keyed rows');
+{
+  const logFile = path.join(wt, 'data/channels', String(credId).replace(/[^A-Za-z0-9._-]/g, '_'), 'api.ndjson');
+  // the hub's measured mix (2026-10-21, read only): 152 calls ran, 20 asked you (15 approved, 5 rejected), 7 refused
+  const shape = []; let at = Date.now() - 8 * 86400e3, pn = 0;
+  const push = (verdict, x = {}) => shape.push({ at: (at += 61e3), cred: credId, principal: { kind: 'agent', id: sid, name: 'api-agent' }, conv: sid, method: x.method || 'GET', host: 'slack.com', path: x.path || '/api/conversations.history', queryKeys: [], status: verdict === 'ok' || verdict === 'approved' ? 200 : null, bytes: 0, ms: 0, verdict, code: x.code || null, proposal: x.proposal || null, by: x.by || null, bodySha: null });
+  for (let i = 0; i < 152; i++) {
+    push('ok', { path: `/api/conversations.history/${i}` });
+    if (i % 7 === 3 && pn < 20) { const id = `api-hub${pn}`; push('proposed', { method: 'POST', path: `/api/chat.postMessage/${pn}`, proposal: id }); push(pn < 15 ? 'approved' : 'rejected', { method: 'POST', path: `/api/chat.postMessage/${pn}`, proposal: id, by: 'user' }); pn++; }
+    if (i % 21 === 10) push('refused', { code: 'api_budget' });
+  }
+  fs.writeFileSync(logFile, shape.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const tally = shape.reduce((o, l) => ({ ...o, [l.verdict]: (o[l.verdict] || 0) + 1 }), {});
+  ok(shape.length === 199 && tally.ok === 152 && tally.proposed === 20 && tally.approved === 15 && tally.rejected === 5 && tally.refused === 7, `the hub's shape in the credential's log: ${shape.length} lines ${JSON.stringify(tally)}`);
+  // the owner's roster: enough Task Groups that the picker's list sits at its cap (260 px)
+  for (let i = 1; i <= 12; i++) await api('POST', '/api/tasks', { title: `Hub group ${String(i).padStart(2, '0')}` });
+  const look = (p) => p.evaljs(`(() => { const d = document.getElementById('chan-api-dialog'); const log = d && d.querySelector('.chan-api-log'); if (!log) return null; const rows = [...log.querySelectorAll('.chan-api-logrow')], note = log.querySelector('.chan-api-lognote'), list = d.querySelector('.pp-list'); return { rows: rows.length, h: Math.round(log.getBoundingClientRect().height), sh: log.scrollHeight, note: note ? note.textContent : null, err: !!(note && note.classList.contains('chan-api-logerr')), first: rows[0] ? rows[0].textContent : null, listH: list ? Math.round(list.getBoundingClientRect().height) : 0, text: log.innerText.slice(0, 200), marked: !!(rows[0] && rows[0].__vsMark), markedAt: rows.findIndex((r) => r.__vsMark) }; })()`);
+  // after the boot (app.ready): the splash covers the page until then — no person opens a dialog under it
+  const openLog = async (p, until20 = true) => { await p.evaljs('app.ready.then(() => new Promise((r) => setTimeout(r, 800)))'); await openChat(p); return until(async () => { if (!(await p.evaljs(`!!document.getElementById('chan-api-dialog')`))) { await p.evaljs(`(() => { const row = document.querySelector('.chat-channel-touches .chat-channel-touch'); if (row) row.click(); return 1; })()`); return null; } const v = await look(p); return v && (!until20 || v.rows === 20) ? v : null; }, 20000); };
+  const pH = await newPage({ lang: 'zh', width: 1400, height: 900 });
+  const hub = await openLog(pH);
+  const vis = await pH.evaljs(`(async () => { const r = document.querySelector('#chan-api-dialog .chan-api-logrow'); if (!r) return null; r.scrollIntoView({ block: 'center' }); await new Promise((q) => setTimeout(q, 300)); const b = r.getBoundingClientRect(), hit = document.elementFromPoint(Math.round(b.left + Math.min(b.width, 200) / 2), Math.round(b.top + b.height / 2)); return { onTop: !!(hit && (hit === r || r.contains(hit))), h: Math.round(b.height) }; })()`);
+  ok(hub && hub.listH >= 250, `the owner's roster: the picker's list sits at its cap (${hub && hub.listH} px)`, hub);
+  ok(hub && hub.rows === 20 && /api\/conversations\.history\/151 · 200 · 已执行/.test(hub.first) && !hub.note, `the log shows the hub's last 20 lines, newest first (${hub && hub.rows} rows)`, hub);
+  ok(hub && hub.h >= Math.min(hub.sh, 170), `· measured: the log box keeps its height in the dialog's column — ${hub && hub.h} px of ${hub && hub.sh} (never squeezed to 0 by the roster above it)`, hub);
+  ok(vis && vis.onTop && vis.h > 0, 'scrolled to, the newest line is on screen and on top (nothing covers it)', vis);
+  ok(await pH.shot('api-log-hub-shape.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *'), 'api-log-hub-shape.png');
+  // KEYED: a re-draw (the credential picked again) patches the rows in place — a new line lands on top, the rest are the same nodes
+  await pH.evaljs(`(() => { document.querySelector('#chan-api-dialog .chan-api-logrow').__vsMark = 1; return 1; })()`);
+  fs.appendFileSync(logFile, JSON.stringify({ ...shape[shape.length - 1], at: Date.now(), path: '/api/conversations.history/new', proposal: null }) + '\n');
+  await pH.evaljs(`(() => { const s = document.querySelector('#chan-api-dialog .chan-api-cred'); s.dispatchEvent(new Event('change')); return 1; })()`);
+  const re = await until(async () => { const v = await look(pH); return v && /history\/new/.test(v.first || '') ? v : null; }, 10000);
+  ok(re && re.rows === 20 && re.markedAt === 1, `a re-draw patches the keyed rows in place: the new line on top, the old newest row is the same node one below (at ${re && re.markedAt})`, re || await look(pH));
+  pH.close();
+  // «Loading…» at once, while the read is held; then the lines
+  const pL = await newPage({ lang: 'zh', width: 1400, height: 900 });
+  const held = [];
+  pL.on.set('Fetch.requestPaused', (q) => { held.push(q.requestId); });
+  await pL.cdp('Fetch.enable', { patterns: [{ urlPattern: '*/api/channels/api/*/log*', requestStage: 'Request' }] });
+  const wait = await openLog(pL, false);
+  await until(() => held.length > 0, 10000);
+  const during = await look(pL);
+  ok(held.length > 0 && during && during.note === '加载中…' && during.rows === 0, `while the read is held the log says 「${during && during.note}」 (never a blank box)`, during);
+  for (const id of held.splice(0)) await pL.cdp('Fetch.continueRequest', { requestId: id });
+  const after = await until(async () => { const v = await look(pL); return v && v.rows === 20 ? v : null; }, 10000);
+  ok(after && !after.note, '…then the lines, the «Loading…» line gone', after || await look(pL));
+  pL.close();
+  // ONE error line: a 500, a failed fetch, a line that cannot be worded
+  const errCase = async (name, answer) => {
+    const p = await newPage({ lang: 'zh', width: 1400, height: 900 });
+    p.on.set('Fetch.requestPaused', (q) => { answer(p, q.requestId); });
+    await p.cdp('Fetch.enable', { patterns: [{ urlPattern: '*/api/channels/api/*/log*', requestStage: 'Request' }] });
+    await openLog(p, false);
+    const v = await until(async () => { const x = await look(p); return x && x.note && x.note !== '加载中…' ? x : null; }, 10000);
+    p.close();
+    return v;
+  };
+  const j64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64');
+  const e500 = await errCase('500', (p, id) => p.cdp('Fetch.fulfillRequest', { requestId: id, responseCode: 500, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: j64({ ok: false, error: 'the ring could not be read' }) }));
+  ok(e500 && e500.err && e500.note === '无法读取 API 日志：the ring could not be read' && e500.rows === 0 && !/还没有调用/.test(e500.text), `a 500 ⇒ ONE error line saying why (「${e500 && e500.note}」), never «No calls yet»`, e500);
+  const eNet = await errCase('net', (p, id) => p.cdp('Fetch.failRequest', { requestId: id, errorReason: 'ConnectionRefused' }));
+  ok(eNet && eNet.err && /^无法读取 API 日志：/.test(eNet.note) && eNet.rows === 0, `a failed fetch ⇒ ONE error line (「${eNet && eNet.note}」)`, eNet);
+  const good = (i) => ({ ...shape[i], at: shape[i].at });
+  const eBad = await errCase('bad', (p, id) => p.cdp('Fetch.fulfillRequest', { requestId: id, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: j64({ ok: true, lines: [good(0), null, good(1)] }) }));
+  ok(eBad && eBad.err && /^无法读取 API 日志：/.test(eBad.note) && eBad.rows === 2, `a line that cannot be worded ⇒ the lines that can + ONE error line (${eBad && eBad.rows} rows, 「${eBad && eBad.note}」)`, eBad);
+  // the empty state
+  fs.writeFileSync(logFile, '');
+  const pE = await newPage({ lang: 'zh', width: 1400, height: 900 });
+  await openLog(pE, false);
+  const empty = await until(async () => { const v = await look(pE); return v && v.text.trim() && v.text.trim() !== '加载中…' ? v : null; }, 10000);
+  ok(empty && empty.text.trim() === '还没有调用' && !empty.err && empty.rows === 0, `a credential with no calls says 「${empty && empty.text.trim()}」`, empty);
+  pE.close();
+}
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
 if (fail && process.env.API_CHROME_DEBUG) console.error(srvLog.join('').slice(-3000));

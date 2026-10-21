@@ -45,8 +45,8 @@ vibespace-channels withdraw <proposalId> [--why "…"]
 vibespace-channels proposals [--all]             # YOUR proposals here, one line each: id · kind · conversation · what it says · state (default: awaiting the user)
 vibespace-channels recall <conv> <msg id> [--why "…"]
                                                  # PROPOSE taking back a message the USER sent (the user approves it — never direct)
-vibespace-channels search "words" [--account <id>] [--limit N] [--full]
-                                                 # messages you can see (the stored logs); --full = ONE page of the account's own search
+vibespace-channels search "words (all must appear)" [--account <id>] [--limit N] [--full]
+                                                 # messages you can see (the stored logs, every word anywhere); --full = those first, then what ONE page of the account's own search adds
 vibespace-channels read <conv> --around <msg id> # the vendor's messages around a message --full found (not saved)
 vibespace-channels status [<proposalId>]         # what you were given (access / notification) + your proposals
 vibespace-channels request <conv> "why"          # ask for access (requestable rows only)
@@ -612,12 +612,21 @@ The user asked (2026-10-03) whether channel search reads the vendor live or the
 local copy. Both, in two tiers — use the free one first:
 
 - `search "words" [--account <id>]` searches the STORED messages of the
-  conversations you can SEE — nothing else is read, and a hit in a
-  conversation you cannot see simply is not there. No vendor call; at least 2
-  characters. Its last line says what it covered ("searched what is stored: N
-  conversation(s) you can see"). The stored copy holds what arrived since the
+  conversations you can SEE. Several words match a message holding EVERY one
+  of them, each anywhere — its text, its sender's name or its conversation's
+  title (a mail thread's subject): `search "Wren NID"` finds Wren's
+  mail about the NID. No vendor call; at least 2 characters. Its last line says
+  what it covered ("searched what is stored: N conversation(s) you can see ·
+  every word must appear …"). The stored copy holds what arrived since the
   account was connected (and what a window paged back to) — an older message
   may not be there.
+- **A match where you cannot read** (a conversation of the same account that
+  is not shared with you) is never shown — the answer says only that it EXISTS:
+  `matches exist that you cannot read — ask the user to share them with you
+  (Channels › the conversation's ⋯ or the account's ⋯ → Grant access…).` No
+  count, no account, no title, no words (the user, 2026-10-21: a number leaks
+  too). That line is not a broken sync — ask the user. `nothing matches "…"`
+  means nothing matched at all.
 - `search "words" --full [--account <id>]` asks the ACCOUNT'S OWN search
   (Lark's message search; on Gmail its search over the WHOLE mailbox — also
   mail outside the folders the account syncs; Gmail reads the words in its own
@@ -625,9 +634,12 @@ local copy. Both, in two tiers — use the free one first:
   history: ONE page per call, within
   the agents' share of the account's vendor budget, at most one per account
   per 20 s for your conversation (`vendor-budget` / `refresh-floor` name the
-  wait — do not loop). Hits the stored copy already holds are left out (the
-  free search finds them); a hit in a conversation you cannot see is absent,
-  never counted. Each line ends `(not saved here)` with the message id. An
+  wait — do not loop). It prints the STORED hits FIRST — exactly what the plain
+  search prints — and then what the account's own search ADDED, each line
+  ending `(not saved here)` with the message id; when it added nothing it says
+  `the account's own search added nothing beyond the N saved hits above` (the
+  hits are the ones above — not «nothing»). A match in a conversation you
+  cannot see is the same existence line, never a count. An
   account whose channel has no search of its own says so; with several such
   accounts, name one with `--account`.
 - `read <conv> --around <msg id>` reads the vendor's messages around a message

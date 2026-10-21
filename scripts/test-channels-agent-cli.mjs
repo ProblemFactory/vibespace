@@ -85,6 +85,8 @@ let listAnswer = null;   // design 008 S6: the REAL engine's listFor answer, ser
 // lane channels-proposals-recall (㉑): the list and the recall answered by the REAL engine, the recall with the ROUTE's own
 // status table (RECALL_STATUS, parsed from src/agent-routes.js — the stub never invents a status)
 let proposalsAnswer = null, recallAnswer = null;
+// lane channels-search-says-hidden (㉒): the search answered by the REAL engine (its searchFor, the route's own arguments)
+let searchAnswer = null;
 const RECALL_ROUTE_STATUS = new Map([...((/const RECALL_STATUS = Object\.freeze\(\{([^}]*)\}\)/.exec(asrc) || [])[1] || '').matchAll(/'?([a-z-]+)'?: (\d{3})/g)].map((m) => [m[1], Number(m[2])]));
 const server = http.createServer((req, res) => {
   const chunks = [];
@@ -182,6 +184,7 @@ const server = http.createServer((req, res) => {
       return send(200, { ok: true, proposal: { id: 'p-9', state: 'awaiting-approval', adapterId: 'gmail', convId: null, compose: { to: String(body.to).split(','), cc: [], subject: body.subject }, policy: { mode: 'review', reasons: ['channel-policy'] }, sendAs: 'user', identity: { marking: 'marked', text: 'Mail sent through the Gmail API carries a Received: header naming gmailapi.google.com' } } });
     }
     if (url.pathname === '/api/agent/channels/search') {
+      if (searchAnswer) { Promise.resolve(searchAnswer(url)).then((r) => send(r && r.ok ? 200 : r && r.code === 'refresh-floor' ? 429 : 400, r)); return; }
       if (url.searchParams.get('full') === '1') return send(200, { ok: true, full: true, truncated: false, results: [], adds: url.searchParams.get('account') === 'gmail' ? 'unsaved' : 'older' });
       return send(200, { ok: true, truncated: false, results: url.searchParams.get('q') === 'deploy' ? [{ key: 'fake-poll/ops', title: 'Ops room', at: 1, author: { name: 'Ada' }, text: 'the deploy finished' }] : [] });
     }
@@ -750,6 +753,84 @@ console.log('\n㉑ lane channels-proposals-recall: proposals [--all] · recall <
   ok(d.code === 0 && /sent directly \(policy: direct\)/.test(d.out) && /SENT \(vendor id om_d1\)/.test(d.out) && /sent as: user/.test(d.out) && /the recipient sees: NOT VERIFIED/.test(d.out), 'a direct send prints the receipt INLINE — SENT · vendor id · sent as · what the recipient sees — so no second "[Channels · Outbox]" message waits in the queue', d.out + ' | ' + d.err);
   ok(!/note: on this channel the recipient sees/.test(d.out), 'the separate identity note is dropped when the full inline receipt is shown (it already carries it)');
 }
+// ── ㉒ lane channels-search-says-hidden (a field miss 2026-10-21) ─────────────────────────────────────────────────────
+// An ops agent ran `search "<two words>" --full --account gmail`, read «the account's own search found nothing you can see
+// that is not saved here» and reported the sync broken — the plain search lists the three stored messages; --full printed
+// only the vendor's ADDITIONS, and the two words were one substring. The CLI against the REAL engine (a fake account that
+// declares its own search; ops shared with the agent, announce NOT): --full prints the saved hits FIRST, then what the
+// vendor added «(not saved here)», and «added nothing beyond the N saved hits above»; two words match anywhere; a match
+// where it cannot read = ONE existence sentence (no count, account, title, word). CONTROL: a CLI copy whose --full skips
+// the plain search (the base's shape) prints no saved hit.
+console.log('\n㉒ lane channels-search-says-hidden: --full prints the saved hits first · every word · a hidden match exists');
+{
+  const ROOT = scratch('chan-agent-cli-search');
+  fs.rmSync(ROOT, { recursive: true, force: true });
+  fs.mkdirSync(ROOT, { recursive: true });
+  process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} });
+  const CH = require(path.join(REPO, 'src/channels/index.js'));
+  const FAKE = require(path.join(REPO, 'src/channels/fake.js'));
+  const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
+  const SR = require(path.join(REPO, 'src/channel-search.js'));
+  const { makeRecord } = require(path.join(REPO, 'src/channel-record.js'));
+  const A = 'srch', OPS = 'srch-ops', ANN = 'srch-announce';
+  const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLevelFor: () => 'none' };
+  const dataDir = path.join(ROOT, 'real');
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: A, kind: A, label: 'Ops Mail', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null }, settings: {} }] }));
+  const registry = CH.createChannelRegistry();
+  registry.register(FAKE.makeFakeAdapter({ kind: A, receive: 'poll', sendAs: ['user'], search: true }), { vendor: false });
+  let clock = Date.now();
+  const quiet = { log() {}, warn() {}, error() {} };
+  const eng = ENG.create({ dataDir, registry, env: {}, broadcast: () => {}, log: quiet, now: () => clock, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }] });
+  await eng.pass(A, { force: true });
+  const t0 = Date.now() - 3600e3;
+  eng.store.appendRecords(A, OPS, [
+    makeRecord({ adapterId: A, convId: OPS, vendorId: 'sh-ops-1', at: t0, author: { id: 'u-br', name: 'Wren Larkspur' }, text: 'the NID is mounted on the wall', mentions: [], attachments: [] }),
+    makeRecord({ adapterId: A, convId: OPS, vendorId: 'sh-ops-2', at: t0 + 1000, author: { id: 'u-ada', name: 'Ada' }, text: 'the quarterly numbers are posted', mentions: [], attachments: [] }),
+  ]);
+  eng.store.appendRecords(A, ANN, [makeRecord({ adapterId: A, convId: ANN, vendorId: 'sh-ann-1', at: t0, author: { id: 'u-vo', name: 'Vendor Ops' }, text: 'Acmenet install date is October 24', mentions: [], attachments: [] })]);
+  await eng.store.index.update(() => { eng.store.index.entry(A, ANN).title = 'Acmenet circuit order'; });
+  await eng.setAccess(A, { kind: 'conversation', convId: OPS }, [{ principal: { kind: 'agent', id: 'agent-1', name: 'Worker' } }]);
+  // the route's own arguments (src/agent-routes.js GET /api/agent/channels/search)
+  searchAnswer = (url) => { const q = url.searchParams; return eng.searchFor(AG, String(q.get('q') || ''), { adapterId: q.get('account') || null, limit: Number(q.get('limit')) || 50, full: q.get('full') === '1', saved: /^\d{1,4}$/.test(String(q.get('saved') || '')) ? Number(q.get('saved')) : null }); };
+  const LEAK = /Acmenet circuit order|Vendor Ops|October|announce|sh-ann|Ops Mail/;
+  const s1 = await run(['search', 'Wren NID']);
+  ok(s1.code === 0 && /^srch\/srch-ops — Ops room .* Wren Larkspur: the NID is mounted on the wall$/m.test(s1.out) && /every word must appear, each anywhere in a message, its sender or its conversation's title/.test(s1.out) && !/nothing/.test(s1.out), 'two words: the message holding both (one in the sender, one in the text) is printed; the trailer names the mode (every word)', s1.out);
+  const s2 = await run(['search', 'Acmenet install']);
+  const hidLines = s2.out.split('\n').filter((l) => l && !/^\(searched what is stored/.test(l));
+  ok(s2.code === 0 && JSON.stringify(hidLines) === JSON.stringify(['nothing you can read matches "Acmenet install".', SR.HIDDEN_TEXT]), 'all hidden: «nothing you can read matches» + ONE sentence that matches EXIST where it cannot read, with the user\'s door — never «nothing matches»', s2.out);
+  ok(!LEAK.test(s2.out) && !/\d/.test(hidLines.join(' ')), 'no leak: no count, account, title, sender or word of the hidden match in what the agent reads', s2.out);
+  const s3 = await run(['search', 'zzqq nothing']);
+  ok(s3.code === 0 && /^nothing matches "zzqq nothing"\.$/m.test(s3.out), 'truly nothing: «nothing matches»', s3.out);
+  // --full: the saved hits FIRST (exactly the plain search), then the vendor's additions, then the words
+  clock += 31000;
+  const f1 = await run(['search', 'Wren NID', '--full', '--account', A]);
+  const fl = f1.out.split('\n');
+  const iSaved = fl.findIndex((l) => /Wren Larkspur: the NID is mounted/.test(l)), iAdd = fl.findIndex((l) => /added nothing beyond the 1 saved hit above\./.test(l));
+  ok(f1.code === 0 && iSaved >= 0 && iAdd > iSaved && !/found nothing you can see that is not saved here/.test(f1.out) && /^\(asked the account's own search/m.test(f1.out), '--full with every vendor hit already saved: the saved hit FIRST, then «the account\'s own search added nothing beyond the 1 saved hit above» — never «nothing»', f1.out);
+  const plainOut = (await run(['search', 'Wren NID', '--account', A])).out;
+  ok(f1.out.startsWith(plainOut.replace(/; --full asks the account's own search\)\n$/, ')\n')), '…and what it prints before the vendor\'s part IS the plain search\'s answer, byte for byte (its --full hint aside)', JSON.stringify([plainOut, f1.out.slice(0, plainOut.length)]));
+  clock += 21000;
+  const f2 = await run(['search', 'quarterly', '--full', '--account', A]);
+  const ql = f2.out.split('\n');
+  const qSaved = ql.findIndex((l) => /Ada: the quarterly numbers are posted/.test(l)), qAdd = ql.findIndex((l) => /\(not saved here\): .*[Qq]uarterly/.test(l));
+  ok(f2.code === 0 && qSaved >= 0 && qAdd > qSaved && /^context: vibespace-channels read <conv> --around <id>/m.test(f2.out), '--full with a vendor addition: the saved hit first, the addition after it marked «(not saved here)»', f2.out);
+  clock += 21000;
+  const f3 = await run(['search', 'Acmenet install', '--full', '--account', A]);
+  ok(f3.code === 0 && f3.out.split(SR.HIDDEN_TEXT).length === 2 && /the account's own search found nothing you can read for "Acmenet install" either\./.test(f3.out) && !LEAK.test(f3.out), '--full where only a hidden conversation matches: the existence sentence once, «found nothing you can read … either», nothing of the match', f3.out);
+  // CONTROL: the base's --full — no plain search first — prints no saved hit for the words the plain search finds
+  const CLI_SRC = fs.readFileSync(CLI, 'utf-8');
+  const PLAIN = "    const r = await call('GET', '/api/agent/channels/search?' + qs);\n";
+  ok(CLI_SRC.split(PLAIN).length === 2, 'CONTROL anchor: the plain search call is in the CLI once');
+  const baseCli = path.join(ROOT, 'vibespace-channels-no-saved');
+  fs.writeFileSync(baseCli, CLI_SRC.replace(PLAIN, "    const r = full ? { results: [] } : await call('GET', '/api/agent/channels/search?' + qs);\n"), { mode: 0o755 });
+  clock += 21000;
+  const cf = await new Promise((resolve) => execFile(process.execPath, [baseCli, 'search', 'Wren NID', '--full', '--account', A], { encoding: 'utf-8', env: { PATH: process.env.PATH, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: 'vsst_test' }, timeout: 15000 }, (err, so) => resolve({ out: so || '' })));
+  ok(!/Wren Larkspur/.test(cf.out), 'CONTROL: a CLI whose --full skips the plain search prints no saved hit (the field miss\'s shape) — the saved-first leg would be RED', cf.out);
+  searchAnswer = null;
+  eng.stop && eng.stop();
+}
+
 server.close();
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

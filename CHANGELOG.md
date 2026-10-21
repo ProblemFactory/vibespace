@@ -2,6 +2,17 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.336 — 2026-10-21
+
+### Fixed
+- An agent's channel search with --full now lists the saved messages first, then what the account's own search added, instead of saying it found nothing.
+- An agent's channel search for several words finds a message holding all of them anywhere — its text, its sender or its conversation's title.
+- When an agent's search matches only conversations you have not shared with it, it is told that matches exist and you can share them — never what or how many.
+- The API log in an account's API access… now shows every call agents made through it — rejected and refused ones too, and calls made before this release.
+
+### Maintenance
+- Test and release tooling only; nothing changes for you.
+
 ## 2.369.335 — 2026-10-21
 
 ### Fixed

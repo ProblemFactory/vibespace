@@ -2200,7 +2200,8 @@ app.get('/api/agent/channels/search', async (req, res) => {
   const [s, id] = hit;
   try {
     // design 010: `full=1` = ONE page of the account's OWN search (the agents' share, a 20 s floor, reach after the answer)
-    const r = await eng.searchFor(channelPrincipal(s, id), String(req.query.q || ''), { adapterId: req.query.account ? String(req.query.account) : null, limit: Number(req.query.limit) || 50, full: req.query.full === '1' || req.query.full === 'true' });
+    // lane channels-search-says-hidden: `saved` = the saved hits the CLI printed first (its own plain search) — `--full`'s words name them
+    const r = await eng.searchFor(channelPrincipal(s, id), String(req.query.q || ''), { adapterId: req.query.account ? String(req.query.account) : null, limit: Number(req.query.limit) || 50, full: req.query.full === '1' || req.query.full === 'true', saved: /^\d{1,4}$/.test(String(req.query.saved || '')) ? Number(req.query.saved) : null });
     // lane search-card-open (.233): a --full search's memo scope rides its touches (the row's dialog reads that memo
     // first) — the card's key, never the agent's answer
     const memo = r && r.memoScope;

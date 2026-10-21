@@ -9946,4 +9946,6 @@ export default {
   "1 thing it may do": "1 个动作", // lane vault-key-row-compact
   "{n} things it may do": "{n} 个动作", // lane vault-key-row-compact
   "No key granted to {target} holds that verb — add it with Edit… on a key's row in the Vault window": "授权给 {target} 的 key 都不含这个动作——在保险库窗口某把 key 的行里用「编辑…」加上", // lane vault-key-row-compact
+  "The log could not be read: {reason}": "无法读取 API 日志：{reason}", // lane channel-api-log-blank
+  "the answer holds no lines": "回复里没有日志行", // lane channel-api-log-blank
 };

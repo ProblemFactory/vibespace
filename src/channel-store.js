@@ -1477,6 +1477,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    * account WHICH conversations were searched was chance; now the cap cuts the oldest. The answer says what it
    * covered: `coverage = {scanned, total, capped, oldestAt}` (conversations read / eligible, whether the BYTE cap
    * cut, the oldest instant the read logs reach — each log's first line is its oldest record).
+   *
+   * EVERY WORD (lane channels-search-says-hidden, a field miss 2026-10-21: «Wren NID» found nothing while each word
+   * alone hit — the whole query was ONE substring): the query's words (split on white space) match a record holding
+   * EVERY one of them, each ANYWHERE — its text, its author's name, an attachment's name, or its conversation's TITLE
+   * (the index's; a mail thread's subject). One word = the substring it always was, the title now beside the text.
    */
   async function search(adapterId, q, { limit = 100, maxBytes = 64 * 1024 * 1024, convIds = null, match = null } = {}) {
     // lane notify-rules-r2 (the Notify… dialog's preview): `match` = a RECORD predicate (a watcher rule, judged by the
@@ -1484,6 +1489,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // counts every hit inside the bytes read (the dialog's "showing 10 of N"), not only the kept ones
     const needle = String(q || '').trim().toLowerCase();
     const pred = typeof match === 'function' ? match : null;
+    const words = [...new Set(needle.split(/\s+/).filter(Boolean))];
     const none = { results: [], scannedBytes: 0, truncated: false, files: 0, matched: 0, coverage: { scanned: 0, total: 0, capped: false, oldestAt: null } };
     if (!needle && !pred) return none;
     const dir = path.join(msgsDir, safeSeg(adapterId));
@@ -1492,8 +1498,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const wanted = convIds ? new Set([...convIds].map((c) => `${safeSeg(c)}.ndjson`)) : null;
     names = names.filter((n) => n.endsWith('.ndjson') && (!wanted || wanted.has(n)));
     // NEWEST CONVERSATION FIRST (design 010): the index's lastAt per log file, read-only (no copy, no touch)
-    const lastAtOf = new Map();
-    for (const en of Object.values(ix.conversations)) if (en && en.adapterId === adapterId && en.id != null) lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0);
+    const lastAtOf = new Map(), titleOf = new Map();
+    for (const en of Object.values(ix.conversations)) if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0); if (en.title) titleOf.set(`${safeSeg(en.id)}.ndjson`, String(en.title).toLowerCase()); }
     names.sort((a, b) => (lastAtOf.has(b) - lastAtOf.has(a)) || ((lastAtOf.get(b) || 0) - (lastAtOf.get(a) || 0)) || (a < b ? -1 : a > b ? 1 : 0));
     let scanned = 0, truncated = false, files = 0, capped = false, oldestAt = null, matched = 0;
     const hits = [];
@@ -1504,12 +1510,16 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       let text; try { text = await fs.promises.readFile(fp, 'utf-8'); } catch { continue; }
       scanned += st.size; files++;
       { const nl = text.indexOf('\n'); try { const r0 = JSON.parse(nl < 0 ? text : text.slice(0, nl)); const a0 = Number(r0 && r0.at); if (a0 > 0 && (oldestAt === null || a0 < oldestAt)) oldestAt = a0; } catch { } }
+      // EVERY WORD: the ones the conversation's title already holds need not be on the line (the raw-bytes pre-check)
+      const title = titleOf.get(n) || '';
+      const rest = pred ? [] : words.filter((w) => !title.includes(w));
       for (const line of text.split('\n')) {
-        if (!line || (needle && !line.toLowerCase().includes(needle))) continue;
+        if (!line) continue;
+        if (pred ? needle && !line.toLowerCase().includes(needle) : rest.length && !((low) => rest.every((w) => low.includes(w)))(line.toLowerCase())) continue;
         let r; try { r = JSON.parse(line); } catch { continue; }
         if (pred) { const rr = r.convId ? patchedOne(adapterId, String(r.convId), r) : r; let ok = false; try { ok = !!pred(rr); } catch { ok = false; } if (ok) { matched++; hits.push(rr); } continue; }
         const hay = `${r.text || ''}\n${(r.author && (r.author.name || '')) || ''}\n${(r.attachments || []).map((a) => (a && a.role !== 'body' ? a.name : '')).join(' ')}`.toLowerCase();
-        if (hay.includes(needle)) { matched++; hits.push(r.convId ? patchedOne(adapterId, String(r.convId), r) : r); }
+        if (rest.every((w) => hay.includes(w))) { matched++; hits.push(r.convId ? patchedOne(adapterId, String(r.convId), r) : r); }
       }
       if (hits.length > limit * 4) { hits.sort((a, b) => cmpRecord(b, a)); hits.length = limit * 2; }
     }

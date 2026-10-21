@@ -6412,12 +6412,16 @@ function create(deps = {}) {
       budgetLeft: w ? Math.floor((b.limit - w.spent) / ((sd && sd.cost) || 1)) : 0, budgetResetAt: w ? w.at + 60e3 : t + 60e3,
       pages: pageToken || by === 'agent' ? 1 : sd ? sd.pagesPerPress : 1,
     });
+    // lane channels-search-says-hidden: WHERE the merge's stored hits were (`[[convId, n]…]`) — the agent's `--full` asks
+    // whether one is in a conversation it may not read (existence only; the owner's dialog never reads it)
+    const storedIn = new Map();
+    const storedTally = (cid, vid, at, m) => { const yes = storedHit(rec.id, cid, vid, at, m); if (yes) storedIn.set(String(cid), (storedIn.get(String(cid)) || 0) + 1); return yes; };
     if (v.act === 'memo') {
       // a snapshot: a hit the local copy has since stored is dropped (it is in section one), nothing else re-asked
       const om = { oldest: new Map(), older: 0, unknown: 0 };
-      const mg = SR.mergeVendorHits(kept.hits, { stored: (cid, vid, at) => storedHit(rec.id, cid, vid, at, om) });
+      const mg = SR.mergeVendorHits(kept.hits, { stored: (cid, vid, at) => storedTally(cid, vid, at, om) });
       const own = kept.scope === scope && !kept.derived;   // a page token belongs to the searcher who asked
-      return { ok: true, sd, hits: mg.hits, next: own ? kept.next : null, stored: mg.stored, repeated: mg.repeated, pages: 0, memo: { askedAt: kept.askedAt, ageMs: kept.ageMs, by: kept.by } };
+      return { ok: true, sd, hits: mg.hits, next: own ? kept.next : null, stored: mg.stored, repeated: mg.repeated, pages: 0, memo: { askedAt: kept.askedAt, ageMs: kept.ageMs, by: kept.by }, storedIn: [...storedIn], unshown: kept.unshown || [] };
     }
     if (v.act === 'unasked') return { ok: true, sd, hits: [], next: null, stored: 0, repeated: 0, pages: 0, unasked: true };
     if (v.act !== 'ask') {
@@ -6436,7 +6440,7 @@ function create(deps = {}) {
     else e.searchOwnerAt = t;
     e.searchFlights.add(fkey);
     const prevBy = e.chargeBy; e.chargeBy = by === 'agent' ? 'agent' : 'owner';
-    const hits = [], facts = [];
+    const hits = [], facts = [], unshown = new Map();
     let next = pageToken, pages = 0, failure = null;
     // design 010 S6 (lane channels-followups): two HINTS for an adapter that reads each hit's details one request at a
     // time (Gmail's metadata read): what the local copy already holds (its stored instant — section one shows it, no
@@ -6452,6 +6456,7 @@ function create(deps = {}) {
         if (outlived(rec, e)) throw new ChannelError('account-changed', 'the account changed while the vendor searched — nothing was kept', { retryable: true });
         hits.push(...page.hits);
         if (page.facts) facts.push(page.facts);
+        for (const [cid, n] of SR.unshownOf(page.unshown)) unshown.set(cid, (unshown.get(cid) || 0) + n);   // lane channels-search-says-hidden
         next = page.next;
       } while (next && pages < v.pages);
     } catch (err) {
@@ -6466,11 +6471,11 @@ function create(deps = {}) {
     } finally { e.chargeBy = prevBy; e.searchFlights.delete(fkey); }
     if (failure && !pages) return failure;
     const memo = { oldest: new Map(), older: 0, unknown: 0 };
-    const mg = SR.mergeVendorHits(hits, { stored: (cid, vid, at) => storedHit(rec.id, cid, vid, at, memo) });
+    const mg = SR.mergeVendorHits(hits, { stored: (cid, vid, at) => storedTally(cid, vid, at, memo) });
     const sum = (k) => facts.reduce((a, f) => a + (Number(f[k]) || 0), 0);
     measureFullSearch(rec, { pages, hits: hits.length, older: memo.older, unknown: memo.unknown, shape: (facts.find((f) => f.shape && f.shape.form !== 'absent') || {}).shape || null, cjk: SR.isCjk(query), of: sum('of'), holding: sum('holding') });
-    if (!failure && !outlived(rec, e)) memoKeep(rec, SR.searchMemo(memoOf(rec), { op: 'put', scope, query, page: pageToken, now: t, hits: mg.hits, next: next || null, by, covers: !!covers }).state, true);
-    return { ok: true, sd, hits: mg.hits, next: failure ? null : next || null, stored: mg.stored, repeated: mg.repeated, pages, ...(failure ? { partial: failure.code } : {}) };
+    if (!failure && !outlived(rec, e)) memoKeep(rec, SR.searchMemo(memoOf(rec), { op: 'put', scope, query, page: pageToken, now: t, hits: mg.hits, next: next || null, by, covers: !!covers, unshown: [...unshown] }).state, true);
+    return { ok: true, sd, hits: mg.hits, next: failure ? null : next || null, stored: mg.stored, repeated: mg.repeated, pages, storedIn: [...storedIn], unshown: [...unshown], ...(failure ? { partial: failure.code } : {}) };
   }
   /** THE OWNER'S FULL SEARCH (GET /api/channels/search/full): a press (no token: ≤ pagesPerPress pages) or the scroll's
    *  next page (its token: one). Each hit: the conversation's NAME from the index (an unknown one: `known:false`, no

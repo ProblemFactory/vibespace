@@ -1313,6 +1313,11 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
   const asked = []; v.calls.length = 0;
   const ph = await a.search({ query: 'deploy', shows: (cid) => cid === 'thr_ops_0001', storedAt: (cid, id) => { asked.push(id); return id === 'msg_ops_b' ? T0 : 0; } });
   ok(asked.join() === 'msg_ops_b,msg_ops_d' && metaReads() === 'msg_ops_d' && ph.hits.map((h) => h.vendorId).join() === 'msg_ops_b,msg_ops_d', 'the hints\' order: `shows` first (the archive thread\'s ids reach neither the stored check nor the vendor), then `storedAt` (the held one at its stored instant, unread)', JSON.stringify({ asked, reads: metaReads() }));
+  // lane channels-search-says-hidden: the dropped ids' THREADS ride the page as `unshown` (the engine answers only WHETHER one
+  // is a stored conversation the caller may not read — existence); a page whose every id it may see carries none
+  const unT = (ph.unshown || []).map((x) => x[0]);
+  const phAll = await a.search({ query: 'deploy', shows: () => true, storedAt: () => 0 });
+  ok(unT.length >= 1 && unT.every((t) => t !== 'thr_ops_0001') && (ph.unshown || []).every((x) => x[1] >= 1) && !('unshown' in phAll), 'the threads `shows` dropped ride the page as `unshown` (thread → ids dropped, no read) — none when every id may be shown', JSON.stringify({ un: ph.unshown, all: 'unshown' in phAll }));
   v.state.search = { ...world(), pages: { '': { messages: Array.from({ length: 11 }, (_, i) => ({ id: `m${i}`, threadId: 't' })) } } };
   const big = await threw(() => a.search({ query: 'deploy' }));
   v.state.search = { ...world(), pages: { '': { messages: { id: 'x' } } } };
@@ -1328,7 +1333,7 @@ console.log('\n⑳ design 010 S6: Gmail\'s full search — messages.list?q=, a m
   const c56 = pc.hits.find((h) => h.vendorId === 'msg_arch_56');
   ok(c56 && c56.snippet.length === 1024 * 1024, 'CONTROL: the copy without the reader returns the 1 MB snippet whole — the leg above would be RED', String(c56 && c56.snippet.length));
   // CONTROL 1b: the hints in the other order — the stored check reads the hidden thread's ids (its log, its timing)
-  const SH = "        if (typeof shows === 'function' && !shows(it.threadId)) continue;\n";
+  const SH = "        if (typeof shows === 'function' && !shows(it.threadId)) { unshown.set(it.threadId, (unshown.get(it.threadId) || 0) + 1); continue; }\n";
   const ST = "        const held = typeof storedAt === 'function' ? Number(storedAt(it.threadId, it.id)) || 0 : 0;\n        if (held > 0) { hits.push({ convId: it.threadId, vendorId: it.id, at: held, fromId: null, threadKey: null, snippet: null }); continue; }\n";
   ok(GSRC.split(SH + ST).length === 2, 'CONTROL 1b anchor: `shows` is asked right before `storedAt` in gmail.js');
   const gb = mkA(MUT.load('src/channels/gmail.js', GSRC.replace(SH + ST, ST + SH), 'stored-first'));

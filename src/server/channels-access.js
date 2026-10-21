@@ -448,52 +448,82 @@ function create(engineCtx) {
   /**
    * THE AGENT'S SEARCH (R4): the owner's search (`search`, off the event
    * loop, byte-capped) over every account the caller can see anything of —
-   * each result filtered by REACH, so a hit in a conversation the agent
-   * cannot see is simply absent (no oracle). Never a vendor call.
+   * each result filtered by REACH: a hit in a conversation the agent cannot
+   * see is never SHOWN. Never a vendor call.
+   * Lane channels-search-says-hidden (a field incident 2026-10-21 — an agent read «nothing» and reported the sync
+   * broken): a hit the reach filtered is answered as EXISTENCE only (`hiddenMatch`, a boolean — the owner: a count
+   * leaks too) in an account the caller reads or may request something of; an account it has no reach in at all stays
+   * total (§8: hidden is not searchable). `said` = PURE `SR.searchAnswer`'s words; `match` = how several words match.
    */
-  async function searchFor(ctx, q, { adapterId = null, limit = 50, full = false } = {}) {
+  async function searchFor(ctx, q, { adapterId = null, limit = 50, full = false, saved = null } = {}) {
     const query = String(q || '').trim();
     if (query.length < 2) return { ok: false, code: 'bad-request', error: 'a search needs at least 2 characters' };
     const n = Math.min(200, Math.max(1, Number(limit) || 50));
-    if (full) return searchFullFor(ctx, query, { adapterId, limit: n });
-    let covered = 0;
+    if (full) return searchFullFor(ctx, query, { adapterId, limit: n, saved });
+    let covered = 0, accounts = 0;
     const results = [];
     const blind = [];
+    const hidden = { match: false, capped: false };
     let truncated = false;
     for (const rec of adapterRecords().adapters) {
       if (rec.enabled === false || (adapterId && rec.id !== adapterId)) continue;
-      const visible = new Map();
-      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id && ACL.canSee(reachFor(ctx, rec, en).level)) visible.set(en.id, agentTitle(en, en.id));   // verify r1 F2: the title through the belt
-      if (!visible.size) continue;
-      if (rec.namesReadable && rec.namesReadable.ok === false) blind.push(rec.label || rec.id);   // lane channel-names-readable
-      // only the VISIBLE conversations' logs are read at all
-      const r = await store.search(rec.id, query, { limit: 200, convIds: [...visible.keys()] });
-      truncated = truncated || !!r.truncated;
-      covered += (r.coverage && r.coverage.scanned) || 0;   // design 010: what was searched — of what it can see only
-      // verify r2 (IDENTITY): the search was an await — a conversation whose reach was removed meanwhile gives nothing
-      for (const cid of [...visible.keys()]) if (!stillSees(ctx, rec.id, cid)) visible.delete(cid);
-      for (const x0 of r.results) {
-        if (!visible.has(x0.convId)) continue;
-        const x = viewOf(rec, x0);   // lane channel-rich: the same read-time view (a bot's name, markup read)
-        const ax = agentCopy(x);   // verify r3: judged on the way out; the 400-character cut leaves no dangling opener
-        results.push({ key: agentId(`${rec.id}/${x.convId}`), adapterId: rec.id, adapter: rec.label || rec.id, convId: agentId(x.convId), title: visible.get(x.convId), at: x.at || null, author: ax.author || null, text: agentText(ax.text, { kind: 'block', max: 400 }), vendorId: agentId(x.vendorId || null) });   // verify r3 F6: the key, the conversation id and the message id as line pieces
-        if (results.length >= n) break;
+      // REACH FIRST, per conversation: what it may read (`visible`, the title through the belt — verify r1 F2) and what it
+      // may NOT (`kept`, for the existence answer) — an account it neither reads nor may request anything of is skipped
+      const visible = new Map(), kept = new Map();
+      const counts = !msgAclAdapter(rec);
+      let knows = false;
+      for (const en of Object.values(store.index.live())) {
+        if (!en || en.adapterId !== rec.id) continue;
+        const lv = reachFor(ctx, rec, en).level;
+        if (ACL.canSee(lv)) { visible.set(en.id, agentTitle(en, en.id)); knows = true; }
+        else if (counts) { kept.set(en.id, lv); knows = knows || ACL.canRequest(lv) || directoryLists(rec, en); }
+      }
+      if (!knows) continue;
+      accounts++;
+      if (visible.size) {
+        if (rec.namesReadable && rec.namesReadable.ok === false) blind.push(rec.label || rec.id);   // lane channel-names-readable
+        // only the VISIBLE conversations' logs are read for what it is shown
+        const r = await store.search(rec.id, query, { limit: 200, convIds: [...visible.keys()] });
+        truncated = truncated || !!r.truncated;
+        covered += (r.coverage && r.coverage.scanned) || 0;   // design 010: what was searched — of what it can see only
+        // verify r2 (IDENTITY): the search was an await — a conversation whose reach was removed meanwhile gives nothing
+        for (const cid of [...visible.keys()]) if (!stillSees(ctx, rec.id, cid)) visible.delete(cid);
+        for (const x0 of r.results) {
+          if (!visible.has(x0.convId)) continue;
+          const x = viewOf(rec, x0);   // lane channel-rich: the same read-time view (a bot's name, markup read)
+          const ax = agentCopy(x);   // verify r3: judged on the way out; the 400-character cut leaves no dangling opener
+          results.push({ key: agentId(`${rec.id}/${x.convId}`), adapterId: rec.id, adapter: rec.label || rec.id, convId: agentId(x.convId), title: visible.get(x.convId), at: x.at || null, author: ax.author || null, text: agentText(ax.text, { kind: 'block', max: 400 }), vendorId: agentId(x.vendorId || null) });   // verify r3 F6: the key, the conversation id and the message id as line pieces
+          if (results.length >= n) break;
+        }
+      }
+      // the conversations it may NOT read: searched for EXISTENCE only — nothing of a record is kept or counted
+      if (kept.size && !hidden.match) {
+        const h = await store.search(rec.id, query, { limit: 1, convIds: [...kept.keys()] });
+        hidden.capped = hidden.capped || !!(h.coverage && h.coverage.capped);
+        // reach AGAIN after the await: a conversation the user shared meanwhile is no hidden match (it reads it now)
+        hidden.match = h.results.some((x) => kept.has(String(x.convId)) && !stillSees(ctx, rec.id, String(x.convId)));
       }
       if (results.length >= n) { truncated = true; break; }
     }
     results.sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
     const fullOffered = adapterRecords().adapters.some((r) => r.enabled !== false && (!adapterId || r.id === adapterId) && searchRowOf(registry.capsOf(r.kind)));
-    return { ok: true, results, truncated, covered, fullOffered, ...namesNoteOf(blind) };
+    const said = SR.searchAnswer({ hitsSeen: results.length, hiddenMatch: hidden.match, q: query, capped: hidden.capped && !hidden.match, accounts });
+    return { ok: true, results, truncated, covered, fullOffered, match: SR.STORE_MATCH, hiddenMatch: hidden.match, said, ...namesNoteOf(blind) };
   }
+  /** The built-in Agents adapter answers reach with msg-acl (other sessions — `vibespace-msg`'s door): not a channel the
+   *  user shares through Channels, so a search never answers that something matched in its conversations. */
+  function msgAclAdapter(rec) { let mod = null; try { mod = registry.get(rec.kind); } catch {} return !!(mod && mod.reach === 'msg-acl'); }
   /**
    * THE AGENT'S `--full` (design 010 — the second tier, EXPLICIT): ONE page of ONE account's own search, refused by the
    * agents' share (`vendor-budget`, the wait) and by a floor of one per account per agent conversation per 20 s. The
    * vendor is asked over the account; every hit is then judged by the caller's REACH — after the await (`stillSees`) —
-   * exactly like a local hit: one outside it is absent and uncounted. `truncated` speaks of the visible hits only (the
-   * agent's own limit), never of the vendor's page or its token (V2: no count of the unseen). Snippets through the belt.
+   * exactly like a local hit: one outside it is never shown. `truncated` speaks of the visible hits only (the agent's
+   * own limit), never of the vendor's page or its token (V2). Snippets through the belt. Lane channels-search-says-hidden:
+   * a hit in a STORED conversation it may not read is answered as EXISTENCE only (`hiddenMatch`); `said` words what the
+   * vendor added beyond the `saved` hits the CLI printed first (its own plain search).
    */
   const agentHitAt = new Map();   // `${ctx.id}\0${adapter}\0${conv}\0${msg}` → the hit's instant (the `--around` read's)
-  async function searchFullFor(ctx, query, { adapterId = null, limit = 50 } = {}) {
+  async function searchFullFor(ctx, query, { adapterId = null, limit = 50, saved = null } = {}) {
     if (query.length > SR.QUERY_MAX) return { ok: false, code: 'bad-request', error: `a search is at most ${SR.QUERY_MAX} characters` };
     const cand = [];
     for (const rec of adapterRecords().adapters) {
@@ -515,15 +545,23 @@ function create(engineCtx) {
     const r = await vendorSearch(rec, query, { by: 'agent', ctx, shows: (cid) => visible.has(String(cid)), scope, covers: visible.size >= total });
     if (!r.ok) return { ok: false, code: r.code === 'search-floor' ? 'refresh-floor' : r.code === 'search-minute' ? 'vendor-budget' : r.code, error: r.error, ...(r.retryAfterSec ? { retryAfterSec: r.retryAfterSec } : {}) };
     const results = [];
+    // lane channels-search-says-hidden: did the vendor match in a STORED conversation the caller may not read — one it
+    // answered, one the merge dropped as already stored (`storedIn`), one the adapter dropped unread by the `shows` hint
+    // (`unshown`)? EXISTENCE only; a hit in a conversation never stored here is no conversation any door shares
+    const live = store.index.live();
+    const hid = !msgAclAdapter(rec) && [...r.hits.map((h) => h.convId), ...(r.storedIn || []).map((x) => x[0]), ...(r.unshown || []).map((x) => x[0])]
+      .some((c) => { const cid = String(c); return !visible.has(cid) && !!live[`${rec.id}/${cid}`] && !stillSees(ctx, rec.id, cid); });
     for (const h of r.hits) {
-      if (!visible.has(h.convId) || !stillSees(ctx, rec.id, h.convId)) continue;   // reach AFTER the await: absent, uncounted
+      if (!visible.has(h.convId) || !stillSees(ctx, rec.id, h.convId)) continue;   // reach AFTER the await: never shown (counted above when stored)
       const k = `${ctx.id}\0${rec.id}\0${h.convId}\0${h.vendorId}`;
       agentHitAt.delete(k); agentHitAt.set(k, h.at);
       if (agentHitAt.size > 2000) agentHitAt.delete(agentHitAt.keys().next().value);
       results.push({ key: agentId(`${rec.id}/${h.convId}`), adapterId: rec.id, adapter: rec.label || rec.id, convId: agentId(h.convId), title: visible.get(h.convId), at: h.at || null, author: null, text: agentText(h.snippet || '', { kind: 'block', max: 400 }), vendorId: agentId(h.vendorId || null), source: 'vendor' });
       if (results.length >= limit) break;
     }
-    return { ok: true, results, truncated: results.length >= limit, full: true, adapterId: rec.id, adds: searchRowOf(registry.capsOf(rec.kind)).adds, memoScope: scope, ...(r.memo ? { remembered: { ageSec: Math.floor(r.memo.ageMs / 1000) } } : {}) };   // F2: the CLI words its line by the row; `memoScope` = the card row's key (the route keeps it off the answer)
+    const adds = searchRowOf(registry.capsOf(rec.kind)).adds;
+    const said = SR.searchAnswer({ hitsSeen: results.length, hiddenMatch: hid, adds, saved, q: query });
+    return { ok: true, results, truncated: results.length >= limit, full: true, adapterId: rec.id, adds, hiddenMatch: hid, said, memoScope: scope, ...(r.memo ? { remembered: { ageSec: Math.floor(r.memo.ageMs / 1000) } } : {}) };   // F2: the CLI words its line by the row; `memoScope` = the card row's key (the route keeps it off the answer)
   }
   /** THE AGENT'S `read <conv> --around <msg>` (design 010): reach first (the uniform not-found), the message's instant
    *  from the log (a stored one) or from this agent's own `--full` answer, the agents' share, ONE `around` read (two

@@ -20,6 +20,10 @@
  *                               (.233): no TTL (bounded by size / LRU only), an answer fanned per conversation (what one
  *                               searcher found for a conversation answers that conversation), memoToDisk / memoFromDisk
  *                               = the per-account file's PURE round trip
+ *   searchAnswer(facts)         THE AGENT'S WORDS (lane channels-search-says-hidden): what `--full` added beyond the
+ *                               saved hits above it; that something matched where it cannot read — EXISTENCE only
+ *                               (HIDDEN_TEXT: no count, account, title or sender) with the user's door; «nothing» only
+ *                               for nothing
  */
 const { peerName } = require('./channel-record.js');
 
@@ -178,12 +182,24 @@ function memoScope(convIds) {
 }
 const memoKey = (scope, query) => `${scope || MEMO_ALL}\u0000${memoQuery(query)}`;
 const hitsBytes = (hits) => (Array.isArray(hits) ? hits : []).reduce((n, h) => n + JSON.stringify(h || null).length * 2, 0);
+/** lane channels-search-says-hidden: a page's UNSHOWN tally — `[[convId, n]…]`, the hits an adapter dropped UNREAD because
+ *  the caller may not be shown that conversation (Gmail's `shows` hint: no read, no snippet — a count per thread only).
+ *  Kept on the page so a remembered answer says what the asked one said. Malformed ⇒ []; ≤ SEARCH_MEMO_FAN * 4 rows. */
+function unshownOf(v) {
+  const out = [];
+  for (const r of Array.isArray(v) ? v.slice(0, SEARCH_MEMO_FAN * 4) : []) {
+    if (!Array.isArray(r) || (typeof r[0] !== 'string' && typeof r[0] !== 'number') || String(r[0]).length > 512) continue;
+    const n = Math.floor(Number(r[1]) || 0);
+    if (n > 0) out.push([String(r[0]), Math.min(n, 1e6)]);
+  }
+  return out;
+}
 /**
  * ONE STEP of an account's memo → { state, answer }. `state` = `{ entries: Map, bytes }` (undefined = empty); a new
  * state each step (the old one untouched).
- *   { op: 'get', scopes, query, page, now }  → answer `{ scope, askedAt, ageMs, hits, next, by, derived }` of the first
+ *   { op: 'get', scopes, query, page, now }  → answer `{ scope, askedAt, ageMs, hits, next, by, derived, unshown }` of the first
  *        scope holding an entry with that page (a hit moves it to the newest); none ⇒ null. No age drops an entry.
- *   { op: 'put', scope, query, page, now, hits, next, by, covers } → page null: the entry (re)born; a token: appended to
+ *   { op: 'put', scope, query, page, now, hits, next, by, covers, unshown } → page null: the entry (re)born; a token: appended to
  *        the entry whose last page's `next` is that token (else nothing). Then THE FAN (above). An entry over the byte
  *        cap is not kept; the oldest leave first past SEARCH_MEMO_MAX entries or SEARCH_MEMO_BYTES (the one just put
  *        last). → answer = kept (boolean)
@@ -205,7 +221,7 @@ function searchMemo(state, ev = {}) {
       const p = x.pages.find((pg) => pg.token === page);
       if (!p) continue;
       entries.delete(k); entries.set(k, x);
-      return done({ scope: scope || MEMO_ALL, askedAt: x.askedAt, ageMs: Math.max(0, now - x.askedAt), hits: p.hits, next: p.next, by: x.by || 'owner', derived: !!x.from });
+      return done({ scope: scope || MEMO_ALL, askedAt: x.askedAt, ageMs: Math.max(0, now - x.askedAt), hits: p.hits, next: p.next, by: x.by || 'owner', derived: !!x.from, unshown: unshownOf(p.unshown) });
     }
     return done(null);
   }
@@ -217,7 +233,8 @@ function searchMemo(state, ev = {}) {
   if (ev.op !== 'put') return done(null);
   const scope0 = ev.scope || MEMO_ALL;
   const k = memoKey(scope0, ev.query);
-  const pg = { token: page, hits: Array.isArray(ev.hits) ? ev.hits : [], next: ev.next || null };
+  const un = unshownOf(ev.unshown);
+  const pg = { token: page, hits: Array.isArray(ev.hits) ? ev.hits : [], next: ev.next || null, ...(un.length ? { unshown: un } : {}) };
   const pb = hitsBytes(pg.hits) + 64;
   let x;
   if (page === null) { dropWith(k); x = { askedAt: now, by, pages: [pg], bytes: pb }; }
@@ -271,7 +288,7 @@ function memoFromDisk(obj) {
     if (!Array.isArray(row) || typeof row[0] !== 'string' || row[0].length > 4096 || !row[1] || typeof row[1] !== 'object') continue;
     const x = row[1];
     if (!Array.isArray(x.pages) || !x.pages.length || !(Number(x.askedAt) > 0)) continue;
-    const pages = x.pages.filter((p) => p && typeof p === 'object' && Array.isArray(p.hits)).map((p) => ({ token: typeof p.token === 'string' ? p.token : null, hits: p.hits.filter(hitOk), next: typeof p.next === 'string' ? p.next : null }));
+    const pages = x.pages.filter((p) => p && typeof p === 'object' && Array.isArray(p.hits)).map((p) => { const un = unshownOf(p.unshown); return { token: typeof p.token === 'string' ? p.token : null, hits: p.hits.filter(hitOk), next: typeof p.next === 'string' ? p.next : null, ...(un.length ? { unshown: un } : {}) }; });
     if (pages.length !== x.pages.length || pages[0].token !== null) continue;
     const e = { askedAt: Number(x.askedAt), by: x.by === 'agent' ? 'agent' : 'owner', ...(typeof x.from === 'string' ? { from: x.from } : {}), pages: x.from ? [{ ...pages[0], next: null }] : pages, bytes: 0 };
     e.bytes = e.pages.reduce((n, p) => n + hitsBytes(p.hits) + 64, 0);
@@ -371,10 +388,55 @@ function matchParts(text, q) {
   return out;
 }
 
+// ── THE AGENT'S ANSWER (lane channels-search-says-hidden, a field incident 2026-10-21: an ops agent searched a mail it
+// was told to find with `--full` and two words, read «found nothing you can see that is not saved here», reported the sync
+// broken — the plain search lists the three stored messages; the owner found the mail in one try). THREE RULES, the words
+// here, the engine and the CLI apply them:
+//   · `--full` prints the SAVED hits first (exactly the plain search) and then what the vendor ADDED — «added nothing»
+//     names the saved hits above it, never «nothing»;
+//   · a refusal by VISIBILITY says THAT something matched where the caller cannot read — EXISTENCE ONLY (the owner,
+//     08:5xZ: 「不要提示有 N 条在你看不到的对话里，应该只给存在与不存在的信息，数量本身也会泄漏信息」): no count, no
+//     account, no title, no sender — and the door; «nothing» only when nothing matched where it looked;
+//   · several words match a record holding EVERY one of them, anywhere (src/channel-store.js `search`). ──────────────────
+/** The user's door the words name (the Channels row menus: the conversation's ⋯ and the account's ⋯ hold the item). */
+const SHARE_DOOR = "Channels › the conversation's ⋯ or the account's ⋯ → Grant access…";
+/** THE ONE SENTENCE for hits the caller may not read — the same bytes whatever matched, however much, wherever. */
+const HIDDEN_TEXT = `matches exist that you cannot read — ask the user to share them with you (${SHARE_DOOR}).`;
+/** How the stored copy matches several words (the answer's `match`; the CLI's trailer names it). */
+const STORE_MATCH = 'every-word';
+/**
+ * THE WORDS of an agent's search → `[line…]`, printed after the rows it may read (none ⇒ these lines are the answer).
+ *   hitsSeen      the hits shown (the store road: its rows; `--full`: the vendor's ADDITIONS)
+ *   hiddenMatch   a hit matched in a conversation the caller cannot read — a BOOLEAN: nothing else of it reaches here
+ *   adds          null = the stored copy's search; 'unsaved' | 'older' = the account's own search (`--full`)
+ *   saved         `--full`: the saved hits the caller was shown above (its own plain search's rows); null = unknown
+ *   q             the words searched
+ *   capped        the store road read the conversations it cannot read only in part (a byte cap) ⇒ no «nothing» claim
+ *   accounts      the store road: how many accounts were searched (0 ⇒ nothing of the connected channels reaches it)
+ */
+function searchAnswer({ hitsSeen = 0, hiddenMatch = false, adds = null, saved = null, q = '', capped = false, accounts = 1 } = {}) {
+  const words = `"${String(q)}"`;
+  const seen = Math.max(0, Math.floor(Number(hitsSeen) || 0));
+  const hid = hiddenMatch === true ? [HIDDEN_TEXT] : [];
+  if (SEARCH_ADDS.includes(adds)) {
+    if (seen) return hid;
+    const n = saved === null || saved === undefined || saved === '' ? null : Math.max(0, Math.floor(Number(saved) || 0));
+    const head = n === null ? `the account's own search added nothing you can read to what is saved here for ${words}.`
+      : n > 0 ? `the account's own search added nothing beyond the ${n} saved ${n === 1 ? 'hit' : 'hits'} above.`
+        : `the account's own search found nothing you can read for ${words} either.`;
+    return [head, ...hid];
+  }
+  if (seen) return hid;
+  if (!(Number(accounts) > 0)) return [`nothing you can read matches ${words} — no conversation of the connected channels is shared with you (ask the user to grant access).`];
+  if (hid.length || capped) return [`nothing you can read matches ${words}.`, ...hid];
+  return [`nothing matches ${words}.`];
+}
+
 module.exports = {
   matchParts,
   SNIPPET_MAX, SNIPPET_READ_MAX, SNIPPET_KEYS, SEARCH_VIA, SEARCH_CONTEXT, SEARCH_MATCH, SEARCH_ADDS, OWNER_FLOOR_MS, AGENT_FLOOR_MS, AROUND_MAX, QUERY_MAX,
   snippetOf, snippetShape, holdsQuery, isCjk, mergeVendorHits, coverageOf, fullSearchVerdict, coverageText, statusText, sectionHead,
   SEARCH_MEMO_MAX, SEARCH_MEMO_BYTES, SEARCH_MEMO_FAN, MEMO_ALL, memoQuery, memoScope, memoConv, isMemoScope, searchMemo, memoToDisk, memoFromDisk,
   memoWhen, memoText, forgottenText,
+  searchAnswer, SHARE_DOOR, HIDDEN_TEXT, STORE_MATCH, unshownOf,
 };

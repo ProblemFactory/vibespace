@@ -16,6 +16,10 @@
 //    and vice versa (the registry throws otherwise — controls); the core names no vendor; and a fake vendor `acme` =
 //    ONE adapter file + ONE entry in the engine's REAL_ADAPTERS line runs end to end through the real fence, ORCH,
 //    card and CLI over the loopback stub — zero edits to the core (the proof of low coupling).
+//  ⑧ THE API LOG THE OWNER READS (lane channel-api-log-blank): ONE line at each run / refuse / decide point — an
+//    ungranted call on a real credential, a card that runs nothing at Approve —, every call line in the shape the
+//    dialog words; the read is PER CREDENTIAL (PURE logTail + a mutant that reads past the credential ⇒ RED) and
+//    BOUNDED (a 20 MB ring read ≤ 4 MiB from its end; a just-rolled ring lends its newest lines).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -603,6 +607,90 @@ console.log('⑦ the redirect rule (B-fc37): a vendor\'s 3xx target is judged be
   const before = census({ ...texts, [O]: texts[O].replace("{ ...init, redirect: 'manual', signal:", "{ redirect: 'manual', ...init, signal:") });
   ok(plant.bad.some((x) => /redirect: 'follow'/.test(x)) && before.bad.some((x) => /NO manual redirect/.test(x)), 'CONTROL: the census goes red on a planted redirect: \'follow\' (in the run\'s init) and on the policy put before the init spread', { plant: plant.bad, before: before.bad });
 }
+// ── ⑧ THE API LOG THE OWNER READS (lane channel-api-log-blank) ──
+console.log('⑧ the API log (lane channel-api-log-blank): one line at each run / refuse / decide point, read back per credential, bounded');
+{
+  // PURE: the tail is ONE credential's last n lines; a MUTANT that does not check the credential is RED
+  const rows = [{ cred: 'lark-1', at: 1, principal: { id: 'conv-A' } }, { cred: 'lark_1', at: 2 }, { cred: 'lark-1', at: 3, principal: { id: 'conv-B' } }, null, 'junk', { cred: 'lark-1', at: 4, principal: { id: 'conv-A' } }, { cred: 'lark:1', at: 5 }];
+  const judge = (Fx) => { const ats = (o) => Fx.logTail(rows, { cred: 'lark-1', ...o }).map((l) => l.at).join(); return ats({ n: 10 }) === '1,3,4' && ats({ n: 1 }) === '4' && ats({ n: 0 }) === '4' && ats({ n: 10, principal: { id: 'conv-A' } }) === '1,4' && Fx.logTail(rows, { cred: 'lark-1', n: 1e9 }).length === 3; };
+  ok(judge(F), 'PURE logTail: the last n lines OF THAT credential, oldest first (n clamped 1…500), a principal = its own lines; lines of lark_1 / lark:1 (one file name) and junk rows never appear');
+  const MT = MUT.load('src/channel-api.js', mutate(SRC, 'l.cred !== cred) continue;', 'false) continue;'), 'tailanycred');
+  ok(!judge(MT) && MT.logTail(rows, { cred: 'lark-1', n: 10 }).some((l) => l.cred !== 'lark-1'), 'MUTANT: a tail that does not check the credential hands back another credential\'s lines ⇒ RED');
+
+  // ORCH: every call leaves ONE line at the point it ran, was refused or decided
+  const eng = fakeEngine();
+  const dataDir = fs.mkdtempSync(path.join(tmpRoot, 'log-'));
+  const api = mkOrch(ORCH, eng, dataDir);
+  const ring = () => api.auditTail('lark-1', { n: 500 });
+  const of = (v, code) => ring().filter((l) => l.verdict === v && (code === undefined || l.code === code));
+  let r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/open-apis/x' });
+  const ng = of('refused', 'api_not_granted');
+  ok(r.code === 'api_not_granted' && ng.length === 1 && ng[0].principal.id === 'conv-A' && ng[0].method === 'GET' && ng[0].path === '/open-apis/x', 'a call on a real credential the conversation holds no access to is ONE refused line (api_not_granted, who, what) in THAT credential\'s log', ring());
+  r = await api.call(A, { cred: 'nope', method: 'GET', path: '/x' });
+  ok(r.code === 'api_not_granted' && !fs.existsSync(path.join(dataDir, 'channels', 'nope')) && ring().length === 1, 'an id that names no credential writes nothing anywhere (no file for a made-up id) — the agent\'s answer is the same');
+  await api.setTiers('lark-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }]);
+  r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/open-apis/im/v1/chats' });
+  ok(r.ok && of('ok').length === 1 && of('ok')[0].status === 200 && of('ok')[0].path === '/open-apis/im/v1/chats', 'a call that ran is ONE ok line (its status)', ring());
+  r = await api.call(A, { cred: 'lark-1', method: 'GET', path: '/x', headers: { Authorization: 'Bearer mine' } });
+  ok(r.code === 'api_header_refused' && of('refused', 'api_header_refused').length === 1, 'a call the fence refused is ONE refused line (its code)');
+  r = await api.call(A, { cred: 'lark-1', method: 'POST', path: '/open-apis/docx/v1/documents', body: '{"t":1}' });
+  const pr = r.proposal;
+  api.reject(pr.id, { reason: 'no' });
+  const rj = of('rejected');
+  ok(rj.length === 1 && rj[0].proposal === pr.id && rj[0].method === 'POST' && rj[0].path === '/open-apis/docx/v1/documents' && rj[0].by === 'user' && ring().filter((l) => l.proposal === pr.id).map((l) => l.verdict).join() === 'proposed,rejected', 'a proposal you rejected: ONE proposed line, then ONE rejected line naming it — what was asked, by you', ring().filter((l) => l.proposal === pr.id));
+  r = await api.call(A, { cred: 'lark-1', method: 'POST', path: '/open-apis/docx/v1/documents', body: '{"t":2}' });
+  const pa = r.proposal;
+  await api.approve(pa.id, { digest: pa.digest });
+  ok(ring().filter((l) => l.proposal === pa.id).map((l) => l.verdict).join() === 'proposed,approved' && of('approved')[0].status === 200, 'a proposal you approved: ONE proposed line, then ONE approved line (its status)');
+  r = await api.call(A, { cred: 'lark-1', method: 'POST', path: '/open-apis/docx/v1/documents', body: '{"t":3}' });
+  const pb = r.proposal;
+  await api.setTiers('lark-1', []);
+  const rb = await api.approve(pb.id, { digest: pb.digest });
+  const bl = ring().filter((l) => l.proposal === pb.id);
+  ok(rb.code === 'api_not_granted' && bl.map((l) => l.verdict).join() === 'proposed,refused' && bl[1].code === 'api_not_granted' && bl[1].method === 'POST' && bl[1].by === 'user', 'Approve on a card whose agent lost its access runs nothing — and says so: ONE refused line naming the card (api_not_granted)', bl);
+  await api.setTiers('lark-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }]);
+  r = await api.call(A, { cred: 'lark-1', method: 'POST', path: '/open-apis/docx/v1/documents/doxT', body: '{"t":4}' });
+  const pt = r.proposal;
+  const sf = path.join(dataDir, 'channels', 'api-proposals.json'), st = JSON.parse(fs.readFileSync(sf, 'utf8'));
+  st.proposals[pt.id].frozen.body = Buffer.from('{"t":"EVIL"}').toString('base64');
+  fs.writeFileSync(sf, JSON.stringify(st));
+  const rt = await mkOrch(ORCH, eng, dataDir).approve(pt.id, { digest: pt.digest });
+  const tl = ring().filter((l) => l.proposal === pt.id);
+  ok(rt.code === 'api_frozen_mismatch' && tl.map((l) => l.verdict).join() === 'proposed,refused' && tl[1].code === 'api_frozen_mismatch' && tl[1].path === '/open-apis/docx/v1/documents/doxT', 'Approve on a record edited after its card was drawn runs nothing — ONE refused line (api_frozen_mismatch) with what the card asked', tl);
+  const calls = ring().filter((l) => l.method !== null);
+  const tally = {}; for (const l of calls) tally[l.verdict + (l.code ? ':' + l.code : '')] = (tally[l.verdict + (l.code ? ':' + l.code : '')] || 0) + 1;
+  ok(JSON.stringify(tally) === JSON.stringify({ 'refused:api_not_granted': 2, ok: 1, 'refused:api_header_refused': 1, proposed: 4, rejected: 1, approved: 1, 'refused:api_frozen_mismatch': 1 }), 'the ring holds EXACTLY one line per event — no call without its line, none twice', tally);
+  ok(calls.every((l) => typeof l.at === 'number' && l.cred === 'lark-1' && l.principal && l.principal.kind === 'agent' && l.principal.id === 'conv-A' && l.principal.name === 'Agent A' && typeof l.method === 'string' && typeof l.path === 'string' && ['ok', 'proposed', 'approved', 'rejected', 'refused', 'withheld'].includes(l.verdict) && ['status', 'code', 'proposal', 'by'].every((k) => k in l)), 'every call line has the shape the dialog words: when, who, the credential, method + path, status, verdict, code, the card', calls[0]);
+
+  // PER CREDENTIAL on disk too: two ids that share a file name (lark:1 / lark_1) never read each other's lines
+  const cd = fs.mkdtempSync(path.join(tmpRoot, 'coll-')), apiC = mkOrch(ORCH, eng, cd);
+  const lineOf = (i, cred, pad = '') => JSON.stringify({ at: i, cred, principal: { kind: 'agent', id: 'conv-A', name: 'Agent A' }, conv: 'conv-A', method: 'GET', host: 'h', path: `/p/${i}${pad}`, queryKeys: [], status: 200, bytes: 0, ms: 0, verdict: 'ok', code: null, proposal: null, by: null, bodySha: null }) + '\n';
+  fs.mkdirSync(path.join(cd, 'channels', 'lark_1'), { recursive: true });
+  fs.writeFileSync(path.join(cd, 'channels', 'lark_1', 'api.ndjson'), [1, 2, 3, 4].map((i) => lineOf(i, i % 2 ? 'lark:1' : 'lark_1')).join(''));
+  ok(apiC.auditTail('lark:1').map((l) => l.at).join() === '1,3' && apiC.auditTail('lark_1').map((l) => l.at).join() === '2,4', 'two credential ids that share one file name read ONLY their own lines', { a: apiC.auditTail('lark:1'), b: apiC.auditTail('lark_1') });
+
+  // BOUNDED: a 20 MB ring is read ≤ 4 MiB from its end (never the whole file), the last n of THIS credential answered
+  const bd = fs.mkdtempSync(path.join(tmpRoot, 'big-')), apiB = mkOrch(ORCH, eng, bd), bf = path.join(bd, 'channels', 'lark-1', 'api.ndjson');
+  fs.mkdirSync(path.dirname(bf), { recursive: true });
+  const pad = '/' + 'x'.repeat(300), N = 32000;
+  for (let k = 0; k < N / 1000; k++) { let chunk = ''; for (let i = k * 1000; i < (k + 1) * 1000; i++) chunk += lineOf(i, i >= N - 3 ? 'lark-2' : 'lark-1', pad); fs.appendFileSync(bf, chunk); }
+  let read = 0;
+  const rs = fs.readSync, rfs = fs.readFileSync;
+  fs.readSync = (...a) => { const n = rs(...a); read += n; return n; };
+  fs.readFileSync = (f, ...a) => { const b = rfs(f, ...a); if (/api(\.1)?\.ndjson$/.test(String(f))) read += b.length; return b; };
+  const t0 = Date.now(); let tb;
+  try { tb = apiB.auditTail('lark-1', { n: 20 }); } finally { fs.readSync = rs; fs.readFileSync = rfs; }
+  const ms = Date.now() - t0;
+  ok(fs.statSync(bf).size > 16e6 && tb.length === 20 && tb[0].at === N - 23 && tb[19].at === N - 4 && read <= ORCH.TAIL_BYTES, `a ${(fs.statSync(bf).size / 1e6).toFixed(1)} MB ring: the last 20 lines of THIS credential (not the 3 newest of lark-2), read ${(read / 1048576).toFixed(2)} MiB from its end in ${ms} ms (≤ 4 MiB, never the whole file)`, { n: tb.length, first: tb[0] && tb[0].at, last: tb[19] && tb[19].at, read });
+  // a ring rolled a moment ago (16 MB ⇒ .1) lends its newest lines
+  const rd = fs.mkdtempSync(path.join(tmpRoot, 'roll-')), apiR = mkOrch(ORCH, eng, rd), rf = path.join(rd, 'channels', 'lark-1', 'api.ndjson');
+  fs.mkdirSync(path.dirname(rf), { recursive: true });
+  fs.writeFileSync(rf.replace(/\.ndjson$/, '.1.ndjson'), Array.from({ length: 30 }, (_, i) => lineOf(i + 1, 'lark-1')).join(''));
+  fs.writeFileSync(rf, [101, 102, 103].map((i) => lineOf(i, 'lark-1')).join(''));
+  const rr = apiR.auditTail('lark-1', { n: 20 }).map((l) => l.at);
+  ok(rr.length === 20 && rr[0] === 14 && rr.slice(-3).join() === '101,102,103', 'a ring rolled a moment ago lends its newest lines: the log stays the last 20, oldest first', rr);
+}
+
 for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 20, label: '' })) ok(c.pass, c.name, c.detail);
 vendor.close();
 fs.rmSync(tmpRoot, { recursive: true, force: true });

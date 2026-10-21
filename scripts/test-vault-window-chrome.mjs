@@ -309,7 +309,12 @@ const relogin = await evalJs(`fetch('/api/login', { method: 'POST', headers: { '
 check('signed in again', relogin === 200, relogin);
 console.log('⑥a the header while LOCKED (lane vault-one-door): 解锁… is the one door; the vault\'s door event');
 await cdp('Page.navigate', { url: URL });
-check('the load opens the unlock modal (locked)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })));
+// wait-for-effect, staged (lane vault-unlock-modal-race): a locked vault opens the unlock modal only after the load's
+// /api/home pass runs (app._localHome) and the vault-state read it then kicks off answers. Give the modal its OWN bounded
+// deadline from the boot pass, so a slow boot (two serial round-trips + the 13 MB bundle under build-server load) is never
+// charged against the modal's wait — the base «one 30 s timer from navigate» reds once the serial boot exceeds 30 s.
+const bootedLocked = await until(`!!(window.app && app.wm && app._localHome)`, { timeout: 45000 });
+check('the load opens the unlock modal (locked)', !!(bootedLocked && (await until(visible('#vault-unlock-dialog'), { timeout: 10000 }))), bootedLocked ? 'the unlock modal did not open within 10 s of the load reading the vault state' : 'the page did not finish its /api/home boot pass within 45 s of the load');
 await splashGone();
 await click('#vault-unlock-dialog .vault-later');
 check('「稍后」 closes it', !!(await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 3000 })));
@@ -409,8 +414,10 @@ const relogin9 = await evalJs(`fetch('/api/login', { method: 'POST', headers: { 
 const items9 = ((((await api('GET', '/api/user-todos')).json || {}).todos || {}).open || []).filter((i) => i.sessionKey === 'vault' && i.action && i.action.type === 'vault-unlock');
 check('⑨L lane vault-locked-loud: the lock act filed THE urgent For-you item at once — an action row, urgent, the lock\u2019s own words (no refusal yet)', relogin9 === 200 && items9.length === 1 && items9[0].kind === 'action' && items9[0].urgency === 'urgent' && items9[0].i18n?.text?.key === 'The vault is locked \u2014 agents that need a credential will be refused until you unlock it. Enter the second password to unlock.', items9.map((i) => ({ kind: i.kind, urgency: i.urgency, i18n: i.i18n })));
 await cdp('Page.navigate', { url: URL });
-await until(`!!(window.app && app.wm)`, { timeout: 30000 });
-check('⑨L the load after the lock asks at once — the unlock dialog (a new lock is a new ask)', !!(await until(visible('#vault-unlock-dialog'), { timeout: 30000 })));
+// wait-for-effect, staged (lane vault-unlock-modal-race): the same shape as ⑥a — the on-load unlock modal is gated behind
+// the serial /api/home → /api/vault/state boot, so wait for the /api/home pass (app._localHome), then the modal's OWN 10 s.
+const bootedRelock = await until(`!!(window.app && app.wm && app._localHome)`, { timeout: 45000 });
+check('⑨L the load after the lock asks at once — the unlock dialog (a new lock is a new ask)', !!(bootedRelock && (await until(visible('#vault-unlock-dialog'), { timeout: 10000 }))), bootedRelock ? 'the unlock modal did not open within 10 s of the load reading the vault state' : 'the page did not finish its /api/home boot pass within 45 s of the load');
 check('⑨L … the ⚙ wears the red mark (its title in Chinese: 「保险库已锁定——点击解锁（「待你处理」里写明了在等它的事）」 — the chip\'s full words since int332) and the tray badge is urgent', !!(await until(`(() => { const b = document.getElementById('btn-global-settings'); const t = document.getElementById('taskbar-user-todos'); return !!b.querySelector('.vault-gear-mark') && b.classList.contains('vault-locked') && b.title === '保险库已锁定——点击解锁（「待你处理」里写明了在等它的事）' && t && t.dataset.urgency === 'urgent' && !!t.querySelector('.ut-seg-urgent'); })()`, { timeout: 8000 })), await evalJs(`({ title: document.getElementById('btn-global-settings').title, urgency: document.getElementById('taskbar-user-todos')?.dataset.urgency })`));
 await splashGone();
 await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); app.replayOpenSpec({ action: 'openVault' }); true`);

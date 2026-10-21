@@ -268,9 +268,11 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
                                                      direct); refused by name: not-yours (only the user's own), window-passed
                                                      (the channel's recall window), unsupported (a channel without recall),
                                                      not-visible (a conversation outside your reach — the user grants reach)
-  vibespace-channels search "words" [--account <id>] [--limit N] [--full]
-                                                   ← what is STORED (free); --full = ONE page of the account's own search over its whole history (your share, one per account per 20 s)
-                                                   ← messages you can see (the stored logs; no vendor call)
+  vibespace-channels search "words (all must appear)" [--account <id>] [--limit N] [--full]
+                                                   ← what is STORED (free): every word, each anywhere in a message, its sender or its
+                                                     conversation's title; --full = those first, then what ONE page of the account's own
+                                                     search over its whole history ADDS (your share, one per account per 20 s)
+                                                   ← messages you can see; a match where you cannot read is said to exist (never what)
   vibespace-channels status [<proposalId>]         ← what you were given (access / notification) + your proposals
   vibespace-channels status <conversation>         ← its sending policy + where it comes from (account / this conversation) — the user changes it
   vibespace-channels request <conv> "why"          ← ask the user for access (only on a 'requestable' row)
@@ -739,30 +741,36 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   }
   if (verb === 'search') {
     const q = chText(1);   // lane cli-one-text-arg: the words are ONE argument — a stray word ⇒ exit 2 (never a narrower search)
-    if (!q || q.startsWith('--')) { console.error('usage: vibespace-channels search "words" [--account <id>] [--limit N] [--full]'); process.exit(1); }
+    if (!q || q.startsWith('--')) { console.error('usage: vibespace-channels search "words (all must appear)" [--account <id>] [--limit N] [--full]'); process.exit(1); }
     const qs = new URLSearchParams({ q });
     if (flag('--account')) qs.set('account', flag('--account'));
     if (flag('--limit')) qs.set('limit', flag('--limit'));
     // design 010: --full = the account's OWN search (one page, the agents' share, a floor) — hits outside what you can see are absent
     const full = args.includes('--full');
-    if (full) qs.set('full', '1');
+    // lane channels-search-says-hidden (a field miss 2026-10-21: `--full` printed only what the vendor ADDED and «found
+    // nothing … not saved here» read as nothing, while the plain search listed the three stored messages): the SAVED hits
+    // come first, always — `--full` prints exactly the plain search, then the account's own search's additions. The
+    // server's words (`said`) follow the rows: «nothing» only for nothing; a hit where you cannot read = that it exists
+    const told = new Set();
+    const said = (x, old) => { if (Array.isArray(x.said)) { for (const l of x.said) if (!told.has(String(l))) { told.add(String(l)); console.log(String(l)); } } else if (old) console.log(old); };
     const r = await call('GET', '/api/agent/channels/search?' + qs);
     const rows = r.results || [];
-    if (full) {
-      if (r.note) { console.log(r.note); return; }
-      if (!rows.length && r.adds === 'unsaved') console.log(`the account's own search found nothing you can see that is not saved here for "${q}".`);   // F2: the row's words
-      else if (!rows.length) console.log(`the account's own search found nothing older that you can see for "${q}".`);
-      for (const m of rows) console.log(`${m.key} — ${m.title}  [${when(m.at)}] (not saved here): ${String(m.text || '').replace(/\n/g, ' ').slice(0, 200)}  (id ${m.vendorId})`);
-      if (rows.length) console.log(`context: vibespace-channels read <conv> --around <id>  (two requests; not saved)`);
-      if (r.remembered) console.log(`(the account's own search answered these ${r.remembered.ageSec < 60 ? 'less than a minute' : `${Math.floor(r.remembered.ageSec / 60)} min`} ago — remembered for 10 min, not asked again)`);   // lane vendor-search-memo
-      else console.log(`(asked the account's own search — one page per call within your share; narrow the words for more)`);
-      return;
-    }
-    if (!rows.length) console.log(`nothing you can see matches "${q}".`);
     for (const m of rows) console.log(`${m.key} — ${m.title}  [${when(m.at)}] ${(m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, ' ').slice(0, 200)}`);
     if (r.truncated) console.log('(more matches exist — narrow the words or pass --account)');
     if (r.namesNote) console.log(r.namesNote);   // lane channel-names-readable
-    console.log(`(searched what is stored: ${Number(r.covered) || 0} conversation(s) you can see${r.fullOffered ? '; --full asks the account\'s own search' : ''})`);
+    said(r, rows.length ? null : `nothing you can see matches "${q}".`);
+    console.log(`(searched what is stored: ${Number(r.covered) || 0} conversation(s) you can see${r.match === 'every-word' ? ' · every word must appear, each anywhere in a message, its sender or its conversation\'s title' : ''}${r.fullOffered && !full ? '; --full asks the account\'s own search' : ''})`);
+    if (!full) return;
+    qs.set('full', '1');
+    qs.set('saved', String(rows.length));   // the words name the saved hits printed above («added nothing beyond the N saved hits above»)
+    const f = await call('GET', '/api/agent/channels/search?' + qs);
+    if (f.note) { console.log(f.note); return; }
+    const added = f.results || [];
+    for (const m of added) console.log(`${m.key} — ${m.title}  [${when(m.at)}] (not saved here): ${String(m.text || '').replace(/\n/g, ' ').slice(0, 200)}  (id ${m.vendorId})`);
+    if (added.length) console.log(`context: vibespace-channels read <conv> --around <id>  (two requests; not saved)`);
+    said(f, added.length ? null : f.adds === 'unsaved' ? `the account's own search found nothing you can see that is not saved here for "${q}".` : `the account's own search found nothing older that you can see for "${q}".`);   // F2: an older server's words by the row
+    if (f.remembered) console.log(`(the account's own search answered these ${f.remembered.ageSec < 60 ? 'less than a minute' : `${Math.floor(f.remembered.ageSec / 60)} min`} ago — remembered for 10 min, not asked again)`);   // lane vendor-search-memo
+    else console.log(`(asked the account's own search — one page per call within your share; narrow the words for more)`);
     return;
   }
   // lane agent-watch-parity: `watch` = the Notify dialog's grammar — the FLAGS go to the server raw and are parsed there by

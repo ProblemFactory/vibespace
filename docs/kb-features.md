@@ -2661,6 +2661,17 @@ the failure this design argues against.
   injection is byte-identical. A shell read of data/channels/ as files gets the bypass card line. Gate:
   test-channels-teach; bytes in scripts/measure-prompt-context.mjs (test-prompt-budget).
 
+### An agent's channel search says what it found (lane channels-search-says-hidden, 2026-10-21; a field miss)
+
+- `search "words" --full` prints the SAVED hits first — exactly the plain search — then what the account's own search
+  ADDED `(not saved here)`; none ⇒ «the account's own search added nothing beyond the N saved hits above», never «nothing».
+- Several words match a stored message holding EVERY one, each anywhere: its text, its sender's name, an attachment's
+  name or its conversation's title (`store.search`; the owner's Channels search box reads the same function).
+- A match in a conversation the agent may NOT read (in an account it reads or may request something of) is said to
+  EXIST — ONE sentence, `HIDDEN_TEXT`, with the user's door (Channels › ⋯ → Grant access…) — never a count, an account,
+  a title or a word (the owner: a number leaks too). «nothing matches» only for nothing. PURE `SR.searchAnswer` owns
+  the words; gates test-channel-search §S, test-channels-agent-cli ㉒.
+
 ### Communication panel — P3: outbox, approval, receipts (2026-09-16; design §8, §9, §11, §12.3; decisions 7/8/9/11/16/17)
 
 - **A reply is a PROPOSAL.** An agent (`vibespace-channels reply`) or the user
@@ -3709,6 +3720,8 @@ Measured (lane foryou-folds, the production shape, counts only): the first scree
 
 ## Channels: API access (B-2198 raw API; 完全信任 lane api-tier-write-all, 2026-10-13)
 Four tiers per (credential, principal), widen-only (MAX over the agent's own row, its groups, All agents): **Read** (reads run, a write is refused), **Read + write, ask each** (every write is a card), **Read + write, auto** (writes run; a sensitive call — DELETE, the vendor's sensitive paths, a big body, an upload — still asks), **完全信任 / Full trust** (`write-all`: sensitive calls run too, without a card — each such call's API log line and chat row say 「完全信任 · 敏感」; still under the daily cap). **The everyone rule:** All agents sit at Read by default, a write tier for them needs the "every agent writes" tick, and Full trust is NEVER theirs. **Full trust names ONE principal** (lane tier-verify-fixes, tier-verify M1): only a single agent / conversation row (`principal.kind === 'agent'`) may hold it — a Task Group is refused like All agents, since its members join by cwd and a group row would reach conversations nobody named. Refused at the row (channel-acl validateGrant + channel-api apiGrant, reason `write_all_named_only`; the PUT answers 400 with that code), at the dialog (on a group / All row the option is disabled and says 「完全信任只能给单个 agent 或对话；岗位、规则和"所有 agent"最高到"读 + 写，自动"」) and capped to write-auto in effectiveApi if a stored row says otherwise. **Two log lines:** granting Full trust writes a `granted` line in the credential's API log (who, when, by whom), and lowering any tier (any step down; a removal = none) writes a `lowered` line of the same shape with `from` → `tier` (the dialog: 「你将 {who} 的档位改为 {tier}」); both pinned by fast legs in test-channel-api (tier-verify L1/L2). The agent reads its tier by name in `vibespace-channels api creds` (`tierSays`).
+
+**The API log (lane channel-api-log-blank, .336 — the owner 2026-10-21 「这个 API 日志为啥一直是空的」).** The dialog's log lists that credential's last 20 lines, newest first: every call an agent made through it — ran, asked you, approved or rejected by you, refused (by the fence, the budget, a missing grant, or an Approve that ran nothing), withheld — plus the 完全信任 grant and tier-lowered lines; calls from before .336 are there too (the engine has written them since the raw API shipped). It is never blank: 「加载中…」 at once, then the lines (patched in place on a re-draw), 「还没有调用」, or ONE line 「无法读取 API 日志：<reason>」. It keeps its height however long the roster above it (it was squeezed to 0 px under a roster at the picker's cap — the heading with nothing under it); the dialog scrolls instead.
 
 **The redirect rule (lane raw-api-redirect-judge, 2.369.274, B-fc37).** A vendor's 301 / 302 / 303 / 307 / 308 is never followed by itself: its Location becomes a request again (https, the SAME host — never another, not even another of the credential's own —, the fence's path rules; 303 ⇒ a GET without the body) and goes through THE SAME judge as the call, under the tier held at that moment. It is followed only when that judge would run it without a card AND it does no more than the call (a read never becomes a write, a write never a sensitive call, one approved request never another); ≤ 5 hops, a revisit stops. Otherwise NOTHING is sent there: the agent gets `api_redirect_unjudged {from, to, why}` (or `api_redirect_loop`), the API log line names where (method + host + path, never the query), and an approved card says 「服务方把它重定向到了别处 — 未跟随」 with the target under 技术细节 and the door 「重新提交」 — which files that target as a NEW card (its own words, chip and digest) for the user to decide; nothing runs on the press. Off-host, a refused tier, a bad path or a loop offer no door.
 
