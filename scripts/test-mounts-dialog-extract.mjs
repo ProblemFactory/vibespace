@@ -21,6 +21,7 @@
 // §2 the control: C = B with ONE character changed in the submit label (the
 //    re-authorize dialog: in the provider's name) must
 //    differ by pixels — proves the comparator can fail
+// §3 edit-unsaved (lane dialog-unsaved-guard): the Edit dialog closing with a changed field ASKS (the shell's own flag)
 // §3 D2 (chunk 4a): the storage Edit dialog — switching a Drive / Gmail
 //    record's OAuth client IS a re-authorization. Save stores the other
 //    fields, Re-authorize opens under the NEW client (its start carries the
@@ -157,7 +158,21 @@ const setSel = (key, v) => { const el = s._lastMountsDialog.inputs[key]; el.valu
       await s._showEditMountDialog(isG ? { id: 'g1', name: 'inbox', type: 'gmail', path: '/mnt/inbox' } : { id: 'm1', name: 'team-drive', type: 'drive', path: '/mnt/team-drive' });
       const f = document.querySelector('#mount-edit-dialog form');
       const set = (k, v) => { const el = f.querySelector('[name="' + k + '"]'); el.value = v; el.dispatchEvent(new Event('change')); };
-      if (scenario !== 'edit-drive-draw') {
+      if (scenario === 'edit-unsaved') {
+        // lane dialog-unsaved-guard: the shell's OWN flag (a change event bubbling in the form) — a clean ✕ closes; a field
+        // changed + ✕ ⇒ the in-place sheet; Discard closes and writes nothing
+        const n0 = window.__calls.length;
+        document.querySelector('#mount-edit-dialog .dialog-close').click();
+        const cleanClosed = !document.getElementById('mount-edit-dialog');
+        await s._showEditMountDialog({ id: 'm1', name: 'team-drive', type: 'drive', path: '/mnt/team-drive' });
+        const box = document.querySelector('#mount-edit-dialog form [name="driveFolder"]');
+        box.value = 'Docs3'; box.dispatchEvent(new Event('change', { bubbles: true }));
+        document.querySelector('#mount-edit-dialog .dialog-close').click();
+        const sheet = document.querySelector('#mount-edit-dialog .dialog-unsaved');
+        const words = sheet ? [...sheet.querySelectorAll('button')].map((x) => x.textContent) : [];
+        if (sheet) sheet.querySelector('.dialog-unsaved-discard').click();
+        after = { cleanClosed, sheet: !!sheet, words, gone: !document.getElementById('mount-edit-dialog'), saveCalls: window.__calls.slice(n0) };
+      } else if (scenario !== 'edit-drive-draw') {
         if (scenario === 'edit-switch-drive' || scenario === 'edit-switch-drive-inflight' || scenario === 'edit-switch-gmail') set('clientPreset', 'lab');
         if (scenario === 'edit-switch-drive-custom') { set('clientPreset', ''); set('clientId', 'cid-9.apps.example.test'); set('clientSecret', 'sec-9'); }
         if (scenario === 'edit-custom-nosecret') { set('clientPreset', ''); set('clientId', 'cid-9.apps.example.test'); }
@@ -338,6 +353,9 @@ console.log('\n§3 D2 — the storage Edit dialog: switching the OAuth client op
   const ns = await render('A', 'edit-custom-nosecret');
   ok(ns.st?.after?.editOpen === true && /secret/i.test(ns.st?.after?.editErr || '') && !call(ns.st, /-auth\/start$/).length && !saveCall(ns.st?.after, /\/api\/mounts\/m1$/, 'PATCH').length,
     'edit-custom-nosecret: a custom client without its secret is refused inline, before any save or consent (a consent under rclone\'s built-in client would be wasted)', JSON.stringify(ns.st?.after && { editOpen: ns.st.after.editOpen, editErr: ns.st.after.editErr }));
+  const un = await render('A', 'edit-unsaved');
+  ok(un.st?.after?.cleanClosed === true && un.st.after.sheet === true && un.st.after.words.join('|') === 'Keep editing|Discard|Save' && un.st.after.gone === true && !saveCall(un.st.after, /\/api\/mounts\/m1$/, 'PATCH').length,
+    'edit-unsaved (lane dialog-unsaved-guard): the shell\'s own flag — a clean ✕ closes; a field changed + ✕ asks in place (Keep editing / Discard / Save); Discard closes and writes nothing', JSON.stringify(un.st?.after || un.st));
   const gm = await render('A', 'edit-switch-gmail');
   const pg = saveCall(gm.st?.after, /\/api\/mounts\/g1$/, 'PATCH');
   const stg = call(gm.st, /\/gmail-auth\/start$/, 'POST');

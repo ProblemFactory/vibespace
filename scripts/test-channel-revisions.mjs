@@ -398,6 +398,7 @@ const NOT_A_ROAD = {
   'channels-engine.js › reactionDigest': 'a reaction line on a message the AGENT sent — no inbound message reaches anyone',
   'channels-engine.js › noteRecall': 'the recall note itself — news about a message the ledger already holds',
   'channels-outbound.js › receiptNow': 'the Outbox receipt of a send from here — no inbound message',
+  'channels-engine.js › noteSkips': 'lane judged-watch-state: the once-a-day not-a-hit line (a count + why) — it carries NO inbound message; what was skipped is owed and reaches the agent later through its own delivery road (onFresh → the ledger door)',
   'channel-api-cards.js › receiptFor': 'a raw-API proposal\'s receipt to the conversation that drafted it — no inbound message',
 };
 const ENGINE_SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');

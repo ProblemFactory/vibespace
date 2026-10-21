@@ -37,6 +37,15 @@
 //      popover / toggle:false rebuild as before, a closed popover opens again;
 //   §3 two more patched copies: the helper WITHOUT its blur listener stays open on a press into a frame; createPopover
 //      WITHOUT the toggle rebuilds the ⚙ popover on the second press (the residue itself) — each while the real one does not.
+//   LANE phone-tray-voice-done (inc-mvhzgiq8-bs3j, 2026-10-21 — the owner's phone: the For-you tray closed under the reply
+//   he dictated, twice): the recording microphone redraws its capsule four times a second, and a touch is decided at its
+//   pointerup by the element it went down on — a finger held on 「0:02」 across one redraw went down on a span that was gone
+//   at the lift: inside nothing, an OUTSIDE press.
+//   §1 the `voice` fact (src/voice-focus.js VOICE_UI — the follower's microphone, a field's floating chip): never outside;
+//   §2 (n) the facts are measured WHERE AND WHEN the press went down: a touch on a node redrawn away before the lift stays
+//      inside (an outside one still closes), a tap on the floating chip / the follower's microphone never closes;
+//   §3 (f) the base closer as a patched copy (the down target measured at the LIFT, no voice fact) closes on both — while
+//      the real helper does not. The real phone sequence: scripts/test-tray-voice-phone.mjs.
 // Prerequisite: `npm run build` (build-version.js is generated). ~0.2 s.
 // Run: node scripts/test-outside-press.mjs
 import fs from 'node:fs';
@@ -71,10 +80,14 @@ console.log('§1 the verdicts (src/lib/outside-press.js)');
     [{ inRoot: true, excluded: true, ignored: true, inNestedPopover: true }, false, 'inside'], // precedence
     [{ excluded: true, ignored: true }, false, 'excluded'],
     [{ ignored: true, inNestedPopover: true }, false, 'ignored'],
+    [{ voice: true }, false, 'voice'], // lane phone-tray-voice-done: the follower's microphone / a field's floating chip (document.body) — the dictation's own press
+    [{ voice: true, inNestedPopover: true, nested: false }, false, 'voice'],
+    [{ ignored: true, voice: true }, false, 'ignored'],
+    [{ voice: true, connected: false }, false, 'root-gone', true],
     [{ connected: true, inRoot: false, excluded: false, ignored: false, inNestedPopover: false, nested: true }, true, 'outside'],
   ];
   const bad = T.filter(([f, c, why, retire = false]) => { const v = OP.pressCloses(f); return v.close !== c || v.why !== why || v.retire !== retire; });
-  ok(bad.length === 0, `pressCloses: ${T.length} rows — inside / anchor / THE PICTURE / nested popover (both rules) / ignore / removed root / the opening press / precedence gone > opening > inside > excluded > ignored > nested > outside`, bad.map(([f]) => [f, OP.pressCloses(f)]));
+  ok(bad.length === 0, `pressCloses: ${T.length} rows — inside / anchor / THE PICTURE / nested popover (both rules) / ignore / removed root / the opening press / the voice UI / precedence gone > opening > inside > excluded > ignored > voice > nested > outside`, bad.map(([f]) => [f, OP.pressCloses(f)]));
   ok(OP.pressCloses().close === true && OP.pressCloses(null).close === true, 'pressCloses: no facts = a press outside (closes)');
   const P = [['mouse', 'down'], ['touch', 'tap'], ['pen', 'tap'], ['', 'down'], [undefined, 'down'], ['MOUSE', 'down']];
   ok(P.every(([t, w]) => OP.pressPhase(t) === w), `pressPhase: mouse / '' / undefined judged at pointerdown (as mousedown was); touch and pen only as a tap (${P.map(([t]) => OP.pressPhase(t)).join(' ')})`);
@@ -437,6 +450,34 @@ console.log('§2 onOutsidePress under the dispatch model');
   s1.remove(); s2.remove(); mouseClick(other);
 }
 
+{
+  // (n) lane phone-tray-voice-done: WHERE AND WHEN the press went down — the recording microphone's capsule is redrawn
+  // (innerHTML) four times a second; a finger held across one redraw went down on a node gone at the lift
+  const { pop } = fresh(); let closed = 0; const before = [...doc.l];
+  const dispose = U.onOutsidePress(pop, () => { closed++; }, { once: false });
+  const box = new El('voice-field', pop, { cls: ['voice-field'] }); const mic = new El('button', box, { cls: ['voice-btn'] });
+  const redrawn = (parent) => { const span = new El('span', parent, { cls: ['voice-time'] }); return { span, redraw: () => { span.remove(); span.parent = null; } }; }; // a node replaced by innerHTML: off the page, no parent
+  const at = performance.now();
+  const r = redrawn(mic);
+  dispatch('pointerdown', r.span, { pointerType: 'touch', pointerId: 11, clientX: 100, clientY: 100, timeStamp: at });
+  r.redraw(); // the capsule repainted under the finger: the span it went down on is off the page
+  dispatch('pointerup', r.span, { pointerType: 'touch', pointerId: 11, clientX: 100, clientY: 100, timeStamp: at + 300 });
+  ok(closed === 0 && !r.span.isConnected, `(n) a touch on the recording capsule's time, redrawn away before the lift: judged where it went down WHEN it went down — inside, the surface stays (closed ${closed}×)`);
+  const o = redrawn(toolbar); const at2 = performance.now();
+  dispatch('pointerdown', o.span, { pointerType: 'touch', pointerId: 12, clientX: 5, clientY: 5, timeStamp: at2 });
+  o.redraw();
+  dispatch('pointerup', o.span, { pointerType: 'touch', pointerId: 12, clientX: 5, clientY: 5, timeStamp: at2 + 300 });
+  ok(closed === 1, '(n) …and a touch OUTSIDE on a node that leaves the page before the lift still closes it (the down-time facts, not "detached ⇒ keep")');
+  const chip = new El('div', body, { cls: ['voice-chip', 'voice-chip-float'] }); const undo = new El('button', chip, { cls: ['voice-chip-btn'] });
+  const host = new El('div', body, { cls: ['voice-follow'] }); const fmic = new El('button', host, { cls: ['voice-btn'] });
+  touch(undo, {}); touch(fmic, {}); mouseClick(undo); mouseClick(fmic);
+  ok(closed === 1, `(n) a tap or a click on a field's floating chip (document.body) or the follower's microphone never closes it — the voice UI is the dictation's own (closed ${closed}×)`);
+  touch(other, {});
+  ok(closed === 2, '(n) …while a tap on anything else outside still does');
+  dispose(); chip.remove(); host.remove(); box.remove();
+  void before;
+}
+
 // ── §3 CONTROLS ─────────────────────────────────────────────────────────────
 console.log('§3 controls — the pre-lane closer, and the helper patched back');
 {
@@ -516,6 +557,30 @@ const M = mutantCopies('outside-press', repo);
   const g1 = U.createPopover(gearT, 'global-settings-popover'); const g2 = U.createPopover(gearT, 'global-settings-popover');
   ok(rebuilt && g1.removed === 1 && !g2.isConnected && doc.querySelectorAll('.global-settings-popover').length === 0, 'CONTROL (createPopover without the toggle — the pre-lane shape): ⚙ pressed while its menu is open REBUILDS the menu (a new attached popover); the real one closes it — the toggle in the dedup is the fix');
   mouseClick(other);
+  // (f) lane phone-tray-voice-done: THE BASE CLOSER — the down TARGET kept and measured at the LIFT, no voice fact (three
+  // edits of a patched copy) — closes on the capsule redrawn under the finger and on the floating chip; the real one does not
+  const BASE = [
+    ['    voice: !!target?.closest?.(VOICE_UI),\n', ''],
+    ['seen: where(e.target, e) };', 'target: e.target };'],
+    ['judge(p.seen, e);', 'judge(where(p.target, e), e);'],
+  ];
+  ok(BASE.every(([a]) => src.split(a).length === 2), 'the three edits the base-closer control makes are each spelled exactly once in utils.js');
+  const baseF = M.write('src/lib/utils.js', BASE.reduce((x, [a, b]) => x.replace(a, b), src), 'base-closer');
+  const UBase = await import(pathToFileURL(baseF).href);
+  const run = (Mod) => {
+    const G = fresh(); let n = 0; const d = Mod.onOutsidePress(G.pop, () => { n++; }, { once: false });
+    const mic = new El('button', G.pop, { cls: ['voice-btn'] }); const span = new El('span', mic, { cls: ['voice-time'] }); const t0 = performance.now();
+    dispatch('pointerdown', span, { pointerType: 'touch', pointerId: 21, clientX: 50, clientY: 50, timeStamp: t0 });
+    span.remove(); span.parent = null;
+    dispatch('pointerup', span, { pointerType: 'touch', pointerId: 21, clientX: 50, clientY: 50, timeStamp: t0 + 300 });
+    const redrawClosed = n;
+    const chip = new El('div', body, { cls: ['voice-chip', 'voice-chip-float'] }); touch(chip, {});
+    const chipClosed = n - redrawClosed;
+    d(); chip.remove();
+    return { redrawClosed, chipClosed };
+  };
+  const b = run(UBase), real = run(U);
+  ok(b.redrawClosed === 1 && b.chipClosed === 1 && real.redrawClosed === 0 && real.chipClosed === 0, `CONTROL (the base closer — the target measured at the lift, no voice fact): the capsule redrawn under the finger CLOSES the surface and so does a tap on the floating chip (the owner's tray, twice); the real helper keeps it open on both — the down-time facts and the voice fact are the fix (${JSON.stringify({ base: b, real })})`);
   for (const row of copiesCensus(M.files, M.dir, repo, { label: 'mutant copies: ' })) ok(row.pass, row.name, row.detail);
 }
 

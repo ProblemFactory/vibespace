@@ -794,7 +794,11 @@ export function installManageAgents(App, ctx = {}) {
     const name = a?.name || '';
     const enc = encodeURIComponent(id);
     let mint = null, closeTimer = null, gone = false;
-    const { overlay, body, close: shut } = createModalShell({ id: 'oat-dialog', title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); } });
+    // lane dialog-unsaved-guard: a token PASTED and not saved ⇒ ✕ / Esc / the backdrop asks; Discard clears it from the page
+    // (a minted token waits on the hub — a reopened dialog shows its phase again — so the mint asks nothing here)
+    const pasted = () => body.querySelector('#oat-paste');
+    const { overlay, body, close: shut, dismiss } = createModalShell({ id: 'oat-dialog', title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); },
+      unsaved: { isDirty: () => !!(pasted() && pasted().value.trim()), save: () => savePasted(), discard: () => { if (pasted()) pasted().value = ''; } } });
     const live = () => mint && !['saved', 'failed', 'cancelled'].includes(mint.phase);
     // 改绑 (lane oat-identity-postcheck): the rows the token may move to — Claude subscriptions holding no live token
     const rebindTo = (oatForeign(a) || oatIdentityAsk(a) || oatUnverified(a)) ? (this._accounts?.accounts || []).filter((x) => x && x.id !== id && x.type === 'subscription' && !x.pooled && (x.backend || 'claude') === (a.backend || 'claude') && !(x.oat && x.oatDaysLeft > 0)) : [];
@@ -952,7 +956,7 @@ export function installManageAgents(App, ctx = {}) {
     overlay.addEventListener('keydown', async (e) => {
       if (e.key !== 'Escape') return;
       e.stopPropagation();
-      if (!live()) { shut(); return; }
+      if (!live()) { dismiss('escape'); return; }
       if (!(await showConfirmDialog({ title: t('Cancel the sign-in?'), message: t('The sign-in for “{name}” is still running. Cancel it?', { name }), danger: true }))) return;
       await mintApi(`/${encodeURIComponent(mint.id)}`, { method: 'DELETE' }).catch(() => null);
       shut();
@@ -961,16 +965,18 @@ export function installManageAgents(App, ctx = {}) {
     // a reopened dialog (this client or another) picks up a sign-in still
     // RUNNING; a finished one is history, not a phase to show again
     mintApi('').then((r) => { if (r?.mint && !mint && !['saved', 'failed', 'cancelled'].includes(r.mint.phase)) render(r.mint); }).catch(() => { });
-    body.querySelector('#oat-save').onclick = async () => {
+    const savePasted = async () => {
       const tok = body.querySelector('#oat-paste').value.trim();
-      if (!tok) { showToast(t('Paste the sk-ant-oat01-… token first'), { type: 'error' }); return; }
+      if (!tok) { showToast(t('Paste the sk-ant-oat01-… token first'), { type: 'error' }); return false; }
       try {
         const r = await fetchJson(`/api/accounts/${enc}/oat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) });
-        if (!r?.success) { showToast(r?.error || t('Save failed'), { type: 'error' }); return; }
+        if (!r?.success) { showToast(r?.error || t('Save failed'), { type: 'error' }); return false; }
         showToast(t('Long-lived token stored — “{name}” is now usable on any machine.', { name }));
         shut(); refresh?.();
-      } catch (e) { showToast(e?.message || t('Save failed'), { type: 'error' }); }
+        return true;
+      } catch (e) { showToast(e?.message || t('Save failed'), { type: 'error' }); return false; }
     };
+    body.querySelector('#oat-save').onclick = () => { savePasted(); };
     const rb = body.querySelector('#oat-rebind');
     if (rb) rb.onclick = async () => {
       const to = body.querySelector('#oat-rebind-pick')?.value || '';
@@ -1213,7 +1219,9 @@ export function installManageAgents(App, ctx = {}) {
     const effHot = a?.hotSupported !== false && !!a?.hot;
     const subs = (list?.accounts || []).filter((x) => x.type === 'subscription' && (x.backend || 'claude') === be && !x.pooled);
     const fresh = (list?.accounts || []).find((x) => x.id === poolId) || a || {};
-    const { body, close } = createModalShell({ id: 'pool-members-dialog', title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '460px', escapeToClose: true });
+    // lane dialog-unsaved-guard: members / placement / order changed and not saved ⇒ ✕ / Esc / the backdrop asks
+    const { body, close } = createModalShell({ id: 'pool-members-dialog', title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '460px', escapeToClose: true,
+      unsaved: { isDirty: () => JSON.stringify(st) !== st0, save: () => save() } });
     const explicit = Array.isArray(fresh.members) && fresh.members.length ? fresh.members : null;
     // the dialog's own state; nothing is saved until Save (the one act — gather — is immediate)
     const st = {
@@ -1222,6 +1230,7 @@ export function installManageAgents(App, ctx = {}) {
       mode: Array.isArray(fresh.priority) && fresh.priority.length ? 'priority' : 'automatic',
       order: Array.isArray(fresh.priority) ? fresh.priority.slice() : [],
     };
+    const st0 = JSON.stringify(st);
     const nowSec = () => Date.now() / 1000;
     const stateOf = (id) => { const x = subs.find((y) => y.id === id) || {}; return memberState({ serve: x.serve || null, loggedIn: !!x.loggedIn, loginState: x.loginState || null, usage: this._accountUsage?.[id] || null, nowSec: nowSec() }); };
     const fmtTime = (ms) => { try { return new Date(ms).toLocaleString(deviceLocale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return new Date(ms).toISOString(); } };
@@ -1295,7 +1304,7 @@ export function installManageAgents(App, ctx = {}) {
       // empty explicit selection would silently mean ALL in the store
       // (updatePool maps [] → null) — refuse instead of surprising
       const members = st.all ? null : st.checked.slice();
-      if (members && !members.length) { showToast(t('Pick at least one member (or choose All)'), { type: 'error' }); return; }
+      if (members && !members.length) { showToast(t('Pick at least one member (or choose All)'), { type: 'error' }); return false; }
       // review B2: a selection with ZERO signed-in members can never take over
       // — the pool would keep billing the current (now non-member) target
       // while the row still shows it, with nothing telling the user why
@@ -1970,9 +1979,13 @@ export function installManageAgents(App, ctx = {}) {
       if (this.sidebar._activeTab !== 'agents') this.sidebar._railGo?.('agents');
       return;
     }
+    // lane dialog-unsaved-guard: the Advanced fold's instructions / stop-nudge numbers typed and not saved ⇒ ✕ / Esc / the
+    // backdrop asks (every other row here acts at once); the fold registers its own test and Save below
+    const adv = { dirty: () => false, save: () => true };
     const shell = container ? { body: container, close: () => {} } : createModalShell({
       id: 'agents-dialog-overlay', title: t('Agents'), dialogClass: 'agents-dialog',
       bodyClass: 'agents-dialog-body', escapeToClose: true, onClose,
+      unsaved: { isDirty: () => adv.dirty(), save: () => adv.save() },
     });
     // rail panel: carry the SAME body class so one stylesheet (incl. the
     // container queries) serves modal and panel — the panel's narrow-width
@@ -2732,6 +2745,9 @@ export function installManageAgents(App, ctx = {}) {
           }
           showToast(t('Saved — new/updated sessions receive it on their next turn'));
         };
+        adv.dirty = () => tas.some(([key, ta]) => ta.isConnected && ta.value.trim() !== String(this.settings.get(key) || '').trim())
+          || numInputs.some(([key, inp, schema]) => inp.isConnected && String(inp.value).trim() !== String(this.settings.get(key) ?? schema.default));
+        adv.save = () => { save.onclick(); return true; };
         btnRow.appendChild(save);
         body2.appendChild(btnRow);
         adv.appendChild(body2);

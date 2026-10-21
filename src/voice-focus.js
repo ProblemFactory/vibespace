@@ -24,6 +24,11 @@ const TEXT_TYPES = Object.freeze(['', 'text', 'search', 'url', 'email', 'tel']);
 const SECRET_AUTOCOMPLETE = Object.freeze(['one-time-code', 'current-password', 'new-password']);
 const FOLLOW_LIMITS = Object.freeze({ factsChars: 600, titleChars: 120, minSide: 4, gap: 4, deskSize: 28, phoneSize: 40 });
 const WHY = Object.freeze(['target', 'secret', 'terminal', 'disabled', 'read-only', 'opted-out', 'hidden', 'not-text', 'not-editable']);
+// THE VOICE UI THAT STANDS OUTSIDE EVERY BOX (lane phone-tray-voice-done, inc-mvhzgiq8-bs3j): the follower's microphone host and
+// a field's floating chip (Inserted · Undo, the failure words) live on document.body, never inside the surface whose box they
+// serve — a press on them is the dictation's own, never another surface's outside press (utils.js onOutsidePress reads it;
+// voice-input.js voiceOwns is the DOM predicate over it). A field's own microphone needs no entry: it is inside its surface.
+const VOICE_UI = '.voice-follow, .voice-chip-float';
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 const lower = (v) => str(v).trim().toLowerCase();
@@ -106,4 +111,4 @@ function followFacts({ label = '', dialog = '', near = '' } = {}) {
   return { title, text };
 }
 
-module.exports = { TEXT_TYPES, SECRET_AUTOCOMPLETE, FOLLOW_LIMITS, WHY, dictationTarget, followCandidates, followPlace, followFacts };
+module.exports = { TEXT_TYPES, SECRET_AUTOCOMPLETE, FOLLOW_LIMITS, WHY, VOICE_UI, dictationTarget, followCandidates, followPlace, followFacts };

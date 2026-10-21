@@ -164,7 +164,10 @@ export async function showAccountReachDialog(app, adapter) {
   if (!st) return;
   const aid = encodeURIComponent(adapter.id);
   let part = null;
-  const { body, close } = createModalShell({ id: 'chan-account-reach-dialog', title: t('Reach & policy — {title}', { title: st.name }), dialogClass: 'chan-dialog chan-assign chan-access chan-reach', escapeToClose: true, onClose: () => { if (part) part.picker.close(); } });
+  // lane dialog-unsaved-guard: section ② (the access rows) changed and not saved ⇒ ✕ / Esc / the backdrop asks; the policy
+  // (section ①) saves at its pick
+  const { body, close } = createModalShell({ id: 'chan-account-reach-dialog', title: t('Reach & policy — {title}', { title: st.name }), dialogClass: 'chan-dialog chan-assign chan-access chan-reach', escapeToClose: true, onClose: () => { if (part) part.picker.close(); },
+    unsaved: { isDirty: () => !!part && part.isDirty(), save: () => part && part.save() } });
   let pol = st.adapter.policy || null;
   const polHost = el('div', 'chan-account-policy');
   const drawPolicy = () => {

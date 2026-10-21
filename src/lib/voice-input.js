@@ -35,7 +35,7 @@
 import { t, resolveLang } from './i18n.js';
 import { copyText, uiScale } from './utils.js';
 import { VOICE_LIMITS, RECORDER_MIME, dictationContext, dictationMessagesOf, voiceWords } from '../voice-model.js';
-import { dictationTarget, followPlace, followCandidates, followFacts } from '../voice-focus.js'; // lane voice-follows-focus: the ONE predicate + placement + facts
+import { dictationTarget, followPlace, followCandidates, followFacts, VOICE_UI } from '../voice-focus.js'; // lane voice-follows-focus: the ONE predicate + placement + facts
 import { teachAfterDictation } from './voice-teach-ui.js'; // P1: teach / context — only when the person turned them on
 
 const MIC_SVG = '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2M5.5 14.5h5"/></svg>';
@@ -376,7 +376,9 @@ let following = false;
 // what a microphone beside a field never sits on (besides the field): what the person presses or types into, and the
 // keyboard-yield strip (lane takeover-keyboard: "your keys come here")
 const KEEP_CLEAR = 'button, a[href], input, textarea, select, [role="button"], [contenteditable], .chat-kbd-yield';
-const ours = (n) => !!(n && n.closest && n.closest('.voice-follow, .voice-chip-float'));
+/** a node of the voice UI outside every box (the follower's microphone, a floating chip — src/voice-focus.js VOICE_UI): a press
+ *  on it is the dictation's own (lane phone-tray-voice-done: the same selector keeps every outside-press closer off it) */
+export const voiceOwns = (n) => !!(n && n.closest && n.closest(VOICE_UI));
 
 /** the DOM facts of a focused element, for the PURE predicate (src/voice-focus.js dictationTarget) */
 export function fieldFacts(el) {
@@ -413,7 +415,7 @@ function factsOf(el) {
 
 /** the first element under a point that is not the follower's own (its microphone, its chip) */
 function underPoint(x, y) {
-  try { for (const n of document.elementsFromPoint(x, y)) if (!ours(n)) return n; } catch { }
+  try { for (const n of document.elementsFromPoint(x, y)) if (!voiceOwns(n)) return n; } catch { }
   return null;
 }
 
@@ -469,7 +471,7 @@ function followSettled(el) {
 }
 
 function followTo(el) {
-  if (!el || el.nodeType !== 1 || ours(el)) return;
+  if (!el || el.nodeType !== 1 || voiceOwns(el)) return;
   if (follow && follow.el === el) { followSoon(); return; }
   if (follow && follow.d.state !== 'idle') return; // a recording (or the words on their way) belongs to its field: it finishes first
   const v = el[OWN] ? { ok: false, why: 'own' } : dictationTarget(fieldFacts(el));
@@ -485,7 +487,7 @@ function followTo(el) {
   // a press on the follower's microphone (or its chip) is nobody else's press: the field keeps its focus (the phone keyboard
   // stays) and no popover / dialog closer reads it as an outside press — window capture runs before their document capture
   // (utils.js onOutsidePress); a cancelled pointerdown fires no compatibility mousedown (§59: no mousedown listener here)
-  const guard = (e) => { if (ours(e.target)) { e.preventDefault(); e.stopPropagation(); } };
+  const guard = (e) => { if (voiceOwns(e.target)) { e.preventDefault(); e.stopPropagation(); } };
   window.addEventListener('pointerdown', guard, { capture: true, ...o });
   window.addEventListener('scroll', followSoon, { capture: true, passive: true, ...o });
   window.addEventListener('resize', followSoon, o);

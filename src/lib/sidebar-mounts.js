@@ -2363,7 +2363,7 @@ export function installSidebarMounts(Sidebar) {
       try { cfg = await api(`/api/mounts/${m.id}/config`, { headers: revealHeaders() }); }
       catch (e) { showToast(e.message || tr('Failed to load connection'), { type: 'error' }); return; }
       const name = cfg.name || m.name;
-      const { body, close } = createModalShell({ id: 'mount-edit-dialog', title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true });
+      const { body, close } = createModalShell({ id: 'mount-edit-dialog', title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true, unsaved: { save: () => form.onsubmit({ preventDefault() {} }) } });
       const form = document.createElement('form');
       form.className = 'mounts-form';
       let editPresets = [];
@@ -2505,6 +2505,9 @@ export function installSidebarMounts(Sidebar) {
         catch (e2) { err.textContent = e2.message || 'Failed'; return; }
         close(); this._renderMounts();
       };
+      // lane dialog-unsaved-guard: `unsaved` above = the shell's OWN flag (an input / change in the form ⇒ ✕ / Esc / the backdrop
+      // asks) and this submit as its Save — kept to one short property there: test-record-clear-census reads this method's
+      // first 6000 characters, and the Remove confirm's `name` sits ~100 characters inside that window
     },
 
     _showMintShareDialog(m) {

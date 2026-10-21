@@ -777,7 +777,8 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   // lane agent-watch-parity: `watch` = the Notify dialog's grammar — the FLAGS go to the server raw and are parsed there by
   // src/channel-watch-spec.js (judged by the dialog's own validators; a refusal prints their words + [code]); this file
   // ships to other machines and parses nothing but `--spec @file` (the file is here). `--show` / `watches` read back.
-  const watchLine = (w) => `${w.how}, on ${w.what}, at most ${w.dailyWakeCap}/day${w.expiresAt ? `, until ${new Date(w.expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''} — ${w.setBy === 'agent' ? 'set by you (unwatch removes it)' : `set by the user${w.as === 'group' ? ` for your group ${w.group}` : w.as === 'everyone' ? ' for all agents' : ' for you'} — yours to read, theirs to change`}`;
+  // lane judged-watch-state: a judged rule's row carries its road (`judged`, the server's words) on the line under it
+  const watchLine = (w) => `${w.how}, on ${w.what}, at most ${w.dailyWakeCap}/day${w.expiresAt ? `, until ${new Date(w.expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''} — ${w.setBy === 'agent' ? 'set by you (unwatch removes it)' : `set by the user${w.as === 'group' ? ` for your group ${w.group}` : w.as === 'everyone' ? ' for all agents' : ' for you'} — yours to read, theirs to change`}${w.judged ? `\n    ${w.judged}` : ''}`;
   if (verb === 'watches') {
     const r = await call('GET', '/api/agent/channels/watches');
     const ws = r.watches || [];
@@ -812,6 +813,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     else if (r.proposed && r.already) console.log(`a wake request of yours for ${target} is already waiting for the user (${r.request.id}); they decide.`);
     else if (r.proposed) console.log(`requested — a wake or a digest is a billed turn, so the user approves it: their For-you tray shows what Approve writes (at most ${r.dailyWakeCap} wakes a day). Until then nothing wakes you (request ${r.request.id}).`);
     else console.log(`watching ${r.target}${r.title ? ` (${r.title})` : ''} — ${on} rides your NEXT turn (free; nothing wakes you)${r.replaced ? '; your earlier watch here was replaced' : ''}. Read back: vibespace-channels watch --show ${r.target} · undo: vibespace-channels unwatch ${r.target}`);
+    if (r.judged) console.log(r.judged);   // lane judged-watch-state: the answer's LAST line — the judged rule's road (saved either way; exit 0)
     return;
   }
   // B-2198 THE RAW API PASS-THROUGH (docs/design-channel-raw-api.md): a vendor's OWN API, called raw — VibeSpace adds the

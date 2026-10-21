@@ -162,7 +162,14 @@ export function showTokenOnce({ caller, token, rotated = false }) {
  *  live), Register a caller (HMAC by default), Rotate / Revoke (each confirmed), the delivery editor. */
 export function showCallersDialog(app, slug, { adapterId = 'webhook', title = '', register = false } = {}) {
   let off = null;
-  const m = createModalShell({ id: 'chan-wh-callers', title: t('Callers of {path}', { path: title || slug }), dialogClass: 'chan-wh-dialog', escapeToClose: true, onClose: () => { if (off) off(); off = null; } });
+  // lane dialog-unsaved-guard: what is typed and not sent — an open Delivery… editor with a change, a caller's name in
+  // Register — makes ✕ / Esc / the backdrop ask; Save there saves each of them (the first refusal keeps the dialog open)
+  const edits = new Set();
+  const m = createModalShell({ id: 'chan-wh-callers', title: t('Callers of {path}', { path: title || slug }), dialogClass: 'chan-wh-dialog', escapeToClose: true, onClose: () => { if (off) off(); off = null; },
+    unsaved: {
+      isDirty: () => [...edits].some((x) => x.dirty()),
+      save: async () => { for (const x of [...edits]) if (x.dirty()) { const r = await x.save(); if (r !== true) return r || false; } return true; },
+    } });
   m.dialog.dataset.whCallersDialog = slug;
   m.body.appendChild(urlRow(slug));
   const list = el('div', 'chan-wh-list');
@@ -223,12 +230,20 @@ export function showCallersDialog(app, slug, { adapterId = 'webhook', title = ''
     const edit = btn(t('Delivery…'), () => {
       if (r.querySelector('.chan-wh-delivery')) return;
       const dp = deliveryPicker({ mode: v.mode, replyUrl: v.replyUrl });
-      const save = btn(t('Save'), async () => {
-        const a = await post(`${BASE}/${enc(slug)}/callers/${enc(v.id)}/delivery`, { delivery: dp.value() });
-        if (!a || !a.ok) { showToast(t('Delivery not saved: {why}', { why: why(a) }), { type: 'error' }); return; }
-        showToast(t('Delivery saved'));
-        load();
-      }, 'mounts-btn-primary');
+      const was = JSON.stringify(dp.value());
+      const ed = {
+        dirty: () => dp.box.isConnected && JSON.stringify(dp.value()) !== was,
+        save: async () => {
+          const a = await post(`${BASE}/${enc(slug)}/callers/${enc(v.id)}/delivery`, { delivery: dp.value() });
+          if (!a || !a.ok) { const w = t('Delivery not saved: {why}', { why: why(a) }); showToast(w, { type: 'error' }); return w; }
+          edits.delete(ed);
+          showToast(t('Delivery saved'));
+          load();
+          return true;
+        },
+      };
+      edits.add(ed);
+      const save = btn(t('Save'), () => { ed.save(); }, 'mounts-btn-primary');
       dp.box.appendChild(save);
       r.appendChild(dp.box);
     });
@@ -243,17 +258,20 @@ export function showCallersDialog(app, slug, { adapterId = 'webhook', title = ''
   const name = whInput('', t('e.g. CI deploy-bot'));
   const authSel = whSelect([{ value: 'hmac', label: t('HMAC-signed (recommended)') }, { value: 'bearer', label: t('Bearer token') }], V.AUTH_MODES[0]);
   const dp = deliveryPicker();
-  const go = btn(t('Register'), async () => {
-    if (!name.value.trim()) { name.focus(); return; }
+  const registerCaller = async () => {
+    if (!name.value.trim()) { name.focus(); return false; }
     go.disabled = true;
     const a = await post(`${BASE}/${enc(slug)}/callers`, { name: name.value.trim(), auth: authSel.value, delivery: dp.value() });
     go.disabled = false;
-    if (!a || !a.ok) { showToast(t('Caller not registered: {why}', { why: why(a) }), { type: 'error' }); return; }
+    if (!a || !a.ok) { const w = t('Caller not registered: {why}', { why: why(a) }); showToast(w, { type: 'error' }); return w; }
     name.value = '';
     form.style.display = 'none';
     showTokenOnce({ caller: a.caller, token: a.token });
     load();
-  }, 'mounts-btn-primary');
+    return true;
+  };
+  const go = btn(t('Register'), () => { registerCaller(); }, 'mounts-btn-primary');
+  edits.add({ dirty: () => form.style.display !== 'none' && !!name.value.trim(), save: registerCaller });
   // verify r1 #3: the Bearer limits beside the picker, shown while Bearer is picked
   const bearerNote = whNote(V.bearerLimitsText({ t }).join(' '), true);
   bearerNote.dataset.whBearerLimits = '1';

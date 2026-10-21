@@ -25,6 +25,8 @@
 //      too; no Task Group row for a conversation in none); ⑥ the key row's 授权给 chip carries the reach as a chip — a click opens
 //      the reach dialog, 整个 VibeSpace + 保存 ⇒ the chip is red with its title and the hub's grant row says instance; a grant the
 //      picker adds reads 只有它开的会话; ⑩ the chip's Japanese word
+//   UNSAVED (lane dialog-unsaved-guard, B-bc31): 编辑… with a verb taken away asks on ✕ / Esc (继续编辑 / 放弃 / 保存) — 放弃 writes
+//      nothing, 保存 writes the dialog's own Save; a clean 编辑… closes at once
 //   ⑥b 编辑… (lane key-folder-picker-all — the owner 2026-10-21): the key's row edits its VERBS — the mint's 9 checkboxes, its own
 //      ticked; 把 agent 的反馈标为已处理 + 读 agent 未处理的反馈 added ⇒ the row says them, the REAL `vibespace-api call feedback.list`
 //      runs at once on the existing grant (no card: its audit line was never asked); taken away ⇒ the next call refused by
@@ -523,6 +525,42 @@ try {
     check('「9 个动作」 opens the verbs as a popover grouped by family — 对话 6 · Agent 群组 1 · 反馈 2 (a billed verb says so) — with 编辑… beside', !!vp && vp.fams === '对话:6|Agent 群组:1|反馈:2' && vp.first === '开一个对话 （会开始一个计费回合）' && vp.edit === '编辑…', vp);
     await evalJs(`document.querySelector('.vw-ak-verbs-pop .vw-ak-vedit').click()`);
     check('…its 编辑… opens the key\'s edit dialog (the popover closes)', !!(await until(`!!document.querySelector('#vault-ak-edit') && !document.querySelector('.vw-ak-verbs-pop')`, 5000)) && (await textOf('#vault-ak-edit h3')) === '编辑「Fleet」');
+    // lane dialog-unsaved-guard (B-bc31): 编辑… closing with an unsaved change ASKS — a clean ✕ closes at once; a verb taken
+    // away + ✕ ⇒ the in-place sheet «有未保存的更改» (继续编辑 / 放弃 / 保存); Esc on it returns; 放弃 writes nothing; Esc on
+    // the dialog asks; 保存 writes the dialog's own Save (the hub's key loses the verb); the verb back through 保存
+    const UK = '#vault-ak-edit';
+    const ust = `(() => { const o = document.querySelector('${UK}'); const sh = o && o.querySelector('.dialog-unsaved'); const cb = o && o.querySelector('${UK} input[value="feedback.list"]'); return { open: !!o, sheet: !!sh, words: sh ? sh.querySelector('.dialog-unsaved-words').textContent : null, buttons: sh ? [...sh.querySelectorAll('button')].map((b) => b.textContent.trim()) : [], on: cb ? cb.checked : null }; })()`;
+    const uact = async (js) => { await evalJs(`(() => { ${js}; return true; })()`); await sleep(250); return evalJs(ust); };
+    const uopen = async () => { await evalJs(`(() => { const r = ${FROW}; if (r) r.querySelector('.vw-ak-edit').click(); return true; })()`); return until(`(() => { const s = ${ust}; return s.open && s.on !== null ? s : null; })()`, 8000); };
+    const fleetHas = async (v) => ((await keysNow()).find((x) => x.id === FLEET) || { scopes: [] }).scopes.includes(v);
+    const UX = `document.querySelector('${UK} .dialog-close').click()`;
+    const UB = (w) => `[...document.querySelectorAll('${UK} .dialog-unsaved button')].find((b) => b.textContent.trim() === ${JSON.stringify(w)}).click()`;
+    const UESC = (sel) => `document.querySelector(${JSON.stringify(sel)}).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`;
+    const u0 = await uact(UX);
+    check('UNSAVED: 编辑… with nothing changed closes on ✕ at once (no question)', !u0.open, u0);
+    const u1 = await uopen();
+    const u2 = await uact(`document.querySelector('${UK} input[value="feedback.list"]').click(); ${UX}`);
+    await shot('ak-18-unsaved-sheet.png');
+    check('UNSAVED: a verb taken away + ✕ ⇒ the dialog STAYS and asks in place «有未保存的更改» · 继续编辑 / 放弃 / 保存', !!u1 && u2.open && u2.sheet && u2.words === '有未保存的更改' && u2.buttons.join('|') === '继续编辑|放弃|保存' && u2.on === false, { u1, u2 });
+    const u3 = await uact(UESC(`${UK} .dialog-unsaved-save`));
+    check('UNSAVED: Esc on the sheet = 继续编辑 (the dialog and the change stay)', u3.open && !u3.sheet && u3.on === false, u3);
+    const u4 = await uact(`${UX}; ${UB('放弃')}`);
+    check('UNSAVED: 放弃 closes and writes nothing (the key still holds 读 agent 未处理的反馈)', !u4.open && (await fleetHas('feedback.list')), u4);
+    await uopen();
+    const u5 = await uact(`document.querySelector('${UK} input[value="feedback.list"]').click(); ${UESC(`${UK} input[value="feedback.list"]`)}`);
+    check('UNSAVED: Esc on the dialog with the change ⇒ the same question', u5.open && u5.sheet, u5);
+    await uact(UB('保存'));
+    let dropped = false; for (let i = 0; i < 40 && !(dropped = !(await fleetHas('feedback.list'))); i++) await sleep(150);
+    const u6 = await evalJs(ust);
+    check('UNSAVED: 保存 on the sheet runs the dialog\'s own Save — the hub\'s key no longer holds the verb, the dialog closed', dropped && !u6.open, { u6, dropped });
+    await uopen();
+    await evalJs(`(() => { document.querySelector('${UK} input[value="feedback.list"]').click(); document.querySelector('${UK} .vw-ak-edit-save').click(); return true; })()`);
+    let back = false; for (let i = 0; i < 40 && !(back = await fleetHas('feedback.list')); i++) await sleep(150);
+    check('UNSAVED teardown: the verb back through the dialog\'s own 保存', back && !!(await until(`!document.querySelector('${UK}')`, 5000)));
+    await evalJs(`(() => { const r = ${FROW}; if (r) r.querySelector('.vw-ak-verbs-chip').click(); return true; })()`);
+    await until(`!!document.querySelector('.vw-ak-verbs-pop .vw-ak-vedit')`, 5000);
+    await evalJs(`document.querySelector('.vw-ak-verbs-pop .vw-ak-vedit').click()`);
+    await until(`!!document.querySelector('#vault-ak-edit')`, 5000);
     await evalJs(`(() => { const b = document.querySelector('#vault-ak-edit .btn-cancel'); if (b) b.click(); return true; })()`);
     // THE NOTICE HEAD SPEAKS: the live conversation archives a conversation the key never opened ⇒ refused (the grant reaches only what it opened)
     const who = ((await live()) || {}).name;

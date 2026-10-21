@@ -34,6 +34,7 @@ function create(engineCtx) {
     store, adapterRecords, adapterFor, tiers, agentShareRefusal, isWatched, laneOf, effectiveConvCaps, rawFactsOf, viewOf, agentCopy, humanNameOf,
     vendorNameOf, notify, known, withView, NOT_A_THREAD, threadRead, vendorSearch, aroundFor, clearWakeTimer, coalesceSeconds, ownRecordOf,
     pathBudgetVerdict,
+    judgedRoadFor,   // lane judged-watch-state: a judged rule's road, as its doors word it (the watch answer, --show, watches)
   } = engineCtx;
   // created AFTER this family: read through the context at call time
   const sendIdentityFor = (...a) => engineCtx.sendIdentityFor(...a);
@@ -793,12 +794,16 @@ function create(engineCtx) {
     // verify r1 F2: a bound on the rows one agent may hold of its OWN across every grain, said with the count
     if (!(mine && F.watchOriginOf(mine) === 'agent') && agentWatchCount(pk) >= F.MAX_AGENT_WATCHES) return { ok: false, code: 'watch-limit', error: `you already hold ${F.MAX_AGENT_WATCHES} notifications of your own (the limit) — \`vibespace-channels unwatch <conv>\` frees one; the user can set more for you in Notify…` };
     const row = { principal, origin: 'agent', delivery: d, notify: S.notify, mode: S.mode, ...(fl.filter ? { filter: fl.filter } : {}), ...(S.notify === 'digest' ? { digestMinutes: S.digestMinutes } : {}), dailyWakeCap: Math.max(1, S.dailyWakeCap) };
-    if (d === 'wake') return fileWatchRequest(ctx, tg, row, S.why);
+    // lane judged-watch-state (B-f42e): THE AGENT IS TOLD AT THE DOOR — a judged rule (`--kind decision`, `--reply-to-sent
+    // --infer`) is saved either way; the answer's last line names its road («live» or «will NOT run: why — starts when …»)
+    const road = judgedRoadFor(fl.filter, { cid: ctx.id });
+    const withRoad = (r) => (road && r && r.ok !== false ? { ...r, judged: road.line, road: road.state } : r);
+    if (d === 'wake') return withRoad(await fileWatchRequest(ctx, tg, row, S.why));
     // the grain AS READ (the legacy lift + the access rule applied) minus this agent's row, plus the new one
     const r = await setGrain(tg.adapterId, tg.grain, { watchers: [...cur.watchers.filter((w) => w && pkOf(w.principal) !== pk), row] }, { by: `agent:${ctx.id}` });
     if (!r || !r.ok) return r;
     try { store.audit({ kind: 'acl', op: 'agent-watch', principal, scope: tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId }, delivery: d, keywords: fl.keywords, rules: fl.filter ? fl.filter.rules.map((x) => x.kind) : [], at: now(), by: 'agent' }); } catch {}
-    return { ok: true, set: true, delivery: d, target: tg.key ? agentId(tg.key) : tg.adapterId, title: tg.key ? agentTitle(tg.en, tg.en.id) : tg.title, keywords: fl.keywords, what: WS.watchWhatWords(row), how: WS.watchHowWords(row), replaced: !!mine };
+    return withRoad({ ok: true, set: true, delivery: d, target: tg.key ? agentId(tg.key) : tg.adapterId, title: tg.key ? agentTitle(tg.en, tg.en.id) : tg.title, keywords: fl.keywords, what: WS.watchWhatWords(row), how: WS.watchHowWords(row), replaced: !!mine });
   }
   /** lane agent-watch-parity: READ BACK — what notifies THIS agent. At one grain (`ref`, judged like `watch`: reach
    *  first) every row naming it — its own, and the user's for it, its group or all agents (theirs: read-only) — its open
@@ -808,7 +813,8 @@ function create(engineCtx) {
     if (!ctx || ctx.kind !== 'agent' || !ctx.id) return ACL.notFound();
     const pk = pkOf({ kind: 'agent', id: ctx.id });
     const view = (w) => { const f = w.mode === 'filtered' ? (w.filter || (w.filterId ? filterFor(w.filterId) : null)) : null;
-      return { setBy: F.watchOriginOf(w), as: w.principal.kind, ...(w.principal.kind === 'group' ? { group: w.principal.name || w.principal.id } : {}), ...(w.via ? { via: w.via } : {}),
+      const jr = judgedRoadFor(f, { cid: ctx.id });   // lane judged-watch-state: each judged row says its road
+      return { ...(jr ? { judged: jr.line } : {}), setBy: F.watchOriginOf(w), as: w.principal.kind, ...(w.principal.kind === 'group' ? { group: w.principal.name || w.principal.id } : {}), ...(w.via ? { via: w.via } : {}),
         delivery: F.deliveryModeOf(w), notify: w.notify, mode: w.mode, filter: f ? { match: f.match, rules: f.rules } : null, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap,
         how: WS.watchHowWords(w), what: WS.watchWhatWords(w, f), expiresAt: w.expiresAt || null }; };
     const rowsOf = (ws) => (Array.isArray(ws) ? ws : []).filter((w) => w && w.principal && F.rowNames(w, ctx)).map(view);

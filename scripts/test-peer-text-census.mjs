@@ -911,6 +911,7 @@ const PRINTS = {
     // lane agent-watch-parity: `watch --show` / `watches` (the read-back) + the grammar's answer
     'r.watches': `${V}:the read-back list (agentWatchesFor)`, 'r.rows': `${V}:the read-back rows at one grain (agentWatchesFor)`, 'r.requests': `${V}:the agent's own open wake asks`,
     'w': `${V}:a read-back row (the line helper prints its judged fields)`, 'w.grain': `${V}:the grain enum`, 'w.target': 'judged:agentId — the key / account id (agentWatchesFor)', 'w.title': 'judged:agentTitle / the account label the user gave (agentWatchesFor)',
+    'w.judged': `${V}:our words — the judged road's line (DM.judgedRoadLine over THE verdict; lane judged-watch-state)`, 'r.judged': `${V}:our words — the judged road's line the watch answer ends with (DM.judgedRoadLine; lane judged-watch-state)`,
     'w.how': `${V}:our words (watchHowWords)`, 'w.what': `${V}:our words over the validated rules — values the user or this agent typed (watchWhatWords / ruleWhy)`, 'w.expiresAt': `${V}:a timestamp`, 'w.setBy': `${V}:the origin enum`, 'w.as': `${V}:the principal kind enum`, 'w.group': `${V}:the group name the user gave (a VibeSpace group)`,
     'q.target': 'judged:agentId (agentWatchesFor)', 'q.how': `${V}:our words (watchHowWords)`, 'q.what': `${V}:our words over the validated rules (watchWhatWords)`, 'q.id': `${V}:a request id we mint`,
     'r.grain': `${V}:the grain enum`, 'r.request.how': `${V}:our words (watchHowWords)`, 'r.request.what': `${V}:our words over the validated rules (watchWhatWords)`, 'r.removedByUser.at': `${V}:a timestamp`,
@@ -2364,7 +2365,7 @@ console.log('§6 the shared-store census (words another principal wrote into a s
     'RN.REFRESH_FROM': 'a constant of ours (src/refresh-note.js — "VibeSpace refresh", the user\'s 「刷新所有活着的会话」 note waiting in each live conversation\'s stash; a NOTIFICATION_SENDERS name)',
     'RX_DIGEST_FROM': 'a constant of ours (channels)',
     'REV_NOTE_FROM': 'a constant of ours (channels — lane channel-record-revisions\' recall note)',
-    "'VibeSpace'": 'ours (auto-resume / the pool engine)', "'You · via Channels'": 'ours', "'Channels · Outbox'": 'ours', "'Channels · API'": 'ours (B-2198 part 2: the raw-API receipt)',
+    "'VibeSpace'": 'ours (auto-resume / the pool engine)', "'You · via Channels'": 'ours', "'Channels · Outbox'": 'ours', "'Channels · API'": 'ours (B-2198 part 2: the raw-API receipt)', "'Channels · judged rules'": 'ours (lane judged-watch-state: the once-a-day not-a-hit line, DM.judgedSkipLine)',
     "'Background Work · ' + (job.name || job.id)": 'a job name is a slug (resolveName)',
     "'Background Work · ' + (e.jobName || e.jobId)": 'a client card of a slug',
     "'Background Work · ' + CLEARED_TEXT": 'ours (a cleared job)',

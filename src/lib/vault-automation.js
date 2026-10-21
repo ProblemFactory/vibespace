@@ -230,7 +230,9 @@ function limitsFollowOpen(boxes, limWrap) {
  *  limits gets its FIRST ones here). Nothing changes until 保存; the key's value never changes; a verb added rides the
  *  key's grants (the hint says so — no new first-use card); a verb taken away is refused from its next call. */
 export function showEditDialog(key, data, { refresh } = {}) {
-  const { body, close } = createModalShell({ id: 'vault-ak-edit', title: t('Edit "{name}"', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true });
+  // lane dialog-unsaved-guard: a verb or a limit changed and not saved ⇒ ✕ / Esc / the backdrop asks
+  const { body, close } = createModalShell({ id: 'vault-ak-edit', title: t('Edit "{name}"', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() } });
   const vp = verbPicks(key.scopes);
   body.append(el('div', 'vw-ak-sec', t('What it may do')), vp.node,
     el('div', 'vw-ak-hint vw-ak-grant-hint', t('A verb you add works at once wherever this key is granted — a grant is for the key and a conversation, not for each verb; a verb you take away is refused from its next call.')));
@@ -240,19 +242,23 @@ export function showEditDialog(key, data, { refresh } = {}) {
   limWrap.append(el('div', 'vw-ak-sec', t('What the conversations it opens may use')), ed.node);
   body.append(limWrap);
   limitsFollowOpen(vp.boxes, limWrap);
+  const drawn = () => JSON.stringify([vp.boxes.filter((b) => b.checked).map((b) => b.value), ed.value()]);
+  const base = drawn();
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
   const save = el('button', 'btn-create vw-ak-edit-save', t('Save'));
   cancel.type = save.type = 'button';
   cancel.onclick = () => close();
-  save.onclick = async () => {
+  const doSave = async () => {
     const scopes = vp.boxes.filter((b) => b.checked).map((b) => b.value);
     const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/edit`, { scopes, ...(scopes.includes(OPEN_VERB) ? { limits: ed.value() } : {}) });
-    if (!r || !r.ok) { showToast(failWords(r), { type: 'error' }); return; }
+    if (!r || !r.ok) { showToast(failWords(r), { type: 'error' }); return false; }
     showToast(t('Saved'));
     close();
     refresh?.();
+    return true;
   };
+  save.onclick = () => { doSave(); };
   f.append(cancel, save);
   body.parentNode.append(f);
 }
@@ -516,31 +522,38 @@ function reachRows(initial, data, { id }) {
 }
 /** The reach dialog (lane key-instance-scope): one grant's reach, changed — the key row's chip opens it; 保存 writes it. */
 export function showReachDialog(key, g, data, { refresh } = {}) {
-  const { body, close } = createModalShell({ id: 'vault-ak-reach', title: t('Reach of "{name}" for {subject}', { name: key.name, subject: subjectName(g.subject, data) }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true });
+  // lane dialog-unsaved-guard: the reach changed and not saved ⇒ ✕ / Esc / the backdrop asks
+  const { body, close } = createModalShell({ id: 'vault-ak-reach', title: t('Reach of "{name}" for {subject}', { name: key.name, subject: subjectName(g.subject, data) }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => JSON.stringify(rows.value()) !== base, save: () => doSave() } });
   body.append(el('div', 'vw-ak-hint', t('Which other conversations that conversation may rename, end or archive with this key. What it opened, what a grant names and itself are always within reach.')));
   const rows = reachRows(g.reach, data, { id: g.id });
   body.append(rows.node);
+  const base = JSON.stringify(rows.value());
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
   const save = el('button', 'btn-create vw-ak-reach-save', t('Save'));
   cancel.type = save.type = 'button';
   cancel.onclick = () => close();
-  save.onclick = async () => {
+  const doSave = async () => {
     const v = rows.value();
-    if (v === null) { showToast(t('Pick at least one Task Group'), { type: 'error' }); return; }
+    if (v === null) { showToast(t('Pick at least one Task Group'), { type: 'error' }); return false; }
     const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/reach`, { reach: v });
-    if (!r || !r.ok) { showToast(failWords(r), { type: 'error' }); return; }
+    if (!r || !r.ok) { showToast(failWords(r), { type: 'error' }); return false; }
     showToast(t('Saved'));
     close();
     refresh?.();
+    return true;
   };
+  save.onclick = () => { doSave(); };
   f.append(cancel, save);
   body.parentNode.append(f);
 }
 
 /** 授权给…: every live conversation and Task Group, multi-select; checked = granted (unchecking takes a grant back). */
 export function showGrantPicker(key, data, { refresh } = {}) {
-  const { body, close } = createModalShell({ id: 'vault-ak-grant', title: t('Grant "{name}" to', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true });
+  // lane dialog-unsaved-guard: a tick or the new grants' reach changed and not saved ⇒ ✕ / Esc / the backdrop asks
+  const { body, close } = createModalShell({ id: 'vault-ak-grant', title: t('Grant "{name}" to', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() } });
   const subjects = (data && data.subjects) || { sessions: [], groups: [] };
   const had = new Map(key.grants.filter((g) => g.mode === 'always').map((g) => [g.subject, g.id]));
   const boxes = [];
@@ -564,23 +577,27 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   const rows = reachRows(null, data, { id: 'picker' });
   body.append(rows.node);
   body.append(el('div', 'vw-ak-hint', t('A conversation granted the key uses it with its own session — it never sees the key\'s value.')));
+  const drawn = () => JSON.stringify([boxes.map((b) => b.checked), rows.value()]);
+  const base = drawn();
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
   const save = el('button', 'btn-create vw-ak-save', t('Save'));
   cancel.type = save.type = 'button';
   cancel.onclick = () => close();
-  save.onclick = async () => {
+  const doSave = async () => {
     const add = boxes.filter((b) => b.checked && !had.has(b.value)).map((b) => b.value);
     const drop = boxes.filter((b) => !b.checked && had.has(b.value)).map((b) => had.get(b.value));
     const reach = rows.value();
-    if (add.length && reach === null) { showToast(t('Pick at least one Task Group'), { type: 'error' }); return; }
+    if (add.length && reach === null) { showToast(t('Pick at least one Task Group'), { type: 'error' }); return false; }
     let bad = null;
     if (add.length) { const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/grants`, { subjects: add, reach }); if (!r || !r.ok) bad = r || {}; }
     for (const gid of drop) { const r = await fetchJson(`/api/automation/grants/${encodeURIComponent(gid)}`, { method: 'DELETE' }); if (!r || !r.ok) bad = r || {}; }
     if (bad) showToast(failWords(bad), { type: 'error' }); else showToast(t('Saved'));
     close();
     refresh?.();
+    return true;
   };
+  save.onclick = () => { doSave(); };
   f.append(cancel, save);
   body.parentNode.append(f);
 }
@@ -588,7 +605,10 @@ export function showGrantPicker(key, data, { refresh } = {}) {
 /** 铸造…: a name + the verbs it may do (the closed table; a billed verb says so) + — when it may open conversations — the
  *  limits of what they may use (lane automation-open-limits). The value is sealed and never shown here. */
 export function showMintDialog({ refresh, data = null } = {}) {
-  const { body, close } = createModalShell({ id: 'vault-ak-mint', title: t('Mint an automation key'), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true });
+  // lane dialog-unsaved-guard: a name typed or a verb ticked and not minted ⇒ ✕ / Esc / the backdrop asks (Mint / Discard /
+  // Keep editing); Discard clears what was typed from the page
+  const { body, close } = createModalShell({ id: 'vault-ak-mint', title: t('Mint an automation key'), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => !!name.value.trim() || boxes.some((b) => b.checked), save: () => doMint(), saveLabel: t('Mint'), discard: () => { name.value = ''; for (const b of boxes) b.checked = false; } } });
   const name = el('input', 'vw-ak-name');
   name.type = 'text'; name.maxLength = 60; name.placeholder = t('Name'); name.setAttribute('aria-label', t('Name')); name.spellcheck = false;
   body.append(name, el('div', 'vw-ak-sec', t('What it may do')));
@@ -606,14 +626,16 @@ export function showMintDialog({ refresh, data = null } = {}) {
   const mint = el('button', 'btn-create vw-ak-mint-go', t('Mint'));
   cancel.type = mint.type = 'button';
   cancel.onclick = () => close();
-  mint.onclick = async () => {
+  const doMint = async () => {
     const scopes = boxes.filter((b) => b.checked).map((b) => b.value);
     const r = await post('/api/automation/keys', { name: name.value, scopes, ...(scopes.includes(OPEN_VERB) ? { limits: ed.value() } : {}) });
-    if (!r || !r.ok) { showToast(failWords(r), { type: 'error' }); return; }
+    if (!r || !r.ok) { showToast(failWords(r), { type: 'error' }); return false; }
     showToast(t('Minted — its value stays sealed in the vault'));
     close();
     refresh?.();
+    return true;
   };
+  mint.onclick = () => { doMint(); };
   f.append(cancel, mint);
   body.parentNode.append(f);
   setTimeout(() => name.focus(), 0);

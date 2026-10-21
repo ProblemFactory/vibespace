@@ -313,8 +313,21 @@ The user gives you two DIFFERENT things, in this order:
     `--choice` the judge picks one of the options (or `none`, never a hit);
     threshold 0.5–0.9 (default 0.7); at most `--per-hour` judgments an hour
     (≤ 60, default 20). The wake's `why` names the condition and the verdict
-    (`decision: … → 0.82` / `→ billing 0.71`). No key, the day's budget spent or
-    the hour cap reached ⇒ that message is simply not a hit.
+    (`decision: … → 0.82` / `→ billing 0.71`).
+  - a judged rule that CANNOT run is said, never silent: the `watch` answer
+    (exit 0 — the rule is saved either way; exit 2 only for a malformed rule),
+    `watch --show <conv>` and `watches` end each judged row with its road —
+    `judged rules: live (today's budget N% used)` or `judged rules will NOT
+    run: <why> — the rule is saved and starts <when>` (the plugin or its
+    switch off, no key, the day's budget spent, the rule's hour used: the
+    door that brings it back is named; a later flip makes it live with no
+    new `watch`). A message it skipped meanwhile is NOT a "no": it is judged
+    when the road returns, up to the reply-judging window after it arrived
+    (Settings › Channels, default 24 h; kept in memory — a restart forgets
+    what was owed), and your next turn carries ONE line a day per cause:
+    `N messages matched nothing today because your judged rules could not
+    run: <why>` (a next-turn line, never a wake). The user is told once a day
+    in For you when the budget paused judged rules.
   - the whole row as JSON: `--spec '{"notify":"digest","digestMinutes":60,
     "filter":{"match":"every","rules":[{"kind":"regex","value":"^deploy"},
     {"kind":"has-attachment"}]},"dailyWakeCap":10}'` or `--spec @row.json`

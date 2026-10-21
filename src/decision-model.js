@@ -19,6 +19,9 @@
  *    flight + this call's estimate (input tokens × `rateOf`), the day = the instance's local day, the default
  *    ceiling = 100 cents (owner 2026-10-12: 1 USD a day); `settleUsd` — what a call finally costs (the vendor's
  *    recorded cost, else the reservation; an answered 4xx / 5xx costs 0); `nextBackoff` — a wall is never retried;
+ *  · `judgedRoadState` — THE ONE VERDICT on a judged rule's road (lane judged-watch-state): the plugin, its switch, the
+ *    key, today's money, the rule's hour ⇒ {live, why}; `budgetVerdict` reads it, every door words it (`judgedRoadLine`,
+ *    `judgedSkipLine`) — a rule that cannot run says so to the one who set it and to the one who pays;
  *  · `rowStopOf` — the answers that stop the ROW until the owner changes the key or the model (401 / 403 the key,
  *    402 the plan, 400 the request's shape — lane decision-vendor-hygiene), never a call a record;
  *  · `oneShotBody` — THE request body of both vendor callers of the row (the judge and the text client): the bytes
@@ -356,6 +359,65 @@ function rateOf(stats, pricePerMtok = PRICE_PER_MTOK_USD.openai) {
   if ((Number(st.calls) || 0) >= RATE_MIN_CALLS && Number(st.inputTokens) > 0 && Number(st.usd) > 0) return Number(st.usd) / Number(st.inputTokens);
   return (Number(pricePerMtok) || 0) / 1e6;
 }
+// ── THE JUDGED ROAD (lane judged-watch-state, B-f42e — the owner 2026-10-21 「做吧」 on «judged rules silently do not fire»)
+/** The road's refusals in the verdict's order, and the paid call's gate word for each (budgetVerdict asks the same verdict). */
+const ROAD_WHY = Object.freeze(['plugin-off', 'rules-off', 'routing-off', 'no-key', 'budget-spent', 'hour-cap']);
+const ROAD_GATE_WHY = Object.freeze({ 'plugin-off': 'plugin-off', 'rules-off': 'feature-off', 'routing-off': 'feature-off', 'no-key': 'no-key', 'budget-spent': 'daily-budget', 'hour-cap': 'per-hour' });
+/** THE ONE VERDICT on a judged rule's road (a `--kind decision` rule, a `--reply-to-sent --infer` rule): can it judge a
+ *  message NOW? facts = {pluginOn, rulesOn (the switch the rule rides: Rules — Routing for a `route` rule), keyPresent,
+ *  budgetLeft (USD left today: the ceiling − settled − reserved), estUsd (what ONE judgment may cost: less than that left
+ *  is a spent day — the call the next message needs would be refused), budgetUsd (the ceiling: the % used), hourCapHit
+ *  (this rule, this hour), rulePerHour, route}. → {live: true, why: null, usedPct} | {live: false, why ∈ ROAD_WHY,
+ *  perHour?}. Order: the plugin, its switch, the key, today's money, the rule's own hour. THE PAID CALL'S GATE
+ *  (`budgetVerdict`) reads this verdict for the first four; the watch answer, `watch --show`, `watches`, the agent's
+ *  not-a-hit line, the owner's paused notice and the Notify… chip word it — never a second copy of the rule. */
+function judgedRoadState({ pluginOn = false, rulesOn = false, keyPresent = false, budgetLeft = 0, estUsd = 0, budgetUsd = null, hourCapHit = false, rulePerHour = null, route = false } = {}) {
+  if (!pluginOn) return { live: false, why: 'plugin-off' };
+  if (!rulesOn) return { live: false, why: route ? 'routing-off' : 'rules-off' };
+  if (!keyPresent) return { live: false, why: 'no-key' };
+  if (microUsd(estUsd) > microUsd(budgetLeft)) return { live: false, why: 'budget-spent' };
+  if (hourCapHit) return { live: false, why: 'hour-cap', ...(Number(rulePerHour) > 0 ? { perHour: Number(rulePerHour) } : {}) };
+  const cap = Number(budgetUsd);
+  return { live: true, why: null, usedPct: budgetUsd !== null && Number.isFinite(cap) && cap > 0 ? Math.min(100, Math.max(0, Math.round((1 - Number(budgetLeft) / cap) * 100))) : null };
+}
+/** The road's words for an AGENT (agent-facing English, never t()): [why, when the saved rule starts]. The judge's own
+ *  refusals past the verdict (a backoff, a refused key / model, the account's "never judge") are worded too. */
+const ROAD_WORDS = Object.freeze({
+  'plugin-off': Object.freeze(['the LLM plugin is off', 'when the user turns the LLM plugin on (Settings › Plugins)']),
+  'rules-off': Object.freeze(['the LLM plugin\'s Rules switch is off', 'when the user turns on its Rules switch (Settings › Plugins › LLM plugin: “Notification rules can use a sentence as the condition” — 中文「通知规则里可以用一句话当条件」)']),
+  'routing-off': Object.freeze(['the LLM plugin\'s Routing switch is off', 'when the user turns on its Routing switch (Settings › Plugins › LLM plugin: “Hand messages to a task group or agent by what they say” — 中文「按内容把消息分给某个岗位或 agent」)']),
+  'no-key': Object.freeze(['no key is saved for the LLM plugin', 'when the user sets a key on the Language model card (⚙ → System → Integrations & keys)']),
+  'budget-spent': Object.freeze(['today\'s LLM budget is spent', 'with tomorrow\'s budget (or when the user raises the daily budget in Settings › Plugins › LLM plugin)']),
+  'hour-cap': Object.freeze(['the rule used its judgments for this hour', 'in the next hour (the rule\'s own --per-hour cap)']),
+  backoff: Object.freeze(['the LLM provider answered an error and is being given a pause', 'when the pause ends (a few minutes)']),
+  reconnect: Object.freeze(['the LLM provider refused the saved key', 'when the user saves a new key (⚙ → System → Integrations & keys)']),
+  plan: Object.freeze(['the LLM provider refused the judging model (its plan)', 'when the user changes the judging model or the key (Settings › Plugins › LLM plugin)']),
+  shape: Object.freeze(['the judging model refused the request', 'when the user changes the judging model (Settings › Plugins › LLM plugin)']),
+  'account-never': Object.freeze(['the user set this account to never be judged by the LLM plugin', 'when the user lifts “never judge” on the account']),
+});
+/** A paid call's refusal (budgetVerdict / the judge's `why`) → the road's word for it (`ROAD_WORDS` keys). */
+function roadWhyOf(why) {
+  const w = String(why || '');
+  const back = Object.entries(ROAD_GATE_WHY).find(([, g]) => g === w);
+  return ROAD_WORDS[w] ? w : back ? back[0] : w === 'use-budget' ? 'budget-spent' : 'backoff';
+}
+/** The line a watch answer, `watch --show` and `watches` end with — «judged rules: live (today's budget N% used)» or
+ *  «judged rules will NOT run: <why> — the rule is saved and starts <when>». `skipped` = the messages it skipped today. */
+function judgedRoadLine(st, { skipped = 0 } = {}) {
+  if (!st || typeof st !== 'object') return '';
+  const n = Math.max(0, Math.floor(Number(skipped) || 0));
+  const said = n ? ` — ${n} message${n === 1 ? '' : 's'} matched nothing today because of it` : '';
+  if (st.live) return `judged rules: live (today's budget ${Number.isFinite(Number(st.usedPct)) && st.usedPct !== null ? `${st.usedPct}%` : '—'} used)${said}`;
+  const w = ROAD_WORDS[st.why] || ROAD_WORDS.backoff;
+  return `judged rules will NOT run: ${w[0]}${st.why === 'hour-cap' && st.perHour ? ` (${st.perHour} an hour)` : ''} — the rule is saved and starts ${w[1]}${said}`;
+}
+/** THE NOT-A-HIT LINE — said ONCE a day per cause to the agent a judged rule notifies (its next-turn delivery, never a
+ *  wake): what was skipped is NOT a no — it is judged when the road returns, within `windowHours`. */
+function judgedSkipLine(n, why, { windowHours = 24 } = {}) {
+  const k = Math.max(1, Math.floor(Number(n) || 1));
+  const w = ROAD_WORDS[why] || ROAD_WORDS.backoff;
+  return `${k} message${k === 1 ? '' : 's'} matched nothing today because your judged rules could not run: ${w[0]}. A skipped message is not a "no": it is judged when the road returns (up to ${windowHours} h after it arrived), and the rule starts ${w[1]}. Later skips today for this reason are counted, not said again — \`vibespace-channels watches\` shows the count.`;
+}
 /** THE GATE. Units = USD: the day's SETTLED cost + the RESERVED estimates of calls in flight (`spentUsd`) + this
  *  call's estimate (`estUsd`) against the ceiling in cents. The engine reserves `estUsd` in the same synchronous
  *  step as this verdict, so N calls in flight can never all pass one ceiling (decision-verify F2).
@@ -368,15 +430,17 @@ function budgetVerdict({ pluginOn = false, featureOn = false, keyPresent = false
   spentUsd = 0, estUsd = 0, ceilingCents = undefined, ceilingUsd = undefined, hourCount = 0, perHour = Infinity, useSpentUsd = 0, useCeilingCents = undefined } = {}) {
   const cents = ceilingCents !== undefined ? Number(ceilingCents) : ceilingUsd !== undefined ? Number(ceilingUsd) * 100 : DAILY_BUDGET_CENTS_DEFAULT;
   const ceiling = (Number.isFinite(cents) && cents >= 0 ? cents : DAILY_BUDGET_CENTS_DEFAULT) / 100;
-  if (!pluginOn) return { ok: false, why: 'plugin-off' };
-  if (!featureOn) return { ok: false, why: 'feature-off' };
-  if (!keyPresent) return { ok: false, why: 'no-key' };
+  // lane judged-watch-state: THE ROAD'S ONE VERDICT decides the switches, the key and the day's money (in 1e-8 USD steps:
+  // what is left = the ceiling − settled − reserved, against this estimate); the gate keeps its order — a spent day is
+  // said after the account, the row stops and the walls, as before
+  const road = judgedRoadState({ pluginOn, rulesOn: featureOn, keyPresent, budgetLeft: (microUsd(ceiling) - microUsd(spentUsd)) / 1e8, estUsd });
+  if (!road.live && road.why !== 'budget-spent') return { ok: false, why: ROAD_GATE_WHY[road.why] };
   if (accountNever) return { ok: false, why: 'account-never' };
   if (reconnect) return { ok: false, why: 'reconnect' };
   if (plan) return { ok: false, why: 'plan' };
   if (shape) return { ok: false, why: 'shape' };
   if (Number(backoffUntil) > Number(now)) return { ok: false, why: 'backoff', retryAt: Number(backoffUntil) };
-  if (microUsd(spentUsd) + microUsd(estUsd) > microUsd(ceiling)) return { ok: false, why: 'daily-budget', ceilingUsd: ceiling };
+  if (!road.live) return { ok: false, why: 'daily-budget', ceilingUsd: ceiling };
   const useCap = useCeilingCents === undefined || useCeilingCents === null ? null : Number(useCeilingCents);
   if (useCap !== null && Number.isFinite(useCap) && microUsd(useSpentUsd) + microUsd(estUsd) > microUsd(Math.max(0, useCap) / 100)) return { ok: false, why: 'use-budget', ceilingUsd: Math.max(0, useCap) / 100 };
   if ((Number(hourCount) || 0) >= perHour) return { ok: false, why: 'per-hour' };
@@ -996,5 +1060,6 @@ module.exports = {
   dialectOf, urlOf, questionError, buildRequest, normalizeAnswers, usageOf, estimateUsd, usdOf, estTokens, questionTokens,
   cutHeadTail, fitTokens, maskAddresses, eraseSecrets, scrub, cleanPart, scrubQuestions, inputPlan, buildInput, memoMaterial, memoKey, batchQuestions, unbatchAnswers,
   READOUT_WARN_AT, READOUT_USES, moneyText, decisionTodayLine, monthSpend,   // lane decision-spend-readout
+  ROAD_WHY, ROAD_GATE_WHY, ROAD_WORDS, judgedRoadState, roadWhyOf, judgedRoadLine, judgedSkipLine,   // lane judged-watch-state (B-f42e): THE judged road
   dayOf, rateOf, budgetVerdict, settleUsd, fetchFailOf, oneShotBody, retryAfterMs, nextBackoff, isWall, isKeyRefused, ROW_STOPS, rowStopOf, journalRow, rubricQuestions, rubricText, attentionVerdict, criteriaProposal,
 };

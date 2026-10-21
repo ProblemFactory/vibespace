@@ -54,6 +54,11 @@
  * with the memo = the candidate record + the sent message (judged once, for ever); the Rules switch gates it, the day's
  * budget bounds it like every use, and its journal line carries the score (`p`).
  *
+ * THE JUDGED ROAD (lane judged-watch-state, B-f42e): `roadFacts(use)` = what M.judgedRoadState reads for a judged rule
+ * (the plugin, its switch, the key, what is left today against one judgment's price) — the channels engine's pre-passes,
+ * the watch answers and `watches` ask it; `notePaused(names)` = the owner's ONE For-you item a day when the budget paused
+ * judged rules (a plugin row filed low, the door = the plugin's settings).
+ *
  * THE LEDGER (lane rule-learning, design q-037 P0): the ONE other paid caller on this pool — src/server/text-model-client.js
  * (the chat completions that DRAFT the person's 「我关心什么」 block, use `learn`) — is created HERE (`textModel`) over
  * `ledger`: the plugin's switches + budget, what the day spent (settled + reserved, every use), one use's share, a
@@ -404,6 +409,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     return { ran: true, judged, placed, stopped, untied };
   }
   function attachInbox(store, { tickMs = 60 * 1000, board = null } = {}) {
+    forYou = store && typeof store.add === 'function' ? store : null;   // lane judged-watch-state: the paused-rules notice files here
     inbox = store && typeof store.setJudged === 'function' && typeof store.openItems === 'function' ? store : null;
     inboxBoard = typeof board === 'function' ? board : null;
     if (!inbox) return;
@@ -413,6 +419,48 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       inboxTimer = setInterval(() => { inboxSwitched(); if (now() - inboxLastPass >= M.INBOX.passMs) inboxPass().catch((e) => log.warn?.(`[decision] For-you pass failed: ${e.message}`)); }, tickMs);
       if (inboxTimer.unref) inboxTimer.unref();
     }
+  }
+
+  // ── THE JUDGED ROAD (lane judged-watch-state, B-f42e) ─────────────────────────────────────────────────────────────
+  /** The road's FACTS for a judged rule's use (`rule` · `routing` · `reply-infer`) — what M.judgedRoadState reads; the
+   *  caller adds the rule's own hour. `estUsd` = ONE judgment at the use's input ceiling (the price the next call needs).
+   *  No call, no reservation. */
+  function roadFacts(use = 'rule') {
+    const s = settings();
+    const cred = credential();
+    const feature = FEATURE_OF[use] || 'rules';
+    const rate = cred ? M.rateOf((usage.rate || {})[rateKey(cred)], M.PRICE_PER_MTOK_USD[cred.provider]) : 0;
+    const ceiling = s.dailyBudgetCents / 100;
+    return { pluginOn: s.pluginOn, rulesOn: s.features[feature] === true, keyPresent: !!cred, route: feature === 'routing',
+      budgetLeft: (Math.round(ceiling * 1e8) - Math.round((totalOf(today()).usd + reservedUsd()) * 1e8)) / 1e8, estUsd: M.inputPlan(use).ceiling * rate, budgetUsd: ceiling };
+  }
+  /** THE OWNER IS TOLD ONCE: the day's budget paused judged rules (the channels engine names whose) ⇒ ONE For-you item a
+   *  day — the attention model's plugin row filed `low` (band 5: no badge, no toast), its door the plugin's settings (the
+   *  budget row); later names the same day re-word that item while it is open, a dismissed one is never filed again that
+   *  day. → the item id | null (no store wired). */
+  let forYou = null, paused = { day: null, id: null, names: [] };
+  function notePaused(names = []) {
+    if (!forYou) return null;
+    const day = today().day;
+    if (paused.day !== day) paused = { day, id: null, names: [] };
+    const more = [...new Set((Array.isArray(names) ? names : []).map((x) => String(x || '').slice(0, 80)).filter(Boolean))].filter((x) => !paused.names.includes(x));
+    if (paused.id) {
+      if (!more.length) return paused.id;
+      let it = null;
+      try { it = typeof forYou.get === 'function' ? forYou.get(paused.id) : null; } catch { it = null; }
+      if (!it || it.status !== 'open') return paused.id;   // handled or dismissed: never repeated that day
+    }
+    paused.names = [...paused.names, ...more].slice(0, 12);
+    const who = paused.names.join(', ');
+    const text = `Today's LLM budget is spent (${day}) — judged notification rules paused`;
+    const back = 'They resume with tomorrow\'s budget, or now if you raise the daily budget (Settings › Plugins › LLM). The messages they skipped are judged then.';
+    try {
+      const r = forYou.add(ROW_ID, { text, detail: `Paused today: ${who}. ${back}`, origin: 'plugin', plugin: ROW_ID, kind: 'action', urgency: 'low', by: 'agent', sessionName: 'LLM plugin',
+        i18n: { text: { key: 'Today\'s LLM budget is spent ({day}) — judged notification rules paused', params: { day } }, detail: [{ key: 'Paused today: {names}', params: { names: who } }, { key: back }] },
+        open: { kind: 'plugin-settings', plugin: ROW_ID, panel: 'budget' } });
+      paused.id = (r && r.id) || paused.id;
+    } catch (e) { log.warn?.(`[decision] the budget's paused-rules item was not filed: ${e.message}`); }
+    return paused.id;
   }
 
   // ── THE LEDGER (lane rule-learning) — the budget door of the text-model client (header) ──
@@ -426,7 +474,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   });
   const textModel = require('./text-model-client.js').create({ integrations, ledger, fetchImpl, now, log, baseUrl: baseUrlFor && baseUrlFor.openrouter ? baseUrlFor.openrouter : null });
 
-  return { judge, testRunner, status, attachPlugin, settings, memoSize: () => memo.size, files: F, ROW_ID, attachInbox, inboxPass, inboxSwitched, grouping, ledger, textModel };
+  return { judge, testRunner, status, attachPlugin, settings, memoSize: () => memo.size, files: F, ROW_ID, attachInbox, inboxPass, inboxSwitched, grouping, ledger, textModel, roadFacts, notePaused };
 }
 
 module.exports = { create, ROW_ID, FEATURE_OF, TEST_SENTENCE };

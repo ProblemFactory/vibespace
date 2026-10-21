@@ -1507,8 +1507,8 @@ class App {
     });
 
     const backendInput = document.getElementById('input-backend');
-    backendInput.addEventListener('change', () => this._applySessionBackendOptions(backendInput.value, { applyDefaults: true }));
-    this._applySessionBackendOptions(backendInput.value || 'claude', { applyDefaults: true });
+    backendInput.addEventListener('change', () => this.applyBackend(backendInput.value, { why: 'pick' }));
+    this.applyBackend(backendInput.value || 'claude', { why: 'boot' });
 
     // Enter in any text input of the New Session dialog submits it
     document.getElementById('dialog-new-session').addEventListener('keydown', (e) => {
@@ -1613,6 +1613,32 @@ class App {
       effort,
       extraArgs: this.settings.get(`${prefix}.defaultExtraArgs`) ?? '',
     };
+  }
+
+  /** THE ONE WAY A BACKEND REACHES THE NEW SESSION DIALOG (lane new-session-account-follows-backend, inc-mvi2cv4b-hdwv:
+   *  after an Antigravity conversation the next dialog said Claude but still offered Antigravity's accounts — the open
+   *  SET the select, which fires no `change`, after the account row had been filled from the previous open's value).
+   *  It sets the select AND refills every row derived from it: the session options with this backend's defaults, then
+   *  the account row, the browser-profile row and the model menu. The open calls it once it has decided the backend; a
+   *  pick calls it through the select's `change`. The rows derive from what the select now HOLDS — what Create sends.
+   *  `why` ('boot' | 'open' | 'pick' | a caller's word) rides the incident recorder's op ring. */
+  applyBackend(backend, { why = 'pick' } = {}) {
+    const sel = document.getElementById('input-backend');
+    if (sel) sel.value = backend || 'claude';
+    const be = sel ? (sel.value || 'claude') : (backend || 'claude');
+    this._applySessionBackendOptions(be, { applyDefaults: true });
+    this._refillNewSessionRows();
+    try { window.__vsOp?.('ns-backend', { backend: be, why: String(why || 'pick') }); } catch { }
+  }
+
+  /** The New Session rows derived from the dialog's CHOICES (its backend, its machine, its Task Group), refilled from
+   *  what the selects hold NOW: the account row (this backend's accounts, the machine's words), the browser-profile row
+   *  (the group's default profile; none on another machine), the model menu (the account's provider — deferred, so it
+   *  reads the account row this pass filled). Whatever applies a choice runs it; no row is filled before its choice. */
+  _refillNewSessionRows() {
+    this._updateAcctRow?.();
+    this._fillBrowserProfileRow?.(document.getElementById('input-task')?.value || '');
+    this._refreshModelMenu?.();
   }
 
   _applySessionBackendOptions(backend, { applyDefaults = false } = {}) {
@@ -1894,6 +1920,13 @@ class App {
   showNewSessionDialog({ cwd, backend, hostId, taskId } = {}) {
     if (this.isMobile) this.sidebar.toggle(false); // close sidebar so dialog is visible
     this._showDialog('dialog-new-session');
+    // THE CHOICES FIRST (lane new-session-account-follows-backend): every select still holds the PREVIOUS open's value
+    // until this open sets it, so the backend and the machine are decided and set before any row derived from them is
+    // filled — decide → apply (applyBackend, below) → fill the rest. A machine the list does not hold yet is set again
+    // when the list lands (below), and its rows follow it then.
+    const b = backend || 'claude';
+    const hostSel = document.getElementById('input-host');
+    if (hostSel) hostSel.value = hostId || '';
     // Task dropdown — new sessions can start "in" a task: pre-selected when
     // opened from the task board, freely pickable otherwise. Picking a task
     // prefills the cwd from its first auto-include folder (never clobbers a
@@ -1908,8 +1941,7 @@ class App {
         o.textContent = tg.title + (tg.archived ? ' ' + t('(archived)') : '');
         taskSel.appendChild(o);
       }
-      taskSel.value = taskId || '';
-      this._fillBrowserProfileRow(taskSel.value); // agent browser P1: the row defaults to the group's default profile
+      taskSel.value = taskId || ''; // agent browser P1: the profile row defaults to the group's default profile (applyBackend fills it)
       taskSel.onchange = () => {
         this._fillBrowserProfileRow(taskSel.value);
         const tg = this.sidebar?._taskById?.(taskSel.value);
@@ -2049,19 +2081,18 @@ class App {
       }
     };
     this._updateAcctRow = updateAcctRow; // freshest closure wins
-    updateAcctRow();
     if (!this._acctListenersWired) {
       // Wire ONCE (this method runs on every dialog open) — call through the
-      // stored freshest updater.
+      // stored freshest updater. (A backend pick is wired once at setup: applyBackend.)
       this._acctListenersWired = true;
-      document.getElementById('input-backend')?.addEventListener('change', () => { this._updateAcctRow?.(); this._fillBrowserProfileRow?.(document.getElementById('input-task')?.value || ''); });
-      document.getElementById('input-host')?.addEventListener('change', () => { this._updateAcctRow?.(); this._fillBrowserProfileRow?.(document.getElementById('input-task')?.value || ''); this._refreshModelMenu?.(); }); // identity r3: a host pick hides the profile row
+      document.getElementById('input-host')?.addEventListener('change', () => this._refillNewSessionRows()); // identity r3: a host pick hides the profile row
       document.getElementById('input-account')?.addEventListener('change', () => this._refreshModelMenu?.()); // q-053 §3: the menu follows the account's provider
     }
+    this.applyBackend(b, { why: 'open' }); // THIS open's backend: the session options, the account row, the profile row, the model menu
     // Host dropdown (remote sessions run over ssh + remote dtach; terminal only until P3)
-    const hostSel = document.getElementById('input-host');
     if (hostSel) {
       fetchJson('/api/hosts').then(d => {
+        const was = hostSel.value;
         this._nsHosts = d?.hosts || []; // account row reads name/transport from here
         hostSel.innerHTML = `<option value="">${t('Local')}</option>`;
         for (const h of d?.hosts || []) {
@@ -2071,20 +2102,18 @@ class App {
           hostSel.appendChild(o);
         }
         hostSel.value = hostId || '';
+        if (hostSel.value !== was) this._refillNewSessionRows(); // the machine landed only now — a programmatic set fires no `change`
         // both terminal and chat supported on remote hosts (chat = ssh -T pipe)
         // switching host re-sources the path list + autocomplete target
         hostSel.onchange = () => this._fillCwdRecent(hostSel.value);
         this._fillCwdRecent(hostSel.value);
       });
     }
-    const b = backend || 'claude';
-    document.getElementById('input-backend').value = b;
-    this._applySessionBackendOptions(b, { applyDefaults: true });
     // lane L (the naive-user study, S6-01 / S12-02: the previous session's name
     // stayed in the field, so typing appended — "S11 chromeS12 first…"). A name
     // names ONE session: the field starts empty on every open. The other rows
     // keep their designed prefills (the cwd the caller passed or the last one
-    // typed, the Task Group, the backend defaults applied just above).
+    // typed, the Task Group, the backend defaults applyBackend applied above).
     { const nameInput = document.getElementById('input-session-name'); if (nameInput) nameInput.value = ''; }
     document.getElementById('input-mode').value = this.settings.get('session.defaultMode') ?? 'chat';
     if (cwd) document.getElementById('input-cwd').value = cwd;

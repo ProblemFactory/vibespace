@@ -1237,7 +1237,7 @@ const REPAINT = [
   ['the For-you popup + mini inbox (+ a live arrival toast, r5 ⑤)', 'src/lib/user-todos-panel.js', [/model\.on\('todos', \(next\) => apply\(next\)\);/, /for \(const el of document\.querySelectorAll\('#global-toasts > \.global-toast\[data-todo-id\]'\)\) \{\s*const it = byId\(el\.dataset\.todoId\);[\s\S]{0,240}?const want = `\$\{el\.dataset\.todoHead\} · \$\{nameFor\(it\.sessionKey, \[it\]\)\}: \$\{wordsOf\(it\)\}`;\s*if \(b\.textContent !== want\) b\.textContent = want;/]],
   ['the For-you window', 'src/lib/inbox-window.js', /model\.on\('todos', \(\) => render\(\), \{ signal \}\);/],
   // verify r7: a CLOSED popup holds no rows — every closer drops them (a draft kept first) and a render while closed drops them
-  ['the For-you popup CLOSED (its rows leave with the close, verify r7)', 'src/lib/user-todos-panel.js', [/const hidePopup = \(\) => \{ popup\.classList\.add\('hidden'\); layout = null; dropRows\(\); \};/, /const dropRows = \(\) => \{ if \(!popup\.firstChild\) return; stashDrafts\(popup\); popup\.replaceChildren\(\); \};/, /onOutsidePress\(popup, hidePopup, \{/, /if \(popup\.classList\.contains\('hidden'\)\) \{ layout = null; dropRows\(\); return; \}/]],
+  ['the For-you popup CLOSED (its rows leave with the close, verify r7)', 'src/lib/user-todos-panel.js', [/const hidePopup = \(why\) => \{ notePopupHide\(why\); popup\.classList\.add\('hidden'\); layout = null; dropRows\(\); \};/, /const dropRows = \(\) => \{ if \(!popup\.firstChild\) return; stashDrafts\(popup\); popup\.replaceChildren\(\); \};/, /onOutsidePress\(popup, \(e\) => hidePopup\(e\?\.type === 'blur' \? 'frame' : 'outside'\), \{/, /if \(popup\.classList\.contains\('hidden'\)\) \{ layout = null; dropRows\(\); return; \}/]],
   ['Session Properties (+ Now + history under the select guard, r5 ④)', 'src/lib/session-props.js', [/if \(!\['tasks-updated', 'session-status-updated', 'active-sessions', 'accounts-updated', 'user-state-updated'\]\.includes\(msg\.type\)\) return;/, /if \(root\.contains\(document\.activeElement\) && document\.activeElement\.tagName === 'SELECT'\) \{\s*const nv = root\.querySelector\('\.sp-now-value'\);\s*if \(nv\) \{ const h = nowHtml\(s\); if \(nv\.innerHTML !== h\) nv\.innerHTML = h; \}\s*const hl = root\.querySelector\('\.session-history-list'\);\s*if \(hl\) fillHistory\(hl, s\);\s*return;\s*\}/]],
   ['the sidebar session card\'s history (a named clear passes the change guard, r5 ②)', 'src/lib/sidebar-tasks.js', /const changed = sig !== this\._statusSig \|\| \(Array\.isArray\(msg\.cleared\) && msg\.cleared\.length > 0\);/],
   ['the Background Work window', 'src/lib/jobs-panel.js', /const off = app\.ws\.onGlobal\(\(msg\) => \{ if \(msg\.type === 'jobs-updated'\) render\(\); \}\);/],
@@ -1252,7 +1252,7 @@ const repaintCensus = (srcs) => REPAINT.filter(([, f, re]) => { const src = srcs
   ok(missing.length === 0, `H5 each of the ${REPAINT.length} surfaces re-renders from the CURRENT record on its store's broadcast (the clear's frame included)`, missing);
 }
 // verify r7: the popup has ONE closer — a site that only hides it would leave its rows (the words) in the hidden DOM
-const oneCloser = (src) => (src.match(/\bpopup\.classList\.add\('hidden'\)/g) || []).length === 1 && /const hidePopup = \(\) => \{ popup\.classList\.add\('hidden'\);/.test(src);
+const oneCloser = (src) => (src.match(/\bpopup\.classList\.add\('hidden'\)/g) || []).length === 1 && /const hidePopup = \(why\) => \{ notePopupHide\(why\); popup\.classList\.add\('hidden'\);/.test(src);
 ok(oneCloser(read('src/lib/user-todos-panel.js')), 'H5 …the For-you popup has ONE closer (hidePopup — its rows leave with it): no other site hides the popup and leaves its rows (verify r7)');
 // ── H7 ORDER (verify r6 — census adequacy: r5 ④'s latest-fill guard reverted on a copy turned NO gate red — not the
 // census, not the chrome census, not the fix's own pin, which matched the catch branch's twin) ──
@@ -1450,7 +1450,7 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
   }
   // 13. verify r7: the outside press only HIDING the popup again (its rows — a record cleared meanwhile — stay in the DOM)
   {
-    const rel = 'src/lib/user-todos-panel.js', src = read(rel), from = '  onOutsidePress(popup, hidePopup, {';
+    const rel = 'src/lib/user-todos-panel.js', src = read(rel), from = "  onOutsidePress(popup, (e) => hidePopup(e?.type === 'blur' ? 'frame' : 'outside'), {";
     ok(src.split(from).length === 2, 'H6 control 13 (closer-keeps-rows) anchor present once');
     const m13 = MUT.write(rel, src.replace(from, "  onOutsidePress(popup, () => popup.classList.add('hidden'), {"), 'closer-keeps-rows', { esm: true });
     const c13 = repaintCensus(libSources({ [rel]: m13 }));

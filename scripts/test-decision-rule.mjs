@@ -11,6 +11,11 @@
 //     memo — and still wakes;
 //   C the rule's hour cap spent ⇒ no call + ONE journal line (not one per record);
 //   D the plugin off ⇒ no call + one journal line per rule; the routing switch off ⇒ only the predicate is asked;
+//   G (lane judged-watch-state, B-f42e) a judged rule that CANNOT run is said, never a "no": the Rules switch off ⇒ 0 calls,
+//     ONE not-a-hit line to agent 3's next-turn stash (the 2nd skip counted, not said), the door reads rules-off; the switch
+//     on ⇒ the owed look judges BOTH skipped messages and they wake; the day's budget spent ⇒ ONE For-you item naming whose
+//     rules paused, one line, no wake; RED CONTROL (the base: no skip doors) ⇒ silent, nothing re-judged. C adds the hour
+//     cap's line; E / F add the road's chip (live · paused: budget spent · off: rules switch · zh plugin off);
 //   E the Notify… dialog's decision row in Chrome (the REAL editor, an esbuild iife over a stub HTTP server): the
 //     condition, the route options, the threshold, the cost line from the server's estimate, Save carries the moved
 //     threshold and the routes; the plugin OFF is said ON the row with Open Plugins (no greyed control); desk 1100 (en)
@@ -83,7 +88,7 @@ const PRED = F.validateRule({ kind: 'decision', condition: 'the sender asks me t
 const ROUTE = F.validateRule({ kind: 'decision', condition: 'which desk should take this message', question: 'choice', threshold: 0.6, choices: [{ value: 'billing', description: 'money, invoices, refunds', to: GA }, { value: 'tech', description: 'outages, bugs, servers', to: GB }] }).rule;
 const LIVE = [{ cid: 'agent-1', name: 'One', groups: ['T-a'] }, { cid: 'agent-2', name: 'Two', groups: ['T-b'] }, { cid: 'agent-3', name: 'Ledger', groups: [] }];
 
-async function world(name, { watchers, decisionEngine = D.eng }) {
+async function world(name, { watchers, decisionEngine = D.eng, ENGM = ENG }) {
   const A = 'dr', OPS = 'ops';
   const recs = [];
   const mint = (vid, text) => makeRecord({ adapterId: A, convId: OPS, vendorId: vid, at: Date.now() + recs.length, author: { id: 'u-ada', name: 'Ada', isSelf: false, isBot: false }, text, mentions: [], attachments: [], replyTo: null, threadKey: OPS, raw: {} });
@@ -117,7 +122,7 @@ async function world(name, { watchers, decisionEngine = D.eng }) {
   fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: A, kind: A, label: 'DR chat', enabled: true, linkedAt: 1, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: null, scan: null }] }));
   const registry = CH.createChannelRegistry(); registry.register(mod);
   const base = Date.now(); let offset = 0;
-  const e = ENG.create({ dataDir, env: {}, registry, broadcast: () => {}, log, deliver: ladder, userTodos: { add() { return { id: 'x' }; }, get() { return null; }, setStatus() {} }, serverSetting: () => undefined, liveSessions: () => LIVE, now: () => base + offset, decisionEngine });
+  const e = ENGM.create({ dataDir, env: {}, registry, broadcast: () => {}, log, deliver: ladder, userTodos: { add() { return { id: 'x' }; }, get() { return null; }, setStatus() {} }, serverSetting: () => undefined, liveSessions: () => LIVE, now: () => base + offset, decisionEngine });
   await e.pass(A, { force: true });
   const OPSC = { kind: 'conversation', convId: OPS };
   const a = await e.setAccess(A, OPSC, [{ principal: AG3, authority: 'draft' }, { principal: GA, authority: 'draft' }, { principal: GB, authority: 'draft' }]);
@@ -172,6 +177,10 @@ console.log('C the rule\'s hour cap spent ⇒ no call + ONE journal line');
   const said = w.lines.filter((l) => /decision rule d[0-9a-f]{16} not judged — per-hour/.test(l));
   ok(got.length === n + 1 && callsTo(w, 'agent-3').length === 1, `perHour 1: the first record is judged (1 call), the next two are not (${got.length - n} call in all) — no wake for them`);
   ok(said.length === 1, `ONE journal line for the spent hour, not one per record (${said.length})`, w.lines);
+  const hl = w.ladder.stash.filter((s) => s.cid === 'agent-3' && /matched nothing today/.test(s.text));
+  const hr = w.e.judgedRoadFor({ match: 'any', rules: [P1] }, { cid: 'agent-3' });
+  ok(hl.length === 1 && /^1 message matched nothing today because your judged rules could not run: the rule used its judgments for this hour\./.test(hl[0].text) && hr && hr.state.why === 'hour-cap' && /\(1 an hour\) — the rule is saved and starts in the next hour \(the rule's own --per-hour cap\) — 2 messages matched nothing today because of it$/.test(hr.line),
+    'lane judged-watch-state: the hour cap is SAID — agent 3 gets ONE not-a-hit line (the second skip counted, not said); the door reads hour-cap with today\'s 2', { hl: hl.map((s) => s.text), hr });
   w.stop();
 }
 
@@ -191,6 +200,59 @@ console.log('D the plugin off ⇒ no call; the routing switch off ⇒ only the p
   ok(got.length === n + 1 && q.body.questions.length === 1 && q.body.questions[0].type === 'predicate' && callsTo(w, 'agent-3').length === 1 && !callsTo(w, 'agent-2').length && w.lines.some((l) => /not judged — feature-off/.test(l)), 'routing off: the call carries ONLY the predicate (rules on); the route is said feature-off and routes nothing');
   D.pm.setConfig('llm', { routing: true });
   w.stop();
+}
+
+console.log('G a judged rule that cannot run is SAID and never a "no" (lane judged-watch-state, B-f42e): the agent once a day, the owner once, re-judged when the road returns + the RED base');
+{
+  const { UserTodoManager } = require(path.join(repo, 'src/user-todos.js'));
+  fs.mkdirSync(path.join(ROOT, 'g-todos'), { recursive: true });
+  const todos = new UserTodoManager({ dataDir: path.join(ROOT, 'g-todos') });
+  D.eng.attachInbox(todos, { tickMs: 0 });   // the owner's For-you store (the server wires the user-todos manager here)
+  D.pm.setConfig('llm', { rules: false });
+  const w = await world('g', { watchers: [W(AG3, [PRED])] });
+  const n = got.length;
+  await w.ingest('dr-g1', 'Invoice 21 is overdue — please pay it today.');
+  await w.ingest('dr-g2', 'Invoice 22 is overdue too.');
+  const told = w.ladder.stash.filter((s) => s.cid === 'agent-3' && /matched nothing today/.test(s.text));
+  ok(got.length === n && !w.ladder.calls.length, 'the Rules switch off: 0 calls, no wake');
+  ok(told.length === 1 && /^1 message matched nothing today because your judged rules could not run: the LLM plugin's Rules switch is off\./.test(told[0].text) && told[0].kind === 'notification' && /not a "no"/.test(told[0].text),
+    'the agent that armed the rule gets ONE line through its next-turn stash (never a wake); the second skip the same day is counted, not said again', w.ladder.stash.map((s) => s.text));
+  const rd = w.e.judgedRoadFor({ match: 'any', rules: [PRED] }, { cid: 'agent-3' });
+  ok(rd && !rd.state.live && rd.state.why === 'rules-off' && /— 2 messages matched nothing today because of it$/.test(rd.line), 'the door reads the same road: rules-off, with today\'s 2 skips', rd);
+  ok(!todos.openItems().some((i) => i.plugin === 'llm'), 'a switch the owner turned off is no budget pause: nothing in For you');
+  D.pm.setConfig('llm', { rules: true });
+  const handed = await w.e.owedPass(); await w.e.settleWakes();
+  const c3 = callsTo(w, 'agent-3');
+  ok(handed === 2 && got.length === n + 2 && c3.some((c) => /Invoice 21/.test(c.text)) && c3.some((c) => /Invoice 22/.test(c.text)), `the switch on ⇒ the owed look judges BOTH skipped messages (${got.length - n} calls) and their hits wake agent 3 — a skip was never a "no"`, { handed, c3: c3.map((c) => c.text.slice(0, 300)) });
+  const again = await w.e.owedPass();
+  ok(again === 0 && got.length === n + 2 && w.e.judgedRoadFor({ rules: [PRED] }).state.live, 'nothing is owed twice (0 handed back, 0 calls); the road reads live');
+  w.stop();
+  // the day's budget spent: the judge refuses (its journal line), the agent is told once, the owner ONCE in For you
+  D.pm.setConfig('llm', { dailyBudgetCents: 0 });
+  const w2 = await world('g2', { watchers: [W(AG3, [PRED]), W(GB, [ROUTE])] });
+  const n2 = got.length;
+  await w2.ingest('dr-g3', 'Invoice 31 — the server is down.');
+  await w2.ingest('dr-g4', 'Invoice 32 — the server is still down.');
+  const items = todos.openItems().filter((i) => i.plugin === 'llm');
+  ok(got.length === n2 && items.length === 1 && /Paused today: Ledger, Tech desk\./.test(items[0].detail) && items[0].urgency === 'low' && items[0].origin === 'plugin', 'the budget spent: 0 calls, ONE For-you item for the owner naming whose rules paused (agent 3, group B) — two batches, one item', items.map((i) => [i.text, i.detail]));
+  const bl = w2.ladder.stash.filter((s) => s.cid === 'agent-3' && /today's LLM budget is spent/.test(s.text));
+  ok(bl.length === 1 && !w2.ladder.calls.length && w2.lines.some((l) => /not judged — daily-budget/.test(l)), 'agent 3 is told once (the budget) and nobody is woken — the judge\'s own refusal is journalled as before', w2.ladder.stash.map((s) => s.text));
+  D.pm.setConfig('llm', { dailyBudgetCents: 100 });
+  w2.stop();
+  // RED CONTROL = the base: without the skip's doors a rule armed with its switch off answers nothing, the skip is silent
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('decision-rule-road', repo);
+  const esrc = fs.readFileSync(path.join(repo, 'src/server/channels-engine.js'), 'utf8');
+  const A0 = '    if (!skips.length) return;\n';
+  ok(esrc.split(A0).length === 2, 'control anchor present (the skip doors\' entry)');
+  const SILENT = MC.load('src/server/channels-engine.js', esrc.replace(A0, '    return;\n'), 'silent');
+  D.pm.setConfig('llm', { rules: false });
+  const wc = await world('gc', { watchers: [W(AG3, [PRED])], ENGM: SILENT });
+  await wc.ingest('dr-gc1', 'Invoice 41 is overdue.');
+  D.pm.setConfig('llm', { rules: true });
+  const hc = await wc.e.owedPass(); await wc.e.settleWakes();
+  ok(!wc.ladder.stash.length && hc === 0 && !callsTo(wc, 'agent-3').length, 'RED CONTROL (the base): no line, nothing owed, nothing judged when the switch comes back — the legs above are RED on it');
+  wc.stop(); todos.stop();
 }
 
 // ── E the Notify… dialog's decision row in headless Chrome ───────────────────
@@ -251,7 +313,7 @@ const ROW = `(() => {
   const rows = [...document.querySelectorAll('.chan-af-decision')];
   return rows.map((b) => ({ cond: b.querySelector('.chan-dec-cond')?.value, q: b.querySelector('.chan-dec-q')?.value, th: b.querySelector('.chan-dec-thv')?.textContent, ph: b.querySelector('.chan-dec-ph')?.value,
     opts: [...b.querySelectorAll('.chan-dec-opt')].map((o) => [o.querySelector('.chan-dec-val')?.value, o.querySelector('.chan-dec-to')?.value].join('>')), cost: b.querySelector('.chan-dec-cost')?.textContent,
-    off: b.querySelector('.chan-dec-off')?.textContent || null, disabled: [...b.querySelectorAll('input,select,textarea')].some((x) => x.disabled) })).concat([{ sw: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth }]);
+    off: b.querySelector('.chan-dec-off')?.textContent || null, chip: (() => { const x = b.querySelector('.chan-road-chip'); return x && !x.hidden ? [x.dataset.road, x.textContent] : null; })(), disabled: [...b.querySelectorAll('input,select,textarea')].some((x) => x.disabled) })).concat([{ sw: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth }]);
 })()`;
 {
   const pg = await page(1100, 1000, 'en');
@@ -264,6 +326,7 @@ const ROW = `(() => {
   const want = F.decisionCost({ recordsPerDay: est.decision.judgedPerDay, perHour: 20, tokensPerCall: 1500, pricePerMtok: 0.1, budgetCents: 100 });
   ok(new RegExp(`^≈ ${want.judgmentsPerDay} judgments/day ≈ \\$${want.usdPerDay.toFixed(4).replace('.', '\\.')} at the current price — within your \\$1\\.00 daily budget\\. How often`).test(p.cost) && /known only once it runs/.test(p.cost), `desk: the COST LINE from the server's estimate × D1's ceiling × the price ("${p.cost}")`, { want, cost: p.cost });
   ok(!p.off && !c.off && !p.disabled && !c.disabled, 'desk: the plugin on with a key and both switches ⇒ no off line; nothing greyed');
+  ok(p.chip && p.chip[0] === 'live' && p.chip[1] === 'judged: live' && c.chip && c.chip[0] === 'live', 'lane judged-watch-state: the road\'s chip beside each judged row — «judged: live» (rule and route)', [p.chip, c.chip]);
   await pg.shot('editor.png', '.chan-af-list');
   await pg.ev(`(() => { const r = document.querySelectorAll('.chan-dec-th')[1]; r.value = '0.8'; r.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const saveSel = await pg.ev(`(() => { const b = [...document.querySelectorAll('#chan-notify-dialog button, .chan-notify button')].find((x) => /^Save/.test(x.textContent.trim())); if (b) b.setAttribute('data-test-save', '1'); return !!b; })()`);
@@ -272,6 +335,19 @@ const ROW = `(() => {
   const sr = sw && sw.filter && sw.filter.rules;
   ok(sr && sr.length === 2 && sr[1].kind === 'decision' && sr[1].threshold === 0.8 && sr[1].choices.map((o) => `${o.value}>${o.to.kind}:${o.to.id}`).join() === 'billing>group:T-a,tech>group:T-b' && F.validateFilter(sw.filter).ok, 'desk: the saved row carries the moved threshold (0.80) and both routes — and passes the server\'s validator', sw);
   pg.close();
+  // lane judged-watch-state: the chip follows THE verdict over the plugin row — the day's budget spent, then the Rules switch off
+  D.pm.setConfig('llm', { dailyBudgetCents: 0 });
+  const pb = await page(1100, 1000, 'en', `!!document.querySelector('.chan-road-chip:not([hidden])')`);
+  const B = await pb.ev(ROW);
+  ok(B[0].chip && B[0].chip[0] === 'budget-spent' && B[0].chip[1] === 'paused: budget spent' && B[1].chip && B[1].chip[0] === 'budget-spent', 'the day\'s budget spent ⇒ «paused: budget spent» on both judged rows', [B[0].chip, B[1].chip]);
+  await pb.shot('chip-budget.png', '.chan-af-decision');
+  pb.close();
+  D.pm.setConfig('llm', { dailyBudgetCents: 100, rules: false });
+  const pr = await page(1100, 1000, 'en', `!!document.querySelector('.chan-road-chip:not([hidden])')`);
+  const Rr = await pr.ev(ROW);
+  ok(Rr[0].chip && Rr[0].chip[0] === 'rules-off' && Rr[0].chip[1] === 'off: rules switch' && Rr[1].chip && Rr[1].chip[0] === 'live', 'the Rules switch off ⇒ «off: rules switch» on the yes/no rule; the route rule rides Routing and stays «judged: live»', [Rr[0].chip, Rr[1].chip]);
+  pr.close();
+  D.pm.setConfig('llm', { rules: true });
   D.pm.setEnabled('llm', false);
   const ph = await page(390, 844, 'zh');
   await ph.until(`!!document.querySelector('.chan-dec-off')`);
@@ -279,6 +355,7 @@ const ROW = `(() => {
   const fit = Z[Z.length - 1];
   ok(Z[0].off && /LLM 插件已关闭/.test(Z[0].off) && Z[1].off && !Z[0].disabled && !Z[1].disabled, `phone (zh): the plugin OFF is said on the row ("${Z[0].off}") — the controls stay live, never greyed`, Z);
   ok(fit.sw <= fit.vw + 1, `phone 390: the dialog fits (scrollWidth ${fit.sw} ≤ ${fit.vw})`, fit);
+  ok(Z[0].chip && Z[0].chip[0] === 'plugin-off' && Z[0].chip[1] === '未生效：LLM 插件没开', `phone (zh): the chip says the plugin is off in Chinese ("${Z[0].chip && Z[0].chip[1]}")`, Z[0].chip);
   ok(await ph.press('.chan-dec-open') && await ph.until(`window.__plugins === 1`, 10), 'phone: Open Plugins on the row opens the Plugins card (app.openPluginsDialog)');
   await ph.shot('phone.png', '.chan-af-decision');
   ph.close();
@@ -288,7 +365,8 @@ const ROW = `(() => {
 //    off SAID on it (the marker road works either way) ──
 {
   const INFER = `(() => { const b = document.querySelector('.chan-af-infer'); if (!b) return null; const tick = b.querySelector('.chan-af-infer-tick'); const note = b.querySelector('.chan-af-infer-note');
-    return { on: !!(tick && tick.checked), label: b.querySelector('.chan-af-infer-on')?.textContent || '', note: note && !note.hidden ? note.textContent : null, off: b.querySelector('.chan-dec-off')?.textContent || null, sw: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth }; })()`;
+    const chip = b.querySelector('.chan-road-chip');
+    return { chip: chip && !chip.hidden ? [chip.dataset.road, chip.textContent] : null, on: !!(tick && tick.checked), label: b.querySelector('.chan-af-infer-on')?.textContent || '', note: note && !note.hidden ? note.textContent : null, off: b.querySelector('.chan-dec-off')?.textContent || null, sw: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth }; })()`;
   const saveNow = async (pg) => { await pg.ev(`(() => { const b = [...document.querySelectorAll('#chan-notify-dialog button, .chan-notify button')].find((x) => /^Save/.test(x.textContent.trim())); if (b) b.setAttribute('data-test-save', '1'); return !!b; })()`); return pg.press('[data-test-save]'); };
   const n0 = saved.length;
   convRules = [{ kind: 'reply-to-sent' }];
@@ -299,6 +377,7 @@ const ROW = `(() => {
   await pg.until(`document.querySelector('.chan-af-infer-tick').checked`, 10);
   const r1 = await pg.ev(INFER);
   ok(r1.on && /judged once: is it an answer to it\?/.test(r1.note || '') && /Settings › Channels/.test(r1.note || '') && !r1.off, 'F desk: ticked ⇒ the note says what is judged, once, and where the window is set; the plugin on ⇒ no off line', r1);
+  ok(!r0.chip && r1.chip && r1.chip[0] === 'live' && r1.chip[1] === 'judged: live', 'lane judged-watch-state: unticked ⇒ no chip; ticked ⇒ «judged: live»', [r0.chip, r1.chip]);
   await pg.shot('infer.png', '.chan-af-list');
   ok(await saveNow(pg) && await pg.until('true', 6) && saved.length === n0 + 1, 'F desk: Save sends the row', saved.length - n0);
   const sr = saved[n0] && saved[n0].watchers && saved[n0].watchers[0] && saved[n0].watchers[0].filter;
@@ -314,6 +393,7 @@ const ROW = `(() => {
   D.pm.setEnabled('llm', false);
   const p3 = await page(390, 844, 'zh', `!!document.querySelector('.chan-af-infer .chan-dec-off')`);
   const r3 = await p3.ev(INFER);
+  ok(r3 && r3.chip && r3.chip[0] === 'plugin-off' && /也判定普通回复/.test(r3.label) && !/未生效/.test(r3.label), 'F phone (zh): the ticked box\'s chip says the plugin is off — beside the label, never inside it', r3 && r3.chip);
   ok(r3 && r3.on && /也判定普通回复/.test(r3.label) && /LLM 插件已关闭/.test(r3.off || '') && /引用和话题里的回复照常通知/.test(r3.off || '') && r3.sw <= r3.vw + 1, `F phone 390 (zh): the plugin OFF is said on the ticked box ("${r3 && r3.off}") — quotes and topic replies still notify; the dialog fits`, r3);
   ok(await p3.press('.chan-af-infer .chan-dec-open') && await p3.until('window.__plugins >= 1', 10), 'F phone: Open Plugins on the box opens the Plugins card');
   await p3.shot('infer-phone.png', '.chan-af-infer');

@@ -38,10 +38,15 @@ export const LONG_PRESS_MS = 500;
  *   inRoot          — the target is inside the surface
  *   excluded        — the target is inside one of the surface's exempt elements (its anchor, its toggle buttons)
  *   ignored         — the surface's own rule said so (an exact-anchor match, a mode like width-pick)
+ *   voice           — the target is the voice UI that stands outside every box (src/voice-focus.js VOICE_UI: the focus
+ *                     follower's microphone, a field's floating chip on document.body) — the dictation's own press, never
+ *                     an outside press of the surface whose box it serves (lane phone-tray-voice-done)
  *   inNestedPopover — the target is inside some [data-popover] (a menu / flyout spawned FROM this one)
  *   nested          — the surface honours the chained-popover rule (a press in a nested popover keeps it open)
- * Order matters and is the table: gone > opening > inside > excluded > ignored > nested > outside.
- * @returns {{ close: boolean, retire: boolean, why: 'root-gone'|'opening'|'inside'|'excluded'|'ignored'|'nested'|'outside' }}
+ * The facts are measured WHERE AND WHEN the press went down (a touch is decided at its pointerup, and by then a repaint may
+ * have taken the target out of the page — lane phone-tray-voice-done: a detached target is inside nothing).
+ * Order matters and is the table: gone > opening > inside > excluded > ignored > voice > nested > outside.
+ * @returns {{ close: boolean, retire: boolean, why: 'root-gone'|'opening'|'inside'|'excluded'|'ignored'|'voice'|'nested'|'outside' }}
  */
 export function pressCloses(facts = {}) {
   const f = facts || {};
@@ -50,6 +55,7 @@ export function pressCloses(facts = {}) {
   if (f.inRoot) return { close: false, retire: false, why: 'inside' };
   if (f.excluded) return { close: false, retire: false, why: 'excluded' };
   if (f.ignored) return { close: false, retire: false, why: 'ignored' };
+  if (f.voice) return { close: false, retire: false, why: 'voice' };
   if (f.nested !== false && f.inNestedPopover) return { close: false, retire: false, why: 'nested' };
   return { close: true, retire: false, why: 'outside' };
 }

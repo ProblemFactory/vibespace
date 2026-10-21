@@ -1715,6 +1715,15 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .dialog-hint.dialog-error { color: var(--red); margin-top: 6px; } /* lane launch-picture-size: showInputDialog's inline refusal (validate) */
 .dialog-list { margin: 0; padding-left: 18px; max-height: 40vh; overflow-y: auto; font-size: 12px; line-height: 1.5; color: var(--text); } /* B-a67c: what a confirm ends (a group close's tab names) */
 .dialog-list li { overflow-wrap: anywhere; }
+/* lane dialog-unsaved-guard: a dialog closing with unsaved changes ASKS — in place, a sheet inside the dialog over its
+   own content (never a second modal); Escape on it = Keep editing */
+.dialog.dialog-guarded { position: relative; }
+.dialog-unsaved { position: absolute; inset: 0; z-index: 2; display: flex; align-items: flex-end; justify-content: center; padding: 14px; background: color-mix(in srgb, var(--bg-dialog) 72%, transparent); border-radius: inherit; }
+.dialog-unsaved-card { width: 100%; max-width: 420px; background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius); box-shadow: var(--shadow-window); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.dialog-unsaved-words { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+.dialog-unsaved-err { margin: 0; font-size: 12px; color: var(--red); overflow-wrap: anywhere; }
+.dialog-unsaved-err[hidden] { display: none; }
+.dialog-unsaved-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 /* A CHECKBOX row inside a dialog body. `.dialog-body label.dialog-check-row`
    must out-rank `.dialog-body label` (0,1,1), whose column flex would stack
    the box above its text — same precedent as label.pool-mem-row. The hint is
@@ -6148,6 +6157,8 @@ a.chan-prop-file-name:hover, a.chan-prop-file-name:focus-visible { text-decorati
 .chan-dec-th { flex: 1; min-width: 0; }
 .chan-dec-thv { font-variant-numeric: tabular-nums; min-width: 2.6em; text-align: right; }
 .chan-dec-off { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chan-road-chip { align-self: flex-start; font-size: 10px; }   /* lane judged-watch-state: the judged road's chip (live · paused · off) */
+.chan-road-chip.chan-road-paused { color: var(--warning, #b7791f); background: color-mix(in srgb, var(--warning, #b7791f) 13%, transparent); }
 .chan-dec-cost.chan-warn { color: var(--warning, #b7791f); }
 @media (max-width: 600px) { .chan-dec-opt { grid-template-columns: 1fr 1fr auto; } .chan-dec-opt .chan-dec-desc { grid-column: 1 / -1; grid-row: 2; } }
 /* lane notify-rules-r2: a keyword / regex rule's preview — the newest ≤ 10 stored messages it matches */

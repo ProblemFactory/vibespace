@@ -98,10 +98,15 @@ export function installUserTodos(app) {
   // first). A record cleared while the popup is closed — the owner's natural path: the right-click on another surface's
   // row is the outside press that closed it — otherwise stayed in the hidden rows (the item's text, its session's status
   // chip) until the next open rebuilt them; an open popup is patched live, and every open builds a fresh skeleton.
-  const hidePopup = () => { popup.classList.add('hidden'); layout = null; dropRows(); };
-  popup.addEventListener(BACK_DISMISS_EVENT, (e) => { e.preventDefault(); hidePopup(); }); // the phone's back gesture: drafts stashed, rows dropped — the one closer
+  // EVERY CLOSER NAMES ITS CAUSE (lane phone-tray-voice-done, inc-mvhzgiq8-bs3j — the owner's phone tray closed under a dictated
+  // reply twice, and the incident recorder could not say what closed it): an open popup's close leaves
+  // { op: 'popup-hide', panel: 'for-you', why } in the recorder's op ring — outside / frame / escape / back / jump / artifact /
+  // open-win / view / answer / button — so the next phone incident answers itself. A cause only, never a row's words.
+  const notePopupHide = (why) => { if (popup.classList.contains('hidden')) return; try { window.__vsOp?.('popup-hide', { panel: 'for-you', why: String(why || 'other') }); } catch { } };
+  const hidePopup = (why) => { notePopupHide(why); popup.classList.add('hidden'); layout = null; dropRows(); };
+  popup.addEventListener(BACK_DISMISS_EVENT, (e) => { e.preventDefault(); hidePopup('back'); }); // the phone's back gesture: drafts stashed, rows dropped — the one closer
   const dropRows = () => { if (!popup.firstChild) return; stashDrafts(popup); popup.replaceChildren(); };
-  const jump = (key, item) => model.jump(key, item, { close: () => { hidePopup(); hideHome(); } }); // leaving: the popup AND the phone's page step aside (a jump to a dialog, the jobs panel or a plugin's sheet opens no window — the central yield never runs)
+  const jump = (key, item) => model.jump(key, item, { close: () => { hidePopup('jump'); hideHome(); } }); // leaving: the popup AND the phone's page step aside (a jump to a dialog, the jobs panel or a plugin's sheet opens no window — the central yield never runs)
   /** lane foryou-attachments: a press on an ask's chip (THE one artifact door) or a link in its words (resolved against the
    *  asker's cwd on its host) — the tray steps aside first (on the phone it covers the viewer). True = handled. */
   const fyPress = (e, close) => {
@@ -664,6 +669,7 @@ export function installUserTodos(app) {
   app._syncInboxBadges = scheduleBadges;
 
   const togglePopup = (anchor) => {
+    notePopupHide('button'); // its own button again (an open popup only: an open says nothing)
     popup.classList.toggle('hidden');
     tab = 'inbox'; // default page on every open (user spec)
     bands = null; noticesOpen = false; // lane foryou-folds: the bands' slots and folds are per open, like the layout
@@ -688,7 +694,7 @@ export function installUserTodos(app) {
   // the nav button is exempt like the taskbar one — a press on it would hide the popup and the click would re-open it
   // (a tap that never closes); the title-bar mini inbox (chunk 3) is a layer ABOVE the panel, not outside it; any
   // other popover is outside (the panel never honoured the chained-popover rule)
-  onOutsidePress(popup, hidePopup, {
+  onOutsidePress(popup, (e) => hidePopup(e?.type === 'blur' ? 'frame' : 'outside'), {
     exclude: [btn, mBtn],
     // a row's own menu (right-click → Clear content…) and the confirm dialog it opens are ABOVE the panel too
     ignore: (t) => !!t?.closest?.('.ut-mini-popover, .win-inbox-badge, .context-menu, #record-clear-dialog'),
@@ -720,7 +726,7 @@ export function installUserTodos(app) {
     for (const o of document.querySelectorAll('.dialog-overlay')) if (!o.classList.contains('hidden')) return;
     const box = e.target?.closest?.('.ut-reply');
     if (box && popup.contains(box)) { foldBox(box); e.preventDefault(); e.stopPropagation(); return; }
-    hidePopup();
+    hidePopup('escape');
     e.preventDefault();
   }, { capture: true });
   function replyKeys(e) {
@@ -764,9 +770,9 @@ export function installUserTodos(app) {
   };
   popup.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('fy-link')) { e.preventDefault(); e.target.click(); } }); // a link span is keyboard-reachable (tabindex 0)
   popup.addEventListener('click', (e) => {
-    if (fyPress(e, hidePopup)) return; // lane foryou-attachments: a chip / a link in the words opens what it names, never the row's jump
+    if (fyPress(e, () => hidePopup('artifact'))) return; // lane foryou-attachments: a chip / a link in the words opens what it names, never the row's jump
     // §9: the whole inbox as THE window (the popup steps aside for it)
-    if (e.target.closest('.ut-tabs > .ut-open-win')) { hidePopup(); app.openInbox(); return; }
+    if (e.target.closest('.ut-tabs > .ut-open-win')) { hidePopup('open-win'); app.openInbox(); return; }
     const tb = e.target.closest('.ut-tab');
     if (tb) { if (tb.dataset.tab !== tab) { tab = tb.dataset.tab; renderPanel(); } return; } // the page below the tabs switches; the tabs are patched, never rebuilt
     // a notice FILTER chip (B-328d): per device; the active origin chip again = all
@@ -827,7 +833,7 @@ export function installUserTodos(app) {
       const rec = byId(id);
       if (!rec) return;
       if (mini) { document.querySelectorAll('.ut-mini-popover').forEach((p) => p.remove()); app.openInbox({ itemId: rec.id, sessionKey: rec.sessionKey }); }
-      else { hidePopup(); app.openInbox({ itemId: rec.id }); }
+      else { hidePopup('view'); app.openInbox({ itemId: rec.id }); }
       return;
     }
     if (e.target.closest('.ut-action-reset')) {
@@ -846,7 +852,7 @@ export function installUserTodos(app) {
         const pv = pressVerdict({ since: appBtn._armSince ?? null, now: performance.now() });
         if (!pv.ok) { showToast(t('That Install moved under the pointer just now — read it, then press it again')); return; }
       }
-      if ((ans === 'install' && !(rec && rec.card)) || ans === 'open') hidePopup();
+      if ((ans === 'install' && !(rec && rec.card)) || ans === 'open') hidePopup('answer');
       appBtn.disabled = true;
       Promise.resolve(model.runAction(rec, ans)).finally(() => { appBtn.disabled = false; });
       return;

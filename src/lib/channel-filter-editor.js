@@ -303,13 +303,17 @@ export async function showGrantAccessDialog(app, target) {
   // plain words (channel-polish, 2026-09-27): the dialog ASKS its question; the grain is said under it
   // the picker's roster listener ends WITH the dialog (verify round 2: it used to live until the next broadcast)
   let part = null;
-  const { body, close } = createModalShell({ id: 'chan-access-dialog', title: t('Who may read and act here?'), dialogClass: 'chan-dialog chan-assign chan-access', escapeToClose: true, onClose: () => { if (part) part.picker.close(); } });
+  // lane dialog-unsaved-guard: ✕ / Esc / the backdrop with a row changed asks (grantAccessBody says what changed)
+  const { body, close } = createModalShell({ id: 'chan-access-dialog', title: t('Who may read and act here?'), dialogClass: 'chan-dialog chan-assign chan-access', escapeToClose: true, onClose: () => { if (part) part.picker.close(); },
+    unsaved: { isDirty: () => !!part && part.isDirty(), save: () => part && part.save() } });
   part = grantAccessBody(app, st, body, { close, target });
 }
 /** THE GRANT ACCESS BODY (lane account-policy-door): the ONE renderer of a grain's access rows — Grant access… draws
  *  it, and so does the account's Reach & policy… (its section 2, `notify: false` — section 3 is its Notify door).
  *  `setCaps(caps)` re-draws the authority choices IN PLACE: the section-1 policy just turned direct ⇒ `send` is
- *  offered without a reopen; turned review ⇒ every row reads draft again. `reopen` = what a `grain-changed` re-opens. */
+ *  offered without a reopen; turned review ⇒ every row reads draft again. `reopen` = what a `grain-changed` re-opens.
+ *  `isDirty()` / `save()` (lane dialog-unsaved-guard) = the rows (and a rule's conditions) against what it drew, and its
+ *  Save as a function — the dialog that hosts it hands both to createModalShell's `unsaved`. */
 export function grantAccessBody(app, st, body, { close, target, notify = true, reopen = null } = {}) {
   let picker = null;
   body.appendChild(el('div', 'chan-dialog-sub', st.kind === 'conversation' ? st.name : st.kind === 'account' ? t('The whole account — {label}', { label: st.name }) : t('The conversations matching a rule — {label}', { label: st.name })));
@@ -404,6 +408,8 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
     syncMoot();
   };
   draw();
+  const drawn = () => JSON.stringify({ rows: rows.map((r) => [r.key, r.authority]), pattern: st.kind === 'pattern' ? st.pattern : null });
+  let base = drawn();
   const actions = el('div', 'chan-flow-actions');
   if (st.kind === 'pattern' && st.id) {
     const rmRule = btn(t('Remove the rule'), async () => { rmRule.disabled = true; const r = await put(`/api/channels/adapters/${encodeURIComponent(st.adapter.id)}/patterns/${encodeURIComponent(st.id)}`, {}, 'DELETE'); rmRule.disabled = false; if (r) { showToast(t('The rule is removed — its access and notifications with it')); close(); } });
@@ -415,7 +421,7 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
   }
   actions.appendChild(btn(t('Cancel'), close));
   const save = btn(t('Save'), null, 'mounts-btn-primary');
-  save.onclick = async () => {
+  const doSave = async () => {
     // the payload's principals come from the SAME choices as before (kind, id, name) — the wire is unchanged;
     // re-read at the click (a session that went live after the dialog opened is in it)
     const choices = principalChoices(app, st.access);
@@ -441,19 +447,24 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
       if (!r) return;
       const names = access.map((a) => principalText(a.principal)).join(', ');
       showToast(access.length ? t('Access saved: {list} — nobody is woken unless you add a notification (Notify…)', { list: names }) : t('Access removed'));
+      base = drawn();
       close();
+      return true;
     } finally { save.disabled = false; picker.setBusy(false); for (const b of rowBtns) b.disabled = false; refocus(save); }
   };
+  save.onclick = () => { doSave(); };
   actions.appendChild(save);
   body.appendChild(actions);
   const setCaps = (caps) => {
     st.caps = caps;
     cap = F.authorityCapCode(caps);
+    const clean = drawn() === base;   // a policy the person just SAVED in section ① re-reads the rows — not their change
     if (cap) for (const r of rows) r.authority = 'draft';
     syncCap();
     draw();
+    if (clean) base = drawn();
   };
-  return { picker, setCaps };
+  return { picker, setCaps, isDirty: () => drawn() !== base, save: doSave };
 }
 
 /** One WATCHER row of the Notify dialog — the pre-R4 form's fields for ONE
@@ -495,8 +506,38 @@ function decisionOffWhy(row, route) {
   if (!route && f.rules !== true) return t('The LLM plugin\'s switch “Notification rules can use a sentence as the condition” is off — this rule checks nothing until you turn it on.');
   return null;
 }
+// lane judged-watch-state (B-f42e): THE ROAD'S CHIP beside each judged row — THE verdict (DM.judgedRoadState, the PURE
+// one the engine's gate reads) over the plugin row's own facts: the switch, the key, what is left today against one
+// judgment at the use's ceiling. live · paused: budget spent · off: … (the rule's own hour is the server's to count —
+// `vibespace-channels watch --show` says it)
+function judgedRoadOf(row, use) {
+  if (!row) return null;
+  if (row.missing) return { live: false, why: 'plugin-off' };
+  const d = row.decision || {};
+  const today = d.today || {};
+  const cap = (Number.isFinite(Number(d.dailyBudgetCents)) ? Number(d.dailyBudgetCents) : DM.DAILY_BUDGET_CENTS_DEFAULT) / 100;
+  const spent = (Number(today.total && today.total.usd) || 0) + (Number(today.reserved) || 0);
+  const provider = DM.PROVIDERS.includes(d.provider) ? d.provider : DM.PROVIDERS[0];
+  return DM.judgedRoadState({ pluginOn: !!row.enabled, rulesOn: ((d.features || {})[use === 'routing' ? 'routing' : 'rules']) === true, keyPresent: !!row.configured,
+    budgetLeft: cap - spent, estUsd: (DM.inputPlan(use).ceiling * DM.PRICE_PER_MTOK_USD[provider]) / 1e6, budgetUsd: cap, route: use === 'routing' });
+}
+function roadChipWords(st) {
+  if (st.live) return t('judged: live');
+  return ({ 'plugin-off': t('off: LLM plugin'), 'rules-off': t('off: rules switch'), 'routing-off': t('off: routing switch'), 'no-key': t('off: no key'), 'budget-spent': t('paused: budget spent'), 'hour-cap': t('paused: hourly limit') })[st.why] || t('off: LLM plugin');
+}
+function paintRoadChip(chip, st) {
+  chip.hidden = !st;
+  if (!st) return;
+  chip.textContent = roadChipWords(st);
+  chip.dataset.road = st.live ? 'live' : st.why;
+  chip.classList.toggle('chan-chip-live', !!st.live);
+  chip.classList.toggle('chan-road-paused', !st.live && (st.why === 'budget-spent' || st.why === 'hour-cap'));
+  chip.classList.toggle('chan-chip-off', !st.live && st.why !== 'budget-spent' && st.why !== 'hour-cap');
+}
 function decisionBlock(rule, { principals, changed }) {
   const box = el('div', 'chan-af-decision');
+  const chip = el('span', 'chan-chip chan-road-chip'); chip.hidden = true;   // lane judged-watch-state: the road's state, beside the row
+  box.appendChild(chip);
   const cond = document.createElement('textarea');
   cond.className = 'chan-opt-input chan-dec-cond'; cond.rows = 3; cond.maxLength = F.DECISION.conditionMax; cond.value = rule.condition || '';
   cond.placeholder = t('In plain words — e.g. the sender asks me to pay or approve something');
@@ -563,6 +604,7 @@ function decisionBlock(rule, { principals, changed }) {
   let row = null, est = null;
   function refresh() {
     const route = F.isRouteRule(rule);
+    paintRoadChip(chip, judgedRoadOf(row, route ? 'routing' : 'rule'));
     off.textContent = '';
     const why = decisionOffWhy(row, route);
     if (why) {
@@ -611,10 +653,12 @@ function inferBlock(rule, { changed }) {
   const note = noteEl(t('A message with no quote and no thread that arrives after this agent\'s own message is judged once: is it an answer to it? A yes notifies like a quote does; each judgment is one call within the plugin\'s daily budget. How long after the agent\'s message: Settings › Channels.'));
   note.classList.add('chan-af-infer-note');
   const off = el('div', 'chan-dec-plugin');
-  box.append(lab, note, off);
+  const chip = el('span', 'chan-chip chan-road-chip'); chip.hidden = true;   // lane judged-watch-state: the road's state while ticked
+  box.append(lab, chip, note, off);
   let row = null;
   function refresh() {
     note.hidden = !tick.checked;
+    paintRoadChip(chip, tick.checked ? judgedRoadOf(row, 'reply-infer') : null);
     off.textContent = '';
     const why = tick.checked ? inferOffWhy(row) : null;
     if (!why) return;
@@ -876,6 +920,9 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
   return {
     box,
     key: () => key,
+    // lane dialog-unsaved-guard: the notification as the dialog holds it (no estimate, nothing clamped back) — Notify…
+    // compares it with what it drew
+    sig: () => JSON.stringify({ key, when: whenNow(), cur: current() }),
     setWho,
     expected() {
       const e = state.lastEstimate;
@@ -953,7 +1000,12 @@ function rulePreview(st, rule, row) {
 export async function showNotifyDialog(app, target) {
   const st = await grainState(target);
   if (!st) return;
-  const { body, close } = createModalShell({ id: 'chan-notify-dialog', title: grainTitle(st, 'notify'), dialogClass: 'chan-dialog chan-assign chan-notify', escapeToClose: true });
+  // lane dialog-unsaved-guard (B-bc31 — the owner ticked «Also judge plain replies» and closed with ✕: the tick vanished
+  // without a word): ✕ / Esc / the backdrop with a notification changed asks Save / Discard / Keep editing
+  let dirtyNow = () => false;
+  let saveNow = async () => true;
+  const { body, close } = createModalShell({ id: 'chan-notify-dialog', title: grainTitle(st, 'notify'), dialogClass: 'chan-dialog chan-assign chan-notify', escapeToClose: true,
+    unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() } });
   const principals = st.access.map((r) => ({ value: pkOf(r.principal), label: principalText(r.principal), kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null, authority: r.authority }));
   for (const r of st.eligibleAbove || []) if (r && r.principal && !principals.some((x) => x.value === pkOf(r.principal))) principals.push({ value: pkOf(r.principal), label: `${principalText(r.principal)} ${r.via === 'pattern' ? t('(rule)') : r.via === 'grant' ? t('(approved request)') : t('(account)')}`, kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null, authority: null });
   // lane notify-rules-r2 (owner inc-muxt96t5-pk42): a group that holds access reaches its MEMBER SESSIONS — each is
@@ -1017,6 +1069,9 @@ export async function showNotifyDialog(app, target) {
   };
   for (const w of st.watchers) addRow(w);
   if (!st.watchers.length) addRow(null);
+  const drawn = () => JSON.stringify(rows.map((r) => r.sig()));
+  let base = drawn();
+  dirtyNow = () => drawn() !== base;
   addB.onclick = () => { addRow(null); };
   body.append(addB, total, noteEl(t('Pacing only — the account budget is the money bound.')));
   const actions = el('div', 'chan-flow-actions');
@@ -1024,7 +1079,7 @@ export async function showNotifyDialog(app, target) {
   actions.append(grant, el('span', 'chan-sp'));
   actions.appendChild(btn(t('Cancel'), close));
   const save = btn(t('Save'), null, 'mounts-btn-primary');
-  save.onclick = async () => {
+  saveNow = async () => {
     const watchers = [];
     let clamped = false;
     for (const r of rows) { const v = r.read(); if (v.error) { showToast(v.error, { type: 'error' }); return; } watchers.push(v.watcher); clamped = clamped || v.clamped; }
@@ -1037,9 +1092,12 @@ export async function showNotifyDialog(app, target) {
       const r = await put(st.watchersUrl, { watchers, base: st.stamp }, 'PUT', { onChanged: () => { close(); showNotifyDialog(app, target); } });
       if (!r) return;
       showToast(watchers.length ? t('Notifications saved: {list}', { list: watchers.map((w) => `${principalText(w.principal)} ${watcherHowText(w)}`).join(', ') }) + (clamped ? ' · ' + t('numbers past their bounds were kept at the bound') : '') : t('Nobody is notified here any more'));
+      base = drawn();
       close();
+      return true;
     } finally { save.disabled = false; refocus(save); }
   };
+  save.onclick = () => { saveNow(); };
   actions.appendChild(save);
   body.appendChild(actions);
 }

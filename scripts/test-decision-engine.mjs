@@ -10,6 +10,10 @@
 //   H the ONE scrub on a record's text;  I a 402 (the plan) / a 400 (the request shape) stops the ROW like a 401: a pass of
 //     5 records = 1 call (before: 5), ONE notice, the status / plugin row say why, a new key / model (or the owner's Test)
 //     lifts it;  J the owner's words in the QUESTIONS reach the vendor scrubbed (+ a RED control: scrubQuestions = identity);
+//   L (lane judged-watch-state, B-f42e) the judged road's facts → the PURE verdict (live / routing-off / budget-spent),
+//     and THE OWNER IS TOLD ONCE: notePaused files ONE low For-you row a day (the plugin's band-5 row, its door the
+//     plugin's settings), a new name re-words it, a dismissed one is never repeated that day, the next day files anew;
+//     no vendor call + a RED control (the dismissed guard removed ⇒ it comes back);
 //   K (lane rule-learning, design q-037 P0) THE TEXT-MODEL CLIENT on the same fake (its chat completions route): no OpenRouter
 //     row ⇒ absent, 0 requests; the request LITERAL (provider {zdr: true, data_collection: 'deny'}, the strict json_schema,
 //     temperature 0, the tier's id, the key only in the header); per-use accounting at the vendor's usage.cost + the journal
@@ -368,6 +372,55 @@ console.log('K the text-model client (lane rule-learning) — the request litera
   n = chatReqs().length;
   const po = await press();
   ok(!po.ok && po.why === 'plugin-off' && !eK.textModel.available().exists && chatReqs().length === n, 'the plugin off ⇒ the drafter does not exist (plugin-off), 0 requests');
+  T = T0;
+}
+
+console.log('L THE JUDGED ROAD\'S FACTS + THE OWNER IS TOLD ONCE A DAY (lane judged-watch-state, B-f42e) — a real For-you store, no call, no wake');
+{
+  const T0 = T;
+  const { UserTodoManager } = require(path.join(repo, 'src/user-todos.js'));
+  const AM = require(path.join(repo, 'src/attention-model.js'));
+  const tdir = path.join(root, 'todos-road'); fs.mkdirSync(tdir, { recursive: true });
+  const todos = new UserTodoManager({ dataDir: tdir, now: () => T });
+  const eL = mkEngine(); const pL = mkPlugins(eL);
+  pL.setEnabled('llm', true); pL.setConfig('llm', { rules: true, routing: false, dailyBudgetCents: 100 });
+  eL.attachInbox(todos, { tickMs: 0 });
+  const n0 = got.length;
+  const road = (use) => M.judgedRoadState(eL.roadFacts(use));
+  ok(road('rule').live && road('reply-infer').live && road('routing').why === 'routing-off' && eL.roadFacts('rule').estUsd > 0 && eL.roadFacts('rule').budgetUsd === 1,
+    'roadFacts → the verdict: rules on ⇒ a rule and a plain-reply judgment are live; routing off ⇒ a route rule is routing-off; one judgment\'s price > 0, the ceiling 1 USD', eL.roadFacts('rule'));
+  pL.setConfig('llm', { dailyBudgetCents: 0 });
+  ok(road('rule').why === 'budget-spent' && M.budgetVerdict({ pluginOn: true, featureOn: true, keyPresent: true, spentUsd: 0, estUsd: eL.roadFacts('rule').estUsd, ceilingCents: 0 }).why === 'daily-budget', 'a 0 budget ⇒ the road says budget-spent — the same verdict the paid call\'s gate answers daily-budget with');
+  const id1 = eL.notePaused(['Ledger']);
+  const it1 = todos.get(id1);
+  const row = it1 && AM.rowOf(it1, T);
+  ok(it1 && it1.status === 'open' && it1.origin === 'plugin' && it1.plugin === 'llm' && it1.urgency === 'low' && row && row.band === 5 && it1.open && it1.open.kind === 'plugin-settings' && it1.open.plugin === 'llm' && /2026-10-1\d/.test(it1.text) && /Paused today: Ledger\./.test(it1.detail) && it1.i18n && it1.i18n.text.params.day,
+    'ONE For-you item: the LLM plugin\'s row filed LOW (band 5 — no badge, no toast), its door the plugin\'s settings, the day in its words, the agent named', it1 && { text: it1.text, detail: it1.detail, band: row && row.band });
+  const id2 = eL.notePaused(['Ledger']), id3 = eL.notePaused(['Tech desk', 'Ledger']);
+  const open1 = todos.openItems().filter((i) => i.plugin === 'llm');
+  ok(id2 === id1 && id3 === id1 && open1.length === 1 && /Paused today: Ledger, Tech desk\./.test(todos.get(id1).detail), 'the same day: the same names file nothing new; a new name RE-WORDS the one item (still one)', open1.map((i) => i.detail));
+  todos.setStatus(id1, 'dismissed', 'user');
+  const id4 = eL.notePaused(['Another agent']);
+  ok(id4 === id1 && todos.get(id1).status === 'dismissed' && !todos.openItems().some((i) => i.plugin === 'llm'), 'dismissed by the owner ⇒ never repeated that day (a later name files nothing, reopens nothing)');
+  T = T0 + 86400e3;
+  const id5 = eL.notePaused(['Ledger']);
+  ok(id5 && id5 !== id1 && todos.get(id5).status === 'open' && todos.openItems().filter((i) => i.plugin === 'llm').length === 1, 'the next local day: the budget pausing rules again files ONE new item');
+  ok(got.length === n0, `no vendor call anywhere in L (${got.length - n0}) — the notice is a For-you row: no turn, no wake, no spend reason`);
+  // RED CONTROL: a copy without the "dismissed ⇒ never again that day" guard re-opens the owner's dismissed item
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MD = mutantCopies('decision-road', repo);
+  const esrc = fs.readFileSync(path.join(repo, 'src/server/decision-engine.js'), 'utf8');
+  const GUARD = "      if (!it || it.status !== 'open') return paused.id;   // handled or dismissed: never repeated that day\n";
+  ok(esrc.split(GUARD).length === 2, 'control anchor present (the dismissed guard)');
+  const EM = MD.load('src/server/decision-engine.js', esrc.replace(GUARD, ''), 'noguard');
+  const t2 = new UserTodoManager({ dataDir: path.join(root, 'todos-road-m'), now: () => T });
+  fs.mkdirSync(path.join(root, 'todos-road-m'), { recursive: true });
+  const eM = EM.create({ dataDir: path.join(root, 'data-road-m'), integrations: store, baseUrlFor: BASE, now: () => T, tzOffset: () => 0, log: { warn() {} } });
+  fs.mkdirSync(path.join(root, 'data-road-m'), { recursive: true });
+  eM.attachInbox(t2, { tickMs: 0 });
+  const m1 = eM.notePaused(['Ledger']); t2.setStatus(m1, 'dismissed', 'user'); eM.notePaused(['Another agent']);
+  ok(t2.get(m1).status === 'open', 'RED CONTROL: without the guard the owner\'s dismissed notice comes back the same day (the "never repeated" leg above is RED on it)', t2.get(m1) && t2.get(m1).status);
+  todos.stop(); t2.stop(); pL.setConfig('llm', { dailyBudgetCents: 100 });
   T = T0;
 }
 

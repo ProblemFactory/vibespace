@@ -326,7 +326,7 @@ ok(importers.join() === 'app.js', 'mobile-back.js has ONE importer (app.js)', im
 ok((wiringSrc.match(/history\.pushState\(/g) || []).length === 1 && /const push = \(\) => \{ baseHref = location\.href; history\.pushState\(\{ vs: 1 \}, ''\); \};/.test(wiringSrc) && wiringSrc.includes('history.go(1);'), 'the wiring has ONE pushState (the sentinel) and re-arms by traversal (history.go(1))');
 ok(!/from '\.\/|import /.test(bgSrc.replace(/^\/\/.*$/gm, '')), 'back-guard.js imports nothing (PURE)');
 const todos = read('src/lib/user-todos-panel.js');
-ok(/popup\.addEventListener\(BACK_DISMISS_EVENT, \(e\) => \{ e\.preventDefault\(\); hidePopup\(\); \}\);/.test(todos) && BG.BACK_DISMISS_EVENT === 'vs-back-dismiss', 'the For-you tray answers the back\'s dismiss through hidePopup (drafts stashed, rows dropped)');
+ok(/popup\.addEventListener\(BACK_DISMISS_EVENT, \(e\) => \{ e\.preventDefault\(\); hidePopup\('back'\); \}\);/.test(todos) && BG.BACK_DISMISS_EVENT === 'vs-back-dismiss', 'the For-you tray answers the back\'s dismiss through hidePopup (drafts stashed, rows dropped)');
 const schema = read('src/lib/settings-schema.js');
 const row = /'mobile\.backGuard': \{\n    type: 'boolean', default: true,\n[\s\S]{0,700}?category: t\('Mobile'\)/.exec(schema);
 ok(!!row && /export const BACK_SETTING = 'mobile\.backGuard';/.test(wiringSrc) && /app\.settings\?\.get\(BACK_SETTING\)/.test(wiringSrc), 'the setting row (Mobile, default on) exists and the wiring reads it live');

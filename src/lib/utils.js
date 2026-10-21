@@ -4,6 +4,7 @@ import { pressCloses, pressPhase, tapVerdict, shouldCloseOnBlur } from './outsid
 import { NATIVE_PRESS_SELECTOR, PRESS_CHROME_SELECTOR, effectiveUserSelect, pointOnText, pressTargetClass, longPressVerdict, selectionCloses, selectStartAllowed, trustedContextMenu } from './press-select.js';
 import { enterSubmits } from './chat-enter-keys.js';
 import { arrivalVerdict } from '../sync-arrival.js'; // PURE: StateSync's arrival rule (lane statesync-last-arrival)
+import { VOICE_UI } from '../voice-focus.js'; // PURE: the voice UI outside every box — never an outside press (lane phone-tray-voice-done)
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
@@ -28,7 +29,20 @@ export const MODAL_OPEN_EVENT = 'vs-modal-open';
 export function announceModal(overlay) {
   try { document.dispatchEvent(new CustomEvent(MODAL_OPEN_EVENT, { detail: { overlay } })); } catch { /* a listener's failure is its own */ }
 }
-export function createModalShell({ id, title = '', dialogClass = '', bodyClass = '', minWidth = null, closeOnBackdrop = true, escapeToClose = false, onClose = null } = {}) {
+// lane dialog-unsaved-guard (B-bc31 — the owner 2026-10-21 ticked «Also judge plain replies» in Notify…, closed it with ✕,
+// and a colleague's reply went unjudged): A CHANGE THE PERSON MADE NEVER VANISHES WITHOUT A WORD. `unsaved` guards the
+// person's own dismissals (✕, Escape, a backdrop press — never the caller's `close()`, which stays its Save / Cancel):
+//   unsaved: { isDirty?, save, words?, discard?, saveLabel? }
+// dirty ⇒ the shell asks IN PLACE (a sheet inside the dialog, not a second modal): «You have unsaved changes» ·
+// Save / Discard / Keep editing. Save runs `save()` — the dialog's own save: it LANDED when the dialog closed itself, is
+// no longer dirty, or resolved `true` (then the shell closes); a throw, a string / `{error}` / `false`, or a dialog still
+// open and dirty is a failure: the sheet stays and says «Not saved: <reason>» (the reason = what it threw / answered, else
+// the error toast its own save showed meanwhile). Discard runs `discard()` (e.g. a typed
+// secret cleared from the DOM) and closes. Keep editing (Escape on the sheet or the overlay) puts the sheet away.
+// No `isDirty` ⇒ the shell's own flag: any input / change event inside the body after open, cleared by `markSaved()`
+// (`markDirty()` for a change no event reports). `unsaved: false` = nothing in the dialog changes until its Save — said at
+// the call with the reason; scripts/test-dialog-unsaved-census.mjs keeps every Save dialog on one of the two.
+export function createModalShell({ id, title = '', dialogClass = '', bodyClass = '', minWidth = null, closeOnBackdrop = true, escapeToClose = false, onClose = null, unsaved = null } = {}) {
   if (id) document.getElementById(id)?.remove();
   const overlay = document.createElement('div');
   if (id) overlay.id = id;
@@ -50,11 +64,13 @@ export function createModalShell({ id, title = '', dialogClass = '', bodyClass =
   announceModal(overlay); // lane dialog-keys: in the opening act's own task, before the caller focuses anything in it
   let unbindEscape = null;
   const close = () => { unbindEscape?.(); overlay.remove(); onClose?.(); };
-  closeBtn.onclick = close;
-  if (closeOnBackdrop) overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
+  const guard = unsaved && typeof unsaved === 'object' ? unsavedGuard({ overlay, dialog, body, unsaved, close }) : null;
+  const dismiss = guard ? guard.dismiss : close;   // the person's own ✕ / Escape / backdrop — asks first when dirty
+  closeBtn.onclick = () => dismiss();
+  if (closeOnBackdrop) overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) dismiss(); });
   if (escapeToClose) {
     overlay.tabIndex = -1;
-    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); dismiss('escape'); } });
     // lane race-sweep (B-6b74, test-desktop-webrtc-chrome ⑪ 5/5 on 2 busy cpus): the overlay hears Escape only from a focus
     // INSIDE it — a control that disables / replaces itself (the window picker's 「停止」 swaps its row) drops the focus to
     // <body>, and Escape closed nothing: the picker stayed over the window. While NOTHING holds the focus, Escape is the
@@ -66,13 +82,77 @@ export function createModalShell({ id, title = '', dialogClass = '', bodyClass =
       if (e.target !== document.body && e.target !== document.documentElement) return;   // something holds the keyboard
       const open = [...document.querySelectorAll('.dialog-overlay')].filter((o) => o._escapeToClose);
       if (open[open.length - 1] !== overlay) return;   // the topmost one only
-      e.preventDefault(); close();
+      e.preventDefault(); dismiss('escape');
     };
     document.addEventListener('keydown', onIdleEscape);
     unbindEscape = () => document.removeEventListener('keydown', onIdleEscape);
     setTimeout(() => overlay.focus(), 0);
   }
-  return { overlay, dialog, body, closeBtn, close };
+  const noop = () => {};
+  return { overlay, dialog, body, closeBtn, close, dismiss, markSaved: guard ? guard.markSaved : noop, markDirty: guard ? guard.markDirty : noop, isDirty: guard ? guard.isDirty : () => false };
+}
+/** The unsaved guard of ONE shell (lane dialog-unsaved-guard — the contract is createModalShell's `unsaved`, above). */
+function unsavedGuard({ overlay, dialog, body, unsaved, close }) {
+  let flagged = false;
+  const own = typeof unsaved.isDirty !== 'function';
+  if (own) { const flag = () => { flagged = true; }; body.addEventListener('input', flag); body.addEventListener('change', flag); }
+  const isDirty = () => { if (own) return flagged; try { return !!unsaved.isDirty(); } catch { return true; } };   // a dirty test that throws asks — never a silent drop
+  dialog.classList.add('dialog-guarded');
+  let sheet = null; let back = null;
+  const keepEditing = () => {
+    if (!sheet) return;
+    sheet.remove(); sheet = null;
+    try { if (back && back.isConnected) back.focus({ preventScroll: true }); else overlay.focus?.({ preventScroll: true }); } catch { /* focus is a courtesy */ }
+  };
+  const discard = () => { try { unsaved.discard?.(); } finally { close(); } };
+  const ask = () => {
+    if (sheet) { sheet.querySelector('.dialog-unsaved-save')?.focus({ preventScroll: true }); return; }
+    back = document.activeElement;
+    sheet = document.createElement('div');
+    sheet.className = 'dialog-unsaved';
+    sheet.setAttribute('role', 'alertdialog');
+    const card = document.createElement('div'); card.className = 'dialog-unsaved-card';
+    const words = document.createElement('p'); words.className = 'dialog-unsaved-words'; words.id = `dialog-unsaved-${Date.now().toString(36)}`;
+    words.textContent = unsaved.words || t('You have unsaved changes');
+    sheet.setAttribute('aria-labelledby', words.id);
+    const err = document.createElement('p'); err.className = 'dialog-unsaved-err'; err.setAttribute('role', 'alert'); err.hidden = true;
+    const row = document.createElement('div'); row.className = 'dialog-unsaved-actions';
+    const mk = (cls, text) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = text; return b; };
+    const keepB = mk('btn-cancel dialog-unsaved-keep', t('Keep editing'));
+    const dropB = mk('btn-cancel dialog-unsaved-discard', t('Discard'));
+    const saveB = mk('btn-create dialog-unsaved-save', unsaved.saveLabel || t('Save'));
+    row.append(keepB, dropB, saveB);
+    card.append(words, err, row);
+    sheet.appendChild(card);
+    keepB.onclick = keepEditing;
+    dropB.onclick = discard;
+    saveB.onclick = async () => {
+      saveB.disabled = dropB.disabled = true; err.hidden = true;
+      let r; let thrown = null; const said = [];
+      unsavedSaySink = said;
+      try { r = await unsaved.save(); } catch (e) { thrown = e; } finally { if (unsavedSaySink === said) unsavedSaySink = null; }
+      if (!overlay.isConnected) return;   // the dialog's own save closed it: it landed
+      saveB.disabled = dropB.disabled = false;
+      const why = thrown ? String((thrown && thrown.message) || thrown) : typeof r === 'string' && r ? r : r && typeof r === 'object' && r.error ? String(r.error) : said.length ? said[said.length - 1] : null;
+      if (!why && r !== false && (r === true || !isDirty())) { close(); return; }
+      err.textContent = why ? t('Not saved: {reason}', { reason: why }) : t('Not saved');
+      err.hidden = false;
+      saveB.focus({ preventScroll: true });
+    };
+    // Escape ON the sheet = Keep editing (it never reaches the overlay's own Escape, nor the page's)
+    sheet.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); keepEditing(); } });
+    // a press on the sheet's scrim is not a press on the dialog's controls (the sheet holds the dialog until answered)
+    sheet.addEventListener('mousedown', (e) => { if (e.target === sheet) { e.preventDefault(); saveB.focus({ preventScroll: true }); } });
+    dialog.appendChild(sheet);
+    saveB.focus({ preventScroll: true });
+  };
+  return {
+    // `how` = 'escape' (an Escape the sheet itself did not hear): with the sheet up, that is Keep editing
+    dismiss: (how) => { if (sheet) { if (how === 'escape') keepEditing(); else ask(); return; } if (isDirty()) ask(); else close(); },
+    markSaved: () => { flagged = false; },
+    markDirty: () => { flagged = true; },
+    isDirty,
+  };
 }
 
 // ── In-app modal dialogs (replace native prompt/confirm/alert) ──
@@ -246,7 +326,11 @@ export function stripLegacyRecordToasts(heads) {
 // `action: { label, run }` (split UX R5, 2026-09-23) = ONE button inside the
 // toast (Undo / Show side by side): a click runs it and dismisses the toast; an
 // action toast lives 5 s unless the user's toast-seconds setting says otherwise.
+// lane dialog-unsaved-guard: while an unsaved sheet's Save runs, an error the dialog's own save says (a toast) is ALSO the
+// sheet's reason — «Not saved: <the same words>» stays beside the choices after the toast fades
+let unsavedSaySink = null;
 export function showToast(message, { type = 'info', duration, action, actions, history = null } = {}) {
+  if (unsavedSaySink && type === 'error') unsavedSaySink.push(String(message));
   let stack = document.getElementById('global-toasts');
   if (!stack) {
     stack = document.createElement('div');
@@ -472,16 +556,19 @@ export function onOutsidePress(root, close, { exclude = [], ignore = null, neste
   // surface existed
   const armedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : 0;
   const began = (e) => (Number.isFinite(e.timeStamp) && e.timeStamp < armedAt ? 'before' : 'after');
-  const judge = (target, e, opening = false) => {
-    const v = pressCloses({
-      connected: roots.some((r) => r.isConnected !== false),
-      opening,
-      inRoot: within(roots, target),
-      excluded: within(exclude, target),
-      ignored: !!(ignore && ignore(target, e)),
-      inNestedPopover: !!target?.closest?.('[data-popover]'),
-      nested,
-    });
+  // WHERE the press went down, measured WHEN it went down (lane phone-tray-voice-done, inc-mvhzgiq8-bs3j): a touch is decided
+  // at its pointerup, and a repaint between the two may take the target out of the page — the recording microphone redraws
+  // its capsule four times a second, so a finger held on 「● 0:02」 across one redraw went down on a span that was gone at
+  // the lift: inside nothing, it read as an OUTSIDE press, and the phone's For-you tray closed under the reply it dictated
+  const where = (target, e) => ({
+    inRoot: within(roots, target),
+    excluded: within(exclude, target),
+    ignored: !!(ignore && ignore(target, e)),
+    voice: !!target?.closest?.(VOICE_UI),
+    inNestedPopover: !!target?.closest?.('[data-popover]'),
+  });
+  const judge = (at, e, opening = false) => {
+    const v = pressCloses({ connected: roots.some((r) => r.isConnected !== false), opening, ...at, nested });
     if (v.retire) { dispose(); return; }
     if (!v.close) return;
     if (once) dispose();
@@ -491,15 +578,16 @@ export function onOutsidePress(root, close, { exclude = [], ignore = null, neste
   const o = { capture: true, passive: true, signal: ctl.signal };
   document.addEventListener('pointerdown', (e) => {
     const opening = began(e) === 'before';
-    if (pressPhase(e.pointerType) === 'down') { pending = null; judge(e.target, e, opening); return; }
-    pending = opening ? null : { id: e.pointerId, x: e.clientX, y: e.clientY, at: e.timeStamp, target: e.target };
+    if (pressPhase(e.pointerType) === 'down') { pending = null; judge(where(e.target, e), e, opening); return; }
+    pending = opening ? null : { id: e.pointerId, x: e.clientX, y: e.clientY, at: e.timeStamp, seen: where(e.target, e) };
   }, o);
   document.addEventListener('pointerup', (e) => {
     const p = pending;
     if (!p || p.id !== e.pointerId) return;
     pending = null;
-    // the press is judged where it went DOWN (a captured pointer's pointerup targets the capturing element)
-    if (tapVerdict({ dx: e.clientX - p.x, dy: e.clientY - p.y, heldMs: e.timeStamp - p.at })) judge(p.target, e);
+    // the press is judged where it went DOWN, as it stood then (a captured pointer's pointerup targets the capturing element;
+    // the down target may have left the page since — see `where`)
+    if (tapVerdict({ dx: e.clientX - p.x, dy: e.clientY - p.y, heldMs: e.timeStamp - p.at })) judge(p.seen, e);
   }, o);
   document.addEventListener('pointercancel', (e) => { if (pending && pending.id === e.pointerId) pending = null; }, o);
   // A PRESS INTO A FRAME IS AN OUTSIDE PRESS (lane menu-close-residue, B-5bd5 ①): the frame's document takes the press,

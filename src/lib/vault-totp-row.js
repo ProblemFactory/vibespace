@@ -131,7 +131,9 @@ export function totpExtras(row, data, { refresh, signal, show } = {}) {
 /** 用于…: every running conversation and Task Group, multi-select; checked = granted (a conversation's grant from an earlier
  *  run counts as not granted); unchecking takes a grant back. */
 export function showTotpGrantPicker(entry, data, { refresh } = {}) {
-  const { body, close } = createModalShell({ id: 'vault-totp-grant', title: t('Grant the code of "{name}" to', { name: entry.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true });
+  // lane dialog-unsaved-guard: a tick changed and not saved ⇒ ✕ / Esc / the backdrop asks
+  const { body, close } = createModalShell({ id: 'vault-totp-grant', title: t('Grant the code of "{name}" to', { name: entry.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => boxes.some((b) => b.checked !== had.has(b.value)), save: () => doSave() } });
   const subjects = (data && data.subjects) || { sessions: [], groups: [] };
   const had = new Map(entry.grants.filter((g) => g.live !== false).map((g) => [g.subject, g.id]));
   const boxes = [];
@@ -156,7 +158,7 @@ export function showTotpGrantPicker(entry, data, { refresh } = {}) {
   const save = el('button', 'btn-create vw-totp-save', t('Save'));
   cancel.type = save.type = 'button';
   cancel.onclick = () => close();
-  save.onclick = async () => {
+  const doSave = async () => {
     const add = boxes.filter((b) => b.checked && !had.has(b.value)).map((b) => b.value);
     const drop = boxes.filter((b) => !b.checked && had.has(b.value)).map((b) => had.get(b.value));
     let bad = null;
@@ -165,7 +167,9 @@ export function showTotpGrantPicker(entry, data, { refresh } = {}) {
     if (bad) showToast(failWords(bad), { type: 'error' }); else showToast(t('Saved'));
     close();
     refresh?.();
+    return true;
   };
+  save.onclick = () => { doSave(); };
   f.append(cancel, save);
   body.parentNode.append(f);
 }

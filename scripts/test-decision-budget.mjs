@@ -141,7 +141,8 @@ console.log('⑥ the per-hour guard rides the same reservation');
   const src = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
   const pj = src.slice(src.indexOf('async function preJudge('), src.indexOf('async function onFresh('));
   const reserveAt = pj.indexOf('hrs.push(t);'), awaitAt = pj.indexOf('await decisionEngine.judge(');
-  ok(reserveAt > 0 && awaitAt > reserveAt && pj.indexOf('if (hrs.length >= F.decisionPerHour(rule))') < reserveAt && /a\.lastIndexOf\(t\)/.test(pj) && !/decisionHours\.get\(k\)\.push\(t\)/.test(pj), 'preJudge: the rule\'s hour slot is reserved right after its check, BEFORE the await, and handed back on a refusal / memo (F5)');
+  const checkAt = pj.indexOf('const road = roadOf(facts[F.isRouteRule(rule) ? \'routing\' : \'rule\'], hrs.length >= F.decisionPerHour(rule), F.decisionPerHour(rule));');   // lane judged-watch-state: the hour rides THE road verdict
+  ok(reserveAt > 0 && awaitAt > reserveAt && checkAt > 0 && checkAt < reserveAt && /a\.lastIndexOf\(t\)/.test(pj) && !/decisionHours\.get\(k\)\.push\(t\)/.test(pj), 'preJudge: the rule\'s hour slot is reserved right after its check, BEFORE the await, and handed back on a refusal / memo (F5)');
 }
 
 console.log('⑦ RED CONTROLS — the old shapes in scratch copies');

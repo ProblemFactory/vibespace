@@ -37,13 +37,27 @@
 //      models, the DeepSeek one exactly its rows ("DeepSeek · Entered by you"), the Empty one ONE line + its door; a pick is
 //      RE-RESOLVED against the provider: Custom… "fast" (its alias) ⇒ the CLI gets set_model deepseek-chat; "gpt-9" ⇒
 //      refused by name, nothing sent
+//   F  THE ROWS FOLLOW THE BACKEND THE DIALOG OPENS WITH (lane new-session-account-follows-backend, inc-mvi2cv4b-hdwv:
+//      「创建过一次 Antigravity 对话后，再次创建对话的时候默认正确加载了 Claude 的信息，除了可选账号依然是 Antigravity 的」 —
+//      the open SET the select, which fires no `change`, after the account row had been filled from the previous open's
+//      value). Create is stubbed in the page (app.createSession records what the real Create click sends — no agy, no
+//      claude spawned). F1 pick Antigravity ⇒ the account row lists only Antigravity's; F2 Create, open again ⇒ Claude
+//      AND Claude's account row (the default selected) AND Claude's model menu, and Create sends no Antigravity account;
+//      F3 the inverse (Claude + an account, then an open on Antigravity); F4 a programmatic applyBackend('codex') refills
+//      every derived row (the shell hides them); every apply names its cause in the op ring
+//   G  … AND THE MACHINE (the same hole: the host list lands after the rows were filled, and its programmatic set fired
+//      no `change`) — the host list stubbed in the page: G1 an open on a machine ⇒ the account row speaks that machine;
+//      G2 the next open on this one ⇒ this machine's words
+//   RED CONTROL = the base's open order (the account row filled from the select's previous value, then a programmatic
+//      set; the machine set only when the list lands), rebuilt from a PATCHED COPY of today's app.js in the throwaway
+//      worktree (one esbuild — never the repository's history): F2 / F3 / G1 red; the real bundle back ⇒ F2 green
 // Requires google-chrome + dtach (SKIP without). Run: node scripts/test-new-session-dialog.mjs
-import { execSync, spawn } from 'node:child_process';
+import { execSync, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for the server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -134,7 +148,14 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
   fs.writeFileSync(path.join(D, 'accounts.json'), JSON.stringify({ version: 1, accounts: [
     { id: 'acct-lane-ds', name: 'DeepSeek key', type: 'api', backend: 'claude', keyEnc: seal(k1), tail: k1.slice(-8), providerId: 'pv-lane-ds' },
     { id: 'acct-lane-empty', name: 'Empty provider', type: 'api', backend: 'claude', keyEnc: seal(k2), tail: k2.slice(-8), providerId: 'pv-lane-empty' },
+    // lane new-session-account-follows-backend (F): an Antigravity account signed in (its root holds agy's token file —
+    // a stat, never read) and a codex one that is not (no usage probe can run on it)
+    { id: 'agy-lane-follow', name: 'Agy work', type: 'subscription', backend: 'antigravity' },
+    { id: 'codex-lane-follow', name: 'Codex work', type: 'subscription', backend: 'codex' },
   ] }), { mode: 0o600 });
+  const agyTok = path.join(D, 'agy-subs', 'agy-lane-follow', '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
+  fs.mkdirSync(path.dirname(agyTok), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(agyTok, 'lane-fixture-not-a-token', { mode: 0o600 });
   fs.writeFileSync(path.join(D, 'providers.json'), JSON.stringify({ v: 1, providers: [
     { id: 'pv-lane-ds', kind: 'self-hosted', label: 'DeepSeek', auth: 'x-api-key', modelsSource: 'configured', models: [{ id: 'deepseek-chat', label: 'DeepSeek Chat', context: 128000, caps: ['tools'] }, { id: 'deepseek-reasoner', label: 'deepseek-reasoner', context: null, caps: ['reasoning'] }], aliases: { fast: 'deepseek-chat' }, defaultModel: 'deepseek-reasoner' },
     { id: 'pv-lane-empty', kind: 'self-hosted', label: 'Empty', modelsSource: 'none' },
@@ -150,6 +171,9 @@ const cleanup = () => {
   try { srv.kill('SIGKILL'); } catch {}
   // every process this suite caused carries one of these scratch paths (dtach, the wrapper, the stub, the device daemon)
   for (const pat of [wt, fakeHome, stubDir]) { try { execSync(`pkill -9 -f ${JSON.stringify(pat)}`, { stdio: 'ignore' }); } catch {} }
+  // …and what lives there only by cwd / HOME / daemon root — the server's device daemon is title-rewritten, so no argv
+  // names it (it outlived every run: the gate's reaper found it later)
+  for (const root of [wt, `${wt}-chrome`, fakeHome, stubDir]) { try { endRootedProcesses(root); } catch {} }
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
   for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
@@ -526,7 +550,130 @@ try {
     await evalJs(`document.querySelector('#account-models-dialog .dialog-close')?.click(); true`);
     for (const s of [sA, sB, sC]) if (s) liveWs.send(JSON.stringify({ type: 'kill', sessionId: s }));
   }
+
+  // ═══ F the rows follow the backend the dialog opens with (lane new-session-account-follows-backend) ═══════════════
+  console.log('F the New Session rows follow the backend the dialog opens with');
+  const AGY = 'agy-lane-follow', CODEX = 'codex-lane-follow', CLAUDE_ACCTS = ['acct-lane-ds', 'acct-lane-empty'];
+  const acctRowJs = `(() => { const s = document.getElementById('input-account'), row = document.getElementById('row-account'); return { shown: row.style.display !== 'none', ids: [...s.options].map((o) => o.value), labels: [...s.options].map((o) => o.textContent), value: s.value }; })()`;
+  const rows = async () => ({ backend: await evalJs(`document.getElementById('input-backend').value`), acct: await evalJs(acctRowJs), menu: await evalJs(menu), effortShown: await evalJs(`!document.getElementById('row-effort').classList.contains('hidden')`) });
+  const claudeRow = (a) => a.shown && CLAUDE_ACCTS.every((v) => a.ids.includes(v)) && !a.ids.includes(AGY) && !a.ids.includes(CODEX) && a.labels[0] === 'Default (Subscription)' && a.labels[1] === 'Subscription (Pro/Max login)';
+  const agyRow = (a) => a.shown && a.ids.includes(AGY) && !CLAUDE_ACCTS.some((v) => a.ids.includes(v)) && !a.ids.includes(CODEX) && a.labels[0] === 'Default (Google login)';
+  const claudeMenu = (m) => m.provider === 'pv-anthropic-subscription' && m.ids.includes('opus') && m.selectShown;
+  const pickBackend = (b) => evalJs(`(() => { const s = document.getElementById('input-backend'); s.value = ${JSON.stringify(b)}; s.dispatchEvent(new Event('change')); return s.value; })()`);
+  // the Create door stubbed IN THE PAGE: the real Create click runs (the cwd check, every row read) and what it would send is recorded
+  const stubCreate = () => evalJs(`(() => { window.__nsCreated = []; app.createSession = (o) => { window.__nsCreated.push(JSON.parse(JSON.stringify(o))); }; window.__nsOps = []; const op = window.__vsOp; window.__vsOp = (n, d) => { if (n === 'ns-backend') window.__nsOps.push({ ...d }); return op?.(n, d); }; return true; })()`);
+  const createNow = async () => {
+    const n = await evalJs('window.__nsCreated.length');
+    await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; true`);
+    await realClick('#dialog-new-session .btn-create');
+    await waitFor(`window.__nsCreated.length > ${n} && !(${dialogVisible})`, 6000);
+    return evalJs(`window.__nsCreated.length > ${n} ? window.__nsCreated.at(-1) : null`);
+  };
+  const openNs = async (args = {}) => { await evalJs(`app.hideDialogs(); app.showNewSessionDialog(${JSON.stringify(args)}); true`); await waitFor(dialogVisible, 5000); };
+  // the owner's sequence: a conversation on Antigravity, then the next dialog (F1 + F2); the inverse (F3)
+  const ownerSequence = async (tag) => {
+    const out = {};
+    await openNs();
+    await pickBackend('antigravity');
+    await waitFor(`(${acctRowJs}).ids.includes(${JSON.stringify(AGY)})`, 5000);
+    out.f1 = await rows();
+    await pickAcct(AGY);
+    out.made1 = await createNow();
+    await openNs(); // the next dialog: nothing passed, so it opens on the designed default — Claude
+    await waitFor(`(() => { const m = ${menu}; return m.provider === 'pv-anthropic-subscription'; })()`, 8000); await sleep(300);
+    out.f2 = await rows();
+    await evalJs(`document.getElementById('row-account').scrollIntoView({ block: 'center' }); true`);
+    await shot('f2-' + tag.replace(/\W+/g, '-')); // the dialog the owner saw (base) / sees now (fix): Backend + Account in view
+    out.made2 = await createNow();
+    await openNs();
+    await pickAcct('acct-lane-ds');
+    await waitFor(`(${menu}).provider === 'pv-lane-ds'`, 8000);
+    out.made3 = await createNow();
+    await openNs({ backend: 'antigravity' }); // an open that names its backend (the `backend` parameter — test-worktree-userchan-ui opens so)
+    await sleep(500);
+    out.f3 = await rows();
+    out.made4 = await createNow();
+    console.log(`    [${tag}] ` + JSON.stringify({ f2acct: out.f2.acct.ids, f2value: out.f2.acct.value, made2: out.made2 && { backend: out.made2.backend, accountId: out.made2.accountId || null }, f3acct: out.f3.acct.ids, made4: out.made4 && { backend: out.made4.backend, accountId: out.made4.accountId || null } }));
+    return out;
+  };
+  await stubCreate();
+  {
+    const o = await ownerSequence('fix');
+    check('F1 a pick of Antigravity ⇒ the account row lists ONLY Antigravity\'s (Default (Google login), its signed-in account; no Claude or codex account)', o.f1.backend === 'antigravity' && agyRow(o.f1.acct), o.f1.acct);
+    check('F1 Create sends the Antigravity session on the Antigravity account', o.made1?.backend === 'antigravity' && o.made1?.accountId === AGY, o.made1);
+    check('F2 THE FINDING: the next dialog opens on Claude AND its account row is Claude\'s (Default (Subscription), the two Claude keys; NO Antigravity account)', o.f2.backend === 'claude' && claudeRow(o.f2.acct), o.f2.acct);
+    check('F2 …the DEFAULT account selected (never the previous open\'s Antigravity pick)', o.f2.acct.value === '', o.f2.acct.value);
+    check('F2 …and the model menu is Claude\'s (Anthropic subscription, opus among them), the effort row shown — the rows the owner saw right stay right', claudeMenu(o.f2.menu) && o.f2.effortShown, o.f2.menu);
+    check('F2 Create sends a Claude session with NO account named (the default) — never the Antigravity account', o.made2?.backend === 'claude' && !o.made2?.accountId, o.made2);
+    check('F3 the inverse: Claude on the DeepSeek key, then an open on Antigravity ⇒ Antigravity\'s row, the default selected', o.made3?.backend === 'claude' && o.made3?.accountId === 'acct-lane-ds' && o.f3.backend === 'antigravity' && agyRow(o.f3.acct) && o.f3.acct.value === '', { made3: o.made3, f3: o.f3.acct });
+    check('F3 …and its Create names no Claude account', o.made4?.backend === 'antigravity' && !o.made4?.accountId, o.made4);
+    await openNs();
+    await evalJs(`app.applyBackend('codex', { why: 'lane-test' }); true`);
+    await waitFor(`(${menu}).provider !== 'pv-anthropic-subscription' && (${acctRowJs}).labels[0] === 'Default (ChatGPT login)'`, 8000);
+    const cx = await rows();
+    check('F4 a PROGRAMMATIC applyBackend(\'codex\') refills every derived row: the select, codex\'s account row (Default (ChatGPT login); no Claude or Antigravity account), codex\'s model menu (no opus)', cx.backend === 'codex' && cx.acct.shown && cx.acct.labels[0] === 'Default (ChatGPT login)' && !cx.acct.ids.some((v) => v === AGY || CLAUDE_ACCTS.includes(v)) && !cx.menu.ids.includes('opus') && cx.menu.provider !== 'pv-anthropic-subscription', cx);
+    await evalJs(`app.applyBackend('shell', { why: 'lane-test' }); true`);
+    const sh = await evalJs(`({ acct: document.getElementById('row-account').style.display, model: document.getElementById('row-model').classList.contains('hidden'), perm: document.getElementById('row-permission').classList.contains('hidden'), profile: document.getElementById('row-browser-profile').style.display })`);
+    check('F4 …applyBackend(\'shell\') hides them (no account, model or permission row; no browser profile)', sh.acct === 'none' && sh.model && sh.perm && sh.profile === 'none', sh);
+    const ops = await evalJs('window.__nsOps');
+    check('F5 every apply names its cause in the op ring (ns-backend: open / pick / the caller\'s word)', ['open', 'pick', 'lane-test'].every((w) => ops.some((x) => x.why === w)) && ops.some((x) => x.backend === 'antigravity' && x.why === 'pick') && ops.some((x) => x.backend === 'codex' && x.why === 'lane-test'), ops);
+    await evalJs(`app.applyBackend('claude', { why: 'lane-test' }); app.hideDialogs(); true`);
+  }
+
+  // ═══ G … and the machine: the host list lands after the rows were filled ═════════════════════════════════════════
+  console.log('G the New Session rows follow the machine the dialog opens on');
+  await evalJs(`(() => { if (window.__nsHostsStub) return true; window.__nsHostsStub = true; const f = window.fetch; window.fetch = (u, o) => (String(u) === '/api/hosts' ? Promise.resolve(new Response(JSON.stringify({ hosts: [{ id: 'h-lane', name: 'lanebox', user: 'lane', host: 'lanebox.invalid', transport: 'ssh' }] }), { headers: { 'Content-Type': 'application/json' } })) : f(u, o)); return true; })()`);
+  const subLabel = `(() => { const o = [...document.getElementById('input-account').options].find((x) => x.value === 'subscription'); return { host: document.getElementById('input-host').value, label: o ? o.textContent : null }; })()`;
+  const machineSequence = async () => {
+    await openNs({ hostId: 'h-lane' });
+    await waitFor(`(${subLabel}).host === 'h-lane'`, 5000); await sleep(600);
+    const g1 = await evalJs(subLabel);
+    await openNs();
+    await sleep(1500); // the list lands, any probe of the other machine answers
+    const g2 = await evalJs(subLabel);
+    await evalJs('app.hideDialogs(); true');
+    return { g1, g2 };
+  };
+  {
+    const { g1, g2 } = await machineSequence();
+    check('G1 an open on a machine ⇒ once its list lands the account row speaks THAT machine ("CLI login @ lanebox (Pro/Max)")', g1.host === 'h-lane' && g1.label === 'CLI login @ lanebox (Pro/Max)', g1);
+    check('G2 the next open on this machine ⇒ this machine\'s words ("Subscription (Pro/Max login)")', g2.host === '' && g2.label === 'Subscription (Pro/Max login)', g2);
+  }
   check('no page error during the run', pageErrors.length === 0, pageErrors);
+
+  // ═══ RED CONTROL: the base's open order, from a patched copy of today's app.js (one esbuild) ═══════════════════════
+  console.log('RED CONTROL — the base\'s open order (a patched copy of today\'s app.js in the throwaway worktree; one esbuild)');
+  {
+    const A = path.join(wt, 'src/lib/app.js');
+    const src = fs.readFileSync(A, 'utf8');
+    const EDITS = [
+      // the base filled the profile row and the account row from the select's PREVIOUS value, then SET the select (no `change`)
+      ["    this.applyBackend(b, { why: 'open' }); // THIS open's backend: the session options, the account row, the profile row, the model menu\n",
+        "    this._fillBrowserProfileRow(document.getElementById('input-task')?.value || ''); updateAcctRow(); document.getElementById('input-backend').value = b; this._applySessionBackendOptions(b, { applyDefaults: true });\n"],
+      ["    if (hostSel) hostSel.value = hostId || '';\n", ''], // the base set the machine only when the list landed…
+      ["        if (hostSel.value !== was) this._refillNewSessionRows(); // the machine landed only now — a programmatic set fires no `change`\n", ''], // …and its rows never followed
+    ];
+    check('the three edits the control makes are each spelled exactly once in app.js', EDITS.every(([a]) => src.split(a).length === 2), EDITS.map(([a]) => src.split(a).length - 1));
+    fs.writeFileSync(A, EDITS.reduce((x, [a, b]) => x.replace(a, b), src));
+    const esbuild = path.join(repo, 'node_modules', '.bin', 'esbuild');
+    const rebuild = () => execFileSync(esbuild, ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify', '--log-level=error'], { cwd: wt, stdio: 'ignore' });
+    const reboot = async () => { await cdp('Page.reload', { ignoreCache: true }); await sleep(500); await waitApp(); await sleep(600); await stubCreate(); };
+    rebuild();
+    await reboot();
+    const o = await ownerSequence('base');
+    check('CONTROL F2 the base: the next dialog says Claude but its account row is STILL Antigravity\'s (the incident)', o.f2.backend === 'claude' && agyRow(o.f2.acct) && !claudeRow(o.f2.acct), o.f2.acct);
+    check('CONTROL F2 the base: its Create sends a CLAUDE session naming the ANTIGRAVITY account', o.made2?.backend === 'claude' && o.made2?.accountId === AGY, o.made2);
+    check('CONTROL F3 the base: an open on Antigravity after Claude keeps Claude\'s row and its DeepSeek pick', o.f3.backend === 'antigravity' && !agyRow(o.f3.acct) && o.made4?.accountId === 'acct-lane-ds', { f3: o.f3.acct, made4: o.made4 });
+    await evalJs(`app.applyBackend('claude', { why: 'lane-test' }); app.hideDialogs(); true`); // the machine alone differs (as in G)
+    await evalJs(`(() => { const f = window.fetch; window.fetch = (u, x) => (String(u) === '/api/hosts' ? Promise.resolve(new Response(JSON.stringify({ hosts: [{ id: 'h-lane', name: 'lanebox', user: 'lane', host: 'lanebox.invalid', transport: 'ssh' }] }), { headers: { 'Content-Type': 'application/json' } })) : f(u, x)); return true; })()`);
+    const g = await machineSequence();
+    check('CONTROL G1 the base: an open on a machine keeps THIS machine\'s words after the list lands', g.g1.host === 'h-lane' && g.g1.label === 'Subscription (Pro/Max login)', g.g1);
+    fs.writeFileSync(A, src);
+    fs.copyFileSync(path.join(repo, 'public', 'bundle.js'), path.join(wt, 'public', 'bundle.js'));
+    await reboot();
+    const back = await ownerSequence('fix again');
+    check('the real bundle back: F2 green again — Claude\'s row, the default, a Create naming no account (the fix, not the reload)', back.f2.backend === 'claude' && claudeRow(back.f2.acct) && back.f2.acct.value === '' && back.made2?.backend === 'claude' && !back.made2?.accountId, { acct: back.f2.acct, made2: back.made2 });
+  }
   try { liveWs.send(JSON.stringify({ type: 'kill', sessionId: sid })); liveWs.close(); } catch {}
 } catch (e) {
   failed++;

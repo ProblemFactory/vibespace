@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.337 — 2026-10-21
+
+### Fixed
+- Closing a dialog with unsaved changes asks to save or discard them, never drops them silently — Notify…, Grant access…, a key’s Edit… and every Save dialog.
+- On a phone, finishing a dictation in a For you reply no longer closes the tray, and the Report a problem box takes dictation too.
+- An agent that sets a notification rule the LLM plugin judges is told if it can run and why not; you get one notice when the day's budget pauses such rules.
+- The New Session dialog's accounts now follow the backend it opens with: after an Antigravity conversation it no longer offers Antigravity accounts for Claude.
+
 ## 2.369.336 — 2026-10-21
 
 ### Fixed

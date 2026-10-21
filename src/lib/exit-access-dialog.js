@@ -97,7 +97,10 @@ async function fetchView(hostId) {
  * Open the dialog on `hostId`. `app` gives the live roster (sidebar sessions + Task Groups). Resolves when drawn.
  */
 export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
-  const { body, close, dialog } = createModalShell({ id: 'exit-access-dialog', title: t('Who can use {machine}?', { machine: name || hostId }), dialogClass: 'exit-access-dialog', bodyClass: 'exit-access-body', escapeToClose: true });
+  // lane dialog-unsaved-guard: who / commands / the hub's answer changed and not saved ⇒ ✕ / Esc / the backdrop asks
+  let dirtyNow = () => false; let saveNow = async () => true;
+  const { body, close, dialog } = createModalShell({ id: 'exit-access-dialog', title: t('Who can use {machine}?', { machine: name || hostId }), dialogClass: 'exit-access-dialog', bodyClass: 'exit-access-body', escapeToClose: true,
+    unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() } });
   body.textContent = t('Loading…');
   let data;
   try { data = await fetchView(hostId); }
@@ -298,5 +301,10 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       refuseLine.textContent = w;
       showToast(t('Could not change who can use it') + (j.code ? ` — ${w}` : ''), { type: 'error' });
     };
+    // what the person changed, against what this draw showed (a fresh draw — the list moved — starts a new base)
+    const drawn = () => JSON.stringify({ sec: ['use', 'run'].map((g) => { const s = sections[g]; return [s.mode, s.picker && typeof s.picker.selected === 'function' ? s.picker.selected().slice().sort() : null, !!(s.askBox && s.askBox.checked)]; }), hub: hubTouched ? hubMode : null });
+    const base = drawn();
+    dirtyNow = () => drawn() !== base;
+    saveNow = async () => { await save.onclick(); return body.querySelector('.exit-access-refuse')?.textContent || undefined; };
   }
 }

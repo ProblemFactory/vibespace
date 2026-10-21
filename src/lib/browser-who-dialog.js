@@ -59,8 +59,10 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   const title = String((view.profile && view.profile.label) || label || id);
   const sb = (app && app.sidebar) || {};
   let closed = false;
+  // lane dialog-unsaved-guard: a pick changed and not saved ⇒ ✕ / Esc / the backdrop asks (the picker is drawn right below)
   const shell = createModalShell({ id: DIALOG_ID, title: t('Who can use {label}?', { label: title }), dialogClass: 'bwho-dialog', bodyClass: 'bwho-body', escapeToClose: true,
-    onClose: () => { closed = true; try { picker.close(); } catch { /* none */ } } });
+    onClose: () => { closed = true; try { picker.close(); } catch { /* none */ } },
+    unsaved: { isDirty: () => picker.selected().slice().sort().join('\n') !== initial.slice().sort().join('\n'), save: () => doSave() } });
   shell.dialog.dataset.profileId = id;
   const body = shell.body;
 
@@ -148,7 +150,7 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
       refusal.style.display = '';
       syncNotes();
       picker.focus();
-      return;
+      return refusalWords({ code: 'empty_list' }, t);
     }
     const namesPicked = mode() === 'only' ? picker.selectedRows().map((r) => r.name) : [];
     save.disabled = true; cancel.disabled = true; picker.setBusy(true);
@@ -163,7 +165,7 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
         openWhoDialog(app, id, { onSaved, label: title });
         return;
       }
-      if (r && r.code === 'empty_list') { noteText(refusal, words); refusal.style.display = ''; syncNotes(); return; }
+      if (r && r.code === 'empty_list') { noteText(refusal, words); refusal.style.display = ''; syncNotes(); return words; }
       showToast(words || (t('Could not change who can use it') + ' — ' + ((r && r.error) || t('server unreachable'))), { type: 'error', duration: 9000 });
       try { save.focus(); } catch { /* none */ }
       return;

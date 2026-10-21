@@ -6955,26 +6955,41 @@ function create(deps = {}) {
       return (i >= 0 ? tail.slice(Math.max(0, i - 3), i) : tail.slice(-3)).filter((x) => x && !FO.systemRead(x)).map((x) => { const v = viewOf(rec, x); return `${(v.author && (v.author.display || v.author.name)) || 'someone'}: ${v.text || ''}`; });
     };
   }
-  async function preJudge(rec, convId, fresh, order, selfId) {
+  // lane judged-watch-state (B-f42e): THE ROAD's facts once a batch (decisionEngine.roadFacts — the plugin, its switch, the
+  // key, what is left today against one judgment's price) + the rule's own hour ⇒ ONE verdict (DM.judgedRoadState). The key
+  // and the money stay the judge's own refusal (its journal line, its notice) — the judge's gate reads the same verdict
+  const JUDGE_REFUSES = new Set(['no-key', 'budget-spent']);
+  const NO_ROAD = Object.freeze({ pluginOn: false });
+  function roadFactsOf(use) {
+    if (!decisionEngine || typeof decisionEngine.judge !== 'function') return NO_ROAD;
+    try {
+      if (typeof decisionEngine.roadFacts === 'function') return decisionEngine.roadFacts(use) || NO_ROAD;
+      const s = decisionEngine.settings();   // an engine without the road's facts (an older seam): its switches — the judge refuses the rest
+      const f = use === 'routing' ? 'routing' : 'rules';
+      return { pluginOn: !!s.pluginOn, rulesOn: !!(s.features && s.features[f] === true), keyPresent: true, budgetLeft: Infinity, estUsd: 0, route: f === 'routing' };
+    } catch { return NO_ROAD; }
+  }
+  const roadOf = (facts, hourCapHit = false, perHour = null) => DM.judgedRoadState({ ...facts, hourCapHit, rulePerHour: perHour });
+  async function preJudge(rec, convId, fresh, order, selfId, skip = () => {}) {
     const rules = new Map();
     for (const item of order) { const w = item.watcher; if (w.mode === 'filtered') for (const r of F.decisionRulesOf(filterFor(w.filterId))) rules.set(F.decisionKeyOf(r), r); }
     if (!rules.size) return null;
     const decisions = new Map();
     const keys = [...rules.keys()].sort();   // a stable question order: a memo answer lines up with the same rules
-    if (!decisionEngine || typeof decisionEngine.judge !== 'function') { for (const k of keys) decisionSay(rec, convId, k, rules.get(k), 'no LLM plugin on this server'); return decisions; }
-    const s = decisionEngine.settings();
-    if (!s.pluginOn) { for (const k of keys) decisionSay(rec, convId, k, rules.get(k), 'plugin-off'); return decisions; }
+    const judgedHere = fresh.filter((r0) => !FO.selfRead(r0, selfId) && !FO.systemRead(r0));   // the owner's own message and a vendor notice are never judged
+    if (!decisionEngine || typeof decisionEngine.judge !== 'function') { for (const k of keys) decisionSay(rec, convId, k, rules.get(k), 'no LLM plugin on this server'); for (const r0 of judgedHere) for (const k of keys) skip(r0, 'plugin-off', { key: k }); return decisions; }
+    const facts = { rule: roadFactsOf('rule'), routing: roadFactsOf('routing') };
+    if (!facts.rule.pluginOn) { for (const k of keys) decisionSay(rec, convId, k, rules.get(k), 'plugin-off'); for (const r0 of judgedHere) for (const k of keys) skip(r0, 'plugin-off', { key: k }); return decisions; }
     let tailOf = null;
-    for (const r0 of fresh) {
-      if (FO.selfRead(r0, selfId) || FO.systemRead(r0)) continue;   // the owner's own message and a vendor notice are never judged
+    for (const r0 of judgedHere) {
       const t = now();
       const ask = [];
       for (const k of keys) {
         const rule = rules.get(k);
-        if (s.features[F.isRouteRule(rule) ? 'routing' : 'rules'] !== true) { decisionSay(rec, convId, k, rule, 'feature-off'); continue; }
         const hrs = (decisionHours.get(k) || []).filter((x) => x > t - 3600e3);
         decisionHours.set(k, hrs);
-        if (hrs.length >= F.decisionPerHour(rule)) { decisionSay(rec, convId, k, rule, 'per-hour'); continue; }
+        const road = roadOf(facts[F.isRouteRule(rule) ? 'routing' : 'rule'], hrs.length >= F.decisionPerHour(rule), F.decisionPerHour(rule));   // THE verdict: the switch, the key, the money, the rule's hour
+        if (!road.live && !JUDGE_REFUSES.has(road.why)) { decisionSay(rec, convId, k, rule, DM.ROAD_GATE_WHY[road.why]); skip(r0, road.why, { key: k }); continue; }
         hrs.push(t);   // RESERVE the rule's hour slot in the same step as its check (decision-verify F5): concurrent passes see it
         ask.push(k);
       }
@@ -6989,7 +7004,7 @@ function create(deps = {}) {
       if (!res || !res.ok || res.memo) {   // no call made (a refusal, a memo answer): the reserved hour slots go back
         for (const k of ask) { const a = decisionHours.get(k) || []; const i = a.lastIndexOf(t); if (i >= 0) a.splice(i, 1); }
       }
-      if (!res || !res.ok) { for (const k of ask) decisionSay(rec, convId, k, rules.get(k), (res && res.why) || 'refused'); continue; }
+      if (!res || !res.ok) { for (const k of ask) { decisionSay(rec, convId, k, rules.get(k), (res && res.why) || 'refused'); skip(r0, DM.roadWhyOf(res && res.why), { key: k }); } continue; }
       ask.forEach((k, i) => { decisions.set(`${k}|${r0.id}`, res.answers[i] || null); });
     }
     if (decisionHours.size > 2000) for (const [k, v] of decisionHours) if (!v.length) decisionHours.delete(k);
@@ -7017,7 +7032,7 @@ function create(deps = {}) {
   }
   const inferHoursSetting = () => setting('channels.replyInferHours');   // THE settings reader (SETTING_BOUNDS = the schema row's numbers)
   const INFER_PARALLEL = 4;        // judgments in flight per pass (review r1: never the sum of N calls before the batch's other watchers)
-  async function preInfer(rec, convId, fresh, order, selfId, ctxOf, extra = {}) {
+  async function preInfer(rec, convId, fresh, order, selfId, ctxOf, extra = {}, skip = () => {}) {
     // the half an item matches with (a group row's `rest` item never reads the sent rule — its members' items do)
     const items = order.filter((item) => { if (item.watcher.mode !== 'filtered') return false; const f0 = filterFor(item.watcher.filterId); return F.inferRuleOf(item.split ? F.splitFilter(f0, item.split) : f0); });
     if (!items.length) return null;
@@ -7033,20 +7048,22 @@ function create(deps = {}) {
           if (FO.selfRead(r0, selfId) || FO.systemRead(r0)) continue;   // the owner's own message and a vendor notice are never judged
           const c = F.inferCandidate(r0, cx);
           // a judgment that cannot change this filter's answer is never bought (review r1: `any` already hit, `every` already missed)
-          if (c && !asks.has(c.key) && F.inferWorth(f, r0, cx)) asks.set(c.key, { r0, c });
+          if (c && F.inferWorth(f, r0, cx)) { if (!asks.has(c.key)) asks.set(c.key, { r0, c, items: new Set() }); asks.get(c.key).items.add(item); }   // + who asked (lane judged-watch-state: a skip is counted for them)
         } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: a record could not be scoped for reply-infer — not judged: ${(err && err.message) || err}`); }
       }
     }
     if (!asks.size) return { inferred, hours };   // nothing in scope: no call, nothing to say
-    if (!decisionEngine || typeof decisionEngine.judge !== 'function') { inferSay(rec, convId, 'no LLM plugin on this server', asks.size); return { inferred, hours }; }
-    if (!decisionEngine.settings().pluginOn) { inferSay(rec, convId, 'plugin-off', asks.size); return { inferred, hours }; }
+    if (!decisionEngine || typeof decisionEngine.judge !== 'function') { inferSay(rec, convId, 'no LLM plugin on this server', asks.size); for (const a of asks.values()) skip(a.r0, 'plugin-off', { items: a.items }); return { inferred, hours }; }
+    const facts = roadFactsOf('reply-infer');   // lane judged-watch-state: THE road (its Rules switch, the key, the money) once a pass
+    if (!facts.pluginOn) { inferSay(rec, convId, 'plugin-off', asks.size); for (const a of asks.values()) skip(a.r0, 'plugin-off', { items: a.items }); return { inferred, hours }; }
     const conv = `${rec.id}/${convId}`;
     const queue = [...asks];
-    const one = async ([key, { r0, c }]) => {
+    const one = async ([key, { r0, c, items }]) => {
       const t = now();
       const hrs = (inferHourly.get(conv) || []).filter((x) => x > t - 3600e3);
       inferHourly.set(conv, hrs);
-      if (hrs.length >= F.INFER.perHour) { inferSay(rec, convId, 'per-hour', 1); return; }
+      const road = roadOf(facts, hrs.length >= F.INFER.perHour, F.INFER.perHour);   // THE verdict: the switch, the key, the money, the conversation's hour
+      if (!road.live && !JUDGE_REFUSES.has(road.why)) { inferSay(rec, convId, DM.ROAD_GATE_WHY[road.why], 1); skip(r0, road.why, { items }); return; }
       hrs.push(t);   // RESERVE the hour slot in the same step as its check: concurrent passes see it
       const sentText = String(c.sent.text || c.sent.words || c.sent.subject || '') || '(a file)';
       let res = null;
@@ -7054,7 +7071,7 @@ function create(deps = {}) {
         res = await decisionEngine.judge('reply-infer', { sent: sentText, reply: r0.text || '', gap: `${c.gapMin} minutes` }, { questions: [DM.REPLY_INFER_QUESTION], memo: { id: String(r0.id), sent: String(c.sent.id) }, accountNever: rec.judge === 'never' });
       } catch (err) { res = { ok: false, why: `error: ${(err && err.message) || err}`.slice(0, 160) }; }
       if (!res || !res.ok || res.memo) { const a = inferHourly.get(conv) || []; const i = a.lastIndexOf(t); if (i >= 0) a.splice(i, 1); }   // no call made: the slot goes back
-      if (!res || !res.ok) { inferSay(rec, convId, (res && res.why) || 'refused', 1); return; }
+      if (!res || !res.ok) { inferSay(rec, convId, (res && res.why) || 'refused', 1); skip(r0, DM.roadWhyOf(res && res.why), { items }); return; }
       const a = (Array.isArray(res.answers) && res.answers[0]) || null;
       inferred.set(key, a);
       const p = a && !a.refused && typeof a.probability === 'number' ? a.probability : null;
@@ -7066,11 +7083,119 @@ function create(deps = {}) {
     return { inferred, hours };
   }
 
+  // ── THE SKIP'S THREE DOORS (lane judged-watch-state, B-f42e — «simply not a hit» was a silent failure) ──────────────
+  // A message a judged rule could not judge (the road down: the plugin / its switch off, no key, the day's budget, the
+  // rule's hour, a refusal of the judge) is NEVER remembered as a no (the memo keeps answers only) and never silent:
+  //   ① OWED — kept in memory (≤ OWED_PER_CONV a conversation, ≤ OWED_CONVS conversations; a restart forgets them) for the
+  //      watchers it missed, and judged when the road returns (`owedPass`, a look a minute while anything is owed) as a
+  //      fresh batch would be — the same doors, wakes and next-turn deliveries; past the reply-judging window
+  //      (`channels.replyInferHours`, Settings › Channels, default 24 h — the judged road's own window) it is dropped;
+  //   ② THE AGENT — the agent the rule notifies gets ONE line a day per cause through its next-turn delivery (the free
+  //      stash, never a wake — the spend authorizer's rule): DM.judgedSkipLine;
+  //   ③ THE OWNER — a skip because the day's budget is spent files the LLM plugin's ONE For-you item of the day naming whose
+  //      rules paused (decisionEngine.notePaused).
+  const OWED_PER_CONV = 50, OWED_CONVS = 200, OWED_LOOK_MS = 60e3;
+  const owed = new Map();       // `${adapterId}/${convId}` → {adapterId, convId, recs: Map(record id → {r, at, pks: Set})}
+  const skipDays = new Map();   // `${cid} ${why}` → {day, ids: Set, said} — what one agent's judged rules skipped today, per cause
+  let owedTimer = null, owedBusy = false;
+  const dayOfNow = (t) => DM.dayOf(t, new Date(t).getTimezoneOffset());
+  function owe(rec, convId, r, pk, at) {
+    const key = `${rec.id}/${convId}`;
+    let o = owed.get(key);
+    if (!o) { if (owed.size >= OWED_CONVS) owed.delete(owed.keys().next().value); o = { adapterId: rec.id, convId, recs: new Map() }; owed.set(key, o); }
+    const id = String(r && r.id);
+    const e = o.recs.get(id) || { r, at, pks: new Set() };
+    e.pks.add(pk);
+    o.recs.delete(id); o.recs.set(id, e);
+    while (o.recs.size > OWED_PER_CONV) o.recs.delete(o.recs.keys().next().value);
+    if (!owedTimer && !stopped) { owedTimer = setInterval(() => { track(owedPass()); }, OWED_LOOK_MS); if (owedTimer.unref) owedTimer.unref(); }
+  }
+  /** What a batch's judged rules could not judge (`skips` = {r0, why, key | items}) → the three doors above. A watcher the
+   *  record reached anyway (another rule hit) owes nothing. */
+  function noteSkips(rec, convId, fresh0, order, skips, per, owedFor) {
+    if (!skips.length) return;
+    const t = now();
+    const raw = new Map(fresh0.map((r) => [String(r && r.id), r]));
+    const hitBy = new Map();
+    for (const { item, hits } of per) for (const h of hits) { const id = String(h.record && h.record.id); if (!hitBy.has(id)) hitBy.set(id, new Set()); hitBy.get(id).add(pkOf(item.watcher.principal)); }
+    const filterOfItem = (item) => { const f0 = item.watcher.mode === 'filtered' ? filterFor(item.watcher.filterId) : null; return f0 && item.split ? F.splitFilter(f0, item.split) : f0; };
+    const told = new Map();   // cid → Map(why → Set(record id))
+    const paused = new Set();
+    for (const s of skips) {
+      const id = String(s.r0 && s.r0.id);
+      const items = s.items ? [...s.items] : order.filter((item) => { const f = filterOfItem(item); return !!f && F.decisionRulesOf(f).some((r) => F.decisionKeyOf(r) === s.key); });
+      for (const item of items) {
+        const p = item.watcher.principal, pk = pkOf(p);
+        if (hitBy.has(id) && hitBy.get(id).has(pk)) continue;
+        const still = stillInEffect(rec, convId, pk);   // THE GATE (§65): only a watcher still in effect here is owed or told
+        if (!still || !still.watched) continue;
+        owe(rec, convId, raw.get(id) || s.r0, pk, owedFor && owedFor.get(id) ? owedFor.get(id).at : t);
+        const cid = p.kind === 'agent' ? String(p.id) : F.fanTargetOf(p);
+        if (cid) { if (!told.has(cid)) told.set(cid, new Map()); const m = told.get(cid); if (!m.has(s.why)) m.set(s.why, new Set()); m.get(s.why).add(id); }
+        if (s.why === 'budget-spent') paused.add(String(p.name || cid || p.id));
+      }
+    }
+    const day = dayOfNow(t);
+    for (const [cid, m] of told) {
+      for (const [why, ids] of m) {
+        const k = `${cid} ${why}`;
+        let d = skipDays.get(k);
+        if (!d || d.day !== day) { d = { day, ids: new Set(), said: false }; skipDays.delete(k); skipDays.set(k, d); }
+        for (const id of ids) if (d.ids.size < 1000) d.ids.add(id);
+        if (d.said || !deliver || typeof deliver.stashFor !== 'function') continue;
+        d.said = true;   // ONE line a day per cause — the next-turn road (the free stash), never a wake
+        try { deliver.stashFor(cid, { source: 'channel', kind: 'notification', fromName: 'Channels · judged rules', text: DM.judgedSkipLine(d.ids.size, why, { windowHours: inferHoursSetting() }) }); }
+        catch (err) { d.said = false; log.warn(`[channels] ${rec.id}/${convId}: the judged rules' not-a-hit line for ${cid} could not be stashed: ${(err && err.message) || err}`); }
+      }
+    }
+    while (skipDays.size > 2000) skipDays.delete(skipDays.keys().next().value);
+    if (paused.size && decisionEngine && typeof decisionEngine.notePaused === 'function') { try { decisionEngine.notePaused([...paused]); } catch (err) { log.warn(`[channels] the budget's paused-rules notice failed: ${(err && err.message) || err}`); } }
+  }
+  /** THE ROAD CAME BACK — the owed messages are judged now, for the watchers their skip named (as a fresh batch: the same
+   *  pre-passes, filters and doors); one past the reply-judging window is dropped. → how many were handed back. */
+  async function owedPass() {
+    if (owedBusy || stopped) return 0;
+    owedBusy = true;
+    let n = 0;
+    try {
+      const t = now(), span = inferHoursSetting() * 3600e3;
+      const live = ['rule', 'routing', 'reply-infer'].some((u) => roadOf(roadFactsOf(u)).live);
+      for (const [key, o] of [...owed]) {
+        for (const [id, e] of o.recs) if (t - e.at > span) o.recs.delete(id);
+        if (!o.recs.size) { owed.delete(key); continue; }
+        if (!live) continue;
+        owed.delete(key);
+        const rec = adapterRecords().adapters.find((x) => x.id === o.adapterId);
+        if (!rec || rec.enabled === false) continue;
+        n += o.recs.size;
+        try { await onFresh(rec, o.convId, [...o.recs.values()].map((e) => e.r), { origin: 'owed', owed: o.recs }); }
+        catch (err) { log.warn(`[channels] ${key}: the owed judgments failed — ${(err && err.message) || err}`); }
+      }
+    } finally { owedBusy = false; }
+    if (!owed.size && owedTimer) { clearInterval(owedTimer); owedTimer = null; }
+    return n;
+  }
+  /** THE DOORS' READING of a filter's judged rules (the watch answer, `watch --show`, `watches`): null = no judged rule;
+   *  else {state, line} — the first rule whose road is down names it, else live; `cid` = the asking agent (its skips of
+   *  the day ride a down road's line). */
+  function judgedRoadFor(filter, { cid = null } = {}) {
+    if (!filter || !Array.isArray(filter.rules)) return null;
+    const t = now();
+    const uses = F.decisionRulesOf(filter).map((r) => ({ use: F.isRouteRule(r) ? 'routing' : 'rule', hour: (decisionHours.get(F.decisionKeyOf(r)) || []).filter((x) => x > t - 3600e3).length >= F.decisionPerHour(r), perHour: F.decisionPerHour(r) }));
+    if (F.inferRuleOf(filter)) uses.push({ use: 'reply-infer', hour: false, perHour: F.INFER.perHour });
+    if (!uses.length) return null;
+    let state = null;
+    for (const u of uses) { const s = roadOf(roadFactsOf(u.use), u.hour, u.perHour); if (!s.live) { state = s; break; } state = state || s; }
+    let skipped = 0;
+    if (cid && !state.live) { const d = skipDays.get(`${cid} ${state.why}`); skipped = d && d.day === dayOfNow(t) ? d.ids.size : 0; }
+    return { state, line: DM.judgedRoadLine(state, { skipped }) };
+  }
+
   /** THE FUNNEL ENTRY. `fresh` are the records that just became durable.
    *  R4: EVERY WATCHER in effect matches with ITS OWN filter and is delivered
    *  on its own (a wake, a digest window, a scope digest), each against its
    *  own pace ledger; ACCESS alone is never on this path. */
-  async function onFresh(rec, convId, fresh0, { lane, origin } = {}) {
+  async function onFresh(rec, convId, fresh0, { lane, origin, owed: owedFor = null } = {}) {
     if (stopped || !Array.isArray(fresh0) || !fresh0.length) return;
     // lane lark-threads (B2–B5): the batch through the ONE view door — a wake / a For-you item names an author as the owner
     // reads them (`author.display`: the owner's name › the vendor's way); the vendor `name` (what a rule matches) unchanged
@@ -7088,12 +7213,14 @@ function create(deps = {}) {
     // the one thing on this path that cannot be re-derived.
     const ledger = async (what, fn) => { try { await store.index.update(fn); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: ${what} ledger failed: ${(err && err.message) || err}`); } };
     // msgs7d — the estimate's denominator measured after the fact (§7.2)
-    await ledger('msgs', () => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); e2.stats.msgs.push({ at: t, n: fresh.length }); e2.stats.msgs = F.pruneLedger(e2.stats.msgs, t); e2.stats.msgs7d = F.countSince(e2.stats.msgs, t, 7); });
+    if (!owedFor) await ledger('msgs', () => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); e2.stats.msgs.push({ at: t, n: fresh.length }); e2.stats.msgs = F.pruneLedger(e2.stats.msgs, t); e2.stats.msgs7d = F.countSince(e2.stats.msgs, t, 7); });
     const eff = wakeEffOf(en);   // ALL AGENTS fanned out: one item per running conversation
     if (!eff || !eff.watchers.length) return;
     // a named AGENT first, then groups (and the All-agents fan-out): a group's round-robin skips a session
     // this batch already reached (one batch never bills one agent twice)
-    const order = eff.watchers.slice().sort((a, b) => (a.watcher.principal.kind === 'agent' ? 0 : 1) - (b.watcher.principal.kind === 'agent' ? 0 : 1));
+    let order = eff.watchers.slice().sort((a, b) => (a.watcher.principal.kind === 'agent' ? 0 : 1) - (b.watcher.principal.kind === 'agent' ? 0 : 1));
+    // lane judged-watch-state: an OWED batch (the road came back) reaches only the watchers its skip named — never again one it reached
+    if (owedFor) { const want = new Set([...owedFor.values()].flatMap((o) => [...o.pks])); order = order.filter((item) => want.has(pkOf(item.watcher.principal))); if (!order.length) return; }
     const per = [];
     const union = new Set();
     // lane channel-threads (spec §5.4): the two PLACE rules read WHOSE a message is — the owner's (author.isSelf in the
@@ -7151,10 +7278,12 @@ function create(deps = {}) {
     // logged BY NAME and skipped, never dropped for the batch.
     // lane decision-rule: the decision rules' answers BEFORE any filter runs (null = no decision rule in scope — no cost)
     let decisions = null;
-    try { decisions = await preJudge(rec, convId, fresh, order, selfId); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the decision pre-judge failed — no decision rule hits this batch: ${(err && err.message) || err}`); }
+    const skips = [];   // lane judged-watch-state: what the judged rules could not judge this batch (the skip's three doors)
+    const skip = (r0, why, o = {}) => { skips.push({ r0, why, ...o }); };
+    try { decisions = await preJudge(rec, convId, fresh, order, selfId, skip); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the decision pre-judge failed — no decision rule hits this batch: ${(err && err.message) || err}`); }
     // lane dm-reply-infers: the reply rule's judged road — its answers before any filter runs (null = no `infer` rule in scope)
     let infer = null;
-    try { infer = await preInfer(rec, convId, fresh, order, selfId, placeCtx, { subjectOf, ...(decisions ? { decisions } : {}) }); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the reply-infer pre-pass failed — no plain message is judged this batch: ${(err && err.message) || err}`); }
+    try { infer = await preInfer(rec, convId, fresh, order, selfId, placeCtx, { subjectOf, ...(decisions ? { decisions } : {}) }, skip); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the reply-infer pre-pass failed — no plain message is judged this batch: ${(err && err.message) || err}`); }
     for (const item of order) {
       try {
         const w = item.watcher;
@@ -7168,6 +7297,7 @@ function create(deps = {}) {
         const mctx = { ...(filter && Array.isArray(filter.rules) && filter.rules.some((x) => x && F.PLACE_RULE_KINDS.includes(x.kind)) ? placeCtx(w.principal) : {}), subjectOf, ...(decisions ? { decisions, principal: w.principal } : {}), ...(infer ? { inferred: infer.inferred, inferHours: infer.hours } : {}) };
         for (const r of fresh) {
           try {
+            if (owedFor) { const o = owedFor.get(String(r.id)); if (!o || !o.pks.has(pkOf(w.principal))) continue; }   // lane judged-watch-state: an owed message, only for a watcher that missed it
             // lane channel-self-unread (B-c91b: 'inc-' matched the owner's OWN Outbox replies to userW): the owner's
             // own message is never a hit — no keyword / regex / place rule, no @ in it, no 'all' watcher (FO.selfRead)
             if (FO.selfRead(r, selfId)) continue;
@@ -7182,6 +7312,7 @@ function create(deps = {}) {
         per.push({ item, hits });
       } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the notification for ${pkOf(item.watcher && item.watcher.principal)} could not be prepared — skipped: ${(err && err.message) || err}`); }
     }
+    try { noteSkips(rec, convId, fresh0, order, skips, per, owedFor); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the judged rules' skips could not be noted: ${(err && err.message) || err}`); }
     if (!per.length) return;
     await ledger('hits', (ix) => {
       const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); e2.stats.hits.push({ at: t, n: union.size }); e2.stats.hits = F.pruneLedger(e2.stats.hits, t); e2.stats.hits7d = F.countSince(e2.stats.hits, t, 7);
@@ -7869,6 +8000,7 @@ function create(deps = {}) {
     dropLive, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, withView, offerNow, NOT_A_THREAD, threadRead, threadRefresh,
     rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, recallMessage, vendorSearch, aroundFor, refreshConvCaps, retractUnsaved,
     retractFailure, track, wakeTimers, clearWakeTimer, coalesceSeconds, billedWake, pathBudgetVerdict,
+    judgedRoadFor,   // lane judged-watch-state: the watch answers' judged-road line (channels-access)
     get stopped() { return stopped; },
     get timer() { return timer; },
   };
@@ -8110,6 +8242,7 @@ function create(deps = {}) {
     if (offStash) { try { offStash(); } catch {} offStash = null; }   // 2026-09-27: the receipt-fate listener
     if (offStashGate) { try { offStashGate(); } catch {} offStashGate = null; }   // verify r3: the stash gate
     if (timer) { clearInterval(timer); timer = null; }
+    if (owedTimer) { clearInterval(owedTimer); owedTimer = null; }   // lane judged-watch-state: the owed look (what is owed is memory — a restart forgets it)
     // P2: a window that never fired keeps its hits PENDING on the index (they
     // were persisted before the timer existed), so the next boot delivers them.
     for (const key of [...wakeTimers.keys()]) clearWakeTimer(key);
@@ -8281,6 +8414,7 @@ function create(deps = {}) {
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
     agentWatch, agentUnwatch, agentWatchesFor, setAgentDirectory, directoryLists,   // lane channel-agent-watch
     attention, setJudge, labelJudged,   // lane decision-attention: the judged rows' scan, the account's "never judge", a label
+    owedPass, judgedRoadFor,   // lane judged-watch-state: the owed re-judgment's look (a suite drives it by hand) + the doors' reading of a judged road
     onFresh,   // lane channel-agent-watch: the hit dispatch, driven by test-channel-agent-watch ⑤ with records the store already holds
     carryParked,   // lane stash-pending-live: a member's own turn (the hook's stash drain) carries what its watchers parked
     listFor, readFor, statusFor,

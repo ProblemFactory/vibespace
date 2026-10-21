@@ -677,5 +677,45 @@ console.log('㉑ use reply-infer (lane dm-reply-infers, B-6b4b) — its row, its
   ok(M.READOUT_USES.includes('reply-infer') && M.decisionTodayLine({ byUse: { 'reply-infer': { calls: 3, usd: 0.0002 } } }, 1).title.includes('Plain replies'), 'the spend readout names the use (Plain replies) once it has spent');
 }
 
+console.log('㉒ THE JUDGED ROAD (lane judged-watch-state, B-f42e) — ONE verdict the gate and every door read; the words; 2 RED mutants');
+{
+  const live = { pluginOn: true, rulesOn: true, keyPresent: true, budgetLeft: 0.6, estUsd: 0.0004, budgetUsd: 1, rulePerHour: 20 };
+  const rows = [
+    [{}, false, 'plugin-off'], [{ ...live, pluginOn: false, rulesOn: false, keyPresent: false }, false, 'plugin-off'], [{ ...live, rulesOn: false }, false, 'rules-off'],
+    [{ ...live, rulesOn: false, route: true }, false, 'routing-off'], [{ ...live, keyPresent: false, budgetLeft: 0 }, false, 'no-key'], [{ ...live, budgetLeft: 0 }, false, 'budget-spent'],
+    [{ ...live, budgetLeft: -0.2 }, false, 'budget-spent'], [{ ...live, budgetLeft: 0.0003 }, false, 'budget-spent'], [{ ...live, budgetLeft: 0, hourCapHit: true }, false, 'budget-spent'],
+    [{ ...live, hourCapHit: true }, false, 'hour-cap'], [{ ...live, budgetLeft: 0.0004 }, true, null], [live, true, null],
+  ];
+  for (const [f, isLive, why] of rows) { const v = M.judgedRoadState(f); ok(v.live === isLive && v.why === why, `judgedRoadState → ${isLive ? 'live' : why} ⇐ ${JSON.stringify(f).slice(0, 120)}`, v); }
+  ok(eq(M.ROAD_WHY, ['plugin-off', 'rules-off', 'routing-off', 'no-key', 'budget-spent', 'hour-cap']) && M.judgedRoadState(live).usedPct === 40 && M.judgedRoadState({ ...live, hourCapHit: true }).perHour === 20 && M.judgedRoadState({ ...live, budgetUsd: null }).usedPct === null,
+    'the order: the plugin, its switch, the key, today\'s money (left < one judgment ⇒ spent), the rule\'s hour; a live road names the % used (40), a capped one its hourly number');
+  // THE GATE READS THE VERDICT: budgetVerdict refuses with its own word for every road refusal (feature-off for both switches, daily-budget for the money)
+  const on = { pluginOn: true, featureOn: true, keyPresent: true, now: 1000 };
+  ok(M.budgetVerdict({ ...on, featureOn: false }).why === M.ROAD_GATE_WHY['rules-off'] && M.budgetVerdict({ ...on, spentUsd: 1, estUsd: 1e-6 }).why === M.ROAD_GATE_WHY['budget-spent'] && M.budgetVerdict({ ...on, keyPresent: false }).why === 'no-key' && M.budgetVerdict({ ...on, pluginOn: false }).why === 'plugin-off',
+    'budgetVerdict (the paid call\'s gate) answers the road\'s refusals in its own words: feature-off / daily-budget / no-key / plugin-off');
+  ok(M.roadWhyOf('daily-budget') === 'budget-spent' && M.roadWhyOf('feature-off') === 'rules-off' && M.roadWhyOf('per-hour') === 'hour-cap' && M.roadWhyOf('backoff') === 'backoff' && M.roadWhyOf('reconnect') === 'reconnect' && M.roadWhyOf('use-budget') === 'budget-spent' && M.roadWhyOf('error: boom') === 'backoff',
+    'roadWhyOf: a paid call\'s refusal → the road\'s word (an unknown one = the provider\'s pause, never silence)');
+  const l1 = M.judgedRoadLine(M.judgedRoadState(live)), l2 = M.judgedRoadLine(M.judgedRoadState({ ...live, rulesOn: false })), l3 = M.judgedRoadLine(M.judgedRoadState({ ...live, budgetLeft: 0 }), { skipped: 3 }), l4 = M.judgedRoadLine(M.judgedRoadState({ ...live, hourCapHit: true }));
+  ok(l1 === "judged rules: live (today's budget 40% used)", 'the live line', l1);
+  ok(/^judged rules will NOT run: the LLM plugin's Rules switch is off — the rule is saved and starts when the user turns on its Rules switch \(Settings › Plugins › LLM plugin: “Notification rules can use a sentence as the condition” — 中文「通知规则里可以用一句话当条件」\)$/.test(l2), 'the switch-off line names the door (the switch\'s own label, en + zh)', l2);
+  ok(/^judged rules will NOT run: today's LLM budget is spent — the rule is saved and starts with tomorrow's budget \(or when the user raises the daily budget in Settings › Plugins › LLM plugin\) — 3 messages matched nothing today because of it$/.test(l3) && /\(20 an hour\) — the rule is saved and starts in the next hour/.test(l4), 'the budget line names tomorrow + the budget row and today\'s skips; the hour line its cap', [l3, l4]);
+  const s1 = M.judgedSkipLine(4, 'budget-spent', { windowHours: 24 }), s0 = M.judgedSkipLine(1, 'rules-off');
+  ok(/^4 messages matched nothing today because your judged rules could not run: today's LLM budget is spent\. A skipped message is not a "no": it is judged when the road returns \(up to 24 h after it arrived\)/.test(s1) && /^1 message matched nothing today because your judged rules could not run: the LLM plugin's Rules switch is off\./.test(s0) && /said again/.test(s1) && !/[{}]/.test(s1 + s0),
+    'the not-a-hit line: the count, the cause, "not a no", how far back it is judged, said once', [s1, s0]);
+  // RED MUTANTS — the verdict is the gate: a copy that lets a rule run with its switch off, a copy that says live on a spent day
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MR = mutantCopies('dmroad', new URL('..', import.meta.url).pathname);
+  const src = fs.readFileSync(new URL('../src/decision-model.js', import.meta.url), 'utf8');
+  const SW = "  if (!rulesOn) return { live: false, why: route ? 'routing-off' : 'rules-off' };\n", MO = "  if (microUsd(estUsd) > microUsd(budgetLeft)) return { live: false, why: 'budget-spent' };\n";
+  ok(src.split(SW).length === 2 && src.split(MO).length === 2, 'mutant anchors present (the switch line, the money line)');
+  const noSwitch = MR.load('src/decision-model.js', src.replace(SW, ''), 'noswitch');
+  const noMoney = MR.load('src/decision-model.js', src.replace(MO, ''), 'nomoney');
+  const v1 = noSwitch.judgedRoadState({ ...live, rulesOn: false }), g1 = noSwitch.budgetVerdict({ ...on, featureOn: false });
+  ok(v1.live === true && g1.ok === true, 'RED MUTANT ①: a verdict without the switch line runs a rule with rulesOn:false — and the PAID CALL\'s gate lets it through too (the table above is RED on it)', { v1, g1 });
+  const v2 = noMoney.judgedRoadState({ ...live, budgetLeft: 0 }), g2 = noMoney.budgetVerdict({ ...on, spentUsd: 1, estUsd: 0.001 });
+  ok(v2.live === true && g2.ok === true, 'RED MUTANT ②: a verdict without the money line says live on a spent day — and the gate pays past the ceiling', { v2, g2 });
+  ok(!(M.judgedRoadState({ ...live, rulesOn: false }).live) && !M.budgetVerdict({ ...on, featureOn: false }).ok && !M.judgedRoadState({ ...live, budgetLeft: 0 }).live && !M.budgetVerdict({ ...on, spentUsd: 1, estUsd: 0.001 }).ok, '…while the real verdict refuses both, at the door and at the gate');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

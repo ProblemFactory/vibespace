@@ -29,6 +29,8 @@
 //     dialog says "已保持在最大值 1440 / 1000" BEFORE saving, 保存 closes with NO
 //     error toast, the account line says it, the wire holds the minted filter
 //     id, and re-opening prefills the rules and the stored numbers
+//   ⑫ lane dialog-unsaved-guard (B-bc31): Notify… / Access… closing with an unsaved change ASK in place (继续编辑 / 放弃 /
+//     保存) — 放弃 writes nothing, 保存 writes the dialog's own Save, Esc on the sheet returns; a clean dialog never asks
 //   mirror-193 (2026-09-27, the 2.369.193 Actions mirror, red on both heavy attempts): ⑤'s Grant access… runs
 //     with page 1's channels-updated frames HELD from before the seed — the runner's order (the panel's copy had
 //     not heard of Xi), constructed on every machine — and the dialog must draw and save the SERVER's lists (it
@@ -1753,6 +1755,104 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   const back = await api('PUT', '/api/channels/adapters/fake-poll', { policy: null });
   const back2 = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: acc0 });
   ok(back.status === 200 && back2.status === 200, 'POLICY DOOR teardown: the account back on the vendor\'s default');
+}
+
+// ── ⑫ lane dialog-unsaved-guard (B-bc31 — the owner 2026-10-21 ticked «也判断普通回复» in 通知…, closed it with ✕, and a
+// colleague's reply went unjudged): A DIALOG CLOSING WITH UNSAVED CHANGES ASKS. Notify… — the owner's exact tick on a
+// 回复了它发过的消息 rule: a clean dialog closes at once (no nag); ticked ⇒ ✕ shows the in-place sheet «有未保存的更改» ·
+// 继续编辑 / 放弃 / 保存 (保存 focused); Esc on the sheet returns with the tick kept; a backdrop press asks again; 放弃 drops
+// it (the wire and a reopen unticked); Esc on the dialog asks; 保存 writes it (the wire's infer:true, a reopen ticked).
+// Access… the same with a removed row (放弃 keeps 工作; 保存 removes it). CONTROL = the base tree (the tick vanishes on ✕).
+{
+  console.log('— ⑫ a dialog closing with unsaved changes asks (lane dialog-unsaved-guard)');
+  const USHOTS = process.env.UNSAVED_SHOTS || wt;
+  const wsOf = async () => ((((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll') || {}).accountGrain || { access: [], watchers: [] });
+  const inferOn = async () => { const g = await wsOf(); const w = (g.watchers || []).find((x) => x.principal && x.principal.name === 'Yu'); return !!(w && w.filter && (w.filter.rules || []).some((r) => r.kind === 'reply-to-sent' && r.infer === true)); };
+  const a12 = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: [{ principal: WORK_P, authority: 'draft' }, { principal: YU, authority: 'draft' }] });
+  const w12 = await api('PUT', '/api/channels/adapters/fake-poll/watchers', { watchers: [{ principal: YU, delivery: 'next-turn', mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'reply-to-sent' }] } }] });
+  ok(a12.status === 200 && w12.status === 200 && !(await inferOn()), 'seed: Yu holds access and a 回复了它发过的消息 notification, its judged road OFF', JSON.stringify({ a: a12.status, w: w12.status, j: w12.json }).slice(0, 300));
+  // the page's view of ONE dialog: open? the sheet? its words, its buttons, the focus; the tick
+  const STATE = (id) => `(() => {
+    const o = document.getElementById(${JSON.stringify(id)});
+    const sh = o && o.querySelector('.dialog-unsaved');
+    const tick = o && o.querySelector('.chan-af-infer-tick');
+    return { open: !!o, sheet: !!sh, words: sh ? sh.querySelector('.dialog-unsaved-words').textContent : null, buttons: sh ? [...sh.querySelectorAll('button')].map((b) => b.textContent.trim()) : [],
+      focus: document.activeElement ? document.activeElement.className : null, ticked: tick ? tick.checked : null, err: sh && !sh.querySelector('.dialog-unsaved-err').hidden ? sh.querySelector('.dialog-unsaved-err').textContent : null,
+      rows: o ? [...o.querySelectorAll('.chan-access-row .chan-access-who')].map((x) => x.textContent) : [] };
+  })()`;
+  const N = 'chan-notify-dialog', A = 'chan-access-dialog';
+  const openNotify = async () => {
+    const m = await p1.evaljs(MENU('通知…'));
+    if (m.fail) return m;
+    return p1.evaljs(`(async () => { for (let i = 0; i < 300 && !document.querySelector('#${N} .chan-af-infer-tick'); i++) await new Promise((r) => setTimeout(r, 100)); return ${STATE(N)}; })()`);
+  };
+  const act = (js) => p1.evaljs(`(async () => { ${js}; await new Promise((r) => setTimeout(r, 250)); return ${STATE(N)}; })()`);
+  const X = (id) => `document.querySelector('#${id} .dialog-close').click()`;
+  const BTN = (id, words) => `[...document.querySelectorAll('#${id} .dialog-unsaved button')].find((b) => b.textContent.trim() === ${JSON.stringify(words)}).click()`;
+  const ESC_ON = (sel) => `document.querySelector(${JSON.stringify(sel)}).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`;
+  // A — clean: ✕ closes at once
+  const c0 = await openNotify();
+  ok(!c0.fail && c0.open && c0.ticked === false, 'Notify… opens on the seeded rule with 也判断普通回复 unticked', JSON.stringify(c0));
+  const c1 = await act(X(N));
+  ok(!c1.open, 'nothing changed ⇒ ✕ closes at once (no question)', JSON.stringify(c1));
+  // B — the owner's tick, then ✕ ⇒ the sheet
+  await openNotify();
+  const b1 = await act(`document.querySelector('#${N} .chan-af-infer-tick').click(); ${X(N)}`);
+  ok(b1.open && b1.sheet && b1.words === '有未保存的更改' && JSON.stringify(b1.buttons) === JSON.stringify(['继续编辑', '放弃', '保存']) && /dialog-unsaved-save/.test(b1.focus || '') && b1.ticked === true,
+    'ticked + ✕ ⇒ the dialog STAYS and asks in place: «有未保存的更改» · 继续编辑 / 放弃 / 保存 (保存 focused, the tick kept)', JSON.stringify(b1));
+  {
+    const shotR = await p1.cdp('Page.captureScreenshot', { format: 'png' });
+    if (shotR.result && shotR.result.data) fs.writeFileSync(path.join(USHOTS, 'unsaved-sheet-notify.png'), Buffer.from(shotR.result.data, 'base64'));
+    ok(!!(shotR.result && shotR.result.data), `the sheet, shot: ${path.join(USHOTS, 'unsaved-sheet-notify.png')}`);
+  }
+  // C — Esc on the sheet = 继续编辑
+  const b2 = await act(ESC_ON(`#${N} .dialog-unsaved-save`));
+  ok(b2.open && !b2.sheet && b2.ticked === true, 'Esc on the sheet = 继续编辑: the sheet goes, the dialog and the tick stay', JSON.stringify(b2));
+  // D — a backdrop press asks again
+  const b3 = await act(`const o = document.getElementById('${N}'); o.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))`);
+  ok(b3.open && b3.sheet, 'a backdrop press with the tick changed asks again (never a silent close)', JSON.stringify(b3));
+  // E — 放弃 drops it: closed, the wire untouched, a reopen unticked
+  const b4 = await act(BTN(N, '放弃'));
+  ok(!b4.open && !(await inferOn()), '放弃 closes and writes nothing (the wire: the judged road still OFF)', JSON.stringify(b4));
+  const b5 = await openNotify();
+  ok(b5.open && b5.ticked === false, 'a reopen after 放弃 shows the tick UNticked (the change was dropped by name)', JSON.stringify(b5));
+  // F — Esc on the dialog asks; 保存 writes it
+  const f1 = await act(`document.querySelector('#${N} .chan-af-infer-tick').click(); ${ESC_ON(`#${N} .chan-af-infer-tick`)}`);
+  ok(f1.open && f1.sheet && f1.ticked === true, 'ticked + Esc on the dialog ⇒ the same question (Esc never drops a change)', JSON.stringify(f1));
+  await p1.evaljs(`(() => { ${TOAST_LOG}; window.__vsU0 = window.__vsToastLog.length; return 1; })()`);
+  const f2 = await act(BTN(N, '保存'));
+  let saved = false; for (let i = 0; i < 40 && !(saved = await inferOn()); i++) await sleep(150);
+  const f2t = await p1.evaljs(`(async () => { for (let i = 0; i < 40 && document.getElementById('${N}'); i++) await new Promise((r) => setTimeout(r, 100)); return { open: !!document.getElementById('${N}'), toasts: window.__vsToastLog.slice(window.__vsU0).map((x) => x.text) }; })()`);
+  ok(saved && !f2t.open && f2t.toasts.some((x) => /通知已保存/.test(x)), '保存 on the sheet runs the dialog\'s own Save: the wire holds infer:true, the dialog closes with its toast', JSON.stringify({ f2, f2t, saved }));
+  const f3 = await openNotify();
+  ok(f3.open && f3.ticked === true, 'a reopen after 保存 shows the tick TICKED', JSON.stringify(f3));
+  const f4 = await act(X(N));
+  ok(!f4.open && !f4.sheet, '…and that saved dialog closes with ✕ at once (what is shown is what is stored)', JSON.stringify(f4));
+  // G — Access… : a removed row
+  const openAccess = async () => {
+    const m = await p1.evaljs(MENU('授权访问…'));
+    if (m.fail) return m;
+    return p1.evaljs(`(async () => { for (let i = 0; i < 300 && !document.querySelector('#${A} .chan-access-row'); i++) await new Promise((r) => setTimeout(r, 100)); return ${STATE(A)}; })()`);
+  };
+  const actA = (js) => p1.evaljs(`(async () => { ${js}; await new Promise((r) => setTimeout(r, 250)); return ${STATE(A)}; })()`);
+  const RM_WORK = `[...document.querySelectorAll('#${A} .chan-access-row')].find((r) => /工作/.test(r.textContent)).querySelector('.chan-af-rm').click()`;
+  const g0 = await openAccess();
+  ok(!g0.fail && g0.open && g0.rows.length === 2, 'Access… opens with two rows (Yu, 工作)', JSON.stringify(g0));
+  const g1 = await actA(`${RM_WORK}; ${X(A)}`);
+  ok(g1.open && g1.sheet && g1.rows.length === 1 && g1.words === '有未保存的更改', 'Access…: 工作 removed + ✕ ⇒ the same sheet (the row stays removed while it asks)', JSON.stringify(g1));
+  const g2 = await actA(BTN(A, '放弃'));
+  ok(!g2.open && (await accessNames()) === 'Yu,工作', 'Access… 放弃 closes and writes nothing (工作 keeps its access)', await accessNames());
+  await openAccess();
+  const g3 = await actA(`${RM_WORK}; ${X(A)}`);
+  ok(g3.sheet, 'Access…: removed again + ✕ asks again', JSON.stringify(g3));
+  await actA(BTN(A, '保存'));
+  let gone = false; for (let i = 0; i < 40 && !(gone = (await accessNames()) === 'Yu'); i++) await sleep(150);
+  const g4 = await p1.evaljs(STATE(A));
+  ok(gone && !g4.open, 'Access… 保存 on the sheet writes the list (Yu only) and closes', JSON.stringify({ g4, wire: await accessNames() }));
+  // teardown: the account's access back to Yu + 工作, no notification
+  const t1 = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: [{ principal: WORK_P, authority: 'draft' }, { principal: YU, authority: 'draft' }] });
+  const t2 = await api('PUT', '/api/channels/adapters/fake-poll/watchers', { watchers: [] });
+  ok(t1.status === 200 && t2.status === 200, '⑫ teardown: Yu + 工作 hold access again, nobody is notified');
 }
 
 // ── ⑧ CONTROL: the PRE-FIX DIALOG (it draws the panel's copy) rebuilt into the scratch bundle ──

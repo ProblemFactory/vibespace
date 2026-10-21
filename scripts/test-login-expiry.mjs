@@ -1072,7 +1072,7 @@ console.log('— §5 wiring');
     baseCss !== css && rcBase.rows.filter((r) => !r.sized).length === 2 && rcBase.rows.filter((r) => !r.sized).every((r) => /acct-serve-chip/.test(r.wrapper)));
   const panel = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-panel.js'), 'utf8');
   const inboxModelSrc = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf8'); // §9 (2026-09-27): jump moved VERBATIM into THE client model the panel calls
-  ck("the inbox item's click lands on Manage Agents instead of a dead end", /if \(key === 'accounts'\) \{ close\(\); app\._showAgentsDialog\?\.\(\); return; \}/.test(inboxModelSrc) && /model\.jump\(key, item, \{ close: \(\) => \{ hidePopup\(\); hideHome\(\); \} \}\)/.test(panel)); // lane phone-first-screen: the close steps the phone's page aside too
+  ck("the inbox item's click lands on Manage Agents instead of a dead end", /if \(key === 'accounts'\) \{ close\(\); app\._showAgentsDialog\?\.\(\); return; \}/.test(inboxModelSrc) && /model\.jump\(key, item, \{ close: \(\) => \{ hidePopup\('jump'\); hideHome\(\); \} \}\)/.test(panel)); // lane phone-first-screen: the close steps the phone's page aside too
   // An item that vanishes on its own must SAY it vanished on its own: the
   // resolved tail credits 'agent' for agent-resolved items, and the watch's
   // retraction is neither the user nor an agent.

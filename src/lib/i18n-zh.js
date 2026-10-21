@@ -9948,4 +9948,17 @@ export default {
   "No key granted to {target} holds that verb — add it with Edit… on a key's row in the Vault window": "授权给 {target} 的 key 都不含这个动作——在保险库窗口某把 key 的行里用「编辑…」加上", // lane vault-key-row-compact
   "The log could not be read: {reason}": "无法读取 API 日志：{reason}", // lane channel-api-log-blank
   "the answer holds no lines": "回复里没有日志行", // lane channel-api-log-blank
+  "You have unsaved changes": "有未保存的更改", // lane dialog-unsaved-guard
+  "Not saved": "没有保存", // lane dialog-unsaved-guard
+  "Not saved: {reason}": "没有保存：{reason}", // lane dialog-unsaved-guard
+  "judged: live": "判断：生效中", // lane judged-watch-state
+  "off: LLM plugin": "未生效：LLM 插件没开", // lane judged-watch-state
+  "off: rules switch": "未生效：规则开关没开", // lane judged-watch-state
+  "off: routing switch": "未生效：分派开关没开", // lane judged-watch-state
+  "off: no key": "未生效：没有 key", // lane judged-watch-state
+  "paused: budget spent": "已暂停：今天的预算用完了", // lane judged-watch-state
+  "paused: hourly limit": "已暂停：本小时次数用完", // lane judged-watch-state
+  "Today's LLM budget is spent ({day}) — judged notification rules paused": "今天的 LLM 预算用完了（{day}）——由模型判断的通知规则已暂停", // lane judged-watch-state
+  "Paused today: {names}": "今天暂停的：{names}", // lane judged-watch-state
+  "They resume with tomorrow's budget, or now if you raise the daily budget (Settings › Plugins › LLM). The messages they skipped are judged then.": "明天预算恢复后继续；在 设置 › 插件 › LLM 调高每日预算则立即恢复。被跳过的消息届时再判断。", // lane judged-watch-state
 };

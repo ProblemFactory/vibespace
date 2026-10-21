@@ -87,6 +87,9 @@ let listAnswer = null;   // design 008 S6: the REAL engine's listFor answer, ser
 let proposalsAnswer = null, recallAnswer = null;
 // lane channels-search-says-hidden (㉒): the search answered by the REAL engine (its searchFor, the route's own arguments)
 let searchAnswer = null;
+// lane judged-watch-state (㉓): `watch` / `watch --show` / `watches` answered by the REAL engine (agentWatch / agentWatchesFor)
+// with the route's own answer rule (a refused spec = 400, any other refusal 4xx — the CLI prints the words + [code])
+let watchAnswer = null, watchesAnswer = null;
 const RECALL_ROUTE_STATUS = new Map([...((/const RECALL_STATUS = Object\.freeze\(\{([^}]*)\}\)/.exec(asrc) || [])[1] || '').matchAll(/'?([a-z-]+)'?: (\d{3})/g)].map((m) => [m[1], Number(m[2])]));
 const server = http.createServer((req, res) => {
   const chunks = [];
@@ -208,6 +211,8 @@ const server = http.createServer((req, res) => {
       return res.end(f.data);
     }
     if (url.pathname === '/api/agent/channels/proposals' && proposalsAnswer) return send(200, proposalsAnswer(url));
+    if (url.pathname === '/api/agent/channels/watch' && watchAnswer) { Promise.resolve(watchAnswer(body)).then((r) => send(r && r.ok ? 200 : r && r.badSpec ? 400 : 409, r && !r.ok ? { ...r, error: r.error || 'refused' } : r)); return; }
+    if (url.pathname === '/api/agent/channels/watches' && watchesAnswer) return send(200, watchesAnswer(url));
     if (url.pathname === '/api/agent/channels/recall' && recallAnswer) { Promise.resolve(recallAnswer(body)).then((r) => send(r && r.ok ? 200 : RECALL_ROUTE_STATUS.get(r && r.code) || 500, r)); return; }
     send(404, { error: 'no such route' });
   });
@@ -746,7 +751,6 @@ console.log('\n㉑ lane channels-proposals-recall: proposals [--all] · recall <
     for (const x of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 3, label: '㉑ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
   }
 }
-
 {
   // lane channel-direct-send-sync: a direct send prints its receipt INLINE and queues no second message
   const d = await run(['reply', 'fake-poll/direct', 'the deploy is done']);
@@ -829,6 +833,79 @@ console.log('\n㉒ lane channels-search-says-hidden: --full prints the saved hit
   ok(!/Wren Larkspur/.test(cf.out), 'CONTROL: a CLI whose --full skips the plain search prints no saved hit (the field miss\'s shape) — the saved-first leg would be RED', cf.out);
   searchAnswer = null;
   eng.stop && eng.stop();
+}
+
+console.log('\n㉓ lane judged-watch-state (B-f42e): a judged rule\'s `watch` answer names its road; --show and watches say it per row; a saved rule turns live when the setting flips');
+{
+  const ROOT = scratch('chan-agent-cli-road');
+  fs.rmSync(ROOT, { recursive: true, force: true });
+  fs.mkdirSync(ROOT, { recursive: true });
+  process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} });
+  const CH = require(path.join(REPO, 'src/channels/index.js'));
+  const FAKE = require(path.join(REPO, 'src/channels/fake.js'));
+  const DE = require(path.join(REPO, 'src/server/decision-engine.js'));
+  const ENGP = 'src/server/channels-engine.js';
+  const ENG = require(path.join(REPO, ENGP));
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const MUTE = mutantCopies('chan-agent-cli-road', REPO);
+  const esrc = engineSource(REPO);
+  const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLevelFor: () => 'none' };
+  const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
+  const quiet = { log() {}, warn() {}, error() {} };
+  let vendor = 0;
+  const cfg = { rules: false, routing: false, dailyBudgetCents: 100 };
+  const mk = async (M, tag) => {
+    const dataDir = path.join(ROOT, tag);
+    fs.mkdirSync(path.join(dataDir, 'decision'), { recursive: true });
+    const dec = DE.create({ dataDir: path.join(dataDir, 'decision'), integrations: { resolveIntegration: () => ({ values: { provider: 'openai', apiKey: ['sk', 'road', 'cli', '0001'].join('-') }, source: 'user' }) }, fetchImpl: async () => { vendor++; throw new Error('no vendor call in this suite'); }, log: quiet });
+    dec.attachPlugin({ peek: () => ({ enabled: true }), settings: () => ({ ...cfg }) });
+    const registry = CH.createChannelRegistry();
+    registry.register(FAKE.makeFakeAdapter({ kind: A, receive: 'poll' }), { vendor: false });
+    const eng = M.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir }), log: quiet, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }], decisionEngine: dec });
+    await eng.pass(A, { force: true });
+    await eng.store.index.update(() => { const e = eng.store.index.entry(A, C); e.reachEntries = [{ principal: { kind: 'agent', id: 'agent-1' }, scope: { kind: 'conversation', id: KEY }, level: 'visible', origin: 'user', at: 1, by: 'user' }]; });
+    watchAnswer = (b) => eng.agentWatch(AG, b.target, b);
+    watchesAnswer = (url) => eng.agentWatchesFor(AG, url.searchParams.get('target') || null);
+    return eng;
+  };
+  const lastLine = (s) => String(s || '').trim().split('\n').pop();
+  const eng = await mk(ENG, 'real');
+  const w1 = await run(['watch', KEY, '--kind', 'decision', '--condition', 'the sender asks me to pay an invoice']);
+  ok(w1.code === 0 && /^watching fake-poll\/fake-poll-ops/m.test(w1.out) && /^judged rules will NOT run: the LLM plugin's Rules switch is off — the rule is saved and starts when the user turns on its Rules switch \(Settings › Plugins › LLM plugin/.test(lastLine(w1.out)),
+    '`watch --kind decision` with the Rules switch off: exit 0, the row is saved, and the answer\'s LAST line says it will NOT run, why, and the door', w1.out + w1.err);
+  const saved = eng.agentWatchesFor(AG, KEY);
+  ok(saved.ok && saved.rows.length === 1 && saved.rows[0].filter.rules[0].kind === 'decision', 'saved, never dropped: the judged row is on the conversation', saved);
+  const s1 = await run(['watch', '--show', KEY]);
+  ok(s1.code === 0 && /\n    on your next turn[^\n]*\n    judged rules will NOT run: the LLM plugin's Rules switch is off/.test(s1.out), '`watch --show <conv>` prints the judged road under the row', s1.out);
+  const ws1 = await run(['watches']);
+  ok(ws1.code === 0 && /judged rules will NOT run: the LLM plugin's Rules switch is off/.test(ws1.out), '`watches` prints it too', ws1.out);
+  cfg.rules = true;   // the user turns the switch on — no new `watch`
+  const s2 = await run(['watch', '--show', KEY]);
+  ok(/\n    judged rules: live \(today's budget 0% used\)$/m.test(s2.out) && !/will NOT run/.test(s2.out), 'the switch flipped ⇒ the SAME saved rule reads live (today\'s budget 0% used) — no new watch', s2.out);
+  cfg.dailyBudgetCents = 0;
+  const ws2 = await run(['watches']);
+  ok(/judged rules will NOT run: today's LLM budget is spent — the rule is saved and starts with tomorrow's budget/.test(ws2.out), 'the day\'s budget spent ⇒ `watches` says so and when it starts again', ws2.out);
+  cfg.dailyBudgetCents = 100;
+  const w2 = await run(['watch', KEY, '--reply-to-sent', '--infer']);
+  ok(w2.code === 0 && lastLine(w2.out) === "judged rules: live (today's budget 0% used)" && /earlier watch here was replaced/.test(w2.out), '`--reply-to-sent --infer` is a judged rule too: its answer ends with the road (live)', w2.out);
+  const w3 = await run(['watch', KEY, '--keyword', 'deploy']);
+  ok(w3.code === 0 && !/judged rules/.test(w3.out) && !/judged rules/.test((await run(['watch', '--show', KEY])).out), 'a rule nobody judges (a keyword) carries no road line', w3.out);
+  const w4 = await run(['watch', KEY, '--kind', 'decision']);
+  ok(w4.code === 1 && /\[[a-z-]+\]/.test(w4.err) && !/judged rules/.test(w4.out), 'a malformed judged rule is refused as today (exit 1, the validator\'s words + [code]) — never a road line', w4.err);
+  ok(vendor === 0, `zero vendor calls (${vendor})`);
+  eng.stop();
+  // RED CONTROL = the base: an answer without the road — the agent armed a rule that cannot run and is told nothing
+  const ANCH = '    const withRoad = (r) => (road && r && r.ok !== false ? { ...r, judged: road.line, road: road.state } : r);';
+  if (esrc.split(ANCH).length !== 2) ok(false, 'control anchor moved: withRoad');
+  else {
+    cfg.rules = false;
+    const e2 = await mk(MUTE.load(ENGP, esrc.replace(ANCH, '    const withRoad = (r) => r;'), 'noroad'), 'base');
+    const c1 = await run(['watch', KEY, '--kind', 'decision', '--condition', 'the sender asks me to pay an invoice']);
+    ok(c1.code === 0 && !/judged rules/.test(c1.out), 'RED CONTROL (the base): without the road the switch-off answer is a plain «watching …» — the door leg above is RED on it', c1.out);
+    e2.stop();
+  }
+  watchAnswer = null; watchesAnswer = null;
+  for (const x of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 1, label: '㉓ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 server.close();

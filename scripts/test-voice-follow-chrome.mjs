@@ -12,18 +12,23 @@
 //      box (its own microphone), a [contenteditable] (a Range at the caret), a type=email box (no caret API: its end)
 //   ② the exclusions, by the predicate: the vault's password (its unlock dialog), xterm's helper textarea (a real terminal)
 //      — NO microphone; the chat composer keeps its own (no follower)
-//   ③ the press: a press on the follower's microphone inside a createPopover popover keeps it open (window capture guard)
-//      — MUTANT (the guard removed) closes it; blur ⇒ gone; a field removed while focused ⇒ gone; a recording outlives a
+//   ③ the press: a press on the follower's microphone inside a createPopover popover keeps it open — two layers: the
+//      follower's window-capture guard and the closer's own voice fact (lane phone-tray-voice-done); MUTANT (the guard
+//      removed) still keeps it, MUTANT 2 (the guard AND the closer's voice fact removed) closes it; blur ⇒ gone; a field removed while focused ⇒ gone; a recording outlives a
 //      blur and lands in ITS field; voice input off ⇒ absent
 //   ④ phone 390×844 and 375×812 (touch): a TAP on the reject box shows a 40-px microphone outside the field, inside the
 //      view, clear of the keyboard-yield strip; a TAP on it keeps the focus (no blur) and the words land at the caret
+//   ④b the owner's phone 448×850 (lane phone-tray-voice-done, inc-mvhzgiq8-bs3j: 「这个"报告问题"的输入框也不能使用语音输入」 — on
+//      2.369.334, before the follower): the REAL Report a problem dialog (incident-recorder.js captureIncident, a
+//      createModalShell textarea) — a tap on its box shows the follower's microphone ≥ 40×40, outside the box, inside the
+//      screen, ON TOP of the modal; a tap records, a tap stops, the words land in the box; nothing captured
 //   ⑤ RED CONTROL = the base's shape: the same page over a PATCHED COPY of today's src/lib/voice-input.js in the scratch dir,
 //      the follower unexported (the base had none) — no microphone on the reject box. Never the repository's history: the
 //      Actions checkout is depth 1, so the .335 cut's read of the base commit was a red there (lane ci-335-reds)
 //   ⑥ THE CENSUS (scripts/test-voice-focus.mjs, grep-derived): printed; each box this suite rendered is judged at run time
 //      exactly as the census judged its site
 // PNGs: VIBESPACE_VOICE_PNG_DIR (default: the scratch dir) → follow-reject.png, follow-dialog.png, follow-phone-390.png,
-//   follow-phone-375.png
+//   follow-phone-375.png, follow-report-448.png
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -92,6 +97,7 @@ import { showUnlock } from ${JSON.stringify(path.join(REPO, 'src/lib/vault-unloc
 import { ChatInput } from ${JSON.stringify(path.join(REPO, 'src/lib/chat-input.js'))};
 import { Terminal } from '@xterm/xterm';
 import { t } from ${JSON.stringify(path.join(REPO, 'src/lib/i18n.js'))};
+import { installIncidentRecorder } from ${JSON.stringify(path.join(REPO, 'src/lib/incident-recorder.js'))};
 window.__follow = () => (typeof VI.followFocus === 'function' ? VI.followFocus() : 'absent');
 window.__judge = (sel) => { const el = document.querySelector(sel); return el && VI.fieldFacts ? dictationTarget(VI.fieldFacts(el)) : null; };
 window.__notePlugins = (rows) => VI.noteVoicePlugins(rows);
@@ -154,6 +160,7 @@ window.__settingsRow = () => {
   return true;
 };
 window.__theme = () => { stage(); new ThemeEditor(app).open('dark'); return true; };
+window.__report = () => { stage(); if (!app.captureIncident) installIncidentRecorder(app); app.captureIncident(); return true; }; // ⚙ › Report a problem (the incident recorder's own dialog)
 window.__vault = () => { stage(); showUnlock(); return true; };
 window.__term = () => { const s = stage(); const d = document.createElement('div'); d.id = 'term-host'; d.style.cssText = 'position:absolute;left:20px;top:20px;width:640px;height:220px'; s.appendChild(d); const term = new Terminal({ cols: 60, rows: 8 }); term.open(d); term.focus(); window.__xterm = term; return true; };
 window.__pop = () => {
@@ -181,6 +188,15 @@ const VI_SRC = fs.readFileSync(VI_PATH, 'utf8');
 const GUARD = "  window.addEventListener('pointerdown', guard, { capture: true, ...o });\n";
 ok('the mutant anchor (the press guard) is in voice-input.js exactly once', VI_SRC.split(GUARD).length === 2);
 await bundle('mutant.js', [{ name: 'no-guard', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]voice-input\.js$/ }, () => ({ contents: VI_SRC.replace(GUARD, ''), loader: 'js', resolveDir: path.dirname(VI_PATH) })); } }]);
+// MUTANT 2 (lane phone-tray-voice-done): the guard removed AND the outside-press closer's voice fact removed (utils.js) — the
+// press on the microphone reaches a closer that reads it as outside
+const U_PATH = path.join(REPO, 'src/lib/utils.js'), U_SRC = fs.readFileSync(U_PATH, 'utf8');
+const VOICE_FACT = '    voice: !!target?.closest?.(VOICE_UI),\n';
+ok('the mutant 2 anchor (the closer\'s voice fact) is in utils.js exactly once', U_SRC.split(VOICE_FACT).length === 2);
+await bundle('mutant2.js', [{ name: 'no-guard-no-voice', setup(b) {
+  b.onLoad({ filter: /src[\\/]lib[\\/]voice-input\.js$/ }, () => ({ contents: VI_SRC.replace(GUARD, ''), loader: 'js', resolveDir: path.dirname(VI_PATH) }));
+  b.onLoad({ filter: /src[\\/]lib[\\/]utils\.js$/ }, () => ({ contents: U_SRC.replace(VOICE_FACT, ''), loader: 'js', resolveDir: path.dirname(U_PATH) }));
+} }]);
 // RED CONTROL = the base's shape (no follower): a PATCHED COPY of today's voice-input.js in the scratch dir with followFocus
 // unexported, so app.js's call has nothing to call, as on the base. It runs on any checkout: no git history (lane ci-335-reds)
 const FOLLOW_EXPORT = 'export function followFocus() {';
@@ -200,8 +216,8 @@ app.get('/api/vault/facts', (q, s) => s.json({ state: 'locked' }));
 const CSS = [...String(fs.readFileSync(path.join(REPO, 'public/index.html'), 'utf8')).matchAll(/<link rel="stylesheet" href="\/([\w-]+)\.css">/g)].map((m) => m[1]);
 const cssFile = (n) => (n === 'xterm' ? path.join(REPO, 'node_modules/@xterm/xterm/css/xterm.css') : path.join(REPO, `public/${n}.css`));
 for (const n of CSS) app.get(`/${n}.css`, (q, s) => (fs.existsSync(cssFile(n)) ? s.type('text/css').send(fs.readFileSync(cssFile(n))) : s.type('text/css').send('')));
-for (const n of ['page', 'mutant', 'base']) app.get(`/${n}.js`, (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, `${n}.js`))));
-app.get('/', (q, s) => s.type('text/html').send(`<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-window);color:var(--text);font:13px system-ui} #stage{position:fixed;inset:0;padding:120px 24px 24px;overflow:auto}</style></head><body><div id="stage"></div><script src="/${['mutant', 'base'].includes(q.query.b) ? q.query.b : 'page'}.js"></script></body></html>`));
+for (const n of ['page', 'mutant', 'mutant2', 'base']) app.get(`/${n}.js`, (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, `${n}.js`))));
+app.get('/', (q, s) => s.type('text/html').send(`<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-window);color:var(--text);font:13px system-ui} #stage{position:fixed;inset:0;padding:120px 24px 24px;overflow:auto}</style></head><body><div id="stage"></div><script src="/${['mutant', 'mutant2', 'base'].includes(q.query.b) ? q.query.b : 'page'}.js"></script></body></html>`));
 app.use((q, s) => s.status(404).json({ error: 'not in this harness' }));
 const PORT = await freePort();
 srv = http.createServer(app);
@@ -483,15 +499,21 @@ console.log('③ the press: a popover stays open; blur / removal ⇒ gone; a rec
   ok('…and back with the broadcast', await p.until(`!!document.querySelector('.voice-follow') && getComputedStyle(document.querySelector('.voice-follow')).display !== 'none'`, 2000));
   ok('no page error on the press legs', (await p.ev('window.__errs')).length === 0, await p.ev('window.__errs'));
   p.close();
-  // MUTANT: the window-capture guard removed ⇒ the press on the microphone is the popover's outside press
-  const m = await page(1280, 860, { b: 'mutant' });
-  await m.ev('window.__pop()');
-  await m.clickSel('.zz-pop-input');
-  await m.until(`!!document.querySelector(${JSON.stringify(MIC)})`, 3000);
-  await m.clickSel(MIC);
-  await sleep(300);
-  ok('MUTANT (the press guard removed): the same press closes the popover — the guard is what keeps it', await m.ev(`!document.querySelector('.zz-follow-pop')`));
-  m.close();
+  // MUTANTS: the window-capture guard removed — the closer's own voice fact still keeps the popover (lane
+  // phone-tray-voice-done: a press on the voice UI is never an outside press); the voice fact removed too ⇒ it closes
+  const popAfterPress = async (b) => {
+    const m = await page(1280, 860, { b });
+    await m.ev('window.__pop()');
+    await m.clickSel('.zz-pop-input');
+    await m.until(`!!document.querySelector(${JSON.stringify(MIC)})`, 3000);
+    await m.clickSel(MIC);
+    await sleep(300);
+    const open = await m.ev(`!!document.querySelector('.zz-follow-pop')`);
+    m.close();
+    return open;
+  };
+  ok('MUTANT (the press guard removed): the popover STILL stays open — the outside-press closer\'s own voice fact keeps it too', await popAfterPress('mutant'));
+  ok('MUTANT 2 (the guard AND the closer\'s voice fact removed): the same press closes the popover — the two layers are what keep it', !(await popAfterPress('mutant2')));
 }
 
 console.log('④ phone (touch) — a tap on the reject box: a 40-px microphone outside the field, in the view, clear of the keyboard-yield strip; a tap on it keeps the focus');
@@ -521,6 +543,26 @@ for (const [w, h] of [[390, 844], [375, 812]]) {
   const eg = await p.ev(`(() => { const f = document.querySelector('.chan-prop-edit'), b = f.parentElement.querySelector(':scope > .voice-btn'); if (!b) return null; const q = b.getBoundingClientRect(), r = f.getBoundingClientRect(); return { w: q.width, h: q.height, inBox: q.left >= r.left - 1 && q.right <= r.right + 1 && q.top >= r.top - 1 && q.bottom <= r.bottom + 1, follow: document.querySelectorAll('.voice-follow:not([hidden])').length }; })()`);
   ok(`${w}×${h}: the Outbox Edit… box (the owner's 「编辑」) has its own microphone on the phone — ≥ 40×40 inside the box, no second one`, !!eg && eg.w >= 40 && eg.h >= 40 && eg.inBox && eg.follow === 0, eg);
   ok(`${w}×${h}: no page error`, (await p.ev('window.__errs')).length === 0, await p.ev('window.__errs'));
+  p.close();
+}
+
+console.log('④b the owner\'s phone 448×850 (touch) — the Report a problem box (the incident recorder\'s dialog): the follower\'s microphone over the modal, the words in the box');
+{
+  const p = await page(448, 850, { touch: true });
+  await p.ev('window.__report()');
+  const rp = '.dialog-overlay .dialog-body textarea.dialog-input';
+  await p.until(`!!document.querySelector(${JSON.stringify(rp)})`);
+  await p.tapSel(rp);
+  await p.until(`!!document.querySelector(${JSON.stringify(MIC)})`, 3000);
+  await sleep(150);
+  const g = await geo(p, rp);
+  const rt = await p.ev(`window.__judge(${JSON.stringify(rp)})`);
+  ok('448×850: a TAP on the Report a problem box (a dictation target by the predicate) ⇒ the follower\'s microphone ≥ 40×40, outside the box, inside the screen, ON TOP of the modal (its centre hits the microphone, not the dialog)', !!rt && rt.ok && g.mic && g.w >= 40 && g.h >= 40 && !g.overField && g.inView && g.onTop && g.focused, { g, rt });
+  const posts0 = routes.length;
+  const d = await dictate(p, rp, { value: '', caret: 0, answer: 'The tray closed when I stopped the dictation' });
+  ok('448×850: a TAP records, a tap stops — the words land in the Report a problem box, which keeps the focus; the dialog stays and nothing is captured', d.recording && d.focusRec && d.landed && d.focused && noBlur(d) && (await p.ev(`!!document.querySelector(${JSON.stringify(rp)})`)) && routes.length === posts0, d);
+  await p.shot('follow-report-448.png', '.dialog-overlay .dialog');
+  ok('448×850: no page error', (await p.ev('window.__errs')).length === 0, await p.ev('window.__errs'));
   p.close();
 }
 

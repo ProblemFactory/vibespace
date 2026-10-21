@@ -661,7 +661,9 @@ export async function openSearchResults(app, { adapterIds = [], q = '', convId =
 /** THE OPTIONS EDITOR: the adapter's DECLARED options only (a select for a
  *  `choices` option, a text input otherwise); `''` restores the default. */
 function showOptionsDialog(app, a) {
-  const { body, close } = createModalShell({ id: 'chan-options-dialog', title: t('Options — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true });
+  // lane dialog-unsaved-guard: an option changed and not saved ⇒ ✕ / Esc / the backdrop asks
+  const { body, close } = createModalShell({ id: 'chan-options-dialog', title: t('Options — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true,
+    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() } });
   const fields = [];
   for (const o of a.optionsSchema || []) {
     const wrap = document.createElement('div');
@@ -692,19 +694,24 @@ function showOptionsDialog(app, a) {
   const sync = () => { for (const [, , o, wrap] of fields) wrap.style.display = inUse(o) ? '' : 'none'; };
   for (const [, input] of fields) input.addEventListener('change', sync);
   sync();
+  const drawn = () => JSON.stringify(fields.map(([k, input]) => [k, input.value]));
+  let base = drawn();
   const actions = document.createElement('div');
   actions.className = 'chan-flow-actions';
   const status = chanLine('chan-flow-status', '');
-  const save = btn(t('Save'), async () => {
+  const doSave = async () => {
     const options = {};
     for (const [k, input, o] of fields) options[k] = inUse(o) ? input.value : '';
     save.disabled = true;
     const r = await put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { options });
     save.disabled = false;
-    if (!r) return;
+    if (!r) return false;
+    base = drawn();
     status.className = 'chan-flow-status chan-ok'; status.textContent = t('Saved.');
     setTimeout(close, 400);
-  }, 'mounts-btn-primary');
+    return true;
+  };
+  const save = btn(t('Save'), () => { doSave(); }, 'mounts-btn-primary');
   actions.append(btn(t('Cancel'), close), save);
   body.append(actions, status);
 }
@@ -729,7 +736,9 @@ const pushWhat = (a) => {
 };
 function showPushDialog(app, a) {
   const p = a.push || {};
-  const { body, close } = createModalShell({ id: 'chan-push-dialog', title: t('Push lane — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true });
+  // lane dialog-unsaved-guard: the switch or the claim changed and not saved ⇒ ✕ / Esc / the backdrop asks
+  const { body, close } = createModalShell({ id: 'chan-push-dialog', title: t('Push lane — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true,
+    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() } });
   // WHAT PUSH IS, first (the owner: "'推送'按钮是干啥的？我没看明白，是gmail特有的吗") — both vendors' requirements, one line
   body.appendChild(chanLine('chan-flow-intro chan-push-intro', pushWhat(a)));
   body.appendChild(chanLine('chan-flow-intro', chanCaps.pushLaneText(p, a.lane, { t, now: Date.now() })));
@@ -764,20 +773,25 @@ function showPushDialog(app, a) {
   wrap.appendChild(chanLine('chan-opt-help chan-push-exclusive-help', t('Exclusive = only this VibeSpace consumes that subscription; shared = another instance also reads it, so push here only advances the cursor and polling stays fast.')));
   wrap.appendChild(chanLine('chan-opt-help', t('The platform does not say how many clients share the app, so exclusivity is asserted here and MEASURED by the product: records the reconciliation poll sees before push do not happen on an exclusive lane. Past 2% over 20 records the lane demotes itself to cursor kicks and says so.')));
   body.appendChild(wrap);
+  const drawn = () => JSON.stringify([enabledBox ? enabledBox.checked : null, sel.value]);
+  let base = drawn();
   const actions = document.createElement('div');
   actions.className = 'chan-flow-actions';
   const status = chanLine('chan-flow-status', '');
-  const save = btn(t('Save'), async () => {
+  const doSave = async () => {
     const push = {};
     if (enabledBox) push.enabled = enabledBox.checked;
     if (sel.value !== current || p.demotedAt) push.claimedExclusive = sel.value;
     save.disabled = true;
     const r = await put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { push });
     save.disabled = false;
-    if (!r) return;
+    if (!r) return false;
+    base = drawn();
     status.className = 'chan-flow-status chan-ok'; status.textContent = t('Saved.');
     setTimeout(close, 400);
-  }, 'mounts-btn-primary');
+    return true;
+  };
+  const save = btn(t('Save'), () => { doSave(); }, 'mounts-btn-primary');
   actions.append(btn(t('Cancel'), close), save);
   body.append(actions, status);
 }

@@ -18,7 +18,10 @@ const errText = (e, k) => (e.code === 'id-pattern' && k ? `${t(MODEL_ERRORS[e.co
  *  models-at-session). A provider that lists its own models (OpenRouter, an OpenAI-compatible /models) has its refresh door
  *  here: a person's press, the vault open, once a minute; the list it answered is kept, with when. */
 export async function openAccountModelsDialog({ accountId, name = '', onTest = null, onClose = null } = {}) {
-  const { body, close } = createModalShell({ id: 'account-models-dialog', title: t('Models — {name}', { name }), minWidth: 'min(660px, 94vw)', escapeToClose: true, onClose });
+  // lane dialog-unsaved-guard: a model typed / removed / a capability ticked and not saved ⇒ ✕ / Esc / the backdrop asks
+  const guard = { dirty: () => false, save: async () => true };
+  const { body, close } = createModalShell({ id: 'account-models-dialog', title: t('Models — {name}', { name }), minWidth: 'min(660px, 94vw)', escapeToClose: true, onClose,
+    unsaved: { isDirty: () => guard.dirty(), save: () => guard.save() } });
   body.classList.add('am-body');
   body.textContent = t('Loading…');
   const r = await fetchJson(`/api/accounts/${encodeURIComponent(accountId)}/models`);
@@ -39,6 +42,9 @@ export async function openAccountModelsDialog({ accountId, name = '', onTest = n
   const k = () => kindOf(st.provider.kind);
   const harnessName = (id) => (id ? getBackendMeta(id).label || id : '');
   const rowOut = (row) => ({ id: row.id.trim(), label: row.label.trim(), context: row.context.trim(), caps: row.caps.slice() });
+  const drawn = () => JSON.stringify({ models: st.rows.map(rowOut), aliases: st.aliases });
+  let base = drawn();
+  guard.dirty = () => st.editable && drawn() !== base;
 
   const capsHtml = (row, edit) => CAPS.map((c) => (edit
     ? `<button type="button" class="am-cap" data-cap="${c}" aria-pressed="${row.caps.includes(c)}">${escHtml(t(CAP_WORDS[c]))}</button>`
@@ -127,7 +133,7 @@ export async function openAccountModelsDialog({ accountId, name = '', onTest = n
       const ans = await fetchJson(`/api/providers/${encodeURIComponent(st.provider.id)}/models/refresh`, { method: 'POST' });
       delete refresh.dataset.busy;
       if (!body.isConnected) return;
-      if (ans && ans.ok && ans.provider) { fromProvider(ans.provider); draw(); showToast(t('The provider listed {n} model(s)', { n: ans.listed })); return; }
+      if (ans && ans.ok && ans.provider) { fromProvider(ans.provider); base = drawn(); draw(); showToast(t('The provider listed {n} model(s)', { n: ans.listed })); return; }
       showToast(ans && REFRESH_WORDS[ans.code] ? t(REFRESH_WORDS[ans.code], { s: Math.ceil((ans.retryAfterMs || 0) / 1000), status: ans.status || '' }) : t('Could not read the models — {reason}', { reason: (ans && ans.error) || t('server unreachable') }), { type: 'error' });
       return;
     }
@@ -144,17 +150,20 @@ export async function openAccountModelsDialog({ accountId, name = '', onTest = n
       onTest(row.id.trim());
       return;
     }
-    if (e.target.closest('.am-save')) {
-      const input = { models: st.rows.map(rowOut), aliases: st.aliases, defaultModel: st.rows.some((x) => x.id.trim() === st.provider.defaultModel) ? st.provider.defaultModel : '' };
-      const v = validateModels(st.provider.kind, input);
-      if (!v.ok) { st.errors = v.errors; showErrors(); return; }
-      const ans = await fetchJson(`/api/accounts/${encodeURIComponent(accountId)}/models`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
-      if (!body.isConnected) return;
-      if (ans && ans.ok && ans.provider) { fromProvider(ans.provider); draw(); showToast(t('Saved')); return; }
-      st.errors = ans && Array.isArray(ans.errors) && ans.errors.length ? ans.errors : [{ code: (ans && ans.error) || t('server unreachable') }];
-      showErrors();
-    }
+    if (e.target.closest('.am-save')) await guard.save();
   });
+  // Save (the button, and the unsaved sheet's) → true when it landed, else the refusal's words (shown under the rows too)
+  guard.save = async () => {
+    const input = { models: st.rows.map(rowOut), aliases: st.aliases, defaultModel: st.rows.some((x) => x.id.trim() === st.provider.defaultModel) ? st.provider.defaultModel : '' };
+    const v = validateModels(st.provider.kind, input);
+    if (!v.ok) { st.errors = v.errors; showErrors(); return v.errors.map((x) => errText(x, k())).join(' · ') || false; }
+    const ans = await fetchJson(`/api/accounts/${encodeURIComponent(accountId)}/models`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+    if (!body.isConnected) return true;
+    if (ans && ans.ok && ans.provider) { fromProvider(ans.provider); base = drawn(); draw(); showToast(t('Saved')); return true; }
+    st.errors = ans && Array.isArray(ans.errors) && ans.errors.length ? ans.errors : [{ code: (ans && ans.error) || t('server unreachable') }];
+    showErrors();
+    return st.errors.map((x) => errText(x, k())).join(' · ') || false;
+  };
   draw();
   return { close };
 }

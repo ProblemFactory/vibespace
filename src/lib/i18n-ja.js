@@ -9947,4 +9947,17 @@ export default {
   "No key granted to {target} holds that verb — add it with Edit… on a key's row in the Vault window": "{target} に許可されたキーはどれもその操作を持っていません——保管庫ウィンドウでキーの行の「編集…」から追加してください", // lane vault-key-row-compact
   "The log could not be read: {reason}": "API ログを読み込めませんでした：{reason}", // lane channel-api-log-blank
   "the answer holds no lines": "応答にログ行がありません", // lane channel-api-log-blank
+  "You have unsaved changes": "保存していない変更があります", // lane dialog-unsaved-guard
+  "Not saved": "保存されていません", // lane dialog-unsaved-guard
+  "Not saved: {reason}": "保存されていません：{reason}", // lane dialog-unsaved-guard
+  "judged: live": "判定：有効", // lane judged-watch-state
+  "off: LLM plugin": "停止中：LLM プラグインがオフ", // lane judged-watch-state
+  "off: rules switch": "停止中：ルールのスイッチがオフ", // lane judged-watch-state
+  "off: routing switch": "停止中：振り分けのスイッチがオフ", // lane judged-watch-state
+  "off: no key": "停止中：キーがない", // lane judged-watch-state
+  "paused: budget spent": "一時停止：今日の予算を使い切った", // lane judged-watch-state
+  "paused: hourly limit": "一時停止：この1時間の上限", // lane judged-watch-state
+  "Today's LLM budget is spent ({day}) — judged notification rules paused": "今日の LLM 予算を使い切りました（{day}）— モデルが判定する通知ルールは一時停止中", // lane judged-watch-state
+  "Paused today: {names}": "今日止まったもの：{names}", // lane judged-watch-state
+  "They resume with tomorrow's budget, or now if you raise the daily budget (Settings › Plugins › LLM). The messages they skipped are judged then.": "明日の予算で再開します。設定 › プラグイン › LLM で1日の予算を上げればすぐ再開。飛ばしたメッセージはその時に判定します。", // lane judged-watch-state
 };

@@ -32,7 +32,10 @@ export async function showApiAccessDialog(app, cred) {
   const creds = view.creds || [];
   let cur = creds.find((c) => c.id === cred) || creds[0];
   if (!cur) { showToast(t('Agents cannot call this API until you grant it')); return; }
-  const { body, dialog, close } = createModalShell({ id: 'chan-api-dialog', title: t('API access'), dialogClass: 'chan-api-dialog', minWidth: 'min(560px, 96vw)' });
+  // lane dialog-unsaved-guard: a grant's tier / cap / tick changed and not saved ⇒ ✕ or the backdrop asks
+  let grantsNow = () => ''; let grantsBase = ''; let saveGrants = async () => true;
+  const { body, dialog, close } = createModalShell({ id: 'chan-api-dialog', title: t('API access'), dialogClass: 'chan-api-dialog', minWidth: 'min(560px, 96vw)',
+    unsaved: { isDirty: () => grantsNow() !== grantsBase, save: () => saveGrants() } });
   // THE API LOG (lane channel-api-log-blank, the owner: 「这个 API 日志为啥一直是空的」) — ONE box for the dialog's life,
   // kept across re-draws, its rows keyed and patched in place. It says «Loading…» at once, then the lines (newest first),
   // «No calls yet», or ONE line saying why the log could not be read (a failed read, a line that cannot be worded) —
@@ -96,6 +99,8 @@ export async function showApiAccessDialog(app, cred) {
     body.append(el('div', 'dialog-label', t('Credential')), pick);
     // WHO, AT WHICH TIER
     const rows = (cur.grants || []).map((g) => ({ key: `${g.principal.kind}:${g.principal.id}`, principal: g.principal, tier: g.tier, perDay: g.perDay, allWrite: g.principal.kind === 'everyone' && g.tier !== 'read' }));
+    const wire = () => rows.map((r) => ({ principal: r.principal, tier: r.tier, perDay: r.perDay, allWrite: !!r.allWrite }));
+    grantsNow = () => JSON.stringify(wire()); grantsBase = grantsNow();
     if (!rows.length) body.appendChild(el('div', 'chan-api-none chat-status-dim', t('Agents cannot call this API until you grant it')));
     const list = el('div', 'chan-api-rows');
     const drawRows = () => {
@@ -156,10 +161,16 @@ export async function showApiAccessDialog(app, cred) {
     body.append(el('div', 'dialog-label', t('API log')), logEl);
     loadLog();
     const foot = el('div', 'dialog-footer');
-    foot.append(button(t('Cancel'), () => close()), button(t('Save'), async () => {
-      try { await fetchJson(`/api/channels/api/${encodeURIComponent(cur.id)}/grants`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grants: rows.map((r) => ({ principal: r.principal, tier: r.tier, perDay: r.perDay, allWrite: !!r.allWrite })) }) }); close(); }
-      catch (e) { showToast(String((e && e.message) || e)); }
-    }, 'mounts-btn mounts-btn-primary'));
+    // a refused write is SAID and the dialog stays (fetchJson never throws — its answer's error was read as a success)
+    saveGrants = async () => {
+      let r;
+      try { r = await fetchJson(`/api/channels/api/${encodeURIComponent(cur.id)}/grants`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grants: wire() }) }); }
+      catch (e) { r = { error: String((e && e.message) || e) }; }
+      if (!r || r.error) { const why = (r && r.error) || t('server unreachable'); showToast(why, { type: 'error' }); return why; }
+      close();
+      return true;
+    };
+    foot.append(button(t('Cancel'), () => close()), button(t('Save'), () => { saveGrants(); }, 'mounts-btn mounts-btn-primary'));
     body.appendChild(foot);
   };
   const refresh = async () => { try { view = await fetchJson('/api/channels/api'); const c = (view.creds || []).find((x) => x.id === cur.id); if (c) cur = c; draw(); } catch {} };
