@@ -17,8 +17,9 @@
 //      blur and lands in ITS field; voice input off ⇒ absent
 //   ④ phone 390×844 and 375×812 (touch): a TAP on the reject box shows a 40-px microphone outside the field, inside the
 //      view, clear of the keyboard-yield strip; a TAP on it keeps the focus (no blur) and the words land at the caret
-//   ⑤ RED CONTROL = the base: the same page over the base tree's src/lib/voice-input.js (git show 4349c575) — no microphone
-//      on the reject box
+//   ⑤ RED CONTROL = the base's shape: the same page over a PATCHED COPY of today's src/lib/voice-input.js in the scratch dir,
+//      the follower unexported (the base had none) — no microphone on the reject box. Never the repository's history: the
+//      Actions checkout is depth 1, so the .335 cut's read of the base commit was a red there (lane ci-335-reds)
 //   ⑥ THE CENSUS (scripts/test-voice-focus.mjs, grep-derived): printed; each box this suite rendered is judged at run time
 //      exactly as the census judged its site
 // PNGs: VIBESPACE_VOICE_PNG_DIR (default: the scratch dir) → follow-reject.png, follow-dialog.png, follow-phone-390.png,
@@ -26,7 +27,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { freePort, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
@@ -75,7 +76,6 @@ const store = { resolveIntegration: (id) => (id === 'dropline' ? { source: 'user
 const prefs = { enabled: true, config: { language: 'auto' } };
 const client = require(path.join(REPO, 'src/server/dropline-client.js')).create({ integrations: () => store, pluginOn: () => prefs.enabled, base: `http://127.0.0.1:${vendor.address().port}`, log: { log() { }, warn() { } } });
 const routes = [];
-const BASE_SHA = '4349c575';
 const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
 const VI_PATH = path.join(REPO, 'src/lib/voice-input.js');
 const entry = `import * as VI from ${JSON.stringify(VI_PATH)};
@@ -181,10 +181,13 @@ const VI_SRC = fs.readFileSync(VI_PATH, 'utf8');
 const GUARD = "  window.addEventListener('pointerdown', guard, { capture: true, ...o });\n";
 ok('the mutant anchor (the press guard) is in voice-input.js exactly once', VI_SRC.split(GUARD).length === 2);
 await bundle('mutant.js', [{ name: 'no-guard', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]voice-input\.js$/ }, () => ({ contents: VI_SRC.replace(GUARD, ''), loader: 'js', resolveDir: path.dirname(VI_PATH) })); } }]);
-// RED CONTROL = the base tree's voice-input.js (no follower)
-let baseSrc = null;
-try { baseSrc = execFileSync('git', ['-C', REPO, 'show', `${BASE_SHA}:src/lib/voice-input.js`], { encoding: 'utf8' }); } catch { }
-if (baseSrc) await bundle('base.js', [{ name: 'base-vi', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]voice-input\.js$/ }, () => ({ contents: baseSrc, loader: 'js', resolveDir: path.dirname(VI_PATH) })); } }]);
+// RED CONTROL = the base's shape (no follower): a PATCHED COPY of today's voice-input.js in the scratch dir with followFocus
+// unexported, so app.js's call has nothing to call, as on the base. It runs on any checkout: no git history (lane ci-335-reds)
+const FOLLOW_EXPORT = 'export function followFocus() {';
+ok('the control anchor (the follower\'s export) is in voice-input.js exactly once', VI_SRC.split(FOLLOW_EXPORT).length === 2);
+const BASE_COPY = path.join(root, 'voice-input.base-shape.js');
+fs.writeFileSync(BASE_COPY, VI_SRC.replace(FOLLOW_EXPORT, 'function followFocus() {'));
+await bundle('base.js', [{ name: 'base-vi', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]voice-input\.js$/ }, () => ({ contents: fs.readFileSync(BASE_COPY, 'utf8'), loader: 'js', resolveDir: path.dirname(VI_PATH) })); } }]);
 
 const app = express();
 app.use(express.json());
@@ -521,18 +524,18 @@ for (const [w, h] of [[390, 844], [375, 812]]) {
   p.close();
 }
 
-console.log('⑤ RED CONTROL = the base (no follower): the same reject box has NO microphone');
-if (baseSrc) {
+console.log('⑤ RED CONTROL = the base\'s shape (the follower unexported in a patched copy): the same reject box has NO microphone');
+{
   const p = await page(1280, 860, { b: 'base' });
-  ok('the base bundle has no followFocus (src/lib/voice-input.js at ' + BASE_SHA + ')', p.started === 'absent', p.started);
+  ok('the control bundle has no followFocus (voice-input.base-shape.js: today\'s file, the follower unexported)', p.started === 'absent', p.started);
   await p.ev(`window.__outbox('The quarterly numbers are in — shall I post them to the product room?')`);
   await p.clickSel('.chan-prop [data-reject]');
   await p.until(`document.activeElement === document.querySelector('.chan-prop-rejectbox input')`);
   await sleep(800);
   const base = await p.ev(`(() => { const f = document.querySelector('.chan-prop-rejectbox input'), r = f.getBoundingClientRect(); const near = [...document.querySelectorAll('.chat-voice-btn')].filter((b) => { const q = b.getBoundingClientRect(); return q.width > 0 && Math.abs(q.top - r.top) < 80; }).length; return { focused: document.activeElement === f, mics: near }; })()`);
-  ok('BASE: the focused reject box has no microphone at all — the check ① proves is RED on the base', base.focused && base.mics === 0, base);
+  ok('BASE SHAPE: the focused reject box has no microphone at all — the check ① proves is RED without the follower', base.focused && base.mics === 0, base);
   p.close();
-} else ok('the base tree is readable for the RED control (git show ' + BASE_SHA + ')', false);
+}
 
 console.log('⑥ THE CENSUS (scripts/test-voice-focus.mjs, grep-derived) — and the boxes rendered here judged at run time as their sites were');
 {

@@ -3940,6 +3940,13 @@ console.log('§75 every old-object git read in a suite is guarded and degrades t
   ];
   const wrong = PLANTS.filter(([p, n]) => judgeSrc(p).bad.length !== n).map(([p, n]) => `${p.slice(0, 70)} (want ${n})`);
   ok(wrong.length === 0, `§75 NEGATIVE CONTROLS: ${PLANTS.length} plants — unguarded reads caught (a commented or quoted "try {" is no guard), guarded ones and HEAD / layout reads pass${wrong.length ? ' — wrong: ' + wrong.join(' | ') : ''}`);
+  // lane ci-335-reds (the .335 cut, Actions shard 4/6): a guard is not enough for a RED CONTROL. test-voice-follow-chrome read
+  // its base commit inside a try and printed ✗ when the object was absent, so the depth-1 runner went red. A control is built
+  // from a PATCHED COPY of today's file in the scratch dir (voice-input.base-shape.js), and the suite reads no git object
+  const vfc = fs.readFileSync(path.join(SCRIPTS, 'test-voice-follow-chrome.mjs'), 'utf8');
+  const OLD_VF = "try { baseSrc = execFileSync('git', ['-C', REPO, " + SH + ", `${BASE_SHA}:src/lib/voice-input.js`], { encoding: 'utf8' }); } catch { }";
+  ok(!judged.some((j) => j.f === 'test-voice-follow-chrome.mjs') && !GIT_CALL.test(vfc) && vfc.includes("'voice-input.base-shape.js'") && judgeSrc(vfc + '\n' + OLD_VF).sites.length === 1,
+    '§75 test-voice-follow-chrome\'s RED CONTROL is a patched copy of today\'s voice-input.js — no git read at all (its .335 base read is seen when planted back)');
 }
 
 // ── THE CLOCK-JUDGE CENSUS (lane work-meter-judges, .209 — ci.mjs clockJudgeLines / CLOCK_JUDGES): a complexity claim

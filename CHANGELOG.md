@@ -11,6 +11,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When an automation key is refused, the Vault's notice says who used which key for what, with the reason on the line below.
 - When an agent may send a message directly, its send command now returns the delivery receipt itself, so no second receipt message waits or wakes it.
 
+### Maintenance
+- Test and release tooling only; nothing changes for you.
+
 ## 2.369.334 — 2026-10-21
 
 ### Fixed

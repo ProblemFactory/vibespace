@@ -38,7 +38,9 @@
 //      opens in place (groups › running › ended, dim 已结束, a kept name), scrolls inside the row (≤ 400 px opened), a filter past
 //      eight, 清理已结束的授权 takes EXACTLY the 3 (one audit line), stays open; the verbs popover by family + 编辑…; the 需要你 band's
 //      head «<who> 用 key「Fleet」做「归档一个对话」被拒» over its cause (the count under ONE fold) and the tray's same head; phones 390×844
-//      and 375×812: two head lines, every door ≥ 36 px on screen, the list scrolls inside the row. RED CONTROL: this leg on the base
+//      and 375×812 (and 375×812 again in DejaVu Sans, the Actions runner's wide default sans): the head in two lines, or three when the
+//      font is wide (a font fact, lane ci-335-reds), the folded row ≤ 200 px, every door ≥ 36 px on screen, nothing off the side,
+//      the list scrolls inside the row. RED CONTROL: this leg on the base
 //      tree (the lane's base.sh) — 818 px, the modes named, every grant drawn
 // Run: node scripts/test-automation-keys-chrome.mjs   (AK_SHOTS=<dir> keeps the 1280×800 screenshots; SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
@@ -534,18 +536,30 @@ try {
     const tray = await until(`(() => { const it = [...document.querySelectorAll('#user-todos-popup .ut-item')].find((x) => /Fleet/.test((x.querySelector('.ut-text') || {}).textContent || '')); return it ? it.querySelector('.ut-text').textContent : null; })()`, 10000);
     check('…and For you\'s row says the same head (the same item, the verb a param that IS words)', tray === `${who} 用 key「Fleet」做「归档一个对话」被拒`, tray);
     await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`);
-    // THE PHONE (390×844 · 375×812): the head wraps to two lines, every door reachable, the grants list scrolls inside the row
-    for (const [W, H] of [[390, 844], [375, 812]]) {
+    // THE PHONE (390×844 · 375×812, then 375×812 again in DejaVu Sans): every door reachable, nothing runs off the side, the grants
+    // list scrolls inside the row, the folded row ≤ CAP_PHONE (measured: 162 px in two head lines, 178 px in three). The
+    // head wraps to two lines, or to three when the font is wide: the Actions runner's default sans is DejaVu Sans, and there the
+    // last use took a line of its own at 375×812 (the .335 cut's red, lane ci-335-reds). A line count is a font fact, not the rule
+    const CAP_PHONE = 200;
+    const WIDE = `.vw-row, .vw-row * { font-family: 'DejaVu Sans', 'Noto Sans CJK SC', sans-serif !important; }`;
+    for (const [W, H, wide] of [[390, 844, false], [375, 812, false], [375, 812, true]]) {
+      const tag = `${W}×${H}${wide ? ' in DejaVu Sans' : ''}`;
       await cdp('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 2, mobile: true });
       await load();
       await openWindow();
+      if (wide) {
+        const has = await evalJs(`(() => { const c = document.createElement('canvas').getContext('2d'); const w = (f) => { c.font = '13px ' + f; return c.measureText('Fleet 10/21, 08:57 hub').width; }; return w("'DejaVu Sans', monospace") !== w('monospace'); })()`);
+        if (!has) { console.log(`  SKIP: PHONE ${tag} — DejaVu Sans is not installed here, so the wide-font pass did not run (1 check skipped)`); continue; }
+        await evalJs(`(() => { const s = document.createElement('style'); s.textContent = ${JSON.stringify(WIDE)}; document.head.appendChild(s); return true; })()`);
+      }
+      const folded = await until(`(() => { const r = ${FROW}; if (!r) return null; const f = r.querySelector('.vw-ak-gfold'); r.scrollIntoView({ block: 'start' }); return { closed: !f || f.hidden, h: Math.round(r.getBoundingClientRect().height) }; })()`, 10000);
       await until(`(() => { const r = ${FROW}; if (!r) return false; const c = r.querySelector('.vw-ak-grants-chip'); const f = r.querySelector('.vw-ak-gfold'); if (f && f.hidden) c.click(); r.scrollIntoView({ block: 'start' }); return true; })()`, 10000);
-      const ph = await until(`(() => { const r = ${FROW}; const f = r && r.querySelector('.vw-ak-gfold'); if (!f || f.hidden) return null; const rr = r.getBoundingClientRect(); const items = [r.querySelector('.vw-label'), ...r.querySelectorAll('.vw-chips > *'), r.querySelector('.vw-used'), ...r.querySelectorAll('.vw-act .vw-btn:not([hidden])')].filter(Boolean); const tops = [...new Set(items.map((e) => Math.round(e.getBoundingClientRect().top)))].sort((a, b) => a - b); const lines = tops.filter((t, i) => i === 0 || t - tops[i - 1] > 12).length; const doors = [...r.querySelectorAll('.vw-show, .vw-ak-grant, .vw-ak-edit, .vw-ak-audit, .vw-ak-revoke')].map((b) => { const q = b.getBoundingClientRect(); return { cls: b.className.split(' ').pop(), l: Math.round(q.left), r: Math.round(q.right), h: Math.round(q.height) }; }); const l = f.querySelector('.vw-ak-glist'); return { rowW: Math.round(rr.width), right: Math.round(rr.right), lines, items: items.map((e) => { const q = e.getBoundingClientRect(); return [e.className.split(' ').pop(), Math.round(q.left), Math.round(q.width), Math.round(q.top), e.textContent.slice(0, 20), getComputedStyle(e).flexBasis, getComputedStyle(e).display]; }), doors, ch: l.clientHeight, sh: l.scrollHeight, pageScroll: document.documentElement.scrollWidth }; })()`, 10000);
+      const ph = await until(`(() => { const r = ${FROW}; const f = r && r.querySelector('.vw-ak-gfold'); if (!f || f.hidden) return null; const rr = r.getBoundingClientRect(); const items = [r.querySelector('.vw-label'), ...r.querySelectorAll('.vw-chips > *'), r.querySelector('.vw-used'), ...r.querySelectorAll('.vw-act .vw-btn:not([hidden])')].filter(Boolean); const tops = [...new Set(items.map((e) => Math.round(e.getBoundingClientRect().top)))].sort((a, b) => a - b); const lines = tops.filter((t, i) => i === 0 || t - tops[i - 1] > 12).length; const doors = [...r.querySelectorAll('.vw-show, .vw-ak-grant, .vw-ak-edit, .vw-ak-audit, .vw-ak-revoke')].map((b) => { const q = b.getBoundingClientRect(); return { cls: b.className.split(' ').pop(), l: Math.round(q.left), r: Math.round(q.right), h: Math.round(q.height) }; }); const l = f.querySelector('.vw-ak-glist'); return { rowW: Math.round(rr.width), right: Math.round(rr.right), h: Math.round(rr.height), lines, items: items.map((e) => { const q = e.getBoundingClientRect(); return [e.className.split(' ').pop(), Math.round(q.left), Math.round(q.width), Math.round(q.top), e.textContent.slice(0, 20), getComputedStyle(e).flexBasis, getComputedStyle(e).display]; }), doors, ch: l.clientHeight, sh: l.scrollHeight, pageScroll: document.documentElement.scrollWidth }; })()`, 10000);
       await evalJs(`(() => { const r = ${FROW}; r.scrollIntoView({ block: 'start' }); return true; })()`);
-      await shot(`ak-17-phone-${W}.png`);
-      console.log(`  · measured: phone ${W}×${H} — the head ${ph && ph.lines} line(s), the grants list ${ph && ph.ch} px of ${ph && ph.sh} px, the row ${ph && ph.rowW} px wide`);
-      check(`PHONE ${W}×${H}: the head wraps to TWO lines (name + chips · the doors); every door reachable (inside the screen, ≥ 36 px); the grants list scrolls INSIDE the row; nothing runs off the side`,
-        !!ph && ph.lines <= 2 && ph.doors.length === 5 && ph.doors.every((d) => d.l >= 0 && d.r <= W && d.h >= 36) && ph.sh > ph.ch && ph.right <= W && ph.pageScroll <= W, ph);
+      await shot(`ak-17-phone-${W}${wide ? '-dejavu' : ''}.png`);
+      console.log(`  · measured: phone ${tag} — the head ${ph && ph.lines} line(s), the row ${folded && folded.h} px folded / ${ph && ph.h} px opened, the grants list ${ph && ph.ch} px of ${ph && ph.sh} px, the row ${ph && ph.rowW} px wide`);
+      check(`PHONE ${tag}: every door reachable (inside the screen, ≥ 36 px); nothing runs off the side; the grants list scrolls INSIDE the row; the head wraps to two lines (name + chips · the doors) or three (the last use alone, a wide font); the folded row ≤ ${CAP_PHONE} px`,
+        !!ph && !!folded && folded.closed && folded.h <= CAP_PHONE && ph.lines >= 2 && ph.lines <= 3 && ph.doors.length === 5 && ph.doors.every((d) => d.l >= 0 && d.r <= W && d.h >= 36) && ph.sh > ph.ch && ph.right <= W && ph.pageScroll <= W, { folded, ...ph });
     }
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   }
