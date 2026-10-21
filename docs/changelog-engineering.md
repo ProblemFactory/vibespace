@@ -6,6 +6,7 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.334 — 2026-10-21
 
+### gate red — the .334 branch run (ci/hotfix-334, 0f8da11a, heavy 2/6): test-phone-composer-chrome ✗ «the composer + bar DOM signature is the pinned desk one» — lane agent-window-no-pop prepends `div.chat-agent-cards` to the chat input area (right: the agent's cards come first), and the suite pins a sha1 of the desk composer's DOM; neither the lane nor the integration ran it. Fix = the re-pin (phone-composer-pin, test-only). Same lesson as .333's webhook pin: a verbatim/hashed DOM pin is a suite the lane that changes that DOM must run — grep the tree for the class it adds.
 ### gate red — the .333 master mirror (run 39536338711, fast): test-desktop-picker ✗ «ONE log line per probe» — the runner measured the Mac probe at 2199 ms and the log-line regex demanded 2200–2599 while the probeMs assert beside it accepts ≥ 2190 (the stub greeting's floor); the branch run of the same sha was green by one millisecond. Fix = the regex accepts the fixture's own floor (219x | 22xx–25xx) — a bound derives from the fixture's constant, never a round number (desktop-picker-pin, test-only).
 
 ### lane key-folder-picker-all — a minted key's verbs and limits are editable (编辑…), and the folders say 「所有路径」 / 及子文件夹 (the owner 2026-10-21; base 0b8c3520 = 2.369.332)
