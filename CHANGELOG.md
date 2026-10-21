@@ -10,6 +10,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An agent that sets a notification rule the LLM plugin judges is told if it can run and why not; you get one notice when the day's budget pauses such rules.
 - The New Session dialog's accounts now follow the backend it opens with: after an Antigravity conversation it no longer offers Antigravity accounts for Claude.
 
+### Maintenance
+- Test and release tooling only; nothing changes for you.
+
 ## 2.369.336 — 2026-10-21
 
 ### Fixed

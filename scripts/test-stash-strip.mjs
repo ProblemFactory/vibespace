@@ -1368,8 +1368,14 @@ function producerCensus(src) {
   // ── 5. THE ORDER (r7 vs r5): the sections stand where they always stood; where the fit decisions coincide the bytes are identical ──
   const tags = ['<vibespace-reminder>', '<vibespace-user-instructions>', '<vibespace-cwd-notice>', '<vibespace-delivery-note>', '<vibespace-task-context>', '<vibespace-task-update>', '<vibespace-session-tools>', '<vibespace-group-manager>', '<vibespace-jobs-missed-while-away>', '<vibespace-jobs-update>', '### Messages that arrived', '<system-reminder>', 'Clean up before parking more'];
   const orderOf = (c) => tags.map((t) => [t, c.indexOf(t)]).filter(([, i]) => i >= 0).sort((x, y) => x[1] - y[1]).map(([t]) => t);
+  // lane teach-clock-scrub: every rig is built at ONE instant (T5) — rigR7 stamps each group's updatedAt (the full shape's «Updated: …»)
+  // from Date.now(), and the r5 and r7 rigs are built seconds apart, so on a real clock the byte identity below straddles a minute edge.
+  // The renders keep their own pin.
+  const T5 = Date.now();
   const run = (routesMod, shape) => {
-    const H = rigR7({ backend: 'claude', groups: shape.groups, n: shape.n, routesMod, settings: { 'agents.injectPreamble': shape.fillChars ? 'p'.repeat(shape.fillChars) : 'standing instructions '.repeat(shape.pre || 0), 'agents.perTurnExtra': shape.extra ? 'per-turn extra line' : '', 'agents.allowGroupManagement': !!shape.manager }, manager: !!shape.manager });
+    const C = Date.now; Date.now = () => T5;
+    let H;
+    try { H = rigR7({ backend: 'claude', groups: shape.groups, n: shape.n, routesMod, settings: { 'agents.injectPreamble': shape.fillChars ? 'p'.repeat(shape.fillChars) : 'standing instructions '.repeat(shape.pre || 0), 'agents.perTurnExtra': shape.extra ? 'per-turn extra line' : '', 'agents.allowGroupManagement': !!shape.manager }, manager: !!shape.manager }); } finally { Date.now = C; }
     const D = Date.now; Date.now = () => 1790000000000;
     try {
       if (shape.sessionStart) H.get('/api/agent/task-context');

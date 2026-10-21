@@ -355,7 +355,9 @@ const indexOf = (ctx) => { const m = ctx.match(/Files \(read what you need with 
   ok(JSON.stringify(tasks._indexRows(small, t.contextDir, '')) === JSON.stringify(small.map((f) => `- ${t.contextDir}/${f.path} (${f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB'})`)),
     'a folder that fits: the index is exactly what it was (every row, path order, no pointer)');
   // the rules part rides above it untouched; the whole context
-  set(0); const ctxOff = tasks.renderContext(id, {}); set(undefined); const ctxOn = tasks.renderContext(id, {});
+  // lane teach-clock-scrub: both renders at ONE clock — the head holds the zone sentence's date, so a midnight between them is a red
+  const D = Date.now, T = D(); Date.now = () => T;
+  let ctxOff, ctxOn; try { set(0); ctxOff = tasks.renderContext(id, {}); set(undefined); ctxOn = tasks.renderContext(id, {}); } finally { Date.now = D; }
   const head = (c) => c.slice(0, c.indexOf('## Shared context folder'));
   ok(head(ctxOff) === head(ctxOn) && ctxOn.includes('### Reporting back') && ctxOn.includes('### Using the shared context folder') && ctxOn.includes('## Activity log'),
     'the rules / tools part is byte-identical with and without the budget; the folder teaching and the activity log now follow the index', { off: B(ctxOff), on: B(ctxOn) });

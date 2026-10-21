@@ -153,7 +153,19 @@ function mkRoutes({ AGR = AR, TGM = TG, eng = null, settings = {} } = {}) {
   return { tasks, g, session, call, turns, settings };
 }
 const taught = (t) => /vibespace-channels/.test(t) && /vibespace-docs channels|\|channels[|\]]/.test(t);   // lane cli-registry: `channels` sits after jobs in the pointer
-const legsOf = async ({ AGR = AR, TGM = TG, ENGM = ENG } = {}, tag = 'real') => {
+// lane teach-clock-scrub: the SessionStart block carries CLOCK words — the zone sentence's «today there is …» (renderContext reads
+// Date.now() itself: it takes no `now`) and «Updated: HH:MM» (each group's updatedAt, stamped by create) — and NO ENGINE compares
+// two groups created and rendered moments apart (R and R0). The 2.369.336 mirror rendered them across 13:10:00Z: one minute word
+// apart, red. So every leg renders at ONE injected clock (Date.now pinned, restored after) and the equality stays byte-exact;
+// `at(leg, t0)` moves a leg's clock (the minute-edge control in ④). `scrub` folds paths and per-session names only, never a clock word.
+const scrub = (t) => t.replace(/vs-chan-teach-\d+\/routes-[^/\s`]+/g, '<dir>').replace(/\bw\d+\b/g, 'w').replace(/sess\d+/g, 'sess');
+const sameNoEngine = (out) => scrub(out.noEngine.start) === scrub(out.none.start) && out.noEngine.p1 === out.none.p1;
+const legsOf = async ({ at = null, ...mods } = {}, tag = 'real') => {
+  const realNow = Date.now, t0 = realNow();
+  try { return await legsAt(mods, tag, (leg) => { const t = at ? at(leg, t0) : t0; Date.now = () => t; }); } finally { Date.now = realNow; }
+};
+const legsAt = async ({ AGR = AR, TGM = TG, ENGM = ENG } = {}, tag, clockAt) => {
+  clockAt('none');
   const eng = mkEngine('r-' + tag, { ENGM });
   await seed(eng, 40);
   await eng.setAgentDirectory(A, { groups: false, singles: false });
@@ -172,6 +184,7 @@ const legsOf = async ({ AGR = AR, TGM = TG, ENGM = ENG } = {}, tag = 'real') => 
   await eng.setAgentDirectory(A, { groups: false, singles: false });
   await eng.store.index.update(() => { const en = eng.store.index.entry('agents', 'c0ffee00-0000-4000-8000-000000000099'); en.kind = 'dm'; en.title = 'Peer'; en.lastAt = clock(); });
   out.peer = R.turns(R.session());
+  clockAt('noEngine');
   const R0 = mkRoutes({ AGR, TGM, eng: null });
   out.noEngine = R0.turns(R0.session());
   return { out, eng, R };
@@ -187,8 +200,7 @@ const real = await legsOf();
   ok(out.off.start === '' && out.off.p1 === '', 'INTEGRATION OFF: nothing is injected at all (neither block)');
   ok(out.request.start.includes(TG.CHANNELS_SECTION_LINES.request) && out.request.p1.includes(AR.CHANNELS_REMINDER_SEG.request) && !out.request.p1.includes(AR.CHANNELS_REMINDER_SEG.read), 'REQUESTABLE ONLY (the directory\'s titles): the request words in both blocks', out.request.p1);
   ok(!taught(out.peer.start) && !taught(out.peer.p1), 'a peer session it may message (the built-in Agents adapter) does not teach vibespace-channels');
-  const scrub = (t) => t.replace(/vs-chan-teach-\d+\/routes-[^/\s`]+/g, '<dir>').replace(/\bw\d+\b/g, 'w').replace(/sess\d+/g, 'sess');
-  ok(scrub(out.noEngine.start) === scrub(out.none.start) && out.noEngine.p1 === out.none.p1, 'NO ENGINE ⇒ byte-identical to an engine with no reach: the SessionStart block (paths scrubbed) and the reminder');
+  ok(sameNoEngine(out), 'NO ENGINE ⇒ byte-identical to an engine with no reach: the SessionStart block (paths scrubbed) and the reminder, both rendered at ONE clock');
 }
 { // the memo: SessionStart asks fresh; a prompt reads the per-session memo for a minute
   const { eng, R } = real;
@@ -225,6 +237,17 @@ console.log('④ CONTROLS: each leg can go red');
   const ARX = MUT.load('src/agent-routes.js', cut, 'teach-anyway');
   const m = await legsOf({ AGR: ARX }, 'teach-anyway');
   ok(cut !== src && taught(m.out.none.p1) && taught(m.out.noEngine.start), 'CONTROL: a route that teaches without reach ⇒ the NO REACH and NO ENGINE legs are RED');
+}
+{ // lane teach-clock-scrub: the mirror's red (2.369.336, 13:10:00Z) — the NO ENGINE pair rendered across a minute edge with two
+  // clocks: 1 ms apart (…:59.999 → :00.000, the mirror's shape) and a minute apart; the leg's own predicate goes RED. ONE clock at
+  // that same edge instant is green.
+  const edge = Math.floor(Date.now() / 60e3) * 60e3;
+  const words = (o) => { const a = scrub(o.none.start).split('\n'), b = scrub(o.noEngine.start).split('\n'); return a.map((l, i) => (l === b[i] ? null : [l, b[i]])).filter(Boolean).slice(0, 3); };
+  const straddle = await legsOf({ at: (leg) => (leg === 'noEngine' ? edge : edge - 1) }, 'edge-1ms');
+  const apart = await legsOf({ at: (leg) => (leg === 'noEngine' ? edge : edge - 60e3) }, 'edge-60s');
+  const one = await legsOf({ at: () => edge - 1 }, 'edge-one');
+  ok(!sameNoEngine(straddle.out) && !sameNoEngine(apart.out) && sameNoEngine(one.out), 'CONTROL: the NO ENGINE pair rendered across a minute edge (two clocks, 1 ms and 60 s apart) ⇒ that leg is RED; ONE clock at the same instant ⇒ green', words(straddle.out));
+  console.log('    the edge words (1 ms apart): ' + JSON.stringify(words(straddle.out)));
 }
 { // an engine that counts the Agents adapter: a copy of the access family without the msg-acl skip, required by a copy of the engine
   const src = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8');
