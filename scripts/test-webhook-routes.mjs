@@ -31,7 +31,7 @@ const AUTH_LINE = "      if (/^\\/hook(?:\\/|$)/.test(p) || (req.method === 'GET
 const authSrc = fs.readFileSync(path.join(repo, 'src/auth.js'), 'utf-8');
 ok(authSrc.split('\n').filter((l) => l === AUTH_LINE).length === 1 && (authSrc.match(/\/\^\\\/hook/g) || []).length === 1, 'src/auth.js holds the webhook exemption as ONE line, verbatim (exactly /hook/<slug>, the caller\'s replies GET, the pairing POST)');
 const serverSrc = fs.readFileSync(path.join(repo, 'server.js'), 'utf-8');
-ok(serverSrc.includes("OWN_BODY_RE = /^\\/(?:proxy\\/|hook\\/|api\\/channels\\/webhook\\/[^/]+\\/pair$)/;") && serverSrc.includes('app.use((req, res, next) => (OWN_BODY_RE.test(req.path) ? next() : jsonBody(req, res, next)));'), 'server.js: the global JSON parser skips /hook/ and the pairing route at the /proxy/ place');
+ok(serverSrc.includes("OWN_BODY_RE = /^\\/(?:proxy\\/|hook\\/|api\\/channels\\/webhook\\/[^/]+\\/pair$|api\\/feedback\\/forward$)/;") && serverSrc.includes('app.use((req, res, next) => (OWN_BODY_RE.test(req.path) ? next() : jsonBody(req, res, next)));'), 'server.js: the global JSON parser skips /hook/, the pairing route and the feedback forward door at the /proxy/ place');
 
 const VNC_ENV = await vncEnv();
 const PORT = await freePort();

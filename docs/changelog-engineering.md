@@ -6,6 +6,8 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.333 — 2026-10-20
 
+### gate red — the .333 branch run (ci/hotfix-333, 976b5e3b): test-webhook-routes ✗ «the global JSON parser skips /hook/ and the pairing route» — lane feedback-forward added the forward door (`api/feedback/forward$`) to server.js OWN_BODY_RE (right: the door reads its own raw bytes after its refusals, like /hook), and the suite pins that regex VERBATIM; neither the lane nor the local affected chain ran the suite. Fix = the pin (test-only, webhook-routes-pin). Lesson: a lane touching server.js OWN_BODY_RE / auth exemptions runs test-webhook-routes.
+
 ### lane feedback-forward — ONE inbox for the maintainer: an agent's feedback filed on any instance reaches the maintainer hub, and the maintainer's mark comes back (the owner 2026-10-20 「这个功能本来就是给你用的，你自己开发个处理流程」)
 - THE GAP: `vibespace-feedback` filed into THAT instance's data/feedback.json, and the maintainer (a conversation on the owner's hub) read only the hub's own store. A fleet user's reports (userW's pod: six) were read with kubectl as the pod user, and a mark made on the hub never reached the instance whose agent filed the report.
 - THE BASE: one commit on int332 07561196. Lane feedback-handled-verb's `feedback.list` / `feedback.handled` and `handledVersion` live there, not on .331. The commit rides .333 by cherry-pick onto 2.369.332.
