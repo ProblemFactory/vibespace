@@ -11,7 +11,9 @@
 //      from the parent, its tool cards (read_file, run_command, write_file, send_message), its last words
 //   K3 the agent's text links its subagent as [`<id>`](conversation://<id>): the link is ours (.chat-link, data-sub) and
 //      a real click opens THAT sub's timeline; a link to a sub this conversation does not know carries the chip that
-//      says so
+//      says so; the same click on the link WRAPPED across two lines (the runner's DejaVu breaks the id at a hyphen —
+//      forced here by narrowing its paragraph) still opens it, and the CONTROL shows the old aim (the centre of the
+//      link's union box, on the paragraph between its two pieces) pressing nothing
 //   K4 the Artifacts chip counts the file the SUB wrote (the helper door read its transcript in the store), and its
 //      card names it
 //   K5 CONTROL: the same page on the PRE-LANE normalizer (its `subagent` case removed in the scratch worktree, the
@@ -114,12 +116,14 @@ const evalJs = async (expr) => {
 const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch {} await sleep(150); } try { return await evalJs(expr); } catch { return false; } };
 const waitApp = () => evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })');
 /** A REAL click at the element's centre that the ELEMENT received (a layout that moves between the measure and the press —
- *  an auto-opened document tiling beside the chat — is measured again, up to 4 times). */
+ *  an auto-opened document tiling beside the chat — is measured again, up to 4 times). The centre is that of one of the
+ *  element's OWN boxes (getClientRects): an inline link that wraps has two, and the centre of their union box is the
+ *  paragraph between them — the 2.369.341 runner red, where the id broke at a hyphen in DejaVu (ci-341-reds). */
 const realClickEl = async (expr) => {
   for (let i = 0; i < 4; i++) {
     if (!(await evalJs(`(() => { const e = ${expr}; if (!e) return false; e.scrollIntoView({ block: 'center' }); return true; })()`))) return false;
     await sleep(350); // the chat re-pins / re-folds after a scroll — press where the element IS, not where it was
-    const r = await evalJs(`(() => { const e = ${expr}; if (!e) return null; window.__vsHit = false; e.addEventListener('click', () => { window.__vsHit = true; }, { once: true, capture: true }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, hits: !!hit && (hit === e || e.contains(hit)) }; })()`);
+    const r = await evalJs(`(() => { const e = ${expr}; if (!e) return null; window.__vsHit = false; e.addEventListener('click', () => { window.__vsHit = true; }, { once: true, capture: true }); const on = (h) => !!h && (h === e || e.contains(h)); const boxes = [...e.getClientRects()].filter((q) => q.width > 0 && q.height > 0); if (!boxes.length) boxes.push(e.getBoundingClientRect()); for (const q of boxes) { const x = q.left + q.width / 2, y = q.top + q.height / 2; if (on(document.elementFromPoint(x, y))) return { x, y, hits: true }; } const q = boxes[0]; return { x: q.left + q.width / 2, y: q.top + q.height / 2, hits: false }; })()`);
     if (!r) return false;
     if (r.hits) {
       await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
@@ -201,6 +205,29 @@ try {
   check('a link to a sub this conversation does not know carries the chip that says so', !!u && u.unknown && u.chip === 'unknown subagent', u);
   check('a REAL click on the known link…', await realClickEl(LINK));
   check('…opens THAT sub\'s timeline (the same window the card opens)', await waitFor(`!!(${SUBWIN}) && (${SUBWIN}).content.querySelectorAll('.chat-msg').length >= 6`, 15000));
+  // THE RUNNER'S WRAP on every box (ci-341-reds): the runner's DejaVu broke the id at a hyphen across two lines, so the
+  // centre of the link's union box was the paragraph between its pieces and the old aim never pressed. Narrow the
+  // agent's paragraph until the link breaks the same way — the premise asserted (two line boxes, the union centre OFF
+  // the link) — then the CONTROL presses that centre (the pre-fix aim: it lands on the paragraph and opens nothing) and
+  // the leg's aim (inside one of the link's own boxes) opens THAT sub's timeline.
+  await evalJs(`(() => { const w = ${SUBWIN}; app.wm.closeWindow(w.id); return true; })()`);
+  await waitFor(`!(${SUBWIN})`, 5000);
+  const WRAP = `(() => { const e = ${LINK}; const p = e.closest('p') || e.parentElement; const on = (h) => !!h && (h === e || e.contains(h)); const full = Math.floor(p.getBoundingClientRect().width); for (let w = full; w >= 60; w -= 4) { p.style.width = w + 'px'; e.scrollIntoView({ block: 'center' }); const rs = e.getClientRects(); if (rs.length < 2) continue; const q = e.getBoundingClientRect(); if (!on(document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2))) return { width: w, boxes: rs.length }; } p.style.width = ''; return null; })()`;
+  const wrap = await evalJs(WRAP);
+  check('the runner\'s premise holds here: the link breaks across two lines and the centre of its union box is OFF it', !!wrap, wrap);
+  if (wrap) {
+    await sleep(350); // the chat re-pins after the scroll (as realClickEl allows) — the press below re-reads the box
+    const pre = await evalJs(`(() => { const e = ${LINK}; window.__vsWrapClicks = []; document.addEventListener('click', (ev) => { window.__vsWrapClicks.push({ target: ev.target.tagName + '.' + [...ev.target.classList].join('.'), onLink: !!ev.target.closest?.('.chat-sub-link[data-sub]') }); }, { capture: true, once: true }); const q = e.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2, boxes: e.getClientRects().length }; })()`);
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pre.x, y: pre.y });
+    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: pre.x, y: pre.y, button: 'left', clickCount: 1 });
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pre.x, y: pre.y, button: 'left', clickCount: 1 });
+    await waitFor('window.__vsWrapClicks.length > 0', 5000); // the click's own record: the sub's window opens inside the handler, synchronously
+    const ctl = await evalJs(`({ clicks: window.__vsWrapClicks, opened: !!(${SUBWIN}) })`);
+    check('CONTROL (the pre-fix aim): a press at the wrapped link\'s union-box centre lands on the paragraph and opens nothing — the runner\'s red', pre.boxes >= 2 && ctl.clicks.length === 1 && !ctl.clicks[0].onLink && !ctl.opened, { pre, ...ctl });
+    check('a REAL click on the WRAPPED link (inside one of its own line boxes)…', await realClickEl(LINK));
+    check('…opens THAT sub\'s timeline', await waitFor(`!!(${SUBWIN}) && (${SUBWIN}).content.querySelectorAll('.chat-msg').length >= 6`, 15000), await evalJs(`[...app.wm.windows.values()].map((w) => w._openSpec?.virtualId || w._openSpec?.action)`));
+    await evalJs(`(() => { const p = (${LINK}).closest('p') || (${LINK}).parentElement; p.style.width = ''; return true; })()`);
+  }
 
   console.log('K4 the Artifacts chip counts the file the SUB wrote');
   check('the chip reads «Artifacts · 1»', await waitFor(`/Artifacts · 1/.test(document.querySelector('.chat-status-artifacts')?.textContent || '')`, 10000), await evalJs(`document.querySelector('.chat-status-artifacts')?.textContent || '(no chip)'`));
