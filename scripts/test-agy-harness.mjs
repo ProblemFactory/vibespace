@@ -30,6 +30,7 @@
 //     the db's rows (node:sqlite read-only) are the timeline; the ACP normalizer draws the card and the virtual session
 // Run: node scripts/test-agy-harness.mjs
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -655,6 +656,60 @@ console.log('— ⑫ THE SUBAGENT CARD (lane agy-subagent-cards): the invoke_sub
     } finally { await m.stop(); }
   });
   for (const out of await Promise.all(legs)) for (const [n, c, e] of out) ok(n, c, e);
+}
+
+console.log('— ⑬ THE TURN\'S USAGE (lane agy-status-bar-facts; ⑫ is lane agy-subagent-cards\'): one `usage` record per turn, agy\'s transcript read through ONE gate');
+{
+  // the fake agy speaks the MEASURED semantics: result.usage = the conversation's running sum of every model call, and
+  // (AGY_STUB_TRANSCRIPT=1) each step is a row of <HOME>/.gemini/antigravity-cli/brain/<conversation>/…/transcript.jsonl
+  const home = path.join(ROOT, 'usage-home');
+  fs.mkdirSync(home, { recursive: true });
+  const txOf = (cid) => path.join(home, '.gemini', 'antigravity-cli', 'brain', cid, '.system_generated', 'logs', 'transcript.jsonl');
+  const sums = (cid) => fs.readFileSync(txOf(cid), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.input_tokens != null)
+    .reduce((a, r) => ({ input: a.input + r.input_tokens, cacheRead: a.cacheRead + r.cache_read_tokens, output: a.output + r.output_tokens }), { input: 0, cacheRead: 0, output: 0 });
+  const w = startWrapper({ env: { HOME: home, AGY_STUB_TRANSCRIPT: '1', AGY_WEBUI_MODEL: 'gemini-4-argon-high' } });
+  let cid = null;
+  try {
+    cid = (await w.until(() => w.find('session'), 8000, 'session')).sessionId;
+    w.send({ type: 'chat-input', text: 'hello', msgId: 'u1' });
+    const u1 = await w.until(() => w.find('usage'), 8000, 'usage 1');
+    w.send({ type: 'chat-input', text: 'please write the summary', msgId: 'u2' });
+    await w.until(() => w.all('usage').length === 2, 8000, 'usage 2');
+    const u2 = w.all('usage')[1];
+    const s2 = sums(cid);
+    ok('ONE `usage` record per turn, after its prompt_end (the transcript read is async; the turn is never held)', w.all('usage').length === 2 && w.records.indexOf(u1) > w.records.indexOf(w.find('prompt_end')), w.records.map((r) => r.kind));
+    ok('total = agy\'s running total, which IS the transcript\'s sum over every call of every turn (the measured fact, reproduced)', u2.total.input === s2.input && u2.total.cacheRead === s2.cacheRead && u2.total.output === s2.output && u2.total.total === s2.input + s2.output, { total: u2.total, s2 });
+    ok('turn = this turn\'s calls only (2: the write + the reply), thinking from the delta of the two totals; turn 1 had no earlier total ⇒ thinking null', u2.turn.calls === 2 && u2.turn.input + u1.total.input === u2.total.input && u2.turn.thinking === u2.total.thinking - u1.total.thinking && u1.turn.calls === 1 && u1.turn.thinking === null, { u1: u1.turn, u2: u2.turn });
+    ok('last = the turn\'s LAST model call (the live context): its cache read is the previous call\'s context — never the turn\'s sum', u2.last.cacheRead > 0 && u2.last.input + u2.last.cacheRead < u2.total.input + u2.total.cacheRead && u2.last.input + u2.last.cacheRead > u1.last.input + u1.last.cacheRead, { u1: u1.last, u2: u2.last });
+    const side = await w.until(() => { try { const m = JSON.parse(fs.readFileSync(path.join(w.dir, 's.json'), 'utf8')); return m.usage?.total_tokens === u2.total.total ? m : null; } catch { return null; } }, 3000, 'the sidecar').catch(() => null); // persisted on its 200 ms timer
+    ok('the model agy named (init) + the result\'s own time ride the record; the sidecar keeps its copy (meta.usage)', u2.model === 'gemini-4-argon-high' && u2.modelFrom === 'agy' && u2.durationSeconds === 0.3 && !!side, { model: u2.model, modelFrom: u2.modelFrom, d: u2.durationSeconds, side: side?.usage });
+    const mm = new AcpMessageManager('sid-u'); const ops = []; mm.onOp((o) => ops.push(o)); for (const r of w.records) mm.processLive(r);
+    const meta = ops.filter((o) => o.subtype === 'usage').pop();
+    ok('…and the shared ACP normalizer turns it into the usage meta the bar reads (last call = context + cache, totals = the odometer)', meta && meta.data.input_tokens === u2.last.input && meta.data.cache_read_input_tokens === u2.last.cacheRead && meta.data.totals.total_tokens === u2.total.total, meta?.data);
+    ok('…and the write_file call is an Artifacts row through the descriptor\'s reader', w.all('update', (r) => r.update.sessionUpdate === 'tool_call' && r.update.title === 'write_file').flatMap((r) => g.artifactsOf(r)).map((o) => o.path).join() === path.join(w.dir, 'reports', 'summary.md'));
+  } finally { await w.stop(); }
+  // THE GATE: the conversation's brain dir is a LINK out of agy's store (to a file of huge, wrong counts) ⇒ never read
+  const linkTurn = async (wrapper, tag) => {
+    const cid2 = crypto.randomUUID(), outside = path.join(ROOT, 'usage-outside-' + tag);
+    const bdir = path.join(home, '.gemini', 'antigravity-cli', 'brain', cid2);
+    fs.rmSync(outside, { recursive: true, force: true });
+    fs.mkdirSync(path.join(outside, '.system_generated', 'logs'), { recursive: true });
+    fs.writeFileSync(path.join(outside, '.system_generated', 'logs', 'transcript.jsonl'), JSON.stringify({ step_index: 0, type: 'USER_INPUT' }) + '\n' + JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', input_tokens: 777777, cache_read_tokens: 0, output_tokens: 1 }) + '\n');
+    fs.symlinkSync(outside, bdir);
+    const x = startWrapper({ wrapper, env: { HOME: home, AGY_WEBUI_RESUME_ID: cid2, AGY_WEBUI_MODEL: 'gemini-4-argon-high' } });
+    try { await x.until(() => x.find('session'), 8000, 'session'); x.send({ type: 'chat-input', text: 'hello', msgId: 'g1' }); return await x.until(() => x.find('usage'), 8000, 'usage'); }
+    finally { await x.stop(); try { fs.unlinkSync(bdir); } catch { } }
+  };
+  // RED copy: the realpath check cut (O_NOFOLLOW alone guards only the file's own name) — written into a scratch tree whose
+  // src/ is the repo's, so the copy's require of src/agy-turn-usage.js resolves
+  const src = fs.readFileSync(WRAPPER, 'utf8'), cut = '    if (!rf.startsWith(rs + path.sep)) return null;\n';
+  const red = path.join(ROOT, 'red-gate', 'data', 'bin', 'agy-wrapper.js');
+  fs.mkdirSync(path.dirname(red), { recursive: true });
+  try { fs.symlinkSync(path.join(REPO, 'src'), path.join(ROOT, 'red-gate', 'src')); } catch { }
+  fs.writeFileSync(red, src.replace(cut, ''));
+  const [viaLink, leaked] = await Promise.all([linkTurn(WRAPPER, 'real'), linkTurn(red, 'red')]); // independent: run together (the suite's 10 s tier)
+  ok('THE GATE: a brain dir that LINKS out of agy\'s store is never read — `last` null, the stream\'s total still recorded', viaLink.last === null && viaLink.total.total > 0 && viaLink.total.input !== 777777, viaLink);
+  ok('RED copy (the realpath check cut): the link is followed and its counts become the context (777 777 tokens)', src.split(cut).length === 2 && leaked.last && leaked.last.input === 777777, leaked);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

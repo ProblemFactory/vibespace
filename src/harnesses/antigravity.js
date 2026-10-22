@@ -24,7 +24,7 @@ const AGY_USAGE = require('./antigravity-usage');
 const { AGY_SLASH_COMMANDS } = require('./antigravity-slash');
 const { HARNESS_SETTINGS } = require('../harness-settings');
 const AS = require('../agy-store');
-const ACP_ARTIFACTS = require('./artifacts-of.js').acp;
+const AGY_ARTIFACTS = require('./artifacts-of.js').antigravity; // lane agy-status-bar-facts: reads agy's own write_file/edit_file (abs Path), else the ACP reader
 const AGY_BACKFILL = require('../agy-backfill'); // a sub that ALREADY RAN under an older wrapper: its card from the store
 
 /** The model slugs the headless docs list (`agy models` needs a sign-in — measured), provenance 'docs'; the
@@ -34,6 +34,16 @@ const AGY_MODELS = Object.freeze([
   'gemini-3.7-flash-high', 'gemini-3.7-flash-medium', 'gemini-3.6-flash-high', 'gemini-3.6-flash-medium', 'gemini-3.1-pro-high',
 ].map((id) => Object.freeze({ id, label: id })));
 const models = () => [{ id: '', label: 'Default' }, ...AGY_MODELS];
+/** THE CONTEXT WINDOW PER MODEL (lane agy-status-bar-facts, 2026-10-21) — agy's stream names no window, so the status bar
+ *  reads it from this table (`ui.statusBar.windows`, context 'table'). DOCUMENTED, not measured: Google's Gemini API model
+ *  pages (ai.google.dev/gemini-api/docs/models/<code>), read 2026-10-21 — gemini-4-argon «Context window (unified input
+ *  and output token limit) 1,048,576» (page of 2026-10-14); input token limit 1,048,576 for gemini-3.8-flash (2026-09-02),
+ *  gemini-3.7-flash (2026-10-12; deprecated, routed to 3.8), gemini-3.6-flash (2026-07-30) and gemini-3.1-pro-preview
+ *  (2026-10-09). agy's slugs are `<code>-<thinking level>`, so a row is a prefix (src/status-bar-facts.js windowOf). A slug
+ *  not here (agy's other models, a newer one) ⇒ the bar says «window unknown» with the token count — never a guess. agy
+ *  may checkpoint a long conversation before the model's window; the bar measures against the MODEL's window, as for
+ *  claude and codex. The client META (src/lib/agent-meta.js) carries the same rows (test-harness-contract deep-compares). */
+const AGY_CONTEXT_WINDOWS = Object.freeze([{ prefix: 'gemini-4-argon', tokens: 1048576 }, { prefix: 'gemini-3.8-flash', tokens: 1048576 }, { prefix: 'gemini-3.7-flash', tokens: 1048576 }, { prefix: 'gemini-3.6-flash', tokens: 1048576 }, { prefix: 'gemini-3.1-pro', tokens: 1048576 }].map(Object.freeze));
 
 // ── NAMED ACCOUNTS = A HOME ROOT EACH (commit 2; 主开发's ruling 2026-10-20 11:29Z) ──
 // MEASURED on agy 1.4.3 offline (bwrap --unshare-net, strace, no sign-in): agy keeps EVERYTHING under $HOME and
@@ -153,8 +163,8 @@ function agyHelperTranscripts(record, ctx = {}) {
 /** The artifacts reader: the journal's ACP records (the ACP reader) and, through the helper door, a SUB's transcript
  *  lines — a write call names its path (agy-store artifactRecordsOf; MEASURED: write_file {Path, Content, Overwrite}). */
 function agyArtifactsOf(rec) {
-  if (rec && (rec.type === 'acp' || rec.method)) return ACP_ARTIFACTS(rec);
-  return AS.artifactRecordsOf(rec).flatMap((x) => ACP_ARTIFACTS(x));
+  if (rec && (rec.type === 'acp' || rec.method)) return AGY_ARTIFACTS(rec);
+  return AS.artifactRecordsOf(rec).flatMap((x) => AGY_ARTIFACTS(x));
 }
 
 const creds = {
@@ -239,16 +249,17 @@ module.exports = {
   // account rides /api/usage's homeAccounts map (the Re-check reading), not a billing-row store. effortLevels = agy's own
   // --effort list (the adapter's AGY_EFFORTS, the one place) and NO effortExtras: the menu offers exactly these (lane
   // effort-menu-per-harness — it used to offer claude's ultracode); effortReport null = no turn reports its effort.
-  ui: { billing: { globalLogin: 'Google login', cliLogin: 'Google login', pickLogin: 'Google login (Antigravity CLI)', pickLoginHost: 'Google login (on the host)', planSuffix: '', switchLogin: 'Google login', accountLogin: 'Google', defaultIdField: 'defaultAntigravityAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: null, globalUsageKey: null, estimates: false }, effortReport: null, effortLevels: AGY_EFFORTS, modelLock: true, legacyIds: false, resumeResend: false, subagents: 'cards' },
+  ui: { billing: { globalLogin: 'Google login', cliLogin: 'Google login', pickLogin: 'Google login (Antigravity CLI)', pickLoginHost: 'Google login (on the host)', planSuffix: '', switchLogin: 'Google login', accountLogin: 'Google', defaultIdField: 'defaultAntigravityAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: null, globalUsageKey: null, estimates: false }, effortReport: null, effortLevels: AGY_EFFORTS, modelLock: true, legacyIds: false, resumeResend: false, subagents: 'cards', statusBar: { context: 'table', cache: true, odometer: true, model: true, duration: true, windows: AGY_CONTEXT_WINDOWS } },
   creds,
   billingIdentity: agyBillingIdentity,
   settingsPrefix: 'antigravity',
   settings: HARNESS_SETTINGS.antigravity,
   configFiles: {},
   models,
-  artifactTools: require('./artifacts-of.js').ARTIFACT_TOOLS.acp,
-  // the journal's tool records carry agy's tool_info (no `diff` content — measured: write_file's stream parameters are
-  // {Path} alone), so the parent's own writes produce nothing here; a SUB's writes arrive through the helper door below
+  artifactTools: require('./artifacts-of.js').AGY_ARTIFACT_TOOLS,
+  // the journal's tool records carry agy's tool_info (no `diff` content): agy's OWN reader (lane agy-status-bar-facts —
+  // MEASURED: write_file / edit_file with an absolute `Path`) reads the parent's writes (agyArtifactsOf below), and a
+  // SUB's writes arrive through the helper door; text chunks still go through the ACP reader
   artifactsOf: agyArtifactsOf,
   // lane agy-subagent-cards: ui.subagents 'cards' — each invoke_subagent row is a card (the wrapper reads the store) that
   // opens the sub's own timeline as the virtual session sub-<id>; a finished sub's writes reach the Artifacts chip
@@ -259,6 +270,7 @@ module.exports = {
 module.exports.AGY_MODELS = AGY_MODELS;
 module.exports.AGY_QUOTA = AGY_QUOTA;
 module.exports.AGY_SLASH_COMMANDS = AGY_SLASH_COMMANDS;   // the commands agy answers itself — the wrapper keeps exactly these out of its stream
+module.exports.AGY_CONTEXT_WINDOWS = AGY_CONTEXT_WINDOWS;
 module.exports.TOKEN_REL = TOKEN_REL;
 module.exports.ACCOUNT_MARK = ACCOUNT_MARK;
 module.exports.seedHomeRoot = seedHomeRoot;

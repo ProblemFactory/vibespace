@@ -239,7 +239,9 @@ console.log('② desk 1100 — the composer + bar untouched (DOM signature pinne
   const s = await page(1100, 760, { phone: false, css: 'stripped' }); const stripped = await s.shot(null, 260); s.close();
   const k = await page(1100, 760, { phone: false, css: 'leak' }); const leak = await k.shot(null, 260); const leakSig = await k.ev(SIG_JS); k.close();
   console.log(`    desk sig sha1 ${crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12)} · png ${real.slice(0, 12)}`);
-  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || 'f4869ee6252b';   // re-pinned .334: lane agent-window-no-pop put div.chat-agent-cards first in the input area
+  // re-pinned .334: lane agent-window-no-pop put div.chat-agent-cards first in the input area; re-pinned by lane
+  // agy-status-bar-facts: the (claude) bar ends in ONE span.chat-status-unreported.chat-status-dim — the facts its row lacks
+  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '09097d333468';
   ok('desk: the composer + bar DOM signature is the pinned desk one (no + door, no in-field mic, no ⋯)', crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) === DESK_SIG && !/chat-plus-btn|chat-input-field|chat-status-more/.test(sig), sig);
   ok('desk: the PNG equals the render with the phone block stripped', real === stripped, { real, stripped });
   ok('RED control: the phone block un-gated changes the desk PNG', leak !== real && leakSig === sig, { leak, real });

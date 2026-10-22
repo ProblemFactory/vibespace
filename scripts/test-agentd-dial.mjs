@@ -485,7 +485,7 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
     spawnOne('b', bsrc); // the copy
     await sleep(9000);
     const f = facts();
-    check(`B9: 9 s later the copy has NOT replaced A — still 1 accept, 0 closes, ≤ 4 broadcasts (before: one accept + one close per second, a broadcast each)`, f.accepts === 1 && f.closes === 0 && f.casts <= 4 && f.linked, JSON.stringify({ accepts: f.accepts, closes: f.closes, casts: f.casts }));
+    check(`B9: 9 s later the copy has NOT replaced A — still 1 accept, 0 closes, ≤ 5 broadcasts (before: one accept + one close per second, a broadcast each; lane device-node-version +1: A's first hello states its node once — the record's runtime moved, the card repaints; a re-dial of the same node moves nothing)`, f.accepts === 1 && f.closes === 0 && f.casts <= 5 && f.linked, JSON.stringify({ accepts: f.accepts, closes: f.closes, casts: f.casts }));
     check('B9: the row stays `connected` with NO failure streak (lastAccept.attempt 0) and carries the duplicate note (dup.from)', f.rs.state === 'connected' && f.rs.n === 0 && !!f.rs.dup && f.rs.dup.from === '127.0.0.1', JSON.stringify({ rs: f.rs, lastAccept: f.row.dial.lastAccept }));
     check('B9: hosts.json holds dial.lastDuplicate {at, from, boot, daemon}', !!f.row.dial.lastDuplicate && /^[0-9a-f]{16}$/.test(String(f.row.dial.lastDuplicate.boot)) && !!f.row.dial.lastDuplicate.daemon, JSON.stringify(f.row.dial.lastDuplicate));
     const sb = statusOf('b');

@@ -39,6 +39,19 @@
 // clamped to `now` (a step back costs at most one floor, never the step) and a
 // bought-bucket record from the future (beyond a 60 s skew) is dropped — a
 // purchase that has not happened yet is no knowledge of the current window.
+// AN ACCOUNT THE PROBE CANNOT PROVE IS NEVER SENT (lane auto-cli-oat-unprobeable,
+// 2026-10-22: six oat-only rows booked 11–36 "failed" probes each — the probe
+// door refuses them by name, no spawn — and backed off for ever; their readings
+// were 35–48 h old and nothing said why). src/auto-cli-model.js
+// probeEligibility is the verdict the loop, the probe door and the row share
+// (its addendum: an oat-only row whose token carries user:profile, on a CLI
+// measured with it in the folder and written there, IS probeable — the same
+// rung, the same spawn); an unprobeable account costs NO attempt, NO failure,
+// NO backoff; the loop says it ONCE a day per kind (`said`, `<id>|<kind>`,
+// persisted beside the attempt clock) and clears what the base booked
+// against it (its old attempts and failures, said on that line). A probeable
+// account's failed probe names its reason on the journal line (the probe
+// door's verdict for THIS attempt, already scrubbed by probeWhyText).
 // THE ORDER OF A SPAWN (quota r3): stamp → save → spawn → the backoff and the
 // bought bucket → save → THEN the engine wake (its own try — an engine
 // exception can never skip the loop's bookkeeping) → the journal line.
@@ -51,6 +64,7 @@ const path = require('path');
 const { decideCliRefresh, cliRefreshWhy, projectionReadsAfter, projectionBucketBought, PROJECTION_WINDOW_MS } = require('../account-pool-auto.js');
 const { cliRefreshDrift } = require('../usage-estimator.js');
 const { capsOf } = require('../backend-caps.js'); // PURE: caps.quotaProbe — the harness whose quota rung IS `<cli> -p /usage`
+const { probeEligibility, isUnprobeable, notProbedWords, NOT_PROBED_SAY_MS, probeWhyText } = require('../auto-cli-model.js'); // PURE: may the panel probe PROVE this account (lane auto-cli-oat-unprobeable)
 
 const STATE_FILE = 'auto-cli-state.json';
 const ATTEMPT_KEEP_MS = 24 * 3600e3; // an attempt older than a day paces nothing (the longest backoff is 5 min × 2^6 = 5.3 h)
@@ -60,6 +74,7 @@ const CLOCK_SKEW_MS = 60e3; // a stamp further in the future than this is a cloc
 function clampStamps(st, now) {
   let n = 0;
   for (const [k, v] of st.attempts) if (v > now) { st.attempts.set(k, now); if (v > now + CLOCK_SKEW_MS) n++; }
+  for (const [k, v] of (st.said || [])) if (v > now) st.said.set(k, now); // a "not probed" line stamped in the future would only stay quiet
   for (const [k, reads] of st.projReads) {
     const out = {};
     for (const [lab, r] of Object.entries(reads || {})) {
@@ -72,7 +87,7 @@ function clampStamps(st, now) {
   return n;
 }
 function loadState(dataDir, now, warn = () => {}) {
-  const st = { attempts: new Map(), fails: new Map(), projReads: new Map() };
+  const st = { attempts: new Map(), fails: new Map(), projReads: new Map(), said: new Map() };
   const fp = path.join(dataDir, STATE_FILE);
   let text = null; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { if (e && e.code !== 'ENOENT') warn(`[auto-cli] pacing state unreadable, starting empty: ${e.message}`); return st; }
   let raw = null; try { raw = JSON.parse(text); } catch (e) { warn(`[auto-cli] pacing state unreadable, starting empty: ${e.message}`); return st; }
@@ -81,6 +96,7 @@ function loadState(dataDir, now, warn = () => {}) {
   for (const [k, v] of Object.entries(obj(raw.attempts))) if (Number.isFinite(v) && now - v < ATTEMPT_KEEP_MS) st.attempts.set(k, v);
   for (const [k, v] of Object.entries(obj(raw.fails))) if (Number.isFinite(v) && v > 0) st.fails.set(k, v);
   for (const [k, v] of Object.entries(obj(raw.projReads))) st.projReads.set(k, v);
+  for (const [k, v] of Object.entries(obj(raw.said))) if (Number.isFinite(v) && now - v < NOT_PROBED_SAY_MS) st.said.set(k, v);
   const moved = clampStamps(st, now);
   if (moved) warn(`[auto-cli] pacing state held ${moved} stamp(s) in the future (the clock stepped back) — clamped to now`);
   for (const [k, v] of [...st.projReads]) {
@@ -93,7 +109,7 @@ function saveState(dataDir, st, warn) {
   try {
     const fp = path.join(dataDir, STATE_FILE);
     fs.mkdirSync(dataDir, { recursive: true });
-    const doc = { v: 1, attempts: Object.fromEntries(st.attempts), fails: Object.fromEntries([...st.fails].filter(([, n]) => n > 0)), projReads: Object.fromEntries(st.projReads) };
+    const doc = { v: 1, attempts: Object.fromEntries(st.attempts), fails: Object.fromEntries([...st.fails].filter(([, n]) => n > 0)), projReads: Object.fromEntries(st.projReads), said: Object.fromEntries(st.said || []) };
     fs.writeFileSync(fp + '.tmp', JSON.stringify(doc));
     fs.renameSync(fp + '.tmp', fp);
   } catch (e) { warn(`[auto-cli] pacing state write failed: ${e.message}`); } // loud; the in-memory state still paces this process
@@ -112,7 +128,7 @@ function lastBoughtInstant(reads) {
  *   usageIdentityGroupsCached, usageEstimator, projectionRereadFor,
  *   projectionBillingIndex (optional: ONE who-bills-where pass per tick, handed
  *   to every projectionRereadFor call of that tick — prod-stall-202),
- *   lastMemberReadAt, usage (refreshViaCliPanel), onMemberReadingFresh, dataDir;
+ *   lastMemberReadAt, usage (refreshViaCliPanel + panelVerdictFor — a failure's reason), onMemberReadingFresh, dataDir;
  *   now/rand/log/warn/metric injectable for the suites.
  */
 function createAutoCliLoop(d) {
@@ -120,8 +136,25 @@ function createAutoCliLoop(d) {
   const clock = d.now || Date.now, rand = d.rand || Math.random;
   const log = d.log || ((l) => console.log(l)), warn = d.warn || ((l) => console.warn(l));
   const st = loadState(d.dataDir, now0, warn);
-  const { attempts, fails, projReads } = st;
+  if (!st.said) st.said = new Map(); // a state built by hand (a suite's in-memory copy) carries no say-memory
+  const { attempts, fails, projReads, said } = st;
   const jitter = 1 + rand() * 0.4; // per-boot 45–63min active-burn cap
+  // AN UNPROBEABLE ACCOUNT (lane auto-cli-oat-unprobeable): true ⇒ skipped with no attempt and no failure; what the
+  // base booked against it is cleared (and said); the line — naming the fact that failed — is said once a day per
+  // kind (a row whose reason changes says the new one). Returns whether to skip.
+  function unprobeable(a, now) {
+    const el = probeEligibility(a);
+    if (!isUnprobeable(el)) return false;
+    const booked = fails.get(a.id) || 0, stamped = attempts.has(a.id);
+    if (booked || stamped) { fails.delete(a.id); attempts.delete(a.id); }
+    const sk = `${a.id}|${el}`;
+    if (booked || stamped || !(now - (said.get(sk) || 0) < NOT_PROBED_SAY_MS)) {
+      said.set(sk, now);
+      saveState(d.dataDir, st, warn);
+      log(`[auto-cli] quota refresh ${a.id}: not probed — ${notProbedWords(el, a)}${booked ? ` (${booked} failed attempt${booked === 1 ? '' : 's'} booked before this cleared)` : ''}`);
+    }
+    return true;
+  }
   async function tick() {
     try {
       if (d.serverSetting('accounts.onDemandQuotaRefresh') !== 'auto-cli') return;
@@ -139,7 +172,7 @@ function createAutoCliLoop(d) {
       let billing;
       const billingIndex = () => (billing === undefined ? (billing = d.projectionBillingIndex ? d.projectionBillingIndex() : null) : billing);
       for (const a of (d.accounts.list().accounts || [])) {
-        if (a.type !== 'subscription' || !a.loggedIn || a.pooled || capsOf(a.backend).quotaProbe !== 'cli-usage' || !d.autoCliReady(a.id)) continue; // auto-cli spawns `claude -p /usage` — claude accounts only, and NOT READY IS NOT FAILED (autoCliReady, 2026-09-08)
+        if (a.type !== 'subscription' || a.pooled || capsOf(a.backend).quotaProbe !== 'cli-usage' || unprobeable(a, now) || !d.autoCliReady(a.id)) continue; // auto-cli spawns `claude -p /usage` — claude accounts only, an account the probe cannot PROVE is never sent (oat-only / no login — unprobeable, lane auto-cli-oat-unprobeable), and NOT READY IS NOT FAILED (autoCliReady, 2026-09-08)
         let raw = null, mem = [a.id];
         try { raw = JSON.parse(fs.readFileSync(path.join(d.USAGE_CACHE_DIR, a.id + '.json'), 'utf-8')); } catch { }
         try {
@@ -173,6 +206,11 @@ function createAutoCliLoop(d) {
         attempts.set(key, now);
         saveState(d.dataDir, st, warn); // the attempt reaches disk BEFORE the spawn (quota r3: a restart mid-spawn must see it)
         let ok = false; try { ok = !!(await d.usage.refreshViaCliPanel(key)); } catch { ok = false; }
+        // A FAILED PROBE NAMES ITS REASON (lane auto-cli-oat-unprobeable): the probe door's verdict for THIS attempt (stamped
+        // after this tick's clock) — its class and the CLI's first line, scrubbed there (probeWhyText again here: the ONE
+        // scrub, idempotent)
+        let failWhy = '';
+        if (!ok) { try { const pv = d.usage.panelVerdictFor?.(key); if (pv && pv.at >= now && pv.why) failWhy = `${probeWhyText(pv.why)} [${pv.code || pv.outcome || 'failed'}]`; } catch { } }
         fails.set(key, ok ? 0 : (fails.get(key) || 0) + 1);
         // a successful read BUYS its bucket's window: a projection read, or ANY read taken while the bucket's crossing is inside
         // the projection window (quota r3 — it is the same number) — never asked again before that window resets. A failed read
@@ -182,7 +220,7 @@ function createAutoCliLoop(d) {
         }
         saveState(d.dataDir, st, warn); // the backoff and the bought buckets outlive a restart (quota r2)
         if (ok) { try { d.onMemberReadingFresh(key, 'auto-cli refresh'); } catch (e) { warn(`[auto-cli] reading wake failed for ${key}: ${e.message}`); } } // the THIRD producer of a fresh reading takes the SAME edge (2026-09-08: its 02:31:43 success changed nothing) — AFTER the bookkeeping (quota r3)
-        log(`[auto-cli] quota refresh ${key}: ${ok ? 'ok' : 'failed'} (${why || '?'}; ${it?.drift == null ? (it?.rolled ? 'no drift control — the reading\'s window already reset' : 'no drift control') : `drift ${Math.round(it.drift)}pt`}${it?.pj ? `; ${it.pj.label} crosses its ${it.pj.line}% line in ~${Math.max(1, Math.round(it.pj.inMs / 60e3))} min at ${it.pj.pctPerMin}%/min` : ''})`);
+        log(`[auto-cli] quota refresh ${key}: ${ok ? 'ok' : 'failed'} (${why || '?'}; ${it?.drift == null ? (it?.rolled ? 'no drift control — the reading\'s window already reset' : 'no drift control') : `drift ${Math.round(it.drift)}pt`}${it?.pj ? `; ${it.pj.label} crosses its ${it.pj.line}% line in ~${Math.max(1, Math.round(it.pj.inMs / 60e3))} min at ${it.pj.pctPerMin}%/min` : ''})${failWhy ? ` — ${failWhy}` : ''}`);
         (d.metric || global.__vsMetric)?.('auto-cli-refresh-ms', 0);
       }
     } catch (e) { warn('[auto-cli] tick failed: ' + e.message); }

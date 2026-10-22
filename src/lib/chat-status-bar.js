@@ -4,7 +4,8 @@ import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model
 import { UI_ICONS } from './icons.js';
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
 import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (lane pages-chip-groups): the Pages chip's two groups
-import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, billingRow } from './agent-meta.js';
+import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, billingRow, statusBarRow } from './agent-meta.js';
+import { windowOf, unreportedRows } from '../status-bar-facts.js'; // PURE (lane agy-status-bar-facts): the facts row's window table + what it lacks
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
 // THE PHONE BAR (lane phone-chat-composer): ≤ 768 px the bar is ONE 40-px row — see _fold
@@ -119,6 +120,8 @@ export class ChatStatusBar {
     this._statusModel = '';
     this._statusLastInputTokens = 0;
     this._statusLastCacheRead = 0;
+    this._statusTurnMs = 0;       // lane agy-status-bar-facts: the last turn's own time (a harness whose row declares `duration`)
+    this._statusTurnUsage = null; // …and its spend {input, output, thinking, cacheRead, total, calls} (agy's `usage` record)
     this._statusCost = 0;
     this._statusContextWindow = 0;
     this._statusPermMode = '';
@@ -240,6 +243,8 @@ export class ChatStatusBar {
     if ('lockedModel' in status) this._lockedModel = status.lockedModel || null;
     if (status.sandbox) this._statusSandbox = status.sandbox;
     if (status.totalUsage) this._statusTotalUsage = status.totalUsage;
+    if (status.turnMs) this._statusTurnMs = status.turnMs;
+    if (status.turnUsage) this._statusTurnUsage = status.turnUsage;
     this.render();
   }
 
@@ -251,9 +256,14 @@ export class ChatStatusBar {
     // other feed). Codex cumulative totals still apply below when present.
     const total = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
     if (!total && !u.totals) return;
-    this._statusLastInputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-    this._statusLastCacheRead = u.cache_read_input_tokens || 0;
-    if (u.totals) this._statusTotalUsage = u.totals; // Codex: cumulative session usage
+    // a reading with totals but no last call (agy without its transcript) keeps the context it had — a sum is no context
+    if (total) {
+      this._statusLastInputTokens = total;
+      this._statusLastCacheRead = u.cache_read_input_tokens || 0;
+    }
+    if (u.totals) this._statusTotalUsage = u.totals; // Codex / agy: the conversation's running total (the odometer)
+    if (u.turnMs) this._statusTurnMs = u.turnMs;     // agy: the turn's own time
+    if (u.turn) this._statusTurnUsage = u.turn;      // agy: the turn's own spend
     // Codex live sessions learn the window from token_count events — without
     // this a freshly-created session showed "123k/?" until the next re-attach
     // (2.368.15, owner: "context length为啥无法获取到").
@@ -960,19 +970,26 @@ export class ChatStatusBar {
       chip('review', `chat-status-review ${reviewClass}`, reviewTitle, `\u2713 ${escHtml(t('Review'))}`);
     }
 
+    // THE FACTS ROW (lane agy-status-bar-facts): context / cache / odometer / model / turn time are drawn for what this
+    // harness's ui.statusBar declares — never on an id — and the facts it lacks say «not reported» (one chip, below).
+    // A 'table' row names the window per model (antigravity: agy's stream names none).
+    const facts = statusBarRow(this._backend);
+    const ctxWindow = this._statusContextWindow || windowOf(facts, this._servedModel || this._statusModel);
     // Context: used tokens without a fake percentage when the window is unknown
-    if (!this._statusContextWindow && this._statusLastInputTokens) {
+    if (facts.context && !ctxWindow && this._statusLastInputTokens) {
       const usedK = fmtK(this._statusLastInputTokens);
-      chip('ctx-unknown', 'chat-status-ctx chat-status-dim', t('Context used last turn: {used} tokens. The context window size was not reported by the CLI, so no percentage is shown.', { used: usedK }), `${escHtml(usedK)}/?`);
+      if (facts.context === 'table') chip('ctx-unknown', 'chat-status-ctx chat-status-dim', t("Context used last turn: {used} tokens. The model's context window is unknown (it is not in this harness's window table), so no percentage is shown.", { used: usedK }), `${escHtml(usedK)}/${escHtml(t('window unknown'))}`);
+      else chip('ctx-unknown', 'chat-status-ctx chat-status-dim', t('Context used last turn: {used} tokens. The context window size was not reported by the CLI, so no percentage is shown.', { used: usedK }), `${escHtml(usedK)}/?`);
     }
     // Context % with pie chart
-    if (this._statusContextWindow && this._statusLastInputTokens) {
-      const pct = Math.min(100, Math.round((this._statusLastInputTokens / this._statusContextWindow) * 100));
+    if (facts.context && ctxWindow && this._statusLastInputTokens) {
+      const pct = Math.min(100, Math.round((this._statusLastInputTokens / ctxWindow) * 100));
       const color = pct > 95 ? tierRed : pct > 85 ? tierOrange : pct > 70 ? tierYellow : tierGreen;
       const deg = Math.round(pct * 3.6);
       const usedK = fmtK(this._statusLastInputTokens);
-      const totalK = fmtK(this._statusContextWindow);
+      const totalK = fmtK(ctxWindow);
       let ctxTitle = t('Context: {used} of {total} tokens', { used: usedK, total: totalK });
+      if (!this._statusContextWindow) ctxTitle += ' \u00B7 ' + t("the model's documented window (this harness's window table)");
       if (this._statusTotalUsage) {
         const u = this._statusTotalUsage;
         ctxTitle += ' \u00B7 ' + t('session total: {total} (in {inp}, cached {cached}, out {out}{reasoning})', {
@@ -984,13 +1001,34 @@ export class ChatStatusBar {
     }
 
     // Cache ratio
-    if (this._statusLastCacheRead != null && this._statusLastInputTokens) {
+    if (facts.cache && this._statusLastCacheRead != null && this._statusLastInputTokens) {
       const cacheTotal = this._statusLastInputTokens;
       const cachePct = cacheTotal > 0 ? Math.round((this._statusLastCacheRead / cacheTotal) * 100) : 0;
       const cacheColor = cachePct >= 80 ? tierGreen : cachePct >= 50 ? tierYellow : tierOrange;
       const cacheTip = t('Prompt cache hit rate (last turn): {pct}% of input tokens were read from cache ({read} of {total}). Higher = cheaper + faster.', { pct: cachePct, read: fmtK(this._statusLastCacheRead), total: fmtK(cacheTotal) });
       chip('cache', '', cacheTip, `${UI_ICONS.bolt}${cachePct}%`, { style: `color:${cacheColor}` });
       chip('cache-k', 'chat-status-dim', cacheTip, `[${fmtK(this._statusLastCacheRead)}]`);
+    }
+    // THE ODOMETER (lane agy-status-bar-facts): the conversation's running token total as the harness counts it, with
+    // the thinking share (codex's reasoning tokens, agy's thinking tokens) — the facts row's `odometer`
+    if (facts.odometer && this._statusTotalUsage && this._statusTotalUsage.total_tokens) {
+      const u = this._statusTotalUsage;
+      const think = u.reasoning_output_tokens || 0;
+      const thinkPart = think ? t(', thinking {n} = {pct}% of the total', { n: fmtK(think), pct: Math.round((think / u.total_tokens) * 100) }) : '';
+      chip('odometer', 'chat-status-dim', t('Token total of this conversation, as the harness counts it: {total} (in {inp}, cached {cached}, out {out}{thinking})', { total: fmtK(u.total_tokens), inp: fmtK(u.input_tokens || 0), cached: fmtK(u.cached_input_tokens || 0), out: fmtK(u.output_tokens || 0), thinking: thinkPart }), `\u03A3${escHtml(fmtK(u.total_tokens))}`);
+    }
+    // THE TURN'S TIME (+ its spend in the title) — the facts row's `duration`
+    if (facts.duration && this._statusTurnMs) {
+      const tu = this._statusTurnUsage;
+      let tip = t('The last turn took {time}', { time: this._fmtElapsed(this._statusTurnMs) });
+      if (tu && tu.total != null) tip += ' \u00B7 ' + t('it spent {total} tokens (in {inp}, cached {cached}, out {out}){calls}', { total: fmtK(tu.total || 0), inp: fmtK(tu.input || 0), cached: fmtK(tu.cacheRead || 0), out: fmtK(tu.output || 0), calls: !tu.calls ? '' : tu.calls === 1 ? t(' over one model call') : t(' over {n} model calls', { n: tu.calls }) });
+      chip('turn-time', 'chat-status-dim', tip, `${UI_ICONS.clock}${escHtml(this._fmtElapsed(this._statusTurnMs))}`);
+    }
+    // WHAT THIS HARNESS DOES NOT REPORT — said once, never a blank (the facts row's missing keys)
+    const lacks = unreportedRows(facts);
+    if (lacks.length) {
+      const FACT_WORDS = { context: t('context used'), cache: t('cache hit rate'), odometer: t('token total'), model: t('model it ran on'), duration: t('turn time') };
+      chip('unreported', 'chat-status-unreported chat-status-dim', t('Not reported by this harness: {facts}', { facts: lacks.map((k) => FACT_WORDS[k]).join(', ') }), escHtml(t('not reported')));
     }
 
     // Cost with color tiers

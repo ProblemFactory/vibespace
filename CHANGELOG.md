@@ -2,6 +2,23 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.342 — 2026-10-22
+
+### Added
+- VibeSpace now keeps its own Node runtime: when a Node security release is out, the next update installs the fixed version and restarts on it.
+- No container rebuild or machine reinstall is needed for that; the Diagnostics report says which Node runs and whether it is below the fixed version.
+
+### Fixed
+- An Antigravity chat's status bar now shows the context used of the model's window, the cache hit rate, the token total, the model and the last turn's time.
+- An Antigravity chat's Artifacts chip now lists the files the agent wrote.
+- A status-bar fact that a chat's agent does not report now says "not reported" instead of showing nothing.
+- The device installer now provides Node 22.23.4, the 2026-10-21 security release, and each machine's card shows which Node its agent runs and flags an older one.
+- An account with only a long-lived token has its usage checked through it on a measured claude CLI; otherwise its row says why, and a failed check says why.
+- With Claude Code 2.1.308, chats show no red "New fields on a known record" cards for its records: VibeSpace now knows that version.
+- On Claude Code 2.1.308, a pool can use a member that has only its long-lived token, as it can on 2.1.307.
+- When Claude Code updates to a version VibeSpace does not know yet, Diagnostics and Manage agents say so; Draft the record table saves it for the next release.
+- A session's browser window keeps its side-by-side button when it is a tab grouped with its session or a narrow window, instead of losing it.
+
 ## 2.369.341 — 2026-10-21
 
 ### Added

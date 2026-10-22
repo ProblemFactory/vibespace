@@ -27,6 +27,12 @@
 //      data/layouts.json and on the desktop client (never flattened);
 //   ⑥ a second session attaching the SAME profile grows the badge to two
 //      dots; a second profile grows the strip with per-pane owner dots.
+//   ⑦ THE SIDE-BY-SIDE DOOR (lane live-bind-door): VISIBLE (hit-tested) in every state its act applies to and a REAL
+//      press does the act — born beside in a ~346-px pane (on its TAB + the bar's icon; the press unbinds), a
+//      non-host tab after Unbind (its TAB; the press splits the same group, never the refusal), a 420-px group
+//      (the tab door), a free view at 420 / 330 px (title bar + the bar's icon, not under ⋯), the live view as the
+//      group's HOST (no door while the chat is shown, its tab door when it is), no window of its session (the
+//      refusal names it + Open {name}), CONTROL: Browse yourself has none. RED on the base (2.369.341).
 // SKIPs with evidence without a chrome / dtach. Free ports, scratch dirs only.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -414,6 +420,93 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     ok(strip && st.length === 2 && st.find((x) => /^Work/.test(x.label))?.dots === 2 && st.find((x) => /^Personal/.test(x.label))?.dots === 1, 'the strip has two tabs, each with ITS profile\'s owner dots: Work = 2 (shared), Personal = 1', JSON.stringify(st));
     ok(await ev(A, "return [...wm.windows.values()].filter((w) => w.type === 'browser-live').length === 1;"), 'a second profile grew the strip, not a second window (D24)');
   } else skip('no second session — the shared-profile leg');
+
+  // ── ⑦ THE SIDE-BY-SIDE DOOR in every state (lane live-bind-door) ──
+  console.log('— ⑦ the side-by-side door is VISIBLE in every state its act applies to, and a real press does the act');
+  {
+    // VISIBLE = a box, inside the viewport, and the hit test at its centre lands on it (never under ⋯, never in a hidden title bar)
+    const SEEN = `const seen = (el) => { if (!el || !el.isConnected) return false; const r = el.getBoundingClientRect(); if (!(r.width > 0 && r.height > 0)) return false; const x = r.left + r.width / 2, y = r.top + r.height / 2; if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) return false; const hit = document.elementFromPoint(x, y); return !!hit && (hit === el || el.contains(hit)); };`;
+    const doors = (who = 'live()') => ev(A, SEEN + ` const l = ${who}; const ch = l._tabChain; const host = ch ? wm.windows.get(ch.tabs[0]) : l; const tabDoor = ch ? host.titleBar.querySelector('.tab-item[data-win-id="' + l.id + '"] .tab-door') : null; const bar = l._browserLive.el().querySelector('.browser-live-bind'); return { layout: ch ? ch.layout : 'free', hostIsLive: !!ch && ch.tabs[0] === l.id, barW: l._browserLive.el().querySelector('.browser-live-bar').clientWidth, bar: seen(bar), barFolded: bar.classList.contains('bar-folded'), title: seen(l.titleBar.querySelector('.win-bind')), tab: seen(tabDoor), tabLabel: tabDoor ? tabDoor.getAttribute('aria-label') : null };`);
+    // the fold lands a frame after a resize: read until two reads agree (bounded)
+    const settled = async (who) => { let prev = null; for (let i = 0; i < 40; i++) { await sleep(120); const d = await doors(who); const k = JSON.stringify(d); if (k === prev) return d; prev = k; } return doors(who); };
+    // a REAL press at the door's centre — only once the hit test there lands on the door itself (never a neighbour's ✕)
+    const press = async (sel) => { const r = await ev(A, `const el = ${sel}; if (!el) return null; const b = el.getBoundingClientRect(); const x = b.left + b.width / 2, y = b.top + b.height / 2; const hit = document.elementFromPoint(x, y); return hit && (hit === el || el.contains(hit)) ? { x, y } : null;`); if (!r) return false; for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await A.send('Input.dispatchMouseEvent', { type, x: r.x, y: r.y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: type === 'mouseMoved' ? 0 : 1 }); return true; };
+    const setW = (w) => ev(A, `const c = chat(); const win = c._tabChain ? wm.windows.get(c._tabChain.tabs[0]) : c; win.element.style.width = ${w} + 'px'; if (win._tabChain) requestAnimationFrame(() => wm._resizePanes(win._tabChain)); return 1;`);
+    const TAB_DOOR = (id) => `(() => { const l = wm.windows.get(${JSON.stringify(id)}); const ch = l._tabChain; return ch ? wm.windows.get(ch.tabs[0]).titleBar.querySelector('.tab-item[data-win-id="' + l.id + '"] .tab-door') : null; })()`;
+    const toastText = () => ev(A, `return [...document.querySelectorAll('#global-toasts > *')].map((x) => x.textContent).join(' | ');`);
+    // ONE client from here: ⑤'s phone page saves its own (older) group — a record re-applied mid-leg moves the strip under the press
+    for (const tg of (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).filter((x) => x.type === 'page' && x.id !== target.id)) await A.send('Target.closeTarget', { targetId: tg.id });
+    // the auto-bind's shape again: the chat hosts, the live view its split pane (wherever ①–⑥ left them)
+    await ev(A, `const l = live(), c = chat(); if (l._tabChain !== c._tabChain || !c._tabChain || c._tabChain.layout !== 'split' || c._tabChain.tabs[0] !== c.id) { if (l._tabChain) wm._detachFromChain(l._tabChain, l.id); wm.bindSplit(c, l, { side: 'right' }); } return 1;`);
+    liveId = await ev(A, 'return live().id;');
+    // ⑦a born beside, a 700-px group ⇒ a ~346-px pane — the measured red: the base folded the bar's bind (rank 3) there and its title-bar button lives in the guest's hidden title bar
+    await setW(700);
+    let d = await settled();
+    ok(d.layout === 'split' && !d.hostIsLive && d.tab && d.tabLabel === 'Unbind', `⑦a born beside, a ${d.barW}-px pane: the door is VISIBLE on the live view's TAB in the group's title bar ("${d.tabLabel}")`, JSON.stringify(d));
+    ok(d.bar && !d.barFolded, '⑦a …and the bar keeps its icon — bind folds only after every other act (the badge\'s rank)', JSON.stringify(d));
+    await ev(A, `document.querySelectorAll('#global-toasts > *').forEach((x) => x.remove()); return 1;`);
+    const pa = await press(TAB_DOOR(liveId));
+    const un = pa && await until(() => ev(A, `const l = live(); const ch = l._tabChain; return !!(ch && ch.layout === 'tabs' && ch.tabs.includes(chat().id) && ch.tabs[ch.active] === l.id);`), 5000);
+    ok(un, '⑦a a real press on the tab door UNBINDS: back to tabs in the same group, the live view in front');
+    // ⑦b the live view a NON-HOST tab — the state after «Unbind — the group stays»
+    d = await settled();
+    ok(d.layout === 'tabs' && !d.hostIsLive && d.tab && !d.title && /^Snap beside /.test(String(d.tabLabel)), `⑦b a non-host tab (its own title bar hidden): the door rides its TAB ("${d.tabLabel}")`, JSON.stringify(d));
+    const pb = await press(TAB_DOOR(liveId));
+    const sp = pb && await until(() => ev(A, `const l = live(), c = chat(); const ch = l._tabChain; return !!(ch && ch.layout === 'split' && ch.split.pair[0] === c.id && ch.split.pair[1] === l.id);`), 5000);
+    const said = await toastText();
+    ok(sp && !/no window open here|Open the session/.test(said), '⑦b a real press SPLITS the same group [chat | live] (bindSplit on the chain — never the "open it first" refusal)', said.slice(0, 300));
+    // ⑦c a 420-px group (a ~206-px pane bar): the bar folds bind at last — the tab door stays
+    await setW(420);
+    d = await settled();
+    ok(d.layout === 'split' && d.tab, `⑦c a 420-px group (${d.barW}-px pane bar): the tab door is VISIBLE (the bar ${d.bar ? 'keeps' : 'folded'} its icon)`, JSON.stringify(d));
+    // ⑦d a FREE view at 420 / 330 px: the title-bar button AND the bar's icon (not under ⋯ — at rank 3 it folded at 330)
+    await setW(900);
+    await ev(A, 'const l = live(); wm._detachFromChain(l._tabChain, l.id); return 1;');
+    for (const w of [420, 330]) {
+      await ev(A, `wm.resizeWindowTo(live().id, { w: ${w}, h: 600 }); wm.focusWindow(live().id); return 1;`); // on top: VISIBLE is a hit test
+      d = await settled();
+      ok(d.layout === 'free' && d.title && d.bar && !d.barFolded && !d.tab, `⑦d a free view at ${w} px (${d.barW}-px bar): the title-bar button AND the bar's icon are VISIBLE — not under ⋯`, JSON.stringify(d));
+    }
+    const pd = await press(`live()._browserLive.el().querySelector('.browser-live-bind')`);
+    ok(pd && await until(() => ev(A, `const l = live(); return !!(l._tabChain && l._tabChain.layout === 'split' && l._tabChain.split.pair.includes(chat().id));`), 5000), '⑦d a real press on the bar\'s icon binds it beside its chat');
+    // ⑦e the live view HOSTS the group (the chat merged into it): no door of the live view while the chat is shown (the
+    // group's title bar is the live view's own — its button stays hidden there), its TAB door while it is
+    await ev(A, `const l = live(); if (l._tabChain) wm._detachFromChain(l._tabChain, l.id); return 1;`); await sleep(300);
+    await ev(A, `wm.createTabChain(live(), chat()); const c = chat(); const ch = c._tabChain; wm.switchTab(ch, ch.tabs.indexOf(c.id)); return 1;`);
+    d = await settled();
+    ok(d.hostIsLive && !d.title && !d.tab && !d.bar, '⑦e the live view HOSTS the group, the chat shown: no door of the hidden live view anywhere (the base showed its title-bar button on the group\'s bar)', JSON.stringify(d));
+    await ev(A, `const l = live(); const ch = l._tabChain; wm.switchTab(ch, ch.tabs.indexOf(l.id)); return 1;`);
+    d = await settled();
+    ok(d.hostIsLive && !d.title && d.tab && /^Snap beside /.test(String(d.tabLabel)), '⑦e …the live view shown: exactly its TAB door', JSON.stringify(d));
+    const pe = await press(TAB_DOOR(liveId));
+    ok(pe && await until(() => ev(A, `const l = live(); return !!(l._tabChain && l._tabChain.layout === 'split');`), 5000), '⑦e a press splits the group it hosts');
+    // ⑦f NO WINDOW of the session here: the refusal names the session and its door (Open {name}); then the press binds
+    if (session2) {
+      const v2 = await ev(A, `const w = app.openBrowserLive({ sessionId: ${JSON.stringify(session2)} }); return w ? w.id : null;`);
+      d = await settled(`wm.windows.get(${JSON.stringify(v2)})`);
+      ok(d.layout === 'free' && d.title, '⑦f a live view of a session with no window here: its door is shown', JSON.stringify(d));
+      await ev(A, `document.querySelectorAll('#global-toasts > *').forEach((x) => x.remove()); return 1;`);
+      const pf = await press(`wm.windows.get(${JSON.stringify(v2)}).titleBar.querySelector('.win-bind')`);
+      const name2 = await ev(A, `const r = (app.sidebar._allSessions || []).find((x) => x.webuiId === ${JSON.stringify(session2)}); return r ? (r.webuiName || r.name) : '';`);
+      const t2 = pf && await until(async () => /has no window open here/.test(await toastText()), 4000);
+      const tt = await toastText();
+      ok(t2 && name2 && tt.includes(name2 + ' has no window open here') && tt.includes('Open ' + name2), `⑦f a press NAMES the session and offers its door: "${tt.slice(0, 160)}"`, tt);
+      await ev(A, `const b = [...document.querySelectorAll('#global-toasts button')].find((x) => /^Open /.test(x.textContent)); if (b) b.click(); return !!b;`);
+      ok(await until(() => ev(A, `return [...app.sessions.values()].some((v) => v.sessionId === ${JSON.stringify(session2)});`), 15000), '⑦f the toast\'s Open opens the session\'s window (the sidebar card\'s own attach)');
+      await ev(A, `wm.windows.get(${JSON.stringify(v2)})._browserLive.toggleBind(); return 1;`);
+      ok(await until(() => ev(A, `const w = wm.windows.get(${JSON.stringify(v2)}); return !!(w._tabChain && w._tabChain.layout === 'split');`), 5000), '⑦f …and the door now binds the view beside it');
+    } else skip('no second session — ⑦f');
+    // ⑦g CONTROL — Browse yourself: no session, no door (by design), free or grouped
+    const hw = await ev(A, `const w = app.openBrowserHuman({ profileId: ${JSON.stringify(work.id)} }); return w ? w.id : null;`);
+    if (hw) {
+      await sleep(400);
+      const hd = await ev(A, SEEN + ` const w = wm.windows.get(${JSON.stringify(hw)}); return { human: w._browserLive.isHuman(), title: seen(w.titleBar.querySelector('.win-bind')), bar: seen(w._browserLive.el().querySelector('.browser-live-bind')) };`);
+      await ev(A, `const w = wm.windows.get(${JSON.stringify(hw)}); wm.addToTabChain(chat()._tabChain, w); const ch = w._tabChain; wm.switchTab(ch, ch.tabs.indexOf(w.id)); return 1;`);
+      await sleep(400);
+      const hg = await ev(A, SEEN + ` const w = wm.windows.get(${JSON.stringify(hw)}); const host = wm.windows.get(w._tabChain.tabs[0]); return { tab: !!host.titleBar.querySelector('.tab-item[data-win-id="' + w.id + '"] .tab-door'), shown: [...host.titleBar.querySelectorAll('.tab-door')].filter(seen).length, title: seen(w.titleBar.querySelector('.win-bind')) };`);
+      ok(hd.human && !hd.title && !hd.bar && !hg.tab && hg.shown === 0 && !hg.title, '⑦g CONTROL: a Browse-yourself window shows no side-by-side door — free or grouped', JSON.stringify({ hd, hg }));
+    } else skip('⑦g no Browse-yourself window opened');
+  }
 
   A.close();
   try { chrome.kill('SIGKILL'); } catch { }

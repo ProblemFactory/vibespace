@@ -18,6 +18,10 @@
 //     (/model, /usage opus, /help) are refused by name in the product's sentence and never reach agy; a line that starts
 //     with a path — the composer's attachment shape `<cwd>/brief.zip 这里是…`, /home/u/x.zip, /tmp/a.txt — or ~/x,
 //     ./run.sh, "/ 2", /2026, /notacommand hello is SENT unchanged (the stub agy reads exactly that line) and answered.
+//   ⑥ (lane agy-status-bar-facts; ④ = agy-subagent-cards, ⑤ = agy-slash-guard-paths in .341) two turns on that conversation journal ONE `usage` record each: agy's running total
+//     (= its own transcript's sum over every call of every turn — the measured semantics, the fake reproduces them), the
+//     turn's own calls, the last call (the live context) — the transcript read in the ACCOUNT's root (agy's HOME); the
+//     turn's write_file call is an Artifacts row through the descriptor's reader.
 // RED CONTROL = the base tree (2.369.336 cut 23d3ce4d): the stub never runs, and the wrapper's log says it ran
 // /usr/bin/env.
 //   ④ THE SUBAGENT CARD through the hub (lane agy-subagent-cards): the account's agy store holds the fixture (scripts/
@@ -119,6 +123,7 @@ async function create(agyCommand, data, binDir = path.join(REPO, 'data/bin')) { 
 const pidsOnSocket = (sock) => fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).filter((d) => { try { return fs.readFileSync(`/proc/${d}/cmdline`, 'utf8').split('\0').includes(sock); } catch { return false; } }).map(Number);
 const ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
+process.env.AGY_STUB_TRANSCRIPT = '1'; // the fake agy writes agy's own transcript under its HOME (⑤) — the account's root here
 try {
   console.log('— ① a new conversation on the named account: the stub agy runs as the wrapper\'s executable');
   const extra = ['--stub-extra', 'two words'];
@@ -255,6 +260,32 @@ try {
   const red = await sayAll(b, ['/home/u/x.zip 这里是…'], 1);
   ok(W_SRC.includes(GUARD) && red.refused.length === 1 && red.refused[0].text === SENTENCE('/home') && red.read.length === 0,
     'RED CONTROL (the base guard): the attachment message is refused as the command «/home» — the owner\'s words — and agy never reads it', red);
+
+  console.log('— ⑥ each turn journals ONE `usage` record (lane agy-status-bar-facts): the running total, the turn, the last call');
+  const say = (text, id) => c.session.pty.write(JSON.stringify({ type: 'chat-input', text, msgId: id }) + '\n'); // what user-input.js writes
+  // earlier legs may have run turns on this conversation (and their record may still be landing): a turn's record is the
+  // first `usage` after THAT turn's prompt_end, the turn found by its own message id
+  const usageOf = (msgId) => { const j = c.journal(); const at = j.findIndex((x) => x.type === 'acp' && x.kind === 'user' && x.msgId === msgId); if (at < 0) return null;
+    const end = j.findIndex((x, i) => i > at && x.type === 'acp' && x.kind === 'prompt_end'); return end < 0 ? null : j.find((x, i) => i > end && x.type === 'acp' && x.kind === 'usage') || null; };
+  say('please write the summary', 'm1');
+  const u1 = await until(() => usageOf('m1'), 15000);
+  say('hello again', 'm2');
+  const u2 = await until(() => usageOf('m2'), 15000);
+  const tx = ses ? path.join(acct.dir, '.gemini', 'antigravity-cli', 'brain', ses.sessionId, '.system_generated', 'logs', 'transcript.jsonl') : '';
+  const calls = (() => { try { return fs.readFileSync(tx, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.input_tokens != null); } catch { return []; } })();
+  const sum = (k) => calls.reduce((a, r) => a + r[k], 0);
+  const lastC = calls[calls.length - 1], prevC = calls[calls.length - 2];
+  ok(!!u1 && !!u2 && u1.turn.calls === 2 && u2.turn.calls === 1 && u2.total.input === u1.total.input + u2.turn.input && u2.total.cacheRead === u1.total.cacheRead + u2.turn.cacheRead,
+    'the per-turn vs running fact: turn 1 = 2 calls, turn 2 = 1 call, and each total = the last total + this turn (the record splits a running total, never sums it twice)', { u1: u1 && u1.turn, u2: u2 && u2.turn });
+  ok(!!u2 && calls.length >= 3 && u2.total.input === sum('input_tokens') && u2.total.cacheRead === sum('cache_read_tokens') && u2.total.output === sum('output_tokens'),
+    'agy\'s total IS its own transcript\'s sum over every call of every turn — the transcript in the ACCOUNT\'s root (agy\'s HOME), read through the wrapper\'s gate', { total: u2 && u2.total, calls: calls.length });
+  ok(!!u2 && !!u2.last && !!lastC && !!prevC && u2.last.input === lastC.input_tokens && u2.last.cacheRead === lastC.cache_read_tokens && u2.last.cacheRead === prevC.input_tokens + prevC.cache_read_tokens,
+    'last = the turn\'s LAST call — the live context (its cache read = the previous call\'s whole context)', u2 && u2.last);
+  ok(!!u1 && u1.model === 'gemini-4-argon-high' && u1.durationSeconds === 0.3, 'the record names the model and the turn\'s own time');
+  const H = require(path.join(REPO, 'src/harnesses/index.js'));
+  const rows = c.journal().filter((x) => x.type === 'acp' && x.kind === 'update').flatMap((x) => H.get('antigravity').artifactsOf(x));
+  ok(rows.length === 1 && rows[0].op === 'write' && rows[0].path === path.join(CWD, 'reports', 'summary.md') && fs.existsSync(rows[0].path),
+    'the turn\'s write_file call is ONE Artifacts row (its absolute Path, the file on disk) through the descriptor\'s reader', rows);
 } finally {
   for (const sock of masters) for (const pid of pidsOnSocket(sock)) { try { process.kill(pid, 'SIGTERM'); } catch { } }
   await sleep(400);

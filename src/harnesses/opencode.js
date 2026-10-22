@@ -28,7 +28,7 @@ const harness = acpHarness({
   label: 'OpenCode',
   // no billing row (the agent holds its own login); modelLock true = the status bar's lock item as before
   // (the turn-end re-pin in usage-pool-engine is protocol-neutral)
-  ui: { billing: null, effortReport: null, effortLevels: null, modelLock: true, legacyIds: false, resumeResend: false, subagents: 'none' },
+  ui: { billing: null, effortReport: null, effortLevels: null, modelLock: true, legacyIds: false, resumeResend: false, subagents: 'none', statusBar: { context: 'reported', cache: false, odometer: false, model: true, duration: false, windows: null } },
   command: 'opencode',
   args: ['acp'],
   store: {

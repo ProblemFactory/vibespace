@@ -392,5 +392,48 @@ console.log('ASK ATTACHMENTS (lane foryou-attachments) — vibespace-ask --artif
   ok(/require\('\.\.\/server\/artifact-registry\.js'\)\.presentAsk\(s, item\.artifacts, \{ id: item\.id \}\)/.test(rs) && !/_artifacts/.test(rs), 'THE ONE WRITER: the ask route hands its attachments to the registry (presentAsk → noteOp), never the rows itself');
 }
 
+console.log('ANTIGRAVITY (lane agy-status-bar-facts) — agy\'s own write / edit calls are rows (the owner\'s shapes, names replaced)');
+{
+  // the owner's conversation wrote .md reports and a SKILL.md and showed no chip: agy's journal tool records carry agy's
+  // parameters (no `diff`), so the ACP reader saw nothing. The fixture = the wrapper's journal of the owner's two
+  // conversations reduced to the tool records, paths in their measured SHAPES (absolute; a skill under the cwd's
+  // .agents/skills/<skill>/; a CJK report at the cwd root; agy's brain/<conversation>/ report + scratch scripts).
+  const fsx = (await import('node:fs')).default;
+  const HOME = '/home/u', ACWD = '/home/u/proj';
+  const J = fsx.readFileSync(path.join(REPO, 'scripts/fixtures/agy-status-bar/journal.jsonl'), 'utf8').split('\n').filter(Boolean)
+    .map((l) => JSON.parse(l.replaceAll('/CWD', ACWD).replaceAll('/HOME', HOME)));
+  const ag = harnessOf('antigravity');
+  const viaDoor = J.map((r) => JSON.stringify(ag.artifactsOf(r))).join() === J.map((r) => JSON.stringify(AO.antigravity(r))).join(); // directly, or a door that delegates to it
+  ok((ag.artifactsOf === AO.antigravity || viaDoor) && JSON.stringify(ag.artifactTools) === '["write_to_file","replace_file_content","multi_replace_file_content"]',
+    'the antigravity descriptor reads the journal with agy\'s own reader; the tools it names to the agent are agy\'s model-facing ones (init.tools)');
+  let ar = {};
+  const seen = [];
+  for (const r of J) for (const o of ag.artifactsOf(r)) { seen.push(`${r.update.title}:${o.op}`); ar = AF.fold(ar, { ...o, cwd: ACWD, at: 1 }); }
+  const B = `${HOME}/.gemini/antigravity-cli/brain/c0ffee00-0000-4000-8000-00000000a9c1`;
+  const row = (p) => ar[':' + p];
+  ok(seen.length === 8 && !seen.some((x) => /^(read_file|run_command|invoke_subagent)/.test(x)), 'write_file / edit_file calls → ops; read_file / run_command / invoke_subagent / every tool_call_update → nothing', seen);
+  ok(Object.keys(ar).length === 6 && row(ACWD + '/评审报告.md')?.kind === 'doc' && row(B + '/review_notes.md')?.kind === 'doc' && row(ACWD + '/.agents/skills/doc-review/references/rubric.md')?.kind === 'doc',
+    'six rows: the CJK report at the cwd root, agy\'s BRAIN report (its own artifacts dir — not agent config) and the skill\'s reference are DOCUMENTS (cards)', Object.values(ar).map((r) => [r.name, r.kind]));
+  ok(row(ACWD + '/.agents/skills/doc-review/SKILL.md')?.kind === 'code' && row(ACWD + '/.agents/skills/doc-review/scripts/score.py')?.writes === 1 && row(ACWD + '/.agents/skills/doc-review/scripts/score.py')?.edits === 1 && row(B + '/scratch/parse_inputs.py')?.edits === 1,
+    'SKILL.md is agent config (code, as claude\'s); a written-then-edited script = ONE row (1 write + 1 edit)');
+  const tcRec = (title, rawInput) => ({ type: 'acp', kind: 'update', update: { sessionUpdate: 'tool_call', toolCallId: 'k:1', title, rawInput } });
+  ok(AO.antigravity(tcRec('write_to_file', { TargetFile: 'file:///home/u/proj/%E6%8A%A5%E5%91%8A/a%20b.md' }))[0]?.path === '/home/u/proj/报告/a b.md' && AO.antigravity(tcRec('replace_file_content', { Path: 'notes/x.md' }))[0]?.op === 'edit'
+    && AF.apply({}, { ...AO.antigravity(tcRec('write_file', { Path: 'notes/x.md' }))[0], cwd: ACWD, at: 1, by: 'agent' }).row.path === ACWD + '/notes/x.md',
+    'the model-facing names too; a file: URI is percent-decoded to its path; a relative path is the conversation cwd\'s');
+  ok(AO.antigravity(tcRec('write_file', { Path: 'file://other-host/x.md' })).length === 0 && AO.antigravity(tcRec('write_file', {})).length === 0 && AO.antigravity(tcRec('write_file', null)).length === 0 && AO.antigravity(tcRec('write_file', { Path: '  ' })).length === 0,
+    'no path, a blank path, a file: URI of ANOTHER host ⇒ nothing (never a guessed path)');
+  ok(AO.antigravity({ kind: 'update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'see /p/pgagy0000001' } } }).some((o) => o.page === 'pgagy0000001'), 'a text chunk still goes through the ACP reader (a page link shown here)');
+  ok(AO.antigravity({ kind: 'update', update: { sessionUpdate: 'tool_call', toolCallId: 'd:1', title: 'write_to_file', content: [{ type: 'diff', path: '/home/u/proj/d.md', oldText: null, newText: 'x' }] } })[0]?.path === '/home/u/proj/d.md', 'a call carrying an ACP diff (a record built from agy\'s own transcript) still reads as ACP\'s');
+  // the LIVE door: the wrapper's records through the ONE writer, the call seen twice moves its row once
+  const live = { backend: 'antigravity', cwd: ACWD, host: '', sockName: null };
+  REG.configure({ activeSessions: () => new Map([['sa', live]]), log: { log() {}, warn() {} } });
+  for (const r of J) REG.observe(live, r);
+  REG.observe(live, J.filter((r) => r.update.title === 'write_file').pop()); // the same call fed again (the parse + a replay)
+  ok(Object.keys(live._artifacts || {}).length === 6 && Object.values(live._artifacts).every((r) => r.by === 'agent') && live._artifacts[':' + B + '/review_notes.md'].writes === 1,
+    'the live registry (observe — what acp-events hands it): the same six rows, and a record seen twice moves its row once', Object.keys(live._artifacts || {}));
+  const base = AO.acp; let none = 0; for (const r of J) none += base(r).length;
+  ok(none === 0, 'CONTROL (the base): the ACP reader produces NOTHING from these records — why the owner saw no chip');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

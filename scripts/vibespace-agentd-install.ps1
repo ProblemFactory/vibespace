@@ -31,7 +31,8 @@ $ProgressPreference = 'SilentlyContinue'
 if ($Dial -notmatch '^wss?://') { Write-Host "x the dial address must start with ws:// or wss:// - got: $Dial"; exit 2 }
 
 $hubId = ''; $t0ms = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()   # lane mac-repair-retires-stale: the hub's id + when this run began
-$NodeVersion = if ($env:VIBESPACE_NODE_VERSION) { $env:VIBESPACE_NODE_VERSION } else { 'v22.22.0' }
+# the pin — v22.23.4 = the Node.js security releases of 2026-10-21 (the hub's floor table, src/device-runtime.js, names them)
+$NodeVersion = if ($env:VIBESPACE_NODE_VERSION) { $env:VIBESPACE_NODE_VERSION } else { 'v22.23.4' }
 $NodeMirror  = if ($env:VIBESPACE_NODE_MIRROR)  { $env:VIBESPACE_NODE_MIRROR }  else { 'https://nodejs.org/dist' }
 
 # per-instance root: one machine can pair to SEVERAL VibeSpace instances —
@@ -50,7 +51,7 @@ function Get-NodeMajor([string]$exe) {
 # outside this script, and `Remove-Item $root -Recurse` stays a complete
 # uninstall (daemon AND its runtime). Verified against the official
 # SHASUMS256.txt, smoke-run before it is committed into place.
-function Install-PrivateNode([string]$rootDir) {
+function Install-PrivateNode([string]$rootDir, [string]$replacing = '') {
   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { 'arm64' }
           elseif ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
   if ($arch -eq 'x86') { throw 'no official Node build for 32-bit Windows - install Node 18+ (winget install OpenJS.NodeJS.LTS)' }
@@ -59,7 +60,8 @@ function Install-PrivateNode([string]$rootDir) {
   if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
   New-Item -ItemType Directory -Force -Path $tmp | Out-Null
   try {
-    Write-Host "-> no usable Node 18+ found - installing a private one into $rootDir\node (~30MB)"
+    if ($replacing) { Write-Host "-> installing Node $NodeVersion in place of this install's own $replacing" }
+    else { Write-Host "-> no usable Node 18+ found - installing a private one into $rootDir\node (~30MB)" }
     Write-Host "   $NodeMirror/$NodeVersion/$zip"
     Invoke-WebRequest -UseBasicParsing -Uri "$NodeMirror/$NodeVersion/$zip"           -OutFile (Join-Path $tmp $zip)
     Invoke-WebRequest -UseBasicParsing -Uri "$NodeMirror/$NodeVersion/SHASUMS256.txt" -OutFile (Join-Path $tmp 'SHASUMS256.txt')
@@ -73,9 +75,11 @@ function Install-PrivateNode([string]$rootDir) {
     $src = Join-Path $tmp "node-$NodeVersion-win-$arch"   # node.exe sits at the ROOT of the zip dir
     if (-not (Test-Path (Join-Path $src 'node.exe'))) { throw 'unexpected archive layout' }
     if ((Get-NodeMajor (Join-Path $src 'node.exe')) -lt 18) { throw 'the downloaded node cannot run on this machine' }
-    $dest = Join-Path $rootDir 'node'
-    if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-    Move-Item $src $dest                                  # commit
+    $dest = Join-Path $rootDir 'node'; $prev = Join-Path $rootDir 'node.old'
+    if (Test-Path $prev) { Remove-Item $prev -Recurse -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $dest) { Move-Item $dest $prev }        # a node.exe still running from it refuses the move: nothing changed
+    try { Move-Item $src $dest } catch { if (Test-Path $prev) { Move-Item $prev $dest }; throw }   # commit (or the old one back)
+    if (Test-Path $prev) { Remove-Item $prev -Recurse -Force -ErrorAction SilentlyContinue }
     Write-Host "   Node $(& (Join-Path $dest 'node.exe') -v) installed at $dest"
     return (Join-Path $dest 'node.exe')
   } finally {
@@ -87,8 +91,11 @@ function Install-PrivateNode([string]$rootDir) {
 # baked into a scheduled task breaks at the user's next node upgrade) -> PATH
 # -> the usual install locations -> provision.
 $privNode = Join-Path $root 'node\node.exe'
+# PowerShell names are case-blind: `$nodeExe` below IS the -NodeExe parameter — keep what was passed before it is reused
+# (lane device-node-version: the `= $null` wiped it, so a -NodeExe was never tried)
+$nodeArg = $NodeExe
 $nodeExe = $null
-foreach ($c in @($NodeExe, $privNode, (Get-Command node -ErrorAction SilentlyContinue).Source,
+foreach ($c in @($nodeArg, $privNode, (Get-Command node -ErrorAction SilentlyContinue).Source,
                  "$env:ProgramFiles\nodejs\node.exe", "$env:LOCALAPPDATA\Programs\nodejs\node.exe")) {
   if ($c -and (Get-NodeMajor $c) -ge 18) { $nodeExe = $c; break }
 }
@@ -171,6 +178,18 @@ if (Test-Path $lock) {
       Start-Sleep -Seconds 1
     }
     Remove-Item $lock -Force -ErrorAction SilentlyContinue
+  }
+}
+
+# THE PIN MOVED (lane device-node-version — the bash installer's twin): this install's OWN node older than the pin is
+# replaced HERE, after the take-over (Windows will not move a folder whose node.exe is running); a failed download or a
+# folder still in use keeps the one it had (said, not fatal). A node this machine had is never touched.
+if (-not $nodeArg -and $nodeExe -eq $privNode) {
+  $privV = "$(& $privNode -v 2>$null)".Trim()
+  if ($privV -match '^v\d+\.\d+\.\d+$' -and [version]($privV.TrimStart('v')) -lt [version]($NodeVersion.TrimStart('v'))) {
+    Write-Host "-> this install's own Node $privV is older than the pinned $NodeVersion - replacing it"
+    try { $null = Install-PrivateNode $root $privV }
+    catch { Write-Host "   ! Node $NodeVersion could not be installed - keeping $privV for now (run this command again to retry): $_" }
   }
 }
 

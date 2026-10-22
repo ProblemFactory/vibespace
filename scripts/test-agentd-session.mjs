@@ -6,6 +6,10 @@
 // dtach-attach session SURVIVES the connection dropping (invariant #1). Runs
 // against a THROWAWAY agentd root; uses the repo's node-pty via
 // VIBESPACE_NODE_MODULES. Run: node scripts/test-agentd-session.mjs
+// lane device-node-version (the Node.js security releases of 2026-10-21): the hello-ack says the node the daemon runs on —
+// `nodeVersion` (every daemon since M0), `openssl`, `nodeOwn` (its root's own <root>/node) — and the hub's client hands it
+// to its construction site (onRuntime); a daemon started from <root>/node/bin/node says own = true; an OLDER daemon (a
+// bundle without the three fields) ⇒ every field not said ⇒ the floor table's `unknown` (no chip).
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { execFileSync, execSync } from 'node:child_process';
@@ -37,7 +41,8 @@ const bundle = path.join(tmp, 'agentd.js');
 execFileSync('npx', ['esbuild', 'src/agentd/agentd.js', '--bundle', '--platform=node', `--outfile=${bundle}`], { cwd: repo });
 
 const { DeviceManager } = require('../src/agentd/client.js');
-const dm = new DeviceManager({ dataDir, bundlePath: bundle, version, log: () => {} });
+const runtimes = [];   // lane device-node-version: what each hello-ack said of the daemon's node (onRuntime)
+const dm = new DeviceManager({ dataDir, bundlePath: bundle, version, log: () => {}, onRuntime: (rt) => runtimes.push(rt) });
 dm.installLocal();
 await dm.connect();
 
@@ -284,6 +289,50 @@ if (!fs.existsSync('/proc/self/environ')) {
   check('WIRING: no `env: process.env` / `env: { ...process.env` literal survives in src/agentd/{client,agentd}.js', !RAW.test(clientSrc) && !RAW.test(daemonSrc));
   check('CONTROL: the raw-literal rule matches the retired spellings', RAW.test('spawn(x, [], { env: { ...process.env, A: 1 } })') && RAW.test('{ detached: true, stdio: "ignore", env: process.env,') && !RAW.test('env: daemonEnv(process.env)') && !RAW.test('env: spawnEnv(msg.env)'));
   delete process.env.VIBESPACE_INTEGRATION_FAKE_APIKEY; delete process.env.VIBESPACE_INTEGRATIONS; delete process.env.VS_CANARY_KEEP;
+}
+
+console.log('— lane device-node-version: the hello says the node the daemon runs on —');
+{
+  const { spawn } = await import('node:child_process');
+  const DR = require('../src/device-runtime.js');
+  const waitFor = async (pred, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(100); } return pred(); };
+  const rt0 = runtimes[0];
+  check('the hello-ack\'s runtime reached the construction site: node = the daemon\'s process.version, openssl = its process.versions.openssl, its platform',
+    !!rt0 && rt0.node === process.version && rt0.openssl === process.versions.openssl && rt0.platform === (['darwin', 'linux', 'win32'].includes(process.platform) ? process.platform : null), JSON.stringify(rt0));
+  check('…own = false: this daemon runs this box\'s node, not its root\'s <root>/node (the installer never replaces such a node)', !!rt0 && rt0.own === false, JSON.stringify(rt0));
+  // a daemon on the installer's OWN node: this node copied to <root>/node/bin/node, the daemon started from it
+  const boot = async (tag, bundlePath, nodeBin) => {
+    const root = path.join(tmp, tag);
+    process.env.VIBESPACE_AGENTD_ROOT = root;
+    const seen = [];
+    const dmX = new DeviceManager({ dataDir, bundlePath, version, nodeModules: path.join(repo, 'node_modules'), log: () => {}, onRuntime: (rt) => seen.push(rt) });
+    dmX._ensureLocalToken();
+    const child = spawn(nodeBin, [bundlePath], { detached: true, stdio: 'ignore', env: { ...process.env, VIBESPACE_AGENTD_ROOT: root } });
+    child.unref();
+    const up = await waitFor(() => fs.existsSync(path.join(root, 'state', 'agentd.sock')) && fs.existsSync(path.join(root, 'state', 'agentd.pid')), 8000);
+    check(`${tag}: the daemon came up`, up);
+    await dmX.connect();
+    try { extraDaemons.push(Number(fs.readFileSync(path.join(root, 'state', 'agentd.pid'), 'utf8'))); } catch {}
+    await waitFor(() => seen.length > 0, 3000);
+    dmX.stop();
+    return seen[0] || null;
+  };
+  const ownRoot = path.join(tmp, 'own-node');
+  fs.mkdirSync(path.join(ownRoot, 'node', 'bin'), { recursive: true });
+  const ownNode = path.join(ownRoot, 'node', 'bin', 'node');
+  fs.copyFileSync(fs.realpathSync(process.execPath), ownNode); fs.chmodSync(ownNode, 0o755);
+  const rtOwn = await boot('own-node', bundle, ownNode);
+  check('a daemon started from its root\'s <root>/node/bin/node says own = true (the installer\'s own node — re-running it replaces that one)', !!rtOwn && rtOwn.own === true && rtOwn.node === process.version, JSON.stringify(rtOwn));
+  // AN OLDER DAEMON: the same bundle without the three fields (a daemon from before them — or before nodeVersion)
+  const bsrc = fs.readFileSync(bundle, 'utf8');
+  const FIELDS = /nodeVersion: process\.version,\s*openssl: process\.versions\.openssl,\s*nodeOwn: nodeOwn\(\),/g;
+  check('the built bundle carries the hello-ack\'s three runtime fields exactly once (patch anchor)', (bsrc.match(FIELDS) || []).length === 1, String((bsrc.match(FIELDS) || []).length));
+  const oldBundle = path.join(tmp, 'agentd-no-runtime.js');
+  fs.writeFileSync(oldBundle, bsrc.replace(FIELDS, ''));
+  const rtOld = await boot('old-daemon', oldBundle, process.execPath);
+  const vOld = DR.runtimeVerdict(rtOld || {});
+  check('an OLDER daemon (no runtime fields): the client still calls the door, every field not said ⇒ the floor table\'s `unknown` — no chip',
+    !!rtOld && rtOld.node === null && rtOld.openssl === null && rtOld.own === null && vOld.state === 'unknown' && vOld.fix === null, JSON.stringify({ rtOld, vOld }));
 }
 
 // restore version stamp + cleanup

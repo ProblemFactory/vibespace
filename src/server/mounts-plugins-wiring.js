@@ -497,20 +497,18 @@ app.get(['/vibespace-device-install.sh', '/agentd-install.sh'], (req, res) => {
 // strict version/filename allowlist, cached on disk. Both the tarball and the
 // SHASUMS come through here, so for that device the trust anchor becomes this
 // instance — which it already trusts to serve the daemon bundle it runs.
+// THE ONE DOWNLOADER of a node release file (lane runtime-floor): src/node-runtime.js fetchFile — the same list of names,
+// bounded, a tmp + rename; the instance's own provisioner (scripts/runtime-check.mjs) downloads through it too.
 app.get('/vibespace-node/:version/:file', async (req, res) => {
+  const NR = require('../node-runtime');
   const v = String(req.params.version || ''), f = String(req.params.file || '');
-  if (!/^v\d+\.\d+\.\d+$/.test(v)) return res.status(400).end();
-  if (!/^(SHASUMS256\.txt|node-v\d+\.\d+\.\d+-(linux|darwin)-(x64|arm64|armv7l|ppc64le|s390x)(-musl)?\.tar\.gz|node-v\d+\.\d+\.\d+-win-(x64|arm64)\.zip)$/.test(f))
-    return res.status(400).end();
+  if (!NR.VERSION_RE.test(v) || !NR.FILE_RE.test(f)) return res.status(400).end();
   const dir = path.join(rootDir, 'data', 'node-cache', v), dest = path.join(dir, f);
   try {
     if (!fs.existsSync(dest)) {
       fs.mkdirSync(dir, { recursive: true });
-      const r = await fetch(`https://nodejs.org/dist/${v}/${f}`);
-      if (!r.ok) return res.status(502).json({ error: 'upstream ' + r.status });
-      const tmp = `${dest}.tmp`;
-      await require('stream/promises').pipeline(require('stream').Readable.fromWeb(r.body), fs.createWriteStream(tmp));
-      fs.renameSync(tmp, dest);
+      try { await NR.fetchFile({ mirror: NR.DEFAULT_MIRROR, version: v, file: f, dest, maxBytes: f === 'SHASUMS256.txt' ? NR.MAX_SUMS : NR.MAX_ARCHIVE }); }
+      catch (e) { return res.status(502).json({ error: e.code === 'upstream' ? String(e.message).replace(/^.*: /, 'upstream ') : e.message }); }
     }
     res.type(f.endsWith('.txt') ? 'text/plain' : 'application/octet-stream');
     fs.createReadStream(dest).pipe(res);

@@ -334,6 +334,40 @@ const BOOT_ID = require('crypto').randomBytes(8).toString('hex');
 // honored forever — in-field daemons were installed with it (launchd plists /
 // systemd units on user devices reference it)
 const ROOT = process.env.VIBESPACE_DEVICE_ROOT || process.env.VIBESPACE_AGENTD_ROOT || path.join(os.homedir(), '.vibespace', 'agentd');
+// lane device-node-version: this agent runs the node its installer PROVISIONED (<root>/node — bin/node, or node.exe on
+// Windows) — the installer replaces that one when its pin moved; a node the machine had (false) it never touches. The
+// self-upgrade (landBundle) lands a bundle only. Lane runtime-floor: <root>/runtime (the release this agent provisioned
+// for itself below the floor) is its own node too.
+function nodeOwn() {
+  let exe; try { exe = fs.realpathSync(process.execPath); } catch { return false; }
+  return ['node', 'runtime'].some((d) => { try { return exe.startsWith(fs.realpathSync(path.join(ROOT, d)) + path.sep); } catch { return false; } });
+}
+// lane runtime-floor: an agent on its OWN node below THE floor (src/runtime-floor.js) provisions the fixed release for
+// itself (src/node-runtime.js → <root>/runtime/current, sha256-checked against the mirror's SHASUMS256.txt; nodejs.org,
+// then this agent's hub's /vibespace-node) and runs on it: this process replaces itself at its start (same pid —
+// launchd / systemd keep supervising it; a self-upgrade's successor switches the same way). POSIX only: Windows has no
+// execve — its road stays the installer's re-provision (the Machines card's 「重新安装…」). A node the machine had is
+// never touched — only said (the Machines card's chip).
+const RUNTIME = require('../node-runtime');
+if (nodeOwn()) { RUNTIME.reexecOnOwnRuntime({ root: ROOT, log: () => { } }); delete process.env.VIBESPACE_RUNTIME_REEXEC; }
+function provisionOwnRuntime() {
+  // a scratch root under the temp dir (a suite's daemon) never downloads — the same rule as the hub's boot pull
+  if (!nodeOwn() || process.platform === 'win32' || process.env.VIBESPACE_RUNTIME_SWITCH === '0' || [os.tmpdir(), '/tmp'].some((t) => (path.resolve(ROOT) + path.sep).startsWith(path.resolve(t) + path.sep))) return;
+  const RFL = require('../runtime-floor');
+  const v = RFL.verdict(process.version), have = RUNTIME.currentOf(ROOT);
+  if (v.state !== 'below-floor' || (have && RFL.compare(have.version, v.wanted) >= 0)) return;
+  const di = process.argv.indexOf('--dial');
+  let hub = null; try { hub = di >= 0 ? new URL(process.argv[di + 1]).origin.replace(/^ws/, 'http') : null; } catch { }
+  const mirrors = [process.env.VIBESPACE_NODE_MIRROR || RUNTIME.DEFAULT_MIRROR, ...(hub ? [hub + '/vibespace-node'] : [])];
+  (async () => {
+    for (const mirror of mirrors) {
+      const r = await RUNTIME.provision(v.wanted, { root: ROOT, mirror, log });
+      if (r.ok) { log(`[runtime] node ${process.version} is below the floor ${v.floor}: ${v.wanted} provisioned at ${path.join(ROOT, 'runtime', 'current')} — the next start runs on it`); return; }
+      log(`[runtime] ${v.wanted} not provisioned from ${mirror} (${r.code}): ${r.error}`);
+    }
+  })().catch(() => { });
+}
+{ const t = setTimeout(provisionOwnRuntime, 90 * 1000); if (t.unref) t.unref(); }
 
 // SPAWN ENV (real owner report: Mac dial chat blank — the daemon runs on
 // node fine but its subprocess `sh -c` couldn't find node/claude). launchd
@@ -1823,6 +1857,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         Promise.all([posixShells(), amIElevated()]).then(([shells, elevated]) => mux.control({ // verify-r2: measured now (≤ POSIX_PROBE_MS, async) — a shell installed since this agent started counts
           op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: VERSION,
           platform: process.platform, arch: process.arch, nodeVersion: process.version,
+          openssl: process.versions.openssl, nodeOwn: nodeOwn(), // lane device-node-version: the runtime's TLS library + whether this node is the installer's own (<root>/node — re-running the installer replaces it; a system node it never touches)
           posixShells: shells, // lane windows-device-fs verify-r1 F1: the shells THIS machine starts (the hub's door keys on it)
           policy: DP.reportOf(POLICY), // lane device-allow-flags: THIS machine's allow list (read-only for the hub: it shows it, asks it first)
           elevated, // lane win-input-elevated: THIS daemon's own token runs elevated (admin), read live each hello; absent on an old daemon ⇒ the hub treats it as not-elevated and never asks it to type into an admin window

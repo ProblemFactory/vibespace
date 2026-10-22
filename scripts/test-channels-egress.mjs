@@ -50,7 +50,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 
 // ── THE RULE, as a function over injected inputs (the controls drive it over
 //    synthetic files; the census drives it over the tree) ──────────────────
-const PRIMITIVE = /https?\.request\s*\(|https?\.get\s*\(|\bfetch\s*\(|\baxios\b|\bgot\s*\(|\bundici\b/;
+const PRIMITIVE = /https?\.request\s*\(|https?\.get\s*\(|\b(?:safeFetch|fetch)\s*\(|\baxios\b|\bgot\s*\(|\bundici\b/; // safeFetch (lane runtime-floor's belt: src/safe-fetch.js) IS a request
 const HOST = /https?:\/\/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)(?=[/:'"`?#\s)\]]|$)/gi;
 /** Hosts that are never egress: loopback is not a vendor, and the RFC 2606
  *  reserved names + schema hosts are documentation, not targets. */
@@ -128,7 +128,7 @@ const ALLOW = {
   'src/server/plugin-install.js|api.github.com': 'plugin install from a GitHub release (the release lookup) — a human\'s Install action, consent per package',
   'src/server/ops-routes.js|raw.githubusercontent.com': 'the update check (the public repo\'s package.json + CHANGELOG) behind ⚙ → Update VibeSpace — a human\'s click',
   'src/channels/fake.js|img.example.invalid': 'lane channel-rich: a REMOTE picture inside the fake world\'s mail HTML (a string the fake serves as a mail body, never a request this file makes) — the heavy leg proves the browser does not ask for it before Show pictures; `.invalid` never resolves',
-  'src/server/mounts-plugins-wiring.js|nodejs.org': 'the node runtime tarball relayed to a paired device that cannot reach nodejs.org itself (corporate egress) — an operator\'s pairing action',
+  'src/node-runtime.js|nodejs.org': 'THE ONE downloader of a node release (lane runtime-floor): the instance\'s own runtime below the floor (scripts/update.sh / the boot pull — scripts/runtime-check.mjs) + the hub\'s device mirror route for a paired device that cannot reach nodejs.org itself — every archive sha256-checked against the mirror\'s SHASUMS256.txt before it is unpacked',
   'src/server/dropline-client.js|api.dropline.fish.audio': 'Dropline voice input (q-029 P0): THE vendor module — /v1/dictate only when the person clicks the microphone and stops (the voice-input plugin ON + the dropline key), /v1/me only on the card\'s Test; audio + key never logged',
   'src/server/dropline-client.js|api.fish.audio': 'Dropline voice input P1 (lane voice-p1-oauth-teach): the OAuth tier — /oauth/register ONCE per deployment on the owner\'s first Connect press, /oauth/token for the code the person\'s own consent landed and for the single-flight refresh of that grant; nothing else',
   'src/server/dropline-client.js|fish.audio': 'Dropline voice input P1: the consent page /oauth/authorize — the hub only BUILDS the address; the owner\'s browser opens it in a new tab after their Connect press (no hub request)',

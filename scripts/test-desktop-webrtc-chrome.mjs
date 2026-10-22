@@ -90,7 +90,9 @@
 //      the picture's MediaStream (one <video>); OFF by default — nothing runs on the machine, the <video> muted; the press = the
 //      <video> unmuted in that click + ONE loopback on the machine ⇒ Chrome receives the Opus and hears the tone (its audio level);
 //      Chrome got RTCP sender reports on BOTH tracks (its lip-sync); THE RATE: the agent tells the picture the estimate less the
-//      sound's 80 kbps; the second press ⇒ muted, the machine's capture ended; ON is remembered per machine (a new window starts
+//      sound's 80 kbps; the second press ⇒ muted, the machine's capture ended and its sent count stands still, Chrome's own count
+//      (read fresh: the strip's is once a second) goes quiet once the packets on the wire land, then nothing — RED CONTROL: an OFF
+//      that never reaches the machine never goes quiet (lane gate-flakes-341); ON is remembered per machine (a new window starts
 //      it); a RESTORED window (a layout replay) says 「点一下开声音」 and captures nothing until a press — RED CONTROL: a toggle
 //      that ignores `restored` starts it by itself; the microphone and the sound on together ⇒ ONE sendrecv m-line, both roads
 //      live; a phone: the same strip                                     sound-off.png, sound-on.png, sound-tap.png, phone-sound.png
@@ -1382,6 +1384,21 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
       page: sv && sv.stats() ? sv.stats().audio : null, agent: sv && sv.agent() ? { audio: sv.agent().audio, bwe: sv.agent().bweKbps } : null, rob, dirs, mem: localStorage.getItem('vibespace.streamSound') }; })()`);
   const pressAt = async (p, sel) => { await p.ev(`document.querySelector('${sel}').scrollIntoView({ inline: 'center', block: 'nearest' }); true`); const at = await p.ev(`(() => { const b = document.querySelector('${sel}').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`); await p.click(at[0], at[1]); };
   const runs = () => MIC.loopbacks().length;
+  // Chrome's OWN count of the machine's sound, read FRESH (lane gate-flakes-341): the strip's numbers (`stats().audio`) are its
+  // once-a-second getStats read, so a count taken from them at the stop is up to a second old — the packets of that second came
+  // BEFORE the stop (measured: the machine stopped 4–8 ms after the click and Chrome got 0 packets after it, the strip's count said
+  // 19). `quietMs` is Chrome's too: since its last audio packet (the report's timestamp − lastPacketReceivedTimestamp).
+  const audioRx = (q) => q.ev(`(async () => { const pc = (window.__pcs || []).slice(-1)[0]; if (!pc) return null; const r = await pc.getStats(); let a = null; r.forEach((x) => { if (x.type === 'inbound-rtp' && x.kind === 'audio') a = x; }); return a ? { n: a.packetsReceived || 0, quietMs: a.lastPacketReceivedTimestamp ? Math.round(a.timestamp - a.lastPacketReceivedTimestamp) : null } : null; })()`);
+  // THE TAIL: packets already on the wire at the stop (werift → the hub's relay → Chrome; 3–4 under load, 0 alone) still land —
+  // wait until Chrome heard none for 300 ms (bounded: 5 s). A sender that keeps sending never goes quiet.
+  const tailOf = async (q, maxMs = 5000) => { const t0 = Date.now(); let r = await audioRx(q); while (!(r && r.quietMs >= 300) && Date.now() - t0 < maxMs) { await sleep(50); r = await audioRx(q); } return { quiet: !!(r && r.quietMs >= 300), n: r ? r.n : null, ms: Date.now() - t0 }; };
+  // the machine's own count of what it SENT (`audio.sent` of its stats push, once a second): `later` waits for a push newer than the last read
+  const machineSent = async (q, { off = false, later = false } = {}) => {
+    const AG = `[...window.__app.wm.windows.values()].find((x) => x._streamView)._streamView.agent()`;
+    if (off && !(await q.until(`(() => { const a = ${AG}; return !!a && !!a.audio && a.audio.state === 'off'; })()`, 5000))) return null;
+    if (later && !(await q.until(`${AG} !== window.__agentRead`, 4000))) return null;
+    return q.ev(`(() => { const a = ${AG}; window.__agentRead = a; return a && a.audio ? { sent: a.audio.sent, state: a.audio.state } : null; })()`);
+  };
   const p = await page(1280, 800, DESK, { pcs: true });
   await p.ev(`localStorage.removeItem('vibespace.streamSound'); true`);
   await p.ev(`window.__open(${JSON.stringify(M)})`);
@@ -1409,8 +1426,22 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
   await pressAt(p, SND_BTN);
   const offed = await p.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); return b.getAttribute('aria-pressed') === 'false' && v.muted === true; })()`, 6000);
   const ended = await nodeUntil(() => MIC.loopbackEnded(r0 + 1), 5000);
-  const pk1 = (await soundState(p)).page.packets; await sleep(1500); const pk2 = (await soundState(p)).page.packets;
-  ok(offed && ended && pk2 - pk1 <= 5 && (await soundState(p)).mem === '{}', `⑳ the second press ⇒ muted, the machine's capture ENDED (its helper's stdin closed), no more packets (${pk2 - pk1}); remembered OFF`);
+  const tail = await tailOf(p), atOff = await machineSent(p, { off: true });
+  await sleep(1500);
+  const pk2 = await audioRx(p), after = await machineSent(p, { later: true });
+  ok(offed && ended && tail.quiet && pk2 && pk2.n === tail.n && atOff && after && after.sent === atOff.sent && pk2.n <= after.sent && (await soundState(p)).mem === '{}', `⑳ the second press ⇒ muted, the machine's capture ENDED (its helper's stdin closed) and it sent NOTHING after (its count stays ${after && after.sent}); the packets already on the wire landed (quiet in ${tail.ms} ms), then NONE for 1.5 s (${pk2 && tail.n != null ? pk2.n - tail.n : '?'}); remembered OFF`, { tail, pk2, atOff, after });
+  // RED CONTROL: an OFF that never reaches the machine (the page mutes, its `stream-audio off` is not sent) — the machine keeps
+  // sending: Chrome's packets never go quiet and the machine's count keeps rising — the row above catches it
+  await pressAt(p, SND_BTN);
+  const nBack = ((await audioRx(p)) || {}).n || 0;
+  const back = await p.until(`document.querySelector('${SND_BTN}').getAttribute('aria-pressed') === 'true' && document.querySelector('${WIN} .stream-video').muted === false`, 8000) && await nodeUntil(() => runs() === r0 + 2, 5000) && await nodeUntil(async () => (((await audioRx(p)) || {}).n || 0) > nBack + 10, 10000);
+  await p.ev(`(() => { const v = [...window.__app.wm.windows.values()].find((x) => x._streamView)._streamView; v.__setSound = v.setSound; v.setSound = (on) => (on === true ? v.__setSound(true) : Promise.resolve({ ok: true, on: false })); return true; })()`);
+  await pressAt(p, SND_BTN);
+  await p.until(`document.querySelector('${SND_BTN}').getAttribute('aria-pressed') === 'false'`, 6000);
+  const c0 = await machineSent(p), ct = await tailOf(p), c1 = await machineSent(p, { later: true });
+  ok(back && !ct.quiet && c0 && c1 && c1.sent > c0.sent && !MIC.loopbackEnded(r0 + 2), `⑳ RED CONTROL: an OFF that never reaches the machine — Chrome's packets never go quiet (${ct.ms} ms) and the machine's count keeps rising (${c0 && c0.sent} → ${c1 && c1.sent}): the row above catches a sender that keeps sending`, { back, ct, c0, c1 });
+  await p.ev(`(() => { const v = [...window.__app.wm.windows.values()].find((x) => x._streamView)._streamView; v.setSound = v.__setSound; delete v.__setSound; return v.setSound(false).then(() => true); })()`); // the shipped stop: the control's capture ends
+  await nodeUntil(() => MIC.loopbackEnded(r0 + 2), 5000);
   // ON is remembered per machine: a NEW window of the machine (this page had the person's clicks) starts with its sound ON
   await pressAt(p, SND_BTN); await p.until(`document.querySelector('${SND_BTN}').getAttribute('aria-pressed') === 'true'`, 8000);
   await p.ev('window.__closeAll()'); await sleep(500);
@@ -1420,16 +1451,23 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
   const again = await p.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); return !!b && b.getAttribute('aria-pressed') === 'true' && v && v.muted === false; })()`, 10000);
   const flowing = await p.until(`(() => { const w = [...window.__app.wm.windows.values()].find((x) => x._streamView); const a = w && w._streamView.stats() && w._streamView.stats().audio; return !!a && a.packets > 20; })()`, 10000);
   ok(again && await nodeUntil(() => runs() === r1 + 1, 5000) && flowing, '⑳ remembered per machine: a NEW window of the same machine starts with its sound ON (no press — the page has the person\'s gesture) and the sound arrives', { again, flowing, st: await soundState(p) });
-  // MICROPHONE + SOUND: ONE m-line, sendrecv — both roads live
+  // MICROPHONE + SOUND: ONE m-line, sendrecv — both roads live. Each step waits for ITS effect (bounded 15 s) and a red names the
+  // step (lane gate-flakes-341: the .341 chain red here once — «voice: false», no render in 10 s, the step unknown — while every
+  // measured run, alone or on two starved CPUs, had the render 50–170 ms after the press)
   const grant = (q) => q.cdp('Browser.grantPermissions', { origin: `http://127.0.0.1:${PORT}`, permissions: ['audioCapture'] });
   const nR = MIC.renders().length;
-  await grant(p);
+  const granted = await grant(p); // its own answer is read: a grant Chrome did not take is a press it refuses (the toggle's «refused»)
   await pressAt(p, `${WIN} .desktop-strip-mic`);
-  const both = await p.until(`document.querySelector('${WIN} .desktop-strip-mic').getAttribute('aria-pressed') === 'true'`, 8000);
-  const voice = await nodeUntil(() => MIC.renders().length === nR + 1, 10000);
-  const pkA = ((await soundState(p)).page || {}).packets || 0; await sleep(1200);
-  const s2 = await soundState(p);
-  ok(both && voice && s2.dirs && s2.dirs.offer === 'sendrecv' && s2.dirs.answer === 'sendrecv' && s2.page && s2.page.packets > pkA + 30 && s2.pressed === 'true', '⑳ 「麦克风」 + 「声音」 together: ONE audio m-line, sendrecv both ways — the viewer\'s voice reaches the machine (a render started) while the machine\'s sound keeps arriving', { dirs: s2.dirs, voice, packets: [pkA, s2.page.packets] });
+  const MIC_OF = `(() => { const w = [...window.__app.wm.windows.values()].find((x) => x._streamView); const a = w && w._streamView.agent(); return a && a.mic ? a.mic : null; })()`;
+  const both = await p.until(`document.querySelector('${WIN} .desktop-strip-mic').getAttribute('aria-pressed') === 'true'`, 15000); // the browser gave the microphone: the toggle is live
+  const sent = both && await p.until(`(async () => { const pc = (window.__pcs || []).slice(-1)[0]; if (!pc) return false; const r = await pc.getStats(); let n = 0; r.forEach((x) => { if (x.type === 'outbound-rtp' && x.kind === 'audio') n = x.packetsSent || 0; }); return n > 0; })()`, 15000); // the voice leaves Chrome
+  const got = sent && await p.until(`(() => { const m = ${MIC_OF}; return !!m && m.packets > 0; })()`, 15000); // the machine receives it (its stats push)
+  const voice = got && await nodeUntil(() => MIC.renders().length === nR + 1, 15000); // and plays it: a render started
+  const pkA = ((await audioRx(p)) || {}).n || 0;
+  const keeps = await nodeUntil(async () => (((await audioRx(p)) || {}).n || 0) > pkA + 30, 10000); // the machine's sound keeps arriving
+  const s2 = await soundState(p), pkB = ((await audioRx(p)) || {}).n || 0;
+  const step = granted && granted.error ? `the permission grant failed (${JSON.stringify(granted.error).slice(0, 120)})` : !both ? 'the toggle never went live (the browser\'s microphone)' : !sent ? 'Chrome sent no voice' : !got ? 'the machine received no voice' : !voice ? 'no render started' : !keeps ? 'the sound stopped arriving' : null;
+  ok(granted && !granted.error && both && sent && got && voice && keeps && s2.dirs && s2.dirs.offer === 'sendrecv' && s2.dirs.answer === 'sendrecv' && s2.pressed === 'true', `⑳ 「麦克风」 + 「声音」 together: ONE audio m-line, sendrecv both ways — the viewer's voice reaches the machine (a render started) while the machine's sound keeps arriving${step ? ` — STUCK AT: ${step}` : ''}`, { dirs: s2.dirs, both, sent, got, voice, keeps, packets: [pkA, pkB], mic: await p.ev(MIC_OF), btn: await p.ev(`(() => { const b = document.querySelector('${WIN} .desktop-strip-mic'); return b ? { cls: b.className, pressed: b.getAttribute('aria-pressed'), title: b.title } : null; })()`) });
   await pressAt(p, `${WIN} .desktop-strip-mic`);
   await p.cdp('Browser.resetPermissions', {});
   await p.close();
@@ -1441,7 +1479,7 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
     await q.ev(`window.__open(${JSON.stringify(M)}, { syncId: 'w-restored' })`);
     const up = await playing(q);
     await q.until(`(() => { const b = document.querySelector('${SND_BTN}'); return !!b && !b.hidden; })()`, 8000); await sleep(1500);
-    return { q, up, st: await soundState(q), started: runs() - rr };
+    return { q, up, st: await soundState(q), started: runs() - rr, rr };
   };
   const R = await restoredCase('/');
   ok(R.up && R.st.mem === '{"win-a":true}' && R.st.tap && R.st.tapText === '点一下开声音' && R.st.pressed === 'false' && R.st.muted === true && R.started === 0, '⑳ a RESTORED window of a machine whose sound is remembered ON: 「点一下开声音」, the <video> muted, NOTHING captured on the machine', { st: R.st, started: R.started });
@@ -1452,6 +1490,7 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
   ok(tapped && await nodeUntil(() => runs() === rr2 + 1, 5000), '⑳ a tap on 「点一下开声音」 ⇒ on: unmuted, ONE loopback on the machine');
   await R.q.close();
   const B = await restoredCase('/soundrestore');
+  if (B.started === 0 && await nodeUntil(() => runs() - B.rr === 1, 10000)) B.started = 1; // the mutant's own start, late under load (lane gate-flakes-341)
   ok(B.up && B.started === 1 && B.st.pressed === 'true' && B.st.muted === false, '⑳ RED CONTROL: a toggle that ignores `restored` unmutes the restored window and starts the machine\'s capture BY ITSELF — the row above catches it', { st: B.st, started: B.started });
   await B.q.close();
   // a PHONE: the same strip

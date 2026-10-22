@@ -7,6 +7,11 @@
 // lane mac-repair-retires-stale (B-06e9, the owner's Macbook 2026-10-18: FOUR installs, three stale): the row and the item
 // name the LIVE install (`device@<the host the current token was minted for>`), the recipe stops the agent ITSELF by its
 // lock pid (the launch item is only a supervisor — the agent runs detached), and both say the door (a re-pair retires them).
+// lane device-node-version (the Node.js security releases of 2026-10-21): THE FLOOR TABLE (PURE src/device-runtime.js) —
+// below / at / above the floor per major line, an unlisted major and a daemon that said nothing ⇒ no chip, whose node it is
+// ⇒ the recipe; the record (`deviceRuntime`, the REAL HostManager: persisted when it moved, the row's `runtime` offline
+// too); the card's words in zh + ja and its CSS on theme vars; two patched-copy controls (at-the-floor read as old, a
+// lexicographic compare).
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -177,6 +182,100 @@ console.log('— the journal: the first line at once, then once per 10 min while
   const DP = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
   const i1 = DP.indexOf("if (health && health.v.kind === 'second-dialer-stale-token') {"), i2 = DP.indexOf("logRefusal(facts, why === 'token-mismatch' ? deviceId : ''");
   ok(i1 > 0 && i2 > i1 && /getDialHealth\(\)\.shouldLog\(health\.h\.id, health\.v\)\) console\.log\(/.test(DP.slice(i1, i2)) && /\n      return null;\n    \}\n/.test(DP.slice(i1, i2)), 'LOG-3: dial-pairing\'s refusal road asks the verdict BEFORE logRefusal and returns (never both lines)');
+}
+
+console.log('— lane device-node-version: the node a machine\'s agent runs on (PURE src/device-runtime.js + the REAL HostManager) —');
+{
+  const DR = require('../src/device-runtime.js');
+  const RT = [
+    ['22 below its floor, its own node ⇒ old, re-install', { node: 'v22.22.0', own: true }, 'old', 'reinstall'],
+    ['22 one patch below (22.23.3) ⇒ old', { node: 'v22.23.3', own: true }, 'old', 'reinstall'],
+    ['22.9.9 (minor 9 < 23 — numbers, not text) ⇒ old', { node: 'v22.9.9', own: true }, 'old', 'reinstall'],
+    ['22 AT its floor (22.23.4) ⇒ ok', { node: 'v22.23.4', own: true }, 'ok', null],
+    ['22 above (22.24.0) ⇒ ok', { node: 'v22.24.0', own: false }, 'ok', null],
+    ['24 below (24.12.0) on a node the machine had ⇒ old, the system recipe', { node: 'v24.12.0', own: false }, 'old', 'system'],
+    ['24 AT its floor (24.22.1) ⇒ ok', { node: 'v24.22.1', own: false }, 'ok', null],
+    ['24 above (24.23.0 — a higher minor, a lower patch) ⇒ ok', { node: 'v24.23.0', own: false }, 'ok', null],
+    ['26 below (26.12.0), whose node not said (an older agent) ⇒ old, re-install', { node: 'v26.12.0', own: null }, 'old', 'reinstall'],
+    ['26 AT its floor (26.12.1) ⇒ ok', { node: 'v26.12.1', own: null }, 'ok', null],
+    ['26 above (27 is another line; 26.20.0) ⇒ ok', { node: 'v26.20.0', own: true }, 'ok', null],
+    ['an unlisted major (20) ⇒ unlisted: no chip', { node: 'v20.19.5', own: false }, 'unlisted', null],
+    ['an odd major (25) ⇒ unlisted: no chip', { node: 'v25.1.0', own: true }, 'unlisted', null],
+    ['a major the table has not met yet (28) ⇒ unlisted: no chip', { node: 'v28.0.0', own: true }, 'unlisted', null],
+    ['a daemon that said no node ⇒ unknown: no chip', { node: null, own: null }, 'unknown', null],
+    ['a malformed version (no v) ⇒ unknown', { node: '22.22.0', own: true }, 'unknown', null],
+  ];
+  const runRT = (M) => RT.map(([name, inp, state, fix]) => { const v = M.runtimeVerdict(inp); return [name, v.state, v.fix, state, fix]; });
+  runRT(DR).forEach(([name, s, f, ws, wf], i) => ok(s === ws && f === wf, `RT-${i + 1}: ${name} (${s}${f ? ' · ' + f : ''})`));
+  ok(JSON.stringify(Object.keys(DR.NODE_FLOORS)) === '["22","24","26"]' && DR.NODE_FLOORS[22].floor === '22.23.4' && DR.NODE_FLOORS[24].floor === '24.22.1' && DR.NODE_FLOORS[26].floor === '26.12.1'
+    && Object.values(DR.NODE_FLOORS).every((r) => r.advisory === 'nodejs-2026-10-21') && DR.ADVISORIES['nodejs-2026-10-21'].date === '2026-10-21'
+    && DR.ADVISORIES['nodejs-2026-10-21'].cves.join(' ') === 'CVE-2026-111497 CVE-2026-105482 CVE-2026-105483 CVE-2026-106069' && Object.isFrozen(DR.NODE_FLOORS) && Object.isFrozen(DR.NODE_FLOORS[22]),
+    'RT-T: the table IS the advisory — three lines (22 / 24 / 26), their fixed releases, the advisory\'s date and four CVE ids; frozen', DR.NODE_FLOORS);
+  const bad = DR.runtimeOf({ node: 'v22.22.0\n', openssl: 'x'.repeat(41), own: 'yes', platform: 'plan9' });
+  const good = DR.runtimeOf({ node: 'v22.22.0', openssl: '3.0.15+quic', own: true, platform: 'darwin' });
+  ok(Object.values(bad).every((x) => x === null) && JSON.stringify(good) === '{"node":"v22.22.0","openssl":"3.0.15+quic","own":true,"platform":"darwin"}' && JSON.stringify(DR.runtimeOf(null)) === '{"node":null,"openssl":null,"own":null,"platform":null}',
+    'RT-B: a statement is bounded — a malformed node / openssl / own / platform is not said (null)', { bad, good });
+  const rowOf = (rt) => DR.runtimeRow({ deviceRuntime: rt });
+  const lines = ['darwin', 'linux', 'win32'].map((p) => rowOf({ node: 'v24.12.0', own: false, platform: p, at: 5 }).line);
+  ok(lines[0] === 'brew upgrade node' && lines[1].startsWith('sudo apt-get install --only-upgrade nodejs') && lines[2] === 'winget upgrade OpenJS.NodeJS.LTS' && rowOf({ node: 'v24.12.0', own: false }).line === null && rowOf({ node: 'v22.22.0', own: true, platform: 'darwin' }).line === null,
+    'RT-R1: a system node below the floor carries its platform\'s upgrade line (none when the platform is not said; never for the installer\'s own node)', lines);
+  const r1 = rowOf({ node: 'v22.22.0', openssl: '3.0.15+quic', own: true, platform: 'darwin', at: 1234 });
+  ok(r1.state === 'old' && r1.fix === 'reinstall' && r1.openssl === '3.0.15+quic' && r1.own === true && r1.at === 1234 && r1.date === '2026-10-21' && r1.cves.length === 4 && r1.floor === '22.23.4'
+    && DR.runtimeRow({}).state === 'unknown' && DR.runtimeRow({}).fix === null, 'RT-R2: the row = the verdict + what the agent said + the advisory; a record whose agent never said ⇒ unknown', r1);
+
+  // the REAL HostManager: a dial device + an ssh machine
+  const dir = fs.mkdtempSync(path.join(SCR, 'rt-'));
+  fs.writeFileSync(path.join(dir, 'hosts.json'), JSON.stringify({ hosts: [{ id: 'host-dial-Macbook', name: 'Macbook', transport: 'dial', deviceId: 'Macbook' }, { id: 'host-ssh-box', name: 'box', transport: 'ssh', user: 'u', host: '192.0.2.7', port: 22 }] }));
+  const hm = new HostManager({ dataDir: dir });
+  hm.dialOnline = () => false;
+  const said = { node: 'v22.22.0', openssl: '3.0.15+quic', own: true, platform: 'darwin' };
+  const m1 = hm.noteRuntime('host-dial-Macbook', said);
+  const disk1 = JSON.parse(fs.readFileSync(path.join(dir, 'hosts.json'), 'utf8')).hosts[0].deviceRuntime;
+  const m2 = hm.noteRuntime('host-dial-Macbook', { ...said });
+  const m3 = hm.noteRuntime('host-dial-Macbook', { ...said, openssl: '3.0.16+quic' });
+  ok(m1 === true && disk1 && disk1.node === 'v22.22.0' && disk1.own === true && Number.isFinite(disk1.at) && m2 === false && m3 === true && hm.noteRuntime('host-nope', said) === false,
+    'H-RT1: noteRuntime keeps the statement on the record (`deviceRuntime`, on disk at once) — the same one again moves nothing, a new OpenSSL moves it, an unknown row is no-op', { m1, m2, m3, disk1 });
+  const rows = new HostManager({ dataDir: dir }).list();
+  const dRow = rows.find((r) => r.id === 'host-dial-Macbook'), sRow = rows.find((r) => r.id === 'host-ssh-box');
+  ok(dRow.runtime && dRow.runtime.state === 'old' && dRow.runtime.fix === 'reinstall' && dRow.runtime.node === 'v22.22.0' && dRow.runtime.openssl === '3.0.16+quic' && dRow.online === false
+    && sRow.runtime && sRow.runtime.state === 'unknown' && sRow.runtime.fix === null,
+    'H-RT2: after a restart, offline, the /api/hosts row carries `runtime` (old · re-install · its node + OpenSSL); a machine whose agent never said reads unknown', { d: dRow.runtime, s: sRow.runtime });
+  // an agent older than the field: the client's door hands what the hello-ack had (no nodeVersion) ⇒ not said ⇒ unknown, no chip
+  hm.noteRuntime('host-ssh-box', DR.runtimeOf({ node: undefined, openssl: undefined, own: undefined, platform: 'linux' }));
+  const sRow2 = hm.list().find((r) => r.id === 'host-ssh-box');
+  ok(sRow2.runtime.state === 'unknown' && sRow2.runtime.node === null, 'H-RT3: a hello-ack without the fields ⇒ the row\'s runtime is unknown (no chip)', sRow2.runtime);
+  const CL = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8'), DP = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8'), HS = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
+  ok(CL.includes("this._onRuntime?.(require('../device-runtime.js').runtimeOf({ node: msg.nodeVersion, openssl: msg.openssl, own: msg.nodeOwn, platform: msg.platform }))")
+    && DP.includes('onRuntime: (rt) => { const h = hosts.findByDeviceId(deviceId); if (h && hosts.noteRuntime?.(h.id, rt))') && HS.includes('onRuntime: (rt) => this.noteRuntime(id, rt)'),
+    'H-RT4: the wiring — the hub\'s client hands every hello-ack\'s runtime to its construction site: a dial device (dial-pairing.js, the card repainted) and an ssh machine (hosts.js)');
+
+  // the words: every key the card uses, in zh and ja; the chip's zh is the brief's; the CSS on theme vars
+  const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+  const LINE = fs.readFileSync(path.join(REPO, 'src/lib/machine-runtime-line.js'), 'utf8');
+  const keys = [...LINE.matchAll(/\bt\('((?:[^'\\]|\\.)+)'/g)].map((m) => m[1]);
+  const miss = keys.filter((k) => !zh[k] || !ja[k]);
+  ok(keys.length === 7 && !miss.length && zh['Runtime too old'] === '运行时过旧' && zh['Install again…'] === '重新安装…', `W-RT1: the card's ${keys.length} keys are in both dictionaries; the chip says 「运行时过旧」, the door 「重新安装…」`, miss);
+  const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8').split('\n').filter((l) => l.startsWith('.agents-mach-runtime'));
+  const sheet = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const defined = new Set([...sheet.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+  const dead = css.flatMap((l) => [...l.matchAll(/var\(\s*(--[\w-]+)\s*(,)?/g)].filter((u) => !u[2] && !defined.has(u[1])).map((u) => u[1]));
+  ok(css.length === 4 && css.every((l) => !/#[0-9a-f]{3,8}\b|rgba?\(/i.test(l)) && !dead.length, `W-RT2: the runtime line's CSS (${css.length} rules) uses theme vars only — each one the theme defines (a var nothing defines paints nothing)`, dead);
+  const MA = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
+  ok(MA.includes('const rtl = runtimeLineEl(h.runtime, { dial: isDialDev });') && MA.includes("runtimeFixEl(rtl.words, { onReinstall: isDialDev ? () => this.sidebar?._showDevicePairDialog?.(h) : null })"),
+    'W-RT3: the Machines card draws the line in every machine\'s summary and the recipe under its tools — the door (a dial device) opens the pairing sheet');
+
+  // controls: patched copies of the table's compare
+  const M2 = mutantCopies('dhlrt', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'src/device-runtime.js'), 'utf8');
+  const mA = src.replace('const below = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };', 'const below = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return true; };');
+  ok(mA !== src, '(rt-a) the patch applies');
+  const ra = runRT(M2.load('src/device-runtime.js', mA, 'atfloor')).filter(([, s, f, ws, wf]) => s !== ws || f !== wf);
+  ok(ra.length === 3 && ra.every(([n]) => /AT its floor/.test(n)), `CONTROL (rt-a): the floor itself read as old ⇒ the three AT-the-floor rows red (${ra.length})`, ra);
+  const mB = src.replace("  const old = below(t, tripleOf('v' + row.floor));", '  const old = node.slice(1) < row.floor;');
+  ok(mB !== src, '(rt-b) the patch applies');
+  const rb = runRT(M2.load('src/device-runtime.js', mB, 'lexical')).filter(([, s, f, ws, wf]) => s !== ws || f !== wf);
+  ok(rb.length >= 1 && rb.some(([n]) => n.startsWith('22.9.9')), `CONTROL (rt-b): versions compared as text ⇒ 22.9.9 reads as fixed (${rb.length} rows red)`, rb);
+  for (const r of copiesCensus(M2.files, M2.dir, REPO, { minCopies: 2, label: 'mutant-copy (device-runtime): ' })) ok(r.pass, r.name, r.detail);
 }
 
 console.log('— controls (patched copies) —');

@@ -173,11 +173,13 @@ class HostManager {
     const up = (h) => { const u = this.agentUpgradeOf?.(h.id); return u ? { agentUpgrade: u } : {}; };
     // lane host-stale-dialer (B-6136): `dialHealth` = a second agent with an old token knocking while the device is in (src/dial-health.js)
     const dh = (h) => { const v = h.deviceId ? this.dialHealthOf?.(h) : null; return v ? { dialHealth: v } : {}; };
+    // lane device-node-version: `runtime` = the node its agent runs on, judged against the floor table (src/device-runtime.js)
+    const DR = require('./device-runtime.js');
     return this._state.hosts.map(h => (h.transport === 'dial'
-      ? { ...h, dialTokenHash: undefined, online: !!this.dialOnline?.(h.deviceId), ...up(h), ...dh(h) }
+      ? { ...h, dialTokenHash: undefined, online: !!this.dialOnline?.(h.deviceId), ...up(h), ...dh(h), runtime: DR.runtimeRow(h) }
       // graduated ssh machine (B-6640): expose the upgrade + live-dial state
       // (hash stays redacted like pure-dial records)
-      : { ...h, dialTokenHash: undefined, ...(h.deviceId ? { graduated: true, dialLive: !!this.dialOnline?.(h.deviceId) } : {}), ...up(h), ...dh(h) }));
+      : { ...h, dialTokenHash: undefined, ...(h.deviceId ? { graduated: true, dialLive: !!this.dialOnline?.(h.deviceId) } : {}), ...up(h), ...dh(h), runtime: DR.runtimeRow(h) }));
   }
 
   get(id) {
@@ -354,6 +356,20 @@ class HostManager {
     if (!h) return false;
     if ((h.deviceElevated === true) === e) return false; // absent / false both read as not-elevated ⇒ the card is unchanged, no repaint (a first hello of `false` must not broadcast)
     h.deviceElevated = e;
+    try { this._save(); } catch (err) { console.warn('[hosts] save failed:', err.message); }
+    return true;
+  }
+  /** lane device-node-version: the node a machine's device agent STATES it runs on (every hello-ack — src/device-runtime.js
+   *  runtimeOf: `{node, openssl, own, platform}`) kept on its record as `deviceRuntime` with the instant it was first said;
+   *  the row's `runtime` judges it (runtimeRow — the floor table), offline too. Persisted only when it moved. → true = moved. */
+  noteRuntime(hostId, rt) {
+    const DR = require('./device-runtime.js');
+    const r = DR.runtimeOf(rt);
+    let h = null; try { h = this.get(hostId); } catch { return false; }
+    if (!h) return false;
+    const key = (x) => JSON.stringify([x.node, x.openssl, x.own, x.platform]);
+    if (h.deviceRuntime && key(DR.runtimeOf(h.deviceRuntime)) === key(r)) return false;
+    h.deviceRuntime = { ...r, at: Date.now() };
     try { this._save(); } catch (err) { console.warn('[hosts] save failed:', err.message); }
     return true;
   }
@@ -1257,6 +1273,7 @@ class HostManager {
       onUpgradeRefused: (from, to, info) => this.onAgentUpgrade?.('refused', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }), // lane device-bundle-signing
       onUpgradeTrusted: (from, to, info) => this.onAgentUpgrade?.('trusted', { ...(info || {}), hostKey: id, machine: h.name || id, from, to }), // fix r2: a first trust (TOFU)
       onPolicy: (p) => this.notePolicy(id, p), onElevated: (e) => this.noteElevated(id, e), machine: () => h.name || id, // lane device-allow-flags: its stated allow list; lane win-input-elevated: its own token elevation; its name in a refusal
+      onRuntime: (rt) => this.noteRuntime(id, rt), // lane device-node-version: the node its agent runs on (the Machines card judges it)
       actGate: this.actGateFor(id), // lane hub-act-ask: an act nobody clicked follows the machine's Hub automation list (asks on a cluster instance)
     });
     await dm.connect();

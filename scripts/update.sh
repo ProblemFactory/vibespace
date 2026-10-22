@@ -111,6 +111,11 @@ npm run build
 # pre-pull reset above. The installed tree and the built bundles are unchanged.
 git checkout HEAD -- package-lock.json 2>/dev/null || true
 git checkout HEAD -- src/agentd/version.js 2>/dev/null || true
+# lane runtime-floor: the node the restart runs on, against THE floor table (src/runtime-floor.js) — below it the
+# product provisions the fixed release for THIS instance (data/runtime/current, sha256-checked) and the server
+# switches to it at its start (same pid). Never fails the update: the server keeps the node it has.
+echo "== runtime"
+node scripts/runtime-check.mjs --provision --root data || echo "  (the runtime check did not finish — the server keeps the node it has)"
 echo "== now at $(git rev-parse --short HEAD) (v$(node -p "require('./package.json').version"))"
 if systemctl --user is-enabled vibespace >/dev/null 2>&1; then
   echo "== restarting vibespace.service"

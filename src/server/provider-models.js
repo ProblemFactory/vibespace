@@ -13,6 +13,7 @@
  * The verdicts are PURE (src/model-providers.js refreshVerdict · parseListed · authHeaders); this file is the request.
  */
 const MP = require('../model-providers.js');
+const { safeFetch } = require('../safe-fetch');
 const VI = require('../vault-inventory.js');
 
 /** The record's key out of the vault: `keyRef` = a vault row reference `<store>:<entry>#<field>` — an Integrations row's
@@ -72,9 +73,13 @@ function create({ providers, vaultState = () => 'locked', keyOf = () => ({ ok: f
       const headers = { accept: 'application/json', ...MP.authHeaders(provider, key.value) };
       let res;
       try {
-        // PROVIDER_MODELS — the one request: a GET of the provider's list, 15 s, never a redirect (the key stays on its host)
-        res = await fetch(v.url, { method: 'GET', headers, redirect: 'error', signal: AbortSignal.timeout(MP.REFRESH.timeoutMs) });
-      } catch (e) { return { ok: false, code: 'unreachable', reason: String((e && (e.cause && e.cause.code || e.name)) || 'error').slice(0, 60) }; }
+        // PROVIDER_MODELS — the one request: a GET of the provider's list, 15 s, never a redirect (the key stays on its host);
+        // a base URL the person typed ⇒ safeFetch (lane runtime-floor's belt: gzip or nothing — never a decoder it picks)
+        res = await safeFetch(v.url, { method: 'GET', headers, redirect: 'error', signal: AbortSignal.timeout(MP.REFRESH.timeoutMs), maxBytes: MP.REFRESH.maxBytes });
+      } catch (e) {
+        if (e && e.code === 'too-big') return { ok: false, code: 'too-large' };
+        return { ok: false, code: 'unreachable', reason: String((e && (e.cause && e.cause.code || e.code || e.name)) || 'error').slice(0, 60) };
+      }
       if (!res.ok) { try { await res.body.cancel(); } catch { } return { ok: false, code: 'http', status: res.status }; }
       const text = await readCapped(res, MP.REFRESH.maxBytes).catch(() => null);
       if (text === null) return { ok: false, code: 'too-large' };

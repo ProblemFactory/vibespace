@@ -778,6 +778,7 @@ class MessageManager extends MessageWindow {
    *  permission-outcome sentence outside the census — enum-only); grown fields are also a drift-ledger row. */
   _noteDrift(drift, raw, emit) {
     const ver = this._harnessVersion?.() || (typeof raw.version === 'string' ? raw.version.slice(0, 40) : null); // a transcript row names its own build
+    if (ver) { try { global.__vsCliSeen?.(ver); } catch {} } // lane cli-2-1-308-records: a build the oracle does not know is said ONCE (src/server/cli-registration.js)
     const seen = this.constructor._seenShapeDrift;
     if (seen && !seen.has(drift.shape)) {
       seen.add(drift.shape);

@@ -77,7 +77,9 @@ mkdir -p "$ROOT/$VER" "$ROOT/state"; chmod 700 "$ROOT" "$ROOT/state"
 # dir to every child's PATH, so the agent tools resolve too. `rm -rf $ROOT`
 # stays a complete uninstall (daemon AND its runtime).
 NODE_MIN=18
-NODE_VERSION="${VIBESPACE_NODE_VERSION:-v22.22.0}"   # pinned LTS; bump via nodejs.org/dist/index.json
+# pinned LTS; bump via nodejs.org/dist/index.json — v22.23.4 = the Node.js security releases of 2026-10-21 (the hub's floor
+# table, src/device-runtime.js NODE_FLOORS, names that advisory; this pin is never below its line's floor)
+NODE_VERSION="${VIBESPACE_NODE_VERSION:-v22.23.4}"
 NODE_MIRROR="${VIBESPACE_NODE_MIRROR:-https://nodejs.org/dist}"
 NODE_FLAVOR="${VIBESPACE_NODE_FLAVOR:-}"             # e.g. -musl with unofficial-builds
 PRIV_NODE="$ROOT/node/bin/node"
@@ -157,13 +159,14 @@ node_platform() {
   fi
 }
 
-install_private_node() {
+install_private_node() { # [replace] — `replace`: the pin moved past this install's own node (the headline says so)
   node_platform || return 1
   TARN="node-$NODE_VERSION-$NOS-$NARCH$NODE_FLAVOR.tar.gz"
   TMP="$ROOT/.node-dl.$$"
   rm -rf "$TMP"; mkdir -p "$TMP"
   trap 'rm -rf "$TMP"' EXIT INT TERM
-  echo "→ no usable Node ≥$NODE_MIN on this machine — installing a private one for VibeSpace only"
+  if [ "${1:-}" = replace ]; then echo "→ installing Node $NODE_VERSION in place of this install's own $PRIV_V"
+  else echo "→ no usable Node ≥$NODE_MIN on this machine — installing a private one for VibeSpace only"; fi
   echo "  $NODE_MIRROR/$NODE_VERSION/$TARN"
   echo "  → $ROOT/node   (~40MB download; nothing outside this folder is touched)"
   if ! fetch_show "$NODE_MIRROR/$NODE_VERSION/$TARN" "$TMP/$TARN"; then
@@ -216,6 +219,24 @@ install_private_node() {
 # node silently would bill the user's debugging to the wrong hypothesis.
 if [ -n "$NODE_BIN_OVERRIDE" ] && ! node_ok "$NODE_BIN_OVERRIDE"; then
   echo "⚠ --node $NODE_BIN_OVERRIDE is not a usable node ≥$NODE_MIN — ignoring it and looking elsewhere"
+fi
+# THE PIN MOVED (lane device-node-version — the Node.js security releases of 2026-10-21): this install's OWN node
+# ($ROOT/node, provisioned by an earlier run of this script) older than NODE_VERSION is replaced by the pinned one,
+# verified like a first provisioning (a rename inside $ROOT — the agent running on the old one keeps its inode until the
+# take-over below restarts it). A failed download keeps the one it had (said, not fatal). A node this machine HAD (PATH,
+# nvm, /usr/…, --node) is never touched: the hub's Machines card says when it is below the fixed release, with its upgrade
+# line. The agent's self-upgrade (landBundle) lands a bundle only — re-running this command is how its node moves.
+ver_lt() { # a b → true when version a is older than b (vX.Y.Z; awk, as BSD sort has no -V)
+  awk -v a="$1" -v b="$2" 'BEGIN { sub(/^v/, "", a); sub(/^v/, "", b); split(a, x, "."); split(b, y, ".")
+    for (i = 1; i <= 3; i++) { if (x[i] + 0 < y[i] + 0) exit 0; if (x[i] + 0 > y[i] + 0) exit 1 }; exit 1 }'
+}
+PRIV_V=""
+if [ -z "$NODE_BIN_OVERRIDE" ] && node_ok "$PRIV_NODE"; then PRIV_V=$("$PRIV_NODE" -v 2>/dev/null || true); fi
+if [ -n "$PRIV_V" ] && ver_lt "$PRIV_V" "$NODE_VERSION"; then
+  echo "→ this install's own Node $PRIV_V is older than the pinned $NODE_VERSION — replacing it"
+  if ! install_private_node replace; then
+    echo "  ⚠ Node $NODE_VERSION could not be installed — keeping $PRIV_V for now (run this command again to retry)"
+  fi
 fi
 NODE_BIN="$(find_node || true)"
 if [ -z "$NODE_BIN" ]; then

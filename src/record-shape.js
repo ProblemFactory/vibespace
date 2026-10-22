@@ -659,12 +659,14 @@ function unknownFieldsSample(record) {
 // subtype, six fields on three shapes) + 2.1.288 (2026-10-07 — eight new subtypes, 23 fields on six shapes) + 2.1.296 (2026-10-15 — two new
 // subtypes, 18 fields on ten shapes, three hook attachment payloads: FIELDS_296 / ATTACHMENT_PAYLOADS) + 2.1.306 (2026-10-21 — no new
 // subtype, 21 fields on eight shapes, the two workflow_progress items: FIELDS_306 / WORKFLOW_PROGRESS_ITEMS) + 2.1.307 (2026-10-21 —
-// no new subtype, 3 fields on two shapes, one attachment payload: FIELDS_307 / ATTACHMENT_PAYLOADS). Each
+// no new subtype, 3 fields on two shapes, one attachment payload: FIELDS_307 / ATTACHMENT_PAYLOADS) + 2.1.308 (2026-10-22 —
+// the 2.1.307 code rebuilt on a newer Bun runtime: its dump equals 2.1.307's in every key, field, nested object and
+// sentence, so nothing is declared for it — no FIELDS_308). Each
 // pinned build has its TRACKED dump in scripts/fixtures/claude-cli/<version>.json, judged with no binary at all;
 // test-record-shape's binary oracle runs on whichever claude is installed and expects the rows of THAT build
 // (SHAPE_SINCE excuses a newer row on an older build). STRICT on any developer box; on the Actions mirror (which
 // installs whatever npm serves today) an UNPINNED build's drift is printed and skipped, never a red gate nobody reads.
-const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307']);
+const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308']);
 const SCHEMA_CLI_VERSION = SCHEMA_CLI_VERSIONS[SCHEMA_CLI_VERSIONS.length - 1];
 
 module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };

@@ -22,6 +22,7 @@
 // uploaded temp file is removed on EVERY exit path (the source whitelist used
 // to throw above the try/finally).
 const fs = require('fs');
+const { safeFetch } = require('../safe-fetch');
 const fsp = require('fs/promises');
 const crypto = require('crypto');
 const os = require('os');
@@ -159,10 +160,12 @@ async function stageFromZip(zipPath, stage) {
   return dest;
 }
 
+// a release a person named (its GitHub lookup + the asset it lists, wherever that redirects) ⇒ safeFetch (lane
+// runtime-floor's belt: gzip or nothing — never a decoder the answering server picks)
 async function fetchWithTimeout(url, opts = {}, ms = 20000) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), ms);
-  try { return await fetch(url, { ...opts, signal: ctl.signal }); }
+  try { return await safeFetch(url, { ...opts, signal: ctl.signal, maxBytes: MAX_ZIP_BYTES + 1024 * 1024 }); }
   finally { clearTimeout(timer); }
 }
 

@@ -46,7 +46,7 @@ const VENDOR = /api\.anthropic\.com|platform\.claude\.com|console\.anthropic\.co
 // lane models-at-session (q-053 P0c): + the listed-provider refresh's marker PROVIDER_MODELS — the ONE /models caller fetches a URL
 // the PURE record builds from a provider's base (any base: OpenRouter's, an OpenAI-compatible one; a suite hands in a loopback)
 const CONSTRUCT_HOSTS = new RegExp(VENDOR.source + '|chatgpt\\.com|openai\\.com|fish\\.audio|openrouter\\.ai|DECISION_ENDPOINT|TEXT_ENDPOINT|PROVIDER_MODELS'); // + Dropline voice input (q-029): api.dropline.fish.audio | api.fish.audio | fish.audio
-const REQUESTY = /https?\.request\s*\(|\bfetch\s*\(|axios|got\s*\(/;
+const REQUESTY = /https?\.request\s*\(|\b(?:safeFetch|fetch)\s*\(|axios|got\s*\(/; // safeFetch (lane runtime-floor's belt) IS a request
 
 // ── collect every server-side JS file (the browser bundle never holds tokens) ──
 const files = [];
@@ -117,6 +117,11 @@ for (const [rel, n] of Object.entries(constructions)) {
   ok(!!a, `vendor request construction only in allowlisted files (found in ${rel}${a ? '' : ' — NOT ALLOWLISTED'})`);
   if (a) ok(n <= a.max, `${rel}: construction count ${n} ≤ ${a.max} (a NEW vendor call site must be allowlisted here with its gates)`);
 }
+// lane runtime-floor: nodejs.org is NOT an API vendor — the node release download (src/node-runtime.js, the one downloader:
+// a public archive, no credential, nothing spent, sha256-checked against the mirror's SHASUMS256.txt before it is
+// unpacked) is never a construction here; its egress row is test-channels-egress's
+ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org\/dist'/.test(fs.readFileSync(path.join(REPO, 'src/node-runtime.js'), 'utf-8')) && !constructions['src/node-runtime.js'],
+  'nodejs.org is no vendor host: the node release download (src/node-runtime.js, sha256-gated) is not a vendor construction (its egress row: test-channels-egress)');
 // CONTROL: a raw vendor fetch planted beside the codex live read (quota.readLive) is a construction in a file outside
 // the rows — the census counts it, so the allowlist check above would go red
 {
@@ -1480,7 +1485,7 @@ console.log('§15 the listed-provider refresh: a person\'s press · the vault ·
     if (!mod.includes("if (by !== 'human') return { ok: false, code: 'human_only' };")) bad.push('A PERSON: the module refuses a call that does not say a person pressed');
     for (const rel of [MOD, DOOR]) if (TIMER.test(strip(texts[rel] || ''))) bad.push(`NO TIMER: ${rel} holds a timer`);
     for (const rel of [...new Set(callers)]) if (rel !== MOD && rel !== DOOR && TIMER.test(strip(texts[rel]))) bad.push(`NO TIMER: ${rel} calls it beside a timer`);
-    const verdict = mod.indexOf('MP.refreshVerdict('), key = mod.indexOf('keyOf(provider.keyRef)'), req = mod.indexOf('await fetch(');
+    const verdict = mod.indexOf('MP.refreshVerdict('), key = mod.indexOf('keyOf(provider.keyRef)'), req = mod.indexOf('await safeFetch('); // lane runtime-floor: a base URL a person typed ⇒ the belt
     if (!(verdict > 0 && key > verdict && req > key) || !/vault: vaultState\(\)/.test(mod)) bad.push('THE VAULT + THE MINUTE: the PURE verdict (vault, cooldown, in flight) is asked BEFORE the key is read and the request sent');
     if (!/providers\.setListed\(provider\.id, parsed\.rows, now\(\)\)/.test(mod)) bad.push('THE CACHE: the answer is kept on the record (setListed, fetchedAt)');
     return bad;

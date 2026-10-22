@@ -444,5 +444,199 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   }
 }
 
+// 10. AN ACCOUNT THE PROBE CANNOT PROVE IS NEVER SENT; A FAILED PROBE NAMES ITS REASON (lane auto-cli-oat-unprobeable,
+//     2026-10-22, the owner: «为什么现在开始出现很多长时间没刷新过用量信息的账户 因为一直没用到过吗？»). MEASURED on the
+//     owner's hub at 2.369.340: six oat-only rows (OAuth login ended, long-lived token valid — 「仅长期 token」) carried
+//     11–36 consecutive "failures" in data/auto-cli-state.json — the probe door refused them by name with no spawn, the
+//     loop booked each refusal as a failed probe and backed off for ever, the journal said `failed (stale-idle; …)` with
+//     no reason. THE ADDENDUM (主开发, measured): those tokens carry user:profile, and `claude -p /usage` works on the token
+//     MATERIALIZED in the row's folder on a CLI measured with it — so an oat-only row with all three facts IS probed (the
+//     same rung, the same spawn), and one without names the fact that failed. §10a the PURE verdict + the ONE scrub;
+//     §10b the REAL loop over a 30 h world — RED CONTROLS: the loop with the fix reverted (the base `!a.loggedIn` filter),
+//     and the verdict with its profile check / its measured check cut (a profile-less token / an unmeasured CLI is sent).
+{
+  const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
+  const AC = require('../src/auto-cli-model.js');
+  // §10a — the eligibility table (rows shaped as accounts.list() answers them)
+  const row = (o) => ({ id: 'x', type: 'subscription', backend: 'claude', loggedIn: true, pooled: false, ...o });
+  const SCOPES = ['user:file_upload', 'user:inference', 'user:mcp_servers', 'user:plugins', 'user:profile', 'user:sessions:claude_code']; // the hub's six (measured)
+  const oatRow = (o = {}) => row({ oat: true, loginState: { state: 'oat-only', login: 'none', oatFile: true }, oatScopes: SCOPES, oatCli: { cli: '2.1.306', measured: true }, oatFile: { state: 'written', cli: '2.1.306' }, ...o });
+  const TABLE = [
+    ['an oat-only row whose token carries user:profile, on a measured CLI, written in its folder (the owner\'s six, measured)', oatRow(), AC.PROBEABLE],
+    ['…the token WITHOUT user:profile (the measured oat-file-scopes refusal)', oatRow({ oatScopes: SCOPES.filter((x) => x !== 'user:profile') }), AC.OAT_NO_PROFILE],
+    ['…no recorded scopes at all', oatRow({ oatScopes: undefined }), AC.OAT_NO_PROFILE],
+    ['…the hub\'s claude not measured with a token in the folder (a held file)', oatRow({ oatCli: { cli: '2.1.308', measured: false }, oatFile: { state: 'held', reason: 'cli-unmeasured', cli: '2.1.308' } }), AC.CLI_UNMEASURED],
+    ['…no profile AND unmeasured ⇒ the profile is named (checked first)', oatRow({ oatScopes: ['user:inference'], oatCli: { cli: '2.1.308', measured: false } }), AC.OAT_NO_PROFILE],
+    ['…measured, but the folder still holds the expired login (the token not written: write-failed)', oatRow({ loginState: { state: 'oat-only', login: 'expired' }, oatFile: { state: 'refused', reason: 'write-failed' } }), AC.OAT_NOT_IN_FOLDER],
+    ['…measured, the CLI wiped the login, nothing written yet', oatRow({ loggedIn: false, loginState: { state: 'oat-only', login: 'logged-out' }, oatFile: undefined }), AC.OAT_NOT_IN_FOLDER],
+    ['a live login', row({ loginState: { state: 'ok' } }), AC.PROBEABLE],
+    ['a login that expires today', row({ loginState: { state: 'expiring' } }), AC.PROBEABLE],
+    ['a login whose deadline passed (no token — its own probe says so)', row({ loginState: { state: 'expired' } }), AC.PROBEABLE],
+    ['a login with no readable deadline', row({ loginState: { state: 'unknown' } }), AC.PROBEABLE],
+    ['a live login and a token beside it (the login is the probe\'s; the token\'s facts do not matter)', row({ oat: true, loginState: { state: 'ok' }, oatScopes: [], oatCli: { measured: false } }), AC.PROBEABLE],
+    ['no login at all', row({ loggedIn: false, loginState: { state: 'unknown' } }), AC.NO_LOGIN],
+    ['a pool (no login of its own)', row({ pooled: true, type: 'pooled' }), null],
+    ['an API key', { id: 'k', type: 'api', loggedIn: true }, null],
+  ];
+  for (const [label, r, want] of TABLE) ok(AC.probeEligibility(r) === want, `§10a ${label} ⇒ ${want}`, AC.probeEligibility(r));
+  ok(AC.probeEligibility(row({}), { quotaProbe: null }) === null && AC.probeEligibility(null) === null && AC.probeEligibility('x') === null && AC.probeEligibility(row({ loginState: 'oat-only' })) === AC.PROBEABLE
+    && AC.probeEligibility(oatRow({ oatCli: { measured: 'yes' } })) === AC.CLI_UNMEASURED && AC.probeEligibility(oatRow({ oatScopes: 'user:profile' })) === AC.OAT_NO_PROFILE,
+    '§10a a harness without the cli-usage rung / hostile input ⇒ null; a garbage loginState is no oat-only claim; a truthy-but-not-true measured / a scopes STRING are no facts');
+  ok(AC.PROBE_ELIGIBILITY.join() === 'probeable,unprobeable:oat-no-profile,unprobeable:cli-unmeasured,unprobeable:oat-not-in-folder,unprobeable:no-login' && AC.PROBE_ELIGIBILITY.slice(1).every(AC.isUnprobeable) && !AC.isUnprobeable(AC.PROBEABLE) && !AC.isUnprobeable('unprobeable:oat-only') && AC.PROFILE_SCOPE === 'user:profile',
+    '§10a the closed table: one probeable state, three named oat-only facts + no login; the retired blanket `unprobeable:oat-only` is no state');
+  ok(AC.notProbedWords(AC.OAT_NO_PROFILE) === 'long-lived token only, without the user:profile scope the usage panel reads; refreshes when a session uses it'
+    && AC.notProbedWords(AC.CLI_UNMEASURED, { oatCli: { cli: '2.1.308' } }) === 'long-lived token only, and claude 2.1.308 is not measured with it in the account\'s folder; refreshes when a session uses it'
+    && AC.notProbedWords(AC.OAT_NOT_IN_FOLDER, { oatFile: { reason: 'write-failed' } }) === 'long-lived token only, not written to the account\'s folder (write-failed); refreshes when a session uses it'
+    && AC.notProbedWords(AC.CLI_UNMEASURED, { oatCli: { cli: '<b>x</b> 1' } }).includes('claude ? is') && AC.notProbedWords(AC.PROBEABLE) === '',
+    '§10a the journal names the fact that failed (the CLI version, the folder refusal — a value outside their shape is said as «?» / dropped)');
+  // the reason + THE ONE scrub: a planted token-shaped line never survives (built at runtime — never a literal)
+  const OAT = ['sk-ant-', 'oat01-', 'Qx7Lm2'.repeat(14)].join('');
+  const BARE = ['Zq9Xk2Lm7Pq4', 'Rt8Vw3Ny6Bc1', 'Hd5Fg0Js9Ka2'].join('');
+  const JWT = ['eyJ', 'hbGciOiJIUzI1NiJ9', '.eyJ', 'zdWIiOiIxIn0', '.c2lnbmF0dXJlLXNpZ25hdHVyZQ'].join('');
+  const STDIN_WARN = 'Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.';
+  const w1 = AC.probeFailWhy({ exitCode: 1, rawStderr: `${STDIN_WARN}\n\x1b[31mError: token ${OAT} rejected · Authorization: Bearer ${BARE}\x1b[0m\n`, rawStdout: '' });
+  ok(/^exit 1: Error: token sk-«redacted» rejected/.test(w1) && !w1.includes(OAT.slice(14, 40)) && !w1.includes(BARE) && !/\x1b/.test(w1), '§10a a failed spawn: `exit N: <the CLI\'s first line>` — the stdin Warning skipped, ANSI out, the token and the bearer «redacted»', w1);
+  ok(AC.probeFailWhy({ exitCode: 1, rawStderr: STDIN_WARN + '\n', rawStdout: 'Not logged in · Please run /login\n' }) === 'exit 1: Not logged in · Please run /login', '§10a …nothing but the Warning on stderr ⇒ the first stdout line (the CLI\'s own refusal)');
+  ok(AC.probeFailWhy({ exitCode: 0, rawStdout: 'You are currently using your subscription to power your Claude Code usage\n' }) === 'no quota lines in its answer: You are currently using your subscription to power your Claude Code usage', '§10a an answer with no quota line (exit 0, the measured 152-row shape) says so with its first line');
+  ok(AC.probeFailWhy({ exitCode: 'killed' }) === 'killed (the 60 s limit)' && AC.probeFailWhy({}) === 'exit ?' && AC.probeFailWhy({ exitCode: 2, why: 'spawn threw: ENOENT' }) === 'exit 2: spawn threw: ENOENT', '§10a a kill / nothing said / the door\'s own why');
+  const long = AC.probeWhyText('x'.repeat(5000) + ' ' + JWT), wj = AC.probeWhyText(`session: ${JWT} and ${BARE}`);
+  ok(long.length === AC.WHY_MAX && long.endsWith('…') && !wj.includes(JWT.slice(3, 20)) && !wj.includes(BARE) && AC.probeWhyText(wj) === wj && AC.probeWhyText(null) === '',
+    '§10a probeWhyText: bounded (WHY_MAX, the cut after the redaction), a JWT and an unnamed key run hidden, idempotent, null ⇒ \'\'', { long: long.length, wj });
+  ok(AC.probeRecordOf({ at: 5, ok: false, why: `boom ${OAT}` }).why === 'boom sk-«redacted»' && AC.probeRecordOf({ at: 5, ok: true, why: 'x' }) === null && AC.probeRecordOf({ at: 0, ok: false, why: 'x' }) === null && AC.probeRecordOf({ at: 5, ok: false, why: '' }) === null && AC.probeRecordOf('x') === null,
+    '§10a probeRecordOf: a record\'s fact bounded and scrubbed again; ok / no instant / no reason / garbage ⇒ null');
+
+  // §10b — the REAL loop (clock + RNG injected) over a 30 h world; the producer stubs the probe door
+  const REAL_LOOP = require.resolve('../src/server/auto-cli-loop.js'), REAL_MODEL = require.resolve('../src/auto-cli-model.js');
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-auto-cli-unprobeable-'));
+  process.on('exit', () => { try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { } });
+  const SRC = path.dirname(REAL_MODEL);
+  const loopOf = (txt, modelFile = REAL_MODEL) => txt.replace(/require\('\.\.\/([\w.-]+)'\)/g, (_, f) => `require(${JSON.stringify(f === 'auto-cli-model.js' ? modelFile : path.join(SRC, f))})`);
+  const loopTxt = loopOf(fs.readFileSync(REAL_LOOP, 'utf8'));
+  // RED CONTROL 1: the fix reverted — the base filter (`!a.loggedIn`, no verdict) — every other line the real loop's
+  const CUT = ['|| a.pooled || capsOf(a.backend).quotaProbe !== \'cli-usage\' || unprobeable(a, now) || !d.autoCliReady(a.id)) continue;', '|| !a.loggedIn || a.pooled || capsOf(a.backend).quotaProbe !== \'cli-usage\' || !d.autoCliReady(a.id)) continue;'];
+  ok(loopTxt.includes(CUT[0]), '§10b the control\'s anchor is the real loop\'s filter (the verdict sits between the rung filter and autoCliReady)');
+  const BASE_LOOP = path.join(scratch, 'loop-base-filter.js'); fs.writeFileSync(BASE_LOOP, loopTxt.replace(CUT[0], CUT[1]));
+  // RED CONTROLS 2 + 3: the verdict with ONE of its checks cut (the same loop, re-pointed at the patched verdict)
+  const modelTxt = fs.readFileSync(REAL_MODEL, 'utf8').replace(/require\('\.\/([\w.-]+)'\)/g, (_, f) => `require(${JSON.stringify(path.join(SRC, f))})`);
+  const mutant = (name, cut) => {
+    if (!modelTxt.includes(cut)) throw new Error('mutant anchor missing: ' + cut.slice(0, 60));
+    const m = path.join(scratch, name + '-model.js'); fs.writeFileSync(m, modelTxt.replace(cut, '    // CUT\n'));
+    const l = path.join(scratch, name + '-loop.js'); fs.writeFileSync(l, loopOf(fs.readFileSync(REAL_LOOP, 'utf8'), m)); return l;
+  };
+  const NO_PROFILE_LOOP = mutant('no-profile', "    if (!(Array.isArray(row.oatScopes) && row.oatScopes.includes(PROFILE_SCOPE))) return OAT_NO_PROFILE;\n");
+  const NO_MEASURE_LOOP = mutant('no-measure', "    if (!(row.oatCli && row.oatCli.measured === true)) return CLI_UNMEASURED;\n");
+  const T0 = 1_800_000_000_000, H = 3600e3;
+  const world = ({ loopFile = REAL_LOOP, stateFile = null } = {}) => {
+    const { createAutoCliLoop } = require(loopFile);
+    const dir = fs.mkdtempSync(path.join(scratch, 'w-')), cacheDir = path.join(dir, 'usage-cache'), dataDir = path.join(dir, 'data');
+    fs.mkdirSync(cacheDir, { recursive: true }); fs.mkdirSync(dataDir, { recursive: true });
+    if (stateFile) fs.writeFileSync(path.join(dataDir, 'auto-cli-state.json'), JSON.stringify(stateFile));
+    let T = T0, rs = 3;
+    const rand = () => { rs = (rs * 1664525 + 1013904223) >>> 0; return rs / 4294967296; };
+    const rows = [
+      oatRow({ id: 'sub-np', oatScopes: SCOPES.filter((x) => x !== 'user:profile') }),                     // a profile-less token
+      oatRow({ id: 'sub-um', oatCli: { cli: '2.1.308', measured: false }, oatFile: { state: 'held', reason: 'cli-unmeasured', cli: '2.1.308' } }), // an unmeasured CLI
+      oatRow({ id: 'sub-oat' }),                                                                            // the owner's six after the addendum
+      row({ id: 'sub-bad', loginState: { state: 'ok' } }),
+      row({ id: 'sub-ok', loginState: { state: 'ok' } }),
+    ];
+    const calls = [], logs = [], verdicts = {};
+    const deps = {
+      now: () => T, rand, dataDir, USAGE_CACHE_DIR: cacheDir, metric: () => {},
+      serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined),
+      accounts: { list: () => ({ accounts: rows }) }, autoCliReady: () => true, usageIdentityGroupsCached: () => [],
+      usageEstimator: { estimateFor: () => null }, projectionRereadFor: () => null, lastMemberReadAt: () => 0,
+      usage: {
+        // the probe door, stubbed AS IT ANSWERS: an unprobeable oat-only row refused by name with no spawn (code login),
+        // the bad row's CLI fails with a token-shaped line (RAW here — the loop's own scrub must hold even if the door's
+        // did not), the ok row and the probeable oat-only row read
+        refreshViaCliPanel(key) {
+          calls.push({ t: T, key });
+          if (key === 'sub-np' || key === 'sub-um') { verdicts[key] = { at: T, outcome: 'login-needed', code: 'login', why: 'the OAuth login ended and the long-lived token cannot be probed' }; return Promise.resolve(false); }
+          if (key === 'sub-bad') { verdicts[key] = { at: T, outcome: 'spawn-failed', code: 'exit', why: `exit 1: Error: token ${OAT} rejected` }; return Promise.resolve(false); }
+          fs.writeFileSync(path.join(cacheDir, key + '.json'), JSON.stringify({ fetchedAt: T, fiveHour: { utilization: 0.2, resetsAt: T / 1000 + 3 * 3600 }, sevenDay: { utilization: 0.3, resetsAt: T / 1000 + 4 * 86400 } }));
+          verdicts[key] = { at: T, outcome: 'written', code: null, why: 'ok' }; return Promise.resolve(true);
+        },
+        panelVerdictFor: (key) => verdicts[key] || null,
+      },
+      onMemberReadingFresh: () => {}, log: (l) => logs.push(l), warn: (l) => logs.push('WARN ' + l),
+    };
+    let loop = createAutoCliLoop(deps);
+    return {
+      calls, logs, rows,
+      state() { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'auto-cli-state.json'), 'utf8')); } catch { return null; } },
+      async run(minutes) { for (let i = 0; i < minutes; i++) { await loop.tick(); T += 60e3; } },
+      restart() { loop = createAutoCliLoop(deps); },
+      get now() { return T; },
+    };
+  };
+  const of = (w, key) => w.calls.filter((c) => c.key === key);
+  const linesOf = (w, key, re) => w.logs.filter((l) => l.startsWith(`[auto-cli] quota refresh ${key}: `) && re.test(l));
+  const NP_LINE = '[auto-cli] quota refresh sub-np: not probed — long-lived token only, without the user:profile scope the usage panel reads; refreshes when a session uses it';
+  const UM_LINE = '[auto-cli] quota refresh sub-um: not probed — long-lived token only, and claude 2.1.308 is not measured with it in the account\'s folder; refreshes when a session uses it';
+  {
+    // the owner's state file: booked failures (36) and an attempt stamp an hour old on the profile-less row
+    const w = world({ stateFile: { v: 1, attempts: { 'sub-np': T0 - H, 'sub-ok': T0 - 2 * H }, fails: { 'sub-np': 36 }, projReads: {} } });
+    await w.run(1);
+    const st1 = w.state(), first = linesOf(w, 'sub-np', /not probed/);
+    ok(st1 && !('sub-np' in (st1.fails || {})) && !('sub-np' in (st1.attempts || {})) && st1.said && st1.said['sub-np|unprobeable:oat-no-profile'] === T0, '§10b the FIRST tick clears what the base booked against an unprobeable row (its 36 failures, its attempt stamp) and stamps the say-memory per kind', st1);
+    ok(first.length === 1 && first[0] === NP_LINE + ' (36 failed attempts booked before this cleared)', '§10b …and SAYS so, once, naming the fact that failed (no user:profile)', first);
+    ok(linesOf(w, 'sub-um', /not probed/).join() === UM_LINE, '§10b an unmeasured CLI is said with its version', linesOf(w, 'sub-um', /./));
+    await w.run(10 * 60 - 1); w.restart(); await w.run(14 * 60); // 24 h, a restart at 10 h (the say-memory is on disk)
+    ok(of(w, 'sub-np').length === 0 && of(w, 'sub-um').length === 0, '§10b a profile-less token and an unmeasured CLI: ZERO probe attempts in 24 h (the door is never asked)', { np: of(w, 'sub-np').length, um: of(w, 'sub-um').length });
+    const st = w.state();
+    ok(!['sub-np', 'sub-um'].some((k) => k in (st.fails || {}) || k in (st.attempts || {})), '§10b …no failure count, no attempt stamp (no backoff pollution)', st);
+    ok(linesOf(w, 'sub-np', /not probed/).length === 1 && linesOf(w, 'sub-um', /not probed/).length === 1, '§10b …ONE "not probed" line each in its first 24 h — a restart at 10 h says nothing again (the say-memory survives)');
+    await w.run(6 * 60);
+    const day2 = linesOf(w, 'sub-np', /not probed/);
+    ok(day2.length === 2 && day2[1] === NP_LINE, '§10b …and one more after a day, without the cleared note (nothing left to clear)', day2);
+    const oat = of(w, 'sub-oat'), oatOk = linesOf(w, 'sub-oat', /: ok \(/);
+    ok(oat.length >= 25 && oatOk.length === oat.length && !linesOf(w, 'sub-oat', /not probed/).length, `§10b THE ADDENDUM: an oat-only row whose token carries user:profile, on a measured CLI, written in its folder, IS probed on the idle rung (${oat.length} reads in 30 h), never "not probed"`);
+    const bad = linesOf(w, 'sub-bad', /: failed \(/), good = linesOf(w, 'sub-ok', /: ok \(/);
+    ok(of(w, 'sub-bad').length >= 4 && of(w, 'sub-bad').length <= 12 && (w.state().fails || {})['sub-bad'] >= 4, `§10b a probeable failing row is still asked, paced by the failure backoff (${of(w, 'sub-bad').length} attempts in 30 h, fails ${(w.state().fails || {})['sub-bad']})`);
+    ok(bad.length === of(w, 'sub-bad').length && bad.every((l) => / — exit 1: Error: token sk-«redacted» rejected \[exit\]$/.test(l)), '§10b …EVERY failed line names its reason: the CLI\'s line + the class', bad.slice(0, 2));
+    ok(!w.logs.some((l) => l.includes(OAT.slice(10)) || l.includes(OAT.slice(14, 40))), '§10b …the planted token-shaped line never reaches the journal (the loop\'s scrub — the door\'s RAW why here)');
+    ok(good.length >= 25 && !good.some((l) => / — /.test(l)), `§10b a probeable reading row reads on the idle rung (${good.length} reads in 30 h), its ok lines unchanged`);
+  }
+  {
+    // RED CONTROL 1: the same world on the reverted filter — the base behaviour, measured on the owner's hub
+    const w = world({ loopFile: BASE_LOOP, stateFile: { v: 1, attempts: { 'sub-np': T0 - H }, fails: { 'sub-np': 36 }, projReads: {} } });
+    await w.run(30 * 60);
+    const st = w.state();
+    ok(of(w, 'sub-np').length >= 1 && of(w, 'sub-um').length >= 1 && (st.fails || {})['sub-np'] > 36 && linesOf(w, 'sub-np', /: failed \(/).length === of(w, 'sub-np').length && !w.logs.some((l) => /not probed/.test(l)),
+      `§10b RED CONTROL 1 (the fix reverted — the base \`!a.loggedIn\` filter): the profile-less row is sent ${of(w, 'sub-np').length}× and the unmeasured one ${of(w, 'sub-um').length}× in 30 h, booked failed (fails ${(st.fails || {})['sub-np']} > 36), never "not probed"`);
+  }
+  // each check alone holds its row: the profile-less row (measured, written) and the hub before it knows its CLI version
+  // (`cli: null` — the folder door still says written) are sent by NOTHING but the cut check
+  const BOOT_UM = (w) => { w.rows[1] = oatRow({ id: 'sub-um', oatCli: { cli: null, measured: false }, oatFile: { state: 'written', cli: null } }); };
+  for (const [label, file, key, other, shape] of [['the profile check cut', NO_PROFILE_LOOP, 'sub-np', 'sub-um', null], ['the measured check cut', NO_MEASURE_LOOP, 'sub-um', 'sub-np', BOOT_UM]]) {
+    const real = world(); if (shape) shape(real);
+    await real.run(6 * 60);
+    const w = world({ loopFile: file }); if (shape) shape(w);
+    await w.run(6 * 60);
+    ok(of(real, key).length === 0 && of(w, key).length >= 1 && of(w, other).length === 0, `§10b RED CONTROL (${label}): the same world SENDS ${key} (${of(w, key).length}× in 6 h; the real verdict 0×) — that check alone keeps it from the spawn; ${other} stays held by the other`, { real: of(real, key).length, key: of(w, key).length, other: of(w, other).length });
+  }
+  {
+    // a row whose facts change mid-run: probeable → unprobeable (cleared, said by its new kind, never sent) → probeable again
+    const w = world();
+    w.rows[3] = { ...w.rows[3], loginState: { state: 'oat-only', login: 'expired' }, oat: true, oatScopes: SCOPES, oatCli: { cli: '2.1.306', measured: true }, oatFile: { state: 'refused', reason: 'write-failed' } }; // the bad row's login ended, its token not written
+    await w.run(2);
+    ok(of(w, 'sub-bad').length === 0 && linesOf(w, 'sub-bad', /not probed — long-lived token only, not written to the account's folder \(write-failed\);/).length === 1, '§10b a row whose login ended and whose token is not in its folder is unprobeable from its next tick, the folder\'s refusal named', w.logs.filter((l) => l.includes('sub-bad')));
+    w.rows[3] = { ...w.rows[3], loginState: { state: 'oat-only', login: 'none', oatFile: true }, oatFile: { state: 'written', cli: '2.1.306' } }; // the sweep wrote it
+    await w.run(30);
+    ok(of(w, 'sub-bad').length >= 1, '§10b …and the token written to its folder makes it probeable (the verdict is read each tick, nothing is remembered against it)');
+  }
+  // WIRING PINS: the loop reads the PURE verdict; the door asks it before the spawn; the door's verdict names the failure; the row carries the facts
+  const loopSrc = fs.readFileSync(REAL_LOOP, 'utf8'), ur = fs.readFileSync(new URL('../src/usage-routes.js', import.meta.url), 'utf8'), acc = fs.readFileSync(new URL('../src/accounts.js', import.meta.url), 'utf8');
+  ok(/const el = probeEligibility\(a\);/.test(loopSrc) && /require\('\.\.\/auto-cli-model\.js'\)/.test(loopSrc) && /const sk = `\$\{a\.id\}\|\$\{el\}`;/.test(loopSrc), 'WIRING PIN: the loop asks src/auto-cli-model.js probeEligibility for every rung subject, its say-memory per kind');
+  ok(/const pv = d\.usage\.panelVerdictFor\?\.\(key\); if \(pv && pv\.at >= now && pv\.why\) failWhy = `\$\{probeWhyText\(pv\.why\)\} \[/.test(loopSrc), 'WIRING PIN: a failed pick\'s line carries the door\'s verdict for THIS attempt, through the ONE scrub');
+  const fnAt = ur.indexOf('async function refreshViaCliPanel('), askAt = ur.indexOf("const oatEl = acctMeta.loginState && acctMeta.loginState.state === 'oat-only' ? probeEligibility(acctMeta) : null;", fnAt), spawnAt = ur.indexOf('spawnPanelProbe(bin', fnAt);
+  ok(fnAt > 0 && askAt > fnAt && spawnAt > askAt && /&& isUnprobeable\(oatEl\)\) \{\n\s*panelSays\(key, \{ at: Date\.now\(\), outcome: 'login-needed', code: 'login'/.test(ur), 'WIRING PIN: the probe door asks the SAME verdict before the spawn and refuses an unprobeable oat-only row by name (code login, no spawn)');
+  ok(/panelSays\(key, \{ at: Date\.now\(\), outcome: probeRec\.exitCode === 0 \? 'no-buckets-parsed' : 'spawn-failed', code: probeRec\.exitCode === 0 \? 'parse' : 'exit', identityVerified: false, why: probeFailWhy\(probeRec\), rung: 'panel' \}\);/.test(ur) && !/_panelVerdict\[key\] = \{/.test(ur),
+    'WIRING PIN: the door names its two silent failures (exit / parse), and EVERY verdict goes through panelSays (the record\'s one writer call)');
+  ok(/const pe = probeEligibility\(row, \{ quotaProbe: capsOf\(backend\)\.quotaProbe \}\);/.test(acc) && /row\.oatCli = \{ cli: caps\.cli, measured: !!caps\.ok \};/.test(acc) && /row\.oatScopes = a\.oatShape && Array\.isArray\(a\.oatShape\.scopes\)/.test(acc), 'WIRING PIN: the roster row carries the verdict AND its facts (oatScopes from the recorded shape, oatCli from oatFileCaps)');
+  ok(!/require\(['"](https?|child_process|net)['"]\)|fetch\(/.test(fs.readFileSync(REAL_MODEL, 'utf8')), '§ban-safety: the verdict module makes no call of any kind (no http/https/net/child_process/fetch)');
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

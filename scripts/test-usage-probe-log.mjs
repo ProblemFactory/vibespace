@@ -8,7 +8,9 @@
 // PANEL rung driven through the REAL setupUsage with a fake `claude`
 // (written / spawn-failed / no-buckets); §3 the CONTROL rung driven through
 // the REAL engine with a fake chat session answering the way the stdout
-// consumer does (written / timeout / unparsed); §4 wiring pins.
+// consumer does (written / timeout / unparsed); §4 wiring pins; §5 a failed
+// probe's reason on the door's verdict and the account record (lane
+// auto-cli-oat-unprobeable).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -169,6 +171,145 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   ok('engine: the control rung logs with the raw reply looked up from the parse', /logControlProbe\(s, key, parsed, _vsuRawOf\.get\(parsed\) \|\| null, target \? 'written' : 'refused-by-window-guard'/.test(eng) && /'timeout', \{ timeoutMs \}/.test(eng));
   ok('stdout consumer: the verbatim control reply is stashed on the pending entry BEFORE it resolves', /pend\.raw = msg\.response\.response;[\s\S]{0,80}pend\.resolve\(parsed\)/.test(con));
   ok('§ban-safety: the log module makes no vendor call (no http/https/fetch/child_process)', !/require\(['"](https?|child_process|net)['"]\)|fetch\(/.test(fs.readFileSync(path.join(REPO, 'src/server/usage-probe-log.js'), 'utf8')));
+}
+
+// ── §5 A FAILED PROBE NAMES ITS REASON WHERE THE OWNER LOOKS (lane auto-cli-oat-unprobeable) ──────────────────────
+// The REAL door (setupUsage's refreshViaCliPanel) with a fake `claude` and the REAL AccountManager: a probeable account's
+// failure leaves its reason — the class + the CLI's first line, bounded and secret-shapes-redacted — on the door's verdict
+// AND on the account RECORD (`probe: {at, ok: false, why}`, accounts.json through the one atomic writer), the roster row
+// carries it, a written answer drops it; an oat-only row is PROBED through the token in its folder when its token carries
+// user:profile on a measured CLI (the addendum), else refused by name with NO spawn and no failure recorded (the row says
+// which fact failed) — RED controls: the verdict with its profile / measured check cut spawns that row. A planted token-shaped line (built at runtime) never reaches the verdict, the record or the file.
+{
+  const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+  const usageMod = require(path.join(REPO, 'src/usage-routes.js'));
+  const OAT = ['sk-ant-', 'oat01-', 'Wd4Kp8'.repeat(14)].join('');
+  const root = mkd(`vs-probelog-why-${process.pid}-`), dataDir = path.join(root, 'data');
+  const am = new AccountManager({ dataDir });
+  const id = am.createSubscription({ name: 'Why Acct' }).id;
+  fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 29 * 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
+  const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+  const bin = path.join(root, 'fake-claude'), ran = path.join(root, 'ran.txt');
+  const say = (script) => fs.writeFileSync(bin, `#!/bin/sh\necho run >> '${ran}'\n${script}`, { mode: 0o755 });
+  const runs = () => { try { return fs.readFileSync(ran, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
+  const u = usageMod.setupUsage({
+    app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} },
+    accounts: am, hosts: null, usageHistory: null, activeSessions: new Map(),
+    serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
+    USAGE_CACHE_FILE: path.join(dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir,
+    CODEX_SESSIONS_DIR: path.join(root, 'codex-sessions'), META_DIR: path.join(dataDir, 'session-meta'),
+    AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(dataDir, 'session-buffers'),
+    probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: bin,
+  });
+  const rowOf = () => (am.list().accounts || []).find((a) => a.id === id);
+  ok('§5 a logged-in row is probeable (the roster row carries the verdict the loop reads) and holds no failure yet', rowOf().probeEligibility === 'probeable' && rowOf().probe === undefined, JSON.stringify(rowOf()));
+  // ① the CLI fails with the stdin warning first and a token-shaped error line after it
+  say(`printf 'Warning: no stdin data received in 3s, proceeding without it.\\n' >&2\nprintf 'Error: token ${OAT} was rejected\\n' >&2\nexit 1\n`);
+  const t1 = Date.now();
+  const r1 = await u.refreshViaCliPanel(id);
+  const pv1 = u.panelVerdictFor(id), rec1 = rowOf().probe;
+  ok('§5 ① a failing CLI: false, the door\'s verdict names the class (exit) and the CLI\'s first line — the Warning skipped, the token «redacted»',
+    r1 === false && pv1 && pv1.code === 'exit' && pv1.outcome === 'spawn-failed' && pv1.at >= t1 && pv1.why === 'exit 1: Error: token sk-«redacted» was rejected', JSON.stringify(pv1));
+  ok('§5 ① …the account RECORD keeps it: probe {at, ok: false, why} on the roster row', rec1 && rec1.ok === false && rec1.at === pv1.at && rec1.why === pv1.why && Object.keys(rec1).join() === 'at,ok,why', JSON.stringify(rec1));
+  const disk = fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf8');
+  ok('§5 ① …written through accounts.json (the one atomic writer), and the planted token is in NEITHER the verdict, the row nor the file',
+    JSON.parse(disk).accounts.find((a) => a.id === id).probe.why === pv1.why && !disk.includes(OAT.slice(14)) && !JSON.stringify(pv1).includes(OAT.slice(14)) && !JSON.stringify(rowOf()).includes(OAT.slice(14)));
+  ok('§5 ① …while the raw probe ring keeps the CLI\'s bytes verbatim (2.369.109: the owner\'s debugger log, data/ only — never a row, a line or a broadcast)', L.readProbeLog(dataDir).slice(-1)[0].rawStderr.includes('was rejected'));
+  // ② an answer with no quota line (the measured 152-row shape)
+  say(`printf 'You are currently using your subscription to power your Claude Code usage\\n'\n`);
+  const r2 = await u.refreshViaCliPanel(id);
+  ok('§5 ② an answer with no quota line: the class parse and its first line', r2 === false && u.panelVerdictFor(id).code === 'parse' && rowOf().probe.why === 'no quota lines in its answer: You are currently using your subscription to power your Claude Code usage', JSON.stringify(rowOf().probe));
+  // ③ a written answer drops the failure
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const at = (ms) => { const d = new Date(Date.now() + ms); return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCHours() % 12 || 12}${d.getUTCHours() < 12 ? 'am' : 'pm'} (UTC)`; };
+  say(`cat <<'EOF'\nCurrent session: 20% used · resets ${at(3 * 3600e3)}\nCurrent week (all models): 40% used · resets ${at(3 * 86400e3)}\nEOF\n`);
+  const r3 = await u.refreshViaCliPanel(id);
+  ok('§5 ③ the next WRITTEN answer drops the record\'s failure (the row says nothing about a probe that works)', r3 === true && rowOf().probe === undefined && !('probe' in JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf8')).accounts.find((a) => a.id === id)), JSON.stringify(rowOf().probe));
+  // ④ THE ADDENDUM at the door: an oat-only row is probed through the token in its folder when the token carries
+  // user:profile, the hub's CLI is measured with it, and it is written there — else refused by name, NO spawn, no failure
+  // recorded. The facts ride the row (accounts.list); the door asks probeEligibility on them before the spawn.
+  const SCOPES = ['user:file_upload', 'user:inference', 'user:mcp_servers', 'user:plugins', 'user:profile', 'user:sessions:claude_code'];
+  const OAT_LS = { state: 'oat-only', login: 'none', oatFile: true, msLeft: 300 * 86400e3, refreshExpiresAt: Date.now() - 86400e3, oatValidUntil: Date.now() + 300 * 86400e3 };
+  const PROBEABLE_FACTS = { oat: true, loginState: OAT_LS, oatScopes: SCOPES, oatCli: { cli: '2.1.306', measured: true }, oatFile: { state: 'written', cli: '2.1.306' } };
+  const realList = am.list.bind(am);
+  const { probeEligibility } = require(path.join(REPO, 'src/auto-cli-model.js'));
+  // the row with these facts, its verdict recomputed exactly as accounts.list() computes it from its own facts
+  const withFacts = (acc, facts) => { acc.list = () => { const l = realList(); l.accounts = l.accounts.map((r) => { if (r.id !== id) return r; const x = { ...r, ...facts }; x.probeEligibility = probeEligibility(x); return x; }); return l; }; };
+  const envFile = path.join(root, 'env.txt');
+  const PANEL = `cat <<'EOF'\nCurrent session: 20% used · resets ${at(3 * 3600e3)}\nCurrent week (all models): 40% used · resets ${at(3 * 86400e3)}\nEOF\n`;
+  say(`printf '%s\\n' "$CLAUDE_SECURESTORAGE_CONFIG_DIR" > '${envFile}'\n${PANEL}`);
+  const tries = [
+    ['④a a token WITHOUT user:profile', { ...PROBEABLE_FACTS, oatScopes: SCOPES.filter((x) => x !== 'user:profile') }, 'unprobeable:oat-no-profile', /without the user:profile scope/],
+    ['④b the hub\'s claude unmeasured with a token in the folder', { ...PROBEABLE_FACTS, oatCli: { cli: '2.1.308', measured: false }, oatFile: { state: 'held', reason: 'cli-unmeasured', cli: '2.1.308' } }, 'unprobeable:cli-unmeasured', /claude 2\.1\.308 is not measured/],
+    ['④b\' the token not in its folder (a write that failed)', { ...PROBEABLE_FACTS, loginState: { ...OAT_LS, oatFile: undefined, login: 'expired' }, oatFile: { state: 'refused', reason: 'write-failed' } }, 'unprobeable:oat-not-in-folder', /not written to the account's folder \(write-failed\)/],
+  ];
+  for (const [label, facts, el, re] of tries) {
+    withFacts(am, facts);
+    const before = runs();
+    const r = await u.refreshViaCliPanel(id), pv = u.panelVerdictFor(id);
+    ok(`§5 ${label}: refused by name (code login, «${el}»), NO spawn, NO failure on its record; the row says ${el}`,
+      r === false && runs() === before && pv.code === 'login' && pv.why.includes(el) && re.test(pv.why) && rowOf().probe === undefined && rowOf().probeEligibility === el, JSON.stringify({ runs: runs() - before, why: pv.why, el: rowOf().probeEligibility }));
+  }
+  withFacts(am, PROBEABLE_FACTS);
+  const b4 = runs();
+  const r4 = await u.refreshViaCliPanel(id);
+  const credsSeen = (() => { try { return fs.readFileSync(envFile, 'utf8').trim(); } catch { return null; } })();
+  ok('§5 ④c THE ADDENDUM: an oat-only row whose token carries user:profile, on a measured CLI, written in its folder IS probed — ONE spawn of the same road, the CLI pointed at the account\'s folder (the token\'s), the reading written',
+    r4 === true && runs() === b4 + 1 && credsSeen === am.subDir(id) && u.panelVerdictFor(id).outcome === 'written' && rowOf().probeEligibility === 'probeable' && rowOf().probe === undefined, JSON.stringify({ r4, runs: runs() - b4, credsSeen, sub: am.subDir(id) }));
+  am.list = realList;
+  // RED CONTROLS at the door: the same door over the verdict with ONE check cut — the profile-less token / the unmeasured
+  // CLI (the boot shape: no version known yet, the folder door still «written») is SPAWNED
+  {
+    const SRC = path.join(REPO, 'src'), scratch = mkd('vs-probelog-mut-');
+    const modelTxt = fs.readFileSync(path.join(SRC, 'auto-cli-model.js'), 'utf8').replace(/require\('\.\/([\w.-]+)'\)/g, (_, f) => `require(${JSON.stringify(path.join(SRC, f))})`);
+    const routesTxt = fs.readFileSync(path.join(SRC, 'usage-routes.js'), 'utf8');
+    const doorWith = (name, cut) => {
+      if (!modelTxt.includes(cut)) throw new Error('mutant anchor missing: ' + cut.slice(0, 60));
+      const m = path.join(scratch, name + '-model.js'); fs.writeFileSync(m, modelTxt.replace(cut, '    // CUT\n'));
+      const r = path.join(scratch, name + '-routes.js');
+      fs.writeFileSync(r, routesTxt.replace(/require\('\.\/([\w./-]+)'\)/g, (_, f) => `require(${JSON.stringify(f === 'auto-cli-model.js' ? m : path.join(SRC, f))})`));
+      return require(r);
+    };
+    const MUT = [
+      ['the profile check cut', "    if (!(Array.isArray(row.oatScopes) && row.oatScopes.includes(PROFILE_SCOPE))) return OAT_NO_PROFILE;\n", { ...PROBEABLE_FACTS, oatScopes: SCOPES.filter((x) => x !== 'user:profile') }],
+      ['the measured check cut', "    if (!(row.oatCli && row.oatCli.measured === true)) return CLI_UNMEASURED;\n", { ...PROBEABLE_FACTS, oatCli: { cli: null, measured: false }, oatFile: { state: 'written', cli: null } }],
+    ];
+    for (const [label, cut, facts] of MUT) {
+      const mod = doorWith(label.replace(/\W+/g, '-'), cut);
+      const um = mod.setupUsage({
+        app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} },
+        accounts: am, hosts: null, usageHistory: null, activeSessions: new Map(),
+        serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
+        USAGE_CACHE_FILE: path.join(dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir,
+        CODEX_SESSIONS_DIR: path.join(root, 'codex-sessions'), META_DIR: path.join(dataDir, 'session-meta'),
+        AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(dataDir, 'session-buffers'),
+        probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: bin,
+      });
+      withFacts(am, facts);
+      const b0 = runs(); await u.refreshViaCliPanel(id); const realRuns = runs() - b0;
+      const b1 = runs(); await um.refreshViaCliPanel(id); const mutRuns = runs() - b1;
+      ok(`§5 RED CONTROL (${label}): the real door spawns NOTHING for that row, the same door over the cut verdict SPAWNS it`, realRuns === 0 && mutRuns === 1, JSON.stringify({ realRuns, mutRuns }));
+      am.list = realList;
+    }
+  }
+  // ⑤ the FACTS come from accounts.list itself (no wrapper): the recorded shape's scopes, the hub's CLI verdict (oatFileCaps)
+  {
+    const a = am._state.accounts.find((x) => x.id === id);
+    fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok', refreshToken: 'r', expiresAt: Date.now() - 36e5, refreshTokenExpiresAt: Date.now() - 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
+    a.oatEnc = 'not-a-real-ciphertext'; a.oatMintedAt = Date.now() - 86400e3; a.oatShape = { scopes: SCOPES, subscriptionType: 'max' };
+    am.noteCliVersion('2.1.306 (Claude Code)'); await am.oatFileSettled();
+    const r1 = rowOf();
+    ok('§5 ⑤ list(): an expired login + a token on record ⇒ oat-only; oatScopes = the recorded shape\'s; oatCli = {cli, measured} from oatFileCaps; not in its folder (the token does not even decrypt here) ⇒ oat-not-in-folder',
+      r1.loginState.state === 'oat-only' && JSON.stringify(r1.oatScopes) === JSON.stringify(SCOPES) && r1.oatCli.cli === '2.1.306' && r1.oatCli.measured === true && r1.probeEligibility === 'unprobeable:oat-not-in-folder', JSON.stringify({ ls: r1.loginState.state, scopes: r1.oatScopes, cli: r1.oatCli, file: r1.oatFile, el: r1.probeEligibility }));
+    am.noteCliVersion('2.1.999'); await am.oatFileSettled();
+    ok('§5 ⑤ …the hub\'s CLI moves to a version the fixture never measured ⇒ cli-unmeasured, the version named', rowOf().oatCli.measured === false && rowOf().oatCli.cli === '2.1.999' && rowOf().probeEligibility === 'unprobeable:cli-unmeasured', JSON.stringify(rowOf().oatCli));
+    a.oatShape = { scopes: ['user:inference'], subscriptionType: 'max' };
+    ok('§5 ⑤ …a recorded shape without user:profile ⇒ oat-no-profile (named first)', rowOf().probeEligibility === 'unprobeable:oat-no-profile');
+    delete a.oatEnc; delete a.oatMintedAt; delete a.oatShape;
+    ok('§5 ⑤ …the token gone, the expired login is a login again (probeable; its own probe says why it fails)', rowOf().probeEligibility === 'probeable' && rowOf().oatScopes === undefined);
+  }
+  ok('§5 accounts.noteProbe refuses a fact with no instant or no reason, and an unknown account', (() => { try { am.noteProbe(id, { at: 0, why: 'x' }); return false; } catch { } try { am.noteProbe(id, { at: 1, why: '' }); return false; } catch { } try { am.noteProbe('nope', null); return false; } catch { return true; } })());
+  ok('§5 the export bundle never carries the probe fact (a reason is this hub\'s, not the account\'s)', (() => { am.noteProbe(id, { at: Date.now(), why: 'exit 1: x' }); const b = am.exportBundle(); return !JSON.stringify(b.accounts.find((a) => a.id === id)).includes('"probe"'); })());
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

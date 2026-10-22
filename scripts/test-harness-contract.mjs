@@ -1168,6 +1168,58 @@ console.log('\ncredential env: one derived list (src/harness-env.js), two doors'
   ok(Array.isArray(MINT_ENV_ALLOW) && !MINT_ENV_ALLOW.some((n) => all().includes(n)), 'wiring: oat-mint allowlist holds no credential name');
 }
 
+// ── statusBar: THE STATUS-BAR FACTS ROW (lane agy-status-bar-facts, 2026-10-21) ──
+// The owner, on an Antigravity conversation: «agy 的 chatview 缺少很多信息啊 什么 context 啊，cache rate，产物啊啥的下面都没有了».
+// What a chat harness's status bar shows is its DESCRIPTOR ROW ui.statusBar (src/status-bar-facts.js): every chat harness
+// declares one with every key (a missing one is RED here), the client META carries the same row, a harness without one
+// (a shell, a register()ed harness that declares none) reports nothing — and the bar says so, never a blank.
+console.log('\nstatusBar: every harness declares what its status bar shows');
+{
+  const SB = require(path.join(REPO, 'src/status-bar-facts.js'));
+  const { statusBarRow } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
+  // the rows each harness's stream really feeds (its normalizer's usage meta): claude = the last message's usage + the
+  // window its result names; codex = token_count last + total + model_context_window; opencode = ACP usage_update
+  // used/size only (no cache field); antigravity = agy-wrapper's `usage` record + the descriptor's window table
+  const EXPECT = {
+    claude: { context: 'reported', cache: true, odometer: false, model: true, duration: false },
+    codex: { context: 'reported', cache: true, odometer: true, model: true, duration: false },
+    opencode: { context: 'reported', cache: false, odometer: false, model: true, duration: false },
+    antigravity: { context: 'table', cache: true, odometer: true, model: true, duration: true },
+    shell: { context: null, cache: false, odometer: false, model: false, duration: false }, // terminal-only: no row, nothing reported
+  };
+  for (const id of chatHarnessIds()) {
+    const row = HARNESSES[id].ui && HARNESSES[id].ui.statusBar;
+    ok(!!row && SB.statusBarErrors(row).length === 0, `${id}: declares ui.statusBar with every key (${SB.STATUS_BAR_ROWS.join(' / ')} / windows)`, JSON.stringify(SB.statusBarErrors(row)));
+    ok(!!EXPECT[id] && SB.STATUS_BAR_ROWS.every((k) => row && row[k] === EXPECT[id][k]), `${id}: the row is what its stream feeds the bar (${JSON.stringify(EXPECT[id])})`, JSON.stringify(row));
+    ok(JSON.stringify(statusBarRow(id)) === JSON.stringify(row), `${id}: the client's statusBarRow() is the descriptor's row`);
+  }
+  ok(JSON.stringify(SB.statusBarOf(harnessOf('shell').ui)) === JSON.stringify(SB.NO_STATUS_BAR) && SB.STATUS_BAR_ROWS.every((k) => statusBarRow('shell')[k] === EXPECT.shell[k]) && SB.unreportedRows(statusBarRow('shell')).length === 5,
+    'shell (terminal-only, no chat): no row ⇒ nothing reported — every fact says «not reported», server and client alike');
+  ok(JSON.stringify(SB.unreportedRows(statusBarRow('claude'))) === '["odometer","duration"]' && JSON.stringify(SB.unreportedRows(statusBarRow('opencode'))) === '["cache","odometer","duration"]' && SB.unreportedRows(statusBarRow('antigravity')).length === 0,
+    'what each lacks is what its bar says «not reported» for: claude the token total + the turn time, opencode also the cache rate, antigravity nothing');
+  // RED rows: the checker can say no
+  const good = { context: 'reported', cache: true, odometer: false, model: true, duration: false, windows: null };
+  const bad = [[{ ...good, cache: undefined }, 'a non-boolean cache'], [(() => { const r = { ...good }; delete r.duration; return r; })(), 'a missing key'], [{ ...good, context: 'guessed' }, 'an unknown context source'],
+    [{ ...good, context: 'table' }, "context 'table' without a window table"], [{ ...good, windows: [{ prefix: 'm', tokens: 1 }] }, "a window table without context 'table'"], [{ ...good, context: 'table', windows: [{ prefix: 'm', tokens: 0 }] }, 'a window of 0 tokens'], [null, 'no row at all']];
+  for (const [row, why] of bad) ok(SB.statusBarErrors(row).length > 0, `RED row: ${why} is refused`, JSON.stringify(row));
+  // a contributed harness that declares no row reports nothing (the bar says so); one that declares a row gets it
+  const H = require(path.join(REPO, 'src/harnesses/index.js'));
+  H.register({ id: 'acme-facts', label: 'Acme Facts', kind: 'chat', quota: H.NULL_QUOTA, ui: { billing: null } });
+  H.register({ id: 'acme-facts2', label: 'Acme Facts 2', kind: 'chat', quota: H.NULL_QUOTA, ui: { billing: null, statusBar: { ...good } } });
+  try {
+    ok(SB.unreportedRows(SB.statusBarOf(H.harnessOf('acme-facts').ui)).length === 5 && SB.unreportedRows(SB.statusBarOf(H.harnessOf('acme-facts2').ui)).join() === 'odometer,duration',
+      'a register()ed harness: no ui.statusBar ⇒ every fact «not reported»; a declared row ⇒ exactly its own gaps');
+  } finally { H.unregister('acme-facts'); H.unregister('acme-facts2'); }
+  // the antigravity window table: every model the descriptor offers resolves (the docs' windows), an unknown slug does not
+  const ag = HARNESSES.antigravity, agRow = ag.ui.statusBar;
+  ok(ag.models().filter((m) => m.id).every((m) => SB.windowOf(agRow, m.id) === 1048576) && SB.windowOf(agRow, 'claude-opus-5-5-max') === 0 && SB.windowOf(agRow, 'gemini-4-argonaut') === 0 && agRow.windows === ag.AGY_CONTEXT_WINDOWS,
+    "antigravity: every slug it offers has a documented window (1,048,576 — Google's model pages, named in the descriptor); an unknown slug ⇒ 0 = «window unknown», never a guess");
+  // gated on the row, never the name: the bar reads the facts row for every fact chip
+  const bar = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf8');
+  ok(/const facts = statusBarRow\(this\._backend\);/.test(bar) && ['facts.context && !ctxWindow', 'facts.context && ctxWindow', 'facts.cache &&', 'facts.odometer &&', 'facts.duration &&'].every((n) => bar.includes(n)) && /unreportedRows\(facts\)/.test(bar),
+    'the bar draws context / cache / odometer / turn time from the facts row and says what it lacks (unreportedRows) — no harness id');
+}
+
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix

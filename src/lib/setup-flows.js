@@ -4,6 +4,7 @@ import { TerminalSession } from './terminal.js';
 import { t, setLang, getLangPref } from './i18n.js';
 import { THEMES, BUILTIN_THEMES } from './themes.js';
 import { sessionDisplayName } from '../session-name.js'; // THE name ladder — a drift-ledger row names its conversation (lane record-oracle-2-1-296)
+import { diagnosticsSection } from './cli-registration-words.js'; // lane cli-2-1-308-records: a claude build this release has no record table for
 
 /**
  * App setup/config flows mixin — the onboarding wizard, Backup & migrate
@@ -467,12 +468,14 @@ export function installSetupFlows(App) {
   },
 
     async _openDiagnostics() {
-    const [d, c, ci, bt, csp] = await Promise.all([
+    const [d, c, ci, bt, csp, rt, reg] = await Promise.all([
       fetchJson('/api/telemetry/summary?days=14&drift=1'),
       fetchJson('/api/telemetry/central-summary?days=14'),
       fetchJson('/api/ci-heavy'),
       fetchJson('/api/boot-trace'),
       fetchJson('/api/csp-reports'), // lane app-page-csp: the page security policy's count (the chip below the title)
+      fetchJson('/api/runtime'), // lane runtime-floor: the node this server runs against THE floor table (src/runtime-floor.js)
+      fetchJson('/api/cli-registration'), // lane cli-2-1-308-records: the claude builds seen with no record table in this release
     ]);
     if (!d) { showToast(t('Could not load diagnostics'), { type: 'error' }); return; }
     const esc = escHtml;
@@ -497,6 +500,22 @@ export function installSetupFlows(App) {
     <h1>${esc(t('VibeSpace diagnostics'))} <span class="dim" style="font-size:13px">— ${esc(t('last {n} days', { n: d.days }))} · ${esc(t('instance'))} ${esc(d.instance || '?')}</span></h1>
     <p class="dim">${esc(t('Local-only data from data/telemetry/. Total events: {n}.', { n: d.total }))}</p>
     ${csp && csp.app ? `<p><span class="chip" title="${esc(t('Lines in data/csp-reports.jsonl. A report from the app page also files a For-you notice; one from a frame the page made (a mail, a design) never does.'))}">${esc(t('Page security policy (reports only): {app} on the app page · {frames} from frames the page made', { app: csp.app.lines, frames: csp.frames.lines }))}</span></p>` : ''}
+    ${(() => {
+      // lane runtime-floor: which Node runs and whether it is below the release that fixes the latest advisory; the
+      // instance's own runtime (data/runtime/current) and the boot check's outcome. Absent on a server older than the route.
+      if (!rt || !rt.verdict) return '';
+      const v = rt.verdict, a = rt.advisory || {};
+      const state = v.state === 'below-floor' ? t('Below {floor}, the release that fixes the Node.js security advisory of {date} — the next update installs it for this instance and restarts on it.', { floor: v.floor, date: a.date || '?' })
+        : v.state === 'ok' ? t('At or above {floor}, the release that fixes the Node.js security advisory of {date}.', { floor: v.floor, date: a.date || '?' })
+        : t('The floor table names no fixed release for Node {major}.', { major: v.major ?? '?' });
+      const more = [];
+      if (rt.base) more.push(t('Switched at start from {base} to this instance’s own runtime.', { base: rt.base }));
+      else if (rt.own) more.push(t('This instance’s own runtime: {version} (data/runtime/current).', { version: rt.own.version }));
+      if (rt.check && rt.check.state === 'running') more.push(t('The boot check is downloading {version}…', { version: rt.check.wanted }));
+      else if (rt.check && rt.check.ok) more.push(t('The boot check provisioned {version} — the next restart runs on it.', { version: rt.check.version }));
+      else if (rt.check) more.push(t('The boot check did not provision {version} ({code}).', { version: rt.check.wanted, code: rt.check.code }));
+      return `<h2>${esc(t('Node runtime'))}</h2><p><b>${esc(t('This server runs Node {node}.', { node: rt.node }))}</b> ${esc(state)}</p>${more.map((l) => `<p class="dim">${esc(l)}</p>`).join('')}`;
+    })()}
     <h2>${esc(t('Errors'))}</h2>${errs}
     <h2>${esc(t('Performance metrics'))}</h2>${(() => {
       const m = d.metrics || {};
@@ -520,6 +539,7 @@ export function installSetupFlows(App) {
       ${said.length ? `<ul class="dim">${said.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`;
     })()}
     <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>
+    ${diagnosticsSection(reg, { t, esc })}
     ${(() => {
       // HARNESS DRIFT (design-unknown-records §3): unknown record types and
       // known types that grew a field, one row per (breadcrumb, detail) with

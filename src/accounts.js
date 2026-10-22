@@ -22,6 +22,7 @@ const crypto = require('crypto');
 const { capsOf } = require('./backend-caps.js'); // PURE registry: per-backend hot-switch verdict rides list() so the UI never offers a dead toggle
 const { loginRank, loginUsable, withOat, oatFileOf, oatFileOurs, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members; the materialized long-lived token's verdict
 const { identityRowState } = require('./oat-identity-model.js'); // PURE: what the roster says of a row's token identity (lane oat-identity-fix)
+const { probeEligibility, probeRecordOf } = require('./auto-cli-model.js'); // PURE: may the quota panel probe PROVE this row; its last failed probe, bounded (lane auto-cli-oat-unprobeable)
 const cliCaps = require('./cli-caps.js'); // PURE: oatInFile(version, fixture) — a measured CLI version gates the materialized token
 const { lawfulKey } = require('./secret-box.js'); // THE KEY-FILE LAW (src/key-file.js, lane key-file-law-stores): mint only when ABSENT with no ciphertext (tmp + link(2)); else a named refusal
 // why a row's long-lived token is NOT in its folder — the row's door names each (pool-oat-materialize + verify r1)
@@ -360,6 +361,20 @@ class AccountManager {
           // turn. 'unknown' where the harness declares no reader.
           const row = { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, loginState: this.loginStateOf(a.id), ...(info.authMode !== undefined ? { authMode: info.authMode } : {}), ...(this._credsOf(backend).longLivedToken ? this._oatMeta(a) : {}) };
           if (row.oat) { const door = this._oatFileDoor(a, row.loginState); if (door) row.oatFile = door; }
+          // THE QUOTA PROBE (lane auto-cli-oat-unprobeable): the SAME verdict the auto-cli loop and the probe door read, off
+          // the row's own facts — an oat-only row is probed through the token in its folder when the token carries
+          // user:profile (`oatScopes`, the recorded shape — no secret) and the hub's CLI is measured with it (`oatCli`,
+          // oatFileCaps); else the row names the fact that failed and says it refreshes when a session uses it — + the
+          // last failed probe's reason
+          if (row.oat) {
+            row.oatScopes = a.oatShape && Array.isArray(a.oatShape.scopes) ? a.oatShape.scopes.filter((x) => typeof x === 'string').slice(0, 20) : [];
+            const caps = this.oatFileCaps();
+            row.oatCli = { cli: caps.cli, measured: !!caps.ok };
+          }
+          const pe = probeEligibility(row, { quotaProbe: capsOf(backend).quotaProbe });
+          if (pe) row.probeEligibility = pe;
+          const pr = probeRecordOf(a.probe);
+          if (pr) row.probe = pr;
           return row;
         }
         return { ...base, tail: a.tail };
@@ -821,6 +836,29 @@ class AccountManager {
     this._save();
     this._notify();
     return a.serve ? { ...a.serve } : null;
+  }
+  /** THE LAST FAILED QUOTA PROBE (lane auto-cli-oat-unprobeable, 2026-10-22): `{at, ok: false, why}` ON the account record,
+   *  through the one atomic writer (`_save`: tmp + rename) — never a sidecar — so the reason survives a restart (a failed
+   *  probe's retry is hours away under the backoff). Written by the ONE probe door (usage-routes refreshViaCliPanel, ⟳ and
+   *  auto-cli alike) with the reason already scrubbed there (src/auto-cli-model.js probeWhyText — bounded and
+   *  secret-shapes-redacted; scrubbed again here, idempotent); dropped by the door's next WRITTEN answer (null). The row
+   *  carries it (`probe`) and its age chip says it. A write only when the fact moved: a cleared record is not re-saved. */
+  probeOf(id) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    return a ? probeRecordOf(a.probe) : null;
+  }
+  noteProbe(id, probe) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    if (!a) throw new Error('unknown account');
+    if (probe == null) { if (!a.probe) return null; delete a.probe; }
+    else {
+      const p = probeRecordOf({ ...probe, ok: false });
+      if (!p) throw new Error('probe needs an instant and a reason');
+      a.probe = p;
+    }
+    this._save();
+    this._notify();
+    return a.probe ? { ...a.probe } : null;
   }
   /** THE LONG-LIVED TOKEN'S IDENTITY (lane oat-identity-postcheck, B-3102 (a)(b)) — two facts ON the account
    *  record, through the one atomic writer (`_save`), never a sidecar. `oatCheck` = the passive post-check of the

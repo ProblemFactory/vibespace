@@ -45,12 +45,14 @@ import { dialRowState } from '../dial-facts.js'; // lane-pairing ③: THE one di
 import { dialStateText, dialHistoryLine } from './dial-address-picker.js';
 import { openExitAccessDialog, exitSummaryText, exitCodeWords, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { signinChipHtml } from './machine-signin-chip.js'; // lane desktop-vnc-remember: the Machines card's 「登录已记住」
+import { runtimeLineEl, runtimeFixEl } from './machine-runtime-line.js'; // lane device-node-version: the node its agent runs on + 「运行时过旧」
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
 import { openDeviceActsDialog } from './device-acts-dialog.js'; // lane device-act-audit: what the hub did on the machine, who asked
 import { allowLineText, allowRemedyText } from './device-allow-words.js'; // lane device-allow-flags: the machine's own allow list in words
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it)
 import { enterSubmits } from './chat-enter-keys.js';
 import { revealAccountKey } from './vault-reveal.js'; // lane vault-contents-window r2: Show key… through THIS page's reveal window (验证是你 first)
+import { hubRegistrationRow, draftLine } from './cli-registration-words.js'; // lane cli-2-1-308-records: the hub's claude is a build with no record table ⇒ the line + 「生成记录草稿」
 import { mintShowVerdict } from '../oat-mint-model.js'; // PURE (lane heavy3-flake-races): a late answer never repaints over a newer push
 
 // Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
@@ -135,6 +137,10 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
   if (ls.state === 'oat-only') {
     if (!local) return ''; // a host section shows the DEAD state only (and the token rides to hosts)
     const near = local && typeof ls.msLeft === 'number' && ls.msLeft < 24 * 3600e3;
+    // …and its tooltip ENDS with why the reading ages (lane auto-cli-oat-unprobeable): never probed, refreshed by use —
+    // after the facts the owner ruled lead the hover (2026-10-15: where the token sits, which CLI verified it)
+    const pn = /^unprobeable:(oat-no-profile|cli-unmeasured|oat-not-in-folder)$/.test(String(a.probeEligibility || '')) ? acctProbeNote(a) : null;
+    const tail = pn ? ' · ' + escHtml(pn.text) : '';
     // THE TOKEN IN THE FOLDER (lane pool-oat-materialize): a member with no usable login whose
     // long-lived token was written into its credential file — pooled sessions spend it too. A POOL
     // row whose worst member is such a slot has nothing to warn about until the token's last day.
@@ -153,14 +159,14 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
       const date = escHtml(loginWhenText(ls.oatValidUntil));
       const title = held ? t('Written to this account’s folder, but this CLI version ({cli}) is not measured: running sessions continue, no new ones are placed here. The long-lived token is valid until {date}; only the quota refresh (⟳) needs you to sign in.', { date, cli })
         : t('Written to this account’s folder; CLI {cli} verified. No usable OAuth login here, so pooled sessions run on this long-lived token too (valid until {date}). It never refreshes; only the quota refresh (⟳) needs you to sign in.', { date, cli });
-      return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(ls.worstId || a.id)}" title="${title}">${ROSTER_ICONS.CLOCK}${who}${label}</span>`;
+      return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(ls.worstId || a.id)}" title="${title}${tail}">${ROSTER_ICONS.CLOCK}${who}${label}</span>`;
     }
     // a token NOT in the folder: the ONE word (.268), and the refusal that kept it out (pool-oat-materialize) beside it
     const refused = a.oatFile && a.oatFile.state === 'refused' ? oatFileRefusedText(a.oatFile.reason, a.oatFile.code) : '';
     const label = near ? t('long-lived token only · ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })
       : t('long-lived token only');
     const title = t('This account’s OAuth login ended {when}; sessions keep running on its long-lived token (valid until {date}); only the quota refresh (⟳) needs you to sign in again.', { when: escHtml(loginWhenText(ls.refreshExpiresAt)), date: escHtml(loginWhenText(ls.oatValidUntil)) });
-    return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" title="${title}">${ROSTER_ICONS.CLOCK}${label}${refused ? ' · ' + refused : ''}</span>`;
+    return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" title="${title}${tail}">${ROSTER_ICONS.CLOCK}${label}${refused ? ' · ' + refused : ''}</span>`;
   }
   const dead = ls.state === 'expired' || ls.state === 'logged-out';
   if (!dead && !(local && ls.state === 'expiring')) return '';
@@ -229,6 +235,27 @@ export function acctExtrasHtml({ login = '', oat = '', oatWarn = false, prov = '
  *  "直接说仅长期 token 就行了"): the ident line never repeats the word and the healthy green token tag
  *  folds into it. An expired login still parses loggedIn, so this reads the chip's state, never loggedIn. */
 export const oatOnlyChipShown = (a, { local = true } = {}) => !!(local && a && a.loginState && a.loginState.state === 'oat-only');
+
+/** What the row says about its QUOTA PROBE (lane auto-cli-oat-unprobeable, 2026-10-22, the owner: «为什么现在开始出现很多
+ *  长时间没刷新过用量信息的账户 因为一直没用到过吗？»): `{text, at}` for the age chip's tooltip, or null. An oat-only row the probe
+ *  cannot prove (the row's `probeEligibility`, the verdict the auto-cli loop and the probe door read — src/auto-cli-model.js)
+ *  is never asked, so its reading refreshes only when a session uses it — said WITH the fact that failed (no profile scope /
+ *  an unmeasured claude CLI / the token not in its folder), while the age stays (it is a fact); an oat-only row that IS
+ *  probeable says nothing new; a probeable row whose last probe failed says why (`probe.why`, scrubbed by the hub), until a
+ *  reading newer than that failure lands (`at`). No new control: the oat-only chip beside it is the 「登录…」 door. */
+export function acctProbeNote(a) {
+  if (!a || typeof a !== 'object') return null;
+  const el = a.probeEligibility;
+  if (el === 'unprobeable:oat-no-profile') return { text: t('Long-lived token only, without the profile scope: can’t be probed — refreshes when a session uses it'), at: 0 };
+  if (el === 'unprobeable:cli-unmeasured') return { text: t('Long-lived token only, and claude {cli} isn’t measured with it: can’t be probed — refreshes when a session uses it', { cli: String((a.oatCli && a.oatCli.cli) || '?') }), at: 0 };
+  if (el === 'unprobeable:oat-not-in-folder') return { text: t('Long-lived token only, not in its folder: can’t be probed — refreshes when a session uses it'), at: 0 };
+  const p = a.probe;
+  if (a.probeEligibility === 'probeable' && p && p.ok === false && p.why) return { text: t('Last probe failed: {why}', { why: String(p.why) }), at: Number(p.at) || 0 };
+  return null;
+}
+/** The note stamped on a usage cell (`data-probe-note` / `data-probe-at`) — what the poll's repaint hands back. */
+const probeNoteOfCell = (ds) => (ds && ds.probeNote ? { text: ds.probeNote, at: Number(ds.probeAt) || 0 } : null);
+const probeNoteAttrs = (n) => (n && n.text ? ` data-probe-note="${escHtml(n.text)}" data-probe-at="${Number(n.at) || 0}"` : '');
 
 /** A subscription row's ident (the tail beside the name). `email` = the best-known address,
  *  `hostTag` = the "· logged in on {host}" tag ('' when no machine holds its login). */
@@ -505,7 +532,7 @@ export function installManageAgents(App, ctx = {}) {
     for (const cell of cells) {
       const snap = rosterUsageSnapshot(cell.dataset, maps);
       if (!snap) continue;
-      const html = this._acctUsageHtml(snap.u, snap.est);
+      const html = this._acctUsageHtml(snap.u, snap.est, probeNoteOfCell(cell.dataset));
       if (cell.innerHTML !== html) { cell.innerHTML = html; n++; const list = cell.closest && cell.closest('.acct-list'); if (list) lists.add(list); }
       // …and the row's CREDITS CHIP from the SAME snapshot, patched in place
       const row = cell.closest && cell.closest('.acct-key-row');
@@ -1406,7 +1433,7 @@ export function installManageAgents(App, ctx = {}) {
   // Claude = the passive statusline cache; Codex = the per-account rate-limit
   // buckets (both ride /api/usage). Scoped weekly buckets (e.g. Fable) get
   // their own donut when present.
-  _acctUsageHtml(u, est) {
+  _acctUsageHtml(u, est, probeNote = null) {
     if (!u) return '';
     const now = Date.now();
     const pct = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
@@ -1490,7 +1517,10 @@ export function installManageAgents(App, ctx = {}) {
       const tip = [buckets.map(([l, p, isE]) => `${l} ${isE ? t('est {pct}%', { pct: p }) : p + '%'}`).join(' · '), etaTitle, nextTip].filter(Boolean).join(' · ');
       mini = `<span class="acct-usage-mini${wEst ? ' acct-mini-est' : ''}" style="color:${wc}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${wEta ? ' · ' + escHtml(wEta) : ''}</span>`;
     }
-    const ageTitle = [age != null ? t('Last refreshed {n} min ago', { n: age }) : '', etaTitle].filter(Boolean).join(' · ');
+    // THE PROBE NOTE (acctProbeNote, lane auto-cli-oat-unprobeable): why this reading ages — never probed / the last probe's
+    // failure; a failure older than the reading it would explain is not said
+    const probeLine = probeNote && probeNote.text && !(probeNote.at && u.fetchedAt > probeNote.at) ? probeNote.text : '';
+    const ageTitle = [age != null ? t('Last refreshed {n} min ago', { n: age }) : '', etaTitle, probeLine].filter(Boolean).join(' · ');
     // PAID OVERAGE (design §1.4 + D3): this roster is where the owner picks a
     // switch target, and an overage member's donuts are the friendliest ones on
     // the row while every token it serves is billed pay-per-use.
@@ -2179,15 +2209,45 @@ export function installManageAgents(App, ctx = {}) {
         // silently reverted the opus alias to 4.8. Offer the persistent
         // user-local install right here (native installer → ~/.local, which
         // wins PATH; picked up by new sessions after the next server restart).
-        if (!selectedHost && b.key === 'claude' && info.installed && info.install && !info.install.userLocal && b.installCmd) {
-          const warnRow = document.createElement('div');
-          warnRow.className = 'ob-cli-ephemeral';
-          warnRow.innerHTML = `<span class="usage-warn">⚠ ${escHtml(t('Installed in a system location ({path}) — in containerized deployments, updates to it are lost when the container is rebuilt.', { path: info.install.binPath }))}</span>`;
-          const persistBtn = document.createElement('button'); persistBtn.className = 'agent-btn'; persistBtn.textContent = t('Install persistent copy');
-          persistBtn.title = b.installCmd + ' — ' + t('installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)');
-          persistBtn.onclick = () => run(b.installCmd);
-          warnRow.appendChild(persistBtn);
-          left.appendChild(warnRow);
+        if (!selectedHost && b.key === 'claude' && info.installed) {
+          if (info.install && !info.install.userLocal && b.installCmd) {
+            const warnRow = document.createElement('div');
+            warnRow.className = 'ob-cli-ephemeral';
+            warnRow.innerHTML = `<span class="usage-warn">⚠ ${escHtml(t('Installed in a system location ({path}) — in containerized deployments, updates to it are lost when the container is rebuilt.', { path: info.install.binPath }))}</span>`;
+            const persistBtn = document.createElement('button'); persistBtn.className = 'agent-btn'; persistBtn.textContent = t('Install persistent copy');
+            persistBtn.title = b.installCmd + ' — ' + t('installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)');
+            persistBtn.onclick = () => run(b.installCmd);
+            warnRow.appendChild(persistBtn);
+            left.appendChild(warnRow);
+          }
+          // THE UNREGISTERED BUILD (lane cli-2-1-308-records — the treadmill): the hub's claude is a build this release has
+          // no record table for (src/server/cli-registration.js) ⇒ say so, and offer its record draft — the static dump of
+          // the installed binary (its strings; it is never run) into data/claude-cli-dumps/<v>.json for the next release
+          {
+            const w = hubRegistrationRow(await fetchJson('/api/cli-registration'), { t });
+            if (stale()) return;
+            if (w) {
+              const regRow = document.createElement('div');
+              regRow.className = 'ob-cli-unregistered';
+              regRow.innerHTML = `<span class="usage-warn">⚠ ${escHtml(w.line)}</span>${w.draft ? ` <span class="dim ob-cli-draft">${escHtml(w.draft)}</span>` : ''}`;
+              if (w.button) {
+                const draftBtn = document.createElement('button'); draftBtn.className = 'agent-btn'; draftBtn.textContent = w.button.label;
+                draftBtn.title = w.button.title;
+                draftBtn.onclick = async () => {
+                  draftBtn.disabled = true;
+                  try {
+                    const r = await api('/api/cli-registration/draft', { method: 'POST' });
+                    const words = draftLine({ file: r.file, changes: r.changes, against: r.against }, t);
+                    const said = document.createElement('span'); said.className = 'dim ob-cli-draft'; said.textContent = words;
+                    draftBtn.replaceWith(said);
+                    showToast(words, { type: 'success' });
+                  } catch (e) { draftBtn.disabled = false; showToast(t('Could not draft the record table: {why}', { why: e.message }), { type: 'error' }); }
+                };
+                regRow.appendChild(draftBtn);
+              }
+              left.appendChild(regRow);
+            }
+          }
         }
         if (stale()) return;
         row.append(left, actions);
@@ -2589,6 +2649,11 @@ export function installManageAgents(App, ctx = {}) {
             l3.title = allowRemedyText(h.name || h.id);
             sum.appendChild(l3);
           }
+          // lane device-node-version: the node its agent runs on (the row's `runtime` — the hub's verdict over the floor table);
+          // 「运行时过旧」 below its line's floor, the recipe under the tools (a dial device: the 「重新安装…」 door)
+          const isDialDev = h.transport === 'dial' && !!h.deviceId;
+          const rtl = runtimeLineEl(h.runtime, { dial: isDialDev });
+          sum.appendChild(rtl.el);
           det.appendChild(sum);
           // lane-pairing ③⑥: two human-triggered tools per machine — its dial history (the device's own record, the
           // `dial-status` op; never fetched on render) and "Who can use it…" (the exit dialog)
@@ -2630,6 +2695,7 @@ export function installManageAgents(App, ctx = {}) {
             }
             det.appendChild(tools);
           }
+          { const fx = runtimeFixEl(rtl.words, { onReinstall: isDialDev ? () => this.sidebar?._showDevicePairDialog?.(h) : null }); if (fx) det.appendChild(fx); } // lane device-node-version: the pairing sheet = the re-install
           const sec = mkSection('', h.id, null, det);
           const fill = () => {
             if (det._filled) return;
@@ -2832,7 +2898,7 @@ export function installManageAgents(App, ctx = {}) {
     // the Codex roster (ROSTER_ICONS at module top).
     const { CROWN, GLOBE, KEY, POOL, STAR_F, STAR_O, DOTS } = ROSTER_ICONS;
     // Compact per-account usage readout — shared with the Codex roster.
-    const usageHtml = (u, est) => this._acctUsageHtml(u, est);
+    const usageHtml = (u, est, probeNote = null) => this._acctUsageHtml(u, est, probeNote);
     // Peer row: the SELECTED MACHINE's own global login. It's the default
     // whenever no named account is starred (a session with no account uses
     // the login of whatever machine it runs on). Not renamable/removable.
@@ -3029,7 +3095,10 @@ export function installManageAgents(App, ctx = {}) {
         : (selectedHost && v?.how === 'host-login') ? { src: 'host-own', key: selectedHost }
         : (selectedHost && v?.how === 'host-held') ? { src: 'host-account', key: selectedHost + ':' + a.id }
         : (a.loggedIn || a.oat) ? { src: 'accounts', key: a.id } : null;
-      const usageStampAttrs = usageStamp ? ` data-usage-src="${usageStamp.src}" data-usage-key="${escHtml(usageStamp.key)}"` : '';
+      // …and the PROBE NOTE (lane auto-cli-oat-unprobeable) rides the same stamp: this machine's own row only (a host's reading
+      // is not this hub's probe)
+      const probeNote = !selectedHost && usageStamp && usageStamp.src === 'accounts' && usageStamp.key === a.id ? acctProbeNote(a) : null;
+      const usageStampAttrs = usageStamp ? ` data-usage-src="${usageStamp.src}" data-usage-key="${escHtml(usageStamp.key)}"${probeNoteAttrs(probeNote)}` : '';
       // THE CREDITS CHIP (B-ad05 + 2.369.189): paid overage in use OR usage
       // credits allowed — the money icon + one word on the identity line
       // (inline, so it neither adds a row line nor shifts the donut cluster /
@@ -3051,7 +3120,7 @@ export function installManageAgents(App, ctx = {}) {
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : isSub ? CROWN : KEY}</span>
         <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${creditsTag}${resetTag ? `<span class="acct-reset-slot">${resetTag}</span>` : ''}</span>${extrasTag}</span>
-        <span class="acct-usage-cell"${usageStampAttrs}>${rowSnap ? usageHtml(rowSnap.u, rowSnap.est) : ''}</span>
+        <span class="acct-usage-cell"${usageStampAttrs}>${rowSnap ? usageHtml(rowSnap.u, rowSnap.est, probeNote) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>

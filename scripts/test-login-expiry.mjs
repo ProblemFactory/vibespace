@@ -2058,5 +2058,116 @@ console.log('— §11 the token-in-folder chip is one noun (desk + phone)');
     finally { try { chrome.kill('SIGKILL'); } catch { } }
   }
 }
+console.log('— §12 the row says why its reading ages: never probed / the last probe failed (lane auto-cli-oat-unprobeable)');
+{
+  // The owner (2026-10-22): «为什么现在开始出现很多长时间没刷新过用量信息的账户 因为一直没用到过吗？» — six oat-only rows read
+  // 35–48 h old and the row said only the age. Now: an account the probe cannot prove says so on its age chip's tooltip and
+  // on its 「仅长期 token」 chip's (the chip's ONE word stays — the owner's 2026-10-14 ruling); a probeable account whose last
+  // probe failed says why on the age chip's tooltip, until a reading newer than that failure lands. The age stays (a fact).
+  // Rows composed from the REAL helpers (loginExpiryChipHtml, acctProbeNote, _acctUsageHtml, _repaintRosterUsage) + the
+  // real style.css; RED CONTROL = manage-agents.js with the note helper cut back to nothing (the base's row).
+  const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
+  const maSrc = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
+  const keyAt = maSrc.indexOf('const keyLines = rosterAccts.map(a => {'), keyEnd = maSrc.indexOf('}).join(', keyAt);
+  const keySrc = keyAt > 0 && keyEnd > keyAt ? maSrc.slice(keyAt, keyEnd) : '';
+  ck('§12 WIRING: the claude row stamps the note on its usage cell and renders the cell with it; the poll\'s repaint hands the stamp back',
+    keySrc.includes("const probeNote = !selectedHost && usageStamp && usageStamp.src === 'accounts' && usageStamp.key === a.id ? acctProbeNote(a) : null;") && keySrc.includes('${probeNoteAttrs(probeNote)}') && keySrc.includes('usageHtml(rowSnap.u, rowSnap.est, probeNote)')
+    && maSrc.includes('const html = this._acctUsageHtml(snap.u, snap.est, probeNoteOfCell(cell.dataset));') && maSrc.includes('const usageHtml = (u, est, probeNote = null) => this._acctUsageHtml(u, est, probeNote);'));
+  if (!CHROME) console.log('  SKIP: no chrome binary on this machine (the §12 legs need headless chrome)');
+  else {
+    const { spawn } = await import('node:child_process');
+    const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-loat12-'));
+    const stubBV = { name: 'stub-bv', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'bv', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
+    const bundle = (opts, out) => esbuild.build({ ...opts, bundle: true, format: 'iife', globalName: 'MA', platform: 'browser', target: 'es2022', outfile: path.join(dir, out), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBV] });
+    await bundle({ entryPoints: [path.join(REPO, 'src/lib/manage-agents.js')] }, 'ma.js');
+    const CUT = ["export function acctProbeNote(a) {\n  if (!a || typeof a !== 'object') return null;", 'export function acctProbeNote(a) {\n  return null;'];
+    const maBase = maSrc.replace(CUT[0], CUT[1]);
+    ck('§12 the control cut the note helper back to nothing (the base row: the age alone)', maSrc.split(CUT[0]).length === 2 && !maBase.includes(CUT[0]));
+    await bundle({ stdin: { contents: maBase, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'manage-agents.js', loader: 'js' } }, 'ma-base.js');
+    fs.copyFileSync(path.join(REPO, 'public/style.css'), path.join(dir, 'style.css'));
+    function pageMain() { // runs IN the page
+      const H = 3600e3, D = 86400e3, NOW = Date.now();
+      class Host {} MA.installManageAgents(Host); const app = new Host();
+      const u = (ageMs) => ({ fetchedAt: NOW - ageMs, fiveHour: { utilization: 0.2, resetsAt: Math.round((NOW + 2 * H) / 1000) }, sevenDay: { utilization: 0.4, resetsAt: Math.round((NOW + 50 * H) / 1000) } });
+      const LS_OAT = { state: 'oat-only', login: 'expired', msLeft: 300 * D, refreshExpiresAt: NOW - 3 * D, oatValidUntil: NOW + 300 * D };
+      const LS_OK = { state: 'ok', msLeft: 20 * D, refreshExpiresAt: NOW + 20 * D };
+      const ROWS = [
+        ['O', { id: 'sub-o', name: 'Side Max', type: 'subscription', oat: true, oatDaysLeft: 300, loggedIn: true, loginState: LS_OAT, oatCli: { cli: '2.1.308', measured: false }, probeEligibility: 'unprobeable:cli-unmeasured' }, u(35 * H)],
+        ['N', { id: 'sub-n', name: 'Bare Max', type: 'subscription', oat: true, oatDaysLeft: 300, loggedIn: true, loginState: LS_OAT, probeEligibility: 'unprobeable:oat-no-profile' }, u(40 * H)],
+        ['Q', { id: 'sub-q', name: 'Live Max', type: 'subscription', oat: true, oatDaysLeft: 300, loggedIn: true, loginState: { ...LS_OAT, login: 'none', oatFile: true }, oatFile: { state: 'written', cli: '2.1.306' }, oatCli: { cli: '2.1.306', measured: true }, probeEligibility: 'probeable' }, u(20 * 60e3)],
+        ['F', { id: 'sub-f', name: 'Work Max', type: 'subscription', loggedIn: true, loginState: LS_OK, probeEligibility: 'probeable', probe: { at: NOW - H, ok: false, why: 'exit 1: Not logged in · Please run /login' } }, u(3 * H)],
+        ['X', { id: 'sub-x', name: 'Odd Max', type: 'subscription', loggedIn: true, loginState: LS_OK, probeEligibility: 'probeable', probe: { at: NOW - H, ok: false, why: 'exit 1: <img src=x onerror="window.__xss=1">' } }, u(3 * H)],
+        ['S', { id: 'sub-s', name: 'Late Max', type: 'subscription', loggedIn: true, loginState: LS_OK, probeEligibility: 'probeable', probe: { at: NOW - 5 * H, ok: false, why: 'exit 1: older than the reading' } }, u(1 * H)],
+        ['K', { id: 'sub-k', name: 'Fine Max', type: 'subscription', loggedIn: true, loginState: LS_OK, probeEligibility: 'probeable' }, u(2 * H)],
+      ];
+      document.getElementById('rows').innerHTML = ROWS.map(([k, a, uu]) => '<div class="acct-key-row" data-k="' + k + '"><span class="acct-type-icon"></span><span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">' + a.name + '</span>'
+        + '<span class="acct-key-tail">' + MA.subIdentHtml(a, { email: '' }) + '</span></span>' + MA.acctExtrasHtml({ login: MA.loginExpiryChipHtml(a), oat: MA.oatTagHtml(a), oatWarn: false }) + '</span>'
+        + '<span class="acct-usage-cell">' + app._acctUsageHtml(uu, null, MA.acctProbeNote ? MA.acctProbeNote(a) : null) + '</span><span class="acct-key-actions"><button class="acct-icon"></button></span></div>').join('');
+      // THE POLL'S REPAINT: a stamped cell (as the row template stamps it — probeNoteAttrs) repainted from the maps
+      const n = MA.acctProbeNote ? MA.acctProbeNote(ROWS[0][1]) : null;
+      const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      document.getElementById('poll').innerHTML = '<div class="acct-key-row" data-k="P"><span class="acct-usage-cell" data-usage-src="accounts" data-usage-key="sub-o"' + (n ? ' data-probe-note="' + esc(n.text) + '" data-probe-at="0"' : '') + '></span></div>';
+      app._accountUsage = { 'sub-o': ROWS[0][2] }; app._usageEstimates = {};
+      window.repainted = app._repaintRosterUsage();
+    }
+    const page = (lang, js) => '<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><link rel="stylesheet" href="./style.css"></head>\n'
+      + "<body style=\"margin:12px\"><script>localStorage.setItem('vibespace.lang','" + lang + "');<" + "/script>"
+      + '<div id="rows" class="acct-list" style="width:520px"></div><div id="poll" class="acct-list" style="width:520px"></div>'
+      + '<script src="./' + js + '"></script><script>\n(' + pageMain.toString() + ')();\n<' + '/script></body></html>';
+    for (const lang of ['en', 'zh', 'ja']) fs.writeFileSync(path.join(dir, lang + '.html'), page(lang, 'ma.js'));
+    fs.writeFileSync(path.join(dir, 'base-en.html'), page('en', 'ma-base.js'));
+    const CDP_PORT = await freePort();
+    const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=900,700', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try {
+      const WS = require(path.join(REPO, 'node_modules/ws'));
+      const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out')), ms); if (t.unref) t.unref(); })]);
+      let target = null;
+      for (let i = 0; i < 60 && !target; i++) { try { const l = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json')).json(); target = l.find((t) => t.type === 'page'); } catch { await sleep(200); } }
+      if (!target) throw new Error('chrome never came up');
+      const sock = new WS(target.webSocketDebuggerUrl);
+      await race(new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); }), 15000, 'devtools socket');
+      let sq = 0; const pend = new Map();
+      sock.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+      const cdp = (method, params = {}) => race(new Promise((res, rej) => { const id = ++sq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); sock.send(JSON.stringify({ id, method, params })); }), 30000, 'CDP ' + method);
+      const ev = async (e) => { const rr = await cdp('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true }); if (rr.exceptionDetails) throw new Error(rr.exceptionDetails.exception?.description || 'threw'); return rr.result.value; };
+      await cdp('Page.enable'); await cdp('Runtime.enable');
+      await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+      const look = async (lang) => {
+        await cdp('Page.navigate', { url: 'file://' + path.join(dir, lang + '.html') }); await sleep(900);
+        return ev(`(() => { const out = {}; for (const row of document.querySelectorAll('.acct-key-row')) { const age = row.querySelector('.acct-usage-age'), chip = row.querySelector('.acct-login-chip');
+            out[row.dataset.k] = { age: age ? age.textContent.trim() : null, ageTitle: age ? age.title : null, chip: chip ? chip.textContent.trim() : null, chipTitle: chip ? chip.title : null, relogin: chip ? chip.dataset.relogin : null, imgs: row.querySelectorAll('img').length, text: row.textContent }; }
+          return { rows: out, xss: window.__xss === 1, repainted: window.repainted }; })()`);
+      };
+      const W = {
+        en: { never: 'Long-lived token only, and claude 2.1.308 isn’t measured with it: can’t be probed — refreshes when a session uses it', noProfile: 'Long-lived token only, without the profile scope: can’t be probed — refreshes when a session uses it', failed: 'Last probe failed: ', chip: 'long-lived token only', ago: 'Last refreshed 2100 min ago' },
+        zh: { never: '仅长期 token，且 claude 2.1.308 未测量：无法主动探测，用到时才刷新', noProfile: '仅长期 token（无 profile 权限）：无法主动探测，用到时才刷新', failed: '上次探测失败：', chip: '仅长期 token', ago: '2100 分钟前刷新' },
+        ja: { never: '長期トークンのみで、claude 2.1.308 は未計測：自動では確認できません。セッションで使われたときに更新されます', noProfile: '長期トークンのみ（profile 権限なし）：自動では確認できません。セッションで使われたときに更新されます', failed: '前回の確認に失敗しました：', chip: '長期トークンのみ', ago: '2100 分前に更新' },
+      };
+      const base = await look('base-en');
+      for (const lang of ['en', 'zh', 'ja']) {
+        const { rows: R, xss, repainted } = await look(lang), w = W[lang];
+        console.log('    ' + lang + ' O age [' + R.O.age + '] «' + R.O.ageTitle + '» · chip «' + R.O.chipTitle.slice(0, 80) + '…»\n    ' + lang + ' F age «' + R.F.ageTitle + '»');
+        ck('§12 BROWSER ' + lang + ': an oat-only row keeps its age («' + R.O.age + '», as the base draws it) and its age chip\'s tooltip says it is not probed and why (claude 2.1.308 unmeasured), refreshed by use',
+          R.O.age === base.rows.O.age && R.O.age !== '' && R.O.ageTitle.startsWith(w.ago) && R.O.ageTitle.endsWith(w.never));
+        ck('§12 BROWSER ' + lang + ': …its 「仅长期 token」 chip keeps its ONE word, its tooltip ENDS with the same sentence (after the facts that lead it), the 登录 door stays (no new control)',
+          R.O.chip === w.chip && R.O.chipTitle.endsWith(' · ' + w.never) && R.O.chipTitle.length > w.never.length + 30 && R.O.relogin === 'sub-o' && !R.O.text.includes(w.never));
+        ck('§12 BROWSER ' + lang + ': a probeable row whose last probe failed says why on its age chip («' + w.failed + '<why>»)', R.F.ageTitle.endsWith(w.failed + 'exit 1: Not logged in · Please run /login') && !R.F.chip);
+        ck('§12 BROWSER ' + lang + ': a markup-shaped why is TEXT in the tooltip (escHtml) — no element, no script ran', R.X.ageTitle.endsWith(w.failed + 'exit 1: <img src=x onerror="window.__xss=1">') && R.X.imgs === 0 && !xss);
+        ck('§12 BROWSER ' + lang + ': a failure OLDER than the reading is not said; a row with no failure says nothing new', !R.S.ageTitle.includes(w.failed) && !R.K.ageTitle.includes(w.failed) && !R.K.ageTitle.includes(w.never));
+        ck('§12 BROWSER ' + lang + ': the poll\'s repaint (_repaintRosterUsage) keeps the stamped note on the age chip', repainted === 1 && R.P && R.P.ageTitle.endsWith(w.never));
+        ck('§12 BROWSER ' + lang + ': a profile-less token says THAT on both tooltips (the fact that failed, named)', R.N.ageTitle.endsWith(w.noProfile) && R.N.chipTitle.endsWith(' · ' + w.noProfile) && R.N.chip === w.chip);
+        ck('§12 BROWSER ' + lang + ': THE ADDENDUM — an oat-only row the probe CAN prove (profile, measured CLI, written in its folder) says nothing new: no note on its age chip, its chip\'s hover as before',
+          !R.Q.ageTitle.includes(w.noProfile) && !R.Q.ageTitle.includes(w.never) && !/can’t be probed|无法主动探测|自動では確認できません/.test(R.Q.ageTitle + ' ' + (R.Q.chipTitle || '')) && R.Q.ageTitle !== '');
+      }
+      console.log('    base O age «' + base.rows.O.ageTitle + '» · F «' + base.rows.F.ageTitle + '»');
+      ck('§12 BROWSER: RED control — the base row says only the age: no «never probed» on the age chip or the chip, no «last probe failed»',
+        base.rows.O.ageTitle.startsWith(W.en.ago) && !base.rows.O.ageTitle.includes(W.en.never) && !base.rows.O.chipTitle.includes(W.en.never) && !base.rows.F.ageTitle.includes(W.en.failed) && base.rows.P.ageTitle.startsWith(W.en.ago) && !base.rows.P.ageTitle.includes(W.en.never));
+      sock.close();
+    } catch (e) { ck('BROWSER §12 ran: ' + e.message, false); }
+    finally { try { chrome.kill('SIGKILL'); } catch { } }
+  }
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

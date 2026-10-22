@@ -180,6 +180,9 @@ app.get('/api/ci-heavy', (req, res) => {
   res.json({ runs: runs.slice(0, 12), running });
 });
 
+// lane runtime-floor: the node this server runs, its floor (src/runtime-floor.js), the instance's own runtime and the boot
+// check — ⚙ Diagnostics report says it (src/server/runtime-boot.js answer)
+app.get('/api/runtime', (req, res) => res.json(require('./runtime-boot.js').answer()));
 app.get('/api/version', async (req, res) => {
   if (versionInfo.commit === null) {
     try { versionInfo.commit = execFileSync('git', ['-C', rootDir, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf-8', timeout: 3000 }).trim(); }

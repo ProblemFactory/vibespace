@@ -7027,6 +7027,12 @@ label.chan-cap-row { cursor: default; }
 .browser-live-strip-owners { display: inline-flex; align-items: center; gap: 2px; margin-left: 2px; }
 .browser-live-strip-owners .win-owner-dot { width: 7px; height: 7px; }
 .file-tool-btn.browser-live-bind.bound { color: var(--accent); }
+/* lane live-bind-door: a window's door on its TAB while grouped (the live view's side by side) — on the active tab and a shown pane only */
+.tab-door { display: none; flex: none; width: 18px; height: 16px; padding: 0; font-size: 12px; margin-left: 2px; align-items: center; justify-content: center; border: none; border-radius: var(--radius-sm); background: none; color: var(--text-dim); cursor: pointer; }
+.tab-item.active > .tab-door, .tab-item.tab-pane > .tab-door { display: inline-flex; }
+.tab-door:hover { background: var(--hover-overlay); color: var(--text); }
+.tab-door.bound { color: var(--accent); }
+.tab-door svg { display: block; } /* svgIcon16 draws it at 1em */
 /* ≤768px: TABS ONLY (D19's measurement) — the model keeps the split, the phone shows the focused pane.
    lane S4 verify r1: the ACTIVE split host only — unscoped, every split host was displayed (2 classes beat the phone's
    `.window { display:none !important }`) and, the phone's windows being `position: relative`, the active window flowed
@@ -7090,6 +7096,10 @@ label.chan-cap-row { cursor: default; }
 #device-pair-dialog .device-pair-allow-note { flex-basis: 100%; margin: 2px 0 0; }
 .agents-mach-allow { flex-basis: 100%; order: 11; padding-left: 16px; white-space: normal; font-size: 10px; color: var(--text-dim); }
 .agents-mach-allow[data-allow-source="unreadable"] { color: var(--red); }
+.agents-mach-runtime { flex-basis: 100%; order: 12; padding-left: 16px; white-space: normal; font-size: 10px; color: var(--text-dim); }
+.agents-mach-runtime-old { color: var(--red); margin-left: 4px; }
+.agents-mach-runtime-fix { margin: 4px 0 6px 16px; font-size: 11px; color: var(--text-secondary); }
+.agents-mach-runtime-line { font-family: var(--font-mono, monospace); font-size: 10px; color: var(--text); user-select: all; }
 #device-pair-dialog .device-pair-cmd { min-height: 110px; font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace; overflow-wrap: anywhere; width: 100%; box-sizing: border-box; }
 .dap { display: flex; flex-direction: column; gap: 2px; }
 .dap-head { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px; }

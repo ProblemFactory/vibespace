@@ -40,6 +40,7 @@ const quotaModel = require('./quota-model.js');
 const { authoritativeScopesOf } = quotaModel;
 
 const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe ring (2.369.109)
+const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWords } = require('./auto-cli-model.js'); // PURE: may the probe PROVE this row, a failed probe's reason + THE ONE scrub (lane auto-cli-oat-unprobeable)
 // THE PANEL PROBE'S ARGV (B-9b40): `/usage` and no MCP server at all. Measured on
 // the claude 2.1.288 binary: print mode loads the account's claude.ai connectors
 // unless the MCP config is strict (`headlessSyncsClaudeAiConnectors: !strictConfig
@@ -530,6 +531,20 @@ app.post('/api/usage-stats/harvest-hosts', async (req, res) => {
 //       delete data) but NOT marked verified — 'unknown' is never spelled yes.
 const READING_ARCHIVE = path.join(path.dirname(USAGE_CACHE_DIR), 'archive', 'readings-window-mismatch.ndjson');
 const _panelVerdict = {};            // key → the last probe's {at, outcome, identityVerified, why, rung} for the route's answer
+// A FAILED PROBE NAMES ITS REASON WHERE THE OWNER LOOKS (lane auto-cli-oat-unprobeable): every verdict of this door goes
+// through here, and the account RECORD keeps the last failed one — `probe: {at, ok: false, why}` (accounts.noteProbe, the
+// one atomic writer) — until its next written answer drops it; the row's age chip says it. The why is scrubbed once here
+// (probeWhyText: bounded, secret-shapes-redacted). An oat-only refusal is not a failed probe (the loop never sends one;
+// the row says why already), a removed account has no record, and `__global__` is no account.
+function panelSays(key, v) {
+  _panelVerdict[key] = v;
+  if (key === '__global__' || !v || v.code === 'login') return v;
+  try {
+    if (v.outcome === 'written') accounts.noteProbe?.(key, null);
+    else accounts.noteProbe?.(key, { at: v.at, ok: false, why: probeWhyText(v.why) || v.outcome });
+  } catch { } // an account removed meanwhile — nothing to keep
+  return v;
+}
 const _panelVerdictSaid = new Map(); // key → the verdict class last journaled (one line per transition)
 const acctNameOf = (id) => { try { return (accounts.list().accounts || []).find((x) => x.id === id)?.name || id; } catch { return id; } };
 /** Re-seed the account's isolated probe config dir: the onboarding flags the
@@ -597,11 +612,14 @@ async function refreshViaCliPanel(key) {
   if (!isGlobal) {
     acctMeta = (accounts.list().accounts || []).find((x) => x.id === key && x.type === 'subscription');
     if (!acctMeta) return false;
-    // OAT-ONLY (2026-10-13): the OAuth login ended and the row lives on its long-lived token —
-    // which is inference-only and can never read the usage panel (the probe strips it from the env
-    // anyway). The ONE door for ⟳ and auto-cli alike: no spawn, a named refusal, re-login is the fix.
-    if (acctMeta.loginState && acctMeta.loginState.state === 'oat-only') {
-      _panelVerdict[key] = { at: Date.now(), outcome: 'login-needed', code: 'login', identityVerified: false, why: 'the OAuth login ended — the long-lived token cannot read the usage panel; re-login to refresh usage', rung: 'panel' };
+    // OAT-ONLY (2026-10-13): the OAuth login ended and the row lives on its long-lived token. The ONE door for ⟳ and
+    // auto-cli alike asks the verdict the loop and the row read (src/auto-cli-model.js probeEligibility, lane
+    // auto-cli-oat-unprobeable + its addendum): a token with user:profile, on a CLI measured with it in the folder, and
+    // written there, IS probed — the same spawn below reads the folder's token (CLAUDE_SECURESTORAGE_CONFIG_DIR; the env
+    // token is stripped as ever); any other oat-only row is refused by name with no spawn (re-login is the fix).
+    const oatEl = acctMeta.loginState && acctMeta.loginState.state === 'oat-only' ? probeEligibility(acctMeta) : null;
+    if (acctMeta.loginState && acctMeta.loginState.state === 'oat-only' && isUnprobeable(oatEl)) {
+      panelSays(key, { at: Date.now(), outcome: 'login-needed', code: 'login', identityVerified: false, why: `the OAuth login ended and the long-lived token cannot be probed (${oatEl}: ${notProbedWords(oatEl, acctMeta)}); re-login to refresh usage`, rung: 'panel' });
       return false;
     }
   }
@@ -626,7 +644,7 @@ async function refreshViaCliPanel(key) {
       // a probe that cannot be isolated is not run: it would answer for whichever org wrote ~/.claude.json last
       probeRec.why = 'could not seed the isolated config dir: ' + (e && e.message);
       logProbe('spawn-failed');
-      _panelVerdict[key] = { at: Date.now(), outcome: 'spawn-failed', code: 'spawn', identityVerified: false, why: probeRec.why, rung: 'panel' };
+      panelSays(key, { at: Date.now(), outcome: 'spawn-failed', code: 'spawn', identityVerified: false, why: probeRec.why, rung: 'panel' });
       return false;
     }
   }
@@ -660,6 +678,10 @@ async function refreshViaCliPanel(key) {
     // A LAPSED SUBSCRIPTION answers this probe with the CLI's lapse sentence (2026-10-08): handed to the engine, whose
     // harness census decides — a lapse opens the episode or only moves `lastFail`; any other answer changes nothing
     if (!isGlobal) { try { app.locals.noteMemberServeFailure?.(key, { message: `${probeRec.rawStdout || ''}\n${probeRec.rawStderr || ''}` }); } catch { } }
+    // …and the failure SAYS WHY (lane auto-cli-oat-unprobeable): the class (`exit` — the CLI failed / `parse` — it answered
+    // without a quota line) + the CLI's first line, scrubbed (probeFailWhy → probeWhyText). The ⟳ route's ladder is unchanged:
+    // it stops only on `login` / `identity` / `write`, so these two codes fall through to the token rungs exactly as before.
+    panelSays(key, { at: Date.now(), outcome: probeRec.exitCode === 0 ? 'no-buckets-parsed' : 'spawn-failed', code: probeRec.exitCode === 0 ? 'parse' : 'exit', identityVerified: false, why: probeFailWhy(probeRec), rung: 'panel' });
     logProbe(probeRec.exitCode === 0 ? 'no-buckets-parsed' : 'spawn-failed'); return false;
   }
   // THE ROSTER IS ASKED AGAIN AT THE WRITE, NOT ONLY AT THE SPAWN (r3, the
@@ -707,7 +729,7 @@ async function refreshViaCliPanel(key) {
       fs.appendFileSync(READING_ARCHIVE, JSON.stringify({ at: Date.now(), store: 'usage-cache', key, sid: null, what: 'panel-identity', reason: idv.why, matched: idv.matched, ownWindow: idv.apiWindow || null, identity: { expected: idv.expected, panel: idv.panel, org: idv.org, phase: idv.phase }, entry: cliPanel }) + '\n');
     } catch { }
     logProbe('write-refused', { why: idv.why, window: idv.panelWindow });
-    _panelVerdict[key] = { at: Date.now(), outcome: 'write-refused', code: 'identity', identityVerified: false, why: idv.why, rung: 'panel' };
+    panelSays(key, { at: Date.now(), outcome: 'write-refused', code: 'identity', identityVerified: false, why: idv.why, rung: 'panel' });
     return false;
   }
   if (_panelVerdictSaid.get(key) !== 'ok') { _panelVerdictSaid.set(key, 'ok'); if (_panelVerdictSaid.size > 256) _panelVerdictSaid.delete(_panelVerdictSaid.keys().next().value); }
@@ -838,14 +860,14 @@ async function refreshViaCliPanel(key) {
       const { windowOf } = require('./reading-lag.js');
       logProbe(wrote.ok ? 'written' : 'write-refused', { why: wrote.ok ? null : (wrote.error || wrote.why || (Array.isArray(wrote.errors) ? wrote.errors.join('; ') : null) || 'refused'), window: windowOf(merged) });
     } catch { logProbe(wrote.ok ? 'written' : 'write-refused'); }
-    _panelVerdict[key] = { at: Date.now(), outcome: wrote.ok ? 'written' : 'write-refused', code: wrote.ok ? null : 'write', identityVerified: !!(wrote.ok && idv && idv.verified), why: wrote.ok ? (idv ? idv.why : null) : (wrote.why || wrote.error || 'refused'), rung: 'panel' };
+    panelSays(key, { at: Date.now(), outcome: wrote.ok ? 'written' : 'write-refused', code: wrote.ok ? null : 'write', identityVerified: !!(wrote.ok && idv && idv.verified), why: wrote.ok ? (idv ? idv.why : null) : (wrote.why || wrote.error || 'refused'), rung: 'panel' });
     if (isGlobal) { _rateLimitCache = merged; writeUsageCache(); }
     else _accountUsage[key] = { ...merged, name: acctMeta.name, email: acctMeta.email };
     // a VERIFIED panel answer for a lapsed member IS the evidence that re-admits it (verify r1 ②)
     if (wrote.ok && idv && idv.verified && !isGlobal) { try { app.locals.memberServeLapsed?.(key, { verified: true }); } catch { } }
     try { ingestPassiveUsage(); } catch { }
   } catch (e) {
-    if (!wroteOk) { _panelVerdict[key] = { at: Date.now(), outcome: 'write-refused', code: 'write', identityVerified: false, why: 'cache write failed: ' + (e && e.message), rung: 'panel' }; try { logProbe('write-refused', { why: 'cache write failed: ' + (e && e.message) }); } catch { } }
+    if (!wroteOk) { panelSays(key, { at: Date.now(), outcome: 'write-refused', code: 'write', identityVerified: false, why: 'cache write failed: ' + (e && e.message), rung: 'panel' }); try { logProbe('write-refused', { why: 'cache write failed: ' + (e && e.message) }); } catch { } }
   }
   return wroteOk;
 }

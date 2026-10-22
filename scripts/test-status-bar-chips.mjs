@@ -104,13 +104,14 @@ globalThis.document = { createElement: (t) => new FakeEl(t) };
   const bar = mkBar(ChatStatusBar);
   bar.applyStatus(firstStatus);
   const order0 = keys(bar);
-  ok(order0.join(',') === 'search,model,effort,goal,style,design,perm,ctx,cache,cache-k,cost', `first render draws the expected chip set in bar order (${order0.join(',')})`);
+  // lane agy-status-bar-facts: a claude bar says «not reported» (ONE chip) for the facts its row lacks — token total, turn time
+  ok(order0.join(',') === 'search,model,effort,goal,style,design,perm,ctx,cache,cache-k,unreported,cost', `first render draws the expected chip set in bar order (${order0.join(',')})`);
   ok(bar.element.children.every((el) => el.tagName === 'SPAN' && el.getAttribute('data-chip')), 'every chip is a <span data-chip=…>');
   const v = driveTwenty(bar);
   ok(Object.keys(v.touched).length === 0, `① every chip is the SAME node object after 20 context%/cache/cost/turn-state ticks (replaced: ${JSON.stringify(v.touched)})`);
   ok(v.created === 0, `① zero elements created after the first render (${v.created})`);
   ok(v.orderAfter.join(',') === v.order.join(','), `① the order is unchanged (${v.orderAfter.join(',')})`);
-  const hot = ['ctx', 'cost'], warm = ['cache', 'cache-k'], cold = ['search', 'model', 'effort', 'goal', 'style', 'design', 'perm'];
+  const hot = ['ctx', 'cost'], warm = ['cache', 'cache-k'], cold = ['search', 'model', 'effort', 'goal', 'style', 'design', 'perm', 'unreported'];
   ok(hot.every((k) => v.after[k].innerSets === 21), `① the hot chips (${hot.join('/')}) re-wrote their inner markup once per tick — their text changes every tick (${hot.map((k) => v.after[k].innerSets).join('/')})`);
   // the cache percentage / [k] round to the same string on several ticks — an
   // unchanged string is NOT written (that is the point), so fewer than 21
@@ -187,7 +188,7 @@ console.log('— ③ attributes land as raw strings; classless chips carry no cl
   // the "?" chips when nothing was reported
   const bare = mkBar(ChatStatusBar, { onSearch: null, onDesignRequest: null });
   bare.render();
-  ok(keys(bare).join(',') === 'model,effort,goal,style,perm' && byKey(bare).model.textContent === 'model: ?' && byKey(bare).model.className.includes('chat-status-dim'), `③ a never-reported session draws model: ? / effort: ? dim, no search/design chips when the view offers none (${keys(bare).join(',')})`);
+  ok(keys(bare).join(',') === 'model,effort,goal,style,perm,unreported' && byKey(bare).model.textContent === 'model: ?' && byKey(bare).model.className.includes('chat-status-dim'), `③ a never-reported session draws model: ? / effort: ? dim, no search/design chips when the view offers none (${keys(bare).join(',')})`);
   bar.dispose(); bare.dispose();
 }
 

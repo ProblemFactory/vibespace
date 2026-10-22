@@ -358,6 +358,7 @@ function handleEvent(line) {
     const init = ev.init || {};
     if (init.permission_mode) meta.agy = { ...(meta.agy || {}), permissionMode: String(init.permission_mode) };
     if (Array.isArray(init.tools)) meta.agy = { ...(meta.agy || {}), tools: init.tools.map(String).slice(0, 200) };
+    if (typeof init.model === 'string' && init.model) meta.agy = { ...(meta.agy || {}), model: init.model.slice(0, 200) }; // the slug agy NAMES (lane agy-status-bar-facts)
     adoptConversation(ev.conversation_id, resumeId && ev.conversation_id === resumeId ? 'load' : (resumeId ? 'new' : 'new'));
     return;
   }
@@ -401,7 +402,7 @@ function handleEvent(line) {
   if (ev.event === 'result') {
     const r = ev.result || {};
     if (r.conversation_id && !sessionRecorded) adoptConversation(r.conversation_id, resumeId ? 'load' : 'new');
-    if (r.usage && typeof r.usage === 'object') { meta.usage = { ...r.usage, at: Date.now() }; scheduleMeta(); }
+    if (r.usage && typeof r.usage === 'object') { meta.usage = { ...r.usage, at: Date.now() }; scheduleMeta(); noteTurnUsage(r); }
     if (!activePrompt) { if (r.status && r.status !== 'SUCCESS') notice('error', `Antigravity: ${r.error || r.status}`, 'agent-error'); return; }
     const st = String(r.status || 'SUCCESS');
     const stop = st === 'SUCCESS' ? 'end_turn' : (st === 'CANCELED' || st === 'INTERRUPTED') ? 'cancelled' : 'error';
@@ -409,6 +410,53 @@ function handleEvent(line) {
     return;
   }
   log(`agy event ignored: ${clip(ev.event, 60)}`);
+}
+
+// ── THE TURN'S USAGE → ONE `usage` RECORD (lane agy-status-bar-facts, 2026-10-21) ──
+// The owner: «agy 的 chatview 缺少很多信息啊 什么 context 啊，cache rate … 下面都没有了». agy's `result.usage` is the
+// conversation's RUNNING total (measured — src/agy-turn-usage.js says how); the status bar needs the turn's own spend and
+// the LIVE CONTEXT, which only agy's own transcript holds per model call. So at each result: the tail of THIS
+// conversation's transcript (read-only, ≤ 4 MiB, through the gate below) + the total → one journal record
+//   {type:'acp', kind:'usage', sessionId, total, turn, last, model, modelFrom, durationSeconds}
+// that the ACP normalizer turns into the usage meta (src/acp-message-manager.js _processUsage). The sidecar keeps its copy
+// (meta.usage) as before. No transcript (another agy, a link, a missing file) ⇒ `last` null: the bar keeps what it had
+// and never draws a context from a sum.
+let TU = null;
+try { TU = require(path.join(__dirname, '..', '..', 'src', 'agy-turn-usage.js')); } catch { TU = null; }
+const CONV_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TRANSCRIPT_TAIL = 4 * 1024 * 1024;
+let lastTotal = null, usageChain = Promise.resolve();
+/** THE GATE: the tail of <HOME>/.gemini/antigravity-cli/brain/<conversation>/.system_generated/logs/transcript.jsonl —
+ *  a uuid conversation id only, the file's realpath INSIDE the store root (no link out), opened O_NOFOLLOW, a regular
+ *  file. Nothing else in agy's store is ever opened here (its login file least of all). null = not readable. */
+async function transcriptTail(conv) {
+  if (!process.env.HOME || !CONV_ID_RE.test(String(conv || ''))) return null;
+  const store = path.join(process.env.HOME, '.gemini', 'antigravity-cli');
+  const fp = path.join(store, 'brain', String(conv), '.system_generated', 'logs', 'transcript.jsonl');
+  let fh = null;
+  try {
+    const [rs, rf] = await Promise.all([fs.promises.realpath(store), fs.promises.realpath(fp)]);
+    if (!rf.startsWith(rs + path.sep)) return null;
+    fh = await fs.promises.open(fp, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const st = await fh.stat();
+    if (!st.isFile()) return null;
+    const len = Math.min(st.size, TRANSCRIPT_TAIL);
+    const b = Buffer.alloc(len);
+    await fh.read(b, 0, len, st.size - len);
+    return b.toString('utf8');
+  } catch { return null; } finally { try { await fh?.close(); } catch { } }
+}
+/** One finished turn's `usage` record (serialized: two quick results never interleave their reads). */
+function noteTurnUsage(r) {
+  if (!TU) return;
+  usageChain = usageChain.then(async () => {
+    const text = await transcriptTail(r.conversation_id || meta.sessionId);
+    const named = meta.agy && meta.agy.model;
+    const u = TU.turnUsage({ usage: r.usage, prev: lastTotal, transcript: text == null ? null : TU.transcriptTurn(text), model: named || state.model || null, modelFrom: named ? 'agy' : 'asked', durationSeconds: r.duration_seconds });
+    if (!u) return;
+    lastTotal = u.total;
+    record('usage', { sessionId: meta.sessionId, ...u });
+  }).catch((e) => log(`usage record failed: ${e.message}`));
 }
 
 // the measured stderr lines (agy 1.4.3, an unauthenticated run) + the docs' soft-deny / AGY_ERROR shapes

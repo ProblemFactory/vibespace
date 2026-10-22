@@ -677,7 +677,7 @@ console.log('§9 wiring pins: the client and the keeper\'s journal');
     [/const how = copyWriteVerdict\(\{ gesture: m\.gesture, chordAge, secure, canWrite: !!\(cb && typeof cb\.writeText === 'function'\), windowMs: GESTURE_WINDOW_MS \}\);/, 'a delivered copy is written by itself ONLY when it answers the user\'s own chord (PURE copyWriteVerdict; a click\'s copy is the chip)'],
     [/if \(how !== 'chip'\) st\.copyAt = 0;/, 'the chord is spent on the copy it answers (single-use on the viewer too)'],
     [/kbd\.addEventListener\('blur', \(\) => \{/, 'the sink takes the focus back after a click elsewhere in the view (an IME needs it at the first key)'],
-    [/open: 2, fit: 2, copy: 2, bind: 3/, 'the fit chip and the copy chip fold with the URL (priority 2) — after bind / viewers / recording'],
+    [/badge: 1, bind: 1, continue: 2, url: 2, open: 2, fit: 2, copy: 2, viewers: 3/, 'the fit chip and the copy chip fold with the URL (priority 2) — after viewers / recording, before bind (the badge\'s rank since lane live-bind-door: the window\'s defining act outlasts them)'],
     [/send\(\{ type: 'fit', [^\n]*claim: claim && vis, place: st\.place \}\);/, 'the pane report carries the claim ("Fit here") and this view\'s place'],
     [/const w = fitChipWords\(c, \{ t \}\);/, 'the fit chip\'s words come from PURE fitChipWords'],
     [/const w = recordingChipWords\(\{ recording: rec, refused, hasProfile: !!pid,/, 'the recording chip\'s words come from PURE recordingChipWords'],

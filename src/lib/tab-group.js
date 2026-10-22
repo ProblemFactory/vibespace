@@ -882,6 +882,10 @@ const tabGroupMethods = {
       // §4.6: the OWNERSHIP badge (the session's own colour + name) rides the tab because the guest's title bar is hidden
       if (tabWin._ownerBadge && tabWin._ownerBadge.dots && tabWin._ownerBadge.dots.length) tab.appendChild(this._ownerBadgeEl(tabWin._ownerBadge));
       if (tabWin._inboxBadge && tabWin._inboxBadge.count) tab.appendChild(this._inboxBadgeEl(tabWinId, tabWin._inboxBadge));
+      // lane live-bind-door: a window's DEFINING act rides its tab too — `_tabDoor()` (the live view's side-by-side door) is
+      // built fresh at every render; shown on the active tab / a shown pane (style.css .tab-door), a guest's title bar never is
+      const door = typeof tabWin._tabDoor === 'function' ? tabWin._tabDoor() : null;
+      if (door) tab.appendChild(door);
       tab.appendChild(closeBtn);
       // a press SHOWS the tab — on its own side in a split (both halves switchable, split tabs v2)
       tab.addEventListener('mousedown', (e) => {
@@ -1174,9 +1178,9 @@ const tabGroupMethods = {
     // Drag listeners live on a per-drag controller, NOT chain._tabCtl: detaching re-renders the tab bar (which aborts
     // _tabCtl) MID-DRAG, which used to kill onMove/onUp — freezing the drag and leaving the grid highlight stuck until
     // something else repainted it. The compat mousedown stays, cancelled (no selection); the tab's own mousedown shows it.
-    // …nor the tab's two click chips, the mini-inbox badge and the billing chip (2.369.200 integration: the capture on the title
-    // bar retargets the click — neither chip's fired)
-    const notATabDrag = (e) => !!(e.target && typeof e.target.closest === 'function' && (e.target.closest('.tab-close') || e.target.closest('.win-inbox-badge') || e.target.closest('.win-auth-badge')));
+    // …nor the tab's click chips, the mini-inbox badge and the billing chip (2.369.200 integration: the capture on the title
+    // bar retargets the click — neither chip's fired) and a window's door (lane live-bind-door)
+    const notATabDrag = (e) => !!(e.target && typeof e.target.closest === 'function' && (e.target.closest('.tab-close') || e.target.closest('.win-inbox-badge') || e.target.closest('.win-auth-badge') || e.target.closest('.tab-door')));
     tabEl.addEventListener('pointerdown', (e) => {
       if (notATabDrag(e) || e.button !== 0 || e.isPrimary === false || mouseDown) return;
       if (chain.tabs.length <= 1) return;

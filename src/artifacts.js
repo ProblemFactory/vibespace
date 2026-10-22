@@ -51,7 +51,10 @@ const CATEGORY_KIND = Object.freeze({
 });
 // markdown that steers an agent (config, never a deliverable — half of all Writes in the study were these)
 const AGENT_CONFIG_NAMES = new Set(['claude.md', 'agents.md', 'gemini.md', 'skill.md', 'memory.md', 'claude.local.md']);
-const AGENT_CONFIG_DIR = /(?:^|\/)\.(?:claude|codex|cursor|gemini|opencode)\//;
+// …except agy's per-conversation BRAIN dir (lane agy-status-bar-facts): ~/.gemini/antigravity-cli/brain/<conversation>/ is where
+// agy writes the reports it makes for the person (agy's own «artifacts», each with a .metadata.json beside it) — a
+// deliverable by its extension, never steering config (the owner's report there showed no card)
+const AGENT_CONFIG_DIR = /(?:^|\/)\.(?:claude|codex|cursor|gemini|opencode)\/(?!antigravity-cli\/brain\/)/;
 // a project's own scaffolding (lane artifacts-e2e): a row BORN BY AN EDIT of one is code — the conversation touched a file
 // it never wrote ("change line 2 of README.md" drew a document card in the real-Opus run); one the conversation WROTE
 // keeps its extension's kind ("write me a README" is the deliverable)

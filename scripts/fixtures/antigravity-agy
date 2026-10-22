@@ -23,7 +23,15 @@
 //                                   store's task names it), then the subagent_info update DONE on the same step (shape:
 //                                   the docs'); with `old` too = an older build: no subagent_info, the tool step DONE
 //                                   with an output that names no subagent
+//       text naming `write the summary` / `edit the summary` → a write_file / edit_file step on <cwd>/reports/summary.md (the
+//                                   file is written) — the MEASURED stream names + an absolute `Path` (lane agy-status-bar-facts)
 //       otherwise                 → agent_response deltas "Antigravity (<model>, <mode>): <text>", a checkpoint, result SUCCESS
+//     USAGE (lane agy-status-bar-facts) = the MEASURED semantics: every model call (one per agent_response, one more per
+//     tool step) counts input / cache_read (the previous call's context) / output, and result.usage is the CONVERSATION'S
+//     RUNNING SUM (total = input + output; thinking beside it); with $AGY_STUB_TRANSCRIPT=1 each step is also a row of
+//     <HOME>/.gemini/antigravity-cli/brain/<conversation>/.system_generated/logs/transcript.jsonl (agy's own shape: a
+//     USER_INPUT row per turn, a MODEL PLANNER_RESPONSE row with the call's counts), and a restart on --conversation
+//     re-reads the sums from it (agy rehydrates its steps).
 //     stdin EOF → exit 0 ($AGY_STUB_EXIT_DELAY_MS: after that long, SIGTERM ignored — a slow restart, made deterministic).  The --model / --effort / --mode / --dangerously-skip-permissions it was started with are echoed.
 const fs = require('fs');
 const path = require('path');
@@ -71,13 +79,32 @@ const cid = flag('--conversation') || process.env.AGY_STUB_CID || crypto.randomU
 const model = flag('--model') || 'default', effort = flag('--effort') || '', mode = argv.includes('--dangerously-skip-permissions') ? 'always-proceed' : (flag('--mode') || 'request-review');
 out({ event: 'init', conversation_id: cid, init: { cwd: process.cwd(), tools: ['ask_permission', 'run_command', 'write_to_file'], permission_mode: mode === 'always-proceed' ? 'always-proceed' : 'request-review', ...(flag('--model') ? { model } : {}) } });
 let step = 0, turns = 0, busy = Promise.resolve();
+// the running sums (see USAGE above) + agy's own transcript when asked
+const TX = process.env.AGY_STUB_TRANSCRIPT === '1' && process.env.HOME ? path.join(process.env.HOME, '.gemini', 'antigravity-cli', 'brain', cid, '.system_generated', 'logs', 'transcript.jsonl') : null;
+const run = { input: 0, output: 0, thinking: 0, cacheRead: 0 };
+let ctx = 0;
+if (TX) { try { for (const l of fs.readFileSync(TX, 'utf8').split('\n')) { if (!l.trim()) continue; const r = JSON.parse(l); step = Math.max(step, r.step_index + 1); if (r.input_tokens != null) { run.input += r.input_tokens; run.output += r.output_tokens; run.cacheRead += r.cache_read_tokens; run.thinking += 3; ctx = r.input_tokens + r.cache_read_tokens; } } } catch { } }
+const tx = (row) => { if (!TX) return; fs.mkdirSync(path.dirname(TX), { recursive: true }); fs.appendFileSync(TX, JSON.stringify({ step_index: row.step_index, source: row.source, type: row.type, status: 'DONE', created_at: new Date().toISOString(), ...row }) + '\n'); };
+function modelCall(i) { const input = 40 + 2 * i, cacheRead = ctx, output = 9; ctx = input + cacheRead; run.input += input; run.output += output; run.cacheRead += cacheRead; run.thinking += 3; tx({ step_index: i, source: 'MODEL', type: 'PLANNER_RESPONSE', input_tokens: input, cache_read_tokens: cacheRead, output_tokens: output }); }
+const running = () => ({ input_tokens: run.input, output_tokens: run.output, thinking_tokens: run.thinking, cache_read_tokens: run.cacheRead, total_tokens: run.input + run.output });
 const fail = (error, code) => { out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error, duration_seconds: 0, num_turns: turns, usage: usage(turns) } }); process.exit(code); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function turn(text) {
   turns++;
+  tx({ step_index: step, source: 'USER_EXPLICIT', type: 'USER_INPUT' });
   out({ event: 'step_update', step_update: { conversation_id: cid, step_index: step++, state: 'DONE', step_type: 'user_input' } });
+  const wm = /\b(write|edit) the summary\b/.exec(text); // a phrase, never a bare word: the task-context prefix the wrapper adds says «write» too
+  if (wm) {
+    const i = step++, file = path.join(process.cwd(), 'reports', 'summary.md'), name = wm[1] === 'write' ? 'write_file' : 'edit_file';
+    modelCall(i);
+    out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: name, tool_info: { name, parameters: { Path: file } } } });
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (wm[1] === 'write') fs.writeFileSync(file, '# Summary\n\nWritten by the fake agy.\n'); else fs.appendFileSync(file, '\nEdited.\n');
+    out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'tool', tool_name: name, duration_seconds: 0.02, tool_info: { name, parameters: { Path: file }, output: 'ok' } } });
+  }
   if (/\btool\b/.test(text)) {
     const i = step++;
+    modelCall(i);
     out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'echo hello_headless_demo' } } } });
     await sleep(10);
     out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'tool', tool_name: 'run_command', duration_seconds: 0.07, tool_info: { name: 'run_command', parameters: { CommandLine: 'echo hello_headless_demo' }, output: 'hello_headless_demo\r\n' } } });
@@ -100,11 +127,12 @@ async function turn(text) {
   if (/\bfail\b/.test(text)) { process.stderr.write('AGY_ERROR: {"short_error":"model unavailable","status":"UNAVAILABLE","code":503,"retryable":true}\n'); out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); return; }
   const reply = `Antigravity (${model}${effort ? ', ' + effort : ''}, ${mode}): ${text}`;
   const i = step++;
+  modelCall(i);
   out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'agent_response', text_delta: reply.slice(0, 12) } });
   await sleep(5);
   out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'agent_response', text_delta: reply.slice(12), duration_seconds: 0.2, usage: usage(1) } });
   out({ event: 'step_update', step_update: { conversation_id: cid, step_index: step++, state: 'DONE', step_type: 'checkpoint', duration_seconds: 0.01, usage: usage(turns) } });
-  out({ event: 'result', result: { conversation_id: cid, status: 'SUCCESS', response: reply, duration_seconds: 0.3, num_turns: turns, usage: usage(turns) } });
+  out({ event: 'result', result: { conversation_id: cid, status: 'SUCCESS', response: reply, duration_seconds: 0.3, num_turns: turns, usage: running() } });
 }
 let buf = '';
 process.stdin.setEncoding('utf8');

@@ -1,6 +1,10 @@
 // CLAUDE CLI DUMP — the binary oracle's two extractors (moved here verbatim from test-record-shape.mjs,
 // lane cli-2-1-288-records, B-e05e) and the dump that pins one CLI build as a TRACKED fixture.
 //   node scripts/claude-cli-dump.mjs <claude binary>   → JSON on stdout (scripts/fixtures/claude-cli/<version>.json)
+//   node scripts/claude-cli-dump.mjs --auto [--bin <claude>] [--data <dir>] [--force]   → the DRAFT of an unregistered build:
+//     <data>/claude-cli-dumps/<version>.json (the same dump + `draft`: its diff against the newest pinned dump) and ONE JSON line
+//     on stdout. The installed claude is NEVER executed — the version is the versions-dir name or the bundle's own stamp (lane
+//     cli-2-1-308-records: the treadmill — the box that saw a new build takes its dump, the registration lane starts from it).
 // METHOD (the same read §4 makes on the installed binary): `strings -n 8 <binary>` (latin1), then
 // extractZodUnion (the SDK record union: shape → depth-1 keys, helper names read off the anchor) and
 // extractPermissionSentences (the §4d tool_result census). The dump adds `zod` — the raw object literal of
@@ -11,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 // ── THE EXTRACTOR (§4a, §4) ──
 // The SDK record union in the installed binary is a run of zod object literals
@@ -175,10 +180,11 @@ export function nestedOf(text, helpers) {
   return out;
 }
 
-/** The dump of one binary: {version, method, helpers, union, sentences, nested, zod:{key: literal}} (zod only for `newKeys`). */
-export function dumpBinary(bin, newKeys = []) {
-  const text = execFileSync('strings', ['-n', '8', bin], { maxBuffer: 1024 * 1024 * 1024, encoding: 'latin1' });
-  const version = (execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }).match(/\d+\.\d+\.\d+/) || [path.basename(bin)])[0];
+/** The dump of one binary: {version, method, helpers, union, sentences, nested, zod:{key: literal}} (zod only for `newKeys`).
+ *  `opts.text` (its strings, already read) and `opts.version` (already known) spare the second read and the `--version` run. */
+export function dumpBinary(bin, newKeys = [], opts = {}) {
+  const text = opts.text || stringsOf(bin);
+  const version = opts.version || (execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }).match(/\d+\.\d+\.\d+/) || [path.basename(bin)])[0];
   const { union, helpers, error } = extractZodUnion(text);
   if (error) throw new Error(error);
   const cen = extractPermissionSentences(text);
@@ -195,7 +201,76 @@ export function dumpBinary(bin, newKeys = []) {
   };
 }
 
+const stringsOf = (bin) => execFileSync('strings', ['-n', '8', bin], { maxBuffer: 1024 * 1024 * 1024, encoding: 'latin1' });
+
+// ── THE DRAFT (lane cli-2-1-308-records — the treadmill, built) ──
+// The hub's claude auto-updates (2.1.296 → 2.1.307 → 2.1.308 in ten days) faster than a registration lane lands. The box that
+// SEES a new build takes its static dump at once — strings only, the binary never run — so the next lane starts from it.
+const VERSION_RE = /^\d+\.\d+\.\d+$/;
+/** PURE: the build a claude binary IS — the versions-dir name when its real path is one (…/claude/versions/2.1.308), else the
+ *  most frequent `VERSION:"x.y.z"` stamp in its strings (2.1.308 carries 299, all one value); null when neither says. */
+export function versionOfBinary(realPath, text) {
+  const base = path.basename(String(realPath || ''));
+  if (VERSION_RE.test(base)) return base;
+  const n = new Map();
+  for (const m of String(text || '').matchAll(/VERSION:"(\d+\.\d+\.\d+)"/g)) n.set(m[1], (n.get(m[1]) || 0) + 1);
+  const top = [...n].sort((a, b) => b[1] - a[1]);
+  return top.length && (top.length === 1 || top[0][1] > top[1][1]) ? top[0][0] : null;
+}
+/** PURE: what a dump adds or drops against another (the newest pinned) — the registration lane's worklist. */
+export function dumpDiff(prev, next) {
+  const pu = prev.union || {}, nu = next.union || {};
+  const fields = {};
+  for (const k of Object.keys(nu)) if (k in pu) { const add = nu[k].filter((f) => !pu[k].includes(f)), gone = pu[k].filter((f) => !nu[k].includes(f)); if (add.length || gone.length) fields[k] = { add, gone }; }
+  const nested = {};
+  for (const [at, keys] of Object.entries(next.nested || {})) { const was = (prev.nested || {})[at]; if (Array.isArray(keys) && Array.isArray(was)) { const add = keys.filter((f) => !was.includes(f)), gone = was.filter((f) => !keys.includes(f)); if (add.length || gone.length) nested[at] = { add, gone }; } else if (!Array.isArray(keys)) nested[at] = { error: keys && keys.error }; }
+  const texts = (d) => new Set(((d.sentences || {}).rows || []).map((r) => r.text));
+  const ps = texts(prev), ns = texts(next);
+  const out = { against: prev.version, newKeys: Object.keys(nu).filter((k) => !(k in pu)).sort(), goneKeys: Object.keys(pu).filter((k) => !(k in nu)).sort(), fields, nested, sentencesAdded: [...ns].filter((t) => !ps.has(t)), sentencesGone: [...ps].filter((t) => !ns.has(t)) };
+  out.changes = out.newKeys.length + out.goneKeys.length + Object.values(fields).reduce((s, f) => s + f.add.length + f.gone.length, 0) + Object.values(nested).reduce((s, f) => s + (f.error ? 1 : f.add.length + f.gone.length), 0) + out.sentencesAdded.length + out.sentencesGone.length;
+  return out;
+}
+const HERE = path.dirname(new URL(import.meta.url).pathname);
+/** The installed claude's real file: --bin, else `claude` on PATH, else ~/.local/bin/claude (realpath — the versions-dir file). */
+export function installedClaude(bin, env = process.env) {
+  const cands = bin ? [bin] : [...String(env.PATH || '').split(':').filter(Boolean).map((d) => path.join(d, 'claude')), path.join(env.HOME || '', '.local/bin/claude')];
+  for (const c of cands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile()) return real; } catch { } }
+  return null;
+}
+/** The auto road: {version, registered, file, wrote, changes, error?}. Registered (SCHEMA_CLI_VERSIONS) ⇒ nothing written unless
+ *  `force`; a draft already taken ⇒ kept (the box saw this build before). Writes <dataDir>/claude-cli-dumps/<version>.json
+ *  (mode 0644, through a temp name) — the dump the recipe would write plus `draft` {takenAt, against, diff}. */
+export function autoDraft({ bin = null, dataDir, force = false, env = process.env, now = Date.now() } = {}) {
+  const pinned = createRequire(import.meta.url)('../src/record-shape.js').SCHEMA_CLI_VERSIONS;
+  const real = installedClaude(bin, env);
+  if (!real) return { error: 'no claude binary (--bin, `claude` on PATH, ~/.local/bin/claude)' };
+  const text = stringsOf(real);
+  const version = versionOfBinary(real, text);
+  if (!version) return { error: 'the binary names no version (neither a versions-dir name nor a VERSION:"x.y.z" stamp)' };
+  const registered = pinned.includes(version);
+  const dir = path.join(dataDir, 'claude-cli-dumps'), file = path.join(dir, version + '.json');
+  if (registered && !force) return { version, registered, file: null, wrote: false };
+  if (fs.existsSync(file) && !force) { let d = null; try { d = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { } return { version, registered, file, wrote: false, changes: d && d.draft && d.draft.diff ? d.draft.diff.changes : null }; }
+  const newest = pinned[pinned.length - 1];
+  const prev = JSON.parse(fs.readFileSync(path.join(HERE, 'fixtures/claude-cli', newest + '.json'), 'utf8'));
+  const newKeys = Object.keys(extractZodUnion(text).union).filter((k) => !(k in prev.union));
+  const dump = dumpBinary(real, newKeys, { text, version });
+  const diff = dumpDiff(prev, dump);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = file + '.' + process.pid + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify({ ...dump, draft: { takenAt: new Date(now).toISOString(), against: newest, diff } }, null, 1) + '\n', { mode: 0o644 });
+  fs.renameSync(tmp, file);
+  return { version, registered, file, wrote: true, changes: diff.changes };
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+  if (process.argv[2] === '--auto') {
+    const a = process.argv.slice(3), opt = (k) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : null; };
+    let r;
+    try { r = autoDraft({ bin: opt('--bin'), dataDir: opt('--data') || path.join(HERE, '..', 'data'), force: a.includes('--force') }); } catch (e) { r = { error: String(e && e.message || e).slice(0, 300) }; }
+    process.stdout.write(JSON.stringify(r) + '\n');
+    process.exit(r.error ? 1 : 0);
+  }
   const [bin, prev] = process.argv.slice(2);
   if (!bin) { console.error('usage: node scripts/claude-cli-dump.mjs <claude binary> [previous dump.json]'); process.exit(2); }
   let newKeys = [];

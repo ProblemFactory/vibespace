@@ -1339,6 +1339,8 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/desktop-mic.js': [2, "device: the microphone road's own children (the decoder ffmpeg on Windows + the vibespace-mic helper — our spawn handles, lane stream-mic-road; declared at int339), stdin closed when the voice stops and SIGTERMed only if still alive after STOP_GRACE_MS, or the decoder when the road closed while it started; never a conversation"],
     // lane speaker-passthrough-v1 — the machine's sound on Windows (the microphone helper's `loopback` + the encoder ffmpeg)
     'src/desktop-sound.js': [1, "device: the sound road's own children (the vibespace-mic helper's `loopback` + the encoder ffmpeg — our spawn handles, lane speaker-passthrough-v1), stdin closed when the sound is turned off or its stream ends and SIGTERMed only if still alive a second later; never a conversation"],
+    // lane runtime-floor — the product's own-Node provisioner's bounded child
+    'src/node-runtime.js': [1, "not a conversation: the provisioner's node download / verify / `--version` child (lane runtime-floor), SIGKILLed by its watchdog timer at the timeout — a bounded one-shot; its exit is the provision's answer, never a session's"],
   };
   // the actor pins: the mark is set BEFORE the kill it names (the teardown reads it; the kill case deletes the session late)
   const ACTOR_PINS = [

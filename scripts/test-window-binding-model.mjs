@@ -47,6 +47,10 @@
 //      the remote apply never re-creates a held close and reads a record's chain without it (withoutMembers),
 //      re-sends the close once, every save releases it; a remote record for a hidden desktop goes through
 //      cacheRemoteState. The chrome half is scripts/test-split-close-resurrect.mjs.
+//   ⑩ THE SIDE-BY-SIDE DOOR (lane live-bind-door, 2026-10-22): the PURE bindDoor verdict (chain-layout.js) over every
+//      state — free / born beside / a tab after Unbind / the group's host / no window of its session / Browse yourself —
+//      the law over all 64 states (a door that never folds wherever the act applies: the window's title bar, or its TAB
+//      while grouped), the base's rules as the NEGATIVE CONTROL, and the wiring (the bar rank, the tab door, the act).
 // Fast: no DOM, no ports, no chrome. The chrome half is test-window-binding.mjs.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -573,6 +577,55 @@ console.log('— ⑨ B-9cd4: the ⫿ words follow a rename; a rebuilt chain\'s f
   wm.restoreTabChain(['A', 'B', 'C'], 2, { layout: 'split', split: { pair: ['B', 'C'], ratio: 0.5, left: ['A', 'B'], right: ['C'] }, order: ['A', 'B', 'C'] });
   const marks = [...wm.windows.values()].filter((w) => w.element.classList.contains('window-active')).map((w) => w.id);
   ok(JSON.stringify(marks) === '["A"]' && wm.activeWindowId === 'C' && wm.windows.get('A')._tabChain?.layout === 'split', '⑨ B-9cd4 a split restored around the focused guest C: the frame A carries the ONE active mark, the focus names C', JSON.stringify({ marks, active: wm.activeWindowId }));
+}
+
+console.log('— ⑩ THE SIDE-BY-SIDE DOOR (lane live-bind-door: «sometimes the browser windows a session opens have no side-by-side button»)');
+{
+  // the PURE verdict over every state the brief names — one row per state, the door's place, the bar's form, the act
+  const bindDoor = typeof C.bindDoor === 'function' ? C.bindDoor : () => ({}); // a tree without the verdict fails the rows, never crashes the suite
+  const D = (o) => bindDoor({ human: false, bound: false, inChain: false, sessionInChain: false, narrow: false, sessionWindow: 'present', ...o });
+  const rows = [
+    ['a free view, its session\'s window open, a wide bar', {}, { title: 'shown', at: 'controls', bar: 'full', label: 'Snap beside {name}', act: 'bind' }],
+    ['a free view at 420 / 330 px (its bar folds)', { narrow: true }, { title: 'shown', at: 'controls', bar: 'compact', label: 'Snap beside {name}', act: 'bind' }],
+    ['born beside its chat (the auto-bind\'s split pane)', { bound: true, inChain: true, sessionInChain: true }, { title: 'shown', at: 'tab', bar: 'full', label: 'Unbind', act: 'unbind' }],
+    ['born beside, a narrow pane (the measured red: a 346 px bar)', { bound: true, inChain: true, sessionInChain: true, narrow: true }, { title: 'shown', at: 'tab', bar: 'compact', label: 'Unbind', act: 'unbind' }],
+    ['after Unbind — a non-host tab of the chat\'s group (tabs layout)', { inChain: true, sessionInChain: true }, { title: 'shown', at: 'tab', bar: 'full', label: 'Snap beside {name}', act: 'split' }],
+    ['the group\'s HOST, the chat a tab of it', { inChain: true, sessionInChain: true, narrow: true }, { title: 'shown', at: 'tab', bar: 'compact', label: 'Snap beside {name}', act: 'split' }],
+    ['a tab of ANOTHER group (the chat elsewhere)', { inChain: true }, { title: 'shown', at: 'tab', bar: 'full', label: 'Snap beside {name}', act: 'bind' }],
+    ['no window of its session here (a free view)', { sessionWindow: 'absent' }, { title: 'shown', at: 'controls', bar: 'full', label: 'Snap beside {name}', act: 'open-session' }],
+    ['no window of its session here, grouped with something else', { sessionWindow: 'absent', inChain: true }, { title: 'shown', at: 'tab', bar: 'full', label: 'Snap beside {name}', act: 'open-session' }],
+    ['Browse yourself (the control: no session, no door by design)', { human: true, inChain: true, bound: true, sessionWindow: 'absent' }, { title: 'hidden', at: null, bar: 'none', label: null, act: 'none' }],
+  ];
+  for (const [name, st, want] of rows) { const got = D(st); ok(J(got) === J(want), `⑩ ${name} ⇒ ${got.act}, the door on ${got.at || 'nothing'} (bar ${got.bar})`, J({ st, got, want })); }
+  // the invariant over EVERY combination: where the act applies, a door that never folds is shown — on the window's own
+  // title bar when free, on its TAB when grouped (host or guest) — and Browse yourself has none (the bar's icon is the
+  // second door: it may fold at last on a narrow bar, its ⋯ row keeping the act)
+  const combos = [];
+  for (const human of [false, true]) for (const bound of [false, true]) for (const inChain of [false, true]) for (const sessionInChain of [false, true]) for (const narrow of [false, true]) for (const sessionWindow of ['present', 'absent']) combos.push({ human, bound, inChain, sessionInChain, narrow, sessionWindow });
+  const law = (f) => combos.filter((st) => { const v = f(st); return st.human ? !(v.title === 'hidden' && v.act === 'none' && v.bar === 'none') : !(v.act !== 'none' && v.title === 'shown' && v.at === (st.inChain ? 'tab' : 'controls') && v.bar !== 'none'); });
+  const broken = law(bindDoor);
+  ok(combos.length === 64 && broken.length === 0, `⑩ the law over all ${combos.length} states: a door that never folds wherever the act applies (the window's title bar, or its tab while grouped); none for Browse yourself`, J(broken.slice(0, 3)));
+  // NEGATIVE CONTROL — the base (2.369.341) as a verdict: the title-bar button lived in the view's OWN title bar (never
+  // shown while grouped) and the bar folded it at rank 3, before the URL — it breaks the law in EVERY grouped state
+  const base = (st) => (st.human ? { title: 'hidden', at: null, bar: 'none', act: 'none' } : { title: st.inChain ? 'hidden' : 'shown', at: st.inChain ? null : 'controls', bar: st.narrow ? 'folded' : 'full', act: st.bound ? 'unbind' : st.sessionWindow === 'present' ? 'bind' : 'open-session' });
+  const red = law(base);
+  ok(red.length > 0 && red.length === 16 && red.every((st) => st.inChain && !st.human) && red.some((st) => st.bound && st.narrow) && red.some((st) => !st.bound && st.sessionInChain), `⑩ NEGATIVE CONTROL: the base's rules break the law in all ${red.length} grouped states (born beside in a narrow pane — its bar folded too —, a tab after Unbind)`, J(red.slice(0, 2)));
+  // the act follows the state, the press never toasts a refusal while the session's window is right there in the group
+  ok(D({ inChain: true, sessionInChain: true }).act === 'split' && D({ inChain: true, sessionInChain: true, sessionWindow: 'present' }).act !== 'open-session', '⑩ a tabs-layout group holding the session\'s window: the act SPLITS it (bindSplit on the same chain), never the refusal');
+
+  // WIRING over the tree
+  const lw = read('src/lib/browser-live-window.js'), tg = read('src/lib/tab-group.js'), css = read('public/style.css');
+  const P = /export const LIVE_BAR_PRIORITY = Object\.freeze\((\{[^}]*\})\)/.exec(lw);
+  const pri = P ? Function(`return ${P[1]}`)() : null;
+  ok(pri && pri.bind === pri.badge && pri.bind < pri.url && pri.bind < pri.open && pri.bind < pri.fit && pri.bind < pri.copy && pri.bind < pri.continue && pri.bind > 0, `⑩ the bar folds bind only after every other act — the badge's rank (${pri && pri.bind}), never 3 (before the URL)`, J(pri));
+  ok(/import \{ ownerDots, livePlacement, bindDoor \} from '\.\/chain-layout\.js';/.test(lw) && /return bindDoor\(\{ human: !!H, bound: isBound\(\), inChain: !!ch, sessionInChain: !!\(ch && host && ch\.tabs\.includes\(host\.id\)\), narrow: barFolded\(\)\.length > 0, sessionWindow: host \? 'present' : 'absent' \}\);/.test(lw) && /barFolded = \(\) => fold\.folded\(\);/.test(lw), '⑩ the live view hands bindDoor its facts (its group, the session\'s window in it, the bar\'s fold)');
+  ok(/titleBind\.style\.display = d\.title === 'shown' && d\.at === 'controls' \? '' : 'none';/.test(lw) && /winInfo\.onChainChanged = \(\) => renderBind\(\);/.test(lw), '⑩ the title-bar button shows only on a FREE window; joining / leaving a group re-decides it (onChainChanged)');
+  ok(/winInfo\._tabDoor = \(\) => \{/.test(lw) && /if \(d\.title !== 'shown' \|\| d\.at !== 'tab'\) return null;/.test(lw) && /b\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); toggleBind\(\); \}\);/.test(lw), '⑩ grouped, the door is the view\'s TAB door (built per render, the same toggleBind)');
+  ok(/const door = typeof tabWin\._tabDoor === 'function' \? tabWin\._tabDoor\(\) : null;\s*if \(door\) tab\.appendChild\(door\);\s*tab\.appendChild\(closeBtn\);/.test(tg) && /e\.target\.closest\('\.tab-door'\)\)\);/.test(tg), '⑩ tab-group renders a window\'s _tabDoor on its tab (before ✕) and a press on it is never a tab drag');
+  ok(/\.tab-door \{ display: none;/.test(css) && /\.tab-item\.active > \.tab-door, \.tab-item\.tab-pane > \.tab-door \{ display: inline-flex; \}/.test(css), '⑩ style.css: the tab door shows on the ACTIVE tab and on a SHOWN pane only');
+  const tb = lw.slice(lw.indexOf('  function toggleBind() {'), lw.indexOf('  bindBtn.onclick = () => toggleBind();'));
+  ok(/const d = doorNow\(\);/.test(tb) && /if \(d\.act === 'unbind'\)/.test(tb) && /if \(d\.act === 'open-session'\) \{ refuseNoWindow\(\); return false; \}/.test(tb) && /app\.wm\.bindSplit\(sessionWindowFor\(app, sessionId\), winInfo, \{ side: 'right', announce: true \}\)/.test(tb) && !/Open the session’s window first/.test(lw), '⑩ toggleBind does the verdict\'s act — unbind / the refusal / bindSplit (split on the same chain or beside it) — and the bare "open it first" is gone');
+  ok(/t\('\{name\} has no window open here — open it, then press Snap beside again', \{ name \}\), \{ type: 'warn', action: \{ label: t\('Open \{name\}', \{ name \}\), run: \(\) => app\.attachSession\(r\.webuiId, r\.webuiName \|\| r\.name, r\.cwd, \{ mode: r\.webuiMode \}\) \} \}/.test(lw), '⑩ the refusal NAMES the session and offers its own door (Open {name} = the sidebar card\'s attach)');
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

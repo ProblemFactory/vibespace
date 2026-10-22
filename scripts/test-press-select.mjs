@@ -359,6 +359,7 @@ const OPT_INS = {
   '.exit-runs-pre': 'a command\'s output in the machine\'s Commands… list (lane exit-run-output; joined at the 2.369.200 integration)',
   '.chat-exit-cmd': 'the command itself on its exit-run chat card, whole under its 技术细节 fold (lane exit-see-whole → exit-card-margin — read and copied)',
   '.exit-runs-cmd-all': 'the whole command in a row of the machine\'s Commands… list, beside Copy (lane exit-see-whole)',
+  '.agents-mach-runtime-line': 'a system node\'s upgrade command on the Machines card — the person runs it on that machine (lane device-node-version — read and copied)',
   '.ut-proposal-plan': 'what Approve runs, line for line (lane browser-propose)',
   '.file-viewer': 'a file\'s text in the viewer',
   '.file-viewer-table': 'a CSV / spreadsheet table in the viewer',

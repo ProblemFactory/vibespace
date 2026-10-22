@@ -23,6 +23,8 @@
  *   update.plan                 → todos meta (same shape as TodoWrite)
  *   update.available_commands_update → slash commands on the init card
  *   update.usage_update         → usage meta (used/size → context%)
+ *   usage (agy-wrapper's record, one per turn — lane agy-status-bar-facts) → usage meta: the last model call
+ *                                 (context + cache), the running total (odometer), the turn's spend + time
  *   permission_request          → the harness-neutral permission card
  *                                 (ordered options with kinds) on the tool card
  *   permission_resolved         → allowed/denied on that card
@@ -49,6 +51,13 @@ function toTs(value) {
   if (!value) return Date.now();
   const t = typeof value === 'number' ? value : Date.parse(value);
   return Number.isFinite(t) ? t : Date.now();
+}
+/** agy-wrapper's sidecar copy of agy's running total ({input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
+ *  total_tokens}) in the odometer's totals shape, or null for any other sidecar usage (ACP's {used, size, cost}). */
+function sidecarTotals(u) {
+  if (!u || typeof u !== 'object' || !Number.isFinite(Number(u.total_tokens)) || Number(u.total_tokens) <= 0) return null;
+  const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
+  return { total_tokens: n(u.total_tokens), input_tokens: n(u.input_tokens), cached_input_tokens: n(u.cache_read_tokens), output_tokens: n(u.output_tokens), reasoning_output_tokens: n(u.thinking_tokens) };
 }
 function parseAcpBufferRecords(buffer) {
   const out = [];
@@ -139,7 +148,7 @@ class AcpMessageManager extends MessageWindow {
     this._userEcho = null;                // {messageId, text, skip, msgId}
     this._currentTs = Date.now();
     this._currentLine = null;
-    this._status = { model: '', permissionMode: '', permissionModes: [], contextWindow: 0, lastUsage: null, total_cost_usd: 0, slashCommands: [], models: [], agentInfo: null };
+    this._status = { model: '', permissionMode: '', permissionModes: [], contextWindow: 0, lastUsage: null, totalUsage: null, turnUsage: null, turnMs: 0, total_cost_usd: 0, slashCommands: [], models: [], agentInfo: null };
     this._initMsgId = null;
     this._seenInit = false;
     this._goalState = null;
@@ -250,6 +259,7 @@ class AcpMessageManager extends MessageWindow {
       case 'subagent': return this._processSubagent(record, emit);
       // `sub` = a SUBAGENT's own step (lane agy-subagent-cards): never the parent's card — its virtual session
       // sub-<subId> draws it (src/server/acp-subagents.js reads the same journal), so it falls to the default below
+      case 'usage': return this._processUsage(record, emit);
       // client_request / notification / peer_result / permission_rules:
       // journal-only. `permission_rules` is named here for the same reason
       // codex's normalizer lists it in SKIPPED_EVENT_TYPES — it is the typed
@@ -437,6 +447,23 @@ class AcpMessageManager extends MessageWindow {
       if (emit) this._emit({ op: 'create', message: msg });
     }
     if (emit) this._emit({ op: 'meta', subtype: 'turn_complete', data: { cost: 0, modelUsage: null } });
+  }
+
+  /** agy-wrapper's per-turn `usage` record (lane agy-status-bar-facts; its fields: src/agy-turn-usage.js turnUsage) →
+   *  the ONE usage meta every harness's bar reads: `last` (the turn's last model call) is the context and the cache
+   *  hit rate, exactly claude's last-message reading — absent, nothing the bar had is overwritten (a sum is never a
+   *  context); `total` is the odometer in codex's totals shape (cached = agy's cache reads, reasoning = its thinking);
+   *  the turn's spend + time ride beside. A model agy NAMED is the served model; one it was only started with is not. */
+  _processUsage(rec, emit) {
+    const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
+    const last = rec.last && typeof rec.last === 'object' ? rec.last : null, tot = rec.total && typeof rec.total === 'object' ? rec.total : null;
+    if (last) this._status.lastUsage = { input_tokens: n(last.input), cache_read_input_tokens: n(last.cacheRead), cache_creation_input_tokens: 0 };
+    if (tot) this._status.totalUsage = { total_tokens: n(tot.total), input_tokens: n(tot.input), cached_input_tokens: n(tot.cacheRead), output_tokens: n(tot.output), reasoning_output_tokens: n(tot.thinking) };
+    this._status.turnUsage = rec.turn && typeof rec.turn === 'object' ? { ...rec.turn } : null;
+    if (rec.durationSeconds != null && Number.isFinite(Number(rec.durationSeconds))) this._status.turnMs = Math.round(Number(rec.durationSeconds) * 1000);
+    if (!emit) return;
+    this._emit({ op: 'meta', subtype: 'usage', data: { ...(last ? this._status.lastUsage : { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }), contextWindow: this._status.contextWindow || 0, totals: this._status.totalUsage || null, turn: this._status.turnUsage, turnMs: this._status.turnMs || 0 } });
+    if (rec.modelFrom === 'agy' && rec.model) this._emit({ op: 'meta', subtype: 'served-model', data: { model: String(rec.model) } });
   }
 
   _processNotice(rec, emit) {
@@ -750,6 +777,9 @@ class AcpSessionMessages {
       permissionModes: st.permissionModes?.length ? st.permissionModes : asArray(meta?.configOptions).filter((o) => o && (o.category === 'mode' || o.id === 'mode')).flatMap((o) => flattenSelect(o).map((v) => String(v.value))),
       contextWindow: st.contextWindow || meta?.usage?.size || 0,
       lastUsage: st.lastUsage || (meta?.usage?.used != null ? { input_tokens: meta.usage.used, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } : null),
+      // agy's `usage` records (lane agy-status-bar-facts); before the first one — a conversation whose wrapper predates
+      // them (dtach keeps it across an update) — the sidecar's own running total (agy-wrapper's meta.usage) is the odometer
+      totalUsage: st.totalUsage || sidecarTotals(meta?.usage), turnUsage: st.turnUsage || null, turnMs: st.turnMs || 0,
       total_cost_usd: st.total_cost_usd || meta?.usage?.cost?.amount || 0,
       slashCommands: st.slashCommands?.length ? st.slashCommands : asArray(meta?.availableCommands).map((c) => c.name),
       models: st.models || [],

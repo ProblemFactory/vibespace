@@ -69,9 +69,36 @@ function acp(record) {
   return out;
 }
 
+/** antigravity (lane agy-status-bar-facts — the owner's conversation wrote .md reports and a SKILL.md and showed no
+ *  Artifacts chip): agy is not ACP. Its wrapper journals each tool step as an ACP `tool_call` whose title is agy's tool
+ *  name and whose rawInput is agy's parameters — never a `diff` content, so the ACP reader saw nothing. MEASURED on the
+ *  owner's two conversations (shapes only): the stream names its writes write_file (a new file) and edit_file, each with
+ *  an ABSOLUTE `Path` and no content; init.tools lists the model-facing names write_to_file / replace_file_content /
+ *  multi_replace_file_content — both families are read. A file: URI is percent-decoded to its path; a relative path is
+ *  the conversation cwd's (the reducer resolves it). The row is born on the call, as claude's Write (id = agy's step
+ *  key: the call seen twice moves its row once). Every other record goes to the ACP reader (a text chunk's page links). */
+const AGY_OPS = { write_file: 'write', write_to_file: 'write', edit_file: 'edit', replace_file_content: 'edit', multi_replace_file_content: 'edit' };
+const AGY_PATH_KEYS = ['Path', 'TargetFile', 'AbsolutePath', 'FilePath'];
+function agyPath(v) {
+  if (typeof v !== 'string' || !v.trim()) return null;
+  if (!/^file:/i.test(v)) return v;
+  try { const u = new URL(v); return u.protocol === 'file:' && (!u.host || u.host === 'localhost') ? decodeURIComponent(u.pathname) || null : null; } catch { return null; }
+}
+function antigravity(record) {
+  const r = record || {};
+  const u = r.kind === 'update' ? r.update : null;
+  if (!u || u.sessionUpdate !== 'tool_call') return acp(record);
+  const op = AGY_OPS[u.title];
+  const inp = u.rawInput && typeof u.rawInput === 'object' ? u.rawInput : null;
+  if (op && inp) for (const k of AGY_PATH_KEYS) { const path = agyPath(inp[k]); if (path) return [{ path, op, bytes: null, id: u.toolCallId || null }]; }
+  return acp(record); // a call that carries an ACP `diff` (a record built from agy's own transcript) reads as ACP's
+}
+
 /** lane artifacts-prompt-hint: the tools each reader above witnesses, as the agent knows them — a descriptor declares
  *  its row as `artifactTools` (ACP: the agent's own tool names are not ours to know ⇒ `[]` = unnamed). */
 const ARTIFACT_TOOLS = { claude: Object.keys(CLAUDE_OPS), codex: ['apply_patch'], acp: [] };
+/** the antigravity reader's tools as agy's MODEL knows them (init.tools) — the names the agent-facing sentence uses */
+const AGY_ARTIFACT_TOOLS = ['write_to_file', 'replace_file_content', 'multi_replace_file_content'];
 /** THE ONE agent-facing sentence (tools intro + the task context's tools section, once per session): which writes become
  *  Artifacts. `names` = the session's descriptor `artifactTools` (`[]`/absent = "your file tools"; `null` = a harness with
  *  no artifacts reader ⇒ no line — never promise a collection that cannot happen). English, never through t(). */
@@ -81,4 +108,4 @@ function artifactsIntroLine(names) {
   return `Use your file tools${list} for files the user should see — they become this conversation's Artifacts; shell-written files do not.`;
 }
 
-module.exports = { claude, codex, acp, ARTIFACT_TOOLS, artifactsIntroLine };
+module.exports = { claude, codex, acp, antigravity, ARTIFACT_TOOLS, AGY_ARTIFACT_TOOLS, artifactsIntroLine };

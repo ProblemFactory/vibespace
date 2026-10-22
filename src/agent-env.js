@@ -74,7 +74,7 @@ const AGENT_ENV_DROP = Object.freeze(new Set(['PORT', 'HOST', 'NODE_ENV', 'NODE_
   'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR']));
 
 /** The daemon tier's own reads, on top of the agent set (derived — see the header). */
-const DAEMON_ENV_KEEP = Object.freeze(new Set([...AGENT_ENV_KEEP, 'VIBESPACE_NODE_MODULES', 'VIBESPACE_AGENTD_VERSION', 'VIBESPACE_INPUT_STUB_FILE', 'VIBESPACE_MIC_HELPER' /* lane stream-mic-road: the suites' fake microphone helper (src/desktop-mic.js), as the input stub */, 'VIBESPACE_SOUND_FFMPEG' /* lane speaker-passthrough-v1: the suites' fake Opus encoder for the sound's road (src/desktop-sound.js) — a box without ffmpeg (the Actions runner) */]));
+const DAEMON_ENV_KEEP = Object.freeze(new Set([...AGENT_ENV_KEEP, 'VIBESPACE_NODE_MODULES', 'VIBESPACE_AGENTD_VERSION', 'VIBESPACE_INPUT_STUB_FILE', 'VIBESPACE_MIC_HELPER' /* lane stream-mic-road: the suites' fake microphone helper (src/desktop-mic.js), as the input stub */, 'VIBESPACE_SOUND_FFMPEG' /* lane speaker-passthrough-v1: the suites' fake Opus encoder for the sound's road (src/desktop-sound.js) — a box without ffmpeg (the Actions runner) */, 'VIBESPACE_NODE_MIRROR', 'VIBESPACE_RUNTIME_SWITCH', 'VIBESPACE_RUNTIME_REEXEC' /* lane runtime-floor: the agent's own node (src/node-runtime.js) — the mirror the installer named, the switch's off word, the second image's mark (dropped after the switch) */]));
 
 /**
  * The sanitized copy of `base`: every `VIBESPACE_*` not in `keep` is dropped

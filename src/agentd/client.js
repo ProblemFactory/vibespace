@@ -63,7 +63,7 @@ class DeviceManager {
    *  version      release version (= daemonVersion expected)
    *  log          logger fn
    */
-  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null, onAct = null, onUpgradeRefused = null, onUpgradeTrusted = null, onPolicy = null, onElevated = null, machine = null, actGate = null, hub = '' } = {}) {
+  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null, onAct = null, onUpgradeRefused = null, onUpgradeTrusted = null, onPolicy = null, onElevated = null, onRuntime = null, machine = null, actGate = null, hub = '' } = {}) {
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
@@ -101,6 +101,7 @@ class DeviceManager {
     // keeps it on the machine's record (the Machines card shows it); `machine` names the machine in a refusal's re-run sentence
     this._onPolicy = typeof onPolicy === 'function' ? onPolicy : null;
     this._onElevated = typeof onElevated === 'function' ? onElevated : null; // lane win-input-elevated: the daemon's OWN token elevation (hello-ack)
+    this._onRuntime = typeof onRuntime === 'function' ? onRuntime : null; // lane device-node-version: the node the daemon runs on (hello-ack — src/device-runtime.js runtimeOf)
     this._machine = machine;
     // lane hub-act-ask: THE ASK's door — a REMOTE machine's client (hosts.js ssh, dial-pairing.js dial; never this machine's
     // own daemon: that is the hub) is built with the machine's gate (src/server/hub-act-ask.js over PURE src/hub-act-policy.js):
@@ -392,6 +393,9 @@ class DeviceManager {
             const pol = DP.reportOf(msg.policy); // lane device-allow-flags: null = an agent older than the list (it judges nothing)
             if (pol) { try { this._onPolicy?.(pol); } catch { } }
             if (typeof msg.elevated === 'boolean') { try { this._onElevated?.(msg.elevated); } catch { } } // lane win-input-elevated: absent on an old daemon ⇒ never called ⇒ the record stays not-elevated
+            // lane device-node-version: the node it runs on (every daemon since M0 says `nodeVersion`; `openssl` / `nodeOwn` are
+            // new — an older daemon's are null: not said). A daemon that says no node ⇒ the record's runtime is `unknown`, no chip
+            try { this._onRuntime?.(require('../device-runtime.js').runtimeOf({ node: msg.nodeVersion, openssl: msg.openssl, own: msg.nodeOwn, platform: msg.platform })); } catch { }
             // LOOP BREAKER (2.330.0): an upgrade that does not change the
             // reported version can never converge — a daemon that fails to
             // install, a stale singleton that will not die, a host missing

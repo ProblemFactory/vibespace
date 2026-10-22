@@ -747,6 +747,39 @@ function ownerDots({ leases = [], profileId = null, sessionId = null, nameOf = n
   return out;
 }
 
+/**
+ * THE SIDE-BY-SIDE DOOR (lane live-bind-door, 2026-10-22 — a daily user: «sometimes the browser windows a session
+ * opens have no side-by-side button»). A live view's DEFINING act — show it side by side with its session, or
+ * unbind — has a door in EVERY state the act applies to: a fold never swallows it, a group's title bar never hides
+ * it. Measured on 2.369.341: a view born beside its chat (the auto-bind's split) had its bar button FOLDED (rank 3,
+ * before the URL) below a ~446 px pane and its title-bar button inside its OWN title bar — never shown while it is
+ * a tab of a group (the group's one title bar is the host's). PURE: the view hands its facts, this says where the
+ * door is, how the bar carries it, its words and what a press does.
+ *   state = { human, bound, inChain, sessionInChain, narrow, sessionWindow: 'present' | 'absent' }
+ *     human          — a «Browse yourself» window: the user's own browsing, no session ⇒ no door (by design)
+ *     bound          — this view is a SHOWN pane of its group's split
+ *     inChain        — a member of a tab group, host or guest (the group's ONE title bar is the host's)
+ *     sessionInChain — the session's own window is a member of the SAME group
+ *     narrow         — the view's bar folds something (it has no room for every act)
+ *     sessionWindow  — the session's own window (chat / terminal) is open on this client
+ *   → { title, at, bar, label, act }
+ *     title — 'shown' whenever the act applies (the door that never folds), 'hidden' for Browse yourself
+ *     at    — 'controls' (a free window's own title bar) | 'tab' (its TAB on the group's title bar — host or guest,
+ *             shown while the tab is the active one or a shown pane) | null
+ *     bar   — 'full' (the bar's icon among every act) | 'compact' (a narrow bar: the icon folds only after every other
+ *             act — the badge's rank; folded at last, its ⋯ row keeps the act) | 'none'
+ *     label — the door's words (an English key: the view passes it through t() with the session's name)
+ *     act   — 'unbind' (a shown pane ⇒ back to tabs) | 'split' (the session's window is in this group ⇒ split the
+ *             group, never a toast) | 'bind' (move beside the session's window) | 'open-session' (no window for the
+ *             session here ⇒ say WHICH session and how to open it) | 'none'
+ */
+function bindDoor(state) {
+  const s = state || {};
+  if (s.human) return { title: 'hidden', at: null, bar: 'none', label: null, act: 'none' };
+  const act = s.bound ? 'unbind' : s.sessionInChain ? 'split' : s.sessionWindow === 'present' ? 'bind' : 'open-session';
+  return { title: 'shown', at: s.inChain ? 'tab' : 'controls', bar: s.narrow ? 'compact' : 'full', label: act === 'unbind' ? 'Unbind' : 'Snap beside {name}', act };
+}
+
 module.exports = {
   SPLIT_RATIO_MIN, SPLIT_RATIO_MAX, SPLIT_RATIO_DEFAULT, SPLIT_DIVIDER_PX, SPLIT_TAIL_FLOOR_PX, SPLIT_PANE_MIN_MAX,
   RATIO_HOLD_MS, holdRatio, heldRatio, releaseRatio,
@@ -765,4 +798,6 @@ module.exports = {
   // B-a67c: which close asks first (a whole group, by a person) and what it names
   closeAsks, groupCloseList,
   ownerSeq, ownerColor, ownerBadge, ownerDots,
+  // lane live-bind-door: the side-by-side door — where it is, how the bar carries it, what a press does
+  bindDoor,
 };

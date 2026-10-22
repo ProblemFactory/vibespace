@@ -132,7 +132,7 @@ import { machineStepWords } from './browser-new-profile-model.js'; // lane remot
 import { MODAL_OPEN_EVENT } from './utils.js'; // lane dialog-keys: every app modal says it opened (createModalShell, app._showDialog)
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
-import { ownerDots, livePlacement } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
+import { ownerDots, livePlacement, bindDoor } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
 import { stripOrder, stripFold, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFold } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
 import { tabRowModel, tabRefusalText, tabGroups, tabsCountText } from '../browser-tabs.js';
 import { tabClickVerdict, watchLineWords, foldMenuRows, watchRefusalWords } from '../browser-windows.js'; // lane browser-windows (U3/U0b): what a chip click does — bring forward / switch (driving) · watch / follow (watching) // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
@@ -192,24 +192,27 @@ export const URL_MIN_PX = 120;
  *  Hand back) and Reconnect (shown only when the stream failed: then it is the one act that matters); 1 the mode badge
  *  (the LAST to go — lane I verify r1: a never-fold badge left a split pane's bar wider than the pane, the toggle cut
  *  and the ⋯ clipped out; folded, its sentence is the ⋯'s first row and the ⋯ wears its colour, and the toggle's own
- *  words still say who drives); 2 the URL + its web-view hand-off; 3 bind, viewers, recording; 4 the browser's name (the
+ *  words still say who drives) — and BIND, the window's defining act (lane live-bind-door: at 3 it folded BEFORE the
+ *  URL, so a split pane under ~446 px lost it; at the badge's rank it goes after every other act, before only the
+ *  badge — and its title-bar door, on the window or on its TAB, never folds); 2 the URL + its web-view hand-off;
+ *  3 viewers, recording; 4 the browser's name (the
  *  button when another browser is available, else the plain label — the rebuilt switch dialog, 2026-09-27);
  *  5 Tabs / Console / Actions (first to go — their counts ride the ⋯ rows). Equal priorities fold right-to-left. */
 /*  2.369.180 (lanes I + J integrated): lane J r2's two driving-only items fold like the rest — the "Typing goes to
-   *  the browser" chip with bind/viewers/recording (3; folded, its words are an info row of the ⋯), the "input sent · n"
+   *  the browser" chip with viewers/recording (3; folded, its words are an info row of the ⋯), the "input sent · n"
    *  echo first (5; a transient count — the page itself shows what the input did). */
 /*  lane S4: the FIT chip (shown only when the page is NOT this pane's size — the agent chose it, another pane rules …)
-   *  folds with bind/viewers/recording (3); folded, its words and its act are a ⋯ row. */
+   *  folds with viewers/recording (3); folded, its words and its act are a ⋯ row. */
 /*  lane live-input: the FIT chip explains the picture on screen and offers the one act that changes it ("Fit here"),
    *  and the COPY chip ("Copied in the page — click to copy") is shown only while a copy waits for the user's click —
-   *  both fold with the URL (2), AFTER bind/viewers/recording (the owner's narrow window folded the chip away first);
+   *  both fold with the URL (2), AFTER viewers/recording (the owner's narrow window folded the chip away first);
    *  folded, each is a ⋯ row with its act. */
 /*  BROWSE YOURSELF (B-6ae8): the user's own browsing window adds its two ends — Close never folds (0: the one act that
    *  matters on that window, like the toggle), Quit the whole browser folds with the chips (3, a ⋯ row of its own words) —
    *  and the touch Keyboard button (3). */
 /*  lane browser-resume B (§3.9, the owner's ruling 2): "Hand back and continue…" folds with the URL (2) — before the badge
    *  (which folds last); the toggle's own Hand back stays the never-fold act; folded, it is a ⋯ row with its own words and act. */
-export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, close: 0, badge: 1, continue: 2, url: 2, open: 2, fit: 2, copy: 2, bind: 3, viewers: 3, rec: 3, kbd: 3, kbdBtn: 3, quit: 3, backend: 4, backendLabel: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
+export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, close: 0, badge: 1, bind: 1, continue: 2, url: 2, open: 2, fit: 2, copy: 2, viewers: 3, rec: 3, kbd: 3, kbdBtn: 3, quit: 3, backend: 4, backendLabel: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
 /** lane J r2: how long the bar's "input sent · n" stays bright after an act, and a ripple lives. */
 const ECHO_MS = 1600;
 const RIPPLE_MS = 650;
@@ -1395,26 +1398,57 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     return el;
   };
   const renderOwner = () => { if (H) return; const pid = st.target && st.target.profileId ? st.target.profileId : null; try { app.wm.setOwnerBadge?.(winInfo.id, { dots: dotsFor(pid) }); } catch { /* window gone */ } };
-  // ── P7 (§4.6): BIND / UNBIND — one act, three surfaces ──
+  // ── P7 (§4.6): BIND / UNBIND — one act, three surfaces ── lane live-bind-door: WHERE each door is and what a press does
+  // is the PURE bindDoor verdict (chain-layout.js) — a free window's own title bar, its TAB while grouped (the group's
+  // title bar is the host's: a guest's own button was never shown), the bar at the badge's rank, never a bare refusal
   const isBound = () => isSplitPane(winInfo);
-  const bindLabel = () => (isBound() ? t('Unbind') : t('Snap beside {name}', { name: sessionName() || t('its session') }));
+  let barFolded = () => []; // the bar's fold (created below, after every item exists)
+  const doorNow = () => {
+    const ch = winInfo._tabChain, host = H ? null : sessionWindowFor(app, sessionId);
+    return bindDoor({ human: !!H, bound: isBound(), inChain: !!ch, sessionInChain: !!(ch && host && ch.tabs.includes(host.id)), narrow: barFolded().length > 0, sessionWindow: host ? 'present' : 'absent' });
+  };
+  const doorWords = (d) => (d.label ? t(d.label, { name: sessionName() || t('its session') }) : '');
+  const bindLabel = () => doorWords(doorNow());
   const bindTitle = () => (isBound() ? t('Back to two free windows — the group stays and nothing moves') : t('Show this browser side by side with its session, in one window'));
   const renderBind = () => {
-    const bound = isBound();
+    const d = doorNow(), bound = d.act === 'unbind';
     bindBtn.classList.toggle('bound', bound); titleBind.classList.toggle('bound', bound);
-    const label = bindLabel();
+    const label = doorWords(d);
     bindBtn.setAttribute('aria-label', label); bindBtn.title = label + ' — ' + bindTitle(); titleBind.title = bindTitle();
+    titleBind.setAttribute('aria-label', label);
+    titleBind.style.display = d.title === 'shown' && d.at === 'controls' ? '' : 'none'; // grouped (host or guest) the door rides the TAB
   };
+  /** GROUPED, the door rides this view's TAB on the group's title bar — tab-group.js makeTab asks at every render; it shows
+   *  on the active tab and on a shown pane (style.css `.tab-door`). */
+  winInfo._tabDoor = () => {
+    const d = doorNow();
+    if (d.title !== 'shown' || d.at !== 'tab') return null;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'tab-door tab-bind' + (d.act === 'unbind' ? ' bound' : ''); b.innerHTML = BIND_SVG;
+    const label = doorWords(d);
+    b.title = label + ' — ' + bindTitle(); b.setAttribute('aria-label', label);
+    b.addEventListener('mousedown', (e) => e.stopPropagation()); // a press on the door never switches, drags or maximizes the group
+    b.addEventListener('dblclick', (e) => e.stopPropagation());
+    b.addEventListener('click', (e) => { e.stopPropagation(); toggleBind(); });
+    return b;
+  };
+  /** No window of the session on this client: the refusal names WHICH session and how to open it (its card's own act). */
+  function refuseNoWindow() {
+    const r = row(), name = sessionName();
+    if (r && name && r.status === 'live') showToast(t('{name} has no window open here — open it, then press Snap beside again', { name }), { type: 'warn', action: { label: t('Open {name}', { name }), run: () => app.attachSession(r.webuiId, r.webuiName || r.name, r.cwd, { mode: r.webuiMode }) } });
+    else showToast(t('This browser’s conversation has no window here — open the conversation from the sidebar, then press Snap beside again'), { type: 'warn' });
+  }
   function toggleBind() {
-    if (isBound()) { // int254 R1: the PERSON's Unbind is a person's action — it may focus: the live view comes to the front of its chain
+    const d = doorNow();
+    if (d.act === 'unbind') { // int254 R1: the PERSON's Unbind is a person's action — it may focus: the live view comes to the front of its chain
       app.wm.unbindSplit(winInfo._tabChain);
       const ch = winInfo._tabChain, i = ch && Array.isArray(ch.tabs) ? ch.tabs.indexOf(winInfo.id) : -1;
       if (i >= 0 && typeof app.wm.switchTab === 'function') app.wm.switchTab(ch, i);
       renderBind(); return true;
     }
-    const host = sessionWindowFor(app, sessionId);
-    if (!host) { showToast(t('Open the session’s window first — there is nothing to snap beside'), { type: 'warn' }); return false; }
-    app.wm.bindSplit(host, winInfo, { side: 'right', announce: true }); // a user's explicit act ⇒ the 5 s Undo toast (split UX R5); the auto-bind (createWindow({intoChain})) stays silent
+    if (d.act === 'open-session') { refuseNoWindow(); return false; }
+    if (d.act !== 'split' && d.act !== 'bind') return false;
+    // 'split' (the session's window is in THIS group: bindSplit enters the split on the same chain) and 'bind' (beside it, wherever it is) — one call
+    app.wm.bindSplit(sessionWindowFor(app, sessionId), winInfo, { side: 'right', announce: true }); // a user's explicit act ⇒ the 5 s Undo toast (split UX R5); the auto-bind (createWindow({intoChain})) stays silent
     renderBind();
     return true;
   }
@@ -1422,6 +1456,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
   titleBind.onclick = (e) => { e.stopPropagation(); toggleBind(); };
   // every chain transition (bind / unbind / detach / a tab switch) ends in onResize of the displayed panes — re-read the state there
   winInfo.onResize = () => { renderBind(); syncKeyboard(); }; // verify r2 (H1): a chain transition moves the view — its ownership is re-judged there too
+  winInfo.onChainChanged = () => renderBind(); // lane live-bind-door: joined / left a group (host included) ⇒ the door moves between the title bar and the tab
   // ── MULTIVIEW (design-browser-multiview §2 A1 / D3 / D4): ONE strip lists EVERY browser of this session ──
   /** The ref of the pane this window shows (a profile id, EPHEMERAL_REF, a helper's handle). */
   const curRef = () => {
@@ -1717,6 +1752,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null }) {
     signal: winInfo._listenerCtl?.signal,
     onLayout: (v) => { renderMore(); floorPane(v); },
   });
+  barFolded = () => fold.folded(); // lane live-bind-door: the door's `narrow` fact
   /** THE SPLIT FLOOR (lane I verify r1): this view's pane never narrower than its own bar's floor (the toggle + the ⋯ +
    *  Reconnect when shown, + the chrome around the bar's content) — WindowManager.setPaneMinWidth holds it while the
    *  window is a pane of a split (the divider stops there); a free window's 320 px floor is already wider. The floor

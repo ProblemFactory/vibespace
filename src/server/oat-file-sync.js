@@ -13,11 +13,13 @@
  * The sweep runs off the loop's back (the store's ONE queue, one row per loop
  * turn — pool-oat-materialize verify r1 F13); a tick resolves when it is done.
  * This module never touches a credential file itself: the store is the actor.
+ * The same tick tells `onCliVersion` the version it read (lane cli-2-1-308-records: src/server/cli-registration.js
+ * says ONCE when that build is one the record oracle does not know) — one --version read serves both.
  */
 const RECHECK_MS = 15 * 60e3;
 const BOOT_DELAY_MS = 20e3;
 
-function start({ accounts, machineProbes, claudeCmd, log = (...a) => console.log(...a), recheckMs = RECHECK_MS, bootDelayMs = BOOT_DELAY_MS } = {}) {
+function start({ accounts, machineProbes, claudeCmd, onCliVersion = null, log = (...a) => console.log(...a), recheckMs = RECHECK_MS, bootDelayMs = BOOT_DELAY_MS } = {}) {
   if (!accounts || typeof accounts.noteCliVersion !== 'function' || !machineProbes || typeof machineProbes.cliVersion !== 'function') return { stop() { }, tick: async () => null };
   let timer = null, stopped = false, said = undefined;
   async function tick() {
@@ -28,6 +30,7 @@ function start({ accounts, machineProbes, claudeCmd, log = (...a) => console.log
       // last known version stands — taking credential files back from running sessions on a hiccup is the bug
       if (!v) { caps = { ...accounts.oatFileCaps(), changed: false }; if (said !== 'probe-failed') { said = 'probe-failed'; log(`[oat-file] claude --version gave no answer — keeping CLI ${caps.cli || '(unknown)'}`); } await accounts.syncOatFiles(); return caps; }
       caps = accounts.noteCliVersion(v);      // a changed verdict re-syncs every row itself
+      if (onCliVersion) { try { onCliVersion(caps.cli || v); } catch { } }
       if (!caps.changed) await accounts.syncOatFiles(); // else: a login that died since the last tick
       else await accounts.oatFileSettled();
       const words = `${caps.cli || 'unknown'}:${caps.ok}`;

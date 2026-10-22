@@ -499,7 +499,7 @@ console.log('§4b the CLI 2.1.280 pass (2026-09-22): the latency reason told tru
 
 console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six fields on three shapes, one new subtype routed to the fall-back card');
 {
-  ok('2.1.281 stays a PINNED build beside 2.1.288, 2.1.296, 2.1.306 and 2.1.307 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296,2.1.306,2.1.307' && R.SCHEMA_CLI_VERSION === '2.1.307', R.SCHEMA_CLI_VERSIONS);
+  ok('2.1.281 stays a PINNED build beside 2.1.288, 2.1.296, 2.1.306, 2.1.307 and 2.1.308 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296,2.1.306,2.1.307,2.1.308' && R.SCHEMA_CLI_VERSION === '2.1.308', R.SCHEMA_CLI_VERSIONS);
   const ADDED = [['system/init', 'per_turn_effort_active'], ['system/init', 'view_mode'], ['assistant', 'local_command_outcome'], ['conversation_reset', 'trigger'], ['conversation_reset', 'user_message_uuid'], ['conversation_reset', 'timestamp']];
   ok('the six fields 2.1.281 added are declared IGNORED (never known — known is the 2.1.274 dump), each with a reason naming the build', ADDED.every(([k, f]) => { const sp = R.SHAPES['claude:stream:' + k]; return !sp.known.has(f) && /2\.1\.281/.test(sp.ignored.get(f) || '') && sp.ignored.get(f).length > 60; }), ADDED.map(([k, f]) => k + '.' + f + ' = ' + R.SHAPES['claude:stream:' + k].ignored.get(f)));
   const pte = R.SHAPES['claude:stream:system/per_turn_effort_changed'];
@@ -583,7 +583,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const PO = require(path.join(REPO, 'src/permission-outcome.js'));
     for (const d of dumps) { const c = outcomeCensus(d.sentences.rows || [], PO.PERMISSION_OUTCOME_ROWS, ''); ok(`${d.version}: §4d ${(d.sentences.rows || []).length} permission sentences, none unresolved, each a row of src/permission-outcome.js`, (d.sentences.rows || []).length === 14 && d.sentences.unresolved.length === 0 && c.unclassified.length === 0, { unresolved: d.sentences.unresolved, c: c.unclassified }); }
     const texts = (d) => JSON.stringify(d.sentences.rows.map((x) => x.text).sort());
-    ok('§4d 2.1.281 → 2.1.288 → 2.1.296 → 2.1.306 → 2.1.307: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.307 (the newest pinned)', dumps.every((d) => texts(d) === texts(dumps[0])) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.307' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
+    ok('§4d 2.1.281 → 2.1.288 → 2.1.296 → 2.1.306 → 2.1.307 → 2.1.308: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.308 (the newest pinned)', dumps.every((d) => texts(d) === texts(dumps[0])) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.308' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
     // THE EIGHT DECISIONS, each on its evidence (the dump's zod literal)
     const z = dumps[1].zod || {};
     const EIGHT = ['session_metadata', 'instruction_size_warning', 'ui_invalidate', 'ui_log', 'ui_toast', 'ui_status', 'ui_scroll', 'ui_focus'];
@@ -718,6 +718,16 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const MMn = rsSrc7.split(EXPORTS7).length === 2 ? require(M7.write('src/message-manager.js', mmSrc7.replace(REQ7, 'require(' + JSON.stringify(M7.write('src/record-shape.js', rsSrc7.replace(EXPORTS7, "for (const sp of [RATE_LIMIT_INFO, COMPACT_METADATA, API_ERROR_ERROR]) sp.ignored.clear(); RATE_LIMIT_INFO.known.delete('overageInUse'); /* the .340 nested declaration (control) */\n" + EXPORTS7), 'nested-340')) + ')'), 'mm-nested-340')) : null;
     const ctlRl = MMn && liveRl(MMn, 'e2e00000-0000-4000-8000-0000000003b2');
     ok('RED CONTROL: the same frame on a copy with the .340 nested declaration ⇒ the red card is back — ONE drift card on rate_limit_event naming rate_limit_info.adminRequestOffer / .overageEnabled / .overageInUse / .usageCreditOffer, and its ledger row', !!ctlRl && ctlRl.cards === 1 && ctlRl.fields === 'rate_limit_info.adminRequestOffer,rate_limit_info.overageEnabled,rate_limit_info.overageInUse,rate_limit_info.usageCreditOffer' && ctlRl.rows === 1, ctlRl);
+    // THE 2.1.308 PIN (lane cli-2-1-308-records) — the hub's claude AUTO-UPDATED again (2026-10-21 22:48 PT): its dump (strings over a
+    // 0644 copy) EQUALS the 2.1.307 dump — the same union keys and fields, the same nested objects, the same 14 sentences under the
+    // same minified names; the strings diff is the version / build stamps, the chunk hashes and the Bun runtime. Nothing to declare.
+    const d308 = dumps.find((d) => d.version === '2.1.308');
+    const sameAs = (a, b, k) => JSON.stringify(a[k]) === JSON.stringify(b[k]);
+    ok('2.1.308: its tracked dump EQUALS 2.1.307\'s — the same ' + Object.keys(d307.union).length + ' union keys with the same fields, the same nested objects, the same 14 sentences under the same names (' + d307.sentences.anchor + '/' + d307.sentences.list + '/' + d307.sentences.set + '), no new zod key — so no FIELDS_308, no SHAPE_SINCE row, no KNOWN_IGNORED decision, nothing left red', !!d308 && ['union', 'nested', 'sentences', 'helpers'].every((k) => sameAs(d308, d307, k)) && Object.keys(d308.zod || {}).length === 0 && !('FIELDS_308' in R) && !Object.values(R.SHAPE_SINCE).includes('2.1.308') && judgeDump(R, d308).length === 0 && nestedUndeclared(R, d308.nested).length === 0, d308 && ['union', 'nested', 'sentences', 'helpers'].filter((k) => !sameAs(d308, d307, k)));
+    // CONTROL: the leg above can fail — the same dump with one field more on a declared shape and one more inside rate_limit_info is named twice
+    const d308x = d308 && { ...d308, union: { ...d308.union, command_lifecycle: [...d308.union.command_lifecycle, 'x_308_probe'] }, nested: { ...d308.nested, 'rate_limit_event.rate_limit_info': [...d308.nested['rate_limit_event.rate_limit_info'], 'x308Probe'] } };
+    const n308x = d308x ? [...judgeDump(R, d308x), ...nestedUndeclared(R, d308x.nested)] : null;
+    ok('CONTROL: the 2.1.308 dump with one undeclared field on command_lifecycle and one inside rate_limit_info ⇒ both NAMED (the equality above is a judgement, not a skip)', !!n308x && n308x.length === 2 && n308x.some((x) => /^UNDECLARED .*command_lifecycle\.x_308_probe/.test(x)) && n308x.includes('UNDECLARED rate_limit_event.rate_limit_info.x308Probe'), n308x);
   }
 }
 
