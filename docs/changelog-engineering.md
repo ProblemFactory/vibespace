@@ -73,6 +73,41 @@ This file is the engineers' record of every release: the lanes, the verification
 - **Measured:** 10× alone: 186 each (6.1–6.2 s); 5× beside test-desktop-webrtc-chrome (127) + test-channels-aggregate-ui (223) looping, load 4.1–4.5: 186 each; 5× confined to 2 CPUs shared with 4 busy loops (taskset): 186 each (7.3–8.1 s). None of this box's load shapes turned the BASE red (base ×5 in the 2-CPU shape: green, 8.3–8.9 s) — the one-shot stalls are what reproduce the runner, and the fix stays green under each of them.
 - **Left by name (order-free, not races):** ⑤'s refresh row: the stub vendor's `/token` answers after 30 ms, holding one refresh in flight for five concurrent calls (a refreshed token is cached, so a late caller never refreshes again); ④ `api wait` is approved at 300 ms on a proposal that exists before the wait starts — an approval before or after its first poll prints the same outcome.
 
+### lane cli-2-1-307-records — the hub's claude AUTO-UPDATED to 2.1.307: the record oracle and the long-lived-token measurement are pinned to it, and the oracle now reads one level down (base 72056f53 2.369.340)
+- **Why:** the hub's CLI auto-updated to 2.1.307 on 2026-10-21 18:34Z (~/.local/share/claude/versions/2.1.307, sha256 6021eb72d20d0682…). The oracle was pinned up to 2.1.306 and oat-in-file.json held 2.1.296 + 2.1.306, so the drift cards came back and every oat-only pool member on the hub was refused as `cli-unmeasured`.
+- **The dump, STATIC:** strings over a 0644 copy of the hub's binary (`<lane>/oracle/2.1.307`); the dump's own `--version` print ran on a 0755 scratch copy, never on the hub's file, never as a session. `node scripts/claude-cli-dump.mjs <copy> scripts/fixtures/claude-cli/2.1.306.json`.
+- **The zod diff 2.1.306 → 2.1.307:** union 177 → 178.
+  - No new subtype and no new stream record type (the 2.1.306 sets exactly), so no SHAPE_SINCE row and no KNOWN_IGNORED decision.
+  - **3 new fields on two shapes, `FIELDS_307`, all `ignored`, no reader in src/ server.js data/bin:**
+    - command_lifecycle.wakeup_source: only on 'started' of a scheduler fire (loop_wakeup = a ScheduleWakeup /loop wakeup, schedule_wakeup = a cron job or the missed-tasks notice), advertised by init's lifecycle_wakeup_source_v1.
+    - command_lifecycle.scheduled_for: the epoch-ms time the fired wakeup was set for.
+    - user.requeue_if_interrupted_within_ms: @internal, INPUT only. A host asks the CLI to put a prompt back in its queue when an interrupt crosses the turn taking it in.
+  - **One new zod key, `projects_thread_ask`:** a transcript ATTACHMENT payload {call, after, deliveredAt, messageId}, a Claude Code Projects thread's ask to its coordinator session, written at a compaction. It is an ATTACHMENT_PAYLOADS row, `ignored`: `_processAttachment` has no branch, so nothing renders.
+  - **The permission sentences:** the same 14 on the same lists, only renamed (anchor rp, list Bp, set Br, suffix gwt). PERMISSION_OUTCOME_CLI_VERSION is 2.1.307, with no `until`.
+- **THE BLIND SPOT, found and closed: nested objects.** The union is depth-1, but src/record-shape.js judges seven objects one level down. So a field a build added INSIDE one never reached a leg.
+  - **The evidence:** the owner's telemetry has 40 `harness-shape-drift` events «rate_limit_event +{rate_limit_info.overageEnabled}», most tagged `cli 2.1.296`. overageEnabled arrived in 2.1.296 (strings of 2.1.287 / .288 / .296), and that build's pin never saw it.
+  - **The dump** now records `nested` (`nestedOf`, NESTED_FIELDS, seven objects). A lazy schema named on the shape (`rate_limit_info:A2r()` → `A2r=p(()=>u({…}))`) is resolved by name, and every miss is named. `control_request.request` is the one nested spec not read: it is a union of every control request (NESTED_UNIONS, with its reason).
+  - **Declared:**
+    - RATE_LIMIT_INFO `known` gains overageInUse (src/rate-limit-capture.js reads it), plus 10 `ignored` rows naming their first build: overageEnabled (2.1.296), usageCreditOffer (2.1.306), adminRequestOffer (2.1.307), and seven ≤2.1.287 (rateLimitGraceActive, overagePeriodMonthly / Channel, limitScope, errorCode, canUserPurchaseCredits, hasChargeableSavedPaymentMethod).
+    - COMPACT_METADATA gains pre_compact_artifact_read_versions.
+    - API_ERROR_ERROR gains the SDK's snake_case is_network_down / rate_limits.
+  - **The binary oracle** (§4) and the tracked-dump judge (§4e) hold every nested object to known ∪ ignored. A census holds the nested specs to NESTED_FIELDS ∪ NESTED_UNIONS.
+- **THE OAT ROW, 2.1.307:** 主开发's namespace rung, 2026-10-22, handed over as `<lane>/oat-in-file-2.1.307.json` (+ measure-2.1.307.log). It has the same six verdicts as 2.1.306 and 2.1.296, each note word for word 2.1.306's.
+  - It was added with the writer's own rule, `withMeasured(committed, record)`, so 2.1.296 and 2.1.306 are kept byte-for-byte; test-cli-caps ⑥ now pins 2.1.306's sha256 too.
+  - `oatInFile('2.1.307')` is true; 2.1.300 and 2.1.308 are false.
+  - test-oat-measure-fake's add leg now READS the committed versions, so a CLI bump never edits that heavy suite again.
+- **Tests (each through the lane env.sh):**
+  - test-record-shape: 129 with no binary (base 112); 148 STRICT on 0644 copies of 2.1.307, 2.1.306, 2.1.296 and 2.1.288, and on the mirror shape (GITHUB_ACTIONS) over 2.1.307. Base on 2.1.307: 129 ✓ / 1 ✗ (the 3 UNDECLARED); base mirror INFORMATIONAL.
+  - Its RED CONTROLS:
+    - a copy without FIELDS_307 (3 named on the dump; on the live frames, ONE drift card on command_lifecycle);
+    - the .340 nested declaration (14 named on the dump; on a live rejected rate_limit_event, ONE card naming adminRequestOffer / overageEnabled / overageInUse / usageCreditOffer).
+  - test-helper-ask 243 (⑱b → 2.1.307). test-agent-tool-rules ⑪ on 2.1.307, through a fake HOME → the 0644 copy: all six binary checks hold.
+  - test-cli-caps 87 (base 84), test-oat-materialize 180 (178), test-account-pool 89 (87), test-oat-measure-fake 20. Each has a RED CONTROL over the .340 base's two-version file: 2.1.307 is `cli-unmeasured`, the member escaped.
+- **Usage in 2.1.307, read off the strings:** most of the usage mechanisms new since 2.1.296 arrived in 2.1.306.
+  - What 2.1.307 adds is the admin request for usage credits: `adminRequestOffer` on rate_limit_info, in VS Code sessions only.
+  - The status-line input schema is unchanged since 2.1.296.
+  - No vendor call was made or proposed.
+
 ## 2.369.340 — 2026-10-21
 
 ### lane cli-2-1-306-records — the record oracle is pinned to claude 2.1.306: the records that build added are known, and the permission sentence it moved is read again (backlog B-42ed; base c1aba74c 2.369.337)

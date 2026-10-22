@@ -300,7 +300,15 @@ console.log('§3 enum drift — an undeclared enum value is a card, and the hand
 }
 
 // ── THE EXTRACTOR (§4a, §4) — moved verbatim to scripts/claude-cli-dump.mjs (lane cli-2-1-288-records) ──
-import { extractZodUnion, extractPermissionSentences, outcomeCensus } from './claude-cli-dump.mjs';
+import { extractZodUnion, extractPermissionSentences, outcomeCensus, nestedOf, NESTED_FIELDS, NESTED_UNIONS } from './claude-cli-dump.mjs';
+/** PURE (lane cli-2-1-307-records): a dump's / a binary's `nested` ({'<shape>.<field>': keys}) vs the nested specs of Rx — every
+ *  key outside known ∪ ignored, every object with no spec or not read, NAMED. */
+const nestedUndeclared = (Rx, nested) => Object.entries(nested).flatMap(([at, keys]) => {
+  const cut = at.lastIndexOf('.'), sp = Rx.SHAPES['claude:stream:' + at.slice(0, cut)]?.nested?.[at.slice(cut + 1)];
+  if (!sp) return ['NO SPEC ' + at];
+  if (!Array.isArray(keys)) return ['UNREAD ' + at + ' (' + (keys && keys.error) + ')'];
+  return keys.filter((f) => !sp.known.has(f) && !sp.ignored.has(f)).map((f) => 'UNDECLARED ' + at + '.' + f);
+});
 
 console.log('§4a the extractor on every spelling the minifier has used — a rename is FOLLOWED, a new form fails BY NAME');
 {
@@ -400,6 +408,7 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
         ok('§4d …and a bundle without the anchor / without the list fails BY NAME', /NO ANCHOR/.test(extractPermissionSentences('var x="nothing here";').error) && /NO LIST/.test(extractPermissionSentences('var Ud="[Request interrupted by user for tool use]";').error));
       }
     }
+    const nb = nestedOf(text, helpers); // the nested objects, read while the dump is still in memory (lane cli-2-1-307-records)
     text = '';
     oracleOk('the extractor found the union\'s anchor in the installed bundle (a new spelling fails HERE, by name)', !exErr, exErr);
     const keys = Object.keys(union);
@@ -434,6 +443,9 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
     const planted = { ...union, 'system/init': [...(union['system/init'] || []), 'planted_drift_field'] };
     const pv = undeclared(planted).viol;
     ok('…NEGATIVE CONTROL: the real union with ONE planted field on system/init fails that leg, naming exactly it', pv.length === viol.length + 1 && pv.includes('claude:stream:system/init.planted_drift_field'), pv);
+    // …and ONE LEVEL DOWN (lane cli-2-1-307-records): each nested object record-shape judges, read off this binary (nestedOf)
+    const nviol = nestedUndeclared(R, nb);
+    oracleOk(`every NESTED object's binary field set ⊆ known ∪ ignored (${Object.keys(nb).length} objects: ${Object.keys(nb).join(', ')})`, nviol.length === 0 && Object.keys(nb).length === NESTED_FIELDS.length, nviol.length ? nviol.join(', ') : { objects: Object.keys(nb).length });
     // reverse: no dead list entry, no declared stream shape the binary does not have. A row a NEWER build
     // declared (R.SHAPE_SINCE) is excused on an older installed build — printed, never silent.
     const verCmp = (a, b) => { const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0); } return 0; };
@@ -487,7 +499,7 @@ console.log('§4b the CLI 2.1.280 pass (2026-09-22): the latency reason told tru
 
 console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six fields on three shapes, one new subtype routed to the fall-back card');
 {
-  ok('2.1.281 stays a PINNED build beside 2.1.288, 2.1.296 and 2.1.306 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296,2.1.306' && R.SCHEMA_CLI_VERSION === '2.1.306', R.SCHEMA_CLI_VERSIONS);
+  ok('2.1.281 stays a PINNED build beside 2.1.288, 2.1.296, 2.1.306 and 2.1.307 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296,2.1.306,2.1.307' && R.SCHEMA_CLI_VERSION === '2.1.307', R.SCHEMA_CLI_VERSIONS);
   const ADDED = [['system/init', 'per_turn_effort_active'], ['system/init', 'view_mode'], ['assistant', 'local_command_outcome'], ['conversation_reset', 'trigger'], ['conversation_reset', 'user_message_uuid'], ['conversation_reset', 'timestamp']];
   ok('the six fields 2.1.281 added are declared IGNORED (never known — known is the 2.1.274 dump), each with a reason naming the build', ADDED.every(([k, f]) => { const sp = R.SHAPES['claude:stream:' + k]; return !sp.known.has(f) && /2\.1\.281/.test(sp.ignored.get(f) || '') && sp.ignored.get(f).length > 60; }), ADDED.map(([k, f]) => k + '.' + f + ' = ' + R.SHAPES['claude:stream:' + k].ignored.get(f)));
   const pte = R.SHAPES['claude:stream:system/per_turn_effort_changed'];
@@ -571,7 +583,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const PO = require(path.join(REPO, 'src/permission-outcome.js'));
     for (const d of dumps) { const c = outcomeCensus(d.sentences.rows || [], PO.PERMISSION_OUTCOME_ROWS, ''); ok(`${d.version}: §4d ${(d.sentences.rows || []).length} permission sentences, none unresolved, each a row of src/permission-outcome.js`, (d.sentences.rows || []).length === 14 && d.sentences.unresolved.length === 0 && c.unclassified.length === 0, { unresolved: d.sentences.unresolved, c: c.unclassified }); }
     const texts = (d) => JSON.stringify(d.sentences.rows.map((x) => x.text).sort());
-    ok('§4d 2.1.281 → 2.1.288 → 2.1.296 → 2.1.306: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.306 (the newest pinned)', dumps.every((d) => texts(d) === texts(dumps[0])) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.306' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
+    ok('§4d 2.1.281 → 2.1.288 → 2.1.296 → 2.1.306 → 2.1.307: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.307 (the newest pinned)', dumps.every((d) => texts(d) === texts(dumps[0])) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.307' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
     // THE EIGHT DECISIONS, each on its evidence (the dump's zod literal)
     const z = dumps[1].zod || {};
     const EIGHT = ['session_metadata', 'instruction_size_warning', 'ui_invalidate', 'ui_log', 'ui_toast', 'ui_status', 'ui_scroll', 'ui_focus'];
@@ -645,6 +657,67 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const lo = lineOnly && lineOnly.extractPermissionSentences(mini306);
     const loGhost = lo && outcomeCensus(lo.sentences, [{ id: 'Dx', binary: 'Gd', text: d0 ? d0.text : '?' }], '').ghosts;
     ok('RED CONTROL: a copy of the extractor judging the LINE alone (the pre-lane rule) leaves D0 unresolved and the row a GHOST — «GHOST: Dx (Gd)», the mirror\'s red', DECL.length === 1 && !!lo && lo.unresolved.length === 1 && /^D0 \(0 candidate/.test(lo.unresolved[0]) && loGhost.join() === 'Dx (Gd)', { decl: DECL.length, unresolved: lo && lo.unresolved, loGhost });
+    // THE 2.1.307 PIN (lane cli-2-1-307-records) — the hub's claude AUTO-UPDATED to 2.1.307 (2026-10-21): its dump (strings over a 0644
+    // copy, never run as a session) minus the 2.1.306 dump, each decision on the dump
+    const d307 = dumps.find((d) => d.version === '2.1.307');
+    const z307 = d307.zod || {};
+    const [, lit7] = (/^([^/]+)\/([^ ]+) @/.exec(d307.helpers[0] || '') || []).slice(1);
+    const no307 = { ...R, SHAPES: Object.fromEntries(Object.entries(R.SHAPES).map(([k, sp]) => [k, R.FIELDS_307[k] ? { ...sp, ignored: new Map([...sp.ignored].filter(([f]) => !(f in R.FIELDS_307[k]))) } : sp])) };
+    const n307 = judgeDump(no307, d307);
+    ok('CONTROL: a copy without FIELDS_307 is red on the 2.1.307 dump (3 fields named) and still green on 2.1.306', n307.length === 3 && n307.every((x) => x.startsWith('UNDECLARED ')) && judgeDump(no307, d306).length === 0, n307);
+    const f307 = Object.entries(R.FIELDS_307).flatMap(([k, fs]) => Object.entries(fs).map(([f, note]) => [k, f, note]));
+    ok('FIELDS_307: 3 fields on two shapes (user, command_lifecycle), each IGNORED with a one-line reason naming 2.1.307 (no reader in the tree), never known', f307.length === 3 && new Set(f307.map(([k]) => k)).size === 2 && f307.every(([k, f, note]) => typeof note === 'string' && /2\.1\.307/.test(note) && note.length > 60 && R.SHAPES[k].ignored.get(f) === note && !R.SHAPES[k].known.has(f)), f307.filter(([k, f, n]) => !/2\.1\.307/.test(n || '')));
+    const grown7 = [...new Set(Object.keys(d307.union).filter((k) => k in d306.union && R.SHAPES[shapeOf(k)]).flatMap((k) => d307.union[k].filter((f) => !d306.union[k].includes(f)).map((f) => shapeOf(k) + '.' + f)))].sort();
+    ok('…and they ARE the dump diff, computed: every field 2.1.307 added to a declared stream shape (its dump minus the 2.1.306 dump) is a FIELDS_307 row, and no row lies outside it', JSON.stringify(grown7) === JSON.stringify(f307.map(([k, f]) => k + '.' + f).sort()), { grown7, rows: f307.map(([k, f]) => k + '.' + f).sort() });
+    ok('2.1.307 adds no system subtype and no stream record type (the 2.1.306 sets exactly) — no SHAPE_SINCE row, no KNOWN_IGNORED decision; nothing is left red', sysOf(d307) === sysOf(d306) && recsOf(d307) === recsOf(d306) && !Object.values(R.SHAPE_SINCE).includes('2.1.307'), { sys: sysOf(d307).split(',').length, recs: recsOf(d307).split(',').length });
+    // the one new zod key: a transcript ATTACHMENT payload (no uuid / session_id — never a stream record type), classified on its literal
+    const nonRec7 = Object.keys(z307).filter((k) => !k.startsWith('system/')).sort();
+    ok('the one non-system zod key of the 2.1.307 dump is an attachment payload on ATTACHMENT_PAYLOADS — projects_thread_ask {call, after, deliveredAt, messageId}, IGNORED: no uuid / session_id (not a stream record), not a 2.1.306 key, and no _processAttachment branch reads it', !!lit7 && nonRec7.join() === 'projects_thread_ask' && z307.projects_thread_ask.includes('type:' + lit7 + '("projects_thread_ask")') && (d307.union.projects_thread_ask || []).join() === 'call,after,deliveredAt,messageId' && !('projects_thread_ask' in d306.union) && /^ignored — \(2\.1\.307\)/.test(R.ATTACHMENT_PAYLOADS.projects_thread_ask || '') && !attBody.includes('projects_thread_ask'), { nonRec7, lit7 });
+    const same14 = d306.sentences.rows.every((r) => d307.sentences.rows.some((x) => x.text === r.text && x.from === r.from));
+    ok('§4d 2.1.307: the same 14 sentences on the same lists, only RENAMED (anchor ' + d306.sentences.anchor + ' → ' + d307.sentences.anchor + ', list ' + d306.sentences.list + ' → ' + d307.sentences.list + ', set ' + d306.sentences.set + ' → ' + d307.sentences.set + ') — no row moves list, none needs `until`', same14 && d307.sentences.rows.length === 14 && d307.sentences.unresolved.length === 0 && d307.sentences.anchor !== d306.sentences.anchor, d307.sentences.rows.map((x) => x.name + ':' + x.from));
+    // the frames 2.1.307 writes, through the REAL normalizer — and the drift card they drew before this pin (a copy without FIELDS_307)
+    const SID7 = 'e2e00000-0000-4000-8000-0000000003a7';
+    const live7 = (MMx, conv) => {
+      const x = MMx === MM ? createMessageManager('claude', conv) : new MMx.MessageManager(conv);
+      x.processLive({ type: 'command_lifecycle', command_uuid: 'c-307-1', state: 'started', wakeup_source: 'loop_wakeup', scheduled_for: 1792636800000, uuid: 'u-307-1', session_id: conv });
+      x.processLive({ type: 'command_lifecycle', command_uuid: 'c-307-2', state: 'started', wakeup_source: 'schedule_wakeup', uuid: 'u-307-2', session_id: conv });
+      const before = x.messages.length;
+      x.processLive({ type: 'attachment', attachment: { type: 'projects_thread_ask', call: { name: 'ask', id: 'toolu_307', input: {} }, after: 'u-307-2', deliveredAt: 1792636800000, messageId: 'msg_307' }, uuid: 'u-307-3', session_id: conv });
+      const cards = driftCards(x);
+      return { cards: cards.length, fields: cards.flatMap((m) => m.content[0].fields).sort().join(), rows: ledgerOf(conv, MMx).length, attachmentMsgs: x.messages.length - before, all: x.messages.length };
+    };
+    const real7 = live7(MM, SID7);
+    ok('the REAL normalizer on 2.1.307\'s frames: a scheduler fire\'s command_lifecycle (wakeup_source loop_wakeup + scheduled_for, schedule_wakeup) and a projects_thread_ask attachment ⇒ no drift card, no ledger row, no message at all', real7.cards === 0 && real7.rows === 0 && real7.all === 0 && real7.attachmentMsgs === 0, real7);
+    const M7 = mutantCopies('record-307', REPO);
+    const FILL7 = 'for (const [key, fields] of Object.entries(FIELDS_307)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);';
+    const rsSrc7 = read('src/record-shape.js'), mmSrc7 = read('src/message-manager.js'), REQ7 = "require('./record-shape.js')";
+    const MM7 = rsSrc7.split(FILL7).length === 2 && mmSrc7.split(REQ7).length === 2 ? require(M7.write('src/message-manager.js', mmSrc7.replace(REQ7, 'require(' + JSON.stringify(M7.write('src/record-shape.js', rsSrc7.replace(FILL7, '/* FIELDS_307 not filled (control) */'), 'no-307')) + ')'), 'mm-no-307')) : null;
+    const ctl7 = MM7 && live7(MM7, SID7.replace(/a7$/, 'a8'));
+    ok('RED CONTROL: the same frames on a copy without FIELDS_307 (the .340 tree on 2.1.307) ⇒ the red card is back — ONE drift card on command_lifecycle naming scheduled_for + wakeup_source, and its ledger row; the attachment still draws nothing', !!ctl7 && ctl7.cards === 1 && ctl7.fields === 'scheduled_for,wakeup_source' && ctl7.rows === 1 && ctl7.attachmentMsgs === 0, ctl7);
+    // THE NESTED OBJECTS (lane cli-2-1-307-records) — the union is depth-1, so a field a build added INSIDE rate_limit_info never
+    // reached a leg: 2.1.296's rate_limit_info.overageEnabled drew a live red card on every rate-limited conversation (the owner's
+    // telemetry: harness-shape-drift «rate_limit_event +{rate_limit_info.overageEnabled} · cli 2.1.296»). From 2.1.307 on the dump
+    // carries `nested` (scripts/claude-cli-dump.mjs nestedOf), judged here with no binary.
+    const declaredNested = Object.entries(R.SHAPES).filter(([k]) => k.startsWith('claude:stream:')).flatMap(([k, sp]) => Object.keys(sp.nested).map((f) => k.slice(14) + '.' + f)).sort();
+    ok(`census: the nested objects src/record-shape.js judges on a claude stream shape are exactly the ones nestedOf reads off a binary (NESTED_FIELDS, ${NESTED_FIELDS.length}) plus the one named union (NESTED_UNIONS: ${Object.keys(NESTED_UNIONS).join(', ')}) — a new nested spec without a dump row goes red here`, JSON.stringify(declaredNested) === JSON.stringify([...NESTED_FIELDS.map(([k, f]) => k + '.' + f), ...Object.keys(NESTED_UNIONS)].sort()) && Object.values(NESTED_UNIONS).every((why) => why.length > 60), { declaredNested });
+    const nestedDumps = dumps.filter((d) => vcmp(d.version, '2.1.307') >= 0);
+    ok(`every pinned dump from 2.1.307 on carries \`nested\` and reads all ${NESTED_FIELDS.length} objects (none unresolved)`, nestedDumps.length >= 1 && nestedDumps.every((d) => d.nested && Object.keys(d.nested).length === NESTED_FIELDS.length && Object.values(d.nested).every(Array.isArray)), nestedDumps.map((d) => [d.version, d.nested]));
+    for (const d of nestedDumps) { const v = nestedUndeclared(R, d.nested); ok(`${d.version}: every NESTED object's field set ⊆ known ∪ ignored (${Object.keys(d.nested).length} objects)`, v.length === 0, v); }
+    const nestedRows = NESTED_FIELDS.flatMap(([k, f]) => [...R.SHAPES['claude:stream:' + k].nested[f].ignored].map(([x, note]) => [k + '.' + f, x, note]));
+    const uniqRows = [...new Map(nestedRows.map((r) => [r[0].replace(/^system\/task_(?:notification|progress)/, 'task') + '.' + r[1], r])).values()];
+    ok('the nested IGNORED rows: 13 — rate_limit_info 10 (overageEnabled 2.1.296, usageCreditOffer 2.1.306, adminRequestOffer 2.1.307, seven ≤2.1.287), compact_metadata 1, api_error.error 2 — each naming its first build, none known; overageInUse is KNOWN (src/rate-limit-capture.js reads it)', uniqRows.length === 13 && uniqRows.every(([, x, note]) => /\((≤2\.1\.287|2\.1\.296|2\.1\.306|2\.1\.307)\)/.test(note) && note.length > 60) && /\(2\.1\.296\)/.test(R.SHAPES['claude:stream:rate_limit_event'].nested.rate_limit_info.ignored.get('overageEnabled')) && /\(2\.1\.306\)/.test(R.SHAPES['claude:stream:rate_limit_event'].nested.rate_limit_info.ignored.get('usageCreditOffer')) && /\(2\.1\.307\)/.test(R.SHAPES['claude:stream:rate_limit_event'].nested.rate_limit_info.ignored.get('adminRequestOffer')) && R.SHAPES['claude:stream:rate_limit_event'].nested.rate_limit_info.known.has('overageInUse') && read('src/rate-limit-capture.js').includes('info.overageInUse'), uniqRows.map(([at, x]) => at + '.' + x));
+    const pre307 = { ...R, SHAPES: Object.fromEntries(Object.entries(R.SHAPES).map(([k, sp]) => [k, { ...sp, nested: Object.fromEntries(Object.entries(sp.nested).map(([f, ns]) => [f, { ...ns, known: new Set([...ns.known].filter((x) => x !== 'overageInUse')), ignored: new Map() }])) }])) };
+    const n340 = nestedUndeclared(pre307, d307.nested);
+    ok('RED CONTROL: the .340 tree\'s nested declarations (no ignored rows, overageInUse unknown) on the 2.1.307 dump ⇒ 14 named, the live card of 2.1.296 (rate_limit_info.overageEnabled), 2.1.306\'s usageCreditOffer and 2.1.307\'s adminRequestOffer among them', n340.length === 14 && ['overageEnabled', 'usageCreditOffer', 'adminRequestOffer', 'overageInUse'].every((f) => n340.includes('UNDECLARED rate_limit_event.rate_limit_info.' + f)), n340);
+    // the live frame, through the REAL normalizer — and the card it drew before this lane (a copy with the .340 nested declaration)
+    const rlFrame = (conv) => ({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1792650000, rateLimitType: 'seven_day', overageStatus: 'rejected', isUsingOverage: false, overageInUse: false, overageEnabled: true, usageCreditOffer: { kind: 'extra_credit', headlinePct: 20, daysLeft: 3, label: 'x' }, adminRequestOffer: { state: 'can_ask', label: 'x', doneLabel: 'y', confirm: false, confirmPrompt: 'z' } }, uuid: 'u-rl-' + conv.slice(-2), session_id: conv });
+    const liveRl = (MMx, conv) => { const x = MMx === MM ? createMessageManager('claude', conv) : new MMx.MessageManager(conv); x.processLive(rlFrame(conv)); const c = driftCards(x); return { cards: c.length, fields: c.flatMap((m) => m.content[0].fields).sort().join(), rows: ledgerOf(conv, MMx).length }; };
+    const realRl = liveRl(MM, 'e2e00000-0000-4000-8000-0000000003b1');
+    ok('the REAL normalizer on a 2.1.307 rejected rate_limit_event (overageEnabled, overageInUse, usageCreditOffer, adminRequestOffer) ⇒ no drift card, no ledger row', realRl.cards === 0 && realRl.rows === 0, realRl);
+    const EXPORTS7 = 'module.exports = { SCHEMA_CLI_VERSION,';
+    const MMn = rsSrc7.split(EXPORTS7).length === 2 ? require(M7.write('src/message-manager.js', mmSrc7.replace(REQ7, 'require(' + JSON.stringify(M7.write('src/record-shape.js', rsSrc7.replace(EXPORTS7, "for (const sp of [RATE_LIMIT_INFO, COMPACT_METADATA, API_ERROR_ERROR]) sp.ignored.clear(); RATE_LIMIT_INFO.known.delete('overageInUse'); /* the .340 nested declaration (control) */\n" + EXPORTS7), 'nested-340')) + ')'), 'mm-nested-340')) : null;
+    const ctlRl = MMn && liveRl(MMn, 'e2e00000-0000-4000-8000-0000000003b2');
+    ok('RED CONTROL: the same frame on a copy with the .340 nested declaration ⇒ the red card is back — ONE drift card on rate_limit_event naming rate_limit_info.adminRequestOffer / .overageEnabled / .overageInUse / .usageCreditOffer, and its ledger row', !!ctlRl && ctlRl.cards === 1 && ctlRl.fields === 'rate_limit_info.adminRequestOffer,rate_limit_info.overageEnabled,rate_limit_info.overageInUse,rate_limit_info.usageCreditOffer' && ctlRl.rows === 1, ctlRl);
   }
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // THE MATERIALIZED LONG-LIVED TOKEN (lane pool-oat-materialize, design q-035 A, B-b928;
-// measured GO on CLI 2.1.296, and on 2.1.306 since lane oat-in-file-2-1-306 —
+// measured GO on CLI 2.1.296, on 2.1.306 since lane oat-in-file-2-1-306 and on 2.1.307 since lane cli-2-1-307-records —
 // scripts/fixtures/oat-in-file.json). A pooled session's CLI
 // reads its member's credential FILE through a symlink, so a token that lives only in
 // accounts.json can never serve it. For a member with NO usable login, accounts.setOat also
@@ -169,7 +169,7 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
   const r = await so(am, dead, OAT);
   ok(am.oatFileCaps().ok === false && r.oatFile === 'cli-unmeasured' && sha(credsOf(am, dead)) === deadBytes && !archives(am, dead).length, 'no CLI version known ⇒ the capability gate is shut: setOat stores the token, writes NOTHING (cli-unmeasured)', r);
   const c = await nv(am, '2.1.296 (Claude Code)');
-  ok(c.ok === true && c.cli === '2.1.296' && c.measured === '2.1.296, 2.1.306' && c.changed === true, 'the hub\'s CLI = the measured 2.1.296 ⇒ oatInFile true (cli-caps over the committed fixture, which holds 2.1.296 and 2.1.306), and the rows re-sync', c);
+  ok(c.ok === true && c.cli === '2.1.296' && c.measured === '2.1.296, 2.1.306, 2.1.307' && c.changed === true, 'the hub\'s CLI = the measured 2.1.296 ⇒ oatInFile true (cli-caps over the committed fixture, which holds 2.1.296, 2.1.306 and 2.1.307), and the rows re-sync', c);
   const arch = archives(am, dead);
   const f = readJ(credsOf(am, dead));
   const a = am.get(dead);
@@ -267,10 +267,29 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
     return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
   };
   const now = await on306('now');
-  ok(now.c.ok === true && now.c.cli === '2.1.306' && now.c.measured === '2.1.296, 2.1.306' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.306' && now.spawn, 'the hub\'s CLI = 2.1.306 (measured 2026-10-21) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.306, the spawn reads the file — as on 2.1.296', now);
+  ok(now.c.ok === true && now.c.cli === '2.1.306' && now.c.measured === '2.1.296, 2.1.306, 2.1.307' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.306' && now.spawn, 'the hub\'s CLI = 2.1.306 (measured 2026-10-21) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.306, the spawn reads the file — as on 2.1.296', now);
   const one = path.join(tmp, 'fx-2.1.296-only.json'); fs.writeFileSync(one, JSON.stringify(COMMITTED.versions['2.1.296'], null, 1) + '\n');
   const base = await on306('base', one);
   ok(base.c.ok === false && base.c.known && base.c.measured === '2.1.296' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the base): over the one-version file (2.1.296 only) the same 2.1.306 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
+}
+{
+  // lane cli-2-1-307-records: the hub's claude AUTO-UPDATED to 2.1.307 — measured 2026-10-22 with the verdicts 2.1.306 has — so a
+  // member with no usable login gets what it gets on 2.1.306; over the .340 base's two-version file it is unmeasured
+  const COMMITTED = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/oat-in-file.json'), 'utf8'));
+  const on307 = async (tag, oatFixture) => {
+    const amV = new AccountManager({ dataDir: path.join(tmp, 'data-307-' + tag), ...(oatFixture ? { oatFixture } : {}) });
+    const m = amV.createSubscription({ name: 'Dead 307' }).id;
+    put(amV, m, login(NOW, { dead: true }));
+    const c = await nv(amV, '2.1.307 (Claude Code)');
+    const r = await so(amV, m, OAT);
+    return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
+  };
+  const now = await on307('now');
+  ok(now.c.ok === true && now.c.cli === '2.1.307' && now.c.measured === '2.1.296, 2.1.306, 2.1.307' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.307' && now.spawn, 'the hub\'s CLI = 2.1.307 (measured 2026-10-22) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.307, the spawn reads the file — as on 2.1.306', now);
+  const { '2.1.307': measured307, ...two } = COMMITTED.versions;
+  const twoF = path.join(tmp, 'fx-2.1.296-2.1.306.json'); fs.writeFileSync(twoF, JSON.stringify({ versions: two }, null, 1) + '\n');
+  const base = await on307('base', twoF);
+  ok(!!measured307 && base.c.ok === false && base.c.known && base.c.measured === '2.1.296, 2.1.306' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .340 base): over the two-version file (2.1.296 + 2.1.306) the same 2.1.307 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
 }
 {
   // our token file is not a LOGIN where a login is the question

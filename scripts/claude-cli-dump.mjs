@@ -4,7 +4,9 @@
 // METHOD (the same read §4 makes on the installed binary): `strings -n 8 <binary>` (latin1), then
 // extractZodUnion (the SDK record union: shape → depth-1 keys, helper names read off the anchor) and
 // extractPermissionSentences (the §4d tool_result census). The dump adds `zod` — the raw object literal of
-// every subtype NEW against the previous dump (the evidence each declaration in src/record-shape.js cites).
+// every subtype NEW against the previous dump (the evidence each declaration in src/record-shape.js cites) —
+// and, since 2.1.307, `nested`: the depth-1 keys of each NESTED object src/record-shape.js judges one level
+// down (NESTED_FIELDS; the flat union never saw them).
 // PURE functions + one CLI entry; the test imports the functions, never runs the entry.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -130,7 +132,50 @@ export function zodLiteralOf(text, helpers, key) {
   return null;
 }
 
-/** The dump of one binary: {version, method, helpers, union, sentences, zod:{key: literal}} (zod only for `newKeys`). */
+// ── THE NESTED OBJECTS (lane cli-2-1-307-records) ──
+// src/record-shape.js judges six objects one level down (SHAPES[…].nested: rate_limit_event.rate_limit_info, …), but the
+// union above is depth-1 — so a field a build added INSIDE one never reached the oracle: 2.1.296's
+// rate_limit_info.overageEnabled drew a live red card on every rate-limited conversation and no leg named it. The dump
+// records each object's depth-1 keys: its value is an inline object (`u({…})`) or a lazy schema named on the shape
+// (`rate_limit_info:A2r()` → `A2r=p(()=>u({…}))`), resolved by name. Every miss is NAMED, never a silent [].
+export const NESTED_FIELDS = Object.freeze([['rate_limit_event', 'rate_limit_info'], ['system/compact_boundary', 'compact_metadata'], ['system/task_notification', 'usage'], ['system/task_progress', 'usage'], ['system/api_error', 'error'], ['system/session_metadata', 'metadata'], ['tool_progress', 'subagent_retry']]);
+// …and the one nested spec NOT read off the binary, with why: its value is a UNION, not an object
+export const NESTED_UNIONS = Object.freeze({ 'control_request.request': 'a union of every control-protocol request subtype, both directions (initialize, interrupt, set_model … beside the five a host receives); its spec is hand-merged over the five CLI → host subtypes (can_use_tool, request_user_dialog, elicitation, hook_callback, mcp_message), so the whole union would name fields that never reach VibeSpace' });
+const skipQuoted = (s, k) => { const q = s[k]; k++; while (k < s.length && s[k] !== q) { if (s[k] === '\\') k++; k++; } return k; };
+/** PURE: the depth-1 [{key, value}] of the object literal opening at s[i] === '{' (string literals skipped), null if unclosed. */
+export function objectMembers(s, i) {
+  const out = []; let d = 0, cur = '', key = null, vs = -1;
+  for (let k = i; k < s.length && k < i + 60000; k++) {
+    const c = s[k];
+    if (c === '"' || c === "'" || c === '`') { k = skipQuoted(s, k); if (key === null) cur = ''; continue; }
+    if (c === '(' || c === '{' || c === '[') { d++; if (key === null) cur = ''; continue; }
+    if (c === ')' || c === '}' || c === ']') { d--; if (d === 0) { if (key !== null) out.push({ key, value: s.slice(vs, k) }); return out; } continue; }
+    if (d !== 1) continue;
+    if (key === null) { if (/[A-Za-z0-9_$]/.test(c)) cur += c; else if (c === ':' && cur) { key = cur; vs = k + 1; cur = ''; } else cur = ''; } else if (c === ',') { out.push({ key, value: s.slice(vs, k) }); key = null; cur = ''; }
+  }
+  return null;
+}
+/** {'<shape>.<field>': [keys] | {error}} for NESTED_FIELDS — read off each shape's zod literal (zodLiteralOf). */
+export function nestedOf(text, helpers) {
+  const out = {};
+  for (const [key, field] of NESTED_FIELDS) {
+    const at = key + '.' + field, lit = zodLiteralOf(text, helpers, key);
+    const f = lit && (objectMembers(lit, lit.indexOf('{')) || []).find((m) => m.key === field);
+    if (!f) { out[at] = { error: lit ? 'no field ' + field + ' on the literal' : 'no literal for ' + key }; continue; }
+    const v = f.value.trim(), named = /^([A-Za-z_$][\w$]*)\(\)/.exec(v), brace = v.indexOf('{');
+    let body = null, i = -1;
+    if (named && (brace < 0 || brace > named[0].length)) {
+      const decl = new RegExp('(?<![\\w$.])' + named[1].replace(/\$/g, '\\$') + '=[A-Za-z_$][\\w$]*\\(\\(\\)=>').exec(text);
+      if (decl) { body = text; i = text.indexOf('{', decl.index); }
+      else { out[at] = { error: 'unresolved schema ' + named[1] }; continue; }
+    } else if (brace >= 0) { body = v; i = brace; }
+    const ms = body ? objectMembers(body, i) : null;
+    out[at] = ms ? ms.map((m) => m.key) : { error: 'not an object literal: ' + v.slice(0, 60) };
+  }
+  return out;
+}
+
+/** The dump of one binary: {version, method, helpers, union, sentences, nested, zod:{key: literal}} (zod only for `newKeys`). */
 export function dumpBinary(bin, newKeys = []) {
   const text = execFileSync('strings', ['-n', '8', bin], { maxBuffer: 1024 * 1024 * 1024, encoding: 'latin1' });
   const version = (execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }).match(/\d+\.\d+\.\d+/) || [path.basename(bin)])[0];
@@ -141,10 +186,11 @@ export function dumpBinary(bin, newKeys = []) {
   for (const k of newKeys) zod[k] = zodLiteralOf(text, helpers, k);
   return {
     version,
-    method: 'strings -n 8 <binary> (latin1) → extractZodUnion + extractPermissionSentences (scripts/claude-cli-dump.mjs)',
+    method: 'strings -n 8 <binary> (latin1) → extractZodUnion + extractPermissionSentences + nestedOf (scripts/claude-cli-dump.mjs)',
     helpers: helpers.map((h) => h.obj + '/' + h.lit + ' @' + h.anchor),
     union: Object.fromEntries(Object.keys(union).sort().map((k) => [k, union[k]])),
     sentences: cen.error ? { error: cen.error } : { anchor: cen.anchor, list: cen.list, set: cen.set, suffixes: cen.suffixes, unresolved: cen.unresolved, rows: cen.sentences.map((x) => ({ name: x.name, from: x.from, text: x.text })) },
+    nested: nestedOf(text, helpers),
     zod,
   };
 }

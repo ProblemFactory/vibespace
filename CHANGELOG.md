@@ -17,6 +17,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Subagents an Antigravity conversation started before this update now show their cards and timelines too.
 - A desktop no longer loses its windows when a phone or another tab wakes up and saves before its chats reconnect, or when a page cannot reopen a window.
 - Restore a previous layout now holds: a phone or tab that slept through the restore can no longer write its older copy over it.
+- With Claude Code 2.1.307, chats no longer show red "New fields on a known record" cards for the records that version added: VibeSpace now knows them.
+- On Claude Code 2.1.307, a pool can use a member that has only its long-lived token, as it can on 2.1.306.
+- A chat that reaches a usage limit no longer shows a red "New fields on a known record" card for the extra details of that limit.
 
 ## 2.369.340 — 2026-10-21
 

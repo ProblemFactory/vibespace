@@ -12,7 +12,8 @@
 //   ⑤ --no-netns refuses a binary / anything under …/claude/versions/ before it runs (the
 //      measurement over the FAKE claude needs strace: scripts/test-oat-measure-fake.mjs, heavy)
 //   ⑥ the committed fixture, once 主开发's namespace rung wrote it: its shape — 2.1.296 (2026-10-14,
-//      its record pinned as it was) + 2.1.306 (2026-10-21); 2.1.300 stays unmeasured
+//      its record pinned as it was) + 2.1.306 (2026-10-21, pinned since lane cli-2-1-307-records) + 2.1.307
+//      (2026-10-22, the hub's auto-update); 2.1.300 / 2.1.308 stay unmeasured
 //   ⑦ (pool-oat-materialize verify r1 F9) machine-probes.cliVersion: the FIRST line that parses as a
 //      version (a warning printed before the number is skipped), 'unparsed' for an answer with none,
 //      null for no answer — over fake #! binaries (never the real CLI)
@@ -197,14 +198,18 @@ if (!fs.existsSync(COMMITTED)) {
 } else {
   let F = null; try { F = JSON.parse(fs.readFileSync(COMMITTED, 'utf8')); } catch { }
   const recs = F && F.versions && typeof F.versions === 'object' ? Object.entries(F.versions) : [];
-  ok('scripts/fixtures/oat-in-file.json parses: one record per measured version, keyed by its exact version — 2.1.296 and 2.1.306, oldest first', !!F && JSON.stringify(Object.keys(F)) === '["versions"]' && JSON.stringify(recs.map(([k]) => k)) === JSON.stringify(['2.1.296', '2.1.306']) && JSON.stringify(C.measuredVersions(F)) === JSON.stringify(['2.1.296', '2.1.306']), JSON.stringify(F).slice(0, 300));
+  ok('scripts/fixtures/oat-in-file.json parses: one record per measured version, keyed by its exact version — 2.1.296, 2.1.306 and 2.1.307, oldest first', !!F && JSON.stringify(Object.keys(F)) === '["versions"]' && JSON.stringify(recs.map(([k]) => k)) === JSON.stringify(['2.1.296', '2.1.306', '2.1.307']) && JSON.stringify(C.measuredVersions(F)) === JSON.stringify(['2.1.296', '2.1.306', '2.1.307']), JSON.stringify(F).slice(0, 300));
   ok('…each record has the six verdicts and names the measurement', recs.length > 0 && recs.every(([k, r]) => r.cliVersion === k && /^\d{4}-\d\d-\d\d$/.test(r.measuredAt) && r.script === 'scripts/measure-claude-cred-read.mjs' && SIX.every((n) => r.variants?.[n] && /^(PASS|FAIL|INCOMPLETE)$/.test(r.variants[n].verdict) && typeof r.variants[n].note === 'string')), JSON.stringify(recs.map(([k, r]) => [k, r.cliVersion, r.measuredAt])));
   ok('…each measured in the namespace with the real CLI (not a fake, not --no-netns)', recs.length > 0 && recs.every(([k, r]) => r.netns === true && k !== '9.9.9'), JSON.stringify(recs.map(([k, r]) => [k, r.netns])));
   const sha = (o) => crypto.createHash('sha256').update(JSON.stringify(o)).digest('hex');
   ok('the 2.1.296 record says exactly what the file said since 2026-10-14 (sha256 of its JSON, pinned)', !!F?.versions?.['2.1.296'] && sha(F.versions['2.1.296']) === 'd7389f7a2edb1d1038cd0ab389d7ec11e5a009586fac78dceca407a732dcbaa5', F?.versions?.['2.1.296'] && sha(F.versions['2.1.296']));
   const verdicts = (v) => SIX.map((n) => F?.versions?.[v]?.variants?.[n]?.verdict).join(' ');
   ok('2.1.306 (主开发\'s namespace rung, 2026-10-21): the SAME six verdicts as 2.1.296 — oat-file PASS, oat-env FAIL, oat-file-401 PASS, oat-file-near PASS, oat-file-switch PASS, oat-file-scopes FAIL', F?.versions?.['2.1.306']?.measuredAt === '2026-10-21' && verdicts('2.1.306') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.306') === verdicts('2.1.296'), `${verdicts('2.1.296')} | ${verdicts('2.1.306')}`);
-  ok('oatInFile over it: 2.1.296 true, 2.1.306 true; an unmeasured 2.1.300 / 2.1.307 false, as today', C.oatInFile('2.1.296', F) === true && C.oatInFile('2.1.306 (Claude Code)', F) === true && C.oatInFile('2.1.300', F) === false && C.oatInFile('2.1.307', F) === false);
+  ok('the 2.1.306 record says exactly what it said since 2026-10-21 (sha256 of its JSON, pinned — the 2.1.307 run ADDED, never rewrote)', !!F?.versions?.['2.1.306'] && sha(F.versions['2.1.306']) === '327b0236b65ef44eba484dca383b5c9fa53efdabd1ee8b296db8d075248b5a0b', F?.versions?.['2.1.306'] && sha(F.versions['2.1.306']));
+  ok('2.1.307 (主开发\'s namespace rung, 2026-10-22 — the hub\'s claude auto-updated 2026-10-21): the SAME six verdicts as 2.1.306 and 2.1.296, each note word for word 2.1.306\'s', F?.versions?.['2.1.307']?.measuredAt === '2026-10-22' && verdicts('2.1.307') === 'PASS FAIL PASS PASS PASS FAIL' && verdicts('2.1.307') === verdicts('2.1.306') && SIX.every((n) => F.versions['2.1.307'].variants[n].note === F.versions['2.1.306'].variants[n].note), `${verdicts('2.1.306')} | ${verdicts('2.1.307')}`);
+  ok('oatInFile over it: 2.1.296 true, 2.1.306 true, 2.1.307 true; an unmeasured 2.1.300 / 2.1.308 false, as today', C.oatInFile('2.1.296', F) === true && C.oatInFile('2.1.306 (Claude Code)', F) === true && C.oatInFile('2.1.307 (Claude Code)', F) === true && C.oatInFile('2.1.300', F) === false && C.oatInFile('2.1.308', F) === false);
+  const { '2.1.307': r307, ...base340 } = F?.versions || {};
+  ok('RED CONTROL (the .340 base): the same file without its 2.1.307 record (2.1.296 + 2.1.306) grants 2.1.307 nothing — the cli-unmeasured refusal the hub\'s auto-update brought', !!r307 && C.oatInFile('2.1.307', { versions: base340 }) === false && C.oatInFile('2.1.306', { versions: base340 }) === true && JSON.stringify(C.measuredVersions({ versions: base340 })) === JSON.stringify(['2.1.296', '2.1.306']));
   ok('the fixture names no path, machine or person (the notes are the measurement\'s own words)', !!F && !/\/(var|home|tmp|opt|root|Users|run)\/|@|\.local\b|\.lan\b/.test(JSON.stringify(F)));
 }
 

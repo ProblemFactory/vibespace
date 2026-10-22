@@ -29,7 +29,7 @@
 // the design's census; since 2.1.281 the minifier spells it `d({type:R(…)`, so the extractor reads the
 // helper names off an anchor instead of spelling them); the fields 2.1.280 and 2.1.281 added sit in each
 // shape's `ignored` map with a reason (a shape NEW in a later build carries that build's declaration as
-// `known`; 2.1.288's / 2.1.296's / 2.1.306's fields sit in FIELDS_288 / FIELDS_296 / FIELDS_306), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
+// `known`; 2.1.288's / 2.1.296's / 2.1.306's / 2.1.307's fields sit in FIELDS_288 / FIELDS_296 / FIELDS_306 / FIELDS_307), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
 // the stream envelope and are omitted per row. Corpus-
 // only fields (seen live, undeclared upstream) are appended in CORPUS_KNOWN with a note.
 
@@ -62,13 +62,35 @@ const OURS = asSet(['webui_peer', 'webui_queue_id', 'webui_after_commit', 'webui
 const isOurs = (k) => OURS.has(k) || k.startsWith('webui_') || k.charCodeAt(0) === 95 /* '_' */;
 
 // ── claude: nested specs (the declared depth) ────────────────────────────────────────────────────
-const RATE_LIMIT_INFO = sh(['status', 'resetsAt', 'rateLimitType', 'utilization', 'unifiedWindows', 'overageStatus', 'overageResetsAt', 'overageDisabledReason', 'isUsingOverage', 'surpassedThreshold', 'unifiedRateLimitFallbackPercentage'], {
+// The fields a pinned build declares INSIDE a nested object beyond the hand-declared `known` (lane cli-2-1-307-records: the
+// dumps' `nested`, scripts/claude-cli-dump.mjs nestedOf — the flat union never saw them, so 2.1.296's
+// rate_limit_info.overageEnabled drew a red card on every rate-limited conversation). Each `ignored` row names the first build
+// whose binary declares it (strings of 2.1.287 / 2.1.288 / 2.1.296 / 2.1.306 / 2.1.307) and why nothing reads it.
+const NESTED_NOTE = (since, what) => what + ' (' + since + ') — no consumer yet (declared so no drift is recorded; move to known with the consumer)';
+const OFFER_NOTE = (since, what) => NESTED_NOTE(since, '@internal ' + what + ' — only on a rejected frame of a session the VS Code extension owns; VibeSpace\'s limit card reads status / resetsAt / rateLimitType');
+const RATE_LIMIT_INFO = sh(['status', 'resetsAt', 'rateLimitType', 'utilization', 'unifiedWindows', 'overageStatus', 'overageResetsAt', 'overageDisabledReason', 'isUsingOverage', 'overageInUse', 'surpassedThreshold', 'unifiedRateLimitFallbackPercentage'], {
   enums: { status: ['allowed', 'allowed_warning', 'rejected'], rateLimitType: ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet', 'seven_day_overage_included', 'overage'] },
   nested: { unifiedWindows: sh(['five_hour', 'seven_day', 'seven_day_overage_included', 'seven_day_opus', 'seven_day_sonnet']) },
+  // overageInUse is KNOWN: src/rate-limit-capture.js reads it (the overage inUse flag, after isUsingOverage)
+  ignored: {
+    overageEnabled: NESTED_NOTE('2.1.296', 'whether usage beyond the plan (extra usage) is turned on for the account (no describe in the binary) — the overage state reads overageStatus / isUsingOverage / overageInUse'),
+    rateLimitGraceActive: NESTED_NOTE('≤2.1.287', 'the CLI is inside its own grace period at a limit (no describe) — the limit card reads status / resetsAt'),
+    overagePeriodMonthly: NESTED_NOTE('≤2.1.287', '@internal monthly service spend-cap telemetry for the Claude-in-Slack surface (utilization = fraction of the cap)'),
+    overagePeriodChannel: NESTED_NOTE('≤2.1.287', '@internal per-Slack-channel spend-cap telemetry for the Claude-in-Slack surface'),
+    limitScope: NESTED_NOTE('≤2.1.287', 'which spend limit blocked the request when it is not the member\'s own cap (service | channel | group_pool) — a team / Slack budget; the pool reads the account\'s own windows'),
+    errorCode: NESTED_NOTE('≤2.1.287', 'credits_required: the request needs purchased credits (no describe) — the limit card reads status / resetsAt'),
+    canUserPurchaseCredits: NESTED_NOTE('≤2.1.287', 'whether the person may buy usage credits (no describe) — VibeSpace offers no purchase'),
+    hasChargeableSavedPaymentMethod: NESTED_NOTE('≤2.1.287', 'whether the account has a saved payment method to charge (no describe) — VibeSpace offers no purchase'),
+    usageCreditOffer: OFFER_NOTE('2.1.306', 'a limited-time usage-credit offer for the IDE extension\'s limit banner {kind, headlinePct, daysLeft, label}'),
+    adminRequestOffer: OFFER_NOTE('2.1.307', 'the IDE limit banner\'s offer to ask a Team / Enterprise member\'s admin for a higher spend limit {state, label, doneLabel, confirm, confirmPrompt, lastFileFailed, revision}'),
+  },
 });
-const COMPACT_METADATA = sh(['trigger', 'pre_tokens', 'post_tokens', 'cumulative_dropped_tokens', 'duration_ms', 'user_context', 'messages_summarized', 'precomputed', 'pre_compact_discovered_tools', 'preserved_segment', 'preserved_messages'], { enums: { trigger: ['manual', 'auto'] } });
+const COMPACT_METADATA = sh(['trigger', 'pre_tokens', 'post_tokens', 'cumulative_dropped_tokens', 'duration_ms', 'user_context', 'messages_summarized', 'precomputed', 'pre_compact_discovered_tools', 'preserved_segment', 'preserved_messages'], { enums: { trigger: ['manual', 'auto'] },
+  ignored: { pre_compact_artifact_read_versions: NESTED_NOTE('≤2.1.287', '@internal the artifact versions the conversation held before the compaction, replayed on resume — the compaction divider reads trigger / pre_tokens') } });
 const TASK_USAGE = sh(['total_tokens', 'tool_uses', 'duration_ms']);
-const API_ERROR_ERROR = sh(['message', 'status', 'request_id', 'formatted', 'connection', 'isNetworkDown', 'rateLimits', 'requestId']);
+const API_ERROR_ERROR = sh(['message', 'status', 'request_id', 'formatted', 'connection', 'isNetworkDown', 'rateLimits', 'requestId'], {
+  // the SDK literal spells the two snake_case (the camelCase pair is the live corpus's); system/api_error is card-less (KNOWN_IGNORED)
+  ignored: { is_network_down: NESTED_NOTE('≤2.1.287', 'whether the error was the network being down — system/api_error draws no card (the live api_retry drives the spinner)'), rate_limits: NESTED_NOTE('≤2.1.287', 'the quota-429 headers the retry banner shows {resets_at, rate_limit_type}, null when not a quota 429 — system/api_error draws no card') } });
 const SUBAGENT_RETRY = sh(['agent_id', 'attempt', 'max_retries', 'retry_delay_ms', 'error_status', 'error_category']);
 // The API message content-block types VibeSpace renders (design §3): user/assistant are judged by
 // these only. server_tool_use / web_search_tool_result / web_fetch_tool_result are the vendor's
@@ -273,10 +295,23 @@ const FIELDS_306 = Object.freeze({
   'claude:stream:system/ui_invalidate': { prompts_screened: NEW_306('@internal a plugin may change what is recorded of a typed line — the plugin UI host\'s wire, emitted only with a UI surface channel attached (VibeSpace attaches none)') },
   'claude:stream:command_lifecycle': { ran_ahead: NEW_306('@internal only on a repeated queued frame written to the VS Code panel — the server consumer reads state + command_uuid only') },
 });
+// The 3 fields 2.1.307 added to shapes 2.1.306 already declared (2026-10-21 census, lane cli-2-1-307-records: the hub's claude
+// auto-updated to 2.1.307 — its dump, strings over a 0644 copy, minus the 2.1.306 dump; the dump's own `.describe()` text is the
+// evidence). A grep of src/ server.js data/bin found NO reader for any of the 3: each is an `ignored` row saying why nothing reads it.
+// No subtype and no stream record type was added; the one new `zod` key is an ATTACHMENT_PAYLOADS row (projects_thread_ask).
+const NEW_307 = (what) => what + ' (2.1.307) — no consumer yet (declared so no drift is recorded; move to known with the consumer)';
+const FIELDS_307 = Object.freeze({
+  'claude:stream:user': { requeue_if_interrupted_within_ms: NEW_307('@internal input only: a host asks the CLI to put a prompt back in its queue when an interrupt crosses the turn taking it in (ms, capped at 10 s) — VibeSpace never sends it, and a replayed user record renders from its content') },
+  'claude:stream:command_lifecycle': {
+    wakeup_source: NEW_307('only on \'started\' of a scheduler fire: loop_wakeup (a ScheduleWakeup /loop wakeup) or schedule_wakeup (a cron job, the missed-tasks notice), advertised by init\'s lifecycle_wakeup_source_v1 capability — the server consumer reads state + command_uuid only'),
+    scheduled_for: NEW_307('only beside loop_wakeup: the epoch-ms time the fired wakeup was set for (the ScheduleWakeup result\'s scheduledFor) — nothing in VibeSpace keeps an idle session alive for a wakeup'),
+  },
+});
 // (filled BEFORE the CORPUS_KNOWN line: test-record-shape §5's control clears every ignored map at that line)
 for (const [key, fields] of Object.entries(FIELDS_288)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_296)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_306)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
+for (const [key, fields] of Object.entries(FIELDS_307)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(CORPUS_KNOWN)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 
 
@@ -459,10 +494,12 @@ const CORPUS_ONLY_SUBTYPES = Object.freeze({
 // The transcript ATTACHMENT payloads a pinned dump's `zod` names (2.1.296: the CLI's own SessionStart-hook attachment parser — a
 // `type`-discriminated union over these three, read back to rebuild the session-start context). They are `attachment.type` values,
 // not stream records (no uuid / session_id), so the union legs never judge them; each is classified here, on its literal.
+// 2.1.307 adds projects_thread_ask (the CLI's own parser of a Claude Code Projects thread's held ask, read back after a compaction).
 const ATTACHMENT_PAYLOADS = Object.freeze({
   hook_success: 'known — message-manager _processAttachment: the hook card (✓ Hook: <name>, its output behind the expander)',
   hook_additional_context: 'known — message-manager _processAttachment: the "✓ Hook context" card (the injected text, deduped against the hook\'s stdout card)',
   async_hook_response: 'ignored — an ASYNC hook\'s protocol JSON (response / command / exitCode); _processAttachment has no branch, so nothing renders and no card is made; the CLI reads only its systemMessage + additionalContext, to rebuild session-start context',
+  projects_thread_ask: 'ignored — (2.1.307) a Claude Code Projects thread\'s ask to its coordinator session (call {name, id, input}, after, deliveredAt, messageId), written at a compaction so auto mode still knows the ask was delivered (only a Projects thread session writes it); _processAttachment has no branch, so nothing renders and no card is made',
 });
 // The `workflow_progress` ITEMS a pinned dump's `zod` names (2.1.306: the CLI now PARSES the list a task_progress record carries — a
 // `type`-discriminated union over these two, its remote-session adapter's reader; 2.1.296 built the same items with no schema). They are
@@ -621,12 +658,13 @@ function unknownFieldsSample(record) {
 // cli-2-1-288-records, B-e05e): 2.1.274 dump + the 2.1.280 additions (2026-09-22) + 2.1.281 (2026-09-23 — one new
 // subtype, six fields on three shapes) + 2.1.288 (2026-10-07 — eight new subtypes, 23 fields on six shapes) + 2.1.296 (2026-10-15 — two new
 // subtypes, 18 fields on ten shapes, three hook attachment payloads: FIELDS_296 / ATTACHMENT_PAYLOADS) + 2.1.306 (2026-10-21 — no new
-// subtype, 21 fields on eight shapes, the two workflow_progress items: FIELDS_306 / WORKFLOW_PROGRESS_ITEMS). Each
+// subtype, 21 fields on eight shapes, the two workflow_progress items: FIELDS_306 / WORKFLOW_PROGRESS_ITEMS) + 2.1.307 (2026-10-21 —
+// no new subtype, 3 fields on two shapes, one attachment payload: FIELDS_307 / ATTACHMENT_PAYLOADS). Each
 // pinned build has its TRACKED dump in scripts/fixtures/claude-cli/<version>.json, judged with no binary at all;
 // test-record-shape's binary oracle runs on whichever claude is installed and expects the rows of THAT build
 // (SHAPE_SINCE excuses a newer row on an older build). STRICT on any developer box; on the Actions mirror (which
 // installs whatever npm serves today) an UNPINNED build's drift is printed and skipped, never a red gate nobody reads.
-const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306']);
+const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307']);
 const SCHEMA_CLI_VERSION = SCHEMA_CLI_VERSIONS[SCHEMA_CLI_VERSIONS.length - 1];
 
-module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };
+module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };

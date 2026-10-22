@@ -202,6 +202,10 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   ck('token slot: the hub moves on to 2.1.306 (measured) ⇒ the token is back in T\'s folder and T is a pool candidate again — not escaped', amT.readSubCreds(T).oatFile === true && amT.poolMembers(PT).some((m) => m.id === T) && amT.isPoolMember(PT, T));
   amT.setPoolTarget(PT, T);
   ck('…the pool dir re-points onto it and resolves through to its token file, as on 2.1.296', amT.poolCurrent(PT) === T && amT.readSubCreds(PT).oatFile === true && amT.resolveForSpawn(PT).poolTarget === T);
+  // lane cli-2-1-307-records: the hub's CLI AUTO-UPDATED to 2.1.307 (measured 2026-10-22, the verdicts 2.1.306 has) ⇒ still no escape
+  amT.noteCliVersion('2.1.307 (Claude Code)');
+  await amT.oatFileSettled();
+  ck('token slot: the hub auto-updates to 2.1.307 (measured) ⇒ T keeps its token file and stays a pool candidate, the pool dir still resolving through to it — not escaped', amT.readSubCreds(T).oatFile === true && amT.poolMembers(PT).some((m) => m.id === T) && amT.isPoolMember(PT, T) && amT.poolCurrent(PT) === T && amT.readSubCreds(PT).oatFile === true && amT.resolveForSpawn(PT).poolTarget === T);
 }
 {
   // RED CONTROL (lane oat-in-file-2-1-306, the base): over the one-version fixture (2.1.296 only) the same member on 2.1.306 is escaped
@@ -218,6 +222,23 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   amB.noteCliVersion('2.1.306 (Claude Code)');
   await amB.oatFileSettled();
   ck('RED CONTROL (the base): over the one-version fixture (2.1.296 only) the same oat-only member on 2.1.306 stays out of the pool and its folder holds no token (today\'s escape)', !amB.poolMembers(PB).some((m) => m.id === T) && !amB.isPoolMember(PB, T) && amB.readSubCreds(T).oatFile !== true && amB.poolMembers(PB).some((m) => m.id === X));
+}
+{
+  // RED CONTROL (lane cli-2-1-307-records, the .340 base): over the two-version fixture (2.1.296 + 2.1.306) the same member on 2.1.307 is escaped
+  const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
+  const { '2.1.307': _measured307, ...two } = FX.versions;
+  const twoF = path.join(DATA, 'fx-2.1.296-2.1.306.json'); fs.writeFileSync(twoF, JSON.stringify({ versions: two }));
+  const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-base-307'), oatFixture: twoF });
+  const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
+  const X = amB.createSubscription({ name: 'Login X' }).id;
+  fs.writeFileSync(path.join(amB.subDir(X), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, ...SH } }), { mode: 0o600 });
+  const T = amB.createSubscription({ name: 'Token T' }).id;
+  fs.writeFileSync(path.join(amB.subDir(T), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 864e5, ...SH } }), { mode: 0o600 });
+  const PB = amB.createPool({ name: 'Tok pool' }).id;
+  amB.setOat(T, ['sk', '-ant-oat01-'].join('') + 'POOLfake_' + 'w'.repeat(40));
+  amB.noteCliVersion('2.1.307 (Claude Code)');
+  await amB.oatFileSettled();
+  ck('RED CONTROL (the .340 base): over the two-version fixture (2.1.296 + 2.1.306) the same oat-only member on 2.1.307 stays out of the pool and its folder holds no token — the escape the hub\'s auto-update brought', !!_measured307 && Object.keys(two).join() === '2.1.296,2.1.306' && !amB.poolMembers(PB).some((m) => m.id === T) && !amB.isPoolMember(PB, T) && amB.readSubCreds(T).oatFile !== true && amB.poolMembers(PB).some((m) => m.id === X));
 }
 // THE PROVIDER OF A POOL MEMBER (q-053 P0b): every member names its provider (a LABEL — readings stay the slot's); the
 // pool's crossProvider setting (never by default, the owner's decision ①) is validated and listed.
