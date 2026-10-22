@@ -18,6 +18,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On Claude Code 2.1.308, a pool can use a member that has only its long-lived token, as it can on 2.1.307.
 - When Claude Code updates to a version VibeSpace does not know yet, Diagnostics and Manage agents say so; Draft the record table saves it for the next release.
 - A session's browser window keeps its side-by-side button when it is a tab grouped with its session or a narrow window, instead of losing it.
+- In app and browser windows, letters and symbols arrive exactly as you typed them, also with Caps Lock and Shift together on a Mac and on non-US layouts.
 
 ## 2.369.341 — 2026-10-21
 

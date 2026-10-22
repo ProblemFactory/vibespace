@@ -662,6 +662,59 @@ try {
           await p1.cdp('Input.insertText', { text: '中文输入' });
           const v2 = await until(() => { const v = keyLog().filter((e) => e.ty === 'value').pop(); return v && v.v === 'wsxd中文输入' ? v.v : null; }, 10000, 200);
           check(`${row.id}: an IME commit (中文输入) lands as its characters after them — the published rows on stock-NoSymbol keycodes (${JSON.stringify(v2 || (keyLog().filter((e) => e.ty === 'value').pop() || {}).v)})`, v2 === 'wsxd中文输入', keyLog().filter((e) => e.ty === 'value').slice(-3));
+          // ── lane browser-uppercase-keys (a fleet user on a Mac, 2026-10-22: 「在 Chrome 浏览器里无法输入大写」): the CHARACTER the
+          // viewer's machine typed reaches the browser in the app — Shift+w as real keys; then keystrokes shaped as a Mac fires
+          // them (the pane's own keyboard textarea, its Caps Lock state in the event): Caps Lock + Shift + w types "W" on a
+          // Mac; the Caps Lock FLAG over a small w (a Mac whose Caps Lock switches the input source) types "w"; a French
+          // layout's & (the 1 key, no Shift) types "&". CONTROL in this session: the pre-fix packet for the Mac's
+          // Caps Lock + Shift + w — w with [shift, lock] — makes X type the small "w". ──
+          const valueNow = () => (keyLog().filter((e) => e.ty === 'value').pop() || {}).v;
+          const typedAfter = async (before, want) => { const v = await until(() => { const x = valueNow(); return x === before + want ? x : null; }, 8000, 200); return { ok: !!v, got: String(valueNow() || '').slice(before.length) }; };
+          const base0 = valueNow() || '';
+          await p1.cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, location: 1, modifiers: 8 });
+          await p1.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'W', code: 'KeyW', windowsVirtualKeyCode: 87, text: 'W', unmodifiedText: 'w', modifiers: 8 });
+          await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'W', code: 'KeyW', windowsVirtualKeyCode: 87, modifiers: 8 });
+          await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, location: 1, modifiers: 0 });
+          const u1 = await typedAfter(base0, 'W');
+          check(`${row.id}: Shift+w through the window ⇒ the browser in the app types "W" (${JSON.stringify(u1.got)})`, u1.ok, u1);
+          const macKeys = (evs) => p1.evalJs(`(() => { Object.defineProperty(navigator, 'userAgentData', { value: { platform: 'macOS' }, configurable: true }); const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(recB.id)}); const ime = w._desktopAppView.ime; ime.focus(); for (const [type, key, code, shift, caps] of ${JSON.stringify(evs)}) ime.dispatchEvent(new KeyboardEvent(type, { key, code, shiftKey: shift, modifierCapsLock: caps, bubbles: true, cancelable: true })); delete navigator.userAgentData; return document.activeElement === ime; })()`);
+          const b1 = valueNow() || '';
+          const m1 = await macKeys([['keydown', 'CapsLock', 'CapsLock', false, true], ['keydown', 'Shift', 'ShiftLeft', true, true], ['keydown', 'W', 'KeyW', true, true], ['keyup', 'W', 'KeyW', true, true], ['keyup', 'Shift', 'ShiftLeft', false, true], ['keyup', 'CapsLock', 'CapsLock', false, false]]);
+          const u2 = await typedAfter(b1, 'W');
+          check(`${row.id}: a MAC's Caps Lock + Shift + w (the Mac types "W") ⇒ the browser in the app types "W" (${JSON.stringify(u2.got)}) — X never undoes the Mac's Caps Lock with its own Shift rule`, m1 === true && u2.ok, u2);
+          const b2 = valueNow() || '';
+          await macKeys([['keydown', 'w', 'KeyW', false, true], ['keyup', 'w', 'KeyW', false, true], ['keydown', 'Shift', 'ShiftLeft', true, true], ['keydown', 'X', 'KeyX', true, true], ['keyup', 'X', 'KeyX', true, true], ['keyup', 'Shift', 'ShiftLeft', false, true]]);
+          const u3 = await typedAfter(b2, 'wX');
+          check(`${row.id}: the Caps Lock FLAG over small letters (a Mac whose Caps Lock switches the input source): w, Shift+x ⇒ "wX" (${JSON.stringify(u3.got)}) — the user's report was the other case each time`, u3.ok, u3);
+          const b3 = valueNow() || '';
+          await macKeys([['keydown', '&', 'Digit1', false, false], ['keyup', '&', 'Digit1', false, false]]);
+          const u4 = await typedAfter(b3, '&');
+          check(`${row.id}: a French layout's & (the 1 key, no Shift) ⇒ "&" (${JSON.stringify(u4.got)}) — never the 7 the US map's level would give`, u4.ok, u4);
+          // HIS SHAPE (the second incident's ring, inc-mvj6ysm7-kmhw): Shift down → the letter's keydown OWNED by the input method
+          // + a composition on the same tick → Shift up 80 ms later → the commit later (Chrome's own IME machinery here:
+          // imeSetComposition, then insertText commits) ⇒ the committed capital types "A", and a committed "Ab1!" types as written
+          const b5 = valueNow() || '';
+          await p1.cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, location: 1, modifiers: 8 });
+          await p1.cdp('Input.imeSetComposition', { text: 'A', selectionStart: 1, selectionEnd: 1 });
+          await sleep(80);
+          await p1.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, location: 1, modifiers: 0 });
+          await sleep(500);
+          await p1.cdp('Input.insertText', { text: 'A' });
+          const u6 = await typedAfter(b5, 'A');
+          check(`${row.id}: HIS shape — Shift down, the input method composes, Shift up, the commit ⇒ the browser in the app types "A" (${JSON.stringify(u6.got)})`, u6.ok, u6);
+          const b6 = valueNow() || '';
+          await p1.cdp('Input.imeSetComposition', { text: 'Ab1!', selectionStart: 4, selectionEnd: 4 });
+          await sleep(200);
+          await p1.cdp('Input.insertText', { text: 'Ab1!' });
+          const u7 = await typedAfter(b6, 'Ab1!');
+          check(`${row.id}: a composition committing "Ab1!" ⇒ the browser in the app types "Ab1!" (${JSON.stringify(u7.got)}) — the IME road's capitals and symbols`, u7.ok, u7);
+          // CONTROL: the pre-fix packet of the Mac's Caps Lock + Shift + w, sent in this session ⇒ X types the small letter; then a
+          // packet with no lock gives X its Caps Lock back off (xpra matches the modifiers of the next key)
+          const b4 = valueNow() || '';
+          await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(recB.id)}); const c = w._desktopAppView.client; c.send(['key-action', c.mainWid, 'Shift_L', true, ['shift', 'lock'], 0, '', 50, 0]); c.send(['key-action', c.mainWid, 'w', true, ['shift', 'lock'], 119, 'W', 25, 0]); c.send(['key-action', c.mainWid, 'w', false, ['shift', 'lock'], 119, 'W', 25, 0]); c.send(['key-action', c.mainWid, 'Shift_L', false, ['lock'], 0, '', 50, 0]); return true; })()`);
+          const u5 = await typedAfter(b4, 'w');
+          await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(recB.id)}); const c = w._desktopAppView.client; c.send(['key-action', c.mainWid, 'Shift_L', false, [], 0, '', 50, 0]); return true; })()`);
+          check(`${row.id}: CONTROL — the pre-fix packet (w with [shift, lock]) in this session ⇒ X types ${JSON.stringify(u5.got)}, the small letter the Mac did not type`, u5.ok, u5);
           // the scroll leg (UPSTREAM bug, xpra 6.5.4: a scroll-encoded frame is lost — the client offers no scroll encoding)
           const appLog = path.join(wt, 'data', 'desktop-apps', recB.id, 'app.log');
           const lost = () => { try { return (fs.readFileSync(appLog, 'utf8').match(/queue_damage_packet\(\) missing 1 required positional argument/g) || []).length; } catch { return -1; } };

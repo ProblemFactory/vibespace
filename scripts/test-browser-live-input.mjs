@@ -25,7 +25,8 @@
 //      the chip only). The journal: no "already holds" per command, no query string in the
 //      handback line, ONE `record start` when recording is switched on during agent commands;
 //   ③ a MAC VIEWER (the viewer's UA / platform / userAgentData emulate a Mac): ⌘A selects all (never types "a"), ⌘C
-//      copies, ⌘X cuts, ⌘Z undoes, ⌘⇧Z redoes;
+//      copies, ⌘X cuts, ⌘Z undoes, ⌘⇧Z redoes; Shift+a, Shift+1 and a French layout's digit row type as the Mac typed them
+//      (lane browser-uppercase-keys);
 //   ④ THE FIT CHIP: two windows of one browser — the smaller one reads where the size comes from, its click makes the
 //      page follow it; the bar is shot in en and zh (env LIVE_INPUT_SHOTS=<dir>);
 //   ⑤ CONTROLS — the same legs on a server built from a patched copy of the tree (the pre-fix chunk in the bridge; the
@@ -629,6 +630,19 @@ async function macLegs(W, Mp, sid, n) {
   await Mp.chord('z', { meta: true, shift: true });
   out.redo = !!(await W.innerUntil(n, (r) => r.b === '', 4000));
   out.kd = ((W.inner(n) || {}).kd || []).slice(-8);
+  // lane browser-uppercase-keys (a fleet user on a Mac, 2026-10-22: 「在 Chrome 浏览器里无法输入大写」): the CHARACTER the viewer's
+  // machine typed reaches the page — Shift+a, Shift+1, and a French layout's Shift+& ("1") and & alone (real keys on the Mac
+  // viewer's page, Shift held across each); the input is emptied first (⌘A, Backspace)
+  await Mp.click(sid, 100, 40);
+  out.onA = !!(await W.innerUntil(n, (r) => r.act === 'a', 5000));
+  await Mp.chord('a', { meta: true }); await Mp.key('Backspace', { code: 'Backspace', vk: 8 });
+  await W.innerUntil(n, (r) => r.a === '', 4000);
+  const K = (p) => Mp.call('Input.dispatchKeyEvent', p);
+  const SHIFT = { key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, location: 1 };
+  const typed = async (key, code, vk, shift) => { if (shift) await K({ type: 'rawKeyDown', ...SHIFT, modifiers: 8 }); await K({ type: 'keyDown', key, code, windowsVirtualKeyCode: vk, text: key, unmodifiedText: key, modifiers: shift ? 8 : 0 }); await K({ type: 'keyUp', key, code, windowsVirtualKeyCode: vk, modifiers: shift ? 8 : 0 }); if (shift) await K({ type: 'keyUp', ...SHIFT, modifiers: 0 }); };
+  await typed('A', 'KeyA', 65, true); await typed('!', 'Digit1', 49, true); await typed('1', 'Digit1', 49, true); await typed('&', 'Digit1', 49, false);
+  out.caps = !!(await W.innerUntil(n, (r) => r.a === 'A!1&', LANDED_MS));
+  out.capsGot = (W.inner(n) || {}).a;
   await Mp.handback(sid);
   return out;
 }
@@ -640,6 +654,7 @@ if (want('mac')) {
   ok(m.selAll && m.noA, `⌘A selects ALL of the textarea and types no "a" (the owner's Chromium typed it) — keys the page saw: ${JSON.stringify(m.kd)}`);
   ok(m.clip && m.clip.includes('mac text 苹果'), `⌘C copies the selection to the viewer's clipboard ("${String(m.clip).slice(-20)}")`);
   ok(m.cut && m.undo && m.redo, `⌘X cuts, ⌘Z undoes, ⌘⇧Z redoes (${JSON.stringify({ cut: m.cut, undo: m.undo, redo: m.redo })})`);
+  ok(m.onA && m.caps, `lane browser-uppercase-keys: Shift+a, Shift+1, a French layout's Shift+& ("1") and & reach the page as the Mac typed them — "${m.capsGot}" (want "A!1&")`, JSON.stringify({ onA: m.onA, got: m.capsGot }));
   await Mp.q(S1.sessionId, 'window.app.wm.closeWindow?.(w.id); return true;');
   await wd.closePage(Mp); // lane live-input-under-load (a): END the page — a loaded one stays a live client of the app
 }

@@ -126,7 +126,7 @@ console.log('§1 the PURE words (xpra-proto.js)');
     [K('Control', 'ControlLeft', 17, { control: true }), { keyname: 'Control_L', keyval: 0, string: '', keycode: 37, modifiers: ['control'] }],
     [K('é', 'KeyE', 69, { altGraph: true }), { keyname: 'eacute', keyval: 233, string: 'é', keycode: 0, modifiers: ['mod5'] }],
     [K('中', '', 0), { keyname: 'U4E2D', keyval: 0x1004E2D, string: '中', keycode: 0, modifiers: [] }],
-    [K('c', 'KeyC', 67, { control: true, capsLock: true, numLock: true }), { keyname: 'c', keyval: 99, string: 'c', keycode: 54, modifiers: ['control', 'lock', 'mod2'] }],
+    [K('c', 'KeyC', 67, { control: true, capsLock: true, numLock: true }), { keyname: 'c', keyval: 99, string: 'c', keycode: 54, modifiers: ['control', 'mod2'] }], // lane browser-uppercase-keys: never `lock` (§3e)
   ];
   ok(table.every(([got, want]) => same(got, want)), 'the browser-key → keysym rule: letters lower-case with shift on the modifier list, punctuation by X name on its base keycode, code first (KP_Enter on its own keycode 104, right-hand modifiers on the left name), every key on its EVDEV X keycode (w = 25, never the browser keyCode 87 — lane xpra-ime-mac), Meta = Super (mod4), AltGraph = ISO_Level3_Shift (mod5), Latin-1 by name, anything else U<HEX> with the Unicode keysym value', table.filter(([g, w]) => !same(g, w)).map(([g, w]) => ({ got: g, want: w })));
   ok(P.nativeKey(K('a', 'KeyA', 65)) && P.nativeKey(K('!', 'Digit1', 49, { shift: true })) && P.nativeKey(K('Enter', 'Enter', 13)) && !P.nativeKey(K('é', 'KeyE', 69, { altGraph: true })) && !P.nativeKey(K('中', '', 0)), 'nativeKey: a / ! / Return are on the published keymap; é (US layout) and 中 are not — they go publish-then-press');
@@ -1002,6 +1002,77 @@ console.log('§3d lane xpra-mac-modifiers (the owner, 2026-10-16: 「根据 host
   const V0 = await import(pathToFileURL(MUTXC.write('src/lib/xpra-view.js', vsrc.replace(MAPLINE, '  const modMap = () => null;'), 'nomodmap')).href);
   const m0 = await modRun(V0, 'mac', null);
   ok(same(m0.chord, ['Super_L+[mod4]', 'a+[mod4]', 'a-[mod4]', 'Super_L-[]']) && same(m0.click, ['down[mod4]', 'up[mod4]']), `CONTROL: without the map a Mac viewer's ⌘+a reaches the Linux app as ${m0.chord.join(' ')} and ⌘+click as mod4 — Super, never select-all`, m0);
+}
+
+console.log('§3e lane browser-uppercase-keys (a fleet user on a Mac, 2026-10-22: 「在 Chrome 浏览器里无法输入大写，导致输入密码的时候无法输入大写」): through the VIEW, the TYPED CHARACTER decides its level — Shift+letter, Shift+digit, Caps Lock, a Mac\'s Caps Lock + Shift, a Caps Lock flag over small letters, another layout\'s digit row; X never applies a Caps Lock of its own');
+{
+  // X's rule for what a key-action types (MEASURED, lane browser-uppercase-keys: xpra 6.5.4's own server keyboard code
+  // programmed with this keymap + a real Chrome on the display — work/probe-xpra.mjs; the real rung is
+  // test-desktop-xpra-window-open §8): a LETTER (an ALPHABETIC key) types its capital when exactly ONE of Shift / Lock is
+  // held (Shift undoes Caps Lock — the Linux rule); any other two-level key types its shifted symbol iff Shift is held
+  const xTypes = (P, q) => { const lv = P.X11_KEYMAP[q[7]] || []; const m = q[4]; if (/^[a-z]$/.test(lv[0] || '')) return (m.includes('shift') !== m.includes('lock')) ? lv[1] : lv[0]; return m.includes('shift') && lv[1] ? lv[1] : lv[0]; };
+  // the shift level for letters is ON the published keymap (the brief's (b) — measured present): every letter [l, L], every
+  // SHIFTED_TABLE key [base, symbol]
+  const letters = Object.entries(P.X11_KEYMAP).filter(([, lv]) => /^[a-z]$/.test(lv[0]));
+  ok(letters.length === 26 && letters.every(([, lv]) => lv.length === 2 && lv[1] === lv[0].toUpperCase()) && Object.entries(P.SHIFTED_TABLE).every(([kc, n]) => same(P.X11_KEYMAP[kc], [P.KEYCODE_TABLE[kc], n])), `the published keymap carries the SHIFT LEVEL: all 26 letters as [l, L] (38 = ${JSON.stringify(P.X11_KEYMAP[38])}) and every shifted symbol on its base key (10 = ${JSON.stringify(P.X11_KEYMAP[10])})`);
+  /** One view, one viewer platform: DOM keystrokes in (each with its own CapsLock state), the key-actions out + what X types. */
+  const typeRun = async (VV, viewer, events) => {
+    const h = new El('div');
+    const view = VV.createXpraView(h, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async () => ({ close() {} }), viewerPlatform: () => viewer, hostPlatform: null });
+    const pane = h.children[0].children[1].children[0];
+    pane.clientWidth = 400; pane.clientHeight = 300;
+    await view.connect();
+    const wk = await until(() => FakeWorker.instances[FakeWorker.instances.length - 1]);
+    await until(() => wk.sent('hello').length);
+    wk.feed(['hello', { 'packet-types': ['keyboard-config'] }]);
+    wk.feed(['new-window', 1, 0, 0, 300, 200, { title: 'Sign in' }]);
+    await sleep(20);
+    const ime = pane.children[1];
+    wk.posted.length = 0;
+    for (const [type, key, code, keyCode, f = {}] of events) ime.fire(type, { key, code, keyCode, shiftKey: !!f.shift, ctrlKey: !!f.ctrl, getModifierState: (n) => n === 'CapsLock' && !!f.caps });
+    const q = wk.sent('key-action');
+    view.dispose();
+    return { packets: q.map((x) => `${x[2]}${x[3] ? '+' : '-'}[${x[4].join(',')}]`), typed: q.filter((x) => x[3] && !P.MODIFIER_KEYNAMES.has(x[2])).map((x) => xTypes(P, x)) };
+  };
+  const SH = (t, f = {}) => [t, 'Shift', 'ShiftLeft', 16, { shift: t === 'keydown', ...f }];
+  const CAPS = (t, f = {}) => [t, 'CapsLock', 'CapsLock', 20, f];
+  const KY = (t, key, code, kc, f = {}) => [t, key, code, kc, f];
+  // the keystrokes as each machine fires them — a Mac: Caps Lock's keydown when it turns ON, its keyup when it turns OFF,
+  // and Caps Lock + Shift + a types "A"; Linux / Windows: a press and a release each time, Shift undoes Caps Lock ("a")
+  const ROWS = [
+    ['Shift+a', 'any', [SH('keydown'), KY('keydown', 'A', 'KeyA', 65, { shift: true }), KY('keyup', 'A', 'KeyA', 65, { shift: true }), SH('keyup')], ['A'], ['Shift_L+[shift]', 'a+[shift]', 'a-[shift]', 'Shift_L-[]']],
+    ['Shift+1', 'any', [SH('keydown'), KY('keydown', '!', 'Digit1', 49, { shift: true }), KY('keyup', '!', 'Digit1', 49, { shift: true }), SH('keyup')], ['exclam'], ['Shift_L+[shift]', 'exclam+[shift]', 'exclam-[shift]', 'Shift_L-[]']],
+    ['Shift held over b, c, then d', 'any', [SH('keydown'), KY('keydown', 'B', 'KeyB', 66, { shift: true }), KY('keyup', 'B', 'KeyB', 66, { shift: true }), KY('keydown', 'C', 'KeyC', 67, { shift: true }), KY('keyup', 'C', 'KeyC', 67, { shift: true }), SH('keyup'), KY('keydown', 'd', 'KeyD', 68), KY('keyup', 'd', 'KeyD', 68)], ['B', 'C', 'd'], ['Shift_L+[shift]', 'b+[shift]', 'b-[shift]', 'c+[shift]', 'c-[shift]', 'Shift_L-[]', 'd+[]', 'd-[]']],
+    ['Caps Lock on, a, off, b (a Mac)', 'mac', [CAPS('keydown', { caps: true }), KY('keydown', 'A', 'KeyA', 65, { caps: true }), KY('keyup', 'A', 'KeyA', 65, { caps: true }), CAPS('keyup'), KY('keydown', 'b', 'KeyB', 66), KY('keyup', 'b', 'KeyB', 66)], ['A', 'b'], ['a+[shift]', 'a-[shift]', 'b+[]', 'b-[]']],
+    ['Caps Lock on, a, off, b (Linux)', 'linux', [CAPS('keydown', { caps: true }), CAPS('keyup', { caps: true }), KY('keydown', 'A', 'KeyA', 65, { caps: true }), KY('keyup', 'A', 'KeyA', 65, { caps: true }), CAPS('keydown'), CAPS('keyup'), KY('keydown', 'b', 'KeyB', 66), KY('keyup', 'b', 'KeyB', 66)], ['A', 'b'], ['a+[shift]', 'a-[shift]', 'b+[]', 'b-[]']],
+    ['a Mac\'s Caps Lock + Shift + a ("A" on the Mac)', 'mac', [CAPS('keydown', { caps: true }), SH('keydown', { caps: true }), KY('keydown', 'A', 'KeyA', 65, { shift: true, caps: true }), KY('keyup', 'A', 'KeyA', 65, { shift: true, caps: true }), SH('keyup', { caps: true }), CAPS('keyup')], ['A'], ['Shift_L+[shift]', 'a+[shift]', 'a-[shift]', 'Shift_L-[]']],
+    ['Linux Caps Lock + Shift + a ("a" there)', 'linux', [CAPS('keydown', { caps: true }), CAPS('keyup', { caps: true }), SH('keydown', { caps: true }), KY('keydown', 'a', 'KeyA', 65, { shift: true, caps: true }), KY('keyup', 'a', 'KeyA', 65, { shift: true, caps: true }), SH('keyup', { caps: true })], ['a'], ['Shift_L+[shift]', 'a+[]', 'a-[]', 'Shift_L-[]']],
+    ['the Caps Lock FLAG over small letters (a Mac whose Caps Lock switches the input source): a, Shift+b', 'mac', [KY('keydown', 'a', 'KeyA', 65, { caps: true }), KY('keyup', 'a', 'KeyA', 65, { caps: true }), SH('keydown', { caps: true }), KY('keydown', 'B', 'KeyB', 66, { shift: true, caps: true }), KY('keyup', 'B', 'KeyB', 66, { shift: true, caps: true }), SH('keyup', { caps: true })], ['a', 'B'], ['a+[]', 'a-[]', 'Shift_L+[shift]', 'b+[shift]', 'b-[shift]', 'Shift_L-[]']],
+    ['a French layout: Shift+& types 1, & alone types &', 'any', [SH('keydown'), KY('keydown', '1', 'Digit1', 49, { shift: true }), KY('keyup', '1', 'Digit1', 49, { shift: true }), SH('keyup'), KY('keydown', '&', 'Digit1', 49), KY('keyup', '&', 'Digit1', 49)], ['1', 'ampersand'], ['Shift_L+[shift]', '1+[]', '1-[]', 'Shift_L-[]', 'ampersand+[shift]', 'ampersand-[shift]']],
+    ['a CHORD keeps Shift as held (Ctrl+Shift+A, Caps Lock on: no lock) and Shift+Space keeps its Shift', 'linux', [KY('keydown', 'A', 'KeyA', 65, { shift: true, ctrl: true, caps: true }), KY('keyup', 'A', 'KeyA', 65, { shift: true, ctrl: true, caps: true }), KY('keydown', ' ', 'Space', 32, { shift: true }), KY('keyup', ' ', 'Space', 32, { shift: true })], null, ['a+[shift,control]', 'a-[shift,control]', 'space+[shift]', 'space-[shift]']],
+  ];
+  const results = [];
+  for (const [name, who, events, typed, packets] of ROWS) for (const viewer of who === 'any' ? ['mac', 'linux'] : [who]) {
+    const r = await typeRun(V, viewer, events);
+    results.push({ name, viewer, r });
+    ok(same(r.packets, packets) && (typed === null || same(r.typed, typed)), `${viewer} viewer — ${name}: the packets ${r.packets.join(' ')}${typed ? ` ⇒ X types ${JSON.stringify(r.typed)}` : ''}`, { want: { packets, typed }, got: r });
+  }
+  ok(results.every(({ r }) => !r.packets.some((x) => x.startsWith('Caps_Lock')) && !r.packets.some((x) => /\block\b/.test(x))), 'no Caps_Lock key-action and no `lock` modifier ever leaves the view (X never applies a Caps Lock of its own on top of the viewer machine\'s)');
+  ok(results.filter(({ name }) => /^Shift/.test(name)).every(({ r }) => { const up = r.packets.indexOf('Shift_L-[]'); const keyUp = r.packets.findIndex((x) => !x.startsWith('Shift_L') && x.includes('-[')); return up > keyUp && keyUp > 0; }), 'a held Shift is released only by its own keyup, after the keys typed under it — never tapped at its keydown (the ⌘-chord tap is ⌘\'s only), on a Mac viewer too');
+  // RED CONTROL: the pre-fix trio (keyActionFor's flags passed through, Caps_Lock forwarded) — the same keystrokes
+  const psrc = read('src/lib/xpra-proto.js');
+  const LEVEL = '  return { keyname, keyval, string, keycode, modifiers: typedModifiers(modifiers, string, keyname, keycode) };';
+  const CAPSL = "  if (keyname === 'Caps_Lock') return null;";
+  ok(psrc.split(LEVEL).length === 2 && psrc.split(CAPSL).length === 2, 'CONTROL anchor: the level rule and the Caps Lock line are each one line in xpra-proto.js');
+  const xp = MUTXC.write('src/lib/xpra-proto.js', psrc.replace(LEVEL, '  return { keyname, keyval, string, keycode, modifiers };').replace(CAPSL, '  void 0;'), 'typedlevel');
+  const xc = MUTXC.write('src/lib/xpra-client.js', read('src/lib/xpra-client.js').replace("from './xpra-proto.js'", `from '${fileUrl(xp)}'`), 'typedlevel');
+  const xv = MUTXC.write('src/lib/xpra-view.js', read('src/lib/xpra-view.js').replace("from './xpra-client.js'", `from '${fileUrl(xc)}'`).replace("from './xpra-proto.js'", `from '${fileUrl(xp)}'`), 'typedlevel');
+  const V0 = await import(fileUrl(xv));
+  const pre = {};
+  for (const i of [5, 7, 8]) { const [name, who, events] = ROWS[i]; pre[i] = await typeRun(V0, who === 'any' ? 'mac' : who, events); void name; }
+  ok(same(pre[5].typed, ['a']) && pre[5].packets.includes('a+[shift,lock]') && pre[5].packets.some((x) => x.startsWith('Caps_Lock+')), `RED CONTROL (the pre-fix keymap road): a Mac's Caps Lock + Shift + a goes as a+[shift,lock] ⇒ X types ${JSON.stringify(pre[5].typed)} — the small letter (the Mac typed "A"); the Caps Lock key itself went to X`, pre[5]);
+  ok(same(pre[7].typed, ['A', 'b']), `RED CONTROL: the Caps Lock FLAG over small letters ⇒ X types ${JSON.stringify(pre[7].typed)} — a is a capital and Shift+b is NOT (the user's report: no capitals where Shift is held)`, pre[7]);
+  ok(same(pre[8].typed, ['exclam', '7']), `RED CONTROL: a French layout's Shift+& ("1") and & ⇒ X types ${JSON.stringify(pre[8].typed)}`, pre[8]);
 }
 
 console.log('§5 x5 — ONE active viewer (docs/design-desktop-apps §7 P8-2): Watch sends no geometry and is fit-scaled, a dormant (blocked) pane never times out, a held hello re-sizes');

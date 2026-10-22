@@ -134,7 +134,7 @@ const CHAR_TO_NAME = (() => {
 })();
 
 /** The keysym NAME and VALUE for one character: ASCII letters/digits are
- *  their own name (lower-case letters — shift rides the modifier list),
+ *  their own name (lower-case letters — shift rides the modifier list, decided by the character: typedModifiers),
  *  punctuation and Latin-1 have X names, everything else is the Unicode
  *  keysym `U<HEX>` (value 0x1000000 | code point — what XStringToKeysym
  *  understands). */
@@ -186,7 +186,33 @@ export function keyActionFor(ev) {
   // browser's keyCode: X keycode 87 is KP_1 (the lane's measurement above).
   const own = NAME_TO_KEYCODE[keyname];
   const keycode = own != null ? own : 0;
-  return { keyname, keyval, string: [...key].length === 1 ? key : '', keycode, modifiers };
+  if (keyname === 'Caps_Lock') return null; // X's own Caps Lock is never engaged — the viewer's machine applied it already (typedModifiers)
+  const string = [...key].length === 1 ? key : '';
+  return { keyname, keyval, string, keycode, modifiers: typedModifiers(modifiers, string, keyname, keycode) };
+}
+/**
+ * THE TYPED CHARACTER DECIDES ITS LEVEL (lane browser-uppercase-keys — a fleet user on a Mac, 2026-10-22: 「在 Chrome 浏览器里
+ * 无法输入大写，导致输入密码的时候无法输入大写」). The viewer's own machine has already turned Shift, Caps Lock and its
+ * layout into the character (`key`); X must type THAT character, never re-derive it from the modifier flags by the US map's
+ * rules. MEASURED on 2.369.341 (xpra 6.5.4's own server keyboard code programmed with this keymap + a real Chrome on the
+ * display): the Caps Lock FLAG on while the machine types small letters (a Mac whose Caps Lock switches the input source)
+ * typed a ⇒ "A" and Shift+b ⇒ "b"; a Mac's Caps Lock + Shift + a ("A" on the Mac) ⇒ "a"; a French layout's Shift+& ("1") ⇒
+ * "!" and its & ⇒ "7". So: for a character on a key with two levels on this map (a letter, a digit, punctuation) `shift` is
+ * exactly "the character sits on the shifted level" (an upper-case letter, a SHIFTED_TABLE name — ImeKeymap.plan's rule for
+ * a composed character); `lock` is never sent (X would apply a Caps Lock of its own on top of the machine's — and a Mac's
+ * Caps Lock fires its keyup only when it turns OFF); a CHORD (Ctrl / Alt / ⌘ / AltGr held — a shortcut, not a character)
+ * and a key with ONE level (space, Enter, the keypad, F-keys: Shift+Space, Shift+Tab, Shift+← mean something) keep Shift
+ * as held. The CDP road needs none of this: its record carries the character itself (browser-stream.js keyRecord's text).
+ */
+const CHORD_MODIFIERS = Object.freeze(new Set(['control', 'mod1', 'mod4', 'mod5']));
+export function typedModifiers(modifiers, string, keyname, keycode) {
+  const mods = (Array.isArray(modifiers) ? modifiers : []).filter((m) => m !== 'lock');
+  const levels = X11_KEYMAP[keycode];
+  if (!string || !levels || levels.length < 2 || mods.some((m) => CHORD_MODIFIERS.has(m))) return mods;
+  const shifted = keyname === levels[1] ? true : keyname === levels[0] ? /^[A-Z]$/.test(string) : null;
+  if (shifted === null) return mods;
+  const rest = mods.filter((m) => m !== 'shift');
+  return shifted ? ['shift', ...rest] : rest;
 }
 /** Is this key on the keymap this client published (so the press resolves)?
  *  A character outside it (é on a US layout, anything an IME composes) goes

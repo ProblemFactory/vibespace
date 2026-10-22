@@ -14,6 +14,8 @@
 //   §3 THE MAC CHORD TABLE (src/browser-takeover.js macChord): ⌘A/C/X/Z/⇧Z … → Ctrl, no text; ⌘ itself → Control;
 //      ⌘←/→ → Home/End; ⌥←/→ → Ctrl+←/→; ⌥-characters without Alt; identity for a non-Mac viewer or a Mac browser;
 //      the copy chords; the journal's URL (origin + path, never the query).
+//   §3b THE CHARACTER RIDES THE RECORD (lane browser-uppercase-keys): Shift+letter / Shift+digit / Caps Lock / a Mac's Caps
+//      Lock + Shift / another layout's digit row — the key record's text IS the typed character, Linux and Mac viewers.
 //   §4 THE FIT CHIP (src/browser-fit.js): a CLAIM rules the page (the driver still wins during a takeover), the
 //      place tags say WHERE the size comes from, `fitChipWords` in plain words (a jargon census) with zh + ja.
 //   §5 THE RECORDING CHIP (src/browser-trace.js recordingChipWords / cleanRecordError).
@@ -195,6 +197,48 @@ console.log('§3 a Mac viewer\'s ⌘ chords on a non-Mac browser; the copy chord
   const m0 = Tid.macChord({ key: 'a', code: 'KeyA', keyCode: 65, metaKey: true }, { viewerMac: true, remoteMac: false });
   const r0 = S.keyRecord({ kind: 'down', key: m0.key, code: m0.code, modifiers: S.modifiersOf(m0), keyCode: m0.keyCode });
   ok(r0.modifiers === 4 && r0.text === 'a', 'NEGATIVE CONTROL: without the table ⌘A reaches the page as Meta+A carrying the text "a" — MEASURED on Chromium 151 to TYPE the letter');
+}
+
+// ═══ §3b THE CHARACTER RIDES THE RECORD (lane browser-uppercase-keys) ════════════
+// A fleet user on a Mac (2026-10-22): 「在 Chrome 浏览器里无法输入大写，导致输入密码的时候无法输入大写」. The live view's key
+// record carries the CHARACTER the viewer's own machine typed (`text` = the DOM key) — Shift, Caps Lock and the layout are
+// already applied there, so the page types exactly it whatever the modifier flags say (MEASURED through the real driver
+// 0.38.2, launch / headed / attach: every shape below typed as written; the xpra road needed the fix — test-xpra-client §3e).
+console.log('§3b the live view\'s key record carries the typed character: Shift+letter, Shift+digit, Caps Lock, a Mac\'s Caps Lock + Shift, another layout — Linux and Mac viewers');
+{
+  /** The onDocKey chain of src/lib/browser-live-window.js for one keystroke: keyRoute → macChord → keyRecord (+ dropText). */
+  const viewerRec = (k, mac, SS = S) => { if (T.keyRoute(k, { appMode: null }).to !== 'page') return null; const m = T.macChord(k, { viewerMac: mac, remoteMac: false }); const r = SS.keyRecord({ kind: 'down', key: m.key, code: m.code, modifiers: SS.modifiersOf(m), keyCode: m.keyCode }); if (r && m.dropText) delete r.text; return r; };
+  const K = (key, code, keyCode, f = {}) => ({ key, code, keyCode, shiftKey: !!f.shift, ctrlKey: false, altKey: false, metaKey: false, isComposing: false });
+  const ROWS = [
+    ['Shift+a', K('A', 'KeyA', 65, { shift: true }), 'A', 8],
+    ['Shift+1', K('!', 'Digit1', 49, { shift: true }), '!', 8],
+    ['Caps Lock on, a (no Shift)', K('A', 'KeyA', 65), 'A', 0],
+    ['a Mac\'s Caps Lock + Shift + a', K('A', 'KeyA', 65, { shift: true }), 'A', 8],
+    ['Linux Caps Lock + Shift + a', K('a', 'KeyA', 65, { shift: true }), 'a', 8],
+    ['the Caps Lock flag over small letters: a', K('a', 'KeyA', 65), 'a', 0],
+    ['a French layout: Shift+& (1)', K('1', 'Digit1', 49, { shift: true }), '1', 8],
+    ['a French layout: & (no Shift)', K('&', 'Digit1', 49), '&', 0],
+  ];
+  for (const mac of [false, true]) for (const [name, k, text, mods] of ROWS) {
+    const r = viewerRec(k, mac);
+    ok(r && r.eventType === 'keyDown' && r.text === text && r.key === k.key && r.modifiers === mods, `${mac ? 'a Mac' : 'a Linux'} viewer — ${name}: keyDown text ${JSON.stringify(r && r.text)} (the character typed), modifiers ${r && r.modifiers}`, JSON.stringify(r));
+  }
+  // the Shift key itself: a held modifier, its own keyDown / keyUp — never translated, never a tap (the ⌘ rows are ⌘'s only)
+  for (const mac of [false, true]) {
+    const down = viewerRec(K('Shift', 'ShiftLeft', 16, { shift: true }), mac);
+    const m = T.macChord(K('Shift', 'ShiftLeft', 16, { shift: true }), { viewerMac: mac, remoteMac: false });
+    ok(down && down.key === 'Shift' && down.modifiers === 8 && !('text' in down) && m.rule === null && m.dropText === false, `${mac ? 'a Mac' : 'a Linux'} viewer: the Shift key goes as itself (keyDown Shift, modifiers 8, no text; no chord rule touches it)`, JSON.stringify({ down, rule: m.rule }));
+  }
+  // the CapsLock key goes as a key with no text (the page's own Caps Lock indicator); the letters after it carry their case
+  const caps = viewerRec(K('CapsLock', 'CapsLock', 20), true);
+  ok(caps && caps.key === 'CapsLock' && !('text' in caps) && caps.windowsVirtualKeyCode === 20, 'the CapsLock key itself: a keyDown with no text (it never types)', JSON.stringify(caps));
+  // RED CONTROL: a record that rebuilds the text from the physical key (`code`) — the brief's hypothesis (a) — loses the case
+  const ssrc = read('src/browser-stream.js');
+  const TXT = "(printable ? k : undefined)) : undefined;";
+  ok(ssrc.split(TXT).length === 2, 'CONTROL anchor: keyRecord\'s text rule is one expression in browser-stream.js');
+  const S0 = M.load('src/browser-stream.js', ssrc.replace(TXT, "(printable ? (/^Key[A-Z]$/.test(String(code)) ? String(code).slice(3).toLowerCase() : k) : undefined)) : undefined;"), 'text-from-code');
+  const bad = [viewerRec(ROWS[0][1], true, S0), viewerRec(ROWS[2][1], false, S0)];
+  ok(bad[0].text === 'a' && bad[1].text === 'a', `RED CONTROL: a text rebuilt from the key's code types ${JSON.stringify(bad[0].text)} for a Mac's Shift+a and ${JSON.stringify(bad[1].text)} under Caps Lock — the shipped record carries the character ("A")`, JSON.stringify(bad));
 }
 
 // ═══ §4 THE FIT CHIP ══════════════════════════════════════════════════════════
