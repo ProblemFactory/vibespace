@@ -27,6 +27,10 @@
  *                 handoverEventsMax records an op (`too_many_events`) — fix r2
  *   desktop-grab  {sid}                                           → { ok, png64, w, h, display, origin, road } — ONE still of the
  *                 session's display (the source's still(): the screen source's one-frame capture; a Mac's is pending)
+ *   stream-audio  {sid, on}                                       → { ok, sid, on, endpoint?, audio } — lane speaker-passthrough-v1
+ *                 (backlog B-aec9): the strip's 「声音」 — `on` starts THE capture of the machine's sound for this session (a Mac's:
+ *                 the screen source's own SCStream, `source.audio`; Windows: src/desktop-sound.js), off ends it; refused by name
+ *                 (no_audio: the session was offered without the sound's track)
  *   pushes        stream-ice {sid, candidate} · stream-stats {sid, stats, state, ended?} once a second and at every change
  * A session's owner is the link that asked; when that link dies the session is an ORPHAN for STREAM_LIMITS.orphanMs (the
  * media path does not ride the link — a re-armed hub finds it playing) and then stops.
@@ -78,6 +82,14 @@
  * verdict. The ladder: direct
  * (ICE-lite host pairs) → the hub relay over this leg → the hub relay over the device link. Said on the record (stats
  * `relay.via` + `relay.leg`, the log) and on the strip.
+ * THE SOUND (lane speaker-passthrough-v1 — backlog B-aec9; the measured road: lane stream-audio-probe): `stream-offer {audio: true}`
+ * (the hub asks only an agent whose hello-ack says `stream-audio`) on a machine that can send its sound (a Mac's screen source has
+ * `audio`; else the `sound` factory — src/desktop-sound.js, Windows) puts a werift audio TRACK on the session's audio m-line — the
+ * microphone's (lane stream-mic-road): sendrecv when the page asked both, sendonly for the sound alone — with the picture's msid
+ * (src/sound-model.js SOUND.streamId: ONE MediaStream, so the page's <video> carries both and lip-sync rides werift's RTCP SR of
+ * each track). Nothing is captured until the page's 「声音」 says `stream-audio {on: true}`; each packet gets the session's sound
+ * clock (soundRtpStep — one sequence + timestamp across every on/off); THE RATE: while the sound is on its ~80 kbps comes off the
+ * picture's target (src/stream-model.js videoKbpsOf — the estimate counts the picture's packets only).
  * THE FIREWALL FACT: once a session's offer is made, a datagram from a second socket of ours to each of our host addresses
  * (the ones werift offers) says whether a DIRECT inbound path is plausible (Windows' firewall filters that the way it filters a
  * browser's) — stats `directInbound` {verdict, addrs, reached, program}; the page builds the admin line from `program`.
@@ -91,6 +103,7 @@ const SP = require('../stream-plan.js'); // THE ESTIMATE (twccPackets, sendEstim
 const SW = require('../stream-window.js');
 const H = require('../stream-h264.js');
 const AV1 = require('../stream-av1.js'); // lane stream-hdr-passthrough: the HDR road's RTP payloads
+const SND = require('../sound-model.js'); // lane speaker-passthrough-v1: the sound's clock + its rate share
 
 const L = SM.STREAM_LIMITS;
 const TWCC_URI = 'http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01';
@@ -291,7 +304,7 @@ const SOURCES = Object.freeze({
   window: (msg, o, f) => (f.window ? f.window(msg, o) : f.screen ? f.screen(msg, o) : named('no_window_source', 'this agent cannot stream one window')),
 });
 
-function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift'), screen = null, window = null, legHosts = () => [], program = process.platform === 'win32' ? process.execPath : null, pasteBackMs = L.pasteBackMs, mic = null } = {}) {
+function createStreamHost({ injector = null, log = () => { }, now = Date.now, loadWerift = () => require('werift'), screen = null, window = null, legHosts = () => [], program = process.platform === 'win32' ? process.execPath : null, pasteBackMs = L.pasteBackMs, mic = null, sound = null } = {}) {
   const sessions = new Map();
   let probeMemo = null; // the self-probe's answer, kept probeMemoMs (a second session within it asks nothing)
   let displaysKnown = 0; // lane desktop-display-modes: how many displays the machine's screen source last named (THE CAP's input)
@@ -311,6 +324,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       relay: s.relay ? { peers: s.relay.shims.size, forwarded: s.relay.fwd, port: s.relay.port, via: s.leg && s.leg.state === 'up' ? 'udp' : 'link', leg: s.leg ? s.leg.facts() : null } : null,
       directInbound: s.directInbound,
       mic: s.mic ? s.mic.stats() : s.micOffered ? { state: 'idle' } : null, // lane stream-mic-road: where the viewer's voice IS going (src/desktop-mic.js)
+      audio: s.audioOffered ? soundStats(s) : null, // lane speaker-passthrough-v1: the machine's sound — off | starting | live | failed, its packets, its kbps
       ice: iceOf(s), // lane stream-mic-road: werift's own ICE view — the evidence of backlog werift-lite-multihomed (a browser holding the microphone permission gathers on every adapter)
     };
     if (s.source && typeof s.source.stats === 'function') { try { st.screen = s.source.stats(); st.encodeMs = st.screen.encodeMs; } catch { /* the source's */ } }
@@ -332,6 +346,30 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     } catch { return null; }
   }
   const stateOf = (s) => (s.pc ? s.pc.connectionState : 'closed');
+  /** lane speaker-passthrough-v1: the session's sound in numbers — the capture's own (state, road, packets, kbps…) + what went out. */
+  function soundStats(s) {
+    let c = null;
+    if (s.sound) { try { c = s.sound.stats(); } catch { c = null; } }
+    return { ...(c || { state: s.soundEnd ? 'failed' : 'off' }), ...(!s.sound && s.soundEnd ? { code: s.soundEnd.code, error: s.soundEnd.error } : {}), sent: s.apackets, sentBytes: s.abytes, held: s.aheld, videoKbps: s.videoKbps };
+  }
+  /** THE RATE with the sound (src/stream-model.js videoKbpsOf): the source is told the estimate less the sound's share while it is on. */
+  function retarget(s, k = s.bweKbps) {
+    if (k == null) return;
+    s.videoKbps = SM.videoKbpsOf({ kbps: k, maxKbps: s.maxKbps, audio: !!s.sound, audioKbps: SND.SOUND.wireKbps });
+    try { s.source.setTargetKbps(s.videoKbps); } catch { /* the source's */ }
+  }
+  /** One Opus packet of the machine's sound → the session's audio track (dropped while ICE is not connected). */
+  function sendAudio(s, p) {
+    if (!s.atrack || stateOf(s) !== 'connected' || !p || !p.payload || !p.payload.length) { s.aheld++; return; }
+    const h = SND.soundRtpStep(s.aclock, { samples: p.samples, at: now(), fresh: !!p.fresh });
+    s.aclock = h.st;
+    try { s.atrack.writeRtp(new s.w.RtpPacket(new s.w.RtpHeader({ payloadType: 111, sequenceNumber: h.seq, timestamp: h.ts, marker: h.marker, ssrc: 2 }), Buffer.from(p.payload))); s.apackets++; s.abytes += p.payload.length + 12; } // werift writes the negotiated payload type + its own SSRC
+    catch { s.aheld++; }
+  }
+  function stopSound(s, why) {
+    const c = s.sound; s.sound = null;
+    if (c) { try { c.stop(why); } catch { /* gone */ } }
+  }
   function pushStats(s) { pushTo(s, { op: 'stream-stats', sid: s.sid, stats: statsOf(s), state: stateOf(s) }); }
 
   function stop(sid, why = 'stopped') {
@@ -342,6 +380,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     if (s.agentQ.length || s.agentHeld.size || s.inFlight === 'agent') { dropAgent(s, 'stream_ended'); pump(s); } // the agent's rest is not typed into a desktop nobody watches
     try { s.source && s.source.stop(why); } catch { /* gone */ }
     try { s.mic && s.mic.stop(why); } catch { /* gone */ } // lane stream-mic-road: the voice's road ends with its session
+    stopSound(s, why); // lane speaker-passthrough-v1: the machine's sound ends with its session
     if (s.leg) s.leg.close();
     if (s.relay) s.relay.close();
     pushTo(s, { op: 'stream-stats', sid, stats: statsOf(s), state: 'closed', ended: why });
@@ -564,8 +603,11 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     try { w = werift(); } catch (e) { try { source.stop(); } catch { } return named('stream_unsupported', `this agent cannot stream here (${(e && e.message) || e}; Node ${process.version})`); }
     const hdr = msg.hdr === true && source.offersAv1 === true; // lane stream-hdr-passthrough: AV1 first, H.264 beside it
     const wantMic = msg.mic === true && typeof mic === 'function'; // lane stream-mic-road: the page asked for its microphone's m-line
+    // lane speaker-passthrough-v1: the page asked for the machine's sound, and this machine can send it (a Mac's screen source, or the sound factory)
+    let wantAudio = false;
+    if (msg.audio === true) { try { wantAudio = typeof source.audio === 'function' || (typeof sound === 'function' && !!sound().can()); } catch { wantAudio = false; } }
     const pc = new w.RTCPeerConnection({
-      codecs: { video: SM.streamCodecsOf({ hdr }).map((C) => new w.RTCRtpCodecParameters({ mimeType: C.mimeType, clockRate: C.clockRate, rtcpFeedback: C.rtcpFeedback.map((f) => ({ ...f })), parameters: C.fmtp })), ...(wantMic ? { audio: [w.useOPUS()] } : {}) },
+      codecs: { video: SM.streamCodecsOf({ hdr }).map((C) => new w.RTCRtpCodecParameters({ mimeType: C.mimeType, clockRate: C.clockRate, rtcpFeedback: C.rtcpFeedback.map((f) => ({ ...f })), parameters: C.fmtp })), ...(wantMic || wantAudio ? { audio: [w.useOPUS()] } : {}) },
       headerExtensions: { video: [w.useTransportWideCC()] },
       // ICE-LITE, no ICE servers (measured, werift 0.25.0): its ICE agent asks stun.l.google.com:19302 for a server-reflexive
       // candidate whenever no STUN server is set — `iceServers: []` included (a hard-coded DEFAULT_STUN_SERVER) — and only
@@ -577,7 +619,8 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     });
     const s = { sid, owner, pc, source, maxKbps, codec: hdr ? null : 'H264', track: null, dc: null, relay: null, leg: null, directInbound: null, frames: 0, bytes: 0, dropped: 0, keyRequests: 0, bweKbps: null, congested: false, estimate: null,
       inputN: 0, inputRefused: null, inputDropped: 0, ownerQ: [], agentQ: [], agentHeld: new Map(), inFlight: null, pumping: false, releaseDue: false, acks: [], ackMs: null, sentAt: new Map(),
-      mark: { at: now(), frames: 0, bytes: 0 }, sending: false, statsTimer: null, orphanTimer: null, failTimer: null, seq: Math.floor(Math.random() * 65536), early: [], replied: false, startedAt: now(), mic: null, micOffered: wantMic };
+      mark: { at: now(), frames: 0, bytes: 0 }, sending: false, statsTimer: null, orphanTimer: null, failTimer: null, seq: Math.floor(Math.random() * 65536), early: [], replied: false, startedAt: now(), mic: null, micOffered: wantMic,
+      audioOffered: wantAudio, atrack: null, sound: null, soundEnd: null, aclock: SND.soundRtpStart(Math.floor(Math.random() * 0x7fffffff)), apackets: 0, abytes: 0, aheld: 0, videoKbps: null, w }; // lane speaker-passthrough-v1
     sessions.set(sid, s);
     try {
       s.track = new w.MediaStreamTrack({ kind: 'video' });
@@ -588,8 +631,15 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       // (`mic`; the hub asks only an agent that says `stream-mic`). The page answers it sendonly with no track and its press is a
       // replaceTrack — no renegotiation; the first RTP packet starts the machine's road (src/desktop-mic.js receiver). B-aec9 (the
       // machine's sound to the viewer) turns this same m-line sendrecv
+      // lane speaker-passthrough-v1: THE MACHINE'S SOUND rides the same m-line — a werift track (sendrecv beside the microphone,
+      // sendonly alone) in the picture's MediaStream (one msid); it carries nothing until the page's 「声音」 turns it on
+      if (wantAudio) {
+        s.atrack = new w.MediaStreamTrack({ kind: 'audio' });
+        const atr = pc.addTransceiver(s.atrack, { direction: wantMic ? 'sendrecv' : 'sendonly' });
+        atr.sender.streamId = SND.SOUND.streamId; tr.sender.streamId = SND.SOUND.streamId;
+      }
       if (wantMic) {
-        pc.addTransceiver('audio', { direction: 'recvonly' });
+        if (!wantAudio) pc.addTransceiver('audio', { direction: 'recvonly' });
         pc.onTrack.subscribe((t) => { if (!t || t.kind !== 'audio' || s.mic) return; s.mic = mic().receiver(sid); t.onReceiveRtp.subscribe((rtp) => { if (s.mic) s.mic.onRtp(rtp); }); });
       }
       s.dc = pc.createDataChannel('input', { ordered: true });
@@ -600,7 +650,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       pc.onIceCandidate.subscribe((c) => { if (!c) { endIce(); return; } iceOut(typeof c.toJSON === 'function' ? c.toJSON() : c); });
       pc.iceGatheringStateChange.subscribe((g) => { if (g === 'complete') endIce(); });
       pc.connectionStateChange.subscribe((st) => {
-        if (st === 'connected' && !s.estimate) { s.estimate = wireEstimate(tr.sender, (k) => { s.bweKbps = k; try { source.setTargetKbps(Math.min(maxKbps, k)); } catch { } }); if (!s.estimate) log(`[stream] ${sid} no send-side estimate (werift's sender shape changed) — the rate holds`); }
+        if (st === 'connected' && !s.estimate) { s.estimate = wireEstimate(tr.sender, (k) => { s.bweKbps = k; retarget(s, k); }); if (!s.estimate) log(`[stream] ${sid} no send-side estimate (werift's sender shape changed) — the rate holds`); } // THE RATE: less the sound's share while it is on (retarget — lane speaker-passthrough-v1)
         if (st === 'connected' && !s.codec) { // the HDR road: the codec werift negotiated (the browser's answer's first) picks the source's road
           const mime = tr.sender.codec && tr.sender.codec.mimeType;
           s.codec = typeof source.useCodec === 'function' ? source.useCodec(mime) : 'H264';
@@ -645,7 +695,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
       if (r.verdict === 'blocked') log(`[stream] ${sid} direct inbound UDP: blocked — none of ${r.addrs} host address${r.addrs === 1 ? '' : 'es'} reached from this machine itself (its firewall); the hub relay carries the stream`);
       pushStats(s);
     }, () => { });
-    return { ok: true, sid, offer: { type: 'offer', sdp: SM.liteSessionSdp(pc.localDescription.sdp) }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null, ...(source.window ? { window: source.window } : {}), ...(source.displays ? { display: source.display, displays: source.displays } : {}), ...(source.scaled ? { scaled: source.scaled } : {}), ...(source.tcc ? { tcc: source.tcc } : {}), ...(source.hdr ? { hdr: source.hdr } : {}) }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, ...(hdr ? { codecs: SM.streamCodecsOf({ hdr }).map((C) => C.mimeType) } : {}), ...(wantMic ? { mic: true } : {}), maxKbps };
+    return { ok: true, sid, offer: { type: 'offer', sdp: SM.liteSessionSdp(pc.localDescription.sdp) }, source: { kind: source.kind, origin: source.origin, fps: source.fps || null, encoder: source.encoder || null, mode: source.mode || null, ...(source.window ? { window: source.window } : {}), ...(source.displays ? { display: source.display, displays: source.displays } : {}), ...(source.scaled ? { scaled: source.scaled } : {}), ...(source.tcc ? { tcc: source.tcc } : {}), ...(source.hdr ? { hdr: source.hdr } : {}) }, relayPort: s.relay ? s.relay.port : null, codec: { mimeType: SM.STREAM_CODEC.mimeType, fmtp: SM.STREAM_CODEC.fmtp }, ...(hdr ? { codecs: SM.streamCodecsOf({ hdr }).map((C) => C.mimeType) } : {}), ...(wantMic ? { mic: true } : {}), ...(wantAudio ? { audio: true } : {}), maxKbps };
   }
   /** After the offer's reply went out: the candidates gathered while it was made follow as pushes, in order. */
   function replied(sid) {
@@ -666,6 +716,30 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     } catch (e) { return named('answer_failed', `the browser's answer did not apply (${(e && e.message) || e})`); }
     return { ok: true };
   }
+  /** THE SOUND'S SWITCH (lane speaker-passthrough-v1 — `stream-audio`): on = THE capture of the machine's sound for this session (a
+   *  Mac's screen source's own; else the sound factory's), off = it ends. → { ok, sid, on, endpoint?, audio } | refusal by name */
+  async function audio(msg) {
+    const sid = String(msg.sid || '');
+    const s = sessions.get(sid);
+    if (!s) return named('not_found', 'that stream session ended');
+    if (!s.audioOffered) return named('no_audio', 'this stream was offered without the sound\'s track (asked without `audio`, or this machine cannot send its sound)');
+    if (msg.on !== true) { const was = !!s.sound; stopSound(s, 'off'); s.soundEnd = null; retarget(s); pushStats(s); return { ok: true, sid, on: false, was, audio: soundStats(s) }; }
+    if (s.sound) return { ok: true, sid, on: true, already: true, audio: soundStats(s) };
+    let cap = null;
+    const onEnd = (code, error) => { if (s.sound !== cap) return; s.sound = null; s.soundEnd = { code: code || 'capture_ended', error: error || null }; retarget(s); pushStats(s); };
+    try {
+      cap = typeof s.source.audio === 'function' ? s.source.audio((p) => sendAudio(s, p), { onEnd }) : sound().capture(sid, (p) => sendAudio(s, p), { onEnd });
+    } catch (e) { return named('capture_failed', `the machine's sound could not start (${(e && e.message) || e})`); }
+    if (!cap || typeof cap.start !== 'function') return named('sound_unsupported', 'this machine cannot send its sound');
+    s.sound = cap; s.soundEnd = null;
+    let r;
+    try { r = await cap.start(); } catch (e) { r = named('capture_failed', String((e && e.message) || e)); }
+    if (sessions.get(sid) !== s || s.sound !== cap) { try { cap.stop('stopped'); } catch { } return r && !r.ok ? r : named('not_found', 'that stream session ended while its sound started'); }
+    if (!r || !r.ok) { s.sound = null; s.soundEnd = { code: (r && r.code) || 'capture_failed', error: (r && r.error) || null }; try { cap.stop('failed'); } catch { } pushStats(s); return r || named('capture_failed', 'no answer'); }
+    retarget(s); pushStats(s);
+    log(`[stream] ${sid} sound on${r.endpoint ? ` (${r.endpoint})` : ''}`);
+    return { ok: true, sid, on: true, ...(r.endpoint ? { endpoint: r.endpoint } : {}), audio: soundStats(s) };
+  }
   function stats(msg, owner) {
     const s = sessions.get(String(msg.sid || ''));
     if (!s) return named('not_found', 'that stream session ended');
@@ -682,7 +756,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     }
   }
   function stopAll(why = 'agent_stopped') { for (const sid of [...sessions.keys()]) stop(sid, why); }
-  return { offer, replied, answer, stop, stats, input, still, linkDead, stopAll, sessions: () => [...sessions.keys()] };
+  return { offer, replied, answer, stop, stats, input, still, audio, linkDead, stopAll, sessions: () => [...sessions.keys()] };
 }
 
 module.exports = { createStreamHost, fakeSource, fakeStill, FAKE_STILL, createLeg, selfProbe };

@@ -56,6 +56,7 @@ const TABLE = Object.freeze({
   'discovery-snapshot': 'read', 'discovery-claims': 'read', 'discovery-watch': 'read', 'session-events-watch': 'read',
   'usage-scan': 'read', 'usage-events-watch': 'read', 'usage-events-ack': 'read', 'pool-orders-log-ack': 'read',
   'stream-offer': 'read', 'stream-answer': 'read', 'stream-stop': 'read', 'stream-stats': 'read', 'stream-windows': 'read',
+  'stream-audio': 'read', // lane speaker-passthrough-v1: the strip's 「声音」 on the person's OWN stream session (its sound captured for that session only, like its picture — stream-offer's class)
   'window-track': 'read', 'window-untrack': 'read', 'proc-list': 'read', 'dial-status': 'read',
   'probe-cli': 'read', 'probe-creds': 'read', 'ping-info': 'read', 'ok': 'read',
   'transcript-op': 'read',  // a conversation's own transcript pages, read where it lives

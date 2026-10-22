@@ -1,0 +1,22 @@
+{
+  "id": "c0000000-0000-4000-8000-0000000000c4",
+  "recipient": "9c0f0000-0000-4000-8000-0000000000a1",
+  "sender": "9c0f0000-0000-4000-8000-0000000000a1/task-3",
+  "priority": "MESSAGE_PRIORITY_HIGH",
+  "timestamp": "2026-10-21T14:32:38.905738578Z",
+  "renderDetails": {
+    "messageTitle": "Run the sample check finished"
+  },
+  "content": "Command exited with code 0.",
+  "sourceMetadata": {
+    "tool": {
+      "conversationId": "9c0f0000-0000-4000-8000-0000000000a1",
+      "stepIndex": 5,
+      "toolCall": {
+        "id": "call_5000001",
+        "name": "run_command",
+        "argumentsJson": "{\"CommandLine\":\"true\",\"WaitMsBeforeAsync\":500,\"toolSummary\":\"a background check\"}"
+      }
+    }
+  }
+}

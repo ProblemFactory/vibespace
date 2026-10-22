@@ -17,6 +17,11 @@
 //                                  = a counter file — while it holds n > 0 a `facts` run fails (exit 1, nothing on stdout), n - 1.
 //                                  lane fast-debt-clear: cfg.pace = pictures a second the fake WRITES (its `started` line still
 //                                  says --fps): a leg that counts pictures gets them sooner
+//                                  lane speaker-passthrough-v1: THE SOUND — `audio on` / `audio off` on stdin answer ONE `audio`
+//                                  line ({on} — or {on: false, error} when cfg.audioRefuse and it did not start with --audio: a
+//                                  live switch macOS refused), and while on it writes cfg.opus's packets (a file of u32LE-length-
+//                                  framed Opus packets) as FLV AUDIO tags (0x91 'Opus' + the packet — the real helper's shape) every
+//                                  20 ms beside the pictures; `--audio` = on from the start (its `started` line says audio: true)
 //   MAC_FACTS                      the canned facts (two 4K displays at 2×, two windows — names invented)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -62,7 +67,14 @@ if (a[0] === 'input') {
 } else if (a[0] === 'capture') {
   if (cfg.tcc.screen !== 'granted') { say({ t: 'end', code: 'screen_permission', error: 'Screen Recording is off for vibespace-screen' }); process.exit(3); }
   const [w, h] = String(opt('size') || '1280x720').split('x').map(Number), fps = Number(opt('fps')) || 30, win = opt('window');
-  say({ t: 'started', w, h, fps, kbps: Number(opt('kbps')), scale: 2, frame: win ? cfg.windowFrame : cfg.displayFrame, pid: win ? cfg.windowPid : 0, window: win ? Number(win) : 0, version: cfg.version, lowLatency: true });
+  const withAudio = a.includes('--audio');
+  say({ t: 'started', w, h, fps, kbps: Number(opt('kbps')), scale: 2, frame: win ? cfg.windowFrame : cfg.displayFrame, pid: win ? cfg.windowPid : 0, window: win ? Number(win) : 0, version: cfg.version, lowLatency: true, audio: withAudio });
+  // lane speaker-passthrough-v1: THE SOUND's packets (cfg.opus: u32LE length + packet, looped) as FLV audio tags
+  const opus = []; if (cfg.opus) { const ob = fs.readFileSync(cfg.opus); for (let k = 0; k + 4 <= ob.length;) { const L = ob.readUInt32LE(k); opus.push(ob.subarray(k + 4, k + 4 + L)); k += 4 + L; } }
+  let audioTimer = null, apk = 0; const t0 = Date.now();
+  const audioTag = (pkt) => { const body = Buffer.concat([Buffer.from([0x91]), Buffer.from('Opus'), pkt]); const ms = Date.now() - t0; const tg = Buffer.alloc(11); tg[0] = 8; tg.writeUIntBE(body.length, 1, 3); tg.writeUIntBE(ms & 0xffffff, 4, 3); tg[7] = (ms >> 24) & 255; const tail = Buffer.alloc(4); tail.writeUInt32BE(11 + body.length); return Buffer.concat([tg, body, tail]); };
+  const audioOn = () => { if (audioTimer || !opus.length) return; audioTimer = setInterval(() => { process.stdout.write(audioTag(opus[apk % opus.length])); apk++; }, 20); };
+  const audioOff = () => { clearInterval(audioTimer); audioTimer = null; };
   const flv = fs.readFileSync(cfg.flv);
   let i = 9 + 4; const tags = [];
   while (i + 11 <= flv.length) { const size = (flv[i + 1] << 16) | (flv[i + 2] << 8) | flv[i + 3]; tags.push(flv.subarray(i, i + 11 + size + 4)); i += 11 + size + 4; }
@@ -70,14 +82,19 @@ if (a[0] === 'input') {
   process.stdout.on('error', () => process.exit(0));
   process.stdout.write(head);
   let n = 0, sent = 0, forced = 0, next = null;
-  lines((l) => { log({ ctl: l }); if (l === 'key') { next = k0; forced++; } if (l === 'quit') process.exit(0); });
+  lines((l) => {
+    log({ ctl: l }); if (l === 'key') { next = k0; forced++; } if (l === 'quit') process.exit(0);
+    if (l === 'audio on') { if (cfg.audioRefuse && !withAudio) say({ t: 'audio', on: false, error: 'updateConfiguration: the operation couldn’t be completed (-3812)' }); else { audioOn(); say({ t: 'audio', on: true }); } }
+    if (l === 'audio off') { audioOff(); say({ t: 'audio', on: false }); }
+  });
+  if (withAudio) audioOn();
   setInterval(() => {
     if (cfg.dieAfter && sent >= cfg.dieAfter) process.exit(1);
     if (cfg.endAfter && sent >= cfg.endAfter && (!cfg.endOnce || take(cfg.endOnce))) { say({ t: 'end', code: cfg.endCode, error: 'the fake ended it' }); process.exit(3); }
     if (cfg.moveAfter && sent === cfg.moveAfter) say({ t: 'frame', frame: cfg.movedFrame });
     if (next != null) { n = next; next = null; }
     process.stdout.write(pics[n % pics.length]); n++; sent++;
-    if (sent % 10 === 0) say({ t: 'stats', captured: sent, encoded: sent, idle: 0, repeats: 0, keys: 1, forced, dropped: 0, encMs: 9.5, capMs: 1.2, kbps: 900, bps: 0, w, h, fps, lowLatency: true });
+    if (sent % 10 === 0) say({ t: 'stats', captured: sent, encoded: sent, idle: 0, repeats: 0, keys: 1, forced, dropped: 0, encMs: 9.5, capMs: 1.2, kbps: 900, bps: 0, w, h, fps, lowLatency: true, audio: audioTimer ? { packets: apk, buffers: apk, peakDb: -20 } : null });
   }, 1000 / (Number(cfg.pace) || fps));
 } else { process.stderr.write('fake helper: no mode in ' + a.join(' ') + '\\n'); process.exit(2); }
 `, { mode: 0o755 });

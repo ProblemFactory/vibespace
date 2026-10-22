@@ -159,11 +159,11 @@ console.log('④ patched-copy controls');
   const OWN = "const row = AF.rowFor(helper._artifacts || {}, it, helper.host || '');";
   const MO = src.includes(OWN) ? M.load('src/server/artifact-registry.js', src.replace(OWN, "const row = AF.rowFor(helper._artifacts || {}, it, helper.host || '') || { key: ':' + it, host: '', path: it, name: it, kind: 'doc' };"), 'noown') : null;
   if (ok(MO, 'CONTROL needle present: the ownership check')) { const w = world(MO); const r = MO.handover({ from: { cid: CH, name: 'design desk', session: w.helper }, to: [CR], items: ['/opt/demo/elsewhere/secret.md'], reach: reachFrom(CH) }); ok(r.ok && w.recv._artifacts[':/opt/demo/elsewhere/secret.md'], 'CONTROL: without the ownership check a path the helper never wrote lands (② sees it red)', r); }
-  const SIDE = "ops = ops.concat(helperOps(session, record, session._helperArtifacts)); }";
-  const MS = src.includes(SIDE) ? M.load('src/server/artifact-registry.js', src.replace(SIDE, '}'), 'noside') : null;
+  const SIDE = "  ops = ops.concat(helperOps(session, record, session._helperArtifacts));\n"; // lane agy-subagent-cards: the door asks every record (the descriptor's hook names what ends a helper)
+  const MS = src.includes(SIDE) ? M.load('src/server/artifact-registry.js', src.replace(SIDE, ''), 'noside') : null;
   if (ok(MS, 'CONTROL needle present: the live helper door')) { const s = mk('M1'); MS.configure({ activeSessions: () => new Map([['M1', s]]), log: quiet }); MS.observe(s, TASK[1]); ok(!Object.keys(s._artifacts || {}).length, 'CONTROL: sidechain not read ⇒ the fixture\'s row is missing live (① sees it red)'); }
   const nsrc = fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
-  const NSIDE = 'if (helper && artifactHelperSource && raw && raw.type === \'user\')';
+  const NSIDE = 'if (helper && artifactHelperSource && raw)'; // lane agy-subagent-cards: the hook decides which record ends a helper
   const MN = nsrc.includes(NSIDE) ? M.load('src/normalizers.js', nsrc.replace(NSIDE, 'if (false)'), 'nonside') : null;
   if (ok(MN, 'CONTROL needle present: the rebuild\'s helper seam')) { MN.setArtifactHelperSource(REG.helperOps); const s = mk('M2', { _normalizer: null, _artifacts: null }); await MN.rebuildHistory(s, 'M2', TASK); ok(!Object.keys(s._artifacts || {}).length, 'CONTROL: the rebuild without the helper seam derives no row (the parity assert sees it red)'); }
 }

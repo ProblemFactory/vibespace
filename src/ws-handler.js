@@ -17,6 +17,7 @@ const { reconcileAttachStreaming } = require('./turn-state'); // §2.5: ONE atta
 const { pidsMatchingCmdline } = require('./cli-identity'); // THE process reader: the kill path's `pgrep -f` without the fork
 const PI = require('./proc-identity'); // the ssh kill compares the meta's recorded birth (vs_same_proc, B-5ee1)
 const { shrinkVerdict, windowIds, layerGate } = require('./lib/desktop-record.js'); // PURE (userW inc-mun7qjmw-iksh): the layout-sync shrink belt + the layer gate (design q-039 P1)
+const { staleVerdict, keepIdentities } = require('./lib/desktop-record.js'); // PURE (lane layout-stale-record-sync): a record never goes backwards; a write never forgets who a window is
 
 /** The sentence a harness-level verb refusal carries. Every branch says what
  *  happens to the message ANYWAY — a refusal that only says "no" leaves the
@@ -279,6 +280,20 @@ function registerWsHandler(wss, ctx) {
     for (const [id, a] of m) { if (now - a.at > ARRIVAL_TTL_MS) { m.delete(id); continue; } if (a.by !== me) out.push(id); }
     return out;
   };
+  // THE STALENESS GATE'S MEMORY (lane layout-stale-record-sync): per desktop, the last writes {who, at, replaced} — which
+  // socket stored which stamp, over which — so a writer's OWN earlier write (its ack not read yet) never counts as a
+  // record it has not seen (PURE staleVerdict / foreignStamp). A deleted desktop forgets them.
+  const WRITES_KEPT = 16;
+  const layoutWrites = new Map(); // desktopId → [{who, at, replaced}]
+  const noteLayoutWrite = (desktopId, ws, at, replaced) => {
+    const list = layoutWrites.get(desktopId) || [];
+    list.push({ who: layoutClientOf(ws), at, replaced: Number(replaced) || 0 });
+    if (list.length > WRITES_KEPT) list.splice(0, list.length - WRITES_KEPT);
+    layoutWrites.set(desktopId, list);
+  };
+  // the rollback ring names what it saw (lane layout-stale-record-sync): the next point's meta carries the write that made
+  // it (`writer`) and the refusals since the last one (`refused`) — routes/persistence.js writeLayouts.note
+  const noteToRing = (entry) => { try { writeLayouts.note?.(entry); } catch { } };
   const noteArrivals = (desktopId, prevIds, nextIds, ws) => {
     let m = layoutArrivals.get(desktopId); if (!m) { m = new Map(); layoutArrivals.set(desktopId, m); }
     const prev = new Set(prevIds), next = new Set(nextIds), at = Date.now(), by = layoutClientOf(ws);
@@ -1042,6 +1057,7 @@ function registerWsHandler(wss, ctx) {
             // helper (`agentId`), instead of the empty reply it used to get.
             const liveTuid = subId.startsWith('sub-agent-') ? null : subId.slice('sub-'.length);
             let found = false;
+            if (liveTuid) require('./server/acp-subagents.js').seed(activeSessions, liveTuid, data.parentSessionId || null); // an ACP sub (agy): its records from the journal when memory has none
             if (liveTuid) {
               const toolUseId = liveTuid;
               for (const [sid, sess] of activeSessions) {
@@ -1055,7 +1071,7 @@ function registerWsHandler(wss, ctx) {
                   if (!sess._subNormalizers) sess._subNormalizers = new Map();
                   let subMM = sess._subNormalizers.get(toolUseId);
                   if (!subMM) {
-                    subMM = new MessageManager(subId);
+                    subMM = require('./server/acp-subagents.js').normalizerFor(sess, subId) || new MessageManager(subId);
                     subMM.onOp((op) => broadcastToSession(sess, sid, { type: 'msg', sessionId: subId, ...op }));
                     await subMM.convertHistoryAsync(rawMsgs);
                     sess._subNormalizers.set(toolUseId, subMM);
@@ -1539,6 +1555,24 @@ function registerWsHandler(wss, ctx) {
             try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: 'no-such-desktop', desktops: layoutData.desktopMeta, sentAt: data.sentAt ?? null })); } catch { }
             break;
           }
+          // THE STALENESS GATE (lane layout-stale-record-sync, §6b guard 11 — a record never goes backwards): a write names
+          // its `base`, the server stamp of the newest record of this desktop its page had seen; one older than the newest
+          // record ANOTHER writer stored was written without it (a page that slept with an old copy, a save queued before the
+          // wake's re-read) and is REFUSED — nothing written, nothing broadcast, the sender told WITH the record kept: it adopts
+          // it and re-sends from it (onSyncRefused). A write naming no base (an older bundle) is not judged. PURE staleVerdict.
+          if (desktopId && layoutData.desktops?.[desktopId]?.autoSave && data.state && typeof data.state === 'object') {
+            const stored = layoutData.desktops[desktopId].autoSave;
+            const sv = staleVerdict({ writes: layoutWrites.get(desktopId), who: layoutClientOf(ws), storedAt: stored.updatedAt, base: data.base });
+            if (!sv.ok) {
+              const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
+              const by = data.viewport === 'phone' || data.viewport === 'desktop' ? data.viewport + ' ' : '';
+              console.warn(`[layout-sync] REFUSED a ${by}record of desktop "${name}" (${desktopId}): written from an older base (${new Date(sv.base).toISOString()} < the record kept, ${new Date(sv.held).toISOString()}) — ${(stored.windows || []).length} → ${Array.isArray(data.state.windows) ? data.state.windows.length : '?'} windows; the sender adopts the record kept`);
+              try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-refused', detail: `stale ${Math.round((sv.held - sv.base) / 1000)}s` }); } catch { }
+              noteToRing({ refused: 'stale', desktopId, viewport: data.viewport || null, base: sv.base, held: sv.held, windows: [(stored.windows || []).length, Array.isArray(data.state.windows) ? data.state.windows.length : null] });
+              try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: 'stale', state: stored, sentAt: data.sentAt ?? null })); } catch { }
+              break;
+            }
+          }
           // THE SHRINK BELT (userW inc-mun7qjmw-iksh — the money of that bug is data loss): a sync that drops ≥ 2
           // windows of the stored record that nothing explains is REFUSED for that desktop. Explained = the client's
           // own evidence (a close, a move, a replace, a window it tried to build and could not — `evidence`, the
@@ -1551,9 +1585,10 @@ function registerWsHandler(wss, ctx) {
             const v = shrinkVerdict({ prev: stored.windows, next: data.state.windows, evidence: data.evidence, alive: (sid) => activeSessions.has(sid), recent: recentArrivals(desktopId, ws) });
             if (!v.ok) {
               const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
-              const arrived = v.arrived?.length ? `; ${v.arrived.length} of them (${v.arrived.join(', ')}) arrived from another client lately — this record was written from an older base` : '';
+              const arrived = (v.arrived?.length ? `; ${v.arrived.length} of them (${v.arrived.join(', ')}) arrived from another client lately — this record was written from an older base` : '') + (v.live?.length ? `; ${v.live.length} LIVE (the sender could not build them)` : '');
               console.warn(`[layout-sync] REFUSED a record of desktop "${name}" (${desktopId}): it drops ${v.unexplained.length} window(s) with no close/move/kill (${v.unexplained.join(', ')}) — ${(stored.windows || []).length} → ${data.state.windows.length}${arrived}; the server keeps its record`);
               try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-refused', detail: `${v.reason} ${v.unexplained.length}/${(stored.windows || []).length}${v.arrived?.length ? ' arrived=' + v.arrived.length : ''}` }); } catch { }
+              noteToRing({ refused: v.reason, desktopId, viewport: data.viewport || null, n: v.unexplained.length, live: v.live?.length || 0 });
               try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: v.reason, unexplained: v.unexplained, arrived: v.arrived || [], state: stored, sentAt: data.sentAt ?? null })); } catch { }
               break;
             }
@@ -1571,6 +1606,7 @@ function registerWsHandler(wss, ctx) {
               const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
               console.warn(`[layout-sync] REFUSED a phone record of desktop "${name}" (${desktopId}): it changes ${g.fields.join(', ')}${g.windows.length ? ` (window${g.windows.length > 1 ? 's' : ''} ${g.windows.join(', ')})` : ''} — a phone writes the workspace only; the server keeps its record`);
               try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-refused', detail: `${g.reason} ${g.fields.join(',')}` }); } catch { }
+              noteToRing({ refused: g.reason, desktopId, viewport: data.viewport || null, fields: g.fields });
               try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: g.reason, fields: g.fields, state: stored, sentAt: data.sentAt ?? null })); } catch { }
               break;
             }
@@ -1581,6 +1617,11 @@ function registerWsHandler(wss, ctx) {
           const viewport = data.viewport === 'phone' || data.viewport === 'desktop' ? data.viewport : null;
           if (data.state && typeof data.state === 'object') { delete data.state.viewport; if (viewport) data.state.viewport = viewport; }
           delete layoutData.autoSaveMobile; // the retired phone slot (guard 10) — never read; this write drops it
+          // IDENTITY IS NEVER FORGOTTEN (lane layout-stale-record-sync): an entry its writer captured before the window's
+          // attach answered names no session (a phone woke and saved within a second: 工作's five windows went nameless and
+          // no desktop could build them) — the stored entry's identity stays, IN PLACE (the relay below carries it too)
+          const replacedAt = desktopId ? Number(layoutData.desktops?.[desktopId]?.autoSave?.updatedAt) || 0 : 0;
+          if (desktopId && Array.isArray(data.state?.windows) && layoutData.desktops?.[desktopId]?.autoSave) data.state.windows = keepIdentities(layoutData.desktops[desktopId].autoSave.windows, data.state.windows);
           if (desktopId) {
             // Per-desktop save
             if (!layoutData.desktops) layoutData.desktops = {};
@@ -1591,16 +1632,19 @@ function registerWsHandler(wss, ctx) {
             // Legacy single-desktop save
             layoutData.autoSave = { ...data.state, updatedAt: Date.now() };
           }
+          const stampNow = desktopId ? layoutData.desktops[desktopId].autoSave.updatedAt : layoutData.autoSave.updatedAt; // the server's stamp: rides the relay and the ack (each page's next `base`)
+          if (desktopId) noteLayoutWrite(desktopId, ws, stampNow, replacedAt);
+          noteToRing({ wrote: desktopId || null, viewport, windows: Array.isArray(data.state?.windows) ? data.state.windows.length : null, evidence: (Array.isArray(data.evidence) ? data.evidence : []).reduce((o, e) => { const k = (e && typeof e === 'object' && typeof e.why === 'string' && e.why) || 'id'; o[k] = (o[k] || 0) + 1; return o; }, {}), base: typeof data.base === 'number' ? data.base : null });
           writeLayouts(layoutData);
           // Broadcast to other clients (sender excluded) — include desktopMeta
-          const syncMsg = JSON.stringify({ type: 'layout-sync', seq: ++layoutSyncSeqRef.value, desktopId, state: data.state, desktopMeta: layoutData.desktopMeta || [], ...(viewport ? { viewport } : {}) });
+          const syncMsg = JSON.stringify({ type: 'layout-sync', seq: ++layoutSyncSeqRef.value, desktopId, state: data.state, updatedAt: stampNow, desktopMeta: layoutData.desktopMeta || [], ...(viewport ? { viewport } : {}) });
           wss.clients.forEach(client => {
             if (client !== ws && client.readyState === WS_OPEN) { try { client.send(syncMsg); } catch {} }
           });
           // THE ACK (lane desktop-move verify r5 ⑤): the sender learns its record was READ and written — `sentAt` names the
           // save back; the client releases the acts that save carried only now, never at its send (a save on a socket the
           // server never read used to count as sent, and the reconnect's re-read reversed the act for good)
-          try { ws.send(JSON.stringify({ type: 'layout-sync-ack', desktopId: desktopId || null, sentAt: data.sentAt ?? null, seq: layoutSyncSeqRef.value })); } catch { }
+          try { ws.send(JSON.stringify({ type: 'layout-sync-ack', desktopId: desktopId || null, sentAt: data.sentAt ?? null, seq: layoutSyncSeqRef.value, updatedAt: stampNow })); } catch { }
           break;
         }
 
@@ -1628,6 +1672,7 @@ function registerWsHandler(wss, ctx) {
           }
           if (layoutData.desktops) delete layoutData.desktops[data.desktopId];
           layoutArrivals.delete(data.desktopId); // the belt's memory of a deleted desktop goes with it
+          layoutWrites.delete(data.desktopId); // …and the staleness gate's
           writeLayouts(layoutData);
           const broadcast = JSON.stringify({ type: 'desktop-updated', desktops: layoutData.desktopMeta || [] });
           wss.clients.forEach(c => { if (c !== ws && c.readyState === WS_OPEN) try { c.send(broadcast); } catch {} });

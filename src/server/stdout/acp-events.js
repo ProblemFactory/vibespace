@@ -38,6 +38,8 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
         try {
           if (msg.type === '_stdin_ack') { session._stdinAckReceived = true; continue; }
           if (msg.type !== 'acp') { feedLive(session, msg); continue; } // e.g. the echoed permission-response frame
+          // a SUBAGENT's own step (lane agy-subagent-cards): its virtual session's, never the parent's cards / label
+          if (msg.kind === 'sub') { require('../acp-subagents.js').feed(session, id, msg, broadcastToSession); continue; }
           let newLabel = null;
           if (msg.kind === 'session') {
             // The agent's session id IS the conversation id (resume = session/load with it)
@@ -73,6 +75,13 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
           } else if (msg.kind === 'prompt_end') {
             session._isStreaming = false; newLabel = '';
             try { noteTurnEnd?.(session); } catch {}
+            // the descriptor's after-turn read (antigravity: the card of a sub its OLD wrapper journaled without one — the
+            // cards' addendum): its records go through THIS loop next, as if journaled (a `sub` step to its virtual
+            // session, a card to the cards) — never into the session buffer / the journal
+            try {
+              const late = require('../../harnesses').harnessOf(session.backend)?.store?.afterTurn?.(session) || [];
+              if (late.length) lineBuf = late.map((r) => JSON.stringify(r)).join('\n') + '\n' + lineBuf;
+            } catch (e) { console.warn(`[acp] after-turn read failed: ${e.message}`); }
           } else if (msg.kind === 'update') {
             const u = msg.update || {};
             // lane artifacts-model: a tool call's diff → the conversation's deliverable rows + their cards (the descriptor's hook reads it)
@@ -83,6 +92,10 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             else if (u.sessionUpdate === 'plan' && Array.isArray(u.entries)) {
               updateSessionTodos(session, u.entries.map((e) => ({ content: String(e?.content || ''), status: e?.status === 'in_progress' ? 'in_progress' : (e?.status === 'completed' ? 'completed' : 'pending') })));
             }
+          } else if (msg.kind === 'subagent') {
+            // a FINISHED subagent card (lane agy-subagent-cards): the files its sub wrote join this conversation's Artifacts
+            // (the descriptor's helper door reads the sub's transcript; a running card reads nothing)
+            if (msg.status && msg.status !== 'running') { try { require('../artifact-registry.js').observe(session, msg); } catch (e) { console.warn('[acp] subagent artifacts failed:', e.message); } }
           } else if (msg.kind === 'permission_rules') {
             // READ-ONLY rule answer (ruling 10). For ACP the answer is always
             // 'unsupported-by-protocol' + the live mode — routed anyway, so a

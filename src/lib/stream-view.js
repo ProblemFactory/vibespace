@@ -29,6 +29,11 @@
 //     that says `stream-mic` offers it; the start's `mic` says whether it did). The answer takes it SENDONLY with no track, so the
 //     strip's press is `setMic(track)` = replaceTrack — no renegotiation — and its stop `setMic(null)`; `micReady` = the m-line is
 //     there; `onMicReady(bool)` after each answer. B-aec9 (the machine's sound) makes the machine's side of it sendrecv
+//   • THE MACHINE'S SOUND (lane speaker-passthrough-v1 — src/sound-model.js): `audio` = ask the machine for its sound's track on
+//     that same m-line (an agent that says `stream-audio`; the start's `audio` says whether it offered it) — taken recvonly, or
+//     sendrecv beside the microphone. It shares the picture's MediaStream (one msid), so THIS <video> carries it: muted until the
+//     strip's 「声音」 — `unmute()` in the press itself (the browser's autoplay wants that gesture), then `setSound(true)` (the
+//     machine starts capturing); `soundReady` = the track is there; `onSoundReady(bool)` after each answer
 import { fetchJson } from './utils.js';
 import { STREAM_LIMITS, streamStep, fallbackVerdict, stallStep, statsOf, relayPathOf, firewallRuleCommand } from '../stream-model.js';
 import { viewerPlatform, keyMapFor, keyMessage, pointerMessage, wheelMessage } from './stream-input.js';
@@ -62,6 +67,7 @@ export function createStreamView(host, opts = {}) {
   let hdrWatch = null, hdrFailed = false; // lane stream-hdr-passthrough: the decode watch of an HDR picture (hdrStallStep)
   let stall = null; // lane stream-leg-flap: THE STALL's watch (stallStep)
   let micOffered = false, micTr = null; // lane stream-mic-road: the machine offered the microphone's m-line · its transceiver here
+  let audioOffered = false, soundTr = null, strayAudio = null; // lane speaker-passthrough-v1: the machine offered its sound's track · the transceiver · a track that came before the picture's
 
   const send = (msg) => {
     const open = !!(msg && dc && dc.readyState === 'open');
@@ -100,23 +106,41 @@ export function createStreamView(host, opts = {}) {
     await pc.setRemoteDescription(offer);
     if (opts.hdr) preferAv1();
     // lane stream-mic-road: the machine RECEIVES on its audio m-line — taken sendonly with no track (the press is a replaceTrack)
-    if (micOffered) { micTr = pc.getTransceivers().find((t) => t.receiver && t.receiver.track && t.receiver.track.kind === 'audio') || null; if (micTr) { try { micTr.direction = 'sendonly'; } catch { micTr = null; } } }
+    // lane speaker-passthrough-v1: …and RECEIVES the machine's sound on it when offered — sendrecv with both, recvonly alone
+    if (micOffered || audioOffered) {
+      const atr = pc.getTransceivers().find((t) => t.receiver && t.receiver.track && t.receiver.track.kind === 'audio') || null;
+      micTr = micOffered ? atr : null; soundTr = audioOffered ? atr : null;
+      if (atr) { try { atr.direction = micOffered && audioOffered ? 'sendrecv' : micOffered ? 'sendonly' : 'recvonly'; } catch { micTr = null; soundTr = null; } }
+    }
     await pc.setLocalDescription(await pc.createAnswer());
     const a = await post(`${BASE}/answer`, { key, sdp: pc.localDescription.sdp });
     if (!a || a.error) throw Object.assign(new Error((a && a.error) || 'the answer did not reach the machine'), { code: (a && a.code) || 'answer_failed' });
   }
   async function start() {
-    const r = await post(`${BASE}/start`, { host: hostId, ...(opts.source ? { source: opts.source, ...(opts.fp16 ? { fp16: true } : {}) } : {}), ...(opts.hdr ? { hdr: true } : {}), ...(opts.after ? { after: opts.after } : {}), ...(opts.mic ? { mic: true } : {}) }).catch(() => null); // opts.source: a display / ONE window (a Mac's or a Windows machine's — int304's one door)
+    const r = await post(`${BASE}/start`, { host: hostId, ...(opts.source ? { source: opts.source, ...(opts.fp16 ? { fp16: true } : {}) } : {}), ...(opts.hdr ? { hdr: true } : {}), ...(opts.after ? { after: opts.after } : {}), ...(opts.mic ? { mic: true } : {}), ...(opts.audio ? { audio: true } : {}) }).catch(() => null); // opts.source: a display / ONE window (a Mac's or a Windows machine's — int304's one door)
     if (disposed) { if (r && r.key) post(`${BASE}/stop`, { key: r.key, why: closeWhy }); return; }
     if (!r || r.error || !r.take) { why = (r && (r.why || r.error)) || null; refusal = r && Number.isInteger(r.cap) ? { live: r.live, cap: r.cap, displays: r.displays } : null; step('refused', (r && r.code) || 'start_failed'); return; }
-    taken = true; key = r.key; micOffered = r.mic === true;
+    taken = true; key = r.key; micOffered = r.mic === true; audioOffered = r.audio === true;
     origin = (r.source && r.source.origin) || { x: 0, y: 0 };
     source = r.source || null;
     try { opts.onSource?.(source); } catch { /* the shell's */ }
     if (r.platform) map = keyMapFor(viewerPlatform(), r.platform);
     try {
       pc = new RTCPeerConnection({ iceServers: [] }); // no STUN/TURN service: host candidates + the hub relay's (in the offer)
-      pc.ontrack = (e) => { if (e.track && e.track.kind !== 'video') return; video.srcObject = (e.streams && e.streams[0]) || new MediaStream([e.track]); video.play?.().catch?.(() => { }); }; // lane stream-mic-road: the microphone's m-line is never the picture
+      pc.ontrack = (e) => {
+        const t = e.track, ms = e.streams && e.streams[0];
+        if (t && t.kind === 'audio') { // lane speaker-passthrough-v1: the machine's sound joins the picture's stream (one msid: it is already there)
+          if (!audioOffered) return;
+          const cur = video.srcObject;
+          if (cur && typeof cur.getTrackById === 'function') { if (!cur.getTrackById(t.id)) cur.addTrack(t); } else strayAudio = t;
+          return;
+        }
+        if (t && t.kind !== 'video') return; // lane stream-mic-road: the microphone's m-line is never the picture
+        video.srcObject = ms || new MediaStream([t]);
+        if (strayAudio && video.srcObject.getAudioTracks && !video.srcObject.getAudioTracks().length) video.srcObject.addTrack(strayAudio);
+        strayAudio = null;
+        video.play?.().catch?.(() => { });
+      };
       pc.ondatachannel = (e) => { if (e.channel && e.channel.label === 'input') dc = e.channel; };
       pc.onicecandidate = (e) => { if (e.candidate && key) post(`${BASE}/candidate`, { key, candidate: e.candidate.toJSON() }); };
       pc.onconnectionstatechange = () => {
@@ -130,6 +154,7 @@ export function createStreamView(host, opts = {}) {
       await answerOffer(r.offer);
       step('answered');
       try { opts.onMicReady?.(!!micTr); } catch { /* the shell's */ }
+      try { opts.onSoundReady?.(!!soundTr); } catch { /* the shell's */ }
       armConnectTimer();
     } catch (e) { why = String((e && e.message) || e); step('failed', (e && e.code) || 'answer_failed'); }
   }
@@ -251,7 +276,7 @@ export function createStreamView(host, opts = {}) {
     if (k) post(`${BASE}/stop`, { key: k, why: reason || 'closed' });
     try { dc && dc.close(); } catch { /* gone */ }
     try { pc && pc.close(); } catch { /* gone */ }
-    pc = null; dc = null; micTr = null;
+    pc = null; dc = null; micTr = null; soundTr = null; strayAudio = null;
     try { video.srcObject = null; } catch { /* gone */ }
     video.remove();
   }
@@ -269,6 +294,21 @@ export function createStreamView(host, opts = {}) {
     get micReady() { return !!micTr; }, // lane stream-mic-road: the machine's microphone m-line is here
     /** lane stream-mic-road: the strip's track onto the m-line (null = off) — replaceTrack, no renegotiation. → Promise<bool> */
     setMic(track) { return micTr ? micTr.sender.replaceTrack(track || null).then(() => true, () => false) : Promise.resolve(false); },
+    get soundReady() { return !!soundTr; }, // lane speaker-passthrough-v1: the machine's sound track is here
+    get muted() { return video.muted; },
+    /** lane speaker-passthrough-v1: the <video> plays its sound — call it IN the person's press (the browser's autoplay rule).
+     *  → Promise<bool> (false = the browser kept it muted) */
+    unmute() {
+      video.muted = false; video.removeAttribute('muted');
+      let p; try { p = video.play(); } catch { p = null; }
+      return Promise.resolve(p).then(() => !video.muted, (e) => { if (e && e.name === 'NotAllowedError') { video.muted = true; video.setAttribute('muted', ''); return false; } return !video.muted; }); // NotAllowedError = the autoplay rule said no; an AbortError (a new picture) is no refusal
+    },
+    mute() { video.muted = true; video.setAttribute('muted', ''); },
+    /** lane speaker-passthrough-v1: the machine's capture for this stream on / off (`stream-audio`). → its answer | { ok: false, code } */
+    setSound(on) {
+      if (!key) return Promise.resolve({ ok: false, code: 'not_found', error: 'the stream ended' });
+      return post(`${BASE}/sound`, { key, on: on === true }).then((r) => r || { ok: false, code: 'unreachable' }, () => ({ ok: false, code: 'unreachable' }));
+    },
     connect() { if (st.state === 'idle') { step('start'); statsTimer = setInterval(() => { readStats(); }, STREAM_LIMITS.statsMs); } },
     focus() { video.focus({ preventScroll: true }); },
     stats: () => page,

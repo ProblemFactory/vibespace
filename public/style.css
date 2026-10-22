@@ -7531,6 +7531,18 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .machine-mic-state.is-bad { color: var(--warning, #d9822b); }
 .machine-mic-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .machine-mic-acts > button { width: auto; padding: 0 10px; }
+/* lane speaker-passthrough-v1: the strip's 「声音」 (the machine's sound here) + 「点一下开声音」 (a restored window) + the card's consent line */
+.desktop-strip-sound { display: inline-flex; align-items: center; gap: 4px; }
+.desktop-strip-sound[hidden], .desktop-strip-sound-tap[hidden] { display: none; }
+.desktop-strip-sound .desktop-strip-sound-waves { opacity: 0.35; }
+.desktop-strip-sound[aria-pressed="true"] { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }
+.desktop-strip-sound[aria-pressed="true"] .desktop-strip-sound-waves { opacity: 1; }
+.desktop-strip-sound.is-starting { opacity: 0.7; cursor: progress; }
+.desktop-strip-sound.is-refused { color: var(--warning, #d9822b); }
+.desktop-strip-sound-tap { flex: 0 0 auto; height: 22px; padding: 0 8px; border: 1px solid var(--accent, #3b82f6); border-radius: var(--radius-sm, 4px); background: none; color: var(--accent, #3b82f6); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.desktop-strip.is-tight .desktop-strip-mic-label, .desktop-strip.is-tight .desktop-strip-sound-label { display: none; } /* a crowded strip: the two toggles' icons only (their titles say what they are) */
+.machine-sound-row { display: flex; align-items: center; gap: 6px; margin: 6px 0; color: var(--text-secondary); }
+.machine-sound-state { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
 .desktop-strip-status[role="button"] { cursor: pointer; }
 .desktop-strip-rung, .desktop-strip-slow { flex: 0 0 auto; padding: 1px 7px; border-radius: 9px; background: var(--bg-input); color: var(--text-secondary); }
 .desktop-strip-rung[data-rung="sharp"], .desktop-strip-rung[data-rung="balanced"] { color: var(--text); }

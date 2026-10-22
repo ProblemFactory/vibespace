@@ -6,7 +6,7 @@ import { isTransientWindowType } from './window-types.js';
 import { legacyIdFor } from './agent-meta.js';
 import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layout RECORD keeps for a window drawn from a record's words (lane-redact verify r7)
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, restoreVerdict } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
-import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
+import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
 import { applyForViewport, arrangementFor } from './desktop-record.js'; // THE LAYER LAW's read half (design q-039 P0, §6b item 10): every read site of a record takes this page's subsets of it here (PURE)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
@@ -134,6 +134,9 @@ class LayoutManager {
     // _appliedSeq: desktopId → the newest seq APPLIED for it — a deferred record not newer is dropped at release, never
     //   applied backwards (layout-model.js releaseNext; cleared with `_lastRemoteSeq` on every reconnect)
     this._appliedSeq = new Map();
+    // A RECORD NEVER GOES BACKWARDS (lane layout-stale-record-sync): desktopId → the newest server stamp this page APPLIED; a
+    // record older than it is never applied (the seq restarts with the socket and the server — the stamp does not)
+    this._appliedStamps = new Map();
     this._drainTimer = null;
     this._pointerDown = false;
     // _applying: the SYNCHRONOUS span of a remote apply (and the cached sweep's closes) — a close made inside it is
@@ -163,6 +166,8 @@ class LayoutManager {
     app.ws.onStateChange((connected) => { if (!connected) { this._lastSentJson = null; this._unacked = this._unacked.filter((s) => s.at == null); } if (connected) { this._clockTick(); this._lastRemoteSeq = 0; for (const s of this._unacked) if (s.at == null) s.at = Date.now(); if (this._connects++ > 0) setTimeout(() => this._resyncFromServer(), 250); } }); // a save queued while down LEAVES now (ws.js flushes right after the handlers): its no-ack clock starts here (verify r5 ⑤)
     app.ws.onStateChange((connected) => { if (connected) this._appliedSeq.clear(); }); // the server's seq restarts with the socket (guard 1)
 
+    // THE BASE (lane layout-stale-record-sync): this page's own write stored — its stamp is the base of the next one
+    app.ws.onGlobal((msg) => { if (msg.type === 'layout-sync-ack' && msg.updatedAt) this.app.desktopManager?.noteStamp?.(msg.desktopId, msg.updatedAt); });
     // Listen for state sync from other clients
     app.ws.onGlobal((msg) => {
       if (msg.type === 'layout-sync-ack') { this._onLayoutAnswer(msg.desktopId, msg.sentAt, { refused: false }); return; } // the server READ a save (verify r5 ⑤)
@@ -310,6 +315,11 @@ class LayoutManager {
     noteApplied(this._appliedSeq, msg); // the newest record applied for its desktop: an older one still deferred never lands after it (B-4767)
     this._clockTick(); // a record after a sleep: the held acts are re-armed BEFORE it is judged against them (verify r5 ①)
     const dm = this.app.desktopManager;
+    // A RECORD NEVER GOES BACKWARDS (lane layout-stale-record-sync, §6b guard 11): one older than the newest this page applied
+    // for its desktop (a deferred broadcast from before a sleep, after the wake's re-read) is not applied; a newer one is the
+    // base of this page's next write of that desktop
+    if (behindStamp(this._appliedStamps, msg)) { try { window.__vsOp?.('layout-sync-behind', { desk: msg.desktopId || '', at: recordStamp(msg) }); } catch { } return; }
+    noteStamp(this._appliedStamps, msg.desktopId, recordStamp(msg)); dm?.noteStamp?.(msg.desktopId, recordStamp(msg));
     // Bar heights are GLOBAL chrome riding PER-DESKTOP states — apply them
     // BEFORE the desktop gate (2.252.2, adversarial-review catch): a client
     // viewing another desktop used to only CACHE the broadcast, so its bars
@@ -1213,9 +1223,10 @@ class LayoutManager {
         if (!alive && ws.serverSessionId) {
           alive = activeSessions.find(s => s.id === ws.serverSessionId);
         }
+        if (!alive && ws.openSpec?.action === 'attachSession' && ws.openSpec.serverId) alive = activeSessions.find(s => s.id === ws.openSpec.serverId); // a NAMELESS entry (no ids — lane layout-stale-record-sync): its openSpec still names the session
         if (alive) {
           const customName = this.app.sidebar?.getCustomName(backendSessionId || alive.backendSessionId || alive.claudeSessionId);
-          const winInfo = this.app.attachSession(alive.id, customName || alive.name, alive.cwd, { backend: alive.backend || backend, mode: alive.mode || 'terminal', machine: true });
+          const winInfo = this.app.attachSession(alive.id, customName || alive.name, alive.cwd, { backend: alive.backend || backend, mode: alive.mode || 'terminal', machine: true, backendSessionId: alive.backendSessionId || alive.claudeSessionId || backendSessionId || undefined });
           applyPosition(winInfo, ws);
           // Restore split-pane editor if it was active (Ctrl+G)
           if (ws.editorState && winInfo) {
@@ -1259,9 +1270,15 @@ class LayoutManager {
         if (!alive && ws.serverSessionId) {
           alive = activeSessions.find(s => s.id === ws.serverSessionId);
         }
+        // A NAMELESS ENTRY (lane layout-stale-record-sync — 工作's five windows after the phone's early save): no serverSessionId,
+        // no conversation id; its openSpec still names the session it attaches to. It used to match nothing here and build
+        // nothing — 20 s later the page dropped it as 'unbuilt' and the server took 工作 5 → 0.
+        if (!alive && ws.openSpec?.action === 'attachSession' && ws.openSpec.serverId) alive = activeSessions.find(s => s.id === ws.openSpec.serverId);
         if (alive) {
           const customName = this.app.sidebar?.getCustomName(backendSessionId || alive.backendSessionId || alive.claudeSessionId);
-          const winInfo = this.app.attachSession(alive.id, customName || alive.name, alive.cwd, { mode: 'chat', backend: alive.backend || backend, machine: true });
+          // the attach CARRIES the conversation id: the window's openSpec names it before the attach answers (a capture in
+          // between — a save of the waking page — wrote the window with no identity at all)
+          const winInfo = this.app.attachSession(alive.id, customName || alive.name, alive.cwd, { mode: 'chat', backend: alive.backend || backend, machine: true, backendSessionId: alive.backendSessionId || alive.claudeSessionId || backendSessionId || undefined });
           applyPosition(winInfo, ws);
         } else if (backendSessionId) {
           // Session not alive (server/machine restarted) — open as view-only
@@ -1420,7 +1437,7 @@ class LayoutManager {
     const sentAt = Date.now(), sentDesks = [];
     for (const d of dm?.takeDirty?.() || []) {
       const st = dm.recordFor(d);
-      this.app.ws.send({ type: 'layout-sync', state: st, desktopId: d, evidence: dm.evidence(), sentAt, viewport: this._viewport() });
+      this.app.ws.send({ type: 'layout-sync', state: st, desktopId: d, evidence: dm.evidence(), sentAt, viewport: this._viewport(), base: dm.stampOf?.(d) });
       sentDesks.push(d);
       dm.noteSent(d, st);
     }
@@ -1444,7 +1461,7 @@ class LayoutManager {
     }
     this._lastSentJson = json;
     // Full state to server for disk persistence (+ the evidence the server's shrink belt reads)
-    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: dm?.evidence?.() || [], sentAt, viewport: this._viewport() });
+    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: dm?.evidence?.() || [], sentAt, viewport: this._viewport(), base: desktopId ? dm?.stampOf?.(desktopId) : undefined });
     sentDesks.push(desktopId || '');
     this.noteLayoutSent(sentDesks, sentAt);
     if (desktopId) { if (dm?.noteSent) dm.noteSent(desktopId, state); else dm?.noteWire?.(desktopId, state); }

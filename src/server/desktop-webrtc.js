@@ -6,7 +6,9 @@
  * answers, and this module is only the SIGNALING relay between the page's requests and the agent's ops, plus the record:
  *   • start(hostId, {source, fp16, hdr, mic}) the rung's verdict; when taken, `stream-offer` on the agent → the offer (+ the relay's candidates);
  *                            `mic` (lane stream-mic-road) = the page wants its microphone's audio m-line — asked of a `stream-mic` agent
- *                            only (src/agentd/client.js gates it), so an older agent streams without it and the answer's `mic` says which
+ *                            only (src/agentd/client.js gates it), so an older agent streams without it and the answer's `mic` says which;
+ *                            `audio` (lane speaker-passthrough-v1) = the page wants the machine's SOUND on that m-line — asked of a
+ *                            `stream-audio` agent only; the answer's `audio` says whether the machine offered its track
  *                            and a session KEY the page names from now on — `{ take: false, code, why }` otherwise (`too_many_streams`
  *                            adds the machine's `live` / `cap` / `displays` — lane desktop-display-modes' per-machine cap; the window
  *                            shows the VNC picture and says why). `source` = the page's choice (src/stream-model.js
@@ -25,6 +27,8 @@
  *                            anything is newer than `seq`, else after ≤ STREAM_LIMITS.pollMaxMs
  *   • answer / candidate     the page's SDP answer and trickled candidates → `stream-answer`
  *   • restart(key)           an ICE-restart offer (the page's restart budget — src/stream-model.js streamStep)
+ *   • sound(key, on)         the strip's 「声音」 (lane speaker-passthrough-v1): `stream-audio` on the agent — THE capture of the machine's
+ *                            sound for that session starts / ends there
  *   • stop(key, why)         `stream-stop` (its `why` reaches the machine's log); a session no page polled for STREAM_LIMITS.idleMs
  *                            is stopped (the page closed). THE VIEWER GONE (lane stream-window-fixes): the route says when a long
  *                            poll's connection closed before its answer (pollGone — the tab closed, the browser quit or crashed):
@@ -230,7 +234,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
   }
 
   /** The rung, then the offer. → { take: false, code, why } | { take: true, key, sid, offer, source, codec, seq } */
-  async function start(hostId, { maxKbps = null, source = null, fp16 = false, hdr = false, after = null, mic = false } = {}) {
+  async function start(hostId, { maxKbps = null, source = null, fp16 = false, hdr = false, after = null, mic = false, audio = false } = {}) {
     if (!access || typeof access.streamRung !== 'function') throw named('host_unavailable', 'the desktop access layer is not wired on this instance');
     const src = SM.streamSourceOf(source);
     if (source != null && !src) return { take: false, code: 'bad_source', why: 'the stream names a display or a window by its id' };
@@ -245,7 +249,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     const relayLeg = s.relay && s.relay.leg ? { port: s.relay.port, key: s.relay.leg.key.toString('base64'), hosts: ips().filter((ip) => /^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip))).slice(0, L.legTargets) } : null;
     let r;
     const sourceId = v.sourceId != null ? v.sourceId : src ? src.id : null; // the verdict's own (a fake source's file), else the page's choice
-    const offer = () => v.dm.streamOffer({ sourceKind: v.source, sourceId, maxKbps, relay, ...(src && src.share ? { share: src.share } : {}), ...(relayLeg ? { relayLeg } : {}), ...(v.source === 'window' && fp16 ? { fp16: true } : {}), ...(v.source === 'screen' && hdr === true ? { hdr: true } : {}), ...(mic === true ? { mic: true } : {}) }, { onPush: (m) => onPush(s, m) }); // fp16: a Windows window's FP16 road (lane stream-p2w-build); hdr: lane stream-hdr-passthrough
+    const offer = () => v.dm.streamOffer({ sourceKind: v.source, sourceId, maxKbps, relay, ...(src && src.share ? { share: src.share } : {}), ...(relayLeg ? { relayLeg } : {}), ...(v.source === 'window' && fp16 ? { fp16: true } : {}), ...(v.source === 'screen' && hdr === true ? { hdr: true } : {}), ...(mic === true ? { mic: true } : {}), ...(audio === true ? { audio: true } : {}) }, { onPush: (m) => onPush(s, m) }); // fp16: a Windows window's FP16 road (lane stream-p2w-build); hdr: lane stream-hdr-passthrough
     try {
       r = await offer();
       if (r && !r.ok && r.code === 'no_helper' && r.helper) { // a Mac without its screen helper: this hub's prebuilt, then once more
@@ -266,7 +270,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     const sdp = withRelay(direct === false ? stripHosts(r.offer.sdp) : r.offer.sdp, s.relayLines);
     try { handover?.started?.(key, hostId, after != null ? String(after) : null); } catch (e) { log.warn?.(`[stream] the hand-over did not hear ${key} start (${e && e.message})`); }
     log.log?.(`[stream] ${hostId}: session ${s.sid} offered (${v.source}${s.relay ? `, relay udp ${s.relay.port}${s.relay.leg ? ' + the daemon\'s udp leg asked' : ''}` : ''})`);
-    return { take: true, key, sid: s.sid, offer: { type: 'offer', sdp }, source: s.source, codec: s.codec, seq: s.seq, platform: v.platform, mic: r.mic === true };
+    return { take: true, key, sid: s.sid, offer: { type: 'offer', sdp }, source: s.source, codec: s.codec, seq: s.seq, platform: v.platform, mic: r.mic === true, audio: r.audio === true };
   }
   const sessionOf = (key) => { const s = sessions.get(String(key || '')); if (!s) throw named('not_found', 'that stream ended'); return s; };
   async function answer(key, sdp) {
@@ -289,6 +293,14 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     const r = await s.dm.streamOffer({ sid: s.sid, iceRestart: true }, { onPush: (m) => onPush(s, m) });
     if (!r || !r.ok) throw named((r && r.code) || 'restart_failed', (r && r.error) || 'the machine did not restart the stream');
     return { offer: { type: 'offer', sdp: withRelay(s.direct === false ? stripHosts(r.offer.sdp) : r.offer.sdp, s.relayLines) }, seq: s.seq };
+  }
+  /** lane speaker-passthrough-v1: the strip's 「声音」 → the agent's `stream-audio` (its capability is the client's gate). */
+  async function sound(key, on) {
+    const s = sessionOf(key);
+    if (!s.sid) throw named('not_found', 'that stream has not started');
+    const r = await s.dm.streamAudio(s.sid, { on: on === true });
+    log.log?.(`[stream] ${s.hostId}: session ${s.sid} sound ${on === true ? 'on' : 'off'}${r && !r.ok ? ` — refused ${r.code}` : ''}`);
+    return r;
   }
   async function poll(key, n = 0, seq = -1, waitMs = pollMaxMs) {
     const s = sessions.get(String(key || ''));
@@ -340,7 +352,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
   const sweep = setInterval(() => { for (const s of [...sessions.values()]) if (now() - s.lastPoll > idleMs) stop(s.key, 'idle').catch(() => { }); }, sweepMs);
   sweep.unref?.();
   function shutdown() { clearInterval(sweep); for (const s of [...sessions.values()]) stop(s.key, 'shutdown').catch(() => { }); }
-  return { start, answer, candidate, restart, poll, pollGone, notePath, stop, stopWindow, facts, device, nudge, shutdown };
+  return { start, answer, candidate, restart, sound, poll, pollGone, notePath, stop, stopWindow, facts, device, nudge, shutdown };
 }
 
 module.exports = { create, hubIps, stripHosts, withRelay, pushMacHelper, HELPERS_DIR };

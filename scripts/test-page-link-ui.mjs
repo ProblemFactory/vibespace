@@ -28,6 +28,15 @@
 //      Open the nearest folder opens the explorer at the first existing
 //      folder; the phone width keeps the words and puts the actions under them
 //      (VS_PNG_DIR=<dir> writes desk.png / phone.png)
+//   ⑦ lane agy-links-file-url (the owner 2026-10-21, an Antigravity conversation:
+//      «文件链接怎么都点不了»): Antigravity's `[SKILL.md](file:///…)` links through
+//      the REAL sanitizer are path spans (decoded, no file: href in the DOM); a
+//      REAL click copies the decoded path, a REAL Cmd+click asks the file probe
+//      and opens it (a :12 at its line); a CJK-first relative path in a code span
+//      opens against the session's cwd; a markup / javascript: link never becomes
+//      one; the conversation:// link pinned as today (lane agy-subagent-cards);
+//      CONTROL the base (the two steps off on the live renderer): the anchor has
+//      no href and a click does nothing — what the owner saw
 // Requires google-chrome (SKIP without). Run: node scripts/test-page-link-ui.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -288,6 +297,72 @@ try {
   check('the phone (390 px): the toast fits, the words keep their width with the ✕ beside them, the actions sit under them', t7.r[0] >= 0 && t7.r[1] <= t7.vw && t7.bw >= 250 && t7.actsIn && t7.below && t7.xBeside, t7);
   await sleep(400); // past the toast's fade-in
   if (process.env.VS_PNG_DIR) fs.writeFileSync(path.join(process.env.VS_PNG_DIR, 'phone.png'), Buffer.from((await cdp('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+
+  console.log('⑦ Antigravity\'s file: links are paths (lane agy-links-file-url, the owner 2026-10-21: «文件链接怎么都点不了»)');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(800);
+  const AGY_DIR = path.join(CWD, '标书研究');
+  fs.mkdirSync(AGY_DIR, { recursive: true });
+  const SKILL = path.join(AGY_DIR, 'SKILL.md'), PLAN = path.join(AGY_DIR, '方案.md'), AJS = path.join(CWD, 'a.js');
+  for (const f of [SKILL, PLAN]) fs.writeFileSync(f, '# x\n');
+  fs.writeFileSync(AJS, Array.from({ length: 20 }, (_, i) => `// line ${i + 1}`).join('\n') + '\n');
+  const UUID = '49120000-0000-4000-8000-0000000000b1';
+  const enc = (p) => p.split('/').map(encodeURIComponent).join('/');
+  const XSS_PATH = '/tmp/a"><img src=x onerror=__xss=1>.md';
+  // as Antigravity writes them (raw UTF-8), percent-encoded, a host part + :12, its subagent link, a CJK-first relative path, two hostile links
+  const TEXT7 = `已完成 Skill（含[SKILL.md](file://${SKILL})、[方案](file://${enc(PLAN)})、[a.js](file://localhost${AJS}:12)）；子任务 [\`${UUID}\`](conversation://${UUID})；方案见 \`标书研究/方案.md\`。坏的：[x](file://${enc(XSS_PATH)}) [y](javascript:__xss=1)`;
+  const render7 = (cls, base) => evalJs(`(() => { document.getElementById('global-toasts')?.remove(); const v = ${VIEW}; const r = v._renderers;
+    if (${base}) { r._fileHrefs = (h) => h; r._pathAnchor = (a) => a; }
+    const div = document.createElement('div'); div.className = 'chat-msg chat-msg-assistant ${cls}'; div.innerHTML = r.renderMarkdown(${JSON.stringify(TEXT7)});
+    delete r._fileHrefs; delete r._pathAnchor; v._messageList.appendChild(div); return true; })()`);
+  await render7('vs-agy', false);
+  // the open road, recorded (not drawn — a viewer window would cover the next link): the file probe + app.openFile
+  await evalJs(`(() => { window.__of = []; app.openFile = (p, n, o) => { window.__of.push([p, n, o && o.line]); }; window.__copied.length = 0; window.__probes.length = 0; return true; })()`);
+  const d7 = await evalJs(`(() => { const l = (${VIEW})._messageList, box = l.querySelector('.vs-agy');
+    return { ps: [...box.querySelectorAll('.chat-link-path:not(.chat-link-rel)')].map((e) => [e.dataset.path, e.textContent, e.title, e.children.length]),
+      rel: [...box.querySelectorAll('.chat-link-rel')].map((e) => [e.dataset.rel, e.textContent]), anchors: [...box.querySelectorAll('a')].map((a) => a.outerHTML), subLinks: [...box.querySelectorAll('.chat-sub-link')].map((e) => [e.tagName, e.dataset.sub, e.classList.contains('chat-sub-unknown'), (e.querySelector('code') || {}).textContent, !!e.querySelector('.chat-sub-chip')]),
+      fileHrefs: l.querySelectorAll('[href^="file:" i]').length, js: l.querySelectorAll('[href^="javascript:" i]').length, imgs: box.querySelectorAll('img').length, xss: typeof window.__xss }; })()`);
+  const T7 = 'Click to copy, Ctrl+Click to open';
+  check('through the REAL sanitizer each file: link is ONE path span: the decoded path, the link\'s text, «Click to copy, Ctrl+Click to open» (raw UTF-8, percent-encoded, file://localhost/…:12)',
+    JSON.stringify(d7.ps.slice(0, 3)) === JSON.stringify([[SKILL, 'SKILL.md', T7, 0], [PLAN, '方案', T7, 0], [AJS + ':12', 'a.js', T7, 0]]), d7.ps);
+  check('…no file: href anywhere in the chat\'s DOM', d7.fileHrefs === 0, d7);
+  check('…the CJK-first relative path in a code span is a .chat-link-rel', JSON.stringify(d7.rel) === JSON.stringify([['标书研究/方案.md', '标书研究/方案.md']]), d7.rel);
+  check('…a link whose decoded path carries markup is a path span holding it as TEXT (no <img>, nothing ran); a javascript: link keeps no href',
+    JSON.stringify(d7.ps[3]) === JSON.stringify([XSS_PATH, 'x', T7, 0]) && d7.imgs === 0 && d7.xss === 'undefined' && d7.js === 0 && d7.anchors.includes('<a>y</a>'), d7);
+  check(`PIN (lane agy-subagent-cards owns conversation://): [x](conversation://id) is a .chat-sub-link SPAN (data-sub, <code> inner), not an <a>; this id names no card in this page ⇒ chat-sub-unknown + the «unknown subagent» chip`, d7.subLinks.length === 1 && d7.subLinks[0][0] === 'SPAN' && d7.subLinks[0][1] === UUID && d7.subLinks[0][2] === true && d7.subLinks[0][3] === UUID && d7.subLinks[0][4] === true && !d7.anchors.some((a) => a.includes(UUID)), { subLinks: d7.subLinks, anchors: d7.anchors });
+  const SKILL_LINK = `(${VIEW})._messageList.querySelector('.vs-agy .chat-link-path[data-path=' + JSON.stringify(${JSON.stringify(SKILL)}) + ']')`;
+  const a7 = await aim(SKILL_LINK);
+  check('the element under the pointer is the SKILL.md path span', a7?.own === true, a7);
+  await click(a7.x, a7.y);
+  await waitFor('window.__copied.length > 0', 3000);
+  const c7 = await evalJs('window.__copied.slice()');
+  check('a REAL click copies the DECODED path (as a bare path\'s click does)', c7.length === 1 && c7[0] === SKILL, c7);
+  await click(a7.x, a7.y, 4);
+  await waitFor('window.__of.length > 0', 5000);
+  const o7 = await evalJs('({ of: window.__of.slice(), probes: window.__probes.slice() })');
+  check('a REAL Cmd+click asks the file probe for the decoded path and opens it in the viewer', o7.probes.some((u) => u.includes('path=' + encodeURIComponent(SKILL))) && JSON.stringify(o7.of) === JSON.stringify([[SKILL, 'SKILL.md', null]]), o7);
+  await evalJs('window.__of.length = 0; true');
+  const a7b = await aim(`(${VIEW})._messageList.querySelector('.vs-agy .chat-link-path[data-path$="a.js:12"]')`);
+  await click(a7b.x, a7b.y, 4);
+  await waitFor('window.__of.length > 0', 5000);
+  const o7b = await evalJs('window.__of.slice()');
+  check('…file://localhost/…/a.js:12 opens a.js at line 12', JSON.stringify(o7b) === JSON.stringify([[AJS, 'a.js', 12]]), o7b);
+  await evalJs('window.__of.length = 0; true');
+  const a7c = await aim(`(${VIEW})._messageList.querySelector('.vs-agy .chat-link-rel')`);
+  await click(a7c.x, a7c.y, 4);
+  await waitFor('window.__of.length > 0', 5000);
+  const o7c = await evalJs('window.__of.slice()');
+  check('…a REAL Cmd+click on 标书研究/方案.md opens it against the session\'s cwd', JSON.stringify(o7c) === JSON.stringify([[PLAN, '方案.md', null]]), o7c);
+  await render7('vs-agy-base', true);
+  await evalJs('window.__of.length = 0; window.__copied.length = 0; window.__probes.length = 0; true');
+  const b7 = await evalJs(`(() => { const box = (${VIEW})._messageList.querySelector('.vs-agy-base'); return { anchors: [...box.querySelectorAll('a')].map((a) => a.outerHTML), paths: box.querySelectorAll('.chat-link-path:not(.chat-link-rel)').length }; })()`);
+  check('CONTROL (the base: the two steps off on the live renderer): the real sanitizer leaves each file: link a bare <a> with no href, no path span', b7.paths === 0 && ['<a>SKILL.md</a>', '<a>方案</a>', '<a>a.js</a>'].every((x) => b7.anchors.includes(x)), b7);
+  const a7d = await aim(`[...(${VIEW})._messageList.querySelectorAll('.vs-agy-base a')].find((a) => a.textContent === 'SKILL.md')`);
+  await click(a7d.x, a7d.y);
+  await click(a7d.x, a7d.y, 4);
+  await sleep(1200);
+  const n7 = await evalJs('({ copied: window.__copied.length, probes: window.__probes.length, of: window.__of.length })');
+  check('…a REAL click and a REAL Cmd+click on it do nothing — nothing copied, nothing asked, nothing opened («点不了»)', n7.copied === 0 && n7.probes === 0 && n7.of === 0, n7);
   check('no page errors', pageErrors.length === 0, pageErrors);
 } catch (e) {
   failed++; console.error('  ✗ the leg threw: ' + (e.stack || e.message));

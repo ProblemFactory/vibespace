@@ -26,6 +26,12 @@
 //      model keeps no second read rule (chromeToApply / TAKEN_WHOLE folded into desktop-record.js applyForViewport); asked
 //      with writerClass(msg), {phone, desktop} × {phone-written, stamped in the record, desktop-written, unstamped, a
 //      re-read} — a phone applies no record's sidebar / grid; a desktop a desktop-class record's, never a live phone one's
+//   ⑩ A RECORD NEVER GOES BACKWARDS (lane layout-stale-record-sync, the owner 2026-10-22): recordStamp (the layout-sync's
+//      server stamp, else its record's; 0 = none), behindStamp (older than the newest applied for its desktop ⇒ never applied;
+//      equal, newer, unstamped, another desktop ⇒ applied), noteStamp (the max per desktop, never lowered); the wake's scenario
+//      (a relayed record applied, the re-read's record, a broadcast from before the sleep drained after it). Wiring in ⑥: the
+//      apply asks behindStamp first and notes the stamp, the ack notes the page's own write's stamp, every send names `base`
+//      (desktop-manager stampOf). Controls in ⑦: the stamp blind, the stamp lowered.
 //   ⑨ THE READ CENSUS (static, acorn — comments and strings never count; THE LAYER LAW, design q-039 P0): every read of a
 //      record's arrangement / chrome / preference field in src/lib/layout.js comes off a subset applyForViewport handed
 //      the page (a binding of its answer, an alias of one, arrangementFor of one, or a RECEIVER's parameter every caller
@@ -170,6 +176,20 @@ function legs(Mod, { quiet = false } = {}) {
     leg(!bad.some((b) => b.startsWith('desktop') && b.includes('phone-written')), '⑧ a DESKTOP applies a phone-written live record\'s sidebar / grid: none (membership only — by class)', J(bad));
     leg(!bad.some((b) => b.startsWith('desktop') && !b.includes('phone-written')), '⑧ a DESKTOP applies a desktop-written, an unstamped and a re-read record\'s sidebar / grid (a re-read is the record on disk taken whole)', J(bad));
   }
+  // ⑩ A RECORD NEVER GOES BACKWARDS (lane layout-stale-record-sync)
+  {
+    const { recordStamp, behindStamp, noteStamp } = Mod;
+    leg(recordStamp({ updatedAt: 7, state: { updatedAt: 3 } }) === 7 && recordStamp({ resync: true, state: { updatedAt: 3 } }) === 3 && recordStamp({ state: {} }) === 0 && recordStamp(null) === 0 && recordStamp({ updatedAt: 'x' }) === 0, '⑩ recordStamp: the layout-sync\'s server stamp, else its record\'s (a re-read); 0 when it names none (an older server) or garbage');
+    const st = new Map([['desk-a', 5000]]);
+    const rows = [[3000, 'desk-a', true], [5000, 'desk-a', false], [6000, 'desk-a', false], [0, 'desk-a', false], [1000, 'desk-b', false]];
+    leg(rows.every(([t, d, want]) => behindStamp(st, { desktopId: d, ...(t ? { updatedAt: t } : {}) }) === want) && behindStamp(null, { updatedAt: 1 }) === false, '⑩ behindStamp: a record OLDER than the newest applied for its desktop is behind; equal, newer, unstamped and another desktop\'s are not', J(rows.map(([t, d]) => behindStamp(st, { desktopId: d, updatedAt: t }))));
+    const n = new Map(); noteStamp(n, 'desk-a', 5000); noteStamp(n, 'desk-a', 3000); noteStamp(n, 'desk-a', 'x'); noteStamp(n, null, 9); noteStamp(null, 'desk-a', 1);
+    leg(n.get('desk-a') === 5000 && n.get('') === 9 && n.size === 2, '⑩ noteStamp keeps the newest per desktop — never lowered; garbage ignored; \'\' is the legacy record', J([...n]));
+    // the wake: a relayed record applied (5000), the re-read's (5000, the record on disk), then a broadcast from before the sleep
+    const applied = new Map(), seq = [{ desktopId: 'desk-a', seq: 9, updatedAt: 5000 }, { desktopId: 'desk-a', resync: true, state: { updatedAt: 5000 } }, { desktopId: 'desk-a', seq: 4, updatedAt: 3000 }];
+    const landed = seq.map((m) => { if (behindStamp(applied, m)) return false; noteStamp(applied, m.desktopId, recordStamp(m)); return true; });
+    leg(J(landed) === J([true, true, false]), '⑩ THE WAKE: the relayed record and the re-read land; a broadcast from before the sleep, drained after them, is older — never applied', J(landed));
+  }
   return failed;
 }
 
@@ -182,7 +202,7 @@ console.log('— ⑥ the wiring (src/lib/layout.js, src/lib/desktop-manager.js)'
 {
   const L = fs.readFileSync(path.join(REPO, 'src/lib/layout.js'), 'utf8');
   const D = fs.readFileSync(path.join(REPO, 'src/lib/desktop-manager.js'), 'utf8');
-  ok(/import \{ writerClass, deferKey, deferKeysOf, releaseNext, noteApplied \} from '\.\/layout-model\.js';/.test(L) && /import \{ applyForViewport, arrangementFor \} from '\.\/desktop-record\.js';/.test(L) && /import \{ deferKeysOf \} from '\.\/layout-model\.js';/.test(D), '⑥ layout.js and desktop-manager.js import the model (the ONE rule, no copy)');
+  ok(/import \{ writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp \} from '\.\/layout-model\.js';/.test(L) && /import \{ applyForViewport, arrangementFor \} from '\.\/desktop-record\.js';/.test(L) && /import \{ deferKeysOf \} from '\.\/layout-model\.js';/.test(D), '⑥ layout.js and desktop-manager.js import the model (the ONE rule, no copy)');
   const libFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js'));
   const writers = libFiles.flatMap((f) => (fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8').match(/_pendingRemote\??\.set\(/g) || []).map(() => f));
   ok(J(writers) === J(['layout.js']) && L.includes('    this._pendingRemote.set(deferKey(msg), msg);\n'), '⑥ ONE writer of the deferred slot in src/lib (layout.js _deferRemote), keyed by deferKey — desktop AND writer class', J(writers));
@@ -194,6 +214,12 @@ console.log('— ⑥ the wiring (src/lib/layout.js, src/lib/desktop-manager.js)'
   ok(/const phoneKey = deferKeysOf\(key\)\[1\], phonePend = this\._pendingRemote\.get\(phoneKey\);\n\s+if \(phonePend && \(phonePend\.receivedAt \|\| 0\) < startedAt\) this\._pendingRemote\.delete\(phoneKey\);/.test(L), '⑥ the re-read drops a phone record deferred BEFORE it was asked (the read holds it), keeps one received while it was in flight');
   ok(D.includes('for (const k of deferKeysOf(id)) this.app.layoutManager?._pendingRemote?.delete(k);'), '⑥ a deleted desktop forgets BOTH its deferred slots (never a ghost phone record the drain fills)');
   ok(/if \(msg\.seq <= this\._lastRemoteSeq\) return;/.test(L) && /const EPS = 0\.002;/.test(L), '⑥ guards 1 and 4 untouched (the seq drop of a stale echo; the 0.002 apply epsilon)');
+  const hrs = L.indexOf('  _handleRemoteSync(msg) {'), hrsBody = L.slice(hrs, L.indexOf('\n  }\n', hrs));
+  ok(hrs > 0 && /if \(behindStamp\(this\._appliedStamps, msg\)\) \{[^\n]*return; \}\n\s+noteStamp\(this\._appliedStamps, msg\.desktopId, recordStamp\(msg\)\); dm\?\.noteStamp\?\.\(msg\.desktopId, recordStamp\(msg\)\);/.test(hrsBody) && hrsBody.indexOf('behindStamp(') < hrsBody.indexOf('cacheRemoteState(') && hrsBody.indexOf('behindStamp(') < hrsBody.indexOf('_applyRemoteState('), '⑩ the apply (live, drained, re-read, cached) asks behindStamp BEFORE it caches or applies a record, then notes the stamp — the base of the next write (lane layout-stale-record-sync)');
+  ok(/app\.ws\.onGlobal\(\(msg\) => \{ if \(msg\.type === 'layout-sync-ack' && msg\.updatedAt\) this\.app\.desktopManager\?\.noteStamp\?\.\(msg\.desktopId, msg\.updatedAt\); \}\);/.test(L) && !/this\._appliedStamps\.clear\(\)/.test(L), '⑩ the ack notes the page\'s own write\'s stamp; the applied stamps survive a reconnect (the seq restarts, the stamp does not)');
+  const sends = [...L.matchAll(/this\.app\.ws\.send\(\{ type: 'layout-sync',[^\n]*\}\);/g), ...D.matchAll(/this\.app\.ws\.send\(\{ type: 'layout-sync',[^\n]*\}\);/g)].map((m) => m[0]);
+  ok(sends.length === 3 && sends.every((x) => /, base: [^,}]*stampOf/.test(x)), '⑩ every layout-sync a page sends names its `base` (desktop-manager stampOf)', J(sends));
+  ok(/import \{ noteStamp \} from '\.\/layout-model\.js';/.test(D) && /stampOf\(desktopId\) \{ return this\._stamps\.get\(desktopId \|\| ''\) \|\| undefined; \}/.test(D) && /this\.noteStamp\(id, dState\?\.autoSave\?\.updatedAt\);/.test(D) && /this\.noteStamp\(d, rec\.updatedAt\);/.test(D), '⑩ desktop-manager: the base is the boot read\'s stamp, a relayed record\'s, the ack\'s and a refusal\'s record kept (the stale refusal is adopted)');
 }
 
 // ⑨ THE READ CENSUS — THE LAYER LAW's read half over src/lib/layout.js (acorn: comments / strings never count)
@@ -351,6 +377,8 @@ const MUTANTS = [
   { tag: 'single-slot', find: "const deferKey = (msg) => (writerClass(msg) === 'phone' ? PHONE_SLOT : '') + desktopOf(msg);", repl: 'const deferKey = (msg) => desktopOf(msg);', expect: /④ F5: desktop record deferred/ },
   { tag: 'drain-in-map-order', find: '    if (!next || seq < seqOf(next[1])) next = e;', repl: '    if (!next) next = e;', expect: /lowest seq goes first|④ the mirror|DEFERRAL IS INVISIBLE/ },
   { tag: 'no-drop', find: '    if (seq > 0 && applied && seq <= (Number(applied.get(desktopOf(e[1]))) || 0)) { drop.push(e[0]); continue; }\n', repl: '\n', expect: /never applied backwards/ },
+  { tag: 'stamp-blind', find: '  return !!(t && stamps && t < (Number(stamps.get(desktopOf(msg))) || 0));', repl: '  return false;', expect: /⑩ behindStamp|⑩ THE WAKE/ },
+  { tag: 'stamp-lowered', find: '  if (t > (Number(stamps.get(d)) || 0)) stamps.set(d, t);', repl: '  stamps.set(d, t);', expect: /never lowered/ },
   { tag: 'resync-as-phone', find: "  if (!msg || msg.resync) return 'desktop';\n", repl: "  if (!msg) return 'desktop';\n", expect: /re-read \(resync\) of a phone-written record/ },
 ];
 for (const m of MUTANTS) {

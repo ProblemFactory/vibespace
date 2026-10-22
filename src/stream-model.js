@@ -131,6 +131,16 @@ const STREAM_LIMITS = Object.freeze({
 });
 /** THE PER-MACHINE CAP (lane desktop-display-modes): `displays` = how many the machine has (unknown ⇒ 1) → how many live streams
  *  its daemon serves: one per display (① a window per display, ② all in one window) + 1 (a phone beside them), ≤ sessionsCap. */
+/** THE RATE WITH THE SOUND (lane speaker-passthrough-v1 — the probe's rule: the sound's ~80 kbps comes OFF the picture's target):
+ *  the estimate (werift's transport-cc feedback, read by src/stream-plan.js — it counts the picture's packets only; the sound's
+ *  carry no transport-cc number), capped by the page's maxKbps, less `audioKbps` while the sound is on — the sound never pushes
+ *  the picture under STREAM_LIMITS.maxKbpsMin, and never RAISES it (an estimate already under the floor is told as it is —
+ *  measured in test-desktop-webrtc-chrome ⑳: 222 kbps on loopback). → the kbps the source is told (its own rule holds its floor). */
+function videoKbpsOf({ kbps, maxKbps = STREAM_LIMITS.maxKbpsDefault, audio = false, audioKbps = 80 } = {}) {
+  const cap = Number.isFinite(Number(maxKbps)) && Number(maxKbps) > 0 ? Number(maxKbps) : STREAM_LIMITS.maxKbpsDefault;
+  const base = kbps == null || !Number.isFinite(Number(kbps)) ? cap : Math.min(cap, Math.max(0, Number(kbps))); // no estimate yet ⇒ the cap
+  return audio ? Math.min(base, Math.max(STREAM_LIMITS.maxKbpsMin, Math.round(base - Math.max(0, Number(audioKbps) || 0)))) : base; // the sound off: the estimate as before
+}
 function streamCapOf(displays) {
   const n = Number.isInteger(displays) && displays > 0 ? displays : 1;
   return Math.min(STREAM_LIMITS.sessionsCap, n + 1);
@@ -345,7 +355,17 @@ function statsOf(prev, reports, now) {
     width: v && Number.isFinite(v.frameWidth) ? v.frameWidth : null,
     height: v && Number.isFinite(v.frameHeight) ? v.frameHeight : null,
     path: remote ? (remote.candidateType === 'relay' ? 'relay' : 'direct') : null,
+    // lane speaker-passthrough-v1: the machine's sound as this browser hears it — its packets, its level (0–1) and its rate
+    audio: audioOf(list.find((r) => r.type === 'inbound-rtp' && (r.kind === 'audio' || r.mediaType === 'audio')) || null, prev && prev.audio, dt),
   };
+}
+/** The sound's inbound-rtp → { packets, bytes, kbps, level, energy, concealed } | null (no sound track). */
+function audioOf(a, prev, dt) {
+  if (!a) return null;
+  const n = (x) => (Number.isFinite(x) ? x : null);
+  const bytes = n(a.bytesReceived);
+  return { packets: n(a.packetsReceived), bytes, kbps: dt && bytes != null && prev && prev.bytes != null ? Math.round(((bytes - prev.bytes) * 8) / dt / 1000) : null,
+    level: n(a.audioLevel), energy: n(a.totalAudioEnergy), concealed: n(a.concealedSamples), jitterMs: Number.isFinite(a.jitter) ? Math.round(a.jitter * 1000) : null };
 }
 
 // ── THE HUB'S UDP RELAY over the device link (NAT: direct first, else the hub forwards) ─────────────────────────────────
@@ -535,7 +555,7 @@ function firewallRuleCommand(program) {
 }
 
 module.exports = {
-  STREAM_CODEC, STREAM_CODEC_AV1, streamCodecsOf, isMdnsCandidate, liteSessionSdp, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, streamCapOf, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict, NEVER_SILENT, endingVerdict,
+  STREAM_CODEC, STREAM_CODEC_AV1, streamCodecsOf, isMdnsCandidate, liteSessionSdp, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, streamCapOf, videoKbpsOf, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict, NEVER_SILENT, endingVerdict,
   videoToSource, INPUT_KINDS, inputEventOf, wheelUnitsOf, statsOf, relayFrame, relayUnframe, relayCandidates,
   LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, legElect, stallStep, streamNumbersOf, directInboundOf, firewallRuleCommand,
 };

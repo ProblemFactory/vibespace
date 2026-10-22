@@ -1551,7 +1551,13 @@ const macWindowLook = { facts: () => streamScreenOf().look(), displays: () => st
 let micRoad = null;
 const micOf = () => micRoad || (micRoad = require('./../desktop-mic.js').createMic({ platform: process.platform, spawn: require('child_process').spawn, execFile: require('child_process').execFile, env: spawnEnv(), lookupEnv: process.env, fs, home: os.homedir(), log, helperPath: process.env.VIBESPACE_MIC_HELPER || null,
   ffmpeg: async () => { if (process.platform !== 'win32') return null; const f = await streamScreenOf().facts(); return (f && f.ffmpeg && f.ffmpeg.path) || null; } }));
-const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log, screen: (msg, o) => streamScreenOf().source(msg, o), window: (msg, o) => windowsOf().source(msg, o), legHosts: dialHostOf, program: process.platform === 'win32' ? process.execPath : null, mic: micOf }));
+// lane speaker-passthrough-v1 (B-aec9): THE MACHINE'S SOUND to the viewer — Windows' road (src/desktop-sound.js, SHARED: the
+// microphone helper's `loopback` verb → the stream's ffmpeg → Opus RTP → the session's track); a Mac's rides its screen source's
+// own SCStream (src/agentd/stream-mac.js source.audio). Made at first use; VIBESPACE_MIC_HELPER's fake stands in for the helper,
+// VIBESPACE_SOUND_FFMPEG for the encoder (the suites' — a box without ffmpeg: scripts/fixtures/stream/sound-fakes.mjs)
+let soundRoad = null;
+const soundOf = () => soundRoad || (soundRoad = require('./../desktop-sound.js').createSound({ platform: process.platform, spawn: require('child_process').spawn, env: spawnEnv(), log, helper: () => micOf().helper(), ffmpegPath: () => (process.env.VIBESPACE_SOUND_FFMPEG ? Promise.resolve(process.env.VIBESPACE_SOUND_FFMPEG) : micOf().ffmpegPath()), fake: !!process.env.VIBESPACE_MIC_HELPER }));
+const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log, screen: (msg, o) => streamScreenOf().source(msg, o), window: (msg, o) => windowsOf().source(msg, o), legHosts: dialHostOf, program: process.platform === 'win32' ? process.execPath : null, mic: micOf, sound: soundOf }));
 function unpinWindow(rec) {
   rec.pinned = false;
   const a = rec.last;
@@ -1823,7 +1829,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2432,6 +2438,9 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       if (msg.op === 'stream-answer') { streamHostOf().answer(msg).then((r) => mux.control({ op: 'stream-answer-result', id: msg.id, result: r }), (e) => mux.control({ op: 'stream-answer-result', id: msg.id, error: String((e && e.message) || e) })); return; }
       if (msg.op === 'stream-stop') { mux.control({ op: 'stream-stop-result', id: msg.id, stopped: streamHost ? streamHost.stop(String(msg.sid || ''), /^[a-z_]{1,40}$/.test(String(msg.why || '')) ? msg.why : 'stopped') : false }); return; } // why: the end's name (lane stream-window-fixes)
       if (msg.op === 'stream-stats') { mux.control({ op: 'stream-stats-result', id: msg.id, result: streamHostOf().stats(msg, mux) }); return; }
+      // lane speaker-passthrough-v1 (THREE-TOUCH: this handler, `stream-audio` in the hello-ack, the client's gated streamAudio): the
+      // strip's 「声音」 — THE capture of this machine's sound for one stream session, on or off (src/agentd/stream-host.js audio)
+      if (msg.op === 'stream-audio') { streamHostOf().audio(msg).then((r) => mux.control({ op: 'stream-audio-result', id: msg.id, result: r }), (e) => mux.control({ op: 'stream-audio-result', id: msg.id, error: String((e && e.message) || e) })); return; }
       // lane stream-p1b-screen (THREE-TOUCH: this handler, `stream-facts` / `stream-screen` in the hello-ack, the client's gated
       // streamFacts): THIS machine's screen facts — each display's HDR state + SDR white level + the DXGI output, the ffmpeg
       // found and what it can do, the primary display's plan — one bounded look (memo 30 s; `force` re-reads)

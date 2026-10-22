@@ -1,0 +1,22 @@
+{
+  "id": "c0000000-0000-4000-8000-0000000000c2",
+  "recipient": "8af00000-0000-4000-8000-0000000000b2",
+  "sender": "9c0f0000-0000-4000-8000-0000000000a1",
+  "priority": "MESSAGE_PRIORITY_HIGH",
+  "timestamp": "2026-10-21T14:32:32.119140491Z",
+  "renderDetails": {
+    "messageTitle": "Message from Parent Agent"
+  },
+  "content": "Check the sample for broken links.",
+  "sourceMetadata": {
+    "tool": {
+      "conversationId": "9c0f0000-0000-4000-8000-0000000000a1",
+      "stepIndex": 7,
+      "toolCall": {
+        "id": "call_7000001",
+        "name": "invoke_subagent",
+        "argumentsJson": "{\"Model\":\"inherit\",\"Prompt\":\"Check the sample for broken links.\",\"Role\":\"Second reviewer\",\"TypeName\":\"self\"}"
+      }
+    }
+  }
+}

@@ -365,6 +365,7 @@ const BACKEND_CAPS = {
     // PLACEHOLDER — src/harnesses/index.js writes the DERIVED row from the
     // descriptor at registration (see deriveAutoResume above).
     terminalOnly: false, oauthUsage: true, globalUsageKey: '__global__', // lane dc-harness-tail: the rows' essay is at capsOf
+    subagents: 'virtual', // lane agy-subagent-cards: a live virtual session per helper (essay at subagentView)
     autoResume: NO_AUTO_RESUME,
   },
   codex: {
@@ -414,6 +415,7 @@ const BACKEND_CAPS = {
     // so re-enabling it without re-measuring fails the build.
     permissionRules: { source: 'config-read', session: true, instance: false, liveVerb: true },
     terminalOnly: false, oauthUsage: false, globalUsageKey: '__global_codex__',
+    subagents: 'threads', // lane agy-subagent-cards: a collab card opens the child's own thread
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
   },
   shell: {
@@ -428,6 +430,7 @@ const BACKEND_CAPS = {
     worktree: NO_WORKTREE,
     permissionRules: { source: null, session: false, instance: false, liveVerb: false }, // no agent ⇒ no rules
     terminalOnly: true, oauthUsage: false, globalUsageKey: null, // no agent: no chat, no window reach, no browser pin, no name prompt
+    subagents: 'none', // lane agy-subagent-cards: no agent, no subagent
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it (shell has neither half)
   },
   // ACP v1 harnesses (S8, design-harness-plugins §2.3): the agent holds its
@@ -470,6 +473,7 @@ const BACKEND_CAPS = {
     // (it answers 'unsupported-by-protocol'; the serve is).
     permissionRules: { source: 'serve-config', session: false, instance: true, liveVerb: false },
     terminalOnly: false, oauthUsage: false, globalUsageKey: null,
+    subagents: 'none', // lane agy-subagent-cards: opencode's ACP stream shows no subagent's own steps — its row says so
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
   },
   // Antigravity CLI (`agy`, lane antigravity-harness): NOT an ACP agent, but its chat wrapper
@@ -491,6 +495,7 @@ const BACKEND_CAPS = {
     worktree: NO_WORKTREE,
     permissionRules: { source: null, session: false, instance: false, liveVerb: false },
     terminalOnly: false, oauthUsage: false, globalUsageKey: null,
+    subagents: 'cards', // lane agy-subagent-cards: the wrapper reads agy's store — a card per sub + its timeline
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
   },
 };
@@ -500,7 +505,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ terminalOnly: false, oauthUsage: false, globalUsageKey: null, pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
+const NO_CAPS = Object.freeze({ terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed
@@ -530,6 +535,17 @@ function capsOf(backend) {
 //                   and the pool-member delete heal read it. Tied to the descriptor's ui.billing.usage === 'accounts'.
 //   globalUsageKey  the usage ledger's key for this harness's MACHINE login (no named account) — the descriptor's
 //                   ui.billing.globalUsageKey (a harness without one books under '__global__').
+// THE SUBAGENT ROW (lane agy-subagent-cards, 2026-10-21 — the owner, in an Antigravity conversation: «子代理细节不在你设计的
+// harness框架里吗？»): what a harness can SHOW of the subagents its agent starts = the descriptor's ui.subagents, one of
+//   'virtual'  a live virtual session per subagent, streamed from its own transcript (claude: the sidechain)
+//   'threads'  a card that opens the subagent's own conversation (codex: its child thread)
+//   'cards'    a card per subagent built from the agent's store (antigravity: the wrapper reads agy's store — role, task,
+//              state, elapsed time, answer) that opens the sub's timeline as the virtual session sub-<id>
+//   'none'     nothing beyond the tool row — and the row SAYS so (opencode; a shell has no agent)
+// Gated on the row, never the name: test-harness-contract re-derives it from every descriptor; a register()ed harness
+// gets it from its ui row ('none' when it declares none).
+const SUBAGENT_VIEWS = Object.freeze(['virtual', 'threads', 'cards', 'none']);
+function subagentView(backend) { const v = capsOf(backend).subagents; return SUBAGENT_VIEWS.includes(v) ? v : 'none'; }
 function globalUsageKeyOf(backend) { return capsOf(backend).globalUsageKey || '__global__'; }
 function oauthUsageAccount(a) { return !!a && a.type === 'subscription' && capsOf(a.backend).oauthUsage === true; }
 
@@ -696,6 +712,6 @@ function worktreeSpawnArgs({ backend, want, resume, fork }) {
   return { args: [wt.flag], pass: true, why: fork ? 'fork' : 'new' };
 }
 
-module.exports = { BACKEND_CAPS, capsOf, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
+module.exports = { BACKEND_CAPS, capsOf, SUBAGENT_VIEWS, subagentView, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
   AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume,
   NO_WORKTREE, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite };

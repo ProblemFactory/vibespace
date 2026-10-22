@@ -261,7 +261,7 @@ function createMic({ platform = process.platform, spawn, execFile, env, lookupEn
     return { onRtp, stop, stats };
   }
 
-  return { facts, setDefault, receiver, helper, stagePlugin };
+  return { facts, setDefault, receiver, helper, stagePlugin, ffmpegPath }; // ffmpegPath + helper: the sound's road shares both (src/desktop-sound.js — lane speaker-passthrough-v1)
 }
 
 module.exports = { createMic, oggPage, oggOpusHead, macFrame };

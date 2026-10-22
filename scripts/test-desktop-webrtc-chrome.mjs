@@ -85,6 +85,15 @@
 //      NEVER SILENT before a picture: an agent that answers no check ⇒ at the connect budget (STREAM_LIMITS.connectMs) the strip
 //      says 串流中断：没能及时连上——正在重新连接… (leg ⑥'s words) — RED CONTROL: the window before this lane still says only
 //      串流 · 连接中… at that moment (it spoke at the 45 s fallback)
+//   ⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1 — backlog B-aec9; the machine's audio is the FAKE loopback of the microphone
+//      helper — scripts/fixtures/stream/mic-fakes.mjs — through the agent's REAL ffmpeg): every stream carries the sound's track in
+//      the picture's MediaStream (one <video>); OFF by default — nothing runs on the machine, the <video> muted; the press = the
+//      <video> unmuted in that click + ONE loopback on the machine ⇒ Chrome receives the Opus and hears the tone (its audio level);
+//      Chrome got RTCP sender reports on BOTH tracks (its lip-sync); THE RATE: the agent tells the picture the estimate less the
+//      sound's 80 kbps; the second press ⇒ muted, the machine's capture ended; ON is remembered per machine (a new window starts
+//      it); a RESTORED window (a layout replay) says 「点一下开声音」 and captures nothing until a press — RED CONTROL: a toggle
+//      that ignores `restored` starts it by itself; the microphone and the sound on together ⇒ ONE sendrecv m-line, both roads
+//      live; a phone: the same strip                                     sound-off.png, sound-on.png, sound-tap.png, phone-sound.png
 import fs from 'node:fs';
 import net from 'node:net';
 import http from 'node:http';
@@ -96,6 +105,7 @@ import { freePort, scratch, endDaemonsOf, ONBOARDED_SOURCE } from './scratch.mjs
 import { writeFakeFfmpeg, factsLine, calibrationFrame } from './fixtures/stream/screen-fakes.mjs';
 import { writeFakeWgc, writeFakeCsc } from './fixtures/stream/window-fakes.mjs';
 import { writeFakeMic, winFacts, toneRatio, writeFakeDecoder, pcmPages, realFfmpeg } from './fixtures/stream/mic-fakes.mjs'; // lane stream-mic-road ⑰: the machine's microphone, a fake sink
+import { writeFakeEncoder, hasOpusFfmpeg } from './fixtures/stream/sound-fakes.mjs'; // lane speaker-passthrough-v1 ⑳: a box without ffmpeg (the Actions runner) encodes with the fake
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -176,9 +186,11 @@ const MIC = writeFakeMic(path.join(root, 'mic')); // ⑰: the agent's microphone
 const PATH0 = process.env.PATH || '', REAL_FF = realFfmpeg(PATH0), DEC = REAL_FF ? null : writeFakeDecoder(path.join(root, 'decoder'));
 if (DEC) process.env.PATH = DEC.dir + path.delimiter + PATH0;
 process.env.HOME = home; process.env.VIBESPACE_AGENTD_ROOT = rootOf(home); process.env.WINDIR = WINDIR; process.env.LOCALAPPDATA = LAD; process.env.VIBESPACE_MIC_HELPER = MIC.exe; // ⑪: the helper's build recipe reads these
+const SOUND_FAKE = !hasOpusFfmpeg() || process.env.VS_SOUND_FAKE_FFMPEG === '1'; // ⑳: no ffmpeg with libopus here ⇒ the sound's encoder is the fake (the committed tone as RTP)
+if (SOUND_FAKE) process.env.VIBESPACE_SOUND_FFMPEG = writeFakeEncoder(path.join(root, 'encoder')).exe;
 const dataDir = path.join(home, 'hub-data'); fs.mkdirSync(dataDir, { recursive: true });
 dm = new DeviceManager({ dataDir, bundlePath: path.join(root, 'bundle', 'vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
-try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; delete process.env.WINDIR; delete process.env.LOCALAPPDATA; delete process.env.VIBESPACE_MIC_HELPER; process.env.PATH = PATH0; }
+try { await dm.connect(); } finally { process.env.HOME = realHome; delete process.env.VIBESPACE_AGENTD_ROOT; delete process.env.WINDIR; delete process.env.LOCALAPPDATA; delete process.env.VIBESPACE_MIC_HELPER; delete process.env.VIBESPACE_SOUND_FFMPEG; process.env.PATH = PATH0; }
 ok(dm.status().info.platform === 'win32' && dm.status().info.capabilities.includes('stream-offer'), 'a real agent, Windows-shaped, says stream-offer');
 
 // ── the machine's VNC server for the fallback: a stub RFB 3.8, VNC-password sign-in, one 1280×720 green frame ─────────
@@ -243,7 +255,7 @@ const wm = { windows: new Map(), revealWindow() {},
 };
 const app = { wm, _hideWelcome() {}, sidebar: { _webuiSessions: [], _tasks: [] } }; // ⑭: the roster the hand-over's picker reads
 window.__app = app;
-window.__open = (m) => { openMachineDesktop(app, m); return true; };
+window.__open = (m, o) => { openMachineDesktop(app, m, o || {}); return true; }; // ⑳: o = { syncId } — a RESTORED window (a layout replay)
 window.__openWin = (m, row) => { openWindowStream(app, m, row); return true; }; // ⑪
 window.__picker = (m) => { openWindowPicker(app, m, {}); return true; };
 window.__closeAll = () => { for (const id of [...wm.windows.keys()]) wm.closeWindow(id); };
@@ -273,6 +285,10 @@ const prePin = { name: 'pre-pin', setup(b) { b.onLoad({ filter: /stream-stats\.j
 const MIC_DISPOSE = "    dispose() { if (disposed) return; run(micStep(st, { type: 'close' })); disposed = true;";
 const micLeak = { name: 'mic-leak', setup(b) { b.onLoad({ filter: /stream-mic-strip\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(MIC_DISPOSE)) throw new Error('the toggle\'s dispose line moved'); return { contents: src.replace(MIC_DISPOSE, '    dispose() { if (disposed) return; disposed = true;'), loader: 'js' }; }); } };
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-micleak.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [micLeak] });
+// ⑳'s RED control (lane speaker-passthrough-v1): the toggle that forgets a window was RESTORED (it would unmute it by itself)
+const SOUND_RESTORED = 'restored: restored && !pressed, activated: !!activated()';
+const soundRestore = { name: 'sound-restore', setup(b) { b.onLoad({ filter: /stream-mic-strip\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(SOUND_RESTORED)) throw new Error('the toggle\'s restored line moved'); return { contents: src.replace(SOUND_RESTORED, 'restored: false, activated: !!activated()'), loader: 'js' }; }); } };
+await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-soundrestore.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [soundRestore] });
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-prepin.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [prePin] });
 // ⑲'s NEVER SILENT RED CONTROL (lane werift-lite-multihomed): the window before the lane — its connect-budget words gone
 const SLOW_SAID = "        if (state === 'restarting' && code === 'timeout' && v === stream) { slowSaid = true; note(t('Stream interrupted: {why} — reconnecting…', { why: streamWords('connect_timeout') })); }\n";
@@ -298,6 +314,8 @@ app.get('/prepin', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '
 app.get('/page-presilent.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-presilent.js'))));
 app.get('/presilent', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-presilent.js')));
 app.get('/micleak', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-micleak.js')));
+app.get('/page-soundrestore.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-soundrestore.js')))); // ⑳'s RED control
+app.get('/soundrestore', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-soundrestore.js')));
 const PORT = await freePort();
 srv = http.createServer(app);
 srv.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head, bridge.upgradeId(new URL(req.url, 'http://x').pathname)));
@@ -1350,6 +1368,106 @@ console.log('⑲ NEVER SILENT before a picture (lane werift-lite-multihomed): IC
   ok(!nb && /连接中/.test(sb.chip || ''), '⑲ RED CONTROL: the window before this lane says only 「串流 · 连接中…」 at that same moment — nothing about why (it spoke at the 45 s fallback)', { nb, sb });
   await a.close(); await b.close();
   fs.rmSync(DEAF_ICE, { force: true });
+}
+console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machine\'s sound beside its picture, in the same <video>');
+{
+  console.log(SOUND_FAKE ? '    (the machine\'s encoder is the FAKE — no ffmpeg with libopus here: it sends the committed −20 dBFS tone)' : '    (the machine\'s encoder is this box\'s ffmpeg)');
+  const STM = require(path.join(REPO, 'src/stream-model.js'));
+  const SND_BTN = `${WIN} .desktop-strip-sound`, TAP = `${WIN} .desktop-strip-sound-tap`;
+  const nodeUntil = async (f, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(60); } return false; };
+  const soundState = (p) => p.ev(`(async () => { const b = document.querySelector('${SND_BTN}'); if (!b) return null; const v = document.querySelector('${WIN} .stream-video'); const t = document.querySelector('${TAP}');
+    const w = [...window.__app.wm.windows.values()].find((x) => x._streamView); const sv = w && w._streamView; const ms = v && v.srcObject; const pc = (window.__pcs || []).slice(-1)[0]; let rob = null, dirs = null;
+    if (pc) { const r = await pc.getStats(); rob = { audio: 0, video: 0 }; r.forEach((x) => { if (x.type === 'remote-outbound-rtp') rob[x.kind] = (rob[x.kind] || 0) + 1; }); const a = (s) => { const m = /m=audio[\\s\\S]*?(?=\\r?\\nm=|$)/.exec(s || ''); return m ? (/a=(sendrecv|sendonly|recvonly|inactive)/.exec(m[0]) || [])[1] || null : null; }; dirs = { offer: a(pc.remoteDescription && pc.remoteDescription.sdp), answer: a(pc.localDescription && pc.localDescription.sdp) }; }
+    return { shown: !b.hidden, pressed: b.getAttribute('aria-pressed'), label: b.textContent, title: b.title, tap: !!t && !t.hidden, tapText: t ? t.textContent : null, muted: v ? v.muted : null, audioTracks: ms ? ms.getAudioTracks().length : 0, videoTracks: ms ? ms.getVideoTracks().length : 0,
+      page: sv && sv.stats() ? sv.stats().audio : null, agent: sv && sv.agent() ? { audio: sv.agent().audio, bwe: sv.agent().bweKbps } : null, rob, dirs, mem: localStorage.getItem('vibespace.streamSound') }; })()`);
+  const pressAt = async (p, sel) => { await p.ev(`document.querySelector('${sel}').scrollIntoView({ inline: 'center', block: 'nearest' }); true`); const at = await p.ev(`(() => { const b = document.querySelector('${sel}').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]; })()`); await p.click(at[0], at[1]); };
+  const runs = () => MIC.loopbacks().length;
+  const p = await page(1280, 800, DESK, { pcs: true });
+  await p.ev(`localStorage.removeItem('vibespace.streamSound'); true`);
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  ok(await playing(p), '⑳ the stream plays');
+  await p.until(`(() => { const b = document.querySelector('${SND_BTN}'); return !!b && !b.hidden; })()`, 8000);
+  const r0 = runs(); await sleep(1500);
+  const s0 = await soundState(p);
+  ok(s0 && s0.shown && s0.pressed === 'false' && s0.label.includes('声音') && !s0.tap && s0.muted === true && s0.audioTracks === 1 && s0.videoTracks === 1 && /不录制、不保存/.test(s0.title) && runs() === r0 && !(s0.page && s0.page.packets), '⑳ the stream carries the sound\'s track IN the picture\'s MediaStream (one <video>: 1 video + 1 audio track); 「声音」 shows OFF, its title says nothing is recorded or stored; the <video> muted; NOTHING runs on the machine (no loopback) and no packet comes', s0);
+  await p.shot('sound-off.png', `${WIN} .desktop-strip`);
+  await pressAt(p, SND_BTN);
+  const on = await p.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); return b.getAttribute('aria-pressed') === 'true' && b.classList.contains('is-on') && v && v.muted === false; })()`, 10000);
+  const lb = MIC.loopbacks()[r0] || {};
+  ok(on && runs() === r0 + 1 && JSON.stringify(lb.argv) === '["loopback"]', '⑳ the press ⇒ the <video> unmuted IN that click + ONE loopback on the machine (its argv the verb alone)', { on, lb });
+  const heard = await p.until(`(async () => { const w = [...window.__app.wm.windows.values()].find((x) => x._streamView); const a = w && w._streamView.stats() && w._streamView.stats().audio; return !!a && a.packets > 60 && a.level > 0.02; })()`, 10000);
+  const s1 = await soundState(p);
+  ok(heard && s1.page.kbps > 20, `⑳ Chrome receives the machine's Opus and HEARS it: ${s1.page && s1.page.packets} packets, audio level ${s1.page && s1.page.level} (the −20 dBFS tone), ${s1.page && s1.page.kbps} kbps`, s1.page);
+  const sr = await p.until(`(async () => { const pc = (window.__pcs || []).slice(-1)[0]; if (!pc) return false; const r = await pc.getStats(); let a = 0, v = 0; r.forEach((x) => { if (x.type === 'remote-outbound-rtp') { if (x.kind === 'audio') a++; else if (x.kind === 'video') v++; } }); return a > 0 && v > 0; })()`, 8000);
+  ok(sr && s1.dirs && s1.dirs.offer === 'sendrecv', '⑳ Chrome holds the agent\'s RTCP sender reports for BOTH tracks (remote-outbound-rtp audio + video) — the lip-sync of one MediaStream rides them', s1.rob);
+  const rate = await p.until(`(() => { const w = [...window.__app.wm.windows.values()].find((x) => x._streamView); const a = w && w._streamView.agent(); return !!a && a.bweKbps != null && a.audio && a.audio.videoKbps != null; })()`, 12000);
+  const ag = (await soundState(p)).agent;
+  const want = ag && ag.bwe != null ? STM.videoKbpsOf({ kbps: ag.bwe, maxKbps: STM.STREAM_LIMITS.maxKbpsDefault, audio: true, audioKbps: 80 }) : null;
+  ok(rate && ag.audio.videoKbps === want && ag.audio.videoKbps <= ag.bwe && (ag.bwe - 80 < STM.STREAM_LIMITS.maxKbpsMin || ag.audio.videoKbps === Math.min(STM.STREAM_LIMITS.maxKbpsDefault, ag.bwe) - 80), `⑳ THE RATE: the agent tells the picture its estimate less the sound's 80 kbps — never more than the estimate, never under the floor because of the sound (estimate ${ag && ag.bwe} ⇒ ${ag && ag.audio && ag.audio.videoKbps})`, ag);
+  ok(s1.mem === '{"win-a":true}' && s1.agent && s1.agent.audio && s1.agent.audio.state === 'live' && s1.agent.audio.road === 'loopback', '⑳ ON is remembered for THIS machine; the machine\'s numbers say live on the loopback road', { mem: s1.mem, audio: s1.agent && s1.agent.audio });
+  await p.shot('sound-on.png', `${WIN} .desktop-strip`);
+  await pressAt(p, SND_BTN);
+  const offed = await p.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); return b.getAttribute('aria-pressed') === 'false' && v.muted === true; })()`, 6000);
+  const ended = await nodeUntil(() => MIC.loopbackEnded(r0 + 1), 5000);
+  const pk1 = (await soundState(p)).page.packets; await sleep(1500); const pk2 = (await soundState(p)).page.packets;
+  ok(offed && ended && pk2 - pk1 <= 5 && (await soundState(p)).mem === '{}', `⑳ the second press ⇒ muted, the machine's capture ENDED (its helper's stdin closed), no more packets (${pk2 - pk1}); remembered OFF`);
+  // ON is remembered per machine: a NEW window of the machine (this page had the person's clicks) starts with its sound ON
+  await pressAt(p, SND_BTN); await p.until(`document.querySelector('${SND_BTN}').getAttribute('aria-pressed') === 'true'`, 8000);
+  await p.ev('window.__closeAll()'); await sleep(500);
+  const r1 = runs();
+  await p.ev(`window.__open(${JSON.stringify(M)})`);
+  await playing(p);
+  const again = await p.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); return !!b && b.getAttribute('aria-pressed') === 'true' && v && v.muted === false; })()`, 10000);
+  const flowing = await p.until(`(() => { const w = [...window.__app.wm.windows.values()].find((x) => x._streamView); const a = w && w._streamView.stats() && w._streamView.stats().audio; return !!a && a.packets > 20; })()`, 10000);
+  ok(again && await nodeUntil(() => runs() === r1 + 1, 5000) && flowing, '⑳ remembered per machine: a NEW window of the same machine starts with its sound ON (no press — the page has the person\'s gesture) and the sound arrives', { again, flowing, st: await soundState(p) });
+  // MICROPHONE + SOUND: ONE m-line, sendrecv — both roads live
+  const grant = (q) => q.cdp('Browser.grantPermissions', { origin: `http://127.0.0.1:${PORT}`, permissions: ['audioCapture'] });
+  const nR = MIC.renders().length;
+  await grant(p);
+  await pressAt(p, `${WIN} .desktop-strip-mic`);
+  const both = await p.until(`document.querySelector('${WIN} .desktop-strip-mic').getAttribute('aria-pressed') === 'true'`, 8000);
+  const voice = await nodeUntil(() => MIC.renders().length === nR + 1, 10000);
+  const pkA = ((await soundState(p)).page || {}).packets || 0; await sleep(1200);
+  const s2 = await soundState(p);
+  ok(both && voice && s2.dirs && s2.dirs.offer === 'sendrecv' && s2.dirs.answer === 'sendrecv' && s2.page && s2.page.packets > pkA + 30 && s2.pressed === 'true', '⑳ 「麦克风」 + 「声音」 together: ONE audio m-line, sendrecv both ways — the viewer\'s voice reaches the machine (a render started) while the machine\'s sound keeps arriving', { dirs: s2.dirs, voice, packets: [pkA, s2.page.packets] });
+  await pressAt(p, `${WIN} .desktop-strip-mic`);
+  await p.cdp('Browser.resetPermissions', {});
+  await p.close();
+  // A RESTORED window (a layout replay) never unmutes by itself — even on a page that had the person's gesture
+  const restoredCase = async (at) => {
+    const q = await page(1280, 800, DESK, { at, pcs: true });
+    await q.click(5, 5); // the person's gesture on this page (sticky activation): only `restored` holds the sound back
+    const rr = runs();
+    await q.ev(`window.__open(${JSON.stringify(M)}, { syncId: 'w-restored' })`);
+    const up = await playing(q);
+    await q.until(`(() => { const b = document.querySelector('${SND_BTN}'); return !!b && !b.hidden; })()`, 8000); await sleep(1500);
+    return { q, up, st: await soundState(q), started: runs() - rr };
+  };
+  const R = await restoredCase('/');
+  ok(R.up && R.st.mem === '{"win-a":true}' && R.st.tap && R.st.tapText === '点一下开声音' && R.st.pressed === 'false' && R.st.muted === true && R.started === 0, '⑳ a RESTORED window of a machine whose sound is remembered ON: 「点一下开声音」, the <video> muted, NOTHING captured on the machine', { st: R.st, started: R.started });
+  await R.q.shot('sound-tap.png', `${WIN} .desktop-strip`);
+  const rr2 = runs();
+  await pressAt(R.q, TAP);
+  const tapped = await R.q.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); const t = document.querySelector('${TAP}'); return b.getAttribute('aria-pressed') === 'true' && v.muted === false && t.hidden; })()`, 8000);
+  ok(tapped && await nodeUntil(() => runs() === rr2 + 1, 5000), '⑳ a tap on 「点一下开声音」 ⇒ on: unmuted, ONE loopback on the machine');
+  await R.q.close();
+  const B = await restoredCase('/soundrestore');
+  ok(B.up && B.started === 1 && B.st.pressed === 'true' && B.st.muted === false, '⑳ RED CONTROL: a toggle that ignores `restored` unmutes the restored window and starts the machine\'s capture BY ITSELF — the row above catches it', { st: B.st, started: B.started });
+  await B.q.close();
+  // a PHONE: the same strip
+  const ph = await page(375, 667, PHONE, { touch: true });
+  await ph.ev(`localStorage.removeItem('vibespace.streamSound'); true`);
+  await ph.ev(`window.__open(${JSON.stringify(M)})`);
+  ok(await playing(ph), '⑳ phone 375: it plays');
+  await ph.until(`(() => { const b = document.querySelector('${SND_BTN}'); return !!b && !b.hidden; })()`, 8000);
+  await ph.ev(`document.querySelector('${SND_BTN}').scrollIntoView({ inline: 'center', block: 'nearest' }); true`); await sleep(200);
+  const pat = await ph.ev(`(() => { const b = document.querySelector('${SND_BTN}').getBoundingClientRect(); return [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2), b.right <= innerWidth + 1 && b.left >= -1]; })()`);
+  await ph.tap(pat[0], pat[1]);
+  const phOn = await ph.until(`(() => { const b = document.querySelector('${SND_BTN}'); const v = document.querySelector('${WIN} .stream-video'); return b.getAttribute('aria-pressed') === 'true' && v.muted === false; })()`, 8000);
+  ok(pat[2] && phOn, '⑳ phone: 「声音」 is on the same strip (in view); a tap turns it on, unmuted', pat);
+  await ph.shot('phone-sound.png', `${WIN} .desktop-strip`);
+  await ph.ev(`localStorage.removeItem('vibespace.streamSound'); true`);
+  await ph.close();
 }
 ok((await sessions()).length === 0, 'every window closed ⇒ no stream session left on the hub');
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

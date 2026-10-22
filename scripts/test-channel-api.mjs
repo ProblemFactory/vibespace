@@ -696,6 +696,9 @@ console.log('⑧ the API log (lane channel-api-log-blank): one line at each run 
 // its card AND its receipt message; a CLI that stops waiting leaves it to the message road (the fallback after the
 // window). The REAL orchestrator + the REAL cards (src/server/channel-api-cards.js) behind a loopback copy of the two
 // agent routes (src/agent-routes.js: POST api's `collect` and GET api/proposals/:id?collect=1); the delivery ladder is a fake.
+// lane channel-api-control-race: no leg judges on a clock — the user approves once the command is WAITING (its first poll
+// arrived), the receipts are read after the cards' own serialized pass, the fallback is waited for as an effect
+// (bounded, 15 s), and «decided inside the window» is the cards' clock held at the CLI's last poll (the product's `now`).
 console.log('⑨ the API receipt road (lane inline-receipts-compose-api): api … --wait reads it inline · no CLI ⇒ the message · the fallback');
 {
   const CARDS = require(path.join(REPO, 'src/server/channel-api-cards.js'));
@@ -706,7 +709,8 @@ console.log('⑨ the API receipt road (lane inline-receipts-compose-api): api �
     let cards = null;
     const dir = fs.mkdtempSync(path.join(tmpRoot, 'road-'));
     const api = ORCH.create({ dataDir: dir, engine: eng, fetchFn, broadcast: (m) => { if (cards) cards.onUpdate(m); } });
-    cards = CARDS.create({ dataDir: dir, api, userTodos: null, deliver, timer: false, collectWindowMs: windowMs, log: { warn() {}, log() {} } });
+    let frozenAt = null;   // the cards' clock (the product's `now` seam): null = the wall clock
+    cards = CARDS.create({ dataDir: dir, api, userTodos: null, deliver, timer: false, collectWindowMs: windowMs, log: { warn() {}, log() {} }, now: () => (frozenAt === null ? Date.now() : frozenAt) });
     await api.setTiers('lark-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }]);
     const srv = http.createServer((req, res) => {
       const chunks = []; req.on('data', (c) => chunks.push(c));
@@ -722,7 +726,7 @@ console.log('⑨ the API receipt road (lane inline-receipts-compose-api): api �
         }
         const m = /^\/api\/agent\/channels\/api\/proposals\/([^/]+)$/.exec(u.pathname);
         if (m) {
-          calls.push({ poll: true, collect: u.searchParams.get('collect') });
+          calls.push({ poll: true, collect: u.searchParams.get('collect'), at: Date.now() });
           const r = api.proposalFor(A, decodeURIComponent(m[1]));
           if (r && r.ok && u.searchParams.get('collect') === '1') Object.assign(r, await cards.collect(decodeURIComponent(m[1])));   // the route's line
           return send(r);
@@ -733,22 +737,32 @@ console.log('⑨ the API receipt road (lane inline-receipts-compose-api): api �
     await new Promise((r) => srv.listen(0, '127.0.0.1', r));
     const env = { ...process.env, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_test' };
     const run = (cli, args, input) => new Promise((resolve) => { const p = spawn(process.execPath, [cli, ...args], { env }); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.stdin.end(input === undefined ? '' : input); p.on('close', (code) => resolve({ code, out, err })); });
-    const approveSoon = (ms) => setTimeout(() => { const pd = api.ownerView().proposals.find((x) => x.status === 'pending'); if (pd) api.approve(pd.id, { digest: pd.digest }); }, ms);
+    // the user approves WHILE the command waits — once its first poll arrived (it holds the id and polls) — never «300 ms
+    // after the spawn»: a CLI slower to start on a loaded runner had filed nothing yet, so nothing was approved and it
+    // printed «pending» at its --timeout (the 2.369.340 mirror run's red); a wait that runs out says what it saw
+    const approveWhenWaiting = async () => {
+      const pd = await until(() => calls.some((x) => x.poll) && api.ownerView().proposals.find((x) => x.status === 'pending'));
+      if (!pd) return { approved: false, saw: { after: '15 s', posts: calls.filter((x) => x.post).length, polls: calls.filter((x) => x.poll).length, proposals: api.ownerView().proposals.map((x) => ({ id: x.id, status: x.status })) } };
+      const r = await api.approve(pd.id, { digest: pd.digest });
+      return { approved: !!(r && r.ok), id: pd.id, status: r && r.proposal ? r.proposal.status : r && r.code };
+    };
     const receiptsOf = (id) => delivered.filter((d) => d.text.includes(id)).length + stash.filter((x) => x.env.ref === id).length;
-    return { api, cards, srv, run, approveSoon, receiptsOf, calls, delivered };
+    const lastPollAt = () => { const p = calls.filter((x) => x.poll).pop(); return p ? p.at : null; };
+    const clock = { freeze: (t) => { frozenAt = t; }, thaw: () => { frozenAt = null; } };
+    return { api, cards, srv, run, approveWhenWaiting, receiptsOf, lastPollAt, clock, calls, delivered };
   }
   const CLI = path.join(REPO, 'data/bin/vibespace-channels');
   const WRITE = ['api', 'lark-1', 'POST', '/open-apis/docx/v1/documents', '--body', '-'];
   const pidOf = (c) => (/"proposal": "(api-[0-9a-f]{12})"/.exec(c.out) || /(api-[0-9a-f]{12})/.exec(c.err) || [])[1];
-  const settle = () => new Promise((z) => setTimeout(z, 150));
+  // wait for the EFFECT, bounded (15 s) — never a clock: what the predicate saw, or null once the bound ran out
+  const until = async (seen, ms = 15000) => { const end = Date.now() + ms; for (;;) { const v = seen(); if (v || Date.now() > end) return v || null; await new Promise((z) => setTimeout(z, 25)); } };
   const legInline = async (ok) => {
     // A — `api … --wait`: the user approves while the command waits ⇒ the outcome is the command's own answer
     const S = await roadServer();
-    S.approveSoon(300);
-    const c = await S.run(CLI, [...WRITE, '--wait', '--timeout', '30'], '{"title":"inline"}');
-    await settle(); await S.cards.sync(); await settle();
+    const [c, approve] = await Promise.all([S.run(CLI, [...WRITE, '--wait', '--timeout', '30'], '{"title":"inline"}'), S.approveWhenWaiting()]);
+    await S.cards.sync();   // the cards' serialized pass: every receipt the decision files is on the record after it
     const pid = pidOf(c);
-    ok(c.code === 0 && /"outcome": "ran"/.test(c.out) && /"status": 200/.test(c.out) && /"bytes": \d+/.test(c.out) && /"receipt": "API proposal api-[0-9a-f]{12} \(POST open\.feishu\.cn\/open-apis\/docx\/v1\/documents on Lark \(test\)\): the user approved it and it RAN — HTTP 200, [\d.]+ (B|KB)\."/.test(c.out), 'api … --wait: the approved call\'s outcome is the command\'s own answer — status, bytes and the card\'s words («the user approved it and it RAN — HTTP 200, …»)', c);
+    ok(c.code === 0 && /"outcome": "ran"/.test(c.out) && /"status": 200/.test(c.out) && /"bytes": \d+/.test(c.out) && /"receipt": "API proposal api-[0-9a-f]{12} \(POST open\.feishu\.cn\/open-apis\/docx\/v1\/documents on Lark \(test\)\): the user approved it and it RAN — HTTP 200, [\d.]+ (B|KB)\."/.test(c.out), 'api … --wait: the approved call\'s outcome is the command\'s own answer — status, bytes and the card\'s words («the user approved it and it RAN — HTTP 200, …»)', { ...c, approve });
     ok(!!pid && S.receiptsOf(pid) === 0, 'api … --wait: NO "[Channels · API]" receipt message is filed for the outcome the command already printed (no delivery, no stash)', { pid, delivered: S.delivered.map((d) => d.text.slice(0, 80)) });
     ok(S.calls[0].post && S.calls[0].collect === true && S.calls.filter((x) => x.poll).every((x) => x.collect === '1'), 'the command says it waits (`collect` on the call) and every poll is the collect door (?collect=1)', S.calls);
     const rec = S.cards.records().find((r) => r.id === pid);
@@ -762,7 +776,7 @@ console.log('⑨ the API receipt road (lane inline-receipts-compose-api): api �
     const pid = pidOf(c);
     ok(c.code === 4 && !!pid && S.calls[0].collect === false, 'api … (no --wait): api_pending, exit 4 — the command does not wait (collect false)', c);
     const pd = S.api.ownerView().proposals.find((x) => x.id === pid);
-    await S.api.approve(pid, { digest: pd.digest }); await settle(); await S.cards.sync();
+    await S.api.approve(pid, { digest: pd.digest }); await S.cards.sync();
     ok(S.receiptsOf(pid) === 1 && S.delivered.some((d) => d.text.includes(pid) && d.opts.spendReason === 'channel-receipt' && d.opts.noWake === true), 'no CLI waited ⇒ the decision reaches the agent as ONE receipt message (no wake, channel-receipt)', S.delivered.map((d) => d.text.slice(0, 80)));
     S.srv.close();
   };
@@ -772,11 +786,17 @@ console.log('⑨ the API receipt road (lane inline-receipts-compose-api): api �
     const c = await S.run(CLI, [...WRITE, '--wait', '--timeout', '1'], '{"title":"slow"}');
     const pid = pidOf(c);
     ok(c.code === 0 && /"outcome": "pending"/.test(c.out) && !!pid, 'api … --wait --timeout 1: the command stops waiting and says the call is still pending', c);
-    const pd = S.api.ownerView().proposals.find((x) => x.id === pid);
-    await S.api.approve(pid, { digest: pd.digest }); await settle(); await S.cards.sync();
+    // the user decides INSIDE the window: the cards' clock is held at the CLI's last poll while the decision lands — the
+    // wall clock from that poll to here (the CLI's exit seen by a loaded runner) is this box's, not the product's
+    const pd = S.api.ownerView().proposals.find((x) => x.id === pid), polledAt = S.lastPollAt();
+    S.clock.freeze(polledAt);
+    await S.api.approve(pid, { digest: pd.digest }); await S.cards.sync();
     const heldNow = S.receiptsOf(pid);
-    await new Promise((z) => setTimeout(z, 1300));
-    ok(heldNow === 0 && S.receiptsOf(pid) === 1, 'the hold ends with the window — the CLI is gone, so the receipt MESSAGES (the fallback; never lost, never twice)', { heldNow, after: S.receiptsOf(pid) });
+    S.clock.thaw();
+    // the window's end: the cards' own fallback timer hands it to the message road — waited for as an effect, then once more
+    const filed = await until(() => S.receiptsOf(pid) >= 1);
+    await S.cards.sync();
+    ok(heldNow === 0 && !!filed && S.receiptsOf(pid) === 1, 'the hold ends with the window — the CLI is gone, so the receipt MESSAGES (the fallback; never lost, never twice)', { heldNow, after: S.receiptsOf(pid), polledAt, proposal: (S.api.ownerView().proposals.find((x) => x.id === pid) || {}).status });
     S.srv.close();
   };
   const legBase = async (ok) => {
@@ -786,11 +806,10 @@ console.log('⑨ the API receipt road (lane inline-receipts-compose-api): api �
     const baseCli = CLI_SRC.replace(", collect: args.includes('--wait') });", ' });').replace("/api/agent/channels/api/proposals/${encodeURIComponent(pid)}?collect=1`", '/api/agent/channels/api/proposals/${encodeURIComponent(pid)}`');
     ok(baseCli.split('collect').length < CLI_SRC.split('collect').length - 1, 'the control CLI drops exactly the api verb\'s two collect points');
     const S = await roadServer();
-    S.approveSoon(300);
-    const c = await S.run(MUT.write('data/bin/vibespace-channels', baseCli, 'api-no-collect'), [...WRITE, '--wait', '--timeout', '30'], '{"title":"twice"}');
-    await settle(); await S.cards.sync(); await settle();
-    const pid = pidOf(c);
-    ok(/"outcome": "ran"/.test(c.out) && !!pid && S.receiptsOf(pid) === 1, 'CONTROL (the base): the command printed the outcome AND a receipt message for it was filed — the ⑨ A legs would be RED', { out: c.out.slice(0, 120), receipts: pid && S.receiptsOf(pid) });
+    const [c, approve] = await Promise.all([S.run(MUT.write('data/bin/vibespace-channels', baseCli, 'api-no-collect'), [...WRITE, '--wait', '--timeout', '30'], '{"title":"twice"}'), S.approveWhenWaiting()]);
+    await S.cards.sync();
+    const pid = pidOf(c), rec = pid && S.api.ownerView().proposals.find((x) => x.id === pid);
+    ok(/"outcome": "ran"/.test(c.out) && !!pid && S.receiptsOf(pid) === 1, 'CONTROL (the base): the command printed the outcome AND a receipt message for it was filed — the ⑨ A legs would be RED', { out: c.out.slice(0, 120), approve, proposal: rec ? rec.status : null, receipts: pid && S.receiptsOf(pid) });
     S.srv.close();
   };
   // the four legs wait on real CLI polls (every 2 s) — run them side by side (each has its own server), report in order

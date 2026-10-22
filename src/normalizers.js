@@ -367,7 +367,7 @@ function artifactDeriver(mm, { artifactsOf, cwd = '', host = '', helper = null }
     let ops = [];
     try { ops = artifactsOf(raw) || []; } catch { ops = []; }
     if (raw && (raw.parent_tool_use_id || raw.isSidechain)) ops = []; // a helper's own record: the helper door folds it at the Task's end
-    if (helper && artifactHelperSource && raw && raw.type === 'user') { try { ops = ops.concat(artifactHelperSource({ backend: helper.backend, cwd, host, claudeSessionId: helper.sessionId }, raw, hstate) || []); } catch { } }
+    if (helper && artifactHelperSource && raw) { try { ops = ops.concat(artifactHelperSource({ backend: helper.backend, cwd, host, claudeSessionId: helper.sessionId }, raw, hstate) || []); } catch { } }
     for (const o of ops) {
       const r = AF.apply(rows, { host, cwd, ...o, at: recordAt(raw), by: 'agent' });
       if (r.skipped || !r.row) continue;

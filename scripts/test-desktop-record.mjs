@@ -1267,9 +1267,9 @@ console.log('— §6 wiring: every door, the belt, the refusal route, the rollba
   ok(/dm\.moveWindowToDesktop\(win\.id, targetDeskId\);/.test(W) && /if \(winId\) this\.moveWindowToDesktop\(winId, desk\.id, \{ speak: true \}\);/.test(D) && /action: \(\) => this\.moveWindowToDesktop\(winId, d\.id, \{ speak: true \}\)/.test(D) && /dm\.moveWindowToDesktop\(wm\.activeWindowId, dm\.desktops\[next\]\.id, \{ speak: true \}\)/.test(CM), '§6 the doors — the title-bar drop, a taskbar drop, the menu, command mode d/D — all reach moveWindowToDesktop (the one move)');
   ok(/dm\.moveWindowToDesktop\(winInfo\.id, destDesktop, \{ replaces: winBounds\.winId \|\| null \}\)/.test(SL) && /desktopId: meta\.id, winId: ws\.winId \|\| ws\.id \|\| null \}/.test(L), '§6 resume placement passes the old record entry it REPLACES (scanStoppedInDesktopStates carries its winId)');
   ok(/this\._updateCachedDesktop\(desktopId, \{ from, ids: members\.map\(\(m\) => m\.id\), replaces: replaces \? \[replaces\] : \[\] \}\);/.test(D), '§6 moveWindowToDesktop hands _updateCachedDesktop the source, the moved chain and what it replaces');
-  ok(/for \(const d of dm\?\.takeDirty\?\.\(\) \|\| \[\]\) \{\s*const st = dm\.recordFor\(d\);\s*this\.app\.ws\.send\(\{ type: 'layout-sync', state: st, desktopId: d, evidence: dm\.evidence\(\), sentAt, viewport: this\._viewport\(\) \}\);/.test(L), '§6 _doAutoSave sends each changed desktop it does not show from its HELD record (recordFor), with the evidence (and the save\'s sentAt — verify r5 ⑤)');
-  ok(/const state = dm\?\.recordFor && desktopId \? dm\.recordFor\(desktopId\) : this\.captureState\(\);/.test(L) && /evidence: dm\?\.evidence\?\.\(\) \|\| \[\], sentAt, viewport: this\._viewport\(\) \}\);/.test(L), '§6 …and the desktop on show through recordFor too (the held record merged with the page), with the evidence');
-  ok(/ws\.send\(JSON\.stringify\(\{ type: 'layout-sync-ack', desktopId: desktopId \|\| null, sentAt: data\.sentAt \?\? null, seq: layoutSyncSeqRef\.value \}\)\);/.test(WS) && WS.indexOf("type: 'layout-sync-ack'") > WS.indexOf('writeLayouts(layoutData);\n          // Broadcast to other clients') && /if \(msg\.type === 'layout-sync-ack'\) \{ this\._onLayoutAnswer\(msg\.desktopId, msg\.sentAt, \{ refused: false \}\); return; \}/.test(L) && /if \(msg\.type === 'layout-sync-refused'\) \{ this\._onLayoutAnswer\(msg\.desktopId, msg\.sentAt, \{ refused: true \}\); return; \}/.test(L) && (L.match(/this\.noteLayoutSent\(sentDesks, sentAt\);/g) || []).length === 2 && /this\.app\.layoutManager\?\.noteLayoutSent\?\.\(\[desktopId\], sentAt\);/.test(D) && !/_movesSentAt = Date\.now\(\)/.test(L) && !/_releaseHeldCloses\(d\);/.test(L) && /if \(refused\) s\.refused\.add\(key\);/.test(L) && /if \(!s\.refused\.has\(d\)\) this\._markCarried\(d, s\.sentAt\);/.test(L) && /this\.app\.desktopManager\?\.noteCarried\?\.\(key\);/.test(L) && /const ACK_WAIT_MS = 2000;/.test(L) && /if \(!this\._serverAcks && s\.at != null && now - s\.at > ACK_WAIT_MS\)/.test(L), '§6 verify r5 ⑤: THE ACK — the server answers every layout-sync it wrote with `layout-sync-ack {desktopId, sentAt}` AFTER the write; every record the client sends (the autosave\'s, the switch\'s) is owed an answer; an ack carries the acts of that save (a refusal carries nothing); the held closes, ratios and the dirty desks are released at the ack, never at the send; an older server that answers nothing is given ACK_WAIT_MS on an open socket, then today\'s rule');
+  ok(/for \(const d of dm\?\.takeDirty\?\.\(\) \|\| \[\]\) \{\s*const st = dm\.recordFor\(d\);\s*this\.app\.ws\.send\(\{ type: 'layout-sync', state: st, desktopId: d, evidence: dm\.evidence\(\), sentAt, viewport: this\._viewport\(\), base: dm\.stampOf\?\.\(d\) \}\);/.test(L), '§6 _doAutoSave sends each changed desktop it does not show from its HELD record (recordFor), with the evidence (and the save\'s sentAt — verify r5 ⑤)');
+  ok(/const state = dm\?\.recordFor && desktopId \? dm\.recordFor\(desktopId\) : this\.captureState\(\);/.test(L) && /evidence: dm\?\.evidence\?\.\(\) \|\| \[\], sentAt, viewport: this\._viewport\(\), base: desktopId \? dm\?\.stampOf\?\.\(desktopId\) : undefined \}\);/.test(L), '§6 …and the desktop on show through recordFor too (the held record merged with the page), with the evidence');
+  ok(/ws\.send\(JSON\.stringify\(\{ type: 'layout-sync-ack', desktopId: desktopId \|\| null, sentAt: data\.sentAt \?\? null, seq: layoutSyncSeqRef\.value, updatedAt: stampNow \}\)\);/.test(WS) && WS.indexOf("type: 'layout-sync-ack'") > WS.indexOf('writeLayouts(layoutData);\n          // Broadcast to other clients') && /if \(msg\.type === 'layout-sync-ack'\) \{ this\._onLayoutAnswer\(msg\.desktopId, msg\.sentAt, \{ refused: false \}\); return; \}/.test(L) && /if \(msg\.type === 'layout-sync-refused'\) \{ this\._onLayoutAnswer\(msg\.desktopId, msg\.sentAt, \{ refused: true \}\); return; \}/.test(L) && (L.match(/this\.noteLayoutSent\(sentDesks, sentAt\);/g) || []).length === 2 && /this\.app\.layoutManager\?\.noteLayoutSent\?\.\(\[desktopId\], sentAt\);/.test(D) && !/_movesSentAt = Date\.now\(\)/.test(L) && !/_releaseHeldCloses\(d\);/.test(L) && /if \(refused\) s\.refused\.add\(key\);/.test(L) && /if \(!s\.refused\.has\(d\)\) this\._markCarried\(d, s\.sentAt\);/.test(L) && /this\.app\.desktopManager\?\.noteCarried\?\.\(key\);/.test(L) && /const ACK_WAIT_MS = 2000;/.test(L) && /if \(!this\._serverAcks && s\.at != null && now - s\.at > ACK_WAIT_MS\)/.test(L), '§6 verify r5 ⑤: THE ACK — the server answers every layout-sync it wrote with `layout-sync-ack {desktopId, sentAt}` AFTER the write; every record the client sends (the autosave\'s, the switch\'s) is owed an answer; an ack carries the acts of that save (a refusal carries nothing); the held closes, ratios and the dirty desks are released at the ack, never at the send; an older server that answers nothing is given ACK_WAIT_MS on an open socket, then today\'s rule');
   ok(/const currentState = this\.recordFor\(this\._activeId\);/.test(D) && /dm\._setRecord\(this\._prevDesktopId, dm\.recordFor\(this\._prevDesktopId\)\);/.test(SM), '§6 the switch\'s and the Stage\'s capture of the desktop being left go through recordFor');
   ok(/else if \(msg\.type === 'layout-sync-refused'\) this\.onSyncRefused\(msg\);/.test(D), '§6 the client routes `layout-sync-refused` to onSyncRefused');
   const beltAt = WS.indexOf('const v = shrinkVerdict({ prev: stored.windows, next: data.state.windows, evidence: data.evidence, alive: (sid) => activeSessions.has(sid), recent: recentArrivals(desktopId, ws) });');
@@ -1300,7 +1300,7 @@ console.log('— §6 wiring: every door, the belt, the refusal route, the rollba
     ok(GEOM_MACHINE.every(([f, en]) => rows.some((r) => r.file === f && r.enclosing === en && r.verdict === 'machine')), '§6 …and no dead machine row (every allowlisted path still has a site)', J(GEOM_MACHINE.filter(([f, en]) => !rows.some((r) => r.file === f && r.enclosing === en)))); }
   ok(geomWitnessPin(W), '§6 verify r3 ①: the geometry witness is stamped only by a press that DRAGGED (after `if (!dragging) return;`) or a handle press that MOVED (`if (resized)`) — a click-to-focus on a title bar holds no geometry');
   ok(/this\.app\.desktopManager\?\.adoptRemoteMove\?\.\(win, win\._desktopId, \{ to: this\.app\.desktopManager\.activeDesktopId, rec: \{ \.\.\.rw, \.\.\.a \} \}\);/.test(L) && /if \(this\.app\.desktopManager\?\.adoptRemoteMove\?\.\(win, activeDesk\)\) continue;/.test(L) && /\.filter\(\(w\) => !this\.adoptRemoteMove\(w, desktopId\)\)/.test(D), '§6 verify r1: a remote move is adopted at all three sites — the apply\'s update loop (in), its close loop (out), the cached record\'s gone sweep');
-  ok(/const \{ desktopChanges \} = require\('\.\.\/lib\/desktop-record\.js'\);/.test(PR) && /snapshotLayout\(_lastGood, nextShape, data\);/.test(PR) && /totalWindows: total, change \}\);/.test(PR), '§6 a rollback point records the change that FOLLOWED it (routes/persistence.js; its own legs: test-layout-history)');
+  ok(/const \{ desktopChanges \} = require\('\.\.\/lib\/desktop-record\.js'\);/.test(PR) && /snapshotLayout\(_lastGood, nextShape, data, \{ writer, refused: _ringNotes\.refused \}\);/.test(PR) && /totalWindows: total, change, \.\.\.seen \}\);/.test(PR), '§6 a rollback point records the change that FOLLOWED it (routes/persistence.js; its own legs: test-layout-history)');
   const orphanAt = WS.indexOf("if (desktopId && Array.isArray(layoutData.desktopMeta) && layoutData.desktopMeta.length && !layoutData.desktopMeta.some((d) => d && d.id === desktopId)) {");
   ok(orphanAt > 0 && orphanAt < beltAt && /reason: 'no-such-desktop', desktops: layoutData\.desktopMeta, sentAt: data\.sentAt \?\? null \}\)\);[\s\S]{0,40}break;/.test(WS.slice(orphanAt, orphanAt + 1200)) && /if \(msg\?\.reason === 'no-such-desktop'\) \{ if \(Array\.isArray\(msg\.desktops\)\) this\._onRemoteDesktopUpdated\(\{ desktops: msg\.desktops \}\); return; \}/.test(D), '§6 verify r2 ⑦: a per-desktop write for a desktop the meta does not name is refused BEFORE the belt (`no-such-desktop`, the meta rides the refusal, nothing written) and the client drops the desktop as a desktop-updated would');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
@@ -1312,19 +1312,20 @@ console.log('— §6 wiring: every door, the belt, the refusal route, the rollba
 const WSH_PATH = require.resolve(path.join(REPO, 'src/ws-handler.js'));
 /** A fresh copy of the REAL ws-handler module; `gate` stands in for desktop-record.js's layerGate while it is required
  *  (the RED control: the gate removed). */
-const loadHandler = (gate = null) => {
-  const DR = require(path.join(REPO, MODEL)), real = DR.layerGate;
+const loadHandler = (gate = null, over = {}) => {
+  const DR = require(path.join(REPO, MODEL)), real = DR.layerGate, saved = {};
   delete require.cache[WSH_PATH];
   if (gate) DR.layerGate = gate;
-  try { return require(WSH_PATH); } finally { DR.layerGate = real; delete require.cache[WSH_PATH]; }
+  for (const [k, v] of Object.entries(over)) { saved[k] = DR[k]; DR[k] = v; } // lane layout-stale-record-sync's controls: a PURE rule swapped while the handler destructures it
+  try { return require(WSH_PATH); } finally { DR.layerGate = real; Object.assign(DR, saved); delete require.cache[WSH_PATH]; }
 };
 /** The real registerWsHandler on a fake wss (test-contributions' harness) over `seed` — layouts.json in memory.
  *  connect(reply?) → a socket {send(msg) (awaits the handler), frames}; `reply(frame)` hears each frame it is sent. */
-function hub(WSH, seed) {
+function hub(WSH, seed, { alive = [] } = {}) {
   let layouts = JSON.parse(J(seed)), writes = 0;
   const tele = [], warns = [];
   const quietly = (fn) => { const o = console.warn; console.warn = (...a) => warns.push(a.map(String).join(' ')); try { return fn(); } finally { console.warn = o; } };
-  const ctx = new Proxy({ telemetry: { record: (e) => tele.push(e) }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: new Map(), WS_OPEN: 1, readLayouts: () => JSON.parse(J(layouts)), writeLayouts: (d) => { writes++; layouts = JSON.parse(J(d)); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
+  const ctx = new Proxy({ telemetry: { record: (e) => tele.push(e) }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: new Map(alive.map((sid) => [sid, {}])), WS_OPEN: 1, readLayouts: () => JSON.parse(J(layouts)), writeLayouts: (d) => { writes++; layouts = JSON.parse(J(d)); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
   const on = {};
   const wss = { _heartbeatTimer: true, clients: new Set(), on: (ev, fn) => { on[ev] = fn; } };
   WSH.registerWsHandler(wss, ctx);
@@ -1334,7 +1335,7 @@ function hub(WSH, seed) {
     wss.clients.add(sock); quietly(() => on.connection(sock));
     return { frames, send: async (m) => { const o = console.warn; console.warn = (...a) => warns.push(a.map(String).join(' ')); try { await h.message(J(m)); } finally { console.warn = o; } } };
   };
-  return { connect, layouts: () => layouts, writes: () => writes, tele, warns };
+  return { connect, layouts: () => layouts, writes: () => writes, tele, warns, replace: (doc) => { layouts = JSON.parse(J(doc)); } }; // replace = a write no socket made (a restore)
 }
 const GSEED = () => ({ desktopMeta: [{ id: 'desk-a', name: 'Alpha' }, { id: 'desk-new', name: 'New' }], desktops: { 'desk-a': { autoSave: { windows: [R('a-1', { gridBounds: GB(0.1, 0.1), zIndex: 11 }), R('a-2', { gridBounds: GB(0.5, 0.1), zIndex: 12 }), R('a-3', { gridBounds: GB(0, 0.5), zIndex: 13, isMinimized: true })], grid: { rows: 1, cols: 3 }, sidebarOpen: false, theme: 'light', globalFontSize: 16, globalFontFamily: 'serif', taskbarHeight: 48, toolbarScale: 1.2, toolbarHeight: 48, viewport: 'desktop', updatedAt: 1 } } } });
 /** desk-a's record as a phone holding it sends it (the server's stamps dropped) */
@@ -1439,6 +1440,214 @@ const hubFailed = await hubLegs(loadHandler());
 console.log('— §9c RECONCILIATION: a phone page (the real DesktopManager + LayoutManager) whose socket is the real handler');
 const gateDoorFailed = await gateDoorLegs(RealDM, loadHandler());
 
+// ── §10 THE OWNER'S RING (lane layout-stale-record-sync, 2026-10-22: «我的工作桌面里的窗口怎么突然都没了», then «我刚才点了恢
+// 复布局也没正确恢复») — shapes only, every id and title here is the suite's own. 23:37:09 a phone that woke after 3 h saved 1 s
+// after its reload while every attach of its windows was still in flight: its capture named no session (captureWin reads
+// app.sessions, filled only by 'attached'; restoreState's attach carried no conversation id) and took the record's place
+// WHOLE — 工作's five chat windows went NAMELESS. 00:17:31 the owner's desktop woke, reloaded, and restoreState matched a
+// nameless chat to nothing (it never read openSpec.serverId): it built 0; 20 s later its switch to 研究 sent 工作 with the
+// five as 'unbuilt' evidence and the belt took 5 → 0. 恢复布局 restored that nameless point; the next desktop that booted on
+// it did the same at 00:19:05 (6 → 1). §10a–c PURE, §10d the REAL handler, §10e the ring through real pages and the real
+// handler, §10f the boot restore of a nameless entry; the controls in §7.
+const CH = (id, n, o = {}) => ({ winId: id, title: 'chat ' + id, type: 'chat', isMinimized: false, isMaximized: false, gridBounds: GB(0.1 * n, 0), zIndex: 10 + n, serverSessionId: 'sess-' + n, backend: 'claude', backendSessionId: 'conv-' + n, claudeSessionId: 'conv-' + n, cwd: '/w/' + n, openSpec: { action: 'attachSession', serverId: 'sess-' + n, name: 'chat ' + id, cwd: '/w/' + n, mode: 'chat', backend: 'claude', backendSessionId: 'conv-' + n, hostId: null, sessionKey: 'claude:conv-' + n }, ...o });
+/** an entry as a capture before its attach answered writes it (the phone's 23:37:09 shape): no ids, openSpec.backendSessionId null */
+const nameless = (w) => { const o = { ...w, openSpec: { ...w.openSpec, backendSessionId: null, sessionKey: '' } }; for (const k of ['serverSessionId', 'backend', 'backendSessionId', 'claudeSessionId', 'cwd']) delete o[k]; return o; };
+const WORK = () => [1, 2, 3, 4, 5].map((n) => CH('w-' + n, n));
+const named = (w) => !!(w && w.serverSessionId && w.backendSessionId && w.openSpec && w.openSpec.backendSessionId);
+const ALIVE = ['sess-1', 'sess-2', 'sess-3', 'sess-4', 'sess-5', 'sess-6', 'sess-9'];
+const unbuiltEv = (list) => list.map((w) => ({ id: w.winId, why: 'unbuilt' }));
+
+function ringPureLegs(P, { quiet = false } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const { keepIdentity, keepIdentities, mergeDesktopRecord: merge, shrinkVerdict, staleVerdict, foreignStamp, sessionOf } = P;
+  // §10a IDENTITY IS NEVER FORGOTTEN
+  const rec = WORK(), before = J(rec);
+  const cap = rec.map((w) => ({ ...nameless(w), gridBounds: GB(0.3, 0.3), zIndex: 99 }));
+  const kept = cap.map((c, i) => keepIdentity(rec[i], c));
+  leg(kept.every(named) && kept.every((w, i) => w.serverSessionId === rec[i].serverSessionId && w.backendSessionId === rec[i].backendSessionId && w.claudeSessionId === rec[i].claudeSessionId && w.cwd === rec[i].cwd && w.backend === 'claude' && w.openSpec.backendSessionId === rec[i].openSpec.backendSessionId && w.openSpec.sessionKey === rec[i].openSpec.sessionKey), '§10a a capture that names no session (its attach not answered — the phone\'s 23:37:09 save) keeps every IDENTITY field and its openSpec\'s conversation id from the record\'s entry', J(kept[0]));
+  leg(kept.every((w) => w.zIndex === 99 && w.gridBounds.left === 0.3), '§10a …and everything else is the capture\'s (its box, its z — the merge\'s rule is unchanged)', J(kept[0]));
+  const other = { ...cap[0], serverSessionId: 'sess-9', openSpec: { ...cap[0].openSpec, serverId: 'sess-9' } };
+  leg(keepIdentity(rec[0], other) === other, '§10a a capture naming ANOTHER session (a resume, a re-attach) keeps its own — nothing is carried', J(keepIdentity(rec[0], other)));
+  const full = CH('w-1', 1, { zIndex: 50 }), files = R('f-1');
+  leg(keepIdentity(rec[0], full) === full && keepIdentity(R('f-1', { title: 'x' }), files) === files && keepIdentity(null, full) === full && keepIdentity(rec[0], null) === null, '§10a a capture that knows who it is, a window that is no session, a missing side — returned as they are (the same object)');
+  leg(J(rec) === before && cap.every((c) => !named(c)), '§10a the inputs are never mutated');
+  const m = merge({ record: { windows: rec }, built: cap });
+  leg(J(ids(m)) === J(ids(rec)) && m.windows.every(named), '§10a mergeDesktopRecord (every record a page sends): the built windows\' nameless captures keep the record\'s identity — 2.369.340 wrote them nameless', J(m.windows.map(named)));
+  const kl = keepIdentities(rec, [...cap, CH('w-9', 9)]);
+  leg(kl.length === 6 && kl.slice(0, 5).every(named) && J(kl[5]) === J(CH('w-9', 9)) && J(keepIdentities(null, cap)) === J(cap), '§10a keepIdentities (the server\'s write) per id; a new entry as it is; no stored record ⇒ nothing carried');
+  leg(sessionOf(nameless(rec[0])) === 'sess-1' && sessionOf(rec[0]) === 'sess-1' && sessionOf(files) === null && sessionOf({ type: 'chat', openSpec: { action: 'viewSession', serverId: 'x' } }) === null, '§10a sessionOf: the live attach, else the session the openSpec attaches to; null for any other window');
+  // §10b A PAGE'S FAILURE IS NOT THE WORKSPACE'S TRUTH
+  const alive = (s) => ALIVE.includes(s);
+  const v = shrinkVerdict({ prev: WORK().map(nameless), next: [], evidence: unbuiltEv(WORK()), alive });
+  leg(!v.ok && v.reason === 'shrink-without-close' && J(v.unexplained) === J(ids(WORK())) && J(v.live) === J(ids(WORK())), '§10b THE RING 00:17:31: 工作 (stored nameless) sent with its 5 live windows as \'unbuilt\' ⇒ REFUSED, all 5 unexplained (2.369.340 took 5 → 0)', J(v));
+  leg(!shrinkVerdict({ prev: WORK(), next: WORK().slice(1), evidence: unbuiltEv(WORK().slice(0, 1)), alive }).ok, '§10b …ONE live window dropped as \'unbuilt\' is refused too (any count — the page could not build it, the session is there)');
+  leg(shrinkVerdict({ prev: WORK(), next: [], evidence: unbuiltEv(WORK()), alive: () => false }).ok && shrinkVerdict({ prev: WORK(), next: [], evidence: WORK().map((w) => ({ id: w.winId, why: 'closed' })), alive }).ok, '§10b …their sessions GONE ⇒ the drop is explained; the person\'s CLOSE of five live windows passes');
+  const dup = shrinkVerdict({ prev: WORK(), next: [CH('w-1b', 1)], evidence: unbuiltEv(WORK().slice(0, 1)), alive: (s) => s === 'sess-1' });
+  leg(dup.ok, '§10b …a live window dropped as \'unbuilt\' while ANOTHER entry of the record shows its session (a duplicate the page settled at once) passes', J(dup));
+  leg(shrinkVerdict({ prev: [R('hr-1'), R('hr-2'), R('hr-3')], next: [], evidence: [{ id: 'hr-1', why: 'moved' }, { id: 'hr-2', why: 'replaced' }, { id: 'hr-3', why: 'unbuilt' }] }).ok, '§10b …a window that is no session stays explained by \'unbuilt\' (§2 unchanged)');
+  // §10c A RECORD NEVER GOES BACKWARDS
+  const W1 = [{ who: 1, at: 200, replaced: 100 }], W2 = [{ who: 1, at: 200, replaced: 100 }, { who: 1, at: 300, replaced: 200 }];
+  const rows = [
+    ['no base (an older bundle)', { writes: W1, who: 2, storedAt: 200, base: null }, true],
+    ['a base that is not a number', { writes: W1, who: 2, storedAt: 200, base: '150' }, true],
+    ['base = the stored record (seen)', { writes: W1, who: 2, storedAt: 200, base: 200 }, true],
+    ['base OLDER than a record another writer stored', { writes: W1, who: 2, storedAt: 200, base: 100 }, false],
+    ['base older than the writer\'s OWN last write (ack not read)', { writes: W1, who: 1, storedAt: 200, base: 100 }, true],
+    ['two own writes in a row over the record it had seen', { writes: W2, who: 1, storedAt: 300, base: 100 }, true],
+    ['own writes, then another writer\'s newer one', { writes: [...W2, { who: 3, at: 400, replaced: 300 }], who: 1, storedAt: 400, base: 300 }, false],
+    ['a record no socket wrote (a restore / the disk) newer than the base', { writes: W2, who: 1, storedAt: 900, base: 300 }, false],
+    ['the first write after a restart (no memory) from the record on disk', { writes: [], who: 1, storedAt: 900, base: 900 }, true],
+    ['garbage memory', { writes: 'x', who: 1, storedAt: 900, base: 100 }, false],
+  ];
+  const table = rows.map(([label, a, want]) => { const r = staleVerdict(a); return { label, want, got: r.ok, r }; });
+  if (!quiet) console.log(table.map((t) => `      ${t.got ? 'ok     ' : 'REFUSED'} ${t.label}`).join('\n'));
+  leg(table.every((t) => t.got === t.want), '§10c THE STALENESS VERDICT TABLE (PURE staleVerdict — printed above): refused only when the base is older than the newest record ANOTHER writer stored', J(table.filter((t) => t.got !== t.want)));
+  leg(staleVerdict(rows[3][1]).reason === 'stale' && staleVerdict(rows[3][1]).held === 200 && staleVerdict(rows[3][1]).base === 100 && staleVerdict(rows[0][1]).judged === false, '§10c …a refusal names reason \'stale\', the stamp kept and the base; no base is not judged');
+  leg(foreignStamp(W2, 1, 300) === 100 && foreignStamp(W2, 2, 300) === 300 && foreignStamp([], 1, 50) === 50, '§10c foreignStamp: the writer\'s own chain looks past itself to the record it replaced');
+  return failed;
+}
+console.log('— §10a–c THE OWNER\'S RING, PURE: identity never forgotten, a page\'s failure is not the truth, a record never goes backwards');
+const ringPureFailed = ringPureLegs(P);
+
+/** §10d on the REAL handler: the staleness gate, the identity kept, the live-unbuilt refusal */
+async function ringHubLegs(WSH, { quiet = false } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const seed = () => ({ desktopMeta: [{ id: 'desk-work', name: '工作' }, { id: 'desk-res', name: '研究' }], desktops: { 'desk-work': { autoSave: { windows: WORK(), grid: null, viewport: 'desktop', updatedAt: 1000 } }, 'desk-res': { autoSave: { windows: [CH('r-6', 6)], grid: null, viewport: 'desktop', updatedAt: 1000 } } } });
+  const send = (S, windows, o = {}) => S.send({ type: 'layout-sync', desktopId: 'desk-work', state: { windows, grid: null }, evidence: o.evidence || [], sentAt: o.sentAt || 5, ...(o.base !== undefined ? { base: o.base } : {}), viewport: o.viewport || 'desktop' });
+  const last = (S, t) => S.frames.filter((f) => f.type === t).pop() || null;
+  {
+    const H = hub(WSH, seed(), { alive: ALIVE }), A = H.connect(), B = H.connect();
+    const moved = WORK(); moved[0].gridBounds = GB(0.6, 0.6);
+    await send(A, moved, { base: 1000, sentAt: 11 });
+    const ack = last(A, 'layout-sync-ack'), st = H.layouts().desktops['desk-work'].autoSave, relay = last(B, 'layout-sync');
+    leg(ack && ack.updatedAt === st.updatedAt && st.updatedAt >= 1000 && relay && relay.updatedAt === st.updatedAt && !('updatedAt' in relay.state), '§10d the server\'s stamp rides the ACK and the RELAY (each page\'s next base) — the relayed state stays the writer\'s', J({ ack, relay: relay && { updatedAt: relay.updatedAt } }));
+    const w0 = H.writes();
+    await send(B, WORK(), { base: 1000, sentAt: 12 });
+    const r = last(B, 'layout-sync-refused');
+    leg(r && r.reason === 'stale' && J(Object.keys(r)) === J(['type', 'desktopId', 'reason', 'state', 'sentAt']) && r.state.updatedAt === st.updatedAt && r.state.windows[0].gridBounds.left === 0.6 && r.sentAt === 12 && H.writes() === w0 && !A.frames.some((f) => f.type === 'layout-sync'), '§10d THE STALENESS GATE on the real handler: a write from a base OLDER than another writer\'s record is REFUSED {reason:\'stale\', state: the record kept} — nothing written, nothing relayed', J(r));
+    leg(H.warns.some((w) => /\[layout-sync\] REFUSED a desktop record of desktop "工作" \(desk-work\): written from an older base/.test(w)) && H.tele.some((e) => e.name === 'layout-sync-refused' && /^stale /.test(e.detail)), '§10d …the journal names the desktop and both stamps; telemetry counts it (layout-sync-refused · stale)', J(H.warns.filter((w) => /stale|older base/.test(w))));
+    await send(B, WORK(), { base: r?.state?.updatedAt ?? H.layouts().desktops['desk-work'].autoSave.updatedAt, sentAt: 13 }); // (a control without the gate refuses nothing)
+    leg(last(B, 'layout-sync-ack')?.sentAt === 13 && H.layouts().desktops['desk-work'].autoSave.windows[0].gridBounds.left === 0.1, '§10d …the re-send from the record kept (its base) is written', J(last(B, 'layout-sync-ack')));
+    const t1 = H.layouts().desktops['desk-work'].autoSave.updatedAt;
+    await send(A, WORK(), { base: t1, sentAt: 14 }); await send(A, WORK(), { base: t1, sentAt: 15 });
+    leg(A.frames.filter((f) => f.type === 'layout-sync-ack' && (f.sentAt === 14 || f.sentAt === 15)).length === 2, '§10d …a writer\'s two saves in a row (the second before the first one\'s ack) are both written — its own write is never "newer than it has seen"');
+    await send(B, WORK(), { sentAt: 16 });
+    leg(last(B, 'layout-sync-ack')?.sentAt === 16, '§10d …a write naming NO base (an older bundle) is not judged');
+  }
+  {
+    const H = hub(WSH, seed(), { alive: ALIVE }), A = H.connect(), B = H.connect();
+    await send(A, WORK().map(nameless), { viewport: 'phone', sentAt: 21 });
+    const st = H.layouts().desktops['desk-work'].autoSave, relay = last(B, 'layout-sync');
+    leg(last(A, 'layout-sync-ack') && st.windows.length === 5 && st.windows.every(named) && relay && relay.state.windows.every(named) && st.viewport === 'phone', '§10d IDENTITY on the real handler: a phone save of the five entries NAMELESS (its attaches still in flight) is written with every entry\'s identity kept — on disk and in the relay', J(st.windows.map((w) => [w.winId, w.serverSessionId || null, w.openSpec.backendSessionId])));
+  }
+  {
+    const H = hub(WSH, { ...seed(), desktops: { ...seed().desktops, 'desk-work': { autoSave: { windows: WORK().map(nameless), grid: null, viewport: 'phone', updatedAt: 1000 } } } }, { alive: ALIVE }), D = H.connect(), B = H.connect();
+    await send(D, [], { evidence: unbuiltEv(WORK()), base: 1000, sentAt: 31 });
+    const r = last(D, 'layout-sync-refused');
+    leg(r && r.reason === 'shrink-without-close' && J(r.unexplained) === J(ids(WORK())) && H.layouts().desktops['desk-work'].autoSave.windows.length === 5 && !B.frames.some((f) => f.type === 'layout-sync'), '§10d THE RING 00:17:31 on the real handler: the woken desktop\'s 工作 = [] with five \'unbuilt\' (the record nameless, the sessions LIVE) is REFUSED — the server keeps 5, nobody hears a 0', J(r));
+    leg(H.warns.some((w) => /drops 5 window\(s\) with no close\/move\/kill[\s\S]*5 LIVE \(the sender could not build them\)/.test(w)), '§10d …the journal says the five were LIVE', J(H.warns.filter((w) => /drops/.test(w))));
+    await send(D, [], { evidence: WORK().map((w) => ({ id: w.winId, why: 'closed' })), base: 1000, sentAt: 32 });
+    leg(last(D, 'layout-sync-ack')?.sentAt === 32 && H.layouts().desktops['desk-work'].autoSave.windows.length === 0, '§10d …the person\'s CLOSE of the five passes');
+  }
+  return failed;
+}
+console.log('— §10d THE OWNER\'S RING on the REAL ws-handler');
+const ringHubFailed = await ringHubLegs(loadHandler());
+
+/** §10e the ring through REAL pages (DesktopManager + LayoutManager) whose sockets are the REAL handler */
+async function ringDoorLegs(DM, LM, WSH, { quiet = false, legs = null } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const want = (k) => !legs || legs.includes(k);
+  const desks = [{ id: 'desk-work', name: '工作' }, { id: 'desk-res', name: '研究' }];
+  const seedOf = (work, at = 1000, viewport = 'desktop') => ({ desktopMeta: desks.map((d) => ({ ...d })), desktops: { 'desk-work': { autoSave: { windows: work, grid: null, viewport, updatedAt: at } }, 'desk-res': { autoSave: { windows: [CH('r-6', 6)], grid: null, viewport: 'desktop', updatedAt: at } } } });
+  const page = (H, work, { phone = false, built = true } = {}) => {
+    let W = null;
+    const sock = H.connect((f) => setTimeout(() => { if (W) for (const h of W.handlers) h(f); }, 5));
+    W = world(DM, LM, { records: { 'desk-work': work, 'desk-res': [CH('r-6', 6)] }, active: 'desk-work', desks, server: sock });
+    W.app.isMobile = phone;
+    for (const d of ['desk-work', 'desk-res']) { const rec = H.layouts().desktops[d].autoSave; W.dm._setRecord(d, JSON.parse(J(rec))); W.dm.noteWire(d, rec); W.dm.noteStamp(d, rec.updatedAt); }
+    W.wins.clear();
+    // the windows this page BUILT on 工作 — chat windows whose attach has not answered (no app.sessions entry) and whose
+    // openSpec names no conversation (2.369.340's restoreState attached without one)
+    if (built) for (const w of work) W.mkWin(w.winId, 'desk-work', { type: 'chat', title: w.title, gridBounds: w.gridBounds, _openSpec: { ...w.openSpec, backendSessionId: null, sessionKey: '' } });
+    W.app.replayOpenSpec = (spec, winId) => W.mkWin(winId, W.dm.activeDesktopId, { type: 'chat', title: 'chat ' + winId, _openSpec: spec });
+    return { W, sock };
+  };
+  const dirty = (W) => { W.lm._userDirty = true; W.lm._lastUserInputAt = Date.now(); };
+  const work = (H) => H.layouts().desktops['desk-work'].autoSave;
+  if (want('phone')) {
+    // 23:37:09 — the phone reloads and saves while its attaches are in flight; the server held the desktop's named record
+    const H = hub(WSH, seedOf(WORK()), { alive: ALIVE });
+    const { W } = page(H, WORK(), { phone: true });
+    dirty(W); await W.lm._doAutoSave(); await tick(40);
+    leg(work(H).viewport === 'phone' && work(H).windows.length === 5 && work(H).windows.every(named), '§10e THE RING 23:37:09: the woken PHONE saves 工作 before its five attaches answered — the record keeps every window\'s identity (2.369.340 wrote all five nameless)', J(work(H).windows.map((w) => [w.winId, w.serverSessionId || null, w.openSpec.backendSessionId])));
+  }
+  if (want('desk')) {
+    // 00:17:31 — the desktop reloads on the NAMELESS record (as the base left it), builds none of the five, and switches to 研究
+    const H = hub(WSH, seedOf(WORK().map(nameless), 1000, 'phone'), { alive: ALIVE });
+    const { W, sock } = page(H, WORK().map(nameless), { built: false });
+    W.dm._noteAttempts('desk-work', ids(WORK()), { at: Date.now() - 30000 }); // the boot's attempts, past the 20 s grace
+    dirty(W); await W.dm.switchTo('desk-res'); W.dm._restoring = false; await tick(60);
+    const r = sock.frames.find((f) => f.type === 'layout-sync-refused' && f.desktopId === 'desk-work');
+    leg(r && r.reason === 'shrink-without-close' && work(H).windows.length === 5, '§10e THE RING 00:17:31: the woken DESKTOP (built none of 工作\'s nameless five) switches to 研究 — its 工作 = [] with five \'unbuilt\' is REFUSED; the server keeps 5 (2.369.340: 5 → 0)', J({ refused: r && r.reason, n: work(H).windows.length }));
+    await W.dm.switchTo('desk-work'); W.dm._restoring = false; await tick(700);
+    const onWork = [...W.wins.values()].filter((w) => w._desktopId === 'desk-work').map((w) => w.id).sort();
+    leg(J(onWork) === J(ids(WORK())), '§10e …and switched back, the page BUILDS the five (the refusal forgot their failed attempts; the record kept them)', J(onWork));
+    dirty(W); W.lm._lastSentJson = null; await W.lm._doAutoSave(); await tick(60);
+    leg(work(H).windows.length === 5 && J(ids(work(H))) === J(ids(WORK())), '§10e …its next save writes 工作 = the five', J(ids(work(H))));
+  }
+  if (want('restore')) {
+    // 00:18:04 恢复布局 → the six (the five + 00:18:16's j) stamped NOW; the phone that slept through it saves its old copy
+    const H = hub(WSH, seedOf(WORK(), 1000), { alive: ALIVE });
+    const { W: P0, sock } = page(H, WORK(), { phone: true });
+    const restored = seedOf([...WORK(), CH('w-j', 9)], Date.now() + 5000); // the restore stamps every record above the one it replaces
+    H.replace(restored);
+    dirty(P0); P0.lm._lastSentJson = null; await P0.lm._doAutoSave(); await tick(60);
+    const r = sock.frames.find((f) => f.type === 'layout-sync-refused');
+    leg(r && r.reason === 'stale' && work(H).windows.length === 6, '§10e 恢复布局 HOLDS: the phone that slept through the restore saves 工作 from its OLD copy (five, no j) — REFUSED stale; the six stay (2.369.340: the one-window drop passed the belt, 6 → 5)', J({ refused: r && r.reason, n: work(H).windows.length }));
+    await tick(900);
+    const acked = sock.frames.filter((f) => f.type === 'layout-sync-ack').length;
+    leg(acked >= 1 && J(ids(work(H)).sort()) === J([...ids(WORK()), 'w-j'].sort()) && P0.dm.stampOf('desk-work') >= restored.desktops['desk-work'].autoSave.updatedAt, '§10e …the phone ADOPTS the restored record (its base becomes the restore\'s stamp) and its re-send keeps the six', J({ acked, ids: ids(work(H)), base: P0.dm.stampOf('desk-work') }));
+  }
+  if (want('behind')) {
+    // A RECORD NEVER GOES BACKWARDS on the page: a record of 研究 stamped 5000 is held; one stamped 3000 (a broadcast from before
+    // a sleep, drained after the wake's re-read) is not applied over it
+    const H = hub(WSH, seedOf(WORK()), { alive: ALIVE });
+    const { W } = page(H, WORK());
+    for (const h of W.handlers) h({ type: 'layout-sync', seq: 7, desktopId: 'desk-res', state: { windows: [CH('r-6', 6), CH('r-7', 7)], grid: null }, updatedAt: 5000 });
+    for (const h of W.handlers) h({ type: 'layout-sync', seq: 8, desktopId: 'desk-res', state: { windows: [CH('r-6', 6)], grid: null }, updatedAt: 3000 });
+    leg(J(ids(W.dm._savedStates.get('desk-res'))) === J(['r-6', 'r-7']) && W.dm.stampOf('desk-res') === 5000, '§10e A RECORD NEVER GOES BACKWARDS on the page: a record OLDER than the one applied for its desktop (5000 → 3000) is not applied; the newer one is the base of the next write', J({ held: ids(W.dm._savedStates.get('desk-res')), base: W.dm.stampOf('desk-res') }));
+  }
+  return failed;
+}
+console.log('— §10e THE OWNER\'S RING through REAL pages on the REAL handler (23:37:09 → 00:17:31 → 恢复布局)');
+const ringDoorFailed = await ringDoorLegs(RealDM, RealLM, loadHandler());
+
+/** §10f THE BOOT RESTORE of a NAMELESS entry (layout.js restoreState): found by its openSpec's session, attached WITH its
+ *  conversation id */
+async function ringRestoreLegs(DM, LM, { quiet = false } = {}) {
+  const failed = [];
+  const leg = (c, n, extra) => { if (!quiet) ok(c, n, extra); if (!c) failed.push(n); return !!c; };
+  const W = world(DM, LM, { records: { 'desk-work': [] }, active: 'desk-work', desks: [{ id: 'desk-work', name: '工作' }] });
+  const calls = [];
+  Object.assign(W.app.wm, { _notify() {}, _scheduleOverlapUpdate() {}, setGrid() {} });
+  W.app.sidebar.getCustomName = () => null;
+  W.app.attachSession = (sid, name, cwd, opts) => { calls.push({ sid, opts }); return W.mkWin('tmp-' + sid, 'desk-work', { type: 'chat', _openSpec: { action: 'attachSession', serverId: sid, backendSessionId: opts.backendSessionId || null } }); };
+  W.app.viewSession = () => null;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u) => ({ ok: true, json: async () => (String(u).includes('/api/active') ? { sessions: WORK().map((w, i) => ({ id: 'sess-' + (i + 1), backend: 'claude', backendSessionId: 'conv-' + (i + 1), cwd: '/w/' + (i + 1), name: 'n', mode: 'chat' })) } : { sessions: [] }) });
+  try { await W.lm.restoreState({ windows: WORK().map(nameless), grid: null }); } catch (e) { calls.push({ threw: String(e && e.message) }); }
+  finally { globalThis.fetch = realFetch; }
+  leg(calls.length === 5 && calls.every((c, i) => c.sid === 'sess-' + (i + 1)), '§10f THE BOOT RESTORE of 工作\'s NAMELESS five (the woken desktop, 00:16:52): each is found by the session its openSpec attaches to — 5 attaches (2.369.340: none, every one dropped as \'unbuilt\' 20 s later)', J(calls));
+  leg(calls.every((c, i) => c.opts && c.opts.backendSessionId === 'conv-' + (i + 1)), '§10f …and each attach CARRIES the conversation id — the window\'s openSpec names it before the attach answers (a save in between never writes it nameless)', J(calls.map((c) => c.opts && c.opts.backendSessionId)));
+  return failed;
+}
+console.log('— §10f THE BOOT RESTORE of a nameless entry (layout.js restoreState)');
+const ringRestoreFailed = await ringRestoreLegs(RealDM, RealLM);
+
 // ── §7 NEGATIVE CONTROLS ─────────────────────────────────────────────────────────────────────────────────────────
 console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)');
 {
@@ -1453,7 +1662,7 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   }
   // (e) a belt blind to evidence
   {
-    const find = '    if (ev.has(id)) continue;';
+    const find = "    if (ev.has(id) && !(why.get(id) === 'unbuilt' && sid && !nextSessions.has(sid) && alive(sid))) continue;";
     ok(PSRC.includes(find), 'control belt-blind: the patched line exists in desktop-record.js');
     const f = pureLegs(M.load(MODEL, PSRC.replace(find, ''), 'belt-blind'), { quiet: true });
     ok(f.some((n) => /bulk close/.test(n)) && !f.some((n) => /userW's write/.test(n)), `control belt-blind: a belt that reads no evidence refuses the user's own bulk close (RED) — the incident's refusal still holds (${f.length})`);
@@ -1504,7 +1713,7 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   }
   // (l) verify r1 D6: the switch's broadcast without the evidence
   {
-    const find = "    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: this.evidence(), sentAt, viewport: this.app.isMobile ? 'phone' : 'desktop' });";
+    const find = "    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: this.evidence(), sentAt, viewport: this.app.isMobile ? 'phone' : 'desktop', base: this.stampOf(desktopId) });";
     ok(DSRC.includes(find), 'control switch-no-evidence: the patched line exists in desktop-manager.js');
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', DSRC.replace(find, "    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: [], sentAt });"), 'switch-no-evidence', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['n'] });
     ok(f.some((n) => /switch's broadcast of the desktop being left/.test(n)), `control switch-no-evidence: the closes leave unexplained — RED (${f.length})`);
@@ -1838,9 +2047,52 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
     const f = await gateDoorLegs(DM0, loadHandler(), { quiet: true, legs: ['cur'] });
     ok(f.some((n) => /a CURRENT phone page/.test(n)), `control pre-p1-write-half: the P0 write half (a phone carries the sidebar and the grid only) — the gate REFUSES a phone save whose own theme / fonts / bars differ from the desk's (RED) (${f.length})`);
   }
+  // THE OWNER'S RING (lane layout-stale-record-sync): each new rule removed turns its own §10 legs RED
+  {
+    const find = "    if (ev.has(id) && !(why.get(id) === 'unbuilt' && sid && !nextSessions.has(sid) && alive(sid))) continue;";
+    ok(PSRC.includes(find), 'control ring-unbuilt-explains-live: the patched line exists in desktop-record.js');
+    const Mx = M.load(MODEL, PSRC.replace(find, '    if (ev.has(id)) continue;'), 'ring-unbuilt-explains-live');
+    const f = ringPureLegs(Mx, { quiet: true });
+    const WSHx = loadHandler(null, { shrinkVerdict: Mx.shrinkVerdict });
+    const h = await ringHubLegs(WSHx, { quiet: true }), d = await ringDoorLegs(RealDM, RealLM, WSHx, { quiet: true, legs: ['desk'] });
+    ok(f.some((n) => /THE RING 00:17:31/.test(n)) && h.some((n) => /THE RING 00:17:31 on the real handler/.test(n)) && d.some((n) => /THE RING 00:17:31: the woken DESKTOP/.test(n)), `control ring-unbuilt-explains-live (2.369.340's belt: 'unbuilt' explains a live window): the woken desktop's 工作 = [] is WRITTEN — 5 → 0 (RED ${f.length}/${h.length}/${d.length})`);
+  }
+  {
+    const find = "    windows.push(page.has(id) ? keepIdentity(w, page.get(id)) : w);";
+    ok(PSRC.includes(find), 'control ring-merge-forgets: the patched line exists in desktop-record.js');
+    const f = ringPureLegs(M.load(MODEL, PSRC.replace(find, '    windows.push(page.has(id) ? page.get(id) : w);'), 'ring-merge-forgets'), { quiet: true });
+    const h = await ringHubLegs(loadHandler(null, { keepIdentities: (p, n) => n }), { quiet: true });
+    ok(f.some((n) => /mergeDesktopRecord \(every record a page sends\)/.test(n)) && h.some((n) => /IDENTITY on the real handler/.test(n)), `control ring-merge-forgets + ring-server-forgets (2.369.340's merge / write): the nameless capture takes the record's place — RED (${f.length}/${h.length})`);
+  }
+  {
+    const WSHx = loadHandler(null, { staleVerdict: () => ({ ok: true, judged: false }) });
+    const h = await ringHubLegs(WSHx, { quiet: true }), d = await ringDoorLegs(RealDM, RealLM, WSHx, { quiet: true, legs: ['restore'] });
+    ok(h.some((n) => /THE STALENESS GATE on the real handler/.test(n)) && d.some((n) => /恢复布局 HOLDS/.test(n)), `control ring-no-stale-gate (2.369.340: no base judged): the phone's old copy lands over the restore — RED (${h.length}/${d.length})`);
+  }
+  {
+    const find = "        if (!alive && ws.openSpec?.action === 'attachSession' && ws.openSpec.serverId) alive = activeSessions.find(s => s.id === ws.openSpec.serverId);\n";
+    ok(LSRC0.includes(find), 'control ring-restore-ignores-spec: the patched line exists in layout.js');
+    const LMx = (await import(M.write('src/lib/layout.js', LSRC0.replace(find, ''), 'ring-restore-ignores-spec', { esm: true }))).LayoutManager;
+    const f = await ringRestoreLegs(RealDM, LMx, { quiet: true });
+    ok(f.some((n) => /THE BOOT RESTORE of 工作's NAMELESS five/.test(n)), `control ring-restore-ignores-spec (2.369.340's restoreState): a nameless chat matches nothing and builds nothing — RED (${f.length})`);
+  }
+  {
+    const find = "{ mode: 'chat', backend: alive.backend || backend, machine: true, backendSessionId: alive.backendSessionId || alive.claudeSessionId || backendSessionId || undefined });";
+    ok(LSRC0.includes(find), 'control ring-attach-nameless: the patched line exists in layout.js');
+    const LMx = (await import(M.write('src/lib/layout.js', LSRC0.replace(find, "{ mode: 'chat', backend: alive.backend || backend, machine: true });"), 'ring-attach-nameless', { esm: true }))).LayoutManager;
+    const f = await ringRestoreLegs(RealDM, LMx, { quiet: true });
+    ok(f.length === 1 && f.some((n) => /each attach CARRIES the conversation id/.test(n)), `control ring-attach-nameless (2.369.340's attach): the window's openSpec names no conversation until 'attached' — RED (${f.length})`);
+  }
+  {
+    const find = "    if (behindStamp(this._appliedStamps, msg)) {";
+    ok(LSRC0.includes(find), 'control ring-applies-older: the patched line exists in layout.js');
+    const LMx = (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '    if (false) {'), 'ring-applies-older', { esm: true }))).LayoutManager;
+    const f = await ringDoorLegs(RealDM, LMx, loadHandler(), { quiet: true, legs: ['behind'] });
+    ok(f.some((n) => /A RECORD NEVER GOES BACKWARDS on the page/.test(n)), `control ring-applies-older: the older record lands over the newer — RED (${f.length})`);
+  }
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 34 })) ok(r.pass, r.name, r.detail);
 }
 
-const anyFailed = fail || pureFailed.length || layerFailed.length || doorFailed.length || gateFailed.length || hubFailed.length || gateDoorFailed.length;
+const anyFailed = fail || pureFailed.length || layerFailed.length || doorFailed.length || gateFailed.length || hubFailed.length || gateDoorFailed.length || ringPureFailed.length || ringHubFailed.length || ringDoorFailed.length || ringRestoreFailed.length;
 console.log(`\n${anyFailed ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(anyFailed ? 1 : 0);

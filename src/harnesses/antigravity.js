@@ -8,7 +8,8 @@
 //   · terminal = agy's TUI with the same flags (src/adapters/agy.js agyFlags);
 //   · resume = `--conversation <conversation_id>` (the wrapper adopts the id agy names); a model / effort / mode
 //     switch or Stop restarts agy on the same conversation (the stream has no cancel and no switch verb);
-//   · a slash command is refused by the wrapper (agy would end the stream, exit 2); an unauthenticated agy prints its
+//   · a slash command is refused by the wrapper (agy would end the stream, exit 2) — ONLY agy's own, the closed measured
+//     list AGY_SLASH_COMMANDS (./antigravity-slash.js); a line that starts with a path is text; an unauthenticated agy prints its
 //     OAuth URL and waits 60 s for a pasted code ON STDIN — the wrapper kills it and says auth-required.
 // Commit 1: the MACHINE's own Antigravity login. Commit 2 (creds below): named Google accounts, each its own HOME ROOT.
 // Commit 3 shipped the `-p /usage` judge; lane antigravity-card-fixes the READING (AGY_QUOTA below), no pool.
@@ -20,7 +21,11 @@ const { AgyAdapter, AGY_EFFORTS } = require('../adapters/agy');
 const { AcpMessageManager, AcpSessionMessages } = require('../acp-message-manager');
 const { NULL_QUOTA } = require('./null-quota');
 const AGY_USAGE = require('./antigravity-usage');
+const { AGY_SLASH_COMMANDS } = require('./antigravity-slash');
 const { HARNESS_SETTINGS } = require('../harness-settings');
+const AS = require('../agy-store');
+const ACP_ARTIFACTS = require('./artifacts-of.js').acp;
+const AGY_BACKFILL = require('../agy-backfill'); // a sub that ALREADY RAN under an older wrapper: its card from the store
 
 /** The model slugs the headless docs list (`agy models` needs a sign-in — measured), provenance 'docs'; the
  *  dropdown keeps a Custom… row, and agy refuses an unknown slug by name (headless never falls back). */
@@ -130,6 +135,28 @@ function agyBillingIdentity(s, { accounts, withHost }) {
   return withHost({ source: 'login-cli', label: 'Google login' });
 }
 
+// ── SUBAGENTS (lane agy-subagent-cards, 2026-10-21) ──
+/** THE HELPER DOOR: a FINISHED subagent card (the wrapper's `subagent` record — its status no longer running) names the
+ *  sub's own transcript in the store it was read from (the record's account HOME root — data/agy-subs/<id> or this
+ *  machine's login); its write_file / edit_file calls become THIS conversation's Artifacts rows `via` the sub. A running
+ *  card, any other record, an id that is not a conversation id ⇒ [] with no disk read (src/agy-store.js builds the path —
+ *  never the login file). */
+function agyHelperTranscripts(record, ctx = {}) {
+  const r = record || {};
+  if (r.type !== 'acp' || r.kind !== 'subagent' || !r.status || r.status === 'running') return [];
+  const rel = AS.storePaths(r.subId)?.transcriptFull;
+  if (!rel || !AS.storeReadable(rel)) return [];
+  const home = typeof ctx.home === 'string' && ctx.home ? ctx.home
+    : (typeof r.home === 'string' && path.isAbsolute(r.home) && path.normalize(r.home) === r.home ? r.home : machineHome());
+  return [{ file: path.join(home, '.gemini', 'antigravity-cli', ...rel.split('/')), via: { kind: 'subagent', name: String(r.role || r.typeName || 'subagent').slice(0, 120) } }];
+}
+/** The artifacts reader: the journal's ACP records (the ACP reader) and, through the helper door, a SUB's transcript
+ *  lines — a write call names its path (agy-store artifactRecordsOf; MEASURED: write_file {Path, Content, Overwrite}). */
+function agyArtifactsOf(rec) {
+  if (rec && (rec.type === 'acp' || rec.method)) return ACP_ARTIFACTS(rec);
+  return AS.artifactRecordsOf(rec).flatMap((x) => ACP_ARTIFACTS(x));
+}
+
 const creds = {
   subsDirName: 'agy-subs',                   // data/agy-subs/<id> = the account's HOME root (0700)
   idPrefix: 'agy',                           // agy-<12 hex> (accounts.createHomeSubscription)
@@ -196,9 +223,13 @@ module.exports = {
   Normalizer: AcpMessageManager,
   store: {
     // agy keeps conversations in its own sqlite (~/.gemini/antigravity-cli/conversation_summaries.db) — no per-
-    // conversation file to locate; the wrapper journal is the history (the ACP rule)
+    // conversation file to locate; the wrapper journal is the history (the ACP rule) — read with the cards of subs that
+    // already ran under a wrapper older than the cards (src/agy-backfill.js, the cards' addendum)
     locate: () => null,
-    SessionMessages: AcpSessionMessages,
+    SessionMessages: AGY_BACKFILL.AgySessionMessages,
+    // the turn end of a conversation an OLD wrapper still serves (dtach kept its code across the update): the cards of
+    // its card-less invoke_subagent rows, read from the store — records acp-events routes as if journaled
+    afterTurn: (session) => AGY_BACKFILL.afterTurn(session),
   },
   quota: AGY_QUOTA,            // the `-p /usage` reading on a person's Re-check (answered without a turn — agy's own changelog)
   // AUTO-RESUME'S RESUME VERB: a continue is a user line on the wrapper's stdin (the 'prompt' form, as ACP) — the
@@ -208,7 +239,7 @@ module.exports = {
   // account rides /api/usage's homeAccounts map (the Re-check reading), not a billing-row store. effortLevels = agy's own
   // --effort list (the adapter's AGY_EFFORTS, the one place) and NO effortExtras: the menu offers exactly these (lane
   // effort-menu-per-harness — it used to offer claude's ultracode); effortReport null = no turn reports its effort.
-  ui: { billing: { globalLogin: 'Google login', cliLogin: 'Google login', pickLogin: 'Google login (Antigravity CLI)', pickLoginHost: 'Google login (on the host)', planSuffix: '', switchLogin: 'Google login', accountLogin: 'Google', defaultIdField: 'defaultAntigravityAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: null, globalUsageKey: null, estimates: false }, effortReport: null, effortLevels: AGY_EFFORTS, modelLock: true, legacyIds: false, resumeResend: false },
+  ui: { billing: { globalLogin: 'Google login', cliLogin: 'Google login', pickLogin: 'Google login (Antigravity CLI)', pickLoginHost: 'Google login (on the host)', planSuffix: '', switchLogin: 'Google login', accountLogin: 'Google', defaultIdField: 'defaultAntigravityAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: null, globalUsageKey: null, estimates: false }, effortReport: null, effortLevels: AGY_EFFORTS, modelLock: true, legacyIds: false, resumeResend: false, subagents: 'cards' },
   creds,
   billingIdentity: agyBillingIdentity,
   settingsPrefix: 'antigravity',
@@ -216,14 +247,18 @@ module.exports = {
   configFiles: {},
   models,
   artifactTools: require('./artifacts-of.js').ARTIFACT_TOOLS.acp,
-  // the journal's tool records carry agy's tool_info (no `diff` content): the ACP reader produces nothing from them
-  // until a signed-in capture shows write_to_file's parameters — never a guessed path
-  artifactsOf: require('./artifacts-of.js').acp,
+  // the journal's tool records carry agy's tool_info (no `diff` content — measured: write_file's stream parameters are
+  // {Path} alone), so the parent's own writes produce nothing here; a SUB's writes arrive through the helper door below
+  artifactsOf: agyArtifactsOf,
+  // lane agy-subagent-cards: ui.subagents 'cards' — each invoke_subagent row is a card (the wrapper reads the store) that
+  // opens the sub's own timeline as the virtual session sub-<id>; a finished sub's writes reach the Artifacts chip
+  helperTranscriptsOf: agyHelperTranscripts,
   inject: { kind: 'acp', hookFile: null, hookEvents: [], sessionStartHonoured: false },
   brand: '/brand/antigravity.svg',
 };
 module.exports.AGY_MODELS = AGY_MODELS;
 module.exports.AGY_QUOTA = AGY_QUOTA;
+module.exports.AGY_SLASH_COMMANDS = AGY_SLASH_COMMANDS;   // the commands agy answers itself — the wrapper keeps exactly these out of its stream
 module.exports.TOKEN_REL = TOKEN_REL;
 module.exports.ACCOUNT_MARK = ACCOUNT_MARK;
 module.exports.seedHomeRoot = seedHomeRoot;

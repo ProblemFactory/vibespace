@@ -7,6 +7,9 @@
 //     the docs' model slugs; the derived never-armed auto-resume row; the job door's agy names)
 //   ② one chat turn: the conversation id adopted from agy's init, the text, a tool step as a tool card, result = turn end,
 //     the version recorded per spawn; the ACP normalizer renders the journal
+//   ①b agy's OWN slash commands (lane agy-slash-guard-paths): ONE closed list = the measured fixture's, PURE, the wrapper's
+//     one source; the table — a command answers its name, a line that starts with a path (the attachment's) or any other
+//     "/…" is text — + its RED control (the base's first-character rule: the attachment message is «/home»)
 //   ③ THE SLASH REFUSAL + its RED control (a wrapper copy that forwards it: agy ends the stream, exit 2)
 //   ④ THE SOFT-DENY CARD + Allow once and retry (one turn with the bypass, then back) / Keep skipped / stale + its RED control
 //     (a copy whose stderr reader drops it: the skip is silent); ④b the one-turn bypass never reaches a reordered user
@@ -20,6 +23,11 @@
 //   ⑥ Stop = restart on the same conversation, the turn ends cancelled; the queue's remove / edit
 //   ⑦ resume (--conversation from the start), an agent error (AGY_ERROR + result ERROR), a text-only stream
 //   ⑧ THE AUTH GATE: an unauthenticated agy is refused in seconds by name, and never gets a user line as its code
+//   ⑫ THE SUBAGENT CARD (lane agy-subagent-cards): over a fixture agy store (scripts/fixtures/agy-store), the
+//     invoke_subagent row → the `subagent` card record (linked by the task's spawning step), the sub's steps as `sub`
+//     records, the row's own end, the card ending on the sub's answer (elapsed, files), the tail ON only while a sub
+//     works and OFF after + its RED copy; an older agy (no subagent_info, no store) ⇒ no card, no error; no transcript ⇒
+//     the db's rows (node:sqlite read-only) are the timeline; the ACP normalizer draws the card and the virtual session
 // Run: node scripts/test-agy-harness.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,6 +44,11 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ROOT = scratchDir('agy-harness');
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
+// a wrapper COPY lives at <root>/data/bin beside <root>/src → the repo's src, so its require of src/agy-store.js resolves
+// (lane agy-subagent-cards: the wrapper's store parser is the shared module)
+const MUTBIN = path.join(ROOT, 'data', 'bin');
+fs.mkdirSync(MUTBIN, { recursive: true });
+try { fs.symlinkSync(path.join(REPO, 'src'), path.join(ROOT, 'src')); } catch { }
 const CLEAN_ENV = { ...process.env };
 for (const k of Object.keys(CLEAN_ENV)) if (/^VIBESPACE_|^ACP_WEBUI_|^AGY_|^CLAUDE_CODE_/.test(k)) delete CLEAN_ENV[k];
 
@@ -73,6 +86,32 @@ console.log('— ① the descriptor, re-derived from what agy 1.4.3 measured');
   ok('auto-resume: the prompt verb exists, no limit signal (NULL_QUOTA, commit 1) ⇒ never offered', JSON.stringify(capsOf('antigravity').autoResume) === JSON.stringify({ signal: false, resume: 'prompt', supported: false }));
   ok('commit 2 = named Google accounts, each its own HOME root (localOnly, nothing shipped); still no pool', !!g.creds && g.creds.spawnForm === 'isolated-home' && g.creds.localOnly === true && g.creds.files.length === 0 && capsOf('antigravity').pool === false);
   ok('the job door strips agy\'s login names (GEMINI_API_KEY / AGY_ADC_AUTH / GOOGLE_GEMINI_BASE_URL — names the binary holds)', ['GEMINI_API_KEY', 'AGY_ADC_AUTH', 'GOOGLE_GEMINI_BASE_URL'].every((n) => HE.VENDOR_CREDENTIAL_ENV.includes(n) && FX.env.names.includes(n)));
+}
+
+console.log('— ①b agy\'s OWN slash commands: ONE closed list (the measured fixture), a line that starts with a path is text');
+{
+  const SL = require(path.join(REPO, 'src/harnesses/antigravity-slash.js'));
+  const modSrc = fs.readFileSync(path.join(REPO, 'src/harnesses/antigravity-slash.js'), 'utf8');
+  const wSrc = fs.readFileSync(WRAPPER, 'utf8');
+  ok('the list IS the one agy 1.4.3 measured (the fixture\'s slashInPrint.answeredWithoutATurn — its own changelog), frozen; the descriptor exports the SAME array',
+    JSON.stringify(SL.AGY_SLASH_COMMANDS) === JSON.stringify(FX.slashInPrint.answeredWithoutATurn) && FX.slashInPrint.provenance === 'changelog' && Object.isFrozen(SL.AGY_SLASH_COMMANDS)
+    && require(path.join(REPO, 'src/harnesses/antigravity.js')).AGY_SLASH_COMMANDS === SL.AGY_SLASH_COMMANDS, SL.AGY_SLASH_COMMANDS);
+  ok('the module is PURE (no require, no import — the wrapper loads it beside src/) and names the fixture it was measured from',
+    !/\brequire\(|\bimport\b/.test(modSrc.replace(/^\s*\/\/.*$/gm, '')) && modSrc.includes('scripts/fixtures/antigravity-cli-1.4.3.json'));
+  ok('ONE definition: the wrapper requires that module and its guard asks agySlashCommand — no first-character test, no list of its own',
+    wSrc.includes("require(path.join(__dirname, '..', '..', 'src', 'harnesses', 'antigravity-slash.js'))") && wSrc.includes('  const word = agySlashCommand(text);\n') && !wSrc.includes('^\\/[A-Za-z]') && !wSrc.includes("'/credits'"));
+  const CMD = [['/model', '/model'], ['/usage opus', '/usage'], ['/help', '/help'], ['  /MODEL', '/model'], ['/Config\nthe next line', '/config'], ['/credits　全角空格', '/credits'], ...SL.AGY_SLASH_COMMANDS.map((c) => [c, c])];
+  const TEXT = ['/home/u/x.zip 这里是…', '/tmp/a.txt', '~/x', './run.sh', '../up.sh', '/ 2', '/2026', '/notacommand hello', '/models', '/model/x', '/usage.txt', 'hello /model', '', null, undefined];
+  const bad = CMD.filter(([t, w]) => SL.agySlashCommand(t) !== w).concat(TEXT.filter((t) => SL.agySlashCommand(t) !== null).map((t) => [t, SL.agySlashCommand(t)]));
+  ok(`the table: ${CMD.length} command lines answer their command (any case, args after whitespace); ${TEXT.length} lines are TEXT — the attachment's path first, /tmp/a.txt, ~/x, ./run.sh, "/ 2", /2026, /notacommand, /models, /model/x, /usage.txt`, bad.length === 0, bad);
+  // RED CONTROL = the base's rule (2.369.340): the guard read the FIRST CHARACTER ("/" + a letter) and named the word after it
+  const cut = "  const head = String(text == null ? '' : text).trimStart().split(/\\s/, 1)[0].toLowerCase();\n  return AGY_SLASH_COMMANDS.includes(head) ? head : null;\n";
+  const BASE_RULE = "  const t = String(text == null ? '' : text).trimStart();\n  return /^\\/[A-Za-z]/.test(t) ? (t.match(/^\\/[\\w:-]+/) || ['/'])[0] : null;\n";
+  const mp = path.join(ROOT, 'antigravity-slash-base.js');
+  fs.writeFileSync(mp, modSrc.replace(cut, BASE_RULE));
+  const base = require(mp).agySlashCommand;
+  ok('RED CONTROL (the base\'s first-character rule): the attachment message IS the command «/home», /tmp/a.txt «/tmp», /notacommand a command',
+    modSrc.includes(cut) && base('/home/u/x.zip 这里是…') === '/home' && base('/tmp/a.txt') === '/tmp' && base('/notacommand hello') === '/notacommand' && base('/model') === '/model', [base('/home/u/x.zip 这里是…'), base('/tmp/a.txt'), base('/notacommand hello')]);
 }
 
 function startWrapper({ env = {}, wrapper = WRAPPER } = {}) {
@@ -129,7 +168,7 @@ console.log('— ③ THE SLASH REFUSAL (agy would end the stream, exit 2)');
     await w.until(() => w.find('session'), 8000, 'session');
     w.send({ type: 'chat-input', text: '/usage', msgId: 's1' });
     const n = await w.until(() => w.find('notice', (r) => r.noticeKind === 'slash-refused'), 5000, 'refusal');
-    ok('a chat line starting with "/" is refused by the wrapper, by name', /\/usage was not sent/.test(n.text), n.text);
+    ok('a chat line that IS one of agy\'s own commands (/usage) is refused by the wrapper, by name', /\/usage was not sent/.test(n.text), n.text);
     w.send({ type: 'chat-input', text: 'still here', msgId: 's2' });
     await w.until(() => w.find('prompt_end'), 8000, 'the next turn');
     ok('…it never reached agy, and the conversation lives on (the next turn answers)', !w.stub().some((x) => x.stdin && /"\/usage"/.test(x.stdin)) && w.exited === null && /still here/.test(w.text()));
@@ -137,7 +176,7 @@ console.log('— ③ THE SLASH REFUSAL (agy would end the stream, exit 2)');
   // RED control: the same wrapper with the refusal removed lets the line through — agy ends the session (exit 2)
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const cut = "      if (slashRefused(n.text)) return;\n";
-  const mutated = path.join(ROOT, 'agy-wrapper-noslash.js');
+  const mutated = path.join(MUTBIN, 'agy-wrapper-noslash.js');
   fs.writeFileSync(mutated, src.replace(cut, ''));
   const m = startWrapper({ wrapper: mutated });
   try {
@@ -191,7 +230,7 @@ const streamStarts = (w) => w.stub().filter((x) => x.argv && x.argv.includes('--
   } finally { await w.stop(); }
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const line = "  if (SOFT_DENY_RE.test(line)) { softDenyCard(line); }";
-  const mutated = path.join(ROOT, 'agy-wrapper-nodeny.js');
+  const mutated = path.join(MUTBIN, 'agy-wrapper-nodeny.js');
   fs.writeFileSync(mutated, src.replace(line, '  if (false && SOFT_DENY_RE.test(line)) { softDenyCard(line); }'));
   const m = startWrapper({ wrapper: mutated });
   try {
@@ -225,7 +264,7 @@ console.log('— ④b THE ONE-TURN BYPASS never reaches a user turn (a reorder d
   ok('the user turn moved ahead of the retry runs under request-review; the retry alone gets the bypass', /request-review\): mine/.test(t) && /always-proceed\): The user allowed run_command/.test(t), t);
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const guard = '  if (wantBypass !== childRetryBypass) {';
-  const mutated = path.join(ROOT, 'agy-wrapper-leak.js');
+  const mutated = path.join(MUTBIN, 'agy-wrapper-leak.js');
   fs.writeFileSync(mutated, src.replace(guard, '  if (wantBypass && !retryBypass) {'));
   const tm = await reorderLeg(mutated);
   ok('RED control: a copy that checks only "retry wants it" (not what the process was started with) runs the moved user turn with every tool approved', src.includes(guard) && /always-proceed\): mine/.test(tm), tm);
@@ -275,7 +314,7 @@ console.log('— ④c ON A NAMED ACCOUNT: "Allow <rule> and retry" writes the ru
   // RED control: a copy that checks the dirs with stat (following links) offers the door and writes the GLOBAL file
   const src = fs.readFileSync(WRAPPER, 'utf8');
   const chk = 'if (!fs.lstatSync(d).isDirectory())';
-  const mutated = path.join(ROOT, 'agy-wrapper-statdir.js');
+  const mutated = path.join(MUTBIN, 'agy-wrapper-statdir.js');
   fs.writeFileSync(mutated, src.replace(chk, 'if (!fs.statSync(d).isDirectory())'));
   const r5 = await ruleLeg(root3, mutated);
   ok('RED control: a copy that follows the link writes the rule into the person\'s global settings.json (the leg above can go red)', src.includes(chk) && r5.card.options.some((o) => o.optionId === 'rule') && /command\(rm\)/.test(fs.readFileSync(path.join(globalDir, 'settings.json'), 'utf8')));
@@ -484,10 +523,138 @@ console.log('— ⑪ THE EXECUTABLE (lane antigravity-spawn-argv): argv[4] is ag
   }
   // RED copy: the refusal cut ⇒ /usr/bin/env runs and the session says only the exit code (the owner's 125)
   const src = fs.readFileSync(WRAPPER, 'utf8'), cut = "  if (refused) { notice('error', refused, 'spawn-failed'); finalizeExit(1); return; }\n";
-  const mutated = path.join(ROOT, 'agy-wrapper-no-refusal.js');
+  const mutated = path.join(MUTBIN, 'agy-wrapper-no-refusal.js');
   fs.writeFileSync(mutated, src.replace(cut, ''));
   const m = await run('/usr/bin/env', mutated);
   ok('RED copy (the refusal cut): /usr/bin/env runs and the session says only «exit code 125 — see agy-wrapper.log»', src.split(cut).length === 2 && m.code === 125 && m.errors.some((t) => /exited \(exit code 125\) — see agy-wrapper\.log/.test(t)), m);
+}
+
+console.log('— ⑫ THE SUBAGENT CARD (lane agy-subagent-cards): the invoke_subagent row read from the agy store; the tail only while a sub works');
+{
+  const FIXS = path.join(REPO, 'scripts/fixtures/agy-store');
+  const P = '9c0f0000-0000-4000-8000-0000000000a1', S = '49120000-0000-4000-8000-0000000000b1', SG = '.system_generated';
+  const { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.js'));
+  // a HOME whose agy store is the fixture (copied in SHAPE from the owner's): the sub's first `lines` steps on disk
+  const mkStore = async (name, { lines = 5, transcript = true, db = false } = {}) => {
+    const home = path.join(ROOT, name), store = path.join(home, '.gemini', 'antigravity-cli');
+    fs.mkdirSync(store, { recursive: true });
+    fs.cpSync(path.join(FIXS, 'brain'), path.join(store, 'brain'), { recursive: true });
+    const t = path.join(store, 'brain', S, SG, 'logs', 'transcript.jsonl');
+    const all = fs.readFileSync(t, 'utf8').split('\n').filter(Boolean);
+    if (transcript) fs.writeFileSync(t, all.slice(0, lines).join('\n') + '\n');
+    else fs.rmSync(path.dirname(t), { recursive: true, force: true });
+    if (db) {
+      const fx = JSON.parse(fs.readFileSync(path.join(FIXS, 'db-steps.json'), 'utf8'));
+      const { DatabaseSync } = await import('node:sqlite');
+      fs.mkdirSync(path.join(store, 'conversations'), { recursive: true });
+      const d = new DatabaseSync(path.join(store, 'conversations', `${S}.db`));
+      d.exec('CREATE TABLE steps (idx integer PRIMARY KEY, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, metadata blob, render_info blob, step_payload blob)');
+      const ins = d.prepare('INSERT INTO steps VALUES (?, ?, ?, ?, ?, ?)');
+      const hex = (h) => (h ? Buffer.from(h, 'hex') : null);
+      for (const r of fx.rows) ins.run(r.idx, r.step_type, r.status, hex(r.metadata), hex(r.render_info), hex(r.step_payload));
+      d.close();
+    }
+    return { home, store, t, rest: all.slice(lines) };
+  };
+  const wlog = (w) => { try { return fs.readFileSync(path.join(w.dir, 'agy-wrapper.log'), 'utf8'); } catch { return ''; } };
+  const env = (home, more = {}) => ({ HOME: home, AGY_WEBUI_RESUME_ID: P, AGY_STUB_SPAWN_STEP: '6', AGY_STUB_SUB_ROLE: '示例评审专家', AGY_WEBUI_SUB_TAIL_MS: '200', AGY_WEBUI_SUB_LOOK_MS: '3000', ...more });
+  const subKind = (r) => (r.rec.kind === 'update' ? r.rec.update.sessionUpdate : r.rec.kind);
+
+  // the four legs are independent wrappers on their own stores: run them TOGETHER (the suite stays under the fast
+  // tier's 10 s), each collecting its checks, printed in this order once all four end
+  const legs = [];
+  const leg = (fn) => { const out = []; legs.push(fn((n, c, e) => { out.push([n, c, e]); }).then(() => out, (err) => [...out, [`leg threw: ${err && err.message}`, false]])); };
+  leg(async (ok) => {
+    const A = await mkStore('agy-sub-a');
+    const w = startWrapper({ env: env(A.home) });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'chat-input', text: 'run a tool first', msgId: 'sa0' });
+      await w.until(() => w.find('prompt_end'), 8000, 'a plain turn');
+      ok('a conversation that starts no subagent never runs the tail (nothing reads the store)', !/subagent tail on/.test(wlog(w)) && !w.find('subagent') && !w.find('sub'), wlog(w).slice(-300));
+      w.send({ type: 'chat-input', text: 'please start a subagent', msgId: 'sa1' });
+      const card = await w.until(() => w.find('subagent', (r) => r.status === 'running'), 8000, 'the running card');
+      ok('the invoke_subagent row → THE CARD: its sub found by the TASK\'s spawning step (6), the role, type, the task the parent gave, running', card.toolCallId === `${P}:6` && card.subId === S && card.role === '示例评审专家' && card.typeName === 'self' && card.spawnStep === 6 && /按 100 分制打分/.test(card.task) && card.home === A.home && card.state === 'SUBAGENT_STATE_ALIVE', card);
+      await w.until(() => w.all('sub').length >= 6, 8000, 'the sub\'s first steps');
+      const first = w.all('sub');
+      ok('…its own steps ride `sub` records under its id (the task bubble, a read, a command — ACP records the virtual session draws)', first.every((r) => r.subId === S && r.toolCallId === `${P}:6`) && subKind(first[0]) === 'user' && first.some((r) => r.rec.update?.title === 'run_command'), first.map(subKind));
+      ok('the row itself: a tool_call, then its OWN end on the subagent_info update (the owner\'s two rows never got one) — and no «started 1 subagent» line beside the card',
+        w.find('update', (r) => r.update?.sessionUpdate === 'tool_call' && r.update.toolCallId === `${P}:6` && r.update.title === 'invoke_subagent') && w.find('update', (r) => r.update?.sessionUpdate === 'tool_call_update' && r.update.toolCallId === `${P}:6` && r.update.status === 'completed') && !w.find('notice', (r) => r.noticeKind === 'subagents'));
+      ok('THE TAIL is on while the sub works', /subagent tail on \(every 200 ms\)/.test(wlog(w)) && !/subagent tail off/.test(wlog(w)), wlog(w).slice(-400));
+      const cards = w.all('subagent').length;
+      // the sub finishes: its last five steps + its answer land in the store
+      fs.appendFileSync(A.t, A.rest.join('\n') + '\n');
+      fs.copyFileSync(path.join(FIXS, 'answer.json'), path.join(A.store, 'brain', P, SG, 'messages', 'c0000000-0000-4000-8000-0000000000c3.json'));
+      const done = await w.until(() => w.find('subagent', (r) => r.status === 'completed'), 8000, 'the finished card');
+      ok('the sub answered (its last step a final planner response) ⇒ the card ends: completed, its answer, the elapsed time (task delivered 14:32:32.119 → last step 14:33:26 = 53 881 ms), the file it wrote, ten steps', /88\/100/.test(done.result) && done.elapsedMs === 53881 && done.files.join() === '/home/u/workspace/示例项目/report.md' && done.steps === 10, done);
+      ok('five more steps re-sent the card ONCE (its change: completed) — a step alone never does (the task + answer are the journal\'s largest texts)', w.all('subagent').length === cards + 1, { before: cards, after: w.all('subagent').length });
+      await w.until(() => /subagent tail off/.test(wlog(w)), 4000, 'the tail off');
+      const n = w.records.length;
+      await sleep(500);
+      ok('…and the tail STOPS — nothing more is read or written (≥ 4 tail periods, no record)', w.records.length === n && w.all('sub').length === 13, { after: w.records.length - n, subs: w.all('sub').length });
+      const mm = new AcpMessageManager('p');
+      mm.convertHistory(w.records.filter((r) => r.type === 'acp'));
+      const cm = mm.messages.filter((m) => m.taskInfo?.subId === S);
+      ok('the ACP normalizer draws ONE card (toolName Agent; taskInfo names the sub, its status, elapsed, files; the answer is its output) — no parent card for a sub step',
+        cm.length === 1 && cm[0].toolName === 'Agent' && cm[0].status === 'complete' && cm[0].taskInfo.status === 'completed' && cm[0].taskInfo.elapsedMs === 53881 && /88\/100/.test(cm[0].content[0].output) && cm[0].content[0].input.prompt.includes('按 100 分制打分') && !mm.messages.some((m) => /wc -l/.test(JSON.stringify(m.content))),
+        mm.messages.map((m) => `${m.role}:${m.toolName || ''}:${m.status}`));
+      const vm = new AcpMessageManager(`sub-${S}`);
+      vm.convertHistory(w.all('sub').map((r) => r.rec));
+      const tools = vm.messages.filter((m) => m.role === 'tool');
+      ok('the virtual session sub-<id> draws the sub\'s own timeline: the task bubble (from «Parent Agent»), four tool cards all closed, its last words',
+        vm.messages[0].role === 'user' && vm.messages[0].peerFrom === 'Parent Agent' && tools.length === 4 && tools.every((m) => m.status === 'complete') && /sent my evaluation/.test(JSON.stringify(vm.messages[vm.messages.length - 1].content)),
+        vm.messages.map((m) => `${m.role}:${m.toolName || ''}:${m.status}`));
+    } finally { await w.stop(); }
+
+  });
+  leg(async (ok) => {
+    // an OLDER agy: no subagent_info, a store that names no sub ⇒ no card, no error; the look ends within its window
+    const B = path.join(ROOT, 'agy-sub-b'); fs.mkdirSync(B, { recursive: true });
+    const w2 = startWrapper({ env: env(B, { AGY_WEBUI_SUB_LOOK_MS: '1000' }) });
+    try {
+      await w2.until(() => w2.find('session'), 8000, 'session');
+      w2.send({ type: 'chat-input', text: 'start a subagent the old way', msgId: 'sb1' });
+      await w2.until(() => w2.find('prompt_end'), 8000, 'the turn');
+      await w2.until(() => /subagent tail off/.test(wlog(w2)), 5000, 'the look window ends');
+      const oldRow = w2.find('update', (r) => r.update?.sessionUpdate === 'tool_call' && r.update.title === 'invoke_subagent');
+      ok('an older agy (no subagent_info) whose store names no sub ⇒ NO card and NO error: the row ends as a row, the tail looks ≤ its window and stops',
+        !!oldRow && !w2.find('subagent') && !w2.find('sub') && !w2.find('notice', (r) => r.level === 'error') && w2.find('update', (r) => r.update?.sessionUpdate === 'tool_call_update' && r.update.toolCallId === oldRow.update.toolCallId && r.update.status === 'completed'),
+        w2.records.map((r) => r.kind));
+    } finally { await w2.stop(); }
+
+  });
+  leg(async (ok) => {
+    // an agy that writes NO transcript: the timeline comes from its db (the protobuf rows, read-only)
+    const C = await mkStore('agy-sub-c', { transcript: false, db: true });
+    const w3 = startWrapper({ env: env(C.home) });
+    try {
+      await w3.until(() => w3.find('session'), 8000, 'session');
+      w3.send({ type: 'chat-input', text: 'please start a subagent', msgId: 'sc1' });
+      const fin = await w3.until(() => w3.find('subagent', (r) => r.status === 'completed'), 8000, 'the db-read card');
+      const kinds = w3.all('sub').map(subKind);
+      ok('no transcript ⇒ the sub\'s DB rows are its timeline (node:sqlite, read-only): the task, read_file calls, results, the final text — and the card ends on the final row',
+        fin.steps === 8 && kinds[0] === 'user' && w3.all('sub').some((r) => r.rec.update?.title === 'read_file') && kinds.includes('tool_call_update') && kinds[kinds.length - 1] === 'agent_message_chunk', { steps: fin.steps, kinds });
+    } finally { await w3.stop(); }
+
+  });
+  leg(async (ok) => {
+    // RED control: a copy whose tick never stops the tail keeps reading after the sub ended (the «stops» leg can go red)
+    const src = fs.readFileSync(WRAPPER, 'utf8');
+    const cut = "  if (!looking && ![...subs.values()].some((s) => !s.done)) stopSubTail();\n";
+    const mutated = path.join(MUTBIN, 'agy-wrapper-tail-forever.js');
+    fs.writeFileSync(mutated, src.replace(cut, ''));
+    const D = await mkStore('agy-sub-d', { lines: 10 });
+    fs.copyFileSync(path.join(FIXS, 'answer.json'), path.join(D.store, 'brain', P, SG, 'messages', 'c0000000-0000-4000-8000-0000000000c3.json'));
+    const m = startWrapper({ wrapper: mutated, env: env(D.home) });
+    try {
+      await m.until(() => m.find('session'), 8000, 'session');
+      m.send({ type: 'chat-input', text: 'please start a subagent', msgId: 'sd1' });
+      await m.until(() => m.find('subagent', (r) => r.status === 'completed'), 8000, 'the card');
+      await sleep(800);
+      ok('RED control: a copy without the stop keeps its tail on after the sub ended (no «tail off») — the leg above can go red', src.includes(cut) && /subagent tail on/.test(wlog(m)) && !/subagent tail off/.test(wlog(m)), wlog(m).slice(-300));
+    } finally { await m.stop(); }
+  });
+  for (const out of await Promise.all(legs)) for (const [n, c, e] of out) ok(n, c, e);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

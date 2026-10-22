@@ -703,7 +703,7 @@ const SH = await import(pathToFileURL(path.join(REPO, SAFE)).href);
     const reader = (text) => (f) => (f === 'src/lib/channel-mail-frame.js' ? text : readRepo(f));
     ok(opened !== mfSrc && hooked !== mfSrc && declaredDomPurifyProblems(reader(opened)).length > 0 && declaredDomPurifyProblems(reader(hooked)).length > 0, 'CONTROL (the .197 integration): the mail frame opened to its parent (allow-same-origin) or a hook on the shared instance turns the declaration red'); }
   const PINS = [
-    ['src/lib/chat-renderers.js', "let html = sanitizeHtml(marked.parse(text || ''));"],
+    ['src/lib/chat-renderers.js', "let html = sanitizeHtml(this._fileHrefs(marked.parse(text || '')));"], // lane agy-links-file-url: a file: href → its path, still inside the sanitize
     ['src/lib/jobs-panel.js', "el.innerHTML = sanitizeHtml(marked.parse(String(b.text || '')));"],
     ['src/lib/code-editor.js', 'this._previewBody.innerHTML = sanitizeHtml(marked.parse(src));'],
     ['src/lib/inbox-window.js', 'el.innerHTML = sanitizeHtml(inline ? md.parseInline(s) : md.parse(s));'],
@@ -754,7 +754,7 @@ const SH = await import(pathToFileURL(path.join(REPO, SAFE)).href);
   ok(h5 !== SRC && JSON.stringify(wiringProblems(h5)) === '["missing: p.setConfig(SAFE_HTML_CONFIG);"]', 'CONTROL (h5): a sanitizer that never installs its config is named by WIRING');
   // CONTROL (h6): the pre-fix call site — assistant text through the shared default DOMPurify
   const rel = 'src/lib/chat-renderers.js', cr = readRepo(rel);
-  const h6 = cr.replace("import { sanitizeHtml } from './safe-html.js';", "import DOMPurify from 'dompurify';").replace("let html = sanitizeHtml(marked.parse(text || ''));", "let html = DOMPurify.sanitize(marked.parse(text || ''));");
+  const h6 = cr.replace("import { sanitizeHtml } from './safe-html.js';", "import DOMPurify from 'dompurify';").replace("let html = sanitizeHtml(this._fileHrefs(marked.parse(text || '')));", "let html = DOMPurify.sanitize(this._fileHrefs(marked.parse(text || '')));");
   const copy = M.write(rel, h6, 'h6');
   const c6 = sanitizerCensus((f) => (f === rel ? fs.readFileSync(copy, 'utf8') : readRepo(f)), SRC_FILES);
   ok(h6 !== cr && c6.hits.length === 3 && c6.hits.every((h) => h.startsWith(rel + ':')), 'CONTROL (h6): the pre-fix renderMarkdown (DOMPurify defaults) turns the CENSUS red — the import, the sanitize, the unsanitized parse', c6.hits);

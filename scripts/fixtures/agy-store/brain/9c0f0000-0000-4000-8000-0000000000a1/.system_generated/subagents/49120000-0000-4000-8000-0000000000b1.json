@@ -1,0 +1,12 @@
+{
+  "conversationId": "49120000-0000-4000-8000-0000000000b1",
+  "subagentDescriptor": {
+    "typeName": "self",
+    "role": "示例评审专家"
+  },
+  "state": "SUBAGENT_STATE_ALIVE",
+  "spawnStepIndex": 7,
+  "workspaceUris": [
+    "file:///home/u/workspace/%E7%A4%BA%E4%BE%8B%E9%A1%B9%E7%9B%AE"
+  ]
+}

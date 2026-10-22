@@ -13,12 +13,13 @@ import { UI_ICONS } from './icons.js';
 import { commandDrivesBrowser, toolCommandText } from '../browser-trace.js'; // agent browser P5 (§4.5 / D35): which shell calls carry an action trace
 import { commandTouchesChannels } from '../channel-touch.js'; // §26 (B-099e): a shell call running vibespace-channels carries the witness's box
 import { describeAgentCommand, agentCommandText, vendorBypassOf, alwaysOfferFor, updatesText, rulesText } from '../agent-tool-rules.js'; // lane L: VibeSpace's own tools in plain words + the widened (or narrowed / withheld) Always Allow; r6: the ONE offer the server also sends (F6) + every update in words (F5)
-import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabel, initFrameOf } from './agent-meta.js';
+import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabel, initFrameOf, subagentView } from './agent-meta.js';
+import { subagentCardHtml, isSubagentToolRow, markConversationLinks, conversationLinksHtml } from './subagent-card.js'; // lane agy-subagent-cards: the card an Antigravity subagent shows + conversation:// links (PURE)
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
 import { stripSetModelBackticks } from '../model-echo.js'; // the ONE /model echo spelling (PURE, shared with chat-view + the server)
 import { searchQueryOf } from '../search-card.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
-import { pathRe as sharedPathRe, cleanPath as sharedCleanPath, looksRelPath, relCandidates } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10)
+import { pathRe as sharedPathRe, cleanPath as sharedCleanPath, fileUrlPath, hrefPath, looksRelPath, relCandidates } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10); a file: URL / an anchor's href as a path (lane agy-links-file-url)
 import { mcpParts } from './chat-run-summary.js';
 import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
 import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../notification-senders.js'; // lane S3: a VibeSpace notice is titled "VibeSpace · …", never `Message from "…"`; S3 verify F3: decided by the record's PATH (`peerVia`), never its sender's name or first sentence
@@ -56,6 +57,14 @@ import { renderArtifactCard, patchArtifactCard, showInPorts } from './artifact-c
 import { renderProposalCard, patchProposalCard } from './browser-proposal-card.js'; // lane browser-propose: the agent's proposal, ONE Approve (patched in place)
 import { peerCore, peerCardFold, demoteHeadings, PEER_FOLD_SETTING } from './peer-card-model.js'; // lane peer-card-fold: the ONE fold verdict + preview + demoted headings
 import { parseReply as parseInboxReply } from '../inbox-reply.js'; // PURE: the For-you reply's marker + quote block (design-user-inbox-reply D1.8) — text-derived, so live and history agree
+
+// An href or a link's text read back out of HTML (marked's and the sanitizer's entities, a numeric one) — escHtml'd again
+// wherever it is written.
+const HTML_ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' };
+const unescHtml = (s) => String(s).replace(/&(?:#(\d+)|#x([0-9a-f]+)|(amp|lt|gt|quot|apos|nbsp));/gi, (m, d, x, n) => {
+  const c = d ? Number(d) : x ? parseInt(x, 16) : -1;
+  return c < 0 ? HTML_ENT[n.toLowerCase()] : c <= 0x10ffff ? String.fromCodePoint(c) : m;
+});
 
 // Agent-memory files get their own card treatment (user ask: a memory write
 // is a different concern than a project write — render "记忆更新 <name>"
@@ -571,7 +580,7 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, onOpenArtifact = null, getWorkflowVerdict, getSourceWinId, peerFold }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, onOpenArtifact = null, getWorkflowVerdict, getSourceWinId, peerFold, subagentKnown = null }) {
     // Is THIS collab card the one the next row would coalesce into, on a turn
     // that is still streaming? Only the VIEW knows (it owns the streaming flag
     // and the message list), and the answer decides live age vs frozen span.
@@ -589,6 +598,7 @@ class ChatRenderers {
     this.app = app;
     this._onOpenArtifact = onOpenArtifact; // lane artifacts-registries: a card opens through the view's ONE door (its kind's: /p/ link · Design window · file)
     this.backend = backend;
+    this._subagentKnown = typeof subagentKnown === 'function' ? subagentKnown : null; // lane agy-subagent-cards: does this conversation have a card for a conversation:// link's sub?
     this._compact = compact;
     this._messageList = messageList;
     this._onPermissionResolve = onPermissionResolve || (() => {});
@@ -1425,7 +1435,11 @@ class ChatRenderers {
     }
     let html;
 
-    if (block.type === 'tool_call') {
+    if (msg.taskInfo && msg.taskInfo.subId) {
+      // lane agy-subagent-cards: a subagent's CARD (an Antigravity invoke_subagent row read from agy's store) — role,
+      // task, state, elapsed time, answer, the files it wrote; its button opens the sub's timeline (sub-<subId>)
+      html = subagentCardHtml(msg, { t, escHtml, linkifyText: (s) => this.linkifyText(s), renderMarkdown: (s) => this.renderMarkdown(s), clickablePath: (p) => this.clickablePath(p), statusChip: this.renderTaskChip(msg.taskInfo), icon: UI_ICONS.robot, now: Date.now() });
+    } else if (block.type === 'tool_call') {
       // Tool call — pending (spinner) or interrupted (error, no result ever came)
       const isAgent = block.toolName === 'Agent';
       const icon = toolCardIcon(block.toolName);
@@ -1470,6 +1484,8 @@ class ChatRenderers {
       html = `<pre>${escHtml(JSON.stringify(block, null, 2))}</pre>`;
     }
 
+    // lane agy-subagent-cards: a harness whose subagents show nothing beyond the row SAYS so on it (caps.subagents 'none')
+    if (!(msg.taskInfo && msg.taskInfo.subId) && subagentView(this.backend) === 'none' && isSubagentToolRow(block, msg)) html += `<div class="chat-sub-none">${escHtml(t('This harness shows no subagent details'))}</div>`;
     const toolLabel = msg.toolStatus === 'error' ? '\u2717' : msg.status === 'pending' ? UI_ICONS.hourglass : '\u2713';
     this.wrapMsg(el, 'tool', toolLabel, html);
 
@@ -2399,8 +2415,11 @@ class ChatRenderers {
       // markup from files or web pages). Sanitize BEFORE linkify so our own
       // chat-link spans aren't subject to filtering. src/lib/safe-html.js: no
       // CSS, no product classes, no forms — an agent's text can never restyle
-      // or cover an approval card (verify-r6).
-      let html = sanitizeHtml(marked.parse(text || ''));
+      // or cover an approval card (verify-r6). _fileHrefs first: the sanitizer drops a
+      // file: href, and that is how Antigravity writes its file links.
+      text = markConversationLinks(text); // agy-subagent-cards
+      let html = sanitizeHtml(this._fileHrefs(marked.parse(text || '')));
+      html = conversationLinksHtml(html, { known: (id) => (this._subagentKnown ? this._subagentKnown(id) : true), t, escHtml }); // lane agy-subagent-cards: [x](conversation://<id>) opens that subagent
       html = this._wrapTables(html);
       return this.linkify(html);
     } catch {
@@ -2626,6 +2645,36 @@ class ChatRenderers {
     return `<span class="chat-link chat-link-path" data-path="${escHtml(fp)}" title="${t('Click to copy, Ctrl+Click to open')}">${escHtml(label || fp)}</span>`;
   }
 
+  /**
+   * A `file:` href → the path it names, BEFORE the sanitizer (lane agy-links-file-url, 2026-10-21 — the owner, in an
+   * Antigravity conversation: «文件链接怎么都点不了»). Antigravity writes `[SKILL.md](file:///…)`; DOMPurify's URI rule
+   * drops every file: href, so the link reached the chat as a bare `<a>` no click handler reads. The path rides the
+   * href as a path (a `%` written `%25` — _pathAnchor decodes once), the sanitizer still sees the whole output, and
+   * _pathAnchor makes the anchor a path span: no file: href ever reaches the DOM. A URL naming no path _pathAnchor takes
+   * (none, or the bare root `file:///`) is left as written — dropped, as before. Only real tags: inside code, marked
+   * writes `&lt;a` / `&quot;`.
+   */
+  _fileHrefs(html) {
+    return html.replace(/(<a\b[^>]*?\shref\s*=\s*)(?:"(file:[^"]*)"|'(file:[^']*)')/gi, (m, pre, dq, sq) => {
+      const fp = fileUrlPath(unescHtml(dq ?? sq));
+      const carried = fp && fp.replace(/%/g, '%25');
+      return carried && hrefPath(carried) ? `${pre}"${escHtml(carried)}"` : m;
+    });
+  }
+
+  /**
+   * An anchor whose href names a local path — `<a href="/home/…">`, a file: URL (_fileHrefs) — IS a path: the span a
+   * bare path becomes, its label the link's text, the path percent-decoded (marked encodes every non-ASCII character of
+   * an href). A `/p/<id>` page anchor and every other href stay as written.
+   */
+  _pathAnchor(a) {
+    const m = /^<a\b([^>]*)>([\s\S]*)<\/a>$/i.exec(a);
+    const href = m && /\shref="([^"]*)"/i.exec(m[1]);
+    const raw = href ? unescHtml(href[1]) : '';
+    const fp = raw && !/^\/p\/pg[a-z0-9]{10}\b/.test(raw) ? hrefPath(raw) : null;
+    return fp ? this.clickablePath(fp, unescHtml(m[2].replace(/<[^>]*>/g, '')).trim()) : a;
+  }
+
   /** Strip trailing punctuation from matched paths/URLs */
   cleanPath(p) { return sharedCleanPath(p); }
 
@@ -2689,9 +2738,22 @@ class ChatRenderers {
       `<span class="chat-link" data-href="${absUrl(p)}" title="${t('Click to copy, Ctrl+Click to open')}">${p}</span>`));
   }
 
+  /**
+   * A bare `file:` URL in text (Antigravity's tool output: «the full output in a file at file:///…») is ONE path span,
+   * the URL as written its label. Before, the path rule linked its `///…` tail. Runs before the path pass, which skips
+   * the span it makes.
+   */
+  linkifyFileUrls(text) {
+    return this._linkifyBareText(text, (txt) => txt.replace(/(?<![\w/])file:\/\/?[^\s<>"'`]+/gi, (raw) => {
+      const url = this.cleanPath(raw);
+      const fp = fileUrlPath(unescHtml(url));
+      return fp ? `<span class="chat-link chat-link-path" data-path="${escHtml(fp)}" title="${t('Click to copy, Ctrl+Click to open')}">${url}</span>${raw.slice(url.length)}` : raw;
+    }));
+  }
+
   /** Combined URL + path linkification on a text segment. */
   linkifySegment(text, esc) {
-    return this.linkifyPathsTagSafe(this.linkifyPagePaths(this.linkifyUrls(text)), esc);
+    return this.linkifyPathsTagSafe(this.linkifyPagePaths(this.linkifyFileUrls(this.linkifyUrls(text))), esc);
   }
 
   /**
@@ -2700,7 +2762,7 @@ class ChatRenderers {
    */
   linkify(html) {
     return html.replace(/(<a[\s>][\s\S]*?<\/a>)|(<code[\s>][\s\S]*?<\/code>)|(<[^>]*>)|([^<]+)/gi, (match, anchor, code, tag, text) => {
-      if (anchor) return match; // preserve <a>...</a> untouched
+      if (anchor) return this._pathAnchor(match); // a path anchor is a path span; any other <a>...</a> untouched
       if (code) {
         // Linkify paths/URLs inside <code> blocks while preserving the <code> wrapper
         return code.replace(/^(<code[^>]*>)([\s\S]*?)(<\/code>)$/i, (_, open, inner, close) => {
@@ -2750,7 +2812,7 @@ class ChatRenderers {
     this._messageList.addEventListener('click', (e) => {
       // Handle both our .chat-link spans and markdown-generated <a> tags
       const link = e.target.closest('.chat-link') || e.target.closest('a[href]');
-      if (!link) return;
+      if (!link || link.classList.contains('chat-sub-link')) return; // lane agy-subagent-cards: a conversation:// link is ChatView's (it opens the sub)
       e.preventDefault();
       e.stopPropagation();
       const { url, fp, rel } = this._linkTargets(link);
@@ -2774,7 +2836,7 @@ class ChatRenderers {
     // menu has no useful actions for .chat-link spans)
     this._messageList.addEventListener('contextmenu', (e) => {
       const link = e.target.closest('.chat-link') || e.target.closest('a[href]');
-      if (!link) return;
+      if (!link || link.classList.contains('chat-sub-link')) return;
       e.preventDefault();
       e.stopPropagation();
       const { url, fp, rel } = this._linkTargets(link);

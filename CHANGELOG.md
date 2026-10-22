@@ -2,6 +2,22 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.341 — 2026-10-21
+
+### Added
+- The desktop stream plays the machine's sound once you press Sound; on a Mac it uses the picture's Screen & System Audio Recording permission, granted once more.
+- An Antigravity conversation shows a card for each subagent it starts: its role, the task it was given, how long it ran and its answer.
+- A subagent's card opens the subagent's own timeline, and the files it wrote show under Artifacts.
+- The links Antigravity writes to its subagents open that subagent; a link to one it never started says so.
+
+### Fixed
+- File links an agent writes as file:// URLs, as Antigravity does, now copy and open like any path; a relative path starting with a Chinese folder name links too.
+- Starting a subagent in an Antigravity conversation no longer leaves a row spinning for good.
+- In Antigravity chats, a message that starts with a file path, as every message with an attachment does, is sent; only Antigravity's own commands are held back.
+- Subagents an Antigravity conversation started before this update now show their cards and timelines too.
+- A desktop no longer loses its windows when a phone or another tab wakes up and saves before its chats reconnect, or when a page cannot reopen a window.
+- Restore a previous layout now holds: a phone or tab that slept through the restore can no longer write its older copy over it.
+
 ## 2.369.340 — 2026-10-21
 
 ### Fixed

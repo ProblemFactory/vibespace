@@ -102,13 +102,16 @@
  *                                     (absent | installed | reboot_owed | inactive | unsupported — where the viewer's voice goes), doors
  *                                     {make, restore}, words} | agent_too_old · POST …/mic/default {host, to: virtual | restore} (「设为默认麦克风」 /
  *                                     「改回」 — the device remembers what it replaced). People only
- *   POST /api/desktop/machine-desktop/stream/start {host, source?, fp16?, hdr?, mic?}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
+ *   POST /api/desktop/machine-desktop/stream/start {host, source?, fp16?, hdr?, mic?, audio?}   lane stream-p1a-transport (design q-041 r2): the machine's desktop
  *                                     (or `source: {kind:'window', id}` = ONE window — lane stream-p3m-build on a Mac,
  *                                     stream-p2w-build on Windows; `fp16` = a Windows window's FP16 road, off; `hdr` = 「HDR 直通」 —
  *                                     lane stream-hdr-passthrough: AV1 10-bit PQ where the machine can and the browser answers it)
  *                                     as a WebRTC stream from its agent — {take: false, code, why} (the window shows the VNC
  *                                     picture) | {take: true, key, sid, offer, source, codec, seq}; then, by `key`:
  *   POST …/stream/answer {key, sdp} · …/stream/candidate {key, candidate} · …/stream/restart {key} (an ICE-restart offer) ·
+ *   …/stream/sound {key, on} (lane speaker-passthrough-v1 — the strip's 「声音」: the machine's sound for that stream, on or off —
+ *   {ok, on, endpoint?, audio} | {ok: false, code, error}; `audio` on the start = the page wants the sound's track, the answer's
+ *   `audio` says whether the machine offered it) ·
  *   …/stream/stop {key, why?} | {host, window, why?} (every stream of that window — the picker's 停止; lane stream-window-fixes) ·
  *   GET …/stream/watch?key&n&seq[&path] (THE LONG POLL: the agent's candidates from index n, the state, the agent's numbers,
  *   `ended`; its connection closing before the answer = the viewer may be gone — no new poll within goneMs stops it) · GET …/stream/facts?host=[&machine=1[&force=1]] (the sessions' record; `machine`
@@ -573,7 +576,7 @@ const webrtcOf = (res) => {
 /** fix r2: the hub's shutdown ends every stream here — and with it every hand-over, its `lease-end` audit line written (sync) before
  *  the process exits (src/server/window-live-wiring.js shutdown → server.js's shutdownWindowLeases) */
 function shutdownStreams() { const wr = (ctx && ctx.webrtc) || webrtc; if (wr && typeof wr.shutdown === 'function') wr.shutdown(); }
-const STREAM_STATUS = Object.freeze({ not_found: 404, 'bad-request': 400, answer_failed: 409, restart_failed: 409 });
+const STREAM_STATUS = Object.freeze({ not_found: 404, 'bad-request': 400, answer_failed: 409, restart_failed: 409, host_needs_daemon: 409 }); // host_needs_daemon: lane speaker-passthrough-v1 — 「声音」 asked of an agent without stream-audio, said by its code
 const streamFail = (res, e) => (e && STREAM_STATUS[e.code] ? res.status(STREAM_STATUS[e.code]).json({ error: String(e.message), code: e.code }) : fail(res, e));
 const streamKey = (req) => String((req.method === 'GET' ? req.query.key : req.body && req.body.key) || '');
 router.get('/api/desktop/machine-desktop/mic', async (req, res) => {
@@ -593,7 +596,7 @@ router.post('/api/desktop/machine-desktop/stream/start', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
   const wr = webrtcOf(res); if (!wr) return;
   const b = req.body || {};
-  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null, source: b.source == null ? null : b.source, fp16: b.fp16 === true, hdr: b.hdr === true, after: typeof b.after === 'string' && /^st[a-z0-9]{1,40}$/.test(b.after) ? b.after : null, mic: b.mic === true })); } catch (e) { streamFail(res, e); } // source: a display / ONE window (a Mac's — lane stream-p3m-build; a Windows machine's — stream-p2w-build)
+  try { res.json(await wr.start(host, { maxKbps: Number(b.maxKbps) || null, source: b.source == null ? null : b.source, fp16: b.fp16 === true, hdr: b.hdr === true, after: typeof b.after === 'string' && /^st[a-z0-9]{1,40}$/.test(b.after) ? b.after : null, mic: b.mic === true, audio: b.audio === true })); } catch (e) { streamFail(res, e); } // source: a display / ONE window (a Mac's — lane stream-p3m-build; a Windows machine's — stream-p2w-build)
 });
 // lane stream-p2w-build (design q-041 r3 §3 P2w): ONE application window of the machine as the stream — the picker's list (the
 // machine's application windows through its agent's `stream-windows` op) and 「还原它」 (a minimized one back, never the focus)
@@ -635,6 +638,12 @@ router.post('/api/desktop/machine-desktop/stream/candidate', async (req, res) =>
   if (humanOnly(req, res)) return;
   const wr = webrtcOf(res); if (!wr) return;
   try { res.json(await wr.candidate(streamKey(req), req.body && req.body.candidate)); } catch (e) { streamFail(res, e); }
+});
+// lane speaker-passthrough-v1: the strip's 「声音」 — the machine's sound for this stream, on or off (its agent's `stream-audio`)
+router.post('/api/desktop/machine-desktop/stream/sound', async (req, res) => {
+  if (humanOnly(req, res)) return;
+  const wr = webrtcOf(res); if (!wr) return;
+  try { res.json(await wr.sound(streamKey(req), req.body && req.body.on === true)); } catch (e) { streamFail(res, e); }
 });
 router.post('/api/desktop/machine-desktop/stream/restart', async (req, res) => {
   if (humanOnly(req, res)) return;

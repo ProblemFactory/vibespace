@@ -41,9 +41,17 @@
  *   werift's estimate obeyed, which counts ~one packet a picture: THE ESTIMATE): src/stream-plan.js THE RATE, the window road's rule —
  *   SP.rateFollower with MAC_RATE_RULE: never under the picture's floor (plan.floor — kbpsFloor of its pixels × its rate), an
  *   echo changes nothing, a shortfall held 2 s steps down (`bps`, live), 10 s without one climbs 25 % back toward the cap.
+ * THE SOUND (lane speaker-passthrough-v1, backlog B-aec9 — lane stream-audio-probe legs 2a–2d): `source.audio(onPacket, {onEnd})` = the
+ *   strip's 「声音」 on THIS session's helper — `audio on` on its stdin turns capturesAudio on in the SAME SCStream (no new TCC class:
+ *   it rides Screen Recording, 「屏幕与系统录音」), AudioToolbox encodes Opus, the packets come back as FLV audio tags beside the
+ *   pictures (SP.flvReader `audio`) → onPacket. A live switch the helper refuses (its `audio` line names the error) is answered ONCE
+ *   by the same capture started again IN PLACE with `--audio` (the picture freezes a moment); `audio off` stops the encoding at
+ *   once. A helper started again in place (GONE MEANS GONE) gets the sound back. A NEW HELPER VERSION = the owner switches Screen
+ *   Recording on once more for it (helper_changed_regrant — the Machines card says so).
  */
 const SP = require('../stream-plan.js');
 const SRC = require('./mac-helper-source.js');
+const SND = require('../sound-model.js'); // lane speaker-passthrough-v1: the sound's limits + the Opus packet's samples
 const MW = require('../machine-window.js');
 
 const FACTS_MS = 30000;
@@ -229,6 +237,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     const st = { aus: 0, keyWaitMs: null, keysAnswered: 0, rateChanges: 0, helper: null, captureRestarts: 0 };
     const rate = SP.rateFollower({ kbps: plan.kbps, cap: maxKbps, floor: plan.floor || 0, rule: SP.MAC_RATE_RULE }); // THE RATE (src/stream-plan.js)
     let child = null, onAu = null, onEnd = null, stopped = false, keyAskedAt = null, t0 = 0, lastTs = -1, started = null, target = null, ended = null;
+    let aud = null, withAudio = false; // lane speaker-passthrough-v1: THE SOUND's capture (source.audio) · the helper runs with --audio
     const restartsAt = []; // GONE MEANS GONE: when the capture was started again in place
     const tail = [];
     const say = (line) => { if (child && child.stdin && !child.stdin.destroyed) { try { child.stdin.write(line + '\n'); } catch { /* its exit says it */ } } };
@@ -243,13 +252,14 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       let o = null;
       try { o = JSON.parse(l); } catch { tail.push(l.slice(0, 200)); if (tail.length > TAIL) tail.shift(); return; }
       if (!o || typeof o !== 'object') return;
-      if (o.t === 'started') { started = o; target = SP.macInputTarget(o); }
+      if (o.t === 'started') { started = o; target = SP.macInputTarget(o); if (aud && aud.waiter && o.audio === true) aud.waiter({ on: true }); }
+      else if (o.t === 'audio') { if (aud && aud.waiter) aud.waiter(o); else if (aud && aud.state === 'live' && o.on === false && o.error) audioEnded('capture_failed', String(o.error).slice(0, 200)); }
       else if (o.t === 'frame' && started) { started = { ...started, frame: o.frame }; target = SP.macInputTarget(started); }
       else if (o.t === 'stats') st.helper = o;
       else if (o.t === 'end') ended = { code: String(o.code || 'capture_failed').slice(0, 40), error: String(o.error || '').slice(0, 200) };
     }
     function startHelper() {
-      const sp = H.spawnPlan(plan.args[0], plan.args.slice(1));
+      const sp = H.spawnPlan(plan.args[0], [...plan.args.slice(1), ...(withAudio ? ['--audio'] : [])]); // lane speaker-passthrough-v1: --audio = the sound from the start (the way back)
       const c = child = spawn(sp.file, sp.args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
       c.on('error', (e) => { if (c === child) finish('capture_failed', `the screen helper: ${e && (e.code || e.message)}`); });
       // its end line may trail the exit: judged once its stderr closed (200 ms at most)
@@ -263,6 +273,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
         if (stopped || c !== child) return;
         for (const ev of r.push(d)) {
           if (ev.type === 'bad') { finish('encoder_failed', ev.error); return; }
+          if (ev.type === 'audio') { onAudio(ev); continue; } // lane speaker-passthrough-v1: the sound's packet
           const ts = Math.max(lastTs + 1, Math.round((Math.max(now(), t0) - t0) * 90));
           lastTs = ts;
           st.aus++;
@@ -290,10 +301,65 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
         if (keyAskedAt == null) keyAskedAt = now(); // the new helper's first picture is a key frame
         try { startHelper(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); return; }
         if (rate.kbps !== plan.kbps) say(`bps ${rate.kbps * 1000}`); // the rate the session had reached, not the plan's
+        if (aud && aud.state === 'live') { aud.fresh = true; if (!withAudio) say('audio on'); } // lane speaker-passthrough-v1: the sound comes back with it
       });
+    }
+    // ── THE SOUND (lane speaker-passthrough-v1) ──
+    function onAudio(ev) {
+      if (!aud || (aud.state !== 'live' && aud.state !== 'starting')) return; // off: the helper's last packets in flight are dropped
+      const payload = Buffer.from(ev.payload.buffer, ev.payload.byteOffset, ev.payload.length);
+      aud.packets++; aud.bytes += payload.length;
+      const fresh = aud.fresh; aud.fresh = false;
+      try { aud.onPacket({ payload, samples: SND.opusSamples(payload) || SND.SOUND.samples, fresh, at: now() }); } catch { /* the host's */ }
+    }
+    function audioEnded(code, error) {
+      const a = aud; if (!a) return;
+      a.state = 'failed'; a.code = code; a.error = error; a.ended = { why: code, at: now() };
+      log(`[stream] mac sound ended: ${code}${error ? ` (${error})` : ''}`);
+      try { a.onEnd(code, error); } catch { /* the host's */ }
+    }
+    /** The same capture again IN PLACE with --audio (a live switch the helper refused): a new helper, the same session. */
+    function relaunchWithAudio() {
+      const old = child;
+      withAudio = true;
+      if (keyAskedAt == null) keyAskedAt = now(); // its first picture is a key frame
+      try { startHelper(); } catch (e) { return false; }
+      if (rate.kbps !== plan.kbps) say(`bps ${rate.kbps * 1000}`);
+      if (old) { try { old.stdin.write('quit\n'); } catch { /* gone */ } setTimeout(() => { if (old.exitCode == null) { try { old.kill(); } catch { /* gone */ } } }, 1000).unref?.(); }
+      return true;
+    }
+    function audioCapture(onPacket, { onEnd: onAudioEnd = () => { } } = {}) {
+      const a = { state: 'off', road: 'sck', packets: 0, bytes: 0, runs: 0, relaunched: false, startedAt: null, ended: null, code: null, error: null, onPacket, onEnd: onAudioEnd, fresh: true, waiter: null, mark: { at: now(), bytes: 0 } };
+      return {
+        start() {
+          if (stopped) return Promise.resolve(named('not_found', 'the picture ended'));
+          aud = a; a.state = 'starting'; a.runs++; a.startedAt = now(); a.fresh = true; a.code = null; a.error = null; a.ended = null;
+          return new Promise((resolve) => {
+            const done = (v) => { clearTimeout(timer); a.waiter = null; if (v.ok) { a.state = 'live'; log(`[stream] mac sound on (SCK capturesAudio${a.relaunched ? ', the capture started again with --audio' : ''})`); } else { a.state = 'failed'; a.code = v.code; a.error = v.error; } resolve(v); };
+            const timer = setTimeout(() => done(named('capture_failed', `the Mac's sound did not start within ${SND.SOUND_LIMITS.startMs / 1000} s`)), SND.SOUND_LIMITS.startMs);
+            timer.unref?.();
+            a.waiter = (o) => {
+              if (o.on === true) { done({ ok: true }); return; }
+              const why = String(o.error || 'refused').slice(0, 200);
+              if (!a.relaunched && relaunchWithAudio()) { a.relaunched = true; log(`[stream] mac sound: the live switch was refused (${why}) — the capture again with --audio`); return; } // the started line answers
+              done(named(/permission|-3801|not authorized/i.test(why) ? 'screen_permission' : 'capture_failed', `the Mac's sound could not start (${why})`));
+            };
+            if (child) say('audio on'); // a helper started with --audio answers it at once (its stream has the sound already)
+            else a.deferred = true; // asked before the picture started (a remembered 「声音」 at the answer): told when the helper starts
+          });
+        },
+        stop(why = 'off') { if (aud === a) aud = null; if (a.state !== 'failed') a.state = 'off'; a.ended = a.ended || { why: String(why).slice(0, 40), at: now() }; a.waiter = null; say('audio off'); },
+        stats() {
+          const t = now(), dt = Math.max(1, t - a.mark.at) / 1000, kbps = Math.round(((a.bytes - a.mark.bytes) * 8) / dt / 1000);
+          a.mark = { at: t, bytes: a.bytes };
+          const h = st.helper && st.helper.audio && typeof st.helper.audio === 'object' ? st.helper.audio : null;
+          return { state: a.state, road: a.road, packets: a.packets, bytes: a.bytes, kbps, runs: a.runs, relaunched: a.relaunched, startedAt: a.startedAt, ended: a.ended && { ...a.ended }, code: a.code, error: a.error, helper: h ? { packets: Number(h.packets) || 0, buffers: Number(h.buffers) || 0, peakDb: Number.isFinite(Number(h.peakDb)) ? Number(h.peakDb) : null } : null };
+        },
+      };
     }
     return {
       ok: true, kind: 'screen', origin: plan.origin, fps: plan.fps, mode: plan.mode, encoder: plan.encoder.label, window: plan.window,
+      audio: audioCapture, // lane speaker-passthrough-v1: THE SOUND on this session's own SCStream
       // lane stream-mac-stall: THE SWITCHER's rows — the display streamed + the Mac's displays (the helper's facts this plan read; a
       // pick restarts the stream with `source: {kind: 'display', id}`): the strip showed none, so one display was all there was
       // (lane desktop-display-modes: + primary, HDR and the real pixels pw × ph — the Windows rows' shape; x/y/w/h stay points)
@@ -304,6 +370,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
         onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rate.begin(t0);
         if (keyAskedAt == null) keyAskedAt = t0; // the helper's first picture is a key frame
         try { startHelper(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); }
+        if (aud && aud.deferred) { aud.deferred = false; say('audio on'); } // lane speaker-passthrough-v1: the sound asked before the picture started
         log(`[stream] mac screen source: ${plan.kind} ${plan.kind === 'window' ? plan.window.id : plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps (${plan.rung}), VideoToolbox ${rate.kbps} kbps (floor ${rate.floor})`);
       },
       stop() { if (stopped) return; stopped = true; say('quit'); const c = child; if (c) setTimeout(() => { if (c.exitCode == null) { try { c.kill(); } catch { /* gone */ } } }, 1000).unref?.(); },

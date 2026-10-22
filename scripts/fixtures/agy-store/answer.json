@@ -1,0 +1,22 @@
+{
+  "id": "c0000000-0000-4000-8000-0000000000c3",
+  "recipient": "9c0f0000-0000-4000-8000-0000000000a1",
+  "sender": "49120000-0000-4000-8000-0000000000b1",
+  "priority": "MESSAGE_PRIORITY_HIGH",
+  "timestamp": "2026-10-21T14:33:20.771560780Z",
+  "renderDetails": {
+    "messageTitle": "Message from 示例评审专家 (self)"
+  },
+  "content": "评审完成：88/100。报告在 report.md — 结构清晰，第二节缺少数据来源。",
+  "sourceMetadata": {
+    "tool": {
+      "conversationId": "49120000-0000-4000-8000-0000000000b1",
+      "stepIndex": 7,
+      "toolCall": {
+        "id": "call_7000001",
+        "name": "send_message",
+        "argumentsJson": "{\"Message\":\"评审完成：88/100。报告在 report.md — 结构清晰，第二节缺少数据来源。\",\"Recipient\":\"9c0f0000-0000-4000-8000-0000000000a1\"}"
+      }
+    }
+  }
+}

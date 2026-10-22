@@ -728,8 +728,10 @@ function sendEstimator({ minPackets = 20, minMs = 100, keep = 4096 } = {}) {
 }
 
 // ── THE ENCODER'S OUTPUT: FLV → access units ─────────────────────────────────────────────────────────────────────────
-/** An incremental FLV reader: push(bytes) → [{ type: 'au', nalus, key, tsMs } | { type: 'bad', error }]. AVC only; the
- *  sequence header's SPS/PPS go in front of every key access unit that lacks them. */
+/** An incremental FLV reader: push(bytes) → [{ type: 'au', nalus, key, tsMs } | { type: 'audio', payload, tsMs } | { type: 'bad',
+ *  error }]. AVC only; the sequence header's SPS/PPS go in front of every key access unit that lacks them. AUDIO (lane
+ *  speaker-passthrough-v1 — a Mac's screen helper writes its sound beside the pictures): an Enhanced-FLV audio tag of coded
+ *  frames in Opus (0x91 + 'Opus' + ONE packet) → { type: 'audio' }; every other audio tag is skipped. */
 function flvReader() {
   let buf = new Uint8Array(0), head = false, lenSize = 4, sps = [], pps = [], dead = false;
   const u24 = (b, i) => (b[i] << 16) | (b[i + 1] << 8) | b[i + 2];
@@ -748,6 +750,7 @@ function flvReader() {
       if (buf.length - i < 11 + size + 4) break;
       const d = buf.subarray(i + 11, i + 11 + size);
       i += 11 + size + 4;
+      if (type === 8) { if (d.length > 5 && d[0] === 0x91 && d[1] === 0x4f && d[2] === 0x70 && d[3] === 0x75 && d[4] === 0x73) out.push({ type: 'audio', payload: d.slice(5), tsMs: ts }); continue; } // 0x91 'Opus'
       if (type !== 9 || d.length < 5 || (d[0] & 0x0f) !== 7) continue; // video, AVC
       if (d[1] === 0) { // AVCDecoderConfigurationRecord
         let k = 10; lenSize = (d[9] & 3) + 1; sps = []; pps = []; // d[5..]: version, profile, compat, level, lengthSizeMinusOne

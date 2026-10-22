@@ -13,6 +13,8 @@
 //   ③ the app moves: the crop follows; the next click lands at the new centre    ④ the app closes: the words + the two buttons
 //   ⑤ Run again → a new window; closing it ends the watch and UNPINS the app     ⑥ the phone: the crop fits 390 px
 //   ⑦ an old agent: "update the agent" at once, the device never asked
+//   ⑧ (lane speaker-passthrough-v1) the Machines card says the sound's permission: a Windows machine asks none; a Mac's sound
+//      uses the picture's 「屏幕与系统录音」 grant, asked once more after its screen helper updates
 // PNGs (when `--shots <dir>`): desk.png, phone.png, gone.png.
 import fs from 'node:fs';
 import net from 'node:net';
@@ -350,6 +352,17 @@ console.log('⑦ an old agent: the update words, at once');
   ok(r.code === 'host_needs_daemon' && ms < 2000, `the old agent is never asked: host_needs_daemon in ${ms} ms (never a hang)`, r);
   const a = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/machine-app/track`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer vsst_x' }, body: JSON.stringify({ host: 'win-a', pid: 9000 }) })).json();
   ok(a.code === 'human_only', 'an agent token is refused by name (people only, like the whole desktop)', a);
+}
+
+console.log('⑧ the Machines card says the sound\'s permission (lane speaker-passthrough-v1)');
+{
+  const p = await page(1100, 800, 'position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg-primary);z-index:5');
+  const rowOf = (setup) => JSON.stringify({ hostId: 'win-a', label: 'WIN-DESK1', code: 'desktop_ready', auth: 'none', setup, desktop: 'vnc-native', selectable: true });
+  const line = async (setup) => { await p.ev(`window.__open(${rowOf(setup)})`); await p.until(`!!document.querySelector('#machine-desktop-dialog .machine-sound-row')`, 5000); return p.ev(`(() => { const r = document.querySelector('#machine-desktop-dialog .machine-sound-row'); return r && !r.hidden && r.getBoundingClientRect().height > 0 ? r.textContent : null; })()`); };
+  const win = await line('win32'), mac = await line('darwin');
+  ok(win === '声音：Windows 不需要授权' && mac === '声音用的是同一个“屏幕与系统录音”授权 · 屏幕助手更新后，macOS 需要你再授权一次', '⑧ the card\'s sound line: Windows asks no permission; a Mac\'s sound uses the picture\'s 「屏幕与系统录音」 grant, re-asked once after the helper updates', { win, mac });
+  await p.ev(`document.getElementById('machine-desktop-dialog')?.remove(); true`);
+  p.close();
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed${fail ? ', ' + fail + ' failed' : ''})`);

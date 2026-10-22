@@ -1962,3 +1962,13 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
   .chat-view .chat-status-bar.chat-status-open > .chat-status-browser { position: static; box-shadow: none; }
 }
 /* ── end THE PHONE COMPOSER ── */
+
+/* lane agy-subagent-cards: an Antigravity subagent's card (role, task, state, elapsed, answer, files) + conversation:// links */
+.chat-sub-card .chat-sub-elapsed { margin-left: 6px; font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.chat-sub-card .chat-sub-task-title { color: var(--text-dim); font-weight: normal; }
+.chat-sub-card .chat-sub-noanswer,
+.chat-sub-card .chat-sub-files { margin-top: 4px; font-size: 12px; color: var(--text-secondary); }
+.chat-sub-none { margin-top: 4px; font-size: 12px; color: var(--text-dim); font-style: italic; }
+.chat-sub-link { cursor: pointer; }
+.chat-sub-link.chat-sub-unknown { cursor: help; text-decoration-style: dotted; }
+.chat-sub-chip { display: inline-block; padding: 0 5px; border-radius: var(--radius-sm); font-size: 10px; line-height: 15px; background: var(--bg-hover); color: var(--text-dim); }

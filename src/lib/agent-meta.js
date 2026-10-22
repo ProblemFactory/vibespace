@@ -6,7 +6,7 @@ import { t } from './i18n.js';
 // drifted verb LIST (which scripts/test-queue-steer.mjs ① deep-compares
 // against the server row) and never a hand-copied boolean that disagrees with
 // the list next to it.
-import { deriveInputModes, notificationDelivery, worktreeCaps as serverWorktreeCaps, NO_WORKTREE, worktreePick, worktreeLatchWrite, capsOf as serverCapsOf } from '../backend-caps.js';
+import { deriveInputModes, notificationDelivery, worktreeCaps as serverWorktreeCaps, NO_WORKTREE, worktreePick, worktreeLatchWrite, capsOf as serverCapsOf, subagentView as serverSubagentView } from '../backend-caps.js';
 
 export const BACKEND_META = {
   claude: {
@@ -63,7 +63,7 @@ export const BACKEND_META = {
     // client META mirrors it key for key (test-harness-contract deep-compares). effortExtras (lane effort-ultracode): the effort
     // rows that are NOT --effort values — appended AFTER the CLI's parsed levels, never replaced by them; a row
     // whose requiresLevel the probe did not parse is absent by name (ultracode spawns as --effort xhigh).
-    ui: { billing: { globalLogin: 'Subscription', cliLogin: 'CLI login', pickLogin: 'Subscription (Pro/Max login)', pickLoginHost: '', planSuffix: ' (Pro/Max)', switchLogin: 'Subscription (Pro/Max)', defaultIdField: 'defaultAccountId', apiKeys: true, longLivedToken: true, hostLogin: true, machineUsage: true, usage: 'accounts', globalUsageKey: '__global__', estimates: true }, effortReport: 'commanded', effortLevels: 'cli-help', effortExtras: [{ value: 'ultracode', label: 'Ultracode', hint: 'xhigh effort + standing dynamic-workflow orchestration', requiresLevel: 'xhigh' }], modelLock: true, legacyIds: true, resumeResend: true },
+    ui: { billing: { globalLogin: 'Subscription', cliLogin: 'CLI login', pickLogin: 'Subscription (Pro/Max login)', pickLoginHost: '', planSuffix: ' (Pro/Max)', switchLogin: 'Subscription (Pro/Max)', defaultIdField: 'defaultAccountId', apiKeys: true, longLivedToken: true, hostLogin: true, machineUsage: true, usage: 'accounts', globalUsageKey: '__global__', estimates: true }, effortReport: 'commanded', effortLevels: 'cli-help', effortExtras: [{ value: 'ultracode', label: 'Ultracode', hint: 'xhigh effort + standing dynamic-workflow orchestration', requiresLevel: 'xhigh' }], modelLock: true, legacyIds: true, resumeResend: true, subagents: 'virtual' },
   },
   shell: {
     id: 'shell',
@@ -131,7 +131,7 @@ export const BACKEND_META = {
     // THE DECLARED UI ROW (lane dc-client-billing, 2026-10-04): billing words, the accounts-store default field,
     // the usage bucket, effort/lock facts and the legacy id forms — the chrome reads THESE, never an id. The
     // client META mirrors it key for key (test-harness-contract deep-compares).
-    ui: { billing: { globalLogin: 'ChatGPT login', cliLogin: 'ChatGPT login', pickLogin: 'ChatGPT login', pickLoginHost: 'ChatGPT login (on the host)', planSuffix: '', switchLogin: 'ChatGPT login', defaultIdField: 'defaultCodexAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: 'codexAccounts', globalUsageKey: '__global_codex__', estimates: false }, effortReport: 'per-turn', effortLevels: 'model-catalog', modelLock: false, legacyIds: false, resumeResend: true },
+    ui: { billing: { globalLogin: 'ChatGPT login', cliLogin: 'ChatGPT login', pickLogin: 'ChatGPT login', pickLoginHost: 'ChatGPT login (on the host)', planSuffix: '', switchLogin: 'ChatGPT login', defaultIdField: 'defaultCodexAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: 'codexAccounts', globalUsageKey: '__global_codex__', estimates: false }, effortReport: 'per-turn', effortLevels: 'model-catalog', modelLock: false, legacyIds: false, resumeResend: true, subagents: 'threads' },
   },
   // OpenCode over ACP v1 (S8, design-harness-plugins §2.3). No accounts
   // roster (the agent holds its own provider login), no effort/fork/review
@@ -164,7 +164,7 @@ export const BACKEND_META = {
     // THE DECLARED UI ROW (lane dc-client-billing, 2026-10-04): billing words, the accounts-store default field,
     // the usage bucket, effort/lock facts and the legacy id forms — the chrome reads THESE, never an id. The
     // client META mirrors it key for key (test-harness-contract deep-compares).
-    ui: { billing: null, effortReport: null, effortLevels: null, modelLock: true, legacyIds: false, resumeResend: false },
+    ui: { billing: null, effortReport: null, effortLevels: null, modelLock: true, legacyIds: false, resumeResend: false, subagents: 'none' },
   },
   // Antigravity CLI (`agy`, lane antigravity-harness): not ACP, but its chat wrapper journals the ACP records, so the
   // protocol rows mirror opencode's. An account roster (commit 2: Google accounts, each its own HOME root), no effort
@@ -187,7 +187,7 @@ export const BACKEND_META = {
     settingsPrefix: 'antigravity',
     permissionModes: ['accept-edits', 'auto', 'plan', 'bypassPermissions'],
     // THE DECLARED UI ROW — mirrors src/harnesses/antigravity.js key for key (test-harness-contract deep-compares).
-    ui: { billing: { globalLogin: 'Google login', cliLogin: 'Google login', pickLogin: 'Google login (Antigravity CLI)', pickLoginHost: 'Google login (on the host)', planSuffix: '', switchLogin: 'Google login', accountLogin: 'Google', defaultIdField: 'defaultAntigravityAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: null, globalUsageKey: null, estimates: false }, effortReport: null, effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'], modelLock: true, legacyIds: false, resumeResend: false },
+    ui: { billing: { globalLogin: 'Google login', cliLogin: 'Google login', pickLogin: 'Google login (Antigravity CLI)', pickLoginHost: 'Google login (on the host)', planSuffix: '', switchLogin: 'Google login', accountLogin: 'Google', defaultIdField: 'defaultAntigravityAccountId', apiKeys: false, longLivedToken: false, hostLogin: false, machineUsage: false, usage: null, globalUsageKey: null, estimates: false }, effortReport: null, effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'], modelLock: true, legacyIds: false, resumeResend: false, subagents: 'cards' },
   },
 };
 
@@ -421,6 +421,11 @@ const NO_BILLING = Object.freeze({ globalLogin: 'Subscription', cliLogin: 'CLI l
  *  no browser pin, no name prompt. ONE row both tiers read (lane dc-harness-tail). */
 export function terminalOnly(backend) {
   return serverCapsOf(backend).terminalOnly === true;
+}
+/** What this harness can SHOW of its agent's subagents ('virtual' | 'threads' | 'cards' | 'none' — the caps row both tiers
+ *  read, lane agy-subagent-cards): 'none' ⇒ a subagent's tool row says the harness shows no details. */
+export function subagentView(backend) {
+  return serverSubagentView(backend);
 }
 export function uiRow(backend) {
   return BACKEND_META[backend || 'claude']?.ui || NO_UI;

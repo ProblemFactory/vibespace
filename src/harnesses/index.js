@@ -180,7 +180,7 @@ function register(h, { replace = false } = {}) {
   if (REGISTRY.has(h.id) && !replace) throw new Error(`harness '${h.id}' already registered (pass {replace:true} to override)`);
   REGISTRY.set(h.id, h);
   // capsOf(id) answers the DECLARED row, over the rows the descriptor itself implies (lane dc-harness-tail)
-  contributeCaps(h.id, { terminalOnly: h.kind === 'terminal', globalUsageKey: h.ui?.billing?.globalUsageKey ?? null, ...(h.caps && typeof h.caps === 'object' ? h.caps : {}) });
+  contributeCaps(h.id, { terminalOnly: h.kind === 'terminal', globalUsageKey: h.ui?.billing?.globalUsageKey ?? null, subagents: h.ui?.subagents || 'none', ...(h.caps && typeof h.caps === 'object' ? h.caps : {}) });
   return h;
 }
 function unregister(id) {

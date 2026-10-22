@@ -124,6 +124,49 @@ ok(legacy.totalWindows === 2, `legacy top-level layout counted in the rollback p
   fs.rmSync(dd, { recursive: true, force: true });
 }
 
+// THE RING NAMES WHAT IT SAW (lane layout-stale-record-sync — the owner's 2026-10-22 loss read «工作 5 → 0» on a point that
+// named neither the writer nor anything refused): the ws layout-sync handler notes each write (`wrote`: the desktop, the
+// writer's viewport, its evidence by reason, its base) and each refusal through writeLayouts.note; the next point's meta
+// carries `writer` and `refused`. And A RESTORE OUTRANKS EVERY LIVE CLIENT: the restore door stamps each restored record NOW
+// (above the one it replaces — a page that slept through it is refused by the staleness gate) and its points name it.
+{
+  const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lh3-'));
+  delete require.cache[require.resolve(REPO + '/src/routes/persistence.js')];
+  const p3 = require(REPO + '/src/routes/persistence.js');
+  const heard = [];
+  p3.setup({ dataDir: dd, wss: { clients: new Set([{ readyState: 1, send: (s) => heard.push(JSON.parse(s)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+  const R3 = p3.router, W3 = R3.writeLayouts;
+  const stamped = (map, at) => { const d = lay(map); for (const v of Object.values(d.desktops)) v.autoSave.updatedAt = at; return d; };
+  W3(stamped({ work: ['k1', 'k2', 'k3', 'k4', 'k5'], res: ['r1'] }, 1000)); await tick();
+  ok(typeof W3.note === 'function', 'writeLayouts.note exists — the ws handler\'s door to the ring (a property: the ws ctx contract hands writeLayouts alone)');
+  W3.note({ refused: 'stale', desktopId: 'work', viewport: 'phone', base: 900, held: 1000, windows: [5, 4] });
+  W3.note({ refused: 'shrink-without-close', desktopId: 'work', viewport: 'desktop', n: 5, live: 5 });
+  const m1 = R3.readLayouts(); m1.desktops.work.autoSave.windows = []; m1.desktops.work.autoSave.updatedAt = 2000;
+  W3.note({ wrote: 'work', viewport: 'desktop', windows: 0, evidence: { unbuilt: 5 }, base: 1000 });
+  W3(m1); await tick();
+  const h1 = R3.listLayoutHistory()[0];
+  const meta1 = JSON.parse(fs.readFileSync(path.join(dd, 'layout-history', h1.id.replace(/\.json$/, '.meta.json')), 'utf8'));
+  ok(h1.writer && h1.writer.wrote === 'work' && h1.writer.viewport === 'desktop' && h1.writer.evidence.unbuilt === 5 && h1.writer.base === 1000 && typeof h1.writer.at === 'number' && JSON.stringify(meta1.writer) === JSON.stringify(h1.writer), 'a point\'s meta names the WRITE that made it — the desktop, the writer\'s viewport, its evidence by reason (unbuilt 5), its base — in the sidecar and the listing', JSON.stringify(h1.writer));
+  ok(Array.isArray(h1.refused) && h1.refused.length === 2 && h1.refused[0].refused === 'stale' && h1.refused[0].viewport === 'phone' && h1.refused[1].refused === 'shrink-without-close' && h1.refused[1].live === 5, '…and the REFUSALS since the last point (the stale phone write, the belt\'s live-unbuilt refusal) with their viewport', JSON.stringify(h1.refused));
+  const m2 = R3.readLayouts(); m2.desktops.work.autoSave.windows = [{ winId: 'k9' }]; W3(m2); await tick();
+  const h2 = R3.listLayoutHistory()[0];
+  ok(h2.id !== h1.id && !h2.writer && !h2.refused, '…a write that noted nothing (a preset, an import) names nobody, and the refusals are told once', JSON.stringify(h2));
+  // the restore door (the real route handler)
+  const route = R3.stack.find((l) => l.route && l.route.path === '/api/layout-history/:id/restore');
+  const target = R3.listLayoutHistory().find((h) => h.id === h1.id);
+  const before = R3.readLayouts().desktops.work.autoSave.updatedAt || 0;
+  const t0 = Date.now(); let answer = null;
+  await route.route.stack[0].handle({ params: { id: target.id } }, { json: (j) => { answer = j; }, status: () => ({ json: (j) => { answer = j; } }) });
+  await tick();
+  const back = R3.readLayouts();
+  ok(answer && answer.success && (back.desktops.work.autoSave.windows || []).length === 5, 'the restore door puts 工作\'s five back', JSON.stringify(answer));
+  ok(back.desktops.work.autoSave.updatedAt >= t0 && back.desktops.work.autoSave.updatedAt > before && back.desktops.res.autoSave.updatedAt >= t0, `A RESTORE OUTRANKS EVERY LIVE CLIENT: each restored record is stamped NOW (${back.desktops.work.autoSave.updatedAt} ≥ ${t0}, above the replaced ${before}) — the point's own stamp (1000) never comes back`, JSON.stringify({ work: back.desktops.work.autoSave.updatedAt, res: back.desktops.res.autoSave.updatedAt }));
+  const points = R3.listLayoutHistory().slice(0, 2);
+  ok(points.length === 2 && points.every((p) => p.writer && p.writer.via === 'restore' && p.writer.from === target.id), 'the restore\'s points (the forced one and its write\'s) name the restore and the point it came from', JSON.stringify(points.map((p) => p.writer)));
+  ok(heard.some((m) => m.type === 'layout-restored'), 'every client is told (layout-restored)');
+  fs.rmSync(dd, { recursive: true, force: true });
+}
+
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail?1:0);

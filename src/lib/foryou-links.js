@@ -41,7 +41,7 @@ function relHits(s, base) {
     const lead = (LEAD.exec(tok) || [''])[0];
     const core = cleanPath(tok.slice(lead.length));
     const tail = core.replace(/\/+$/, '').split('/').pop();
-    if (core.includes('/') && !core.startsWith('/') && !core.startsWith('~') && (core.endsWith('/') || FILE_TAIL.test(tail)) && looksRelPath(core)) {
+    if (core.includes('/') && !core.startsWith('/') && !core.startsWith('~') && (core.endsWith('/') || FILE_TAIL.test(tail)) && looksRelPath(core, { prose: true })) {
       out.push({ start: base + at + lead.length, end: base + at + lead.length + core.length, kind: 'rel', ref: core });
     }
     at += tok.length;

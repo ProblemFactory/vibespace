@@ -74,7 +74,7 @@ const AGENT_ENV_DROP = Object.freeze(new Set(['PORT', 'HOST', 'NODE_ENV', 'NODE_
   'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR']));
 
 /** The daemon tier's own reads, on top of the agent set (derived — see the header). */
-const DAEMON_ENV_KEEP = Object.freeze(new Set([...AGENT_ENV_KEEP, 'VIBESPACE_NODE_MODULES', 'VIBESPACE_AGENTD_VERSION', 'VIBESPACE_INPUT_STUB_FILE', 'VIBESPACE_MIC_HELPER' /* lane stream-mic-road: the suites' fake microphone helper (src/desktop-mic.js), as the input stub */]));
+const DAEMON_ENV_KEEP = Object.freeze(new Set([...AGENT_ENV_KEEP, 'VIBESPACE_NODE_MODULES', 'VIBESPACE_AGENTD_VERSION', 'VIBESPACE_INPUT_STUB_FILE', 'VIBESPACE_MIC_HELPER' /* lane stream-mic-road: the suites' fake microphone helper (src/desktop-mic.js), as the input stub */, 'VIBESPACE_SOUND_FFMPEG' /* lane speaker-passthrough-v1: the suites' fake Opus encoder for the sound's road (src/desktop-sound.js) — a box without ffmpeg (the Actions runner) */]));
 
 /**
  * The sanitized copy of `base`: every `VIBESPACE_*` not in `keep` is dropped

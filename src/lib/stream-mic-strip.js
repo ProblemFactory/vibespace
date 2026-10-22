@@ -9,9 +9,18 @@
 //     else the facts (GET …/mic): 「你的声音 → 本机应用的麦克风『…』」, or (no virtual microphone yet) 「对方电脑会从扬声器播放你的
 //     声音」 every time that road is in force, with 「安装虚拟麦克风…」 as the door
 //   • the button shows only once a stream offered the m-line (an older agent offers none: no dead toggle)
+// lane speaker-passthrough-v1 (backlog B-aec9 — the measured road: lane stream-audio-probe): THE STRIP'S 「声音」 beside it — the
+// machine's sound in this window's <video>. The decisions are PURE src/sound-model.js (soundStep, soundStartOf, the memory):
+//   • OFF for a machine until the person turns it on; ON is remembered per machine in this browser (the HDR switch's way); off =
+//     the machine captures nothing; a press = the <video> unmuted IN that click (the browser's autoplay rule) + the machine's
+//     capture started (`view.setSound` — one op); a RESTORED window (a reload, a layout replay) never unmutes by itself: it says
+//     「点一下开声音」 until a press
+//   • its title says nothing is recorded or stored (and on a Mac: the same 「屏幕与系统录音」 permission as the picture); the
+//     Machines card says the consent per platform (createSoundCard)
 import { t } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
 import { micStep, micAskCode, micRoadWords, micDefaultDoors, MIC_CONSTRAINTS } from '../mic-model.js';
+import { soundStep, SOUND_KEY, soundRemembered, rememberSound, soundRefusalKey, soundConsentKeys } from '../sound-model.js';
 
 const MIC_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5V14.5M5.5 14.5h5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
 /** The refusal words by the toggle's code (micAskCode / the m-line's absence). */
@@ -160,4 +169,91 @@ export function createMicCard({ hostId, machine, install = null } = {}) {
     draw(r);
   }
   return { el: row, refresh };
+}
+
+// ── lane speaker-passthrough-v1: 「声音」 ─────────────────────────────────────────────────────────────────────────────────
+const SOUND_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M2.5 6h2.5l3.5-3v10L5 10H2.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path class="desktop-strip-sound-waves" d="M10.8 5.6a3.2 3.2 0 0 1 0 4.8M12.6 3.9a5.6 5.6 0 0 1 0 8.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+/** The refusal words by the machine's code (the `stream-audio` answer) or the page's own. */
+export function soundRefusalText(code) { return t(soundRefusalKey(code)); }
+const soundMemory = (store) => { try { return store ? store.getItem(SOUND_KEY) : null; } catch { return null; } };
+
+/** `platform` = the machine's (its title names a Mac's permission); `restored` = this window came back by itself (a reload, a
+ *  layout replay); `activated()` = the page has had a person's gesture (the browser lets it unmute).
+ *  → { el, ready(view, ok), ended(view), dispose(), get state() } */
+export function createSoundToggle({ hostId, platform = null, strip, before = null, restored = false, activated = () => (typeof navigator === 'undefined' || !navigator.userActivation ? true : !!navigator.userActivation.hasBeenActive), store = typeof localStorage !== 'undefined' ? localStorage : null } = {}) {
+  let st = { state: 'unavailable', code: null }, view = null, disposed = false, pressed = false, said = '', seq = 0;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'desktop-strip-btn desktop-strip-sound'; b.hidden = true; b.setAttribute('aria-pressed', 'false');
+  b.innerHTML = `${SOUND_SVG}<span class="desktop-strip-sound-label"></span>`;
+  b.querySelector('.desktop-strip-sound-label').textContent = t('Sound');
+  const tap = document.createElement('button'); tap.type = 'button'; tap.className = 'desktop-strip-sound-tap'; tap.hidden = true; tap.textContent = t('Tap to turn the sound on');
+  strip.insertBefore(b, before && before.parentNode === strip ? before : null);
+  strip.insertBefore(tap, before && before.parentNode === strip ? before : null);
+  const consent = () => soundConsentKeys(platform).slice(0, 1).map((k) => t(k)).join('');
+  function draw() {
+    const on = st.state === 'on' || st.state === 'starting';
+    b.hidden = st.state === 'unavailable';
+    b.setAttribute('aria-pressed', String(on));
+    b.classList.toggle('is-on', st.state === 'on');
+    b.classList.toggle('is-starting', st.state === 'starting');
+    b.classList.toggle('is-refused', st.state === 'refused');
+    tap.hidden = st.state !== 'tap';
+    const more = consent() ? `\n${consent()}` : '';
+    b.title = on ? t('Sound on — press to turn it off; nothing is recorded or stored') + more
+      : st.state === 'refused' ? soundRefusalText(st.code)
+        : st.state === 'tap' ? t('This window came back by itself — tap to turn its sound on (the browser waits for your press)')
+          : t('Play this machine’s sound here — off until you press it; nothing is recorded or stored') + more;
+    tap.title = b.title;
+  }
+  function run(r) {
+    st = { state: r.state, code: r.code || null };
+    if (r.remember !== undefined && store) { try { store.setItem(SOUND_KEY, rememberSound(soundMemory(store), hostId, r.remember)); } catch { /* storage refused: this window only */ } }
+    const v = view;
+    if (r.action === 'start' && v) {
+      const mine = ++seq;
+      const heard = v.unmute(); // IN the press (or the gesture this page already had): the browser's autoplay rule
+      Promise.all([heard, v.setSound(true)]).then(([u, a]) => {
+        if (mine !== seq || disposed || view !== v) { if (a && a.ok === true && !disposed && view === v && st.state !== 'on' && st.state !== 'starting') v.setSound(false); return; } // turned off while it started: the machine's capture ends too
+        if (!a || a.ok !== true) { run(soundStep(st, { type: 'failed', code: (a && a.code) || 'start_failed' })); return; }
+        run(soundStep(st, u ? { type: 'started' } : { type: 'blocked' }));
+      });
+    } else if (r.action === 'stop') { seq++; if (v) { v.mute(); v.setSound(false); } }
+    else if (r.action === 'mute') { seq++; if (v) v.mute(); }
+    if (st.state === 'refused' || (st.state === 'tap' && st.code === 'autoplay')) { const w = soundRefusalText(st.code); if (w !== said) { said = w; showToast(w, { type: st.state === 'refused' ? 'error' : 'info' }); } } else said = '';
+    draw();
+  }
+  const press = () => { if (disposed) return; pressed = true; run(soundStep(st, { type: 'press' })); };
+  b.onclick = press; tap.onclick = press;
+  // the machine's own word: a capture that ended by itself (its speaker gone for good, the helper died) is said, never a silent 「声音」
+  const tick = setInterval(() => {
+    if (st.state !== 'on' || !view || typeof view.agent !== 'function') return;
+    const a = view.agent() && view.agent().audio;
+    if (a && a.state === 'failed') run(soundStep(st, { type: 'failed', code: a.code || 'capture_ended' }));
+  }, 2000);
+  draw();
+  return {
+    el: b,
+    get state() { return st.state; },
+    /** A stream view answered its offer: `ok` = it carries the machine's sound track. The first that does carries the sound. */
+    ready(v, ok) {
+      if (disposed) return;
+      if (ok && (!view || view === v)) { view = v; run(soundStep(st, { type: 'ready', ok: true, remembered: soundRemembered(soundMemory(store), hostId), restored: restored && !pressed, activated: !!activated() })); }
+      else if (!ok && (!view || view === v)) { if (view === v) view = null; run(soundStep(st, { type: 'ready', ok: false })); }
+    },
+    /** That stream ended (a fallback, a switch, its window): the machine's capture ends with its session; the <video> goes with it. */
+    ended(v) { if (disposed || !v || v !== view) return; run(soundStep(st, { type: 'stream_end' })); view = null; },
+    dispose() { if (disposed) return; run(soundStep(st, { type: 'close' })); disposed = true; clearInterval(tick); b.remove(); tap.remove(); },
+  };
+}
+
+/** THE MACHINES CARD'S SOUND LINE (lane speaker-passthrough-v1 — the consent, said where the owner looks): Windows asks nothing;
+ *  a Mac's sound uses the picture's 「屏幕与系统录音」 grant, re-asked once after its screen helper updates. → { el } | null */
+export function createSoundCard({ platform } = {}) {
+  const keys = soundConsentKeys(platform);
+  if (!keys.length) return null;
+  const row = document.createElement('div'); row.className = 'machine-sound-row';
+  const line = document.createElement('span'); line.className = 'machine-sound-state';
+  line.textContent = keys.map((k) => t(k)).join(' · ');
+  row.append(line);
+  return { el: row };
 }

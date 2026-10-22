@@ -8,6 +8,7 @@ import { stripAnsi } from './highlight.js';
 import { ChatMinimap } from './chat-minimap.js';
 import { ChatSearch } from './chat-search.js';
 import { ChatRenderers, toolDisplayName, formatSleepRemaining, isCompactSummaryText } from './chat-renderers.js';
+import { fmtElapsed } from './subagent-card.js'; // lane agy-subagent-cards: a running subagent card's elapsed time
 import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
@@ -483,6 +484,7 @@ class ChatView {
 
     // Renderers (extracted rendering methods)
     this._renderers = new ChatRenderers({
+      subagentKnown: (id) => !!this._messages?.some((m) => m?.taskInfo?.subId === id), // lane agy-subagent-cards: a conversation:// link's sub has a card here
       getSessionCtx: () => this._getSessionIds(), // view-only/terminated windows keep host+cwd via openSpec
       getSourceWinId: () => this.winInfo?.id || null, // split tabs v2 (F2): a path opened here is born beside THIS window — never the active one
       onOpenArtifact: (b) => this._openArtifact(b), // lane artifacts-registries: the card and the chip's row share ONE door
@@ -940,8 +942,13 @@ class ChatView {
             threadId: e.target.dataset.threadId,
             agentId: e.target.dataset.agentId,
             parentToolUseId: e.target.dataset.parentToolId,
+            subId: e.target.dataset.subId, // lane agy-subagent-cards: an Antigravity sub's timeline (sub-<subId>)
             description: e.target.dataset.desc,
           });
+        }
+        if (e.target.closest?.('.chat-sub-link[data-sub]')) { // lane agy-subagent-cards: [x](conversation://<id>) in the agent's text
+          e.stopPropagation(); e.preventDefault();
+          this._openSubagentLink(e.target.closest('.chat-sub-link[data-sub]').dataset.sub);
         }
       });
       this._handler = (msg) => {
@@ -1040,8 +1047,13 @@ class ChatView {
           threadId: e.target.dataset.threadId,
           agentId: e.target.dataset.agentId,
           parentToolUseId: e.target.dataset.parentToolId,
+          subId: e.target.dataset.subId, // lane agy-subagent-cards: an Antigravity sub's timeline (sub-<subId>)
           description: e.target.dataset.desc,
         });
+      }
+      if (e.target.closest?.('.chat-sub-link[data-sub]')) { // lane agy-subagent-cards: [x](conversation://<id>) in the agent's text
+        e.stopPropagation(); e.preventDefault();
+        this._openSubagentLink(e.target.closest('.chat-sub-link[data-sub]').dataset.sub);
       }
       // Codex collab row / sub-agent report: the agent NAME opens the child's
       // rollout read-only (B-7473). Also reachable from a fold header, whose
@@ -1095,9 +1107,11 @@ class ChatView {
     // by construction, not by clearing a timer.
     this._sleepTicker = setInterval(() => {
       try {
+        const now = Date.now();
+        // lane agy-subagent-cards: a RUNNING subagent card's elapsed time counts the same way (a finished card has no data-sub-since)
+        for (const el of this._container?.querySelectorAll?.('.chat-sub-elapsed[data-sub-since]') || []) el.textContent = fmtElapsed(now - (Number(el.dataset.subSince) || now));
         const els = this._container?.querySelectorAll?.('.chat-sleep-remaining[data-sleep-until]');
         if (!els || !els.length) return;
-        const now = Date.now();
         for (const el of els) el.textContent = formatSleepRemaining((Number(el.dataset.sleepUntil) || 0) - now);
       } catch { }
     }, 1000);
@@ -5461,7 +5475,9 @@ class ChatView {
       // Detect activity from raw subagent message
       let activity = '';
       const c = msg.message?.content || msg.content;
-      if (Array.isArray(c)) {
+      const u = msg.kind === 'update' && msg.update && typeof msg.update === 'object' ? msg.update : null; // lane agy-subagent-cards: a sub's own ACP record (by its shape)
+      if (u) activity = u.sessionUpdate === 'tool_call' ? t('running {tool}', { tool: String(u.title || t('tool')).slice(0, 40) }) : u.sessionUpdate === 'agent_thought_chunk' ? t('thinking') : u.sessionUpdate === 'agent_message_chunk' ? t('responding') : '';
+      else if (Array.isArray(c)) {
         const last = c[c.length - 1];
         if (last?.type === 'tool_use' || last?.type === 'tool_call') activity = t('running {tool}', { tool: toolDisplayName(last.name || last.toolName) || t('tool') });
         else if (last?.type === 'thinking') activity = t('thinking');
@@ -5512,7 +5528,15 @@ class ChatView {
   }
 
   // Unified subagent viewer: works for both live (parentToolUseId) and completed (agentId)
-  _openSubagentViewer({ parentToolUseId, threadId, agentId, description, agentRole = '', agentNickname = '' }) {
+  /** A conversation:// link in the agent's text (lane agy-subagent-cards): the sub's card here opens its timeline; a sub
+   *  no card names still asks the server (its journal may hold it) — whose empty answer the viewer says. */
+  _openSubagentLink(subId) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(subId || ''))) return;
+    const card = this._messages?.find((m) => m?.taskInfo?.subId === subId);
+    this._openSubagentViewer({ subId, parentToolUseId: card?.toolCallId || undefined, description: card?.taskInfo?.agentRole || card?.taskInfo?.description || subId.slice(0, 8) });
+  }
+
+  _openSubagentViewer({ parentToolUseId, threadId, agentId, subId, description, agentRole = '', agentNickname = '' }) {
     const { backend, backendSessionId, claudeId, cwd, host } = this._getSessionIds();
     if (backend === 'codex' && threadId) {
       const viewId = viewIdFor(backend, threadId);
@@ -5546,6 +5570,9 @@ class ChatView {
     // view is `sub-<tool_use_id>` — the only one that receives its permission asks (and their Allow /
     // Deny) — even when the card also names its transcript; `agentId` rides along so the server falls
     // back to the transcript on disk once the live buffers are gone. A finished helper opens from disk.
+    // lane agy-subagent-cards: an Antigravity sub's view is keyed by ITS conversation id — sub-<subId> (the card, a
+    // conversation:// link and a restored layout name the same window; its records live on the parent's journal)
+    if (subId && /^[0-9a-f-]{36}$/i.test(subId)) { parentToolUseId = subId; agentId = undefined; }
     const card = parentToolUseId ? this._messages.find((m) => m.toolCallId === parentToolUseId) : null;
     const st = card?.taskInfo?.status;
     const helperLive = !!parentToolUseId && (!st || st === 'running');

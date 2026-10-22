@@ -23,6 +23,7 @@ const BY_UPGRADE = 'system:device-upgrade'; // the hub's version-drift rule push
 const SIG = require('../agentd-signature.js'); // design q-042 D2: the release record a pushed bundle must carry
 const DP = require('../device-policy.js'); // lane device-allow-flags: the device's OWN allow list — asked here first, decided there
 const { MIC_CAPABILITY } = require('../mic-model.js'); // lane stream-mic-road: the hello-ack word the microphone's op + m-line are gated on (PURE)
+const { SOUND_CAPABILITY } = require('../sound-model.js'); // lane speaker-passthrough-v1: the hello-ack word the machine's sound (its track + `stream-audio`) is gated on (PURE)
 
 // lane windows-device-fs — THE DOOR: a POSIX shell is never asked of a WINDOWS agent THAT HAS NONE. The hub ran `sh -c …`
 // over the device link for the Files view, the home, path completion, the sweeps; a Windows machine without `sh` answered
@@ -447,7 +448,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'stream-mic-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'stream-mic-result' || m.op === 'stream-audio-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -1229,7 +1230,7 @@ class DeviceManager {
     if (onPush) this._streamWatches.set(sid, onPush);
     const forget = () => { if (fresh) this._streamWatches.delete(sid); };
     let r;
-    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, ...(params.relayLeg ? { relayLeg: params.relayLeg } : {}), ...(params.fp16 ? { fp16: true } : {}), ...(params.share ? { share: params.share } : {}), ...(params.hdr ? { hdr: true } : {}), ...(params.mic && conn.info.capabilities.includes(MIC_CAPABILITY) ? { mic: true } : {}), iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
+    try { r = await this._request({ op: 'stream-offer', sid, sourceKind: params.sourceKind, sourceId: params.sourceId, maxKbps: params.maxKbps, relay: !!params.relay, ...(params.relayLeg ? { relayLeg: params.relayLeg } : {}), ...(params.fp16 ? { fp16: true } : {}), ...(params.share ? { share: params.share } : {}), ...(params.hdr ? { hdr: true } : {}), ...(params.mic && conn.info.capabilities.includes(MIC_CAPABILITY) ? { mic: true } : {}), ...(params.audio && conn.info.capabilities.includes(SOUND_CAPABILITY) ? { audio: true } : {}), iceRestart: !fresh, timeoutMs }); } catch (e) { forget(); throw e; }
     if (r.error) { forget(); throw new Error(r.error); }
     const res = r.result || { ok: false, code: 'offer_failed', error: 'no answer' };
     if (!res.ok) forget();
@@ -1244,6 +1245,17 @@ class DeviceManager {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.(MIC_CAPABILITY)) { const e = new Error('daemon lacks stream-mic (capabilities gate) -- upgrade the agent on this machine for the microphone'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
     const r = await this._request({ op: 'stream-mic', action: params.action === 'default' ? 'default' : 'facts', ...(params.to ? { to: String(params.to) } : {}), ...(params.force ? { force: true } : {}), ...(params.prepare ? { prepare: true } : {}), timeoutMs: params.prepare ? 300000 : 60000, by: params.by });
+    if (r.error) throw new Error(r.error);
+    return r.result || { ok: false, code: 'no_answer', error: 'no answer' };
+  }
+  /** lane speaker-passthrough-v1 (THREE-TOUCH: `stream-audio-result` in the id-keyed routing set, the capability gate here, the
+   *  handler in agentd.js): the strip's 「声音」 for one stream session — `on` starts THE capture of the machine's sound, off ends it.
+   *  An agent that predates it is NEVER asked (`host_needs_daemon`); `streamOffer({ audio: true })` is likewise asked of
+   *  `stream-audio` agents only — an older one streams the picture alone. → { ok, sid, on, endpoint?, audio } | { ok: false, code, error } */
+  async streamAudio(sid, { on = false } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.(SOUND_CAPABILITY)) { const e = new Error('daemon lacks stream-audio (capabilities gate) -- upgrade the agent on this machine for its sound'); e.code = 'host_needs_daemon'; e.daemonVersion = conn.info?.daemonVersion || null; throw e; }
+    const r = await this._request({ op: 'stream-audio', sid: String(sid || ''), on: on === true, timeoutMs: 30000 });
     if (r.error) throw new Error(r.error);
     return r.result || { ok: false, code: 'no_answer', error: 'no answer' };
   }

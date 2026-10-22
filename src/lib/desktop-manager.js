@@ -4,6 +4,7 @@ import { t } from './i18n.js';
 import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
 import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from './desktop-record.js'; // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
 import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
+import { noteStamp } from './layout-model.js'; // lane layout-stale-record-sync: the newest server stamp seen per desktop — each write's `base` (PURE)
 
 /** A window this page tried to build (a desktop's first visit, the boot restore) and that is still absent this long
  *  after is one it cannot build: the record drops it, and says so to the server's belt ('unbuilt'). Before that it is
@@ -32,6 +33,9 @@ export class DesktopManager {
     this._dirtyDesks = new Set();
     this._buildAttempts = new Map();
     this._departed = new Map();
+    // THE BASE (lane layout-stale-record-sync, §6b guard 11): desktopId → the newest server stamp (`updatedAt`) this page has
+    // seen of that desktop's record — the boot read, a relayed record, its own write's ack, a refusal's record kept
+    this._stamps = new Map();
 
     // Listen for desktop metadata updates from other clients
     app.ws.onGlobal((msg) => {
@@ -51,6 +55,12 @@ export class DesktopManager {
   }
 
   get activeDesktopId() { return this._activeId; }
+
+  /** THE BASE every layout-sync of `desktopId` names (lane layout-stale-record-sync): the server refuses a write whose base is
+   *  older than a record ANOTHER writer stored since (ws-handler THE STALENESS GATE) — the page adopts that record and
+   *  re-sends from it (onSyncRefused). undefined = never seen one (a first write; the gate does not judge it). */
+  stampOf(desktopId) { return this._stamps.get(desktopId || '') || undefined; }
+  noteStamp(desktopId, at) { noteStamp(this._stamps, desktopId, at); }
   get desktops() { return this._desktops; }
 
   // ── Lifecycle ──
@@ -86,6 +96,7 @@ export class DesktopManager {
       for (const [id, dState] of Object.entries(desktopsData)) {
         if (id !== '__stage__' && dState.autoSave) { this._setRecord(id, dState.autoSave); this.noteWire(id, dState.autoSave); } // the server's record, as it is
       }
+      for (const [id, dState] of Object.entries(desktopsData)) this.noteStamp(id, dState?.autoSave?.updatedAt); // the base of this page's first write of each
 
       // Restore the active (first) desktop
       const firstState = this._savedStates.get(this._activeId);
@@ -365,6 +376,7 @@ export class DesktopManager {
     if (!d || d === '__stage__' || !this._desktops.some((x) => x.id === d)) return;
     const lm = this.app.layoutManager;
     const rec = msg.state && typeof msg.state === 'object' ? msg.state : { windows: [] };
+    this.noteStamp(d, rec.updatedAt); // the record kept is the base of the re-send (a 'stale' refusal: the page adopts it — lane layout-stale-record-sync)
     for (const id of msg.unexplained || []) { this._buildAttempts.delete(String(id)); this._departed.delete(String(id)); }
     // the windows this page built there through THE ONE CAPTURE: a phone's re-send carries the kept record's arrangement,
     // never its own z (phone-arrangement-verify F2: the reconciled re-send wrote the phone's z, a desktop's reload restacked)
@@ -738,7 +750,7 @@ export class DesktopManager {
     if (desktopId === '__stage__') return; // stage state never enters desktop records
     if (!this._desktops.some((d) => d.id === desktopId)) return; // a desktop deleted meanwhile: its record is nobody's to write (verify r2 ④ — the switch off it wrote an orphan record on the server)
     const sentAt = Date.now();
-    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: this.evidence(), sentAt, viewport: this.app.isMobile ? 'phone' : 'desktop' });
+    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: this.evidence(), sentAt, viewport: this.app.isMobile ? 'phone' : 'desktop', base: this.stampOf(desktopId) });
     this.app.layoutManager?.noteLayoutSent?.([desktopId], sentAt); // this record carries every close made on that desktop (inc-mukeyzpt-lpou) — released once the server READ it (verify r5 ⑤)
     this.noteSent(desktopId, state);
   }

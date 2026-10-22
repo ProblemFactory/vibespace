@@ -247,6 +247,9 @@ class AcpMessageManager extends MessageWindow {
       case 'queue_changed': return this._processQueueChanged(record, emit);
       case 'queue_op_result': return this._processQueueOpResult(record, emit);
       case 'notice': return this._processNotice(record, emit);
+      case 'subagent': return this._processSubagent(record, emit);
+      // `sub` = a SUBAGENT's own step (lane agy-subagent-cards): never the parent's card — its virtual session
+      // sub-<subId> draws it (src/server/acp-subagents.js reads the same journal), so it falls to the default below
       // client_request / notification / peer_result / permission_rules:
       // journal-only. `permission_rules` is named here for the same reason
       // codex's normalizer lists it in SKIPPED_EVENT_TYPES — it is the typed
@@ -444,6 +447,40 @@ class AcpMessageManager extends MessageWindow {
     if (emit) this._emit({ op: 'create', message: msg });
   }
 
+  /** THE SUBAGENT CARD (lane agy-subagent-cards — the owner 2026-10-21: «使用子代理的时候怎么没有子代理卡片查看细节»): the
+   *  wrapper's `subagent` record (data/bin/agy-wrapper.js, from the agy store) turns its invoke_subagent row into the
+   *  Agent card — role, type, the task the parent gave, state, spawn step, elapsed time, the answer — whose taskInfo
+   *  names the virtual session sub-<subId> it opens. Re-sent on every change; the card owns the row from then on (a
+   *  later tool_call_update for it changes nothing). A record for a row this journal never drew opens the card itself. */
+  _processSubagent(rec, emit) {
+    const subId = typeof rec.subId === 'string' ? rec.subId : '';
+    const toolCallId = String(rec.toolCallId || '') || (subId ? `sub:${subId}` : '');
+    if (!subId || !toolCallId) return;
+    const status = ['running', 'completed', 'failed', 'stopped'].includes(rec.status) ? rec.status : 'running';
+    const running = status === 'running', bad = status === 'failed' || status === 'stopped';
+    const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+    const num = (v) => (Number.isFinite(Number(v)) && v !== null ? Number(v) : null);
+    const input = { description: str(rec.role, 200) || str(rec.typeName, 80) || 'subagent', subagent_type: str(rec.typeName, 80), prompt: str(rec.task, 6000) };
+    const taskInfo = {
+      id: subId, subId, type: 'agent', description: input.description, agentRole: str(rec.role, 200), typeName: input.subagent_type,
+      status, summary: str(rec.result, 400), state: str(rec.state, 80), spawnStep: num(rec.spawnStep), startedAt: num(rec.startedAt),
+      endedAt: num(rec.endedAt), elapsedMs: num(rec.elapsedMs), steps: num(rec.steps) || 0,
+      files: (Array.isArray(rec.files) ? rec.files : []).filter((f) => typeof f === 'string').slice(0, 20), taskTitle: str(rec.taskTitle, 200),
+    };
+    const block = running ? { type: 'tool_call', toolCallId, toolName: 'Agent', input } : { type: 'tool_result', toolCallId, toolName: 'Agent', input, output: str(rec.result, 20000), status: bad ? 'error' : 'ok' };
+    const fields = { status: running ? 'pending' : bad ? 'error' : 'complete', toolName: 'Agent', toolStatus: running ? null : bad ? 'error' : 'ok', content: [block], taskInfo };
+    const msgId = this.toolCards.get(toolCallId);
+    const msg = msgId ? this.messageIndex.get(msgId) : null;
+    if (!msg) {
+      const m = this._create({ role: 'tool', ...fields, toolCallId, collapseKind: null, backendMeta: { acpKind: 'other', title: 'invoke_subagent', acpStatus: running ? 'in_progress' : 'completed' } });
+      this.toolCards.set(toolCallId, m.id);
+      if (emit) this._emit({ op: 'create', message: m });
+      return;
+    }
+    Object.assign(msg, fields, { collapseKind: null });
+    if (emit) this._emit({ op: 'edit', id: msg.id, fields: { ...fields, collapseKind: null } });
+  }
+
   // ── session/update variants ──
   _processUpdate(u, emit, replay) {
     switch (u.sessionUpdate) {
@@ -593,6 +630,7 @@ class AcpMessageManager extends MessageWindow {
     const msgId = this.toolCards.get(toolCallId);
     const existing = msgId ? this.messageIndex.get(msgId) : null;
     if (!existing) return this._toolCall({ ...u, status: u.status || 'in_progress' }, emit);
+    if (existing.taskInfo && existing.taskInfo.subId) return; // a subagent card: its `subagent` record owns the row
     const block = existing.content?.[0] || {};
     const fields = {};
     if (u.kind) { existing.collapseKind = collapseKindOf(u.kind); existing.toolName = toolNameOf(u.kind); fields.collapseKind = existing.collapseKind; fields.toolName = existing.toolName; }

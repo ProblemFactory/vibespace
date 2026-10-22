@@ -3,7 +3,11 @@
 // facts.json beside it (its `platform` decides the road: win32 = PCM from the agent's ffmpeg, darwin = length-framed Opus),
 // `render` records what it was handed (render-<n>.json: its env names, its argv; render-<n>.bin: its stdin; render-<n>.end: the
 // byte count once stdin closed), `setdefault` rewrites facts.json's default microphone. Used by test-stream-mic-op and
-// test-desktop-webrtc-chrome ⑰.
+// test-desktop-webrtc-chrome ⑰. Lane speaker-passthrough-v1: `loopback` stands in for the machine's SOUND (WASAPI loopback of the
+// default speaker) — s16le 48 kHz stereo at real-time pace, a 1 kHz tone on the LEFT and 1.5 kHz on the RIGHT at −20 dBFS
+// (loopback-<n>.json: its env names + argv; loopback-<n>.end: the bytes it wrote once stdin closed); a `loopback-die` file beside it
+// = the default speaker goes away 1 s in (it ends `device_lost`, once — the file is consumed). Used by test-stream-sound-op and
+// test-desktop-webrtc-chrome ⑳.
 // lane ci-339-reds: + THE FAKE DECODER (writeFakeDecoder) — the Windows road's ffmpeg stand-in for a box without one (the
 // Actions runner has no ffmpeg): the suites put it first on the scratch agent's PATH.
 import fs from 'node:fs';
@@ -30,6 +34,23 @@ else if (cmd === 'setdefault') {
   process.stderr.write(JSON.stringify({ ev: 'started', endpoint: process.env.VS_MIC_DEVICE || 'speakers' }) + '\\n');
   process.stdin.on('data', (d) => { fs.writeSync(out, d); bytes += d.length; });
   process.stdin.on('end', () => { fs.closeSync(out); fs.writeFileSync(path.join(D, 'render-' + n + '.end'), String(bytes)); process.stderr.write(JSON.stringify({ ev: 'end', why: 'stdin_closed', frames: bytes / 4 }) + '\\n'); process.exit(0); });
+} else if (cmd === 'loopback') {
+  const n = fs.readdirSync(D).filter((x) => /^loopback-\\d+\\.json$/.test(x)).length + 1;
+  const die = fs.existsSync(path.join(D, 'loopback-die')); if (die) fs.unlinkSync(path.join(D, 'loopback-die'));
+  fs.writeFileSync(path.join(D, 'loopback-' + n + '.json'), JSON.stringify({ n, device: process.env.VS_MIC_DEVICE || null, argv: process.argv.slice(2), at: Date.now() }));
+  process.stderr.write(JSON.stringify({ ev: 'started', endpoint: 'Speakers (Sound Blaster X3)', eventMode: true }) + '\\n');
+  let frame = 0, bytes = 0, done = false; const t0 = Date.now();
+  const end = (why) => { if (done) return; done = true; clearInterval(tick); fs.writeFileSync(path.join(D, 'loopback-' + n + '.end'), String(bytes)); process.stderr.write(JSON.stringify({ ev: 'end', why, frames: frame, bytes }) + '\\n'); process.exit(0); };
+  const tick = setInterval(() => {
+    const want = Math.floor((Date.now() - t0) * 48) - frame; if (want <= 0) return;
+    const b = Buffer.alloc(want * 4);
+    for (let i = 0; i < want; i++, frame++) { b.writeInt16LE(Math.round(3277 * Math.sin(2 * Math.PI * 1000 * frame / 48000)), i * 4); b.writeInt16LE(Math.round(3277 * Math.sin(2 * Math.PI * 1500 * frame / 48000)), i * 4 + 2); }
+    try { process.stdout.write(b); bytes += b.length; } catch { end('stdout_closed'); }
+    if (frame % 48000 < want) process.stderr.write(JSON.stringify({ ev: 'stats', packets: Math.floor(frame / 480), frames: frame, silent: 0, peakDb: -20 }) + '\\n');
+    if (die && Date.now() - t0 > 1000) end('device_lost');
+  }, 10);
+  process.stdout.on('error', () => end('stdout_closed'));
+  process.stdin.on('data', () => { }); process.stdin.on('end', () => end('stdin_closed'));
 } else process.exit(2);
 `;
 
@@ -58,7 +79,11 @@ export function writeFakeMic(dir, facts = winFacts()) {
   const ended = (n) => fs.existsSync(path.join(dir, `render-${n}.end`));
   const binOf = (n) => (fs.existsSync(path.join(dir, `render-${n}.bin`)) ? fs.readFileSync(path.join(dir, `render-${n}.bin`)) : Buffer.alloc(0));
   const setdefaults = () => (fs.existsSync(path.join(dir, 'setdefault.log')) ? fs.readFileSync(path.join(dir, 'setdefault.log'), 'utf8').trim().split('\n').filter(Boolean) : []);
-  return { exe, dir, setFacts, renders, ended, binOf, setdefaults };
+  // lane speaker-passthrough-v1: the `loopback` runs (the machine's sound)
+  const loopbacks = () => fs.readdirSync(dir).filter((x) => /^loopback-\d+\.json$/.test(x)).map((x) => JSON.parse(fs.readFileSync(path.join(dir, x), 'utf8'))).sort((a, b) => a.n - b.n);
+  const loopbackEnded = (n) => fs.existsSync(path.join(dir, `loopback-${n}.end`));
+  const speakerGoes = () => fs.writeFileSync(path.join(dir, 'loopback-die'), '1');
+  return { exe, dir, setFacts, renders, ended, binOf, setdefaults, loopbacks, loopbackEnded, speakerGoes };
 }
 
 /** 1 kHz energy against 3 kHz in s16le stereo PCM's left channel (Goertzel over the whole run): the tone made it through. */

@@ -61,7 +61,14 @@
 //      maximize / minimize on disk is the desk's, and D's reload shows the desk D had. RED copy (printed): this source with
 //      the server's gate removed (layerGate answers ok) ⇒ the old save lands whole — D keeps its boxes live (belt 2), but
 //      the record on disk is the phone's and D's reload takes it (a phone write moves a desk window).
-// PDSYNC_ONLY=1,2,… runs a subset (the base control is ⑧; ⑩–⑬, ⑮, ⑯ and ⑰ carry their own).
+//   ⑱ lane layout-stale-record-sync (the owner 2026-10-22 «我刚才点了恢复布局也没正确恢复» — §6b guard 11, a record never goes
+//      backwards): P closes a window (a rollback point holds the five), then SLEEPS (its layout-sync and layout-restored frames
+//      dropped — it keeps its old copy); 恢复布局 restores the five (D reloads on the broadcast); P wakes and its person closes
+//      another window ⇒ P's save names the base it had seen, older than the restore's stamp ⇒ the server REFUSES it (stale,
+//      the journal line), P adopts the restored record (it rebuilds the restored window) and re-sends ⇒ the restored window
+//      STAYS on disk and on D, and P's own close LANDS. RED copy (printed): this source with the staleness gate removed
+//      (staleVerdict answers ok) ⇒ P's old copy is written — the restored window is gone again (one window: below the belt).
+// PDSYNC_ONLY=1,2,… runs a subset (the base control is ⑧; ⑩–⑬, ⑮, ⑯, ⑰ and ⑱ carry their own).
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -670,6 +677,44 @@ else await (async () => {
     judge(J(d2) === J(d0), `${tag}⑰: D's reload shows the desk D had (the boot takes the record whole — a phone write never moved a desk window)`, J({ d0, d2 }));
   };
 
+  // ── ⑱ (lane layout-stale-record-sync): 恢复布局 HOLDS against a phone that slept through it. `red` = this source with the
+  // staleness gate removed (src/lib/desktop-record.js staleVerdict answers ok) — the checks judged by `judge` FAIL there.
+  const SLEEP = `(() => { if (window.__sleepWrapped) return; window.__sleepWrapped = 1; app.ws.globalHandlers = app.ws.globalHandlers.map((h) => (m) => { if (window.__asleep && m && (m.type === 'layout-sync' || m.type === 'layout-restored')) return; return h(m); }); })()`;
+  const STALE_FIND = '  if (b === null) return { ok: true, judged: false };', STALE_GONE = '  return { ok: true, judged: false };';
+  const closeOnP = async (P, title) => {
+    await switchTo(P, title); await sleep(300);
+    await P.tap(`document.getElementById('mobile-nav-close')`); await sleep(400);
+    const confirmBtn = await P.ptOf(`document.querySelector('.dialog-overlay .btn-primary, #dialog-overlay .btn-primary')`);
+    if (confirmBtn) await P.touch(confirmBtn);
+  };
+  const onDisk = (S, id) => (S.disk().windows || []).some((w) => w.winId === id);
+  const staleLegs = async (S, D, P, red) => {
+    const tag = red ? 'NO-STALE-GATE ' : '';
+    const judge = (c, n, extra) => (red ? ok(!c, `RED CONTROL ${n} — FAILS with the staleness gate removed`, extra) : ok(c, n, extra));
+    ok(await D.boot(S.PORT) && await P.boot(S.PORT), `${tag}⑱: D and P booted on a fresh record`);
+    await closeOnP(P, 'pd-bravo'); // the shape change: a rollback point holds the five
+    const bravoGone = await until(() => !onDisk(S, 'win-pd-bravo'), 10000); await sleep(1500);
+    const points = await (await fetch(`http://127.0.0.1:${S.PORT}/api/layout-history`)).json();
+    const point = (points.entries || []).find((e) => e.totalWindows === 5);
+    ok(bravoGone && !!point && !(await D.ev(`app.wm.windows.has('win-pd-bravo')`)), `${tag}⑱: P closed bravo (D followed) — the rollback point before it holds the five`, J({ bravoGone, point: point && point.id }));
+    await P.ev(SLEEP); await P.ev('window.__asleep = true'); // P sleeps: it hears no record and no restore — its copy stays the four
+    const rr = await (await fetch(`http://127.0.0.1:${S.PORT}/api/layout-history/${encodeURIComponent(point.id)}/restore`, { method: 'POST' })).json();
+    await sleep(1800); await D.boot(S.PORT); // D reloads on layout-restored (as the restoring page does)
+    const held0 = await S.held();
+    ok(rr.success && (held0.windows || []).some((w) => w.winId === 'win-pd-bravo') && (await D.ev(`app.wm.windows.has('win-pd-bravo')`)) && !(await P.ev(`app.wm.windows.has('win-pd-bravo')`)), `${tag}⑱: 恢复布局 put bravo back (on the server and on D); P slept through it (its copy has no bravo)`, J({ rr, ids: (held0.windows || []).map((w) => w.winId) }));
+    await P.ev('window.__asleep = false'); // P wakes; its person closes charlie from the OLD copy
+    const pS = P.sent.length, pG = P.got.length, j0 = S.journal.length;
+    await closeOnP(P, 'pd-charlie');
+    const charlieGone = await until(() => !onDisk(S, 'win-pd-charlie'), 10000); await sleep(2500);
+    const first = P.sent.slice(pS)[0], refusal = P.got.slice(pG).find((m) => m.type === 'layout-sync-refused');
+    console.log(`    ${tag}⑱: P's first save after the wake: base ${first?.base} vs the restored record ${held0.updatedAt}, bravo ${(first?.state?.windows || []).some((w) => w.winId === 'win-pd-bravo')}; refusal ${J(refusal ? { reason: refusal.reason } : null)}; ${P.sent.length - pS} phone save(s)`);
+    ok(!!first && typeof first.base === 'number' && first.base < held0.updatedAt && !(first.state?.windows || []).some((w) => w.winId === 'win-pd-bravo'), `${tag}⑱: the setup is real — P's first save after its close is from the OLD copy (no bravo) and names the older base it had seen`, J({ base: first?.base, held: held0.updatedAt }));
+    judge(refusal?.reason === 'stale' && /REFUSED a phone record of desktop "Main" \(desk-[^)]+\): written from an older base/.test(S.journal.slice(j0)), `${tag}⑱: the server REFUSES P's old copy — stale, the journal line`, J({ refusal, journal: S.journal.slice(j0).split('\n').filter((l) => /layout-sync/.test(l)) }));
+    judge(onDisk(S, 'win-pd-bravo') && (await D.ev(`app.wm.windows.has('win-pd-bravo')`)), `${tag}⑱: 恢复布局 HOLDS — bravo stays on disk and on D (2.369.340: one window below the belt, the restore undone by the next phone sync)`, J({ disk: (S.disk().windows || []).map((w) => w.winId) }));
+    ok(charlieGone && !(await D.ev(`app.wm.windows.has('win-pd-charlie')`)), `${tag}⑱: P's own close LANDS (charlie off the record and off D)`, J({ charlieGone }));
+    judge(await until(() => P.ev(`app.wm.windows.has('win-pd-bravo')`), 5000), `${tag}⑱: P ADOPTED the restored record — it rebuilt bravo`);
+  };
+
   const D = await mkPage('desk', false), P = await mkPage('phone', true);
   if (!ok(!!D && !!P, 'two chromes exposed a CDP page target each (D 1440×900, P iPhone 390×844)')) return;
   try {
@@ -923,6 +968,20 @@ else await (async () => {
       if (ok(RSRC.split(GATE_FIND).length === 2, '⑰ RED: the gate\'s line exists once in src/lib/desktop-record.js (the control judges this source)')) {
         const SR = await startServer(mkTree('gate-red', 'HEAD', true, null, ['src/lib/desktop-record.js', (t) => t.replace(GATE_FIND, GATE_GONE)]), 'gate-red', fixture);
         if (ok(SR.up, '⑰ RED: its server booted', SR.journal.slice(-600))) await gateLegs(SR, D, P, true);
+        await SR.stop();
+      }
+    }
+    // ── ⑱ lane layout-stale-record-sync: 恢复布局 HOLDS — this source, then the RED copy (the staleness gate removed) ──
+    if (want(18)) {
+      await S.stop();
+      const ST = await startServer(fixedTree, 'stale', fixture);
+      if (ok(ST.up, '⑱: the fixed-tree server re-booted on a fresh record', ST.journal.slice(-600))) await staleLegs(ST, D, P, false);
+      await ST.stop();
+      const RSRC = fs.readFileSync(path.join(repo, 'src', 'lib', 'desktop-record.js'), 'utf8');
+      console.log('— ⑱ RED control: this source with the staleness gate removed (src/lib/desktop-record.js staleVerdict answers ok)');
+      if (ok(RSRC.split(STALE_FIND).length === 2, '⑱ RED: the gate\'s line exists once in src/lib/desktop-record.js (the control judges this source)')) {
+        const SR = await startServer(mkTree('stale-red', 'HEAD', true, null, ['src/lib/desktop-record.js', (t) => t.replace(STALE_FIND, STALE_GONE)]), 'stale-red', fixture);
+        if (ok(SR.up, '⑱ RED: its server booted', SR.journal.slice(-600))) await staleLegs(SR, D, P, true);
         await SR.stop();
       }
     }

@@ -1,0 +1,22 @@
+{
+  "id": "c0000000-0000-4000-8000-0000000000c1",
+  "recipient": "49120000-0000-4000-8000-0000000000b1",
+  "sender": "9c0f0000-0000-4000-8000-0000000000a1",
+  "priority": "MESSAGE_PRIORITY_HIGH",
+  "timestamp": "2026-10-21T14:32:32.119140491Z",
+  "renderDetails": {
+    "messageTitle": "Message from Parent Agent"
+  },
+  "content": "请评审 /home/u/workspace/示例项目/样例.md，按 100 分制打分，并把报告写到 /home/u/workspace/示例项目/report.md。",
+  "sourceMetadata": {
+    "tool": {
+      "conversationId": "9c0f0000-0000-4000-8000-0000000000a1",
+      "stepIndex": 6,
+      "toolCall": {
+        "id": "call_6000001",
+        "name": "invoke_subagent",
+        "argumentsJson": "{\"Model\":\"inherit\",\"Prompt\":\"请评审 /home/u/workspace/示例项目/样例.md，按 100 分制打分，并把报告写到 /home/u/workspace/示例项目/report.md。\",\"Role\":\"示例评审专家\",\"TypeName\":\"self\"}"
+      }
+    }
+  }
+}

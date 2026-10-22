@@ -138,6 +138,18 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return perDesktop;
   }
   let _lastShape = null;
+  // WHAT THE RING SAW (lane layout-stale-record-sync — the owner's 2026-10-22 loss read «工作 5 → 0» with no writer and no
+  // refusal on record): the ws layout-sync handler notes each write (`wrote` — the desktop, the writer's viewport, its
+  // evidence by reason, its base) and each refusal (`refused` — stale / shrink-without-close / cross-layer) here through
+  // writeLayouts.note; the next rollback point's meta carries the write that made it (`writer`) and the refusals since
+  // the last point (`refused`, ≤ 20). A restore's point names the restore.
+  const _ringNotes = { writer: null, refused: [] };
+  function noteLayout(entry) {
+    if (!entry || typeof entry !== 'object') return;
+    const e = { ...entry, at: Date.now() };
+    if (entry.refused) { _ringNotes.refused.push(e); if (_ringNotes.refused.length > 20) _ringNotes.refused.splice(0, _ringNotes.refused.length - 20); }
+    else _ringNotes.writer = e;
+  }
   let _histSeq = 0;
   let _histWarned = false;
   // CRITICAL (adversarial review): readLayouts() hands out the LIVE cache
@@ -154,7 +166,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // changed after it — per desktop whose window set changed, [name, before, after] ("HR 3 → 1") — so a user looking
   // for the state before a loss finds the row the loss FOLLOWS (userW inc-mun7qjmw-iksh: every row read "44
   // windows — …", the damage was in none of them)
-  function snapshotLayout(prev, nextShape, next = null) {
+  function snapshotLayout(prev, nextShape, next = null, notes = null) {
     try {
       // No detached copy yet (first write after boot, or a restore issued
       // before anything read layouts): fall back to what is ON DISK — that IS
@@ -177,6 +189,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       try { change = next ? desktopChanges(prev, next) : null; } catch { change = null; } // computed NOW — the caller mutates `next` in place later
       const snap = detach(prev);
       if (!snap) return;
+      const seen = {}; // what the ring saw (above): the write that made this point and the refusals since the last one
+      if (notes && notes.writer) seen.writer = notes.writer;
+      if (notes && Array.isArray(notes.refused) && notes.refused.length) seen.refused = notes.refused.splice(0);
       wordlessTitles(snap); // a rollback point is a layout record too (the disk belt above may read what an older build wrote)
       setImmediate(() => {
         try {
@@ -192,10 +207,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           const at = Date.now();
           // atomic like layouts.json next door — a torn rollback point fails
           // exactly when it is finally needed
-          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.json`), { at, summary: before, totalWindows: total, change, layouts: snap });
+          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.json`), { at, summary: before, totalWindows: total, change, ...seen, layouts: snap });
           // tiny sidecar header: listing must not parse 40 whole layouts on the
           // panic-button path
-          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.meta.json`), { at, summary: before, totalWindows: total, change });
+          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.meta.json`), { at, summary: before, totalWindows: total, change, ...seen });
           pruneHistory();
         } catch (e) {
           // never silent: the UI asserts this protection exists
@@ -227,7 +242,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     wordlessTitles(data);
     try {
       const nextShape = layoutShape(data);
-      snapshotLayout(_lastGood, nextShape, data);   // the DETACHED previous state, never the live cache (+ what replaces it, for the row's "what changed")
+      const writer = _ringNotes.writer; _ringNotes.writer = null; // this write's own note (a write with none — a preset, an import — names nobody)
+      snapshotLayout(_lastGood, nextShape, data, { writer, refused: _ringNotes.refused });   // the DETACHED previous state, never the live cache (+ what replaces it, for the row's "what changed")
       _lastShape = nextShape;
       _lastGood = detach(data);
     } catch {}
@@ -244,7 +260,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           // layouts.json each) is read only when actually restoring
           try {
             const m = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f.replace(/\.json$/, '.meta.json')), 'utf-8'));
-            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows, change: m.change || null };
+            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows, change: m.change || null, ...(m.writer ? { writer: m.writer } : {}), ...(m.refused ? { refused: m.refused } : {}) };
           } catch {}
           try {
             const j = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f), 'utf-8'));
@@ -335,9 +351,20 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // the shape gate while still overwriting `saved` presets, customGrids and
     // all geometry — silently, on an action whose dialog promises it is
     // undoable. The restore is the one write that must never be gated.
-    snapshotLayout(_lastGood, '\u0000force-' + Date.now());
+    snapshotLayout(_lastGood, '\u0000force-' + Date.now(), null, { writer: { via: 'restore', from: id, at: Date.now() }, refused: _ringNotes.refused });
+    // A RESTORE OUTRANKS EVERY LIVE CLIENT (lane layout-stale-record-sync, the owner's «我刚才点了恢复布局也没正确恢复»): the
+    // point's records carry the stamps of THEIR time — older than every record a page has seen since — so each record is
+    // stamped NOW (above the one it replaces): a page that missed the restore (asleep, its socket down) writes from an
+    // older base and the staleness gate (ws-handler) refuses it — it adopts the restored record instead of writing over it
+    const restoredAt = Date.now();
+    const cur = _layoutsCache || {};
+    for (const [dk, v] of Object.entries(saved.layouts.desktops || {})) {
+      if (v && v.autoSave && typeof v.autoSave === 'object') v.autoSave.updatedAt = Math.max(restoredAt, (Number(cur.desktops?.[dk]?.autoSave?.updatedAt) || 0) + 1);
+    }
+    if (saved.layouts.autoSave && typeof saved.layouts.autoSave === 'object') saved.layouts.autoSave.updatedAt = Math.max(restoredAt, (Number(cur.autoSave?.updatedAt) || 0) + 1);
     // the CURRENT state becomes a rollback point too — restoring is itself
     // undoable, so a mis-click can never be the end of the story
+    noteLayout({ via: 'restore', from: id }); // the restore's own write names it (its point's `writer`)
     writeLayouts(saved.layouts);
     flushLayouts();
     // BROADCAST (adversarial review): every other layout mutation broadcasts;
@@ -357,6 +384,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.listLayoutHistory = listLayoutHistory;
   router.readLayouts = readLayouts;
   router.writeLayouts = writeLayouts;
+  writeLayouts.note = noteLayout; // the ws handler's notes for the ring (a property: the ws ctx contract hands writeLayouts alone)
   router.flushLayouts = flushLayouts;
   router.readUserState = () => readUserState(); // TaskGroupManager one-time Groups migration
   // lane peer-card-sender (③): ONE custom name set from the server (ws rename-session — an agent or a script renaming a

@@ -10,12 +10,19 @@
 //                  WAITS reading a pasted code on stdin, up to $AGY_STUB_AUTH_WAIT_MS, and answers a result ERROR)
 //   --input-format stream-json    → init once (conversation_id = --conversation or a fresh uuid), then per stdin line:
 //       not JSON / no `event`     → result ERROR, exit 1        · an unknown event → a stderr warning, skipped
-//       control_request/_response → result ERROR, exit 2        · a `user` whose text starts with "/" → result ERROR, exit 2
+//       control_request/_response → result ERROR, exit 2
+//       a `user` whose first word is one of agy's OWN commands (the fixture's slashInPrint.answeredWithoutATurn, any case)
+//                                 → result ERROR, exit 2 — any other text, one that starts with a path too, is a turn
 //       a non-text content block  → result ERROR, exit 1
 //       text naming `tool`        → a run_command tool step (ACTIVE, then DONE with output)
 //       text naming `deny`        → a soft-deny notice on stderr (the run continues); under --dangerously-skip-permissions
 //                                   the tool runs instead (a run_command step)
 //       text naming `fail`        → result ERROR + an AGY_ERROR line on stderr · `slow` → the turn takes $AGY_STUB_SLOW_MS
+//       text naming `subagent`    → an invoke_subagent tool step (ACTIVE, parameters {Role, TypeName} — what the owner's
+//                                   journal recorded, lane agy-subagent-cards) at step $AGY_STUB_SPAWN_STEP (the fixture
+//                                   store's task names it), then the subagent_info update DONE on the same step (shape:
+//                                   the docs'); with `old` too = an older build: no subagent_info, the tool step DONE
+//                                   with an output that names no subagent
 //       otherwise                 → agent_response deltas "Antigravity (<model>, <mode>): <text>", a checkpoint, result SUCCESS
 //     stdin EOF → exit 0 ($AGY_STUB_EXIT_DELAY_MS: after that long, SIGTERM ignored — a slow restart, made deterministic).  The --model / --effort / --mode / --dangerously-skip-permissions it was started with are echoed.
 const fs = require('fs');
@@ -60,7 +67,7 @@ if (process.env.AGY_STUB_AUTH === 'wait') { // the MEASURED start on a character
   return;
 }
 if (flag('--input-format') !== 'stream-json') { process.stderr.write('stub: only --input-format stream-json is implemented\n'); process.exit(2); }
-const cid = flag('--conversation') || crypto.randomUUID();
+const cid = flag('--conversation') || process.env.AGY_STUB_CID || crypto.randomUUID(); // AGY_STUB_CID: a suite's fixed conversation (its fixture store is that conversation's)
 const model = flag('--model') || 'default', effort = flag('--effort') || '', mode = argv.includes('--dangerously-skip-permissions') ? 'always-proceed' : (flag('--mode') || 'request-review');
 out({ event: 'init', conversation_id: cid, init: { cwd: process.cwd(), tools: ['ask_permission', 'run_command', 'write_to_file'], permission_mode: mode === 'always-proceed' ? 'always-proceed' : 'request-review', ...(flag('--model') ? { model } : {}) } });
 let step = 0, turns = 0, busy = Promise.resolve();
@@ -79,6 +86,16 @@ async function turn(text) {
     const i = step++;
     out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'rm -rf build' }, output: '' } } });
   } else if (/\bdeny\b/.test(text)) process.stderr.write('Tool run_command(rm -rf build) requires approval and was skipped. Allow it with a "command(rm)" rule under permissions.allow in ~/.gemini/antigravity-cli/settings.json, or run with --dangerously-skip-permissions.\n');
+  if (/\bsubagent\b/.test(text)) {
+    const fixed = Number(process.env.AGY_STUB_SPAWN_STEP);
+    const i = Number.isInteger(fixed) && fixed >= 0 && !/\bold\b/.test(text) ? fixed : step++; // the old way: the next free step
+    if (i >= step) step = i + 1;
+    const role = process.env.AGY_STUB_SUB_ROLE || 'reviewer';
+    out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: 'invoke_subagent', tool_info: { name: 'invoke_subagent', parameters: { Role: role, TypeName: 'self' } } } });
+    await sleep(10);
+    if (/\bold\b/.test(text)) out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'tool', tool_name: 'invoke_subagent', tool_info: { name: 'invoke_subagent', parameters: { Role: role, TypeName: 'self' }, output: 'Started.' } } });
+    else out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'subagent', subagent_info: { subagents: [{ type_name: 'self', role }] } } });
+  }
   if (/\bslow\b/.test(text)) await sleep(Number(process.env.AGY_STUB_SLOW_MS || 1500));
   if (/\bfail\b/.test(text)) { process.stderr.write('AGY_ERROR: {"short_error":"model unavailable","status":"UNAVAILABLE","code":503,"retryable":true}\n'); out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); return; }
   const reply = `Antigravity (${model}${effort ? ', ' + effort : ''}, ${mode}): ${text}`;
@@ -105,7 +122,8 @@ process.stdin.on('data', (d) => {
     const blocks = Array.isArray(c) ? c : [{ type: 'text', text: String(c || '') }];
     if (blocks.some((b) => !b || b.type !== 'text')) fail('content block type other than text', 1);
     const text = blocks.map((b) => b.text).join('');
-    if (/^\s*\//.test(text)) fail(`${text.trim().split(/\s/)[0]} is answered by the CLI itself and is unavailable with --input-format stream-json; run it as its own --print ${text.trim().split(/\s/)[0]} invocation`, 2);
+    const head = text.trim().split(/\s/)[0];
+    if (FX.slashInPrint.answeredWithoutATurn.includes(head.toLowerCase())) fail(`${head} is answered by the CLI itself and is unavailable with --input-format stream-json; run it as its own --print ${head} invocation`, 2);
     busy = busy.then(() => turn(text));
   }
 });

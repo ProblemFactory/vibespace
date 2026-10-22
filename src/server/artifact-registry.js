@@ -97,7 +97,9 @@ function observe(session, record) {
   if (record.parent_tool_use_id || record.isSidechain) return 0; // a helper's own record: the helper door folds it at the Task's end (with its `via`)
   let ops = [];
   try { ops = of(record) || []; } catch { return 0; }
-  if (record.type === 'user') { if (!session._helperArtifacts) session._helperArtifacts = { runs: new Map(), seen: new Set() }; ops = ops.concat(helperOps(session, record, session._helperArtifacts)); }
+  // the helper door: the descriptor's hook names what ENDS a helper (claude: a user record; antigravity: a finished `subagent` card)
+  if (!session._helperArtifacts) session._helperArtifacts = { runs: new Map(), seen: new Set() };
+  ops = ops.concat(helperOps(session, record, session._helperArtifacts));
   let n = 0;
   for (const o of ops) { try { if (!noteOp(session, { ...o, by: 'agent' }).skipped) n++; } catch (e) { deps.log.warn?.(`[artifacts] op skipped: ${e.message}`); } }
   return n;
@@ -109,7 +111,7 @@ function observe(session, record) {
  *  parse + the device feed, or a background agent read at its launch and again at its end, fold an op once)}.
  *  A remote conversation (host ≠ '') reads nothing (its sidechains are on its machine; none is fetched). */
 function helperOps(session, record, state = { runs: new Map(), seen: new Set() }) {
-  if (!session || !record || record.type !== 'user' || (session.host && session.host !== 'local')) return [];
+  if (!session || !record || (session.host && session.host !== 'local')) return [];
   let h = null;
   try { h = require('../harnesses').harnessOf(session.backend || 'claude'); } catch { h = null; }
   const of = h && h.artifactsOf, helpers = h && h.helperTranscriptsOf;

@@ -33,6 +33,8 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   ok(J(links('the dump is /home/u/workspace/39AI/platform-dev/docs/skrypt-import-2026-10-09/DRY-DUMP.md, read it')) === J(['path:/home/u/workspace/39AI/platform-dev/docs/skrypt-import-2026-10-09/DRY-DUMP.md']), 'an absolute path (the owner\'s screenshot) — the comma after it is not part of it');
   ok(J(links('设计稿：/var/tmp/vibespace-lanes/webhook-design/design-webhook.zh.md（中文）')) === J(['path:/var/tmp/vibespace-lanes/webhook-design/design-webhook.zh.md']), 'CJK punctuation ends a path (path-linkify\'s rule, shared)');
   ok(J(links('open `report.md` then `out/`')) === J(['rel:report.md', 'rel:out/']), 'a bare filename / a folder IN A CODE SPAN links (the chat\'s rule)');
+  ok(J(links('见 `标书研究/方案.md`')) === J(['rel:标书研究/方案.md']), 'lane agy-links-file-url: a code span whose path starts with a CJK folder name links (the chat\'s rule, shared)');
+  ok(links('请看docs/plan.md · 报告：docs/x.md · 方案在 标书研究/方案.md 里').length === 0, '…in PROSE a relative path still starts with an ASCII letter: a word glued to it (请看docs/plan.md) is never part of a link');
   ok(J(links('`cat /etc/hosts` and `~/x/y.md`')) === J(['path:/etc/hosts', 'path:~/x/y.md']), 'a path inside a code span links on its own words');
   ok(J(links('page /p/pgabcdefghij and https://vs.test/p/pgabcdefghij')) === J(['page:/p/pgabcdefghij', 'url:https://vs.test/p/pgabcdefghij']), 'a /p/<id> page; inside a URL it is the URL');
   ok(J(links('mail ops@foo.com or mailto:team@bar.org')) === J(['mail:mailto:ops@foo.com', 'mail:mailto:team@bar.org']), 'a mail address and a mailto: link');
@@ -176,7 +178,7 @@ console.log('§5 CENSUSES — one grammar · escaped words · the one artifact d
   const oneGrammar = (fy) => /import \{ pathRe, cleanPath, looksRelPath, relCandidates \} from '\.\.\/path-linkify\.js';/.test(fy) && pathRegexes(fy).length === 0;
   ok(oneGrammar(FY), 'ONE GRAMMAR: foryou-links.js reads where a path ends / a relative rule / the candidates from src/path-linkify.js, and holds no regex of its own that matches a whole path', pathRegexes(FY));
   ok(/looksRelPath, relCandidates \} from '\.\.\/path-linkify\.js'/.test(CR) && /if \(looksRelPath\(txt\)\)/.test(CR) && /const cands = relCandidates\(rel, cwd\);/.test(CR), 'the chat reads the SAME relative rule and candidates (moved, not copied)');
-  const SIG = String.raw`[\w@%+=.\-][^\s<>"'` + '`' + String.raw`|]*$`;
+  const SIG = String.raw`[\p{L}\p{N}_@%+=.\-][^\s<>"'` + '`' + String.raw`|]*$`; // a first letter of any script (lane agy-links-file-url)
   const holders = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = path.posix.join(d, e.name); if (e.isDirectory()) walk(rel); else if (/\.(m?js)$/.test(e.name) && read(rel).includes(SIG)) holders.push(rel); } };
   walk('src');
   ok(J(holders) === J(['src/path-linkify.js']) && PL.includes(SIG), 'the relative rule\'s own pattern lives in ONE file under src/', holders);

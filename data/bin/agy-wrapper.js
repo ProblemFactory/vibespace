@@ -15,8 +15,11 @@
 //        subagent_info?,usage?,duration_seconds?}}; {"event":"result","result":{conversation_id,status SUCCESS|ERROR|
 //        CANCELED|INTERRUPTED|INVALID|WAITING|RUNNING,response,error?,num_turns,usage{…}}} per turn.
 //   A SLASH COMMAND agy answers itself (/model, /usage …) or a control_request in the stream ends the session (exit 2)
-//   ⇒ a chat-input starting with "/" is REFUSED HERE and never reaches agy. There is no cancel and no model switch in
-//   the stream ⇒ Stop, set-model / set-effort / set-mode RESTART the process on the same conversation (--conversation).
+//   ⇒ a chat-input whose first word is one of agy's OWN commands (the closed, measured list in
+//   src/harnesses/antigravity-slash.js) is REFUSED HERE and never reaches agy; any other line — one that starts with a
+//   path (the composer's upload puts the file's path first) or another "/…" — is text and is sent. There is no cancel
+//   and no model switch in the stream ⇒ Stop, set-model / set-effort / set-mode RESTART the process on the same
+//   conversation (--conversation).
 //   stderr carries diagnostics: an unauthenticated agy prints its OAuth URL and then WAITS 60 s reading a pasted code on
 //   ITS STDIN (measured) — our next user line would be read as that code — so the URL line kills the child at once and
 //   is said as the auth-required refusal; a tool that needed approval is SOFT-DENIED (the run continues) and its stderr
@@ -34,6 +37,8 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
+// agy's own slash commands: the ONE closed list, PURE (no require), read beside src/ as chat-wrapper.js reads claude-transport.js
+const { agySlashCommand } = require(path.join(__dirname, '..', '..', 'src', 'harnesses', 'antigravity-slash.js'));
 
 const bufferFile = process.argv[2];
 const metaFile = process.argv[3];
@@ -165,10 +170,12 @@ function startChild() {
   });
   child.on('error', (err) => { notice('error', `Antigravity process error: ${err.message}`, 'child-error'); });
   setImmediate(drainPromptQueue); // what queued behind a restart runs on the new process
+  if ([...subs.values()].some((x) => !x.done)) armSubTail(); // a sub still working when agy restarted
   child.on('exit', (code, signal) => {
     if (mine !== child) return; // an old child after a restart
     child = null;
     if (restarting) return;   // the restart path starts the next one
+    subsAtExit();
     if (activePrompt) endPrompt(activePrompt, 'error', { message: `Antigravity exited (${signal || code})` }, activePrompt.opts || {});
     if (!shuttingDown && !authFailed) {
       if (code === 2) notice('error', 'Antigravity ended this session (exit 2): its stream refused a message it does not take in a running session (a slash command or a control message). Resume the conversation to continue.', 'agent-exited');
@@ -191,16 +198,153 @@ function restartChild(why) {
   log(`restart (${why}) on conversation ${meta.sessionId || '(new)'}`);
 }
 
+// ── SUBAGENT CARDS (lane agy-subagent-cards, 2026-10-21 — the owner: «使用子代理的时候怎么没有子代理卡片查看细节») ──
+// agy's invoke_subagent runs ASYNC (MEASURED on the owner's store, 2026-10-21): the tool's own output is only «Created
+// the following subagent: {conversationId …}»; the sub works in its OWN conversation (its own db + brain dir under THIS
+// HOME root), answers its parent with send_message minutes later, and its state stays SUBAGENT_STATE_ALIVE after it.
+// The stream says only tool_info + one subagent_info — so THIS process, on the machine that holds the store, reads it
+// (src/agy-store.js parses; every read goes through src/agy-store-fs.js — agy-store's verdict, then no link past the
+// store root — so it can never open the login file, nor anything a link planted in the store points at):
+//   · the invoke_subagent row becomes THE CARD — a `subagent` record {toolCallId, subId, role, typeName, task, state,
+//     spawnStep, status, startedAt, endedAt, elapsedMs, result, steps, files}, re-sent whenever it changes;
+//   · the sub's own steps ride `sub` records {subId, toolCallId, rec: <an ACP record>} — its virtual session
+//     sub-<subId>, drawn by the ACP normalizer (src/server/stdout/acp-events.js routes them);
+//   · THE TAIL runs every 2 s ONLY while a spawn looks for its sub (≤ 60 s) or a sub works — never otherwise; a sub
+//     whose last step is a final planner response (it answered), or that left ALIVE, ends its card. A parent
+//     send_message to a known sub wakes it again.
+// The link from the row to the sub: the stream's own output / subagent_info when they name it, else the store — the
+// parent's TASK in the sub's messages names the parent's spawning step (unique per sub; spawnStepIndex is not).
+// An agy whose store shows no subagent (an older build, another HOME) ⇒ no card and no error: the row stays a row.
+const AS = require(path.join(__dirname, '..', '..', 'src', 'agy-store.js'));
+const SUB_TAIL_MS = Math.max(200, Number(process.env.AGY_WEBUI_SUB_TAIL_MS) || 2000);
+const SPAWN_LOOK_MS = Math.max(1000, Number(process.env.AGY_WEBUI_SUB_LOOK_MS) || 60000);
+const SUB_MAX = 4000;          // a timeline text's clip in the journal (the full text stays in the store)
+const subs = new Map();        // subId → {toolCallId, row, task, answer, startedAt, offset, lastIdx, st, steps, last, files, done, card}
+const spawns = new Map();      // the invoke_subagent row's toolCallId → {step, at, subId}
+let subTimer = null;
+/** THE ONE GATE every store read passes (the token law): src/agy-store-fs.js — agy-store's verdict on the RELATIVE path,
+ *  then no link anywhere past the store root and O_NOFOLLOW (the hub's reader of a sub that already ran opens files
+ *  through the same gate). The store = this agy's HOME (the account's root). */
+let storeGate = null;
+const store = () => storeGate || (storeGate = require(path.join(__dirname, '..', '..', 'src', 'agy-store-fs.js')).storeReader(process.env.HOME || require('os').homedir(), { log }));
+const storeRead = (rel) => store().read(rel);
+const storeRows = (rel, of) => store().rows(rel, of);
+/** The complete lines appended to a store file since `offset` (≤ 512 KB a tick): {lines, next} | null (no such file). */
+const storeLines = (rel, offset) => store().lines(rel, offset);
+let sqliteMod;
+/** The db's step rows after `afterIdx` (read-only, at the path the gate answers) — the timeline when this agy writes no
+ *  transcript. */
+function storeDbRows(rel, afterIdx) {
+  const abs = store().path(rel, 'db');
+  if (!abs) return [];
+  if (sqliteMod === undefined) {
+    const emit = process.emitWarning; // node:sqlite announces itself as experimental once — noise in this log
+    process.emitWarning = function (w, ...rest) { if (/SQLite is an experimental feature/.test(String((w && w.message) || w))) return; return emit.call(this, w, ...rest); };
+    try { sqliteMod = require('node:sqlite'); } catch { sqliteMod = null; } finally { process.emitWarning = emit; }
+  }
+  if (!sqliteMod) return [];
+  let db = null;
+  try { db = new sqliteMod.DatabaseSync(abs, { readOnly: true }); return db.prepare('SELECT idx, step_type, status, metadata, render_info, step_payload FROM steps WHERE idx > ? ORDER BY idx LIMIT 200').all(afterIdx); }
+  catch (e) { log(`store db unreadable (${rel}): ${e.message}`); return []; }
+  finally { try { db?.close(); } catch { } }
+}
+function emitCard(sub, now = Date.now()) {
+  const card = AS.cardOf({ toolCallId: sub.toolCallId, row: sub.row, task: sub.task, answer: sub.answer, lastStep: sub.last, startedAt: sub.startedAt, steps: sub.steps, files: sub.files, now, ended: sub.ended });
+  const key = JSON.stringify({ ...card, steps: null, elapsedMs: null, endedAt: null }); // a step alone never re-sends the card (its task / answer are the journal's largest texts)
+  if (key === sub.cardKey) return card;
+  sub.cardKey = key; sub.card = card;
+  record('subagent', { ...card, home: process.env.HOME || null }); // home = the store's account root (the hub's helper door reads the sub's transcript there)
+  return card;
+}
+function addStep(sub, step) {
+  if (!step || step.idx <= sub.lastIdx) return;
+  sub.lastIdx = step.idx; sub.steps++; sub.last = step;
+  for (const p of AS.writesOf(step)) if (!sub.files.includes(p)) sub.files.push(p);
+  const parentName = sub.task && /^Message from (.{1,60})$/.exec(sub.task.title || '') ? /^Message from (.{1,60})$/.exec(sub.task.title)[1] : null;
+  for (const rec of AS.stepRecords(step, sub.st, { subId: sub.row.id, parentId: meta.sessionId, parentName, max: SUB_MAX })) record('sub', { subId: sub.row.id, toolCallId: sub.toolCallId, rec });
+}
+function adoptSub(toolCallId, subId) {
+  const parent = meta.sessionId;
+  if (!AS.isId(parent) || !AS.isId(subId) || subs.has(subId)) return false;
+  const row = AS.subagentRowOf(safeJsonParse(storeRead(`${AS.storePaths(parent).subagents}/${subId}.json`)));
+  if (!row) return false;   // not (yet) this conversation's subagent — looked for again next tick
+  const sp = spawns.get(toolCallId);
+  const task = AS.taskOf(storeRows(AS.storePaths(subId).messages, AS.messageRowOf), { parentId: parent, subId });
+  if (sp) sp.subId = subId;
+  const sub = { toolCallId, row, task, answer: null, startedAt: (task && task.at) || (sp && sp.at) || Date.now(), offset: 0, lastIdx: -1, st: { pending: [] }, steps: 0, last: null, files: [], done: false, ended: false, cardKey: null, card: null };
+  subs.set(subId, sub);
+  log(`subagent ${subId} ← ${toolCallId} (${row.typeName || '?'})`);
+  emitCard(sub);
+  return true;
+}
+/** Each unlinked spawn looks for its sub in the store: the sub whose TASK names this row's step. */
+function linkSpawns() {
+  const parent = meta.sessionId;
+  const open = [...spawns.entries()].filter(([, s]) => !s.subId && Date.now() - s.at < SPAWN_LOOK_MS);
+  if (!open.length || !AS.isId(parent)) return;
+  for (const row of storeRows(AS.storePaths(parent).subagents, AS.subagentRowOf)) {
+    if (subs.has(row.id)) continue;
+    const task = AS.taskOf(storeRows(AS.storePaths(row.id).messages, AS.messageRowOf), { parentId: parent, subId: row.id });
+    const hit = task && open.find(([, s]) => !s.subId && s.step === task.step);
+    if (hit) adoptSub(hit[0], row.id);
+  }
+}
+function tailSub(sub) {
+  const p = AS.storePaths(sub.row.id);
+  const t = storeLines(p.transcript, sub.offset);
+  if (t) { sub.offset = t.next; for (const line of t.lines) addStep(sub, AS.transcriptStepOf(line)); }
+  else for (const r of storeDbRows(p.db, sub.lastIdx)) addStep(sub, AS.dbStepOf(r));
+  const row = AS.subagentRowOf(safeJsonParse(storeRead(`${AS.storePaths(meta.sessionId).subagents}/${sub.row.id}.json`)));
+  if (row) sub.row = row;
+  const over = !sub.row.alive || AS.subPhaseOf(sub.last) === 'idle';
+  if (over) {
+    const answers = AS.answersOf(storeRows(AS.storePaths(meta.sessionId).messages, AS.messageRowOf), { parentId: meta.sessionId, subId: sub.row.id });
+    if (answers.length) sub.answer = answers[answers.length - 1];
+    sub.done = true;
+  }
+  emitCard(sub);
+}
+function subTick() {
+  try {
+    linkSpawns();
+    for (const sub of subs.values()) if (!sub.done) tailSub(sub);
+  } catch (e) { log(`subagent tail: ${e.message}`); }
+  const looking = [...spawns.values()].some((s) => !s.subId && Date.now() - s.at < SPAWN_LOOK_MS);
+  if (!looking && ![...subs.values()].some((s) => !s.done)) stopSubTail();
+}
+function armSubTail() {
+  if (subTimer || !child) return;
+  subTimer = setInterval(subTick, SUB_TAIL_MS);
+  log(`subagent tail on (every ${SUB_TAIL_MS} ms)`);
+  setImmediate(subTick);
+}
+function stopSubTail() { if (subTimer) { clearInterval(subTimer); subTimer = null; log('subagent tail off'); } }
+/** agy ended (not a restart): one last read; a sub still working is said as stopped with its conversation's process. */
+function subsAtExit() {
+  stopSubTail();
+  if (!subs.size) return;
+  try { for (const sub of subs.values()) if (!sub.done) tailSub(sub); } catch { }
+  for (const sub of subs.values()) if (!sub.done) { sub.done = true; sub.ended = true; sub.row = { ...sub.row, alive: false, state: 'SUBAGENT_STATE_STOPPED_WITH_PARENT' }; emitCard(sub); }
+}
+/** The stream's invoke_subagent row: remember it, link it now when the stream names the sub, else let the tail look. */
+function noteSpawn(key, step, ti) {
+  if (!spawns.has(key)) spawns.set(key, { step: Number(step), at: Date.now(), subId: null });
+  const named = AS.createdSubagentOf(typeof ti?.output === 'string' ? ti.output : '');
+  if (named) adoptSub(key, named);
+  armSubTail();
+}
+/** A parent send_message to a sub it started wakes that sub's card and tail again. */
+function noteSendTo(recipient) {
+  const sub = subs.get(String(recipient || ''));
+  if (!sub || !sub.done || sub.ended) return;
+  sub.done = false; sub.answer = null; sub.last = null;
+  emitCard(sub);
+  armSubTail();
+}
+
 // ── agy → journal ──
 const toolSeen = new Map(); // step key → recorded tool_call
-function kindOfTool(name) {
-  const n = String(name || '').toLowerCase();
-  if (/command|shell|terminal/.test(n)) return 'execute';
-  if (/write|edit|replace|create|patch/.test(n)) return 'edit';
-  if (/view|read|list|grep|find|search|glob/.test(n)) return /search|grep|find|glob/.test(n) ? 'search' : 'read';
-  if (/fetch|browser|url|web/.test(n)) return 'fetch';
-  return 'other';
-}
+const kindOfTool = AS.kindOfTool; // THE ONE tool → ACP kind mapping (src/agy-store.js): a sub's timeline draws the same kinds
 function adoptConversation(id, how) {
   if (!id || typeof id !== 'string') return;
   if (meta.sessionId === id && sessionRecorded) return;
@@ -231,17 +375,25 @@ function handleEvent(line) {
         toolSeen.set(key, true);
         record('update', { sessionId: sid, update: { sessionUpdate: 'tool_call', toolCallId: key, title: name, kind: kindOfTool(name), status: 'in_progress', rawInput: ti.parameters ?? null } });
       }
+      if (name === 'invoke_subagent') noteSpawn(key, s.step_index, ti);   // THE CARD (above): the row looks for its sub
+      else if (name === 'send_message' && ti.parameters && typeof ti.parameters === 'object') noteSendTo(ti.parameters.Recipient);
       if (s.state === 'DONE') {
         const err = ti.error && (ti.error.message || ti.error.type) ? `${ti.error.type ? ti.error.type + ': ' : ''}${ti.error.message || ''}` : '';
         const out = err || (typeof ti.output === 'string' ? ti.output : (ti.output != null ? JSON.stringify(ti.output) : ''));
         record('update', { sessionId: sid, update: { sessionUpdate: 'tool_call_update', toolCallId: key, status: err ? 'failed' : 'completed', ...(out ? { content: [{ type: 'content', content: { type: 'text', text: clip(out, 20000) } }] } : {}) } });
       }
     } else if (Array.isArray(s.subagent_info?.subagents) || Array.isArray(s.subagent_info)) {
-      const subs = asArray(s.subagent_info?.subagents || s.subagent_info);
+      const started = asArray(s.subagent_info?.subagents || s.subagent_info);
       if (s.state === 'DONE' || !toolSeen.has(key)) {
         toolSeen.set(key, true);
-        notice('info', `Antigravity started ${subs.length} subagent${subs.length === 1 ? '' : 's'}: ${subs.map((x) => `${x.type_name || 'agent'}${x.role ? ' (' + x.role + ')' : ''}`).join(', ').slice(0, 400)}`, 'subagents');
+        // the line stays only where no invoke_subagent row will carry the card (its role rides the card)
+        if (!spawns.has(key)) notice('info', `Antigravity started ${started.length} subagent${started.length === 1 ? '' : 's'}: ${started.map((x) => `${x.type_name || 'agent'}${x.role ? ' (' + x.role + ')' : ''}`).join(', ').slice(0, 400)}`, 'subagents');
       }
+      // the row's own end: the stream's DONE for an invoke_subagent step rides THIS update, never a tool step (measured:
+      // the owner's journal had no tool_call_update for either row — they spun for ever); the card says the rest
+      if (s.state === 'DONE' && spawns.has(key) && !spawns.get(key).closed) { spawns.get(key).closed = true; record('update', { sessionId: sid, update: { sessionUpdate: 'tool_call_update', toolCallId: key, status: 'completed' } }); }
+      for (const subId of AS.subagentInfoIds(s.subagent_info)) { const k = spawns.has(key) ? key : [...spawns.keys()].reverse().find((x) => !spawns.get(x).subId); if (k) adoptSub(k, subId); }
+      if (spawns.size) armSubTail();
     }
     if (s.usage && typeof s.usage === 'object') { meta.usage = { ...s.usage, at: Date.now() }; scheduleMeta(); }
     return;
@@ -486,11 +638,12 @@ function loadFrameFile(msg) {
   return payload;
 }
 /** THE SLASH REFUSAL: agy answers its own slash commands (/model, /usage, /credits …) outside the stream and ENDS the
- *  session (exit 2) when one arrives on stdin — so it never leaves this wrapper. */
+ *  session (exit 2) when one arrives on stdin — so it never leaves this wrapper. ONLY a command on agy's closed list is
+ *  one (lane agy-slash-guard-paths: the guard read the first CHARACTER, so `/home/…/x.zip 这里是…` — every message with an
+ *  attachment — was refused as «/home»); a path or any other "/…" is text and goes to agy unchanged. */
 function slashRefused(text) {
-  const t = String(text || '').trimStart();
-  if (!/^\/[A-Za-z]/.test(t)) return false;
-  const word = (t.match(/^\/[\w:-]+/) || ['/'])[0];
+  const word = agySlashCommand(text);
+  if (!word) return false;
   notice('error', `${word} was not sent: Antigravity answers its slash commands itself and would end this conversation if one arrived in its stream. Use the model / effort / mode menus here, or run ${word} in an Antigravity terminal session.`, 'slash-refused');
   return true;
 }

@@ -932,6 +932,39 @@ console.log('\n— the long tail\'s declared rows (terminalOnly / oauthUsage / g
   ok(!H.has('acme-term') && capsOf('acme-term').terminalOnly === false, 'the fakes are gone after the proof (unregister drops the contributed row)');
 }
 
+// ── THE SUBAGENT ROW (lane agy-subagent-cards, 2026-10-21 — the owner: «子代理细节不在你设计的harness框架里吗？») ──
+// What a harness can SHOW of the subagents its agent starts is a DECLARED row: the descriptor's ui.subagents ('virtual' a
+// live virtual session · 'threads' the sub's own conversation · 'cards' a card from the agent's store opening its timeline ·
+// 'none' the row says so), mirrored as caps.subagents, read by both tiers through subagentView. Conformance: every row
+// re-derived from its descriptor; a chat descriptor or a caps row WITHOUT it is red; a register()ed harness gets it from
+// its descriptor alone.
+console.log('\n— the subagent row (ui.subagents ⇄ caps.subagents)');
+{
+  const { SUBAGENT_VIEWS, subagentView } = require(path.join(REPO, 'src/backend-caps.js'));
+  const conforms = (h, row) => !!row && SUBAGENT_VIEWS.includes(row.subagents) && row.subagents === (h.ui?.subagents || 'none') && (h.kind !== 'chat' || !!(h.ui && SUBAGENT_VIEWS.includes(h.ui.subagents)));
+  for (const id of Object.keys(BACKEND_CAPS)) ok(SUBAGENT_VIEWS.includes(BACKEND_CAPS[id].subagents), `${id}: the shipped caps row declares subagents (${BACKEND_CAPS[id].subagents})`);
+  for (const id of harnessIds()) ok(conforms(harnessOf(id), capsOf(id)), `${id}: caps.subagents is the descriptor's ui.subagents (${capsOf(id).subagents}); a chat harness declares it`, { ui: harnessOf(id).ui?.subagents, caps: capsOf(id).subagents });
+  ok(capsOf('antigravity').subagents === 'cards' && capsOf('claude').subagents === 'virtual' && capsOf('codex').subagents === 'threads' && capsOf('opencode').subagents === 'none' && capsOf('shell').subagents === 'none',
+    'the shipped values: claude virtual (its sidechain), codex threads (the child thread), antigravity cards (agy\'s store, this lane), opencode / shell none');
+  ok(subagentView(undefined) === 'virtual' && subagentView('nope') === 'none' && Object.keys(BACKEND_CAPS).every((id) => subagentView(id) === BACKEND_CAPS[id].subagents), 'subagentView: the row (absent = claude; an unknown harness = none)');
+  const agy = harnessOf('antigravity');
+  const noUi = { ...agy, ui: { ...agy.ui } }; delete noUi.ui.subagents;
+  const noCaps = { ...BACKEND_CAPS.antigravity }; delete noCaps.subagents;
+  ok(!conforms(noUi, BACKEND_CAPS.antigravity) && !conforms(agy, noCaps) && !conforms({ ...agy, ui: { ...agy.ui, subagents: 'cards-ish' } }, { ...noCaps, subagents: 'cards-ish' }),
+    'RED: a chat descriptor without ui.subagents, a caps row without subagents, an unknown value — each fails the conformance row');
+  const H = require(path.join(REPO, 'src/harnesses/index.js'));
+  H.register({ id: 'acme-subs', label: 'Acme Subs', kind: 'chat', quota: H.NULL_QUOTA, ui: { subagents: 'cards' } });
+  H.register({ id: 'acme-nosubs', label: 'Acme', kind: 'chat', quota: H.NULL_QUOTA });
+  try {
+    ok(capsOf('acme-subs').subagents === 'cards' && subagentView('acme-subs') === 'cards' && capsOf('acme-nosubs').subagents === 'none',
+      'PROOF: a register()ed harness gets its row from its descriptor alone (declared ⇒ that view; none declared ⇒ none, never another harness\'s)');
+  } finally { H.unregister('acme-subs'); H.unregister('acme-nosubs'); }
+  const { subagentView: clientView } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
+  ok(Object.keys(BACKEND_META).every((id) => clientView(id) === subagentView(id)), 'the client reads the SAME row (agent-meta subagentView over the bundled backend-caps)');
+  const rend = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
+  ok(/subagentView\(this\.backend\) === 'none' && isSubagentToolRow\(block, msg\)/.test(rend) && /This harness shows no subagent details/.test(rend), 'a \'none\' harness\'s subagent row SAYS it shows no details (the renderer gates on the row, never the name)');
+}
+
 // ── lane artifacts-prompt-hint: THE ARTIFACTS SENTENCE names the descriptor's own file tools ──
 // Files written through a shell are not Artifacts (only the harness's own write tools are witnessed), so the tools intro +
 // the task context's tools section say so ONCE per session, naming the tools the session's descriptor declares

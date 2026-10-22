@@ -8,6 +8,13 @@
 //   a table whose restore re-opens the microphone)   §6 the browser's refusals   §7 the helpers' facts parsers   §8 the build
 //   plans + spawns (names ride the env)   §9 the install plans (+ RED CONTROL: a starter without the defaults' restore)
 //   §10 the uninstall doors   §11 the installs' rows   §12 the Ogg pager + the Mac frame
+// Lane speaker-passthrough-v1 (backlog B-aec9 — THE MACHINE'S SOUND to the viewer; every pin is lane stream-audio-probe's): src/sound-model.js
+//   §13 the sound's tables: the capability word, the encoder argv (the probe's leg 1h), the streaming WAV header, the RTP reader, an
+//   Opus packet's samples   §14 THE CLOCK (one sequence + timestamp per session across every on / off)   §15 THE TOGGLE (+ RED
+//   CONTROL: a start verdict that unmutes a restored window) + the per-machine memory   §16 the words (refusals, consent, zh + ja)
+//   §17 THE RATE with the sound (src/stream-model.js videoKbpsOf — the sound's ~80 kbps comes off the picture's target) + the page's
+//   own read of the sound (statsOf's `audio`). (There is no test-stream-model suite: src/stream-model.js's PURE rows live where their
+//   lane's are.)
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +26,8 @@ const MM = require(path.join(REPO, 'src/mic-model.js'));
 const MD = require(path.join(REPO, 'src/mic-install.js')); // the setup row's plans (beside src/machine-desktop-model.js — the agent bundles that one)
 const I = require(path.join(REPO, 'src/installs.js'));
 const DM = require(path.join(REPO, 'src/desktop-mic.js'));
+const SND = require(path.join(REPO, 'src/sound-model.js')); // lane speaker-passthrough-v1
+const STM = require(path.join(REPO, 'src/stream-model.js')); // lane speaker-passthrough-v1: THE RATE with the sound (videoKbpsOf) + statsOf's `audio`
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 600) : '')); } };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -235,6 +244,111 @@ console.log('§12 the Ogg pager + the Mac frame (src/desktop-mic.js)');
   ok(head.subarray(28, 36).toString() === 'OpusHead' && head[37] === 2 && head.readUInt32LE(40) === 48000 && head[5] === 2 && tags.subarray(28, 36).toString() === 'OpusTags', 'the head pages: OpusHead (stereo, 48 kHz, BOS) + OpusTags');
   const f = DM.macFrame(Buffer.from([1, 2, 3]));
   ok(same([...f], [3, 0, 0, 0, 1, 2, 3]), 'the Mac road\'s frame: u32 little-endian length, then the packet');
+}
+
+console.log('§13 THE SOUND\'s tables (lane speaker-passthrough-v1 — the probe\'s pins)');
+{
+  const S = SND.SOUND;
+  ok(SND.SOUND_CAPABILITY === 'stream-audio' && S.kbps === 64 && S.wireKbps === 80 && S.frameMs === 20 && S.clockRate === 48000 && S.samples === 960 && S.channels === 2, 'the hello-ack word stream-audio; Opus 64 kbps, 20 ms (960 samples) of 48 kHz stereo; ~80 kbps on the wire (the share the picture gives up)');
+  ok(S.streamId === 'vibespace-desktop' && Object.isFrozen(S) && Object.isFrozen(SND.SOUND_LIMITS) && SND.SOUND_LIMITS.startMs >= 5000 && SND.SOUND_LIMITS.stopGraceMs === 1000, 'ONE msid for the picture and the sound (one MediaStream — the page\'s <video> carries both); the tables are frozen');
+  const P = 9; // an argv's port only (PURE — the discard port, nothing is opened)
+  const a = SND.soundEncoderArgs(P);
+  ok(same(a, ['-hide_banner', '-loglevel', 'error', '-fflags', 'nobuffer', '-probesize', '32', '-analyzeduration', '0', '-f', 'wav', '-max_size', '1920', '-ignore_length', '1', '-i', 'pipe:0', '-c:a', 'libopus', '-b:a', '64k', '-application', 'lowdelay', '-frame_duration', '20', '-flush_packets', '1', '-max_delay', '0', '-muxdelay', '0', '-muxpreload', '0', '-f', 'rtp', `rtp://127.0.0.1:${P}?rtcpport=${P}`]), 'the encoder = the probe\'s leg 1h: PCM behind a STREAMING WAV header (`-max_size 1920` — 10 ms demuxed packets, not the raw demuxer\'s 85 ms clumps), no probing, libopus 64 kbps lowdelay 20 ms, every packet flushed, RTP to OUR loopback port (its RTCP to the same socket — never port + 1, someone else\'s)', a);
+  ok(SND.soundEncoderArgs(0) === null && SND.soundEncoderArgs(70000) === null && SND.soundEncoderArgs('x') === null && !a.some((x) => /[A-Z]{2,}_[A-Z]+=/.test(x)), 'a port that is no port ⇒ no argv; no name rides it');
+  const h = Buffer.from(SND.soundWavHeader());
+  ok(h.length === 44 && h.toString('latin1', 0, 4) === 'RIFF' && h.readUInt32LE(4) === 0xFFFFFFFF && h.toString('latin1', 8, 16) === 'WAVEfmt ' && h.readUInt16LE(20) === 1 && h.readUInt16LE(22) === 2 && h.readUInt32LE(24) === 48000 && h.readUInt32LE(28) === 192000 && h.readUInt16LE(32) === 4 && h.readUInt16LE(34) === 16 && h.toString('latin1', 36, 40) === 'data' && h.readUInt32LE(40) === 0xFFFFFFFF, 'the WAV header: PCM s16le stereo 48 kHz (192000 B/s, 4-byte frames), its sizes unknown (0xFFFFFFFF — `-ignore_length 1`)');
+  // the RTP reader: a header with 2 CSRCs, a one-word extension and 3 bytes of padding
+  const pkt = Buffer.from([0xb2, 0x60, 0x12, 0x34, 0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03, 0x04, 0, 0, 0, 1, 0, 0, 0, 2, 0xbe, 0xde, 0, 1, 9, 9, 9, 9, 0xfc, 0xaa, 0xbb, 0, 0, 3]);
+  const r = SND.rtpOf(pkt);
+  ok(r && r.seq === 0x1234 && r.ts === 0xdeadbeef && r.pt === 0x60 && r.ssrc === 0x01020304 && same([...r.payload], [0xfc, 0xaa, 0xbb]), 'the RTP reader: version 2, its CSRCs, its extension and its padding skipped — the Opus payload exact', r);
+  ok(SND.rtpOf(Buffer.from([0x40, 0x60, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1])) === null && SND.rtpOf(Buffer.alloc(8)) === null && SND.rtpOf('x') === null && SND.rtpOf(Buffer.from([0x90, 0x60, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0xbe, 0xde, 0, 9])) === null, 'not version 2, too short, not bytes, an extension past the end ⇒ null (a stray datagram is dropped, never a packet)');
+  const os = (bytes) => SND.opusSamples(Uint8Array.from(bytes));
+  ok(os([0xfc]) === 960 && os([0x78]) === 960 && os([0x00]) === 480 && os([0x01, 0, 0]) === 960 && os([0x03 | (31 << 3), 0x03]) === 2880 && os([0x03 | (31 << 3), 0x00]) === 0 && os([]) === 0 && os([0x03 | (3 << 3), 0x02]) === 5760 && os([0x03 | (3 << 3), 0x03]) === 0, 'an Opus packet\'s samples from its TOC (RFC 6716 §3.1): CELT 20 ms = 960, hybrid 20 ms, SILK 10 ms = 480, two frames, three CELT frames = 2880, the 120 ms bound; an empty / a zero-count packet = 0');
+}
+
+console.log('§14 THE CLOCK (one sequence + one 48 kHz timestamp per session, across every on / off)');
+{
+  let c = SND.soundRtpStart(77);
+  const p1 = SND.soundRtpStep(c, { samples: 960, at: 1000, fresh: true }); c = p1.st;
+  const p2 = SND.soundRtpStep(c, { samples: 960, at: 1020 }); c = p2.st;
+  const p3 = SND.soundRtpStep(c, { samples: 480, at: 1040 }); c = p3.st;
+  ok(p1.seq === 77 && p1.marker === true && p2.seq === 78 && p2.ts === (p1.ts + 960) >>> 0 && p2.marker === false && p3.ts === (p2.ts + 960) >>> 0, 'the first packet is MARKED; inside a run each packet is the next number, its timestamp the last one\'s + that one\'s samples', [p1, p2, p3]);
+  const q = SND.soundRtpStep(c, { samples: 960, at: 1060 + 5000, fresh: true });
+  ok(q.seq === 80 && q.marker === true && q.ts === (p3.ts + 480 + 250 * 960) >>> 0, 'a press after 5 s off: the SAME sequence goes on (one stream, no jump the receiver reads as loss), the timestamp moves by the 5 s that passed (250 frames) — NetEq sees time pass; marked', q);
+  const z = SND.soundRtpStep({ seq: 65535, ts: 0xFFFFFE00, at: 0, samples: 960 }, { samples: 960, at: 20 });
+  ok(z.seq === 0 && z.ts === (0xFFFFFE00 + 960) % 0x100000000, 'the sequence wraps at 65536, the timestamp at 2^32', z);
+  const now0 = SND.soundRtpStep({ seq: 5, ts: 1000, at: 100, samples: 960 }, { samples: 960, at: 110, fresh: true });
+  ok(now0.ts === 1960 && now0.marker === true, 'a run that begins at once (an in-place restart) advances only the last packet\'s samples', now0);
+  ok(SND.soundRtpStep(null, { at: 5 }).seq === 0 && SND.soundRtpStep(c, { samples: 0, at: 9 }).st.samples === 960 && SND.soundRtpStep(c, { samples: 99999, at: 9 }).st.samples === 960, 'no clock yet ⇒ a fresh one; a sample count that is no Opus count ⇒ one frame');
+}
+
+console.log('§15 THE TOGGLE 「声音」 (the verdict table) + the per-machine memory');
+{
+  const step = SND.soundStep, start = SND.soundStartOf;
+  ok(start({}) === 'off' && start({ remembered: true, activated: true }) === 'on' && start({ remembered: true, restored: true, activated: true }) === 'tap' && start({ remembered: true, activated: false }) === 'tap' && start({ remembered: false, restored: true, activated: true }) === 'off', 'how a stream begins: OFF for a machine never turned on; remembered on + a person\'s gesture on this page ⇒ on; a RESTORED window (or no gesture yet) ⇒ 「点一下开声音」; never on otherwise');
+  ok(same(step({ state: 'unavailable' }, { type: 'ready', ok: true }), { state: 'off', action: null, code: null }), 'a stream that carries the sound ⇒ 「声音」 shows, OFF by default — the machine captures nothing');
+  ok(same(step({ state: 'unavailable' }, { type: 'ready', ok: true, remembered: true, activated: true }), { state: 'starting', action: 'start', code: null }), 'remembered on (a new window, a person\'s click opened it) ⇒ starting: the <video> unmuted + ONE op');
+  ok(same(step({ state: 'unavailable' }, { type: 'ready', ok: true, remembered: true, restored: true, activated: true }), { state: 'tap', action: null, code: null }), 'remembered on, a RESTORED window ⇒ tap — 「点一下开声音」, nothing captured, nothing unmuted');
+  ok(same(step({ state: 'off' }, { type: 'ready', ok: false }), { state: 'unavailable', action: null, code: 'no_mline' }) && same(step({ state: 'on' }, { type: 'ready', ok: false }), { state: 'unavailable', action: 'mute', code: 'no_mline' }), 'a stream without the sound\'s track (an older agent) ⇒ unavailable (no dead toggle); one that was on is muted');
+  ok(same(step({ state: 'off' }, { type: 'press' }), { state: 'starting', action: 'start', code: null, remember: true }) && same(step({ state: 'tap' }, { type: 'press' }), { state: 'starting', action: 'start', code: null, remember: true }) && same(step({ state: 'refused', code: 'x' }, { type: 'press' }), { state: 'starting', action: 'start', code: null, remember: true }), 'off / tap / refused + press ⇒ starting (unmute IN the press + the op); this machine is remembered ON');
+  ok(same(step({ state: 'on' }, { type: 'press' }), { state: 'off', action: 'stop', code: null, remember: false }) && same(step({ state: 'starting' }, { type: 'press' }), { state: 'off', action: 'stop', code: null, remember: false }), 'on / starting + press ⇒ off (the op off + muted); remembered OFF');
+  ok(same(step({ state: 'unavailable' }, { type: 'press' }), { state: 'unavailable', action: null, code: 'no_mline' }), 'unavailable + press ⇒ nothing asked');
+  ok(step({ state: 'starting' }, { type: 'started' }).state === 'on' && step({ state: 'off' }, { type: 'started' }).state === 'off', 'starting + the machine started ⇒ on; a late answer after off changes nothing');
+  ok(same(step({ state: 'starting' }, { type: 'failed', code: 'no_ffmpeg' }), { state: 'refused', action: 'mute', code: 'no_ffmpeg' }) && same(step({ state: 'on' }, { type: 'failed', code: 'capture_ended' }), { state: 'refused', action: 'mute', code: 'capture_ended' }), 'the machine refused / its capture ended ⇒ refused by its code, muted');
+  ok(same(step({ state: 'starting' }, { type: 'blocked' }), { state: 'tap', action: 'stop', code: 'autoplay' }), 'the browser kept it muted ⇒ tap (the machine stops capturing — nobody would hear it)');
+  ok(same(step({ state: 'on' }, { type: 'stream_end' }), { state: 'unavailable', action: 'mute', code: 'no_stream' }) && same(step({ state: 'on' }, { type: 'close' }), { state: 'off', action: 'stop', code: null }) && step({ state: 'on' }, { type: 'close' }).remember === undefined, 'the stream ends ⇒ unavailable (its capture ended with the session); the window closes ⇒ off (stop) — the memory untouched (the next window of the machine)');
+  // THE WHOLE MATRIX: only a press or a ready (soundStartOf's on) ever starts; a restored ready never does; only a press remembers
+  const starts = [], remembers = [], restoredStarts = [];
+  for (const s0 of SND.SOUND_STATES) for (const ev of SND.SOUND_EVENTS) for (const remembered of [false, true]) for (const restored of [false, true]) {
+    const r = step({ state: s0 }, { type: ev, ok: true, remembered, restored, activated: true, code: 'x' });
+    if (r.action === 'start') starts.push(`${s0}+${ev}${restored ? '(restored)' : ''}`);
+    if (r.action === 'start' && ev === 'ready' && restored) restoredStarts.push(s0);
+    if (r.remember !== undefined) remembers.push(`${s0}+${ev}`);
+  }
+  ok(starts.every((x) => /\+press/.test(x) || /\+ready$/.test(x)) && restoredStarts.length === 0, `the matrix (${SND.SOUND_STATES.length} states × ${SND.SOUND_EVENTS.length} events × memory × restored): only a press or a remembered ready starts — a RESTORED window never unmutes by itself`, { starts, restoredStarts });
+  ok(remembers.every((x) => x.endsWith('+press')), 'only a press changes the memory', remembers);
+  // RED CONTROL: a start verdict that ignores `restored` (it would unmute a restored window) fails the rows above
+  const src = read('src/sound-model.js');
+  const want = "  return restored || !activated ? 'tap' : 'on';";
+  ok(src.includes(want), 'RED CONTROL anchor: the start verdict is spelled once');
+  const M2 = MUT.load('src/sound-model.js', src.replace(want, "  return !activated ? 'tap' : 'on';"), 'restored-unmutes');
+  const r2 = M2.soundStep({ state: 'unavailable' }, { type: 'ready', ok: true, remembered: true, restored: true, activated: true });
+  ok(r2.action === 'start', 'RED CONTROL: a mutant that ignores `restored` STARTS a restored window\'s sound — the never-by-itself row catches it', r2);
+  // THE MEMORY (the HDR switch's shape): per machine, on only, ≤ 32 machines, the newest kept
+  ok(SND.SOUND_KEY === 'vibespace.streamSound' && SND.soundRemembered(null, 'win-a') === false && SND.soundRemembered('not json', 'win-a') === false && SND.soundRemembered('[1]', 'win-a') === false, 'its localStorage key; nothing stored / junk ⇒ off');
+  let m = SND.rememberSound(null, 'win-a', true); m = SND.rememberSound(m, 'mac-b', true);
+  ok(SND.soundRemembered(m, 'win-a') && SND.soundRemembered(m, 'mac-b') && !SND.soundRemembered(m, 'x') && !SND.soundRemembered(SND.rememberSound(m, 'win-a', false), 'win-a') && SND.soundRemembered(SND.rememberSound(m, 'win-a', false), 'mac-b'), 'on is remembered PER MACHINE; off forgets that machine alone');
+  let big = null; for (let i = 0; i < 40; i++) big = SND.rememberSound(big, 'h' + i, true);
+  const keys = Object.keys(JSON.parse(big));
+  ok(keys.length === 32 && keys[0] === 'h8' && keys[31] === 'h39' && !SND.soundRemembered(SND.rememberSound(null, '', true), ''), 'at most 32 machines, the newest kept; no machine id ⇒ nothing remembered');
+}
+
+console.log('§16 the sound\'s words (refusals, consent — zh + ja)');
+{
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  const has = (dict, k) => dict.includes(`  ${JSON.stringify(k)}: `);
+  const codes = ['no_mline', 'sound_unsupported', 'helper_missing', 'no_ffmpeg', 'screen_permission', 'helper_changed_regrant', 'not_found', 'autoplay', 'capture_failed'];
+  const keys = [...new Set(codes.map(SND.soundRefusalKey))];
+  ok(keys.length === codes.length && keys.every((k) => has(zh, k) && has(ja, k)), `every refusal code has its own words, in zh and ja (${keys.length})`, keys.filter((k) => !has(zh, k) || !has(ja, k)));
+  const mac = SND.soundConsentKeys('darwin'), win = SND.soundConsentKeys('win32');
+  ok(mac.length === 2 && win.length === 1 && SND.soundConsentKeys('linux').length === 0 && [...mac, ...win].every((k) => has(zh, k) && has(ja, k)), 'the consent: a Mac names its permission + the one re-grant after the helper updates; Windows asks nothing; another machine says nothing');
+  ok(zh.includes(`${JSON.stringify(mac[0])}: "声音用的是同一个“屏幕与系统录音”授权"`) && zh.includes(`${JSON.stringify(win[0])}: "声音：Windows 不需要授权"`) && zh.includes('"Tap to turn the sound on": "点一下开声音"'), 'the brief\'s words: 「声音用的是同一个“屏幕与系统录音”授权」, 「声音：Windows 不需要授权」, 「点一下开声音」');
+  const strip = read('src/lib/stream-mic-strip.js');
+  ok(/t\('Play this machine’s sound here — off until you press it; nothing is recorded or stored'\)/.test(strip) && /t\('Sound on — press to turn it off; nothing is recorded or stored'\)/.test(strip) && zh.includes('不录制、不保存'), 'the toggle\'s title says nothing is recorded or stored (zh: 不录制、不保存)');
+}
+
+console.log('§17 THE RATE with the sound (src/stream-model.js videoKbpsOf) + the page\'s read of it (statsOf `audio`)');
+{
+  const v = STM.videoKbpsOf, W = SND.SOUND.wireKbps;
+  ok(v({ kbps: 5000, maxKbps: 8000 }) === 5000 && v({ kbps: 9000, maxKbps: 8000 }) === 8000 && v({ kbps: 4321.5, maxKbps: 8000 }) === 4321.5 && v({ kbps: 0, maxKbps: 8000 }) === 0, 'the sound OFF: the estimate capped by the page\'s maxKbps — exactly the rule before this lane (Math.min)');
+  ok(v({ kbps: 5000, maxKbps: 8000, audio: true, audioKbps: W }) === 4920 && v({ kbps: 9000, maxKbps: 8000, audio: true, audioKbps: W }) === 7920, `the sound ON: its ${W} kbps come OFF the picture's target (the estimate counts the picture's packets only — the sound carries no transport-cc number)`);
+  ok(v({ kbps: 320, maxKbps: 8000, audio: true, audioKbps: W }) === STM.STREAM_LIMITS.maxKbpsMin && v({ kbps: 222, audio: true, audioKbps: W }) === 222 && v({ kbps: 100, audio: true, audioKbps: W }) === 100, `the sound never pushes the picture under the stream's floor (${STM.STREAM_LIMITS.maxKbpsMin} kbps) and never RAISES it: an estimate already under the floor is told as it is (⑳ measured 222 kbps on loopback — the floor rule first written told 300)`);
+  for (let k = 0; k <= 20000; k += 37) if (v({ kbps: k, maxKbps: 8000, audio: true, audioKbps: W }) > v({ kbps: k, maxKbps: 8000 })) { ok(false, 'the sound ON never tells the picture MORE than the sound off', k); break; }
+  ok(true, 'for every estimate 0–20000 kbps: the sound ON never tells the picture more than the sound off');
+  ok(v({ kbps: null, maxKbps: 6000, audio: true, audioKbps: W }) === 5920 && v({ kbps: undefined, maxKbps: 6000 }) === 6000 && v({ kbps: 'x', maxKbps: 'y' }) === STM.STREAM_LIMITS.maxKbpsDefault, 'no estimate yet ⇒ the cap (less the sound while it is on); junk ⇒ the default cap');
+  const rep = (packets, bytes, level) => [{ id: 'v', type: 'inbound-rtp', kind: 'video', framesDecoded: 10, bytesReceived: 1000 }, { id: 'a', type: 'inbound-rtp', kind: 'audio', packetsReceived: packets, bytesReceived: bytes, audioLevel: level, totalAudioEnergy: 0.5, concealedSamples: 960, jitter: 0.004 }];
+  const s1 = STM.statsOf(null, rep(50, 10000, 0.1), 1000), s2 = STM.statsOf(s1, rep(100, 20000, 0.09), 2000);
+  ok(s1.audio && s1.audio.packets === 50 && s1.audio.level === 0.1 && s1.audio.kbps === null && s2.audio.kbps === 80 && s2.audio.jitterMs === 4 && s2.audio.concealed === 960 && STM.statsOf(null, rep(1, 1, 0).slice(0, 1), 1).audio === null, 'the page\'s read: the sound\'s packets, its level, its kbps between two reads, its jitter, the concealed samples — none when the stream carries no sound', s2.audio);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

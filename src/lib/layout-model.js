@@ -21,7 +21,13 @@
 //                      first. A record whose seq is not newer than the newest one already APPLIED for its desktop
 //                      (`applied`, a Map desktop → seq) is dropped — never applied backwards.
 //   noteApplied(applied, msg)  after an apply: the newest applied seq of the record's desktop
-//
+//   recordStamp(msg)   the SERVER's stamp of a record on the wire (lane layout-stale-record-sync): the layout-sync's
+//                      `updatedAt`, else the record's own (a re-read takes the stored record whole); 0 = none (an older
+//                      server). The seq restarts with the socket and the server; the stamp does not.
+//   behindStamp(stamps, msg)  the record is OLDER than the newest one this page applied for its desktop — never applied
+//                      (a record never goes backwards: a deferred broadcast from before a sleep after the wake's re-read)
+//   noteStamp(stamps, desktopId, at)  the newest stamp of a desktop (a Map desktop → stamp; never lowered)
+
 //   (THE READ HALF of guard 10 — which of a record's layers a page applies — is desktop-record.js applyForViewport, asked
 //   with this writerClass: THE LAYER LAW, design q-039 P0; lane phone-sidebar-chrome's chromeToApply is its chrome column.)
 
@@ -57,4 +63,21 @@ function noteApplied(applied, msg) {
   if (seq > (Number(applied.get(d)) || 0)) applied.set(d, seq);
 }
 
-module.exports = { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, PHONE_SLOT };
+function recordStamp(msg) {
+  const t = Number(msg && (msg.updatedAt != null ? msg.updatedAt : msg.state && msg.state.updatedAt));
+  return Number.isFinite(t) && t > 0 ? t : 0;
+}
+
+function behindStamp(stamps, msg) {
+  const t = recordStamp(msg);
+  return !!(t && stamps && t < (Number(stamps.get(desktopOf(msg))) || 0));
+}
+
+function noteStamp(stamps, desktopId, at) {
+  const t = Number(at);
+  if (!stamps || !(Number.isFinite(t) && t > 0)) return;
+  const d = desktopId || '';
+  if (t > (Number(stamps.get(d)) || 0)) stamps.set(d, t);
+}
+
+module.exports = { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, PHONE_SLOT, recordStamp, behindStamp, noteStamp };
