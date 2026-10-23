@@ -46,7 +46,7 @@
  * characters, the whole name ≤ 35 (Slack's limit for an app name); JSON + URL encoding escape the rest. The link
  * stays under LINK_MAX bytes whatever the name (a verifier control).
  */
-const EGRESS = Object.freeze(['api.slack.com', 'slack.com', 'problemfactory.github.io']);   // design 018: slack.com = the consent page the member's browser opens (authorizeUrl); problemfactory.github.io = the default relay page it is sent back through (RELAY_DEFAULT)
+const EGRESS = Object.freeze(['api.slack.com', 'slack.com', 'problemfactory.github.io']);   // design 018: slack.com = the consent page the member's browser opens (authorizeUrl); problemfactory.github.io = the public relay page (RELAY_DEFAULT) a member's browser is sent back through — kept because a person's OWN app (the custom rung's setting, its default) may still ride it; a company preset never does (lane oauth-relay-road addendum 1)
 const CREATE_URL = 'https://api.slack.com/apps?new_app=1&manifest_json=';
 /** design 017: the page that holds "Generate Token" (step 1) and each app's install page (step 2) — the person's
  *  BROWSER opens both; the one request this server makes with the setup token goes to the Web API (slack.js). */
@@ -203,12 +203,15 @@ function stateVerdict(s, { sign, flowId = null, now = Date.now(), ttlMs = 30 * 6
   return { ok: true, why: null, parts: p };
 }
 /** The custom rung's relay page when its setting (Settings → Channels → Slack relay page) is unset — the schema's default,
- *  the same address: the project's own static page (docs/slack-relay/), a page the member's BROWSER is sent through. */
+ *  the same address: the project's own static page (docs/slack-relay/), a page the member's BROWSER is sent through. A
+ *  person's own app only: a company preset rides its own relayUrl › the fleet's (lane oauth-relay-road addendum 1). */
 const RELAY_DEFAULT = 'https://problemfactory.github.io/vibespace/slack/';
 /** THE RELAY RULE: a private-network instance (loopback, 10/8, 172.16/12, 192.168/16, fc00::/7, ::1, localhost,
- *  *.local / *.lan / *.home) or an https host under an `allow` suffix (a fleet's own domain, label-bounded) is sent
- *  back to; anything else gets the code shown — the relay is never an open redirector to the internet. */
-const PRIVATE_SUFFIXES = Object.freeze(['.local', '.lan', '.home', '.localhost']);
+ *  *.local / *.lan / *.home; a Tailscale one — 100.64/10, the tailnet's CGNAT range, and its MagicDNS names *.ts.net —
+ *  backlog B-be43, so a hub reached over Tailscale comes back instead of the paste-the-code fallback) or an https host
+ *  under an `allow` suffix (a fleet's own domain, label-bounded) is sent back to; anything else gets the code shown —
+ *  the relay is never an open redirector to the internet. */
+const PRIVATE_SUFFIXES = Object.freeze(['.local', '.lan', '.home', '.localhost', '.ts.net']);
 function privateHost(host) {
   const h = String(host || '').toLowerCase();
   if (h === 'localhost') return true;
@@ -216,7 +219,7 @@ function privateHost(host) {
   if (v4) {
     const o = v4.slice(1).map(Number);
     if (o.some((x) => x > 255)) return false;
-    return o[0] === 127 || o[0] === 10 || (o[0] === 172 && o[1] >= 16 && o[1] <= 31) || (o[0] === 192 && o[1] === 168);
+    return o[0] === 127 || o[0] === 10 || (o[0] === 172 && o[1] >= 16 && o[1] <= 31) || (o[0] === 192 && o[1] === 168) || (o[0] === 100 && o[1] >= 64 && o[1] <= 127);
   }
   if (h.startsWith('[') && h.endsWith(']')) { const a = h.slice(1, -1); return a === '::1' || /^f[cd][0-9a-f]{0,2}:/.test(a); }
   return PRIVATE_SUFFIXES.some((x) => h.length > x.length && h.endsWith(x));

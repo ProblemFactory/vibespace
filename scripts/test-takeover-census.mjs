@@ -188,6 +188,7 @@ export const CENSUS = [
   ['settings-ui.js', 'textarea', 'text', 'a multi-line setting'],
   ['settings-ui.js', 'select', 'choice', 'an enum setting'],
   ['setup-flows.js', 'input', 'text', 'the password dialogs, the onboarding cwd'],
+  ['signin-card.js', 'input', 'text', 'the Claude sign-in card\'s paste-the-code box (lane door-signin-fixes: the card lane added it unclassified)'],
   ['sidebar-mounts.js', 'input', 'text+control', 'machine / pairing fields; checkboxes'],
   ['sidebar-mounts.js', 'textarea', 'text+control', 'a key paste; read-only share links / tokens (their Copy button copies)'],
   ['sidebar-mounts.js', 'select', 'choice', 'a mode'],

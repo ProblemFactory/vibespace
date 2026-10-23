@@ -242,6 +242,13 @@ spec:
             # A user-set agentd.publicUrl in Settings overrides it.
             - name: VIBESPACE_PUBLIC_URL
               value: {{ printf "https://%s" $host | quote }}
+            {{- with .Values.oauthRelayUrl }}
+            # The fleet's sign-in relay page (lane oauth-relay-road): every
+            # Lark / Gmail sign-in of this pod names it as the redirect — ONE
+            # address per vendor app for the whole fleet, never one per pod.
+            - name: VIBESPACE_OAUTH_RELAY_URL
+              value: {{ . | quote }}
+            {{- end }}
             {{- if and .Values.frp .Values.frp.addr (or .Values.frp.token .Values.frp.clusterToken) }}
             # frp relay defaults (B-0b60 public URLs) — the plugin reads these
             # as DEFAULTS; a user can override any of them in ⚙ → Plugins. When

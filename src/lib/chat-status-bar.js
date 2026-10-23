@@ -13,6 +13,7 @@ const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.mat
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
 import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
+import { costBasisOf, costChipWords, addedKindsChipWords } from './chat-bar-words.js'; // PURE (lane door-healthy-chat): the cost's words + the record-kinds chip
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { enterSubmits } from './chat-enter-keys.js';
 import { MENU_EMPTY, resolvePick, sourceOf } from '../model-providers.js'; // PURE (q-053 §3, lane models-at-session): the badge's list is THIS conversation's provider's
@@ -600,6 +601,23 @@ export class ChatStatusBar {
   }
 
   /** EVERY ask the user can answer in this conversation (lane S1) — the chip's words + its target. */
+  /** lane door-healthy-chat: the kinds of record the agent's CLI added (the normalizer's `record-kinds`) — never cards in the
+   *  chat; ONE quiet chip here. */
+  setAddedKinds(kinds) {
+    const list = Array.isArray(kinds) ? kinds.filter((k) => k && k.name) : [];
+    const sig = list.map((k) => `${k.kind}:${k.name}:${k.cli || ''}`).join('|');
+    if (sig === (this._addedKindsSig || '')) return;
+    this._addedKindsSig = sig; this._addedKinds = list;
+    this.render();
+  }
+  /** lane door-healthy-chat: whether this conversation's usage is billed (its `auth`, desktop and phone alike) — the cost chip's words. */
+  setCostBasis(auth) {
+    const basis = costBasisOf(auth);
+    if (basis === (this._costBasis ?? null)) return;
+    this._costBasis = basis;
+    this.render();
+  }
+
   setPendingAsks(asks) {
     const next = Array.isArray(asks) ? asks : [];
     const sig = next.map((a) => `${a.kind}:${a.requestId}:${a.label || ''}`).join('|');
@@ -1031,10 +1049,20 @@ export class ChatStatusBar {
       chip('unreported', 'chat-status-unreported chat-status-dim', t('Not reported by this harness: {facts}', { facts: lacks.map((k) => FACT_WORDS[k]).join(', ') }), escHtml(t('not reported')));
     }
 
-    // Cost with color tiers
+    // THE COST, IN WORDS (lane door-healthy-chat — the naive studies' W3/C21: a bare «$0.47 → $5.35» every tester read as
+    // "am I being charged?"): the figure with what it is and whether it is billed — «This chat ≈ $0.24 · included in your
+    // subscription». The colour tiers warn only where the figure can be a bill (an API key, or nobody knows); a
+    // subscription's figure is quiet.
     if (this._statusCost > 0) {
-      const costColor = this._statusCost > 5 ? tierRed : this._statusCost > 1 ? tierOrange : tierGreen;
-      chip('cost', '', '', `$${this._statusCost.toFixed(2)}`, { style: `color:${costColor}` });
+      const cw = costChipWords(this._statusCost, this._costBasis ?? null, t);
+      const costColor = cw.tone === 'quiet' ? 'var(--text-dim)' : this._statusCost > 5 ? tierRed : this._statusCost > 1 ? tierOrange : tierGreen;
+      chip('cost', 'chat-status-cost', cw.title, escHtml(cw.text), { style: `color:${costColor}` });
+    }
+    // THE KINDS OF RECORD THE AGENT'S CLI ADDED (lane door-healthy-chat): ONE quiet chip instead of red cards in the flow —
+    // the update signal stays where the owner reads it; a press opens ⚙ Diagnostics. Last, so it never moves another chip.
+    {
+      const kw = addedKindsChipWords(this._addedKinds, t);
+      if (kw) chip('kinds', 'chat-status-kinds chat-status-clickable', kw.title, escHtml(kw.text));
     }
 
     if (PHONE_MQ?.matches) chip('more', `chat-status-more chat-status-clickable${this._foldOpen ? ' active' : ''}`, this._foldOpen ? t('Close') : t('More'), this._foldOpen ? '\u2715' : '\u22EF');
@@ -1329,6 +1357,7 @@ export class ChatStatusBar {
     if (e.target.closest('.chat-status-search')) { e.stopPropagation(); this._onSearch?.(); return; }
     if (e.target.closest('.chat-status-vault-wait')) { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); return; }   // r2: the vault's door
     if (e.target.closest('.chat-status-turnstate.chat-status-clickable')) { e.stopPropagation(); this._onJumpToAsk?.(); return; } // lane S1: go to the card that waits
+    if (e.target.closest('.chat-status-kinds')) { e.stopPropagation(); this._app?._openDiagnostics?.(); return; } // lane door-healthy-chat: the record kinds → ⚙ Diagnostics
     const wfChip = e.target.closest('.chat-status-wf');
     if (wfChip && this._onOpenWorkflow && wfChip.dataset.wfRun) {
       this._onOpenWorkflow(wfChip.dataset.wfRun, wfChip.dataset.wfName);

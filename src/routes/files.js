@@ -108,6 +108,24 @@ router.get('/api/home', async (req, res) => {
   res.json({ zone: require('../server/owner-facts.js').zone(), home: os.homedir(), authEnabled: !!req.app.locals.authEnabled, ssoEnabled: !!req.app.locals.ssoEnabled, repoDir: path.resolve(__dirname, '..', '..'), publicUrlDefault: process.env.VIBESPACE_PUBLIC_URL || null, instancePublicUrl: req.app.locals.instancePublicUrl || null, harnesses });
 });
 
+// THE HOME'S FOLDERS (lane door-day-one-landing — the naive-user studies: every tester typed `…/work` by guessing; the
+// folder holding their files was never offered). Each folder of this machine's home with a bounded count of the files it
+// holds — the New Session dialog's and the tour's folder chips (src/day-one.js folderChips orders them). Local only (a
+// remote machine's chips stay its recent folders); walked in the SafeFs pool (a hung mount is named, never walked); one
+// answer is kept 10 s, so a dialog opened twice walks once.
+let _homeFolders = { at: 0, body: null };
+router.get('/api/home-folders', async (req, res) => {
+  if (req.query.host) return res.json({ folders: [], unsupported: 'remote' });
+  const now = Date.now();
+  if (_homeFolders.body && now - _homeFolders.at < 10e3) return res.json(_homeFolders.body);
+  const home = os.homedir();
+  try {
+    const { folders } = await sfs(req).call('folderCensus', { path: home });
+    _homeFolders = { at: now, body: { home, folders: Array.isArray(folders) ? folders : [] } };
+    res.json(_homeFolders.body);
+  } catch (e) { res.status(e.status || 500).json({ home, folders: [], error: String((e && e.message) || e).slice(0, 160) }); }
+});
+
 // Bounded filename search — the chat's relative-path resolver's last resort
 // (`SCRIPTS.md` clicked in a reply, not directly under the session cwd). Depth-
 // capped, dep/VCS dirs pruned, 3s kill, first 16 hits — a user-initiated click,

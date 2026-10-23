@@ -42,6 +42,6 @@ export function diagnosticsSection(status, { t, esc, when = (ms) => new Date(ms)
       : t('No draft — run node scripts/claude-cli-dump.mjs --auto on the machine whose claude this is'));
   const tr = rows.map((u) => `<tr><td><b>${esc(unregisteredLine(u.version, t))}</b><div class="dim">${esc(t('seen as {where} · first {when}', { where: where(u.sources), when: u.firstSeen ? when(u.firstSeen) : '?' }))}</div><div>${esc(next(u))}</div></td></tr>`).join('');
   return `<h2>${esc(t('Claude builds without a record table'))}</h2>
-      <p class="dim">${esc(t('Builds of claude this server saw that this release has no record table for (it knows {newest} and older). Until a release registers one, its conversations may show red cards for the records it added. The draft is the build\'s static dump — its strings, never run — for the release that registers it.', { newest: status.newest || '?' }))}</p>
+      <p class="dim">${esc(t('Builds of claude this server saw that this release has no record table for (it knows {newest} and older). Until a release registers one, its conversations count the records it added in one quiet chip of their status bar. The draft is the build\'s static dump — its strings, never run — for the release that registers it.', { newest: status.newest || '?' }))}</p>
       <table class="cli-registration">${tr}</table>`;
 }

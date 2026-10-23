@@ -92,6 +92,7 @@ function sessionFromMeta(meta, transportFacts) {
     clients: new Map(),
     cwd: meta.cwd || os.homedir(),
     _nameExplicit: meta.nameExplicit === true, // lane peer-card-sender: a name given at creation / by a rename
+    _purpose: meta.purpose === 'sign-in' ? 'sign-in' : null, // lane door-day-one-landing: a sign-in terminal is not a session row
     createdAt: meta.createdAt || Date.now(),
     claudeSessionId: meta.claudeSessionId || null,
     agentToken: meta.agentToken || null, // vibespace-status auth survives restarts

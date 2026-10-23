@@ -13,13 +13,15 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
+import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
+import { waitingTurnOf, signinWallOf } from '../signin-model.js'; // PURE (lane door-signin-fixes): the turn waiting at the wall; which wall a death gets
 import { isAgentMemoryPath, effortDisplay, getBackendMeta, backendFeatureCaps, noteMemoryPaths, initHealthIssues, initFrameOf, notificationDeliveryFor, billingRow, viewIdFor, legacyIdFor, BACKEND_META } from './agent-meta.js';
 import { registerCommand, registerKeybinding, runCommand, hasCommand } from './contributions.js';
 // The verb list a wrapper that publishes a queue WITHOUT naming verbs serves —
 // the SAME array the server maps a verb-less sidecar onto (src/server/
 // wrapper-files.js). Imported, never re-typed: the two ends disagreeing about
 // "no list" is the bug this constant now prevents.
-import { LEGACY_QUEUE_VERBS, worktreeLatchWrite } from '../backend-caps.js';
+import { LEGACY_QUEUE_VERBS, worktreeLatchWrite, capsOf } from '../backend-caps.js';
 import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode, machineCardOf, machineRunPart, splitRuns, machineCompact, commandHeadWords } from './chat-run-summary.js';
 import { assistantNoteOf } from './chat-run-summary.js'; // lane S3: a run's note members say which note they were
 import { turnPreviewOf } from '../assistant-note.js'; // PURE (B-40f8): THE preview of a user turn — the server's turnMap builders read the same rule
@@ -33,6 +35,7 @@ import { toolCommandText } from '../browser-trace.js'; // lane run-fold-channel-
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
 import { createChannelTouchView, openTouchRow } from './channel-touch-view.js'; // §26 (B-099e): the conversations an agent read / drafted, as rows on the tool card + the status-bar chip
 import { serviceHref, serviceOpenSpec, publishArtifacts } from './artifact-card.js'; // lane artifacts-services(-url): a service row's link (the server's ladder: published forward, else this instance's proxy)
+import { requestPhrases } from '../command-words.js'; // PURE (lane door-healthy-chat): the waiting line's plain question
 import { stallVerdict, waitingOnUser } from '../turn-state.js'; // PURE (lane parked-ask-stall): the delivery-stall verdict + "is the turn waiting on the user"
 import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
 
@@ -410,6 +413,10 @@ class ChatView {
     // Message list
     this._messageList = document.createElement('div');
     this._messageList.className = 'chat-message-list';
+    // FOCUSABLE (lane door-healthy-chat — the naive studies' B3/W5: PageUp / PageDown did nothing): a press in the transcript
+    // focused `.chat-view` — the list's PARENT — so the keys found no scroller to move and the NAV_KEYS listener below never
+    // heard them. A list that takes focus (never a Tab stop) is what the channel window's list has always been.
+    this._messageList.tabIndex = -1;
     this._messageList._axView = this; // app.js applyAxExposure reaches EVERY view's band through its list (sub-agent viewers are not in app.sessions)
     try { if (this.app?.settings?.get('accessibility.exposeChat') === false) this._messageList.setAttribute('aria-hidden', 'true'); } catch { } // 2.369.144: keep the transcript out of the accessibility tree when asked
     // Media-card thumbnails that cannot load (file deleted, or a history viewed
@@ -486,6 +493,8 @@ class ChatView {
     this._renderers = new ChatRenderers({
       subagentKnown: (id) => !!this._messages?.some((m) => m?.taskInfo?.subId === id), // lane agy-subagent-cards: a conversation:// link's sub has a card here
       getSessionCtx: () => this._getSessionIds(), // view-only/terminated windows keep host+cwd via openSpec
+      // lane door-healthy-chat: how many permission prompts this conversation has shown (the loaded ones + the pending set) — the third offers «let it work in this folder»
+      getPermissionPromptCount: () => { const ids = new Set(); for (const m of this._messages || []) { const p = m?.permission; if (p && p.requestId != null && p.kind !== 'user_input' && m.toolName !== 'AskUserQuestion') ids.add(String(p.requestId)); } for (const a of this._pendingAsks || []) if (a && a.kind === 'main') ids.add(String(a.requestId)); return ids.size; },
       getSourceWinId: () => this.winInfo?.id || null, // split tabs v2 (F2): a path opened here is born beside THIS window — never the active one
       onOpenArtifact: (b) => this._openArtifact(b), // lane artifacts-registries: the card and the chip's row share ONE door
       // In-chat ACTION buttons (Compact now): product-authored text, so the
@@ -988,6 +997,8 @@ class ChatView {
         }
       },
       onInterrupt: () => this.ws.send({ type: 'interrupt', sessionId: this.sessionId }),
+      // lane door-healthy-chat: PageUp / PageDown in the message box page the CONVERSATION — a positioning act like the list's own keys
+      onPageKey: (dir) => { this._notePositioning('key'); this._messageList.scrollBy({ top: dir * Math.max(40, Math.round(this._messageList.clientHeight * 0.9)) }); },
       getCwd: () => this._getSessionIds().cwd,
       getHost: () => this._getSessionIds().host || null,
       // Dropline voice input (q-029 P0): the conversation's title + messages the PURE dictationContext reads (text blocks only)
@@ -1231,7 +1242,15 @@ class ChatView {
         // compaction stage, the harness's turn-state chip, the executing-tool
         // run set. One owner, because round 7 retired only the first of them.
         this._retireLiveClaims();
-        if (msg.reason === 'not_logged_in') {
+        if (msg.reason === 'not_logged_in' && this._signinWall() === 'card') {
+          // lane door-signin-card: the chat's «Not logged in» message IS the humane sign-in
+          // card now — no "/login" dead end. On sign-in it offers «Send my message again»,
+          // re-sending the waiting message in ONE press (no retyping).
+          // lane door-signin-fixes: the card drives the LOCAL hub's Claude login only — a Codex
+          // or a remote-host death keeps the terminal road and its words (the branch below).
+          this._setReadOnly();
+          this._showSignInCard();
+        } else if (msg.reason === 'not_logged_in') {
           this._renderers.appendSystem(t('Not logged in — please log in to continue.'));
           this._setReadOnly();
           this._showLoginBar();
@@ -1939,6 +1958,7 @@ class ChatView {
     if ('inProgressTools' in meta) this._onToolsInProgress(meta.inProgressTools || []);
     if ('backgroundTasks' in meta && Array.isArray(meta.backgroundTasks)) this._statusBar?.setBackgroundTasks?.(meta.backgroundTasks); // the harness's level set (design-unknown-records); absent/null = never published, the card-derived set stands
     if ('pendingAsks' in meta) this._setPendingAsks(Array.isArray(meta.pendingAsks) ? meta.pendingAsks : []); // lane S1: who waits for the user, and where
+    if ('recordKinds' in meta) this._statusBar?.setAddedKinds?.(meta.recordKinds || []); // lane door-healthy-chat: the kinds of record the CLI added — the bar's quiet chip
     if ('autoResume' in meta) this._statusBar?.setAutoResume?.(meta.autoResume || null);
     // WHERE this spawn's model/effort came from (B-6b6d) — the resume ladder's
     // verdict, so the effort tooltip can say "carried over from this
@@ -4475,6 +4495,7 @@ class ChatView {
     if (op.subtype === 'background-tasks') { this._statusBar?.setBackgroundTasks?.(op.data?.tasks || []); return; }
     // EVERY ask the user can answer here (lane S1) — the waiting chip names who waits and jumps to it
     if (op.subtype === 'pending-asks') { this._setPendingAsks(op.data?.asks || []); return; }
+    if (op.subtype === 'record-kinds') { this._statusBar?.setAddedKinds?.(op.data?.kinds || []); return; } // lane door-healthy-chat
     if (op.subtype === 'usage') {
       this._statusBar.updateUsage(op.data);
     } else if (op.subtype === 'todos') {
@@ -5110,7 +5131,17 @@ class ChatView {
     if (!this._typingSince) this._typingSince = Date.now(); // watchdog arm
     this._typingReq = [label, kind];
     label = this._typingWord(label);
-    if (this._chatInput) { this._chatInput.showTyping(label, kind); return; }
+    // lane door-healthy-chat: while the turn waits on the person the line is a door to the card that waits
+    const waiting = waitingOnUser({ turnState: this._turnState || null, pendingAsks: this._pendingAsks || [] }) && !!(this._pendingAsks || []).length;
+    if (this._chatInput) {
+      this._chatInput.showTyping(label, kind);
+      const ss = this._chatInput._streamStatus;
+      if (ss) {
+        ss.classList.toggle('chat-stream-waiting', waiting);
+        if (!ss.dataset.waitDoor) { ss.dataset.waitDoor = '1'; ss.addEventListener('click', (e) => { if (ss.classList.contains('chat-stream-waiting') && e.target.closest('.chat-stream-label')) this.jumpToPendingAsk().catch(() => {}); }); }
+      }
+      return;
+    }
     // readOnly fallback — same shape as ChatInput's line (label in its own
     // `.chat-stream-label`), so a ticking age is a textContent write and not a
     // rebuild of the whole line once a second
@@ -5332,7 +5363,21 @@ class ChatView {
    *  render time, never stored as the label: the moment the state moves on, the line shows the
    *  label it was given again (the round-8 rule — no line that outlives its truth). */
   _typingWord(label) {
-    return waitingOnUser({ turnState: this._turnState || null, pendingAsks: this._pendingAsks || [] }) ? t('waiting for you') : label;
+    if (!waitingOnUser({ turnState: this._turnState || null, pendingAsks: this._pendingAsks || [] })) return label;
+    const q = this._waitingQuestion();
+    return q ? t('Waiting for you to allow: {what}', { what: q }) : t('waiting for you');
+  }
+
+  /** THE ONE PLAIN QUESTION OF A WAITING PERMISSION (lane door-healthy-chat — the naive studies' W2: the first turn stopped at
+   *  «Permission: Bash» below the fold while the person waited on the assistant): the oldest waiting main ask, in the card's
+   *  own words (requestPhrases over the request — its loaded card's input, else the ask's command line). '' = no words. */
+  _waitingQuestion() {
+    const a = (this._pendingAsks || []).find((x) => x && x.kind === 'main');
+    if (!a) return '';
+    const m = (this._messages || []).find((x) => x && x.id === a.msgId);
+    const p = m?.permission;
+    const phrases = p && p.input ? requestPhrases(p.toolName || a.toolName, p.input) : (a.toolName === 'Bash' && a.target ? requestPhrases('Bash', { command: a.target }) : []);
+    return phrases.map((x) => t(x.key, x.params)).join(' · ');
   }
 
   _refreshTypingWord() {
@@ -6438,7 +6483,41 @@ class ChatView {
     this._resumeBar = bar;
   }
 
-  // Show login bar when session exits due to expired/missing OAuth token
+  // THE HUMANE SIGN-IN CARD in the chat (lane door-signin-card): the session
+  // exited not-logged-in — instead of a dead-end «run /login» bar, mount the
+  // sign-in card (SignInCard drives the CLI login itself). The waiting message
+  // is remembered so ONE press re-sends it once the sign-in lands.
+  _showSignInCard() {
+    if (this._resumeBar) this._resumeBar.remove();
+    this._resumeBar = null;
+    const container = this._container;
+    if (!container) return;
+    this._waitingText = this._waitingTurnText(); // taken AT THE WALL — what was waiting when it hit
+    if (this._signInCard) { try { this._signInCard.destroy(); } catch { } }
+    if (this._signInHost) { try { this._signInHost.remove(); } catch { } }
+    const host = document.createElement('div');
+    host.className = 'chat-resume-bar chat-signin-host';
+    this._signInCard = new SignInCard({
+      ws: this.ws,
+      hasWaiting: () => !!this._waitingText,
+      onResend: () => this._resendWaiting(),
+      onAdvanced: () => this._openLoginTerminal(),
+    });
+    this._signInCard.mount(host);
+    if (this._statusBar?.element && this._statusBar.element.parentNode === container) container.insertBefore(host, this._statusBar.element);
+    else container.appendChild(host);
+    this._signInHost = host;
+  }
+
+  // the message the person was waiting on when the login wall hit (re-sent in
+  // ONE press after the sign-in lands) — lane door-signin-fixes: ONLY a typed
+  // turn nothing answered, an image-attached one's words included, never an
+  // older turn; nothing waiting ⇒ '' (the card says «Connected», no re-send).
+  _waitingTurnText() { return waitingTurnOf(this._messages || []); }
+  // the card for a LOCAL conversation of the harness whose subscriptions the card signs in (its declared oauthUsage row)
+  _signinWall() { const ids = this._getSessionIds(); return signinWallOf({ oauthSubscription: capsOf(ids.backend).oauthUsage === true, host: ids.host || null }); }
+
+  // Codex / a remote host (lane door-signin-fixes): the terminal road — the card drives the local Claude login only
   _showLoginBar() {
     if (this._resumeBar) this._resumeBar.remove();
     this._resumeBar = null;
@@ -6455,12 +6534,7 @@ class ChatView {
     const loginBtn = document.createElement('button');
     loginBtn.className = 'chat-resume-btn';
     loginBtn.innerHTML = `${UI_ICONS.wrench} <span>${t('Open Login Terminal')}</span>`;
-    loginBtn.onclick = () => {
-      // Open a terminal window running claude (user can /login there)
-      const ids = this._getSessionIds();
-      const cwd = ids.cwd || this.winInfo?._openSpec?.cwd || '';
-      this.app.createSession({ cwd, mode: 'terminal', backend: ids.backend || 'claude' });
-    };
+    loginBtn.onclick = () => this._openLoginTerminal(); // a terminal running the conversation's own CLI (user can /login there)
 
     const retryBtn = document.createElement('button');
     retryBtn.className = 'chat-resume-btn';
@@ -6474,6 +6548,33 @@ class ChatView {
       container.appendChild(bar);
     }
     this._resumeBar = bar;
+  }
+
+  // the kept 'advanced' road: open a terminal running claude for a manual /login.
+  _openLoginTerminal() {
+    const ids = this._getSessionIds();
+    const cwd = ids.cwd || this.winInfo?._openSpec?.cwd || '';
+    this.app.createSession({ cwd, mode: 'terminal', backend: ids.backend || 'claude' });
+  }
+
+  // ONE press: resume this conversation with the waiting message as its first
+  // message (createSession's initialMessage, forwarded through resumeSession).
+  _resendWaiting() {
+    const ids = this._getSessionIds();
+    const backend = ids.backend || 'claude';
+    const backendSessionId = ids.backendSessionId || this.winInfo?.backendSessionId || null;
+    const cwd = ids.cwd || this.winInfo?._openSpec?.cwd || this.winInfo?.cwd || '';
+    const text = this._waitingText;
+    if (!backendSessionId || !cwd) { showToast(t('Cannot resume from this window — use the session card in the sidebar instead.'), { type: 'error' }); return; }
+    this._waitingText = ''; // sent once: a later re-render offers it no more (lane door-signin-fixes)
+    const customName = this.app.sidebar?.getCustomName?.(backendSessionId);
+    const name = customName || this.winInfo?.name || this.winInfo?.titleMeta?.name || 'Session';
+    this.app.resumeSession(backendSessionId, cwd, name, {
+      mode: 'chat', backend, backendSessionId, hostId: ids.host || undefined,
+      agentKind: this.winInfo?.titleMeta?.agentKind, agentRole: this.winInfo?.titleMeta?.agentRole,
+      agentNickname: this.winInfo?.titleMeta?.agentNickname, sourceKind: this.winInfo?.titleMeta?.sourceKind,
+      ...(text ? { initialMessage: text } : {}),
+    });
   }
 
   // The pinned account cannot serve (lane resume-account-door, owner 2026-10-15): the verdict's sentence + its two doors
@@ -6552,6 +6653,8 @@ class ChatView {
   setBillingIdentity(auth, onSwitch) {
     this._statusBar?.setBilling?.(auth, onSwitch);
   }
+  // lane door-healthy-chat: the cost chip says whether this conversation's usage is billed (desktop and phone alike)
+  setCostBasis(auth) { this._statusBar?.setCostBasis?.(auth); }
 
   // ── Consecutive thinking/Bash run collapse (chat.collapseRuns) ──
   // Decoration-only pass: adjacent thinking/Bash cards get a "N × …" header
@@ -7213,6 +7316,7 @@ class ChatView {
 
   dispose() {
     this._statusBar?.dispose?.();
+    try { this._signInCard?.destroy(); } catch { } // lane door-signin-card
     this._disposed = true;
     try { this.app?._reconnectQueue?.cancel(this); } catch { } // a disposed view never takes its reconnect slot (perf ⑤b)
     try { this._cvReleaseIO?.disconnect(); } catch { }

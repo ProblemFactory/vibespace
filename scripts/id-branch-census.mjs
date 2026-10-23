@@ -43,6 +43,7 @@ export const FAMILIES = {
 export const ALLOW = [
   { family: 'harness', file: /^src\/codex-message-manager\.js$/, line: /\bn === 'shell'/, reason: 'Codex\'s own tool name (exec / shell / local_shell → bash), not the shell harness' },
   { family: 'appkind', file: /^src\/browser-profiles\.js$/, line: /t\.phase === 'npm'/, reason: 'the browser install\'s npm STEP (its progress phase), not the npm app kind' },
+  { family: 'appkind', file: /^src\/command-words\.js$/, line: /^const (?:INSTALL|RUN)_VERBS = Object\.freeze\(\{/, reason: 'a shell command\'s PROGRAM (the first word of a permission request\'s command line — `npm install`, `apt install`), worded for the card; not the npm / apt app kinds (lane door-healthy-chat)' },
   { family: 'mount', file: /^src\/machine-mounts\.js$/, line: /rclone !== 'rclone'/, reason: 'the rclone BINARY resolved off PATH (the bare name = none found), not the rclone storage provider' },
   { family: 'channel', file: /^src\/lib\/(?:manage-agents|sidebar-rail)\.js$/, line: /_activeTab\s*[!=]==?\s*'agents'/, reason: 'the sidebar rail\'s Agents tab, not the agents channel vendor' },
   // lane dc-harness-tail (2026-10-05)

@@ -114,7 +114,14 @@ class TerminalSession {
     });
     this.fitAddon = new FitAddon();
     this.terminal.loadAddon(this.fitAddon);
-    this.terminal.loadAddon(new WebLinksAddon());
+    // lane door-signin-card: a handler so a link (the Claude sign-in URL, and
+    // every other) opens in a NEW TAB through the product, never xterm's default
+    // native "WARNING: This link could potentially be dangerous" confirm — D3 / C2,
+    // which scared 3 of 7 naive testers off the sign-in link. http(s) only; noopener
+    // so the opened tab cannot reach window.opener.
+    this.terminal.loadAddon(new WebLinksAddon((event, uri) => {
+      if (/^https?:\/\//i.test(uri)) window.open(uri, '_blank', 'noopener,noreferrer');
+    }));
     const unicode11 = new Unicode11Addon();
     this.terminal.loadAddon(unicode11);
     this.terminal.unicode.activeVersion = '11';

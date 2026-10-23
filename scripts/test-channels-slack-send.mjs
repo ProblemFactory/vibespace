@@ -58,12 +58,12 @@ const AGENT = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLev
 
 const logLines = [];
 const capture = { log: (...a) => logLines.push(a.join(' ')), warn: (...a) => logLines.push(a.join(' ')), error: (...a) => logLines.push(a.join(' ')) };
-async function mkEngine(name, { registry = undefined, mode = {}, storeEnv = {} } = {}) {
+async function mkEngine(name, { registry = undefined, mode = {}, storeEnv = {}, env = {} } = {}) {
   const v = createSlackVendor({ mode: { tsShift: SHIFT, ...mode } });
   const dir = path.join(ROOT, name); fs.mkdirSync(dir, { recursive: true });
   const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: storeEnv, now, broadcast: () => {}, drivePresets: () => [], log: capture });
   const frames = [];
-  const eng = ENG.create({ dataDir: path.join(dir, 'eng'), env: {}, now, broadcast: (m) => frames.push(m), integrations, fetch: v.fetchFn, log: capture, ...(registry ? { registry } : {}), ...FAST_PACE });
+  const eng = ENG.create({ dataDir: path.join(dir, 'eng'), env, now, broadcast: (m) => frames.push(m), integrations, fetch: v.fetchFn, log: capture, ...(registry ? { registry } : {}), ...FAST_PACE });
   engines.push(eng);
   return { eng, v, frames, dir: eng.store.dir, root: path.join(dir, 'eng') };
 }
@@ -359,7 +359,9 @@ console.log('⑧ two pastes through the engine');
 //      name, Slack not asked; access_denied; the secret in no file / log / frame / answer / error (a planted control);
 //      two members → two accounts; a paste account re-pointed through the preset (same record); no preset → the paste
 //      steps; a preset without a relay on an http origin → refused `no-https`, on an https origin → its own callback;
-//      the custom rung → the relay page setting's default
+//      the custom rung → the relay page setting's default; lane oauth-relay-road addendum 1 (the owner 2026-10-22: the public
+//      page is never a company app's): a preset without its own page on a fleet pod rides the FLEET's
+//      (VIBESPACE_OAUTH_RELAY_URL) — an http hub too — and its own page outranks the fleet's; the custom rung keeps the setting
 console.log('⑨ the workspace app through the engine');
 {
   const vm = require('vm');
@@ -401,7 +403,8 @@ console.log('⑨ the workspace app through the engine');
   const rf = [];
   for (const [kind, state] of [['slack', s2.slice(0, -1) + (s2.endsWith('A') ? 'B' : 'A')], ['slack', sO], ['lark', s2], ['slack', 'nonsense']]) rf.push((await eng.oauthLanding({ kind, code: '1.2.abcdef', state })).why);
   clock += 31 * 60 * 1000; const late = await eng.oauthLanding({ kind: 'slack', code: '1.2.abcdef', state: s2 }); clock -= 31 * 60 * 1000;
-  ok(rf.join() === 'bad-hmac,bad-hmac,wrong-flow,bad-shape' && late.why === 'expired' && v.calls.filter((c) => c.method === 'oauth.v2.access').length === n0, `a flipped signature, another pod's state, the wrong kind's route, a malformed state, past the TTL: refused by name (${rf.join()},${late.why}), Slack never asked`);
+  // lane pod-oauth-callback: Lark declares its own landing now — a Slack state on Lark's route is refused by LARK's verdict as another kind's
+  ok(rf.join() === 'bad-hmac,bad-hmac,wrong-kind,bad-shape' && late.why === 'expired' && v.calls.filter((c) => c.method === 'oauth.v2.access').length === n0, `a flipped signature, another pod's state, the wrong kind's route, a malformed state, past the TTL: refused by name (${rf.join()},${late.why}), Slack never asked`);
   const st3 = await eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: ORIGIN });
   const L3 = await land(eng, v, st3.url, { deny: true });
   ok(L3.r && L3.r.why === 'denied' && /did not grant/.test(eng.oauthStatus(st3.flowId).error || ''), 'access_denied: the relay passes it back, the flow ends by name');
@@ -465,6 +468,19 @@ console.log('⑨ the workspace app through the engine');
   const nh = await threw(() => W11.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: ORIGIN }));
   const sh = await W11.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: 'https://pod-7.example.test' });
   const cu = await W11.eng.startOAuth({ kind: 'slack', clientPreset: 'custom', clientId: WS_CLIENT_ID, clientSecret: WS_CLIENT_SECRET, origin: ORIGIN });
+  {
+    const FLEET_RELAY = 'https://admin.fleet.example.test/relay/', FLEET_ENV = { VIBESPACE_OAUTH_RELAY_URL: FLEET_RELAY };
+    const W12 = await mkEngine('no-relay-fleet', { storeEnv: preset({ relayUrl: '' }), env: FLEET_ENV });
+    const W13 = await mkEngine('own-relay-fleet', { storeEnv: preset(), env: FLEET_ENV });
+    const rOf = (s) => new URL(s.url).searchParams.get('redirect_uri');
+    const fh = await W12.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: ORIGIN });
+    const fp = await W12.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: 'https://pod-7.fleet.example.test' });
+    const fo = await W13.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: 'https://pod-7.fleet.example.test' });
+    const fc = await W12.eng.startOAuth({ kind: 'slack', clientPreset: 'custom', clientId: WS_CLIENT_ID, clientSecret: WS_CLIENT_SECRET, origin: ORIGIN });
+    const back = RELAY.decide(new URL(W12.v.allow(fp.url)).search, ['fleet.example.test']);
+    ok(rOf(fh) === FLEET_RELAY && rOf(fp) === FLEET_RELAY && rOf(fo) === RELAY_URL && rOf(fc) === SM.RELAY_DEFAULT && back.act === 'redirect' && back.to.startsWith('https://pod-7.fleet.example.test/api/channels/oauth/cb/slack?'),
+      'addendum 1: a preset naming no relay page rides the FLEET\'s on a fleet pod (an http hub too — no more no-https), the cluster\'s copy sends the pod back; a preset\'s own page outranks the fleet\'s; the custom rung keeps the setting\'s page', JSON.stringify({ fh: rOf(fh), fp: rOf(fp), fo: rOf(fo), fc: rOf(fc), back: back.act }));
+  }
   ok(np.flow.mode === 'paste' && np.credentialKey === null && nh && nh.detail && nh.detail.why === 'no-https' && new URL(sh.url).searchParams.get('redirect_uri') === 'https://pod-7.example.test/api/channels/oauth/cb/slack' && cu.credentialKey === 'custom' && new URL(cu.url).searchParams.get('redirect_uri') === 'https://problemfactory.github.io/vibespace/slack/', 'no preset → the paste steps; a preset without a relay: an http instance refused by name (no-https), an https one uses its own callback; a custom client → the relay page setting\'s default', JSON.stringify({ np: np.flow.mode, nh: nh && nh.detail, sh: sh.url && new URL(sh.url).searchParams.get('redirect_uri'), cu: cu.url && new URL(cu.url).searchParams.get('redirect_uri') }));
 }
 

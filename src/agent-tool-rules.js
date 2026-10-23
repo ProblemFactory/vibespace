@@ -391,6 +391,25 @@ function alwaysOfferFor(permission) {
   return { updates: Array.isArray(aa.updates) ? aa.updates : [], withheld: aa.withheld };
 }
 
+// ── LET IT WORK IN THIS FOLDER WITHOUT ASKING (lane door-healthy-chat, 2.369.344 — the naive studies on 2.369.342, W2/C9:
+// 4–12 Allow presses per task, «Always Allow» covering only that exact command, two of three testers finding the mode menu's
+// "auto" by guessing). From a conversation's THIRD permission prompt (the owner's day-one rule) a Claude card offers ONE
+// press that answers this request AND sends the CLI the folder's allow rules — every command and every file edit — on the
+// road Always Allow already takes: the CLI saves them in the folder's local settings (.claude/settings.local.json), so the
+// next conversation in that folder does not ask either. The ask rules VibeSpace ships (`vibespace-page publish` …) still
+// ask — an ask rule wins over any allow rule (lane L, measured). Withheld whole when the request holds a hidden character
+// (F7); only a Claude CLI request — a record with no `kind` (codex's are 'approval', a question's 'user_input'), no ACP
+// options and no other answering lane (`via`). The card says every update it sends (F5, `updatesText`).
+const FOLDER_TOOLS = Object.freeze(['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+const FOLDER_PROMPT_AT = 3;
+const RULE_ALLOWS = 'allow'; // a PermissionUpdate rule's behavior (the CLI's own suggestion vocabulary) — never an answer's: the answer frame is built only by the claude adapter (test-helper-ask ⑲)
+function folderOfferFor(permission) {
+  const p = permission && typeof permission === 'object' ? permission : {};
+  if (hiddenCharsOf(p.input).length) return { updates: [], withheld: WITHHELD_HIDDEN };
+  if (p.kind || p.via || isQuestionRecord(p) || (Array.isArray(p.options) && p.options.length)) return { updates: [], withheld: null };
+  return { updates: [{ type: 'addRules', rules: FOLDER_TOOLS.map((toolName) => ({ toolName })), behavior: RULE_ALLOWS, destination: 'localSettings' }], withheld: null };
+}
+
 /** Is this record a QUESTION to the user (claude AskUserQuestion, codex requestUserInput, an ACP ask) — the
  *  one kind whose answer the CLIENT legitimately authors (the `answers`)? */
 const isQuestionRecord = (r) => !!r && (r.kind === 'user_input' || r.toolName === 'AskUserQuestion');
@@ -411,7 +430,8 @@ const isQuestionRecord = (r) => !!r && (r.kind === 'user_input' || r.toolName ==
 function answerFromRecord(record, data) {
   const d = { ...(data || {}) };
   const wantsAlways = d.always === true || (Array.isArray(d.permissionUpdates) && d.permissionUpdates.length > 0);
-  delete d.always;
+  const wantsFolder = d.folder === true; // lane door-healthy-chat: «let it work in this folder without asking» — the record's folder offer
+  delete d.always; delete d.folder;
   if (!record || typeof record !== 'object') {
     // a request this server never saw (older than the buffer — the CLI decides, verify r1): never the client's
     // updates, and never the client's input — an EMPTY updatedInput makes 2.1.281 run the request's OWN input
@@ -439,8 +459,8 @@ function answerFromRecord(record, data) {
     return { ok: true, data: d, from: 'record' };
   }
   d.toolInput = input;
-  const offer = alwaysOfferFor(record);
-  d.permissionUpdates = wantsAlways && offer.updates.length ? offer.updates : undefined;
+  const offer = wantsFolder ? folderOfferFor(record) : alwaysOfferFor(record);
+  d.permissionUpdates = (wantsAlways || wantsFolder) && offer.updates.length ? offer.updates : undefined;
   return { ok: true, data: d, from: 'record' };
 }
 
@@ -754,4 +774,6 @@ module.exports = {
   widenSuggestions, alwaysAllowFor, rulesText, splitShell, describeAgentCommand, agentCommandText,
   // verify r6: the inert-tail census (F4), every update in words (F5), the ONE offer + the server's own answer (F6/F7)
   FILTER_ARGS, QUIET_ARGS, inertArgs, updatesText, WITHHELD_HIDDEN, alwaysOfferFor, isQuestionRecord, answerFromRecord,
+  // lane door-healthy-chat: the third prompt's «let it work in this folder without asking»
+  FOLDER_TOOLS, FOLDER_PROMPT_AT, folderOfferFor,
 };

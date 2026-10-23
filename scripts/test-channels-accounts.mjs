@@ -216,7 +216,9 @@ const integrations = STORE.create({ dataDir: storeDir, env: {}, now, broadcast: 
 const v = mkVendor();
 const engDir = path.join(ROOT, 'eng'); fs.mkdirSync(engDir, { recursive: true });
 const frames = [];
-const eng = ENG.create({ dataDir: engDir, env: {}, now, broadcast: (m) => frames.push(m), integrations, fetch: v.fetchFn, log: capLog , ...FAST_PACE });
+// lane oauth-relay-road: an instance with NO relay page (Settings → Channels: the Lark / Gmail relay pages blank) — these
+// legs pin the loopback consent (its listener, its paste-back's state check); test-consent-road pins the relay road
+const eng = ENG.create({ dataDir: engDir, env: {}, now, serverSetting: (k) => (/^channels\.(lark|gmail)RelayUrl$/.test(k) ? '' : undefined), broadcast: (m) => frames.push(m), integrations, fetch: v.fetchFn, log: capLog , ...FAST_PACE });
 const engines = [eng];
 process.on('exit', () => { for (const e of engines) { try { e.oauth.stopAll(); e.stop(); } catch {} } });
 const chBox = SB.secretBox(path.join(engDir, ENG.KEY_FILE));   // the engine's own key file — reading the seal back

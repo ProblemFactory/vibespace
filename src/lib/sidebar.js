@@ -7,6 +7,7 @@ import { installSidebarRender } from './sidebar-render.js';
 import { installSidebarRenderMobile } from './sidebar-render-mobile.js';
 import { installSidebarMounts } from './sidebar-mounts.js';
 import { installSidebarRail, PANEL_TABS } from './sidebar-rail.js';
+import { isSignInRow } from '../day-one.js'; // lane door-day-one-landing: a sign-in terminal is not a session row
 import { installSidebarWorkbench } from './sidebar-workbench.js';
 import { installSidebarTasks } from './sidebar-tasks.js';
 import { openRefreshLive, REFRESH_ICON } from './refresh-live.js'; // lane refresh-live-sessions: the list's ⋯ menu entry 「刷新所有活着的会话」
@@ -793,7 +794,7 @@ class Sidebar {
   _applySidebarLayoutWidth(width = this.el.offsetWidth) {
     const right = this.app.settings?.get('sidebar.position') === 'right';
     // collapsed-with-rail keeps a 44px strip on screen (sidebar.railPersistent)
-    const w = this.isOpen ? `${width}px` : (this.el.classList.contains('rail-collapsed') ? '44px' : '0');
+    const w = this.isOpen ? `${width}px` : (this.el.classList.contains('rail-collapsed') ? (this.el.classList.contains('rail-labelled') ? '68px' : '44px') : '0');   // 68px: the rail with its words (lane door-day-one-landing)
     const mw = document.getElementById('main-wrapper');
     mw.style.marginLeft = right ? '0' : w;
     mw.style.marginRight = right ? w : '0';
@@ -945,6 +946,7 @@ class Sidebar {
     });
 
     for (const ws of webui) {
+      if (isSignInRow(ws)) continue;   // lane door-day-one-landing: the terminal a sign-in opened — a window, never a session row
       if (!matchedWebuiIds.has(ws.id)) {
         const backend = ws.backend || 'claude';
         const backendSessionId = ws.backendSessionId || ws.claudeSessionId || ws.id;

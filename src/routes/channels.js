@@ -130,6 +130,9 @@ function requestOrigin(req) {
   // else the request's own origin — THE one rule (src/write-origin.js: the forwarded proto / host first; lane owner-write-origin)
   return require('../write-origin.js').ownOriginOf(req.headers, { encrypted: req.protocol === 'https' || !!(req.socket && req.socket.encrypted) }) || null;
 }
+/** lane pod-oauth-callback: `road: 'loopback'` = the person asked for the copy-the-address way (the dialog's last resort);
+ *  anything else = the road src/consent-road.js decides. */
+const roadOf = (b) => (b && b.road === 'loopback' ? 'loopback' : null);
 function choiceOf(b) {
   const out = {};
   // 2.369.195: a storage mount's own client, copied SERVER-SIDE (never a secret in this body)
@@ -186,7 +189,7 @@ router.post('/api/channels/oauth/start', async (req, res) => {
     if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4
     if (refuseMalformedMount(req, res)) return;
     const b = req.body || {};
-    res.json({ ok: true, ...(await engine().startOAuth({ kind: typeof b.kind === 'string' ? b.kind : (typeof b.backend === 'string' ? b.backend : ''), ...choiceOf(b), options: b.options, origin: requestOrigin(req) })) });
+    res.json({ ok: true, ...(await engine().startOAuth({ kind: typeof b.kind === 'string' ? b.kind : (typeof b.backend === 'string' ? b.backend : ''), ...choiceOf(b), options: b.options, origin: requestOrigin(req), road: roadOf(b) })) });
   } catch (e) { fail(res, e); }
 });
 /** THE STORAGE MOUNTS WHOSE OWN OAUTH CLIENT AN ACCOUNT OF `kind` MAY
@@ -238,7 +241,10 @@ function landingAllowed(ip, t = Date.now()) {
   }
   return ++h.n <= LANDING_PER_MIN;
 }
-const LANDING_HEADERS = Object.freeze({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" });
+// lane pod-oauth-callback: a connected page closes the tab VibeSpace opened — the ONE inline script it may run, allowed by
+// its sha256 (src/consent-road.js CLOSE_SCRIPT); nothing else runs on a landing page
+const CLOSE_SCRIPT_HASH = require('crypto').createHash('sha256').update(require('../consent-road.js').CLOSE_SCRIPT).digest('base64');
+const LANDING_HEADERS = Object.freeze({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-${CLOSE_SCRIPT_HASH}'` });
 /** design 018: THE CONSENT LANDING — the vendor (or its relay page) sends the member's browser here with `code` +
  *  `state` (`error=access_denied` when they declined). 2.369.214: NO COOKIE IS ASKED — the browser that pressed Allow
  *  is often another profile (the person's identity at the vendor lives apart from their VibeSpace login), the normal
@@ -315,7 +321,7 @@ router.post('/api/channels/adapters/:id/reauthorize', async (req, res) => {
     if (refuseAgentMountChoice(req, res)) return;
     if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4
     if (refuseMalformedMount(req, res)) return;
-    res.json(await engine().reauthorize(req.params.id, { ...choiceOf(req.body || {}), origin: requestOrigin(req) }));
+    res.json(await engine().reauthorize(req.params.id, { ...choiceOf(req.body || {}), origin: requestOrigin(req), road: roadOf(req.body || {}) }));
   } catch (e) { fail(res, e); }
 });
 /** DUPLICATE (r4 §8.1 #2): `{name?}` → `{adapter}` — a NEW, UNAUTHORIZED

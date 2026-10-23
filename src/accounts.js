@@ -387,15 +387,37 @@ class AccountManager {
   // Allocate an empty account + dir. The OAuth login happens in an interactive
   // terminal through vibespace-claude-subscription-login.mjs; the caller
   // watches for the creds/status file, then calls finalizeSubscription.
-  createSubscription({ name } = {}) {
+  createSubscription({ name, signinPending = false } = {}) {
     const id = 'sub-' + crypto.randomBytes(6).toString('hex');
     fs.mkdirSync(this.subDir(id), { recursive: true, mode: 0o700 });
     this._seedConfigDir(this.subDir(id));
-    const a = { id, name: String(name || '').trim().slice(0, 60) || 'Subscription', type: 'subscription', source: 'login', createdAt: Date.now() };
+    const a = { id, name: String(name || '').trim().slice(0, 60) || 'Subscription', type: 'subscription', source: 'login', createdAt: Date.now(), ...(signinPending ? { signinPending: Date.now() } : {}) };
     this._state.accounts.push(a);
     this._save();
     this._notify();
     return { id, dir: this.subDir(id) };
+  }
+
+  // THE SIGN-IN CARD'S ROW (lane door-signin-fixes, the verify's debris): every
+  // «Sign in with Claude» / «Try again» used to push a NEW «Subscription» row, so
+  // each failed attempt left one that never logged in. The card's row is MARKED
+  // `signinPending` (cleared by finalize once it logs in); the next attempt
+  // REUSES an idle marked row (`busy` = a sign-in is running on it), and
+  // src/server/claude-signin.js sweeps a marked row past the sign-in TTL.
+  pendingSignin({ busy = () => false } = {}) {
+    const idle = this._state.accounts.find((a) => a.signinPending && this._acctType(a) === 'subscription' && !busy(a.id) && !this.readSubCreds(a.id).loggedIn);
+    if (idle) return { id: idle.id, dir: this.subDir(idle.id), reused: true };
+    return this.createSubscription({ signinPending: true });
+  }
+  pendingSignins() { return this._state.accounts.filter((a) => a.signinPending && this._acctType(a) === 'subscription').map((a) => ({ id: a.id, signinPending: a.signinPending })); }
+  /** Remove a marked row that never logged in — never one that did, a pool lists by name, or a harness default. */
+  discardPendingSignin(id) {
+    const a = this.get(id);
+    if (!a || !a.signinPending || this._acctType(a) !== 'subscription' || this.readSubCreds(id).loggedIn) return false;
+    if (this._state.accounts.some((p) => this._acctType(p) === 'pooled' && Array.isArray(p.members) && p.members.includes(id))) return false;
+    if (this._defaultIdFields().some((f) => this._state[f] === id)) return false;
+    this.remove(id);
+    return true;
   }
 
   // Read-only parse of a subscription account's creds. NEVER writes/refreshes
@@ -471,6 +493,7 @@ class AccountManager {
       a.name = (info.email || (info.subscriptionType ? info.subscriptionType[0].toUpperCase() + info.subscriptionType.slice(1) : 'Subscription')).slice(0, 60);
       this._save();
     }
+    if (info.loggedIn && a.signinPending) { delete a.signinPending; this._save(); } // the card's row logged in: an account now, never swept
     this._notify();
     const { accessToken: _accessToken, ...publicInfo } = info;
     return {

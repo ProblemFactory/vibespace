@@ -24,8 +24,9 @@ export class ChatInput {
    * @param {function} opts.getStateSync - returns StateSync instance
    * @param {function} opts.onInterrupt - called when user clicks Stop
    */
-  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getVoiceFacts, openPlugins, getUploadDir, isTouch, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onSteerSend }) {
+  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getVoiceFacts, openPlugins, getUploadDir, isTouch, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onSteerSend, onPageKey }) {
     this._ws = ws;
+    this._onPageKey = onPageKey || null; // lane door-healthy-chat: PageUp / PageDown page the conversation
     this._sessionId = sessionId;
     this._onSend = onSend;
     this._onInterrupt = onInterrupt;
@@ -197,6 +198,10 @@ export class ChatInput {
     // Send: Enter in normal mode, Ctrl+Enter in expanded mode
     // Tab to accept slash autocomplete
     this._textarea.addEventListener('keydown', (e) => {
+      // PAGEUP / PAGEDOWN PAGE THE CONVERSATION (lane door-healthy-chat — the naive studies' B3/W5: the keys did nothing with
+      // the message box focused): a chat's keys, as every chat app has them. A draft that outgrew its box keeps them.
+      if ((e.key === 'PageUp' || e.key === 'PageDown') && this._onPageKey && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey
+        && this._textarea.scrollHeight <= this._textarea.clientHeight + 1) { e.preventDefault(); this._onPageKey(e.key === 'PageUp' ? -1 : 1); return; }
       if (!this._slashDropdown.classList.contains('hidden')) {
         if (!imeOwnsKey(e) && (e.key === 'Tab' || e.key === 'Enter')) {   // the input method's Enter commits its word, never the command
           const active = this._slashDropdown.querySelector('.active');

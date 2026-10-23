@@ -33,6 +33,10 @@
 //      its hits listed with the match marked; a hit click opens the window AT that message (the jump's flash); the
 //      tail opens the same search unscoped, grouped by conversation; CONTROL: the old click (app.openChannel) opens
 //      no results; the dialog at 390 px (nothing off-screen, no sideways scroll); zh + ja (reloads)
+//   ⑪ (lane pod-oauth-callback — study 1 L1: an agent that needed Lark opened Lark's WEB login in its own browser; study 2
+//      M2: another told the person to find the Channels window) a fourth turn runs `vibespace-channels connect gmail`: its
+//      card shows ONE «Connect Gmail» row (the accent card, no conversation), and a REAL click opens the Connect an account
+//      dialog ON GMAIL; the CLI's answer names the button; CONTROL: a row opened through the outbox door opens no dialog
 // VS_SHOT_DIR=<dir> saves the screenshots (the card rows, the chip + menu, the window header link).
 // Requires google-chrome + dtach (SKIP without). ~60 s. Run: node scripts/test-channel-jump.mjs
 import { execSync, spawn } from 'node:child_process';
@@ -77,6 +81,7 @@ const CLI = path.join(wt, 'data', 'bin', 'vibespace-channels');
 const CMD1 = 'for c in fake-poll/fake-poll-ops fake-poll/fake-poll-announce fake-scan/fake-scan-ops; do vibespace-channels read "$c"; done; vibespace-channels reply fake-poll/fake-poll-ops "On it — drafted"';
 const CMD3 = 'vibespace-channels search "the"';
 const CMD2 = `vibespace-channels compose fake-poll --to ada@example.com --subject '${HOSTILE}' "Hello Ada"`;
+const CMD4 = 'vibespace-channels connect gmail';   // lane pod-oauth-callback ⑪
 const stubPath = path.join(stubDir, 'claude');
 const TRANSCRIPT = path.join(fakeHome, '.claude', 'projects', CWD.replace(/[/._]/g, '-'), SID + '.jsonl');
 fs.mkdirSync(path.dirname(TRANSCRIPT), { recursive: true });
@@ -125,6 +130,7 @@ process.stdin.on('data', (d) => {
     else if (/write the mail/.test(s)) chain = chain.then(() => toolTurn(2, 'write the mail', ${JSON.stringify(CMD2)},
       [['compose', 'fake-poll', '--to', 'ada@example.com', '--subject', ${JSON.stringify(HOSTILE)}, 'Hello Ada']], 'Drafted the mail.'));
     else if (/search the channels/.test(s)) chain = chain.then(() => toolTurn(3, 'search the channels', ${JSON.stringify(CMD3)}, [['search', 'the']], 'Searched.'));
+    else if (/connect the mail/.test(s)) chain = chain.then(() => toolTurn(4, 'connect the mail', ${JSON.stringify(CMD4)}, [['connect', 'gmail']], 'Put a Connect Gmail button above.'));
   }
 });
 process.stdin.on('end', () => process.exit(0));
@@ -448,6 +454,36 @@ try {
     await drop();
   }
   await evalJs(`localStorage.removeItem('vibespace.lang'); true`);
+  // ⑪ lane pod-oauth-callback: the agent's «Connect Gmail» — a row on its card, a REAL click opens the Connect dialog on Gmail
+  // (the page back in English first: the loop above left it in ja)
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+  await waitApp(); await sleep(800);
+  await waitFor(`(app.sidebar._webuiSessions || []).some((s) => s.id === ${JSON.stringify(sid)})`, 20000);
+  await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'jump stub', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
+  await waitFor(`${ROWS(3)}.length === 3`, 30000);
+  await evalJs(`app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(sid)}, text: 'connect the mail' }); true`);
+  const got4 = await waitFor(`${ROWS(4)}.length === 1`, 30000);
+  const r4 = await rowsOf(4);
+  const isConnect = await evalJs(`(() => { const r = document.querySelector('${CARD(4)} .chat-channel-touch'); return r ? { connect: r.classList.contains('connect'), key: r.dataset.key, title: r.title } : null; })()`);
+  check('⑪ `vibespace-channels connect gmail`: its card shows ONE «Connect Gmail» row — the accent card, keyed to the type (no conversation)',
+    got4 && r4.length === 1 && /^Connect Gmail — sign in so the assistant can use it$/.test(r4[0].words) && r4[0].name === 'Gmail' && isConnect && isConnect.connect && isConnect.key === 'gmail/~connect', { r4, isConnect });
+  let turns = '';
+  for (let i = 0; i < 80; i++) { try { turns = fs.readFileSync(path.join(stubDir, 'turns.log'), 'utf8'); } catch { turns = ''; } if (/^4 /m.test(turns)) break; await sleep(250); }   // the stub logs the turn after its result
+  check('⑪ the CLI\'s answer names the button in the user\'s chat (the agent tells the person, never a web login)', /a «Connect Gmail» button is in the user's chat now/.test(turns), turns.split('\n').filter((l) => l.startsWith('4 ')).join(' ').slice(0, 300));
+  await evalJs(`document.querySelector('${CARD(4)} .chat-channel-touch')?.scrollIntoView({ block: 'center' }); true`); await sleep(300);
+  await shot('connect-row', CARD(4));
+  const DLGC = `document.querySelector('.dialog-body[data-chan-dialog="connect"]')`;
+  await realClick(`${CARD(4)} .chat-channel-touch`);
+  const okC = await waitFor(`!!${DLGC} && (() => { const s = ${DLGC}.querySelector('select'); return !!s && s.value === 'gmail'; })()`, 15000);
+  const dC = await evalJs(`(() => { const d = ${DLGC}; return d ? { type: d.querySelector('select')?.value, title: d.closest('.modal, .dialog, [role=dialog]')?.querySelector('h3, .dialog-title')?.textContent || '' } : null; })()`);
+  check('⑪ a REAL click on the row opens Connect an account ON GMAIL (the type preselected — the person signs in there)', okC && dC && dC.type === 'gmail', dC);
+  await shot('connect-dialog-gmail', '#mounts-dialog-overlay .dialog');
+  await evalJs(`(() => { const d = ${DLGC}; const ov = d && (d.closest('#mounts-dialog-overlay') || d.closest('.modal-overlay')); if (ov) ov.remove(); return true; })()`);
+  await sleep(300);
+  // CONTROL: the same row opened through the pre-lane door (the outbox) opens no Connect dialog — the check above can go red
+  await evalJs(`app.openChannelOutbox?.(); true`);
+  await sleep(900);
+  check('⑪ CONTROL the pre-lane door (a row with no conversation ⇒ the Outbox) opens no Connect dialog', !(await evalJs(`!!${DLGC}`)));
   check('no page exception anywhere', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++;

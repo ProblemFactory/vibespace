@@ -262,6 +262,9 @@ console.log('§2c agents never receive HTML: the agent route census + every agen
     proposeRecall: 'the agent\'s own recall proposal (the message id + a quote of the user\'s own message through the belt; agentIdsOf)',
     // lane channel-attach-read (B-d6b9)
     attachment: 'the bytes of a part a message of a readable conversation carries — never its role:body part (not-found, even cached); the sender / title / type through the belt; driven below and in test-channels-images ③b',
+    // lane pod-oauth-callback: an account TYPE, never a conversation (test-architecture §65 NO_CONVERSATION)
+    connectOffer: 'a vendor type\'s label, glyph, whether a company app is offered, how many accounts of it hold a sign-in — no conversation, nothing of one; the touch it leaves is the chat\'s Connect row',
+    connectOffers: 'the types no account of which holds a sign-in ({kind, label, accounts}) — `list`\'s not-connected line',
     // lane channel-direct-send-sync
     collectReceipt: 'the drafting agent reads its OWN direct send\'s receipt inline (receiptText = the rendered block; marks receipt.road:\'inline\') — a caller who is not the drafter = the uniform not-found',
   };

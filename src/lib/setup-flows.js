@@ -1,10 +1,12 @@
 import { escHtml, showToast, showConfirmDialog, fetchJson, createModalShell } from './utils.js';
 import { maybeNagVault } from './vault-unlock.js'; // lane vault-e2e-password: the tour ends ⇒ the second password (while not set up)
 import { TerminalSession } from './terminal.js';
-import { t, setLang, getLangPref } from './i18n.js';
-import { THEMES, BUILTIN_THEMES } from './themes.js';
+import { t } from './i18n.js';
 import { sessionDisplayName } from '../session-name.js'; // THE name ladder — a drift-ledger row names its conversation (lane record-oracle-2-1-296)
 import { diagnosticsSection } from './cli-registration-words.js'; // lane cli-2-1-308-records: a claude build this release has no record table for
+import { SIGN_IN, tourSteps, folderChips, firstFilesFolder } from '../day-one.js'; // lane door-day-one-landing: the tour's steps, its folder chips; a sign-in terminal is not a session row
+import { loadHomeFolders, recentLocalCwds, paintFolderChips } from './folder-chips.js'; // lane door-day-one-landing: the folder chips' painter (the New Session dialog's too)
+import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card inline in the tour's connect step
 
 /**
  * App setup/config flows mixin — the onboarding wizard, Backup & migrate
@@ -69,7 +71,7 @@ export function installSetupFlows(App) {
           }, 3000);
         };
         this.ws.onGlobal(onCreated);
-        this.ws.send({ type: 'create', backend: 'shell', mode: 'terminal', name: cmd.split(' ')[0], reqId, ephemeral: true });
+        this.ws.send({ type: 'create', backend: 'shell', mode: 'terminal', name: cmd.split(' ')[0], reqId, ephemeral: true, purpose: SIGN_IN });
       });
     },
 
@@ -207,31 +209,25 @@ export function installSetupFlows(App) {
     };
 
     const render = () => {
-      const dots = [0, 1, 2, 3].map(i => `<span class="ob-dot${i === step ? ' active' : ''}"></span>`).join('');
+      // lane door-day-one-landing: the steps this workspace needs (src/day-one.js tourSteps) — a workspace the admin already
+      // protects (SSO, a sign-in password) skips «Protect this workspace» and its SSO sentence: the person just signed in
+      const plan = tourSteps({ ssoEnabled: !!this._ssoEnabled, authEnabled: !!this._authEnabled });
+      if (step === 2 && !plan.includes('protect')) step = 3;
+      const STEP_OF = { welcome: 0, connect: 1, protect: 2, start: 3 };
+      const dots = plan.map((name) => `<span class="ob-dot${STEP_OF[name] === step ? ' active' : ''}"></span>`).join('');
+      if (this._obSignInCard) { try { this._obSignInCard.destroy(); } catch { } this._obSignInCard = null; } // lane door-signin-card
       if (step === 0) {
-        // Language chips: setLang() reloads the page; vs-onboarded isn't set
-        // yet, so the wizard re-enters in the picked language automatically.
-        const lang = getLangPref();
-        const langChip = (code, label) =>
-          `<button class="ob-lang${lang === code ? ' active' : ''}" data-lang="${code}">${label}</button>`;
-        // Theme chips: applied LIVE (themeManager.apply persists per-device),
-        // no reload — the wizard itself recolors as immediate feedback.
-        const curTheme = this.themeManager?.current || 'dark';
-        const themeChip = (name) => {
-          const term = THEMES[name]?.terminal || {};
-          const label = name.charAt(0).toUpperCase() + name.slice(1); // brand-ish names, untranslated
-          return `<button class="ob-lang ob-theme${curTheme === name ? ' active' : ''}" data-theme-name="${name}">
-            <i style="background:${term.background || '#222'}"></i>${label}</button>`;
-        };
+        // lane door-day-one-landing (the naive-user studies: a pitch to coding agents, a promise of a terminal UI and 6
+        // themes × 4 languages on screen one — "is this even for me?"): ONE sentence of what it is for, in plain words, and
+        // three things a person could ask. Theme and language wait in ⚙ (the gear menu keeps both).
         content.innerHTML = `
           <h1>${t('Welcome to VibeSpace')}</h1>
-          <p class="ob-sub">${t('Your workspace for coding agents')}</p>
-          <div class="ob-langs">${langChip('auto', t('Auto'))}${langChip('en', 'English')}${langChip('zh', '中文')}${langChip('ja', '日本語')}</div>
-          <div class="ob-langs ob-themes">${[...BUILTIN_THEMES].map(themeChip).join('')}</div>
-          <div class="ob-points">
-            <div class="ob-point"><b>${t('Sessions that never die')}</b><span>${t('Agents keep running through restarts, refreshes, and network drops — reattach from any device.')}</span></div>
-            <div class="ob-point"><b>${t('A real window manager')}</b><span>${t('Tile agent chats, terminals, files and editors across virtual desktops.')}</span></div>
-            <div class="ob-point"><b>${t('Chat or terminal, your choice')}</b><span>${t('Every session can run as a structured chat or a raw terminal TUI.')}</span></div>
+          <p class="ob-sub">${escHtml(t('An assistant that works on your files — ask it in plain words.'))}</p>
+          <div class="ob-asks">
+            <div class="ob-asks-head">${escHtml(t('For example:'))}</div>
+            <div class="ob-ask">${escHtml(t('Read the contracts in my folder and list when each one renews.'))}</div>
+            <div class="ob-ask">${escHtml(t('Check the numbers in this report against the spreadsheet and fix what is wrong.'))}</div>
+            <div class="ob-ask">${escHtml(t('Turn my notes into a one-page summary I can send.'))}</div>
           </div>
           <div class="welcome-actions">
             <button class="welcome-btn" id="ob-next">${t('Get started')}</button>
@@ -240,27 +236,43 @@ export function installSetupFlows(App) {
           <div class="ob-dots">${dots}</div>`;
         content.querySelector('#ob-next').onclick = () => { step = 1; render(); };
         content.querySelector('#ob-skip').onclick = done;
-        content.querySelectorAll('.ob-lang:not(.ob-theme)').forEach((b) => {
-          b.onclick = () => { if (b.dataset.lang !== getLangPref()) setLang(b.dataset.lang); };
-        });
-        content.querySelectorAll('.ob-theme').forEach((b) => {
-          b.onclick = () => { this.themeManager?.apply(b.dataset.themeName); render(); };
-        });
       } else if (step === 1) {
         content.innerHTML = `
           <h1>${t('Connect your agents')}</h1>
-          <p class="ob-sub">${t('VibeSpace drives the official CLIs — log in once, credentials persist')}</p>
-          <div class="ob-backends" id="ob-backends"><div class="ob-loading">${t('Checking…')}</div></div>
+          <p class="ob-sub">${t('Sign in with your own Claude account — your company uses a Claude subscription. Nothing works until you do.')}</p>
+          <div id="ob-signin"></div>
+          <div class="ob-warn" id="ob-signin-warn" hidden>${t('You are not signed in yet — you won’t be able to start a chat. Continue anyway?')}</div>
+          <details class="ob-advanced"><summary>${t('Advanced: sign in from a terminal, or add Codex')}</summary>
+          <div class="ob-backends" id="ob-backends"><div class="ob-loading">${t('Checking…')}</div></div></details>
           <div class="welcome-actions">
             <button class="welcome-btn" id="ob-next">${t('Continue')}</button>
             <button class="welcome-btn welcome-btn-secondary" id="ob-back">${t('Back')}</button>
           </div>
           <div class="ob-dots">${dots}</div>`;
-        content.querySelector('#ob-next').onclick = () => { step = 2; render(); };
+        // lane door-signin-card: the humane sign-in card inline; the connect step cannot be
+        // skipped SILENTLY — Continue, when nothing is signed in, warns once and relabels first.
+        this._obSignInCard = new SignInCard({ ws: this.ws, hasWaiting: () => false,
+          onConnected: () => { this._obSignedIn = true; const w = content.querySelector('#ob-signin-warn'); if (w) w.hidden = true; try { refresh(); } catch { } } });
+        this._obSignInCard.mount(content.querySelector('#ob-signin'));
+        const obNext = content.querySelector('#ob-next');
+        obNext.onclick = () => {
+          if (!this._obSignedIn && !this._obReady && !this._obWarnedOnce) {
+            this._obWarnedOnce = true;
+            const w = content.querySelector('#ob-signin-warn'); if (w) w.hidden = false;
+            obNext.textContent = t('Continue anyway');
+            return;
+          }
+          step = 2; render();
+        };
         content.querySelector('#ob-back').onclick = () => { step = 0; render(); };
         const refresh = async () => {
           let st = {};
           try { st = await fetchJson('/api/backend-status'); } catch {}
+          // lane door-signin-card: readiness gates the tour's Continue warning (a terminal login via the
+          // Advanced road, or a named account/pool, also counts as signed in)
+          const obReady = (k) => { const b = st[k] || {}; return !!(b.loggedIn || (b.namedLoggedIn || 0) > 0); };
+          this._obReady = obReady('claude') || obReady('codex');
+          if (this._obReady) { const w = content.querySelector('#ob-signin-warn'); if (w) w.hidden = true; }
           const card = (key, label, loginCmd, installCmd) => {
             const b = st[key] || {};
             // Named/pooled accounts count as READY (2.267.4, user request:
@@ -318,22 +330,9 @@ export function installSetupFlows(App) {
         };
         refresh();
       } else if (step === 2) {
+        // reached only where nothing protects the workspace yet (tourSteps) — an SSO / password workspace never shows this
+        // step, nor the SSO sentence it carried (lane door-day-one-landing: it followed a password sign-in on every pod)
         const protectedAlready = !!this._authEnabled;
-        // SSO configured → login is handled by the identity provider; a local
-        // password is redundant, so skip the whole password step (show why).
-        if (this._ssoEnabled) {
-          content.innerHTML = `
-            <h1>${t('Protect this workspace')}</h1>
-            <p class="ob-sub">${t('Single sign-on (SSO) is already configured ✓ — login is handled by your identity provider, so no password is needed.')}</p>
-            <div class="welcome-actions">
-              <button class="welcome-btn" id="ob-next">${t('Continue')}</button>
-              <button class="welcome-btn welcome-btn-secondary" id="ob-back">${t('Back')}</button>
-            </div>
-            <div class="ob-dots">${dots}</div>`;
-          content.querySelector('#ob-next').onclick = () => { step = 3; render(); };
-          content.querySelector('#ob-back').onclick = () => { step = 1; render(); };
-          return;
-        }
         content.innerHTML = `
           <h1>${t('Protect this workspace')}</h1>
           <p class="ob-sub">${protectedAlready ? t('Password auth is already enabled ✓') : t('Optional — anyone who can reach this server gets full shell access. A password gates pages, APIs, and terminals.')}</p>
@@ -381,25 +380,36 @@ export function installSetupFlows(App) {
           } catch { errEl.textContent = t('Failed'); }
         });
       } else {
+        // lane door-day-one-landing (the naive-user studies: a grey /home/<user> placeholder, «project folder», Chat vs
+        // Terminal side by side — every tester typed `…/work` by guessing): the home's folders as chips, the one holding the
+        // most files CHOSEN (src/day-one.js folderChips / firstFilesFolder), ONE primary button — a chat on their files
         content.innerHTML = `
-          <h1>${t('Start your first session')}</h1>
-          <p class="ob-sub">${t('Pick a project folder — the agent works inside it')}</p>
-          <input type="text" id="ob-cwd" class="ob-cwd" placeholder="~/projects/my-app" autocomplete="off">
+          <h1>${escHtml(t('Start your first chat'))}</h1>
+          <p class="ob-sub">${escHtml(t('Pick the folder with your files — the assistant works inside it'))}</p>
+          <div class="cwd-recent ob-chips" id="ob-chips"></div>
+          <input type="text" id="ob-cwd" class="ob-cwd" placeholder="${escHtml(t('or type a folder…'))}" autocomplete="off">
           <div class="welcome-actions">
-            <button class="welcome-btn" id="ob-chat">${t('Start Chat Session')}</button>
-            <button class="welcome-btn welcome-btn-secondary" id="ob-term">${t('Start Terminal Session')}</button>
+            <button class="welcome-btn" id="ob-chat">${escHtml(t('Start the chat'))}</button>
           </div>
-          <div class="ob-alt"><a href="#" id="ob-files">${t('or browse files first')}</a> · <a href="#" id="ob-finish">${t('finish tour')}</a></div>
+          <div class="ob-alt"><a href="#" id="ob-term">${escHtml(t('or a terminal'))}</a> · <a href="#" id="ob-files">${t('or browse files first')}</a> · <a href="#" id="ob-finish">${t('finish tour')}</a></div>
           <div class="ob-dots">${dots}</div>`;
         const cwdInput = content.querySelector('#ob-cwd');
-        fetchJson('/api/home').then(d => { cwdInput.placeholder = d.home; }).catch(() => {});
+        const chipsEl = content.querySelector('#ob-chips');
+        cwdInput.addEventListener('input', () => { for (const x of chipsEl.querySelectorAll('.cwd-recent-chip.selected')) x.classList.remove('selected'); });
+        loadHomeFolders().then((folders) => {
+          if (!chipsEl.isConnected) return;
+          const chips = folderChips({ folders, recent: recentLocalCwds(this) });
+          const first = cwdInput.value.trim() ? null : firstFilesFolder(chips);
+          if (first) cwdInput.value = first;
+          paintFolderChips(chipsEl, chips, { selected: first, onPick: (c) => { cwdInput.value = c.path; } });
+        });
         const go = (mode) => {
           const cwd = cwdInput.value.trim() || undefined;
           done();
           this.createSession({ cwd, mode, backend: 'claude' });
         };
         content.querySelector('#ob-chat').onclick = () => go('chat');
-        content.querySelector('#ob-term').onclick = () => go('terminal');
+        content.querySelector('#ob-term').onclick = (e) => { e.preventDefault(); go('terminal'); };
         content.querySelector('#ob-files').onclick = (e) => { e.preventDefault(); done(); this.openFileExplorer(); };
         content.querySelector('#ob-finish').onclick = (e) => { e.preventDefault(); done(); };
       }
@@ -562,7 +572,7 @@ export function installSetupFlows(App) {
       const tr = rows.map((r) => `<tr><td>${esc(nameOf(r.conversation))}</td><td>${esc(r.harness || '')} · ${esc(r.shape || '')}</td><td>+{${esc((r.fields || []).join(', '))}}</td><td class="dim">${esc(r.cli || '?')}</td><td class="n">${r.count}</td></tr>`
         + (r.sample ? `<tr><td colspan="5"><details><summary>${esc(t('Technical details'))}</summary><pre>${esc(r.sample)}</pre></details></td></tr>` : '')).join('');
       return `<h2>${esc(t('Records that grew a field'))}</h2>
-      <p class="dim">${esc(t('Records VibeSpace knows that arrived carrying fields it does not declare. Handling is unchanged; the conversation also shows one red card per kind of record — the sign that the CLI may have updated. Each row is one kind of record in one conversation, since this server started.'))}</p>
+      <p class="dim">${esc(t('Records VibeSpace knows that arrived carrying fields it does not declare. Handling is unchanged; the conversation\'s status bar shows one quiet chip counting these kinds — the sign that the CLI may have updated. Each row is one kind of record in one conversation, since this server started.'))}</p>
       <table class="drift-ledger"><tr><td class="dim">${esc(t('conversation'))}</td><td class="dim">${esc(t('harness record'))}</td><td class="dim">${esc(t('new fields'))}</td><td class="dim">${esc(t('CLI version'))}</td><td class="n dim">n</td></tr>${tr}</table>`;
     })()}
     <h2>${esc(t('By event'))}</h2><table>${kv(d.byName)}</table>

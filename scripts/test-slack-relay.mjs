@@ -3,13 +3,19 @@
 // (index.html + relay.js, its own CSP) by a static server standing in for the https host; a second server stands in
 // for a VibeSpace instance on 127.0.0.1. Headless Chrome opens the page the way Slack redirects to it:
 //   ① the rule: relay.js's relayTargetVerdict equals src/channels/slack-manifest.js's over one table (private networks,
-//      public hosts, look-alikes, the allow suffix) — the page and the server never disagree
+//      public hosts, look-alikes, the allow suffix; backlog B-be43: Tailscale's 100.64/10 and *.ts.net are private, a
+//      public 100.x outside the /10 and ts.net look-alikes are not) — the page and the server never disagree
 //   ② a state naming the instance (127.0.0.1): the browser lands on <instance>/api/channels/oauth/cb/slack with the
 //      query VERBATIM (the instance sees code + state + nothing else)
 //   ③ a state naming a public host, a forged / missing state, a look-alike under a data-allow page: the code is SHOWN
 //      (Copy), no navigation; an `error=access_denied` with no way back says "declined"
 //   ④ CDP no-network census: across every load the page asks for index.html and relay.js only — no fetch, beacon,
 //      font, image or third-party script; nothing in localStorage / sessionStorage / cookies
+//   ⑥ lane oauth-relay-road (one registered address per app — the page serves EVERY kind): the ONE table × every kind a
+//      landing serves (slack, dropline, lark, gmail — each passes KIND_RE): the page redirects exactly when
+//      slack-manifest's verdict does, to /api/channels/oauth/cb/<kind>; in Chrome a Lark state (code + state) and a Gmail
+//      state (Google's code + scope + authuser + prompt) land on /cb/lark and /cb/gmail with the query VERBATIM, through
+//      the public copy (a private instance) and the admin copy (data-allow = the fleet's domain: an https pod)
 // Run: node scripts/test-slack-relay.mjs   (SKIPs without chrome)
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -41,7 +47,18 @@ const TABLE = [
   ['http://localhost:3000', []], ['http://box.local', []], ['http://box.lan', []], ['http://nas.home:8080', []], ['https://example.com', []], ['http://8.8.8.8', []], ['http://172.32.0.1', []],
   ['http://evil.com/.lan', []], ['javascript:alert(1)', []], ['http://u:p@10.0.0.1', []], ['https://a.pods.example.test', ['pods.example.test']], ['http://a.pods.example.test', ['pods.example.test']],
   ['https://pods.example.test.evil.net', ['pods.example.test']], ['https://evilpods.example.test', ['pods.example.test']], ['https://a.pods.example.test', ['test']],
+  // backlog B-be43: Tailscale — the tailnet's CGNAT range 100.64.0.0/10 (both edges) and MagicDNS *.ts.net; CONTROLS: a
+  // public 100.x just outside the /10, a bare ts.net, look-alikes (evilts.net, a ts.net label under another domain)
+  ['http://100.64.0.1:3456', []], ['http://100.101.102.103:3456', []], ['http://100.127.255.254', []], ['https://hub.tail1234.ts.net', []], ['http://hub.tail1234.ts.net:3456', []],
+  ['http://100.63.255.255', []], ['http://100.128.0.1', []], ['http://100.1.2.3', []], ['https://ts.net', []], ['https://hub.evilts.net', []], ['https://hub.ts.net.evil.com', []],
 ];
+// backlog B-be43: the Tailscale rows say what they mean (the table above only proves the two functions agree)
+{
+  const v = (o) => M.relayTargetVerdict(o, { allow: [] });
+  const ts = ['http://100.64.0.1:3456', 'http://100.101.102.103:3456', 'http://100.127.255.254', 'https://hub.tail1234.ts.net', 'http://hub.tail1234.ts.net:3456'];
+  const ctl = ['http://100.63.255.255', 'http://100.128.0.1', 'http://100.1.2.3', 'https://ts.net', 'https://hub.evilts.net', 'https://hub.ts.net.evil.com'];
+  ok(ts.every((o) => v(o) === 'redirect') && ctl.every((o) => v(o) === 'show-code'), `① a hub reached over Tailscale is private — 100.64.0.0/10 (both edges) and *.ts.net redirect; CONTROLS: a public 100.x outside the /10 (100.63.255.255, 100.128.0.1, 100.1.2.3), a bare ts.net and look-alikes stay show-code`, JSON.stringify([...ts, ...ctl].map((o) => [o, v(o)])));
+}
 const diff = TABLE.filter(([o, allow]) => RV.relayTargetVerdict(o, { allow }) !== M.relayTargetVerdict(o, { allow }));
 ok(!diff.length && TABLE.some(([o, a]) => M.relayTargetVerdict(o, { allow: a }) === 'redirect') && TABLE.some(([o, a]) => M.relayTargetVerdict(o, { allow: a }) === 'show-code') && RV.CALLBACK_PATH === M.CALLBACK_PATH && RV.PRIVATE_SUFFIXES.join() === M.PRIVATE_SUFFIXES.join(), `① relay.js and slack-manifest.js answer one table alike (${TABLE.length} rows), with the same callback path and private suffixes`, JSON.stringify(diff));
 // lane voice-p1-oauth-teach: the state's `k` (account kind) — absent = slack; dropline lands on its own door; a malformed
@@ -115,6 +132,35 @@ ok(!foreign.length && own === '/,/relay.js' && stor === '[0,0,""]', `④ CDP cen
   const qd = `?code=2222.3333.abcdef&state=${encodeURIComponent(DO.stateOf({ origin: INST, flowId: '0123456789abcdef', issuedAt: Date.now() }, sign))}`;
   const atd = await open(PAGE + qd);
   ok(atd === `${INST}/api/channels/oauth/cb/dropline${qd}` && landed[landed.length - 1] === `/api/channels/oauth/cb/dropline${qd}`, '⑤ a dropline state (k=dropline) in Chrome: the page sends the browser to the instance\'s /api/channels/oauth/cb/dropline, the query verbatim', atd);
+}
+// ⑥ lane oauth-relay-road: every kind through the ONE table, then Lark and Google's own queries in Chrome
+{
+  const CR = require(path.join(repo, 'src/consent-road.js'));
+  const DO = require(path.join(repo, 'src/server/dropline-oauth.js'));
+  const LANDED_KINDS = ['slack', 'dropline', 'lark', 'gmail'];
+  const stateFor = (k, u) => (k === 'slack' ? M.stateOf({ origin: u, flowId: '0123456789abcdef', issuedAt: Date.now() }, sign)
+    : k === 'dropline' ? DO.stateOf({ origin: u, flowId: '0123456789abcdef', issuedAt: Date.now() }, sign)
+      : CR.stateOf({ origin: u, flowId: '0123456789abcdef', issuedAt: Date.now(), kind: k }, sign));
+  const wrong = [];
+  for (const k of LANDED_KINDS) for (const [o, allow] of TABLE) {
+    if (!M.originOf(o)) continue;   // the state carries only a canonical origin (stateOf's own rule)
+    const d = RV.decide(`?code=abcd.efgh.1234&state=${encodeURIComponent(stateFor(k, o))}`, allow);
+    const want = M.relayTargetVerdict(o, { allow }) === 'redirect';
+    if (want !== (d.act === 'redirect') || (want && !d.to.startsWith(`${M.originOf(o)}/api/channels/oauth/cb/${k}?code=`))) wrong.push({ k, o, allow, d });
+  }
+  ok(!wrong.length && LANDED_KINDS.every((k) => /^[a-z][a-z0-9-]{1,19}$/.test(k) && RV.stateKind(stateFor(k, INST)) === k), `⑥ the ONE table × every landed kind (${LANDED_KINDS.join(', ')}): the page redirects exactly when the server's verdict does, to /api/channels/oauth/cb/<kind>`, JSON.stringify(wrong).slice(0, 600));
+  const ql = `?code=lark-relay-code-01&state=${encodeURIComponent(stateFor('lark', INST))}`;
+  const atl = await open(PAGE + ql);
+  const qg = `?code=4%2F0Ab-relay-google-01&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.modify+openid&authuser=0&prompt=consent&state=${encodeURIComponent(stateFor('gmail', INST))}`;
+  const atg = await open(PAGE + qg);
+  ok(atl === `${INST}/api/channels/oauth/cb/lark${ql}` && atg === `${INST}/api/channels/oauth/cb/gmail${qg}` && landed.includes(`/api/channels/oauth/cb/gmail${qg}`),
+    '⑥ in Chrome, the public copy: a Lark state lands on <instance>/cb/lark, a Gmail state on /cb/gmail — Google\'s code, scope, authuser and prompt VERBATIM', JSON.stringify({ atl, atg }));
+  const pod = 'https://alice.pods.example.test';
+  const qp = `?code=lark-relay-code-02&state=${encodeURIComponent(stateFor('lark', pod))}`;
+  const allowed = RV.decide(qp, ['pods.example.test']);
+  const pub = await shown(PAGE + qp);
+  ok(allowed.act === 'redirect' && allowed.to === `${pod}/api/channels/oauth/cb/lark${qp}` && pub.vis === 'paste' && pub.code === 'lark-relay-code-02',
+    '⑥ an https pod: the admin copy (data-allow = the fleet\'s domain) sends it on; the public copy shows the code instead (it sends back private addresses only)', JSON.stringify({ allowed, pub }));
 }
 pageSrv.close(); instSrv.close(); ws.close();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

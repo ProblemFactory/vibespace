@@ -79,6 +79,7 @@ const CSS = `
 .doc-raw>.editor-container{flex:1;min-height:0}
 .doc-page{font-size:15px;max-width:calc(76ch + 64px);box-sizing:border-box;margin:0 auto;padding:28px 32px 96px;position:relative}
 .doc-page .ProseMirror{outline:none;white-space:pre-wrap;word-wrap:break-word;line-height:1.6;font-size:15px}
+.doc-page.doc-waiting{color:var(--text-dim)}
 .doc-page .ProseMirror ::selection{background:color-mix(in srgb,var(--accent) 28%,transparent)}
 .doc-page .ProseMirror :is(h1,h2,h3,h4,h5,h6){font-weight:600;margin-bottom:0}
 .doc-page .ProseMirror h1{font-size:26px;line-height:1.25}
@@ -862,9 +863,24 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
       else { if (S.mode === 'rich' || first) { say(''); showRich(); paint(src); setDirty(false); } }
       renderStatus();
     } catch (e) {
-      if (first) { page.textContent = t('Could not read this document: {why}', { why: e.message }); }
+      // NOT WRITTEN YET (lane door-healthy-chat — the naive studies' W4/C11: the agent's summary opened beside the chat at its
+      // WRITE request, the permission still pending ⇒ «Could not read this document: ENOENT», and the window kept the error
+      // after the file existed): a file that is not there yet is WAITED for — said, re-asked every 2 s (any host), opened
+      // the moment it lands. Any other failure is said as before.
+      if (first && isMissing(e)) { S.waiting = true; page.classList.add('doc-waiting'); page.textContent = t('Waiting for the file… it opens here as soon as it is written.'); armWait(); }
+      else if (first) { page.textContent = t('Could not read this document: {why}', { why: e.message }); }
       else say(t('Could not read this document: {why}', { why: e.message }));
     } finally { S.busy = false; }
+  }
+  /** ENOENT and its words, as the file routes answer a missing path */
+  function isMissing(e) { return /ENOENT|no such file|not found|does not exist/i.test(String((e && e.message) || '')); }
+  let waitTimer = 0;
+  function armWait() { if (!waitTimer) waitTimer = setInterval(() => { check(); }, POLL_MS); }
+  /** the file landed: the wait ends and the document opens as a first load */
+  async function endWait() {
+    S.waiting = false; clearInterval(waitTimer); waitTimer = 0;
+    page.classList.remove('doc-waiting'); page.textContent = '';
+    await load({ first: true });
   }
 
   async function toggleRaw() {
@@ -907,6 +923,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
 
   // ── live: the 2 s watch + the relay + the conflict bar ──
   async function check() {
+    if (S.waiting) { if (!S.busy && await info()) await endWait(); return; } // lane door-healthy-chat: waiting for the file to be written
     if (document.hidden || S.busy || S.mode !== 'rich' || !S.base) return;
     const disk = await info();
     const v = M.conflictVerdict({ disk, base: S.base, dirty: S.dirty, kept: S.kept });
@@ -918,7 +935,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   const timer = host ? 0 : setInterval(check, POLL_MS);
   window.addEventListener('focus', check, { signal });
   onFileChanged((d) => { if (sameFile(d, { host: host || null, path })) check(); }, { signal });
-  signal.addEventListener('abort', () => { clearInterval(timer); clearTimeout(selTimer); offer.dismiss(); linkBar.drop(); ro?.disconnect(); S.ed?.destroy(); });
+  signal.addEventListener('abort', () => { clearInterval(timer); clearInterval(waitTimer); clearTimeout(selTimer); offer.dismiss(); linkBar.drop(); ro?.disconnect(); S.ed?.destroy(); });
 
   // ── comments ──
   pane.addEventListener('scroll', () => offer.dismiss(), { signal, passive: true }); // a fixed popover never follows the text

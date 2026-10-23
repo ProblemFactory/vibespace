@@ -4,8 +4,11 @@
 //   · LOCKED (every start) ⇒ the unlock modal right after the page loads behind its sign-in — a phone gets the same modal;
 //     「稍后」 leaves a lock chip in the taskbar (the door back) and every feature that needs a key says
 //     「保险库已锁定——先解锁」 (key-file-words.js);
-//   · NOT SET UP ⇒ the setup modal at every load once the welcome tour is done (`maybeNagVault`, from the tour's end and
-//     from app.js's onboarding check) — 「稍后」 snoozes it for THIS tab only;
+//   · NOT SET UP ⇒ the setup modal ONLY once a secret is stored (lane door-day-one-landing — the naive-user studies: it met
+//     seven testers at their first chat and again at every sign-in, before anything was stored): the hub's facts say
+//     `secretWaiting` (a store's first key, a device's link token, a store the vault refused) and PURE src/day-one.js
+//     vaultSetupAsk decides — at a load (`maybeNagVault`, from the tour's end and app.js's onboarding check) and at the
+//     broadcast that turns it true (the store itself asks at once); 「稍后」 snoozes it for 3 days on this device;
 //   · the Vault WINDOW's header (src/lib/vault-window.js; ⚙ System ▸ Vault…, the ONE row — lane vault-one-door) draws the
 //     state and its doors: set up / unlock / lock now / change the second password / the idle lock (default never). This
 //     module keeps the modals those doors open and the requests behind them (`lockNow`, `setIdleHours`, `onVaultFacts`).
@@ -21,6 +24,7 @@ import { enterSubmits } from './chat-enter-keys.js';
 import { replayOpenSpec } from './window-types.js'; // the door (vs-vault-door) opens the Vault window while unlocked (src/lib/vault-window.js registers it)
 import { vaultLoudState, LATER_KEY } from '../vault-loud.js'; // lane vault-locked-loud: THE table — the dialog, the ⚙ mark, the item
 import { slotBeside } from './customize-mode.js'; // lane vault-chip-zone-errors: the chip sits beside For-you, in whichever zone the chrome put it
+import { vaultSetupAsk, vaultLaterUntil } from '../day-one.js'; // lane door-day-one-landing: the setup ask only once a secret is stored
 
 const MIN = 8;
 let facts = null;
@@ -255,9 +259,11 @@ export function unlockFirst(open) {
   open();
 }
 
-/** THE SETUP MODAL — the second password, twice, with the plain warning. `nag` = the load-time ask (「稍后」 snoozes this tab). */
+/** THE SETUP MODAL — the second password, twice, with the plain warning. `nag` = the ask a stored secret raised (「稍后」 snoozes
+ *  it for 3 days on this device — localStorage `vs-vault-later`, the epoch ms the chrome suites' scratch hubs preset too). */
 export function showSetup({ nag = false } = {}) {
   const { dialog, body, close } = createModalShell({ id: 'vault-setup-dialog', title: t('Set a second password'), dialogClass: 'vault-dialog-box', minWidth: 'min(460px, 92vw)', closeOnBackdrop: false });
+  if (nag) body.appendChild(el('p', 'vault-text vault-why', t('A credential was just stored here — a second password keeps it sealed.')));
   body.appendChild(el('p', 'vault-text', t('Every credential VibeSpace stores is sealed in a vault that only this second password opens. After every restart, the first sign-in asks for it; until then nothing stored can be read.')));
   body.appendChild(el('p', 'vault-warn', t('There is no recovery: forget it and the stored credentials are gone — you would connect every account again. An export of the credentials is not part of this version.')));
   const a = pwInput('vault-setup-pw', t('Second password'), 'new-password');
@@ -265,7 +271,7 @@ export function showSetup({ nag = false } = {}) {
   const err = el('div', 'vault-err'); err.setAttribute('role', 'alert');
   body.append(a, b, err);
   const later = el('button', 'btn-cancel vault-later', t('Later'));
-  later.onclick = () => { if (nag) { try { sessionStorage.setItem('vs-vault-later', '1'); } catch { } } close(); };
+  later.onclick = () => { if (nag) { try { localStorage.setItem('vs-vault-later', String(vaultLaterUntil(Date.now()))); } catch { } } close(); };
   const go = el('button', 'btn-create vault-setup-go', t('Set'));
   const submit = async () => {
     err.textContent = '';
@@ -308,13 +314,15 @@ export function showChange() {
   setTimeout(() => o.focus(), 0);
 }
 
-/** The load-time ask while NOT SET UP — after the welcome tour (setup-flows.js) or straight away when there is none
- *  (app.js `_maybeShowOnboarding`). Snoozed for this tab by 「稍后」, or by `vs-vault-later` (an epoch ms in localStorage:
- *  the chrome suites' scratch hubs — scripts/scratch.mjs ONBOARDED_SOURCE). Never shown while the vault is set up. */
+/** The setup ask while NOT SET UP — at a load (after the welcome tour, or straight away when there is none: app.js
+ *  `_maybeShowOnboarding`) and at the broadcast that says a secret was just stored (onVaultState). PURE src/day-one.js
+ *  vaultSetupAsk decides: only once a secret waits (`secretWaiting`), never on day one; snoozed by 「稍后」 or by
+ *  `vs-vault-later` (an epoch ms in localStorage — the chrome suites' scratch hubs preset it: scripts/scratch.mjs). */
 export async function maybeNagVault() {
   if (!facts) { const f = await fetchJson('/api/vault/state'); if (f && f.state) applyVaultFacts(f); }
-  if (!facts || facts.state !== 'not_set_up') return;
-  try { if (sessionStorage.getItem('vs-vault-later') || Number(localStorage.getItem('vs-vault-later') || 0) > Date.now()) return; } catch { }
+  let snoozedUntil = 0;
+  try { snoozedUntil = Number(localStorage.getItem('vs-vault-later') || 0); } catch { }
+  if (!vaultSetupAsk({ facts, snoozedUntil, now: Date.now() })) return;
   if (document.getElementById('vault-setup-dialog')) return;
   showSetup({ nag: true });
 }
@@ -326,7 +334,10 @@ export async function maybeNagVault() {
  *  (applyVaultFacts); the dialog stays closed, and a 「稍后」 within one boot survives every later lock act. */
 function onVaultState(f, on = 'broadcast') {
   const seen = facts ? facts.startedAt : undefined;
+  const wasWaiting = !!(facts && facts.secretWaiting);
   applyVaultFacts(f);
+  // lane door-day-one-landing: the broadcast that says the FIRST secret was just stored (no vault yet) — the setup ask's moment
+  if (on === 'broadcast' && !wasWaiting && f && f.state === 'not_set_up' && f.secretWaiting) maybeNagVault();
   // lane vault-locked-loud: THE table decides — a load / reconnect asks unless this tab set THIS lock aside; a broadcast asks
   // only for a new boot (the relock-door rule above)
   if (vaultLoudState({ facts: f, dismissed: dismissedLock(), on, seen }).dialog) showUnlock();

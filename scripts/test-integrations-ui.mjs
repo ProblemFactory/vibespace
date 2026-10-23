@@ -81,6 +81,20 @@
 //          refusal) is inside the viewport and PAINTED — not one flat colour,
 //          ink where it carries text (the mockups' check.py rule)
 //      and nothing the page ever opened pointed at a vendor host.
+//   ⑫ (lane oauth-relay-road, the owner 2026-10-22: one registered redirect per app) ①–⑪ run on an instance whose relay
+//      pages are BLANK (the loopback / the route as before); ⑫ reboots with the relay pages at their DEFAULT and a fleet
+//      relay (VIBESPACE_OAUTH_RELAY_URL): a custom Lark app's setup lists the relay pages to register once (no per-instance
+//      callback row); Connect Google from a private address names the relay page as redirect_uri; the fold says the road
+//      and why and names the ONE address an admin registers; the relay page (docs/slack-relay/relay.js as shipped, the admin
+//      copy's data-allow) sends the stub's code to THIS instance's landing route; the dialog says connected; Connect makes it
+//      ADDENDUM 1 (the owner 2026-10-22: the public page is never a company app's): ⑪'s pod — the Google company preset names
+//      no relay page — says «no relay page yet» in its setup and its fold; ⑫'s preset shows ONLY its own page (the fleet's
+//      here), never the public one; a custom app's public-page row reads «you may register if … no https address»
+//   ⑪ (lane pod-oauth-callback, study 2 B2) the server rebooted AS A POD (VIBESPACE_PUBLIC_URL + a company Lark preset
+//      naming its brand): the chat's door opens Connect on Lark with the company app AND brand lark (CONTROL: a preset
+//      naming no brand ⇒ feishu, the testers' form); Connect Google sends the browser back to the instance's own route;
+//      the paste-back is LAST and FOLDED (its box not shown); unfolded: why, the exact address an admin adds, the other
+//      road — which starts the same sign-in the copy-the-address way (an ephemeral loopback) with the loopback's words.
 //
 // Everything is per-pid (scripts/scratch.mjs); the server gets a NAMED
 // scratch HOME. Run: node scripts/test-integrations-ui.mjs   (SKIPs without chrome)
@@ -149,6 +163,10 @@ const MOUNT_ID = (() => {
   return mm.add({ type: 'gmail', name: 'mail archive', token: '{"access_token":"fake-at","refresh_token":"fake-rt"}', clientId: MOUNT_CID, clientSecret: MOUNT_CSEC, email: MOUNT_EMAIL });
 })();
 const MOUNT_OPTION = `From storage: mail archive (custom client ${MOUNT_CID.slice(0, 12)}…, ${MOUNT_EMAIL})`;
+// lane oauth-relay-road: ①–⑪ run on an instance with NO relay page (Settings → Channels: the Lark / Gmail relay pages
+// blank — the local hub's loopback and the pod's route as they were); ⑫ reboots with the relay pages at their defaults
+const SETTINGS_FILE = path.join(wt, 'data', 'settings.json');
+fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ 'channels.larkRelayUrl': '', 'channels.gmailRelayUrl': '' }));
 
 let srv = null;
 const STUB = path.join(repo, 'scripts/fixtures/channels-vendor-stub.cjs');
@@ -161,6 +179,7 @@ srv = bootServer();
 
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--window-size=375,667', '--disable-background-timer-throttling', '--force-device-scale-factor=1',
+  '--host-resolver-rules=MAP pod-road.example.test 127.0.0.1',   // ⑪: the page on a NAME (a browser that is not on the instance's loopback), served by this scratch server
   `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 
 const cleanup = () => {
@@ -247,10 +266,10 @@ async function newPage() {
   };
   // no consent page is EVER loaded: the page's window.open records the URL and opens nothing
   const NO_POPUPS = "window.__opened = []; window.open = function (u) { window.__opened.push(String(u)); return {}; };";
-  const load = async () => {
+  const load = async (url = `${base}/`) => {
     await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
     await cdp('Page.addScriptToEvaluateOnNewDocument', { source: NO_POPUPS });
-    await cdp('Page.navigate', { url: `${base}/` });
+    await cdp('Page.navigate', { url });
     for (let i = 0; i < 160; i++) { try { if (await evaljs('!!(window.app && window.app.wm)')) return true; } catch {} await sleep(250); }
     return false;
   };
@@ -884,6 +903,138 @@ const p2 = await newPage();
   ok(targets.every((t) => !VENDOR_HOSTS.test(t.url || '')), `no chrome target ever loaded a vendor page (${targets.map((t) => t.url).join(', ').slice(0, 200)}) — the ${opened.length} consent URLs went to the stubbed window.open`);
   const calls = fs.readFileSync(path.join(stubDir, 'calls.ndjson'), 'utf-8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
   ok(calls.length > 0 && calls.some((c) => c.path === '/token') && calls.some((c) => c.host === 'gmail.googleapis.com'), `the vendor stub answered the token exchanges and the mailbox reads (${calls.length} calls)`);
+}
+
+// ── ⑪ lane pod-oauth-callback (study 2 B2 — a pod's Connect dead-ended on the pod's own 127.0.0.1; the form said feishu
+// while the company's app lives on Lark international; nobody walked the paste-the-address box): the scratch server
+// rebooted AS A POD — an https address (VIBESPACE_PUBLIC_URL) + a company Lark preset that names its brand ──
+{
+  console.log('\n⑪ a pod\'s Connect: the brand from the preset, the route as redirect, the paste-back folded last');
+  const POD = 'https://pod-road.example.test';
+  srv.kill('SIGKILL'); await waitDown();
+  srv = bootServer({ VIBESPACE_PUBLIC_URL: POD, VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' } }]) });
+  ok(await waitServer(), 'rebooted as a pod: an https address + a company Lark preset that names its brand (lark)');
+  // the page on a NAME (mapped to this server): the browser is NOT on the instance's loopback, as a person's is on a pod
+  ok(await p1.load(`http://pod-road.example.test:${PORT}/`), 'page 1 reloaded on the pod\'s name (not the loopback)');
+  const DLGC = `document.querySelector('.dialog-body[data-chan-dialog="connect"]')`;
+  const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('#mounts-dialog-overlay')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
+  ok(await openOn('lark'), 'the chat\'s door (app.openChannelConnect) opens Connect an account on Lark');
+  const f = await p1.evaljs(`(() => { const d = ${DLGC}; const sel = (k) => d.querySelector('[data-field="' + k + '"]') || [...d.querySelectorAll('select')].find((s) => s.dataset.key === k); const type = d.querySelector('select'); const brand = [...d.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'feishu') && [...s.options].some((o) => o.value === 'lark') && s.style.display !== 'none'); const client = [...d.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'co')); return { type: type && type.value, brand: brand ? brand.value : null, client: client ? client.value : null }; })()`);
+  ok(f.type === 'lark' && f.client === 'co' && f.brand === 'lark', `the form shows the company app AND its brand: lark, not feishu (${JSON.stringify(f)})`);
+  // CONTROL: the same dialog over a digest whose preset names no brand (the pre-lane wire) says feishu — the check above can go red
+  await p1.evaljs(`(() => { if (!window.__f0) { window.__f0 = window.fetch; window.fetch = async (u, o) => { const r = await window.__f0(u, o); if (!String(u).includes('/api/channels?scope=accounts')) return r; const j = await r.json(); for (const k of j.kinds || []) for (const p of k.presets || []) delete p.facts; return new Response(JSON.stringify(j), { status: 200, headers: { 'Content-Type': 'application/json' } }); }; } return 1; })()`);
+  await openOn('lark');
+  const f0 = await p1.evaljs(`(() => { const d = ${DLGC}; const brand = [...d.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'feishu') && [...s.options].some((o) => o.value === 'lark') && s.style.display !== 'none'); return brand ? brand.value : null; })()`);
+  ok(f0 === 'feishu', `CONTROL: a preset that names no brand leaves the form at feishu (the testers' form) — the brand check can go red (${f0})`);
+  await p1.evaljs(`(() => { if (window.__f0) { window.fetch = window.__f0; delete window.__f0; } return 1; })()`);
+  // Gmail (its loopback is an ephemeral port — the other road binds no machine-wide one): the route, then the fold
+  ok(await openOn('gmail'), 'Connect an account on Gmail');
+  // addendum 1: the company preset names no relay page (and no fleet page here) — its setup says so, and offers no page
+  const bare = await p1.evaljs(`(() => { const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none'; return { notes: [...d.querySelectorAll(':scope > .mounts-note')].filter((e) => vis(e) && /^prn\\d+\\.gmail$/.test(e.dataset.field)).map((e) => e.textContent), links: [...d.querySelectorAll(':scope > .mounts-oauth-link')].filter(vis).map((e) => e.querySelector('input').value) }; })()`);
+  ok(bare.notes.length === 1 && bare.notes[0] === 'This company app has no relay page yet: a sign-in comes back to this VibeSpace’s own address. Your admin can give the app one relay page that serves every VibeSpace.' && !bare.links.some((v) => /github\.io/.test(v)),
+    `addendum 1: a company preset with no relay page says so in its setup — and offers no public page (${JSON.stringify(bare)})`);
+  const before = await p1.evaljs(`(window.__opened || []).length`);
+  await p1.evaljs(`(() => { const b = [...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); b.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
+  const opened1 = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${before}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  const r1 = opened1 ? new URL(opened1).searchParams.get('redirect_uri') : null;
+  ok(r1 === `${POD}/api/channels/oauth/cb/gmail`, `Connect Google from the pod: the sign-in comes back to the instance's own route, never 127.0.0.1 (${r1})`);
+  const FOLD = `[...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none').querySelector('details.mounts-oauth-paste')`;
+  const fold = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { if (${FOLD}) break; await new Promise((r) => setTimeout(r, 100)); } const d = ${FOLD}; if (!d) return null; const kids = [...d.parentElement.children]; return { open: d.open, summary: d.querySelector('summary').textContent, last: kids[kids.length - 1] === d, boxVisible: !!d.querySelector('input') && (typeof d.querySelector('input').checkVisibility === 'function' ? d.querySelector('input').checkVisibility() : d.querySelector('input').getBoundingClientRect().height > 0) }; })()`);
+  ok(fold && fold.open === false && fold.summary === 'The sign-in did not come back here by itself?' && fold.last && fold.boxVisible === false, `the paste-back is LAST and FOLDED under one line that says when it is needed — the box itself is not shown (${JSON.stringify(fold)})`);
+  const inside = await p1.evaljs(`(() => { const d = ${FOLD}; d.open = true; const admin = d.querySelector('.mounts-oauth-admin'); const copy = admin && admin.nextElementSibling && admin.nextElementSibling.querySelector('input'); const other = d.querySelector('.mounts-oauth-other'); return { admin: admin ? admin.textContent : null, value: copy ? copy.value : null, other: other ? other.textContent : null, hint: [...d.querySelectorAll('.mounts-field-hint')].map((x) => x.textContent).join(' | ') }; })()`);
+  ok(inside.admin && /^Google said this address is not allowed\? Add it to the app’s redirect URLs/.test(inside.admin) && inside.value === `${POD}/api/channels/oauth/cb/gmail` && inside.other === 'Sign in the other way: copy the last page’s address back here',
+    `unfolded: why in a person's words, the exact address an admin adds to the app, and the other road (${JSON.stringify(inside).slice(0, 400)})`);
+  const bareHints = await p1.evaljs(`[...${FOLD}.querySelectorAll(':scope > .mounts-field-hint')].map((h) => h.textContent)`);
+  ok(bareHints.some((h) => /^This company app has no relay page yet, so this sign-in comes back to this VibeSpace’s own address \(pod-road\.example\.test\) — the app must list it, or your admin gives the app one relay page that serves every VibeSpace\./.test(h)),
+    `addendum 1: the fold says WHY the route — the company app has no relay page yet (${JSON.stringify(bareHints).slice(0, 300)})`);
+  await p1.probe('a pod\'s Connect Google: the route consent, the folded paste-back opened', `#mounts-dialog-overlay .mounts-oauth-paste`);
+  const before2 = await p1.evaljs(`(window.__opened || []).length`);
+  await p1.evaljs(`(() => { ${FOLD}.querySelector('.mounts-oauth-other').click(); return 1; })()`);
+  const opened2 = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${before2}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  const r2 = opened2 ? new URL(opened2).searchParams.get('redirect_uri') : null;
+  const fold2 = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { const d = ${FOLD}; if (d && !d.querySelector('.mounts-oauth-admin')) return { summary: d.querySelector('summary').textContent, hint: [...d.querySelectorAll('.mounts-field-hint')].map((x) => x.textContent).join(' | ') }; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(r2 || '') && fold2 && fold2.summary === 'The sign-in page ended on an address that would not load?' && /starts with 127\.0\.0\.1/.test(fold2.hint),
+    `the other road: the same sign-in the copy-the-address way (an ephemeral loopback), its fold saying why in a person's words (${r2}, ${JSON.stringify(fold2).slice(0, 300)})`);
+  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay')?.remove(); 1`);
+  // CONTROL: the same page on the instance's own loopback IS a browser on this machine — its Connect keeps the loopback
+  // (the local hub's road, as before) — so the route check above is about where the browser is
+  ok(await p1.load(), 'page 1 back on 127.0.0.1');
+  await openOn('gmail');
+  const before3 = await p1.evaljs(`(window.__opened || []).length`);
+  await p1.evaljs(`(() => { const b = [...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); b.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
+  const opened3 = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${before3}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(opened3 ? new URL(opened3).searchParams.get('redirect_uri') : ''), `CONTROL: a browser on the instance's own loopback keeps the loopback road (a local hub) — the route above is the pod's (${opened3 && new URL(opened3).searchParams.get('redirect_uri')})`);
+  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay')?.remove(); 1`);
+}
+
+// ── ⑫ lane oauth-relay-road (the owner 2026-10-22: «不可能每次都让我手动加 redirect url 的» — one registered redirect per app,
+// never one per pod): the relay pages at their DEFAULT + a FLEET relay; a browser on a private address rides the relay ──
+{
+  console.log('\n⑫ the relay road: the setup rows, the fold, the round trip through the relay page');
+  const ADMIN = 'https://admin.fleet.example.test/relay/', PUBLIC = require(path.join(wt, 'src/consent-road.js')).RELAY_DEFAULT;
+  srv.kill('SIGKILL'); await waitDown();
+  fs.writeFileSync(SETTINGS_FILE, '{}');
+  srv = bootServer({ VIBESPACE_OAUTH_RELAY_URL: ADMIN });
+  ok(await waitServer(), 'rebooted with the relay pages at their defaults and a fleet relay page (VIBESPACE_OAUTH_RELAY_URL)');
+  ok(await p1.load(), 'page 1 on 127.0.0.1 — a private address, which every relay page sends back');
+  const DLGC = `document.querySelector('.dialog-body[data-chan-dialog="connect"]')`;
+  const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('#mounts-dialog-overlay')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
+  ok(await openOn('lark'), 'Connect an account on Lark (no company app here: Custom)');
+  const lk = await p1.evaljs(`(() => {
+    const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none';
+    const rows = [...d.querySelectorAll(':scope > .mounts-oauth-link')].filter(vis);
+    const labelOf = (row) => { let l = row.previousElementSibling; while (l && l.tagName !== 'LABEL') l = l.previousElementSibling; return l ? l.textContent : null; };
+    const last = rows[rows.length - 1]; const hints = [];
+    for (let n = last && last.nextElementSibling; n && n.className === 'mounts-field-hint'; n = n.nextElementSibling) hints.push(n.textContent);
+    return { rows: rows.map((r) => ({ label: labelOf(r), value: r.querySelector('input').value, field: r.dataset.field })), hints };
+  })()`);
+  ok(JSON.stringify(lk.rows.map((r) => r.value)) === JSON.stringify([ADMIN, PUBLIC]) && /^Redirect URL for this fleet’s VibeSpaces/.test(lk.rows[0].label || '') && lk.rows[1].label === 'A public relay page you may register if this VibeSpace has no https address' && !lk.rows.some((r) => /127\.0\.0\.1/.test(r.value)),
+    `a custom Lark app's setup lists the relay pages (the fleet's; the public one — addendum 1: «you may register if this VibeSpace has no https address») — no per-instance callback row (${JSON.stringify(lk.rows)})`);
+  ok(lk.hints[0] === R.rowById('lark').setup.callbackNote && lk.hints.length === 4, `…with the console note and the prerequisites under the last (${JSON.stringify(lk.hints).slice(0, 200)})`);
+  await p1.probe('a custom Lark app\'s relay rows', `#mounts-dialog-overlay .dialog-body > .mounts-oauth-link[data-field="rp1.lark"]`);
+  // a page NO relay sends back (a public http name, no https address here): the setup shows the road it really takes
+  ok(await p1.load(`http://pod-road.example.test:${PORT}/`), 'page 1 reloaded on a public http name (no relay page sends it back)');
+  ok(await openOn('lark'), 'Connect an account on Lark again');
+  const lk2 = await p1.evaljs(`(() => { const d = ${DLGC}; return [...d.querySelectorAll(':scope > .mounts-oauth-link')].filter((e) => e.style.display !== 'none').map((r) => r.querySelector('input').value); })()`);
+  ok(JSON.stringify(lk2) === JSON.stringify([R.rowById('lark').setup.callbackUrl]), `…its custom setup shows the road its sign-in takes (the loopback callback), not relay rows it would never ride (${JSON.stringify(lk2)})`);
+  ok(await p1.load(), 'page 1 back on 127.0.0.1');
+  // Gmail under the drive preset: the relay road
+  ok(await openOn('gmail'), 'Connect an account on Gmail');
+  // addendum 1: the company preset (no page of its own) shows ONLY its relay page — the fleet's — never the public one
+  const pre = await p1.evaljs(`(() => { const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none'; const labelOf = (row) => { let l = row.previousElementSibling; while (l && l.tagName !== 'LABEL') l = l.previousElementSibling; return l ? l.textContent : null; }; return [...d.querySelectorAll(':scope > .mounts-oauth-link')].filter(vis).map((r) => ({ field: r.dataset.field, label: labelOf(r), value: r.querySelector('input').value })); })()`);
+  ok(pre.length === 1 && /^prp\d+\.gmail$/.test(pre[0].field) && pre[0].value === ADMIN && pre[0].label === 'This company app’s redirect URL — its relay page, registered once by your admin' && !pre.some((r) => r.value === PUBLIC),
+    `addendum 1: a company preset's setup shows ONLY its own relay page (the fleet's here) — the public page never (${JSON.stringify(pre)})`);
+  await p1.probe('Connect Google under the company preset: its relay page only', `#mounts-dialog-overlay .dialog-body > .mounts-oauth-link[data-field^="prp"]`);
+  const n0 = (((await api('GET', '/api/channels')).json || {}).adapters || []).filter((a) => a.kind === 'gmail').length;
+  const before = await p1.evaljs(`(window.__opened || []).length`);
+  await p1.evaljs(`(() => { const b = [...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); b.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
+  const opened = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${before}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  const redirect = opened ? new URL(opened).searchParams.get('redirect_uri') : null;
+  ok(redirect === ADMIN, `Connect Google from a private address: redirect_uri = the relay page (the fleet's here — one address for every instance), never 127.0.0.1 or a per-instance route (${redirect})`);
+  const FOLD = `[...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none').querySelector('details.mounts-oauth-paste')`;
+  const fold = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { if (${FOLD}) break; await new Promise((r) => setTimeout(r, 100)); } const d = ${FOLD}; if (!d) return null; d.open = true; const admin = d.querySelector('.mounts-oauth-admin'); return { summary: d.querySelector('summary').textContent, admin: admin && admin.textContent, value: admin && admin.nextElementSibling && admin.nextElementSibling.querySelector('input') && admin.nextElementSibling.querySelector('input').value, hints: [...d.querySelectorAll(':scope > .mounts-field-hint')].map((h) => h.textContent), other: (d.querySelector('.mounts-oauth-other') || {}).textContent || null }; })()`);
+  ok(fold && fold.summary === 'The sign-in did not come back here by itself?' && fold.hints.some((h) => /^This sign-in comes back through the relay page admin\.fleet\.example\.test: one address, registered once on the app, serves every VibeSpace — the page sends your browser back here and keeps nothing\./.test(h)),
+    `the fold says the ROAD and WHY in a person's words (${JSON.stringify(fold && fold.hints).slice(0, 300)})`);
+  ok(fold && /^Google said this address is not allowed\? It is the relay page — add it ONCE to the app’s redirect URLs/.test(fold.admin || '') && fold.value === ADMIN && /^Sign in the other way/.test(fold.other || ''),
+    `a refused sign-in: the fold names the ONE address missing (the relay page) with Copy, and keeps the other road (${JSON.stringify(fold).slice(0, 300)})`);
+  await p1.probe('Connect Google through the relay page: the fold opened', `#mounts-dialog-overlay .mounts-oauth-paste`);
+  // the relay page, as shipped, with the admin copy's data-allow — the vendor sends the browser there with the stub's code
+  const vm = await import('node:vm');
+  const rctx = { URL, URLSearchParams, atob }; rctx.globalThis = rctx; vm.createContext(rctx);
+  vm.runInContext(fs.readFileSync(path.join(repo, 'docs/slack-relay/relay.js'), 'utf8'), rctx);   // the working tree's page (the overlay copies src / public only)
+  const st = new URL(opened).searchParams.get('state');
+  const d = rctx.VibeSpaceRelay.decide(`?code=stub-relay-code-12&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.modify&state=${encodeURIComponent(st)}`, ['fleet.example.test']);
+  ok(d.act === 'redirect' && d.to.startsWith(`${base}/api/channels/oauth/cb/gmail?code=stub-relay-code-12&scope=`), `the relay page sends the browser to THIS instance's landing route with the query verbatim (${JSON.stringify(d).slice(0, 200)})`);
+  const land = d.act === 'redirect' ? await fetch(d.to) : null;
+  const page = land ? await land.text() : '';
+  ok(land && land.status === 200 && /data-landing="ok"/.test(page), `the landing page says connected (${land && land.status})`);
+  const signed = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const b = [...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const s = b && b.querySelector('.mounts-field-hint').textContent; if (/Connected/.test(s || '')) return s; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  ok(/✓ Connected as \S+@example\.test — finish with the “Connect” button below\./.test(signed || ''), `the dialog's poll reads the sign-in that landed through the relay (${JSON.stringify(signed)})`);
+  await p1.evaljs(`${DLGC}.querySelector('.dialog-actions .btn-create').click(); 1`);
+  let n1 = n0;
+  for (let i = 0; i < 60 && n1 === n0; i++) { n1 = (((await api('GET', '/api/channels')).json || {}).adapters || []).filter((a) => a.kind === 'gmail').length; if (n1 === n0) await sleep(100); }
+  ok(n1 === n0 + 1, `Connect makes the account — no per-instance address was registered anywhere (${n0} → ${n1})`);
+  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay')?.remove(); 1`);
 }
 
 p1.close(); p2.close();

@@ -54,6 +54,11 @@
 //   reuseValues: chart.Values = oldVals) — so an old release upgraded with it
 //   alone renders NO ephemeral-storage; with the README's two --set (read out
 //   of deploy/README.md, equal to the values.yaml defaults) it renders both.
+// L THE FLEET'S SIGN-IN RELAY PAGE (lane oauth-relay-road — the owner 2026-10-22: one registered redirect per vendor
+//   app, never one per pod): oauthRelayUrl empty (the default) ⇒ no VIBESPACE_OAUTH_RELAY_URL and the Deployment
+//   byte-identical to a render with the key absent (a release from an older values file); set ⇒ the env, its value
+//   exactly, right after VIBESPACE_PUBLIC_URL, and nothing else moves. CONTROL: a template that renders the env
+//   whatever the value (an empty relay on every pod) is RED.
 // CONTROLS (chart copies in scratch): a subPath mount, a source without
 //   optional, an env rendered beside the volume — each turns its assert red;
 //   the app system's env without the forced caps, a second SYS_ADMIN, the env
@@ -379,7 +384,30 @@ const preJ = chartCopy('noeph-values', (s) => s.replace(', ephemeral-storage: "2
   ok(!ephVerdict(render(CHART, C)).length, '(and a release replayed WITHOUT --reuse-values — its own values over this chart — gets the defaults by itself)');
 }
 
+console.log('L the fleet\'s sign-in relay page (oauthRelayUrl → VIBESPACE_OAUTH_RELAY_URL)');
+const RELAY = 'https://admin.vibe.example.com/relay/';
+const relayVerdict = (out, want) => {
+  const dep = depOf(out), bad = [];
+  const env = envNames(dep);
+  const has = env.includes('VIBESPACE_OAUTH_RELAY_URL');
+  if (!want && has) bad.push('VIBESPACE_OAUTH_RELAY_URL rendered with no relay set');
+  if (want && !new RegExp(`- name: VIBESPACE_PUBLIC_URL\\n\\s+value: "[^"]+"\\n\\s+# [^\\n]*\\n(\\s+# [^\\n]*\\n)*\\s+- name: VIBESPACE_OAUTH_RELAY_URL\\n\\s+value: ${JSON.stringify(want).replace(/[.?/]/g, '\\$&')}\\n`).test(dep)) bad.push('the env (its exact value, after VIBESPACE_PUBLIC_URL) is missing');
+  if (env.filter((e) => e === 'VIBESPACE_OAUTH_RELAY_URL').length > 1) bad.push('the env twice');
+  return bad;
+};
+{
+  const def = render(CHART, C), withKey = render(CHART, { ...C, oauthRelayUrl: '' }), on = render(CHART, { ...C, oauthRelayUrl: RELAY });
+  ok(!relayVerdict(def, null).length && depOf(def) === depOf(withKey), `the default (and an explicit empty value) renders no VIBESPACE_OAUTH_RELAY_URL — the Deployment byte-identical either way${say(relayVerdict(def, null))}`);
+  ok(!relayVerdict(on, RELAY).length, `--set oauthRelayUrl=${RELAY} ⇒ the env with exactly that value, after VIBESPACE_PUBLIC_URL${say(relayVerdict(on, RELAY))}`);
+  const strip = (d) => d.replace(/\n\s+# The fleet's sign-in relay page[\s\S]*?- name: VIBESPACE_OAUTH_RELAY_URL\n\s+value: "[^"]*"/, '');
+  ok(strip(depOf(on)) === depOf(def), 'nothing else in the Deployment moves (the env block is the WHOLE diff)');
+  const onA = render(CHART, { ...A, oauthRelayUrl: RELAY });
+  ok(!relayVerdict(onA, RELAY).length && !volumeVerdict(onA, { release: REL_OV }).length, 'beside the presets volume (a release with the blocks): the env and the volume form both hold');
+}
+
 console.log('CONTROLS (chart copies)');
+const relayAlways = chartCopy('relay-always', (s) => s.replace('{{- with .Values.oauthRelayUrl }}', '{{- with (list .Values.oauthRelayUrl) }}').replace('              value: {{ . | quote }}\n            {{- end }}\n            {{- if and .Values.frp', '              value: {{ index . 0 | quote }}\n            {{- end }}\n            {{- if and .Values.frp'));
+ok(relayVerdict(render(relayAlways, C), null).length > 0, 'CONTROL: a template that renders VIBESPACE_OAUTH_RELAY_URL whatever the value (an empty relay on every pod) is RED');
 const sub = chartCopy('subpath', (s) => s.replace('              mountPath: {{ $presets.mountPath | default "/etc/vibespace/presets" }}\n              readOnly: true', '              mountPath: {{ $presets.mountPath | default "/etc/vibespace/presets" }}/integrations.json\n              subPath: integrations.json\n              readOnly: true'));
 ok(volumeVerdict(render(sub, A), { release: REL_OV }).some((b) => /subPath/.test(b)), 'CONTROL: a subPath mount (the form that never updates) is RED');
 const req = chartCopy('required', (s) => s.replace("                  name: {{ $presets.clusterSecret | default \"vibespace-cluster-presets\" }}\n                  optional: true", "                  name: {{ $presets.clusterSecret | default \"vibespace-cluster-presets\" }}"));

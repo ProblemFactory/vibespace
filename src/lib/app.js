@@ -53,6 +53,7 @@ import { openSearchWindow } from './search-window.js'; // lane global-search: Se
 import { openChannelWindow } from './channel-window.js';
 import { focusChannelsPanel, openSearchResults } from './channels-panel.js';
 import { openChannelOutbox as openChannelOutboxFn } from './channel-outbox.js';
+import { showConnectAccountDialog } from './channel-account-dialogs.js';   // lane pod-oauth-callback: the chat's «Connect <type>» row
 import { openIntegrationsWindow } from './integrations-window.js';
 import './feedback-sheet.js'; // lane agent-feedback: ⚙ System ▸ Agent feedback… (the module registers its gear row)
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
@@ -78,6 +79,8 @@ import { sessionGivenName } from '../session-name.js'; // lane session-title-rec
 import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-everywhere: every microphone follows the voice plugin (absent when off); lane voice-follows-focus: dictation follows the focus
 import { enterSubmits } from './chat-enter-keys.js';
 import { initVault, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
+import { folderChips } from '../day-one.js'; // lane door-day-one-landing: the New Session dialog's folder chips, in order
+import { loadHomeFolders, recentLocalCwds, paintFolderChips } from './folder-chips.js'; // lane door-day-one-landing: the home's folders + the painter
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -1847,33 +1850,19 @@ class App {
     return out;
   }
 
-  // Fill the recent-cwd chip row for the selected host (or local). The
-  // selected Task Group's folders are PINNED first as marked chips.
+  // Fill the folder chip row for the selected host (or local). lane door-day-one-landing (the naive-user studies: the field
+  // showed a grey /home/<user>, a later dialog pre-filled the PREVIOUS area's folder, the folder with the person's files was
+  // never offered): the selected Task Group's folders pinned first, then — on this machine — the home's folders WITH files
+  // («work (23 files)»), «the last one you used», the rest (PURE src/day-one.js folderChips; src/lib/folder-chips.js
+  // paints). A chip fills the field; nothing pre-fills it; typing stays possible.
   _fillCwdRecent(hostId) {
     const recentEl = document.getElementById('cwd-recent');
     if (!recentEl) return;
     const taskChips = this._taskCwdSuggestions(hostId);
-    const paint = (cwds) => {
-      recentEl.innerHTML = '';
-      const mkChip = (cwd, { cls, tip, color } = {}) => {
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.className = 'cwd-recent-chip' + (cls ? ' ' + cls : '');
-        const short = cwd.replace(/^\/home\/[^/]+/, '~');
-        if (cls) {
-          if (color) { const dot = document.createElement('span'); dot.className = 'tvg-dot'; dot.style.setProperty('--g-color', color); chip.appendChild(dot); }
-          const p = document.createElement('span'); p.className = 'cwd-chip-path'; p.textContent = short; chip.appendChild(p);
-        } else {
-          chip.textContent = short;
-        }
-        chip.title = tip ? `${tip}\n${cwd}` : cwd;
-        chip.onclick = () => { document.getElementById('input-cwd').value = cwd; };
-        recentEl.appendChild(chip);
-      };
-      for (const s of taskChips) mkChip(s.path, { cls: 'cwd-task-chip', tip: s.tip, color: s.color });
-      const pinned = new Set(taskChips.map((s) => s.path));
-      for (const cwd of cwds.filter((c) => !pinned.has(c)).slice(0, 8)) mkChip(cwd);
-    };
+    const cwdInput = document.getElementById('input-cwd');
+    const paint = (folders, cwds) => paintFolderChips(recentEl, folderChips({ folders, recent: cwds, task: taskChips }), {
+      onPick: (c) => { if (cwdInput) cwdInput.value = c.path; },
+    });
     const stillThisHost = () => (document.getElementById('input-host')?.value || '') === (hostId || '');
     if (hostId) {
       recentEl.innerHTML = `<span class="cwd-recent-loading">${t('loading host paths…')}</span>`;
@@ -1882,7 +1871,6 @@ class App {
       // /home/<user> which doesn't exist there). Reset to a NEUTRAL hint
       // BEFORE the async fetch so an offline/paired device whose /api/home
       // 400s never leaves the stale local home showing (review).
-      const cwdInput = document.getElementById('input-cwd');
       if (cwdInput) cwdInput.placeholder = t('directory on this machine…');
       if (cwdInput) fetchJson(`/api/home?host=${encodeURIComponent(hostId)}`).then(d => {
         if (d?.home && stillThisHost()) cwdInput.placeholder = d.home;
@@ -1893,19 +1881,14 @@ class App {
         // (review: a clicked chip would set a cross-host cwd).
         if (!stillThisHost()) return;
         // strip the "host: " display prefix discovery may add
-        paint((d?.cwds || []).map(c => c.includes(': ') ? c.split(': ').pop() : c));
+        paint([], (d?.cwds || []).map(c => c.includes(': ') ? c.split(': ').pop() : c));
       }).catch(() => { if (stillThisHost()) recentEl.innerHTML = ''; });
     } else {
-      const cwdInput = document.getElementById('input-cwd');
-      if (cwdInput && this._localHome) cwdInput.placeholder = this._localHome;
-      const seen = new Set();
-      const local = [];
-      for (const s of [...(this.sidebar?._allSessions || [])].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))) {
-        if (!s.cwd || s.host || seen.has(s.cwd)) continue; // skip remote sessions' host-prefixed cwds
-        seen.add(s.cwd); local.push(s.cwd);
-        if (local.length >= 8) break;
-      }
-      paint(local);
+      // words, not a path (the grey /home/<user> read as a value to copy); an empty field still starts in the home folder
+      if (cwdInput) cwdInput.placeholder = t('Type a folder, or pick one below');
+      const local = recentLocalCwds(this);
+      paint([], local);
+      loadHomeFolders().then((folders) => { if (stillThisHost() && folders.length) paint(folders, local); });
     }
   }
 
@@ -2115,11 +2098,13 @@ class App {
     // lane L (the naive-user study, S6-01 / S12-02: the previous session's name
     // stayed in the field, so typing appended — "S11 chromeS12 first…"). A name
     // names ONE session: the field starts empty on every open. The other rows
-    // keep their designed prefills (the cwd the caller passed or the last one
-    // typed, the Task Group, the backend defaults applyBackend applied above).
+    // keep their designed prefills (the cwd the caller passed, the Task Group,
+    // the backend defaults applyBackend applied above).
     { const nameInput = document.getElementById('input-session-name'); if (nameInput) nameInput.value = ''; }
     document.getElementById('input-mode').value = this.settings.get('session.defaultMode') ?? 'chat';
-    if (cwd) document.getElementById('input-cwd').value = cwd;
+    // lane door-day-one-landing: the folder is the caller's (a folder's «+», a Task Group) or EMPTY — never the one the last
+    // dialog held (it belonged to another area: testers retyped it 5/5 and 3/3 times); the chips offer the rest
+    document.getElementById('input-cwd').value = cwd || '';
     this._fillCwdRecent(hostId || '');
     document.getElementById('input-cwd').focus();
   }
@@ -2301,6 +2286,13 @@ class App {
   openChannel(adapterId, convId, opts) { return openChannelWindow(this, adapterId, convId, opts || {}); }
   /** .212: an agent's channel search AS RESULTS — the search dialog pre-filled, scoped to one conversation or grouped. */
   openChannelSearch(opts) { return openSearchResults(this, opts || {}); }
+  /** lane pod-oauth-callback (study 1 L1 / study 2 M2): the Connect an account dialog OPEN ON ONE TYPE — the chat's
+   *  «Connect <type>» row (an agent's `vibespace-channels connect <kind>`); the types are the panel's own (`kinds`). */
+  async openChannelConnect(kind) {
+    const d = await fetchJson('/api/channels?scope=accounts');
+    if (!d || d.error) { showToast(t('Channels are not available on this instance'), { type: 'error' }); return null; }
+    return showConnectAccountDialog(this, d.kinds || [], { kind: typeof kind === 'string' ? kind : null });
+  }
   /** THE For-you window (design-user-inbox-reply §9) — a singleton kind; `{itemId, sessionKey, syncId}`:
    *  select that item / scope to that session; an open window is revealed and re-pointed (a replay never re-points). */
   openInbox(opts) { return openInboxWindow(this, opts || {}); }
@@ -2660,6 +2652,7 @@ class App {
       // Mobile has no window title bars → no badge; the chat status bar hosts
       // the identity chip there instead (same click-to-switch).
       if (this.isMobile) session.setBillingIdentity?.(match.auth || null, (el) => this.showBillingSwitcher(winId, el));
+      session.setCostBasis?.(match.auth || null); // lane door-healthy-chat: the cost chip's «· included in your subscription»
       if (win._openSpec) {
         // NEVER write the webui server id into backendSessionId: a session
         // whose CLI hasn't reported its real id yet (remote spawns stay in
@@ -2694,7 +2687,10 @@ class App {
       if (win._openSpec?.action === 'viewSession' || win._openSpec?.action === 'attachSession') {
         // THE name ladder's given rungs (src/session-name.js: the rename › a given name › the CLI's own title — lane
         // session-title-record), then the window's own fallbacks — a title the CLI picks mid-session renames the window live
-        const displayName = sessionGivenName(match, this.sidebar.getCustomName?.(match)) || match.webuiName || match.name || win._openSpec?.name || win.title || t('Session');
+        // lane door-day-one-landing (the naive-user studies: the first chat stayed «Session 3»): after the given rungs, the FIRST
+        // MESSAGE (discovery's `name` — the card's rung ④) names the window before the server's generated «Session N»; a row
+        // with no transcript yet carries name === webuiName, so the order only matters once the first message exists
+        const displayName = sessionGivenName(match, this.sidebar.getCustomName?.(match)) || match.name || match.webuiName || win._openSpec?.name || win.title || t('Session');
         const cwd = match.cwd || win._openSpec?.cwd || '';
         this.wm.setTitle(winId, cwd ? `${displayName} — ${cwd}` : displayName);
       }

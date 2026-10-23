@@ -119,7 +119,7 @@ globalThis.document = { createElement: (t) => new FakeEl(t) };
   ok(cold.every((k) => v.after[k].innerSets === 1), `① the cold chips (${cold.join('/')}) were written once and never again (${cold.map((k) => v.after[k].innerSets).join('/')})`);
   // tick 20: 21000 + 2500 + 20 = 23520 of 200000 → 12 %, "24k"
   ok(/>12%</.test(v.after.ctx.innerHTML) && /\[24k\/200k\]/.test(v.after.ctx.innerHTML), `① …and the ctx chip shows the LAST reading (${v.after.ctx.textContent})`);
-  ok(v.after.cost.innerHTML === '$2.50', `① …and the cost chip shows the accumulated cost (${v.after.cost.innerHTML})`);
+  ok(v.after.cost.innerHTML === 'This chat ≈ $2.50', `① …and the cost chip shows the accumulated cost IN WORDS (lane door-healthy-chat — the studies' W3: a bare «$0.47» read as a bill) (${v.after.cost.innerHTML})`);
   // a render with NOTHING changed writes nothing at all
   const w = counters.innerHTML; bar.render();
   ok(counters.innerHTML === w, `① a render with no change writes no innerHTML at all (${counters.innerHTML - w} writes)`);
@@ -180,7 +180,7 @@ console.log('— ③ attributes land as raw strings; classless chips carry no cl
   ok(byKey(bar).held.getAttribute('title') === nasty, `③ a title with quotes / & / <> is the raw string (${JSON.stringify(byKey(bar).held.getAttribute('title'))})`);
   ok(byKey(bar).held.innerHTML.includes('a &quot;quoted&quot; &amp; &lt;tagged&gt; reason') && !byKey(bar).held.innerHTML.includes('<tagged>'), '③ …while the same text inside the chip is escaped markup (escHtml unchanged)');
   const els = byKey(bar);
-  ok(!els.cache.hasAttribute('class') && !els.cost.hasAttribute('class') && els['cache-k'].className === 'chat-status-dim', '③ the cache / cost chips carry NO class attribute (as before); the [k] twin is chat-status-dim');
+  ok(!els.cache.hasAttribute('class') && els.cost.className === 'chat-status-cost' && els['cache-k'].className === 'chat-status-dim', '③ the cache chip carries NO class attribute (as before), the cost chip `chat-status-cost` (lane door-healthy-chat: its words + its title); the [k] twin is chat-status-dim');
   // 500 of 1500 cached = 33 % → the orange tier (a color-mix of the two theme vars), never a literal colour
   ok(/^color:color-mix\(in srgb, var\(--red, #e55\) 50%, var\(--yellow, #e5c07b\)\)$/.test(els.cache.getAttribute('style')) && /^color:var\(--green, #3fb950\)$/.test(els.cost.getAttribute('style')), `③ their colour rides the style attribute, theme vars only (${els.cache.getAttribute('style')} / ${els.cost.getAttribute('style')})`);
   ok(/^<span class="chat-status-ctx-pie" style="background:conic-gradient\(.*\)"><\/span> <span style="color:.*">\d+%<\/span><span class="chat-status-dim">\[\d+k\/\d+k\]<\/span>$/.test(els.ctx.innerHTML), '③ the ctx chip keeps its pie + percent + [used/total] markup shape');
@@ -225,6 +225,30 @@ console.log('— ⑤ wiring');
   ok((src.match(/\n\s*(?:if \([^)]*\) )?chip\('/g) || []).length >= 22, `⑤ every chip site goes through chip(key, …) (${(src.match(/\n\s*(?:if \([^)]*\) )?chip\('/g) || []).length} sites)`);
   ok(/this\._element\.addEventListener\('click', \(e\) => \{\s*this\._onClick\(e\);/.test(src) && !/\bel\.onclick\s*=|\bel\.addEventListener\(/.test(src.slice(src.indexOf('_reconcile(chips) {'), src.indexOf('// ── Private ──'))), '⑤ click handling stays the ONE delegated listener on the bar — _reconcile binds nothing per chip');
   ok(/\{ name: 'test-status-bar-chips', tier: 'fast'(?:,| \})/.test(read('scripts/ci.mjs')), '⑤ ci.mjs carries test-status-bar-chips in the fast tier');
+}
+
+// ⑥ lane door-healthy-chat (2.369.344): the cost says what it is and whether it is billed; the kinds of record the CLI added
+// are ONE quiet chip, LAST (it never moves another chip under the pointer — W6)
+{
+  const BW = await import(pathToFileURL(path.join(repo, 'src/lib/chat-bar-words.js')).href);
+  const fmt = (k, p) => String(k).replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : ''));
+  ok(BW.costBasisOf({ source: 'subscription' }) === 'subscription' && BW.costBasisOf({ source: 'codex-subscription' }) === 'subscription' && ['api-key', 'api-console', 'api-other'].every((x) => BW.costBasisOf({ source: x }) === 'api') && BW.costBasisOf({ source: 'pooled' }) === null && BW.costBasisOf({ source: 'unknown' }) === null && BW.costBasisOf(null) === null, '⑥ costBasisOf: a plan login = subscription, an API key = api, a pool / unknown / none = no claim');
+  const sub = BW.costChipWords(0.24, 'subscription', fmt), api = BW.costChipWords(4.24, 'api', fmt), none = BW.costChipWords(0.47, null, fmt);
+  ok(sub.text === 'This chat ≈ $0.24 · included in your subscription' && sub.tone === 'quiet' && /nothing is billed per use/.test(sub.title) && api.text === 'This chat ≈ $4.24 · billed per use (API key)' && api.tone === 'tier' && none.text === 'This chat ≈ $0.47' && none.tone === 'tier' && /at API prices/.test(none.title), '⑥ costChipWords: the figure with its words — «This chat ≈ $0.24 · included in your subscription» (quiet), «… · billed per use (API key)», or the figure alone with what it is', { sub, api, none });
+  const zh = (await import(pathToFileURL(path.join(repo, 'src/lib/i18n-zh.js')).href)).default;
+  ok(zh['This chat ≈ {usd} · included in your subscription'] === '本次对话约 {usd} · 按你的订阅不另计费', '⑥ …in Chinese, the brief\'s words: «本次对话约 $0.24 · 按你的订阅不另计费»');
+  const bar = mkBar(ChatStatusBar);
+  bar.applyStatus(firstStatus);
+  bar.setCostBasis({ source: 'subscription' });
+  bar.setAddedKinds([{ kind: 'record', name: 'api-request-blob', cli: '2.1.309' }]);
+  const order = keys(bar), els = byKey(bar);
+  ok(order[order.length - 1] === 'kinds' && order.join(',').startsWith('search,model,effort,goal,style,design,perm,ctx,cache,cache-k,unreported,cost'), `⑥ the kinds chip is LAST — every other chip keeps its place (${order.join(',')})`);
+  ok(els.kinds.textContent === '1 record kind this version added — Diagnostics' && els.kinds.className === 'chat-status-kinds chat-status-clickable' && !els.kinds.getAttribute('style') && /api-request-blob: a new record \(2\.1\.309\)/.test(els.kinds.getAttribute('title')), '⑥ «1 record kind this version added — Diagnostics», quiet (no inline colour — the theme\'s dim), each kind in its title');
+  ok(els.cost.innerHTML === 'This chat ≈ $0.50 · included in your subscription' && els.cost.getAttribute('style') === 'color:var(--text-dim)', `⑥ a subscription's cost is quiet (dim), never the tier colours (${els.cost.getAttribute('style')})`);
+  const n = counters.innerHTML; bar.setAddedKinds([{ kind: 'record', name: 'api-request-blob', cli: '2.1.309' }]); bar.setCostBasis({ source: 'subscription' });
+  ok(counters.innerHTML === n, '⑥ the same kinds / the same basis again write nothing');
+  bar.setAddedKinds([]);
+  ok(!keys(bar).includes('kinds'), '⑥ no kinds ⇒ no chip');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -165,6 +165,10 @@ console.log('§2 synthetic drift — a known record that GREW a field is ONE car
   c = driftCards(mm);
   row = ledgerOf(SID1)[0];
   ok('a THIRD with +{qux} MERGES into the same card (fields now foo,bar,qux) through an EDIT op — never a new card; the row grows the same way (count 3)', c.length === 1 && JSON.stringify(c[0].content[0].fields) === '["foo","bar","qux"]' && ops.slice(nEdits).some((o) => o.op === 'edit' && o.id === c[0].id && o.fields.content[0].fields.length === 3) && ledgerOf(SID1).length === 1 && JSON.stringify(row.fields) === '["foo","bar","qux"]' && row.count === 3, { cards: c.map((m) => m.content[0].fields), row });
+  // THE CARD'S NEW HOME (lane door-healthy-chat, 2.369.344 — the naive studies' W1/C1): the notice still exists (the census above) but the
+  // chat no longer draws it; the shape is ONE row of the conversation's added kinds — the status bar's quiet chip — said by a meta op
+  const kindsOps = ops.filter((o) => o.op === 'meta' && o.subtype === 'record-kinds');
+  ok('…the grown shape is ONE added kind of the conversation (kind fields, name system/init, the CLI build) — the bar\'s quiet chip — and its `record-kinds` meta op went out once (the merges add none)', JSON.stringify(mm.addedKinds()) === JSON.stringify([{ kind: 'fields', name: 'system/init', cli: '2.1.274' }]) && kindsOps.length === 1, { kinds: mm.addedKinds(), kindsOps: kindsOps.length });
   const drifts = events.filter((e) => e[0] === 'harness-shape-drift');
   ok('telemetry harness-shape-drift fired ONCE per process per shape, the detail naming shape + fields + the CLI build', drifts.length === 1 && /^claude:stream:system\/init \+\{foo,bar\}/.test(drifts[0][1]) && /cli 2\.1\.274/.test(drifts[0][1]), drifts);
   // the fall-back card owns an unknown TYPE: never ALSO a drift card

@@ -56,6 +56,7 @@ export function openTouchRow(app, row) {
   if (row.ops && row.ops.api) { showApiAccessDialog(app, row.adapterId); return; }   // B-2198: a raw API call row opens its credential's API access (the waiting card, the log)
   const v = T.openVerdict(row);
   if (v.open === 'search' && typeof app.openChannelSearch === 'function') app.openChannelSearch({ adapterIds: [v.adapterId], q: v.query, convId: v.convId, convTitle: v.title, hits: v.hits, memo: v.memo, searchedAt: v.searchedAt });
+  else if (v.open === 'connect') { if (typeof app.openChannelConnect === 'function') app.openChannelConnect(v.kind); }   // lane pod-oauth-callback: the agent's «Connect <type>» — the Connect dialog on that type
   else if (v.open !== 'outbox') app.openChannel(v.adapterId, v.convId);
   else if (typeof app.openChannelOutbox === 'function') app.openChannelOutbox();   // a composed message has no conversation until it is sent
 }
@@ -170,7 +171,7 @@ export function createChannelTouchView(view) {
       }
       rowEl._row = r;
       const verdict = T.openVerdict(r).open;
-      const tip = r.ops && r.ops.api ? t('Open API access and its log') : verdict === 'search' ? t('Show the search results') : verdict === 'outbox' ? t('Not sent yet — open the Outbox') : t('Open this conversation');   // B-2198: a raw API call row opens its credential's API access
+      const tip = r.ops && r.ops.api ? t('Open API access and its log') : verdict === 'connect' ? t('Sign in — the Connect dialog opens on this account type') : verdict === 'search' ? t('Show the search results') : verdict === 'outbox' ? t('Not sent yet — open the Outbox') : t('Open this conversation');   // B-2198: a raw API call row opens its credential's API access
       if (rowEl.title !== tip) rowEl.title = tip;
       const glyph = T.glyphFor(r.icon);
       const g = rowEl.querySelector('.cct-glyph');
@@ -180,6 +181,7 @@ export function createChannelTouchView(view) {
       set('.cct-words', T.rowWords(r, t));
       set('.cct-time', clock(r.last));
       rowEl.classList.toggle('drafted', T.DRAFT_OPS.some((o) => r.ops[o] > 0));
+      rowEl.classList.toggle('connect', verdict === 'connect');   // lane pod-oauth-callback: the Connect card wears the accent
       if (box.children[i] !== rowEl) box.insertBefore(rowEl, box.children[i] || null);
       have.delete(r.key);
       i++;

@@ -626,6 +626,7 @@ class CodexMessageManager extends MessageWindow {
       try { global.__vsEvent?.('harness-shape-drift', `${drift.shape} +{${drift.fields.join(',')}}${drift.enumDrift.length ? ' enum:' + drift.enumDrift.map((e) => e.field + '=' + e.value).join(',') : ''}${ver ? ' · cli ' + ver : ''}`.slice(0, 300)); } catch {}
     }
     if (drift.fields.length) noteFieldDrift({ conversation: this._threadId || this.sessionId, harness: 'Codex', shape: drift.shape, fields: drift.fields, cli: ver, raw, recordKey: this._currentRk });
+    this._noteAddedKind('fields', drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), ver, emit); // the status bar's quiet chip (lane door-healthy-chat)
     const cards = this._shapeDrift || (this._shapeDrift = new Map());
     const entry = cards.get(drift.shape);
     const newFields = drift.fields.filter((f) => !entry || !entry.fields.has(f));
@@ -810,7 +811,8 @@ class CodexMessageManager extends MessageWindow {
       role: 'system', status: 'complete', noticeKind: 'unknown-record',
       content: [{ type: 'unknown_record', kind, name: String(type || '(untyped)').slice(0, 80), harness: 'Codex', record: require('./message-manager.js').unknownRecordJson(raw) }],
     });
-    if (emit) this._emit({ op: 'create', msg });
+    if (emit) this._emit({ op: 'create', message: msg }); // `message` — the key every create op carries (lane door-healthy-chat)
+    this._noteAddedKind('record', String(type || '(untyped)').slice(0, 80), null, emit);
   }
 
   // The ledger thread id of a record = the FILE it came from (the walker keys a

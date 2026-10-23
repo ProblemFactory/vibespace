@@ -35,12 +35,12 @@
 //      as "Message from “bob”" with the head as his own words, "VibeSpace" as
 //      "Message from an agent calling itself “VibeSpace”" — and exactly ONE new
 //      VibeSpace notice appears (the real notification)
-//   ⑦ THE DRIFT CARD IS THE UPDATE SIGNAL (lane drift-card-restore, owner 2026-10-15 「那个红色是有理由的啊，就是为了知道什么时候
-//      有更新啊」 — .276 had hidden it): a third stub turn plays a KNOWN record that grew a field (system/informational +
+//   ⑦ THE UPDATE SIGNAL LEFT THE PERSON'S CHAT (lane door-healthy-chat, 2.369.344 — the naive studies; it was the red card of lane
+//      drift-card-restore, owner 2026-10-15 「那个红色是有理由的啊，就是为了知道什么时候有更新啊」): a third stub turn plays a KNOWN record that grew a field (system/informational +
 //      banner_style_v2), an undeclared enum value (vcs_state_changed kind:squash), 2.1.296's file_attachments_missing and
 //      permission_check_status; then a FIELD-ONLY drift card as a conversation already stores it (cli 2.1.296) is fed to the view.
-//      The grown record renders as itself AND as ONE red-bordered "New fields on a known record" card whose line says the CLI may
-//      have updated, the stored card renders (its CLI build in the head), the enum card still renders, the attachments line is
+//      The grown record renders as itself and NO card — the status bar's ONE quiet chip names it and the enum drift (the owner
+//      keeps the signal there and in ⚙ Diagnostics), a stored card draws nothing, the attachments line is
 //      one dim line in our words, the permission pulse is card-less — and the grown field is ALSO a row of the drift ledger
 //      ⚙ Diagnostics reads (GET …summary?drift=1). HYGIENE_PNG_DIR=<dir> keeps a PNG of that chat (the report's evidence).
 // Requires google-chrome (SKIP without). Run: node scripts/test-chat-hygiene-ui.mjs
@@ -363,8 +363,8 @@ try {
   const newNotices = n6.notices.slice(noticesBefore);
   check(`…and exactly ONE new VibeSpace notice — the real notification ("${newNotices[0] || ''}"), never "VibeSpace · Please run…" / "VibeSpace · I finished…"`, newNotices.length === 1 && /^VibeSpace · you handed control back after 9 s/.test(newNotices[0]) && !n6.notices.some((t) => /Please run|I finished/.test(t)), n6.notices);
 
-  // ── ⑦ the drift card is the update signal: a known record that grew a field is ONE red card again ──
-  console.log('⑦ a known record that GREW a field is ONE red card (the update signal) + a ledger row; a stored one renders; an enum drift still is a card; 2.1.296\'s records are known');
+  // ── ⑦ a record kind the CLI added is never drawn in the chat (lane door-healthy-chat, 2.369.344): the status bar's quiet chip carries the update signal ──
+  console.log('⑦ a known record that GREW a field (or a value) draws NO card in the chat — the bar\'s quiet chip counts it, ⚙ Diagnostics lists it; a stored card draws nothing; 2.1.296\'s records are known');
   liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Did my three files arrive?' }));
   const played3 = await waitFor(`(() => { const v = ${VIEW}; return !!v && [...v._messageList.querySelectorAll('.chat-msg')].some((e) => /Two of your three files never arrived/.test(e.textContent)); })()`, 20000);
   check('the third stub turn rendered (its closing line is on screen)', played3, await evalJs(`(() => { const v = ${VIEW}; return v ? v._messageList.innerText.slice(-600) : 'no view'; })()`));
@@ -382,12 +382,13 @@ try {
   })()`);
   const red = (d) => { const [r, g, b] = (String(d.border).match(/\d+/g) || []).map(Number); return r > g + 60 && r > b + 60; }; // the --red border (any theme's red)
   const grown = n7.drift.filter((d) => /banner_style_v2/.test(d.text));
-  check('the grown record renders as ITSELF (the CLI\'s dim line "Your files are being checked.") AND as ONE red-bordered card "⚠ New fields on a known record" naming Claude Code · system/informational +{banner_style_v2}, its line saying what it is FOR (Claude Code may have updated; registering the new version ends these notices)', n7.lines.some((l) => l.text === 'Your files are being checked.') && grown.length === 1 && /^⚠ New fields on a known record/.test(grown[0].text) && /Claude Code( 2\.1\.274)? · system\/informational \+\{banner_style_v2\}/.test(grown[0].text) /* the stub prints its init before the wrapper listens: the build may be unknown */ && /Claude Code may have updated: this record carries fields VibeSpace has not registered/.test(grown[0].text) && /once the new version is registered, these notices go away/.test(grown[0].text) && red(grown[0]) && grown[0].shown, { lines: n7.lines, drift: n7.drift });
+  const chip7 = await evalJs(`(() => { const c = document.querySelector('.chat-view .chat-status-kinds'); return c ? { text: c.textContent, title: c.title } : null; })()`);
+  check('the grown record renders as ITSELF (the CLI\'s dim line "Your files are being checked.") and NO card in the chat; the status bar\'s quiet chip names it (system/informational: new fields) — the update signal, out of the person\'s flow', n7.lines.some((l) => l.text === 'Your files are being checked.') && grown.length === 0 && n7.drift.length === 0 && !!chip7 && /record kinds? this version added — Diagnostics$/.test(chip7.text) && /system\/informational: new fields/.test(chip7.title), { drift: n7.drift, chip7 });
   const st = n7.drift.filter((d) => d.id === 'hy-stored-drift');
-  check('the STORED field-only drift card RENDERS (no .276 quiet rule): its element, "New fields on a known record", the CLI build it carries beside the harness ("Claude Code 2.1.296 · system/init +{stored_grown_field}"), red-bordered, the message count +1', n7.stored && st.length === 1 && /^⚠ New fields on a known record/.test(st[0].text) && st[0].text.includes('Claude Code 2.1.296 · system/init +{stored_grown_field}') && red(st[0]) && st[0].shown && n7.count === before7 + 1, { stored: n7.stored, st, count: n7.count, before7 });
-  check('…and no drift card is folded away: no run header names one (the unknown kind is off in "Card kinds that collapse" by default — the card breaks the run, the owner sees it)', !n7.hdrs.some((h) => /unknown events|new fields/i.test(h)), n7.hdrs);
+  check('a STORED drift card (a conversation that kept one from before) draws nothing either: no element, the message count unchanged', !n7.stored && st.length === 0 && n7.count === before7, { stored: n7.stored, count: n7.count, before7 });
+  check('…and no run header names one (nothing of it is in the flow to fold)', !n7.hdrs.some((h) => /unknown events|new fields/i.test(h)), n7.hdrs);
   const en = n7.drift.filter((d) => /kind = squash/.test(d.text));
-  check('the ENUM drift still renders: ONE red-bordered card headed "An undeclared value on a known record", naming "kind = squash"; three drift cards in all (grown, stored, enum)', en.length === 1 && /^⚠ An undeclared value on a known record/.test(en[0].text) && red(en[0]) && en[0].shown && n7.drift.length === 3, n7.drift);
+  check('the ENUM drift (vcs_state_changed kind = squash) is no card either — the chip names it beside the grown record', en.length === 0 && !/kind = squash/.test(n7.text) && /system\/vcs_state_changed: new fields/.test(chip7.title), { drift: n7.drift, title: chip7 && chip7.title });
   check('2.1.296 file_attachments_missing is ONE dim line in our words ("2 of 3 attached files did not reach Claude"), the reason codes on hover; no Unknown-event card for either new record', n7.lines.some((l) => l.text === '2 of 3 attached files did not reach Claude' && /too_large, not_found/.test(l.title)) && n7.unknownCards === 0 && !/permission_check_status|file_attachments_missing/.test(n7.text), { lines: n7.lines, unknown: n7.unknownCards });
   const led = await evalJs(`fetch('/api/telemetry/summary?days=1&drift=1').then((r) => r.json()).then((d) => ({ rows: (d.driftLedger || []).filter((r) => r.conversation === ${JSON.stringify(LIVE_SID)}), all: (d.driftLedger || []).map((r) => r.conversation + ' ' + r.shape + ' ' + r.fields.join()), plain: 'driftLedger' in d }))`);
   const plain = await evalJs(`fetch('/api/telemetry/summary?days=1').then((r) => r.json()).then((d) => 'driftLedger' in d)`);

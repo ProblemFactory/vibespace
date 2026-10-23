@@ -707,6 +707,7 @@ const ENV_ALLOW = new Map([
   ['src/integration-registry.js', 'DECLARES the names a row is served under (never reads them)'],
   ['scripts/test-integration-registry.mjs', 'this census + the store legs'],
   ['scripts/test-integrations-ui.mjs', 'the heavy leg injects the env into a worktree server'],
+  ['scripts/test-consent-road.mjs', 'lane pod-oauth-callback: the engine legs hand the store a Lark preset that names its brand in the JSON env form — the store\'s env HANDLE, never process.env'],
   ['scripts/test-feed-miss-ui.mjs', 'lane lark-search-miss: the heavy leg injects the fake row\'s cluster key into its worktree server (a signed-in account is what draws the feed line)'],
   ['scripts/dbg-comm-surfaces.mjs', 'the comm-panel screenshot driver injects the cluster copy path into its worktree server (a1 of the polish; the i18n census drives it)'],
   ['scripts/test-browser-backend.mjs', 'the agent-browser key legs (design-agent-browser-v2 §9 iii) inject a cluster default into the store\'s env HANDLE (never process.env) and assert user > cluster > none'],
@@ -1082,6 +1083,50 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
   const v = R.validateValues(dl, { clientId: 'cid_abc12345', relayUrl: 'https://admin.example.test/relay/' });
   const b = R.validateValues(dl, { relayUrl: 'http://x.lan/relay', clientId: 'a b' });
   ok(v.ok && !b.ok && b.errors.relayUrl && b.errors.clientId, 'clientId / relayUrl validate (an http relay page or a spaced id is refused by name)', JSON.stringify(b.errors));
+}
+
+// lane oauth-relay-road (the owner 2026-10-22: one registered redirect per app — the fleet's admin host /relay/ or
+// VibeSpace's public page — never one per pod): the Lark and Gmail rows gain the `relayUrl` field exactly as Slack's
+// and Dropline's (public, optional, an https page with no query); the custom client is still the row's first two fields;
+// Lark's setup block keeps its loopback callback (the other road) and Gmail's names where a WEB client lists the pages;
+// the two vendors' consent rows read a relay SETTING (channels.larkRelayUrl / gmailRelayUrl) whose default is the public page
+{
+  const CR = require(path.join(REPO, 'src/consent-road.js'));
+  const shapeOf = (r) => r.fields.map((f) => `${f.key}:${f.secret ? 's' : 'p'}${f.required ? 'R' : 'o'}`).join();
+  const lk = R.rowById('lark'), gm = R.rowById('gmail'), sl = R.rowById('slack');
+  ok(shapeOf(lk) === 'appId:pR,appSecret:sR,relayUrl:po' && shapeOf(gm) === 'clientId:pR,clientSecret:sR,relayUrl:po' && sl.fields.some((f) => f.key === 'relayUrl' && !f.secret && !f.required) && !R.checkRow(lk).length && !R.checkRow(gm).length,
+    `lark / gmail gain relayUrl (public, optional) like slack's (${shapeOf(lk)} · ${shapeOf(gm)})`);
+  ok(JSON.stringify([R.clientFieldsOf('lark').idKey, R.clientFieldsOf('lark').secretKey, R.clientFieldsOf('gmail').idKey, R.clientFieldsOf('gmail').secretKey]) === JSON.stringify(['appId', 'appSecret', 'clientId', 'clientSecret']), 'the custom client is still the first id + the first secret (the relay page never becomes the client id)');
+  const good = [R.validateValues(lk, { appId: 'cli_abc', appSecret: 'dummy-secret-1', relayUrl: 'https://admin.example.test/relay/' }), R.validateValues(gm, { clientId: 'x.apps.googleusercontent.com', clientSecret: 'dummy-secret-1', relayUrl: CR.RELAY_DEFAULT })];
+  const badV = ['http://admin.example.test/relay/', 'https://admin.example.test/relay/?x=1', 'https://a b/'].map((u) => R.validateValues(lk, { appId: 'cli_abc', appSecret: 'dummy-secret-1', relayUrl: u }));
+  ok(good.every((x) => x.ok) && badV.every((x) => !x.ok && x.errors.relayUrl), 'relayUrl validates: an https page passes; http, a query, a space are refused by name', JSON.stringify(badV.map((x) => x.errors)));
+  ok(lk.clusterEnv.prefix === 'VIBESPACE_INTEGRATION_LARK_' && storeMod.envFieldName('lark', 'relayUrl') === 'VIBESPACE_INTEGRATION_LARK_RELAYURL' && gm.delegate && gm.delegate.to === 'drive-presets', 'a Lark preset names its page as VIBESPACE_INTEGRATION_LARK_RELAYURL (or a JSON entry\'s value); a Google preset in its drive-presets entry');
+  ok(lk.setup.callbackUrl === 'http://127.0.0.1:17865/lark/cb' && gm.setup && !gm.setup.callbackUrl && /Web application client/.test(gm.setup.callbackNote) && /Desktop client cannot take an https address/.test(gm.setup.callbackNote) && !(gm.setup.prerequisites || []).length,
+    'setup blocks: Lark keeps its loopback callback (the other road); Gmail names where a WEB application client lists the relay pages (a Desktop client cannot take https)');
+  const L = require(path.join(REPO, 'src/channels/lark.js')), G = require(path.join(REPO, 'src/channels/gmail.js'));
+  const LM = require(path.join(REPO, 'src/channels/lark/manifest.js')), GMm = require(path.join(REPO, 'src/channels/gmail/manifest.js'));
+  const opt = (m, k) => (m.settings.options || []).find((o) => o.key === k) || {};
+  ok(L.consent.relayUrlSetting.key === 'larkRelayUrl' && G.consent.relayUrlSetting.key === 'gmailRelayUrl' && L.consent.relayUrlSetting.fallback === CR.RELAY_DEFAULT && G.consent.relayUrlSetting.fallback === CR.RELAY_DEFAULT
+    && opt(LM, 'larkRelayUrl').role === 'relayUrl' && opt(LM, 'larkRelayUrl').default === CR.RELAY_DEFAULT && opt(GMm, 'gmailRelayUrl').role === 'relayUrl' && opt(GMm, 'gmailRelayUrl').default === CR.RELAY_DEFAULT && opt(GMm, 'gmailRelayUrl').tier === 'advanced',
+    'the consent rows read channels.larkRelayUrl / gmailRelayUrl (advanced option rows), default = the public page — the same default as Slack\'s');
+  const dz = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default || {}, dj = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default || {};
+  const said = [lk.fields[2].help, gm.setup.callbackNote, opt(LM, 'larkRelayUrl').label, opt(LM, 'larkRelayUrl').description, opt(GMm, 'gmailRelayUrl').label, opt(GMm, 'gmailRelayUrl').description];
+  ok(said.every((s) => typeof dz[s] === 'string' && dz[s] && typeof dj[s] === 'string' && dj[s]), 'every new word of these rows has its zh and ja line', said.filter((s) => !dz[s] || !dj[s]));
+  // addendum 1 (the owner 2026-10-22: «github 那个 url 不能加到我们公司的 lark 和 slack app 默认配置里»): a COMPANY preset's relay
+  // field names the cluster's own page only (empty = the fleet's, else none) and says the public page is never its; the
+  // relay SETTING is worded as a person's OWN app's, the public page an option «if this VibeSpace has no https address»;
+  // no setup block carries the public page's address (a preset's page is its own value; a custom app's comes from the digest)
+  const host = new URL(CR.RELAY_DEFAULT).hostname;
+  const presetHelp = [lk, gm].map((r) => r.fields.find((f) => f.key === 'relayUrl').help);
+  ok(presetHelp.every((h) => /^The company app’s relay page/.test(h) && /fleet’s admin host \/relay\//.test(h) && /Empty = the fleet’s relay page on a fleet pod, else none/.test(h) && /never uses the public relay page/.test(h) && !/VibeSpace’s public page|each instance’s own relay setting/.test(h)),
+    'a preset\'s relayUrl field: the cluster\'s own page, empty = the fleet\'s else none — never «the public page» nor «the instance\'s setting»', presetHelp);
+  const desc = [opt(LM, 'larkRelayUrl').description, opt(GMm, 'gmailRelayUrl').description];
+  ok(/your own Lark app/.test(desc[0]) && /your own Google OAuth client/.test(desc[1]) && desc.every((d) => /a public relay page you may register .* if this VibeSpace has no https address/.test(d) && /(company app|company client) never uses this setting/.test(d)),
+    'the relay SETTING is a person\'s own app\'s: the public page offered «if this VibeSpace has no https address»; a company app never uses it', desc);
+  const setups = [lk, gm, sl].map((r) => JSON.stringify(r.setup || {}));
+  ok(setups.every((s) => !s.includes(host)), 'no setup block (Lark, Gmail, Slack) carries the public page\'s address — a preset\'s page is its own value, a custom app\'s comes from the digest', setups.map((s) => s.slice(0, 120)));
+  const words = [...presetHelp, ...desc];
+  ok(words.every((s) => typeof dz[s] === 'string' && dz[s] && typeof dj[s] === 'string' && dj[s]), 'the re-worded rows have their zh and ja lines', words.filter((s) => !dz[s] || !dj[s]).map((s) => s.slice(0, 60)));
 }
 
 // lane dropline-connect-door (a fleet user's report 2026-10-18: "plugin页面没地方进行登录，integrations里也只能setup key"):

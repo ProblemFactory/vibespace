@@ -62,6 +62,7 @@ export function createModalShell({ id, title = '', dialogClass = '', bodyClass =
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
   announceModal(overlay); // lane dialog-keys: in the opening act's own task, before the caller focuses anything in it
+  pageKeysScroll(overlay, dialog); // lane door-healthy-chat: PageUp / PageDown move the dialog's scroll region
   let unbindEscape = null;
   const close = () => { unbindEscape?.(); overlay.remove(); onClose?.(); };
   const guard = unsaved && typeof unsaved === 'object' ? unsavedGuard({ overlay, dialog, body, unsaved, close }) : null;
@@ -90,6 +91,34 @@ export function createModalShell({ id, title = '', dialogClass = '', bodyClass =
   }
   const noop = () => {};
   return { overlay, dialog, body, closeBtn, close, dismiss, markSaved: guard ? guard.markSaved : noop, markDirty: guard ? guard.markDirty : noop, isDirty: guard ? guard.isDirty : () => false };
+}
+/** THE PAGE KEYS SCROLL A DIALOG (lane door-healthy-chat, 2.369.344 — the naive studies' B3: «the Who can use… dialog and
+ *  the pairing command ignore the wheel», a dialog's long list read by dragging its bar). A press inside a dialog lands
+ *  the focus on the overlay (tabindex −1, an ANCESTOR of every scroll region) or on <body>, where the browser's own
+ *  PageUp / PageDown find no scroller. The keys page the region that holds the focus, else the region of the last press,
+ *  else the dialog's tallest one; a text field keeps its own keys. (The wheel needs nothing: it scrolls what is under it.) */
+const scrollRegion = (el, stop) => {
+  for (let n = el; n && n !== stop.parentNode; n = n.parentElement) {
+    if (n.nodeType !== 1) continue;
+    const oy = getComputedStyle(n).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n;
+  }
+  return null;
+};
+function pageKeysScroll(overlay, dialog) {
+  if (overlay.tabIndex < 0 && !overlay.hasAttribute('tabindex')) overlay.tabIndex = -1; // a press inside focuses the dialog, never <body>
+  let pressed = null;
+  dialog.addEventListener('pointerdown', (e) => { pressed = e.target; }, true);
+  overlay.addEventListener('keydown', (e) => {
+    if ((e.key !== 'PageUp' && e.key !== 'PageDown') || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.defaultPrevented || e.isComposing) return;
+    const tg = e.target;
+    if (_editable(tg)) return; // a text field keeps its own keys
+    let box = (tg && tg !== overlay && dialog.contains(tg) && scrollRegion(tg, dialog)) || (pressed && dialog.contains(pressed) && scrollRegion(pressed, dialog));
+    if (!box) for (const n of dialog.querySelectorAll('*')) { const r = scrollRegion(n, n); if (r && (!box || r.clientHeight > box.clientHeight)) box = r; }
+    if (!box) return;
+    e.preventDefault();
+    box.scrollBy({ top: (e.key === 'PageUp' ? -1 : 1) * Math.max(40, Math.round(box.clientHeight * 0.9)) });
+  });
 }
 /** The unsaved guard of ONE shell (lane dialog-unsaved-guard — the contract is createModalShell's `unsaved`, above). */
 function unsavedGuard({ overlay, dialog, body, unsaved, close }) {

@@ -199,6 +199,29 @@ function create(engineCtx) {
     if (!mod) throw new ChannelError('not-supported', `'${kind}' cannot be connected — it is not a channel adapter with a consent flow (connectable: ${registry.vendors().map((m) => m.kind).join(', ')})`, { retryable: false });
     return mod;
   }
+  /** lane pod-oauth-callback (study 1 L1 / study 2 M2: an agent that needed Lark opened Lark's WEB login in its own
+   *  browser; another told the person to find the Channels window): what an AGENT may offer the person to connect — a
+   *  vendor type this instance can connect, its label and glyph, whether a company preset is offered and how many of its
+   *  accounts hold a sign-in. Never a value, never a record made: the person signs in through the Connect dialog the
+   *  chat's row opens. An unknown type answers the types there are. */
+  function connectOffer(kind) {
+    const k = String(kind == null ? '' : kind).trim().toLowerCase().slice(0, 40);
+    const mod = k ? registry.vendor(k) : null;
+    if (!mod) return { ok: false, code: 'bad-request', error: `no account type "${k}" can be connected here — the types: ${registry.vendors().map((m) => m.kind).join(', ') || 'none'}`, kinds: registry.vendors().map((m) => m.kind) };
+    const accounts = adapterRecords().adapters.filter((r) => r && r.kind === mod.kind && r.enabled !== false);
+    const row = rowOf(mod);
+    let preset = false;
+    try { preset = !!row && offeredCredentials(row.id).some((c) => c && c.source === 'cluster'); } catch { preset = false; }
+    return { ok: true, kind: mod.kind, label: mod.label || mod.kind, glyph: (mod.caps && mod.caps.glyph) || null, preset, accounts: accounts.length, signedIn: accounts.filter((r) => r.auth && r.auth.tokenEnc).length };
+  }
+  /** …every type no account of which holds a sign-in (what `vibespace-channels list` names as not connected yet). */
+  function connectOffers() { return registry.vendors().map((m) => connectOffer(m.kind)).filter((x) => x.ok && !x.signedIn); }
+  /** …and whether the hook TEACHES `vibespace-channels connect` (reach word 'connect'): no account of any vendor type is
+   *  here yet and a type offers a COMPANY preset — a fleet pod before anyone signed in. */
+  function connectTaught() {
+    if (adapterRecords().adapters.some((r) => r && r.enabled !== false && registry.vendor(r.kind))) return false;
+    return registry.vendors().some((m) => connectOffer(m.kind).preset);
+  }
   /** The id of the NEXT account of a kind: the kind itself while no record
    *  carries it, else `<kind>:<8 hex>` — never one already taken. */
   function mintAdapterId(kind, recs) {
@@ -419,15 +442,32 @@ function create(engineCtx) {
     const t = now();
     for (const [id, p] of pendingFlows) if (t - p.startedAt > PENDING_FLOW_TTL_MS) { try { flows.cancel(id, 'expired'); } catch {} pendingFlows.delete(id); }
   }
+  /** lane pod-oauth-callback: the option values a company PRESET names (its `facts` — the Lark app's brand): each a
+   *  declared option of the type whose value is one of its choices; {} for a custom / mount / paste choice. */
+  function presetOptionsOf(mod, choice) {
+    const key = choice && typeof choice.credentialKey === 'string' && choice.credentialKey.startsWith(CLUSTER_PREFIX) ? choice.credentialKey.slice(CLUSTER_PREFIX.length) : null;
+    if (!key) return {};
+    let p = null;
+    try { p = (presetsOf(mod) || []).find((x) => x && x.key === key) || null; } catch { p = null; }
+    const out = {};
+    for (const [k, v] of Object.entries((p && p.facts) || {})) {
+      const d = ((mod && mod.OPTIONS) || []).find((o) => o.key === k);
+      if (d && typeof v === 'string' && (!Array.isArray(d.choices) || d.choices.includes(v))) out[k] = v;
+    }
+    return out;
+  }
   const latestPending = () => { let best = null; for (const p of pendingFlows.values()) if (!p.targetId && (!best || p.startedAt >= best.startedAt)) best = p; return best; };
   /** verify r8: does the pending flow's TARGET hold a sign-in right now (the refusal's tail says so). */
   const targetHolds = (p) => { const t = p.targetId ? adapterRecords().adapters.find((x) => x.id === p.targetId) : null; return !!(t && t.auth && t.auth.tokenEnc); };
-  async function beginPending(mod, choice, { target = null, options = null, origin = null } = {}) {
+  async function beginPending(mod, choice, { target = null, options = null, origin = null, road = null } = {}) {
     sweepPending();
     const id = target ? target.id : `pending:${crypto.randomBytes(6).toString('hex')}`;
     const rec = newRecord(mod, { id, credentialKey: choice.credentialKey });
     if (choice.credential) rec.credential = choice.credential;
     rec.options = normalizeOptions(mod, options, target ? { ...(target.options || {}) } : rec.options);
+    // lane pod-oauth-callback (study 2 B2): a NEW account under a company preset that names an option's value (the Lark
+    // app's brand) takes it — a value the dialog sent wins; a re-authorize keeps the account's own options
+    if (!target) for (const [k, v] of Object.entries(presetOptionsOf(mod, choice))) if (!(options && typeof options === 'object' && typeof options[k] === 'string' && options[k].trim())) rec.options[k] = v;
     if (target) rec.label = target.label;
     assertResolvable(mod, rec);
     const p = { flowId: null, kind: mod.kind, choice, rec, targetId: target ? target.id : null, tokenEnc: null, tokenMeta: null, done: false, ok: null, error: null, user: null, startedAt: now(), adapter: null };
@@ -451,7 +491,7 @@ function create(engineCtx) {
     };
     const memState = { read: () => ({}), write: async () => {} };
     p.adapter = registry.create(mod.kind, rec, { now, resolveIntegration: resolverFor(rec), fetch: fetchFn, log, tokens: memTokens, state: memState, oauth: flows, consent: consentDepsOf(mod.kind), onAuthDone: (_id, r) => onPendingDone(p, r), deliver, liveSessions, credentialKey: rec.credentialKey || null });
-    const flow = await p.adapter.auth.begin({ origin });   // design 018: the browser's own origin rides the Slack state (the relay's way back)
+    const flow = await p.adapter.auth.begin({ origin, road });   // design 018: the browser's own origin rides the Slack state (the relay's way back); lane pod-oauth-callback: it decides the route vs the loopback, `road` = the person's last resort
     p.flowId = flow.flowId;
     pendingFlows.set(p.flowId, p);
     return { flowId: p.flowId, kind: mod.kind, credentialKey: choice.credentialKey, flow: safeFlow(flow) };
@@ -526,7 +566,7 @@ function create(engineCtx) {
     const mod = connectableFor(String(input.kind || input.backend || ''));
     normalizeOptions(mod, input.options, {});   // verify r2: a body refused on its options never opens a mount's secret (judged again, on the record, in beginPending)
     const choice = clientChoice(mod, input);
-    const r = await beginPending(mod, choice, { options: input.options, origin: typeof input.origin === 'string' ? input.origin : null });
+    const r = await beginPending(mod, choice, { options: input.options, origin: typeof input.origin === 'string' ? input.origin : null, road: input.road === 'loopback' ? 'loopback' : null });
     auditMountCopy(choice, mod);
     return withMount({ ...r, url: r.flow && r.flow.consentUrl }, choice);   // verify r3: the answer names the client copied
   }
@@ -698,13 +738,14 @@ function create(engineCtx) {
     const mod = connectableFor(rec.kind);
     const choice = clientChoice(mod, input, { allowDefault: false });
     const origin = typeof input.origin === 'string' ? input.origin : null;
+    const road = input.road === 'loopback' ? 'loopback' : null;   // lane pod-oauth-callback: the person's last resort
     if (!choice && !rec.credentialKey && !(rowOf(mod) && rowOf(mod).signin === 'paste')) {   // design 018: a key-less Slack account IS the paste rung — never stamped with a preset
       const ev = credentialKeyEvidence(rec, mod);
       if (ev.key) await store.adapters.update(() => { rec.credentialKey = ev.key; });
     }
     if (rec.enabled === false) await store.adapters.update(() => { rec.enabled = true; });
     if (choice && !sameClient(rec, choice)) {
-      const r = await beginPending(mod, choice, { target: rec, origin });
+      const r = await beginPending(mod, choice, { target: rec, origin, road });
       auditMountCopy(choice, mod, rec.id);
       await store.adapters.update(() => { rec.lastAuthError = null; });
       notify([]);
@@ -715,7 +756,7 @@ function create(engineCtx) {
     if (rec.credentialKey === OWN_KEY) await inlineLegacyClient(rec);
     const e = adapterFor(rec);
     assertResolvable(mod, rec);
-    const flow = await e.adapter.auth.begin({ origin });
+    const flow = await e.adapter.auth.begin({ origin, road });
     await store.adapters.update(() => { rec.lastAuthError = null; });
     notify([]);
     return withMount({ adapter: adapterView(rec), flow: safeFlow(flow) }, choice);
@@ -729,7 +770,7 @@ function create(engineCtx) {
    *  secret, never the exchange result. */
   function safeFlow(st) {
     if (!st) return null;
-    return { flowId: st.flowId, mode: st.mode, running: !!st.running, done: !!st.done, ok: st.ok, error: st.error || null, why: st.why || null, cancelled: st.cancelled || null, step: st.step || null, stepFacts: st.stepFacts && typeof st.stepFacts === 'object' ? { ...st.stepFacts } : null, consentUrl: st.consentUrl, redirectUri: st.redirectUri, port: st.port, listening: !!st.listening, refusal: st.refusal || null, pasteBack: true, startedAt: st.startedAt, expiresAt: st.expiresAt, optional: Array.isArray(st.optional) ? st.optional.slice() : [], narrowed: Array.isArray(st.narrowed) ? st.narrowed.slice() : null, groups: Array.isArray(st.groups) ? st.groups.map((g) => (Array.isArray(g) ? g.slice() : [])) : [], nextNarrow: Array.isArray(st.nextNarrow) ? st.nextNarrow.slice() : null };
+    return { flowId: st.flowId, mode: st.mode, running: !!st.running, done: !!st.done, ok: st.ok, error: st.error || null, why: st.why || null, cancelled: st.cancelled || null, step: st.step || null, stepFacts: st.stepFacts && typeof st.stepFacts === 'object' ? { ...st.stepFacts } : null, consentUrl: st.consentUrl, redirectUri: st.redirectUri, road: st.road || null, port: st.port, listening: !!st.listening, refusal: st.refusal || null, pasteBack: true, startedAt: st.startedAt, expiresAt: st.expiresAt, optional: Array.isArray(st.optional) ? st.optional.slice() : [], narrowed: Array.isArray(st.narrowed) ? st.narrowed.slice() : null, groups: Array.isArray(st.groups) ? st.groups.map((g) => (Array.isArray(g) ? g.slice() : [])) : [], nextNarrow: Array.isArray(st.nextNarrow) ? st.nextNarrow.slice() : null };
   }
   /** Paste-back (§12.4): the user pastes the redirect URL their browser
    *  landed on; the adapter's own `auth.finish` runs the state check. A
@@ -1213,6 +1254,7 @@ function create(engineCtx) {
     recordOrThrow, safeFlow, finishAuth, narrowAuth, oauthNarrow, cancelAuth, onAuthDone, disconnect, referencesOf, remove, setupView, duplicate,
     setLabel, setCustomSecret, adapterConfig, inlineLegacyClient, scheduleInline, inlineLegacyClients, stampIdentities, stampCredentialKeys,
     setEnabled, setAccountPolicy, setSenderHonesty, setOptions,
+    connectOffer, connectOffers, connectTaught,   // lane pod-oauth-callback: the chat's Connect row
   };
 }
 

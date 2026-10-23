@@ -2091,7 +2091,10 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   const mountClients = { list: (v) => mm.oauthClientsFor(v), head: (id, opts) => mm.oauthClientIdOf(id, opts), of: (id, opts) => mm.oauthClientOf(id, opts) };   // the wiring's shape: the vendor rides down; verify r2: `head` = the key-less read
   const edir = path.join(ROOT, 'cfm-eng');
   const frames = [];
-  const mkCfm = (E, dir) => { const e = E.create({ dataDir: dir, env: {}, broadcast: (m) => frames.push(m), fetch: fetchG, log: capLog, mountClients }); engines.push(e); return e; };
+  // lane oauth-relay-road: an instance with NO relay page (Settings → Channels: the relay pages blank) — a client borrowed
+  // from a storage mount is a Desktop client (the mount's own consent is a loopback one), its road here is the loopback
+  const noRelay = (k) => (/^channels\.(lark|gmail)RelayUrl$/.test(k) ? '' : undefined);
+  const mkCfm = (E, dir) => { const e = E.create({ dataDir: dir, env: {}, serverSetting: noRelay, broadcast: (m) => frames.push(m), fetch: fetchG, log: capLog, mountClients }); engines.push(e); return e; };
   const eng = mkCfm(ENG, edir);
   const chBox = SB.secretBox(path.join(edir, ENG.KEY_FILE));
   const disk = (dir) => { try { return fs.readFileSync(path.join(dir, 'channels', 'adapters.json'), 'utf-8'); } catch { return ''; } };
@@ -6595,7 +6598,8 @@ console.log('\nconsent: a vendor declares its consent row; the engine + route na
       out.land = await get(back.pathname + back.search);
       for (let i = 0; i < 50 && !(e.oauthStatus(st.flowId) || {}).done; i++) await sleep(20);
       out.status = e.oauthStatus(st.flowId);
-      out.none = await get('/api/channels/oauth/cb/lark?code=x&state=y');
+      out.none = await get('/api/channels/oauth/cb/webhook?code=x&state=y');
+      out.lark = await get('/api/channels/oauth/cb/lark?code=x&state=y');   // lane pod-oauth-callback: Lark declares a landing now
       out.unknown = await get('/api/channels/oauth/cb/nonesuch?code=x&state=y');
     } catch (er) { out.err = (er && er.stack) || String(er); }
     try { await e.stop(); } catch {}
@@ -6610,7 +6614,11 @@ console.log('\nconsent: a vendor declares its consent row; the engine + route na
     'consent: the REAL route answers the fake vendor\'s OWN page — connected, the code exchanged once', JSON.stringify(real.land).slice(0, 300));
   ok(real.status && real.status.done === true && real.status.ok === true, 'consent: the pending flow ends connected (oauthStatus)', JSON.stringify(real.status).slice(0, 300));
   ok(real.none && real.none.status === 404 && /no-landing/.test(real.none.body) && real.unknown && real.unknown.status === 404 && /no-landing/.test(real.unknown.body),
-    'consent: a kind whose row declares no landing (Lark) and an unknown kind are 404 by name (`no-landing`), never another vendor\'s page', `${real.none && real.none.status} ${real.unknown && real.unknown.status}`);
+    'consent: a kind whose row declares no landing (the webhook) and an unknown kind are 404 by name (`no-landing`), never another vendor\'s page', `${real.none && real.none.status} ${real.unknown && real.unknown.status}`);
+  // lane pod-oauth-callback: Lark's consent lands on the instance's route now (an https address, a browser elsewhere) —
+  // a made-up state is refused on LARK's own page (src/consent-road.js landingHtml), nothing exchanged
+  ok(real.lark && real.lark.status === 400 && /data-landing="failed"/.test(real.lark.body) && /Lark/.test(real.lark.body) && !/<script/.test(real.lark.body),
+    'consent: Lark declares its landing — a made-up state answers Lark\'s own page (400, not connected, no close script)', `${real.lark && real.lark.status} ${real.lark && real.lark.body.slice(0, 160)}`);
   exchanged.length = 0;
   const judged = await roundTrip('slack-judge', withFake.replace(JUDGE, "const v = require('../channels/slack-manifest.js').stateVerdict(state, {"), routeSrcC);
   ok(!judged.err && judged.land && judged.land.status === 400 && /data-fc="bad-shape"/.test(judged.land.body) && exchanged.length === 0 && !(judged.status && judged.status.ok),

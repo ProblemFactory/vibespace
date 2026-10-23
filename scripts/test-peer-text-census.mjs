@@ -851,6 +851,14 @@ const PRINTS = {
     'x.error': 'judged:msgName — the hand-over refusal sentence (our words around the caller\'s own path and a conversation id)',
   }),
   ...rows('data/bin/vibespace-channels', {
+    // lane pod-oauth-callback: `connect <kind>` and `list`'s not-connected line — a vendor TYPE's label / kind and counts, our words
+    'r.connectable': `${V}:the types no account of which holds a sign-in ({kind, label, accounts}) — the engine's connectOffers`,
+    'notYet': `${V}:those types (r.connectable, each with a kind)`,
+    'x.label': `${V}:an account TYPE's label (the adapter module's own, e.g. Lark / 飞书)`,
+    'x.kind': `${V}:an account TYPE's kind (lark, gmail …)`,
+    'r.label': `${V}:an account TYPE's label (the adapter module's own)`,
+    'r.preset': `${V}:a flag — a company app is offered`,
+    'r.signedIn': `${V}:a count of the type's signed-in accounts`,
     // lane cli-one-text-arg: the ONE-text rule's pieces (src/agent-cli-text.js, walked above — it prints nothing; its sentences are
     // RETURNED): a refusal is our words around the caller's OWN stray words / door path, the echo our words around counts
     'TX': `${V}:the ONE-text rule module (src/agent-cli-text.js) — what its oneText / strayRefusal / sentLine return is our words around counts and the caller's own words`,

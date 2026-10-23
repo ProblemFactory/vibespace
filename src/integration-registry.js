@@ -726,6 +726,8 @@ function checkRow(row) {
   if (row.clusterEnv && row.delegate) errs.push('clusterEnv and delegate are a UNION — declare one');
   const words = (x) => Array.isArray(x) && x.length > 0 && x.every((w) => typeof w === 'string' && /^[A-Za-z][A-Za-z0-9_:-]*$/.test(w));
   if (row.clusterEnv && row.clusterEnv.extras !== undefined && (!words(row.clusterEnv.extras) || row.clusterEnv.extras.some((k) => (row.fields || []).some((f) => f.key === k)))) errs.push('clusterEnv.extras is a list of preset value names that are NOT fields');
+  // lane pod-oauth-callback: `facts` = the preset values the account dialog may READ (Lark's brand) — extras only, never a field (a secret never rides)
+  if (row.clusterEnv && row.clusterEnv.facts !== undefined && (!words(row.clusterEnv.facts) || !row.clusterEnv.facts.every((k) => Array.isArray(row.clusterEnv.extras) && row.clusterEnv.extras.includes(k)))) errs.push('clusterEnv.facts is a list of clusterEnv.extras names (the preset values the account dialog may read)');
   const lg = row.clusterEnv && row.clusterEnv.legacy;
   if (lg !== undefined && (!lg || !words(lg.jsonKeys) || !words(lg.prefixes) || lg.jsonKeys.length !== lg.prefixes.length || lg.jsonKeys.includes(row.id))) errs.push('clusterEnv.legacy = {jsonKeys, prefixes}: the old row ids and their old prefixes, one each, never the row\'s own id');
   if (row.delegate && row.delegate.to !== 'drive-presets') errs.push('delegate.to must be drive-presets');

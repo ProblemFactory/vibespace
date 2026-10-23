@@ -40,7 +40,7 @@ export { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD };
  *  the way the wizard did. A LOCKED vault's unlock modal is not snoozed by anything. */
 /** The keys the preset writes. A suite that censuses what a PAGE stored excludes exactly these (test-slack-relay ④) — never
  *  a literal of its own: the .314 mirror went red when the vault key joined and the relay census still knew only the first. */
-export const PRESET_KEYS = Object.freeze({ 'vs-onboarded': '1', 'vs-vault-later': '9999999999999' });
+export const PRESET_KEYS = Object.freeze({ 'vs-onboarded': '1', 'vs-vault-later': '9999999999999', 'vs-rail-labels': 'done' });   // vs-rail-labels (lane door-day-one-landing): the first week's rail words, done
 export const ONBOARDED_SOURCE = `try { ${Object.entries(PRESET_KEYS).map(([k, v]) => `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join(' ')} } catch {}`;
 
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */

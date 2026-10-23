@@ -87,6 +87,51 @@ const OPS = {
     return { result: { entries: out } };
   },
 
+  // GET /api/home-folders (lane door-day-one-landing): the home's folders, each with a BOUNDED count of the regular files it
+  // holds — the New Session dialog's folder chips (src/day-one.js folderChips orders them). Hidden names and dependency /
+  // cache folders are skipped; a folder that is a MOUNT POINT (named in /proc/self/mountinfo, or on another device) is named,
+  // never walked (a hung mount never answers a stat); the walk stops at `cap` entries per folder (`more`) and `depth` levels;
+  // symlinked folders inside are not followed (lstat-free: a Dirent's own type).
+  folderCensus({ path: dirPath, cap = 2000, depth = 4, max = 24 }) {
+    let mps = null;
+    try {
+      mps = new Set();
+      for (const ln of fs.readFileSync('/proc/self/mountinfo', 'utf8').split('\n')) {
+        const f = ln.split(' ');
+        if (f.length > 4) mps.add(f[4].replace(/\\([0-7]{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8))));
+      }
+    } catch { mps = null; }
+    const top = fs.statSync(dirPath);
+    const SKIP = new Set(['node_modules', '__pycache__', 'snap']);
+    const out = [];
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    for (const e of entries) {
+      if (out.length >= max) break;
+      if (e.name.startsWith('.') || SKIP.has(e.name)) continue;
+      if (!e.isDirectory() && !e.isSymbolicLink()) continue;
+      const p = path.join(dirPath, e.name);
+      if (mps && mps.has(p)) { out.push({ name: e.name, path: p, files: null, mount: true }); continue; }
+      let st = null;
+      try { st = fs.statSync(p); } catch { continue; }   // a dangling link
+      if (!st.isDirectory()) continue;
+      if (st.dev !== top.dev) { out.push({ name: e.name, path: p, files: null, mount: true }); continue; }
+      let files = 0, seen = 0, more = false;
+      const walk = (d, level) => {
+        let list;
+        try { list = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+        for (const x of list) {
+          if (++seen > cap) { more = true; return; }
+          if (x.name.startsWith('.')) continue;
+          if (x.isFile()) files++;
+          else if (x.isDirectory() && level < depth && !SKIP.has(x.name)) { walk(path.join(d, x.name), level + 1); if (more) return; }
+        }
+      };
+      walk(p, 1);
+      out.push({ name: e.name, path: p, files, more });
+    }
+    return { result: { folders: out } };
+  },
+
   // stat (+ optional dir entryCount) for GET /api/file/stat, and the fail-fast
   // guards on raw/download/excel. mode is returned raw; the route formats it.
   stat({ path: p, entryCount }) {

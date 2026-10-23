@@ -741,7 +741,10 @@ class MessageManager extends MessageWindow {
       role: 'system', status: 'complete', noticeKind: 'unknown-record',
       content: [{ type: 'unknown_record', kind, name: String(name).slice(0, 80), harness: this.harnessLabel || 'Claude Code', record: unknownRecordJson(raw) }],
     });
-    if (emit) this._emit({ op: 'create', msg });
+    // `message`, the key every create op carries (lane door-healthy-chat: `msg` here made the chat view throw on EVERY live
+    // unknown record — a poisoned watermark per record; only a re-attach drew them)
+    if (emit) this._emit({ op: 'create', message: msg });
+    this._noteAddedKind('record', (kind === 'system' ? 'system/' : '') + String(name).slice(0, 80), this._harnessVersion?.() || null, emit);
   }
 
   _processMessage(raw, emit) {
@@ -785,6 +788,7 @@ class MessageManager extends MessageWindow {
       try { global.__vsEvent?.('harness-shape-drift', `${drift.shape} +{${drift.fields.join(',')}}${drift.enumDrift.length ? ' enum:' + drift.enumDrift.map((e) => e.field + '=' + e.value).join(',') : ''}${ver ? ' · cli ' + ver : ''}`.slice(0, 300)); } catch {}
     }
     if (drift.fields.length) noteFieldDrift({ conversation: raw.session_id || raw.sessionId || this.sessionId, harness: 'Claude Code', shape: drift.shape, fields: drift.fields, cli: ver, raw, recordKey: this._currentRk });
+    this._noteAddedKind('fields', drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), ver, emit); // the status bar's quiet chip (lane door-healthy-chat)
     const cards = this._shapeDrift || (this._shapeDrift = new Map());
     const entry = cards.get(drift.shape);
     const newFields = drift.fields.filter((f) => !entry || !entry.fields.has(f));

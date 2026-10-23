@@ -11,6 +11,7 @@
 // `t` / `i18nKey` are only EXTRACTION MARKERS (English-string-as-key): the client re-wraps every word with the real t().
 const t = (s) => s;
 const i18nKey = (s) => s;
+const { RELAY_DEFAULT } = require('../../consent-road.js');   // PURE: the project's public relay page (the relay setting's default — a person's own app only)
 
 /** THE ONE DEFINITION of Lark's registered redirect URL (decision 4, owner
  *  2026-09-13): a VibeSpace-owned FIXED loopback, never a per-instance public
@@ -46,6 +47,16 @@ const settings = {
       ], label: t('Lark: how people are named'),
       description: t('A person is shown by the nickname your organization gives them, else their name, followed by their department or job title in parentheses when you choose one — the way Lark shows it. Reading profiles needs the sign-in to allow it (the account card says when it does not). A name you set yourself on an author always wins.'),
     },
+    // lane oauth-relay-road (the owner 2026-10-22: one registered redirect per app, never one per instance): the relay page
+    // a sign-in with a person's OWN Lark app comes back through on THIS instance (a fleet pod rides the fleet's first,
+    // VIBESPACE_OAUTH_RELAY_URL); addendum 1: a company preset never reads it — its own relayUrl › the fleet's, or none.
+    // Read by the hub (serverSetting, the consent row's relayUrlSetting).
+    {
+      key: 'larkRelayUrl', role: 'relayUrl', type: 'string', default: RELAY_DEFAULT,
+      label: t('Lark: relay page'),
+      description: t('The https page a sign-in with your own Lark app (its App ID and Secret typed here) comes back through: it sends the browser on to this VibeSpace when it runs on a private network and keeps nothing. The default is a public relay page you may register under the app’s Redirect URLs if this VibeSpace has no https address; on a fleet pod the fleet’s page comes first. A company app never uses this setting — it signs in through its own relay page. Empty = this instance’s own https address, else 127.0.0.1.'),
+      tier: 'advanced',
+    },
   ],
 };
 
@@ -58,6 +69,14 @@ function integrationRow({ V, okV, bad }) {
     if (!/^cli_[A-Za-z0-9]+$/.test(s)) return bad('a Lark App ID starts with cli_ (Developer Console → Credentials & Basic Info)');
     return okV;
   };
+  /** lane oauth-relay-road: an https relay page address, or empty (empty = the instance's own relay setting). */
+  const relayPage = (v) => {
+    const s = String(v);
+    if (!s) return okV;
+    if (/\s/.test(s)) return bad('must not contain whitespace');
+    if (!/^https:\/\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?(\/[^?#]*)?$/i.test(s) || s.length > 300) return bad('must be an https URL with no query (the vendor redirects to it)');
+    return okV;
+  };
   // ── LARK / 飞书 (design §14.2 row 1; consumer lands in P1) ──────────────
   return {
     id: 'lark',
@@ -67,8 +86,15 @@ function integrationRow({ V, okV, bad }) {
         help: i18nKey('Developer Console → Credentials & Basic Info.'), validate: larkAppId },
       { key: 'appSecret', label: i18nKey('App Secret'), secret: true, required: true,
         help: i18nKey('Same page. It is only ever written here, never read back.'), validate: V.minLen(8) },
+      // lane oauth-relay-road: a company preset's relay page (a JSON entry's value, or VIBESPACE_INTEGRATION_LARK_RELAYURL) —
+      // addendum 1: the cluster's own page (the admin host's /relay/); empty = the fleet's, else none, never the public page
+      { key: 'relayUrl', label: i18nKey('Relay page'), secret: false, required: false, placeholder: 'https://…/relay/',
+        help: i18nKey('The company app’s relay page: the https page it sends every member back through after a sign-in — the fleet’s admin host /relay/. Register it once under the app’s Redirect URLs. Empty = the fleet’s relay page on a fleet pod, else none (the sign-in comes back to the instance’s own address). A company app never uses the public relay page.'), validate: relayPage },
     ],
-    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_LARK_' },
+    // lane pod-oauth-callback (study 2 B2: the form defaulted to feishu while the company's app lives on Lark
+    // international): a company preset NAMES its app's brand (`brand`: feishu | lark — a JSON entry's value, or
+    // VIBESPACE_INTEGRATION_LARK_BRAND), and the account dialog reads it (`facts`) — the brand option's default under that preset
+    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_LARK_', extras: ['brand'], facts: ['brand'] },
     setup: {
       callbackUrl: LARK_CALLBACK_URL,
       callbackNote: i18nKey('Developer Console → Security Settings → Redirect URLs. It must match byte for byte.'),

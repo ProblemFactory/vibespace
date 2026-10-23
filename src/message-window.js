@@ -53,6 +53,27 @@ class MessageWindow {
   }
   get permissionOpsVersion() { return this._permOps || 0; }
 
+  /** THE KINDS OF RECORD THIS CONVERSATION'S HARNESS ADDED (lane door-healthy-chat — the naive studies' W1/C1: red «Unknown
+   *  event» / «New fields on a known record» cards buried a person's answers). Such a record still becomes its notice message
+   *  (history, the drift ledger and ⚙ Diagnostics read it) but the chat no longer draws it: this list feeds ONE quiet chip in
+   *  the chat's status bar (→ ⚙ Diagnostics) — the update signal stays where the owner reads, out of the person's flow. One
+   *  row per kind (`record` = a record type the normalizer does not know, `fields` = a known record that grew a field or a
+   *  value), the newest CLI build beside it; a change is ONE meta op `record-kinds` (the attach payload carries the list).
+   *  ≤ 50 kinds. */
+  _noteAddedKind(kind, name, cli, emit) {
+    const kinds = this._addedKinds || (this._addedKinds = new Map());
+    const nm = String(name || '?').slice(0, 80);
+    const key = kind + ':' + nm;
+    const was = kinds.get(key);
+    const ver = cli ? String(cli).slice(0, 40) : null;
+    if (was && (!ver || was.cli === ver)) return;
+    if (!was && kinds.size >= 50) return;
+    kinds.set(key, { kind, name: nm, cli: ver || (was && was.cli) || null });
+    if (emit) this._emit({ op: 'meta', subtype: 'record-kinds', data: { kinds: this.addedKinds() } });
+  }
+  /** The kinds above, in the order first seen. */
+  addedKinds() { return this._addedKinds ? [...this._addedKinds.values()] : []; }
+
   /** Get current message count */
   get total() { return this.messages.length; }
   /** Get message by ID */

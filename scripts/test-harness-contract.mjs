@@ -1127,6 +1127,7 @@ console.log('\ncredential env: one derived list (src/harness-env.js), two doors'
   const EXEMPT = {
     'src/agentd/agentd.js': 'the daemon bundle: no registry inside; it is BORN without the names (src/agentd/client.js), and its children merge over that env',
     'src/server/oat-mint.js': 'MINT_ENV_ALLOW is an allowlist laid over it (checked below: no credential name in it)',
+    'src/server/claude-signin.js': 'the SAME mintEnvOf allowlist (MINT_ENV_ALLOW) laid over it (lane door-signin-card — the subscription sign-in is the oat mint\'s sibling; the allowlist check below covers it)',
   };
   const srcFiles = [];
   const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (e.name.endsWith('.js')) srcFiles.push(p); } };

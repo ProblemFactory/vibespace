@@ -2,6 +2,43 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.344 — 2026-10-22
+
+### Changed
+- The welcome now says in plain words what VibeSpace is for, with three things you could ask; theme and language are in Settings instead of the first screen.
+- Your first chat starts in the folder that holds your files: the tour and New Session offer your folders, the one with files first, like "work (23 files)".
+- New Session no longer fills in the folder of your previous session; pick a folder, the last one you used, or type one.
+- For your first week, the left bar shows each icon's name under it, until you have used every one.
+
+### Fixed
+- On a cloud VibeSpace, connecting Lark or Gmail now comes back to VibeSpace by itself after you sign in, and the sign-in tab closes itself.
+- The Connect form now picks your company's Lark app with its own brand (Lark or Feishu) instead of always Feishu.
+- When the assistant needs your Lark or Gmail and none is connected, its chat shows a Connect button that opens the sign-in.
+- The box for pasting the sign-in page's address is now a folded last resort that says when you need it and what to tell your admin.
+- A Lark or Gmail app no longer lists one address per VibeSpace: one relay page finishes every sign-in.
+- A company's Lark, Slack or Gmail app signs in only through the fleet's own relay page; the public relay page is offered only for an app you made yourself.
+- A VibeSpace you reach over Tailscale gets its sign-ins back by itself instead of showing a code to paste.
+- The second password is asked only when you first store a credential, not on your first visit or at every sign-in; Later waits three days.
+- After you sign in with a password, the tour no longer says single sign-on is set up; a workspace that already has a sign-in skips that step.
+- A chat's window is named after your first message instead of "Session 3".
+- The sign-in terminal no longer shows up as a session you never made.
+- When git has no name and email yet, your assistant's commits use the ones from your Claude sign-in.
+- Signing in to Claude now happens on a card — one button opens the sign-in page and you paste the code back; no terminal, theme picker or trust prompt.
+- A Claude chat’s “not logged in” message is now that sign-in card; once you’re signed in, one press re-sends the message you were waiting on.
+- The welcome tour signs you in on the same card and no longer lets you skip that step in silence when nothing is connected yet.
+- A link in a terminal now opens in a new tab, instead of a browser warning that the link could be dangerous.
+- “Send my message again” sends only the message that was still waiting for an answer — never one already answered or an older one.
+- Closing the sign-in card stops that sign-in right away.
+- A sign-in that fails never shows the code you pasted.
+- Trying the sign-in again after it failed adds no extra “Subscription” account.
+- Your chat no longer fills with red "Unknown event" or "New fields" cards after Claude Code updates; one quiet note in the status bar opens Diagnostics.
+- When the assistant waits for your OK, the line above the message box says in plain words what it wants to do, and a click shows you the request.
+- A permission request says what it does in plain words, such as "install python-docx · read 3 files", with the command one click away.
+- From the third request in a chat, you can let the assistant work in that folder without asking each time.
+- PageUp and PageDown move the chat, also from the message box, and move a dialog's list after you click in it.
+- A document the assistant is still writing says "Waiting for the file…" and opens by itself once the file is saved.
+- The cost in the status bar says what it is and whether it is billed, such as "This chat ≈ $0.24 · included in your subscription".
+
 ## 2.369.343 — 2026-10-22
 
 ### Added

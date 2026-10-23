@@ -279,6 +279,9 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
   vibespace-channels status [<proposalId>]         ← what you were given (access / notification) + your proposals
   vibespace-channels status <conversation>         ← its sending policy + where it comes from (account / this conversation) — the user changes it
   vibespace-channels request <conv> "why"          ← ask the user for access (only on a 'requestable' row)
+  vibespace-channels connect <kind>                ← no account of that type is connected (lark, gmail, slack …; \`list\` names them):
+                                                     puts a «Connect» button for the user in this chat — they sign in there;
+                                                     never open a vendor's web login in your browser instead
   vibespace-channels watch <conv|account> [--mode next-turn|wake|digest [--digest-minutes N]] [rules…] [--match any|every] [--cap N] [--why "…"]
                                                    ← YOUR notification on what you can read — the user's Notify… grammar: next-turn
                                                      (default, free — the news rides your next turn) is set at once; wake / digest
@@ -352,7 +355,10 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     // lane channel-agent-watch W2: the directory's rows (titles you may REQUEST) print after what you can read
     const dir = rows0.filter((c) => c.directory);
     const rows = rows0.filter((c) => !c.directory);
-    if (!rows.length && !dir.length) { console.log(all ? 'no channel conversations are visible or requestable for you right now (the user can grant access, or let agents see an account\'s list).' : 'no channel conversations are visible to you right now (ask the user to grant you access; `list --all` shows what you may request).'); return; }
+    // lane pod-oauth-callback: the types no account of which is signed in — the `connect` verb puts their Connect button in the chat
+    const notYet = (r.connectable || []).filter((x) => x && x.kind);
+    const connectLine = () => { if (notYet.length) console.log(`not connected yet: ${notYet.map((x) => `${x.label} (${x.kind})`).join(', ')} — \`vibespace-channels connect <kind>\` puts a Connect button for the user in this chat`); };
+    if (!rows.length && !dir.length) { console.log(all ? 'no channel conversations are visible or requestable for you right now (the user can grant access, or let agents see an account\'s list).' : 'no channel conversations are visible to you right now (ask the user to grant you access; `list --all` shows what you may request).'); connectLine(); return; }
     const via = (v) => (v && v !== 'conversation' ? ` via the ${v === 'account' ? 'whole account' : 'rule'}` : '');
     for (const c of rows) {
       const chips = [c.level === 'requestable' ? 'requestable (not readable yet)' : 'visible', c.canSend ? `reply → ${c.policy === 'direct' ? 'sends directly' : 'user approves'}` : `no reply (${c.sendWhy || 'not offered'})`];
@@ -889,6 +895,17 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (r.json === undefined) shown.body = r.text;
     if (pid) Object.assign(shown, { proposal: pid, outcome: r.outcome, reason: r.reason, receipt: r.receipt });
     console.log(JSON.stringify(shown, null, 2));
+    return;
+  }
+  if (verb === 'connect') {
+    // lane pod-oauth-callback (study 1 L1 / study 2 M2): the person's road to a mail / chat account is VibeSpace's Connect
+    // dialog — this puts its button in the chat; nothing is signed in or made here
+    const kind = args[1];
+    if (!kind || args.length > 2) { console.error('usage: vibespace-channels connect <kind>   (lark, gmail, slack … — `list` names the ones not connected yet)'); process.exit(args.length > 2 ? 2 : 1); }
+    const r = await call('POST', '/api/agent/channels/connect', { kind });
+    console.log(`a «Connect ${r.label}» button is in the user's chat now, on this command's card — they sign in there${r.preset ? ' (their company app is preselected)' : ''}.`);
+    if (r.signedIn) console.log(`  ${r.signedIn} ${r.label} account${r.signedIn === 1 ? ' is' : 's are'} already signed in — \`vibespace-channels list\` shows what you may read; ask the user for access if it is not shared with you.`);
+    else console.log('  once they have, `vibespace-channels list` shows what the user shares with you.');
     return;
   }
   if (verb === 'request') {

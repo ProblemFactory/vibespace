@@ -135,6 +135,24 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
 
   const setUp = () => !!record || !!recordBad;
   const state = () => (setUp() ? (dek ? 'unlocked' : 'locked') : 'not_set_up');
+  // lane door-day-one-landing (the naive-user studies: «Set a second password … there is no recovery» met seven testers at
+  // their first chat and again at every sign-in, before anything was stored): A SECRET IS WAITING — a store's key file or a
+  // device's link token beside the data (a not-set-up vault's migration window), found at boot or minted now, or a store
+  // the vault refused for want of one. The page asks for the second password only then (src/day-one.js vaultSetupAsk);
+  // the moment it turns true is announced (the first secret's store asks at once). Names only — never a key's bytes.
+  let secretWaiting = false;   // this boot: a store's first key minted, or a store refused
+  let clearAt = -Infinity, clearSeen = false;
+  /** the key files / device link tokens beside the data — read at most every 5 s (a device paired since is seen at the next
+   *  facts read: the token file road is host-tokens', which tells nobody) */
+  const clearFiles = () => {
+    if (clearSeen) return true;
+    if (now() - clearAt < 5000) return false;
+    clearAt = now();
+    try { clearSeen = STORE_KEYS.some((k) => fs.existsSync(path.join(dataDir, k.name))) || fs.readdirSync(path.join(dataDir, 'agentd')).some((n) => /^host-[\w.-]+\.token$/.test(n)); } catch { /* no agentd dir: the key files decided */ }
+    return clearSeen;
+  };
+  const waiting = () => !setUp() && (secretWaiting || clearFiles());
+  const noteSecret = () => { if (secretWaiting || setUp()) return false; secretWaiting = true; announce(); return true; };
   const audit = (event, extra = {}) => {
     const line = { at: new Date(now()).toISOString(), event, ...extra };
     try { fs.appendFileSync(path.join(dataDir, AUDIT_FILE), JSON.stringify(line) + '\n', { mode: 0o600 }); } catch { /* the log line below still says it */ }
@@ -156,6 +174,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       keys: record ? Object.keys(record.entries).filter((n) => !isSecretName(n)).length : 0,
       secrets: record ? Object.keys(record.entries).filter(isSecretName).length : 0,   // r2: the device link tokens + the frp token
       blocked: st === 'locked' ? blockedList.count() : 0,   // lane vault-locked-refusal-notice: how many callers the lock stopped (the strip's count)
+      secretWaiting: st === 'not_set_up' && waiting(),   // lane door-day-one-landing: a secret is stored with no vault — the setup ask's one fact
     };
   }
   const announce = () => { try { bcast({ type: 'vault-state', ...facts() }); } catch { } };
@@ -230,7 +249,12 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   function keyRead(name, { keyFile, raw = false, hasCiphertext = () => true, legacy } = {}) {
     const st = state();
-    if (st === 'not_set_up') return typeof legacy === 'function' ? legacy() : { ok: false, code: KF.VAULT_LOCKED };
+    if (st === 'not_set_up') {
+      if (typeof legacy !== 'function') return { ok: false, code: KF.VAULT_LOCKED };
+      const r = legacy();
+      if (r && r.ok && r.minted) noteSecret();   // lane door-day-one-landing: a store's FIRST secret minted its key — the setup ask's moment
+      return r;
+    }
     if (st === 'locked') return { ok: false, code: KF.VAULT_LOCKED };
     const file = keyFile || path.join(dataDir, name);
     const verdict = V.keyVerdict({ state: st, hasEntry: !!record.entries[name], legacyFile: !record.entries[name] && fs.existsSync(file), holdsCiphertext: (() => { if (record.entries[name] || fs.existsSync(file)) return true; try { return !!hasCiphertext(); } catch { return true; } })() });
@@ -270,7 +294,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   /** Seal `value` under `name` (unlocked only — locked ⇒ refused by name, nothing written). */
   function secretPut(name, value, { prov = null, actor = null } = {}) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
-    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); return { ok: false, code: lockedCode() }; }
+    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }   // noteSecret: a not-set-up vault refused a store (lane door-day-one-landing)
     const plain = Buffer.isBuffer(value) ? Buffer.from(value) : Buffer.from(String(value == null ? '' : value), 'utf8');
     try {
       const box = { ...V.wrapEntry(dek, name, plain), at: now() };   // int317: `at` = when it was sealed (the Vault window's «saved»)
@@ -288,7 +312,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
    *  vault refused by name). */
   function agentMint(name, { length, charset, actor = null } = {}) {
     if (!V.AGENT_NS_RE.test(String(name || ''))) return { ok: false, code: 'bad-name' };
-    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); return { ok: false, code: lockedCode() }; }
+    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }
     const mv = V.mintVerdict({ length, charset });
     if (!mv.ok) return mv;
     const value = V.randomSecret(mv.length, mv.charset);
@@ -303,7 +327,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   function agentPut(name, value, { actor = null } = {}) {
     if (!V.AGENT_NS_RE.test(String(name || ''))) return { ok: false, code: 'bad-name' };
     if (value == null || String(value) === '') return { ok: false, code: 'value_required' };
-    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); return { ok: false, code: lockedCode() }; }
+    if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }
     const r = secretPut(name, value, { prov: 'stored', actor });
     if (!r.ok) return r;
     audit('vault-agent-put', { why: name, actor: actor ? String(actor).slice(0, 128) : null, by: 'agent' });

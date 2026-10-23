@@ -61,8 +61,10 @@ function cleanPty(raw) {
     .replace(/\r/g, '\n');
 }
 
-/** The secret never rides out in words: any sk-ant-… run is masked. */
-function redact(s) { return String(s || '').replace(/sk-ant-[\w-]*/g, 'sk-ant-…'); }
+/** The secret never rides out in words: any sk-ant-… run is masked, and so is
+ *  whatever stands after the code prompt on its line — the PTY echoes a pasted
+ *  code there (lane door-signin-fixes: a failed run's text carried it). */
+function redact(s) { return String(s || '').replace(/sk-ant-[\w-]*/g, 'sk-ant-…').replace(/(paste\s+(?:the\s+)?code\s+here)[^\n]*/gi, '$1 …'); }
 
 /** The CLI's last meaningful line (spinner frames skipped), masked, ≤ 300. */
 function lastLine(text) {

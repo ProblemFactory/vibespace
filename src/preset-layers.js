@@ -45,14 +45,16 @@ function parseIntegrations(arr) {
   }
   return out;
 }
-/** `[{key, label?, clientId, clientSecret}]` → the same, strings — the rule
+/** `[{key, label?, clientId, clientSecret, relayUrl?}]` → the same, strings — the rule
  *  `VIBESPACE_GDRIVE_CLIENTS` has always been read with (an entry missing one
- *  of key / clientId / clientSecret is skipped). Throws on a non-array. */
+ *  of key / clientId / clientSecret is skipped). Throws on a non-array.
+ *  lane oauth-relay-road: `relayUrl` (optional) = the client's relay page — a Gmail sign-in under it comes back through
+ *  that page (src/consent-road.js); a storage mount never reads it. */
 function parseDriveClients(arr) {
   if (!Array.isArray(arr)) throw new TypeError('not an array');
   const out = [];
   for (const c of arr) {
-    if (c && c.key && c.clientId && c.clientSecret) out.push({ key: String(c.key), label: String(c.label || c.key), clientId: String(c.clientId), clientSecret: String(c.clientSecret) });
+    if (c && c.key && c.clientId && c.clientSecret) out.push({ key: String(c.key), label: String(c.label || c.key), clientId: String(c.clientId), clientSecret: String(c.clientSecret), ...(typeof c.relayUrl === 'string' && c.relayUrl.trim() ? { relayUrl: c.relayUrl.trim() } : {}) });
   }
   return out;
 }
@@ -63,7 +65,7 @@ const identityOf = (kind, e) => (kind === 'integrations' ? `${e.id}\u0000${e.key
 /** A short, value-free name for the journal / the summary (`lark/jarvis`, `org1`). */
 const nameOf = (kind, e) => (kind === 'integrations' ? `${e.id}/${e.key}` : String(e.key));
 /** The value part of an entry, compared to say "rotated" — never printed. */
-const valueOf = (kind, e) => (kind === 'integrations' ? JSON.stringify(Object.keys(e.values).sort().map((k) => [k, e.values[k]])) : JSON.stringify([e.clientId, e.clientSecret]));
+const valueOf = (kind, e) => (kind === 'integrations' ? JSON.stringify(Object.keys(e.values).sort().map((k) => [k, e.values[k]])) : JSON.stringify(e.relayUrl ? [e.clientId, e.clientSecret, e.relayUrl] : [e.clientId, e.clientSecret]));
 
 /** THE MERGE, per key. `layers` = `{cluster, release}`, each an entry array or
  *  `null` (that layer's file is absent). Answers `null` when BOTH are absent —

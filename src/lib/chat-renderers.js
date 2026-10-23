@@ -12,7 +12,8 @@ import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } fr
 import { UI_ICONS } from './icons.js';
 import { commandDrivesBrowser, toolCommandText } from '../browser-trace.js'; // agent browser P5 (§4.5 / D35): which shell calls carry an action trace
 import { commandTouchesChannels } from '../channel-touch.js'; // §26 (B-099e): a shell call running vibespace-channels carries the witness's box
-import { describeAgentCommand, agentCommandText, vendorBypassOf, alwaysOfferFor, updatesText, rulesText } from '../agent-tool-rules.js'; // lane L: VibeSpace's own tools in plain words + the widened (or narrowed / withheld) Always Allow; r6: the ONE offer the server also sends (F6) + every update in words (F5)
+import { describeAgentCommand, agentCommandText, vendorBypassOf, alwaysOfferFor, updatesText, rulesText, folderOfferFor, FOLDER_PROMPT_AT } from '../agent-tool-rules.js';
+import { requestPhrases } from '../command-words.js'; // PURE (lane door-healthy-chat): a request in a person's words — «install python-docx · read 3 files» // lane L: VibeSpace's own tools in plain words + the widened (or narrowed / withheld) Always Allow; r6: the ONE offer the server also sends (F6) + every update in words (F5)
 import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabel, initFrameOf, subagentView } from './agent-meta.js';
 import { subagentCardHtml, isSubagentToolRow, markConversationLinks, conversationLinksHtml } from './subagent-card.js'; // lane agy-subagent-cards: the card an Antigravity subagent shows + conversation:// links (PURE)
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
@@ -589,7 +590,7 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, onOpenArtifact = null, getWorkflowVerdict, getSourceWinId, peerFold, subagentKnown = null }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, onOpenArtifact = null, getWorkflowVerdict, getSourceWinId, peerFold, subagentKnown = null, getPermissionPromptCount = null }) {
     // Is THIS collab card the one the next row would coalesce into, on a turn
     // that is still streaming? Only the VIEW knows (it owns the streaming flag
     // and the message list), and the answer decides live age vs frozen span.
@@ -616,6 +617,7 @@ class ChatRenderers {
     this._getSessionCtx = getSessionCtx || null;
     this._getPublishedFiles = getPublishedFiles || null; // toolCallId → published SendUserFile rows (owner ruling 8(c))
     this._getWorkflowVerdict = getWorkflowVerdict || null; // runId → the server's stalled verdict (the view keeps it; absent = none)
+    this._getPermissionPromptCount = getPermissionPromptCount || null; // lane door-healthy-chat: the conversation's permission prompts so far (the third offers the folder)
     // THE WINDOW THIS CHAT IS DRAWN IN, read at click time (a restore can remap
     // window ids): a path / local link opened here is born beside it (split tabs
     // v2, F2 — app.linkPlacement). Absent ⇒ a free window, as before.
@@ -1763,53 +1765,14 @@ class ChatRenderers {
     if (msg.noticeKind === 'artifact' && msg.content?.[0]?.type === 'artifact') {
       return { el: renderArtifactCard(msg, { showJob: (id) => this.app?.openJobs?.({ focusJobId: id }), showPorts: (fid) => showInPorts(this.app, fid), open: (b) => (this._onOpenArtifact ? this._onOpenArtifact(b) : this.app?.openFile(b.path, b.name || b.path.split('/').pop(), { host: b.host || undefined, from: this._sourceWinId() })) }), sideEffect: null };
     }
-    // UNKNOWN EVENT — the fall-back card (2.369.119/.120, owner): a harness
-    // record VibeSpace does not recognize sits in the flow like any other
-    // card, red-bordered so it is noticed, the WHOLE record behind its
-    // expander. Every field is harness-authored ⇒ escaped. Folds under the
-    // 'unknown' kind of chat.collapseKinds (off by default).
-    if (msg.noticeKind === 'unknown-record' && msg.content?.[0]?.type === 'unknown_record') {
-      const b = msg.content[0];
-      const el = document.createElement('div');
-      el.className = 'chat-msg chat-msg-system chat-unknown-event';
-      const what = (b.kind === 'system' ? 'system/' : '') + escHtml(b.name);
-      el.innerHTML = `<div class="chat-unknown-event-head"><span class="chat-unknown-event-title">⚠ ${escHtml(t('Unknown event'))}</span><span class="chat-unknown-event-name">${escHtml(b.harness || '')} · ${what}</span></div>`
-        + `<div class="chat-unknown-event-hint">${escHtml(t('A record VibeSpace does not recognize — the harness may have gained a feature or changed its protocol.'))}</div>`;
-      if (b.record) {
-        const det = document.createElement('details');
-        det.innerHTML = `<summary>${escHtml(t('Full record'))}</summary><pre class="chat-pre">${escHtml(b.record)}</pre>`;
-        el.appendChild(det);
-      }
-      return { el, sideEffect: null };
-    }
-    // NEW FIELDS ON A KNOWN RECORD — the schema-drift card (design-unknown-records
-    // §3, 2026-09-21): a record VibeSpace handles, carrying fields the harness
-    // never declared. Red border like the unknown-event card (something changed
-    // upstream) with the DIM head variant (handling is unchanged), the shape +
-    // the field list in the head, enum drift as its own line, the redacted
-    // sample behind the expander. Everything is harness-authored ⇒ escaped.
-    // Folds under the same 'unknown' kind. THE UPDATE SIGNAL (owner 2026-10-15
-    // 「你隐藏了还怎么知道」, lane drift-card-restore): a card naming fields says
-    // what it is FOR — the CLI may have updated — with the CLI build beside the
-    // harness when the card knows it; an enum-only card names the VALUE.
-    if (msg.noticeKind === 'unknown-fields' && msg.content?.[0]?.type === 'unknown_fields') {
-      const b = msg.content[0];
-      const el = document.createElement('div');
-      el.className = 'chat-msg chat-msg-system chat-unknown-event chat-unknown-fields';
-      const fields = Array.isArray(b.fields) ? b.fields : [];
-      const plus = fields.length ? ` +{${fields.map((f) => escHtml(String(f))).join(', ')}}` : '';
-      const cli = b.cli ? ' ' + escHtml(String(b.cli)) : ''; // the CLI build the init frame named (cards stored before lane drift-card-restore carry none)
-      // enum-only (a value drift, e.g. vcs_state_changed kind:squash): a VALUE, not fields — say so
-      el.innerHTML = `<div class="chat-unknown-event-head"><span class="chat-unknown-event-title">⚠ ${escHtml(fields.length ? t('New fields on a known record') : t('An undeclared value on a known record'))}</span><span class="chat-unknown-event-name">${escHtml(b.harness || '')}${cli} · ${escHtml(b.shape || '')}${plus}</span></div>`
-        + (Array.isArray(b.enumDrift) ? b.enumDrift.map((e) => `<div class="chat-unknown-event-hint">${escHtml(t('Undeclared value: {field} = {value}', { field: String(e?.field || ''), value: String(e?.value || '') }))}</div>`).join('') : '')
-        + `<div class="chat-unknown-event-hint">${escHtml(fields.length ? t('{harness} may have updated: this record carries fields VibeSpace has not registered — handling is unchanged; once the new version is registered, these notices go away.', { harness: String(b.harness || 'Claude Code') }) : t('A record VibeSpace knows, carrying a value it does not declare — its meaning may differ from the declared ones. Handling is unchanged.'))}</div>`;
-      if (b.sample) {
-        const det = document.createElement('details');
-        det.innerHTML = `<summary>${escHtml(t('Full record'))}</summary><pre class="chat-pre">${escHtml(b.sample)}</pre>`;
-        el.appendChild(det);
-      }
-      return { el, sideEffect: null };
-    }
+    // UNKNOWN EVENT / NEW FIELDS ON A KNOWN RECORD — NEVER DRAWN IN A PERSON'S CHAT (lane door-healthy-chat, 2.369.344 — the
+    // naive studies on 2.369.342: pods that self-updated to a CLI this release had not registered filled every tester's first
+    // turn with red «⚠ Unknown event · api-request-blob» / «⚠ New fields on a known record» cards, read as "it broke"). The
+    // records still become their notice messages (history, the drift ledger and ⚙ Diagnostics read them) and the update
+    // signal the owner reads (ruling 2026-10-15) stays visible to the admin: ONE quiet chip in the chat's status bar counts
+    // the kinds (the normalizer's `record-kinds`, src/message-window.js `_noteAddedKind`) and opens ⚙ Diagnostics, and the
+    // rail's Diagnostics counter counts them. Here: nothing.
+    if ((msg.noticeKind === 'unknown-record' && msg.content?.[0]?.type === 'unknown_record') || (msg.noticeKind === 'unknown-fields' && msg.content?.[0]?.type === 'unknown_fields')) return null;
     // THE REPL'S OWN NOTIFICATION (claude system/notification, design-unknown-
     // records 2026-09-21): a dim notice, priority-coloured (immediate = red,
     // high = yellow), the CLI's text verbatim (escaped). stop-hook-error points
@@ -2300,11 +2263,31 @@ class ChatRenderers {
       const alwaysWhatHtml = alwaysLines.length ? `<div class="chat-permission-always-what"><span class="chat-permission-always-head">${escHtml(t('Always Allow also sends:'))}</span>${alwaysLines.map((l) => `<div class="chat-permission-always-line">${revealedHtml(l)}</div>`).join('')}</div>` : '';
       const withheldHtml = offer.withheld && !always.length ? `<div class="chat-permission-withheld">${escHtml(t(offer.withheld))}</div>` : '';
       const hiddenHtml = hidden.length ? `<div class="chat-permission-hidden" role="alert">${UI_ICONS.alert} ${escHtml(t('This request holds {n} hidden character(s) that can make text read differently from what runs: {codes}. Each is shown as ⟦U+…⟧. Allow needs a second press.', { n: hidden.length, codes: hidden.join(', ') }))}</div>` : '';
-      const cmdHtml = cmdText ? `<pre class="chat-permission-cmd">${revealedHtml(cmdText)}</pre>` : '';
+      // IN A PERSON'S WORDS (lane door-healthy-chat — the naive studies' W2/C10): ONE line saying what the request does,
+      // derived from the command itself (requestPhrases — never the agent's own description of it), and the command one
+      // press away under it; a request holding a hidden character keeps it open (F7). VibeSpace's own tools already
+      // speak (agentPermissionWhatHtml). F4 stands: the words are a summary ABOVE the raw line, never instead of it.
+      const phrases = ac ? [] : requestPhrases(msg.permission.toolName, msg.permission.input);
+      const summaryHtml = phrases.length ? `<div class="chat-permission-summary">${revealedHtml(phrases.map((p) => t(p.key, p.params)).join(' · '))}</div>` : '';
+      const cmdPre = cmdText ? `<pre class="chat-permission-cmd">${revealedHtml(cmdText)}</pre>` : '';
+      const cmdHtml = cmdPre && phrases.length && !hidden.length ? `<details class="chat-permission-cmd-fold"><summary>${escHtml(t('Show the command'))}</summary>${cmdPre}</details>` : cmdPre;
+      // THE THIRD PROMPT (lane door-healthy-chat, the owner's day-one rule): «let it work in <folder> without asking» —
+      // the record's folder offer (folderOfferFor, the SAME one the server sends), every update it sends said on the card
+      const folderName = (() => { const c = this._getSessionCtx?.()?.cwd || ''; const b = String(c).replace(/\/+$/, '').split('/').pop(); return b ? b + '/' : t('this folder'); })();
+      const folder = !opts.mount && (this._getPermissionPromptCount?.() || 0) >= FOLDER_PROMPT_AT ? folderOfferFor(msg.permission) : { updates: [] }; // the record decides (a Claude CLI request)
+      const folderBtnHtml = folder.updates.length ? `<button class="chat-perm-btn chat-perm-folder" title="${escHtml(updatesText(folder.updates).map(lineOf).join('\n'))}">${escHtml(t('Let it work in {folder} without asking', { folder: folderName }))}</button>` : '';
+      const folderWhatHtml = folder.updates.length ? `<div class="chat-permission-folder-what">${escHtml(t('From now on it edits files and runs commands in {folder} without a card each time — saved in that folder\'s settings. VibeSpace\'s own publishing steps still ask.', { folder: folderName }))}</div>` : '';
       // …and the WHOLE request with each one marked, open on the card — a pending Write / Edit card has no Input block,
       // and a hidden character may sit in a field the command line does not show
       const hiddenInputHtml = hidden.length ? `<details class="chat-diff chat-permission-hidden-input" open><summary class="chat-diff-summary">${escHtml(t('The whole request, each hidden character marked'))}</summary><pre class="chat-permission-cmd">${revealedHtml(JSON.stringify(msg.permission.input || {}, null, 2))}</pre></details>` : '';
-      section.innerHTML = `<div class="chat-permission-prompt"><span class="chat-permission-label">${UI_ICONS.lock} ${t('Permission: {tool}', { tool: revealedHtml(toolName) })}</span>${agentPermissionWhatHtml(ac)}${cmdHtml}${alwaysWhatHtml}${withheldHtml}${hiddenHtml}${hiddenInputHtml}<div class="chat-permission-actions"><button class="chat-perm-btn chat-perm-allow">${hidden.length ? escHtml(t('Allow…')) : t('Allow')}</button>${always.length ? `<button class="chat-perm-btn chat-perm-always"${alwaysTitle}>${t('Always Allow')}</button>` : ''}<button class="chat-perm-btn chat-perm-deny">${t('Deny')}</button></div></div>`;
+      section.innerHTML = `<div class="chat-permission-prompt"><span class="chat-permission-label">${UI_ICONS.lock} ${t('Permission: {tool}', { tool: revealedHtml(toolName) })}</span>${summaryHtml}${agentPermissionWhatHtml(ac)}${cmdHtml}${alwaysWhatHtml}${withheldHtml}${hiddenHtml}${hiddenInputHtml}<div class="chat-permission-actions"><button class="chat-perm-btn chat-perm-allow">${hidden.length ? escHtml(t('Allow…')) : t('Allow')}</button>${always.length ? `<button class="chat-perm-btn chat-perm-always"${alwaysTitle}>${t('Always Allow')}</button>` : ''}${folderBtnHtml}<button class="chat-perm-btn chat-perm-deny">${t('Deny')}</button></div>${folderWhatHtml}</div>`;
+      section.querySelector('.chat-perm-folder')?.addEventListener('click', () => {
+        // the press names the answer only (F6): the server sends ITS record's folder offer
+        this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: true, folder: true });
+        msg.permission.resolved = 'allowed';
+        this.renderPermissionOverlay(el, msg, opts);
+        this._onPermissionResolve('allowed');
+      });
       let armedAt = 0;
       section.querySelector('.chat-perm-allow')?.addEventListener('click', (ev) => {
         if (hidden.length) {

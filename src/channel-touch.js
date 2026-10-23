@@ -49,7 +49,7 @@
  */
 
 /** The closed op set, in the order a row SAYS them (a draft outranks a read). */
-const OPS = Object.freeze(['reply', 'compose', 'react', 'recall', 'read', 'search', 'refresh', 'request', 'status', 'api']);   // + lane channels-proposals-recall
+const OPS = Object.freeze(['reply', 'compose', 'react', 'recall', 'read', 'search', 'refresh', 'request', 'status', 'api', 'connect']);   // + lane channels-proposals-recall; + lane pod-oauth-callback: `connect` = the agent asked the person to connect an account TYPE (the row opens the Connect dialog on it)
 /** The ops that make a row a DRAFT row (sorted first; the reverse link says "Drafted by"). */
 const DRAFT_OPS = Object.freeze(['reply', 'compose']);
 /** The per-session ring (the witness keeps the newest). */
@@ -87,6 +87,7 @@ function touchKey(t) {
   if (!t) return '';
   if (t.convId) return `${t.adapterId}/${t.convId}`;
   if (t.op === 'api') return `${t.adapterId}/~api/${t.id || t.at || ''}`;   // B-2198: one row per raw API call
+  if (t.op === 'connect') return `${t.adapterId}/~connect`;   // lane pod-oauth-callback: one row per account type asked for
   return `${t.adapterId}/~compose/${t.proposalId || t.id || ''}`;
 }
 
@@ -112,7 +113,7 @@ function normalizeTouch(x) {
   if (!adapterId) return null;
   const convId = x.convId ? str(x.convId, ID_MAX) : null;
   const proposalId = x.proposalId ? str(x.proposalId, ID_MAX) : null;
-  if (!convId && op !== 'compose' && op !== 'api') return null;   // only a message not yet sent (or a raw API call — B-2198) has no conversation
+  if (!convId && op !== 'compose' && op !== 'api' && op !== 'connect') return null;   // only a message not yet sent (or a raw API call — B-2198, or an account type to connect — lane pod-oauth-callback) has no conversation
   const at = num(x.at);
   if (!(at > 0)) return null;
   return {
@@ -178,6 +179,7 @@ function namesTouch(text, t) {
   if (t.op === 'search' && /vibespace-channels\s+search\b/.test(s)) return true;
   if (t.op === 'compose' && /vibespace-channels\s+compose\b/.test(s) && s.includes(t.adapterId)) return true;
   if (t.proposalId && s.includes(t.proposalId)) return true;
+  if (t.op === 'connect' && /vibespace-channels\s+connect\b/.test(s) && s.includes(t.adapterId)) return true;   // lane pod-oauth-callback
   return false;
 }
 
@@ -270,6 +272,8 @@ function foldView(rows, { max = FOLD_SHOWN, expanded = false } = {}) {
  *  else (a read, a reply, a search recorded before the query was kept) ⇒ the conversation, as before. */
 function openVerdict(row) {
   if (!row) return null;
+  // lane pod-oauth-callback: the agent asked the person to connect an account type ⇒ the Connect dialog on that type
+  if (!row.convId && row.ops && row.ops.connect && String(row.key || '').endsWith('/~connect')) return { open: 'connect', kind: row.kind || row.adapterId };
   if (!row.convId) return { open: 'outbox' };
   const la = row.lastAt || {};
   const newest = Math.max(0, ...Object.values(la).map(num));
@@ -303,6 +307,7 @@ function rowWords(row, t) {
   if (o.request) out.push(t('asked for access'));
   if (o.status) out.push(t('checked its draft'));
   if (o.api) out.push(row.proposalId ? t('API call {call} · awaiting you', { call: row.title }) : row.trust === 'write-all' ? t('API call {call} · Full trust · sensitive', { call: row.title }) : t('API call {call}', { call: row.title }));
+  if (o.connect) out.push(t('Connect {type} — sign in so the assistant can use it', { type: row.account || row.kind || row.adapterId }));   // lane pod-oauth-callback
   return out.join(' · ');
 }
 
@@ -321,6 +326,7 @@ function replyWords(placement, t) {
 /** The row's name: `account › title` (the title alone when the account is unknown). */
 function rowName(row) {
   const title = (row && (row.title || row.convId)) || '';
+  if (!title) return (row && row.account) || '';   // lane pod-oauth-callback: a connect row names its account type alone
   return row && row.account ? `${row.account} › ${title}` : title;
 }
 
@@ -346,7 +352,7 @@ function chipView(touches, turnAt) {
 }
 function chipText(view, t) {
   if (!view || !view.latest) return '';
-  return `${t('Channels')} · ${view.latest.title || view.latest.convId || ''}`;
+  return `${t('Channels')} · ${view.latest.title || view.latest.convId || view.latest.account || ''}`;
 }
 
 /** THE REVERSE LINK's facts: per session, over its ring, the touches of ONE conversation key → the strongest op

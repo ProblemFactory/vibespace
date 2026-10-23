@@ -16,7 +16,7 @@ const {
 } = require('../session-store');
 // THE agent-CLI identity, one rule for every machine (B-3185) — /api/kill-pid's
 // LOCAL branch asks it exactly like the remote branch's shell twin does.
-const { isCliProcess } = require('../cli-identity');
+const { isCliProcess, readChildPids } = require('../cli-identity');   // readChildPids: a sign-in terminal's own processes (lane door-day-one-landing)
 const { createMessageManager } = require('../normalizers');
 const { mergeLiveWorkflow } = require('../workflow-live'); // 2.369.119: the card's stream tree laid over the disk skeleton
 const { parseRunDir, journalAttemptsFromText, treeAlive } = require('../workflow-disk'); // 2026-09-26: the run dir's labels/phases/liveness — THE disk view (PURE)
@@ -620,10 +620,22 @@ function setup(ctx) {
     // only registered descriptors are iterated.
     const sessions = [];
     const seenSessionKeys = new Set();
+    // lane door-day-one-landing: the processes under a SIGN-IN terminal (its shell, the claude it runs, one level more) —
+    // the claude a login started in $HOME showed as an ACTIVE session named after the account (its folder); never a row
+    const signInPids = new Set();
+    for (const [id, s] of activeSessions) {
+      if (!s || s._purpose !== 'sign-in') continue;
+      let root = s._childPid || null;
+      if (!root) { try { root = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8')).childPid || null; } catch { root = null; } }
+      if (!root) continue;
+      signInPids.add(root);
+      for (const k of readChildPids(root)) { signInPids.add(k); for (const g of readChildPids(k)) signInPids.add(g); }
+    }
     for (const h of listHarnesses()) {
       if (!h.store || typeof h.store.discover !== 'function') continue;
       const entries = await h.store.discover({ activeSessions, webuiPids, devSnap });
       for (const entry of entries) {
+        if (entry && entry.pid && signInPids.has(entry.pid)) continue;   // a sign-in's own claude (lane door-day-one-landing)
         const key = `${entry.backend || h.id}:${entry.backendSessionId || entry.sessionId}`;
         if (seenSessionKeys.has(key)) continue;
         seenSessionKeys.add(key);

@@ -76,11 +76,11 @@ export const ROWS = [
   ['src/routes/apps.js', 'own-tree', 4, null, DATA],
   ['src/routes/browser-trace.js', 'own-tree', 2, null, DATA],
   ['src/routes/channels.js', 'own-tree', 5, null, DATA],
-  ['src/routes/files.js', 'user-path', 41, 'mounts\\.pathBlocked\\(p\\)', 'the explorer + every file op: the route middleware 503 by name, then SafeFs.call refuses at the pool door'],
+  ['src/routes/files.js', 'user-path', 42, 'mounts\\.pathBlocked\\(p\\)', 'the explorer + every file op: the route middleware 503 by name, then SafeFs.call refuses at the pool door'],
   ['src/routes/persistence.js', 'own-tree', 15, null, DATA],
-  ['src/routes/sessions.js', 'user-path', 26, 'DOOR\\.blocked\\(', 'a session cwd realpath (sync, main thread): null, not cached'],
+  ['src/routes/sessions.js', 'user-path', 27, 'DOOR\\.blocked\\(', 'a session cwd realpath (sync, main thread): null, not cached'],
   ['src/routes/window-targets.js', 'own-tree', 1, null, DATA],
-  ['src/safe-fs-worker.js', 'exempt', 19, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked)'],
+  ['src/safe-fs-worker.js', 'exempt', 24, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked)'],
   ['src/search-index-worker.js', 'own-tree', 5, null, CLI],
   ['src/secret-box.js', 'own-tree', 13, null, DATA], // lane key-file-law-stores: +3 — THE KEY-FILE LAW's reads (the key file raw/hex, each store's ciphertext files + their dirs); lane vault-e2e-password: +4 — data/vault.json and the `.sealed` markers beside a key file (is this dir's vault set up?); lane vault-e2e-password-fix-r2: +1 — sealedDir (data/vault.json's presence, for a process with no engine)
   ['src/app-secrets.js', 'own-tree', 7, null, DATA], // lane app-display-secrets: the service/sealer files beside it, the key file (secret-box), the app dir's sealed store + bus socket; lane vault-contents-window +3 — the Vault window lists data/desktop-apps/*, asks each app dir for its sealed store and reads it (own data dir)
@@ -94,7 +94,7 @@ export const ROWS = [
   ['src/server/vault-totp.js', 'own-tree', 2, null, DATA], // design q-047 L1 (lane vault-totp): data/vault-grants.json — who may have a two-step CODE (read, and its tmp opened `wx`); never a seed
   ['src/server/vault-run-door.js', 'user-path', 17, 'DOOR\\.blocked\\(', 'vibespace-vault run (lane vault-run-door): the run’s folder, its program’s path and a template the agent names — storage_blocked by name before any stat or read; + its own run folder under $XDG_RUNTIME_DIR (made, shredded, swept) and data/vault-run.json; + the run’s MARK scan (/proc and each process’s environ — procfs) and the program’s write check (access W_OK)'],
   ['src/server/voice-teach-engine.js', 'own-tree', 1, null, DATA], // lane voice-dictionary-nag: data/voice-suggestions.json (the suggestion ledger — the plugin's own store file, read once)
-  ['src/server/vault-engine.js', 'own-tree', 15, null, DATA], // lane vault-e2e-password: data/vault.json, the key files it seals (read, overwrite, unlink) and their `.sealed` markers; lane vault-e2e-password-fix-r2: +1 — secretAdopt reads a plaintext secret file (a host token) it seals; verify r2 +2: shred's and secretAdopt's lstat (a SYMLINK is never followed — its target neither read nor overwritten) — lane vault-manual-and-lock: +1 — usesOf reads the tail of its own data/vault-audit.jsonl (O_NOFOLLOW | O_NONBLOCK, ≤ 512 KiB) for `vibespace-vault uses`
+  ['src/server/vault-engine.js', 'own-tree', 17, null, DATA], // lane door-day-one-landing: +2 — the boot's «a secret is waiting» question (the store key files' presence + data/agentd's token names) // lane vault-e2e-password: data/vault.json, the key files it seals (read, overwrite, unlink) and their `.sealed` markers; lane vault-e2e-password-fix-r2: +1 — secretAdopt reads a plaintext secret file (a host token) it seals; verify r2 +2: shred's and secretAdopt's lstat (a SYMLINK is never followed — its target neither read nor overwritten) — lane vault-manual-and-lock: +1 — usesOf reads the tail of its own data/vault-audit.jsonl (O_NOFOLLOW | O_NONBLOCK, ≤ 512 KiB) for `vibespace-vault uses`
   ['src/server/csp-reports.js', 'own-tree', 4, null, DATA], // lane app-page-csp: data/csp-reports.jsonl (+ its .1) read at boot for the keys on disk, its size before an append — or the chrome suites' VIBESPACE_CSP_REPORTS_FILE under /tmp; never a user path. Lane chrome-156-followups +2: the checkout's own public/bundle.js — its stat (the build a report names) and its text once per build (the sanitizer's parse sites), async
   ['src/secret-file.js', 'own-tree', 2, null, DATA], // lane vault-e2e-password-fix-r2: replaceShredding opens the file it replaces (r+), to overwrite its old bytes (a data/ secret file); verify r2 +1: its lstat (a symlink is refused before the open — the overwrite would reach the target)
   ['src/server/host-tokens.js', 'own-tree', 7, null, DATA], // lane vault-e2e-password-fix-r2: data/agentd — the pre-vault host-<id>.token files (read / exists), the attach configs it strips, the dir listings, vault.json's presence (via secret-box)
@@ -154,6 +154,7 @@ export const ROWS = [
   ['src/server/mount-health-watch.js', 'exempt', 6, null, 'the server-tree watch: /proc + mountinfo, never a user path (the judge’s P4)'],
   ['src/server/mounts-plugins-wiring.js', 'own-tree', 8, null, DATA], // lane passkey-store-core: +3 — data/browser-passkeys.json + its key file (own data dir); lane key-file-law-stores: −2 — the key file reads through secret-box lawfulKey
   ['src/server/oat-mint.js', 'own-tree', 3, null, 'its own 0700 scratch dir per mint (the $BROWSER URL file) + the boot sweep of its own orphaned vs-oat-mint-* dirs (readdir + lstat of tmpRoot)'],
+  ['src/server/claude-signin.js', 'own-tree', 4, null, 'lane door-signin-card: the account\'s own pre-seeded creds dir (ensureSeed existsSync + the helper\'s .vibespace-login-status.json read — a member dir under data/subs) + the boot sweep of its own orphaned vs-signin-* scratch dirs (readdir + lstat of tmpRoot); nothing a person names'],
   ['src/server/ops-routes.js', 'own-tree', 10, null, DATA],
   ['src/server/otel-ingest.js', 'own-tree', 5, null, CLI], // B-1319: +1 = the stash replay's fs.promises read (the sync read stays, for a reader before the replay is done)
   ['src/server/permission-rules.js', 'own-tree', 3, null, CLI],
@@ -170,6 +171,7 @@ export const ROWS = [
   ['src/server/usage-index.js', 'own-tree', 1, null, CLI],
   ['src/server/usage-pool-engine.js', 'own-tree', 25, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
   ['src/server/usage-probe-log.js', 'own-tree', 3, null, CLI],
+  ['src/server/git-identity.js', 'own-tree', 1, null, `${CLI} — lane door-day-one-landing: ~/.claude.json's oauthAccount (the sign-in's email + name, git's default identity)`],
   ['src/server/window-targets-engine.js', 'own-tree', 4, null, DATA],
   ['src/server/wrapper-files.js', 'own-tree', 4, null, PROC],
   ['src/session-status.js', 'own-tree', 1, null, DATA],

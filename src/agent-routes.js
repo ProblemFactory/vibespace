@@ -1905,7 +1905,9 @@ const channelsTaughtFor = (s, id, { fresh = false } = {}) => {
   const m = channelsReachMemo.get(s);
   if (!fresh && m && t - m.at < CHANNELS_REACH_TTL_MS) return m.v;
   let v = false;
-  try { v = eng.reachCountFor(channelPrincipal(s, id)) || false; } catch { v = false; }
+  // lane pod-oauth-callback (study 1 L1): nothing connected yet on an instance whose admin offers a company app ⇒ 'connect'
+  // (the agent learns `vibespace-channels connect <kind>` — a Connect button in the chat, never a vendor's web login)
+  try { v = eng.reachCountFor(channelPrincipal(s, id)) || (typeof eng.connectTaught === 'function' && eng.connectTaught() ? 'connect' : false); } catch { v = false; }
   channelsReachMemo.set(s, { at: t, v });
   return v;
 };
@@ -1937,7 +1939,26 @@ app.get('/api/agent/channels/list', (req, res) => {
   if (!eng) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   const [s, id] = hit;
   // lane channel-agent-watch W2: `?all=1` adds the account directories' rows (titles the agent may REQUEST, never read)
-  chanAnswer(res, eng.listFor(channelPrincipal(s, id), { all: req.query.all === '1' || req.query.all === 'true' }));
+  const r = eng.listFor(channelPrincipal(s, id), { all: req.query.all === '1' || req.query.all === 'true' });
+  // lane pod-oauth-callback: the types no account of which is signed in — the CLI names them with the `connect` verb
+  if (r && r.ok && typeof eng.connectOffers === 'function') { try { r.connectable = eng.connectOffers().map((x) => ({ kind: x.kind, label: x.label, accounts: x.accounts })); } catch { } }
+  chanAnswer(res, r);
+});
+// lane pod-oauth-callback (study 1 L1 / study 2 M2 — an agent that needed Lark opened Lark's WEB login in its own browser;
+// another told the person to find the Channels window): `vibespace-channels connect <kind>` — the chat's tool card gets ONE
+// «Connect <type>» row (the witness's `connect` touch) that opens the Connect dialog on that type; the person signs in
+// there, the agent never holds a sign-in. Nothing is made here.
+app.post('/api/agent/channels/connect', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.connectOffer !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [, id] = hit;
+  const b = req.body || {};
+  const r = eng.connectOffer(typeof b.kind === 'string' ? b.kind : '');
+  if (r && r.ok) touchChannel(id, [{ op: 'connect', adapterId: r.kind, kind: r.kind, account: r.label, icon: r.glyph }]);   // §26: the row IS the Connect card
+  chanAnswer(res, r);
 });
 app.get('/api/agent/channels/read', async (req, res) => {
   const hit = agentSession(req, res);

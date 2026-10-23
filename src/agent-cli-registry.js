@@ -10,7 +10,8 @@
 //   · renderIndex — the table `vibespace-docs` with no argument prints (docs/agent/index-manual.md's generated block);
 //   · AGENT_DOC_TOPICS — topic → manual file(s), what `GET /api/agent/docs/:topic` serves.
 // `gate` is a NAME the hook already evaluates, never a function into the server: status / ask / task / jobs = the
-// per-feature toggles, channels = the session's reach word ('read' | 'request' — lane channels-teach), always. A closed
+// per-feature toggles, channels = the session's reach word ('read' | 'request' — lane channels-teach; 'connect' — lane
+// pod-oauth-callback: nothing connected yet and the admin offers a company app), always. A closed
 // gate OMITS the row from every surface (2.211.0: teaching a command whose endpoint refuses trains dead ends). A row with
 // `teach: null` is INDEX-ONLY: named in the docs pointer and the index, never injected. Row order = every surface's order.
 // scripts/test-cli-registry.mjs holds the census (every bin has a row or an EXCLUDED reason), the caps and the renders.
@@ -21,13 +22,17 @@
 const CHANNELS_SECTION_LINES = Object.freeze({
   read: 'What the user connected — mail, chats, threads — you may read here: `vibespace-channels list` (what you may read), `vibespace-channels search "<words>"` (across everything you can see), `vibespace-channels read <conv>`; `reply` only PROPOSES (the user approves). A question about people, mail, deals or chats: look here BEFORE any other connector or file. Manual: `vibespace-docs channels`.',
   request: 'The user connected mail, chats and threads you may ASK to read: `vibespace-channels list --all` names them, `vibespace-channels request <conv> "why"` files the ask (the user approves). A question about people, mail, deals or chats: ask here BEFORE any other connector or file. Manual: `vibespace-docs channels`.',
+  // lane pod-oauth-callback (study 1 L1: an agent that needed Lark opened Lark's WEB login in its own browser): nothing
+  // connected yet, the admin offers a company app — the agent puts the Connect button in the chat
+  connect: 'No mail or chat account is connected yet. A task needs one (Lark, Gmail, Slack)? `vibespace-channels connect <kind>` puts a Connect button for the user in this chat — they sign in there; never a vendor\'s web login in your browser. Manual: `vibespace-docs channels`.',
 });
 /** lane channels-teach: the reminder's segment by reach (each ≤ 120 B — test-channels-teach) */
 const CHANNELS_REMINDER_SEG = Object.freeze({
   read: 'vibespace-channels list|search "words"|read <conv> — the mail and chats the user connected; look there first',
   request: 'vibespace-channels list --all|request <conv> "why" — the mail and chats the user connected, yours to ask for',
+  connect: 'vibespace-channels connect <kind> — nothing connected yet: a Connect button for the user in this chat',
 });
-const channelsByReach = (map, reach) => map[reach === 'request' ? 'request' : 'read'];
+const channelsByReach = (map, reach) => map[reach === 'request' || reach === 'connect' ? reach : 'read'];
 /** the tray in the hub's words (tray-words phrase: its label and its current place); a caller that has none says only
  *  that it is theirs — never a guessed place */
 const trayOf = (tray) => (typeof tray === 'string' && tray ? tray : 'their tray');

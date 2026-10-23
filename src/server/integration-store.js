@@ -301,7 +301,8 @@ function create(deps = {}) {
    *  PICKS from it; the per-account rung (`cluster:<key>`) INDEXES it. */
   function clusterPresetsFor(row) {
     if (row.delegate) {
-      return (drivePresets() || []).map((p) => ({ key: String(p.key), label: String(p.label || p.key), values: { clientId: String(p.clientId || ''), clientSecret: String(p.clientSecret || '') } }));
+      // lane oauth-relay-road: + the client's relay page, when the entry names one (the Gmail row's `relayUrl` field)
+      return (drivePresets() || []).map((p) => ({ key: String(p.key), label: String(p.label || p.key), values: { clientId: String(p.clientId || ''), clientSecret: String(p.clientSecret || ''), ...(typeof p.relayUrl === 'string' && p.relayUrl ? { relayUrl: p.relayUrl } : {}) } }));
     }
     const src = clusterJsonEntries();
     let json = src.entries.filter((e) => e.id === row.id);
@@ -437,7 +438,15 @@ function create(deps = {}) {
   function presetsFor(id) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
-    return clusterPresetsFor(row).map((p) => ({ key: String(p.key), label: String(p.label || p.key) }));
+    return clusterPresetsFor(row).map((p) => ({ key: String(p.key), label: String(p.label || p.key), ...presetFactsOf(row, p.values) }));
+  }
+  /** lane pod-oauth-callback: the preset values its row DECLARES readable (`clusterEnv.facts` — Lark's brand) as
+   *  `{facts}`; each a short word, never a field's value (checkRow: facts ⊆ extras); nothing named ⇒ nothing added. */
+  function presetFactsOf(row, values) {
+    const names = row.clusterEnv && Array.isArray(row.clusterEnv.facts) ? row.clusterEnv.facts : [];
+    const facts = {};
+    for (const k of names) { const v = values && values[k]; if (typeof v === 'string' && /^[A-Za-z0-9._-]{1,40}$/.test(v.trim())) facts[k] = v.trim(); }
+    return Object.keys(facts).length ? { facts } : {};
   }
   /** THE ONE READER of a pre-r4 card's own values (r4 §2.6): the engine's
    *  one-shot copy of a legacy `own` account's client onto the account

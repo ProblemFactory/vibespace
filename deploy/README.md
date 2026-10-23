@@ -313,6 +313,38 @@ Values are never copied into the instance's `data/`, so rotating the Secret
 rotates every consumer on every instance; a withdrawn default leaves the row
 answering "not configured" with the reason, never serving a stale value.
 
+### One sign-in redirect per vendor app — the relay page
+
+A Lark app, a Slack app or a Google OAuth client lists the addresses a sign-in
+may come back to. Never list one per pod: every pod's sign-in under a company
+app rides ONE relay page, which sends the browser back to the pod it started
+from.
+
+```bash
+helm upgrade u-<user> . --reuse-values --set oauthRelayUrl=https://admin.<domain>/relay/
+```
+
+- `oauthRelayUrl` → `VIBESPACE_OAUTH_RELAY_URL` (every kind). The fleet admin
+  (vibespace-admin ≥ 2.11.0) serves the page at `/relay/`, allowing the fleet's
+  domain; any https host serving `docs/slack-relay/` with
+  `data-allow="<your pods' domain>"` works the same.
+- Register, ONCE per company app: that address — and only that. A company
+  preset never uses VibeSpace's public relay page (the owner, 2026-10-22): its
+  relay is its own `"relayUrl"` (an `integrations.json` Lark or Slack entry's
+  values, a `gdrive-clients.json` entry), else the fleet's
+  `VIBESPACE_OAUTH_RELAY_URL`, else none. Every instance on the preset rides
+  it — a local hub too. A Google client must be a **Web application** client:
+  a Desktop client cannot take an https address.
+- The public page (`https://problemfactory.github.io/vibespace/slack/`, the
+  default of Settings → Channels → relay page) is only for a person's OWN app
+  on a VibeSpace with no https address; a company app's setup never shows it.
+- Neither set = the preset has no relay page (its setup says so): each pod's
+  sign-in comes back to its own `https://<pod>/api/channels/oauth/cb/<kind>`,
+  which the app must then list; a local hub keeps its loopback.
+- The page sends back a private origin — Tailscale's `100.64.0.0/10` and
+  `*.ts.net` included — or an https host under its `data-allow`; it shows the
+  code anywhere else.
+
 ## App system — installed apps that survive a pod rebuild (optional)
 
 `--set appSystem.enabled=true` turns on App persistence Layer 1 (VibeSpace ≥

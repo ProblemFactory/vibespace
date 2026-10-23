@@ -813,7 +813,10 @@ function create(record = {}, deps = {}) {
           if (!consent || typeof consent.sign !== 'function') throw new ChannelError('not-supported', 'slack.auth.begin: no state signer was handed to this adapter', { retryable: false });
           const c = workspaceClient();
           const own = Manifest.originOf(origin);
-          const relay = c.source === 'cluster' ? c.relayUrl : (typeof consent.relayUrl === 'function' ? String(consent.relayUrl() || '') : '');
+          // lane oauth-relay-road addendum 1 (the owner 2026-10-22: the public page is never a company app's): a preset rides
+          // its own relay page, else the fleet's (VIBESPACE_OAUTH_RELAY_URL) — never the setting; a custom app the setting
+          const fleet = typeof consent.fleetRelayUrl === 'function' ? String(consent.fleetRelayUrl() || '').trim() : '';
+          const relay = c.source === 'cluster' ? (c.relayUrl || fleet) : (typeof consent.relayUrl === 'function' ? String(consent.relayUrl() || '') : '');
           const to = Manifest.redirectFor({ relayUrl: relay, origin: own });
           if (to.via === 'bad-relay') throw new ChannelError('forbidden', 'the Slack relay page address is not an https URL — fix it (the company preset\'s relayUrl, or Settings → Channels → Slack relay page)', { retryable: false, detail: { why: 'bad-relay' } });
           if (!to.uri && c.source === 'cluster') throw new ChannelError('not-supported', 'this VibeSpace has no https address and the company Slack app names no relay page — use "make your own app" instead', { retryable: false, detail: { why: 'no-https' } });

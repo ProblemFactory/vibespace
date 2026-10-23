@@ -27,6 +27,9 @@
 //      are grepped — the ONLY files allowed to hold a word are the DECLARED append-only bytes
 //      (the group log's ndjson, a run's own log file); the stub CLI's stdin (what a chat turn
 //      injects: the override notice, the reply quote) carries none
+//   §6 THE SIGN-IN ROAD (lane door-signin-fixes): a code typed into the Claude sign-in card (a stub
+//      `claude auth login` that reads it on its tty and dies silently) rides no route answer, no
+//      broadcast, no file and no journal line
 //   §5 CONTROL: a patched server copy whose For-you snapshot skips the fold (serves the item's
 //      original words from a shadow copy) makes the SAME walk go RED (run in-process over the
 //      real store: the fold that the copy drops is the one every reader depends on)
@@ -199,6 +202,13 @@ const fs = require('fs');
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('2.1.281 (Claude Code) stub'); process.exit(0); }
 if (args.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
+// \`claude auth login\` (§6, lane door-signin-fixes): the login screen, then it READS the pasted code on its tty (the line
+// discipline echoes it onto the prompt's line) and dies SILENTLY — exit 1, no worded error
+if (args[0] === 'auth' && args[1] === 'login') {
+  process.stdout.write('Browser didn\u2019t open? Use the url below to sign in (c to copy):\\r\\n\\r\\nhttps://claude.ai/oauth/authorize?code=true&state=walk\\r\\n\\r\\nPaste code here if prompted > ');
+  process.stdin.once('data', () => process.exit(1));
+  return;
+}
 const SID = ${J(SID)};
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5', cwd: ${J(CWD)}, tools: ['Bash'], permissionMode: 'default', claude_code_version: '2.1.281' });
@@ -533,6 +543,27 @@ await turn('second turn');
   await raw(`/api/jobs/${SVC_JOB}/stop`, { method: 'POST', body: { force: true } }); }
 // telemetry + incidents: no word
 { const tel = execSync(`grep -rl -F ${J(S)} ${J(path.join(DATA, 'telemetry'))} ${J(path.join(DATA, 'incidents'))} 2>/dev/null || true`, { encoding: 'utf8' }).trim(); check('telemetry shards + incident captures carry no word', !tel, tel); }
+
+// ── §6 THE SIGN-IN ROAD (lane door-signin-fixes, the verify's claim 2): a code typed into the Claude sign-in rides no answer ──
+console.log('\n§6 THE SIGN-IN ROAD: a code typed into the sign-in card reaches the CLI and nothing else');
+{
+  const SW = w('si1c'), holds = (x) => (typeof x === 'string' ? x : J(x) || '').includes(SW);
+  const f0 = frames.length;
+  const acct = await raw('/api/accounts/subscription', { method: 'POST', body: { signin: true } });
+  const aid = acct.json && acct.json.id;
+  const st = await raw(`/api/accounts/${aid}/signin`, { method: 'POST', body: {} });
+  let g = null; for (let i = 0; i < 60; i++) { g = await raw(`/api/accounts/${aid}/signin`); if (g.json && g.json.signin && g.json.signin.phase === 'waiting-code') break; await sleep(150); }
+  check('§6 the sign-in drives the stub CLI to its code prompt (POST …/subscription {signin:true} → POST …/signin)', !!aid && st.status === 200 && g.json && g.json.signin && g.json.signin.phase === 'waiting-code', { acct: acct.text.slice(0, 120), st: st.text.slice(0, 200), g: g && g.text.slice(0, 200) });
+  const sent = await raw(`/api/accounts/${aid}/signin/code`, { method: 'POST', body: { code: SW + '#walkstate' } });
+  for (let i = 0; i < 60; i++) { g = await raw(`/api/accounts/${aid}/signin`); if (g.json && g.json.signin && g.json.signin.phase === 'failed') break; await sleep(150); }
+  check('§6 the CLI read the code (its tty echoed it) and died silently ⇒ the sign-in failed', sent.status === 200 && g.json && g.json.signin && g.json.signin.phase === 'failed', { sent: sent.text.slice(0, 200), g: g.text.slice(0, 200) });
+  check('§6 no answer of the sign-in routes holds the typed code (start, code, GET after the death)', !holds(st.text) && !holds(sent.text) && !holds(g.text), { st: holds(st.text), sent: holds(sent.text), get: g.text.slice(0, 300) });
+  const seen = frames.slice(f0).filter((f) => f.type === 'claude-signin');
+  check(`§6 no claude-signin broadcast holds it (${seen.length} frames)`, seen.length > 0 && !seen.some(holds), seen.filter(holds).slice(0, 2));
+  const files = execSync(`grep -rl -F ${J(SW)} ${J(DATA)} ${J(fakeHome)} 2>/dev/null || true`, { encoding: 'utf8' }).trim();
+  check('§6 … nor any file under data/ or HOME, nor the server journal (the code reached the CLI only)', !files && !fs.readFileSync(JOURNAL, 'utf8').includes(SW), files);
+  await raw(`/api/accounts/${aid}`, { method: 'DELETE' });
+}
 
 // ── §5 CONTROL: the walk's judge over a copy whose For-you snapshot serves a SHADOW copy of the words ──
 console.log('\n§5 CONTROL: a reader that keeps a shadow copy of the words makes the same judge go red');

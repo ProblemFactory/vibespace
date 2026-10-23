@@ -224,7 +224,7 @@ try {
   const p2 = await evalJs(`(() => { const v = ${VIEW(sid)}; return { turnState: v?._turnState || null, asks: (v?._pendingAsks || []).map((a) => a.requestId), chip: !!(${CHIP(sid)}), typing: ${TYPING(sid)}, typingSince: !!v?._typingSince }; })()`);
   check('the view\'s turn state is requires_action (the ring\'s last word, not a bare streaming:true)', p2.turnState === 'requires_action', p2);
   check('the chip says "waiting for you" and the asks name the parked request', p2.chip && p2.asks.includes('req-park'), p2);
-  check('the typing line says "waiting for you", never "thinking"', p2.typingSince && /waiting for you/.test(p2.typing) && !/thinking/i.test(p2.typing), p2);
+  check('the typing line says it waits for the person, never "thinking" — and names the request in words (lane door-healthy-chat: «Waiting for you to allow: delete ds-out · run sign.sh»)', p2.typingSince && /waiting for you/i.test(p2.typing) && !/thinking/i.test(p2.typing) && p2.typing === 'Waiting for you to allow: delete ds-out · run sign.sh', p2);
   let turn = turnOfList(sid); for (let i = 0; i < 20 && turn !== 'waiting'; i++) { await sleep(250); turn = turnOfList(sid); }
   check('the session list\'s turn fact (the sidebar / For-you dot) is \'waiting\'', turn === 'waiting', turn);
   const stallBefore = stallLines.length;

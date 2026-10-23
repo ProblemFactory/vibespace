@@ -35,7 +35,7 @@
 //    plus optional `fields` rendered between the hint and the button (the
 //    channel side's OAuth-client select: switching the client IS a
 //    re-authorization).
-import { createModalShell, showToast, copyText, escHtml } from './utils.js';
+import { createModalShell, showToast, copyText } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { t as tr } from './i18n.js';
 
@@ -110,6 +110,42 @@ function drawConsentLinks(status, r, provider) {
     } }));
   };
   addNarrow(link, r.narrow);
+}
+// lane pod-oauth-callback (study 2 B2 — nobody walked the copy-the-failed-page's-address box; one tester closed the
+// dialog at it): a caller that names the box's line (`r.pasteTitle` — the channel account dialogs) makes the paste-back the
+// LAST RESORT — folded under that line; unfolded: why, in a person's words, the box, and for a consent that lands on this
+// instance (`public`) the address an admin adds to the vendor's app (`r.askAdmin`) and the other road (`r.otherRoad` — the
+// copy-the-address way). A pasted TOKEN (Slack's per-person app: `pasteSecret`) IS the road and stays open; a caller that
+// names no line (the storage dialogs — test-mounts-dialog-extract holds them to their baseline) keeps the open box.
+function pasteBack({ r = {}, pasteHint = null, pastePlaceholder, pasteSecret = false, onPaste, onOtherRoad = null }) {
+  const hint = document.createElement('div');
+  hint.className = 'mounts-field-hint';
+  hint.textContent = r.pasteHint || pasteHint || tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:");
+  const inp = document.createElement('input');
+  inp.placeholder = pastePlaceholder;
+  if (pasteSecret) { inp.type = 'password'; inp.autocomplete = 'off'; inp.spellcheck = false; }   // design 012: a pasted TOKEN is a secret — never drawn in the clear
+  inp.onchange = () => onPaste(inp.value);
+  if (pasteSecret || !r.pasteTitle) { const box = document.createElement('div'); box.append(hint, inp); return box; }
+  const box = document.createElement('details');
+  box.className = 'mounts-oauth-paste';
+  const sum = document.createElement('summary');
+  sum.className = 'mounts-field-hint';
+  sum.textContent = r.pasteTitle;
+  box.append(sum);
+  if (r.askAdmin && r.askAdmin.value) {
+    const a = document.createElement('div');
+    a.className = 'mounts-field-hint mounts-oauth-admin';
+    a.textContent = r.askAdmin.text;
+    box.append(a, copyLine(r.askAdmin.value));
+  }
+  box.append(hint, inp);
+  if (r.otherRoad && typeof r.otherRoad.run === 'function' && onOtherRoad) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'mounts-btn mounts-oauth-other'; b.textContent = r.otherRoad.label;
+    b.onclick = async () => { b.disabled = true; try { await onOtherRoad(await r.otherRoad.run()); } catch (e) { b.disabled = false; hint.textContent = (e && e.message) || tr('Failed'); } };
+    box.append(b);
+  }
+  return box;
 }
 export function oauthLinkRow(url) {
   const row = document.createElement('div');
@@ -318,6 +354,22 @@ export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, c
   let pasteBox = null, poll = null;
   const stopPoll = () => { clearInterval(poll); poll = null; };
   const finish = (token, user = null) => { stopPoll(); tokenInput.value = token; status.textContent = typeof finishText === 'function' ? finishText(user) : (finishText || connectedLine(user)); btn.textContent = tr('Reconnect'); btn.disabled = false; pasteBox?.remove(); pasteBox = null; };
+  // ONE consent shown in the block: its page opened, its links, the folded paste-back, its poll (lane pod-oauth-callback:
+  // the other road re-shows the block for the consent it started)
+  const show = (r, prov) => {
+    const _w = window.open(r.url, '_blank');
+    drawConsentLinks(status, r, prov);
+    status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider: prov });
+    if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
+    if (r.notice) status.textContent = r.notice;
+    pasteBox?.remove();
+    pasteBox = pasteBack({ r, pasteHint, pastePlaceholder: pastePlaceholder || 'http://127.0.0.1:53682/?state=…&code=…', pasteSecret,
+      onPaste: async (v) => { try { status.textContent = tr('Completing…'); const fr = await post(endpoints.callback, { url: v }); if (fr.error) throw new Error(fr.error); if (fr.token) finish(fr.token, fr.user || null); } catch (e) { status.textContent = e.message || tr('Failed'); } },
+      onOtherRoad: (r2) => { if (r2 && r2.error) throw new Error(r2.error); show(r2, prov); } });
+    wrap.appendChild(pasteBox);
+    stopPoll();
+    poll = setInterval(async () => { try { const st = await get(endpoints.status); if (st.token) finish(st.token, st.user || null); else if (st.error) { stopPoll(); status.textContent = st.error; btn.disabled = false; } else if (!st.running) { stopPoll(); btn.disabled = false; } } catch {} }, 1500);
+  };
   btn.onclick = async () => {
     btn.disabled = true; status.textContent = tr('Preparing authorization…');
     try {
@@ -326,20 +378,7 @@ export function wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, c
       if (extra) Object.assign(body, extra() || {});
       const r = await post(endpoints.start, body);
       if (r.error) throw new Error(r.error);
-      const _w = window.open(r.url, '_blank');
-      drawConsentLinks(status, r, provider || signins[body.backend] || body.backend);
-      status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider: provider || signins[body.backend] || body.backend });
-      if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
-      if (r.notice) status.textContent = r.notice;
-      if (!pasteBox) {
-        pasteBox = document.createElement('div');
-        pasteBox.innerHTML = `<div class="mounts-field-hint">${(r.pasteHint || pasteHint) ? escHtml(r.pasteHint || pasteHint) : escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
-        const inp = document.createElement('input'); inp.placeholder = pastePlaceholder || 'http://127.0.0.1:53682/?state=…&code=…';
-        if (pasteSecret) { inp.type = 'password'; inp.autocomplete = 'off'; inp.spellcheck = false; }   // design 012: a pasted TOKEN is a secret — never drawn in the clear
-        inp.onchange = async () => { try { status.textContent = tr('Completing…'); const fr = await post(endpoints.callback, { url: inp.value }); if (fr.error) throw new Error(fr.error); if (fr.token) finish(fr.token, fr.user || null); } catch (e) { status.textContent = e.message || tr('Failed'); } };
-        pasteBox.appendChild(inp); wrap.appendChild(pasteBox);
-      }
-      poll = setInterval(async () => { try { const st = await get(endpoints.status); if (st.token) finish(st.token, st.user || null); else if (st.error) { stopPoll(); status.textContent = st.error; btn.disabled = false; } else if (!st.running) { stopPoll(); btn.disabled = false; } } catch {} }, 1500);
+      show(r, provider || signins[body.backend] || body.backend);
     } catch (e) { status.textContent = e.message || tr('Failed to start authorization'); btn.disabled = false; }
   };
 }
@@ -505,27 +544,20 @@ export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText
     try {
       const r = await start(form ? form.readValues() : {});
       if (r.error) throw new Error(r.error);
-      const _w = window.open(r.url, '_blank');
-      drawConsentLinks(status, r, provider);
-      status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider });
-      if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
-      if (r.notice) status.textContent = r.notice;
-      if (!pasteBox) {
-        pasteBox = document.createElement('div');
-        pasteBox.innerHTML = `<div class="mounts-field-hint">${(r.pasteHint || pasteHint) ? escHtml(r.pasteHint || pasteHint) : escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
-        const inp = document.createElement('input');
-        inp.placeholder = pastePlaceholder;
-        if (pasteSecret) { inp.type = 'password'; inp.autocomplete = 'off'; inp.spellcheck = false; }
-        inp.onchange = async () => {
-          try {
-            status.textContent = tr('Completing…');
-            const fr = await callback(inp.value);
-            finish(fr.token);
-          } catch (e) { status.textContent = e.message || tr('Failed'); }
-        };
-        pasteBox.appendChild(inp);
+      // lane pod-oauth-callback: the other road re-shows the block for the consent it started (the folded paste-back)
+      const show = (x) => {
+        const _w = window.open(x.url, '_blank');
+        drawConsentLinks(status, x, provider);
+        status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider });
+        if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
+        if (x.notice) status.textContent = x.notice;
+        pasteBox?.remove();
+        pasteBox = pasteBack({ r: x, pasteHint, pastePlaceholder, pasteSecret,
+          onPaste: async (v) => { try { status.textContent = tr('Completing…'); const fr = await callback(v); finish(fr.token); } catch (e) { status.textContent = e.message || tr('Failed'); } },
+          onOtherRoad: (x2) => { if (x2 && x2.error) throw new Error(x2.error); show(x2); } });
         body.appendChild(pasteBox);
-      }
+      };
+      show(r);
       poll = setInterval(async () => {
         if (!status.isConnected) { stopPoll(); return; } // dialog closed
         try {

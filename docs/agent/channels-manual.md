@@ -22,6 +22,16 @@ files: that read has no card, no read marker and no budget record, and it
 skips the reach the user set. When `list` shows only rows marked
 `requestable` (or `list --all` shows titles), ask with `request <conv> "why"`.
 
+Nothing connected for what the task needs (`list` says `not connected yet:
+Lark / 飞书 (lark), Gmail (gmail)`)? Run `vibespace-channels connect <kind>`:
+your command's card in the user's chat gets a «Connect Lark» button that
+opens VibeSpace's own Connect dialog on that type (their company's app is
+preselected when the admin offers one); the user signs in there — on a
+cloud instance the sign-in comes back to VibeSpace by itself. Tell them in
+your reply that the button is there. Never open the vendor's web login in
+your browser instead (the user would sign in to a page, not connect an
+account, and nothing in VibeSpace could read or send for them).
+
 ## Commands
 
 ```
@@ -50,6 +60,7 @@ vibespace-channels search "words (all must appear)" [--account <id>] [--limit N]
 vibespace-channels read <conv> --around <msg id> # the vendor's messages around a message --full found (not saved)
 vibespace-channels status [<proposalId>]         # what you were given (access / notification) + your proposals
 vibespace-channels request <conv> "why"          # ask for access (requestable rows only)
+vibespace-channels connect <kind>                # no account of that type yet: a «Connect» button for the user in this chat
 vibespace-channels watch <conv|account> [--mode next-turn|wake|digest] [rule flags…] [--match any|every] [--cap N] [--why "…"]
                                                  # YOUR notification on what you can read (next-turn = free, at once; wake / digest = the user approves)
 vibespace-channels watch --show <conv|account>   # what notifies you there: yours + the user's for you (read-only)

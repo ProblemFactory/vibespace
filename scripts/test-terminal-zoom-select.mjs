@@ -95,6 +95,34 @@ try {
     check(`zoom ${z}, FIXED page (counter-zoom + font × scale): the selection lands on row 20`, fixed.row === 20 && /^ ?x{9,11}$/.test(fixed.text), fixed);
     check(`zoom ${z}: the fixed screen is the same visual size as the raw one (±3 %)`, Math.abs(fixed.screen[0] - raw.screen[0]) / raw.screen[0] < 0.03 && Math.abs(fixed.screen[1] - raw.screen[1]) / raw.screen[1] < 0.03, { raw: raw.screen, fixed: fixed.screen });
   }
+
+  // lane door-signin-card (D3 / C2): the terminal's links open through the product in a NEW TAB,
+  // never xterm's default native "WARNING: This link could potentially be dangerous" confirm that
+  // scared 3 of 7 naive testers off the Claude sign-in link. Run terminal.js's REAL WebLinksAddon
+  // handler, with the REAL @xterm/addon-web-links, in this browser.
+  {
+    const termSrc = fs.readFileSync(path.join(repo, 'src/lib/terminal.js'), 'utf8');
+    const handlerSrc = (termSrc.match(/new WebLinksAddon\((\(event, uri\) => \{[\s\S]*?\})\)/) || [])[1];
+    check('terminal.js wires a WebLinksAddon handler that window.open()s http(s)', !!handlerSrc && /window\.open/.test(handlerSrc) && /https\?/.test(handlerSrc), handlerSrc ? handlerSrc.slice(0, 90) : null);
+    const WL = path.join(repo, 'node_modules/@xterm/addon-web-links/lib/addon-web-links.js');
+    await evalJs(`new Promise((res,rej)=>{const s=document.createElement('script');s.src=${JSON.stringify('file://' + WL)};s.onload=()=>res(true);s.onerror=()=>rej(new Error('addon load failed'));document.head.appendChild(s);})`);
+    const R = JSON.parse(await evalJs(`(() => {
+      const W = window.WebLinksAddon && (window.WebLinksAddon.WebLinksAddon || window.WebLinksAddon);
+      const opens = []; let confirms = 0;
+      window.open = (...a) => { opens.push(a); return {}; };
+      window.confirm = () => { confirms++; return true; };
+      const H = ${handlerSrc};
+      const host = document.createElement('div'); document.body.appendChild(host);
+      const term2 = new Terminal({ rows: 4, cols: 80 }); term2.open(host);
+      let ctorOk = true; try { term2.loadAddon(new W(H)); } catch (e) { ctorOk = false; }
+      H({ preventDefault(){} }, 'https://claude.com/oauth/authorize?code=true');
+      H({ preventDefault(){} }, 'ftp://evil.example/x');
+      return JSON.stringify({ ctorOk, opens, confirms });
+    })()`));
+    check('the real WebLinksAddon accepts the product handler', R.ctorOk, R);
+    check('an http(s) link opens in a NEW TAB via window.open, with no native confirm', R.opens.length === 1 && R.opens[0][0] === 'https://claude.com/oauth/authorize?code=true' && R.opens[0][1] === '_blank' && /noopener/.test(R.opens[0][2] || '') && R.confirms === 0, R);
+    check('a non-http(s) link is ignored (never auto-opened)', R.opens.length === 1, R);
+  }
 } catch (e) { failed++; console.error('  ✗ harness error: ' + e.message); }
 ws.close();
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');

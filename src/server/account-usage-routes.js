@@ -676,13 +676,26 @@ const oatMint = require('./oat-mint.js').create({ accounts, claudeCmd: CLAUDE_CM
   windows: () => (typeof engine.establishedWindows === 'function' ? engine.establishedWindows() : {}),
   journal: (rec) => { try { require('./usage-probe-log.js').appendProbeLog(accounts.dataDir, { rung: 'oat-mint', ...rec }); } catch { } } });
 require('./oat-mint.js').registerMintRoutes(app, { mint: oatMint, isAgentBearer });
+// THE HUMANE CLAUDE SIGN-IN (lane door-signin-card): the hub drives `claude auth login
+// --claudeai` (through the same subscription-login helper the Add flow types into a terminal)
+// in a PTY IT OWNS, so the person signs in on a CARD (chat / tour / Manage agents) — no
+// terminal, theme picker, method menu or trust prompt. This ORCH only drives the login screen;
+// the client card calls the EXISTING /subscription/:id/finalize | /:id/relogin-finalize routes
+// (above) once the sign-in lands, so the identity merge / login-expiry sweep / pool wake are unchanged.
+const claudeSignin = require('./claude-signin.js').create({ accounts, claudeCmd: CLAUDE_CMD, nodeCmd: NODE_CMD,
+  helperPath: CLAUDE_SUBSCRIPTION_LOGIN_HELPER, broadcastAll, exitHook: true, hub: true }); // hub: the WS layer's page holds (lane door-signin-fixes)
+require('./claude-signin.js').registerSigninRoutes(app, { signin: claudeSignin, isAgentBearer });
 // the token's identity post-check (lane oat-identity-postcheck) is told when a save / a removal / a move replaces a
 // check — it resolves the For-you notice the old one filed (the account store exists by now)
 if (typeof engine.oatIdentityAttach === 'function') engine.oatIdentityAttach();
 
 app.post('/api/accounts/subscription', (req, res) => {
   try {
-    const { id, dir } = accounts.createSubscription(req.body || {});
+    // the sign-in card's row (lane door-signin-fixes): `{signin: true}` reuses an idle never-signed-in row the card made
+    // before (marked signinPending), so «Try again» never adds a row; the terminal Add flow keeps a fresh one per press
+    const { id, dir } = req.body && req.body.signin === true
+      ? accounts.pendingSignin({ busy: (aid) => claudeSignin.isLive(aid) })
+      : accounts.createSubscription({ name: req.body && req.body.name });
     // The client opens a shell terminal with this exact command. The helper
     // runs the official `claude auth login --claudeai` with BOTH config envs
     // scoped to the pre-seeded account dir, isolating credentials + identity

@@ -589,6 +589,12 @@ function registerWsHandler(wss, ctx) {
 
         // lane artifacts-model: the user's own save in an editor window linked to this chat (`from`) — the owning
         // conversation's deliverable row gets by:user edits+1 (its card patched) and ONE next-turn note (the stash, free)
+        // lane door-signin-fixes: the page that started a Claude sign-in HOLDS its run (src/server/claude-signin.js) — this
+        // socket's close releases it; a run nobody holds again within SIGNIN_ORPHAN_MS is cancelled, not left to its TTL
+        case 'claude-signin-hold': {
+          try { require('./server/claude-signin.js').socketHold(ws, data); } catch { }
+          break;
+        }
         case 'artifact-touch': {
           try { require('./server/artifact-registry.js').touch({ sessionId: data.sessionId, host: data.host || '', path: data.path, summary: String(data.summary || '').slice(0, 300) }); } catch (e) { console.warn('[artifacts] touch failed:', e.message); }
           break;
@@ -1369,6 +1375,8 @@ function registerWsHandler(wss, ctx) {
                 // cards and each helper's), oldest first — the waiting chip names who waits and
                 // jumps to the card even when it is outside the loaded window (`msgIndex`)
                 pendingAsks: (() => { try { const mm = session._normalizer; return mm ? (typeof mm.pendingAsks === 'function' ? mm.pendingAsks() : pendingAsksOf(mm.messages)) : []; } catch { return []; } })(),
+                // lane door-healthy-chat: the kinds of record the harness added (never drawn in the chat — the bar's quiet chip)
+                recordKinds: (() => { try { return session._normalizer?.addedKinds?.() || []; } catch { return []; } })(),
                 normEpoch: session._normEpoch || 0,
                 remoteState: session._vaultWait ? { state: 'vault-locked', at: session._vaultWait } : session._remoteState || (session._bareRemote ? { state: 'unprotected' } : null),   // lane vault-e2e-password-fix-r2: waiting for the vault
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null,
@@ -1774,6 +1782,7 @@ function registerWsHandler(wss, ctx) {
 
     ws.on('close', () => {
       try { const de = getDesign && getDesign(); if (de) de.unwatchSocket(ws); } catch { }   // a closed socket's design watches end with it
+      try { require('./server/claude-signin.js').socketClosed(ws); } catch { }   // lane door-signin-fixes: the sign-in runs this page held
       for (const sid of attachedSessions) {
         const session = activeSessions.get(sid);
         if (session) {

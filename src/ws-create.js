@@ -7,6 +7,8 @@
  * pre-extraction meaning (inner loops' breaks are untouched).
  */
 
+const DAY_ONE = require('./day-one.js');   // lane door-day-one-landing: SIGN_IN — a sign-in terminal is not a session row
+const { ensureGitIdentity } = require('./server/git-identity.js');   // lane door-day-one-landing: git's name / email default from the sign-in's account
 const { MessageManager } = require('./message-manager');
 const { capsOf, worktreeRefusal, worktreeSpawnArgs } = require('./backend-caps');
 const { get: harnessOf } = require('./harnesses'); // S9: store-side fork (opencode serve) before the spawn
@@ -956,6 +958,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // lane peer-card-sender: a name GIVEN at creation (the client sends `sessionName` only for one — its 'Session N' default
             // stays client-side) outranks the first message on the sidebar card; persisted as meta `nameExplicit`
             _nameExplicit: typeof data.sessionName === 'string' && !!data.sessionName.trim(),
+            // lane door-day-one-landing (the naive-user studies: the sign-in terminal and the claude inside it showed as two
+            // ACTIVE sessions nobody made): a terminal a sign-in opened says so — the sidebar lists no row for it, the live
+            // count skips it, and the claude it runs is no discovered row (routes/sessions.js) — src/day-one.js SIGN_IN
+            _purpose: data.purpose === DAY_ONE.SIGN_IN ? DAY_ONE.SIGN_IN : null,
             createdAt: Date.now(),
             // Per-session bearer for the agent-facing API (vibespace-status):
             // spawned into the CLI's env, scopes writes to this session only
@@ -1518,9 +1524,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             setTimeout(() => { try { hosts?.invalidateDiscovery?.(session.host); } catch {} }, 3000);
           }
 
+          if (!session.host) ensureGitIdentity().catch(() => {});   // lane door-day-one-landing: a local agent's first commit has an identity (once; never over git's own)
           writeSessionMeta(sockName, {
             name: session.name,
             nameExplicit: session._nameExplicit || undefined, // lane peer-card-sender: restored by boot-restore
+            purpose: session._purpose || undefined, // lane door-day-one-landing: a sign-in terminal stays one after a restart
             cwd,
             spawnModel: data.model || null, // plan C model ladder's floor — survives restarts
             agentdPipe: r6Handle ? true : undefined, // R6: daemon-owned pipe session (restore re-opens it, no dtach socket exists)

@@ -406,7 +406,7 @@ export function census(texts) {
     ok: /switchesClient\(/.test(editC) && /showReauthAccountDialog\(app, a, \{ kinds, preselect:/.test(editC), why: 'the channel Save no longer routes a client switch to re-authorize' });
   out.push({ rule: '§7 …and on both sides the token lands WITH the new client (storage: drive-token {token, client} / Gmail PATCH {clientPreset, token}; channel: the reauthorize choice body)',
     ok: /drive-token`, \{ method: 'POST', body: JSON\.stringify\(\{ token, client: sw\.client \}\)/.test(switchReauth) && /JSON\.stringify\(\{ clientPreset: sw\.client\.clientPreset, token \}\)/.test(switchReauth)
-      && /\/reauthorize`, choiceBody\(vals\)/.test(chanReauth), why: 'a side writes the token without its client' });
+      && /\/reauthorize`, (?:\{ \.\.\.)?choiceBody\(vals\)/.test(chanReauth), why: 'a side writes the token without its client' });   // lane pod-oauth-callback: the body may carry `road` beside the choice
   const mo = mountsEditOrder(mounts), co = channelsEditOrder(dlg), mk = mockupEditOrder(texts[EDIT_MOCKUP]);
   out.push({ rule: `§7 Edit's buttons, storage: ${EDIT_ORDER.mounts.join(' · ')}`, ok: JSON.stringify(mo) === JSON.stringify(EDIT_ORDER.mounts), why: `read ${JSON.stringify(mo)}` });
   out.push({ rule: `§7 Edit's buttons, channel: ${EDIT_ORDER.channels.join(' · ')}`, ok: JSON.stringify(co) === JSON.stringify(EDIT_ORDER.channels), why: `read ${JSON.stringify(co)}` });

@@ -81,7 +81,8 @@ function create({ sessions = () => null, broadcast = () => {}, metaStore = () =>
     for (const x of inputs) {
       if (!x) continue;
       let acc = null;
-      try { acc = accountOf(x.adapterId) || null; } catch { acc = null; }
+      // lane pod-oauth-callback: a `connect` touch names an account TYPE (no account of it may exist yet) — its words and glyph are the route's
+      if (x.op !== 'connect') { try { acc = accountOf(x.adapterId) || null; } catch { acc = null; } }
       // B-c127 THE NAME LADDER: the conversation's name as the engine knows it NOW (① its title → ② a description) wins
       // over the agent answer's `title`, which says the raw id when the conversation had no title (agentTitle's fallback)
       let named = null;
@@ -91,7 +92,7 @@ function create({ sessions = () => null, broadcast = () => {}, metaStore = () =>
         title: inert(named || x.title, T.TITLE_MAX),
         account: inert(x.account || (acc && acc.label) || '', T.LABEL_MAX),
         kind: x.kind || (acc && acc.kind) || null,
-        icon: (acc && acc.glyph) || null,   // lane dc-channels-blocks: the adapter's DECLARED glyph (caps.glyph)
+        icon: (acc && acc.glyph) || (x.op === 'connect' ? x.icon || null : null),   // lane dc-channels-blocks: the adapter's DECLARED glyph (caps.glyph); a connect touch's is its type's
         ...(x.glyph ? { glyph: inert(x.glyph, 70) } : {}),
         ...(x.query ? { query: inert(x.query, T.QUERY_MAX) } : {}),   // .212: the agent's search words — its own text, made inert
       });

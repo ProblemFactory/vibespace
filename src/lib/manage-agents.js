@@ -54,6 +54,7 @@ import { enterSubmits } from './chat-enter-keys.js';
 import { revealAccountKey } from './vault-reveal.js'; // lane vault-contents-window r2: Show key… through THIS page's reveal window (验证是你 first)
 import { hubRegistrationRow, draftLine } from './cli-registration-words.js'; // lane cli-2-1-308-records: the hub's claude is a build with no record table ⇒ the line + 「生成记录草稿」
 import { mintShowVerdict } from '../oat-mint-model.js'; // PURE (lane heavy3-flake-races): a late answer never repaints over a newer push
+import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (the same one the chat and the tour show)
 
 // Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
 // key, name-sorted within a type. ONE comparator for both rosters (2.369.18 —
@@ -607,6 +608,21 @@ export function installManageAgents(App, ctx = {}) {
   // login, the API key lives in our store, sessions pick per-spawn. Each login
   // step opens a terminal; a background watcher detects completion and reopens
   // the wizard at the next step.
+  // THE HUMANE SIGN-IN (lane door-signin-card): the same CARD the chat's «Not
+  // logged in» card and the tour show, in a modal. It drives `claude auth login
+  // --claudeai` in a hub-owned PTY (src/server/claude-signin.js) — no terminal,
+  // theme picker, method menu or trust prompt — and finalises through the normal
+  // Add road (so signing in again folds into the existing account by e-mail). The
+  // terminal and long-lived-token roads stay under «Add subscription…» (advanced).
+  _openSignInCard() {
+    let card = null;
+    const { body, close } = createModalShell({ id: 'signin-dialog', title: t('Sign in with Claude'), minWidth: 'min(460px, 92vw)', escapeToClose: true, onClose: () => { try { card?.destroy(); } catch { } } });
+    const host = document.createElement('div');
+    body.appendChild(host);
+    card = new SignInCard({ ws: this.ws, hasWaiting: () => false, onConnected: () => { try { this.refresh?.(); } catch { } setTimeout(() => { try { close(); } catch { } }, 1500); } });
+    card.mount(host);
+  },
+
   // Add another Claude subscription: name it, allocate an isolated creds dir,
   // open a login terminal scoped to that dir (does NOT disturb the CLI's global
   // login), and watch for the OAuth login to land. Held per-account, switchable
@@ -641,7 +657,7 @@ export function installManageAgents(App, ctx = {}) {
     if (hostId) {
       const login = remoteClaudeSubscriptionLoginCommand(created.id);
       this._watchHostLogin(hostId, hostLabel, created.id, login.attempt);
-      this.openShellTerminal(undefined, { hostId, initialCommand: login.command });
+      this.openSignInTerminal(undefined, { hostId, initialCommand: login.command });
       showToast(t('A terminal opened ON {host} — sign in there. The login lives on {host} only; sessions on it can then pick this account.', { host: hostLabel }), { duration: 7000 });
       refresh();
       return;
@@ -652,7 +668,7 @@ export function installManageAgents(App, ctx = {}) {
     refresh();
     // Open a login terminal with the env-scoped command. The sign-in writes THIS
     // account's creds into its own dir — your current/global login is untouched.
-    this.openShellTerminal(undefined, { initialCommand: created.loginCmd });
+    this.openSignInTerminal(undefined, { initialCommand: created.loginCmd });
     showToast(t('A terminal opened — sign in with the account you want to add. Your other logins are untouched; VibeSpace captures it automatically.'), { duration: 6000 });
     // Poll finalize until the creds file appears (or give up after ~5 min).
     let tries = 0;
@@ -690,7 +706,7 @@ export function installManageAgents(App, ctx = {}) {
     try { r = await fetchJson('/api/accounts/console-login', { method: 'POST' }); }
     catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
     if (!r?.loginCmd) { showToast(r?.error || t('Could not start'), { type: 'error' }); return; }
-    this.openShellTerminal(undefined, { initialCommand: r.loginCmd });
+    this.openSignInTerminal(undefined, { initialCommand: r.loginCmd });
     showToast(t('A terminal opened — pick “Anthropic Console account” and sign in. Your subscription login stays intact.'), { duration: 6000 });
     let tries = 0;
     const iv = setInterval(async () => {
@@ -727,7 +743,7 @@ export function installManageAgents(App, ctx = {}) {
     if (!created?.loginCmd) { showToast(created?.error || t('Could not start'), { type: 'error' }); return; }
     // Login writes THIS account's auth.json into its own CODEX_HOME; sessions
     // stay shared (symlinked). Your other logins are untouched.
-    this.openShellTerminal(undefined, { initialCommand: created.loginCmd });
+    this.openSignInTerminal(undefined, { initialCommand: created.loginCmd });
     showToast(t('A terminal opened — sign in with the ChatGPT account you want to add. Your other logins are untouched; VibeSpace captures it automatically.'), { duration: 6000 });
     let tries = 0;
     const iv = setInterval(async () => {
@@ -763,7 +779,7 @@ export function installManageAgents(App, ctx = {}) {
       created = await fetchJson('/api/accounts/home-subscription', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backend: be, name: (name || '').trim() }) });
     } catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
     if (!created?.loginCmd) { showToast(created?.error || t('Could not start'), { type: 'error' }); return; }
-    this.openShellTerminal(undefined, { initialCommand: created.loginCmd });
+    this.openSignInTerminal(undefined, { initialCommand: created.loginCmd });
     showToast(t('A terminal opened — {cli} shows a sign-in link: open it, sign in with the account you want to add, and paste the code back. Your other logins are untouched; VibeSpace captures it automatically.', { cli: label }), { duration: 8000 });
     this._watchHomeLogin(created.id);
   },
@@ -775,7 +791,7 @@ export function installManageAgents(App, ctx = {}) {
     try { r = await fetchJson(`/api/accounts/home-subscription/${encodeURIComponent(id)}/login`, { method: 'POST' }); }
     catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
     if (!r?.loginCmd) { showToast(r?.error || t('Could not start'), { type: 'error' }); return; }
-    this.openShellTerminal(undefined, { initialCommand: r.loginCmd });
+    this.openSignInTerminal(undefined, { initialCommand: r.loginCmd });
     showToast(t('A terminal opened — {cli} shows a sign-in link: open it, sign in with this account, and paste the code back. VibeSpace captures it automatically.', { cli: getBackendMeta(be).label }), { duration: 8000 });
     this._watchHomeLogin(id, { again: true });
   },
@@ -1046,7 +1062,7 @@ export function installManageAgents(App, ctx = {}) {
     catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
     if (!r?.loginCmd) { showToast(r?.error || t('Could not start'), { type: 'error' }); return; }
     const baseline = r.baselineAttempt || null;
-    this.openShellTerminal(undefined, { initialCommand: r.loginCmd });
+    this.openSignInTerminal(undefined, { initialCommand: r.loginCmd });
     showToast(t('A terminal opened — sign in as “{name}”. Only this account’s login is refreshed; every other login is untouched.', { name: a?.name || '' }), { duration: 6000 });
     let tries = 0;
     const iv = setInterval(async () => {
@@ -2057,10 +2073,11 @@ export function installManageAgents(App, ctx = {}) {
     // append logic below (backend rows, rosters, integration) runs unchanged
     // inside the section — nothing in it needs the OUTER dialog body.
     const renderMachine = async (body, selectedHost, hostLabel, hostTransport, stale) => {
-      const run = (cmd) => {
+      const run = (cmd, { signIn = false } = {}) => {   // signIn: a login terminal — not a session row (lane door-day-one-landing)
         done();
-        if (selectedHost) this.openShellTerminal(undefined, { hostId: selectedHost, initialCommand: cmd });
-        else this.openShellTerminal(undefined, { initialCommand: cmd });
+        const open = signIn ? (c, o) => this.openSignInTerminal(c, o) : (c, o) => this.openShellTerminal(c, o);
+        if (selectedHost) open(undefined, { hostId: selectedHost, initialCommand: cmd });
+        else open(undefined, { initialCommand: cmd });
       };
       // Row actions re-render the WHOLE surface (all machines) — the same
       // full-refresh semantics the single-machine dialog had.
@@ -2179,7 +2196,7 @@ export function installManageAgents(App, ctx = {}) {
         if (info.installed && !info.loggedIn && !(b.key === 'claude' && !selectedHost && info.namedLoggedIn > 0)) {
           const loginBtn = document.createElement('button'); loginBtn.className = 'agent-btn primary'; loginBtn.textContent = t('Log in');
           loginBtn.title = selectedHost ? t('Logs in ON the selected remote host (its own login, not VibeSpace)') : '';
-          loginBtn.onclick = () => run(selectedHost && b.remoteLoginCmd ? b.remoteLoginCmd : absCmd(b.loginCmd));
+          loginBtn.onclick = () => run(selectedHost && b.remoteLoginCmd ? b.remoteLoginCmd : absCmd(b.loginCmd), { signIn: true });
           actions.appendChild(loginBtn);
         }
         if (info.installed) {
@@ -3191,12 +3208,13 @@ export function installManageAgents(App, ctx = {}) {
             done();
             const login = remoteClaudeSubscriptionLoginCommand(sa.id);
             this._watchHostLogin(selectedHost, hostLabel, sa.id, login.attempt);
-            this.openShellTerminal(undefined, { hostId: selectedHost, initialCommand: login.command });
+            this.openSignInTerminal(undefined, { hostId: selectedHost, initialCommand: login.command });
             showToast(t('Sign in as “{name}” in the terminal — this login lives ON {host} only; the machine’s own login is untouched.', { name: sa.name, host: hostLabel }), { duration: 7000 });
           } });
         }
         items.push({ label: t('New subscription — log in on {host}…', { host: hostLabel }), action: () => { done(); this._addSubscription(selectedHost, hostLabel); } });
       } else {
+        items.push({ label: t('Sign in with Claude…'), action: () => { done(); this._openSignInCard(); } });
         items.push({ label: t('Add subscription…'), action: () => { done(); this._addSubscription(); } });
         // Add a subscription straight as a LONG-LIVED TOKEN (B-211a) — no local
         // login needed, usable on any machine. Mints the account record then

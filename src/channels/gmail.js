@@ -87,6 +87,7 @@ const { createGmailLive, PUBSUB_SCOPE, UNAVAILABLE_WORDS } = require('./live/gma
 // attribution, ticket banners and signatures set apart; `text` stays whole.
 const Blocks = require('../channel-blocks.js');
 const SR = require('../channel-search.js');   // design 010 S6: THE snippet reader + the search bounds (PURE)
+const CR = require('../consent-road.js');   // lane pod-oauth-callback: WHERE the sign-in comes back (the instance's route / the loopback) + the route's state and page (PURE)
 
 const KIND = 'gmail';
 const LABEL = 'Gmail';
@@ -249,8 +250,16 @@ const SEARCH_PAGE = 10;
 const SEARCH_IDS_NARROW = 100;
 
 /** lane dc-channels-consent: THE CONSENT ROW (src/channels/index.js validateConsent) — Google's installed-app consent comes
- *  back to an EPHEMERAL loopback port; nothing lands on the instance's own routes. */
-const CONSENT = Object.freeze({ mode: 'ephemeral', landing: null });
+ *  back to an EPHEMERAL loopback port. lane pod-oauth-callback (study 2 B2): on an instance with an https address and a
+ *  browser elsewhere it comes back to the instance's own route (`public`, src/consent-road.js) — a web client's
+ *  registered redirect. lane oauth-relay-road (the owner 2026-10-22: one registered address per app): THE RELAY PAGE
+ *  first — the fleet's, the company preset's, else this setting (channels.gmailRelayUrl, default the project's public
+ *  page; empty = none). */
+const CONSENT = Object.freeze({
+  mode: Object.freeze(['ephemeral', 'public']),
+  landing: Object.freeze({ stateVerdict: (s, o = {}) => CR.stateVerdict(s, { ...o, kind: KIND }), landingHtml: (r) => CR.landingHtml(r, { name: 'Google' }) }),
+  relayUrlSetting: Object.freeze({ key: 'gmailRelayUrl', fallback: CR.RELAY_DEFAULT }),   // the server setting channels.<key>
+});
 
 const caps = Object.freeze({
   receive: 'push',
@@ -881,6 +890,7 @@ function create(record = {}, deps = {}) {
   const resolveIntegration = typeof deps.resolveIntegration === 'function' ? deps.resolveIntegration : null;
   const tokens = deps.tokens || null;
   const oauth = deps.oauth || null;
+  const consent = deps.consent || null;   // lane pod-oauth-callback: the engine's consent facts (sign, publicUrl) — the route road's
   const log = deps.log || console;
 
   /** The include query is read from the LIVE record at call time — the
@@ -1270,13 +1280,18 @@ function create(record = {}, deps = {}) {
        *  parameters, the CLIENT from the resolver, the exchange requiring a
        *  refresh_token (gmail-sync's own check), then ONE profile read so
        *  `isSelf` and the row's "who" can be answered. */
-      async begin() {
+      async begin({ origin = null, road = null } = {}) {
         if (!oauth) throw new ChannelError('not-supported', 'gmail.auth.begin: no OAuth loopback was handed to this adapter', { retryable: false });
         const cred = credential();
         if (!cred.values) throw new ChannelError('auth-expired', `cannot start a Gmail consent flow: ${cred.why}`, { retryable: false, detail: { needsCredentials: true, missing: cred.missing } });
         const { clientId, clientSecret } = cred.values;
+        // lane pod-oauth-callback: THE ROAD — the instance's route (its https address, a browser elsewhere) or the ephemeral loopback;
+        // lane oauth-relay-road: the relay page first (the fleet's › the preset's › the setting's), when it sends this browser back
+        const way = CR.consentRoad({ kind: KIND, publicUrl: consent && typeof consent.publicUrl === 'function' ? consent.publicUrl() : '', origin, road, ...CR.relayOf(consent, cred) });
+        const viaRoute = way.road !== 'loopback' && !!consent && typeof consent.sign === 'function';
         return oauth.begin({
-          id: adapterId, mode: 'ephemeral', label: 'Gmail',
+          id: adapterId, label: 'Gmail',
+          ...(viaRoute ? { mode: 'public', redirectUri: way.redirectUri, stateFor: ({ flowId, issuedAt }) => CR.stateOf({ origin: way.u, flowId, issuedAt, kind: KIND }, consent.sign), road: way.road } : { mode: 'ephemeral' }),
           successText: 'VibeSpace: Gmail connected — you can close this tab.',
           buildConsentUrl: ({ redirectUri, state }) => AUTH_URL + '?' + new URLSearchParams({
             client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope: scopesFor().join(' '),

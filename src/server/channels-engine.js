@@ -105,6 +105,7 @@ const VB = require('../vault-blocked.js');   // PURE: a refusal's actor name (la
 const { VAULT_LOCKED: VAULT_LOCKED_CODE } = require('../key-file.js');   // lane vault-e2e-password-fix-r2: the vault's refusal code
 const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');   // the two credential-key forms, spelled ONCE (the store's)
 const R = require('../integration-registry.js');   // PURE: the rows' `bindsPerAccount` + `clientFieldsOf` (the custom client's two fields)
+const ROAD = require('../consent-road.js');   // lane pod-oauth-callback (PURE): the route a redirect consent lands on (the kinds digest's `consentRoute`)
 const { createOAuthLoopback, OPTIONAL_SCOPES_MAX } = require('../oauth-loopback.js');
 // P2: the PURE filter / assignment / renderer (design §7). Everything after
 // `store.append` is PURE except the two ORCH calls at the end of `wake()`.
@@ -473,6 +474,10 @@ function create(deps = {}) {
     deliver = null,
     // The setting reader (`channels.pushCoalesceSeconds`, fence 12).
     serverSetting = () => undefined,
+    // lane pod-oauth-callback: THIS INSTANCE'S ADDRESS (src/server/instance-url.js `url()`, the ONE resolver) — a redirect
+    // consent (Lark, Gmail) lands on <https address>/api/channels/oauth/cb/<kind> when the browser is elsewhere
+    // (src/consent-road.js); null ⇒ the adapter's own loopback, as before.
+    publicUrl = () => null,
     // The LIVE agent sessions an assignment can address: `() => [{cid, name,
     // groups[]}]` — cid is the conversation id the ladder addresses; groups
     // are the task-group ids the session belongs to (round-robin, §7.3).
@@ -564,8 +569,13 @@ function create(deps = {}) {
     return v === undefined || v === null ? s.fallback : String(v).trim();
   }
   /** The consent facts an adapter whose row declares a LANDING is handed (`deps.consent`): `sign` = the per-boot state
-   *  HMAC, `relayUrl()` = its row's relay setting; every other adapter gets none. */
-  const consentDepsOf = (kind) => { const row = consentRowOf(kind); return row && row.landing ? Object.freeze({ sign: signState, relayUrl: () => relayUrlOf(row) }) : null; };
+   *  HMAC, `relayUrl()` = its row's relay setting, `publicUrl()` = this instance's address (lane pod-oauth-callback: the
+   *  route a redirect consent lands on), `fleetRelayUrl()` = the fleet's relay page (lane oauth-relay-road: the chart's
+   *  VIBESPACE_OAUTH_RELAY_URL — the admin host's /relay/, one registered address for every pod and kind); every other
+   *  adapter gets none. */
+  const instanceAddress = () => { try { return publicUrl() || null; } catch { return null; } };
+  const fleetRelayUrl = () => String((env && env.VIBESPACE_OAUTH_RELAY_URL) || '').trim();
+  const consentDepsOf = (kind) => { const row = consentRowOf(kind); return row && row.landing ? Object.freeze({ sign: signState, relayUrl: () => relayUrlOf(row), publicUrl: instanceAddress, fleetRelayUrl }) : null; };
 
   // Built-ins. The three fakes exercise BOTH axes; the real adapters register
   // the same way and nothing downstream learns their names.
@@ -3661,14 +3671,48 @@ function create(deps = {}) {
     if (rec.credential.appSecretEnc) { try { masked = R.maskValue(box.dec(rec.credential.appSecretEnc)); } catch { undecryptable = true; } }
     return { appId: String(rec.credential.appId || ''), secretSet: !!rec.credential.appSecretEnc, secretMasked: masked, undecryptable };
   }
+  function consentRouteOf(m, row) {
+    const cr = consentRowOf(m.kind);
+    if (!cr || !cr.landing || (row && row.signin === 'paste')) return null;
+    return ROAD.consentRoad({ kind: m.kind, publicUrl: instanceAddress() || '', origin: null }).redirectUri;
+  }
+  /** lane oauth-relay-road (the owner 2026-10-22: one registered address per app, never one per instance): the RELAY PAGES
+   *  a person's OWN app of this type registers ONCE — `{url, who}`: the fleet's (`fleet`, this pod's
+   *  VIBESPACE_OAUTH_RELAY_URL) and the instance's relay setting (`page`, default the project's public page); [] for a
+   *  type with no relay setting or one that signs in by paste (Slack keeps its own steps). A company preset's page is
+   *  its own (presetsView). */
+  const ridesRelays = (m, row) => { const cr = consentRowOf(m.kind); return !!(cr && cr.landing && cr.relayUrlSetting && !(row && row.signin === 'paste')); };
+  function relayPagesOf(m, row) {
+    const cr = consentRowOf(m.kind);
+    if (!ridesRelays(m, row)) return [];
+    const out = [];
+    for (const [url, who] of [[ROAD.relayPageOf(fleetRelayUrl()), 'fleet'], [ROAD.relayPageOf(relayUrlOf(cr)), 'page']]) if (url && !out.some((x) => x.url === url)) out.push({ url, who });
+    return out;
+  }
+  /** ADDENDUM 1 (the owner 2026-10-22: «github 那个 url 不能加到我们公司的 lark 和 slack app 默认配置里»): the presets of a type
+   *  that rides relay pages, each with ITS relay page (`relayPage`: the preset's own relayUrl › the fleet's — the page
+   *  its sign-in names; null = the preset has none yet: the route / the loopback), never the instance's setting. */
+  function presetsView(m, row) {
+    const list = presetsOf(m);
+    if (!list.length || !ridesRelays(m, row)) return list;
+    return list.map((p) => {
+      let own = '';
+      try { const r = integrations.resolveIntegration(m.integration, { credentialKey: CLUSTER_PREFIX + p.key }); own = r && r.source === 'cluster' && r.values && typeof r.values.relayUrl === 'string' ? r.values.relayUrl : ''; } catch { own = ''; }
+      return { ...p, relayPage: ROAD.relayPick({ fleet: fleetRelayUrl(), preset: own }).url || null };
+    });
+  }
   function kindView(m) {
     const row = rowOf(m);
     return {
       kind: m.kind, label: m.label || m.kind, integration: m.integration || null,
       bindsPerAccount: !!(row && row.bindsPerAccount),
-      presets: presetsOf(m), clientHint: row ? (row.clientHint || null) : null, clientFields: clientFieldDecls(m),
+      presets: presetsView(m, row), clientHint: row ? (row.clientHint || null) : null, clientFields: clientFieldDecls(m),
       // the custom branch's console setup (Lark: the registered redirect URL + its three prerequisites) — the registry's declaration
       setup: row && row.setup ? { callbackUrl: row.setup.callbackUrl || null, callbackNote: row.setup.callbackNote || null, prerequisites: (row.setup.prerequisites || []).slice() } : null,
+      // lane pod-oauth-callback: where a consent of this type lands when the browser is elsewhere — this instance's route
+      // (src/consent-road.js; null without an https address, or for a type whose consent never lands here / signs in by paste)
+      consentRoute: consentRouteOf(m, row),
+      relayPages: relayPagesOf(m, row),   // lane oauth-relay-road: the addresses an app of this type registers once
       optionsSchema: (m.OPTIONS || []).map((o) => ({ key: o.key, label: o.label, help: o.help || '', default: o.default === undefined ? '' : o.default, placeholder: o.placeholder || '', choices: Array.isArray(o.choices) ? o.choices.slice() : null, choiceLabels: o.choiceLabels && typeof o.choiceLabels === 'object' ? { ...o.choiceLabels } : null, usedWhen: o.usedWhen && typeof o.usedWhen === 'object' ? JSON.parse(JSON.stringify(o.usedWhen)) : null })),
       receive: m.caps.receive, sendAs: m.caps.sendAs, pushOptIn: !!m.caps.pushOptIn,
     };
@@ -3782,7 +3826,7 @@ function create(deps = {}) {
       // may show it (the id, the secret MASKED — the Edit dialog's prefilled
       // secret comes from the owner-only config route, D3, never from here).
       bindsPerAccount: !!(mod && rowOf(mod) && rowOf(mod).bindsPerAccount),
-      presets: mod ? presetsOf(mod) : [],
+      presets: mod ? presetsView(mod, rowOf(mod)) : [],
       clientHint: mod && rowOf(mod) ? (rowOf(mod).clientHint || null) : null,
       clientFields: mod ? clientFieldDecls(mod) : null,
       customClient: customClientView(rec),
@@ -8052,6 +8096,7 @@ function create(deps = {}) {
     recordOrThrow, safeFlow, finishAuth, narrowAuth, oauthNarrow, cancelAuth, onAuthDone, disconnect, referencesOf, remove, setupView, duplicate,
     setLabel, setCustomSecret, adapterConfig, inlineLegacyClient, scheduleInline, inlineLegacyClients, stampIdentities, stampCredentialKeys,
     setEnabled, setAccountPolicy, setSenderHonesty, setOptions,
+    connectOffer, connectOffers, connectTaught,
   } = Object.assign(engineCtx, ChannelsAuth.create(engineCtx));
 
   const EXPIRY_SWEEP_MS = 60e3;
@@ -8448,6 +8493,7 @@ function create(deps = {}) {
     listFor, readFor, statusFor,
     proposalsListFor, proposeRecall,   // lane channels-proposals-recall: the agent's own proposals as a list; a recall of the user's message, proposed
     reachCountFor,   // lane channels-teach: the hook teaches vibespace-channels on this (a count, never a render)
+    connectOffer, connectOffers, connectTaught,   // lane pod-oauth-callback: the agent's `connect` verb, `list`'s not-connected line, the 'connect' reach word
     flushPending: (adapterId, convId, opts) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushPending(rec, convId, opts || {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },
     // R4: a window is per (conversation | scope, WATCHER) — `key` names the conversation (or `scope:acct:<id>` / `scope:pat:<id>`), `principal` the watcher
     orphanWatchers,

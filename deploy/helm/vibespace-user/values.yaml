@@ -148,6 +148,17 @@ telemetry:
   forwardToken: ""
   ingestToken: ""
 
+# The fleet's SIGN-IN RELAY PAGE (lane oauth-relay-road): a pod's Lark / Gmail
+# sign-in names this ONE address as its redirect — every pod and every kind —
+# and the page sends the browser back to the pod it started from
+# (/api/channels/oauth/cb/<kind>). Each vendor app then registers it ONCE,
+# never one address per pod. The fleet's admin serves the page at
+#   https://admin.<domain>/relay/
+# (vibespace-admin ≥ 2.11.0; its data-allow = the fleet's domain). Empty = no
+# fleet relay: a pod's sign-in comes back to its own https address, which each
+# vendor app must then list per pod. Injected as VIBESPACE_OAUTH_RELAY_URL.
+oauthRelayUrl: ""
+
 # frp relay for PUBLIC URLs (B-0b60). Set addr+token to inject the relay as the
 # plugin's default (⚙ → Plugins → Public URLs) — the plugin then default-enables
 # and connects on boot. Users can override any of it in the UI. subdomainHost

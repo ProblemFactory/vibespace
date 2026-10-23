@@ -146,6 +146,8 @@ const VERDICTS = {
   'channels list': ['no-text', 'conversations'], 'channels read': ['no-text', 'a conversation + flags'], 'channels attachment': ['no-text', 'a message id + an attachment id'], 'channels refresh': ['no-text', 'a conversation'],
   'channels status': ['no-text', 'an id'], 'channels watch': ['no-text', 'rule flags the SERVER parses (src/channel-watch-spec.js refuses an unexpected word by name)'],
   'channels watches': ['no-text', 'none'], 'channels unwatch': ['no-text', 'a target'],
+  // lane pod-oauth-callback: an account TYPE (lark / gmail …) — no text; a word after it is refused (exit 2), nothing posted
+  'channels connect': ['no-text', 'an account type — a stray word after it is refused (exit 2), nothing posted'],
   'channels api': ['no-text', 'a raw vendor call — its body is --json / --body @file / --body - (a door of its own)'], 'channels api creds': ['no-text', 'none'], 'channels api wait': ['no-text', 'a proposal id'],
   'ask (question)': ['one-text', 'ask', [], ['--urgency', 'high'], '/api/agent/user-todo', SENT.ask, 'a question to the user (it JOINED the words: the quotes lost, the bug hidden); --detail-file for the detail'],
   'ask list': ['no-text', 'none'], 'ask resolve': ['lookup', 'an id or a unique text fragment — joined on purpose; a stray word makes the lookup miss by name'],

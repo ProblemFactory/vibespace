@@ -17,6 +17,7 @@ import { carriedGeometry } from './stage-rules.js'; // the geometry a replaced w
 import { attachSlab } from './view-visibility.js'; // perf r1: the slab an attach asks for (floor | text)
 import { memberState, poolSubmenuModel, submenuNoteWords } from './pool-priority-model.js'; // THE CONVERSATION'S POOL PIN (2026-09-28): the pool row's submenu, as a PURE model
 import { deviceLocale } from './i18n.js';
+import { SIGN_IN } from '../day-one.js'; // lane door-day-one-landing: a sign-in terminal is not a session row
 import { resumeAccountVerdict } from '../resume-account.js'; // lane resume-account-door: the pinned account is asked FIRST at the Resume press
 
 // lane mirror-green-228: a window's focus on the server's answer never takes the keys from an open app dialog (the Rename
@@ -27,14 +28,18 @@ export function installSessionLifecycle(App, ctx = {}) {
   Object.assign(App.prototype, {
   // management. Optional initialCommand is typed for the user once the shell
   // is up (e.g. the in-product "Log in to Claude" helper).
-  openShellTerminal(cwd, { initialCommand, hostId } = {}) {
+  openShellTerminal(cwd, { initialCommand, hostId, purpose } = {}) {
     this.createSession({
       backend: 'shell', mode: 'terminal', cwd: cwd || undefined, hostId,
       name: initialCommand ? initialCommand.split(' ')[0] : 'Terminal',
       model: null, permission: null, effort: null, extraArgs: '',
-      initialCommand,
+      initialCommand, purpose,
     });
   },
+  /** A terminal a SIGN-IN opens (lane door-day-one-landing — the naive-user studies: the login terminal and the claude it ran
+   *  showed as two ACTIVE sessions the person never made): the server marks it (`purpose: 'sign-in'`), the sidebar lists no
+   *  row for it and the claude it runs is no discovered row. It is still a window the person sees and closes. */
+  openSignInTerminal(cwd, opts = {}) { this.openShellTerminal(cwd, { ...opts, purpose: SIGN_IN }); },
 
   /** "Open terminal in this session" (S9 remainder piece (c), B-eac2): a shell
    *  the OpenCode SERVE owns, in the conversation's own directory, opened as a
@@ -51,7 +56,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, extraTaskBinds, accountId, modelLock, lockModel, poolPin, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, extraTaskBinds, accountId, modelLock, lockModel, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
     // service (opencode → the 'opencode-serve' plugin, default OFF since
@@ -213,6 +218,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // a local shell. The server bridges its websocket onto the normal
       // terminal path; the serve's port never reaches this browser.
       opencodePty: opencodePty || undefined,
+      purpose: purpose === SIGN_IN ? SIGN_IN : undefined, // lane door-day-one-landing: a sign-in terminal — not a session row
     };
     // agent browser P1 (§3.2.5): WHICH fact chose the browser profile rides the same
     // hint (its own statement — test-codex-effort-meta pins the model/effort line verbatim)
@@ -881,7 +887,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult } = {}) {
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, initialMessage } = {}) {
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
     // If this session is already open in a LIVE window, focus it.
@@ -948,6 +954,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       taskId: contextTask?.id,
       winBounds,
       onCreateResult,
+      initialMessage, // lane door-signin-card: the chat's «Send my message again» re-sends the waiting turn on resume
     });
   },
 

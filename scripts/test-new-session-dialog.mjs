@@ -7,7 +7,11 @@
 //
 //   A  the New Session dialog
 //     A1 opening it twice never carries the name ("S11 chromeS12 first…"); the
-//        cwd the user typed is still remembered (the designed prefill)
+//        folder never carries either (lane door-day-one-landing — the naive-user
+//        studies: a later dialog pre-filled the PREVIOUS area's folder; testers
+//        retyped it 5/5 and 3/3 times) — the field reopens EMPTY
+//     A1b the folder chips: the home's folder WITH files first («work (3 files)»),
+//        then «the last one you used»; a chip fills the field
 //     A2 Escape with the permission <select>'s picker OPEN closes only the
 //        picker; the next Escape closes the dialog. CONTROL: Escape from a text
 //        field closes the dialog at once (the leg can say no)
@@ -239,6 +243,8 @@ try {
   // ═══ A the New Session dialog ═══════════════════════════════════════════
   console.log('A1 the name never carries over');
   {
+    fs.mkdirSync(path.join(fakeHome, 'work'), { recursive: true });   // A1b: the person's files (before the first open — the hub keeps its answer 10 s)
+    for (const f of ['a.txt', 'b.txt', 'c.txt']) fs.writeFileSync(path.join(fakeHome, 'work', f), 'x');
     await evalJs(`app.showNewSessionDialog(); true`);
     check('the dialog opens', await waitFor(dialogVisible, 5000));
     await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-session-name').focus(); true`);
@@ -252,7 +258,19 @@ try {
     await evalJs(`document.getElementById('input-session-name').focus(); true`);
     await cdp('Input.insertText', { text: 'S12 first (example.com)' });
     check('typing a new name gives exactly that name (never "S11 chromeS12 first…")', (await evalJs(`document.getElementById('input-session-name').value`)) === 'S12 first (example.com)');
-    check('the cwd typed last time is still remembered (the designed prefill survives)', (await evalJs(`document.getElementById('input-cwd').value`)) === CWD);
+    check('THE FINDING (lane door-day-one-landing): the folder typed last time is NOT carried — the field reopens EMPTY', (await evalJs(`document.getElementById('input-cwd').value`)) === '', await evalJs(`document.getElementById('input-cwd').value`));
+  }
+
+  console.log('A1b the folder chips');
+  {
+    await waitFor(`[...document.querySelectorAll('#cwd-recent .cwd-recent-chip')].some((c) => c.dataset.kind === 'files')`, 8000);
+    const chips = await evalJs(`[...document.querySelectorAll('#cwd-recent .cwd-recent-chip')].map((c) => ({ kind: c.dataset.kind, text: c.textContent, path: c.dataset.path }))`);
+    const work = (chips || []).find((c) => c.path === path.join(fakeHome, 'work'));
+    check('the home\u2019s folder with files is a chip: «work (3 files)»', !!work && work.kind === 'files' && work.text === 'work (3 files)', chips);
+    check('… the folders WITH files lead the row', !!chips && chips.findIndex((c) => c.kind !== 'files') > chips.findIndex((c) => c.kind === 'files'), chips && chips.map((c) => c.kind));
+    await evalJs(`document.querySelector('#cwd-recent .cwd-recent-chip[data-path=' + JSON.stringify(${JSON.stringify(path.join(fakeHome, 'work'))}) + ']').click(); true`);
+    check('a chip fills the field', (await evalJs(`document.getElementById('input-cwd').value`)) === path.join(fakeHome, 'work'));
+    await evalJs(`document.getElementById('input-cwd').value = ''; true`);
   }
 
   console.log('A2 Escape with the permission picker open closes only the picker');

@@ -70,6 +70,7 @@ const Feed = require('../channel-feed.js');
 const { budgetOf, paceOf } = require('../channel-settings.js');   // B-df40 part 3: the budget + pace rows are DECLARED there (the schema row, the engine bound and this caps all read it)
 const MANIFEST = require('./lark/manifest.js');   // lane dc-channels-manifest: this vendor's declarations (PURE) — its settings table, integration row, option rows
 const SR = require('../channel-search.js');   // design 010: THE snippet reader + the shape-only measurement (PURE)
+const CR = require('../consent-road.js');   // lane pod-oauth-callback: WHERE the sign-in comes back (the instance's route / the loopback) + the route's state and page (PURE)
 
 const KIND = 'lark';
 const LABEL = 'Lark / 飞书';
@@ -333,7 +334,16 @@ const RATE_OK = Object.freeze([
 /** lane dc-channels-consent: THE CONSENT ROW (src/channels/index.js validateConsent) — Lark's consent comes back to the
  *  FIXED loopback its registry row registers (`setup.callbackUrl`, src/integration-registry.js); nothing lands on the
  *  instance's own routes. */
-const CONSENT = Object.freeze({ mode: 'fixed', landing: null, callbackUrl: require('../integration-registry.js').rowById(INTEGRATION).setup.callbackUrl });
+// lane pod-oauth-callback (study 2 B2): on an instance with an https address the consent comes back to its own route
+// (`public`, src/consent-road.js); the registered FIXED loopback stays the road of a browser on this machine.
+// lane oauth-relay-road (the owner 2026-10-22: one registered address per app): THE RELAY PAGE first — the fleet's, the
+// company preset's, else this setting (channels.larkRelayUrl, default the project's public page; empty = none).
+const CONSENT = Object.freeze({
+  mode: Object.freeze(['fixed', 'public']),
+  landing: Object.freeze({ stateVerdict: (s, o = {}) => CR.stateVerdict(s, { ...o, kind: KIND }), landingHtml: (r) => CR.landingHtml(r, { name: 'Lark' }) }),
+  callbackUrl: require('../integration-registry.js').rowById(INTEGRATION).setup.callbackUrl,
+  relayUrlSetting: Object.freeze({ key: 'larkRelayUrl', fallback: CR.RELAY_DEFAULT }),   // the server setting channels.<key>
+});
 
 const caps = Object.freeze({
   receive: 'push',
@@ -1051,6 +1061,7 @@ function create(record = {}, deps = {}) {
   const resolveIntegration = typeof deps.resolveIntegration === 'function' ? deps.resolveIntegration : null;
   const tokens = deps.tokens || null;        // { read(): {token, why}, write(token, {expiresAt, scopes}), clear() } — the ENGINE's encrypted store
   const oauth = deps.oauth || null;          // src/oauth-loopback.js instance — the ENGINE's
+  const consent = deps.consent || null;      // lane pod-oauth-callback: the engine's consent facts (sign, publicUrl) — the route road's
   const log = deps.log || console;
   const brand = BRANDS.includes(record.brand) ? record.brand : (record.options && BRANDS.includes(record.options.brand) ? record.options.brand : 'feishu');
   const H = HOSTS[brand];
@@ -1887,8 +1898,13 @@ function create(record = {}, deps = {}) {
       },
       /** The FIXED-mode loopback flow (§12.4): the vendor consent URL is built
        *  with the REGISTERED redirect_uri; the exchange mints the user token
-       *  and looks the user up once so `isSelf` can be answered. */
-      async begin() {
+       *  and looks the user up once so `isSelf` can be answered.
+       *  lane pod-oauth-callback: on an instance with an https address and a browser elsewhere (`origin` — the page that
+       *  pressed Connect) the consent is `public` — redirect_uri = the instance's /api/channels/oauth/cb/lark, the state
+       *  this boot signs; `road: 'loopback'` = the person asked for the copy-the-address way (src/consent-road.js).
+       *  lane oauth-relay-road: a RELAY page that sends this browser back comes first — redirect_uri = the relay page, the
+       *  state's `u` = the browser's own origin (the relay sends it on to <u>/api/channels/oauth/cb/lark). */
+      async begin({ origin = null, road = null } = {}) {
         if (!oauth) throw new ChannelError('not-supported', 'lark.auth.begin: no OAuth loopback was handed to this adapter', { retryable: false });
         const cred = credential();
         if (!cred.values) throw new ChannelError('auth-expired', `cannot start a Lark consent flow: ${cred.why}`, { retryable: false, detail: { needsCredentials: true, missing: cred.missing } });
@@ -1903,10 +1919,18 @@ function create(record = {}, deps = {}) {
         // registered callback and a state longer than any the loopback mints
         const heldNow = new Set(((readToken().token || {}).scopes) || []);
         const urlOf = (scopes, redirectUri, state) => `${H.accounts}/open-apis/authen/v1/authorize?` + new URLSearchParams({ client_id: appId, redirect_uri: redirectUri, scope: scopes.join(' '), state });
-        const extras = consentPage(floor, enabled.filter((x) => !heldNow.has(x)), (sc) => Buffer.byteLength(urlOf(sc, CONSENT.callbackUrl, 'x'.repeat(64))));
+        // lane pod-oauth-callback: THE ROAD — the instance's route (its https address, a browser elsewhere) or the fixed loopback;
+        // lane oauth-relay-road: the relay page first (the fleet's › the preset's › the setting's), when it sends this browser back
+        const way = CR.consentRoad({ kind: KIND, publicUrl: consent && typeof consent.publicUrl === 'function' ? consent.publicUrl() : '', origin, road, ...CR.relayOf(consent, cred) });
+        const viaRoute = way.road !== 'loopback' && !!consent && typeof consent.sign === 'function';
+        const stateFor = ({ flowId, issuedAt }) => CR.stateOf({ origin: way.u, flowId, issuedAt, kind: KIND }, consent.sign);
+        // the page is measured with the redirect this consent names and a state as long as any it carries
+        const sampleState = viaRoute ? stateFor({ flowId: '0'.repeat(16), issuedAt: now() }) : '';
+        const extras = consentPage(floor, enabled.filter((x) => !heldNow.has(x)), (sc) => Buffer.byteLength(urlOf(sc, viaRoute ? way.redirectUri : CONSENT.callbackUrl, 'x'.repeat(Math.max(64, sampleState.length)))));
         const asked = (without = []) => [...consentScopes(without), ...extras.filter((x) => !(Array.isArray(without) && without.includes(x)))];
         return oauth.begin({
-          id: adapterId, mode: 'fixed', registeredCallbackUrl: CONSENT.callbackUrl, label: 'Lark',
+          id: adapterId, label: 'Lark',
+          ...(viaRoute ? { mode: 'public', redirectUri: way.redirectUri, stateFor, road: way.road } : { mode: 'fixed', registeredCallbackUrl: CONSENT.callbackUrl }),
           successText: 'VibeSpace: Lark connected — you can close this tab.',
           buildConsentUrl: ({ redirectUri, state, without = [] }) => urlOf(asked(without), redirectUri, state),
           // the ORDERED groups this consent actually names (a group whose scopes the owner's options leave out is not offered)

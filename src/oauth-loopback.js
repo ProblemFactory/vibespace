@@ -301,7 +301,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
    *                   beside ok:true = a cancel that arrived AFTER the exchange resolved (carried for a consumer
    *                   whose durable write is still ahead; the record's own door reads ok as landed)
    */
-  async function begin({ id, mode, callbackUrl = null, registeredCallbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null, optionalScopes = [], redirectUri = null, stateFor = null } = {}) {
+  async function begin({ id, mode, callbackUrl = null, registeredCallbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null, optionalScopes = [], redirectUri = null, stateFor = null, road = null } = {}) {
     if (!id || typeof id !== 'string') throw new OAuthFlowError('bad-request', 'oauth-loopback: `id` is required');
     if (!MODES.includes(mode)) throw new OAuthFlowError('bad-request', `oauth-loopback: mode must be one of ${MODES.join('|')} (got ${JSON.stringify(mode)})`);
     if (typeof buildConsentUrl !== 'function' || typeof exchange !== 'function') throw new OAuthFlowError('bad-request', 'oauth-loopback: buildConsentUrl and exchange are required');
@@ -362,6 +362,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       // nothing listens: the paste is the callback (`forwardCallback`)
     } else if (mode === 'public') {
       st.redirectUri = typeof redirectUri === 'string' && redirectUri ? redirectUri : null;   // design 018: the vendor lands on the instance route / the relay
+      st.road = typeof road === 'string' && /^[a-z]{1,12}$/.test(road) ? road : null;   // lane oauth-relay-road: which (`relay` | `route`) — the dialog's words
     } else if (mode === 'ephemeral') {
       try {
         await listen(srv, 0);
@@ -516,7 +517,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       flowId: st.flowId, id: st.id, mode: st.mode, label: st.label,
       running: !st.done && !st.cancelled, done: st.done, ok: st.done ? !st.error : null,
       error: st.error, why: st.why || null, cancelled: st.cancelled, step: st.step || null, stepFacts: st.stepFacts ? { ...st.stepFacts } : null,
-      consentUrl: st.consentUrl, redirectUri: st.redirectUri, port: st.port,
+      consentUrl: st.consentUrl, redirectUri: st.redirectUri, road: st.road || null, port: st.port,
       listening: st.listening, refusal: st.refusal,
       optional: st.optional.slice(), narrowed: st.narrowed ? st.narrowed.slice() : null,
       groups: st.groups.map((g) => g.slice()), nextNarrow: st.narrowedGroups < st.groups.length ? st.groups[st.narrowedGroups].slice() : null,

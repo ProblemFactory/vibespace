@@ -25,6 +25,7 @@ import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a cleared service's 
 import { clearedText } from './record-clear-ui.js';
 import { Chart, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler } from 'chart.js';
 import { enterSubmits } from './chat-enter-keys.js';
+import { railLabels, railUsed, RAIL_DONE } from '../day-one.js'; // lane door-day-one-landing: the rail's words for the first week
 // Self-contained registration (idempotent) — the rail must not depend on the
 // usage-dashboard module having run its own Chart.register first.
 Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler);
@@ -139,6 +140,15 @@ registerMenuItem({ menu: 'gear', parent: 'system', order: 90, icon: PORTS_ICON, 
 registerWindowType({ type: 'system', label: 'System', singleton: true, icon: '', action: 'openSystem', replay: (app, spec, { syncId } = {}) => openRailPanel(app, 'system', { syncId, forceWindow: true }) });
 registerWindowType({ type: 'ports', label: 'Ports', singleton: true, icon: '', action: 'openPorts', replay: (app, spec, { syncId } = {}) => openRailPanel(app, 'ports', { syncId, forceWindow: true }) });
 
+// lane door-day-one-landing (the naive-user studies: the way to the sign-in («Agents») and to machines («Remote») was found
+// only by hovering every icon): the rail carries its doors' WORDS under the icons for the first week, or until every door
+// was used once (PURE src/day-one.js railLabels; the record — the week's start + the doors used — is this device's
+// localStorage `vs-rail-labels`; the chrome suites' scratch hubs preset it to done: scripts/scratch.mjs PRESET_KEYS)
+const RAIL_LABELS_KEY = 'vs-rail-labels';
+const RAIL_CAPTION = { diagnostics: 'Diagnostics' };   // a door whose tip is a sentence carries a word under its icon
+const readRailRecord = () => { try { const v = localStorage.getItem(RAIL_LABELS_KEY); return v === RAIL_DONE ? RAIL_DONE : v ? JSON.parse(v) : null; } catch { return null; } };
+const keepRailRecord = (r) => { try { localStorage.setItem(RAIL_LABELS_KEY, r === RAIL_DONE ? RAIL_DONE : JSON.stringify(r)); } catch { } };
+
 export function installSidebarRail(Sidebar) {
   Object.assign(Sidebar.prototype, {
 
@@ -175,7 +185,12 @@ export function installSidebarRail(Sidebar) {
         b.dataset.tip = label;
         // the icon is aria-hidden (icons carry no name) — the label is the button's accessible name; no `title` (the custom tip is the only visible tooltip)
         b.setAttribute('aria-label', label);
-        b.onclick = onClick;
+        const cap = document.createElement('span');   // the door's word — shown while the rail is labelled (lane door-day-one-landing)
+        cap.className = 'rail-label';
+        cap.setAttribute('aria-hidden', 'true');
+        cap.textContent = RAIL_CAPTION[id] ? tr(RAIL_CAPTION[id]) : label;
+        b.appendChild(cap);
+        b.onclick = (e) => { this._railDoorUsed(id); return onClick(e); };
         return b;
       };
       rail.append(
@@ -200,6 +215,7 @@ export function installSidebarRail(Sidebar) {
       );
       sb.insertBefore(rail, sb.firstChild);
       this._railEl = rail;
+      this._railApplyLabels();
       const tabs = this.el.querySelector('.sidebar-tabs');
       if (tabs) tabs.style.display = 'none';
       // restore the last panel (per device, like the old tab persistence)
@@ -214,6 +230,23 @@ export function installSidebarRail(Sidebar) {
       this._railApplyTitle();
       this._railApplyCollapsed();
       this._applySidebarLayoutWidth();
+    },
+
+    /** The doors' words under the icons (src/day-one.js railLabels): the first week, or until every door was used once. */
+    _railApplyLabels() {
+      if (!this._railEl) return;
+      const doors = [...this._railEl.querySelectorAll('.rail-item')].map((b) => b.dataset.rail);
+      const v = railLabels({ record: readRailRecord(), now: Date.now(), doors });
+      keepRailRecord(v.record);
+      const was = this._railEl.classList.contains('rail-labelled');
+      this._railEl.classList.toggle('rail-labelled', v.show);
+      this.el.classList.toggle('rail-labelled', v.show);
+      if (was !== v.show) this._applySidebarLayoutWidth?.();
+    },
+    _railDoorUsed(id) {
+      if (!this._railEl?.classList.contains('rail-labelled')) return;
+      keepRailRecord(railUsed(readRailRecord(), id));
+      this._railApplyLabels();
     },
 
     /** vscode behavior (sidebar.railPersistent, default ON): a collapsed
@@ -297,7 +330,9 @@ export function installSidebarRail(Sidebar) {
       this._railRefreshBadges();
       // diagnostics: one cheap cached probe per page load, not a poll
       fetchJson('/api/telemetry/summary?days=1').then((r) => {
-        const n = (r?.errors || []).reduce((a, g) => a + (g.count || 0), 0);
+        // + the kinds of record a harness sent that this release does not know (lane door-healthy-chat: they left the
+        // person's chat — the admin's counter keeps the signal)
+        const n = (r?.errors || []).reduce((a, g) => a + (g.count || 0), 0) + (Array.isArray(r?.drift) ? r.drift.length : 0);
         if (n) this._railSetBadge('diagnostics', n > 99 ? '99+' : n);
       }).catch(() => {});
       // system: one probe at load; live updates ride the sysinfo-alert

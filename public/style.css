@@ -2572,6 +2572,13 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 .cwd-task-chip .cwd-chip-path::before { content: '\200e'; content: '\200e' / ""; }
 /* the chip itself is ltr flex (dot leftmost) — the ::before LRM belongs on the inner path span, not the button */
 .cwd-task-chip.cwd-recent-chip::before { content: none; }
+/* lane door-day-one-landing: the home's folders («work (23 files)»), «Last used: …» and a bare folder name are WORDS — read
+   left to right (the rtl front-truncation is for paths); the folder holding files leads in the accent; the chosen chip
+   (a press, or the tour's pick) is outlined */
+.cwd-recent-chip[data-kind="files"], .cwd-recent-chip[data-kind="folder"], .cwd-recent-chip[data-kind="last"] { direction: ltr; }
+.cwd-recent-chip[data-kind="files"]::before, .cwd-recent-chip[data-kind="folder"]::before, .cwd-recent-chip[data-kind="last"]::before { content: none; }
+.cwd-files-chip { color: var(--text); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.cwd-recent-chip.selected { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 14%, var(--bg-input)); }
 
 /* ── Chrome position customization (taskbar.position / sidebar.position) ── */
 /* Taskbar docked to the top: reorder the main-wrapper flex column (taskbar,
@@ -3151,6 +3158,15 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .ob-cwd:focus { outline: none; border-color: var(--accent); }
 .ob-alt { margin-top: 12px; font-size: 12px; color: var(--text-dim); }
 .ob-alt a { color: var(--text-secondary); }
+/* lane door-day-one-landing: the welcome says what it is for and shows three things a person could ask */
+.ob-asks { display: flex; flex-direction: column; gap: 8px; text-align: left; margin: 0 0 22px; }
+.ob-asks-head { font-size: 12px; color: var(--text-dim); }
+.ob-ask { font-size: 13px; color: var(--text); line-height: 1.5; padding: 9px 14px; border-radius: var(--radius-sm);
+  background: var(--bg-input); border: 1px solid var(--border); }
+.ob-ask::before { content: '\201C'; content: '\201C' / ""; color: var(--text-dim); }
+.ob-ask::after { content: '\201D'; content: '\201D' / ""; color: var(--text-dim); }
+.ob-chips { justify-content: center; margin: 0 0 12px; }
+.ob-chips .cwd-recent-chip { font-size: 12px; padding: 5px 12px; border-radius: 14px; }
 .ob-dots { display: flex; gap: 6px; justify-content: center; margin-top: 20px; }
 .ob-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
 .ob-dot.active { background: var(--accent); }
@@ -4601,6 +4617,12 @@ button.plugin-chip-primary:hover { background: color-mix(in srgb, var(--accent) 
 .rail-item.active { color: var(--text); }
 .rail-item.active::before { content: ''; position: absolute; left: -2px; top: 7px; bottom: 7px; width: 2.5px; border-radius: 2px; background: var(--accent); }
 .rail-spacer { flex: 1; }
+/* lane door-day-one-landing: the first week the rail carries each door's WORD under its icon (src/day-one.js railLabels) */
+.rail-label { display: none; }
+#sidebar-rail.rail-labelled { width: 68px; flex: 0 0 68px; overflow-y: auto; overflow-x: hidden; }
+#sidebar-rail.rail-labelled .rail-item { width: 64px; height: auto; min-height: 44px; flex-direction: column; gap: 2px; padding: 5px 2px; }
+#sidebar-rail.rail-labelled .rail-label { display: block; font-size: 9.5px; line-height: 1.15; text-align: center; max-width: 62px; overflow-wrap: anywhere; color: inherit; }
+.sidebar.rail-collapsed.rail-labelled { width: 68px !important; }
 .rail-panel { padding: 8px; overflow-y: auto; }
 .ports-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 6px; border-radius: var(--radius-sm); font-size: 12px; }
 .ports-row:hover { background: var(--hover-overlay); }
@@ -6675,6 +6697,14 @@ label.chan-cap-row { cursor: default; }
 .chat-channel-touch { display: flex; align-items: baseline; gap: 6px; width: 100%; min-width: 0; box-sizing: border-box; padding: 2px 8px; font: inherit; font-size: 11px; text-align: left; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 .chat-channel-touch:hover, .chat-channel-touch:focus-visible { color: var(--accent); border-color: var(--accent); }
 .chat-channel-touch.drafted { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+/* lane pod-oauth-callback: the agent's «Connect <type>» row IS a card — the accent, a bigger target, its words in full */
+.chat-channel-touch.connect { padding: 6px 10px; font-size: 12px; color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.chat-channel-touch.connect .cct-words { white-space: normal; color: var(--text); }
+/* …and the channel account dialogs' paste-back, folded under the one line that says when it is needed */
+.mounts-oauth-paste { margin-top: 6px; }
+.mounts-oauth-paste > summary { cursor: pointer; }
+.mounts-oauth-paste[open] > summary { margin-bottom: 4px; }
+.mounts-oauth-paste .mounts-oauth-other { margin-top: 6px; }
 .chat-channel-touch .cct-glyph { flex-shrink: 0; align-self: center; display: inline-flex; }
 .chat-channel-touch .cct-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); unicode-bidi: isolate; } /* isolate: a hostile title's RTL override stays inside the name */
 .chat-channel-touch:hover .cct-name { color: var(--accent); }
@@ -7963,3 +7993,26 @@ button.vw-chip { cursor: pointer; }
   .vw-row[data-store="automation"] > .vw-tech { order: 4; flex: 1 0 100%; }
   .vw-row[data-store="automation"] .vw-mask, .vw-row[data-store="automation"] .vw-chip-prov .vw-chip-words { display: none; }
 }
+
+/* THE HUMANE CLAUDE SIGN-IN CARD (lane door-signin-card) — ONE card at every
+   wall (chat «Not logged in», tour «Connect your agents», Manage agents). */
+.signin-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-secondary, var(--bg-window)); padding: 14px 16px; margin: 8px 0; max-width: 460px; }
+.signin-card-head { display: flex; align-items: center; gap: 8px; color: var(--accent); margin-bottom: 8px; }
+.signin-card-title { font-weight: 600; font-size: 14px; color: var(--text); }
+.signin-card-body { font-size: 13px; color: var(--text-secondary); }
+.signin-sub { color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
+.signin-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+.signin-actions .mounts-btn { display: inline-flex; align-items: center; gap: 6px; }
+.signin-code-row { display: flex; gap: 8px; align-items: center; margin: 10px 0 4px; }
+.signin-code-input { flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 10px; font-size: 13px; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.signin-code-input:focus { outline: none; border-color: var(--border-active, var(--accent)); }
+.signin-code-input:disabled { opacity: 0.5; }
+.signin-spinner { color: var(--text-dim); }
+.signin-advanced { margin-top: 10px; }
+.signin-link-btn { background: none; border: none; padding: 0; color: var(--text-dim); font-size: 11px; text-decoration: underline; cursor: pointer; }
+.signin-link-btn:hover { color: var(--text-secondary); }
+
+/* lane door-signin-card: the tour's «Connect your agents» — the terminal road folds under Advanced. */
+.ob-advanced { margin: 10px 0; text-align: left; }
+.ob-advanced > summary { cursor: pointer; color: var(--text-dim); font-size: 12px; list-style: revert; }
+.ob-advanced[open] > summary { margin-bottom: 8px; }
