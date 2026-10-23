@@ -5,7 +5,8 @@
 // stores nothing: it reads the CLEAR part of `state` (`v1.<base64url {u, f, t}>.<sig>` — `u` = the VibeSpace the member
 // started from; `k` = the account kind, absent = slack — lane voice-p1-oauth-teach: `dropline`) and sends the browser back
 // to `<u>/api/channels/oauth/cb/<k>?<the query verbatim>` ONLY when `u` is
-// on a private network (or an https host under this page's `data-allow` suffixes); otherwise it shows the code to paste
+// on a private network — a Tailscale one too: 100.64/10, *.ts.net — (or an https host under this page's `data-allow`
+// suffixes); otherwise it shows the code to paste
 // back. The instance checks the signature. The rule below is src/channels/slack-manifest.js `relayTargetVerdict`, kept
 // equal to it by scripts/test-slack-relay.mjs (one table, both functions).
 (function (root) {
@@ -13,7 +14,7 @@
   var CALLBACK_PATH = '/api/channels/oauth/cb/slack';
   var CALLBACK_BASE = '/api/channels/oauth/cb/';
   var KIND_RE = /^[a-z][a-z0-9-]{1,19}$/;
-  var PRIVATE_SUFFIXES = ['.local', '.lan', '.home', '.localhost'];
+  var PRIVATE_SUFFIXES = ['.local', '.lan', '.home', '.localhost', '.ts.net'];
   function originOf(o) {
     if (typeof o !== 'string' || !o || o.length > 300) return null;
     var u;
@@ -28,7 +29,7 @@
     if (v4) {
       var o = v4.slice(1).map(Number);
       if (o.some(function (x) { return x > 255; })) return false;
-      return o[0] === 127 || o[0] === 10 || (o[0] === 172 && o[1] >= 16 && o[1] <= 31) || (o[0] === 192 && o[1] === 168);
+      return o[0] === 127 || o[0] === 10 || (o[0] === 172 && o[1] >= 16 && o[1] <= 31) || (o[0] === 192 && o[1] === 168) || (o[0] === 100 && o[1] >= 64 && o[1] <= 127);
     }
     if (h.charAt(0) === '[' && h.charAt(h.length - 1) === ']') { var a = h.slice(1, -1); return a === '::1' || /^f[cd][0-9a-f]{0,2}:/.test(a); }
     return PRIVATE_SUFFIXES.some(function (x) { return h.length > x.length && h.slice(-x.length) === x; });
