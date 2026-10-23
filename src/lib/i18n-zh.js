@@ -10416,6 +10416,7 @@ export default {
   "{path} does not exist, nor the folder above ({parent})": "{path} 不存在，上一级 {parent} 也不存在",
   "«{text}» is not a path yet — pick a folder from the list": "「{text}」还不是一个路径 —— 在候选里挑一个文件夹",
   "The machine did not answer: {err}": "这台机器没有回答：{err}",
+  "{host} cannot be reached — use a path on this machine or try again later": "{host} 连不上 — 用本机路径或稍后再试",
   "No suggestions yet — type a path or a few letters.": "还没有候选 —— 输入路径或几个字。",
   "No matching folder.": "没有匹配的文件夹。",
   "{n} more": "还有 {n} 个",

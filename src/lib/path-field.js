@@ -33,7 +33,7 @@ const RECENT_TTL_MS = 30e3;
 const TAB_OPENS_MS = 400;
 
 /* ── the machines as far as the fields have seen them (shared by every field of the page) ── */
-const WORLD = new Map(); // hostKey ('' = here) → { L, self, recent, error }
+const WORLD = new Map(); // hostKey ('' = here) → { L, self, recent, error, unreachable }
 const hostKey = (h) => (!h || h === 'local' ? '' : String(h));
 const world = (hk) => {
   if (!WORLD.has(hk)) WORLD.set(hk, { L: { home: hk ? '' : LOCAL.home, machine: hk || null, dirs: {}, links: {}, localized: {}, mounts: [], nondirs: {} }, self: null, recent: null, error: '' });
@@ -58,6 +58,9 @@ const hostName = (hk) => {
   const o = [...document.querySelectorAll('select[id*="host"] option')].find((x) => x.value === hk);
   return (o && o.textContent.replace(/\s*\(.*\)\s*$/, '').trim()) || hk;
 };
+/* a paired machine the hub could not reach (lane hub-dies-dead-ssh-host): the server refuses it BY NAME before anything
+   spawns (`unreachable` in the answer, kept a minute there) — the field says so in its own line and offers nothing there */
+const unreachableWords = (hk) => t('{host} cannot be reached — use a path on this machine or try again later', { host: hostName(hk) });
 
 /* ── the pointer: a commit waits until the press is over (a re-render under the pointer eats the click) ── */
 let pointerIsDown = false; const afterUp = []; let lastTabAt = 0; let installed = false;
@@ -245,6 +248,7 @@ export function pathField(input, opts = {}) {
       if (!W.recent || !W.recent.p) {
         const p = fetchJson(`/api/hosts/${encodeURIComponent(h)}/recent-cwds`).then((d) => {
           W.recent = { at: Date.now(), rows: Array.isArray(d && d.recent) ? d.recent : (d && d.cwds || []).map((c) => ({ path: c, count: 1, last: 0 })), p: null };
+          if (d && d.unreachable) W.unreachable = d.unreachable;
           paint(); paintChips(true);
         });
         W.recent = { ...(W.recent || { at: 0, rows: [] }), p };
@@ -256,8 +260,9 @@ export function pathField(input, opts = {}) {
   let memo = { key: '', m: null };
   function model(text = textNow()) {
     const inp = inputsNow();
-    const key = JSON.stringify([text, hk(), inp.name, inp.groups.map((g) => [g.id, g.selected, g.folders]), inp.bases.map((b) => b.path), Object.keys(inp.listing.dirs).length, inp.recent.length, !!inp.self]);
-    if (memo.key !== key) memo = { key, m: rankCandidates(text, inp), inp };
+    const dead = !!(hk() && world(hk()).unreachable); // a machine that cannot be reached is offered nothing (no «not on my-mac» guesses)
+    const key = JSON.stringify([text, hk(), inp.name, inp.groups.map((g) => [g.id, g.selected, g.folders]), inp.bases.map((b) => b.path), Object.keys(inp.listing.dirs).length, inp.recent.length, !!inp.self, dead]);
+    if (memo.key !== key) { const m = rankCandidates(text, inp); memo = { key, m: dead ? { ...m, rows: [], sections: [], best: null, nameRows: [] } : m, inp }; }
     return memo.m;
   }
   const abs = (p) => fromTilde(world(hk()).L.home || LOCAL.home, p);
@@ -292,6 +297,7 @@ export function pathField(input, opts = {}) {
           if (d.self) W.self = d.self;
         }
         W.error = (d && d.error) || (d ? '' : t('the machine did not answer'));
+        W.unreachable = (d && d.unreachable) || null;
         st.answered = { text, h, at: Date.now() };
         if (d && d.partial && !st.reasked) { st.reasked = true; setTimeout(() => { st.reasked = false; if (textNow() === text) ask(text, { force: true }); }, 450); }
         paint();
@@ -313,6 +319,7 @@ export function pathField(input, opts = {}) {
   function verdictNow() {
     const text = textNow(); const x = target(text);
     if (st.err) return { status: 'unresolved', text: t('Not applied:') + ' ' + st.err };
+    if (hk() && world(hk()).unreachable) return { status: 'unreachable', text: unreachableWords(hk()) };
     if (x.empty) return { status: 'empty', text: '' };
     if (x.ok) return { status: 'ok', text: '= ' + x.r.path, path: abs(x.r.path), alts: x.all.length - 1 };
     if (wrap.dataset.pending && !st.answered) return { status: 'pending', text: t('Asking the machine…') };
@@ -332,7 +339,7 @@ export function pathField(input, opts = {}) {
     const m = model();
     if (!m.rows.length) {
       const W = world(hk());
-      return `<div class="pf-empty">${escHtml(W.error ? t('The machine did not answer: {err}', { err: W.error }) : m.mode === 'empty' ? t('No suggestions yet — type a path or a few letters.') : t('No matching folder.'))}</div>`;
+      return `<div class="pf-empty">${escHtml(W.unreachable && hk() ? unreachableWords(hk()) : W.error ? t('The machine did not answer: {err}', { err: W.error }) : m.mode === 'empty' ? t('No suggestions yet — type a path or a few letters.') : t('No matching folder.'))}</div>`;
     }
     let i = 0;
     const body = m.sections.map((s) => `<div class="pf-sec">${escHtml(secTitle(s))}${s.more ? `<span class="pf-more">${escHtml(t('{n} more', { n: s.more }))}</span>` : ''}</div>` + s.rows.map((r) => {
@@ -356,6 +363,7 @@ export function pathField(input, opts = {}) {
     const text = textNow(); const x = target(text); const L = world(hk()).L;
     let h = '';
     if (st.err) h += `<div class="pf-res pf-err"><span class="pf-hint"><b>${escHtml(t('Not applied:'))}</b> ${escHtml(st.err)}</span>${st.errBest ? `<button type="button" class="pf-link pf-best" data-act="best">${UI_ICONS.check} ${escHtml(t('Use the first: {path}', { path: st.errBest }))}</button>` : ''}</div>`;
+    if (hk() && world(hk()).unreachable) return h + `<div class="pf-res pf-err pf-unreachable"><span class="pf-hint">${escHtml(unreachableWords(hk()))}</span></div>`;
     if (x.empty) {
       const h2 = hk();
       h += `<div class="pf-res"><span class="pf-hint one" title="${escHtml(baseOrderTip())}">${h2 ? escHtml(t('On {host}:', { host: hostName(h2) })) + ' ' : ''}${escHtml(t('An absolute path, ~/…, a relative path or a few letters'))} ${UI_ICONS.info}</span></div>`;

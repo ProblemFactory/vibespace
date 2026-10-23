@@ -311,13 +311,14 @@ app.get('/api/hosts/bootstrap-steps', (req, res) => res.json({ steps: hosts.boot
 // lane path-field: with `bases` / `q` / `probe` / `kind` (the path field asks) the answer is the machine's listing slice
 // (hosts.dirSlice — one sh round trip there; the same listing /api/dir-complete builds here) + `self` + `took`.
 const jsonList = (v) => { if (Array.isArray(v)) return v.map(String); if (typeof v !== 'string' || !v) return []; try { const a = JSON.parse(v); return Array.isArray(a) ? a.map(String) : []; } catch { return [v]; } };
+const { refusalBody } = require('../hosts.js'); // «my-mac cannot be reached» as the path field's words (lane hub-dies-dead-ssh-host)
 app.get('/api/hosts/:id/dir-complete', async (req, res) => {
   if (req.query.bases != null || req.query.q != null || req.query.probe != null || req.query.kind != null) {
     try { return res.json(await hosts.dirSlice(req.params.id, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder') }, { by: DAU.byOfReq(req) })); }
-    catch (e) { return res.json({ suggestions: [], error: String((e && e.message) || e).slice(0, 120) }); }
+    catch (e) { return res.json({ suggestions: [], error: String((e && e.message) || e).slice(0, 120), ...refusalBody(e) }); }
   }
   try { res.json({ suggestions: await hosts.dirComplete(req.params.id, req.query.path || '', { by: DAU.byOfReq(req) }) }); }
-  catch { res.json({ suggestions: [] }); }
+  catch (e) { res.json({ suggestions: [], ...(e && e.code === 'host-unreachable' ? { error: String(e.message).slice(0, 120), ...refusalBody(e) } : {}) }); }
 });
 // Recent working dirs seen on the host (from its Claude project dirs) — the
 // "path list" the New Session dialog offers as chips for a remote host.
@@ -357,6 +358,8 @@ app.post('/api/hosts/:id/agent-tools/uninstall', async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/hosts/:id/recent-cwds', async (req, res) => {
+  // a paired ssh machine that cannot be reached is refused BY NAME before discovery spawns (lane hub-dies-dead-ssh-host)
+  try { await hosts.refuseUnreachable(req.params.id); } catch (e) { return res.json({ cwds: [], recent: [], error: String((e && e.message) || e).slice(0, 120), ...refusalBody(e) }); }
   try {
     const sessions = await hosts.discoverSessions(req.params.id);
     const seen = [];

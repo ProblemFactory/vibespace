@@ -63,6 +63,13 @@
 //      H9 a REAL create: the spawn's --allowedTools / --disallowedTools, and the ticked fake account holds ONE access row
 //      {agent: that conversation, draft} once its id exists (the tools pick latched as its config), 无 | 已选 | 全部, H10 the
 //      phone stacks LEFT then RIGHT
+//   I  A PAIRED MACHINE THAT CANNOT BE REACHED (lane hub-dies-dead-ssh-host — the .346 verify round's HIGH: picking it
+//      killed the hub): a machine record added over the API (my-mac @ mac.example.test) and a stub `ssh` first on the
+//      server's PATH that exits 255 at once (never a real machine). I1 picked in the host row ⇒ the folder field's own
+//      line says «my-mac cannot be reached — use a path on this machine or try again later» (state `unreachable`), its
+//      list offers nothing there; I2 the footer refuses Create with the same words; I3 typing on spawns nothing; the rung asks ONE
+//      ssh for the whole walk (the verdict kept a minute); I4 back to This machine ⇒ the field is usable again; I5 the hub
+//      answers the next request
 //   RED CONTROL = the base's open order (the account row filled from the select's previous value, then a programmatic
 //      set; the machine set only when the list lands), rebuilt from a PATCHED COPY of today's app.js in the throwaway
 //      worktree (one esbuild — never the repository's history): F2 / F3 / G1 red; the real bundle back ⇒ F2 green
@@ -88,6 +95,12 @@ const fakeHome = scratchHome('new-session-dialog-home', fs);
 const stubDir = scratch('new-session-dialog-stub');
 fs.rmSync(stubDir, { recursive: true, force: true });
 fs.mkdirSync(stubDir, { recursive: true });
+const sshDir = scratch('new-session-dialog-ssh'); // I: a stub ssh for a machine that cannot be reached (never a real one)
+fs.rmSync(sshDir, { recursive: true, force: true }); fs.mkdirSync(sshDir, { recursive: true });
+const SSH_CALLS = path.join(sshDir, 'calls.log');
+fs.writeFileSync(path.join(sshDir, 'ssh'), `#!/bin/sh\nfor a; do last="$a"; done\necho "\${last%%[[:space:]]*}" >> '${SSH_CALLS}'\necho "ssh: Could not resolve hostname mac.example.test: Name or service not known" >&2\nexit 255\n`, { mode: 0o755 });
+const sshLines = () => { try { return fs.readFileSync(SSH_CALLS, 'utf8').split('\n').filter(Boolean); } catch { return []; } };
+const sshCalls = () => sshLines().length; // each line = the remote command's first word (`true` = the reachability probe)
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
@@ -176,7 +189,7 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
     { id: 'pv-lane-empty', kind: 'self-hosted', label: 'Empty', modelsSource: 'none' },
   ] }), { mode: 0o600 });
 }
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1' /* H: the fake channel accounts the form's 「账号 · 以你的身份」 lists */ }, stdio: 'ignore' });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1' /* H: the fake channel accounts the form's 「账号 · 以你的身份」 lists */, PATH: `${sshDir}:${process.env.PATH}` /* I: the stub ssh */ }, stdio: 'ignore' });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
 let cleaned = false;
@@ -819,6 +832,32 @@ try {
     await evalJs('app.hideDialogs(); true');
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
     check('H no page error during the form\'s legs', pageErrors.length === 0, pageErrors);
+  }
+
+  // ═══ I a paired machine that cannot be reached: the refusal in the field, the hub lives ══════════════════════════
+  console.log('I the host row with a machine that cannot be reached (lane hub-dies-dead-ssh-host)');
+  {
+    const add = await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'my-mac', user: 'me', host: 'mac.example.test', port: 22 }) })).json();
+    const hid = add.id;
+    const s0 = sshCalls();
+    await openNs();
+    await evalJs(`(() => { const s = document.getElementById('input-host'); if (![...s.options].some((o) => o.value === ${JSON.stringify(hid)})) s.add(new Option('my-mac (me@mac.example.test)', ${JSON.stringify(hid)})); s.value = ${JSON.stringify(hid)}; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await realClick('#input-cwd');
+    const WORDS = 'my-mac cannot be reached — use a path on this machine or try again later';
+    const said = await waitFor(`(document.querySelector('#input-cwd').closest('[data-state]')?.dataset.state === 'unreachable') && (document.querySelector('#input-cwd').closest('[data-state]').querySelector('.pf-under')?.textContent || '').includes(${JSON.stringify(WORDS)})`, 10000);
+    const listNow = await evalJs(`(() => { const l = document.querySelector('.pf-list'); return { rows: l ? l.querySelectorAll('.pf-item').length : -1, empty: (l?.querySelector('.pf-empty')?.textContent || '').trim() }; })()`);
+    check('I1 picked in the host row ⇒ the folder field\'s own line says «my-mac cannot be reached — …» (state unreachable); its list offers nothing there', !!said && listNow.rows === 0, { said, listNow, under: await evalJs(`(document.querySelector('.pf-under')?.textContent || '').trim()`) });
+    check('I2 the footer refuses Create with the same words', await waitFor(`document.getElementById('ns-foot-info').innerText.includes(${JSON.stringify('Cannot create yet: ' + WORDS)})`, 5000), await evalJs(`document.getElementById('ns-foot-info').innerText`));
+    await sleep(1500); const s1 = sshCalls();
+    for (const ch of 'Docs') { await cdp('Input.insertText', { text: ch }); await sleep(200); }
+    await sleep(1500);
+    const probes = sshLines().slice(s0).filter((w) => w === 'true').length;
+    check('I3 typing on spawns nothing (0 ssh for four keystrokes) — the host rung asked ONE probe for the whole walk (the verdict is kept a minute)', sshCalls() === s1 && probes === 1, { duringTyping: sshCalls() - s1, probes, all: sshLines().slice(s0) });
+    await evalJs(`(() => { const s = document.getElementById('input-host'); s.value = ''; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    check('I4 back to This machine ⇒ the field is usable again (its state is not the refusal; the footer drops it)', await waitFor(`document.querySelector('#input-cwd').closest('[data-state]')?.dataset.state !== 'unreachable' && !document.getElementById('ns-foot-info').innerText.includes('cannot be reached')`, 5000), await evalJs(`document.querySelector('#input-cwd').closest('[data-state]')?.dataset.state`));
+    const next = await fetch(`http://127.0.0.1:${PORT}/api/home`).then((r) => r.status, (e) => 'NO ANSWER ' + e.message);
+    check('I5 the hub answers the next request', next === 200, next);
+    await evalJs('app.hideDialogs(); true');
   }
 
   // ═══ RED CONTROL: the base's open order, from a patched copy of today's app.js (one esbuild) ═══════════════════════

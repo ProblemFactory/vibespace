@@ -6260,6 +6260,8 @@ scripts/test-desktop-vnc-fit.mjs — THE vnc-display RUNG FITS THE WINDOW TOO (P
 
 ### hosts.js
 
+**2026-10-23 (lane hub-dies-dead-ssh-host, the .346 verify HIGH):** `feedStdin(child, bytes)` is THE ONE stdin feed of every ssh child (the five hosts.js feeds, remote-fs `write`, machine-mounts `_run`): it listens for the pipe's `'error'` before the first write, so a machine that cannot be reached is an answer (`sshRefusal` → `host-unreachable` / `ssh-exited-early`, the machine's name + ssh's line), never an uncaught EPIPE that exits the hub (test-architecture §101); `reachable(id)` / `refuseUnreachable(id)` — a live link, a fresh down-memo or ONE bounded `ssh -o ConnectTimeout=3 … true` over `_ssh`, single-flight, kept 60 s — is the first question of `dirComplete` / `dirSlice` / recent-cwds / RemoteFs `home`, so the path field says «my-mac 连不上» and nothing spawns per keystroke.
+
 **2026-09-28 (lane-pairing ③⑥, B-7007):** `noteDial` / the `dial` facts, `setExitAccess` / `setLastRun` / the throttled save, `reshapeStore`; `setAllowExit` removed — see "hosts.js — `dial` facts, `exit` lists" in the LANE-PAIRING block at the end of this file.
 
 **Lane C2 (2026-09-25, docs/design-desktop-apps-seamless.zh.md §3.5):** `connectedDevice(id)` = the cached machine handle ONLY when it is connected now (device #0 for a local id) — never a connect ladder; the desktop launch dialog's machine picker draws a row per machine with it.

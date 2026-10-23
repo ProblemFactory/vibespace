@@ -170,12 +170,14 @@ class MachineMounts {
       }
     }
     const sshArgs = [...this.hosts.sshArgs(h, { multiplex: true }), '--', [cmd, ...args.map((a) => `'${String(a).replace(/'/g, `'\\''`)}'`)].join(' ')];
+    const { feedStdin, sshRefusal } = require('./hosts.js'); // THE ONE STDIN FEED (lane hub-dies-dead-ssh-host): a dead machine's EPIPE is an answer, never the hub's death
     return await new Promise((resolve) => {
       const child = execFile('ssh', sshArgs, { env: this.hosts.sshEnv(), timeout: 60000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
-        if (err) resolve({ code: err.code || 1, stdout: (stdout || '').toString(), stderr: (stderr || err.message).toString() });
+        const refusal = err && sshRefusal(h, err, stderr, fed);
+        if (err) resolve({ code: err.code || 1, stdout: (stdout || '').toString(), stderr: (stderr || err.message).toString(), ...(refusal ? { refusal: refusal.code } : {}) });
         else resolve({ code: 0, stdout: (stdout || '').toString(), stderr: '' });
       });
-      if (input != null) { try { child.stdin.end(input); } catch {} } else { try { child.stdin.end(); } catch {} }
+      const fed = feedStdin(child, input);
     });
   }
 

@@ -20,6 +20,12 @@
 //     its index searched; the PURE rank gives the POC's remote ① (there · declared · absent «create?») and ② under each
 //     group's folder THERE; recentCounts (GET /api/hosts/:id/recent-cwds) counts per folder, newest first
 //   ⑥ wiring pins: the two routes take bases / q / probe / kind, the host route answers counts, SafeFs deadlines
+//   ⑦ a paired machine that CANNOT be reached (lane hub-dies-dead-ssh-host — the .346 verify round's HIGH: picking it in
+//     New Session stopped the hub): the real HostManager + a stub `ssh` on PATH that exits 255 at once — the host rung
+//     refuses it BY NAME (code host-unreachable, «my-mac», ssh's own line) with ONE bounded probe for six asks, the route
+//     says `unreachable`; every stdin road (the tools tar, the usage scanner, the opencode op, the agent install, the
+//     bootstrap) answers with the named refusal and NOTHING is uncaught. RED CONTROL: a copy of hosts.js whose feedStdin
+//     does not listen ⇒ an uncaught write EPIPE (what server.js's handler exits the hub on)
 // Run: node scripts/test-dir-complete.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,6 +33,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf-8');
@@ -193,6 +200,60 @@ console.log('\n── ⑤ the host rung with a FAKE machine (the real HostManage
   ok('…and through GET /api/dir-complete?host=h-mac (the router\'s remote dispatch)', viaRoute.listing && viaRoute.listing.home === MAC && viaRoute.listing.machine === 'h-mac', Object.keys(viaRoute));
   const rc = PC.recentCounts([{ cwd: '/Users/me/Projects/website', mtime: 1792000000 }, { cwd: '/Users/me/Downloads', mtime: 1791000000 }, { cwd: '/Users/me/Projects/website', mtime: 1792500000 }, { cwd: '' }]);
   ok('recentCounts: per folder, newest first, seconds scaled to ms', rc.length === 2 && rc[0].path === '/Users/me/Projects/website' && rc[0].count === 2 && rc[0].last === 1792500000 * 1000 && rc[1].count === 1, rc);
+}
+
+console.log('\n── ⑦ a paired machine that CANNOT be reached: refused by name before any spawn, its stdin roads never an uncaught ──');
+{
+  const BIN7 = path.join(TMP, 'deadbin'); fs.mkdirSync(BIN7);
+  const CALLS = path.join(TMP, 'ssh-calls.log');
+  fs.writeFileSync(path.join(BIN7, 'ssh'), `#!/bin/sh\necho x >> '${CALLS}'\necho "ssh: Could not resolve hostname mac.example.test: Name or service not known" >&2\nexit 255\n`, { mode: 0o755 });
+  const calls = () => { try { return fs.readFileSync(CALLS, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
+  const PATH0 = process.env.PATH; process.env.PATH = `${BIN7}:${PATH0}`;
+  const uncaught = []; const trap = (e) => uncaught.push(String((e && e.code) || e)); process.on('uncaughtException', trap);
+  /* payloads bigger than a pipe holds: the child exits before it reads, so the write meets a closed pipe every time */
+  const tools = path.join(TMP, 'tools7'); fs.mkdirSync(tools); fs.writeFileSync(path.join(tools, 'vibespace-status'), Buffer.alloc(3 << 20, 98));
+  const big = path.join(TMP, 'scan7'); fs.writeFileSync(big, Buffer.alloc(2 << 20, 97));
+  const bundle = path.join(TMP, 'agentd7.js'); fs.writeFileSync(bundle, Buffer.alloc(2 << 20, 99));
+  const roadsOf = async (HM, tag) => {
+    const hm = new HM({ dataDir: path.join(TMP, 'hub-data-' + tag) });
+    hm._state.hosts.push({ id: 'h-dead', name: 'my-mac', host: 'mac.example.test', user: 'me', port: 22, transport: 'ssh' });
+    const out = {};
+    const road = async (k, f) => { try { await f(); out[k] = 'resolved'; } catch (e) { out[k] = (e && e.code) || String((e && e.message) || e).slice(0, 80); } };
+    await road('installAgentTools', () => hm.installAgentTools('h-dead', tools));
+    await road('harvestUsage', () => hm.harvestUsage('h-dead', { force: true, scannerPath: big }));
+    await road('opencodeOp', () => hm.opencodeOp('h-dead', 'state', { pad: 'x'.repeat(1 << 20) }));
+    await road('installAgentd', () => hm.installAgentd('h-dead', bundle, '2.369.346', 'tok'));
+    const evs = []; await road('bootstrap', () => hm.bootstrap('h-dead', (ev) => evs.push(ev)));
+    out.bootstrapDone = (evs.find((e) => e.type === 'done') || {}).refusal || 'none';
+    await sleep(300);
+    return out;
+  };
+  try {
+    const { HostManager } = require('../src/hosts.js');
+    const dead = new HostManager({ dataDir: path.join(TMP, 'hub-data-dead') });
+    dead._state.hosts.push({ id: 'h-dead', name: 'my-mac', host: 'mac.example.test', user: 'me', port: 22, transport: 'ssh' });
+    const errs = [];
+    for (const text of ['', 'D', 'Do', 'Doc', 'Docs']) { try { await dead.dirSlice('h-dead', { text, q: text, bases: ['~'] }); errs.push(null); } catch (e) { errs.push(e); } }
+    let dc = null; try { await dead.dirComplete('h-dead', '~/x'); } catch (e) { dc = e; }
+    ok('the host rung refuses the machine BY NAME — code host-unreachable, «my-mac», ssh\'s own line (five keystrokes + a dirComplete)', errs.every((e) => e && e.code === 'host-unreachable' && e.host === 'my-mac' && /Could not resolve hostname/.test(e.sshLine)) && !!dc && dc.code === 'host-unreachable', errs.map((e) => e && [e.code, e.message]));
+    ok('…with ONE bounded probe for all six (the verdict is kept a minute — nothing spawns per keystroke)', calls() === 1, calls());
+    app.locals.getRemoteFs = () => ({ dirSlice: (id, o) => dead.dirSlice(id, o) });
+    const viaRoute = await ask('Doc', { host: 'h-dead', bases: ['~'] });
+    ok('…and GET /api/dir-complete?host= says `unreachable` (the path field\'s words: the machine\'s name + ssh\'s line)', viaRoute.unreachable && viaRoute.unreachable.host === 'my-mac' && /Could not resolve hostname/.test(viaRoute.unreachable.line) && Array.isArray(viaRoute.suggestions) && !viaRoute.suggestions.length, viaRoute);
+    const reachable = new HostManager({ dataDir: path.join(TMP, 'hub-data-alive') });
+    reachable._state.hosts.push({ id: 'h-up', name: 'up', host: 'up.example.test', user: 'me', port: 22, transport: 'ssh' });
+    reachable._ssh = (h, cmd) => new Promise((resolve, reject) => execFile('sh', ['-c', cmd], { env: { HOME: TMP, PATH: '/usr/bin:/bin' }, timeout: 8000 }, (e, o) => (e ? reject(e) : resolve(o))));
+    const up = await reachable.dirSlice('h-up', { text: '', bases: ['~'] });
+    ok('a machine that answers keeps its rung (the probe rides the same _ssh road; the listing comes back)', up && up.listing && up.listing.home === TMP && !!(await reachable.reachable('h-up')).ok, up && up.listing && up.listing.home);
+    const fixed = await roadsOf(HostManager, 'fixed');
+    ok('every stdin road on the dead machine answers with the named refusal (tools tar · usage scanner · opencode op · agent install · bootstrap)', ['installAgentTools', 'harvestUsage', 'opencodeOp', 'installAgentd'].every((k) => fixed[k] === 'host-unreachable') && fixed.bootstrapDone === 'host-unreachable', fixed);
+    ok('…and NOTHING is uncaught — each feed went through feedStdin', uncaught.length === 0, uncaught);
+    const src = read('src/hosts.js');
+    const mut = src.replace("  stdin.on('error', (e) => { if (!fed.error) fed.error = e; });\n", '');
+    const M = mutantCopies('dir-complete-nolisten', REPO);
+    const preFix = await roadsOf(M.load('src/hosts.js', mut, 'nolisten').HostManager, 'prefix');
+    ok('RED CONTROL: the same roads through a copy whose feedStdin does not listen ⇒ an uncaught write EPIPE (the hub\'s death)', mut !== src && uncaught.filter((c) => c === 'EPIPE').length >= 2, { uncaught, preFix });
+  } finally { process.removeListener('uncaughtException', trap); process.env.PATH = PATH0; }
 }
 
 console.log('\n── ⑥ wiring pins ──');

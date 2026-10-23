@@ -10415,6 +10415,7 @@ export default {
   "{path} does not exist, nor the folder above ({parent})": "{path} はなく、上のフォルダー（{parent}）もありません",
   "«{text}» is not a path yet — pick a folder from the list": "「{text}」はまだパスではありません —— 候補からフォルダーを選んでください",
   "The machine did not answer: {err}": "マシンが応答しませんでした：{err}",
+  "{host} cannot be reached — use a path on this machine or try again later": "{host} に接続できません — このマシンのパスを使うか、しばらくしてから試してください",
   "No suggestions yet — type a path or a few letters.": "まだ候補がありません —— パスか数文字を入力してください。",
   "No matching folder.": "一致するフォルダーはありません。",
   "{n} more": "ほか {n} 件",

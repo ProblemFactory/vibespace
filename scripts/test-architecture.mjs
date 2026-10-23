@@ -5525,5 +5525,82 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(planted.raw.length === 2 && plantedLegacy.legacy.includes('src/lib/planted.js') && gone.dead.length === 1 && gone.raw.some((r) => r.includes('ob-cwd')), `§98d NEGATIVE CONTROLS: a planted raw path input (markup + a placeholder) is RED (${planted.raw.length}), a planted setupDirAutocomplete( is RED, a door whose call is gone is a dead row AND its input turns raw`);
 }
 
+// §101 NO CHILD'S STDIN IS EVER UNLISTENED ON A MACHINE ROAD (lane hub-dies-dead-ssh-host — the .346 verify round's HIGH:
+// picking a paired ssh machine that cannot be reached stopped the whole hub). A child's stdin is a stream; a stream
+// 'error' nobody listens to is an uncaught exception and server.js's handler exits the hub on it. ssh to a machine it
+// cannot reach exits at once (BatchMode), so what we feed it meets a closed pipe (write EPIPE). GREP-DERIVED over git
+// ls-files (comments stripped):
+//  (a) the SSH ROADS (src/hosts.js, src/remote-fs.js, src/machine-mounts.js, src/server/dial-pairing.js,
+//      src/remote-shell.js) write NO child's stdin themselves — every feed is THE ONE helper, hosts.js feedStdin, whose
+//      body attaches its 'error' listener BEFORE the first write; the feeds are counted per file (5 / 1 / 1);
+//  (b) everywhere else in src/ (and server.js) a `X.stdin.write(` / `X.stdin.end(` has `X.stdin.on('error'` within the 25
+//      lines above it, or is a DEBT101 row: a counted per-file ratchet of the local children this lane did not touch
+//      (src/agentd/ is the signed device bundle) — a NEW unlistened site is red, and so is a row that got fixed
+//      (lower the pin);
+//  (c) CONTROLS: a bare `child.stdin.end(tar)` planted in hosts.js, the helper with its listener after the write, and an
+//      unlistened write in a new file are each red; a listened one is not.
+{
+  console.log('\n§101 no child\'s stdin is ever unlistened on a machine road (lane hub-dies-dead-ssh-host): ONE feed, hosts.js feedStdin');
+  const strip101 = (t) => String(t).replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const ROADS101 = { 'src/hosts.js': 5, 'src/remote-fs.js': 1, 'src/machine-mounts.js': 1, 'src/server/dial-pairing.js': 0, 'src/remote-shell.js': 0 };
+  const DEBT101 = {
+    'src/agentd/agentd.js': [5, 'the device daemon (the signed bundle): run-cmd / run-stream / the posix-shell probe end a local child\'s stdin'],
+    'src/agentd/attach-cli.js': [1, 'the attach CLI\'s ssh transport write — its own process, exits on transport loss'],
+    'src/agentd/stream-mac.js': [2, 'the device daemon: the Mac capture helper\'s command lines'],
+    'src/agentd/stream-screen.js': [1, 'the device daemon: the screen encoder\'s frames'],
+    'src/agentd/stream-window-source.js': [2, 'the device daemon: the window encoder\'s frames'],
+    'src/codex-reset-helper.js': [2, 'a local codex helper (not a machine road)'],
+    'src/codex-thread-read.js': [2, 'a local codex reader (not a machine road)'],
+    'src/desktop-mic.js': [4, 'the local mic decoder / helper (not a machine road)'],
+    'src/desktop-sound.js': [1, 'the local sound child (not a machine road)'],
+    'src/input-inject.js': [1, 'the local input injector (not a machine road)'],
+    'src/server/cli-usage-door.js': [1, 'the local CLI usage child (not a machine road)'],
+  };
+  const sites101 = (t) => {
+    const lines = strip101(t).split('\n'); const out = [];
+    lines.forEach((l, i) => {
+      for (const m of l.matchAll(/([\w$.]+?)\.stdin\??\.(write|end)\(/g)) {
+        const v = m[1].split('.').pop().replace(/\$/g, '\\$');
+        const win = lines.slice(Math.max(0, i - 25), i + 1).join('\n');
+        out.push({ line: i + 1, v, listened: new RegExp(`${v}\\.stdin\\??\\.on\\(\\s*'error'|${v}\\.stdin\\s*&&\\s*${v}\\.stdin\\.on\\(\\s*'error'`).test(win) });
+      }
+    });
+    return out;
+  };
+  const helperOk101 = (t) => { const b = (strip101(t).match(/\nfunction feedStdin\(child, bytes\) \{[\s\S]*?\n\}/) || [''])[0]; const on = b.indexOf("stdin.on('error'"), w = b.search(/stdin\.(?:end|write)\(/); return !!b && on > 0 && w > on; };
+  const census101 = (tx) => {
+    const roadBad = [], feeds = {}, newBad = [], debtOff = [];
+    for (const [f, want] of Object.entries(ROADS101)) {
+      const t = tx[f] || '';
+      for (const s of sites101(t)) roadBad.push(`${f}:${s.line}`);
+      feeds[f] = (strip101(t).match(/(?<!function )\bfeedStdin\(child, /g) || []).length;
+      if (feeds[f] !== want) roadBad.push(`${f}: ${feeds[f]} feedStdin( calls, want ${want}`);
+    }
+    for (const [f, t] of Object.entries(tx)) {
+      if (f in ROADS101) continue;
+      const un = sites101(t).filter((s) => !s.listened);
+      const pin = DEBT101[f] ? DEBT101[f][0] : 0;
+      if (un.length > pin) newBad.push(`${f}: ${un.map((s) => s.line).join(',')}`);
+      else if (un.length < pin) debtOff.push(`${f}: ${un.length} < pin ${pin}`);
+    }
+    for (const f of Object.keys(DEBT101)) if (!(f in tx)) debtOff.push(`${f}: not tracked`);
+    return { roadBad, feeds, newBad, debtOff, helper: helperOk101(tx['src/hosts.js'] || '') };
+  };
+  const files101 = trackedFiles(REPO, 'src', 'server.js').filter((f) => /\.(?:c|m)?js$/.test(f));
+  const tx101 = Object.fromEntries(files101.map((f) => [f, read(f)]));
+  const real101 = census101(tx101);
+  ok(files101.length > 300 && real101.helper, `§101a THE ONE feed exists — hosts.js feedStdin attaches its 'error' listener before the first write (${files101.length} tracked files scanned)`);
+  ok(!real101.roadBad.length, `§101a the ssh roads write no child's stdin themselves — every feed is feedStdin (${Object.entries(real101.feeds).map(([f, n]) => `${f.replace(/^src\//, '')} ${n}`).join(', ')})${real101.roadBad.length ? ' — RED: ' + real101.roadBad.join(' | ') : ''}`);
+  ok(!real101.newBad.length, `§101b no NEW unlistened child stdin anywhere in src/ (${Object.values(DEBT101).reduce((n, [c]) => n + c, 0)} counted debt sites in ${Object.keys(DEBT101).length} files)${real101.newBad.length ? ' — RED: ' + real101.newBad.join(' | ') : ''}`);
+  ok(!real101.debtOff.length, `§101b every DEBT101 pin is exact (a fixed site lowers its pin)${real101.debtOff.length ? ' — off: ' + real101.debtOff.join(' | ') : ''}`);
+  const hostsT = tx101['src/hosts.js'] || '';
+  const bare101 = census101({ ...tx101, 'src/hosts.js': hostsT.replace('const fed = feedStdin(child, tar);', 'child.stdin.end(tar);') });
+  const late101 = census101({ ...tx101, 'src/hosts.js': hostsT.replace(/(\n  stdin\.on\('error'[^\n]*\n)(  try \{ if \(bytes == null\)[^\n]*\n)/, '\n$2$1') });
+  const newF = census101({ ...tx101, 'src/planted-101.js': "const c = spawn('x');\nc.stdin.end(buf);\n" });
+  const okF = census101({ ...tx101, 'src/planted-101.js': "const c = spawn('x');\nc.stdin.on('error', () => {});\nc.stdin.end(buf);\n" });
+  ok(bare101.roadBad.length >= 1 && late101.helper === false && hostsT !== hostsT.replace('const fed = feedStdin(child, tar);', '') && newF.newBad.some((x) => x.startsWith('src/planted-101.js')) && !okF.newBad.length,
+    `§101c CONTROLS: a bare child.stdin.end(tar) in hosts.js (${bare101.roadBad.length} red), the helper's listener after its write (${late101.helper ? 'WRONG' : 'red'}) and an unlistened write in a new file (${newF.newBad.length ? 'red' : 'WRONG'}) are caught; a listened one is not (${okF.newBad.length ? 'WRONG' : 'green'})`);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

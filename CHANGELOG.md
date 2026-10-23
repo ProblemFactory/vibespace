@@ -42,6 +42,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Before refreshing the usage limits of one or every account, the question now says in plain words what happens: a free check, like typing /usage.
 - A Gmail draft you never sent no longer shows at the top of its thread as if it had been sent; it shows as a draft at the end, and a deleted draft is not shown.
 - On a new workspace, the first chat no longer starts in VibeSpace's own install folder; it starts in the folder with your files.
+- Choosing a paired machine that cannot be reached no longer stops VibeSpace; the folder field says the machine is unreachable and you can go on.
 
 ## 2.369.345 — 2026-10-23
 

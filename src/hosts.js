@@ -60,6 +60,44 @@ const slotMovedError = (msg) => Object.assign(new Error(msg), { code: SLOT_MOVED
  *  that explains a refusal must not be able to disagree about it. */
 const stampedSizeOf = (meta) => (meta && Number.isFinite(Number(meta.size)) ? Number(meta.size) : NaN);
 
+/** THE ONE STDIN FEED (lane hub-dies-dead-ssh-host — the .346 verify round's HIGH: picking a paired ssh machine that
+ *  cannot be reached stopped the whole hub). A child's stdin is a stream, and a stream 'error' nobody listens to is an
+ *  uncaught exception — server.js's handler exits the hub on it. ssh to a machine it cannot reach exits at once
+ *  (BatchMode), so the bytes we feed it meet a closed pipe: write EPIPE (ECONNRESET / ERR_STREAM_DESTROYED by timing).
+ *  feedStdin listens BEFORE the first write and keeps the error as a fact of the feed (`fed.error`) — never a throw,
+ *  never an uncaught; the child's own result (its exit, ssh's stderr) says what happened and sshRefusal names it. Every
+ *  child this file, src/remote-fs.js and src/machine-mounts.js feed goes through here (test-architecture §101). */
+const STDIN_GONE = new Set(['EPIPE', 'ECONNRESET', 'ERR_STREAM_DESTROYED', 'ERR_STREAM_WRITE_AFTER_END']);
+function feedStdin(child, bytes) {
+  const fed = { error: null };
+  const stdin = child && child.stdin;
+  if (!stdin) return fed;
+  stdin.on('error', (e) => { if (!fed.error) fed.error = e; });
+  try { if (bytes == null) stdin.end(); else stdin.end(bytes); } catch (e) { if (!fed.error) fed.error = e; }
+  return fed;
+}
+/** «my-mac cannot be reached», as an error with a CODE (the road's refusal and the host rung's): the machine's id and
+ *  name and ssh's own last stderr line ride along for the field / the route to say. */
+function unreachableError(h, line = '') {
+  const name = (h && (h.name || h.id)) || 'the machine';
+  const l = String(line || '').trim().slice(0, 300);
+  return Object.assign(new Error(`${name} cannot be reached${l ? ' — ' + l : ''}`), { code: 'host-unreachable', hostId: (h && h.id) || null, host: name, sshLine: l, params: { host: name, line: l } });
+}
+/** A failed ssh road BY NAME (feedStdin's partner): `host-unreachable` when ssh itself could not reach the machine (its
+ *  own exit 255 — resolve / connect / auth — or no answer within the bound), `ssh-exited-early` when the far side ended
+ *  before it read what we fed it. null = no failure, or not the road's (the remote command's own exit: the caller's words). */
+function sshRefusal(h, err, stderr, fed) {
+  if (!err) return null; // the child succeeded: whatever the pipe said, the answer stands
+  const line = String(stderr || '').trim().split('\n').filter(Boolean).pop() || '';
+  if (err && (err.code === 255 || err.killed)) return unreachableError(h, line || (err.killed ? 'no answer in time' : ''));
+  if (!(fed && fed.error && STDIN_GONE.has(fed.error.code))) return null;
+  const name = (h && (h.name || h.id)) || 'the machine';
+  return Object.assign(new Error(`${name} ended the connection before it read its input (${fed.error.code})${line ? ' — ' + line : ''}`), { code: 'ssh-exited-early', hostId: (h && h.id) || null, host: name, sshLine: line.slice(0, 300) });
+}
+/** A route's words for a refusal: `{ unreachable: { host, hostId, line } }` for the path field, else nothing. */
+const refusalBody = (e) => (e && e.code === 'host-unreachable' ? { unreachable: { host: e.host || '', hostId: e.hostId || null, line: e.sshLine || '' } } : {});
+const REACH_TTL_MS = 60 * 1000;
+
 // lane device-bundle-signing-fix-r2 (verify-r1 RED-3): the ssh road's remote step — ONE sh script, the tar on stdin
 // (agentd.js + token [+ agentd.manifest.json]); see HostManager#installAgentd for the rungs. The token always lands
 // (the hub's bridge needs it); `current` moves only through a rung that says so — an existing install's own agent
@@ -849,9 +887,9 @@ class HostManager {
     return null;
   }
 
-  _ssh(h, remoteCmd, { timeoutMs = 15000, maxBuffer = 4 * 1024 * 1024, encoding, fresh = false } = {}) {
+  _ssh(h, remoteCmd, { timeoutMs = 15000, maxBuffer = 4 * 1024 * 1024, encoding, fresh = false, connectTimeoutS = 0 } = {}) {
     return new Promise((resolve, reject) => {
-      execFile('ssh', [...this.sshArgs(h, { multiplex: !fresh }), '--', remoteCmd], { env: this.sshEnv(), timeout: timeoutMs, maxBuffer, ...(encoding !== undefined ? { encoding } : {}) }, (err, stdout, stderr) => {
+      execFile('ssh', [...(connectTimeoutS ? ['-o', `ConnectTimeout=${connectTimeoutS}`] : []), ...this.sshArgs(h, { multiplex: !fresh }), '--', remoteCmd], { env: this.sshEnv(), timeout: timeoutMs, maxBuffer, ...(encoding !== undefined ? { encoding } : {}) }, (err, stdout, stderr) => {
         if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
         resolve(stdout);
       });
@@ -934,11 +972,40 @@ class HostManager {
     return { success: true, gone: out.includes('VS_GONE') };
   }
 
+  /** CAN THIS MACHINE BE REACHED — asked at most once a minute (lane hub-dies-dead-ssh-host). The host rung's FIRST
+   *  question for a paired ssh machine (dirComplete / dirSlice / its recent folders / its home), so a machine that
+   *  cannot be reached is refused BY NAME before anything else spawns — never an ssh child per keystroke. A live device
+   *  link says yes with no spawn; a fresh unreachable memo (the transcript road's _hostDownUntil) says no with none;
+   *  else ONE bounded `ssh … true` (BatchMode, ConnectTimeout=3, the shared ControlMaster — a yes warms it for the
+   *  listing that follows), single-flight per machine, its verdict kept REACH_TTL_MS. A dial device is not asked (its
+   *  link is the only road and answers for itself). → { ok, at, via, line? } */
+  async reachable(id) {
+    const h = this.get(id);
+    if (!h || h.transport === 'dial') return { ok: true, at: Date.now(), via: 'not-ssh' };
+    const R = (this._reach ||= new Map());
+    const c = R.get(id) || {};
+    if (c.verdict && Date.now() - c.verdict.at < REACH_TTL_MS) return c.verdict;
+    if (c.p) return c.p;
+    const keep = (v) => { R.set(id, { verdict: v }); return v; };
+    if (this.linkState(id) === 'online') return keep({ ok: true, at: Date.now(), via: 'link' });
+    if ((this._hostDownUntil?.get(id) || 0) > Date.now()) return keep({ ok: false, at: Date.now(), via: 'memo', line: '' });
+    const p = this._ssh(h, 'true', { timeoutMs: 5000, connectTimeoutS: 3 })
+      .then(() => keep({ ok: true, at: Date.now(), via: 'probe' }), (e) => keep({ ok: false, at: Date.now(), via: 'probe', line: String((e && e.message) || e || '').trim().split('\n').pop().slice(0, 300) }));
+    R.set(id, { ...c, p });
+    return p;
+  }
+  /** …the same as a refusal: throws unreachableError (code 'host-unreachable', the machine's name, ssh's line) or returns. */
+  async refuseUnreachable(id) {
+    const v = await this.reachable(id);
+    if (!v.ok) throw unreachableError(this.get(id), v.line);
+  }
+
   /** Remote directory autocomplete — parent-dir listing, prefix-filter.
    *  Device link first (the ONLY path for dial machines — real report: the
    *  pull dialog completed LOCAL folders; ssh fallback below unchanged). */
   async dirComplete(id, input, { by = 'system:hosts' } = {}) {
     const h = this.get(id);
+    if (h && h.transport !== 'dial') await this.refuseUnreachable(id); // BY NAME, before any spawn (lane hub-dies-dead-ssh-host)
     const raw = String(input || '');
     const slash = raw.lastIndexOf('/');
     const parent = slash >= 0 ? raw.slice(0, slash) || '/' : '';
@@ -976,6 +1043,7 @@ class HostManager {
    *  → { suggestions, listing, self, took, partial } */
   async dirSlice(id, { text = '', bases = [], probe = [], q = '', kind = 'folder' } = {}, { by = 'system:hosts' } = {}) {
     const h = this.get(id);
+    if (h && h.transport !== 'dial') await this.refuseUnreachable(id); // BY NAME, before any spawn (lane hub-dies-dead-ssh-host)
     const PC = require('./path-candidates.js');
     const DS = require('./dir-slice-script.js');
     const t0 = Date.now();
@@ -1175,11 +1243,11 @@ class HostManager {
         + (refused ? '' : `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${this._cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; `)
         + 'echo VS-INSTALLED'],
         { env: this.sshEnv(), timeout: 30000 }, (err, stdout, stderr) => {
-          if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
+          if (err) return reject(sshRefusal(h, err, stderr, fed) || new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
           if (!String(stdout).includes('VS-INSTALLED')) return reject(new Error('unexpected response'));
           resolve({ installed: present, cliConfig: parseReceiptLines(String(stdout)), ...(refused ? { refused } : {}) });
         });
-      child.stdin.end(tar);
+      const fed = feedStdin(child, tar);
     });
   }
 
@@ -1379,7 +1447,7 @@ class HostManager {
         const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--', remote],
           { env: this.sshEnv(), timeout: 30000 }, (err, stdout, stderr) => {
             try { fs.rmSync(stage, { recursive: true, force: true }); } catch {}
-            if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
+            if (err) return reject(sshRefusal(h, err, stderr, fed) || new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
             const r = installAgentdAnswer(stdout);
             if (!r) return reject(new Error('unexpected response: ' + String(stdout).slice(0, 120)));
             if (r.failed) return reject(new Error('the host could not land the agent: ' + r.failed));
@@ -1388,7 +1456,7 @@ class HostManager {
             if (r.tofu) { try { this.onAgentUpgrade?.('trusted', { hostKey: id, machine, from: r.from, to: ver, keyIds: r.tofu, by: 'system:device-upgrade' }); } catch { } }
             resolve({ agentdPath: '$HOME/.vibespace/agentd/current/agentd.js', ...r });
           });
-        child.stdin.end(tar);
+        const fed = feedStdin(child, tar);
       });
     } catch (e) { try { fs.rmSync(stage, { recursive: true, force: true }); } catch {}; throw e; }
   }
@@ -2363,10 +2431,10 @@ class HostManager {
       const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
         'umask 077; mkdir -p "$HOME/.vibespace/bin"; cat > "$HOME/.vibespace/bin/vibespace-usage-scan"; ' + REMOTE_PRELUDE + 'node "$HOME/.vibespace/bin/vibespace-usage-scan"'],
         { env: this.sshEnv(), timeout: 180000, maxBuffer: 128 * 1024 * 1024 }, (err, stdout, stderr) => {
-          if (err) { this._usageHarvestAt.set(id, 0); return reject(new Error((stderr || err.message || '').toString().slice(0, 200))); }
+          if (err) { this._usageHarvestAt.set(id, 0); return reject(sshRefusal(h, err, stderr, fed) || new Error((stderr || err.message || '').toString().slice(0, 200))); }
           resolve(stdout.toString());
         });
-      child.stdin.end(script);
+      const fed = feedStdin(child, script);
     });
   }
 
@@ -2414,10 +2482,10 @@ class HostManager {
         + ' | base64 -d > "$HOME/.vibespace/bin/vibespace-opencode-op"; '
         + REMOTE_PRELUDE + 'node "$HOME/.vibespace/bin/vibespace-opencode-op"'],
         { env: this.sshEnv(), timeout: timeoutMs, maxBuffer: 96 * 1024 * 1024 }, (err, out, stderr) => {
-          if (err) return reject(new Error((stderr || err.message || '').toString().slice(0, 300) || 'ssh failed'));
+          if (err) return reject(sshRefusal(h, err, stderr, fed) || new Error((stderr || err.message || '').toString().slice(0, 300) || 'ssh failed'));
           resolve(out.toString());
         });
-      child.stdin.end(JSON.stringify({ op, params }));
+      const fed = feedStdin(child, JSON.stringify({ op, params }));
     });
     let parsed = null;
     for (const line of stdout.trim().split('\n')) { try { const j = JSON.parse(line); if (j && typeof j.ok === 'boolean') parsed = j; } catch { } }
@@ -2884,9 +2952,9 @@ HostManager.prototype.bootstrap = function (id, onEvent) {
   return new Promise((resolve) => {
     const steps = Object.fromEntries(BOOTSTRAP_STEPS.map(s => [s.key, 'pending']));
     const child = spawn('ssh', [...this.sshArgs(h), 'bash -s'], { env: this.sshEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
-    child.stdin.write(bootstrapScript());
-    child.stdin.end();
-    let buf = '';
+    let spawnErr = null; child.on('error', (e) => { spawnErr = e; }); // no ssh at all is an answer too, never an uncaught
+    const fed = feedStdin(child, bootstrapScript());
+    let buf = '', lastErrLine = '';
     const feed = (chunk) => {
       buf += chunk.toString();
       let nl;
@@ -2901,15 +2969,17 @@ HostManager.prototype.bootstrap = function (id, onEvent) {
       }
     };
     child.stdout.on('data', feed);
-    child.stderr.on('data', feed);
+    child.stderr.on('data', (chunk) => { const l = String(chunk).trim().split('\n').filter(Boolean).pop(); if (l) lastErrLine = l; feed(chunk); });
     const timer = setTimeout(() => { try { child.kill(); } catch {} }, 10 * 60 * 1000);
     child.on('close', (code) => {
       clearTimeout(timer);
       for (const k of Object.keys(steps)) if (steps[k] === 'pending' || steps[k] === 'running') steps[k] = 'fail';
-      onEvent({ type: 'done', code, steps });
+      const refusal = sshRefusal(h, code !== 0 ? { code: spawnErr ? spawnErr.code : code } : null, lastErrLine || (spawnErr && spawnErr.message) || '', fed);
+      if (refusal) onEvent({ type: 'log', line: refusal.message.slice(0, 500) });
+      onEvent({ type: 'done', code, steps, ...(refusal ? { refusal: refusal.code } : {}) });
       resolve(steps);
     });
   });
 };
 
-module.exports = { HostManager, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer };
+module.exports = { HostManager, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody };

@@ -39,7 +39,7 @@ function daemonInfoOf(dm) { try { const st = typeof dm.status === 'function' ? d
 const named = (code, message, status, params) => Object.assign(new Error(message), { code, status, params });
 // verify-r2: the Files view's refusals travel as a CODE (+ its params) beside the English `error` — the client words them
 // in the reader's language (src/lib/file-explorer-ops.js fsErrorText); every other error: `{ error }` as before
-const FS_REFUSALS = Object.freeze(['device_agent_outdated', 'windows_unsupported', 'windows_no_shell']);
+const FS_REFUSALS = Object.freeze(['device_agent_outdated', 'windows_unsupported', 'windows_no_shell', 'host-unreachable']); // host-unreachable: a paired ssh machine refused BY NAME (lane hub-dies-dead-ssh-host)
 const fsErrorBody = (e) => ({ error: String((e && e.message) || e), ...(e && FS_REFUSALS.includes(e.code) ? { code: e.code, params: e.params || {} } : {}) });
 
 // ONE archive-listing parser for local AND remote (B-b87b: RemoteFs used to
@@ -230,6 +230,8 @@ class RemoteFs {
     // /api/home?host=<dial> used to 400 'has no ssh', so New Session could
     // never learn the device home and defaulted cwd to the LOCAL home).
     const w = await this._win(id); if (w) return String((await w.fsHome()).home || '');
+    // a paired ssh machine that cannot be reached is refused BY NAME before anything spawns (lane hub-dies-dead-ssh-host)
+    if (this._host(id)?.transport !== 'dial') await this.hosts.refuseUnreachable?.(id);
     const dm = await this._dev(id);
     if (dm) { try { const h = await this._devHome(id, dm); if (h) return h; } catch { /* legacy */ } }
     const out = await this._run(id, 'printf %s "$HOME"');
@@ -374,12 +376,14 @@ class RemoteFs {
       } catch { /* legacy */ }
     }
     const h = this._host(id);
+    const { feedStdin, sshRefusal } = require('./hosts.js'); // THE ONE STDIN FEED (lane hub-dies-dead-ssh-host): a dead machine's EPIPE is an answer, never the hub's death
     await new Promise((resolve, reject) => {
       const child = spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', `mkdir -p "$(dirname ${shqp(filePath)})" && cat > ${shqp(filePath)}`], { env: this.hosts.sshEnv() });
       let err = '';
       child.stderr.on('data', d => { err += d; });
-      child.on('close', (code) => code === 0 ? resolve() : reject(new Error(err.trim() || `write failed (${code})`)));
-      child.stdin.end(contentBuffer);
+      child.on('error', reject);
+      child.on('close', (code) => code === 0 ? resolve() : reject(sshRefusal(h, { code }, err, fed) || new Error(err.trim() || `write failed (${code})`)));
+      const fed = feedStdin(child, contentBuffer);
     });
     return { success: true };
   }

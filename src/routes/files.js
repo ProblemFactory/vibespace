@@ -206,7 +206,7 @@ router.get('/api/dir-complete', async (req, res) => {
       if (!res.headersSent) res.json(ans);
     } catch (e) {
       clearTimeout(guard);
-      if (!res.headersSent) res.json({ suggestions: [], error: String(e.message || e).slice(0, 120) });
+      if (!res.headersSent) res.json({ suggestions: [], error: String(e.message || e).slice(0, 120), ...require('../hosts.js').refusalBody(e) });
     }
     return;
   }
@@ -229,7 +229,7 @@ router.get('/api/dir-complete', async (req, res) => {
       if (!res.headersSent) res.json({ suggestions });
     } catch (e) {
       clearTimeout(guard);
-      if (!res.headersSent) res.json({ suggestions: [], error: String(e.message || e).slice(0, 120) });
+      if (!res.headersSent) res.json({ suggestions: [], error: String(e.message || e).slice(0, 120), ...require('../hosts.js').refusalBody(e) });
     }
     return;
   }
