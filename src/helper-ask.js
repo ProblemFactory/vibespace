@@ -478,6 +478,12 @@ function isStopRejection(text) {
     || /^\s*\[Request interrupted by user/i.test(String(text || ''));
 }
 
+/** The sentinel an agy sub's unfinished tool card carries once the sub was killed / stopped mid-step (lane
+ *  agy-card-details gap 5; written by src/agy-store.js closePendingRecords). The renderer turns it into the localized
+ *  «terminated with the subagent» — never the raw token, never a spinner left spinning. */
+const SUB_TERMINATED_NOTE = '@@agy-subagent-terminated@@';
+function isSubTerminated(text) { return typeof text === 'string' && text.trim() === SUB_TERMINATED_NOTE; }
+
 /** THE WORDS OF A REFUSED ANSWER (verify r1): a `permission-response` for a
  *  request this session already knows as settled — answered from the other
  *  window, withdrawn by the CLI, or its helper over — writes NOTHING to stdin
@@ -525,7 +531,7 @@ module.exports = {
   askSubject, INBOX_SUBJECT_MAX, hiddenCharsOf, revealParts, revealHidden, SECOND_PRESS_MS, secondPressVerdict,
   HELPER_ASK_INBOX_MS, helperAskOf, askRecordOf, helperParentOf, askTarget, askState, hasPendingHelperAsk, helperLabelOf,
   pendingAsksOf, asksSignature, waitingChip, helperAskHead, helperAskSettledWords, mainAskSettledWords, inboxItemFor, inboxDueAt,
-  isStopRejection, agentStatusWords, answerSessionFor, answerRefusalWords,
+  isStopRejection, isSubTerminated, SUB_TERMINATED_NOTE, agentStatusWords, answerSessionFor, answerRefusalWords,
   // verify r3: THE TABLE
   ASK_STATES, ASK_EVENTS, ASK_EFFECTS, ASK_INITIAL, ASK_RECORD_EVENTS, ASK_TABLE, askTransition, isWaiting, answerVerdict,
   RESULT_EVENT_OF, isUnknownOutcome, // verify r5: the census's outcome word → the table's result event; the unknown speller

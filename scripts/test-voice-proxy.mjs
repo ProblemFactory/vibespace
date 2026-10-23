@@ -8,6 +8,9 @@
 //   LOG (console.*, stdout/stderr, the injected log) and AUDIO NEVER ON DISK (every fs writer is a refusing spy while a
 //   dictation is in flight) — with RED controls (voice-verify F3): scratch copies of the route + client with
 //   `console.log(audio)`, a Bearer log line, an audio write planted are each caught by the same checks.
+//   ⑦ (lane voice-teach-skips) the teach calls' documented shapes: POST /v1/terms {terms:[{term}]}, every skipped entry
+//   kept with its reason (review / refused) and other fields, ONE log line without the key, the vocabulary rows; RED = the
+//   base's parse (x.term || x) that threw the reason away.
 import fs from 'node:fs';
 import os from 'node:os';
 import http from 'node:http';
@@ -223,6 +226,30 @@ console.log('⑥ AUDIO + KEY NEVER IN A LOG, AUDIO NEVER ON DISK (and their RED 
   const a4 = '      const f = req.file;\n';
   const m4 = await plantLeg('src/routes/voice.js', a4, a4 + "      try { require('fs').writeFileSync(require('path').join(require('os').tmpdir(), 'vs-last-dictation.webm'), f.buffer); } catch { }\n");
   ok('CONTROL: a planted write of the audio to disk is caught by the spy (and refused — nothing lands) ⇒ the disk check is RED on it', m4.once && m4.writes.some((w) => /^writeFileSync .*vs-last-dictation\.webm$/.test(w)) && !fs.existsSync(path.join(os.tmpdir(), 'vs-last-dictation.webm')), m4);
+}
+console.log('⑦ THE TEACH CALLS\' SHAPES (lane voice-teach-skips — https://dropline.fish.audio/docs §5.2 / §6.2): the body, every skipped entry with its reason, the log line; RED: the base\'s parse');
+{
+  const C7 = require(path.join(REPO, 'src/server/dropline-client.js'));
+  const mkT = (mod = C7) => mod.create({ integrations: () => store, pluginOn: () => true, base: BASE, now: () => clock, log: capture });
+  seen.length = 0; logs.length = 0;
+  script = [{ status: 200, json: { added: ['Zephyr'], skipped: [{ term: '青松', reason: 'review' }, { term: 'Ostrevia', reason: 'refused', note: 'deleted 2026-10-01' }, 'Bare'], dictionary_version: 1791420000123, request_id: 'tr_doc' } }];
+  const out = await mkT().terms(['Zephyr', '青松', 'Ostrevia', 'Bare']);
+  const sent = seen.find((s) => s.url === '/v1/terms');
+  ok('POST /v1/terms carries the documented body {terms: [{term}]}, the key as the Bearer only', !!sent && sent.method === 'POST' && JSON.stringify(JSON.parse(sent.body.toString())) === JSON.stringify({ terms: [{ term: 'Zephyr' }, { term: '青松' }, { term: 'Ostrevia' }, { term: 'Bare' }] }) && sent.auth === `Bearer ${KEY}`, sent && sent.body.toString());
+  ok('the documented answer: added + EVERY skipped entry with its reason (review / refused), the vendor\'s other fields kept (note), a bare string = a term with no reason', out.added.join() === 'Zephyr' && out.skipped.join() === '青松,Ostrevia,Bare' && out.skips[0].reason === 'review' && out.skips[1].reason === 'refused' && out.skips[1].fields.note === 'deleted 2026-10-01' && out.skips[2].reason === null && out.requestId === 'tr_doc', out);
+  const line = logs.filter((l) => l.includes('/v1/terms'));
+  ok('ONE server log line: the counts, each skipped word with its reason, the request id — never the key', line.length === 1 && /added 1 · skipped 3/.test(line[0]) && line[0].includes('"reason":"refused"') && line[0].includes('tr_doc') && !line[0].includes(KEY), line);
+  script = [{ status: 200, json: { terms: [{ term: 'Zephyr', aliases: ['zefir'], section: 'manual' }, { term: 'Anika', aliases: [], section: 'auto' }, 'BareRow'], version: 1791420000123 } }];
+  const voc = await mkT().vocabulary();
+  ok('GET /v1/vocabulary: the documented rows (manual and auto) read as their terms; a bare string row too', voc.join() === 'Zephyr,Anika,BareRow', voc);
+  // RED: the base's parse threw every skipped entry's reason away (x.term || x — a word and a count, never a why)
+  const src = fs.readFileSync(path.join(REPO, 'src/server/dropline-client.js'), 'utf8');
+  const anchor = '    const skips = (Array.isArray(j && j.skipped) ? j.skipped : []).map(skipOf).filter((x) => x.term);';
+  const MCm = (await import('./mutant-copy.mjs')).mutantCopies('voice-proxy-skips', REPO);
+  const base = require(MCm.write('src/server/dropline-client.js', src.replace(anchor, '    const skips = (Array.isArray(j && j.skipped) ? j.skipped : []).map((x) => ({ term: String((x && x.term) || x), reason: null }));'), 'baseparse'));
+  script = [{ status: 200, json: { added: [], skipped: [{ term: '青松', reason: 'review' }], request_id: 'tr_b' } }];
+  const b = await mkT(base).terms(['青松']);
+  ok('CONTROL RED: the base\'s parse (x.term || x) ⇒ the reason is gone — the reason check above is red on it', src.split(anchor).length === 2 && b.skips[0].reason === null, b);
 }
 H.close(); vendor.close();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

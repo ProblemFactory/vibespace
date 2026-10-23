@@ -859,8 +859,11 @@ try {
   check('a patched renderer copy that assigns innerHTML = the raw title DOES run it (window.__xss === 1) — ① can go red', x7 === 1, x7);
   // lane app-page-csp: the planted handler is what the app page's report-only policy exists for — it REPORTS it (the enforced
   // policy will block it); the suite takes that one report, so its zero-report teardown (scripts/scratch.mjs) judges the rest
-  const planted = await takeCspReports((r) => r.directive === 'script-src-attr' && r.blocked === 'inline' && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(r.document));
-  check('…and the app page\'s report-only policy REPORTED the planted inline handler (script-src-attr inline — the enforced policy blocks it)', planted.length === 1, planted);
+  // lane chrome-156-drift: taken by the planted handler's OWN SAMPLE (src/app-csp.js 'report-sample' — a suite's hub keeps
+  // it), so a product report with other code is never taken; Chrome ≤ 155 reports it once (when it compiles), Chrome 156
+  // twice (also when its attribute is SET — measured, the same sample)
+  const planted = await takeCspReports((r) => r.directive === 'script-src-attr' && r.blocked === 'inline' && r.sample === 'window.__xss=1' && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(r.document), { want: 2, ms: 3000 });
+  check('…and the app page\'s report-only policy REPORTED the planted inline handler (script-src-attr inline, its sample the planted code — when it compiles; on Chrome 156 also when its attribute is set — the enforced policy blocks it)', planted.length >= 1 && planted.length <= 2, planted);
   check('no uncaught page exceptions on the desktop page', pageErrors.length === 0, pageErrors.slice(0, 3));
 
   // ── ⑳ THE FIRST SCREEN, MEASURED (lane foryou-folds, design q-044 decision 1) ──

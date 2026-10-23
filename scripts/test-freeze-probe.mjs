@@ -4,7 +4,8 @@
 // (inc-mvi50qdh-ygmh «9.1 s» / inc-mvi5ggqh-1tz8 «620.8 s», the owner's idle Windows
 // desktop) the PAINT-GAP rule — a gap in painting is jank only with a busy main
 // thread or a person there. PURE functions, every branch a leg, the pre-fix / base
-// rule as the negative control.
+// rule as the negative control. 2.369.343 (lane vault-slow-load — inc-mvk5jyv3 «保险库操作好像加载时间有点长» carried no
+// timing at all) the page's last 20 requests: fetchTimingOf + the ring the incident snapshot carries.
 import { selfGapIsFreeze, jankStormVerdict, paintGapKind } from '../src/lib/telemetry-client.js';
 import * as tc from '../src/lib/telemetry-client.js';
 import fs from 'node:fs';
@@ -125,6 +126,29 @@ ok(selfGapIsFreeze({ tickGap: 4001, prevTick: T + 100000, now: T + 104001, hidde
   ok(/out\.screenEvents = window\.__vsScreenEvents/.test(rec), 'WIRING: the incident snapshot carries screenEvents (the window\'s screen facts reach the bundle)');
   ok(/window\.__vsInputs = recentInputs/.test(src), 'WIRING: the input ring is exposed as window.__vsInputs (like the sibling rings)');
   ok(/out\.inputs = window\.__vsInputs/.test(rec), 'WIRING: the snapshot carries the input ring (the paint-gap verdict\'s present-person evidence)');
+}
+// ── THE PAGE'S LAST REQUESTS (lane vault-slow-load): a resource-timing entry ⇒ { at, route, ms } for the page's own
+// /api/ requests — the route = the first three path segments (the server's slow-request rule: no query, no id, no path) ──
+{
+  const O = 'https://hub.example.test';
+  const e = (name, o = {}) => ({ name, initiatorType: 'fetch', startTime: 1000, responseEnd: 1812.6, duration: 812.6, ...o });
+  const r = tc.fetchTimingOf(e(O + '/api/vault/contents?x=1'), O, 1_700_000_000_000);
+  ok(!!r && r.route === '/api/vault/contents' && r.ms === 813 && r.at === 1_700_000_001_000 && Object.keys(r).join() === 'at,route,ms', 'a request to the hub ⇒ { at, route, ms } — its route without the query, request to last byte', r);
+  ok(tc.fetchTimingOf(e(O + '/api/automation/keys/ak-1/audit?limit=50'), O)?.route === '/api/automation/keys' && tc.fetchTimingOf(e(O + '/api/vault/totp/my-bank'), O)?.route === '/api/vault/totp', 'an id or a name never rides — the first three segments');
+  ok(tc.fetchTimingOf(e(O + '/api/file/serve/home/u/notes.txt'), O)?.route === '/api/file/serve', '… nor a file path');
+  ok(tc.fetchTimingOf(e(O + '/api/vault/state', { initiatorType: 'xmlhttprequest' }), O)?.route === '/api/vault/state', 'an XHR counts like a fetch');
+  ok(tc.fetchTimingOf(e('https://elsewhere.example/api/vault/state'), O) === null, 'another origin ⇒ nothing');
+  ok(tc.fetchTimingOf(e(O + '/bundle.js'), O) === null && tc.fetchTimingOf(e(O + '/api/vault/state', { initiatorType: 'img' }), O) === null && tc.fetchTimingOf(e('not a url'), O) === null && tc.fetchTimingOf(null, O) === null, 'not an /api/ request, not a fetch / XHR, no URL ⇒ nothing');
+  ok(tc.fetchTimingOf(e(O + '/api/vault/state', { responseEnd: 0, duration: 40.2 }), O)?.ms === 40, 'no responseEnd ⇒ the entry\'s duration');
+  ok(tc.FETCH_TIMINGS_KEPT === 20, 'the ring keeps the last 20');
+  const src = fs.readFileSync(new URL('../src/lib/telemetry-client.js', import.meta.url), 'utf8');
+  const client = fs.readFileSync(new URL('../src/client.js', import.meta.url), 'utf8');
+  const rec = fs.readFileSync(new URL('../src/lib/incident-recorder.js', import.meta.url), 'utf8');
+  ok(/po\.observe\(\{ type: 'resource', buffered: true \}\)/.test(src) && /const rec = fetchTimingOf\(e, location\.origin, performance\.timeOrigin\);/.test(src) && /if \(_fetchTimings\.length > FETCH_TIMINGS_KEPT\) _fetchTimings\.shift\(\);/.test(src), 'WIRING: the ring observes the resource timings through fetchTimingOf and keeps the last FETCH_TIMINGS_KEPT');
+  ok(/window\.__vsFetchTimings = recentFetchTimings/.test(src) && /installFetchTimingWatch\(\);/.test(client), 'WIRING: exposed as window.__vsFetchTimings (like the sibling rings), installed by client.js at boot');
+  const carries = (t) => /out\.fetchTimings = window\.__vsFetchTimings \? window\.__vsFetchTimings\(\)\.slice\(-20\) : null;/.test(t);
+  ok(carries(rec), 'WIRING: the incident snapshot carries the page\'s last 20 requests (route, ms)');
+  ok(!carries(rec.replace(/\n.*out\.fetchTimings = .*/, '')), 'RED CONTROL: the base recorder (no such line) carries no timing — inc-mvk5jyv3\'s bundle');
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

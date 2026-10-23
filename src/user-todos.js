@@ -668,6 +668,29 @@ class UserTodoManager {
     return { changed, unknown };
   }
 
+  /** «Mark all read» on the notices (lane inbox-fyi-mark-all, the owner 2026-10-22: a notice asks nothing, so confirming
+   *  them one by one is busywork). `read` true: every OPEN NOTICE among `ids` becomes done (resolvedBy `by`) — an id
+   *  already resolved is left exactly as it is (`already`: the act is idempotent), an item that is not a notice is never
+   *  touched (`refused`: an ask is answered on its own), an unknown id is reported. `read` false = THE UNDO: a notice
+   *  this door resolved (done by `by`) comes back open AS IT WAS — its expiry and judgement kept, unlike a hand reopen;
+   *  one another door resolved meanwhile (expired, withdrawn) stays resolved. ONE save + ONE broadcast however many
+   *  went; the status listeners hear a batch. @returns {{changed: string[], already: string[], refused: string[], unknown: string[]}} */
+  readNotices(ids, read = true, by = 'user') {
+    const changed = [], already = [], refused = [], unknown = [], went = [];
+    const now = this._now();
+    for (const id of new Set(Array.isArray(ids) ? ids : [])) {
+      const item = this._state.items.find((i) => i.id === id);
+      if (!item) { unknown.push(id); continue; }
+      if (item.kind !== 'notice') { refused.push(id); continue; }
+      if (read ? item.status !== 'open' : !(item.status === 'done' && item.resolvedBy === by)) { already.push(id); continue; }
+      if (read) { item.status = 'done'; item.resolvedAt = now; item.resolvedBy = by; }
+      else { item.status = 'open'; item.resolvedAt = null; item.resolvedBy = null; }
+      changed.push(id); went.push(item);
+    }
+    if (changed.length) { this._save(); this._notify(); this._emitStatus(went, by, true); }
+    return { changed, already, refused, unknown };
+  }
+
   /** A PRODUCER'S ANSWER to its own OPEN items (lane exit-item-heal): each id still open becomes done with
    *  `resolvedBy: by` and `resolvedFact` = the fact that answered it, which the client words (an unexpected-exit
    *  item's `{resumedAt}` ⇒ "running again (resumed 16:16)"). An item the user already resolved or dismissed is left

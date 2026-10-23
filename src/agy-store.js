@@ -21,6 +21,7 @@
 // THESE functions. THE TOKEN LAW: the login file (antigravity-oauth-token) is never a store read — storeReadable refuses
 // its name anywhere in a path, and no path this module builds can name it (test-vault-law's control).
 
+const { decodeScalar, normalizeAgyToolArgs } = require('./agy-tool-args.js'); // lane agy-card-details: THE one arg normalizer (JSON-scalar decode + canonical aliases), shared with the wrapper
 const TOKEN_FILE = 'antigravity-oauth-token';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (s) => typeof s === 'string' && UUID.test(s);
@@ -188,7 +189,7 @@ function kindOfTool(name) {
 }
 const clipArgs = (args, n = 400) => Object.fromEntries(Object.entries(args || {}).slice(0, 12).map(([k, v]) => [k, typeof v === 'string' ? clip(v, n) : v]));
 const WRITE_TOOLS = /^(write_file|write_to_file|edit_file|replace_file_content|multi_replace_file_content|create_file)$/;
-const pathArg = (a) => str(a && (a.Path || a.TargetFile || a.AbsolutePath || a.path || a.file_path));
+const pathArg = (a) => str(decodeScalar(a && (a.Path || a.TargetFile || a.AbsolutePath || a.path || a.file_path))); // lane agy-card-details: the store road's value is a JSON-encoded string — a quoted path broke the artifacts reader
 
 /** A sub's step → the ACP journal records its virtual session draws (the SAME records the parent's chat reads, so the
  *  view is the ACP normalizer's). `st` carries the open tool calls across steps ({pending: []}); `ctx` = {subId,
@@ -215,7 +216,7 @@ function stepRecords(step, st, ctx = {}) {
     step.toolCalls.forEach((c, k) => {
       const toolCallId = `${id}:${k}`;
       (st.pending || (st.pending = [])).push(toolCallId);
-      upd({ sessionUpdate: 'tool_call', toolCallId, title: c.name, kind: kindOfTool(c.name), status: 'in_progress', rawInput: clipArgs(c.args) });
+      upd({ sessionUpdate: 'tool_call', toolCallId, title: c.name, kind: kindOfTool(c.name), status: 'in_progress', rawInput: clipArgs(normalizeAgyToolArgs(c.args)) }); // lane agy-card-details: ONE card shape (Path→file_path, StartLine→offset, CommandLine→command, toolSummary→summary)
     });
     return out;
   }
@@ -232,6 +233,16 @@ function stepRecords(step, st, ctx = {}) {
   if (step.content) out.push({ type: 'acp', kind: 'notice', level: 'info', text: `${step.type}: ${clip(step.content, 300)}`, noticeKind: 'agy-system' });
   return out;
 }
+/** THE SENTINEL an ended sub's unfinished tool card carries (lane agy-card-details, gap 5): a sub killed / stopped
+ *  mid-step left tool calls with no result — they spun «运行中» for ever. The renderer (src/lib/helper-ask.js
+ *  isSubTerminated) turns this exact text into the localized «terminated with the subagent». */
+const SUB_TERMINATED = '@@agy-subagent-terminated@@';
+/** The closing records for a sub that ENDED with tool calls still open (`st.pending`): each is a `tool_call_update`
+ *  status 'failed' carrying the sentinel — never left in_progress. Empties `st.pending`. */
+function closePendingRecords(st) {
+  const ids = st && Array.isArray(st.pending) ? st.pending.splice(0) : [];
+  return ids.map((toolCallId) => ({ type: 'acp', kind: 'update', update: { sessionUpdate: 'tool_call_update', toolCallId, status: 'failed', content: [{ type: 'content', content: { type: 'text', text: SUB_TERMINATED } }] } }));
+}
 /** The files a step's tool calls WROTE (paths) — the card's list and the helper door's artifacts. */
 function writesOf(step) { return (step && step.toolCalls || []).filter((c) => WRITE_TOOLS.test(c.name)).map((c) => pathArg(c.args)).filter(Boolean); }
 /** A transcript line as the ACP records the artifacts reader understands (a write = a `diff` block naming its path). */
@@ -239,7 +250,7 @@ function artifactRecordsOf(line) {
   const step = transcriptStepOf(line);
   if (!step) return [];
   return step.toolCalls.map((c, k) => ({ c, k })).filter(({ c }) => WRITE_TOOLS.test(c.name) && pathArg(c.args)).map(({ c, k }) => {
-    const a = c.args || {};
+    const a = normalizeAgyToolArgs(c.args); // lane agy-card-details: decode the store's JSON-encoded args (the path + the content)
     const newText = typeof a.Content === 'string' ? a.Content : typeof a.ReplacementContent === 'string' ? a.ReplacementContent : typeof a.Replacement === 'string' ? a.Replacement : '';
     const edit = !/^write|^create/.test(c.name);
     // the id names the step, the call AND the path: two subs' writes at the same step index never fold into one row
@@ -291,6 +302,17 @@ function subPhaseOf(lastStep) {
   if (!lastStep) return 'working';
   return lastStep.type === 'PLANNER_RESPONSE' && lastStep.status !== 'RUNNING' && !lastStep.toolCalls.length ? 'idle' : 'working';
 }
+/** A stopped sub's LAST PROGRESS for its parent card (lane agy-card-details gap 5): the last planner prose, else the
+ *  last tool's own words (toolSummary / toolAction / name) — a killed research sub that only ever read files still
+ *  says what it was last doing, never a bare «它没有发回答复». */
+function lastProgressOf(lastStep) {
+  if (!lastStep) return '';
+  if (typeof lastStep.content === 'string' && lastStep.content.trim()) return clip(lastStep.content, 2000);
+  const tcs = Array.isArray(lastStep.toolCalls) ? lastStep.toolCalls : [];
+  const tc = tcs[tcs.length - 1];
+  if (tc) { const a = normalizeAgyToolArgs(tc.args); return clip(str(a.summary || a.title || tc.name), 300); }
+  return '';
+}
 /** THE CARD the parent conversation shows for one subagent (the journal's `subagent` record). */
 function cardOf({ toolCallId, row, task, answer, lastStep, startedAt = null, steps = 0, files = [], now = 0, ended = false } = {}) {
   const st = row ? row.state : 'SUBAGENT_STATE_UNSPECIFIED';
@@ -306,7 +328,7 @@ function cardOf({ toolCallId, row, task, answer, lastStep, startedAt = null, ste
     spawnStep: task && task.step != null ? task.step : (row ? row.spawnStep : null),
     task: task ? clip(task.content, 6000) : '', taskTitle: task ? clip(task.title, 200) : '',
     status, startedAt: start, endedAt: end, elapsedMs: start && end ? Math.max(0, end - start) : null,
-    result: answer ? clip(answer.content, 20000) : '', steps, files: (files || []).slice(-20),
+    result: answer ? clip(answer.content, 20000) : '', lastText: answer ? '' : lastProgressOf(lastStep), steps, files: (files || []).slice(-20),
   };
 }
 
@@ -326,6 +348,18 @@ function unlinkedSpawns(records) {
   }
   return out;
 }
+/** The sub a parent's invoke_subagent STEP created, BY ID: the step's own output in the parent transcript names it
+ *  («Created the following subagent: {conversationId}» — createdSubagentOf). The link the stream-vs-transcript index
+ *  drift cannot break (lane agy-card-details gap 4; MEASURED on the owner's store: the stream toolCallId said :24/:25,
+ *  the transcript's GENERIC result sat at step 24/25, the sub rows' spawnStepIndex BOTH said 27 — only the output's own
+ *  id is sure, and it is unique per call). null when the step named none (an older agy, another store). */
+function subIdForStep(read, parentId, step) {
+  const pp = read && storePaths(parentId);
+  if (!pp || !Number.isFinite(Number(step))) return null;
+  const lines = read.allLines(pp.transcript) || [];
+  for (const line of lines) { const s = transcriptStepOf(line); if (s && s.idx === Number(step) && s.type === 'GENERIC') { const id = createdSubagentOf(s.content); if (id) return id; } }
+  return null;
+}
 /** ONE sub read whole from the store — what the wrapper's adopt + tail journal step by step, at once. `read` = the
  *  machine's gated reader (src/agy-store-fs.js: rows / allLines; a `dbRows` only where a db may be opened — never the
  *  hub's main thread, so the hub draws a sub with no transcript as its card alone); → {subId, card, subs, final} | null
@@ -334,7 +368,9 @@ function snapshotOf(read, { parentId, toolCallId, step, now = 0, max = 4000, max
   const pp = read && storePaths(parentId);
   if (!pp || !Number.isFinite(Number(step))) return null;
   let row = null, task = null;
-  for (const r of read.rows(pp.subagents, subagentRowOf)) {
+  const byId = subIdForStep(read, parentId, Number(step)); // lane agy-card-details gap 4: the invoke_subagent output names the sub (link by ID, never the stream step alone)
+  if (byId) { const r = subagentRowOf(parseJson(read.read(`${pp.subagents}/${byId}.json`))); if (r) { row = r; task = taskOf(read.rows(storePaths(r.id).messages, messageRowOf), { parentId, subId: r.id }); } }
+  if (!row) for (const r of read.rows(pp.subagents, subagentRowOf)) {
     const t = taskOf(read.rows(storePaths(r.id).messages, messageRowOf), { parentId, subId: r.id, step: Number(step) });
     if (t) { row = r; task = t; break; }
   }
@@ -351,6 +387,8 @@ function snapshotOf(read, { parentId, toolCallId, step, now = 0, max = 4000, max
     for (const rec of stepRecords(s, st, { subId: row.id, parentId, parentName: named ? named[1] : null, max })) subs.push({ subId: row.id, toolCallId, rec });
   }
   const final = !row.alive || subPhaseOf(last) === 'idle';
+  const terminated = !row.alive && /KILL|CANCEL|STOP|ABORT|FAIL|ERROR/i.test(String(row.state || '')); // lane agy-card-details gap 5: killed / stopped-with-parent / failed only — NOT an answered sub (agy leaves it ALIVE)
+  if (terminated) for (const rec of closePendingRecords(st)) subs.push({ subId: row.id, toolCallId, rec }); // lane agy-card-details gap 5: an ended sub never leaves a tool card «运行中»
   const answers = final ? answersOf(read.rows(pp.messages, messageRowOf), { parentId, subId: row.id }) : [];
   const card = cardOf({ toolCallId, row, task, answer: answers[answers.length - 1] || null, lastStep: last, startedAt: task.at, steps: n, files, now });
   return { subId: row.id, card, subs, final };
@@ -361,5 +399,6 @@ module.exports = {
   pbFields, pbTree, pbAll, pbStrings, dbStepOf, DB_STEP_TYPES, DB_STATUS,
   transcriptStepOf, resultBody, deliveredMessageOf, kindOfTool, stepRecords, writesOf, artifactRecordsOf,
   subagentRowOf, messageRowOf, taskOf, answersOf, createdSubagentOf, subagentInfoIds, subPhaseOf, cardOf,
-  unlinkedSpawns, snapshotOf,
+  unlinkedSpawns, snapshotOf, subIdForStep, closePendingRecords, SUB_TERMINATED,
+  decodeScalar, normalizeAgyToolArgs,
 };

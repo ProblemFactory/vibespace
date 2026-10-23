@@ -474,7 +474,7 @@ now fails the build if a category ever goes unlisted again.
 | `plugin.voice-input.suggest` | boolean | `true` | **Dictionary suggestions** — On: words Dropline did not know in your dictations are suggested — listed here, each with Add and Ignore. Ignore (or ✕ on the For you item) means not now: the word comes back only when you say it again. Off: nothing is suggested. |
 | `voice.suggestions.mode` | enum | `item` | **Where dictionary suggestions wait** — One item in For you (the default): at most one at a time, never above urgent asks — a later batch joins it. Only here in Settings: never a For you item; the words wait in the list above. |
 | `plugin.voice-input.context` | boolean | `false` | **Send the conversation to Dropline's two-week memory (shows the text the first time)** — Dropline then knows the names and terms of the conversation you dictate into. The first time, the exact text is shown before anything is sent. |
-| `plugin.voice-input.autoProjects` | json | `[]` | **Projects whose file names go without asking** — Folders (absolute paths) whose file names and identifiers are proposed to Dropline without asking — at most 50 an hour, journaled. A proposal card adds its project here with one tick. |
+| `plugin.voice-input.autoProjects` | json | `[]` | **Folders whose suggested words go without asking** — Folders (absolute paths), each with its subfolders, whose suggested words go to Dropline without asking — at most 50 an hour, journaled; the rest wait for the next hour. A suggestion card adds its folder here with one tick. |
 <!-- /settings-table -->
 
 ### Plugin: Public URLs (frp)

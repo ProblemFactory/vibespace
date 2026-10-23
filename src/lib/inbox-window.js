@@ -31,9 +31,9 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: an automation card's reach choices in the pane
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
-import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts
+import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
 import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml, askChipEls, linkifyInto } from './user-todos-row.js'; // THE keyed reconciler + the row words
-import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
+import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 // The taskbar For-you button's own glyph (UI_ICONS.inbox's paths), in the registry's 16px chrome.
@@ -93,6 +93,11 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     for (const k of tab === 'actions' ? ['action'] : ['notice']) { const n = mk('span', 'ut-count iw-tab-n'); n.dataset.n = k; n.style.display = 'none'; b.append(n); }
     tabs.append(b);
   }
+  // «Mark all read» (lane inbox-fyi-mark-all): beside the Notices tab's count, on that tab only — every open notice the
+  // list shows (the scope and the filter in force) in ONE request, a 5 s Undo after it
+  const readAll = mk('button', 'iw-read-all', t('Mark all read'));
+  readAll.type = 'button';
+  readAll.style.display = 'none';
   const scope = mk('div', 'iw-scope');
   scope.setAttribute('role', 'group');
   scope.setAttribute('aria-label', t('Sessions'));
@@ -105,7 +110,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
   filter.type = 'search';
   filter.placeholder = t('Filter…');
   filter.setAttribute('aria-label', t('Filter…'));
-  bar.append(tabs, scope, filter);
+  bar.append(tabs, readAll, scope, filter);
   const body = mk('div', 'iw-body');
   const list = mk('div', 'iw-list');
   list.tabIndex = 0;
@@ -138,6 +143,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     tab: 'actions', scopeKey: sessionKey || null, query: '', selected: null, pendingItem: itemId || null,
     layout: null, noticeOrder: null, tailOpen: false, display: [], mode: 'split', rowMin: 0, cur: null,
     tailIds: new Set(), // the resolved tail's ids of the last render (the tail head must still close while one is selected)
+    readIds: [],        // «Mark all read»'s ids at the last render (PURE noticeReadAll over the listed notices)
     loadErr: null,      // {id, why} — a previewed detail whose rest could not be loaded (the pane says so)
   };
 
@@ -238,6 +244,16 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
         if (b.getAttribute('aria-label') !== label) b.setAttribute('aria-label', label);
       }
     }
+  };
+  /** «Mark all read»: shown on the Notices tab only; disabled — with its reason as the title — when nothing listed is open. */
+  const patchReadAll = (ids) => {
+    st.readIds = ids || [];
+    const disp = ids ? '' : 'none';
+    if (readAll.style.display !== disp) readAll.style.display = disp;
+    const off = !st.readIds.length || readAll.dataset.busy === '1';
+    if (readAll.disabled !== off) readAll.disabled = off;
+    const title = st.readIds.length ? t('Mark the {n} notices listed here read (Undo for 5 s)', { n: st.readIds.length }) : t('No unread notices here');
+    if (readAll.title !== title) readAll.title = title;
   };
   const patchScope = () => {
     const sel = st.selected ? model.byId(st.selected) : null;
@@ -578,12 +594,45 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     // the tab counts over the open items in scope
     const inScope = keys ? todos.open.filter((i) => keys.includes(i.sessionKey)) : todos.open;
     patchTabs(inScope);
+    patchReadAll(st.tab === 'notices' ? noticeReadAll(main, 'all') : null);
     patchScope();
     const selRow = st.selected ? list.querySelector(`.iw-row[data-id="${CSS.escape(st.selected)}"]`) : null;
     if (selRow) list.setAttribute('aria-activedescendant', selRow.id); else list.removeAttribute('aria-activedescendant');
     if (st.mode === 'single' && root.dataset.view === 'item' && !st.selected) root.dataset.view = 'list';
     renderPane();
+    armRead();
   }
+
+  // ── A NOTICE IS READ BY READING IT (lane inbox-fyi-mark-all): one that asks nothing (PURE readOnSight) shown in the
+  // pane NOTICE_READ_MS — the page visible, the window the one the person is in (focus inside it: a window left open
+  // behind others whose selection fell onto a notice that just arrived reads nothing), the pane showing — or left by
+  // ‹ back is marked done, the same status write as Mark done (kept for the keyboard); the selection stays where the
+  // reader is. One clock, for the selected id.
+  let readClock = null, readFor = null;
+  const paneOnScreen = () => root.isConnected && root.clientWidth > 0 && document.visibilityState === 'visible' && root.contains(document.activeElement) && (st.mode === 'split' || root.dataset.view === 'item');
+  function armRead() {
+    const it = st.selected ? model.byId(st.selected) : null;
+    const want = it && readOnSight(it) && paneOnScreen() ? it.id : null;
+    if (want === readFor) return; // the same notice still on screen: its clock runs on (a broadcast does not restart it)
+    clearTimeout(readClock); readClock = null; readFor = want;
+    if (want) readClock = setTimeout(() => { readClock = null; const cur = model.byId(want); if (st.selected === want && cur && readOnSight(cur) && paneOnScreen()) model.setStatus(want, 'done'); else readFor = null; }, NOTICE_READ_MS);
+  }
+  /** ‹ back from a notice that asks nothing: it was read — marked at once, whatever its clock says. */
+  const readOnBack = () => {
+    const it = st.cur ? model.byId(st.cur.id) : null;
+    if (!it || !readOnSight(it)) return;
+    clearTimeout(readClock); readClock = null; readFor = it.id;
+    model.setStatus(it.id, 'done');
+  };
+  /** «Mark all read»: the ids the last render listed, ONE request (THE model's verb — the Undo toast is its). */
+  const readAllPress = async () => {
+    const ids = st.readIds.slice();
+    if (!ids.length || readAll.dataset.busy === '1') return;
+    readAll.dataset.busy = '1'; readAll.disabled = true;
+    await model.readNotices(ids);
+    delete readAll.dataset.busy;
+    render();
+  };
 
   /** Keyboard focus where the user is: the list, or — one pane showing the item — the pane. */
   const focusHome = () => { if (st.mode === 'single' && root.dataset.view === 'item') pane.focus({ preventScroll: true }); else list.focus({ preventScroll: true }); };
@@ -720,7 +769,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       if (st.tailOpen && st.selected && st.tailIds.has(st.selected)) st.selected = null;
       st.tailOpen = !st.tailOpen; render(); return;
     }
-    if (e.target.closest('.iw-back')) { root.dataset.view = 'list'; list.focus({ preventScroll: true }); return; }
+    if (e.target.closest('.iw-read-all')) { readAllPress(); return; }
+    if (e.target.closest('.iw-back')) { readOnBack(); root.dataset.view = 'list'; armRead(); list.focus({ preventScroll: true }); return; }
     const row = e.target.closest('.iw-row');
     if (row) { select(row.dataset.id, { reveal: false, show: true }); focusHome(); return; }
     const c = st.cur;
@@ -795,6 +845,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     }
     const px = m.rowMin ? m.rowMin + 'px' : '';
     if (root.style.getPropertyValue('--iw-row-min') !== px) { if (px) root.style.setProperty('--iw-row-min', px); else root.style.removeProperty('--iw-row-min'); }
+    armRead(); // a window shrunk to one pane showing the list (or minimized) is no longer reading the notice
   };
   let ro = null;
   if (typeof ResizeObserver === 'function') {
@@ -811,7 +862,10 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     patchLivePane();
   }, { signal });
   model.on('status', () => patchBoardPane(), { signal }); // chips only, never a row (the popup's chunk-4 rule)
-  signal?.addEventListener('abort', () => { stash(st.cur); });
+  document.addEventListener('visibilitychange', () => armRead(), { signal }); // a hidden page reads nothing: the clock stops, and starts afresh on return
+  root.addEventListener('focusin', () => armRead(), { signal }); // the person came into the window: the notice shown starts being read
+  root.addEventListener('focusout', () => setTimeout(armRead, 0), { signal }); // …and left it (activeElement settles after the event)
+  signal?.addEventListener('abort', () => { stash(st.cur); clearTimeout(readClock); });
 
   /** The door for an OPEN window (a user's ⤢ / menu): select the item, apply the scope, re-sort (a new open). */
   const show = ({ itemId: id = null, sessionKey: key = null } = {}) => {

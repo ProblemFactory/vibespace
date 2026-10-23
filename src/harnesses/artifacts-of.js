@@ -8,6 +8,7 @@ const bytesOf = (s) => (typeof s === 'string' ? Buffer.byteLength(s) : null);
 // lane pages-chip-groups: a page link in a TEXT block (never a tool call / result) witnesses a page shown here —
 // src/artifacts.js pageLinksIn / presentOp turn the text into `present` ops (the registry resolves them at read)
 const { pageLinksIn, presentOp } = require('../artifacts.js');
+const { agyFilePath } = require('../agy-tool-args.js'); // lane agy-card-details: decode a store value + percent-decode a file: URI (shared with the store)
 const presentOps = (texts) => { const out = []; for (const s of texts) for (const l of pageLinksIn(s)) { const o = presentOp(l); if (o) out.push(o); } return out; };
 const textBlocks = (content, types) => (typeof content === 'string' ? [content] : Array.isArray(content) ? content.filter((b) => b && types.includes(b.type) && typeof b.text === 'string').map((b) => b.text) : []);
 
@@ -79,18 +80,13 @@ function acp(record) {
  *  key: the call seen twice moves its row once). Every other record goes to the ACP reader (a text chunk's page links). */
 const AGY_OPS = { write_file: 'write', write_to_file: 'write', edit_file: 'edit', replace_file_content: 'edit', multi_replace_file_content: 'edit' };
 const AGY_PATH_KEYS = ['Path', 'TargetFile', 'AbsolutePath', 'FilePath'];
-function agyPath(v) {
-  if (typeof v !== 'string' || !v.trim()) return null;
-  if (!/^file:/i.test(v)) return v;
-  try { const u = new URL(v); return u.protocol === 'file:' && (!u.host || u.host === 'localhost') ? decodeURIComponent(u.pathname) || null : null; } catch { return null; }
-}
 function antigravity(record) {
   const r = record || {};
   const u = r.kind === 'update' ? r.update : null;
   if (!u || u.sessionUpdate !== 'tool_call') return acp(record);
   const op = AGY_OPS[u.title];
   const inp = u.rawInput && typeof u.rawInput === 'object' ? u.rawInput : null;
-  if (op && inp) for (const k of AGY_PATH_KEYS) { const path = agyPath(inp[k]); if (path) return [{ path, op, bytes: null, id: u.toolCallId || null }]; }
+  if (op && inp) for (const k of AGY_PATH_KEYS) { const path = agyFilePath(inp[k]); if (path) return [{ path, op, bytes: null, id: u.toolCallId || null }]; }
   return acp(record); // a call that carries an ACP `diff` (a record built from agy's own transcript) reads as ACP's
 }
 

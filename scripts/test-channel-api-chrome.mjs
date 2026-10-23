@@ -11,7 +11,8 @@
 //   ① the "API access…" dialog: the credential picker by source, the tier per principal, the sensitive list, the
 //      always-allowed shapes with Revoke, the API log (zh; en + ja words)
 //   ② a write-ask call ⇒ ONE card under the chat's call row + ONE Outbox "API calls" row + ONE For-you item
-//   ③ Approve in the chat ⇒ the Outbox row and the For-you item resolve IN PLACE (ran · 200)
+//   ③ Approve in the chat ⇒ the Outbox row and the For-you item resolve IN PLACE (the row «已执行» — lane outbox-window-scroll-filter:
+//      HTTP 200 sits in its card's 技术细节 fold)
 //   ④ Reject from the For-you tray ⇒ the chat card says "Rejected by you" (the row: the card's title, the call in ONE
 //      collapsed 技术细节 fold above Approve — lane card-grammar-exceptions)
 //   ⑤ a sensitive card has NO "Run and always allow" button
@@ -192,7 +193,7 @@ async function newPage({ lang = 'zh', width = 1400, height = 1000, control = fal
 const CHAT = (sidSel) => `[...document.querySelectorAll('.chat-api-cards')].filter((b) => b.closest(${JSON.stringify(sidSel)}))`;
 const openChat = (p) => p.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const s = (app.sidebar._webuiSessions || []).find((x) => x.id === ${JSON.stringify(sessionId)}); if (s) { app.attachSession(s.id, s.name, s.cwd, { mode: 'chat', backend: 'claude' }); return true; } await new Promise((r) => setTimeout(r, 250)); } return false; })()`);
 const chatCards = (p) => p.evaljs(`[...document.querySelectorAll('.chat-api-cards .chan-api-card')].map((c) => ({ id: c.dataset.key, fate: c.dataset.fate, text: c.innerText, always: !!c.querySelector('.chan-api-always'), alwaysText: (c.querySelector('.chan-api-always') || {}).textContent || '', tech: (c.querySelector('.chan-api-tech') || {}).textContent || '', approve: !!c.querySelector('.chan-api-approve'), underCall: !!(c.closest('.chat-api-cards') && c.closest('.chat-api-cards').previousElementSibling && c.closest('.chat-api-cards').previousElementSibling.classList.contains('chat-channel-touches')) }))`);
-const outboxRows = (p) => p.evaljs(`[...document.querySelectorAll('.chan-api-outbox .chan-api-orow')].map((r) => ({ id: r.dataset.key, fate: r.dataset.fate, text: r.innerText }))`);
+const outboxRows = (p) => p.evaljs(`[...document.querySelectorAll('.chan-api-outbox .chan-api-orow')].map((r) => ({ id: r.dataset.key, fate: r.dataset.fate, text: r.innerText, out: (r.querySelector('.chan-api-orow-out') || {}).textContent || '' }))`);
 const forYou = (p) => p.evaljs(`(async () => { try { const r = await fetch('/api/user-todos'); const j = await r.json(); const s = j.todos; const list = Array.isArray(s) ? s : [].concat(...Object.values(s || {}).filter(Array.isArray)); return list.filter((i) => i && i.action && i.action.type === 'channel-api-proposal').map((i) => ({ id: i.action.id, status: i.status, state: i.state, resolved: !!(i.resolvedAt || i.doneAt || i.status === 'done' || i.status === 'resolved'), outcome: i.outcome || i.resolution || null, title: i.title })); } catch (e) { return String(e); } })()`);
 
 const p1 = await newPage({ lang: 'zh' });
@@ -215,7 +216,7 @@ ok(await p1.shot('api-card-chat-zh.png', '.chat-api-cards'), 'api-card-chat-zh.p
 // ③ Approve in the chat ⇒ the Outbox row and the For-you item resolve in place
 await p1.evaljs(`(() => { const b = document.querySelector('.chat-api-cards .chan-api-card[data-key=${JSON.stringify(pid1)}] .chan-api-approve'); b.click(); return 1; })()`);
 const ran1 = await until(async () => { const ob = await outboxRows(p1), cc = await chatCards(p1); return ob.find((r) => r.id === pid1 && r.fate === 'ran') && cc.find((c) => c.id === pid1 && c.fate === 'ran') ? { ob, cc } : null; }, 20000);
-ok(ran1 && /200/.test(ran1.ob.find((r) => r.id === pid1).text) && !ran1.cc.find((c) => c.id === pid1).approve, 'Approve in the chat ⇒ the Outbox row says it ran · 200, the chat card lost its buttons (patched in place)', ran1 || { ob: await outboxRows(p1), cc: await chatCards(p1), ans: await p1.evaljs('window.__answers') });
+ok(ran1 && /^已执行$/.test(ran1.ob.find((r) => r.id === pid1).out) && !/\b200\b/.test(ran1.ob.find((r) => r.id === pid1).text) && !ran1.cc.find((c) => c.id === pid1).approve, 'Approve in the chat ⇒ the Outbox row says «已执行» (lane outbox-window-scroll-filter: the short status — HTTP 200 sits in its card\'s fold), the chat card lost its buttons (patched in place)', ran1 || { ob: await outboxRows(p1), cc: await chatCards(p1), ans: await p1.evaljs('window.__answers') });
 const fyRan = await until(async () => { const f = await forYou(p1); const it = Array.isArray(f) && f.find((i) => i.id === pid1); return it && it.status !== 'open' && it.status !== 'pending' ? it : null; });
 ok(fyRan, 'the For-you item resolved in place', await forYou(p1));
 ok(fs.readFileSync(path.join(STUB, 'calls.ndjson'), 'utf-8').split('\n').some((l) => /"host":"slack.com","path":"\/api\/chat\.postMessage"/.test(l)), 'the approved call reached the STUB vendor (slack.com answered by the fake)');

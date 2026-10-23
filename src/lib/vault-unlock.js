@@ -59,6 +59,24 @@ function footerOf(dialog, buttons) {
   for (const b of buttons) f.appendChild(b);
   dialog.appendChild(f);
 }
+/** SAY THE WAIT (lane vault-slow-load — the owner, inc-mvk5jyv3: «保险库操作好像加载时间有点长»): a spinner and the step's name,
+ *  one line (role=status) — what a vault door, the Vault window's list and a key's audit show from the press to the answer,
+ *  never a blank second. */
+export function vaultWaitLine(words) {
+  const w = el('div', 'vault-wait');
+  w.setAttribute('role', 'status');
+  w.append(el('span', 'vault-spin'), el('span', 'vault-wait-text', words));
+  return w;
+}
+/** A dialog door's press: its button disabled and saying the step (`busy` — 「正在解锁…」) and the wait line (`step`) above
+ *  the error line, until the answer. → done(): the button's own word back, the line gone. */
+export function sayVaultWait(go, err, busy, step) {
+  const word = go.textContent;
+  const line = vaultWaitLine(step);
+  go.disabled = true; go.textContent = busy;
+  err.before(line);
+  return () => { go.disabled = false; go.textContent = word; line.remove(); };
+}
 
 // ── the lock chip (taskbar + phone nav): the door back while locked ──
 // lane vault-chip-zone-errors (inc-mvi50qdh-ygmh): the chip sits BESIDE the For-you button wherever the chrome put it
@@ -216,9 +234,9 @@ export function showUnlock({ then = null } = {}) {
   const submit = async () => {
     err.textContent = '';
     if (!pw.value) { pw.focus(); return; }
-    go.disabled = true;
+    const done = sayVaultWait(go, err, t('Unlocking…'), t('Checking the second password…'));
     const r = await post('/api/vault/unlock', { password: pw.value });
-    go.disabled = false;
+    done();
     if (r && r.ok) { pw.value = ''; applyVaultFacts(r); close(); showToast(t('Vault unlocked')); return; }
     pw.value = ''; pw.focus();
     err.textContent = vaultWords(r);
@@ -253,9 +271,9 @@ export function showSetup({ nag = false } = {}) {
     err.textContent = '';
     if ([...a.value].length < MIN) { err.textContent = t('At least 8 characters'); a.focus(); return; }
     if (a.value !== b.value) { err.textContent = t('The two passwords differ'); b.focus(); return; }
-    go.disabled = true;
+    const done = sayVaultWait(go, err, t('Setting…'), t('Sealing every stored key under the second password…'));
     const r = await post('/api/vault/setup', { password: a.value });
-    go.disabled = false;
+    done();
     if (r && r.ok) { a.value = ''; b.value = ''; applyVaultFacts(r); close(); showToast(t('Vault set up — {n} key(s) sealed', { n: (r.sealed || []).length })); return; }
     err.textContent = vaultWords(r);
   };
@@ -280,9 +298,9 @@ export function showChange() {
     err.textContent = '';
     if ([...a.value].length < MIN) { err.textContent = t('At least 8 characters'); return; }
     if (a.value !== b.value) { err.textContent = t('The two passwords differ'); return; }
-    go.disabled = true;
+    const done = sayVaultWait(go, err, t('Changing…'), t('Checking the current password and sealing every key again…'));
     const r = await post('/api/vault/change', { old: o.value, new: a.value });
-    go.disabled = false;
+    done();
     if (r && r.ok) { o.value = a.value = b.value = ''; applyVaultFacts(r); close(); showToast(t('Second password changed')); return; }
     o.value = ''; err.textContent = vaultWords(r);
   };

@@ -26,6 +26,7 @@ const { openLayout, nextLayout, entriesFor } = await import(path.join(ROOT, 'src
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
 const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), `${m} (${JSON.stringify(a)})`);
+const css0 = () => fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
 const it = (id, sessionKey, extra = {}) => ({ id, sessionKey, text: id, urgency: 'normal', createdAt: 1, ...extra });
 const rows = (layout, todos) => entriesFor(layout, todos).flatMap((g) => g.entries.map((e) => `${g.key}:${e.item.id}${e.resolved ? '✓' : ''}`));
 
@@ -352,6 +353,19 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
     eq(shownOf(L.noticeGroups(arrived, 'login', { prev: order })), ['login'], "control: the STORED choice re-applied at the arrival (r1's panel) shows ONLY login — every other group vanishes under an active All chip (the verifier's flip)");
   }
 
+  console.log('   noticeReadAll — «Mark all read»: the ids ONE press covers under each filter (lane inbox-fyi-mark-all)');
+  {
+    // the fixture above: spend s1 s2 s3✓ · login l1✓ · channels c1 · agent a1 a2 (✓ = resolved in place)
+    eq(L.noticeReadAll(notices), ['s1', 's2', 'c1', 'a1', 'a2'], "'all' ⇒ every OPEN notice listed, in the groups' order — a row resolved in place (s3✓, l1✓) never");
+    eq(L.noticeReadAll(notices, 'spend'), ['s1', 's2'], 'the section in force ⇒ only its open rows (a hidden group\'s rows are not on screen, so not covered)');
+    eq(L.noticeReadAll(notices, 'channels'), ['c1'], '…another section, its own');
+    eq(L.noticeReadAll(notices, 'login'), [], 'a section whose every row is read ⇒ [] (the button disabled)');
+    eq(L.noticeReadAll(notices, 'pool'), L.noticeReadAll(notices), 'a filter whose origin has no notice is all (noticeFilterFor — the filter in force is always a drawn chip)');
+    eq(L.noticeReadAll([N('x1', { origin: 'spend', status: 'done' }), N('x2', { origin: 'spend', status: 'open' }), N('x3', { origin: 'spend', status: 'dismissed' })]), ['x2'], 'an item whose status already left open (a broadcast ahead of the slot) is not sent again');
+    eq(L.noticeReadAll([...notices, { item: { id: 'q1', sessionKey: 'k', text: 'q1', kind: 'action', origin: 'agent' }, resolved: false }, N('a1', { origin: 'agent' })]), ['s1', 's2', 'c1', 'a1', 'a2'], 'an ASK is never covered; an id listed twice goes once');
+    eq([L.noticeReadAll([]), L.noticeReadAll(null)], [[], []], 'no notices / null ⇒ []');
+  }
+
   console.log('   tabCounts — the Inbox tab (actions + the grey notices) and the Notifications tab (unread since the last look)');
   const open = [it('x1', 'S', { urgency: 'high' }), it('x2', 'S', { urgency: 'low' }), it('n1', 'accounts', { kind: 'notice', urgency: 'urgent' }), it('n2', 'S', { kind: 'notice' })];
   const hist = [{ ts: 100, m: 'a' }, { ts: 200, m: 'b' }, { ts: 300, m: 'c' }, { m: 'no ts' }, null];
@@ -660,6 +674,16 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   ok(/if \(knownIds !== null\) \{ const eff = noticeFilterFor\(noticeFilter, entries\); if \(eff !== noticeFilter\) setNoticeFilter\(eff\); \}\n    const groups = noticeGroups\(entries, noticeFilter, \{ prev: st \? st\.noticeOrder : noticeOrder \}\);/.test(panel), 'r2 THE HELD FILTER: before the groups are laid out, the filter goes through noticeFilterFor and its answer BECOMES the filter (held + stored) — an arrival never re-applies a stored choice');
   ok(/patchChips\(nBox\.querySelector\(':scope > \.ut-chips'\), noticeChips\(entries, \{ prev: order \}\), noticeFilter\);/.test(panel) && (panel.match(/noticeFilterFor\(/g) || []).length === 1, '…the strip marks the HELD filter (the one call of noticeFilterFor is the hold — no second derivation that could disagree)');
   ok(/noticeFilter = readFilter\(\); \/\/ …read afresh from the device on every open/.test(panel), '…read afresh from the device on every open (then held)');
+  // lane inbox-fyi-mark-all: 「全部已读」 beside the notices head (popup + phone page), THE model's ONE bulk verb
+  ok(/const ra = mk\('button', 'ut-read-all', t\('Mark all read'\)\);/.test(panel) && /notices\.append\(nh, ra, chips, mk\('div', 'ut-notice-groups'\)\);/.test(panel), '«Mark all read»: its own button BESIDE the notices head (a button never nests in the head button) — the popup\'s and the phone page\'s (one noticesEl)');
+  ok(/ra\._ids = noticeReadAll\(notices, open \? noticeFilter : 'all'\);/.test(panel) && /const off = !ra\._ids\.length \|\| ra\.dataset\.busy === '1';/.test(panel) && /t\('No unread notices here'\)/.test(panel), '…its ids are PURE noticeReadAll — the section in force while open, every counted notice while closed; disabled with its reason when none');
+  ok((panel.match(/const ra = e\.target\.closest\('\.ut-read-all'\);\n\s+if \(ra\) \{ readAllNotices\(ra\); return; \}/g) || []).length === 2 && /await model\.readNotices\(ids\);/.test(panel), '…both surfaces route a press to readAllNotices ⇒ THE model\'s readNotices (one implementation)');
+  {
+    const acts = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8');
+    const verb = (acts.match(/\n  const readNotices = async \(ids\) => \{[\s\S]*?\n  \};\n/) || [''])[0];
+    ok((verb.match(/post\('read-all'/g) || []).length === 1 && !/for \(|forEach|\.map\(\(id\)/.test(verb) && /\{ duration: 5000, actions: \[\{ label: t\('Undo'\), run: async \(\) => \{\n\s+const u = await post\('unread', \{ ids: read \}\);/.test(verb), 'THE verb: ONE POST for every id (never a loop of N), then a 5 s Undo toast that posts back exactly the ids it read');
+  }
+  ok(/\.ut-notices \{ display: flex; flex-wrap: wrap;[^}]*\}/.test(css0()) && /\.ut-notices > button\.ut-notice-head \{ flex: 1 1 0;/.test(css0()) && /#phone-home \.ut-read-all \{ min-height: 36px;/.test(css0()), '…the head and the button share one line (the strip and groups wrap below); a ≥ 36 px target on touch');
   ok(/if \(tb\) \{ if \(tb\.dataset\.tab !== tab\) \{ tab = tb\.dataset\.tab; renderPanel\(\); \} return; \}/.test(panel) && !/popup\.replaceChildren\(tabsEl\(\)/.test(panel), 'a tab click switches the PAGE; the tabs are never rebuilt (no replaceChildren(tabsEl(), …))');
   ok(/const c = tabCounts\(todos\.open, getToastHistory\(\), histSeen\(\), now, attnPolicy\(\)\);/.test(panel) && /ut-tab-n\[data-n="\$\{k\}"\]/.test(panel), 'the tab counts come from tabCounts (lane foryou-folds: with `now` — the Inbox tab = the badge\'s bands 1–4) and patch keyed `.ut-tab-n[data-n]` spans');
   ok(/window\.addEventListener\('vs-toast', \(\) => \{ if \(popup\.classList\.contains\('hidden'\)\) return; if \(tab === 'history'\) renderPanel\(\); else patchTabs\(\); \}\);/.test(panel), 'a toast patches the Notifications count in place (or refreshes the page being read)');
@@ -1016,6 +1040,25 @@ console.log('⑬ THE PIN (lane foryou-plugin-notices, owner 2026-10-19: 「这�
     eq(evs, [[a.id, 'done', 'user', false], [b.id, 'done', 'user', true], [c.id, 'done', 'user', true]], 'the status event says `batch` for 「全部标为已看」 (setStatusMany) — a plugin whose ✓ applies something acts on ONE ✓ only');
     const RC = req(path.join(ROOT, 'src/record-clear.js'));
     ok(RC.SHAPES.todo.some(([f, op]) => f === 'open' && op === 'drop'), 'record-clear: a cleared item drops its door (its prefill holds the suggested words)');
+  }
+  // lane inbox-fyi-mark-all — THE BULK TRANSITION: «Mark all read» over the real store is ONE broadcast, and every count
+  // the person sees reads from it — the Notices tab's n (tabCounts), the taskbar / tray badge's grey count (badgeOf) and the
+  // attention list's notices (A.listOf counts) drop to 0 in that ONE snapshot; the asks' numbers do not move
+  {
+    const casts = [];
+    const m = new UT.UserTodoManager({ dataDir: tmpdir(), expirySweepMs: 0, onChange: (snap) => casts.push(snap) });
+    const nIds = Array.from({ length: 9 }, (_, k) => m.add(k % 2 ? 'accounts' : 'browser', { origin: k % 2 ? 'spend' : 'browser', kind: 'notice', text: 'fyi ' + k }).id);
+    m.add('claude:a', { origin: 'agent', text: 'a real ask', urgency: 'high' });
+    const before = m.snapshot();
+    const counts = (snap) => ({ tab: L.tabCounts(snap.open, [], 0).inbox, badge: L.badgeOf(snap.open, Date.now()).notices, list: A.needsMe(snap.open.map((i) => A.rowOf(i, Date.now())).filter(Boolean), Date.now()).counts.notices });
+    const c0 = counts(before), n0 = casts.length;
+    const r = m.readNotices(L.noticeReadAll(L.splitNotices([['all', before.open.map((item) => ({ item, resolved: false }))]]).notices));
+    const after = casts[casts.length - 1];
+    eq([c0.tab.notice, c0.badge, c0.list, c0.tab.action], [9, 9, 9, 1], 'before: the Notices tab, the badge\'s grey count and the attention list all count the 9 notices (1 ask)');
+    ok(r.changed.length === 9 && casts.length === n0 + 1, 'the press over the PURE ids reads all 9 in ONE broadcast', { changed: r.changed.length, casts: casts.length - n0 });
+    const c1 = counts(after);
+    eq([c1.tab.notice, c1.badge, c1.list, c1.tab.action, c1.tab.urgency], [0, 0, 0, 1, 'high'], 'after, from that ONE snapshot: every notice count is 0 in the same tick; the ask\'s count and colour unchanged');
+    m.stop(); m.flush();
   }
   {
     const rowSrc = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8');

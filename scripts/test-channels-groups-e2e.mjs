@@ -631,12 +631,12 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
     for (let i = 0; i < 80; i++) {
       const card = document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pid}"]');
       const row = document.querySelector('#user-todos-popup .ut-item[data-id="${ptr && ptr.id}"]');
-      if (card && /chan-prop-withdrawn/.test(card.className) && (!row || /ut-item-resolved/.test(row.className))) return { reason: card.querySelector('.chan-prop-reason')?.textContent || null, state: card.querySelector('.chan-prop-state')?.textContent || null, buttons: card.querySelectorAll('button').length, row: row ? row.className : null, head: [...document.querySelectorAll('.chan-outbox-list .chan-outbox-sec')].map((h) => h.textContent) };
+      if (card && /chan-prop-withdrawn/.test(card.className) && (!row || /ut-item-resolved/.test(row.className))) return { reason: card.querySelector('.chan-prop-reason')?.textContent || null, state: card.querySelector('.chan-prop-state')?.textContent || null, buttons: card.querySelectorAll('button').length, row: row ? row.className : null, pill: document.querySelector('.chan-outbox-list .chan-orow[data-orow="${pid}"] .chan-prop-state')?.textContent || null };
       await new Promise((r) => setTimeout(r, 250));
     }
     return { fail: 'never withdrawn on the page', cls: document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pid}"]')?.className || null };
   })()`);
-  ok(!gone.fail && gone.reason === 'Withdrawn by beta · wrong thread' && gone.state === 'withdrawn' && gone.buttons === 0 && gone.head.some((h) => /^withdrawn · \d+$/.test(h)), `⑩ WITHOUT A RELOAD the card reads "${gone.reason}", settled under "withdrawn", with NO buttons`, JSON.stringify(gone));
+  ok(!gone.fail && gone.reason === 'Withdrawn by beta · wrong thread' && gone.state === 'withdrawn' && gone.buttons === 0 && gone.pill === 'withdrawn', `⑩ WITHOUT A RELOAD the card reads "${gone.reason}", its row's pill says "withdrawn" (lane outbox-window-scroll-filter: 「全部」 is newest first, each row with its outcome — no per-state heads), with NO buttons`, JSON.stringify(gone));
   ok(!gone.fail && (gone.row === null || /ut-item-resolved/.test(gone.row)), '⑩ …and the For-you row resolved live (retracted by the engine, never by a reload)', JSON.stringify(gone.row));
   const reopened = await p1.evaljs(`(async () => {
     const b = document.getElementById('taskbar-user-todos'); const pop = document.getElementById('user-todos-popup');

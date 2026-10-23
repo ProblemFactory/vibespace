@@ -6,7 +6,10 @@
 //   · THE POLICY is derived from what the bundle needs — each source MEASURED (the lane's report: the strict start, the
 //     reports the chrome set and a window walk produced, the source each one added):
 //       script-src 'self'            — the bundle is one <script src>; doc-editor / novnc are imported from this origin;
-//                                      no eval, no new Worker, no inline handler in the page
+//                                      no eval, no new Worker, no inline handler in the page. + 'report-sample' (lane
+//                                      chrome-156-drift): it allows NOTHING — a report then carries the first 40
+//                                      characters of the handler / script it names, so a chrome suite's teardown
+//                                      prints WHAT was reported, never only «line 1 column 101»
 //       style-src + 'unsafe-inline'  — index.html's own style attributes + its <style>, the <style> elements the bundle adds
 //       img-src + data: blob: https: — the favicon (data:); a file's bytes shown as a picture (blob:); a markdown file's
 //                                      remote pictures (https:)
@@ -24,11 +27,24 @@
 //   · A REPORT is untrusted input (no cookie, no Origin rule — a sandboxed frame posts `Origin: null`): `reportsOf` reads
 //     only the fields a person needs and NEVER a value — no script sample, no query, no fragment, a URL cut to its origin +
 //     3 path segments (a path can carry a user's file path; a query a token) — a directive outside the CSP vocabulary is
-//     dropped, a field is bounded.
+//     dropped, a field is bounded. The ONE exception is asked for by name: `reportsOf(text, { sample: true })` keeps a
+//     script-src report's sample (≤ 40 characters, the browser's own cut) — only a chrome suite's scratch hub asks
+//     (src/server/csp-reports.js, a sink handed the suite's file), so a hub's own data/ never holds one.
 //   · DEDUPE: a line per (directive, blocked, source, line) — `lineKey`; a For-you notice per (directive, blocked) —
 //     `pairKey`; `noticeWords` are its words. A report from a FRAME THE PAGE MADE (document about / blob / data: a srcdoc
 //     mail or design frame, a blob: page — it inherits the app policy) is a line and NO notice (`noticeWorthy`): a mail's
 //     tracker pixels and the frames' own scripts are the frame-host lane's work, never an item the owner can act on.
+//   · THE SANITIZER'S PARSE IS NOT A GAP (lane chrome-156-followups): since Chrome 156 an inline handler is reported when
+//     its attribute is SET, in an inert document too — and DOMPurify's parse of somebody else's HTML (src/lib/safe-html.js:
+//     an agent's markdown, a peer's .md file) is a DOMParser document, so a handler it then drops is a report, filed as the
+//     app page. Nothing ran. `reportOf(r, { site: true })` keeps WHERE a candidate was set — a script-src-attr inline
+//     report carrying a handler's sample, set by this page's own /bundle.js (the build in its `?v=`) — and the sink names
+//     it `sanitizer-parse` (KIND_SANITIZER) when the bundle's code AT that line and column is DOMPurify's parse
+//     (`purifyParseSites`: the call on two variables, then DOMPurify's own `createDocument(…, "template", null)` fallback —
+//     test-csp-report pins the sites on the bundle's symbol map, scripts/symbolicate.mjs, for the release build and the
+//     chrome suites' build; never a column alone). Such a line is counted apart (Diagnostics: «Sanitizer dropped an inline
+//     handler: N»), never a notice, never in the app page's count nor a chrome suite's zero-report teardown; every other
+//     report — the same attribute set by our own code anywhere else — keeps its notice.
 // PURE: imports nothing (scripts/test-architecture.mjs PURE set). The sink is src/server/csp-reports.js.
 
 const HEADER = 'Content-Security-Policy-Report-Only';
@@ -39,7 +55,7 @@ const REPORT_PATH = '/api/csp-report';
 /** THE APP PAGE'S POLICY — one row per directive, its sources in the order they are written. */
 const APP_POLICY = Object.freeze([
   ['default-src', ["'self'"]],
-  ['script-src', ["'self'"]],
+  ['script-src', ["'self'", "'report-sample'"]],
   ['style-src', ["'self'", "'unsafe-inline'"]],
   ['img-src', ["'self'", 'data:', 'blob:', 'https:']],
   ['font-src', ["'self'", 'blob:']],
@@ -117,31 +133,82 @@ const directiveOf = (r) => {
 };
 const numOf = (v) => (Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) < 1e9 ? Number(v) : null);
 
+/** The kind of a line whose handler the sanitizer's inert parse set (and dropped) — see THE SANITIZER'S PARSE above. */
+const KIND_SANITIZER = 'sanitizer-parse';
+/** The app page's one script (public/index.html; server.js stamps `?v=<mtime>`). */
+const BUNDLE_PATH = '/bundle.js';
+
+/** WHERE a sanitizer-parse CANDIDATE was set, or null: a script-src-attr `inline` report whose sample is a handler's code,
+ *  set by the page's own /bundle.js (same origin as the document) at a line and column → { v, line, column } (`v` = the
+ *  build the page loaded, its `?v=`, or null). Numbers only — the sink reads its bundle there; never stored. */
+function siteOf(r, directive, blocked) {
+  if (directive !== 'script-src-attr' || blocked !== 'inline' || !clean(r['script-sample'] ?? r.sample)) return null;
+  const line = numOf(r['line-number'] ?? r.lineNumber), column = numOf(r['column-number'] ?? r.columnNumber);
+  if (!line || !column) return null;
+  let s, d;
+  try { s = new URL(clean(r['source-file'] ?? r.sourceFile, 2048)); d = new URL(clean(r['document-uri'] ?? r.documentURL ?? r.documentUri, 2048)); } catch { return null; }
+  if (!/^https?:$/.test(s.protocol) || s.origin !== d.origin || s.pathname !== BUNDLE_PATH) return null;
+  const v = s.searchParams.get('v');
+  return { v: v && /^\d{1,16}$/.test(v) ? v : null, line, column };
+}
+
+// DOMPurify's inert parse as a bundle spells it, read at the browser's position (the `parseFromString` it names): the
+// call on two VARIABLES (the payload, the parser's type), then — within a few statements — DOMPurify's own fallback
+// `.createDocument(<namespace>, "template", null)`. The release build (minified) and the chrome suites' build both read
+// so; the docx viewer's and the chart library's parses (a string literal type, no template fallback) never do. A
+// DOMPurify that spells it otherwise matches nothing — its reports keep their notice — and test-csp-report goes red.
+const PURIFY_PARSE = /^parseFromString\(\s*[\w$]+\s*,\s*[\w$]+\s*\)[^]{0,240}?\.createDocument\(\s*[\w$]+\s*,\s*(["'])template\1\s*,\s*null\s*\)/;
+const PURIFY_WINDOW = 400;
+
+/** The positions in a bundle's text where its code is DOMPurify's inert parse: [[line, column]] (1-based, as V8 reports
+ *  them: its line terminators — \n, \r, \r\n, U+2028, U+2029 — and a column in UTF-16 units, a JS string's own index). */
+const LINE_END = /\r\n?|[\n\u2028\u2029]/g;
+function purifyParseSites(text) {
+  const s = String(text || ''), out = [];
+  let line = 1, start = 0;
+  for (let at = s.indexOf('.parseFromString(', 0); at >= 0; at = s.indexOf('.parseFromString(', at + 1)) {
+    const p = at + 1;
+    if (!PURIFY_PARSE.test(s.slice(p, p + PURIFY_WINDOW))) continue;
+    LINE_END.lastIndex = start;
+    for (let m = LINE_END.exec(s); m && m.index < p; m = LINE_END.exec(s)) { line++; start = m.index + m[0].length; }
+    out.push([line, p - start + 1]);
+  }
+  return out;
+}
+
 /** One browser report body → the line's fields, or null (not a report we understand). `r` = the inner object of a
- *  report-uri post (`{"csp-report": r}`) or a Reporting-API entry's `body`. */
-function reportOf(r) {
+ *  report-uri post (`{"csp-report": r}`) or a Reporting-API entry's `body`. `sample` (a chrome suite's hub only): a
+ *  script-src* report keeps the browser's sample of the code it names — the handler's text, ≤ 40 characters. `site`
+ *  (the sink): a sanitizer-parse candidate also carries `site` (siteOf) — the sink reads it, names the kind, drops it. */
+const SAMPLE_MAX = 40;
+function reportOf(r, { sample = false, site = false } = {}) {
   if (!r || typeof r !== 'object' || Array.isArray(r)) return null;
   const directive = directiveOf(r);
   if (!directive) return null;
   const disposition = clean(r.disposition, 16) === 'enforce' ? 'enforce' : 'report';
+  const blocked = uriOf(r['blocked-uri'] ?? r.blockedURL ?? r.blockedUri) || 'other';
+  const at = site ? siteOf(r, directive, blocked) : null;
   return {
     directive,
-    blocked: uriOf(r['blocked-uri'] ?? r.blockedURL ?? r.blockedUri) || 'other',
+    blocked,
     source: uriOf(r['source-file'] ?? r.sourceFile) || '',
     line: numOf(r['line-number'] ?? r.lineNumber),
     column: numOf(r['column-number'] ?? r.columnNumber),
     document: uriOf(r['document-uri'] ?? r.documentURL ?? r.documentUri) || '',
     disposition,
+    ...(sample && /^script-src/.test(directive) ? { sample: clean(r['script-sample'] ?? r.sample, SAMPLE_MAX) } : {}),
+    ...(at ? { site: at } : {}),
   };
 }
 
 /** A POST body → its reports (≤ 20): the report-uri shape `{"csp-report": {…}}` (application/csp-report) or the
- *  Reporting API's `[{type: 'csp-violation', body: {…}}, …]` (application/reports+json). Never throws. */
-function reportsOf(text) {
+ *  Reporting API's `[{type: 'csp-violation', body: {…}}, …]` (application/reports+json). Never throws. `opts.sample`:
+ *  see reportOf (a chrome suite's hub only). */
+function reportsOf(text, opts = {}) {
   let j;
   try { j = JSON.parse(String(text || '')); } catch { return []; }
   const raw = Array.isArray(j) ? j.filter((e) => e && e.type === 'csp-violation').map((e) => e.body) : [j && j['csp-report']];
-  return raw.slice(0, 20).map(reportOf).filter(Boolean);
+  return raw.slice(0, 20).map((r) => reportOf(r, opts)).filter(Boolean);
 }
 
 /** The content types a browser posts a report with. A page on another site cannot send these without a CORS preflight,
@@ -151,8 +218,13 @@ const isReportType = (ct) => REPORT_TYPES.includes(String(ct || '').split(';')[0
 
 /** The documents that are a frame the page made (they inherit the app page's policy) — a line, never a notice. */
 const FRAME_DOCUMENTS = new Set(['about', 'blob', 'data']);
-const noticeWorthy = (r) => !!r && !FRAME_DOCUMENTS.has(r.document);
-const lineKey = (r) => `${r.directive}\u0000${r.blocked}\u0000${r.source}\u0000${r.line == null ? '' : r.line}`;
+/** A notice for the owner: the app page's own report — never a frame's, never the sanitizer's parse. */
+const noticeWorthy = (r) => !!r && !FRAME_DOCUMENTS.has(r.document) && r.kind !== KIND_SANITIZER;
+/** The count a line belongs to: 'sanitizer' (the sanitizer's parse) · 'app' (the app page — the policy's gaps) · 'frames'. */
+const sideOf = (r) => (r && r.kind === KIND_SANITIZER ? 'sanitizer' : noticeWorthy(r) ? 'app' : 'frames');
+// a suite's line also differs by its sample (two controls' handlers on line 1 of two evaluated scripts are two lines); a
+// hub's own lines carry none, so their key is what it always was
+const lineKey = (r) => `${r.directive}\u0000${r.blocked}\u0000${r.source}\u0000${r.line == null ? '' : r.line}${r.sample ? `\u0000${r.sample}` : ''}`;
 const pairKey = (r) => `${r.directive}\u0000${r.blocked}`;
 
 /** THE NOTICE (one per new pair): what the enforced policy would block, and where it was seen. */
@@ -168,6 +240,7 @@ function noticeWords(r) {
 
 module.exports = {
   HEADER, ENFORCE_HEADER, REPORT_PATH, APP_POLICY, policyString, appPolicy, loginPolicy,
-  DIRECTIVES, KEYWORDS, TOKEN_SEGMENT, uriOf, reportOf, reportsOf, REPORT_TYPES, isReportType, FRAME_DOCUMENTS, noticeWorthy, lineKey, pairKey,
+  DIRECTIVES, KEYWORDS, TOKEN_SEGMENT, SAMPLE_MAX, uriOf, reportOf, reportsOf, REPORT_TYPES, isReportType, FRAME_DOCUMENTS, noticeWorthy, lineKey, pairKey,
+  KIND_SANITIZER, BUNDLE_PATH, siteOf, purifyParseSites, sideOf,
   NOTICE_TEXT, NOTICE_DETAIL, noticeWords,
 };

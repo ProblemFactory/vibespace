@@ -2,6 +2,26 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.343 — 2026-10-22
+
+### Added
+- For you's notices have Mark all read (Undo for 5 seconds), and a notice you read in the For you window is marked read by itself.
+
+### Fixed
+- The Outbox window scrolls: a long list stays inside the window, and the message waiting for your approval is reachable at any window height.
+- In the Outbox, Awaiting now shows only what waits for you, and first; API calls that already ran or were refused are under All.
+- Outbox API rows say who did what, like "Odd jobs · upload a file to a folder", repeats as one row ×3; ids, HTTP status and sizes are in Technical details.
+- Voice input no longer suggests words Dropline would skip: words already in your dictionary are left out, and a skipped word is not suggested again for 30 days.
+- A folder set to add words automatically now covers its subfolders and asks nothing there; words over the hourly limit are sent later by themselves.
+- When Dropline skips a word, the result says why: it already writes the word right, or the dictionary refused it.
+- On Chrome 156, an agent's message or a markdown file with an inline event handler no longer files a page security notice in For you: the sanitizer removed it.
+- The Vault window opens with one wait instead of two and says it is reading; unlocking, setting the second password and Show all say what they wait on.
+- Reporting a problem no longer freezes VibeSpace for seconds while it copies the scene, and a stalled server now says in its log what held it.
+- An Antigravity "Read" card now names the file it read and its size, instead of a bare "1 line".
+- An Antigravity command card now shows the command, and the file its long output was saved to is a link you can open.
+- Every subagent an Antigravity chat starts in one step now gets its own card, not only the first.
+- A subagent the parent stopped now shows as stopped with its last progress, instead of looking like it is still running or simply never answered.
+
 ## 2.369.342 — 2026-10-22
 
 ### Added

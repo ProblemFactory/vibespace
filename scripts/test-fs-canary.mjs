@@ -11,6 +11,11 @@
 //   §5 CONTROL (scripts/mutant-copy.mjs, never src/): the stat timed on the main thread again → §2's blocked loop
 //      reads as a slow mount; the copies census
 //   §6 pins: server.js runs the canary through createFsCanary and no main-thread stat remains; the probe is the pool's
+//   §7 THE BLOCKED LOOP NAMES ITS BLOCKER (lane vault-slow-load addendum — the owner's inc-mvk5ues0: «the main loop held the
+//      probe's answer 5892ms» and nothing about what): src/server/loop-blame.js keeps every slow SYNC fs call of the main
+//      thread (call, file, bytes, ms, the src/ frame); a loop held by a sync read of a FIFO a child fills after 1.3 s ⇒ the
+//      canary's line names readFileSync, the file, the bytes and the caller; a CPU block ⇒ the line says CPU work; the PURE
+//      words; server.js installs it before anything; CONTROL: the canary without the blame (the base) names nothing
 // Run: node scripts/test-fs-canary.mjs
 // before the first pool use: §3 saturates a pool of TWO — PINNED, never inherited (lane race-sweep, B-2d49: a VibeSpace agent
 // session's env carries UV_THREADPOOL_SIZE=32, the 12-job saturation then never queued the stat — fs 0 ms, 3 FAILED)
@@ -171,6 +176,86 @@ console.log('§6 pins');
   const worker = fs.readFileSync(path.join(REPO, 'src/server/fs-canary-worker.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   ok(/fs\.promises\.stat\(p\)/.test(worker) && !/statSync|readFileSync/.test(worker), 'the probe is an ASYNC stat — it goes through the shared pool, the thing the canary watches');
   ok(/poolSize: 1,/.test(SRC) && /timeouts: \{ probe: deadlineMs \* 3 \}/.test(SRC), 'its own one-worker SafeFs (never queued behind a file route), a backstop past the probe\'s own deadline');
+}
+
+console.log('§7 the blocked loop names its blocker (lane vault-slow-load)');
+{
+  const LB = require(path.join(REPO, 'src/server/loop-blame.js'));
+  const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'fscan-blame-'));
+  fs.mkdirSync(path.join(ROOT, 'src'));
+  fs.writeFileSync(path.join(ROOT, 'src', 'slow-reader.js'), "'use strict';\nconst fs = require('fs');\nfunction readAll(p) { return fs.readFileSync(p); }\nmodule.exports = { readAll };\n");
+  // int343: what each wrapped call carries BEFORE the install (its own properties — fs.realpathSync.native is one)
+  const ownOf = (f) => Reflect.ownKeys(f).filter((k) => !['length', 'name', 'prototype', 'arguments', 'caller'].includes(k)).map(String).sort();
+  const BEFORE = Object.fromEntries(LB.SYNC_FNS.filter((fn) => typeof fs[fn] === 'function').map((fn) => [fn, Object.fromEntries(ownOf(fs[fn]).map((k) => [k, fs[fn][k]]))]));
+  const nativeBefore = fs.realpathSync.native;
+  ok(LB.install({ root: ROOT }) === true && LB.isWrapped(fs.readFileSync) && LB.install({ root: ROOT }) === false, 'install wraps the main thread\'s sync fs calls once');
+  // int343 — A WRAPPER OVER A LIBRARY FUNCTION CARRIES THAT FUNCTION'S OWN PROPERTIES. The first wrapper dropped
+  // fs.realpathSync.native: on a hub every automation-key open was refused «does not exist» (automation-engine's folder
+  // judge) and browser-facts' real paths read null. THE CENSUS: every fs call the wrapper touches keeps every own property.
+  const lost = (mod, before) => Object.entries(before).flatMap(([fn, props]) => Object.entries(props).filter(([k, v]) => mod[fn][k] !== v).map(([k]) => `${fn}.${k}`));
+  ok(Object.keys(BEFORE).length === LB.SYNC_FNS.length && Object.values(BEFORE).some((p) => Object.keys(p).length) && !lost(fs, BEFORE).length,
+    `CENSUS: every one of the ${LB.SYNC_FNS.length} wrapped fs calls keeps its own properties (${Object.entries(BEFORE).filter(([, p]) => Object.keys(p).length).map(([fn, p]) => `${fn}.${Object.keys(p).join('/')}`).join(', ')})`, lost(fs, BEFORE));
+  ok(typeof fs.realpathSync.native === 'function' && fs.realpathSync.native === nativeBefore && fs.realpathSync.native(ROOT) === nativeBefore(ROOT),
+    'fs.realpathSync.native still answers after the install (the automation keys\' folder judge, browser-facts)');
+  { // THE RED CONTROL: the wrapper as it first shipped (the property copy cut) ⇒ the census names realpathSync.native lost
+    const SRC = fs.readFileSync(path.join(REPO, 'src/server/loop-blame.js'), 'utf8');
+    const CUT = /\n    for \(const k of Reflect\.ownKeys\(orig\)\)[^\n]*\n/;
+    const pre = path.join(ROOT, 'loop-blame-pre.js');
+    fs.writeFileSync(pre, SRC.replace(CUT, '\n'));
+    const mk = () => ({ realpathSync: Object.assign(function realpathSync(p) { return p; }, { native: (p) => p }), readFileSync: function readFileSync() { return ''; } });
+    const mPre = mk(), bPre = { realpathSync: { native: mPre.realpathSync.native } };
+    require(pre).install({ fsMod: mPre });
+    const mNow = mk(), bNow = { realpathSync: { native: mNow.realpathSync.native } };
+    require(path.join(REPO, 'src/server/loop-blame.js')).install({ fsMod: mNow });
+    ok(CUT.test(SRC) && lost(mPre, bPre).join() === 'realpathSync.native' && !lost(mNow, bNow).length && mNow.realpathSync.native('/x') === '/x',
+      'RED CONTROL: the wrapper without the property copy loses realpathSync.native (the census names it); the shipped wrapper keeps it — on a module object handed in', { pre: lost(mPre, bPre), now: lost(mNow, bNow) });
+  }
+  const reader = require(path.join(ROOT, 'src', 'slow-reader.js'));
+  const fifo = path.join(ROOT, 'pipe');
+  execFileSync('mkfifo', [fifo]);
+  const { spawn } = await import('node:child_process');
+  const B = harness(createFsCanary);
+  await B.c.tick();
+  const p = B.c.tick();
+  spawn('sh', ['-c', `sleep 1.3; printf 'four' > '${fifo}'`], { stdio: 'ignore' });
+  const got = reader.readAll(fifo);   // the loop is held HERE: a sync read of a FIFO nobody has written yet
+  const r = await p;
+  const line = B.lines.find((l) => /a blocked loop/.test(l)) || '';
+  ok(got.length === 4 && r && r.loopMs >= 1000, `the loop was held by the sync read (${r && r.loopMs} ms)`);
+  ok(/; in that window: readFileSync 4 B pipe \d{4,} ms ← src\/slow-reader\.js:3 (Object\.)?readAll$/.test(line), `the canary's line names the call, the bytes, the file and the caller: ${line}`);
+  ok(r.blockedBy && r.blockedBy.startsWith('readFileSync'), 'the probe\'s facts carry the same words (blockedBy)');
+  B.lines.length = 0;
+  const p2 = B.c.tick();
+  spin(1300);
+  await p2;
+  ok(/; in that window: no sync fs call over 20 ms in that window — CPU work on the main thread/.test(B.lines.find((l) => /a blocked loop/.test(l)) || ''), `a CPU block is said as CPU work: ${B.lines[0]}`);
+  B.c.close();
+  // PURE
+  ok(LB.bytesOf('readFileSync', [], Buffer.alloc(7)) === 7 && LB.bytesOf('readFileSync', [], 'héllo') === 6 && LB.bytesOf('readSync', [], 512) === 512 && LB.bytesOf('writeFileSync', ['f', 'abc']) === 3 && LB.bytesOf('statSync', ['f'], {}) === null, 'bytesOf: a read\'s result, a write\'s data, nothing for a stat');
+  ok(LB.callerOf(`Error\n    at wrapped (${REPO}/src/server/loop-blame.js:9:1)\n    at sha256Head (${REPO}/src/incident.js:80:22)\n    at x (${REPO}/server.js:5:1)`, REPO) === 'src/incident.js:80 sha256Head' && LB.callerOf(`Error\n    at y (${REPO}/node_modules/z/i.js:1:1)\n    at x (${REPO}/server.js:5:1)`, REPO) === 'server.js:5 x' && LB.callerOf('Error\n    at y (node:fs:1:1)', REPO) === null, 'callerOf: the first frame of the hub\'s own code, never this module\'s, never node_modules');
+  ok(LB.blameWords([{ fn: 'readSync', bytes: 1073741824, path: path.join(REPO, 'home/x.jsonl'), ms: 15220, caller: 'src/incident.js:80 sha256Head' }], REPO) === 'readSync 1024 MB home/x.jsonl 15220 ms ← src/incident.js:80 sha256Head', 'blameWords: the call, the size, the path under the root, the ms, the caller');
+  const at = Date.now();
+  const win = LB.blame(at, at + 10, { entries: [{ at: at - 5000, ms: 100, fn: 'old' }, { at: at - 50, ms: 200, fn: 'spans' }, { at: at + 2, ms: 30, fn: 'in' }, { at: at + 50, ms: 999, fn: 'after' }] }).map((e) => e.fn).join();
+  ok(win === 'spans,in', `blame keeps the calls that overlap the window, the longest first (${win})`);
+  const server = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), trace = fs.readFileSync(path.join(REPO, 'src/server/boot-trace.js'), 'utf8');
+  const lines5 = server.split('\n').slice(0, 6).join('\n');
+  ok(/require\('\.\/src\/server\/boot-trace\.js'\)\.start\(/.test(lines5) && /function start\(\{ dataDir,[^\n]*\{\n(?:\s*\/\/[^\n]*\n)*\s*try \{ if \(dataDir\) require\('\.\/loop-blame\.js'\)\.install\(\{ root: path\.dirname\(dataDir\) \}\); \} catch \{ \}/.test(trace), 'installed by the boot trace\'s start() — server.js\'s first lines, before the modules that destructure fs');
+  // CONTROL: the base canary (no blame) — the same sync-read block, and the line names nothing
+  const from = "log(`[canary] the main loop held the probe's answer ${loopMs}ms (the stat itself took ${fsMs}ms ${r.where === 'worker' ? 'off the main thread' : 'on the main thread'}) — a blocked loop, not a slow mount${by ? `; in that window: ${by}` : ''}`);";
+  ok(SRC.split(from).length === 2, 'CONTROL premise: the line\'s patch point is one line of the module');
+  const base = M.load('src/server/fs-canary.js', SRC.replace(from, "log(`[canary] the main loop held the probe's answer ${loopMs}ms (the stat itself took ${fsMs}ms ${r.where === 'worker' ? 'off the main thread' : 'on the main thread'}) — a blocked loop, not a slow mount`);"), 'no-blame');
+  const C = harness(base.createFsCanary);
+  await C.c.tick();
+  const fifo2 = path.join(ROOT, 'pipe2');
+  execFileSync('mkfifo', [fifo2]);
+  const p3 = C.c.tick();
+  spawn('sh', ['-c', `sleep 1.3; printf 'four' > '${fifo2}'`], { stdio: 'ignore' });
+  reader.readAll(fifo2);
+  await p3;
+  const cl = C.lines.find((l) => /a blocked loop/.test(l)) || '';
+  ok(!!cl && !/in that window|readFileSync/.test(cl), `CONTROL: the base canary's line for the same block names nothing (the owner's journal): ${cl}`);
+  C.c.close();
+  fs.rmSync(ROOT, { recursive: true, force: true });
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

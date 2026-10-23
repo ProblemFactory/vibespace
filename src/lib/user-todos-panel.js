@@ -28,7 +28,7 @@
 // it (mobile-back.js: HOME = the page while the list has rows, else the conversation list); ☰ still opens the list.
 import { t, tc } from './i18n.js';
 import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
-import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
+import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY, noticeReadAll } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
@@ -282,11 +282,15 @@ export function installUserTodos(app) {
     nh.type = 'button';
     nh.title = t('Show the notices');
     nh.append(mk('span', 'ut-head-sub'));
+    // lane inbox-fyi-mark-all: 「全部已读」 on the head's line (a button never nests in the head button) — every notice it
+    // counts (open: the section in force) in ONE request, a 5 s Undo after it
+    const ra = mk('button', 'ut-read-all', t('Mark all read'));
+    ra.type = 'button';
     // B-328d: the filter strip, then one group per ORIGIN (the producer that filed it)
     const chips = mk('div', 'ut-chips');
     chips.setAttribute('role', 'group');
     chips.setAttribute('aria-label', t('Notices by source'));
-    notices.append(nh, chips, mk('div', 'ut-notice-groups'));
+    notices.append(nh, ra, chips, mk('div', 'ut-notice-groups'));
     return notices;
   };
   const ensureInbox = () => {
@@ -473,6 +477,23 @@ export function installUserTodos(app) {
     if (nHead.getAttribute('aria-expanded') !== String(open)) nHead.setAttribute('aria-expanded', String(open));
     if (nBox.classList.contains('ut-notices-open') !== open) nBox.classList.toggle('ut-notices-open', open); // closed: the strip and the groups are not drawn (style.css)
     renderNotices(nBox, notices.map((e) => ({ item: e.item, resolved: e.resolved, notice: true })), st);
+    // «Mark all read»: closed, the head counts every open notice — the press covers them all; open, the section in force
+    const ra = nBox.querySelector(':scope > .ut-read-all');
+    ra._ids = noticeReadAll(notices, open ? noticeFilter : 'all');
+    const off = !ra._ids.length || ra.dataset.busy === '1';
+    if (ra.disabled !== off) ra.disabled = off;
+    const title = ra._ids.length ? t('Mark the {n} notices listed here read (Undo for 5 s)', { n: ra._ids.length }) : t('No unread notices here');
+    if (ra.title !== title) ra.title = title;
+  };
+  /** «Mark all read» (lane inbox-fyi-mark-all): the ids its last paint chose, ONE request through THE model's verb (the
+   *  store's one broadcast repaints every surface; the Undo toast is the verb's). */
+  const readAllNotices = async (ra) => {
+    const ids = Array.isArray(ra._ids) ? ra._ids.slice() : [];
+    if (!ids.length || ra.dataset.busy === '1') return;
+    ra.dataset.busy = '1'; ra.disabled = true;
+    await model.readNotices(ids);
+    delete ra.dataset.busy;
+    ra.disabled = !(Array.isArray(ra._ids) && ra._ids.length);
   };
   const setNoticeFilter = (origin) => {
     noticeFilter = origin || 'all';
@@ -794,6 +815,8 @@ export function installUserTodos(app) {
     }
     // the notices' grey count opens (and closes) the notices in place
     if (e.target.closest('.ut-notice-head')) { noticesOpen = !noticesOpen; renderPanel(); return; }
+    const ra = e.target.closest('.ut-read-all');
+    if (ra) { readAllNotices(ra); return; }
     const sa = e.target.closest('.ut-seen-all');
     if (sa) { markAllSeen(sa); return; }
     // A click on the detail expander is a toggle, not a jump — without this
@@ -982,6 +1005,8 @@ export function installUserTodos(app) {
       const fb = e.target.closest('.ut-fold');
       if (fb) { if (H.bands) H.bands = bandLayout(todos, { now: Date.now(), prev: H.bands, expand: Number(fb.dataset.band), policy: attnPolicy() }); renderHome(); return; } // THE FOLD opens its band IN PLACE
       if (e.target.closest('.ut-notice-head')) { H.noticesOpen = !H.noticesOpen; renderHome(); return; }
+      const ra = e.target.closest('.ut-read-all');
+      if (ra) { readAllNotices(ra); return; }
       const sa = e.target.closest('.ut-seen-all');
       if (sa) { markAllSeen(sa); return; }
       if (e.target.closest('.ut-detail-exp')) return;

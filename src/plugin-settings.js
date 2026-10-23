@@ -104,8 +104,8 @@ const PLUGIN_SETTINGS = {
         label: t("Send the conversation to Dropline's two-week memory (shows the text the first time)"),
         description: t('Dropline then knows the names and terms of the conversation you dictate into. The first time, the exact text is shown before anything is sent.') },
       { key: 'autoProjects', type: 'json', default: [], tier: 'advanced', apply: 'server',
-        label: t('Projects whose file names go without asking'),
-        description: t('Folders (absolute paths) whose file names and identifiers are proposed to Dropline without asking — at most 50 an hour, journaled. A proposal card adds its project here with one tick.') },
+        label: t('Folders whose suggested words go without asking'), // lane voice-teach-skips: a folder covers its subfolders and asks nothing there
+        description: t('Folders (absolute paths), each with its subfolders, whose suggested words go to Dropline without asking — at most 50 an hour, journaled; the rest wait for the next hour. A suggestion card adds its folder here with one tick.') },
     ],
   },
   'frp': {

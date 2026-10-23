@@ -17,7 +17,9 @@
 //   ③ teach ON ⇒ a proposal card of word chips (+ a For-you item); select two, 加入所选 ⇒ ONE POST /v1/terms with exactly those two
 //   ④ 忽略 ⇒ no write
 //   ⑤ the context switch ⇒ the first dictation opens the PREVIEW; 发送 ⇒ ONE POST /v1/context with the previewed text
-//   ⑥ the per-project tier ⇒ a later identifier goes without a card and lands in the journal
+//   ⑥ an automatic folder (lane voice-teach-skips: the folder AND its subfolders, nothing asked) — the card's toggle names the
+//     folder and offers the parent; in a subfolder every word goes without a card and lands in the journal; ✕ asks again
+//   ⑥b the vendor skips (documented reasons review / refused) ⇒ the toast and the journal row say why; the words are not asked again
 //   ⑦ phone 390
 //   ⑧ RETIRED (int263 seam c3): the polished card body it judged was deleted by plugin-settings-p0 (the Plugins list row)
 //   ⑨ THE FOR-YOU TRAY (lane foryou-plugin-notices, owner 2026-10-19; lane voice-dictionary-nag 2026-10-21): the REAL tray
@@ -105,7 +107,7 @@ vendor = http.createServer(async (req, res) => {
     if (!fake.access.has(tok)) return json(401, { error: { code: 'unauthorized' } });
     if (u.pathname === '/v1/me') return json(200, { user: { id: 'u1', email: 'ana@example.test', name: 'Ana' }, team: { id: 't1', name: 'Fish Lab' }, request_id: 'r' });
     if (u.pathname === '/v1/vocabulary') return json(200, { terms: [{ term: 'VibeSpace', aliases: [], section: 'auto' }], version: 1 });
-    if (u.pathname === '/v1/terms') { const t = (JSON.parse(body).terms || []).map((x) => x.term); return json(200, { added: t, skipped: [], dictionary_version: 2 }); }
+    if (u.pathname === '/v1/terms') { const t = (JSON.parse(body).terms || []).map((x) => x.term); if (fake.skip) return json(200, { added: [], skipped: t.map((x) => ({ term: x, reason: /^[A-Z]/.test(x) ? 'review' : 'refused' })), dictionary_version: 2, request_id: 'tr_skip' }); return json(200, { added: t, skipped: [], dictionary_version: 2 }); } // ⑥b: the documented skip shape
     if (u.pathname === '/v1/context') return json(200, { ok: true, request_id: 'cx' });
     if (u.pathname === '/v1/dictate') return json(200, { request_id: 'd' + calls.length, mode: 'dictate', final_text: 'DICTATED', transcript: { text: 'dictated', language: 'en' }, rewrite: { status: 'used' } });
   }
@@ -496,23 +498,52 @@ try {
   const cx = writes().filter((c) => c.p === '/v1/context');
   ok('发送 ⇒ ONE POST /v1/context with exactly the previewed text, title + source VibeSpace', cx.length === 1 && cx[0].body.text === shown && cx[0].body.source === 'VibeSpace' && cx[0].body.title === 'Doc comments', cx);
 
-  console.log('⑥ the per-project tier ⇒ a later identifier goes without a card and lands in the journal');
+  console.log('⑥ an automatic folder (lane voice-teach-skips): the toggle names the folder + offers the parent; a subfolder asks nothing — every word goes and lands in the journal');
   await p.ev('window.__set({ context: false })');   // ⑤ proved the preview; off now, so no dialog covers the next clicks
   await dictate(p, 'conv-5', [{ role: 'user', content: [{ type: 'text', text: 'rename freshIdentOne in zeta_notes.md' }] }]);   // ④ ignored the earlier words: new ones
   await rerender(p, '.voice-project-auto input');
+  const label = await p.ev('({ t: document.querySelector(".voice-project-auto").textContent.trim(), title: document.querySelector(".voice-project-auto").title, up: (document.querySelector(".voice-project-parent") || {}).textContent || null, upTitle: (document.querySelector(".voice-project-parent") || {}).title || null })');
+  ok('the card\'s toggle names the folder it will cover — it and its subfolders, never asked — (its path on hover) and offers the parent folder', label.t === '这个文件夹及其子文件夹里建议的词都自动加入，不再询问（vibespace）' && label.title === '/home/u/projects/vibespace' && label.up === '或改为上一级文件夹（projects）' && label.upTitle === '/home/u/projects', label);
   await p.clickSel('.voice-project-auto input');
   await p.until('!!document.querySelector(".voice-project-row")');
+  ok('the folders list says what «automatic» means: the folder and its subfolders, without asking', (await p.ev('document.querySelector(".voice-projects").textContent')).includes('这些文件夹（含子文件夹）里建议的词不经询问直接加入'));
   const nTerms = writes().filter((c) => c.p === '/v1/terms').length;
-  // voice-verify F2 (lane voice-verify-fixes): the per-project tier auto-sends only what a SOURCE names — here an agent
-  // code span — and the person's own word (myOwnPlanWord) goes to the card (int260, ruling R1)
+  // the base's rule sent only an agent code span here and carded the person's own word — the owner read «automatic» as «no
+  // more asking there» (2026-10-22); and a conversation in a SUBFOLDER was not «on» at all (exact match)
+  await p.ev("(() => { window.__cwd = '/home/u/projects/vibespace/src/lib'; return true; })()");
   await dictate(p, 'conv-4', [{ role: 'user', content: [{ type: 'text', text: 'now wire myOwnPlanWord into the card' }] }, { role: 'assistant', content: [{ type: 'text', text: 'Wired `brandNewIdent` into the card.' }] }]);
   await rerender(p, '.voice-journal-row');
   const tw = writes().filter((c) => c.p === '/v1/terms');
   const journal = await p.ev('[...document.querySelectorAll(".voice-journal-row")].map((x) => x.textContent)');
-  const ownCarded = await p.until('[...document.querySelectorAll(".voice-proposal")].some((c) => c.textContent.includes("myOwnPlanWord"))');
-  ok('opted in: brandNewIdent (an agent code span) went WITHOUT a card (one POST, no new proposal), the journal says 词（本项目自动） and the person\'s own myOwnPlanWord is on the card, never auto-sent', ownCarded && !tw.some((x) => x.body.terms.some((y) => y.term === 'myOwnPlanWord')) && tw.length === nTerms + 1 && tw[tw.length - 1].body.terms.map((x) => x.term).join() === 'brandNewIdent' && !(await p.ev('[...document.querySelectorAll(".voice-proposal")].some((c) => c.textContent.includes("brandNewIdent"))')) && journal[0].includes('词（本项目自动）'), { ownCarded, tw: tw.map((x) => x.body), journal });
+  const sent6 = tw.length === nTerms + 1 ? tw[tw.length - 1].body.terms.map((x) => x.term).sort().join() : '';
+  ok('in a SUBFOLDER of the automatic folder: brandNewIdent AND the person\'s own myOwnPlanWord went in ONE write, no card asked for either; the journal says 词（本项目自动）', sent6 === 'brandNewIdent,myOwnPlanWord' && !(await p.ev('[...document.querySelectorAll(".voice-proposal")].some((c) => /myOwnPlanWord|brandNewIdent/.test(c.textContent))')) && journal[0].includes('词（本项目自动）'), { sent6, tw: tw.map((x) => x.body), journal });
   ok('the journal lists memory + words rows and the dropline.fish.audio/app link', journal.some((j) => j.includes('记忆')) && await p.ev('document.querySelector(".voice-memory-link").href === "https://dropline.fish.audio/app"'));
   await p.shot('journal.png');
+  await p.clickSel('.voice-project-off');   // ✕ = ask again for this folder (the later legs dictate in it)
+  await p.until('!document.querySelector(".voice-project-row")');
+
+  console.log('⑥b the vendor skips (lane voice-teach-skips): the toast and the journal say why; a skipped word is not asked again');
+  fake.skip = true;
+  await p.ev("(() => { window.__cwd = '/home/u/projects/other'; return true; })()");
+  await dictate(p, 'conv-6', [{ role: 'user', content: [{ type: 'text', text: 'ask Quillonia about verbaMint, then Quillonia and verbaMint again' }] }]);
+  await rerender(p, '.voice-proposal');
+  const id6 = await p.until('[...document.querySelectorAll(".voice-proposal")].some((c) => c.textContent.includes("Quillonia"))') ? await p.ev('[...document.querySelectorAll(".voice-proposal")].find((c) => c.textContent.includes("Quillonia")).dataset.id') : '';
+  const card6 = `.voice-proposal[data-id="${id6}"]`;
+  const shown6 = await p.ev(`[...document.querySelectorAll('${card6} .voice-term')].map((x) => x.dataset.term).sort().join()`);
+  await p.ev(`(() => { for (const x of document.querySelectorAll('${card6} .voice-term[aria-pressed=false]')) x.click(); return true; })()`);
+  await p.clickSel(`${card6} .voice-proposal-add`);
+  await p.until(`!document.querySelector('${card6}')`);
+  await sleep(300);
+  const toast6 = await p.ev('(JSON.parse(localStorage.getItem("vibespace.toastHistory") || "[]")[0] || {}).m || ""');
+  ok('加入所选 on words Dropline skips: the toast names each reason — «已加入 0 · 跳过 2（Dropline：已能写对 1 · 词典不收 1）» (the base said «已加入 0 · 跳过 2», no why)', shown6 === 'Quillonia,verbaMint' && toast6 === '已加入 0 · 跳过 2（Dropline：已能写对 1 · 词典不收 1）', { shown6, toast6 });
+  await rerender(p, '.voice-journal-row');
+  const jr6 = await p.ev('({ t: document.querySelector(".voice-journal-row").textContent, title: document.querySelector(".voice-journal-row").title })');
+  ok('the journal row says the same, and each skipped word with its reason on hover', jr6.t.includes('跳过 2（Dropline：已能写对 1 · 词典不收 1）') && jr6.title.includes('Quillonia — 已能写对') && jr6.title.includes('verbaMint — 词典不收'), jr6);
+  const again6 = await p.ev("window.__seen('conv-6b', 'ask Quillonia about verbaMint, then Quillonia and verbaMint again')");
+  ok('the skipped words are not asked again (another conversation, the same words: no card, no item)', !again6.proposal && !userTodos.openItems().some((i) => /Quillonia|verbaMint/.test(i.text)), again6);
+  fake.skip = false;
+  await p.ev("window.__seen('conv-7', 'phoneCardWord twice: phoneCardWord')");   // ⑦'s card (the phone measures its buttons)
+  await p.ev("(() => { window.__cwd = '/home/u/projects/vibespace'; return true; })()");
   p.close();
 
   console.log('⑦ phone 390');

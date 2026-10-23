@@ -1354,5 +1354,21 @@ console.log('⑱ THE KEY ROW, BOUNDED (lane vault-key-row-compact — the owner 
     'zh 「N 种」 · 「授权给 N 个」 · 「N 个动作」 · 「清理已结束的授权」 · 任何 — ja the same; the old 授权给： label and the «could not <verb>» sentences are gone from the dictionaries');
 }
 
+// int343 — THE HUB'S fs IS WRAPPED: a hub installs src/server/loop-blame.js at boot (boot-trace start()), which wraps the main
+// thread's sync fs calls. Its first wrapper dropped fs.realpathSync.native, so the engine's OWN realpath (no openFacts.realpath
+// — the hub's road) threw and every open under a key's folders was refused «does not exist». An open inside, on a wrapped fs:
+{
+  const LB = R('src/server/loop-blame.js');
+  LB.install({});
+  const rig = judgeRig();
+  const w = await mkWorld('judge-wrapped-fs');
+  const e = judgeEngine(ENG, w, rig);
+  const k = e.mint({ name: 'wrapped-fs', scopes: ['conversations.open'], limits: LIM_OPEN });
+  e.grant(k.key.id, ['session:conv-1']);
+  const r = await e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN, name: 'inside, wrapped fs' } });
+  ok(LB.isWrapped(fs.realpathSync) && r.ok && rig.calls.some((c) => c[0] === 'spawn' && c[1] === RP(IN)),
+    'the hub\'s fs wrapped (loop-blame installed): an open INSIDE the key\'s folder is judged by the engine\'s own realpath and spawned — never «does not exist»', { r, calls: rig.calls });
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

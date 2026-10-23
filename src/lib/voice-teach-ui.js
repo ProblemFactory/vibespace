@@ -32,6 +32,17 @@ const fmtTime = (at) => { const d = new Date(at); return `${d.toLocaleDateString
 const whyWords = (w) => (!w ? '' : w.byPerson > 1 ? t('You wrote this {n} times', { n: w.byPerson }) : w.byPerson === 1 ? t('You wrote this once')
   : w.why === 'file' ? t('A file name') : t('Seen {n} times here', { n: w.seen }));
 const projectName = (cwd) => String(cwd || '').replace(/\/+$/, '').split('/').pop() || cwd;
+// lane voice-teach-skips (the owner 2026-10-22: «已加入 0 · 跳过 11» said no why): Dropline's documented skip reasons in words —
+// `review` = it did not need the word (it already writes it right), `refused` = the dictionary did not take it; a reason
+// this table does not know is shown as the vendor's own word
+const REASON_KEYS = { review: 'already written right', refused: 'refused by the dictionary', unstated: 'no reason given' };
+const reasonWord = (r) => (REASON_KEYS[r] ? t(REASON_KEYS[r]) : String(r));
+const countReasons = (skips) => { const out = {}; for (const x of skips || []) { const r = (x && x.reason) || 'unstated'; out[r] = (out[r] || 0) + 1; } return out; };
+/** «已加入 0 · 跳过 11（Dropline：已能写对 9 · 词典不收 2）» — the outcome with each reason counted */
+function outcomeLine(added, skipped, reasons) {
+  const parts = Object.entries(reasons || {}).map(([r, n]) => `${reasonWord(r)} ${n}`);
+  return parts.length && skipped ? t('Added {n} · skipped {m} (Dropline: {why})', { n: added, m: skipped, why: parts.join(' · ') }) : t('Added {n} · skipped {m}', { n: added, m: skipped });
+}
 
 /** lane voice-dictionary-nag: EVERY WORD SUGGESTED NOW under the 「词典建议」 row of All Settings, each with 加入 / 忽略
  *  (POST /api/voice/teach/word) — the refusal's door: 加入 sends that word to the person's Dropline, 忽略 means not now (it
@@ -51,8 +62,10 @@ export async function mountSuggestionList(box) {
       const answer = (verb) => async () => {
         for (const x of chip.querySelectorAll('button')) x.disabled = true;
         try {
-          draw(await voiceApi('/api/voice/teach/word', { term: c.term, verb }));
-          showToast(verb === 'add' ? t('“{term}” was added to your Dropline dictionary', { term: c.term }) : t('“{term}” comes back only when you say it again', { term: c.term }));
+          const v = await voiceApi('/api/voice/teach/word', { term: c.term, verb });
+          draw(v);
+          const skip = verb === 'add' && v.result && Array.isArray(v.result.skips) ? v.result.skips[0] : null; // lane voice-teach-skips: a skip is said with its reason
+          showToast(skip ? t('“{term}” was skipped by Dropline: {why}', { term: c.term, why: reasonWord(skip.reason || 'unstated') }) : verb === 'add' ? t('“{term}” was added to your Dropline dictionary', { term: c.term }) : t('“{term}” comes back only when you say it again', { term: c.term }));
         } catch (e) { for (const x of chip.querySelectorAll('button')) x.disabled = false; showToast(e.message, { type: 'error' }); }
       };
       const add = el('button', 'settings-link-btn voice-cand-add', t('Add to dictionary'));
@@ -109,7 +122,7 @@ export async function renderTeachSection(box, rerender, { focus = null } = {}) {
       const pick = chosen();
       if (!pick.length) return;
       add.disabled = skip.disabled = true;
-      try { const r = await voiceApi(`/api/voice/teach/proposal/${encodeURIComponent(p.id)}`, { verb: 'add', terms: pick }); showToast(t('Added {n} · skipped {m}', { n: r.added.length, m: r.skipped.length })); rerender(); } catch (e) { showToast(e.message, { type: 'error' }); add.disabled = skip.disabled = false; }
+      try { const r = await voiceApi(`/api/voice/teach/proposal/${encodeURIComponent(p.id)}`, { verb: 'add', terms: pick }); showToast(outcomeLine(r.added.length, r.skipped.length, countReasons(r.skips))); rerender(); } catch (e) { showToast(e.message, { type: 'error' }); add.disabled = skip.disabled = false; }
     };
     skip.onclick = async () => {
       add.disabled = skip.disabled = true;
@@ -118,19 +131,38 @@ export async function renderTeachSection(box, rerender, { focus = null } = {}) {
     const acts = el('div', 'voice-proposal-actions');
     acts.append(add, skip);
     card.append(terms, acts);
-    if (p.cwd && !v.settings.autoProjects.includes(p.cwd)) {
+    // lane voice-teach-skips: «automatic» covers the folder AND its subfolders and asks nothing there — the toggle names the
+    // folder it will cover (its path on hover) and offers the parent; a card already under an automatic folder says so
+    const cover = p.cover || null;
+    const setAuto = (cwd) => voiceApi('/api/voice/teach/settings', { autoProject: { cwd, on: true } }).then(() => rerender()).catch((e) => showToast(e.message, { type: 'error' }));
+    if (p.cwd && cover && cover.folder) card.appendChild(el('div', 'plugin-detail voice-project-covered', t('This folder is automatic ({folder}) — its words go without asking', { folder: projectName(cover.folder) })));
+    else if (p.cwd) {
       const l = el('label', 'voice-switch voice-project-auto');
       const cb = el('input'); cb.type = 'checkbox';
-      cb.onchange = () => voiceApi('/api/voice/teach/settings', { autoProject: { cwd: p.cwd, on: cb.checked } }).then(() => rerender()).catch((e) => showToast(e.message, { type: 'error' }));
-      l.append(cb, document.createTextNode(' ' + t("Add this project's file names and identifiers automatically — don't ask again ({project})", { project: projectName(p.cwd) })));
+      cb.onchange = () => { if (cb.checked) setAuto(p.cwd); };
+      l.title = p.cwd;
+      l.append(cb, document.createTextNode(' ' + t('Add every suggested word in this folder and its subfolders automatically — never ask ({folder})', { folder: projectName(p.cwd) })));
       card.appendChild(l);
+      if (cover && cover.parent) {
+        const up = el('button', 'settings-link-btn voice-project-parent', t('or its parent folder ({folder})', { folder: projectName(cover.parent) }));
+        up.type = 'button'; up.title = cover.parent;
+        up.onclick = () => setAuto(cover.parent);
+        card.appendChild(up);
+      }
     }
     sec.appendChild(card);
     if (focused) requestAnimationFrame(() => { card.scrollIntoView({ block: 'nearest' }); if (!add.disabled) add.focus(); });
   }
+  // lane voice-teach-skips: the words an automatic folder left over this hour's limit — said with the rule that holds them
+  const waiting = Array.isArray(v.pending) ? v.pending : [];
+  if (waiting.length) {
+    const w = el('div', 'voice-pending');
+    w.append(el('div', 'plugin-detail voice-pending-why', t("This folder is automatic — these words passed this hour's limit and go by themselves later")), el('div', 'voice-pending-terms', waiting.map((x) => x.term).join(', ')));
+    sec.appendChild(w);
+  }
   if (v.settings.autoProjects.length) {
     const list = el('div', 'voice-projects');
-    list.appendChild(el('div', 'plugin-detail', t('Projects whose file names and identifiers go without asking (≤ 50 an hour, journaled):')));
+    list.appendChild(el('div', 'plugin-detail', t('Folders (and their subfolders) whose suggested words go without asking (≤ 50 an hour, journaled):')));
     for (const cwd of v.settings.autoProjects) {
       const r = el('div', 'voice-project-row');
       const x = el('button', 'mounts-btn voice-project-off', '✕');
@@ -147,8 +179,12 @@ export async function renderTeachSection(box, rerender, { focus = null } = {}) {
   if (!v.journal.length) j.appendChild(el('div', 'plugin-detail', t('Nothing sent yet.')));
   for (const e of v.journal.slice(0, 12)) {
     const kind = e.kind === 'context' ? t('memory') : e.auto ? t('words (this project)') : t('words');
-    const counts = e.kind === 'terms' ? ` · ${t('Added {n} · skipped {m}', { n: e.added, m: e.skipped })}` : '';
-    j.appendChild(el('div', 'voice-journal-row', `${fmtTime(e.at)} · ${kind} · ${e.title || ''} · ${t('{n} chars', { n: e.chars })}${counts}`));
+    const counts = e.kind === 'terms' ? ` · ${outcomeLine(e.added, e.skipped, e.reasons)}` : '';
+    const row = el('div', 'voice-journal-row', `${fmtTime(e.at)} · ${kind} · ${e.title || ''} · ${t('{n} chars', { n: e.chars })}${counts}`);
+    // lane voice-teach-skips: the words sent and each skip's reason, on hover (the row keeps them)
+    if (Array.isArray(e.skips) && e.skips.length) row.title = e.skips.map((x) => `${x.term} — ${reasonWord(x.reason || 'unstated')}`).join('\n');
+    else if (Array.isArray(e.words) && e.words.length) row.title = e.words.join(', ');
+    j.appendChild(row);
   }
   const link = el('a', 'voice-memory-link', t('See or clear your Dropline memory at dropline.fish.audio/app'));
   link.href = MEMORY_URL; link.target = '_blank'; link.rel = 'noopener noreferrer';
@@ -189,6 +225,8 @@ export function showContextPreview(preview) {
 export async function teachAfterDictation(st, facts) {
   if (!st || (!st.teach && !st.context) || !facts || !facts.conv) return null;
   const r = await voiceApi('/api/voice/teach/seen', facts).catch(() => null);
+  // lane voice-teach-skips: an automatic folder over this hour's limit — the words wait, the tick sends them; said once per batch
+  if (r && r.queued && r.queued.n > 0) showToast(t("This hour's limit is used — {n} words go automatically later", { n: r.queued.n }));
   if (r && r.preview) await showContextPreview(r.preview);
   return r;
 }

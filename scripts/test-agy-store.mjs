@@ -311,5 +311,75 @@ console.log('— ⑪ A SUB THAT ALREADY RAN (the cards\' addendum): the hub draw
   ok(!!cardFrame && subFrames.length === 13 && s4.subagentBuffers?.get(S)?.length === 13, 'acp-events at the old wrapper\'s prompt_end: THE CARD frame + 13 subagent-message frames (the sub-<id> viewer\'s live feed)', { card: !!cardFrame, subs: subFrames.length });
 }
 
+// ── ⑫ CARD DETAILS (lane agy-card-details, 2026-10-22 — the owner, two screenshots of an Antigravity chat: «很多卡片
+// 都缺少细节») ── the owner's store SHAPES, MADE UP here (placeholder ids — the owner's never ride a test): agy's tool
+// args are JSON-ENCODED STRINGS in the store ("Path":"\"/x\"", "StartLine":"1"); two subs spawned in ONE planner step
+// (the stream gave each its own step 24/25, the sub rows' spawnStepIndex BOTH say 27 — the drift); one sub KILLED mid-read.
+console.log('— ⑫ card details (the arg normalizer, link-by-id, a killed sub closed)');
+{
+  const { storeReader } = require(path.join(REPO, 'src/agy-store-fs.js'));
+  const { withCards } = require(path.join(REPO, 'src/agy-backfill.js'));
+  ok(AS.decodeScalar(JSON.stringify('/home/u/x.md')) === '/home/u/x.md' && AS.decodeScalar('400') === 400 && AS.decodeScalar('/home/u/x.md') === '/home/u/x.md' && AS.decodeScalar('7z x a.zip') === '7z x a.zip',
+    'decodeScalar: a JSON-encoded scalar → that scalar; a clean path / command (even digit-leading) stays itself');
+  const rd = AS.normalizeAgyToolArgs({ EndLine: '400', Path: JSON.stringify('/home/u/x.md'), StartLine: '1' });
+  ok(rd.file_path === '/home/u/x.md' && rd.offset === 1 && rd.limit === 400 && rd.Path === '/home/u/x.md',
+    'normalizeAgyToolArgs: Path→file_path, StartLine→offset, EndLine→limit; the raw keys (decoded) stay for the 技术细节 fold', rd);
+  const rc = AS.normalizeAgyToolArgs({ CommandLine: JSON.stringify('ls -la'), toolAction: JSON.stringify('List'), toolSummary: JSON.stringify('list the dir') });
+  ok(rc.command === 'ls -la' && rc.title === 'List' && rc.summary === 'list the dir',
+    '…CommandLine→command, toolAction→title, toolSummary→summary (agy’s own human words for the act)', rc);
+  const wline = JSON.stringify({ step_index: 3, type: 'PLANNER_RESPONSE', status: 'DONE', tool_calls: [{ name: 'write_file', args: { Path: JSON.stringify('/home/u/report.md'), Content: JSON.stringify('# hi\n') } }] });
+  const arec = AS.artifactRecordsOf(wline);
+  ok(arec.length === 1 && arec[0].update.content[0].path === '/home/u/report.md' && arec[0].update.content[0].newText === '# hi\n',
+    'artifactRecordsOf: the store’s JSON-encoded Path + Content are decoded — never a \"-wrapped path', arec[0] && arec[0].update.content[0].path);
+
+  const PX = 'aa000000-0000-4000-8000-0000000000f0', SA = 'aa000000-0000-4000-8000-0000000000f1', SB = 'aa000000-0000-4000-8000-0000000000f2';
+  const home = path.join(ROOT, 'cards'), brain = path.join(home, '.gemini/antigravity-cli/brain');
+  const W = (rel, body) => { const p = path.join(brain, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, body); };
+  const created = (id) => `Created At: x\nCompleted At: y\nCreated the following subagent:\n{\n  "conversationId": "${id}",\n  "logAbsoluteUri": "file:///x"\n}\nThe subagent will send you a message when it has completed its task.`;
+  W(`${PX}/${SG}/logs/transcript.jsonl`, [
+    { step_index: 23, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', content: 'Spawning two analysts.', tool_calls: [{ name: 'invoke_subagent', args: { Role: JSON.stringify('A-L'), TypeName: JSON.stringify('research') } }, { name: 'invoke_subagent', args: { Role: JSON.stringify('N-Z'), TypeName: JSON.stringify('research') } }] },
+    { step_index: 24, source: 'MODEL', type: 'GENERIC', status: 'DONE', content: created(SA) },
+    { step_index: 25, source: 'MODEL', type: 'GENERIC', status: 'DONE', content: created(SB) },
+  ].map((o) => JSON.stringify(o)).join('\n') + '\n');
+  W(`${PX}/${SG}/subagents/${SA}.json`, JSON.stringify({ conversationId: SA, subagentDescriptor: { typeName: 'research', role: 'A-L' }, state: 'SUBAGENT_STATE_KILLED', spawnStepIndex: 27, workspaceUris: ['file:///home/u/ws'] }));
+  W(`${PX}/${SG}/subagents/${SB}.json`, JSON.stringify({ conversationId: SB, subagentDescriptor: { typeName: 'research', role: 'N-Z' }, state: 'SUBAGENT_STATE_KILLED', spawnStepIndex: 27, workspaceUris: ['file:///home/u/ws'] }));
+  const taskMsg = (sub, step, tail) => JSON.stringify({ id: `d0000000-0000-4000-8000-0000000000${tail}`, recipient: sub, sender: PX, timestamp: '2026-10-21T23:10:41Z', renderDetails: { messageTitle: 'Message from Parent Agent' }, content: 'Analyze.', sourceMetadata: { tool: { conversationId: PX, stepIndex: step, toolCall: { name: 'invoke_subagent', id: 'call_x' } } } });
+  W(`${SA}/${SG}/messages/d0000000-0000-4000-8000-0000000000d4.json`, taskMsg(SA, 24, 'd4'));
+  W(`${SB}/${SG}/messages/d0000000-0000-4000-8000-0000000000d5.json`, taskMsg(SB, 25, 'd5'));
+  const viewArgs = (p, sum) => ({ AbsolutePath: JSON.stringify(p), StartLine: JSON.stringify(1), EndLine: JSON.stringify(400), toolSummary: JSON.stringify(sum) });
+  W(`${SA}/${SG}/logs/transcript.jsonl`, [
+    { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', content: 'Analyze A-L.' },
+    { step_index: 10, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', content: '', tool_calls: [{ name: 'view_file', args: viewArgs('/home/u/a.txt', 'Reading a.txt') }, { name: 'view_file', args: viewArgs('/home/u/b.txt', 'Reading b.txt') }] },
+  ].map((o) => JSON.stringify(o)).join('\n') + '\n');
+  W(`${SB}/${SG}/logs/transcript.jsonl`, [
+    { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', content: 'Analyze N-Z.' },
+    { step_index: 10, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', content: '', tool_calls: [{ name: 'view_file', args: viewArgs('/home/u/z.txt', 'Reading z.txt') }] },
+  ].map((o) => JSON.stringify(o)).join('\n') + '\n');
+  const reader = storeReader(home);
+  ok(AS.subIdForStep(reader, PX, 24) === SA && AS.subIdForStep(reader, PX, 25) === SB && AS.subIdForStep(reader, PX, 99) === null,
+    'subIdForStep: «Created the following subagent: {id}» at the step names the sub — unique per call, drift-proof (never spawnStepIndex 27)');
+  const snapA = AS.snapshotOf(reader, { parentId: PX, toolCallId: `${PX}:24`, step: 24, now: Date.parse('2026-10-21T23:20:00Z') });
+  const openA = new Set(); for (const s of snapA.subs) { const u = s.rec.update; if (u?.sessionUpdate === 'tool_call') openA.add(u.toolCallId); if (u?.sessionUpdate === 'tool_call_update' && u.status !== 'in_progress') openA.delete(u.toolCallId); }
+  const firstView = snapA.subs.map((s) => s.rec.update).find((u) => u?.sessionUpdate === 'tool_call' && u.title === 'view_file');
+  const closers = snapA.subs.map((s) => s.rec.update).filter((u) => u?.sessionUpdate === 'tool_call_update' && u.status === 'failed' && u.content?.[0]?.content?.text === AS.SUB_TERMINATED);
+  ok(snapA && snapA.subId === SA && snapA.card.status === 'stopped' && firstView?.rawInput?.file_path === '/home/u/a.txt' && firstView?.rawInput?.AbsolutePath === '/home/u/a.txt',
+    'snapshotOf a KILLED sub: linked by id, stopped, the read card’s path decoded (file_path + the raw AbsolutePath kept)', { subId: snapA && snapA.subId, status: snapA && snapA.card.status, fp: firstView?.rawInput?.file_path });
+  ok(openA.size === 0 && closers.length === 2 && /Reading [ab]\.txt/.test(snapA.card.lastText),
+    'a killed sub leaves NO tool card open: its 2 unfinished view_file calls close as «terminated» (SUB_TERMINATED), lastText = its last read', { open: openA.size, closed: closers.length, lastText: snapA.card.lastText });
+  const journal = [
+    { type: 'acp', kind: 'update', sessionId: PX, ts: '2026-10-21T23:10:39.000Z', update: { sessionUpdate: 'tool_call', toolCallId: `${PX}:24`, title: 'invoke_subagent', kind: 'other', status: 'in_progress', rawInput: { Role: 'A-L' } } },
+    { type: 'acp', kind: 'update', sessionId: PX, ts: '2026-10-21T23:10:40.000Z', update: { sessionUpdate: 'tool_call', toolCallId: `${PX}:25`, title: 'invoke_subagent', kind: 'other', status: 'in_progress', rawInput: { Role: 'N-Z' } } },
+  ];
+  const spawns = AS.unlinkedSpawns(journal);
+  ok(spawns.length === 2 && spawns[0].step === 24 && spawns[1].step === 25,
+    'unlinkedSpawns: two invoke_subagent rows of ONE planner step get DISTINCT stream steps (24 / 25) — never folded into one', spawns.map((s) => s.step));
+  const preHome = process.env.HOME; process.env.HOME = home;
+  let cards;
+  try { const out = withCards({ _accountId: null, host: 'local' }, journal, { dataDir: path.join(home, 'data') }); cards = out.filter((r) => r.kind === 'subagent'); }
+  finally { process.env.HOME = preHome; }
+  ok(cards.length === 2 && cards.map((c) => c.subId).sort().join() === [SA, SB].sort().join() && cards.every((c) => c.status === 'stopped'),
+    'withCards: the history gets BOTH subs’ cards (A-L and N-Z), each stopped — never one card for two subs', cards.map((c) => c.subId));
+}
+
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);
 process.exit(fail ? 1 : 0);

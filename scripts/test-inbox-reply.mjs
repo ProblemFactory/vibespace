@@ -42,6 +42,10 @@
 //      snapshot's resolved tail keeping a whole batch, and POST
 //      /api/user-todos/resolve-many (≤ 200, agent tokens 403, bad shapes by
 //      code, ONE broadcast) registered BEFORE the /api/user-todos/:id route
+//   §9 «Mark all read» on the notices (lane inbox-fyi-mark-all): the store's readNotices — open notices done in ONE
+//      write + ONE broadcast (a census: N notices ⇒ 1), an ask refused by id, a read one left as it was (idempotent:
+//      a repeat broadcasts nothing), the Undo (…/unread) bringing exactly those back AS THEY WERE (expiry + judgement
+//      kept; one the expiry took meanwhile stays resolved); the two routes (agent tokens 403, bad ids, ≤ 1000)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -775,6 +779,85 @@ console.log('§8d wiring pins + RED CONTROL');
   const r = await H.callAsync(it.id, { text: 'answer' });
   ok(r.status === 409 && r.json.code === 'no_live_session' && H.reopened.length === 0, 'RED CONTROL: without the reopen line an ended conversation\'s reply is the pre-lane 409 no_live_session — the §8b legs can go red', r.json);
   H.userTodos.stop(); H.userTodos.flush();
+}
+
+// ── §9 «MARK ALL READ» ON THE NOTICES (lane inbox-fyi-mark-all, the owner 2026-10-22: 「既然是仅供知晓还让我一个一个确认很弱智」) ──
+// THE INVARIANT: what asks nothing is never confirmed one by one, and a bulk act is ONE write + ONE broadcast — the census
+// below files N notices and counts the broadcasts the press causes (1), the Undo (1), a repeat (0)
+console.log('§9 readNotices + POST /api/user-todos/notices/read-all · unread («Mark all read» and its Undo)');
+{
+  const { m, calls } = mkStore();
+  ok(typeof m.readNotices === 'function', 'the store has readNotices');
+  const N = 12;
+  const notes = Array.from({ length: N }, (_, k) => m.add('accounts', { origin: 'spend', kind: 'notice', text: 'notice ' + k }));
+  const timed = m.add('browser', { origin: 'browser', kind: 'notice', text: 'a notice with a window', expiresAt: Date.now() + 3600e3 });
+  m.get(timed.id).judged = { v: 1, at: 1 };
+  const ask = m.add('claude:s', { origin: 'agent', text: 'an ask, never a notice' });
+  const seen = m.add('accounts', { origin: 'spend', kind: 'notice', text: 'read by hand before' });
+  m.setStatus(seen.id, 'done', 'user');
+  const seenAt = m.get(seen.id).resolvedAt;
+  const heard = []; m.onStatus((it, o) => heard.push([it.id, o.status, o.by, !!o.batch]));
+  const ids = [...notes.map((x) => x.id), timed.id, ask.id, seen.id, 'ut-nope00000a', notes[0].id];
+  const n0 = calls.length;
+  const r = m.readNotices ? m.readNotices(ids, true, 'user') : null;
+  ok(r && r.changed.length === N + 1 && [...notes, timed].every((x) => r.changed.includes(x.id)), `${N + 1} open notices (a duplicate id once) ⇒ every one changed`, r);
+  ok(r && r.already.length === 1 && r.already[0] === seen.id && m.get(seen.id).resolvedAt === seenAt, '…a notice already read is left EXACTLY as it was (idempotent: its stamp untouched)', r && r.already);
+  ok(r && r.refused.length === 1 && r.refused[0] === ask.id && m.get(ask.id).status === 'open', '…an ASK among the ids is refused by id and stays open (only what asks nothing is read in bulk)', r && r.refused);
+  ok(r && r.unknown.length === 1 && r.unknown[0] === 'ut-nope00000a', '…an unknown id is named', r && r.unknown);
+  ok(calls.length === n0 + 1, `THE CENSUS: ${N + 1} notices read ⇒ ONE broadcast (never one per item)`, calls.length - n0);
+  ok([...notes, timed].every((x) => { const g = m.get(x.id); return g.status === 'done' && g.resolvedBy === 'user' && g.resolvedAt === m.get(notes[0].id).resolvedAt; }), 'each is done, by the user, under ONE stamp');
+  ok(heard.length === N + 1 && heard.every(([, st, by, batch]) => st === 'done' && by === 'user' && batch), 'the status listeners hear the press as a BATCH (a plugin whose ✓ applies something never acts on it)', heard.slice(0, 3));
+  const snap = calls[calls.length - 1];
+  ok(snap && !snap.open.some((i) => i.kind === 'notice') && snap.open.some((i) => i.id === ask.id), 'the ONE broadcast carries no open notice (every count reads 0 from it) and the ask still open');
+  const n1 = calls.length;
+  const again = m.readNotices([...notes.map((x) => x.id), timed.id], true, 'user');
+  ok(again.changed.length === 0 && again.already.length === N + 1 && calls.length === n1, 'pressed again ⇒ nothing changed, NO broadcast (idempotent)', { again, b: calls.length - n1 });
+  // THE UNDO: exactly the ids the press read come back open AS THEY WERE (the expiry and the judgement kept — a hand
+  // reopen clears both); one another door resolved in the meantime stays resolved
+  m.get(notes[5].id).resolvedBy = 'expired'; // the expiry sweep took it during the 5 s
+  const n2 = calls.length; heard.length = 0;
+  const u = m.readNotices(r.changed, false, 'user');
+  ok(u.changed.length === N && !u.changed.includes(notes[5].id) && u.already.includes(notes[5].id), 'Undo ⇒ the read notices back open; the one the expiry took meanwhile stays resolved', u);
+  ok(calls.length === n2 + 1, 'THE CENSUS: the Undo is ONE broadcast too', calls.length - n2);
+  const t2 = m.get(timed.id);
+  ok(t2.status === 'open' && t2.resolvedAt === null && t2.resolvedBy === null && typeof t2.expiresAt === 'number' && t2.judged && t2.judged.v === 1, '…back AS IT WAS: open, no resolution stamp, its expiry and judgement kept', t2);
+  ok(heard.length === N && heard.every(([, st, , batch]) => st === 'open' && batch), '…and the listeners hear the reopen (a batch)', heard.length);
+  const n3 = calls.length;
+  const u2 = m.readNotices([notes[0].id, ask.id, seen.id], false, 'user');
+  ok(u2.changed.length === 1 && u2.changed[0] === seen.id && u2.refused[0] === ask.id && u2.already[0] === notes[0].id && calls.length === n3 + 1, 'unread is notice-only too (an ask refused, an open notice already); a notice read by the user is reopened', u2);
+  m.stop(); m.flush();
+}
+{
+  const R2 = require(path.join(REPO, 'src/routes/user-todos-reply.js'));
+  const routes = {};
+  const app = { post: (p, h) => { routes['POST ' + p] = h; }, get: (p, h) => { routes['GET ' + p] = h; } };
+  const { m, calls } = mkStore();
+  R2.registerResolveManyRoute(app, { userTodos: m });
+  const call = (door, body, headers = {}) => { const h = routes['POST /api/user-todos/notices/' + door]; let status = 200, json = null; if (h) h({ params: {}, body, headers }, { status(c) { status = c; return this; }, json(j) { json = j; return this; } }); return { status, json }; };
+  ok(typeof routes['POST /api/user-todos/notices/read-all'] === 'function' && typeof routes['POST /api/user-todos/notices/unread'] === 'function', 'it registers POST /api/user-todos/notices/read-all and …/unread (beside resolve-many)');
+  ok(R2.NOTICES_READ_MAX === 1000, 'the cap is the ledger\'s own (1000): every notice the store can hold goes in ONE request');
+  const notes = Array.from({ length: 7 }, (_, k) => m.add('accounts', { origin: 'spend', kind: 'notice', text: 'route notice ' + k }).id);
+  const ask = m.add('claude:s', { origin: 'agent', text: 'route ask' }).id;
+  const n0 = calls.length;
+  const rv = call('read-all', { ids: notes }, { authorization: 'Bearer vsst_abc' });
+  const rj = call('unread', { ids: notes }, { authorization: 'Bearer jbt_abc' });
+  ok(rv.status === 403 && rv.json.code === 'agent_forbidden' && rj.status === 403 && rj.json.code === 'agent_forbidden' && calls.length === n0 && notes.every((id) => m.get(id).status === 'open'), 'vsst_ / jbt_ ⇒ 403 agent_forbidden, nothing changed, nothing broadcast', [rv, rj]);
+  const bad = [{ ids: [] }, { ids: 'x' }, { ids: [7] }, {}, { ids: [''] }];
+  ok(bad.every((b) => { const r = call('read-all', b); return r.status === 400 && r.json.code === 'bad_ids'; }), 'empty / non-array / non-string ids ⇒ 400 bad_ids');
+  const r1001 = call('read-all', { ids: Array.from({ length: 1001 }, (_, k) => 'ut-' + String(k).padStart(10, '0')) });
+  ok(r1001.status === 400 && r1001.json.code === 'too_many' && calls.length === n0, '1001 ids ⇒ 400 too_many, nothing written', r1001);
+  const r = call('read-all', { ids: [...notes, ask] });
+  ok(r.status === 200 && r.json.ok === true && JSON.stringify(r.json.changed) === JSON.stringify(notes) && r.json.already === 0 && r.json.refused[0] === ask && r.json.unknown.length === 0, '7 notices + an ask ⇒ {ok, changed:[the 7], already:0, refused:[the ask], unknown:[]}', r.json);
+  ok(calls.length === n0 + 1, 'THE CENSUS over the route: 7 notices ⇒ ONE broadcast', calls.length - n0);
+  const r2 = call('read-all', { ids: notes });
+  ok(r2.status === 200 && r2.json.changed.length === 0 && r2.json.already === 7 && calls.length === n0 + 1, 'the same press again ⇒ 200, nothing changed, no broadcast (idempotent)', r2.json);
+  const u = call('unread', { ids: r.json.changed });
+  ok(u.status === 200 && u.json.changed.length === 7 && notes.every((id) => m.get(id).status === 'open') && calls.length === n0 + 2, 'the Undo with the answer\'s ids ⇒ the 7 back open in ONE broadcast', u.json);
+  m.stop(); m.flush();
+  const rsrc = read('src/routes/user-todos-reply.js');
+  const body = (rsrc.match(/function registerResolveManyRoute[\s\S]*?\n\}\n/) || [''])[0];
+  ok(/const noticesDoor = \(read\) => \(req, res\) => \{\n {4}const fail[^\n]*\n {4}try \{\n {6}if \(isAgentBearer\(req\)\) return fail\(403, 'agent_forbidden'/.test(body) && /userTodos\.readNotices\(ids, read, 'user'\)/.test(body)
+    && /app\.post\('\/api\/user-todos\/notices\/read-all', noticesDoor\(true\)\);/.test(body) && /app\.post\('\/api\/user-todos\/notices\/unread', noticesDoor\(false\)\);/.test(body), 'wiring: both doors refuse an agent token FIRST and write through the store\'s ONE readNotices');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

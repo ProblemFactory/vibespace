@@ -3,9 +3,10 @@ import { applyUiPrefs, getStateSync } from './lib/utils.js';
 import { applyI18nToDom, t } from './lib/i18n.js';
 import { showToast } from './lib/utils.js';
 import { installIncidentRecorder } from './lib/incident-recorder.js';
-import { installTelemetry, track, metric, reportBootTime, installLongTaskWatch, recentLongTasks, gpuRenderer, installCompositorStallWatch, installScreenWatch, installInputStamp, recentCompositorStalls } from './lib/telemetry-client.js';
+import { installTelemetry, track, metric, reportBootTime, installLongTaskWatch, installFetchTimingWatch, recentLongTasks, gpuRenderer, installCompositorStallWatch, installScreenWatch, installInputStamp, recentCompositorStalls } from './lib/telemetry-client.js';
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
 installLongTaskWatch(); // main-thread stall ring — feeds the suspend-vs-block verdict below
+installFetchTimingWatch(); // the page's last 20 requests (route, ms) — an incident snapshot carries them (lane vault-slow-load)
 installCompositorStallWatch(); // rAF-vs-timer discriminator — measures GPU/compositor freezes from inside the page
 installScreenWatch(); // DPR changes + screen moves (the owner's two freeze triggers), into the ring the freeze capture carries
 installInputStamp(); // pointer/key timestamps — the paint-gap verdict's "a person was there" signal (2.369.339)

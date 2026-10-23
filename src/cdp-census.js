@@ -5,7 +5,7 @@
  *
  * Every method the installed Chrome's own protocol lists (scripts/fixtures/cdp-protocol-<version>/ — the pinned
  * GET /json/protocol; 58 domains, 664 methods on 153.0.8010.47, 661 on 154.0.8037.57 — 4 added, 7 removed —, 664 on
- * 155.0.8059.39 — 3 added; see CENSUS_CHROMES below) has ONE row here, classed by what it can do to the
+ * 155.0.8059.39 — 3 added —, 674 on 156.0.8078.47 — 11 added, 1 removed; see CENSUS_CHROMES below) has ONE row here, classed by what it can do to the
  * tab the user is driving through the live view. Three verify rounds (r1 CRITICAL, r2 MAJOR, r3 MEDIUM ×2) each found
  * the takeover fence ONE METHOD SHORT because the fence was a hand-written LIST (Input.* + a navigation family, then
  * + setIgnoreInputEvents, then + DOM.focus): a list names what somebody thought of; a census names what the vendor
@@ -23,6 +23,8 @@
  *                  the viewport / scale / screen / emulated media / vision / dark mode / scrollbars, a frozen page
  *                  (Debugger pause + breakpoints, virtual time, script execution off, lifecycle state, throttling),
  *                  overlays painted on the page (since Chrome 155 a forced spelling / grammar squiggle on its text),
+ *                  a find-in-page (since Chrome 156: it scrolls the page to its match, highlights it and takes the
+ *                  focus out of the field the user is typing in),
  *                  casting — refused (browser_interrupted)
  *   page-mutation  changes the page's CONTENT, its SCRIPT environment, or the STATE it reads: script evaluation, DOM /
  *                  CSS / animation edits, cookies / storage / cache / permissions / service workers / WebAuthn /
@@ -64,7 +66,9 @@
  * a method with no row is refused by name while the user drives on EVERY version — an older Chrome than the census
  * (the fleet's Debian chromium 150: measured 149–152 list 6–12 methods no row names, none a whole-browser act) and a
  * newer one alike. Chrome 155.0.8059.39 is the third (lane mediation-chrome-155, 2026-10-14: the Actions runner's
- * ubuntu-latest image moved to it and the mirror's heavy leg went red on its 3 new DOM methods — +3, −0).
+ * ubuntu-latest image moved to it and the mirror's heavy leg went red on its 3 new DOM methods — +3, −0). Chrome
+ * 156.0.8078.47 is the fourth (lane chrome-156-drift, 2026-10-22: the runner image moved to it between the branch run
+ * and the master mirror of the SAME sha, and the mirror's heavy leg went red on its 11 new methods — +11, −1).
  *
  * The gates: test-cdp-census (fast — every censused fixture ⇔ the table, the version marks ⇔ the fixtures' diff, the
  * rows' own words; patched-copy controls) + test-browser-mediation ⑥ (every row's verdicts; the unknown rule; controls)
@@ -75,13 +79,15 @@
 const SINCE = '2026-09-26';
 /** The Chromes whose protocols this table was censused against, OLDEST FIRST — each has its names-only fixture
  *  scripts/fixtures/cdp-protocol-<version>/protocol.json (scripts/cdp-protocol-fetch.mjs writes it). */
-const CENSUS_CHROMES = Object.freeze(['153.0.8010.47', '154.0.8037.57', '155.0.8059.39']);
+const CENSUS_CHROMES = Object.freeze(['153.0.8010.47', '154.0.8037.57', '155.0.8059.39', '156.0.8078.47']);
 /** The NEWEST censused Chrome (the refusal words name every censused one). */
 const CENSUS_CHROME = CENSUS_CHROMES[CENSUS_CHROMES.length - 1];
 /** The Chrome of the 2026-09-28 census step (the rows it added carry `chrome`, the rows it removed `until`). */
 const C154 = '154.0.8037.57';
 /** The Chrome of the 2026-10-14 census step (the 3 rows it added carry `chrome`; it removed none). */
 const C155 = '155.0.8059.39';
+/** The Chrome of the 2026-10-22 census step (the 11 rows it added carry `chrome`, the one it removed `until`). */
+const C156 = '156.0.8078.47';
 const CLASSES = Object.freeze(['input', 'view', 'page-mutation', 'read', 'session', 'harmless', 'refused']);
 /** What the paused fence does with a class: 'refuse' (input / view / page-mutation — the owner's ruling of 2026-09-27;
  *  the r4 'switch' rule and its setting are retired), 'allow' (read / session / harmless); 'refused' rows never reach the fence. */
@@ -229,6 +235,16 @@ const ROWS = Object.freeze({
   FileSystem: {
     getDirectory: 'read',
   },
+  FindInPage: {
+    // Chrome 156 (lane chrome-156-drift, 2026-10-22) — a NEW domain. MEASURED on 156.0.8078.47 (Chrome for Testing, a
+    // scratch headless Chrome, a data: page with a focused text field and two matches far below the fold, logging scroll /
+    // selection / focus events and every DOM mutation, the picture read as a viewport PNG): no read — every verb but stop
+    // MOVES the page the user is looking at, and stop ends the TAB's find whoever started it.
+    findFirst: { cls: 'view', since: '2026-10-22', chrome: C156, why: "starts a find-in-page — measured on Chrome 156.0.8078.47: the page SCROLLS to the first match (0 → 2414 px), the match is highlighted (the picture changes) and the field the user had focused is BLURRED (blur + focusout; the next key reaches no field) — it moves what the user is LOOKING AT, so it is refused while they drive" },
+    findNext: { cls: 'view', since: '2026-10-22', chrome: C156, why: "moves the find to the next match — measured on Chrome 156.0.8078.47: the page scrolls (2414 → 5037 px) and the highlight moves; only the session that ran findFirst has a find to move (another session is answered 'No active find session')" },
+    findPrev: { cls: 'view', since: '2026-10-22', chrome: C156, why: "moves the find to the previous match — measured on Chrome 156.0.8078.47: the page scrolls back (5037 → 2414 px) and the highlight moves" },
+    stop: { cls: 'view', since: '2026-10-22', chrome: C156, why: "ends the TAB's find and clears its highlighting — measured on Chrome 156.0.8078.47: ANOTHER connection that never started a find ended this session's find and the picture changed, so it is not a release of its own (DOM.clearTextMarkers is) — it changes what the user is looking at" },
+  },
   HeadlessExperimental: {
     beginFrame: 'view', disable: 'harmless', enable: 'harmless',
   },
@@ -295,6 +311,9 @@ const ROWS = Object.freeze({
     captureScreenshot: 'read', captureSnapshot: 'read', clearDeviceMetricsOverride: 'view', clearDeviceOrientationOverride: 'page-mutation',
     clearGeolocationOverride: 'page-mutation', createIsolatedWorld: 'harmless', deleteCookie: 'page-mutation', disable: 'harmless', enable: 'harmless',
     getAppManifest: 'read', getInstallabilityErrors: 'read', getManifestIcons: 'read', getAppId: 'read', getAdScriptAncestry: 'read',
+    // Chrome 156 (lane chrome-156-drift, 2026-10-22): the Isolated Web Apps' sub-app lists, read like getAppManifest
+    getSubApps: { cls: 'read', since: '2026-10-22', chrome: C156, why: "lists the installed child sub-apps of the inspected app (name, scope, manifest id, start URL) — measured on Chrome 156.0.8078.47: a plain page answers { subApps: [] } and nothing on the page moves; read like Page.getAppManifest" },
+    getSiblingSubApps: { cls: 'read', since: '2026-10-22', chrome: C156, why: "lists the sub-apps sharing the inspected sub-app's parent — measured on Chrome 156.0.8078.47: a plain page answers { subApps: [] } and nothing on the page moves; read like Page.getAppManifest" },
     getFrameTree: 'read', getLayoutMetrics: 'read', getNavigationHistory: 'read', resetNavigationHistory: 'page-mutation', getResourceContent: 'read',
     getResourceTree: 'read', handleJavaScriptDialog: ['view', '2026-09-21'], navigate: ['view', '2026-09-21'],
     navigateToHistoryEntry: ['view', '2026-09-21'], printToPDF: 'read', reload: ['view', '2026-09-21'], removeScriptToEvaluateOnLoad: 'page-mutation',
@@ -339,7 +358,18 @@ const ROWS = Object.freeze({
     trackIndexedDBForStorageKey: 'harmless', untrackCacheStorageForOrigin: 'harmless', untrackCacheStorageForStorageKey: 'harmless',
     untrackIndexedDBForOrigin: 'harmless', untrackIndexedDBForStorageKey: 'harmless', getTrustTokens: 'read', clearTrustTokens: 'page-mutation',
     setStorageBucketTracking: 'harmless', deleteStorageBucket: 'page-mutation',
-    runBounceTrackingMitigations: 'page-mutation', getRelatedWebsiteSets: 'read',
+    runBounceTrackingMitigations: 'page-mutation',
+    // Related Website Sets left the protocol in Chrome 156: the row stays for a 153–155 that still ships it
+    getRelatedWebsiteSets: { cls: 'read', until: C156 },
+    // Chrome 156 (lane chrome-156-drift, 2026-10-22): the Private Verification Tokens — the profile's credential-class
+    // token store — classed like the Trust Token pair above (getTrustTokens read, clearTrustTokens page-mutation). A stock
+    // 156.0.8078.47 answers every verb -32000 'Private Verification Tokens service is not available' (the feature is off),
+    // so the classes follow what each verb names, the stricter way where it changes state a page reads.
+    getPrivateVerificationTokens: { cls: 'read', since: '2026-10-22', chrome: C156, why: "returns the stored Private Verification Tokens of the browsing context (issuer, key id, times) — a read like Storage.getTrustTokens; a stock Chrome 156.0.8078.47 answers 'service is not available'" },
+    getPrivateVerificationTokensIssuerConfigs: { cls: 'read', since: '2026-10-22', chrome: C156, why: "returns the configured token issuers and their redeemer origins — a read; a stock Chrome 156.0.8078.47 answers 'service is not available'" },
+    clearPrivateVerificationTokens: { cls: 'page-mutation', since: '2026-10-22', chrome: C156, why: "removes every Private Verification Token an issuer gave — the profile's credential state, changed like Storage.clearTrustTokens; refused while the user drives (a stock Chrome 156.0.8078.47 answers 'service is not available')" },
+    deletePrivateVerificationToken: { cls: 'page-mutation', since: '2026-10-22', chrome: C156, why: "removes one stored Private Verification Token by its id — the profile's credential state, changed; refused while the user drives like Storage.clearTrustTokens (a stock Chrome 156.0.8078.47 answers 'service is not available')" },
+    setPrivateVerificationTokensTracking: { cls: 'harmless', since: '2026-10-22', chrome: C156, why: "turns the Storage.privateVerificationTokensUpdated event on or off for this session (Chrome 156.0.8078.47 added the event with it) — an event toggle like setStorageBucketTracking" },
     // Shared Storage left the protocol in Chrome 154 (with its two events and eight types); the rows stay for a 153
     // that still ships them, marked `until` the first censused Chrome without them
     getSharedStorageMetadata: { cls: 'read', until: C154 }, getSharedStorageEntries: { cls: 'read', until: C154 },

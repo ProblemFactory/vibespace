@@ -160,6 +160,7 @@ export function installIncidentRecorder(app) {
     try { out.tickLags = window.__vsTickLags ? window.__vsTickLags().slice(-40) : null; } catch { }
     try { out.screenEvents = window.__vsScreenEvents ? window.__vsScreenEvents().slice(-40) : null; } catch { }
     try { out.inputs = window.__vsInputs ? window.__vsInputs().slice(-40) : null; } catch { }   // pointer/key timestamps (no elements) — the paint-gap verdict's present-person evidence
+    try { out.fetchTimings = window.__vsFetchTimings ? window.__vsFetchTimings().slice(-20) : null; } catch { }   // lane vault-slow-load: this page's last requests (route, ms) — «加载有点长» answers itself
     try {
       out.windows = [...app.wm.windows.values()].map((w) => ({
         id: w.id, type: w.type, title: w.titleSpan?.textContent?.slice(0, 60),

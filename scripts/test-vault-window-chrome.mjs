@@ -30,6 +30,12 @@
 //   ⑥a LOCKED: one sentence + 解锁… in the list, the rail counts «—», NO 添加…. ⑦ THE PHONE COLUMN (375×812): the rail a
 //   chip strip, the filters behind 筛选… (a modal — the list behind follows), a row stacks. ⑧ the zh words of the rail and
 //   the 「显示」 help (the owner's own sentence).
+//   ⑩ SAY THE WAIT (lane vault-slow-load — inc-mvk5jyv3 «保险库操作好像加载时间有点长»; zh): each answer HELD at the page's own
+//   request (CDP Fetch) — 解锁's button says 「正在解锁…」 (disabled) and the dialog 「正在核对第二密码…」 with a spinner until the
+//   answer; the window's open says 「正在读取保险库…」 in the list, the keys' grants are asked WHILE the list is still out (one
+//   round trip, not two) and the chat accounts are never asked; the page's request ring (the incident snapshot's) has the
+//   held list's real wait; 验证是你 says 「正在验证…」, 显示全部 counts 「正在显示 1 / N…」, 审计… says 「正在读取审计记录…」.
+//   RED CONTROL: the base tree under this suite (each of these blank).
 // Run: node scripts/test-vault-window-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -102,6 +108,10 @@ const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 
 await new Promise((r) => ws.on('open', r));
 let seq = 0; const pend = new Map();
 ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+// lane vault-slow-load: an answer HELD at the page's own request (CDP Fetch, request stage) — the wait the page shows is the subject
+const paused = [];
+let autoGo = false;
+ws.on('message', (d) => { const m = JSON.parse(d); if (m.method !== 'Fetch.requestPaused') return; if (autoGo) cdp('Fetch.continueRequest', { requestId: m.params.requestId }).catch(() => {}); else paused.push(m.params); });
 const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => m.error ? rej(new Error(m.error.message)) : res(m.result)); ws.send(JSON.stringify({ id, method, params })); });
 const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
 const until = async (expr, { timeout = 15000, step = 100 } = {}) => { const t0 = Date.now(); for (;;) { let v = null; try { v = await evalJs(expr); } catch { } if (v) return v; if (Date.now() - t0 > timeout) return v; await sleep(step); } };
@@ -423,6 +433,80 @@ await splashGone();
 await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); app.replayOpenSpec({ action: 'openVault' }); true`);
 check('signed in again: the hub says locked; the window lists nothing and says so (「解锁…」 in its header)', relogin9 === 200 && (await api('GET', '/api/vault/state')).json?.state === 'locked' && (await until(`document.querySelector('.vw-head')?.dataset.state === 'locked'`, { timeout: 15000 })) === true && (await evalJs(`document.querySelectorAll('.vw-row').length`)) === 0 && (await evalJs(`document.querySelector('.vw-head .vault-do-unlock')?.textContent`)) === '解锁…');
 await headShot('vw-head-4-locked-zh.png');
+
+console.log('⑩ SAY THE WAIT (lane vault-slow-load — inc-mvk5jyv3; zh): from the press to the answer, never a blank second');
+{
+  // (globalThis.URL below: the suite's own `URL` is the hub's address)
+  const hold = (...pats) => { autoGo = false; return cdp('Fetch.enable', { patterns: pats.map((u) => ({ urlPattern: u, requestStage: 'Request' })) }); };
+  const heldOf = async (pathname, ms = 15000) => { const t0 = Date.now(); for (;;) { const i = paused.findIndex((p) => { const u = new globalThis.URL(p.request.url).pathname; return pathname instanceof RegExp ? pathname.test(u) : u === pathname; }); if (i >= 0) return paused.splice(i, 1)[0]; if (Date.now() - t0 > ms) return null; await sleep(50); } };
+  const release = (p) => (p ? cdp('Fetch.continueRequest', { requestId: p.requestId }) : null);
+  const unhold = async () => { autoGo = true; for (const p of paused.splice(0)) await release(p); await cdp('Fetch.disable'); autoGo = false; };
+  const waitOf = (scope) => evalJs(`(() => { const w = document.querySelector(${JSON.stringify(scope + ' .vault-wait')}); return w ? { text: w.textContent, spin: !!w.querySelector('.vault-spin'), role: w.getAttribute('role'), shown: w.getBoundingClientRect().height > 0 } : null; })()`);
+  // 解锁 (the vault is locked since ⑨): its button and the dialog say the step while the answer is out
+  await hold('*/api/vault/unlock');
+  await click('.vw-head .vault-do-unlock');
+  await until(visible('#vault-unlock-dialog'), { timeout: 5000 });
+  await typeInto('#vault-unlock-pw', SECOND); await click('.vault-unlock-go');
+  const heldUnlock = await heldOf('/api/vault/unlock');
+  await sleep(400);
+  const wU = await waitOf('#vault-unlock-dialog');
+  const goU = await evalJs(`(() => { const b = document.querySelector('.vault-unlock-go'); return b ? { text: b.textContent, disabled: b.disabled } : null; })()`);
+  check('⑩ 解锁 held: the button is disabled and says 「正在解锁…」', !!heldUnlock && goU && goU.disabled === true && goU.text === '正在解锁…', { held: !!heldUnlock, goU });
+  check('⑩ … and the dialog says the step: a spinner + 「正在核对第二密码…」 (role=status) — not a blank second', !!wU && wU.shown && wU.spin && wU.role === 'status' && wU.text === '正在核对第二密码…', wU);
+  await release(heldUnlock);
+  check('⑩ the answer ⇒ unlocked, the dialog closes (the line goes with it)', !!(await until(`!document.getElementById('vault-unlock-dialog') && document.querySelector('.vw-head')?.dataset.state === 'unlocked'`, { timeout: 20000 })));
+  await unhold();
+  await closeVaultWindow();
+  await sleep(300);
+  // the window's OPEN: the list held 700 ms
+  await hold('*/api/vault/contents');
+  const t0 = await evalJs(`(() => { const t = performance.now(); app.replayOpenSpec({ action: 'openVault' }); return t; })()`);   // its reads start inside the call
+  const heldList = await heldOf('/api/vault/contents');
+  await sleep(700);
+  const wL = await waitOf('.vw-list');
+  const early = await evalJs(`performance.getEntriesByType('resource').filter((e) => e.startTime >= ${t0}).map((e) => new URL(e.name).pathname)`);
+  check('⑩ the open, the list held: it SAYS 「正在读取保险库…」 with a spinner (the owner\'s blank list on a busy hub)', !!heldList && !!wL && wL.shown && wL.spin && wL.text === '正在读取保险库…', wL);
+  check('⑩ … the keys\' grants were asked WHILE the list is out (one round trip, not two)', early.includes('/api/automation/keys'), early);
+  await release(heldList);
+  check('⑩ the answer ⇒ the rows, and the wait line is gone', !!(await until(`!!document.querySelector(${JSON.stringify(ROW_INT)}) && !document.querySelector('.vw-list .vault-wait')`, { timeout: 15000 })));
+  await unhold();
+  await sleep(600);
+  const opened = await evalJs(`performance.getEntriesByType('resource').filter((e) => e.startTime >= ${t0}).map((e) => new URL(e.name).pathname + new URL(e.name).search)`);
+  check('⑩ the window loads what it shows: the open never asks the chat accounts (/api/channels)', opened.includes('/api/vault/contents') && !opened.some((u) => u.startsWith('/api/channels')), opened);
+  const ring = await evalJs(`typeof window.__vsFetchTimings === 'function' ? window.__vsFetchTimings() : null`);
+  const listT = Array.isArray(ring) ? ring.filter((r) => r.route === '/api/vault/contents').pop() : null;
+  check('⑩ the page\'s request ring (what an incident snapshot carries) has the held list\'s real wait — route + ms, no query', !!listT && listT.ms >= 600 && Object.keys(listT).join() === 'at,route,ms' && ring.length <= 20 && ring.every((r) => !/[?#]/.test(r.route)), { listT, n: ring && ring.length });
+  // 验证是你 and 显示全部
+  const showWord = await evalJs(`document.querySelector('.vw-show-all')?.textContent || ''`);
+  await hold('*/api/vault/reveal-session', '*/api/vault/reveal');
+  await click('.vw-show-all');
+  await until(visible('#vault-reveal-dialog'), { timeout: 5000 });
+  await typeInto('#vault-reveal-pw', SECOND); await click('.vault-reveal-go');
+  const heldRs = await heldOf('/api/vault/reveal-session');
+  await sleep(300);
+  const wR = await waitOf('#vault-reveal-dialog');
+  const goR = await evalJs(`(() => { const b = document.querySelector('.vault-reveal-go'); return b ? { text: b.textContent, disabled: b.disabled } : null; })()`);
+  check('⑩ 验证是你 held: 「正在验证…」 on the disabled button, 「正在核对第二密码…」 in the dialog', !!heldRs && goR && goR.disabled && goR.text === '正在验证…' && !!wR && wR.spin && wR.text === '正在核对第二密码…', { goR, wR });
+  await release(heldRs);
+  const heldRv = await heldOf('/api/vault/reveal');
+  await sleep(200);
+  const prog = await evalJs(`document.querySelector('.vw-show-all')?.textContent || ''`);
+  check('⑩ 显示全部 counts its reveals: 「正在显示 1 / N…」 while the first is out', !!heldRv && /^正在显示 1 \/ \d+…$/.test(prog), prog);
+  await release(heldRv);
+  await unhold();
+  check('⑩ … and says its own word again (「全部显示」) once every value is in', showWord === '全部显示' && !!(await until(`document.querySelector('.vw-show-all')?.textContent === ${JSON.stringify(showWord)} && document.querySelectorAll('.vw-row.vw-open').length >= 3`, { timeout: 20000 })), { showWord, now: await evalJs(`document.querySelector('.vw-show-all')?.textContent`) });
+  // 审计… of the automation key
+  await hold('*/api/automation/keys/*/audit*');
+  await evalJs(`(() => { const b = document.querySelector('.vw-row[data-store="automation"] .vw-ak-audit'); if (b) b.click(); return !!b; })()`);
+  const heldAu = await heldOf(/^\/api\/automation\/keys\/[^/]+\/audit$/);
+  await sleep(300);
+  const wA = await waitOf('#vault-ak-audit');
+  check('⑩ 审计… held: the dialog says 「正在读取审计记录…」 with a spinner', !!heldAu && !!wA && wA.spin && wA.text === '正在读取审计记录…', { held: !!heldAu, wA });
+  await release(heldAu);
+  check('⑩ … the answer replaces it (the lines, or «none yet»)', !!(await until(`!document.querySelector('#vault-ak-audit .vault-wait') && !!document.querySelector('#vault-ak-audit .vw-ak-audit-line, #vault-ak-audit .vw-empty')`, { timeout: 10000 })));
+  await unhold();
+  await shot('vw-10-waits-zh.png');
+}
 
 await stopServer();
 console.log(failed ? `\nFAILED (${passed} passed, ${failed} failed)` : `\nALL PASS (${passed})`);

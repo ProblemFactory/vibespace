@@ -35,6 +35,9 @@ let one = null;
 
 /** The boot clock (one per process; a second call answers the first). */
 function start({ dataDir, env = process.env, now = () => performance.now(), windowMs = Number(env.VIBESPACE_BOOT_TRACE_WINDOW_MS) || WINDOW_MS } = {}) {
+  // lane vault-slow-load addendum: the main thread's slow SYNC fs calls are kept from here (server.js's 5th line — before the
+  // modules that destructure fs): a blocked loop names its blocker (src/server/loop-blame.js)
+  try { if (dataDir) require('./loop-blame.js').install({ root: path.dirname(dataDir) }); } catch { }
   if (one) return one;
   const startAt = now(), steps = [], spans = [], gaps = [], ops = [], notes = [];
   let label = null, sticky = null, last = startAt, mainMs = null, mainEndAt = null, listenAt = null, closed = false, resolveDone;

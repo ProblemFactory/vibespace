@@ -29,6 +29,7 @@ import { fetchJson, showToast, showConfirmDialog, createModalShell, createPopove
 import { SCOPES, ALL_PATHS, limitSetView, verbFamilies, grantOrder } from '../automation-keys.js'; // PURE: the closed table of verbs (their words); `/` = 「所有路径」; lane vault-key-row-compact: a limit's set in words, the verbs' families, the grants' order
 import { BACKEND_META } from './agent-meta.js';
 import { enterSubmits } from './chat-enter-keys.js'; // an Enter that ends an IME composition never submits
+import { vaultWaitLine } from './vault-unlock.js'; // lane vault-slow-load: the audit says it is reading
 import { REACH_CHOICES, reachWord, reachTitle, kindOf, groupsOf } from './automation-reach.js'; // lane key-instance-scope: ONE spelling of the reach's words
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -273,7 +274,10 @@ export async function showAuditDialog(key, data) {
   done.type = 'button'; done.onclick = () => close();
   f.append(done);
   body.parentNode.append(f);
+  const wait = vaultWaitLine(t('Reading the audit…'));
+  list.append(wait);
   const r = await fetchJson(`/api/automation/keys/${encodeURIComponent(key.id)}/audit?limit=50`);
+  wait.remove();
   if (!r || !r.ok) { list.append(el('div', 'vw-empty', failWords(r))); return; }
   if (!r.lines.length) { list.append(el('div', 'vw-empty', t('No audit line for this key yet'))); return; }
   for (const l of r.lines) {

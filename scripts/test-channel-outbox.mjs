@@ -1830,6 +1830,7 @@ async function ccReachLeg(engine, tag) {
     set className(v) { this._cls = new Set(String(v).split(/\s+/).filter(Boolean)); }
     get children() { return this.childNodes.filter((n) => n.nodeType === 1); }
     get firstChild() { return this.childNodes[0] || null; }
+    get lastChild() { return this.childNodes[this.childNodes.length - 1] || null; }
     get firstElementChild() { return this.children[0] || null; }
     get lastElementChild() { const c = this.children; return c[c.length - 1] || null; }
     get textContent() { return this.nodeType === 3 ? this._text : this.childNodes.map((n) => n.textContent).join(''); }
@@ -1845,7 +1846,8 @@ async function ccReachLeg(engine, tag) {
     after(n) { const p = this.parentNode; if (!p) return; const i = p.childNodes.indexOf(this); p.insertBefore(n, p.childNodes[i + 1] || null); }
     setAttribute(k, v) { this.attrs[k] = String(v); }
     getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
-    focus() {} addEventListener() {} removeEventListener() {}
+    focus() {} addEventListener(k, fn) { (this._on || (this._on = {}))[k] = fn; } removeEventListener() {}
+    fire(k) { const f = this._on && this._on[k]; return f ? f({ isTrusted: false, preventDefault() {}, stopPropagation() {}, target: this }) : undefined; }   // lane outbox-window-scroll-filter: the API section's rows listen
     click() { if (typeof this.onclick === 'function' && !this.disabled) return this.onclick({ isTrusted: false, preventDefault() {}, stopPropagation() {} }); return undefined; }
     getBoundingClientRect() { const p = this.parentNode; const i = p ? p.children.indexOf(this) : 0; const top = (p ? p.getBoundingClientRect().top : 0) + i * 100; return { top, bottom: top + 90, left: 0, right: 500, width: 500, height: 90 }; }
     _all() { const out = []; const walk = (n) => { for (const c of n.children) { out.push(c); walk(c); } }; walk(this); return out; }
@@ -2152,8 +2154,8 @@ async function ccReachLeg(engine, tag) {
       const R0 = rowsOf(all0.nodes);
       const rC = R0.find((r) => r.dataset.orow === 'p-w1'), rL = R0.find((r) => r.dataset.orow === 'p-w2');
       const txt = (root, cls) => { const e = find(root, cls)[0]; return e ? e.textContent : null; };
-      ok(R0.length === 2 && !all0.nodes.some((n) => n._cls.has('chan-prop')) && all0.nodes.filter((n) => n._cls.has('chan-outbox-sec')).length === 2,
-        'B-f467: the All view is ONE ROW per proposal under its state head — no stacked card until one is opened', JSON.stringify(all0.nodes.map((n) => n.className)));
+      ok(R0.length === 2 && !all0.nodes.some((n) => n._cls.has('chan-prop')) && all0.nodes.filter((n) => n._cls.has('chan-outbox-sec')).length === 1 && all0.nodes[0].dataset.sec === 'messages' && R0[0] === rC && R0[1] === rL,
+        'B-f467: the All view is ONE ROW per proposal, newest first, under its section\'s ONE head (lane outbox-window-scroll-filter: no per-state heads) — no stacked card until one is opened', JSON.stringify(all0.nodes.map((n) => n.className)));
       ok(rC && txt(rC, 'chan-orow-title') === 'owner@example.com · VibeSpace Channels 邮件测试' && txt(rC, 'chan-orow-who') === 'owner@example.com' && txt(rC, 'chan-orow-text') === '马丁，' && txt(rC, 'chan-prop-state') === 'awaiting your approval' && txt(rC, 'chan-orow-acct') === 'Fish' && find(rC, 'chan-av-badge').length === 1 && rC._all().filter((e) => e.dataset.review === '1').length === 1 && rC.getAttribute('aria-expanded') === 'false',
         'B-f467: the compose row says WHO receives it and WHERE in one line (the recipient, then the subject), the first line of the text, the state pill, the account (Fish — Gmail holds 3) on its badged avatar, and ONE primary: "Approve…"', JSON.stringify({ title: rC && txt(rC, 'chan-orow-title'), text: rC && txt(rC, 'chan-orow-text'), acct: rC && txt(rC, 'chan-orow-acct') }));
       ok(rL && txt(rL, 'chan-orow-title') === 'userW' && !/oc_/.test(rL.textContent) && txt(rL, 'chan-orow-acct') === null && find(rL, 'chan-av-badge').length === 1 && rL._all().filter((e) => e.dataset.review === '1').length === 0 && txt(rL, 'chan-prop-state') === 'sent',
@@ -2255,6 +2257,132 @@ async function ccReachLeg(engine, tag) {
       await esbuild.build({ entryPoints: [srcT], bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: outT, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
       const tidyRed = tidyJudge(await import(outT));
       ok(tidyRed.length >= 1 && /not a shut line/.test(tidyRed[0] || ''), 'CONTROL: decided proposals drawn as full cards (the window the owner screenshotted) are caught by the same judge', JSON.stringify(tidyRed));
+      // ── §OW lane outbox-window-scroll-filter (the owner, 2026-10-22, the Outbox window 「发件箱」 at 2.369.342: «1 条待我审批
+      // 这一条在哪呢？而且这个界面需要优化下» + «这个窗口里不能滚动，只能拉长窗口才能看到下面那个要发的消息»): the head said 1 of 157
+      // waits; under 「待审批」 the API section listed 20 executed / refused calls ABOVE the list and squeezed it — the one
+      // waiting message — out of sight. THE OWNER'S SHAPE: 157 message proposals (1 awaiting), 20 API calls (none waiting) ──
+      {
+        const OC = require(path.join(REPO, 'src/outbox-census.js'));
+        const CA = require(path.join(REPO, 'src/channel-api-card.js'));
+        const W = require(path.join(REPO, 'src/api-call-words.js'));
+        const ZH = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default;
+        const tz = (k, prm = {}) => String(ZH[k] !== undefined ? ZH[k] : k).replace(/\{(\w+)\}/g, (m, x) => (prm[x] !== undefined ? String(prm[x]) : m));
+        const LARK = { adapterId: 'lark', adapterLabel: 'Lark / 飞书', convKind: 'group', draftedBy: { kind: 'agent', id: 'a-1', name: '大开发' }, sendAs: 'user', policy: { mode: 'review', reasons: ['channel-policy'] } };
+        const MSGS = [];
+        for (let i = 0; i < 157; i++) MSGS.push({ ...LARK, id: `p-ow${i}`, convId: `oc_ow${i % 7}`, title: `项目群 ${i % 7}`, state: i === 101 ? 'awaiting-approval' : i % 9 ? 'sent' : 'rejected', text: i === 101 ? '今晚的发版说明：…' : `第 ${i} 条`, at: clock0 - (157 - i) * 60e3, updatedAt: clock0 - (157 - i) * 60e3, ttlAt: clock0 + 86400e3 });
+        const PEND = MSGS[101];
+        const api = (i, o) => ({ id: `api-ow${i}`, cred: 'lark-1', credLabel: 'Lark · ops', host: 'open.feishu.cn', headers: { 'content-type': 'application/json' }, digest: `d-${i}`, at: clock0 - 3600e3 + i * 60e3, ...o });
+        const DEL = (i, mid) => api(i, { status: 'ran', principal: { name: '大开发' }, method: 'DELETE', path: `/open-apis/im/v1/messages/${mid}`, sensitive: 'delete', result: { status: 200, bytes: 36 } });
+        const UP = (i) => api(i, { status: 'ran', principal: { name: '杂活' }, method: 'POST', path: '/open-apis/drive/v1/files/upload_all', body: JSON.stringify({ parent_node: 'doxlgPqF7a2b3c4d5e6f', file_name: `r${i}.png` }), bodyBytes: 512, sensitive: 'upload', result: { status: 200, bytes: 88 } });
+        const APIS = [];
+        for (let i = 0; i < 20; i++) APIS.push(i >= 4 && i < 7 ? UP(i) : i % 6 === 5 ? { ...DEL(i, `om_x100b4${i}aa`), status: 'rejected', decidedBy: 'user', result: null } : DEL(i, `om_x100b4${i}aa`));
+        // ① THE PURE CENSUS — one count for the head and both sections
+        const cen = OC.outboxCensus({ proposals: MSGS, apiCards: APIS, apiFate: CA.fateOf });
+        const secOf = (c, k) => c.sections.find((x) => x.key === k);
+        ok(cen.total === 177 && cen.waiting === 1 && secOf(cen, 'messages').total === 157 && secOf(cen, 'messages').waiting === 1 && secOf(cen, 'api').total === 20 && secOf(cen, 'api').waiting === 0,
+          '§OW ① THE CENSUS over the owner\'s shape: the head = 1 waiting of 177 (157 message proposals, 1 waiting · 20 API calls, 0 waiting) — the head and the sections are ONE count', JSON.stringify({ total: cen.total, waiting: cen.waiting, s: cen.sections.map((x) => [x.key, x.total, x.waiting]) }));
+        const aw = OC.outboxView(cen, null);
+        const decided = (it) => (it.state ? it.state !== 'awaiting-approval' : CA.fateOf(it) !== 'pending');
+        ok(aw.view === 'awaiting' && aw.sections.length === 2 && aw.sections[0].key === 'messages' && !aw.sections[0].folded && aw.sections[0].items.length === 1 && aw.sections[0].items[0] === PEND && aw.sections[1].key === 'api' && aw.sections[1].folded && aw.sections[1].items.length === 0 && !aw.sections.some((x) => x.items.some(decided)),
+          '§OW ② 「待审批」 (the first view while one waits) = ONLY what waits — the waiting message FIRST; the API section (0 waiting) FOLDED to its summary line; no executed or refused item in any section', JSON.stringify(aw.sections.map((x) => [x.key, x.folded, x.items.map((i) => i.id)])));
+        const all = OC.outboxView(cen, 'all');
+        const newestFirst = (xs) => xs.every((x, i) => i === 0 || (xs[i - 1].at || 0) >= (x.at || 0));
+        ok(all.view === 'all' && all.sections.map((x) => x.key).join() === 'messages,api' && all.sections[0].items.length === 157 && all.sections[1].items.length === 20 && all.sections.every((x) => !x.folded && newestFirst(x.items)),
+          '§OW ③ 「全部」 = every item of every section, newest first (157 + 20)', JSON.stringify(all.sections.map((x) => [x.key, x.items.length])));
+        // an API call that waits while no message does: ITS section comes first, the messages fold
+        const cenB = OC.outboxCensus({ proposals: MSGS.map((m) => (m === PEND ? { ...m, state: 'sent' } : m)), apiCards: [...APIS, { ...UP(30), status: 'pending', result: null }], apiFate: CA.fateOf });
+        const awB = OC.outboxView(cenB, null);
+        ok(awB.view === 'awaiting' && awB.sections[0].key === 'api' && awB.sections[0].items.length === 1 && awB.sections[1].key === 'messages' && awB.sections[1].folded && cenB.waiting === 1,
+          '§OW ④ a waiting API call is first under 「待审批」 and the message section (0 waiting) folds — every section obeys the filter', JSON.stringify(awB.sections.map((x) => [x.key, x.folded, x.items.length])));
+        const cen0 = OC.outboxCensus({ proposals: MSGS.map((m) => ({ ...m, state: 'sent' })), apiCards: APIS, apiFate: CA.fateOf });
+        ok(OC.outboxView(cen0, null).view === 'all' && OC.outboxView(cen0, 'awaiting').sections.every((x) => x.folded), '§OW ⑤ nothing waits ⇒ the first view is 「全部」; 「待审批」 picked anyway folds every section to its line');
+        // ⑥ THE ROW'S WORDS (the card law): actor · action (named object only) · the policy chip · a short status; the ids,
+        // HTTP 200 and the bytes are the card's fold lines; identical consecutive rows are ONE run
+        const rmDel = CA.rowModel(APIS[0]), rmUp = CA.rowModel(APIS[4]), rmRej = CA.rowModel(APIS[11]);
+        const wordsZh = (m) => CA.rowWords(m, { t: tz, lang: 'zh' });
+        ok(wordsZh(rmDel) === '大开发 · 删除消息' && tz(rmDel.status.key) === '已执行' && tz(rmRej.status.key) === '已拒绝' && wordsZh(rmUp) === '杂活 · 上传文件到文件夹' && tz(rmDel.chip.key) === '删除 · 总是询问',
+          '§OW ⑥ the row reads «大开发 · 删除消息» / «杂活 · 上传文件到文件夹», the policy a chip («删除 · 总是询问»), the outcome «已执行» / «已拒绝»', JSON.stringify([wordsZh(rmDel), wordsZh(rmUp), rmDel.status, rmRej.status]));
+        const rowFace = [wordsZh(rmDel), wordsZh(rmUp), tz(rmDel.status.key)].join(' ');
+        ok(!/om_|doxlg|\b200\b|\d+ ?B\b|https?:|\/open-apis/.test(rowFace) && rmDel.objectId === 'om_x100b40aa' && tz(CA.answerOf(APIS[0]).key, CA.answerOf(APIS[0]).params) === '返回：HTTP 200 · 36 B',
+          '§OW ⑥ no id, HTTP status, size or path on the row; the object\'s id and «返回：HTTP 200 · 36 B» are its card\'s fold lines', rowFace);
+        const runs = OC.runsOf(APIS.slice().sort((a, b) => b.at - a.at), (r) => CA.rowModel(r).runKey);
+        const upRun = runs.find((r) => r.items[0].principal.name === '杂活');
+        ok(upRun && upRun.items.length === 3 && runs.length < 20 && runs.reduce((n, r) => n + r.items.length, 0) === 20 && CA.rowModel({ ...UP(40), status: 'pending' }).runKey !== CA.rowModel({ ...UP(41), status: 'pending' }).runKey,
+          `§OW ⑥ identical consecutive rows are ONE run — the three uploads ×3 (${runs.length} rows for 20 calls); a waiting call is never grouped`, JSON.stringify(runs.map((r) => r.items.length)));
+        const handKeys = W.ROWS.length && [...fs.readFileSync(path.join(REPO, 'src/api-call-words.js'), 'utf-8').matchAll(/key: '([^']*\{object\}[^']*)'/g)].map((m) => m[1]);
+        const JA = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+        const noBare = handKeys.filter((k) => !W.BARE[k] || ZH[W.BARE[k]] === undefined || JA[W.BARE[k]] === undefined || /\{object\}/.test(W.BARE[k]));
+        ok(handKeys.length >= 10 && !noBare.length, `§OW ⑥ every hand phrase that names {object} has its object-less twin, in zh and ja (${handKeys.length})`, noBare);
+        // ⑦ THE REAL WINDOW over the minimal DOM: the toolbar + ONE list; every section INSIDE the list in the census's order
+        const OB = { proposals: MSGS, accounts: [{ id: 'lark', kind: 'lark', label: 'Lark / 飞书' }] };
+        const route = async (url) => ({ json: async () => (/\/api\/channels\/outbox$/.test(String(url)) ? OB : /\/api\/channels\/api$/.test(String(url)) ? { cards: APIS } : { ok: true }) });
+        const winOf = async (M) => {
+          const content = new N('div');
+          const app2 = { ...app, wm: { windows: new Map(), createWindow: () => ({ content, _listenerCtl: null }) }, ws: { onGlobal() {}, offGlobal() {} } };
+          const keep = globalThis.fetch;
+          globalThis.fetch = route;
+          try { M.openChannelOutbox(app2); for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0)); } finally { globalThis.fetch = keep; }
+          return content.children[0];
+        };
+        const judge = (root) => {
+          const bad = [];
+          const bar = root.children.find((c) => c._cls.has('jobs-toolbar')), list = root.children.find((c) => c._cls.has('chan-outbox-list'));
+          if (!list || root.children.length !== 2) bad.push(`the window is not the toolbar over ONE list: ${root.children.map((c) => c.className).join(' | ')}`);
+          const sum = bar && bar.querySelector('.jobs-summary');
+          if (!sum || sum.textContent !== '1 awaiting your approval · 177 proposals') bad.push(`the head is not the census's: ${sum && sum.textContent}`);
+          const apiRows = root.querySelectorAll('.chan-api-orow');
+          if (apiRows.some((r) => r.dataset.fate !== 'pending')) bad.push(`under 「待审批」 ${apiRows.filter((r) => r.dataset.fate !== 'pending').length} executed / refused API rows`);
+          if (list) {
+            const firstRow = list._all().find((e) => e._cls.has('chan-orow'));
+            if (!firstRow || firstRow.dataset.orow !== PEND.id) bad.push(`the first row is not the waiting one: ${firstRow && (firstRow.dataset.orow || firstRow.dataset.key)}`);
+            if (list.querySelectorAll('.chan-orow').some((r) => r.dataset.orow && r.dataset.orow !== PEND.id)) bad.push('a decided message row under 「待审批」');
+            const apiHead = list.querySelector('.chan-api-outbox .chan-outbox-sec');
+            if (!apiHead || !apiHead.querySelector('.chan-outbox-sec-all') || apiHead.querySelector('.chan-outbox-sec-all').hidden) bad.push('the API section is not folded to its summary line + 「See them in All」');
+          }
+          return bad;
+        };
+        const root = await winOf(CO);
+        const red = judge(root);
+        ok(!red.length, '§OW ⑦ THE REAL WINDOW: the toolbar over ONE list (the API section INSIDE it); the head = the census (1 · 177); 「待审批」 shows the waiting message FIRST, no decided row, the API section folded to its line', JSON.stringify(red));
+        const listW = root.children[1];
+        const secs = listW.children.filter((c) => c._cls.has('chan-outbox-sec') || c._cls.has('chan-api-outbox'));
+        ok(secs.length === 2 && secs[0].dataset.sec === 'messages' && secs[1].dataset.sec === 'api' && secs[0].querySelector('.chan-outbox-sec-words').textContent === 'Message proposals · 1 awaiting you · 157' && secs[1].querySelector('.chan-outbox-sec-words').textContent === 'API calls · 0 awaiting you · 20',
+          '§OW ⑦ the sections\' counts come from the same census (messages 1 · 157, API calls 0 · 20) — the waiting section first', JSON.stringify(secs.map((c) => c.textContent.slice(0, 60))));
+        // 「See them in All」 on the folded API head ⇒ 「全部」: every row newest first, the API calls as runs with ×n
+        secs[1].querySelector('.chan-outbox-sec-all').fire('click');
+        const allRows = listW.querySelectorAll('.chan-orow').filter((r) => r.dataset.orow);
+        const apiRowsAll = listW.querySelectorAll('.chan-api-orow');
+        const x3 = apiRowsAll.find((r) => r.querySelector('.chan-api-orow-count').textContent === '×3');
+        ok(root.children[0].querySelector('[data-view="all"]')._cls.has('chan-seg-on') && allRows.length === 157 && allRows[0].dataset.orow === 'p-ow156' && apiRowsAll.length === runs.length && x3 && !x3.querySelector('.chan-api-orow-count').hidden && apiRowsAll.every((r) => !/om_|doxlg|\b200\b|\d+ ?B\b/.test(r.textContent)),
+          `§OW ⑧ the folded head's 「See them in All」 switches to 「全部」: all 157 message rows newest first + the API calls as ${apiRowsAll.length} rows (the three uploads ONE row ×3), no id / HTTP status / size on any row`, JSON.stringify({ n: allRows.length, first: allRows[0] && allRows[0].dataset.orow, api: apiRowsAll.map((r) => r.textContent.slice(0, 50)) }));
+        // ⑨ the fold: a run opens into its calls' cards — each card's ONE 技术细节 fold holds the id, HTTP 200 and the size
+        const delRow = apiRowsAll.find((r) => /大开发/.test(r.textContent));
+        delRow.fire('click');
+        const cardsOpen = listW.querySelectorAll('.chan-api-card');
+        const fold0 = cardsOpen[0] && cardsOpen[0].querySelector('.chan-api-tech');
+        ok(cardsOpen.length === Number(delRow.dataset.count) && fold0 && /Object id: om_x100b4/.test(fold0.textContent) && /Answer: HTTP 200 · 36 B/.test(fold0.textContent) && !cardsOpen[0].querySelector('.chan-api-head'),
+          '§OW ⑨ a row opens into the card of each of its calls; the object\'s id and «Answer: HTTP 200 · 36 B» sit in the card\'s 技术细节 fold (the row is never repeated)', JSON.stringify({ n: cardsOpen.length, count: delRow.dataset.count, fold: fold0 && fold0.textContent.slice(0, 200) }));
+        // ⑩ RED CONTROL = the base's shape (2.369.342), rebuilt from THIS source (a shallow clone has no history): the API
+        // section mounted BESIDE the list, drawing itself, outside the census — the judge above is red, each way
+        const OS2 = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
+        const MOUNT = "  const apiSec = apiOutboxSection(app, { onRecords: (recs) => { apiCards = recs; draw(last); }, onAll });\n";
+        const PASS = "    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview, apiCards, apiSection: apiSec, onAll });\n";
+        ok(OS2.split(MOUNT).length === 2 && OS2.split(PASS).length === 2, '§OW CONTROL setup: the API section is mounted once and handed to the census once');
+        const bdir = fs.mkdtempSync(path.join(ROOT, 'ow-base-'));
+        const abs = (src) => src.replace(/from '\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src/lib', f)}'`).replace(/from '\.\.\/([^']+)'/g, (_, f) => `from '${path.join(REPO, 'src', f)}'`);
+        fs.writeFileSync(path.join(bdir, 'channel-outbox.js'), abs(OS2.replace(MOUNT, '  const apiSec = apiOutboxSection(app);\n  root.insertBefore(apiSec.el, list);\n').replace(PASS, '    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview, onAll });\n')));
+        const bOut = path.join(bdir, 'channel-outbox-base.mjs');
+        await esbuild.build({ entryPoints: [path.join(bdir, 'channel-outbox.js')], bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: bOut, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBuildVersion] });
+        const redBase = judge(await winOf(await import(bOut)));
+        ok(redBase.some((x) => /not the toolbar over ONE list/.test(x)) && redBase.some((x) => /head is not the census/.test(x)) && redBase.some((x) => /executed \/ refused API rows/.test(x)),
+          '§OW ⑩ RED CONTROL (the base\'s shape): the API section BESIDE the list (the squeeze), the head counting 157 not 177, 「待审批」 listing the 20 executed / refused calls — the judge is red each way', JSON.stringify(redBase));
+        // ⑪ THE CSS: the list is the window's scroll container and no child of it shrinks; the base had no such rule
+        const cssNow = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf-8'), cssBase = cssNow.replace(/\n\.chan-outbox-list > \* \{ flex-shrink: 0; \}/, '').replace(/\n\.chan-outbox > \.jobs-toolbar \{ flex-shrink: 0; \}/, '');
+        const lst = /\n\.chanwin-list \{([^}]*)\}/.exec(cssNow);
+        const noShrink = (c) => /\n\.chan-outbox-list > \* \{ flex-shrink: 0; \}/.test(c) && /\n\.chan-outbox > \.jobs-toolbar \{ flex-shrink: 0; \}/.test(c);
+        ok(lst && /flex: 1/.test(lst[1]) && /min-height: 0/.test(lst[1]) && /overflow-y: auto/.test(lst[1]) && noShrink(cssNow) && !noShrink(cssBase),
+          '§OW ⑪ CSS: the list flexes (min-height 0, overflow-y auto) and none of its sections shrinks; the toolbar keeps its height — CONTROL: without the two rules (the base) the census is red');
+      }
     } finally { Date.now = realNow; }
   }
   for (const [k, d] of Object.entries(saved)) { try { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; } catch {} }

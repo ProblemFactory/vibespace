@@ -214,7 +214,7 @@ const droplineOAuth = droplineOAuthMod.create({ client: dropline, flows: require
   // lane dropline-connect-door: WHO can give this instance an https address — the status answer's connectWhy
   instanceSource: () => instanceUrl?.effective?.().source || null, clusterDeploy: () => !!process.env.VIBESPACE_INSTANCE_NAME || !!require('./cluster-presets.js').sharedPresets().dir });
 require('./oauth-doors.js').register('dropline', { landing: droplineOAuth.landing, page: droplineOAuth.page });
-droplineTeach = require('./voice-teach-engine.js').create({ client: dropline, plugin: { peek: () => voicePlugin.peek(), update: (fn) => voicePlugin.update(fn), settings: () => voicePlugin.settings(), writeSettings: (p) => voicePlugin.writeSettings(p) }, userTodos, ledgerFile: path.join(rootDir, 'data', 'voice-suggestions.json') });
+droplineTeach = require('./voice-teach-engine.js').create({ client: dropline, plugin: { peek: () => voicePlugin.peek(), update: (fn) => voicePlugin.update(fn), settings: () => voicePlugin.settings(), writeSettings: (p) => voicePlugin.writeSettings(p) }, userTodos, ledgerFile: path.join(rootDir, 'data', 'voice-suggestions.json'), tickMs: 10 * 60e3 }); // lane voice-teach-skips: the tick sends an automatic folder's waiting words
 app.use(require('../routes/voice.js').create({ client: dropline, prefs: () => ({ ...voicePlugin.peek(), config: voicePlugin.settings() }), oauth: droplineOAuth, teach: droplineTeach }));
 setTimeout(() => { try { plugins.bootReplay(); } catch (e) { console.warn('[plugins] boot replay:', e.message); } }, 5000);
 // CS data-plane deps for hosts.device(id) (2.146.0) — wired SYNCHRONOUSLY.

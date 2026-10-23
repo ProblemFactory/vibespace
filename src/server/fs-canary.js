@@ -22,7 +22,10 @@ const SLOW_MS = 1000;
 const STRIKES = 3;
 
 function createFsCanary({ file, record = () => {}, log = (...a) => console.error(...a), onWedged = () => {}, onProbe = () => {},
-  deadlineMs = DEADLINE_MS, slowMs = SLOW_MS, probe = null, now = () => Date.now() } = {}) {
+  deadlineMs = DEADLINE_MS, slowMs = SLOW_MS, probe = null, now = () => Date.now(), blame = null } = {}) {
+  // lane vault-slow-load addendum: a blocked loop names WHAT held it — the main thread's slow sync fs calls in that window
+  const LB = require('./loop-blame.js');
+  const blameOf = typeof blame === 'function' ? blame : (from, to) => LB.blameWords(LB.blame(from, to));
   const pool = probe || new SafeFs({
     workerPath: path.join(__dirname, 'fs-canary-worker.js'), name: 'fs-canary',
     inlineRun: require('./fs-canary-worker.js').runOp,
@@ -57,7 +60,10 @@ function createFsCanary({ file, record = () => {}, log = (...a) => console.error
     const facts = { fsMs, loopMs, queueMs, timedOut: !!r.timedOut, where: r.where, strike: 0 };
     if (loopMs > slowMs) {
       counts.slowLoop++;
-      log(`[canary] the main loop held the probe's answer ${loopMs}ms (the stat itself took ${fsMs}ms ${r.where === 'worker' ? 'off the main thread' : 'on the main thread'}) — a blocked loop, not a slow mount`);
+      let by = '';
+      try { by = blameOf(r.doneAt, gotAt) || ''; } catch { by = ''; }
+      facts.blockedBy = by;
+      log(`[canary] the main loop held the probe's answer ${loopMs}ms (the stat itself took ${fsMs}ms ${r.where === 'worker' ? 'off the main thread' : 'on the main thread'}) — a blocked loop, not a slow mount${by ? `; in that window: ${by}` : ''}`);
       record({ kind: 'metric', name: 'srv-loop-canary-ms', value: loopMs });
     }
     if (r.timedOut) {

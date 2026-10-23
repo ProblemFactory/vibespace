@@ -17,6 +17,12 @@
 //      mirror's heavy leg went red on 3 methods): DOM.setTextMarker a VIEW act (refused while the user drives),
 //      DOM.clearTextMarkers harmless and DOM.getImplicitAnchorCandidates a read (forwarded), each row carrying its
 //      measurement; the step's one parameter change (Emulation.setDeviceMetricsOverride +viewportMeta?) moves no class;
+//   ④c the 156 step (lane chrome-156-drift, 2026-10-22 — the runner image moved to Chrome 156 between the branch run and
+//      the master mirror of the SAME sha; the mirror's heavy leg went red on 11 methods): the new FindInPage domain a VIEW
+//      act all through (measured: the page scrolls to the match and the user's focused field is blurred; stop ends the TAB's
+//      find whoever started it), the two sub-app lists reads, the five Private Verification Token verbs classed like the
+//      Trust Token pair; Storage.getRelatedWebsiteSets, which 156 dropped, keeps its row marked `until`; the step's two
+//      parameter changes move no class;
 //   ⑤ the unknown rule on ANY Chrome: a method no row names is refused BY NAME while the user drives whatever the
 //      installed version (newer, older — the fleet's Debian chromium 150 —, between, unparsable), the words naming
 //      every censused Chrome; `chromeRelation` over the four relations;
@@ -27,7 +33,9 @@
 //      lease; (b) a removed row's `until` dropped ⇒ 154 reports it stale; (c) a surviving row marked `until` 154 ⇒ 154
 //      reports it misdated; (d) a new row's `chrome` dropped ⇒ 153 reports it stale; (e) DOM.setTextMarker's row
 //      removed ⇒ 155 is no longer covered and a paused lease's marker is refused only as `unclassified`; (f)
-//      DOM.setTextMarker classed read ⇒ a paused lease's marker is FORWARDED (the class is what refuses it).
+//      DOM.setTextMarker classed read ⇒ a paused lease's marker is FORWARDED (the class is what refuses it); (g)
+//      FindInPage.findFirst classed read (the brief's first guess) ⇒ 156 is still "covered", yet a paused lease's find is
+//      FORWARDED — it would scroll the page under the user's hands and blur their field.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -46,6 +54,7 @@ const versionOf = (f) => (/Chrome\/(\d+\.\d+\.\d+\.\d+)/.exec(String(f && f.brow
 const name = (r) => r.domain + '.' + r.method;
 const C154 = '154.0.8037.57';
 const C155 = '155.0.8059.39';
+const C156 = '156.0.8078.47';
 
 // a judge scope: tab T-A attached as session S-A (the shape test-browser-mediation ⑥ judges every row on)
 const scope = () => { const sc = M.newScope({ targets: ['T-A'] }); M.admitReply({ id: 1, result: { sessionId: 'S-A' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-A' } }, sc); return sc; };
@@ -62,7 +71,7 @@ for (const v of C.CENSUS_CHROMES) {
   fixtures[v] = fixtureOf(v);
   ok(versionOf(fixtures[v]) === v && fixtures[v].protocolVersion === '1.3', `① Chrome ${v}: the fixture names the Chrome it was read from (${fixtures[v].browser}, protocol ${fixtures[v].protocolVersion})`);
 }
-ok(C.CENSUS_CHROME === C.CENSUS_CHROMES[C.CENSUS_CHROMES.length - 1] && C.CENSUS_CHROME === C155, `① CENSUS_CHROME is the newest censused Chrome (${C.CENSUS_CHROME})`);
+ok(C.CENSUS_CHROME === C.CENSUS_CHROMES[C.CENSUS_CHROMES.length - 1] && C.CENSUS_CHROME === C156, `① CENSUS_CHROME is the newest censused Chrome (${C.CENSUS_CHROME})`);
 
 // ═══ ② each censused Chrome ⇔ the table ═════════════════════════════════════
 console.log('— ② on EACH censused Chrome the table names exactly its methods');
@@ -129,14 +138,45 @@ if (fixtures[C154] && fixtures[C155]) {
     && d45.events.added.length + d45.events.removed.length + d45.events.changed.length === 0, `④b ${C154} → ${C155} (both sides recorded): +3 −0 methods, the one parameter change Emulation.setDeviceMetricsOverride +viewportMeta? (still view), no event changed`, JSON.stringify({ methods: d45.methods, params: pc, events: d45.events }));
 }
 
+// ═══ ④c the 156 step, row by row ════════════════════════════════════════════
+console.log('— ④c Chrome 156\'s eleven new methods (the new FindInPage domain, two sub-app reads, five Private Verification Token verbs) and the one it dropped');
+const NEW156 = {
+  'FindInPage.findFirst': 'view', 'FindInPage.findNext': 'view', 'FindInPage.findPrev': 'view', 'FindInPage.stop': 'view',
+  'Page.getSubApps': 'read', 'Page.getSiblingSubApps': 'read',
+  'Storage.getPrivateVerificationTokens': 'read', 'Storage.getPrivateVerificationTokensIssuerConfigs': 'read',
+  'Storage.clearPrivateVerificationTokens': 'page-mutation', 'Storage.deletePrivateVerificationToken': 'page-mutation', 'Storage.setPrivateVerificationTokensTracking': 'harmless',
+};
+for (const [m, cls] of Object.entries(NEW156)) {
+  const r = C.rowOf(m);
+  const paused = C.PAUSED_RULE[cls] === 'refuse' ? `browser_interrupted:${cls}` : 'forward';
+  ok(r && r.cls === cls && r.chrome === C156 && r.until === null && r.since === '2026-10-22' && r.fence === 'mediator' && typeof r.why === 'string' && r.why.includes(C156) && verdict(M, m, { paused: true }) === paused && verdict(M, m, {}) === 'forward',
+    `④c ${m}: class ${cls}, first listed on ${C156}, dated 2026-10-22, the Chrome named on its row — ${paused === 'forward' ? 'forwarded while the user drives' : 'browser_interrupted while the user drives'}, forwarded when the agent does`, r && JSON.stringify({ cls: r.cls, chrome: r.chrome, since: r.since, paused: verdict(M, m, { paused: true }) }));
+}
+const fw = (m) => C.rowOf(m).why;
+ok(/SCROLLS/.test(fw('FindInPage.findFirst')) && /BLURRED/.test(fw('FindInPage.findFirst')) && /ANOTHER connection/.test(fw('FindInPage.stop')) && /No active find session/.test(fw('FindInPage.findNext')) && /getAppManifest/.test(fw('Page.getSubApps')) && /Storage\.clearTrustTokens/.test(fw('Storage.clearPrivateVerificationTokens')) && /service is not available/.test(fw('Storage.getPrivateVerificationTokens')),
+  '④c each row carries what was measured on 156 (the find scrolls the page and blurs the user\'s field; another connection\'s stop ended this session\'s find; the token store is off on a stock Chrome) or the row it is classed with');
+const rws = C.rowOf('Storage.getRelatedWebsiteSets');
+ok(rws && rws.cls === 'read' && rws.until === C156 && rws.chrome === C.CENSUS_CHROMES[0] && verdict(M, 'Storage.getRelatedWebsiteSets', { paused: true }) === 'forward' && C.listedOn(rws, C155) && !C.listedOn(rws, C156),
+  `④c Storage.getRelatedWebsiteSets, which Chrome 156 dropped, keeps its row and class (marked until ${C156}) — a 153–155 still ships it, and the judge never asks which Chrome is installed`);
+if (fixtures[C155] && fixtures[C156]) {
+  const d56 = diffListings(fixtures[C155], fixtures[C156]);
+  const pc = (d56.params && d56.params.changed) || [];
+  const pcOf = (m) => pc.find((x) => x.method === m) || { added: [], removed: [] };
+  ok(d56.unrecorded.length === 0 && d56.methods.added.join() === Object.keys(NEW156).sort().join() && d56.methods.removed.join() === 'Storage.getRelatedWebsiteSets' && d56.methods.reflagged.length === 0 && d56.domains.added.join() === 'FindInPage' && d56.domains.removed.length === 0
+    && pc.length === 2 && pcOf('Animation.seekAnimations').added.join() === 'currentTime?,currentTimes?' && pcOf('Animation.seekAnimations').removed.join() === 'currentTime' && C.classOf('Animation.seekAnimations') === 'page-mutation'
+    && pcOf('Emulation.setDeviceMetricsOverride').added.join() === 'textLayoutMode?' && C.classOf('Emulation.setDeviceMetricsOverride') === 'view'
+    && d56.events.added.join() === 'Storage.privateVerificationTokensUpdated' && d56.events.removed.length === 0,
+  `④c ${C155} → ${C156} (both sides recorded): +11 −1 methods (+ the FindInPage domain), two parameter changes that move no class (Animation.seekAnimations currentTime → currentTime? + currentTimes?, still page-mutation; Emulation.setDeviceMetricsOverride +textLayoutMode?, still view), one event added (Storage.privateVerificationTokensUpdated)`, JSON.stringify({ domains: d56.domains, methods: d56.methods, params: pc, events: d56.events }).slice(0, 600));
+}
+
 // ═══ ⑤ the unknown rule on ANY Chrome ═══════════════════════════════════════
 console.log('— ⑤ a method no row names is refused BY NAME while the user drives — on every Chrome, older or newer than the census');
-ok(C.chromeRelation('153.0.8010.47') === 'censused' && C.chromeRelation(C154) === 'censused' && C.chromeRelation(C155) === 'censused' && C.chromeRelation('154.0.8037.92') === 'between' && C.chromeRelation('150.0.7871.124') === 'older' && C.chromeRelation('153.0.8010.60') === 'between' && C.chromeRelation('155.0.8100.1') === 'newer' && C.chromeRelation('chromium') === 'unknown' && C.chromeRelation('') === 'unknown', '⑤ chromeRelation: censused / older (the fleet\'s Debian chromium 150) / between / newer / unknown');
+ok(C.chromeRelation('153.0.8010.47') === 'censused' && C.chromeRelation(C154) === 'censused' && C.chromeRelation(C155) === 'censused' && C.chromeRelation(C156) === 'censused' && C.chromeRelation('155.0.8100.1') === 'between' && C.chromeRelation('154.0.8037.92') === 'between' && C.chromeRelation('150.0.7871.124') === 'older' && C.chromeRelation('153.0.8010.60') === 'between' && C.chromeRelation('156.0.8100.1') === 'newer' && C.chromeRelation('chromium') === 'unknown' && C.chromeRelation('') === 'unknown', '⑤ chromeRelation: censused / older (the fleet\'s Debian chromium 150) / between / newer / unknown');
 // an OLDER Chrome's extra (measured 2026-09-28: Chrome for Testing 149.0.7827.55, 151.0.7922.34 and Google Chrome
 // 152.0.7977.82 list Network.setRequestInterception, which 153 dropped) and a NEWER Chrome's (a synthetic name)
 const older = { domains: [...fixtures['153.0.8010.47'].domains.map((d) => (d.domain === 'Network' ? { ...d, commands: [...d.commands, { name: 'setRequestInterception' }] } : d))] };
-const newer = { domains: [...fixtures[C155].domains, { domain: 'Zzz', commands: [{ name: 'futureMethod' }] }] };
-const cOld = C.compare(older, { chrome: '150.0.7871.124' }), cNew = C.compare(newer, { chrome: '155.0.8100.1' });
+const newer = { domains: [...fixtures[C156].domains, { domain: 'Zzz', commands: [{ name: 'futureMethod' }] }] };
+const cOld = C.compare(older, { chrome: '150.0.7871.124' }), cNew = C.compare(newer, { chrome: '156.0.8100.1' });
 ok(cOld.chrome === null && cOld.relation === 'older' && cOld.unclassified.join() === 'Network.setRequestInterception' && cNew.relation === 'newer' && cNew.unclassified.join() === 'Zzz.futureMethod' && cNew.misdated.length === 0, '⑤ compare on an uncensused Chrome: the extra method is UNCLASSIFIED (older and newer alike), nothing is judged misdated');
 for (const m of ['Network.setRequestInterception', 'Zzz.futureMethod', 'Page.zzzFutureMethod']) {
   const v = M.judge({ id: 30, method: m, params: {}, sessionId: 'S-A' }, scope(), { paused: true });
@@ -161,6 +201,7 @@ ok(shapeBad.length === 0, '⑥ every fixture is a names-only listing: domain / c
 const f154 = fixtures[C154];
 ok(f154 && f154.domains.some((d) => Array.isArray(d.events) && d.events.length) && f154.domains.every((d) => d.commands.every((c) => Array.isArray(c.params))), `⑥ the ${C154} fixture records every command's parameter names and the events (the next Chrome's diff can say what changed)`);
 ok(fixtures[C155] && fixtures[C155].domains.some((d) => Array.isArray(d.events) && d.events.length) && fixtures[C155].domains.every((d) => d.commands.every((c) => Array.isArray(c.params))), `⑥ the ${C155} fixture records every command's parameter names and the events too`);
+ok(fixtures[C156] && fixtures[C156].domains.some((d) => Array.isArray(d.events) && d.events.length) && fixtures[C156].domains.every((d) => d.commands.every((c) => Array.isArray(c.params))), `⑥ the ${C156} fixture (written from Chrome for Testing ${C156}, the runner's Chrome) records them too`);
 const d34 = diffListings(fixtures['153.0.8010.47'], f154);
 ok(d34.params === null && d34.events === null && d34.unrecorded.join() === 'older: parameter names,older: events', '⑥ 153 → 154: the 153 fixture recorded names only, so the diff says the parameter / event parts are UNRECORDED on that side (never an empty change list)', JSON.stringify(d34.unrecorded));
 const d44 = diffListings(f154, f154);
@@ -172,7 +213,7 @@ const dB = diffListings(bumped, f154);
 ok(dB.params.changed.length === 1 && dB.params.changed[0].method === 'Page.startScreencast' && dB.params.changed[0].added.join() === 'sendLastFrame?' && dB.events.removed.join() === 'Storage.zzzEvent', '⑥ where both sides recorded them, a changed parameter list and a removed event are named');
 
 // ═══ CONTROLS ═══════════════════════════════════════════════════════════════
-console.log('— CONTROLS: patched census copies — a new row removed, an until mark dropped, a surviving row mis-marked, a chrome mark dropped');
+console.log('— CONTROLS: patched census copies — a new row removed, an until mark dropped, a surviving row mis-marked, a chrome mark dropped, a view classed read');
 {
   const MUT = mutantCopies('cdp-census', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/cdp-census.js'), 'utf8');
@@ -206,6 +247,12 @@ console.log('— CONTROLS: patched census copies — a new row removed, an until
   const asRead = MUT.write('src/cdp-census.js', src.replace(markA, "setTextMarker: { cls: 'read',"), 'text-marker-read');
   const Mf = MUT.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(asRead)})`), 'text-marker-read');
   ok(require(asRead).compare(fixtures[C155], { chrome: C155 }).sameSet && verdict(Mf, 'DOM.setTextMarker', { paused: true }) === 'forward', `CONTROL (f) DOM.setTextMarker classed read: Chrome ${C155} is still "covered", yet a paused lease's marker is FORWARDED onto the page the user drives — the class is what refuses it`);
+  // (g) Chrome 156's FindInPage.findFirst classed read (the dispatch's first guess: "reads the page")
+  const findA = "findFirst: { cls: 'view',";
+  ok(src.split(findA).length === 2, 'control setup: the findFirst anchor is spelled once');
+  const findRead = MUT.write('src/cdp-census.js', src.replace(findA, "findFirst: { cls: 'read',"), 'find-first-read');
+  const Mg = MUT.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(findRead)})`), 'find-first-read');
+  ok(require(findRead).compare(fixtures[C156], { chrome: C156 }).sameSet && verdict(Mg, 'FindInPage.findFirst', { paused: true }) === 'forward' && verdict(M, 'FindInPage.findFirst', { paused: true }) === 'browser_interrupted:view', `CONTROL (g) FindInPage.findFirst classed read: Chrome ${C156} is still "covered", yet a paused lease's find is FORWARDED — measured, it scrolls the page under the user's hands and blurs their field; the class is what refuses it`);
   for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 5, label: 'CONTROL ' })) ok(r.pass, r.name, r.detail);
 }
 

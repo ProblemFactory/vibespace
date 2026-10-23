@@ -22,8 +22,9 @@
 //   ⑧ rect census: the dialog, its rows and its buttons inside the viewport (desktop AND 390 px
 //      phone); the select bar's buttons inside the window; no clipped button text
 //   ⑨ no native dialog is ever called; no page exception
-//   ⑩ NEGATIVE CONTROL: the hostile note through a raw innerHTML copy IS an <img onerror> (an inert document — nothing is
-//      planted on the app page, whose CSP teardown fails a suite on any inline handler)
+//   ⑩ NEGATIVE CONTROL: the hostile note through a raw innerHTML copy IS an <img onerror> (an inert document in a BLANK TAB
+//      with no policy — scripts/scratch.mjs evalInBlankTab: since Chrome 156 a handler attribute set in an inert document
+//      on the app page is a CSP report, and the teardown fails a suite on any)
 //   verify r2 (the UX verifier's findings, each pinned where it shows): a Find that matches only a
 //   DETAIL opens that detail and the dialog says "Found in the detail: …"; a batch ends the
 //   selection; a cleared row in Select mode has no checkbox (and no ⋯); the day / time cells speak
@@ -38,7 +39,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, evalInBlankTab } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -554,8 +555,10 @@ try {
   // Built in an INERT document (lane mirror-331-reds-chrome): nothing loads there and no handler is compiled. On the app
   // page this copy's <img onerror> ran an inline handler — the suite's one CSP report, which the teardown (scripts/scratch.mjs)
   // fails. Taking that report is no fix: the hub writes a report key once, so a product leak would share it and hide behind it.
-  const x = await P1.evalJs(`(() => { const d = document.implementation.createHTMLDocument('').createElement('div'); d.innerHTML = ${J(HOSTILE)}; const i = d.querySelector('img'); return i ? i.getAttribute('onerror') : null; })()`);
-  check('the hostile note through a raw innerHTML copy IS an <img onerror="window.__xss=1"> (built in an inert document) — ② can go red', x === 'window.__xss=1', x);
+  // In a BLANK TAB (lane chrome-156-drift): Chrome 156 reports a handler when its attribute is SET, an inert document's too —
+  // on the app page this line was the runner's «script-src-attr inline, line 1 column 101, source ""» (scratch.mjs evalInBlankTab)
+  const x = await evalInBlankTab(CDP_PORT, `(() => { const d = document.implementation.createHTMLDocument('').createElement('div'); d.innerHTML = ${J(HOSTILE)}; const i = d.querySelector('img'); return i ? i.getAttribute('onerror') : null; })()`);
+  check('the hostile note through a raw innerHTML copy IS an <img onerror="window.__xss=1"> (built in an inert document, in a blank tab with no policy) — ② can go red', x === 'window.__xss=1', x);
 
   // ── ⑧ the phone: the dialog fits ──
   console.log('⑧ the phone (390 px): the dialog fits the viewport');

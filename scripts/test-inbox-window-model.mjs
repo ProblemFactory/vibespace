@@ -11,6 +11,8 @@
 //   ④ scopeRows     — tab · session scope (a key or a session's keys) · every filter term
 //   ⑤ itemView      — the pane as STRUCTURE: meta words, chips, the reply verdict (fed the REAL
 //                     replyButtonState), the action row, Copy's text; hostile strings verbatim
+//   ⑧ readOnSight (lane inbox-fyi-mark-all) — an open notice that asks nothing is read by being read (NOTICE_READ_MS in
+//      the pane, or ‹ back); one that offers a button (Check again, Show window…), chips, a card or a door never
 //   ⑥ the patched-copy census (nothing written into src/)
 //   ⑦ wiring pins + i18n + the ci.mjs row
 import fs from 'node:fs';
@@ -238,13 +240,38 @@ const it = (x = {}) => ({ id: 'ut-1', sessionKey: 'claude:s1', text: 'Ship it?',
   ok(noiseNote && noiseNote.itemView(note, ctx(note)).reply.why !== '', 'control: a copy without the no_session rule prints "nothing to reply to" on every notice');
 }
 
+console.log('⑧ readOnSight — a notice that asks nothing is read by being read (lane inbox-fyi-mark-all)');
+{
+  const n = (x = {}) => ({ id: 'ut-n', sessionKey: 'accounts', kind: 'notice', origin: 'spend', status: 'open', text: 'fyi', ...x });
+  const T = [
+    [n(), true, 'an open notice with nothing to press'],
+    [n({ urgency: 'urgent' }), true, '…urgent or not (a notice asks nothing)'],
+    [n({ action: { type: 'browser-floor-check' } }), false, 'a notice with a producer button (Check again) — resolving it mid-read would take the button away'],
+    [n({ action: { type: 'desktop-app-notify', appId: 'a' } }), false, '…Show window'],
+    [n({ options: ['ok', 'later'] }), false, 'a notice with option chips'],
+    [n({ options: [] }), true, '…an EMPTY options array is no chip'],
+    [n({ card: { state: 'done' } }), false, 'a notice with a card'],
+    [n({ open: { kind: 'plugin-settings', plugin: 'x' } }), false, 'a notice whose press opens a place (a door)'],
+    [n({ status: 'done' }), false, 'a notice already read'],
+    [n({ status: 'dismissed' }), false, '…or dismissed'],
+    [n({ kind: 'action' }), false, 'an ASK is never read for the person'],
+    [n({ kind: undefined }), false, '…nor an item without a kind (an ask)'],
+    [null, false, 'null-safe'],
+  ];
+  for (const [it, want, m] of T) ok(L.readOnSight(it) === want, `${want ? 'READ' : 'kept'}: ${m}`, it);
+  ok(L.NOTICE_READ_MS === 1500, 'NOTICE_READ_MS = 1.5 s — arrowing past a row reads nothing, opening one does', L.NOTICE_READ_MS);
+  // CONTROL: the button guard dropped ⇒ the Check again notice would be read under the reader's pointer ⇒ RED here
+  const Mx = await mutant('read-any-notice', '&& !i.action && ', '&& ');
+  ok(Mx && Mx.readOnSight(n({ action: { type: 'browser-floor-check' } })) === true && L.readOnSight(n({ action: { type: 'browser-floor-check' } })) === false, 'CONTROL: without its button guard the rule reads a notice that offers Check again — the table above goes red on that copy');
+}
+
 console.log('⑥ the patched copies live outside the checkout');
 for (const row of copiesCensus(M.files, M.dir, ROOT, { minCopies: 12, label: '⑥ ' })) ok(row.pass, row.name, row.detail);
 
 console.log('⑦ wiring pins — the window really calls every rule; the doors; THE model\'s verbs');
 {
   const w = read('src/lib/inbox-window.js');
-  ok(/import \{ TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView \} from '\.\/inbox-window-layout\.js';/.test(w) && /const sub = rowPreview\(model\.detailOf\(i\), 160\);/.test(w), 'inbox-window.js imports the six rules + TABS from the PURE module (the row\'s cut form is rowPreview)');
+  ok(/import \{ TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS \} from '\.\/inbox-window-layout\.js';/.test(w) && /const sub = rowPreview\(model\.detailOf\(i\), 160\);/.test(w), 'inbox-window.js imports the six rules + TABS from the PURE module (the row\'s cut form is rowPreview)');
   ok(/const next = nextSelection\(st\.display, id\);/.test(w) && /if \(await model\.setStatus\(id, a === 'done' \? 'done' : 'dismissed'\)\) advance\(id\);/.test(w) && /if \(ok && wasOpen\) advance\(c\.id\);/.test(w),
     'the mail-client rule runs after THIS client\'s Mark done / Dismiss succeeded and after a reply that resolved an OPEN item');
   ok(/st\.selected = holdSelection\(st\.display, st\.selected\);/.test(w), 'every render holds the selection through holdSelection');
@@ -313,6 +340,15 @@ console.log('⑦ wiring pins — the window really calls every rule; the doors; 
   ok(!missing.length, `every new word (${NEW.length}) has a zh + a ja entry`, missing);
   ok(/tc\('inbox', 'Actions'\)/.test(w) && /tc\('inbox', 'Dismiss'\)/.test(w), '"Actions" / "Dismiss" are contexted (tc) — the plain keys mean other things (操作 / 关闭)');
   ok(/\{ name: 'test-inbox-window-model', tier: 'fast'/.test(read('scripts/ci.mjs')), 'ci.mjs carries this suite in the fast tier');
+  // lane inbox-fyi-mark-all: «Mark all read» on the Notices tab + a notice read by being read
+  ok(/const readAll = mk\('button', 'iw-read-all', t\('Mark all read'\)\);/.test(w) && /bar\.append\(tabs, readAll, scope, filter\);/.test(w), '«Mark all read» sits in the bar right after the tabs (beside the Notices count — never inside the tab button)');
+  ok(/patchReadAll\(st\.tab === 'notices' \? noticeReadAll\(main, 'all'\) : null\);/.test(w) && /const off = !st\.readIds\.length \|\| readAll\.dataset\.busy === '1';/.test(w), '…on the Notices tab only; its ids are PURE noticeReadAll over what the list shows (scope + filter applied); disabled with its reason when none is open');
+  ok(/if \(e\.target\.closest\('\.iw-read-all'\)\) \{ readAllPress\(\); return; \}/.test(w) && /await model\.readNotices\(ids\);/.test(w), '…a press is THE model\'s ONE bulk verb (the window still holds no fetch of its own)');
+  const arm = (w.match(/\n  function armRead\(\) \{[\s\S]*?\n  \}\n/) || [''])[0];
+  ok(/const want = it && readOnSight\(it\) && paneOnScreen\(\) \? it\.id : null;/.test(arm) && /\}, NOTICE_READ_MS\);/.test(arm) && /if \(st\.selected === want && cur && readOnSight\(cur\) && paneOnScreen\(\)\) model\.setStatus\(want, 'done'\);/.test(arm) && !/advance\(/.test(arm),
+    'read-on-sight: the selected notice that asks nothing, NOTICE_READ_MS on screen, re-checked when the clock ends, marked through THE status write — the selection never moves under the reader');
+  ok(/const paneOnScreen = \(\) => root\.isConnected && root\.clientWidth > 0 && document\.visibilityState === 'visible' && root\.contains\(document\.activeElement\) && \(st\.mode === 'split' \|\| root\.dataset\.view === 'item'\);/.test(w), '…"on screen" = the page visible, the person IN this window (focus), the pane showing (a window left behind others reads nothing)');
+  ok(/renderPane\(\);\n    armRead\(\);\n  \}/.test(w) && /if \(e\.target\.closest\('\.iw-back'\)\) \{ readOnBack\(\);/.test(w) && /document\.addEventListener\('visibilitychange', \(\) => armRead\(\), \{ signal \}\);/.test(w), '…every render arms the clock; ‹ back reads the notice at once; a hidden page stops the clock');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);

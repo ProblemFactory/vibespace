@@ -58,9 +58,11 @@ console.log('① the PURE schedule');
     && T.proposalVerdict(T.prune(s2, now + 31 * DAY), { conv: 'c1', terms: ['fooBar'], now: now + 31 * DAY, settings: ON, kindOf: VM.termKind }).propose.join() === 'fooBar');
   const P = { ...ON, autoProjects: ['/w/vibespace'] };
   const v3 = T.proposalVerdict(s0, { conv: 'c1', cwd: '/w/vibespace', terms: ['commentsBatches', 'doc-window-ui.js', 'Zephyr Team'], now, settings: P, kindOf: VM.termKind, autoFrom: ['commentsBatches', 'doc-window-ui.js'] });
-  ok('the per-project tier: that project\'s file names + identifiers go without a card; a name still asks', v3.auto.join() === 'commentsBatches,doc-window-ui.js' && v3.propose.join() === 'Zephyr Team', v3);
-  const v3b = T.proposalVerdict(s0, { conv: 'c1', cwd: '/w/vibespace', terms: ['commentsBatches', 'jane.doe', 'my_private_plan99'], now, settings: P, kindOf: VM.termKind, autoFrom: ['commentsBatches'] });
-  ok('…named by SOURCE, never by shape: a file- or identifier-shaped word autoFrom does not name still asks (voice-verify F2)', v3b.auto.join() === 'commentsBatches' && v3b.propose.join() === 'jane.doe,my_private_plan99', v3b);
+  // lane voice-teach-skips (the owner 2026-10-22: «我不是开了那几个目录自动嘛？»): an automatic folder asks NOTHING — every
+  // proposable word goes (names too), within the caps; the base sent only file/ident words and carded the rest
+  ok('an automatic folder: EVERY proposable word goes without a card — its file names + identifiers AND a name (Zephyr Team)', v3.auto.join() === 'commentsBatches,doc-window-ui.js,Zephyr Team' && !v3.propose.length && v3.folder === '/w/vibespace', v3);
+  const v3b = T.proposalVerdict(s0, { conv: 'c1', cwd: '/w/vibespace/src/lib', terms: ['commentsBatches', 'jane.doe', 'my_private_plan99'], now, settings: P, kindOf: VM.termKind, autoFrom: ['commentsBatches'] });
+  ok('…and its SUBFOLDERS (a prefix rule: /w/vibespace covers /w/vibespace/src/lib) — the person\'s words too, nothing asked', v3b.auto.join() === 'commentsBatches,jane.doe,my_private_plan99' && !v3b.propose.length && v3b.folder === '/w/vibespace', v3b);
   ok('…only for the project opted in (another cwd still asks for everything)', T.proposalVerdict(s0, { conv: 'c1', cwd: '/w/other', terms: ['commentsBatches'], now, settings: P, kindOf: VM.termKind }).auto.length === 0);
   const many = Array.from({ length: 70 }, (_, i) => `term_${i}_x`);
   const s4 = T.recordAuto(s0, 45, now - 10 * MIN);
@@ -156,16 +158,16 @@ let proposalCheck, previewCheck;
   const r = rig(ENGINE, { settings: { teach: true, autoProjects: ['/w/vibespace'] } });
   const out = await r.E.seen(seenArgs());
   const w = r.writes();
-  ok('the per-project tier ⇒ the agent\'s code-span identifier + named path go WITHOUT a card, journaled as this project; the person\'s file name still asks (voice-verify F2); an identifier only the agent wrote is no proposal (voice-teach-candidates)', w.length === 1 && w[0][1].join() === 'commentsBatches,doc-model.js' && out.proposal && out.proposal.terms.join() === 'doc-window-ui.js' && r.E.view().journal[0].auto === true, { w, out });
+  ok('an automatic folder ⇒ the agent\'s code-span identifier + named path AND the person\'s file name go WITHOUT a card (lane voice-teach-skips: nothing asked there), journaled as automatic with the words and the folder', w.length === 1 && w[0][1].join() === 'commentsBatches,doc-model.js,doc-window-ui.js' && !out.proposal && r.items.length === 0 && r.E.view().journal[0].auto === true && r.E.view().journal[0].words.join() === w[0][1].join() && r.E.view().journal[0].folder === '/w/vibespace', { w, out });
   const r2 = rig(ENGINE, { settings: { teach: true, autoProjects: ['/w/vibespace'] } });
   await r2.E.seen(seenArgs({ cwd: '/w/other' }));
   ok('…another project still asks (no write)', r2.writes().length === 0);
-  // voice-verify F2 RED leg: the person's own sentence in an opted-in project — nothing of it leaves without a press;
-  // a path in the agent's code span does (the base auto-sent jane.doe + my_private_plan99 here)
+  // voice-verify F2 kept the person's own words on the card even in an opted-in project; lane voice-teach-skips (the owner
+  // 2026-10-22, «不能设置成自动加入不用我确认吗？») makes «automatic» mean no asking there — the toggle's sentence says so
   const r3 = rig(ENGINE, { settings: { teach: true, autoProjects: ['/w/vibespace'] } });
   const out3 = await r3.E.seen(seenArgs({ messages: [{ role: 'user', content: [{ type: 'text', text: 'tell jane.doe my_private_plan99 about it' }] }, { role: 'assistant', content: [{ type: 'text', text: 'Sure — see `src/lib/foo.ts`.' }] }] }));
   const w3 = r3.writes();
-  ok('the person\'s own words never auto-send (jane.doe and the identifier my_private_plan99 ⇒ the card — ids are what dictation gets wrong, lane voice-teach-ids-allowed); the agent\'s code-span path does (foo.ts)', w3.length === 1 && w3[0][1].join() === 'foo.ts' && !!out3.proposal && out3.proposal.terms.includes('jane.doe') && out3.proposal.terms.includes('my_private_plan99'), { w3, p: out3.proposal && out3.proposal.terms });
+  ok('in an automatic folder the person\'s own words go too (jane.doe, my_private_plan99 beside the agent\'s foo.ts) — ONE write, no card', w3.length === 1 && ['foo.ts', 'jane.doe', 'my_private_plan99'].every((x) => w3[0][1].includes(x)) && !out3.proposal, { w3, p: out3.proposal && out3.proposal.terms });
 }
 {
   const r = rig(ENGINE, { settings: { context: true } });
@@ -211,10 +213,10 @@ console.log('③ RED controls (schedule copies)');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-voice-teach-'));
   try {
     const src = fs.readFileSync(path.join(REPO, 'src/voice-teach.js'), 'utf8');
-    const a1 = "  return { auto, propose: top.map((c) => c.term), pick: top.filter((c) => c.pick).map((c) => c.term), below: rest.slice(top.length).map((c) => [c.term, Number(c.seen) || 0]), why: null };";
+    const a1 = "  return { ...none, propose: top.map((c) => c.term), pick: top.filter((c) => c.pick).map((c) => c.term), below: rest.slice(top.length).map((c) => [c.term, Number(c.seen) || 0]), why: null };";
     const a2 = "  if (!last || last.declined) return { act: 'preview', why: null };";
     ok('CONTROL anchors apply once each', src.split(a1).length === 2 && src.split(a2).length === 2);
-    fs.writeFileSync(path.join(dir, 'm1.js'), src.replace(a1, "  return { ...none, auto: [...auto, ...top.map((c) => c.term)], why: null };"));
+    fs.writeFileSync(path.join(dir, 'm1.js'), src.replace(a1, "  return { ...none, auto: top.map((c) => c.term), why: null };"));
     fs.writeFileSync(path.join(dir, 'm2.js'), src.replace(a2, "  if (!last || last.declined) return { act: 'send', why: null };"));
     const m1 = require(path.join(dir, 'm1.js')), m2 = require(path.join(dir, 'm2.js'));
     const r1 = rig(ENGINE, { settings: { teach: true }, model: m1 });
@@ -421,6 +423,186 @@ console.log('③ THE TRAY\'S DOOR (lane foryou-plugin-notices): the suggestion i
     const xo = await x.seen('conv-x', A1);
     ok('CONTROL RED: the pre-fix listener (× unheard) ⇒ the SAME messages offer the dismissed words again the next day — the checks above fail on it', !!xo.proposal && xo.proposal.terms.includes('fooBarQux'), xo.proposal);
   }
+}
+
+console.log('⑤ THE SKIPS (lane voice-teach-skips — the owner 2026-10-22: «最近几次 dropline 添加都是跳过，如果加入会跳过为啥还让我加入，而且不能设置成自动加入不用我确认吗？我不是开了那几个目录自动嘛？»)');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('voice-skips', REPO);
+  const C = require(path.join(REPO, 'src/server/dropline-client.js'));
+  const now = 1e12, D = 24 * H;
+  // ⑤a PURE: the folder rule, the skip memory, the cap, the queue, the reasons, the streak
+  const P = { teach: true, autoProjects: ['/w/vibespace', '/w/work'] };
+  ok('folderOf: a folder covers ITSELF and its SUBFOLDERS (the deepest listed wins); never a sibling with the same prefix, never through `..`',
+    T.folderOf(P.autoProjects, '/w/vibespace') === '/w/vibespace' && T.folderOf(P.autoProjects, '/w/vibespace/src/lib') === '/w/vibespace' && T.folderOf(P.autoProjects, '/w/vibespace/') === '/w/vibespace'
+    && T.folderOf(P.autoProjects, '/w/vibespace-other') === null && T.folderOf(P.autoProjects, '/w/vibespace/../secret') === null && T.folderOf(P.autoProjects, '/w') === null
+    && T.folderOf(['/w/work', '/w/work/api-dev'], '/w/work/api-dev/x') === '/w/work/api-dev');
+  ok('parentOf: the card offers the parent folder — never shallower than three segments (/home/<user> would cover everything)', T.parentOf('/home/u/code/projects/webui') === '/home/u/code/projects' && T.parentOf('/home/u/workspace') === null && T.parentOf('/home/u/x/../y') === null);
+  const sk = T.rememberSkips(T.stateOf({}), [{ term: 'Varnokin', reason: 'review' }, { term: 'Kestrel Bay', reason: 'refused' }], now);
+  const cands = [{ term: 'varnokin', seen: 2, pick: true }, { term: 'Kestrel Bay', seen: 2, pick: true }, { term: 'zephyrGrid', seen: 2, pick: true }];
+  const vs = T.proposalVerdict(sk, { conv: 'c1', candidates: cands, now: now + H, settings: { teach: true }, kindOf: VM.termKind });
+  const vs31 = T.proposalVerdict(T.prune(sk, now + 31 * D), { conv: 'c1', candidates: cands, now: now + 31 * D, settings: { teach: true }, kindOf: VM.termKind });
+  ok('a word the vendor SKIPPED is remembered with its reason and never proposed for 30 days (any case); after 30 days it may be asked again', T.skippedNow(sk, 'VARNOKIN', now + 29 * D) && sk.skipped.varnokin.reason === 'review' && vs.propose.join() === 'zephyrGrid' && vs31.propose.length === 3 && !('varnokin' in T.prune(sk, now + 31 * D).skipped), { vs, vs31 });
+  let capped = T.stateOf({}); for (let i = 0; i < 6; i++) capped = T.recordCall(capped, 'terms', now - i * MIN);
+  const vc = T.proposalVerdict(capped, { conv: 'c1', candidates: cands, now, settings: { teach: true }, kindOf: VM.termKind });
+  ok('this hour\'s terms calls spent ⇒ NO proposal (why cap) — an ask is filed only for an act that can succeed; the hour after, the card comes', vc.why === 'cap' && !vc.propose.length && T.proposalVerdict(capped, { conv: 'c1', candidates: cands, now: now + H, settings: { teach: true }, kindOf: VM.termKind }).propose.length === 3, vc);
+  const room = T.recordAuto(T.stateOf({}), 48, now - MIN);
+  const vq = T.proposalVerdict(room, { conv: 'c1', cwd: '/w/vibespace/a', candidates: cands, now, settings: P, kindOf: VM.termKind });
+  const vq0 = T.proposalVerdict(capped, { conv: 'c1', cwd: '/w/vibespace/a', candidates: cands, now, settings: P, kindOf: VM.termKind });
+  ok('an automatic folder over this hour\'s room: 2 words go, the third is QUEUED (no card); no call left ⇒ all queued (why cap)', vq.auto.length === 2 && vq.queued.join() === 'zephyrGrid' && !vq.propose.length && vq0.auto.length === 0 && vq0.queued.length === 3 && vq0.why === 'cap', { vq, vq0 });
+  let q = T.queueWords(T.stateOf({}), ['zephyrGrid', 'ZEPHYRGRID', 'orbitLatch'], '/w/vibespace', now);
+  q = T.queueWords(q, ['tallowMint'], '/w/work', now);
+  const due = T.pendingDue(q, { now, settings: P, known: ['orbitlatch'] });
+  const dueOff = T.pendingDue(q, { now, settings: { teach: true, autoProjects: ['/w/work'] }, known: [] });
+  ok('the queue: deduped (any case); the next tick sends what is still under an automatic folder and not known since; a folder turned off drops its words', q.pending.length === 3 && due.send.map((x) => x.term).join() === 'zephyrGrid,tallowMint' && dueOff.send.map((x) => x.term).join() === 'tallowMint' && dueOff.keep.length === 0, { q: q.pending, due, dueOff });
+  const j = T.journalAdd(T.stateOf({}), { at: now, kind: 'terms', chars: 9, added: 0, skipped: 3, words: ['Varnokin', 'Kestrel Bay', 'zephyrGrid'], skips: [{ term: 'Varnokin', reason: 'review', fields: { score: 0.98 } }, { term: 'Kestrel Bay', reason: 'review' }, { term: 'zephyrGrid', reason: 'refused' }] }).journal[0];
+  ok('a journal row keeps the words sent, EVERY skipped entry (its reason and the other fields the vendor sent) and the reasons counted', j.words.length === 3 && j.skips[0].fields.score === 0.98 && j.skips[2].reason === 'refused' && JSON.stringify(j.reasons) === '{"review":2,"refused":1}' && j.skipped === 3, j);
+  ok('the reasons in words: «已能写对 2 · 词典不收 1»; a reason the table does not know is the vendor\'s own word; a skip with none is «没给理由»', T.reasonsWords('zh', j.reasons) === '已能写对 2 · 词典不收 1' && T.reasonsWords('en', { 'too-short': 1 }) === 'too-short 1' && T.reasonsWords('zh', T.reasonCounts([{ term: 'x' }])) === '没给理由 1');
+  let st5 = T.stateOf({}); for (let i = 0; i < 4; i++) st5 = T.journalAdd(st5, { at: now + i, kind: 'terms', added: 0, skipped: 2 });
+  const k4 = T.skipStreak(st5);
+  st5 = T.journalAdd(T.journalAdd(st5, { at: now + 5, kind: 'context', chars: 9 }), { at: now + 6, kind: 'terms', added: 0, skipped: 1, skips: [{ term: 'a', reason: 'review' }] });
+  const k5 = T.skipStreak(st5);
+  ok('the streak: FIVE terms writes in a row that added nothing (a context row between them does not count) — the pre-lane rows\' skips are «unstated»; one add breaks it', k4 === null && k5 && k5.writes === 5 && k5.skipped === 9 && k5.reasons.unstated === 8 && k5.reasons.review === 1 && T.skipStreak(T.journalAdd(st5, { at: now + 7, kind: 'terms', added: 1, skipped: 0 })) === null, k5);
+
+  // ⑤b THE ENGINE over a fake vendor answering the DOCUMENTED shapes (https://dropline.fish.audio/docs §5.2: «review means
+  // Dropline did not need the word. refused means the dictionary did not take it»), parsed by THE client's skipOf
+  const skipRig = ({ settings = { teach: true }, vocab = ['VibeSpace'], answer = null, enginePath = ENGINE, model = null, account = () => ({ tier: 'oauth', name: 'Ana', team: 'Lab' }) } = {}) => {
+    const r = { calls: [], logs: [], rec: { enabled: true, config: { ...settings } }, clock: now, items: [], listeners: [] };
+    const reply = answer || ((list) => ({ added: [], skipped: list.map((t) => ({ term: t, reason: /^[A-Z]/.test(t) ? 'review' : 'refused', confidence: 0.97 })), dictionary_version: 7, request_id: 'tr_1' }));
+    const client = {
+      connected: () => true, account,
+      vocabulary: async () => { r.calls.push(['vocabulary']); return typeof vocab === 'function' ? vocab() : vocab; },
+      terms: async (list) => { r.calls.push(['terms', list.slice()]); const j = reply(list); const skips = (j.skipped || []).map(C.skipOf); return { added: j.added || [], skipped: skips.map((x) => x.term), skips, requestId: j.request_id }; },
+      context: async (b) => { r.calls.push(['context', b]); return { ok: true }; },
+    };
+    const userTodos = {
+      add: (key, it) => { const x = { id: 'ut' + r.items.length, sessionKey: key, status: 'open', reply: null, createdAt: r.clock, ...it }; r.items.push(x); return x; },
+      get: (id) => r.items.find((x) => x.id === id) || null,
+      setStatus: (id, s) => { const x = r.items.find((i) => i.id === id); if (x) x.status = s; },
+      onStatus: (fn) => r.listeners.push(fn),
+      openItems: () => r.items.filter((x) => x.status === 'open'),
+      reshapeItems: (fn) => r.items.filter((x) => fn(x)).length,
+      reply: (id, text) => { const x = r.items.find((i) => i.id === id); x.reply = { text, at: r.clock }; x.status = 'resolved'; for (const f of r.listeners) f(x, { status: 'resolved' }); },
+    };
+    delete require.cache[require.resolve(enginePath)];
+    r.E = require(enginePath).create({ client, plugin: { peek: () => r.rec, update: (fn) => fn(r.rec), settings: () => r.rec.config || {}, writeSettings: (pp) => { r.rec.config = { ...(r.rec.config || {}), ...pp }; } }, userTodos, now: () => r.clock, log: { warn() { }, log: (m) => r.logs.push(String(m)) }, ...(model ? { model } : {}) });
+    r.writes = () => r.calls.filter((c) => c[0] === 'terms');
+    r.reads = () => r.calls.filter((c) => c[0] === 'vocabulary').length;
+    r.seen = (conv, text, over = {}) => r.E.seen({ conv, title: conv, cwd: '/w/p', messages: [{ role: 'user', content: [{ type: 'text', text }] }], uiLang: 'zh', ...over });
+    return r;
+  };
+  const SAY = 'Varnokin met Ostrevia about zephyrGrid, then Varnokin and Ostrevia again';
+  // the owner's journal: 加入 ⇒ «已加入 0 · 跳过 N», a count and no why; the same words asked again
+  const ownerLeg = async (opts = {}) => {
+    const r = skipRig(opts);
+    const a = await r.seen('conv-1', SAY);
+    const res = a.proposal ? await r.E.confirm(a.proposal.id, a.proposal.terms) : null;
+    r.clock += 61 * MIN;
+    const b = await r.seen('conv-1', SAY + ' — and once more Varnokin');
+    return { r, a, res, b };
+  };
+  {
+    const { r, a, res, b } = await ownerLeg();
+    const row = r.E.view().journal[0];
+    ok('加入 on a card the vendor skips whole: the answer carries EVERY skipped entry with its reason (review / refused) and the vendor\'s other fields', !!res && res.added.length === 0 && res.skips.length === a.proposal.terms.length && res.skips.every((x) => ['review', 'refused'].includes(x.reason) && x.fields && x.fields.confidence === 0.97), res);
+    ok('…the journal row keeps the words, the skipped entries and the reasons counted (the base kept «added 0 · skipped 3» only)', row.kind === 'terms' && row.words.join() === a.proposal.terms.join() && row.skips.length === row.skipped && row.reasons.review === 2 && row.reasons.refused === 1, row);
+    ok('…a skip leaves the card AND is never asked again: an hour later the same conversation (and more) proposes none of the skipped words — no card, no item', !b.proposal && r.items.filter((x) => x.status === 'open' && x.text.startsWith('Dropline 建议')).length === 0, { b: b.proposal, items: r.items });
+  }
+  {
+    // the vendor module's ONE log line: the words + reasons + the request id, never a key (the real client over a stub fetch)
+    const logs = [];
+    const cl = C.create({ integrations: () => ({ resolveIntegration: () => ({ values: { apiKey: 'dl_' + 'k'.repeat(24) }, source: 'own' }) }), fetchImpl: async () => ({ ok: true, json: async () => ({ added: ['zephyrGrid'], skipped: [{ term: 'Varnokin', reason: 'review' }, 'Ostrevia'], dictionary_version: 3, request_id: 'tr_9' }) }), log: { log: (m) => logs.push(String(m)), warn: (m) => logs.push(String(m)) } });
+    const out = await cl.terms(['zephyrGrid', 'Varnokin', 'Ostrevia']);
+    ok('THE CLIENT: a skipped entry keeps its reason (a bare string entry = no reason, never thrown away) and ONE server log line names the words, the reasons and the request id — no key', out.skips[0].reason === 'review' && out.skips[1].term === 'Ostrevia' && out.skips[1].reason === null && out.added.join() === 'zephyrGrid' && logs.length === 1 && /skipped 2/.test(logs[0]) && logs[0].includes('"reason":"review"') && logs[0].includes('tr_9') && !/dl_k|Bearer/.test(logs[0]), { out, logs });
+  }
+  {
+    // the known words: the dictionary read is subtracted before asking (any case), read per ACCOUNT, a day, again after each write
+    let acct = { tier: 'oauth', name: 'Ana', team: 'Lab' };
+    const r = skipRig({ vocab: ['varnokin'], account: () => acct });
+    const a = await r.seen('conv-k', SAY);
+    ok('a word already in the dictionary (GET /v1/vocabulary, any case) is never proposed', !!a.proposal && !a.proposal.terms.some((x) => x.toLowerCase() === 'varnokin') && a.proposal.terms.includes('Ostrevia'), a.proposal);
+    r.clock += 2 * H;
+    await r.seen('conv-k2', 'nothing new here');
+    const n1 = r.reads();
+    await r.E.confirm(a.proposal.id, a.proposal.terms);
+    await r.seen('conv-k3', 'still nothing new');
+    const n2 = r.reads();
+    acct = { tier: 'oauth', name: 'Bo', team: 'Lab' };
+    await r.seen('conv-k4', 'and nothing');
+    ok('the dictionary is read once a day (2 h later: no read), again right after a write, and again for another account', n1 === 1 && n2 === 2 && r.reads() === 3, { n1, n2, n3: r.reads() });
+  }
+  {
+    // the streak: five writes that added nothing ⇒ ONE low For-you item naming the reasons; a sixth files no second; 停止发词
+    const r = skipRig();
+    for (let i = 0; i < 6; i++) { const o = await r.seen('conv-s' + i, `we met Quillon${'abcdef'[i]} and Quillon${'abcdef'[i]} about verbaMint${i}, verbaMint${i}`); if (o.proposal) await r.E.confirm(o.proposal.id, o.proposal.terms); r.clock += 2 * MIN; }
+    const streak = r.items.filter((x) => x.text.startsWith('Dropline 一直跳过'));
+    ok('five writes in a row that added nothing ⇒ ONE low For-you item that names the reasons («已能写对 … · 词典不收 …»); the sixth files no second', r.writes().length === 6 && streak.length === 1 && streak[0].urgency === 'low' && /已能写对 5 · 词典不收 5/.test(streak[0].text) && streak[0].options.join() === '停止发词,知道了' && streak[0].open && streak[0].open.panel === 'teach', { w: r.writes().length, items: r.items.map((x) => x.text), j: (r.rec.teach.journal || []).map((x) => [x.added, x.skipped]), streak: r.rec.teach.streak, lang: r.rec.teach.lang });
+    const item = streak[0];
+    item.reply = { text: '停止发词' }; item.status = 'resolved';
+    for (const f of r.listeners) f(item, { status: 'resolved' });
+    ok('…停止发词 turns teaching off (the context switch is its own)', r.rec.config.teach === false && r.rec.config.context === undefined, r.rec.config);
+    let n = 0;
+    const r2 = skipRig({ answer: (l) => (++n <= 5 ? { added: [], skipped: l.map((t) => ({ term: t, reason: 'review' })) } : { added: l, skipped: [] }) });
+    for (let i = 0; i < 6; i++) { const o = await r2.seen('conv-t' + i, `Quillon${i} and Quillon${i} met verbaMint${i}, verbaMint${i}`); if (o.proposal) await r2.E.confirm(o.proposal.id, o.proposal.terms); r2.clock += 2 * MIN; }
+    const it2 = r2.items.find((x) => x.text.startsWith('Dropline 一直跳过'));
+    ok('…a later write that ADDS closes the streak item (its producer closes it) — never a stale «keeps skipping»', r2.writes().length === 6 && !!it2 && it2.status === 'done' && r2.rec.teach.streak === null, { it2, streak: r2.rec.teach.streak });
+  }
+  {
+    // the cap: no call left this hour ⇒ no card, no item (the base filed both, then 加入 answered 429)
+    const r = skipRig({ answer: (l) => ({ added: l, skipped: [] }) });
+    const st = r.rec.teach = T.stateOf({});
+    for (let i = 0; i < 6; i++) r.rec.teach = T.recordCall(r.rec.teach, 'terms', now - i * MIN);
+    const o = await r.seen('conv-c', SAY);
+    ok('this hour\'s terms calls spent ⇒ the dictation files NO card and NO For-you item (an ask only for an act that can succeed)', !!st && !o.proposal && r.items.length === 0, { o, items: r.items });
+    r.clock += H;
+    const o2 = await r.seen('conv-c', SAY + ' and Varnokin');
+    ok('…the hour after, the card comes', !!o2.proposal);
+  }
+  {
+    // an automatic folder and its subfolder: nothing asked; over the room ⇒ queued + said; the tick sends them; a folder off drops them
+    const r = skipRig({ settings: { teach: true, autoProjects: ['/w/vibespace'] }, answer: (l) => ({ added: l, skipped: [] }) });
+    const o = await r.seen('conv-a', SAY, { cwd: '/w/vibespace/src/lib' });
+    const row = r.E.view().journal[0];
+    ok('a SUBFOLDER of an automatic folder: every word goes in ONE write, no card, no item; the journal row says automatic, the folder and the words', r.writes().length === 1 && !o.proposal && r.items.length === 0 && row.auto === true && row.folder === '/w/vibespace' && row.words.includes('Varnokin') && o.auto.folder === '/w/vibespace', { o, row });
+    r.rec.teach = T.recordAuto(r.rec.teach, 49 - r.rec.teach.autoSent.reduce((n, x) => n + x.n, 0), r.clock);   // 49 of this hour's 50 sent
+    const o2 = await r.seen('conv-b', 'Quillon and Quillon met verbaMint and Tarragona, Tarragona, verbaMint', { cwd: '/w/vibespace' });
+    const v = r.E.view();
+    ok('over this hour\'s room (49 of 50 sent): ONE word goes, the rest WAIT (out.queued — the toast «本小时额度已用完，N 个词稍后自动发»), no card', !o2.proposal && o2.auto.terms.length === 1 && o2.queued.n === 2 && v.pending.length === 2 && v.pending.every((x) => x.folder === '/w/vibespace'), { o2, pending: v.pending });
+    const before = r.writes().length;
+    ok('…the tick inside the hour sends nothing', (await r.E.flush()).waiting === 2 && r.writes().length === before);
+    r.clock += H + MIN;
+    await r.E.flush();
+    ok('…the tick after the hour sends the waiting words in ONE write, journaled as automatic', r.writes().length === before + 1 && r.writes().slice(-1)[0][1].length === 2 && r.E.view().pending.length === 0 && r.E.view().journal[0].auto === true, r.writes().slice(-1));
+    r.rec.teach = T.queueWords(r.rec.teach, ['orphanWord'], '/w/vibespace', r.clock);
+    r.rec.config.autoProjects = [];
+    await r.E.flush();
+    ok('…a folder turned off before the tick: its waiting words leave the queue, nothing sent', r.E.view().pending.length === 0 && r.writes().length === before + 1);
+  }
+  {
+    // the settings list's 加入: its answer carries the outcome (the toast names the skip and its reason)
+    const r = skipRig();
+    await r.seen('conv-w', SAY);
+    const v = await r.E.answerWord('Ostrevia', 'add');
+    ok('the settings list\'s 加入 answers the outcome with the list: skipped, its reason', v.result && v.result.added.length === 0 && v.result.skips[0].term === 'Ostrevia' && v.result.skips[0].reason === 'review' && Array.isArray(v.candidates), v.result);
+  }
+  // ⑤c RED CONTROLS — the base's three rules, one at a time, in a schedule copy: each check above goes red on it
+  const SRC = fs.readFileSync(path.join(REPO, 'src/voice-teach.js'), 'utf8');
+  const n1 = '  const gone = (t) => ignoredNow(state, t, now) || skippedNow(state, t, now);';
+  const n2 = "  if (capLeft(state, 'terms', now) <= 0) return { ...none, why: 'cap' };\n";
+  const n3 = '  const folder = cwd ? folderOf(set.autoProjects, cwd) : null;';
+  ok('the controls\' needles occur exactly once', [n1, n2, n3].every((n) => SRC.split(n).length === 2));
+  const noMemory = require(MC.write('src/voice-teach.js', SRC.replace(n1, '  const gone = (t) => ignoredNow(state, t, now);'), 'nomemory'));
+  const c1 = await ownerLeg({ model: noMemory });
+  ok('CONTROL RED: a schedule without the skip memory (the base) ⇒ an hour later the skipped words are ASKED AGAIN', !!c1.b.proposal && c1.b.proposal.terms.includes('Varnokin'), c1.b.proposal);
+  const askCapped = require(MC.write('src/voice-teach.js', SRC.replace(n2, ''), 'askcapped'));
+  const rc = skipRig({ model: askCapped });
+  for (let i = 0; i < 6; i++) rc.rec.teach = T.recordCall(rc.rec.teach || {}, 'terms', now - i * MIN);
+  const oc = await rc.seen('conv-c', SAY);
+  ok('CONTROL RED: a schedule that asks with the cap spent (the base) ⇒ a card + an item whose 加入 can only answer 429', !!oc.proposal && rc.items.length === 1);
+  const exact = require(MC.write('src/voice-teach.js', SRC.replace(n3, '  const folder = cwd && set.autoProjects.includes(cwd) ? cwd : null;'), 'exact'));
+  const rx = skipRig({ settings: { teach: true, autoProjects: ['/w/vibespace'] }, model: exact, answer: (l) => ({ added: l, skipped: [] }) });
+  const ox = await rx.seen('conv-a', SAY, { cwd: '/w/vibespace/src/lib' });
+  ok('CONTROL RED: an exact-match folder rule (the base) ⇒ the subfolder ASKS (a card, no automatic write)', !!ox.proposal && rx.writes().length === 0, ox);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

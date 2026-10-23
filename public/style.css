@@ -1394,6 +1394,11 @@ button.ut-notice-head::after { content: '▸'; content: '▸' / ""; margin-left:
 .ut-notices-open > button.ut-notice-head::after { content: '▾'; content: '▾' / ""; }
 button.ut-notice-head:hover { color: var(--accent); }
 .ut-notices:not(.ut-notices-open) > .ut-chips, .ut-notices:not(.ut-notices-open) > .ut-notice-groups { display: none !important; }
+/* lane inbox-fyi-mark-all: 「全部已读」 shares the head's line — the head stays THE toggle, the strip and the groups wrap below */
+.ut-notices { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; }
+.ut-notices > button.ut-notice-head { flex: 1 1 0; min-width: 0; width: auto; }
+.ut-notices > .ut-chips, .ut-notices > .ut-notice-groups { flex: 1 1 100%; min-width: 0; }
+.ut-notices > .ut-read-all { margin: 10px 0 2px; }
 .ut-item-notice .ut-text { color: var(--text-secondary); }
 .ut-item-notice .ut-dot { background: var(--text-dim); }
 .taskbar-user-todos.ut-blink { animation: ut-blink 0.9s ease 2; }
@@ -1560,12 +1565,13 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .ut-live-dot[data-state="unreachable"] { border-style: dashed; background: transparent; }
 .ut-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* design-user-inbox-reply chunk 4: "Mark all seen", the board chip (the For-you window), the fold's expander (lane foryou-folds: a band's) */
-.ut-seen-all {
+.ut-seen-all, .ut-read-all {
   flex: 0 0 auto; background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
   color: var(--text-secondary); font-size: 10px; line-height: 14px; padding: 1px 6px; cursor: pointer; white-space: nowrap;
 }
-.ut-seen-all:not(:disabled):hover { color: var(--accent); border-color: var(--accent); }
+.ut-seen-all:not(:disabled):hover, .ut-read-all:not(:disabled):hover { color: var(--accent); border-color: var(--accent); }
 .ut-seen-all:disabled { opacity: 0.5; cursor: progress; }
+.ut-read-all:disabled { opacity: 0.45; cursor: default; } /* nothing open to read — its title says so */
 .ut-board {
   flex: 0 0 auto; font-size: 9px; font-weight: 400; line-height: 13px; padding: 0 5px; border-radius: 999px;
   border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap;
@@ -2434,7 +2440,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   #user-todos-popup .ut-reply-btn svg, #user-todos-popup .ut-reply-send svg, #phone-home .ut-reply-btn svg, #phone-home .ut-reply-send svg { width: 15px; height: 15px; }
   #user-todos-popup .ut-live-dot, #phone-home .ut-live-dot { width: 9px; height: 9px; }
   /* chunk 4: "Mark all seen" and the fold's expander are touch targets too */
-  #user-todos-popup .ut-seen-all, #phone-home .ut-seen-all { min-height: 36px; padding: 6px 12px; font-size: 12px; }
+  #user-todos-popup .ut-seen-all, #phone-home .ut-seen-all, #user-todos-popup .ut-read-all, #phone-home .ut-read-all { min-height: 36px; padding: 6px 12px; font-size: 12px; }
   #user-todos-popup .ut-fold, #phone-home .ut-fold { min-height: 36px; font-size: 12px; }
   /* B-328d: the notice filter chips are touch targets too */
   #user-todos-popup .ut-chip, #phone-home .ut-chip { min-height: 36px; padding: 6px 12px; font-size: 12px; }
@@ -4266,6 +4272,13 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm);
 }
 .iw-filter:focus { outline: none; border-color: var(--accent); }
+/* lane inbox-fyi-mark-all: «Mark all read» beside the Notices tab's count (that tab only) */
+.iw-read-all {
+  flex: 0 0 auto; font-size: 11px; padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-input); color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+}
+.iw-read-all:not(:disabled):hover { color: var(--accent); border-color: var(--accent); }
+.iw-read-all:disabled { opacity: 0.45; cursor: default; }
 .iw-body { flex: 1 1 auto; min-height: 0; display: flex; }
 .iw-list { flex: 0 0 clamp(240px, 36%, 400px); min-width: 0; overflow-y: auto; border-right: 1px solid var(--border); outline: none; padding: 2px 0 8px; }
 .iw-list:focus-visible .iw-row.on { box-shadow: inset 0 0 0 1px var(--accent); }
@@ -4376,7 +4389,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .iw-back:hover { color: var(--accent); border-color: var(--accent); }
 /* touch: every control a ≥ 36 px target (rows get the same floor through paneMode's --iw-row-min) */
 @media (hover: none) and (pointer: coarse) {
-  .iw-tab, .iw-scope-btn, .iw-act, .iw-opt, .iw-back, .iw-tail-head, .iw-filter { min-height: 36px; }
+  .iw-tab, .iw-read-all, .iw-scope-btn, .iw-act, .iw-opt, .iw-back, .iw-tail-head, .iw-filter { min-height: 36px; }
   .iw-back { min-width: 40px; }
   .iw-filter, .iw-reply-input { font-size: 14px; }
 }
@@ -6103,6 +6116,17 @@ a.chan-prop-file-name:hover, a.chan-prop-file-name:focus-visible { text-decorati
   .chan-outbox-list .chan-prop-where .chan-prop-link { display: inline-flex; align-items: center; min-height: 36px; }
 }
 .chan-outbox-sec { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim); margin: 4px 0 -2px; }
+/* lane outbox-window-scroll-filter (the owner 2026-10-22: «这个窗口里不能滚动，只能拉长窗口才能看到下面那个要发的消息»): the list is THE
+   window's ONE scroll container — the toolbar keeps its height, every section (the API calls' too) is INSIDE the list and
+   no child of it shrinks (a shrinking section is how the waiting message got 0 px); a section head carries the census's
+   words and, folded under 「待审批」, its one door 「在「全部」里看」 */
+.chan-outbox > .jobs-toolbar { flex-shrink: 0; }
+.chan-outbox-list > * { flex-shrink: 0; }
+.chan-outbox-sec-words { flex: 0 1 auto; min-width: 0; }
+.chan-outbox-sec .chan-outbox-sec-all { margin: 0 0 0 auto; padding: 1px 8px; font-size: 11px; font-weight: 500; letter-spacing: normal; text-transform: none; }
+.chan-outbox-sec .chan-outbox-sec-all[hidden] { display: none; }
+.chan-outbox-sec-folded { padding: 4px 0; }
+@media (max-width: 480px) { .chan-outbox-sec .chan-outbox-sec-all { min-height: 36px; padding: 6px 12px; } .chan-api-orow { min-height: 36px; align-items: center; } }
 
 /* the dialog family — ONE width token (a1 O3 / R4), the house form rhythm */
 .dialog.chan-dialog { width: min(520px, calc(92vw / var(--ui-scale, 1))); }
@@ -6622,9 +6646,16 @@ label.chan-cap-row { cursor: default; }
 .chan-api-reject-pop { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-dialog); box-shadow: 0 4px 14px color-mix(in srgb, #000 18%, transparent); }
 .chan-api-reject-pop .chan-api-why { flex: 1 1 12em; min-width: 0; box-sizing: border-box; }
 @media (max-width: 600px) { .chan-api-actions > .mounts-btn { flex: 1 1 auto; text-align: center; } .chan-api-reject-pop .chan-api-why { flex-basis: 100%; } }
+.chan-api-outbox { display: flex; flex-direction: column; gap: 2px; }
+.chan-api-outbox[hidden] { display: none; }
+.chan-api-outbox > .chan-outbox-sec { margin-top: 8px; }
 .chan-api-outbox-list { display: flex; flex-direction: column; gap: 4px; }
 .chan-api-orow { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; text-align: left; overflow-wrap: anywhere; width: 100%; background: none; color: var(--text); font: inherit; }
 .chan-api-orow .chan-api-orow-head { font-size: 13px; }
+/* lane outbox-window-scroll-filter: «actor · action» · the policy chip · ×n · the short status at the row's end */
+.chan-api-orow .chan-api-orow-count { font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.chan-api-orow .chan-api-orow-count[hidden] { display: none; }
+.chan-api-orow .chan-api-orow-out { margin-left: auto; white-space: nowrap; }
 .chan-api-dialog .chan-api-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; }
 .chan-api-dialog .chan-api-row .chan-api-who { flex: 1 1 8em; min-width: 0; overflow-wrap: anywhere; }
 .chan-api-dialog .chan-api-row .chan-api-tier { flex: 1 1 12em; min-width: 0; }
@@ -7684,6 +7715,11 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .vault-pw { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
 .vault-pw:focus { outline: none; border-color: var(--border-active); }
 .vault-err { min-height: 1.3em; color: var(--bad-text); font-size: 12px; }
+/* lane vault-slow-load: a vault wait is SAID — a spinner and the step's name, from the press to the answer */
+.vault-wait { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
+.vw-list > .vault-wait, .vw-ak-audit-list > .vault-wait { padding: 14px; }
+.vault-spin { flex: none; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: oat-spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .vault-spin { animation: none; } }
 .vault-state-line { display: flex; align-items: center; gap: 8px; color: var(--text); }
 .vault-state-line[data-state="locked"] { color: var(--warn-text); }
 .vault-state-when { color: var(--text-dim); font-size: 12px; }

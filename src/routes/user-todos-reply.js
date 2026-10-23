@@ -31,6 +31,12 @@
  *       server.js registers it BEFORE `POST /api/user-todos/:id` — Express
  *       matches in order, and after it `resolve-many` would read as an item id.
  *
+ *   POST /api/user-todos/notices/read-all   {ids: string[] (1..1000)}  ·  POST /api/user-todos/notices/unread {ids}
+ *     → {ok:true, changed: [id…], already: n, refused: [id…], unknown: [id…]} — «Mark all read» on the notices
+ *       (lane inbox-fyi-mark-all): the store's readNotices — every open NOTICE among the ids done in ONE save + ONE
+ *       broadcast, an id already resolved left as it is (idempotent), an ask refused by id; `unread` is its 5 s Undo
+ *       (exactly the `changed` ids back open, as they were) | {error, code}: agent_forbidden 403 · too_many / bad_ids 400.
+ *
  * OWNER-ONLY (both routes): cookie auth comes from auth.middleware (every non-/api/agent/*
  * route), and an agent's session / job token is refused by name — a reply is
  * the USER's own message (a per-occurrence owner action), so it goes through
@@ -105,6 +111,9 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
 
 const RESOLVE_MANY_MAX = 200; // one group holds ≤ 20 open items per session (the store's cap) — 200 is ten groups, never a whole-store wipe
 const RESOLVE_MANY_STATUSES = ['dismissed', 'done'];
+// lane inbox-fyi-mark-all: «Mark all read» covers every listed notice in ONE request — the ledger's own cap (MAX_ITEMS),
+// so no number of notices ever takes N round-trips; the store touches notices only (an ask in `ids` is refused by id)
+const NOTICES_READ_MAX = 1000;
 
 function registerResolveManyRoute(app, { userTodos }) {
   app.post('/api/user-todos/resolve-many', (req, res) => {
@@ -119,6 +128,22 @@ function registerResolveManyRoute(app, { userTodos }) {
       res.json({ ok: true, changed: r.changed.length, unknown: r.unknown });
     } catch (e) { fail(500, 'failed', e.message); }
   });
+  // «Mark all read» (lane inbox-fyi-mark-all): POST /api/user-todos/notices/read-all {ids} — every open NOTICE among the
+  // ids done in ONE store write + ONE broadcast (idempotent: an id already resolved stays as it is); …/unread {ids} = its
+  // 5 s Undo — exactly those come back open. Owner-only like resolve-many; `changed` lists the ids, the Undo's input.
+  const noticesDoor = (read) => (req, res) => {
+    const fail = (status, code, error) => res.status(status).json({ error, code });
+    try {
+      if (isAgentBearer(req)) return fail(403, 'agent_forbidden', 'reading the user\'s notices is the user\'s act — an agent token cannot');
+      const { ids } = req.body || {};
+      if (!Array.isArray(ids) || !ids.length || !ids.every((x) => typeof x === 'string' && x)) return fail(400, 'bad_ids', 'ids must be a non-empty array of item ids');
+      if (ids.length > NOTICES_READ_MAX) return fail(400, 'too_many', `at most ${NOTICES_READ_MAX} ids per request (got ${ids.length})`);
+      const r = userTodos.readNotices(ids, read, 'user');
+      res.json({ ok: true, changed: r.changed, already: r.already.length, refused: r.refused, unknown: r.unknown });
+    } catch (e) { fail(500, 'failed', e.message); }
+  };
+  app.post('/api/user-todos/notices/read-all', noticesDoor(true));
+  app.post('/api/user-todos/notices/unread', noticesDoor(false));
 }
 
 /** GET /api/user-todos/:id → {item} — ONE item WHOLE, whatever its status (2026-09-27, the
@@ -137,4 +162,4 @@ function registerItemReadRoute(app, { userTodos }) {
   });
 }
 
-module.exports = { registerUserTodoReplyRoutes, registerResolveManyRoute, registerItemReadRoute, RESOLVE_MANY_MAX, STATUS, sessionForItem };
+module.exports = { registerUserTodoReplyRoutes, registerResolveManyRoute, registerItemReadRoute, RESOLVE_MANY_MAX, NOTICES_READ_MAX, STATUS, sessionForItem };

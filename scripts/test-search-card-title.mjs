@@ -119,6 +119,22 @@ console.log('— ② the real renderer (esbuild → node, DOM shimmed)');
   ok('pending codex stub (empty query) renders NO empty chip', r.renderToolMsg(pendCodex)._html && !/chat-tool-query/.test(r.renderToolMsg(pendCodex)._html));
   ok('pending claude WebSearch header carries the query while running', chip(r.renderToolMsg(pendClaude)._html)?.text === 'pending q', r.renderToolMsg(pendClaude)._html.slice(0, 300));
   ok('searchQueryChipHtml is exported and empty for non-search / empty input', searchQueryChipHtml({ toolName: 'Read', input: { query: 'x' } }, {}) === '' && searchQueryChipHtml({ toolName: 'WebSearch', input: {} }, {}) === '');
+  // ── lane agy-card-details (2026-10-22 — the owner, two screenshots of an Antigravity chat: «很多卡片都缺少细节») ──
+  // the real renderer over agy's card shapes: a Read whose result is a one-line summary, a run_command with agy's own
+  // words, a sub tool card closed by the kill, a KILLED sub's parent card.
+  const SUB_TERMINATED = '@@agy-subagent-terminated@@'; // = src/agy-store.js SUB_TERMINATED / src/helper-ask.js isSubTerminated
+  const tr = (toolName, input, output, status = 'ok') => { const b = { type: 'tool_result', toolCallId: 'c', toolName, input, output, status }; return r.renderToolResult(b, { role: 'tool', status: status === 'ok' ? 'complete' : 'error', toolStatus: status, toolName, content: [b] }); };
+  const rh = tr('Read', { file_path: '/home/u/roster.md', offset: 1, limit: 400, Path: '/home/u/roster.md' }, '113 lines, 24215 bytes');
+  ok('GAP 1 Read: agy’s «113 lines, 24215 bytes» summary → «113 lines · 23.6 KB» status over a clickable path — never «1 line»', /113 lines/.test(rh) && /23\.6 KB/.test(rh) && /roster\.md/.test(rh) && !/>\s*1 line</.test(rh), rh.slice(0, 320));
+  const bh = tr('Bash', { command: 'wc -l roster.md', summary: 'count the lines', CommandLine: 'wc -l roster.md' }, 'ok');
+  ok('GAP 3 Bash: agy’s toolSummary rides the card head (its own words for the act)', chip(bh)?.text === 'count the lines', bh.slice(0, 320));
+  const th = tr('Read', { file_path: '/home/u/a.txt' }, SUB_TERMINATED, 'error');
+  ok('GAP 5 timeline: a killed sub’s unfinished read card says «Terminated with the subagent» — never the raw sentinel, never a spinner', /Terminated with the subagent/.test(th) && !th.includes(SUB_TERMINATED) && !/chat-spinner/.test(th) && /a\.txt/.test(th), th.slice(0, 320));
+  const subMsg = { role: 'tool', status: 'error', toolStatus: 'error', toolCallId: 'p:24', content: [{ type: 'tool_result', toolCallId: 'p:24', toolName: 'Agent', input: { description: 'A-L', prompt: 'Analyze A-L.' }, output: '', status: 'error' }], taskInfo: { id: 'aa000000-0000-4000-8000-0000000000f1', subId: 'aa000000-0000-4000-8000-0000000000f1', type: 'agent', status: 'stopped', state: 'SUBAGENT_STATE_KILLED', agentRole: 'A-L', lastText: 'Reading a.txt', summary: '', steps: 56, files: [] } };
+  const sh = r.renderToolMsg(subMsg)._html;
+  ok('GAP 5 card: a KILLED sub → «Terminated by the parent» + «Last progress», never «It sent no answer»', /Terminated by the parent/.test(sh) && /Last progress/.test(sh) && /Reading a\.txt/.test(sh) && !/It sent no answer/.test(sh), sh.slice(0, 420));
+  // a non-agy tool (no input.summary) gets NO summary chip — no behaviour change for claude / codex
+  ok('no input.summary → no summary chip (claude / codex unchanged)', !/chat-tool-query/.test(tr('Bash', { command: 'ls' }, 'ok')));
 }
 
 console.log('— ③ wiring pins');

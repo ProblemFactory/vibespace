@@ -1474,12 +1474,13 @@ ok(miss.length === 0 && zh.includes('"键盘在对话框 — 点画面继续操�
 // key… (revealAccountKey) asks FIRST while the vault is unlocked and this page holds no window (§1 dialogPassword: asked after the
 // hub's refusal it opened a round trip late, and the second password went to the agent's page); the Vault window's 「显示」
 // (revealValue) asks before its request
+// (lane vault-slow-load: the import line gains sayVaultWait — askRevealPassword's wait is said; the line stays pinned whole)
 { const VR = fs.readFileSync(path.join(REPO, 'src/lib/vault-reveal.js'), 'utf8');
   const fnOf = (src, head) => { const a = src.indexOf(head); return a < 0 ? '' : src.slice(a, src.indexOf('\n}\n', a)); };
   const firstLine = (fn) => fn.split('\n').slice(1).find((l) => /\S/.test(l) && !/^\s*\/\//.test(l)) || '';
   const PRE = "  if (!revealLeftMs() && vaultFacts()?.state === 'unlocked' && !(await askRevealPassword())) return null;";
   const asksFirst = (src) => { const f = fnOf(src, 'export async function revealAccountKey('); return firstLine(f) === PRE && f.indexOf(PRE) < f.indexOf('fetchJson('); };
-  ok(asksFirst(VR) && /^import \{ vaultWords, vaultFacts, onVaultFacts \} from '\.\/vault-unlock\.js';$/m.test(VR), 'vault-reveal.js: Show key… (revealAccountKey) asks 验证是你 FIRST — before any request — while the vault is unlocked and this page holds no window', firstLine(fnOf(VR, 'export async function revealAccountKey(')));
+  ok(asksFirst(VR) && /^import \{ vaultWords, vaultFacts, onVaultFacts, sayVaultWait \} from '\.\/vault-unlock\.js';$/m.test(VR), 'vault-reveal.js: Show key… (revealAccountKey) asks 验证是你 FIRST — before any request — while the vault is unlocked and this page holds no window', firstLine(fnOf(VR, 'export async function revealAccountKey(')));
   ok(!asksFirst(VR.replace(PRE + '\n', '')), 'NEGATIVE CONTROL (the pre-lane revealAccountKey: the key asked for first): the pin is red');
   const rv = fnOf(VR, 'export async function revealValue(');
   ok(/^    if \(!revealLeftMs\(\) && !\(await askRevealPassword\(\)\)\) return \{ ok: false, code: 'cancelled' \};$/m.test(rv) && rv.indexOf('askRevealPassword()') < rv.indexOf('rvPost('), 'vault-reveal.js: the Vault window\'s 「显示」 (revealValue) asks before its request while this page holds no window', rv.slice(0, 300));

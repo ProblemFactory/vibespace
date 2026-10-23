@@ -7,7 +7,7 @@
 import { t } from './i18n.js';
 import { createModalShell, fetchJson } from './utils.js';
 import { enterSubmits } from './chat-enter-keys.js';
-import { vaultWords, vaultFacts, onVaultFacts } from './vault-unlock.js';
+import { vaultWords, vaultFacts, onVaultFacts, sayVaultWait } from './vault-unlock.js';
 
 let pageSecret = null;   // THIS page's window — memory only
 let revealUntil = 0;     // its end on this page's clock (the hub's own clock is the authority)
@@ -64,9 +64,9 @@ export function askRevealPassword() {
     const submit = async () => {
       err.textContent = '';
       if (!pw.value) { pw.focus(); return; }
-      go.disabled = true;
+      const done = sayVaultWait(go, err, t('Verifying…'), t('Checking the second password…'));   // lane vault-slow-load: the wait is said
       const r = await rvPost('/api/vault/reveal-session', { password: pw.value });
-      go.disabled = false;
+      done();
       pw.value = '';
       if (r && r.ok && typeof r.page === 'string') { pageSecret = r.page; revealUntil = Date.now() + (Number(r.leftMs) || 0); opened = true; changed(); close(); return; }
       pw.focus();

@@ -20,6 +20,8 @@
  *   scopeRows(entries, {sessionKey, query, tab, textOf}) — the rows the left
  *                                        pane lists: the tab, the session scope,
  *                                        the text filter
+ *   readOnSight(item)                  — a notice that asks nothing is READ by being read: on screen
+ *                                        NOTICE_READ_MS in the pane, or left by ‹ back (lane inbox-fyi-mark-all)
  *   rowPreview(detail, max)            — the list row's one-line cut of the detail
  *                                        (plain words: markdown marks dropped)
  *   itemView(item, ctx)                — the right pane as STRUCTURE: its meta
@@ -41,6 +43,19 @@ export const NARROW_PX = 620;
 export const TOUCH_ROW_PX = 36;
 /** The two list pages: the asks (needs you) and the for-your-information notices. */
 export const TABS = Object.freeze(['actions', 'notices']);
+
+/** A notice shown this long in the item pane is read (lane inbox-fyi-mark-all, the owner 2026-10-22: 「既然是仅供知晓
+ *  还让我一个一个确认很弱智」) — long enough that arrowing past a row reads nothing, short enough that opening one does. */
+export const NOTICE_READ_MS = 1500;
+
+/** THE READ-ON-SIGHT RULE: an OPEN notice that asks nothing — no producer button (Check again, Show window,
+ *  Re-authorize…), no option chips, no card, no door — is resolved by being read (the same status write as Mark done;
+ *  the window does not move the selection). A notice that offers a button stays open until it is pressed or marked:
+ *  resolving it under the reader's pointer would take the button away mid-read. */
+export function readOnSight(item) {
+  const i = item || {};
+  return i.kind === 'notice' && i.status === 'open' && !i.action && !i.card && !i.open && !(Array.isArray(i.options) && i.options.length);
+}
 
 const idOf = (e) => (e && e.item ? e.item.id : null);
 const isOpenEntry = (e) => !!(e && e.item && !e.resolved);

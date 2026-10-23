@@ -23,9 +23,9 @@
 // Approve, never pushed into the recipient's message.
 //
 // THE OUTBOX WINDOW is a toolbar (summary + an Awaiting | All segment) over
-// the cards: Awaiting = the queue; All = grouped by STATE with a dot per head
-// (awaiting · unknown · failed · sent · rejected) so an `unknown` outcome is
-// never buried under sent ones (the element borrowed from direction B).
+// ONE scrolling list: Awaiting = the queue; All = every proposal newest first
+// with its state pill (lane outbox-window-scroll-filter — the per-state heads
+// of direction B gave way to the census's sections; see below).
 //
 // Every vendor / agent string is textContent (fence 5): a proposal's text is
 // an agent's, the reason is an adapter's, the why is a label — none of it
@@ -73,6 +73,15 @@
 // offers "Jump to this message" (it is a message of the thread now). More than `INLINE_FOLD_OVER` decided ⇒ the
 // settled ones sit under ONE folded line "Handled proposals (N)" that opens in place; an unknown / failed outcome
 // is never folded away (it still asks something of the owner). The Outbox window is unchanged.
+//
+// lane outbox-window-scroll-filter (the owner, 2026-10-22, the Outbox window: «1 条待我审批 这一条在哪呢？» and «这个窗口里不能滚动，只能拉长
+// 窗口才能看到下面那个要发的消息»): the API calls' section sat OUTSIDE the list, so its 20 rows squeezed the list — the one waiting
+// message in it — to 0 px, and it ignored the filter. Now THE LIST IS THE WINDOW'S ONE SCROLL CONTAINER and every section (the
+// message proposals, the API calls) lives inside it; ONE PURE census (src/outbox-census.js) counts the head and the sections
+// and decides the view: 「待审批」 = ONLY what waits, the sections holding it first, a section with nothing waiting FOLDED to its
+// summary line (「在「全部」里看」); 「全部」 = everything newest first with its outcome (the per-state heads are gone). An API row
+// is the card law's «actor · action · named object» + the policy chip + a short status, identical consecutive rows ONE row ×n;
+// its ids, HTTP status and size sit in the card's 技术细节 fold.
 import { fetchJson, showToast, showContextMenu, showImageOverlay } from './utils.js';
 import { urlViewerKind } from './file-types.js';
 import { t } from './i18n.js';
@@ -86,15 +95,15 @@ import * as chanCaps from '../channel-caps.js';
 import * as P from '../channel-policy.js';
 // a3 i18n: a route failure is worded by its CODE, never by the engine's sentence.
 import { routeErrorText } from './channel-words.js';
-import { apiOutboxSection } from './channel-api-card-view.js';   // B-2198 part 2: one row per raw-API proposal, its card under it
+import { apiOutboxSection, outboxSecHead, paintSecHead } from './channel-api-card-view.js';   // B-2198 part 2: one row per raw-API proposal, its card under it
+import { fateOf as apiFate } from '../channel-api-card.js';
+import { outboxCensus, outboxView } from '../outbox-census.js';   // lane outbox-window-scroll-filter: ONE count, ONE filter
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { enterSubmits } from './chat-enter-keys.js';
 
 const ICON = svgIcon16('<path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 4.5l5.5 4 5.5-4"/><path d="M8 2v3"/>');
 const JSON_HDR = { 'Content-Type': 'application/json' };
 /** The Outbox's All view: the order states are grouped in (attention first). */
-const STATE_ORDER = ['awaiting-approval', 'sending', 'unknown', 'failed', 'sent', 'rejected', 'expired', 'withdrawn', 'proposed'];
-const STATE_TONE = { 'awaiting-approval': 'attn', sending: 'attn', unknown: 'warn', failed: 'bad', sent: 'ok', rejected: 'idle', expired: 'idle', withdrawn: 'idle', proposed: 'idle' };
 /** This device's last-used receipt delivery (the split buttons' primary). */
 const DELIVER_KEY = 'vibespace.channels.receiptDeliver';
 export function rememberedDelivery() { try { return localStorage.getItem(DELIVER_KEY) === 'wake-now' ? 'wake-now' : 'next-turn'; } catch { return 'next-turn'; } }
@@ -920,50 +929,42 @@ function keyedRow(app, p, prev, opts) {
   return row;
 }
 /**
- * B-f467 THE OUTBOX LIST'S NODES for one store answer `ob` (`{proposals, accounts}`): the Awaiting view = its rows;
- * All = grouped by state with a head per state (the order of STATE_ORDER); each row followed by its FULL CARD when
- * `open` holds its id. `list` = the container whose kept rows / cards / heads are reused (keyed). Returns
- * `{nodes, view, awaiting, proposals}`; the caller places them (`placeArmed`).
+ * B-f467 THE OUTBOX LIST'S NODES for one store answer `ob` (`{proposals, accounts}`) and the API cards `apiCards` — in
+ * the order of THE CENSUS's view (lane outbox-window-scroll-filter, src/outbox-census.js): each section's head (its
+ * waiting / total, from the census), then its rows — a message proposal's row followed by its FULL CARD when `open`
+ * holds its id; the API section is `apiSection` (channel-api-card-view.js), drawn from the same census section.
+ * 「待审批」 ('awaiting') lists only what waits, the sections holding it first, a section with nothing waiting folded to
+ * its head (its 「在「全部」里看」 calls `onAll(key)`); 「全部」 ('all') every proposal newest first. `list` = the container
+ * whose kept rows / cards / heads are reused (keyed). Returns `{nodes, view, census, awaiting, proposals}` (the last two
+ * = the message section's); the caller places them (`placeArmed`).
  */
-export function outboxNodes(app, list, ob, { view = null, open = new Set(), onToggle = null, onReview = null } = {}) {
-  const ps = ((ob && ob.proposals) || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0));
-  const awaiting = ps.filter((p) => p.state === 'awaiting-approval');
-  const v = view || (awaiting.length ? 'awaiting' : 'all');
+export function outboxNodes(app, list, ob, { view = null, open = new Set(), onToggle = null, onReview = null, apiCards = [], apiSection = null, onAll = null } = {}) {
+  const census = outboxCensus({ proposals: (ob && ob.proposals) || [], apiCards: apiCards || [], apiFate });
+  const vw = outboxView(census, view);
+  const msgs = census.sections.find((x) => x.key === 'messages');
   const badges = accountBadges((ob && ob.accounts) || []);
   const kids = list ? [...list.children] : [];
   const cards = new Map(kids.filter((c) => c.classList.contains('chan-prop')).map((c) => [c.dataset.proposal, c]));
   const rows = new Map(kids.filter((c) => c.classList.contains('chan-orow')).map((c) => [c.dataset.orow, c]));
-  const heads = new Map(kids.filter((c) => c.classList.contains('chan-outbox-sec')).map((h) => [h.dataset.state, h]));
+  const heads = new Map(kids.filter((c) => c.classList.contains('chan-outbox-sec')).map((h) => [h.dataset.sec, h]));
   const nodes = [];
   const push = (p) => {
     const isOpen = open.has(p.id);
     nodes.push(keyedRow(app, p, rows.get(p.id) || null, { badge: badges.get(p.adapterId) || null, open: isOpen, onToggle, onReview }));
     if (isOpen) nodes.push(keyedCard(app, p, cards.get(p.id) || null));
   };
-  if (!ps.length) nodes.push(el('div', 'empty-hint', t('When an agent proposes a reply with vibespace-channels, it waits here for you to approve, edit or reject it.')));
-  else if (v === 'awaiting') {
-    if (!awaiting.length) nodes.push(el('div', 'empty-hint', t('Nothing is waiting for your approval.')));
-    for (const p of awaiting) push(p);
-  } else {
-    const known = new Set(STATE_ORDER);
-    const groups = [...STATE_ORDER, ...ps.map((p) => p.state).filter((s) => !known.has(s))];
-    for (const st of [...new Set(groups)]) {
-      const mine = ps.filter((p) => p.state === st);
-      if (!mine.length) continue;
-      let h = heads.get(st);
-      if (!h) {
-        h = el('div', 'chan-outbox-sec');
-        h.dataset.state = st;
-        h.appendChild(el('span', `chan-dot chan-dot-${STATE_TONE[st] || 'idle'}`));
-        h.appendChild(el('span', ''));
-      }
-      const words = `${stateLabel(st)} · ${mine.length}`;
-      if (h.lastElementChild.textContent !== words) h.lastElementChild.textContent = words;
-      nodes.push(h);
-      for (const p of mine) push(p);
+  if (!census.total) nodes.push(el('div', 'empty-hint', t('When an agent proposes a reply with vibespace-channels, it waits here for you to approve, edit or reject it.')));
+  else if (vw.view === 'awaiting' && !census.waiting) nodes.push(el('div', 'empty-hint', t('Nothing is waiting for your approval.')));
+  for (const sec of census.total ? vw.sections : []) {
+    if (sec.key === 'messages') {
+      nodes.push(paintSecHead(heads.get('messages') || outboxSecHead('messages'), sec, t('Message proposals · {a} awaiting you · {n}', { a: sec.waiting, n: sec.total }), onAll));
+      for (const p of sec.items) push(p);
+    } else if (sec.key === 'api' && apiSection) {
+      apiSection.draw(sec);
+      nodes.push(apiSection.el);
     }
   }
-  return { nodes, view: v, awaiting, proposals: ps };
+  return { nodes, view: vw.view, census, awaiting: msgs.waitingItems, proposals: msgs.items };
 }
 
 /** The section a conversation window draws above its composer (design C4): the cards that still wait (awaiting /
@@ -1053,7 +1054,7 @@ export function openChannelOutbox(app, opts = {}) {
   const bar = el('div', 'jobs-toolbar');
   const summary = el('span', 'jobs-summary');
   bar.appendChild(summary);
-  // the Awaiting | All segment (a1 C5): Awaiting = the queue; All = grouped by state
+  // the Awaiting | All segment (a1 C5): Awaiting = only what waits for you (every section); All = everything newest first
   const seg = el('div', 'chan-seg');
   const segAwait = el('button', 'jobs-btn', t('Awaiting'));
   segAwait.type = 'button'; segAwait.dataset.view = 'awaiting';
@@ -1061,12 +1062,14 @@ export function openChannelOutbox(app, opts = {}) {
   segAll.type = 'button'; segAll.dataset.view = 'all';
   seg.append(segAwait, segAll);
   bar.appendChild(seg);
+  // lane outbox-window-scroll-filter: THE list is the window's ONE scroll container — the API calls' section is a node
+  // INSIDE it (it sat beside it and squeezed it to 0 px), placed where the census's view puts it
   const list = el('div', 'chanwin-list chan-outbox-list');
-  const apiSec = apiOutboxSection(app);
-  root.append(bar, apiSec.el, list);
-  /** `null` until the user picks — the store decides the first view. */
+  root.append(bar, list);
+  /** `null` until the user picks — the census decides the first view. */
   let view = null;
   let last = null;
+  let apiCards = [];
   /** B-f467: the proposals whose full card is open under their row (pruned as proposals leave). */
   const open = new Set();
   const onToggle = (id) => { if (open.has(id)) open.delete(id); else open.add(id); draw(last); };
@@ -1078,17 +1081,25 @@ export function openChannelOutbox(app, opts = {}) {
     if (primary) primary.focus();
     if (card && card.scrollIntoView) card.scrollIntoView({ block: 'nearest' });
   };
+  /** A folded section's 「在「全部」里看」: the All view, that section's head at the top of the list. */
+  const onAll = (key) => {
+    view = 'all';
+    draw(last);
+    const h = [...list.querySelectorAll('.chan-outbox-sec')].find((x) => x.dataset.sec === key);
+    if (h && h.scrollIntoView) h.scrollIntoView({ block: 'start' });
+  };
+  const apiSec = apiOutboxSection(app, { onRecords: (recs) => { apiCards = recs; draw(last); }, onAll });
 
   // KEYED (2026-09-27): a broadcast re-renders only the rows / cards whose record
   // changed; a card the user is editing is left alone; section heads are
   // re-worded in place (B-f467: the nodes are outboxNodes' — a row per proposal)
   function draw(ob) {
     last = ob;
-    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview });
+    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview, apiCards, apiSection: apiSec, onAll });
     for (const id of [...open]) if (!r.proposals.some((p) => p.id === id)) open.delete(id);
     segAwait.classList.toggle('chan-seg-on', r.view === 'awaiting');
     segAll.classList.toggle('chan-seg-on', r.view === 'all');
-    summary.textContent = r.proposals.length ? t('{a} awaiting your approval · {n} proposals', { a: r.awaiting.length, n: r.proposals.length }) : t('No proposals yet');
+    summary.textContent = r.census.total ? t('{a} awaiting your approval · {n} proposals', { a: r.census.waiting, n: r.census.total }) : t('No proposals yet');
     const nodes = r.nodes;
     placeArmed(list, nodes);
   }

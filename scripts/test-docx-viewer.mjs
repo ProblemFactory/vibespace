@@ -368,8 +368,10 @@ try {
   ok(neg === 1, `NEGATIVE CONTROL: the same paragraph text through innerHTML DOES run its onerror (window.__docxPwned = ${neg}) — the payload is live, the viewer made it text`);
   // the control's handler ran on the APP page ⇒ the page's report-only policy reported it: the suite's own, taken (lane
   // frame-host-preview — the teardown judges what is left: zero)
-  const negReports = await takeCspReports((r) => r.directive === 'script-src-attr' && r.blocked === 'inline' && r.document !== 'about', { ms: 3000 });
-  ok(negReports.length === 1, 'NEGATIVE CONTROL: …and the app page\'s policy reported that handler (taken — the suite\'s own)', negReports);
+  // lane chrome-156-drift: taken by the control's OWN SAMPLE (the payload's handler, src/app-csp.js 'report-sample'), so a
+  // product report with other code is never taken; once when it compiles, and on Chrome 156 also when its attribute is SET
+  const negReports = await takeCspReports((r) => r.directive === 'script-src-attr' && r.blocked === 'inline' && r.document !== 'about' && String(r.sample || '').startsWith('window.__docxPwned='), { ms: 3000, want: 2 });
+  ok(negReports.length >= 1 && negReports.length <= 2, 'NEGATIVE CONTROL: …and the app page\'s policy reported that handler (taken by its own sample — the suite\'s own; on Chrome 156 also when its attribute is set)', negReports);
 
   // ── ⑥ refusals ──
   console.log('⑥ refusals');

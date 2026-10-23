@@ -10,6 +10,13 @@
 // never a For-you item (the list in All Settings). ✕ / 忽略 / 全部标为已看 / a word's 忽略 CONSUME the words' evidence in
 // voice-model's EVIDENCE LEDGER (the plugin's own store file, data/voice-suggestions.json, writeJsonAtomic 0600): a word
 // comes back only from a NEW dictation; a new item waits a day after a dismissal (suggestionPace).
+// lane voice-teach-skips (the owner 2026-10-22: every terms write since the feature shipped added 0 — «如果加入会跳过为啥还让我
+// 加入»): EVERY terms write goes through `afterTerms` — the journal row keeps the words + the vendor's skipped entries and
+// reasons, the skipped words are remembered 30 days (never proposed meanwhile), the added ones are known at once, the
+// dictionary read is cached per ACCOUNT for a day and read again after each write; five writes in a row that added nothing
+// file ONE low For-you item naming the reasons (停止发词 = teach off; a later add closes it). A folder set to automatic (and
+// its subfolders) asks nothing: its words go within the caps, the rest wait in `pending` — the next dictation or the tick
+// (`tickMs`, the wiring's) sends them.
 const crypto = require('crypto');
 const fs = require('fs');
 const { writeJsonAtomic } = require('../channel-store.js'); // the ONE atomic data/*.json writer
@@ -23,8 +30,9 @@ const DONE_KEY = i18nKey('Add these words to your Dropline dictionary');
 /** the item's DOOR: the plugin's sheet on the teach panel, this proposal's card chosen with its preselected words */
 const openOf = (p) => (p ? { kind: 'plugin-settings', plugin: ITEM_KEY, panel: 'teach', prefill: { proposal: p.id, terms: (p.pick || []).slice(0, 32) }, done: DONE_KEY } : { kind: 'plugin-settings', plugin: ITEM_KEY, panel: 'teach' });
 
-function create({ client, plugin, userTodos = null, now = Date.now, log = console, model = T, ledgerFile = null }) {
-  let vocab = { at: 0, terms: [] };
+function create({ client, plugin, userTodos = null, now = Date.now, log = console, model = T, ledgerFile = null, tickMs = 0 }) {
+  let vocab = { at: 0, terms: [], who: null, stale: false };
+  const learned = new Map();      // lane voice-teach-skips: lower case → {term, at} — words the vendor ADDED (known before a read shows them)
   const previews = new Map();     // preview id → {conv, title, source, text, hash} (the exact text the dialog showed)
   const settings = () => model.settingsOf(typeof plugin.settings === 'function' ? plugin.settings() : {}); // the settings rows (src/plugin-settings.js voice-input), never rec.config
   const state = () => model.prune((plugin.peek() || {}).teach, now());
@@ -45,31 +53,81 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
     if (ledgerFile) { try { writeJsonAtomic(ledgerFile, { v: 1, words: ledger.words }, { mode: 0o600 }); } catch (e) { log.warn?.(`[voice] the suggestion ledger was not written: ${e && e.message}`); } }
     return ledger;
   };
-  /** the dictionary (a read, cached an hour) — proposals never repeat a word it already holds */
+  /** the dictionary (a read) — proposals never repeat a word it already holds. Lane voice-teach-skips: cached per ACCOUNT
+   *  (another sign-in reads again), for a day, and read again after each write (`stale`); + the words the vendor added */
+  const whoOf = () => { try { const a = typeof client.account === 'function' ? client.account() : null; return a ? [a.tier, a.name, a.team].join('|') : ''; } catch { return ''; } };
   async function known() {
-    if (vocab.at && now() - vocab.at < 3600e3) return vocab.terms;
-    try { vocab = { at: now(), terms: await client.vocabulary() }; } catch (e) { vocab = { at: now(), terms: vocab.terms }; log.warn?.(`[voice] the Dropline vocabulary was not read: ${e && e.message}`); }
-    return vocab.terms;
+    const who = whoOf(), at = now();
+    if (vocab.who !== null && vocab.who !== who) learned.clear();
+    if (!(vocab.at && vocab.who === who && !vocab.stale && at - vocab.at < model.TEACH_LIMITS.vocabEveryMs)) {
+      try { vocab = { at, terms: await client.vocabulary(), who, stale: false }; } catch (e) { vocab = { at, terms: vocab.who === who ? vocab.terms : [], who, stale: false }; log.warn?.(`[voice] the Dropline vocabulary was not read: ${e && e.message}`); }
+    }
+    for (const [k, x] of learned) if (!(at - x.at < model.TEACH_LIMITS.vocabEveryMs)) learned.delete(k);
+    return [...vocab.terms, ...[...learned.values()].map((x) => x.term)];
   }
-  // 加入 ⇒ the words sent are KNOWN at once (the hour's cached read would offer them again)
-  const learnKnown = (terms) => { vocab = { at: vocab.at, terms: [...vocab.terms, ...terms] }; };
+  // the words the vendor ADDED are KNOWN at once (a read right after a write may not show them yet)
+  const learnKnown = (terms) => { for (const t of terms) learned.set(String(t).toLowerCase(), { term: String(t), at: now() }); };
   function closeItem(p, by = 'user') {
     if (!p || !p.itemId || !userTodos) return;
     try { const it = typeof userTodos.get === 'function' ? userTodos.get(p.itemId) : null; if (!it || it.status === 'open') userTodos.setStatus(p.itemId, 'done', by); } catch (e) { log.warn?.(`[voice] the proposal's For-you item was not closed: ${e && e.message}`); }
   }
   // lane voice-dictionary-nag: filed `low` — a plugin's low reminder waits in band 5 with the other asks, never pinned
-  // under urgent, no badge, no toast (src/attention-model.js bandOfRow)
-  function fileItem(p) {
+  // under urgent, no badge, no toast (src/attention-model.js bandOfRow). Lane voice-teach-skips: the ONE filing door of the
+  // plugin's items (the proposal's and the skip streak's)
+  function fileTodo(words, open, what) {
     if (!userTodos) return null;
     try {
-      const r = userTodos.add(ITEM_KEY, { text: model.teachWords(p.lang, 'proposal', { terms: p.pick.join(', ') }), detail: model.teachWords(p.lang, 'detail'), options: [model.teachWords(p.lang, 'add'), model.teachWords(p.lang, 'ignore')], origin: 'plugin', plugin: ITEM_KEY, open: openOf(p), kind: 'action', urgency: 'low', by: 'agent', sessionName: 'Voice input · Dropline' });
+      const r = userTodos.add(ITEM_KEY, { ...words, origin: 'plugin', plugin: ITEM_KEY, open, kind: 'action', urgency: 'low', by: 'agent', sessionName: 'Voice input · Dropline' });
       return (r && r.id) || null;
-    } catch (e) { log.warn?.(`[voice] the proposal's For-you item was not filed: ${e && e.message}`); return null; }
+    } catch (e) { log.warn?.(`[voice] the ${what} For-you item was not filed: ${e && e.message}`); return null; }
   }
-  /** THE ONE open suggestion item: the plugin's open item in the store (the newest, when an older instance left two) */
+  const fileItem = (p) => fileTodo({ text: model.teachWords(p.lang, 'proposal', { terms: p.pick.join(', ') }), detail: model.teachWords(p.lang, 'detail'), options: [model.teachWords(p.lang, 'add'), model.teachWords(p.lang, 'ignore')] }, openOf(p), "proposal's");
+  /** lane voice-teach-skips: the skip streak's ONE item — the reasons in words, 停止发词 / 知道了, the teach panel its door */
+  const fileStreak = (k, lang) => fileTodo({ text: model.teachWords(lang, 'streak', { n: k.writes, reasons: model.reasonsWords(lang, k.reasons) }), detail: model.teachWords(lang, 'streakDetail'), options: [model.teachWords(lang, 'streakOff'), model.teachWords(lang, 'streakOk')] }, openOf(null), 'skip streak\'s');
+  /** EVERY terms write lands here (lane voice-teach-skips): the call counted, the journal row with the words + the vendor's
+   *  skipped entries + reasons, the skips remembered 30 d, the added words known, the read made stale, the answered words
+   *  off every card and out of the queue; the streak filed once (five writes, nothing added) or closed by an add */
+  function afterTerms(st, words, r, { auto = false, folder = null, title = '', at }) {
+    const skips = Array.isArray(r.skips) ? r.skips : (Array.isArray(r.skipped) ? r.skipped : []).map((term) => ({ term: String(term), reason: null }));
+    st = model.recordCall(st, 'terms', at);
+    if (auto) st = model.recordAuto(st, words.length, at);
+    st = model.journalAdd(st, { at, kind: 'terms', title, chars: words.join(', ').length, added: r.added.length, skipped: skips.length, auto, words, skips, folder });
+    st = model.rememberSkips(st, skips, at);
+    learnKnown(r.added); vocab.stale = true;
+    const gone = new Set([...r.added, ...skips.map((x) => x.term)].map((w) => String(w).toLowerCase()));
+    const off = (x) => !gone.has(String(x).toLowerCase());
+    st.proposals = st.proposals.map((p) => ({ ...p, terms: p.terms.filter(off), pick: (p.pick || []).filter(off) })).filter((p) => p.terms.length);
+    st.pending = st.pending.filter((x) => off(x.term));
+    if (r.added.length) { if (st.streak && st.streak.itemId) closeItem({ itemId: st.streak.itemId }, 'voice-input'); st.streak = null; }
+    else if (!st.streak) { const k = model.skipStreak(st); if (k) st.streak = { at, itemId: fileStreak(k, st.lang || 'en') }; }
+    return st;
+  }
+  /** the next tick (lane voice-teach-skips): the automatic folders' waiting words that may go now — ONE /v1/terms */
+  let flushing = false;
+  async function flushPending(st, at, kn) {
+    if (flushing || !st.pending.length) return st;
+    const d = model.pendingDue(st, { now: at, settings: settings(), known: kn });
+    st.pending = d.keep;
+    if (!d.send.length) return st;
+    const words = d.send.map((x) => x.term);
+    const folder = d.send.every((x) => x.folder === d.send[0].folder) ? d.send[0].folder : null;
+    flushing = true;
+    try { return afterTerms(st, words, await client.terms(words), { auto: true, folder, at }); } catch (e) { log.warn?.(`[voice] the waiting words were not sent: ${e && e.message}`); st.pending = [...d.send, ...d.keep]; return st; } finally { flushing = false; }
+  }
+  /** the tick's own door: teach on, signed in, words waiting ⇒ flushPending, saved */
+  async function flush() {
+    if (!settings().teach || !client.connected() || !state().pending.length) return null;
+    const kn = await known();
+    const st = await flushPending(state(), now(), kn);
+    save(st);
+    return { waiting: st.pending.length };
+  }
+  /** THE ONE open suggestion item: the plugin's open item in the store (the newest, when an older instance left two) — never
+   *  the skip streak's item (the same plugin files it; a batch merged into it would re-word it into a suggestion) */
   const openItem = () => {
     if (!userTodos || typeof userTodos.openItems !== 'function') return null;
-    return userTodos.openItems().filter((i) => i.sessionKey === ITEM_KEY).sort((a, b) => b.createdAt - a.createdAt)[0] || null;
+    const streakId = (state().streak || {}).itemId || null;
+    return userTodos.openItems().filter((i) => i.sessionKey === ITEM_KEY && i.id !== streakId).sort((a, b) => b.createdAt - a.createdAt)[0] || null;
   };
   /** an item's words: the engine's own record of it, or (an item filed before this lane) its proposal's preselection */
   const itemWords = (id, st) => (st.item && st.item.id === id ? st.item.terms : ((st.proposals.find((x) => x.itemId === id) || {}).pick || []));
@@ -103,23 +161,31 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
    *  maybe the context — the first one a PREVIEW the browser shows before anything leaves */
   async function seen({ conv, title = '', cwd = '', messages = [], files = [], groupName = '', uiLang = 'en' } = {}) {
     const set = settings();
-    const out = { proposal: null, auto: null, preview: null, context: null };
+    const out = { proposal: null, auto: null, queued: null, preview: null, context: null };
     conv = String(conv || '').slice(0, 120);
     if ((!set.teach && !set.context) || !conv || !client.connected()) return out;
     let st = state();
     const at = now();
+    st.lang = ['zh', 'ja'].includes(uiLang) ? uiLang : 'en';
     if (set.teach) {
       const kn = await known();
       const terms = VM.termsOf({ messages, files, cwd, groupName, known: kn });            // the per-project tier's input
       // the card's: words a person says — minus what the vendor knows AND the evidence a dismissal consumed (rule 1)
       const candidates = VM.proposalCandidates({ messages, files, cwd, groupName, known: kn, ledger: readLedger() });
+      st = await flushPending(st, at, kn);   // lane voice-teach-skips: the words an automatic folder left waiting go first
       const v = model.proposalVerdict(st, { conv, cwd, terms, candidates, now: at, settings: set, kindOf: VM.termKind, autoFrom: VM.autoSourcesOf({ messages, files, cwd }) });
       if (v.auto.length) {
         try {
           const r = await client.terms(v.auto);
-          st = model.journalAdd(model.recordAuto(model.recordCall(st, 'terms', at), v.auto.length, at), { at, kind: 'terms', title, chars: v.auto.join(', ').length, added: r.added.length, skipped: r.skipped.length, auto: true });
-          out.auto = { terms: v.auto, added: r.added, skipped: r.skipped };
-        } catch (e) { log.warn?.(`[voice] the project's terms were not sent: ${e && e.message}`); }
+          st = afterTerms(st, v.auto, r, { auto: true, folder: v.folder, title, at });
+          out.auto = { terms: v.auto, added: r.added, skipped: r.skipped, skips: r.skips || [], folder: v.folder };
+        } catch (e) { log.warn?.(`[voice] the automatic folder's words were not sent: ${e && e.message}`); st = model.queueWords(st, v.auto, v.folder, at); }
+      }
+      // lane voice-teach-skips: over this hour's room ⇒ no ask — the words wait, the next tick sends them (the toast says so)
+      if (v.queued.length) {
+        const before = st.pending.length;
+        st = model.queueWords(st, v.queued, v.folder, at);
+        out.queued = { n: st.pending.length - before, waiting: st.pending.length, folder: v.folder };
       }
       // THE PACE (lane voice-dictionary-nag, PURE voice-model suggestionPace): an open item ⇒ the words merge into it; a
       // dismissal less than a day ago ⇒ no For-you item (the card waits on the sheet); mode settings-only or nothing
@@ -157,6 +223,7 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
       } else if (v.act === 'send') {
         try {
           await client.context({ title: c.title, text: c.text });
+          vocab.stale = true;   // lane voice-teach-skips: Dropline adds the words it gets wrong from a context — read again
           st = model.journalAdd(model.recordCall(st, 'context', at), { at, kind: 'context', title: c.title, chars: c.text.length });
           st.ctxSent[conv] = { at, hash };
           out.context = { sent: true, chars: c.text.length };
@@ -177,6 +244,7 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
     if (!settings().context) throw httpErr(409, 'context-off', 'sending context is turned off');
     if (!capOk('context')) throw httpErr(429, 'teach-cap', 'this instance sent its context 6 times this hour — try later');
     await client.context({ title: p.title, text: p.text });
+    vocab.stale = true;
     st = model.journalAdd(model.recordCall(state(), 'context', at), { at, kind: 'context', title: p.title, chars: p.text.length });
     st.ctxSent[p.conv] = { at, hash: p.hash };
     save(st);
@@ -193,14 +261,14 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
     if (!capOk('terms')) throw httpErr(429, 'teach-cap', 'this instance sent its terms 6 times this hour — try later');
     const r = await client.terms(pick);
     const at = now();
-    st = model.journalAdd(model.recordCall(state(), 'terms', at), { at, kind: 'terms', title: p.title, chars: pick.join(', ').length, added: r.added.length, skipped: r.skipped.length });
+    st = afterTerms(state(), pick, r, { title: p.title, at });
     st.proposals = st.proposals.filter((x) => x.id !== p.id);
     // lane voice-dictionary-nag: the sent words are KNOWN (they leave the ledger and the open item)
-    writeLedger(VM.ledgerAdded(readLedger(), pick)); learnKnown(pick);
+    writeLedger(VM.ledgerAdded(readLedger(), pick));   // afterTerms knows the ADDED ones and remembers the skipped (lane voice-teach-skips)
     const sh = p.itemId && st.item && st.item.id === p.itemId ? shrinkItem(st, p.terms) : { st, close: p.itemId }; // the card's words leave the item (its unticked ones were looked at)
     save(sh.st);
     if (sh.close) closeItem({ itemId: sh.close }, 'voice-input'); // the producer closes it — no answer of the person's
-    return { added: r.added, skipped: r.skipped };
+    return { added: r.added, skipped: r.skipped, skips: r.skips || [] };   // lane voice-teach-skips: the toast names each reason
   }
   /** 忽略: the proposal's terms are not offered again for 30 days; nothing leaves */
   function ignore(proposalId) {
@@ -226,12 +294,12 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
     const r = await client.terms(words);
     const at = now();
     const p = st.proposals.filter((x) => x.itemId === itemId).slice(-1)[0] || {};
-    st = model.journalAdd(model.recordCall(state(), 'terms', at), { at, kind: 'terms', title: p.title || '', chars: words.join(', ').length, added: r.added.length, skipped: r.skipped.length });
+    st = afterTerms(state(), words, r, { title: p.title || '', at });
     st.proposals = st.proposals.filter((x) => x.itemId !== itemId);
     if (st.item && st.item.id === itemId) st.item = null;
     save(st);
-    writeLedger(VM.ledgerAdded(readLedger(), words)); learnKnown(words);
-    return { added: r.added, skipped: r.skipped };
+    writeLedger(VM.ledgerAdded(readLedger(), words));
+    return { added: r.added, skipped: r.skipped, skips: r.skips || [] };
   }
   /** ✕ / 忽略 / 全部标为已看: «not now» — the item's words' evidence is CONSUMED (they come back only from a new dictation); nothing leaves.
    *  The batch's cards leave the sheet. */
@@ -250,7 +318,7 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
   async function answerWord(term, verb) {
     if (verb !== 'add' && verb !== 'ignore') throw httpErr(400, 'bad-request', 'verb must be add or ignore');
     const t = String(term || '').trim().toLowerCase();
-    let st = state();
+    let st = state(), result = null;
     const has = (x) => String(x).toLowerCase() === t;
     const word = t && (st.proposals.flatMap((p) => p.terms).find(has) || (st.item ? st.item.terms.find(has) : null));
     if (!word) throw httpErr(404, 'no-candidate', 'that word is not suggested now');
@@ -259,14 +327,15 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
       if (!capOk('terms')) throw httpErr(429, 'teach-cap', 'this instance sent its terms 6 times this hour — try later');
       const r = await client.terms([word]);
       const at = now();
-      st = model.journalAdd(model.recordCall(state(), 'terms', at), { at, kind: 'terms', title: '', chars: word.length, added: r.added.length, skipped: r.skipped.length });
-      writeLedger(VM.ledgerAdded(readLedger(), [word])); learnKnown([word]);
+      st = afterTerms(state(), [word], r, { at });
+      writeLedger(VM.ledgerAdded(readLedger(), [word]));
+      result = { added: r.added, skipped: r.skipped, skips: r.skips || [] };
     } else writeLedger(VM.ledgerDismissed(readLedger(), [word], now()));
     st.proposals = st.proposals.map((p) => ({ ...p, terms: p.terms.filter((x) => !has(x)), pick: (p.pick || []).filter((x) => !has(x)) })).filter((p) => p.terms.length);
     const sh = shrinkItem(st, [word]);
     save(sh.st);
     if (sh.close) closeItem({ itemId: sh.close }, 'voice-input'); // the producer closes it — no answer of the person's
-    return view();
+    return result ? { ...view(), result } : view();   // lane voice-teach-skips: 加入's outcome (the list's toast says a skip and why)
   }
   /** every word suggested now (the sheet's cards, newest first, then the open item's) — the settings list */
   const candidatesOf = (st) => {
@@ -291,9 +360,12 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
     if (Object.keys(w).length) plugin.writeSettings(w); // through the ONE settings writer (settings-updated reaches every tab)
     return view();
   }
+  // lane voice-teach-skips: a card's folder rule — the automatic folder covering its cwd (null = not covered: the card's
+  // toggle names the folder it would cover, `cwd`, and offers its `parent`); the waiting words with their folder
   function view() {
-    const st = state();
-    return { settings: settings(), proposals: st.proposals.map(({ id, conv, cwd, title, terms, pick, why, at }) => ({ id, conv, cwd, title, terms, pick: pick || [], why: why || {}, at })), journal: st.journal.slice().reverse(), caps: { terms: model.capLeft(st, 'terms', now()), context: model.capLeft(st, 'context', now()) }, candidates: candidatesOf(st) };
+    const st = state(), set = settings();
+    const cover = (cwd) => (cwd ? { folder: model.folderOf(set.autoProjects, cwd), parent: model.parentOf(cwd) } : null);
+    return { settings: set, proposals: st.proposals.map(({ id, conv, cwd, title, terms, pick, why, at }) => ({ id, conv, cwd, title, terms, pick: pick || [], why: why || {}, at, cover: cover(cwd) })), journal: st.journal.slice().reverse(), caps: { terms: model.capLeft(st, 'terms', now()), context: model.capLeft(st, 'context', now()) }, candidates: candidatesOf(st), pending: st.pending.map(({ term, folder, at }) => ({ term, folder, at })) };
   }
   // the For-you chip IS the press: 加入词库 adds the item's words, 忽略 is «not now»
   // lane foryou-plugin-notices: and so is the row's ✓ (its title says so — the door's `done`): ONE ✓ by the owner adds the
@@ -306,6 +378,8 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
       if (!it || it.sessionKey !== ITEM_KEY) return;
       const reply = it.reply && it.reply.text;
       const st = state();
+      // lane voice-teach-skips: the skip streak's item — 停止发词 turns teaching off (the context switch stays); 知道了 / × change nothing
+      if (st.streak && st.streak.itemId === it.id) { if (reply && reply === model.teachWords(st.lang || 'en', 'streakOff')) { try { plugin.writeSettings({ teach: false }); } catch (e) { log.warn?.(`[voice] teaching was not turned off: ${e && e.message}`); } } return; }
       const lang = st.item && st.item.id === it.id ? st.item.lang : (st.proposals.find((x) => x.itemId === it.id) || {}).lang || 'en';
       if (!(st.item && st.item.id === it.id) && !st.proposals.some((x) => x.itemId === it.id)) return;
       const byUser = ev.by === 'user';
@@ -334,7 +408,9 @@ function create({ client, plugin, userTodos = null, now = Date.now, log = consol
       });
     } catch (e) { log.warn?.(`[voice] the older For-you items were not given their door: ${e && e.message}`); }
   }
-  return { seen, answerPreview, confirm, ignore, addItem, dismissItem, answerWord, setSettings, view, capOk };
+  // lane voice-teach-skips: THE TICK — the automatic folders' waiting words go once the hour's room is back (unref'd)
+  if (tickMs > 0) { const t = setInterval(() => { flush().catch((e) => log.warn?.(`[voice] the waiting words were not sent: ${e && e.message}`)); }, tickMs); if (t.unref) t.unref(); }
+  return { seen, answerPreview, confirm, ignore, addItem, dismissItem, answerWord, setSettings, view, capOk, flush };
 }
 
 module.exports = { create, ITEM_KEY, DONE_KEY };

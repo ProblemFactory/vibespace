@@ -3,6 +3,7 @@
 // Words and fate come from the PURE model (src/channel-api-card.js); a card is KEYED by proposal id and patched in
 // place only when its model's `sig` changes; every surface refetches the same records on `channel-api-updated`.
 import * as C from '../channel-api-card.js';
+import { runsOf } from '../outbox-census.js';   // lane outbox-window-scroll-filter: identical consecutive Outbox rows are ONE row ×n
 import { fetchJson, showToast } from './utils.js';
 import { t, resolveLang } from './i18n.js';
 import { enterSubmits } from './chat-enter-keys.js';
@@ -72,11 +73,16 @@ export function renderApiCard(rec, prev = null, { app = null, head = true } = {}
   if (m.tier) meta.appendChild(chip(t('Under the tier: {tier}', { tier: TIER_WORD[m.tier] ? t(TIER_WORD[m.tier]) : m.tier })));
   if (m.cred) meta.appendChild(chip(m.cred));
   if (head) meta.appendChild(el('span', 'chan-api-outcome', tw(m.outcome)));
+  // lane outbox-window-scroll-filter: the Outbox's row says a SHORT status — its card adds the reason when there is one
+  else { const more = C.outcomeMore(rec); if (more) meta.appendChild(el('span', 'chan-api-outcome', tw(more))); }
   card.appendChild(meta);
   const tech = el('details', 'chan-api-tech'); tech.dataset.fold = 'tech';
   tech.appendChild(el('summary', '', t('Technical details')));
   tech.appendChild(el('code', 'chan-api-url', `${m.request.method} https://${m.request.host}${m.request.path}${m.request.query ? `?${m.request.query}` : ''}`));
   for (const h of m.headers) tech.appendChild(el('div', 'chat-status-dim chan-api-hdr', h));
+  // lane outbox-window-scroll-filter: the Outbox row never carries an id, an HTTP status or a size — they are here
+  if (!head && m.head.object && m.head.object.id) tech.appendChild(el('div', 'chat-status-dim chan-api-objline', t('Object id: {id}', { id: m.head.object.id })));
+  if (!head && C.answerOf(rec)) tech.appendChild(el('div', 'chat-status-dim chan-api-answerline', tw(C.answerOf(rec))));
   if (m.always) tech.appendChild(el('div', 'chat-status-dim chan-api-allowline', t('Allowed from then on: {shape}', { shape: m.always.params.shape })));
   // B-fc37: where the vendor redirected the approved call (method + host + path) and why VibeSpace did not follow
   if (m.redirect) tech.appendChild(el('div', 'chat-status-dim chan-api-redirectline', t('The vendor redirected it ({status}) to {to} — not followed: {why}', { status: m.redirect.status || '3xx', to: m.redirect.to, why: tw(m.redirect.why) })));
@@ -165,38 +171,92 @@ export function chatApiCards(app, cardEl, ids) {
   placeApiCards(box, rowCards(ids, records), { app });
 }
 
-/** THE OUTBOX'S API section: one row per proposal (fate dot · short title · policy chip · outcome), its card opens
- *  under it without repeating the title. */
-export function apiOutboxSection(app) {
+/** THE OUTBOX'S SECTION HEAD (lane outbox-window-scroll-filter) — both sections draw it: a dot (accent while one
+ *  waits), the census's words, and — FOLDED under 「待审批」 (nothing of it waits) — 「在「全部」里看」, the one door to its
+ *  rows. `paintSecHead` patches it in place; `onAll(key)` = the window's switch to 「全部」 at that section. */
+export function outboxSecHead(key) {
+  const h = el('div', 'chan-outbox-sec');
+  h.dataset.sec = key;
+  const all = el('button', 'jobs-btn chan-outbox-sec-all', t('See them in All'));
+  all.type = 'button';
+  all.hidden = true;
+  all.addEventListener('click', (ev) => { ev.stopPropagation(); if (h._onAll) h._onAll(key); });
+  h.append(el('span', 'chan-dot chan-dot-idle'), el('span', 'chan-outbox-sec-words'), all);
+  return h;
+}
+export function paintSecHead(h, sec, words, onAll = null) {
+  const dot = `chan-dot chan-dot-${sec.waiting ? 'attn' : 'idle'}`;
+  if (h.firstElementChild.className !== dot) h.firstElementChild.className = dot;
+  const w = h.querySelector('.chan-outbox-sec-words');
+  if (w.textContent !== words) w.textContent = words;
+  h.querySelector('.chan-outbox-sec-all').hidden = !sec.folded;
+  h.classList.toggle('chan-outbox-sec-folded', !!sec.folded);
+  h._onAll = onAll;
+  return h;
+}
+/** An Outbox row's words: «<actor> · <action>» (the named object only) — C.rowWords in this device's language. */
+export const rowText = (rm) => C.rowWords(rm, { t, lang: resolveLang() });
+
+/** THE OUTBOX'S API section (lane outbox-window-scroll-filter — the owner's card law): one row per RUN of identical
+ *  consecutive proposals — the fate dot · «actor · action» · the policy chip · «×n» · the short status — the card of
+ *  each opens under it without repeating the row (its ids, the HTTP status and the size in its 技术细节 fold); a
+ *  waiting one is its own row, its card open. `onRecords(records)` = the window: it takes every change and draws this
+ *  section through `draw(section)` (the census's — src/outbox-census.js), INSIDE its one scrolling list. Without
+ *  `onRecords` the section draws all its records itself (a suite's mount). */
+export function apiOutboxSection(app, { onRecords = null, onAll = null } = {}) {
   const root = el('div', 'chan-api-outbox');
-  const head = el('div', 'chan-outbox-sec', '');
+  root.dataset.sec = 'api';
+  const head = outboxSecHead('api');
   const list = el('div', 'chan-api-outbox-list');
   root.append(head, list);
   const open = new Set(), seen = new Set();
-  const draw = (all) => {
-    root.hidden = !all.length;
-    const waiting = all.filter((r) => C.fateOf(r) === 'pending').length;
-    const words = t('API calls · {a} awaiting you · {n}', { a: waiting, n: all.length });
-    if (head.textContent !== words) head.textContent = words;
+  let last = null;
+  const draw = (sec) => {
+    const S = last = sec || { key: 'api', total: 0, waiting: 0, folded: false, items: [] };
+    root.hidden = !S.total;
+    paintSecHead(head, S, t('API calls · {a} awaiting you · {n}', { a: S.waiting, n: S.total }), onAll);
+    const now = Date.now();
+    const runs = S.folded ? [] : runsOf(S.items, (r) => C.rowModel(r, { now }).runKey);
     const have = new Map([...list.children].map((c) => [c.dataset.key + (c.classList.contains('chan-api-card') ? '#card' : ''), c]));
     const nodes = [];
-    for (const r of all) {
-      const m = C.cardModel(r);
-      let row = have.get(r.id);
-      if (!row) { row = el('button', 'chan-orow chan-api-orow'); row.type = 'button'; row.dataset.key = r.id; row.append(el('span', 'chan-dot'), el('span', 'chan-api-orow-head'), el('span', 'chan-api-chip chan-api-chip-warn chan-api-orow-chip'), el('span', 'chat-status-dim chan-api-orow-out')); row.addEventListener('click', () => { if (open.has(r.id)) open.delete(r.id); else open.add(r.id); draw(records); }); }
+    for (const run of runs) {
+      const lead = run.items[0];
+      const m = C.rowModel(lead, { now });
+      let row = have.get(lead.id);
+      if (!row || !row.classList.contains('chan-api-orow')) {
+        row = el('button', 'chan-orow chan-api-orow'); row.type = 'button'; row.dataset.key = lead.id;
+        row.append(el('span', 'chan-dot'), el('span', 'chan-api-orow-head'), el('span', 'chan-api-chip chan-api-chip-warn chan-api-orow-chip'), el('span', 'chan-api-orow-count'), el('span', 'chat-status-dim chan-api-orow-out'));
+        row.addEventListener('click', () => {
+          const ids = row._ids || [];
+          const shut = ids.some((id) => open.has(id));
+          for (const id of ids) { if (shut) open.delete(id); else open.add(id); }
+          draw(last);
+        });
+      }
+      row._ids = run.items.map((r) => r.id);
       row.dataset.fate = m.fate;
+      row.dataset.count = String(run.items.length);
       row.querySelector('.chan-dot').className = `chan-dot chan-dot-${m.fate === 'pending' ? 'warn' : m.fate === 'ran' ? 'ok' : 'idle'}`;
-      const set = (s, x) => { const n = row.querySelector(s); if (n.textContent !== x) n.textContent = x; };
-      set('.chan-api-orow-head', titleText(m.head)); set('.chan-api-orow-chip', tw(m.sensitive)); set('.chan-api-orow-out', tw(m.outcome));
-      row.querySelector('.chan-api-orow-chip').hidden = !m.sensitive;
+      const set = (q, x) => { const n = row.querySelector(q); if (n.textContent !== x) n.textContent = x; };
+      set('.chan-api-orow-head', rowText(m)); set('.chan-api-orow-chip', tw(m.chip)); set('.chan-api-orow-out', tw(m.status));
+      set('.chan-api-orow-count', run.items.length > 1 ? `×${run.items.length}` : '');
+      row.querySelector('.chan-api-orow-chip').hidden = !m.chip;
+      row.querySelector('.chan-api-orow-count').hidden = run.items.length < 2;
       nodes.push(row);
-      if (!seen.has(r.id)) { seen.add(r.id); if (m.actionable) open.add(r.id); }
-      row.classList.toggle('chan-orow-open', open.has(r.id));
-      if (open.has(r.id)) nodes.push(renderApiCard(r, have.get(r.id + '#card') || null, { app, head: false }));
+      for (const r of run.items) if (!seen.has(r.id)) { seen.add(r.id); if (C.fateOf(r) === 'pending') open.add(r.id); }
+      const isOpen = run.items.some((r) => open.has(r.id));
+      row.classList.toggle('chan-orow-open', isOpen);
+      row.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      if (isOpen) for (const r of run.items) nodes.push(renderApiCard(r, have.get(r.id + '#card') || null, { app, head: false }));
     }
     nodes.forEach((n, i) => { if (list.children[i] !== n) list.insertBefore(n, list.children[i] || null); });
     while (list.children.length > nodes.length) list.lastChild.remove();
   };
-  const off = onApiCards(app, draw);
-  return { el: root, stop: off };
+  let mine = [];
+  const off = onApiCards(app, (all) => {
+    mine = all;
+    if (onRecords) onRecords(all);
+    else draw({ key: 'api', total: all.length, waiting: all.filter((r) => C.fateOf(r) === 'pending').length, folded: false, items: all });
+  });
+  return { el: root, stop: off, draw, records: () => mine };
 }

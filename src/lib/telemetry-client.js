@@ -383,6 +383,38 @@ export function gpuRenderer() {
   return (gpuRenderer._v = v);
 }
 
+// ── THE PAGE'S LAST REQUESTS (lane vault-slow-load — inc-mvk5jyv3 «保险库操作好像加载时间有点长» carried no timing at all) ──
+// The incident snapshot carries this page's last 20 requests to its own hub: the ROUTE (the first three path segments — the
+// server's own slow-request rule: never a query, an id or a path) and the milliseconds from the request to its last byte, so
+// a «加载有点长» record answers itself.
+export const FETCH_TIMINGS_KEPT = 20;
+const _fetchTimings = [];
+/** PURE: a resource-timing entry → { at, route, ms } for a request this page made to its own hub's /api/, else null. */
+export function fetchTimingOf(e, origin, timeOrigin = 0) {
+  if (!e || (e.initiatorType !== 'fetch' && e.initiatorType !== 'xmlhttprequest')) return null;
+  let u;
+  try { u = new URL(String(e.name)); } catch { return null; }
+  if (u.origin !== origin || !u.pathname.startsWith('/api/')) return null;
+  const ms = e.responseEnd > 0 ? e.responseEnd - e.startTime : e.duration;
+  return { at: Math.round(timeOrigin + (Number(e.startTime) || 0)), route: u.pathname.split('/').slice(0, 4).join('/'), ms: Math.max(0, Math.round(Number(ms) || 0)) };
+}
+export function recentFetchTimings() { return _fetchTimings.slice(); }
+export function installFetchTimingWatch() {
+  try {
+    if (typeof PerformanceObserver === 'undefined') return;
+    const po = new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) {
+        const rec = fetchTimingOf(e, location.origin, performance.timeOrigin);
+        if (!rec) continue;
+        _fetchTimings.push(rec);
+        if (_fetchTimings.length > FETCH_TIMINGS_KEPT) _fetchTimings.shift();
+      }
+    });
+    po.observe({ type: 'resource', buffered: true });
+  } catch { }
+}
+try { window.__vsFetchTimings = recentFetchTimings; } catch { }
+
 export function installLongTaskWatch() {
   try {
     if (typeof PerformanceObserver === 'undefined') return;

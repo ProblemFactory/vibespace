@@ -26,6 +26,9 @@
 //      shape card answers and the run's output comes back scrubbed — no answer of the whole suite carries the value
 //   ⑬ THE USE LAW (lane vault-use-law): a bearer refused at a person's door = one vault-use line naming it (its session /
 //      job), the 20th in a day runs the owner's card once; the guess it sent is in no line
+//   ⑭ A SLOW DOOR NAMES ITSELF (lane vault-slow-load — inc-mvk5jyv3 «保险库操作好像加载时间有点长», the server console had no
+//      vault line at all): a door slower than 250 ms = ONE log line (method, the route's PATTERN, ms) — never a parameter, a
+//      query, a password; a fast door says nothing; the agent doors too. RED CONTROL: the routes without the timer say nothing
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -582,6 +585,49 @@ console.log('⑬ THE USE LAW (lane vault-use-law — design q-043 D1/D7): a BEAR
   }
   ok(cards.length === 1 && cards[0].by === 'agent' && cards[0].key === 'agent:s1' && cards[0].entry === VU.VAULT_ENTRY && cards[0].door === 'unlock' && cards[0].n === VU.FAIL_PER_DAY, `the ${VU.FAIL_PER_DAY}th refused use of the session in a day runs the owner's card ONCE (${VU.FAIL_PER_DAY + 5 - before} more knocks)`, cards);
   ok(!fs.readFileSync(path.join(dataDir, VE.AUDIT_FILE), 'utf8').includes('a guess') && calls.length === calls0, 'the guess a bearer sent is in no line, and the engine\'s unlock was never asked');
+}
+
+console.log('⑭ A SLOW DOOR NAMES ITSELF (lane vault-slow-load): one line above 250 ms — the route\'s pattern and the ms, nothing else');
+{
+  const R = require(path.join(REPO, 'src/routes/vault.js'));
+  ok(R.VAULT_SLOW_MS === 250, 'the threshold is 250 ms');
+  ok(R.slowLineOf({ method: 'GET', route: { path: '/api/vault/totp/:name' }, originalUrl: '/api/vault/totp/my-bank?x=1' }, 812.4) === '[vault] GET /api/vault/totp/:name answered in 812 ms', 'the line names the ROUTE\'S PATTERN — never the parameter, never the query');
+  ok(R.slowLineOf({ method: 'POST', originalUrl: '/api/vault/totp/my-bank/grants?x=1' }, 300) === '[vault] POST /api/vault/totp answered in 300 ms', 'no matched route ⇒ the first three path segments (the server\'s own slow-request rule)');
+  const sData = path.join(ROOT, 'slow-data'); fs.mkdirSync(sData);
+  fs.writeFileSync(path.join(sData, '.accounts-key'), crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
+  const vS = VE.create({ dataDir: sData, kdf: { N: 1024, r: 8, p: 1 }, log, idleTimer: false, signInPassword: (p) => auth.verifyPassword(p), bcast: () => {} });
+  const realUnlock = vS.unlock;
+  vS.unlock = async (...a) => { await new Promise((r) => setTimeout(r, 320)); return realUnlock(...a); };   // the door is the subject: an engine 320 ms slow
+  const MUT = path.join(ROOT, 'vault-routes-untimed.js');
+  const src = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8');
+  const untimed = src.replace(/\n  app\.use\(\['\/api\/vault', '\/api\/agent\/vault'\][\s\S]*?\n  \}\);/, '');
+  ok(untimed !== src, 'CONTROL premise: the timer is cut out of the copy');
+  fs.writeFileSync(MUT, at('src/routes/vault.js')(untimed));
+  const drive = async (mod, opts = {}) => {
+    const lines = [];
+    const a = express(); a.use(auth.middleware()); auth.registerRoutes(a); a.use(express.json());
+    mod.registerVaultRoutes(a, { vault: vS, activeSessions, log: (l) => lines.push(String(l)), ...opts });
+    const s = await new Promise((r) => { const x = a.listen(0, '127.0.0.1', () => r(x)); });
+    const port = s.address().port, page = { cookie: COOKIE, 'sec-fetch-site': 'same-origin', origin: `http://127.0.0.1:${port}` };
+    const st = {};
+    if (vS.state() === 'not_set_up') st.setup = (await hit('/api/vault/setup', { port, headers: page, body: { password: PW } })).status;
+    st.lock = (await hit('/api/vault/lock', { port, headers: page })).status;
+    st.unlock = (await hit('/api/vault/unlock', { port, headers: page, body: { password: PW } })).status;
+    st.state = (await hit('/api/vault/state', { method: 'GET', port, headers: page })).status;
+    st.agent = (await hit('/api/agent/vault/state', { method: 'GET', port, headers: { authorization: 'Bearer ' + SESSION_TOKEN } })).status;
+    await new Promise((r) => setTimeout(r, 50));
+    s.close();
+    return { lines, st };
+  };
+  const d = await drive(R);
+  ok(d.st.lock === 200 && d.st.unlock === 200 && d.st.state === 200 && d.st.agent === 200, 'the doors answered (lock, a 320 ms unlock, the state, the agent state)', d.st);
+  ok(d.lines.length === 1 && /^\[vault\] POST \/api\/vault\/unlock answered in \d{3,} ms$/.test(d.lines[0]) && Number(d.lines[0].match(/(\d+) ms$/)[1]) >= 320, 'the slow unlock is ONE line: the method, the route, the ms — and the fast doors say nothing', d.lines);
+  ok(!d.lines.join('\n').includes(PW), 'the line carries no password');
+  const all = await drive(R, { slowMs: -1 });
+  ok(all.lines.some((l) => /^\[vault\] GET \/api\/vault\/state answered in \d+ ms$/.test(l)) && all.lines.some((l) => /^\[vault\] GET \/api\/agent\/vault\/state answered in \d+ ms$/.test(l)) && all.lines.length === 4, 'every vault door is timed — the person doors and the agent doors (a threshold below 0 names each)', all.lines);
+  const red = await drive(require(MUT));
+  ok(red.st.unlock === 200 && red.lines.length === 0, 'RED CONTROL: the routes without the timer — the same 320 ms unlock leaves no line (the owner\'s console)', red);
+  vS.close();
 }
 
 srv.close(); vault.close(); console.warn = warn0;

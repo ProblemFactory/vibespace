@@ -69,6 +69,45 @@ export function lookup(map, decoded, line, col) {
   return { source: map.sources[s[1]], line: s[2] + 1, col: s[3] + 1, name: s.length >= 5 ? (map.names[s[4]] || '') : '' };
 }
 
+/** SEVERAL generated positions ([[line, col]], 1-based) → Map `line:col` → lookup()'s answer (null where nothing maps), in
+ *  ONE pass over `mappings` that keeps only the asked lines' segments — decodeMappings holds every segment (~2 M arrays
+ *  for the client bundle). Lane chrome-156-followups: test-csp-report pins the CSP collector's sanitizer sites with it. */
+export function lookupMany(map, positions) {
+  const want = new Map();
+  for (const [l, c] of positions) { if (!want.has(l)) want.set(l, []); want.get(l).push(c); }
+  const out = new Map(), m = String((map && map.mappings) || '');
+  let src = 0, sLine = 0, sCol = 0, name = 0, line = 1, gCol = 0, value = 0, shift = 0, v = [];
+  let segs = want.has(1) ? [] : null;
+  const answer = () => {
+    for (const c of want.get(line)) {
+      let s = null;
+      for (const g of segs) { if (g[0] <= c - 1) s = g; else break; }
+      out.set(`${line}:${c}`, s && s.length >= 4 ? { source: map.sources[s[1]], line: s[2] + 1, col: s[3] + 1, name: s.length >= 5 ? (map.names[s[4]] || '') : '' } : null);
+    }
+  };
+  for (let i = 0; i <= m.length; i++) {
+    const ch = i < m.length ? m[i] : ';';
+    if (ch === ',' || ch === ';') {
+      if (v.length) {
+        gCol += v[0];
+        if (v.length >= 4) { src += v[1]; sLine += v[2]; sCol += v[3]; if (v.length >= 5) name += v[4]; }
+        if (segs) segs.push(v.length >= 5 ? [gCol, src, sLine, sCol, name] : v.length >= 4 ? [gCol, src, sLine, sCol] : [gCol]);
+        v = [];
+      }
+      if (ch === ';') { if (segs) answer(); line++; gCol = 0; segs = want.has(line) ? [] : null; }
+      continue;
+    }
+    const d = B64[ch];
+    if (d === undefined) throw new Error(`mappings: not a base64 character ${JSON.stringify(ch)}`);
+    value += (d & 31) * 2 ** shift;
+    if (d & 32) { shift += 5; continue; }
+    v.push(value % 2 === 1 ? -Math.floor(value / 2) : Math.floor(value / 2));
+    value = 0; shift = 0;
+  }
+  for (const [l, c] of positions) if (!out.has(`${l}:${c}`)) out.set(`${l}:${c}`, null); // a line past the last mapping
+  return out;
+}
+
 /** The client esbuild step of package.json's build script → esbuild API options (the map flags left to the caller). Throws
  *  on a flag it does not know — a silent difference would map the wrong bytes. `flagsOf` renders them back (the census:
  *  flagsOf(clientBuildOptions(pkg)) is the step's own flag list). */

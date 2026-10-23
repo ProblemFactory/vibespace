@@ -47,6 +47,12 @@
 //      the box is disabled, document.activeElement never the box, the typing lost (the incident). Then, last, on the
 //      desktop: a REAL press on 「Reopen and send」 ⇒ the conversation resumes behind the real create path, the reply is
 //      its FIRST input, it is live under one session, its window opens showing the reply, the item resolved
+// lane inbox-fyi-mark-all (the owner 2026-10-22: 「inbox 里仅供知晓部分应该加一个一键已读的按钮」):
+//   ㉑ «Mark all read» beside the Notices tab's count: a REAL press = ONE POST, ONE broadcast, the tab's count and the
+//      taskbar badge's grey count at 0 in that same tick, every notice row resolved in place, a 5 s Undo (a REAL press ⇒
+//      ONE POST, every one back open), disabled with its reason when nothing is open; the popup's notices head carries
+//      the same button; a notice that asks nothing is read by reading it (1.5 s in the pane with the person in the
+//      window — not before, not with focus elsewhere; one with chips never), and by ‹ back at once
 // VS_SHOT_DIR=<dir> saves the screenshots (the window with a long item, the 480 px window,
 // the popup with its new ⤢). Requires google-chrome (SKIP without).
 import { execSync, spawn, spawnSync } from 'node:child_process';
@@ -121,6 +127,8 @@ const BIG_RESOLVED_ID = 'ut-b19000000a', BIG_OPEN_ID = 'ut-b19000000b', LINKS_ID
 // lane browser-probe-transient (B-0b8c): the browser keeper's could-not-read-the-version notice — the product's own words
 // (PURE floorNotice / floorNoticeDetail over an exhausted ladder), its Check again door (⑭)
 const FLOOR_ID = 'ut-f100r00001';
+// lane inbox-fyi-mark-all (㉑): three notices that ask nothing + one that offers choices (never read by being shown)
+const RA1_ID = 'ut-4ead000001', RA2_ID = 'ut-4ead000002', RA3_ID = 'ut-4ead000003', RA_OPT_ID = 'ut-4ead0000c0';
 const BPF = require('../src/browser-profiles.js'), BFF = require('../src/browser-facts.js');
 const FLOOR_V = BPF.floorVerdict('', BPF.FLOOR_VERSION, { ok: false, exhausted: true, attempts: 6, at: 834e3, since: 1e3, why: 'timed out after 8 s' });
 const MARK_BIG_R = 'MARK-END-of-the-big-resolved', MARK_BIG_O = 'MARK-END-of-the-big-open';
@@ -139,6 +147,10 @@ const SEEDED = [
   seed(BIG_RESOLVED_ID, 'claude:' + OTHER_SID, { text: 'A long item handled yesterday', detail: BIG(MARK_BIG_R), status: 'done', resolvedBy: 'user', resolvedAt: now - 86400e3, createdAt: now - 90000e3 }),
   seed(BIG_OPEN_ID, LIVE_KEY, { text: 'A long open item that gets resolved elsewhere', detail: BIG(MARK_BIG_O), createdAt: now - 50e3 }),
   seed(LINKS_ID, 'claude:' + OTHER_SID, { text: 'Links in an item', detail: LINKS_DETAIL, createdAt: now - 85e3 }),
+  seed(RA1_ID, 'accounts', { kind: 'notice', origin: 'spend', sessionName: 'Spending', text: 'Account B has used 6 of its 12 unattended turns this hour (50%).', createdAt: now - 71e3 }),
+  seed(RA2_ID, 'accounts', { kind: 'notice', origin: 'spend', sessionName: 'Spending', text: 'Account C has used 7 of its 12 unattended turns this hour (58%).', createdAt: now - 72e3 }),
+  seed(RA3_ID, 'accounts', { kind: 'notice', origin: 'spend', sessionName: 'Spending', text: 'Account D has used 8 of its 12 unattended turns this hour (66%).', createdAt: now - 73e3 }),
+  seed(RA_OPT_ID, 'accounts', { kind: 'notice', origin: 'spend', sessionName: 'Spending', text: 'Account E crossed its daily budget — keep the cap?', options: ['Keep it', 'Raise it'], createdAt: now - 74e3 }),
   seed(FLOOR_ID, 'browser', { kind: 'notice', origin: 'browser', sessionName: 'Agent browser', text: BPF.floorNotice(FLOOR_V), detail: BPF.floorNoticeDetail(FLOOR_V, { retryMs: BFF.PROBE_RETRY_MS, timeoutMs: BFF.PROBE_TIMEOUT_MS }), action: { type: 'browser-floor-check' }, createdAt: now - 75e3 }),
 ];
 // ⑭'s browser CLI: its --version fails while <state>/fail exists (so the keeper's boot probe misses and the seeded notice
@@ -268,6 +280,8 @@ const stubToken = () => {
 };
 const fileItem = async (token, add) => (await fetch(`http://127.0.0.1:${PORT}/api/agent/user-todo`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ add }) })).json();
 const storeNow = async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/user-todos`)).json()).todos;
+// a leg's PREMISE (lane inbox-fyi-mark-all): these items open — an earlier leg may have READ a notice by showing it 1.5 s
+const ensureOpen = async (ids) => { const st = await storeNow(); for (const id of ids) if (!st.open.some((i) => i.id === id)) await fetch(`http://127.0.0.1:${PORT}/api/user-todos/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'open' }) }); };
 const shot = async (P, name, sel) => {
   const dir = process.env.VS_SHOT_DIR;
   if (!dir) return;
@@ -511,6 +525,7 @@ try {
   await realClick(P1, `${IW} .iw-tab[data-tab="actions"]`);
   await realClick(P1, `${IW} .iw-scope-btn[data-scope="all"]`);
   check('All sessions widens it again', await waitFor(`!${ST}.scopeKey && document.querySelectorAll('${IW} .iw-list .iw-row').length >= 3`, 3000));
+  await ensureOpen([NOTICE_ID]); // ⑦'s Notices tab showed it (lane inbox-fyi-mark-all: a notice on screen 1.5 s is read)
   await realClick(P1, `${IW} .iw-tab[data-tab="notices"]`);
   await realClick(P1, rowSel(NOTICE_ID));
   check('with an account-level notice selected no per-session scope button is offered (its first item\'s name would label a button scoping every account notice)', await waitFor(`${ST}?.selected === ${JSON.stringify(NOTICE_ID)} && document.querySelector('${IW} .iw-scope-one').style.display === 'none'`, 3000), await evalJs(`({ sel: ${ST}.selected, one: document.querySelector('${IW} .iw-scope-one').style.display, txt: document.querySelector('${IW} .iw-scope-one').textContent })`));
@@ -601,6 +616,89 @@ try {
   await realClick(P1, `${IW} .iw-tab[data-tab="actions"]`);
 
   // ── ⑫ negative control for ② ──
+  // ── ㉑ lane inbox-fyi-mark-all: «Mark all read» + a notice read by reading it ──
+  console.log('㉑ «Mark all read» on the Notices tab: ONE request, ONE broadcast, every count drops in that tick, a 5 s Undo; a notice is read by reading it');
+  {
+    const RA = [NOTICE_ID, RA1_ID, RA2_ID, RA3_ID, RA_OPT_ID];
+    await ensureOpen(RA);
+    const ups = () => frames.filter((f) => f && f.type === 'user-todos-updated').length;
+    const openNotices = async () => (await storeNow()).open.filter((i) => i.kind === 'notice').map((i) => i.id).sort();
+    // the person is NOT in the window while the leg sets up (no notice is being read): focus out, a synthetic tab click
+    await evalJs(`document.activeElement && document.activeElement.blur(); document.querySelector('${IW} .iw-scope-btn[data-scope="all"]').click(); document.querySelector('${IW} .iw-tab[data-tab="notices"]').click(); true`);
+    check('the Notices tab (All sessions) lists the leg\'s five open notices', await waitFor(`${ST}?.tab === 'notices' && ${JSON.stringify(RA)}.every((id) => !!document.querySelector('${IW} .iw-row[data-id="' + id + '"]:not(.iw-row-resolved)'))`, 4000), await evalJs(displayRows));
+    const n0 = (await openNotices()).length;
+    const geo = await evalJs(`(() => { const b = document.querySelector('${IW} .iw-read-all'), tab = document.querySelector('${IW} .iw-tab[data-tab="notices"]'); if (!b) return null; const q = b.getBoundingClientRect(), r = tab.getBoundingClientRect();
+      return { shown: getComputedStyle(b).display !== 'none', disabled: b.disabled, text: b.textContent, title: b.title, inBar: b.parentElement.classList.contains('iw-bar'), afterTabs: b.previousElementSibling?.classList.contains('iw-tabs'), inTab: !!b.closest('.iw-tab'),
+        sameRow: q.top < r.bottom && q.bottom > r.top, beside: q.left >= r.right - 1, tabN: tab.querySelector('.iw-tab-n').textContent, bar: document.querySelector('#taskbar-user-todos .ut-seg-notice')?.textContent || '' }; })()`);
+    check(`the button «Mark all read» sits right after the tabs, on the Notices tab's row, beside its count (never inside the tab button), enabled; its title counts the ${n0} it covers`,
+      n0 >= 5 && !!geo && geo.shown && !geo.disabled && geo.text === 'Mark all read' && geo.inBar && geo.afterTabs && !geo.inTab && geo.sameRow && geo.beside && geo.title === `Mark the ${n0} notices listed here read (Undo for 5 s)`, { n0, geo });
+    check(`before: the tab's count and the taskbar badge's grey count both say ${n0}`, !!geo && geo.tabN === String(n0) && geo.bar === String(n0), geo);
+    await shot(P1, 'inbox-window-notices-mark-all-read', '.window:has(.iw)');
+    // the probes: every POST the page makes to the For-you routes, and the first moment the tab's count changes —
+    // what the taskbar's grey count says AT THAT MOMENT (one broadcast ⇒ both in the same task)
+    await evalJs(`(() => { window.__raPosts = []; if (!window.__raOf) { window.__raOf = window.fetch; window.fetch = (u, o) => { if (o && o.method === 'POST' && String(u).startsWith('/api/user-todos/')) window.__raPosts.push(String(u)); return window.__raOf(u, o); }; }
+      const tabN = document.querySelector('${IW} .iw-tab[data-tab="notices"] .iw-tab-n'); window.__raTick = null;
+      const mo = new MutationObserver(() => { if (window.__raTick || tabN.textContent === ${JSON.stringify(String(n0))}) return; window.__raTick = { tab: tabN.textContent, bar: document.querySelector('#taskbar-user-todos .ut-seg-notice')?.textContent || '' }; mo.disconnect(); });
+      mo.observe(tabN, { childList: true, characterData: true, subtree: true }); return true; })()`);
+    const u0 = ups();
+    check('a REAL press on «Mark all read»', await realClick(P1, `${IW} .iw-read-all`));
+    check('the store: every one of the notices done, by the user', await (async () => { for (let i = 0; i < 40; i++) { const st = await storeNow(); if (RA.every((id) => st.resolved.some((x) => x.id === id && x.status === 'done' && x.resolvedBy === 'user'))) return true; await sleep(150); } return false; })(), await openNotices());
+    await sleep(700); // anything else the press caused would have arrived by now
+    const posts1 = await evalJs('window.__raPosts.slice()');
+    check(`ONE request for the ${n0} (never ${n0} round-trips): POST /api/user-todos/notices/read-all and no per-item status write`, posts1.length === 1 && posts1[0] === '/api/user-todos/notices/read-all', posts1);
+    check(`ONE broadcast for the ${n0} (a live socket counted user-todos-updated: ${ups() - u0})`, ups() - u0 === 1, ups() - u0);
+    const tick = await evalJs('window.__raTick');
+    check('THE SAME TICK: the moment the Notices tab\'s count changed, the taskbar\'s grey count was already gone — both read 0 from the one broadcast', !!tick && tick.tab === '' && tick.bar === '', tick);
+    const after = await evalJs(`(() => { const b = document.querySelector('${IW} .iw-read-all') || {}; return { rows: ${JSON.stringify(RA)}.map((id) => document.querySelector('${IW} .iw-row[data-id="' + id + '"]')?.classList.contains('iw-row-resolved')), disabled: b.disabled, title: b.title, tabNShown: getComputedStyle(document.querySelector('${IW} .iw-tab[data-tab="notices"] .iw-tab-n')).display !== 'none', toast: [...document.querySelectorAll('#global-toasts .global-toast')].map((t) => ({ body: t.querySelector('.global-toast-body')?.textContent, acts: [...t.querySelectorAll('.global-toast-action')].map((a) => a.textContent) })) }; })()`);
+    check('every notice row is resolved IN PLACE (dimmed, struck — the slot law); the button is disabled, its title says why', after.rows.every(Boolean) && after.disabled && after.title === 'No unread notices here' && !after.tabNShown, after);
+    check(`a toast says "${n0} notices marked read" with an Undo`, after.toast.some((t) => t.body === `${n0} notices marked read` && t.acts.includes('Undo')), after.toast);
+    const u1 = ups();
+    check('a REAL press on Undo', await realClick(P1, '#global-toasts .global-toast .global-toast-action'));
+    check('Undo: every one of them is open again in the store', await (async () => { for (let i = 0; i < 40; i++) { const o = await openNotices(); if (RA.every((id) => o.includes(id))) return true; await sleep(150); } return false; })(), await openNotices());
+    await sleep(500);
+    const posts2 = await evalJs('window.__raPosts.slice()');
+    check('…in ONE request (POST …/notices/unread) and ONE broadcast', posts2.length === 2 && posts2[1] === '/api/user-todos/notices/unread' && ups() - u1 === 1, { posts2, ups: ups() - u1 });
+    check(`…and the counts are back: the tab ${n0}, the taskbar ${n0}, the button enabled`, await waitFor(`document.querySelector('${IW} .iw-tab[data-tab="notices"] .iw-tab-n').textContent === ${JSON.stringify(String(n0))} && document.querySelector('#taskbar-user-todos .ut-seg-notice')?.textContent === ${JSON.stringify(String(n0))} && document.querySelector('${IW} .iw-read-all')?.disabled === false`, 3000));
+    // THE POPUP (and the phone page — one noticesEl): the same button beside its notices head
+    await evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => el.remove()); document.getElementById('taskbar-user-todos').click(); true`);
+    check('the popup\'s notices head carries «Mark all read» beside it (a sibling, the same line), enabled', await waitFor(`(() => { const h = document.querySelector('#user-todos-popup .ut-notices > .ut-notice-head'), b = document.querySelector('#user-todos-popup .ut-notices > .ut-read-all'); if (!h || !b || !h.offsetParent) return false; const q = b.getBoundingClientRect(), r = h.getBoundingClientRect(); return b.previousElementSibling === h && !b.disabled && q.top < r.bottom && q.bottom > r.top && q.left >= r.right - 1 && b.textContent === 'Mark all read'; })()`, 4000),
+      await evalJs(`(() => { const b = document.querySelector('#user-todos-popup .ut-read-all'); return b ? { t: b.textContent, d: b.disabled, title: b.title } : null; })()`));
+    await shot(P1, 'popup-notices-mark-all-read', '#user-todos-popup');
+    check('a REAL press there reads them all too (ONE request)', await realClick(P1, '#user-todos-popup .ut-read-all') && await (async () => { for (let i = 0; i < 40; i++) { if (!(await openNotices()).length) return true; await sleep(150); } return false; })() && (await evalJs('window.__raPosts.length')) === 3);
+    check('…the popup\'s button disabled with its reason', await waitFor(`(() => { const b = document.querySelector('#user-todos-popup .ut-read-all'); return !!b && b.disabled && b.title === 'No unread notices here'; })()`, 3000));
+    await realClick(P1, '#global-toasts .global-toast .global-toast-action'); // its Undo: the read-on-sight legs need them open
+    await (async () => { for (let i = 0; i < 40; i++) { if ((await openNotices()).length === n0) return; await sleep(150); } })();
+    await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden') || document.getElementById('taskbar-user-todos').click(); true`);
+    await ensureOpen(RA);
+    // A NOTICE IS READ BY READING IT
+    const stat = async (id) => { const st = await storeNow(); const o = st.open.find((i) => i.id === id); if (o) return 'open'; const r = st.resolved.find((i) => i.id === id); return r ? r.status + ':' + r.resolvedBy : 'gone'; };
+    check('a REAL click on a notice that asks nothing (the person in the window)', await realClick(P1, rowSel(RA1_ID)) && await waitFor(`${ST}?.selected === ${JSON.stringify(RA1_ID)}`, 3000));
+    await sleep(600);
+    check('…0.6 s on screen: still open (the clock waits — arrowing past reads nothing)', (await stat(RA1_ID)) === 'open', await stat(RA1_ID));
+    check('…by 1.5 s it is READ: done, by the user — no button pressed', await (async () => { for (let i = 0; i < 30; i++) { if ((await stat(RA1_ID)) === 'done:user') return true; await sleep(150); } return false; })(), await stat(RA1_ID));
+    check('…the selection stays where the reader is (no jump to the next)', await waitFor(`${ST}?.selected === ${JSON.stringify(RA1_ID)} && document.querySelector(${JSON.stringify(rowSel(RA1_ID))}).classList.contains('iw-row-resolved')`, 2000), await evalJs(ST));
+    check('a REAL click on the notice that offers choices', await realClick(P1, rowSel(RA_OPT_ID)) && await waitFor(`${ST}?.selected === ${JSON.stringify(RA_OPT_ID)}`, 3000));
+    await sleep(2500);
+    check('…2.5 s on screen: still OPEN — it asks something, so only a press resolves it', (await stat(RA_OPT_ID)) === 'open', await stat(RA_OPT_ID));
+    check('a REAL click on another notice, then the person leaves the window at once (focus elsewhere)', await realClick(P1, rowSel(RA2_ID)) && await evalJs(`(() => { document.activeElement && document.activeElement.blur(); return ${ST}.selected === ${JSON.stringify(RA2_ID)}; })()`));
+    await sleep(2500);
+    check('…2.5 s later it is still open — a window nobody is in reads nothing', (await stat(RA2_ID)) === 'open', await stat(RA2_ID));
+    check('…back in the window (a REAL click on its row): read once its 1.5 s have passed', await realClick(P1, rowSel(RA2_ID)) && await (async () => { for (let i = 0; i < 30; i++) { if ((await stat(RA2_ID)) === 'done:user') return true; await sleep(150); } return false; })(), await stat(RA2_ID));
+    // ‹ back (one pane): left before its 1.5 s, the notice was read
+    await evalJs(`(() => { const w = ${WIN}; w.element.style.width = '480px'; w.element.style.height = '600px'; w.onResize && w.onResize(); return true; })()`);
+    await waitFor(`${ST}?.mode === 'single'`, 3000);
+    check('at 480 px a REAL tap on a notice shows it with ‹ back', await realClick(P1, rowSel(RA3_ID)) && await waitFor(`document.querySelector('${IW}').dataset.view === 'item' && ${ST}.selected === ${JSON.stringify(RA3_ID)}`, 3000));
+    await evalJs(`document.activeElement && document.activeElement.blur(); true`); // the clock stops (nobody in the window)…
+    await sleep(2000);
+    check('…the person leaves the window: 2 s later it is still open (no clock runs)', (await stat(RA3_ID)) === 'open', await stat(RA3_ID));
+    const tBack = Date.now();
+    check('…a REAL press on ‹ back ⇒ READ at once (done, by the user) — the back, not a clock: resolved < 1.5 s after the press', await realClick(P1, `${IW} .iw-back`) && await (async () => { for (let i = 0; i < 20; i++) { const r = (await storeNow()).resolved.find((x) => x.id === RA3_ID); if (r && r.status === 'done' && r.resolvedBy === 'user' && r.resolvedAt - tBack < 1500) return true; await sleep(100); } return false; })(), { st: await stat(RA3_ID), ms: ((await storeNow()).resolved.find((x) => x.id === RA3_ID)?.resolvedAt || 0) - tBack });
+    await evalJs(`(() => { const w = ${WIN}; w.element.style.width = '920px'; w.element.style.height = '640px'; w.onResize && w.onResize(); return true; })()`);
+    await waitFor(`${ST}?.mode === 'split'`, 3000);
+    await evalJs(`(() => { if (window.__raOf) { window.fetch = window.__raOf; delete window.__raOf; } return true; })()`);
+    await realClick(P1, `${IW} .iw-tab[data-tab="actions"]`);
+  }
+
   console.log('⑫ negative control');
   const x12 = await evalJs(`new Promise((res) => { const d = document.createElement('div'); d.className = 'iw-title'; d.innerHTML = ${JSON.stringify(HOSTILE_TITLE)}; document.body.appendChild(d); setTimeout(() => { const v = window.__xss; d.remove(); window.__xss = undefined; res(v); }, 800); })`);
   check('the hostile title through a raw innerHTML copy DOES run (window.__xss === 1) — ② can go red', x12 === 1, x12);

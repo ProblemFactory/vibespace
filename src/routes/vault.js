@@ -100,8 +100,22 @@ function personVerdict(req) {
   return v.ok ? { ok: true } : { ok: false, code: 'cross_site' };
 }
 
+/** lane vault-slow-load (inc-mvk5jyv3 «保险库操作好像加载时间有点长» — the server console had no vault line at all): a vault door
+ *  that took longer than this names itself in the log, ONE line — the method, the ROUTE'S PATTERN (`/api/vault/totp/:name`,
+ *  never a parameter, a query or a body), the milliseconds. */
+const VAULT_SLOW_MS = 250;
+function slowLineOf(req, ms) {
+  const route = req.route && typeof req.route.path === 'string' && req.route.path.startsWith('/api/') ? req.route.path : String(req.originalUrl || req.url || '').split('?')[0].split('/').slice(0, 4).join('/');
+  return `[vault] ${req.method} ${route} answered in ${Math.round(ms)} ms`;
+}
+
 function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null,
-  totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }) }) {
+  totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }), log = (line) => console.log(line), slowMs = VAULT_SLOW_MS }) {
+  app.use(['/api/vault', '/api/agent/vault'], (req, res, next) => {
+    const t0 = process.hrtime.bigint();
+    res.once('finish', () => { const ms = Number(process.hrtime.bigint() - t0) / 1e6; if (ms > slowMs) { try { log(slowLineOf(req, ms)); } catch { /* the answer went out */ } } });
+    next();
+  });
   const answer = (res, r) => {
     if (r && r.ok) return res.json({ ...r, ...vault.facts() });
     const code = (r && r.code) || 'error';
@@ -405,4 +419,4 @@ function vaultGate({ vault, contents, who = () => null }) {
 /** A machine's link-token entry name (src/server/host-tokens.js `entryOf`) — read at the call (the routes load first). */
 const linkEntryOf = (hostKey) => require('../server/host-tokens.js').entryOf(hostKey);
 
-module.exports = { registerVaultRoutes, personVerdict, vaultGate, STATUS, WORDS };
+module.exports = { registerVaultRoutes, personVerdict, vaultGate, STATUS, WORDS, VAULT_SLOW_MS, slowLineOf };

@@ -282,6 +282,11 @@ function linkSpawns() {
   const parent = meta.sessionId;
   const open = [...spawns.entries()].filter(([, s]) => !s.subId && Date.now() - s.at < SPAWN_LOOK_MS);
   if (!open.length || !AS.isId(parent)) return;
+  // lane agy-card-details gap 4: link by the SUB's ID — the spawn's own step output names it («Created the following
+  // subagent: {id}», AS.subIdForStep over the parent transcript). The stream sends NO tool_call_update for an
+  // invoke_subagent row (measured on the owner's journal), so this, not the step number, is the sure link, and the
+  // stream-vs-transcript index drift cannot break it; the step-match below stays as the fallback.
+  for (const [key, s] of open) { if (s.subId) continue; const id = AS.subIdForStep(store(), parent, s.step); if (id && !subs.has(id)) adoptSub(key, id); }
   for (const row of storeRows(AS.storePaths(parent).subagents, AS.subagentRowOf)) {
     if (subs.has(row.id)) continue;
     const task = AS.taskOf(storeRows(AS.storePaths(row.id).messages, AS.messageRowOf), { parentId: parent, subId: row.id });
@@ -300,6 +305,7 @@ function tailSub(sub) {
   if (over) {
     const answers = AS.answersOf(storeRows(AS.storePaths(meta.sessionId).messages, AS.messageRowOf), { parentId: meta.sessionId, subId: sub.row.id });
     if (answers.length) sub.answer = answers[answers.length - 1];
+    if (!sub.row.alive && /KILL|CANCEL|STOP|ABORT|FAIL|ERROR/i.test(String(sub.row.state || ''))) for (const rec of AS.closePendingRecords(sub.st)) record('sub', { subId: sub.row.id, toolCallId: sub.toolCallId, rec }); // lane agy-card-details gap 5: an ended sub never leaves a tool card «运行中»
     sub.done = true;
   }
   emitCard(sub);
@@ -324,7 +330,7 @@ function subsAtExit() {
   stopSubTail();
   if (!subs.size) return;
   try { for (const sub of subs.values()) if (!sub.done) tailSub(sub); } catch { }
-  for (const sub of subs.values()) if (!sub.done) { sub.done = true; sub.ended = true; sub.row = { ...sub.row, alive: false, state: 'SUBAGENT_STATE_STOPPED_WITH_PARENT' }; emitCard(sub); }
+  for (const sub of subs.values()) if (!sub.done) { for (const rec of AS.closePendingRecords(sub.st)) record('sub', { subId: sub.row.id, toolCallId: sub.toolCallId, rec }); sub.done = true; sub.ended = true; sub.row = { ...sub.row, alive: false, state: 'SUBAGENT_STATE_STOPPED_WITH_PARENT' }; emitCard(sub); }
 }
 /** The stream's invoke_subagent row: remember it, link it now when the stream names the sub, else let the tail look. */
 function noteSpawn(key, step, ti) {
@@ -374,7 +380,7 @@ function handleEvent(line) {
       const name = s.tool_name || ti.name || 'tool';
       if (!toolSeen.has(key)) {
         toolSeen.set(key, true);
-        record('update', { sessionId: sid, update: { sessionUpdate: 'tool_call', toolCallId: key, title: name, kind: kindOfTool(name), status: 'in_progress', rawInput: ti.parameters ?? null } });
+        record('update', { sessionId: sid, update: { sessionUpdate: 'tool_call', toolCallId: key, title: name, kind: kindOfTool(name), status: 'in_progress', rawInput: ti.parameters != null ? AS.normalizeAgyToolArgs(ti.parameters) : null } }); // lane agy-card-details: ONE card shape (the same normalizer the store uses)
       }
       if (name === 'invoke_subagent') noteSpawn(key, s.step_index, ti);   // THE CARD (above): the row looks for its sub
       else if (name === 'send_message' && ti.parameters && typeof ti.parameters === 'object') noteSendTo(ti.parameters.Recipient);

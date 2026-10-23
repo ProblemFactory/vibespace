@@ -23,6 +23,7 @@
 //   ⑬ THE ONE READER: `attention.band.*` / `attention.cap` are read only by settingsPolicy (a census over src/) + the
 //      MUTANT (a surface reading attention.cap itself) ⇒ RED; every surface asks settingsPolicy (wiring pins)
 //   ⑭ A SESSION AS A ROW (the sidebar's rank): urgent ⇒ 1, a running agent blocked ⇒ 2, asking ⇒ 5, else not in the list
+//   ⑮ «Mark all read» (lane inbox-fyi-mark-all): every notice read in bulk ⇒ counts.notices N → 0, the list unmoved
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -321,6 +322,23 @@ console.log('⑭ A SESSION AS A ROW — the sidebar\'s rank reads the band');
   ok(A.placeOf(A.sessionRowOf({ state: 'blocked', at: NOW }, { live: true, now: NOW }), NOW, A.settingsPolicy((k) => (k === 'attention.band.waiting' ? false : undefined))) === 5, 'waiting OFF ⇒ a blocked session ranks with the asks (band 5)');
   const SS = fs.readFileSync(path.join(ROOT, 'src/lib/sidebar-state.js'), 'utf8');
   ok(/const row = sessionRowOf\(st, \{ key, live: isLive, waiting: waiting\.has\(key\), now \}\);/.test(SS) && /if \(ab !== bb\) return ab - bb;/.test(SS) && SS.indexOf('if (ab !== bb)') < SS.indexOf('if (ar !== br) return br - ar;'), 'PIN: _sortSessions orders by the band first (sessionRowOf + placeOf), the old rank only inside a band');
+}
+
+// ⑮ «MARK ALL READ» (lane inbox-fyi-mark-all): the bulk transition as the list sees it — the same items with every notice
+// done: `counts.notices` N → 0 in that one snapshot; the list, the first screen, every band and the badge rows unchanged
+// (a notice never was in the list — reading them all moves no ask)
+console.log('⑮ the bulk read of every notice: the grey count drops to 0, the list does not move');
+{
+  const T0 = Date.now();
+  const items = [
+    ...Array.from({ length: 5 }, (_, k) => ({ id: 'n' + k, sessionKey: 'accounts', kind: 'notice', origin: 'spend', text: 'fyi ' + k, urgency: k ? 'normal' : 'urgent', status: 'open', createdAt: T0 - k * 1000 })),
+    { id: 'a1', sessionKey: 'claude:a', origin: 'agent', text: 'an ask', urgency: 'urgent', status: 'open', createdAt: T0 - 5000 },
+    { id: 'a2', sessionKey: 'claude:b', origin: 'agent', text: 'a choice', options: ['yes', 'no'], status: 'open', createdAt: T0 - 6000 },
+  ];
+  const view = (open) => { const v = A.needsMe(open.map((i) => A.rowOf(i, T0)).filter(Boolean), T0); return { notices: v.counts.notices, list: v.list.map((r) => r.id), screen: v.screen.map((r) => r.id), badge: A.badgeRows(open.map((i) => A.rowOf(i, T0)).filter(Boolean), T0).map((r) => r.id) }; };
+  const before = view(items), after = view(items.filter((i) => i.kind !== 'notice'));
+  ok(before.notices === 5 && after.notices === 0, 'counts.notices 5 → 0 (an URGENT notice included: a notice is never a band-1 row)', [before.notices, after.notices]);
+  ok(JSON.stringify([before.list, before.screen, before.badge]) === JSON.stringify([after.list, after.screen, after.badge]) && before.list.length === 2, 'the list, the first screen and the badge rows are the SAME two asks before and after', { before, after });
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

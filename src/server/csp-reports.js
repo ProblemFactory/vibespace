@@ -7,15 +7,25 @@
 //     never buffered), ≤ 60 posts a minute per address that ADD a line (a repeat is never paced — it writes nothing; a
 //     refusal is a count, never a log line).
 //   · NEVER A VALUE: a report is reduced by app-csp `reportsOf` (no sample, no query, a URL cut to origin + 3 segments, a
-//     segment that looks like a token cut to `<token>` — B-a35f).
+//     segment that looks like a token cut to `<token>` — B-a35f). The one exception: a sink handed an explicit `file` (a
+//     chrome suite's scratch hub — scripts/scratch.mjs VIBESPACE_CSP_REPORTS_FILE) keeps a script-src report's sample, the
+//     first 40 characters of the handler it names, so the suite's teardown says WHAT was reported (lane chrome-156-drift:
+//     the runner's «script-src-attr inline, line 1 column 101, source ""» named no element); data/ never holds one.
 //   · ONE LINE per (directive, blocked, source, line) in data/csp-reports.jsonl (0600; past 1 MB it rotates to .1);
 //     the keys on disk are read at boot, so a restart re-writes nothing.
 //   · ONE For-you notice per NEW (directive, blocked) pair (origin `server`, key `csp-report`) — never per report, never for
 //     a frame the page made (app-csp noticeWorthy: a mail's trackers, the design frames' scripts — lines only); a pair
 //     noticed at any earlier boot never files again (the line that filed it carries `noticed: true`); ≤ 10 new pairs a day
 //     file (a forged flood from a non-browser caller cannot fill the tray — the rest stay lines, and file on a later day).
-//   · THE COUNT (主开发's ruling 2): reports since this boot and lines on disk, the app page's apart from the frames' —
-//     `GET /api/csp-reports` (behind the sign-in, like every read) answers it; the Diagnostics report shows it as a chip.
+//   · THE SANITIZER'S PARSE (lane chrome-156-followups — app-csp THE SANITIZER'S PARSE IS NOT A GAP): a script-src-attr
+//     inline report with a handler's sample, set by this page's own /bundle.js, is read against the bundle ON DISK — the
+//     build its `?v=` names (another build: unread, it keeps its notice) — once per build: the text is read, DOMPurify's
+//     parse sites kept (app-csp purifyParseSites — a handful of numbers), the text dropped. A report AT one is a line of
+//     kind `sanitizer-parse`: no notice, its own count. No bundle, an unreadable one, any other position ⇒ the report is
+//     what it always was. The sample is read to judge and never written (a chrome suite's file keeps it, as before).
+//   · THE COUNT (主开发's ruling 2): reports since this boot and lines on disk, the app page's apart from the frames' and
+//     the sanitizer's — `GET /api/csp-reports` (behind the sign-in, like every read) answers it; the Diagnostics report
+//     shows it as a chip (the sanitizer's own chip only when it has a line).
 //   · THE CHROME SUITES' TEARDOWN (scripts/scratch.mjs cspReportsAtExit): a scratch hub's file must be empty when a suite
 //     ends — the policy is proven complete before the later lane enforces it.
 
@@ -33,13 +43,18 @@ const NOTICES_PER_DAY = 10;
 const NOTICE_KEY = 'csp-report';
 if (C.REPORT_PATH !== '/api/csp-report') throw new Error('csp-reports: register() writes the report path as a literal — move it with C.REPORT_PATH');
 
-function create({ dataDir, file: fileOpt = null, getUserTodos = () => null, now = Date.now, log = console, fileMax = FILE_MAX, bodyMax = BODY_MAX, pacePerMin = PACE_PER_MIN, noticesPerDay = NOTICES_PER_DAY } = {}) {
+// the app page's bundle, as server.js serves it (public/ beside src/) — `bundle` names another (test-csp-report)
+const BUNDLE = path.join(__dirname, '..', '..', 'public', 'bundle.js');
+
+function create({ dataDir, file: fileOpt = null, bundle = BUNDLE, getUserTodos = () => null, now = Date.now, log = console, fileMax = FILE_MAX, bodyMax = BODY_MAX, pacePerMin = PACE_PER_MIN, noticesPerDay = NOTICES_PER_DAY } = {}) {
   // `file`: the scratch hubs of a chrome suite write where the suite reads (scripts/scratch.mjs, VIBESPACE_CSP_REPORTS_FILE)
   const file = fileOpt || path.join(dataDir, FILE), rotated = file + '.1';
+  const samples = !!fileOpt; // a chrome suite's file keeps the sample (above); a hub's own data/ never
   const lines = new Set(), noticed = new Set();
   // THE COUNT: reports since this boot; lines on disk per file (the rotation moves the current file's to .1)
-  const since = { app: 0, frames: 0 }, disk = { [rotated]: { app: 0, frames: 0 }, [file]: { app: 0, frames: 0 } };
-  const sideOf = (r) => (C.noticeWorthy(r) ? 'app' : 'frames');
+  const zero = () => ({ app: 0, frames: 0, sanitizer: 0 });
+  const since = zero(), disk = { [rotated]: zero(), [file]: zero() };
+  const sideOf = C.sideOf;
   for (const f of [rotated, file]) {
     let t = '';
     try { t = fs.readFileSync(f, 'utf8'); } catch { continue; }
@@ -49,7 +64,7 @@ function create({ dataDir, file: fileOpt = null, getUserTodos = () => null, now 
     }
   }
   const pace = new Map(); // address → { min, n }
-  const stats = { received: 0, written: 0, duplicate: 0, refused: 0, paced: 0, noticed: 0, held: 0 };
+  const stats = { received: 0, written: 0, duplicate: 0, refused: 0, paced: 0, noticed: 0, held: 0, sanitizer: 0, otherBuild: 0 };
   let day = { day: '', n: 0 }, wrote = false;
 
   function paceOk(addr) {
@@ -60,7 +75,7 @@ function create({ dataDir, file: fileOpt = null, getUserTodos = () => null, now 
   }
   function append(row) {
     const s = JSON.stringify(row) + '\n';
-    try { if (fs.statSync(file).size + Buffer.byteLength(s) > fileMax) { fs.renameSync(file, rotated); disk[rotated] = disk[file]; disk[file] = { app: 0, frames: 0 }; } } catch { /* no file yet */ }
+    try { if (fs.statSync(file).size + Buffer.byteLength(s) > fileMax) { fs.renameSync(file, rotated); disk[rotated] = disk[file]; disk[file] = zero(); } } catch { /* no file yet */ }
     if (!wrote) { fs.mkdirSync(path.dirname(file), { recursive: true }); wrote = true; }
     fs.appendFileSync(file, s, { mode: 0o600 });
   }
@@ -76,6 +91,28 @@ function create({ dataDir, file: fileOpt = null, getUserTodos = () => null, now 
     day.n++; stats.noticed++;
     log.log?.(`[csp] the page reported what the enforced policy would block: ${r.directive} ${r.blocked} (a For-you notice; data/${FILE})`);
     return true;
+  }
+  // THE SANITIZER'S PARSE SITES of the bundle on disk: { v, sites: Promise<Set<'line:column'>> } — one read per build
+  let parse = null;
+  async function parseSites() {
+    const v = String(Math.floor((await fs.promises.stat(bundle)).mtimeMs));
+    if (!parse || parse.v !== v) parse = { v, sites: fs.promises.readFile(bundle, 'utf8').then((t) => new Set(C.purifyParseSites(t).map(([l, c]) => `${l}:${c}`)), () => new Set()) };
+    return parse;
+  }
+  /** Reports carrying a `site` (app-csp reportOf, `site: true`) → `kind: 'sanitizer-parse'` where the bundle's code at
+   *  that position is DOMPurify's parse; `site` is dropped from every report. Never throws. */
+  async function classify(reports) {
+    for (const r of reports) {
+      const at = r.site;
+      if (!at) continue;
+      delete r.site;
+      try {
+        const p = await parseSites();
+        if (at.v && at.v !== p.v) { stats.otherBuild++; continue; }
+        if ((await p.sites).has(`${at.line}:${at.column}`)) { r.kind = C.KIND_SANITIZER; stats.sanitizer++; }
+      } catch { /* no bundle on disk: the report keeps its notice */ }
+    }
+    return reports;
   }
   /** Reports (app-csp reportOf rows) → their lines + notices: { written, noticed }. */
   function record(reports, { at = now() } = {}) {
@@ -108,22 +145,22 @@ function create({ dataDir, file: fileOpt = null, getUserTodos = () => null, now 
     });
     req.on('end', () => {
       if (over) return;
-      const got = C.reportsOf(Buffer.concat(parts).toString('utf8'));
+      const got = C.reportsOf(Buffer.concat(parts).toString('utf8'), { sample: samples, site: true });
       // THE PACE counts only a post that would ADD a line: a browser repeats a violation once per occurrence (a mail list
       // full of trackers), and a repeat costs a parse and a lookup — pacing those let a burst of repeats hide the next NEW
       // report (measured: a chrome suite's teardown read 17 lines one run, 1 the next)
       if (got.some((r) => !lines.has(C.lineKey(r))) && !paceOk(String(req.socket && req.socket.remoteAddress || '?'))) { stats.paced++; return res.status(429).json({ error: 'too many reports' }); }
-      record(got);
-      res.status(204).end();
+      if (!got.some((r) => r.site)) { record(got); res.status(204).end(); return; }
+      classify(got).then(() => { record(got); res.status(204).end(); });
     });
     req.on('error', () => { /* the browser went away */ });
   }
 
-  /** What Diagnostics shows: the app page's reports apart from the frames' (since this boot / lines on disk). */
+  /** What Diagnostics shows: the app page's reports apart from the frames' and the sanitizer's (since this boot / lines on disk). */
   const onDisk = (side) => disk[rotated][side] + disk[file][side];
-  const summary = () => ({ policy: 'report-only', app: { reports: since.app, lines: onDisk('app') }, frames: { reports: since.frames, lines: onDisk('frames') }, noticed: noticed.size, refused: stats.refused, paced: stats.paced });
+  const summary = () => ({ policy: 'report-only', app: { reports: since.app, lines: onDisk('app') }, frames: { reports: since.frames, lines: onDisk('frames') }, sanitizer: { reports: since.sanitizer, lines: onDisk('sanitizer') }, noticed: noticed.size, refused: stats.refused, paced: stats.paced });
   return {
-    file, record, handler, summary, stats: () => ({ ...stats, lines: lines.size, pairs: noticed.size }),
+    file, record, classify, handler, summary, stats: () => ({ ...stats, lines: lines.size, pairs: noticed.size }),
     /** `POST /api/csp-report` — BEFORE the json body parser (the route reads its own ≤ 32 KB); `GET /api/csp-reports` = the count */
     register(app) {
       app.post('/api/csp-report', handler); // = C.REPORT_PATH, written as a literal: test-auth's route census reads the path

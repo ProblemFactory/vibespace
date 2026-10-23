@@ -40,7 +40,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, evalInBlankTab } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -310,8 +310,10 @@ try {
   // Built in an INERT document (lane mirror-331-reds-chrome): nothing loads there and no handler is compiled. On the app
   // page this copy's <img onerror> ran an inline handler — the suite's one CSP report, which the teardown (scripts/scratch.mjs)
   // fails. Taking that report is no fix: the hub writes a report key once, so a product leak would share it and hide behind it.
-  const ctl = await evalJs(`(() => { const d = document.implementation.createHTMLDocument('').createElement('div'); d.innerHTML = ${JSON.stringify(HOSTILE)}; const i = d.querySelector('img'); return { onerror: i ? i.getAttribute('onerror') : null, frame: !!d.querySelector('system-reminder') }; })()`);
-  check('a raw innerHTML copy IS an <img onerror="window.__xss=1"> and a <system-reminder> element (built in an inert document — ⑤ can go red)', ctl.onerror === 'window.__xss=1' && ctl.frame, ctl);
+  // In a BLANK TAB (lane chrome-156-drift): Chrome 156 reports a handler when its attribute is SET, an inert document's too —
+  // on the app page this line was the runner's «script-src-attr inline, line 1 column 101, source ""» (scratch.mjs evalInBlankTab)
+  const ctl = await evalInBlankTab(CDP_PORT, `(() => { const d = document.implementation.createHTMLDocument('').createElement('div'); d.innerHTML = ${JSON.stringify(HOSTILE)}; const i = d.querySelector('img'); return { onerror: i ? i.getAttribute('onerror') : null, frame: !!d.querySelector('system-reminder') }; })()`);
+  check('a raw innerHTML copy IS an <img onerror="window.__xss=1"> and a <system-reminder> element (built in an inert document, in a blank tab with no policy — ⑤ can go red)', ctl.onerror === 'window.__xss=1' && ctl.frame, ctl);
 
   // ── ⑦ agent bearers ──
   console.log('⑦ the owner\'s reads refuse an agent');

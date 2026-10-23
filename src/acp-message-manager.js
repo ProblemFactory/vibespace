@@ -490,7 +490,7 @@ class AcpMessageManager extends MessageWindow {
     const input = { description: str(rec.role, 200) || str(rec.typeName, 80) || 'subagent', subagent_type: str(rec.typeName, 80), prompt: str(rec.task, 6000) };
     const taskInfo = {
       id: subId, subId, type: 'agent', description: input.description, agentRole: str(rec.role, 200), typeName: input.subagent_type,
-      status, summary: str(rec.result, 400), state: str(rec.state, 80), spawnStep: num(rec.spawnStep), startedAt: num(rec.startedAt),
+      status, summary: str(rec.result, 400), lastText: str(rec.lastText, 2000), state: str(rec.state, 80), spawnStep: num(rec.spawnStep), startedAt: num(rec.startedAt),
       endedAt: num(rec.endedAt), elapsedMs: num(rec.elapsedMs), steps: num(rec.steps) || 0,
       files: (Array.isArray(rec.files) ? rec.files : []).filter((f) => typeof f === 'string').slice(0, 20), taskTitle: str(rec.taskTitle, 200),
     };

@@ -65,9 +65,16 @@ export function subagentCardHtml(msg, h = {}) {
   const taskHtml = task ? `<details class="chat-diff"><summary class="chat-diff-summary">${esc(t('Task'))}${title ? ` <span class="chat-sub-task-title">${esc(title)}</span>` : ''}</summary><pre>${h.linkifyText ? h.linkifyText(task) : esc(task)}</pre></details>` : '';
   const result = String(block.output || '');
   const first = (ti.summary ? String(ti.summary) : result).split('\n').find((l) => l.trim()) || '';
+  // lane agy-card-details gap 5: a sub the parent KILLED (kill_all) / that STOPPED never answered — say so, with its
+  // last progress, not a bare «它没有发回答复» as if it just chose silence.
+  const stopped = ti.status === 'stopped' || ti.status === 'failed';
+  const lastText = String(ti.lastText || '');
+  const endWord = /KILL/i.test(String(ti.state || '')) ? t('Terminated by the parent') : ti.status === 'failed' ? t('It failed before it answered') : t('It stopped before it answered');
+  const lastHtml = lastText ? `<details class="chat-diff"><summary class="chat-diff-summary">${esc(t('Last progress'))}</summary><div class="chat-text">${h.renderMarkdown ? h.renderMarkdown(lastText) : esc(lastText)}</div></details>` : '';
   let outHtml;
   if (running) outHtml = `<div class="chat-tool-output-pending"><span class="chat-spinner" aria-hidden="true"></span> ${esc(t('working…'))}</div>`;
   else if (result) outHtml = `<details class="chat-diff"><summary class="chat-diff-summary">${ti.status === 'completed' ? '✓ ' : ''}${esc(first.slice(0, 160))}</summary><div class="chat-text">${h.renderMarkdown ? h.renderMarkdown(result) : esc(result)}</div></details>`;
+  else if (stopped) outHtml = `<div class="chat-sub-noanswer">${esc(endWord)}</div>${lastHtml}`;
   else outHtml = `<div class="chat-sub-noanswer">${esc(t('It sent no answer'))}</div>`;
   const files = (Array.isArray(ti.files) ? ti.files : []).filter((f) => typeof f === 'string' && f);
   const filesHtml = files.length ? `<div class="chat-sub-files">${esc(t('Files it wrote'))}: ${files.map((f) => (h.clickablePath ? h.clickablePath(f) : esc(f))).join(' · ')}</div>` : '';

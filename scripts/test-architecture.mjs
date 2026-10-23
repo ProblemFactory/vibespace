@@ -198,6 +198,11 @@ const PURE = new Set(['src/device-runtime.js' /* lane device-node-version (the N
   //     async-interleaved imperative scheduler each grew an ordering bug; a pure
   //     step function is pinned by a seeded invariant walk (test-channel-drain).
   'src/channel-drain.js',
+  //   outbox-census — THE OUTBOX'S ONE COUNT (lane outbox-window-scroll-filter, 2026-10-22): the head's and every
+  //     section's waiting / total, the 「待审批」 | 「全部」 view (only what waits, first; a section with nothing waiting
+  //     folded) and the rows' runs (×n); the window and test-channel-outbox §OW ask it. Imports nothing — the API
+  //     card's fate is HANDED IN.
+  'src/outbox-census.js',
   //   channel-census — THE SCHEDULER CARD'S CLOCK CENSUS (lane scheduler-census-index, B-7978): one row's judgement
   //     and the instant it holds until (`rowClock`), how a re-judged row moves the counters (`censusStep`). Imports
   //     nothing, reads no clock; the engine keeps the index and only drives it (test-channel-census).
@@ -327,8 +332,12 @@ const PURE = new Set(['src/device-runtime.js' /* lane device-node-version (the N
   'src/usage-index-model.js',
   // lane agy-subagent-cards: THE ANTIGRAVITY STORE, READ — agy's on-disk shapes (subagents / messages JSON, the transcript,
   // the db's protobuf rows through a wire reader), the card, a sub's steps as ACP records, the token law (storeReadable);
-  // imports nothing — the agy wrapper (the tail, where the store lives) and the hub's helper door do the I/O through it
+  // imports only agy-tool-args (PURE → PURE) — the agy wrapper (the tail, where the store lives) and the hub's helper door do the I/O through it
   'src/agy-store.js',
+  // lane agy-card-details: THE AGY TOOL ARGUMENT NORMALIZER — a JSON-encoded-scalar decoder + agy's keys' canonical
+  // aliases (file_path / command / cwd / offset / limit / title / summary), ONE shape for both the live and store roads;
+  // imports nothing; the wrapper and the store both call it
+  'src/agy-tool-args.js',
   // lane runtime-floor: THE NODE RUNTIME FLOOR — the one table (per major line the fixed release + its advisory), the
   // verdict; the hub's boot line, the updater, the provisioner and the Machines card's chip (device-runtime) read it
   'src/runtime-floor.js',

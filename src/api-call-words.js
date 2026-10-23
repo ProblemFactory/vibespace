@@ -137,6 +137,30 @@ function wordsOf(p, { rows = ROWS, generated = GENERATED } = {}) {
   return { row: null, key: 'call the {vendor} API ({call})', params: { vendor: v ? v.name : String((p && (p.credLabel || p.cred)) || ''), call: `${method} ${lastSegment(path)}` }, object: null };
 }
 
+/** THE PHRASE WITHOUT ITS OBJECT (lane outbox-window-scroll-filter, the owner 2026-10-22 — the Outbox row is the card
+ *  law's «actor · action · NAMED object»; an object known only by its id leaves the row for the card's 技术细节 fold):
+ *  every hand row whose phrase names `{object}` has its bare twin here (test-channel-outbox §OW pins the coverage); a
+ *  generated phrase drops its 「（{object}）」 / “{object}” tail, the generator's own no-object form. */
+const BARE = Object.freeze({
+  'delete {n} blocks ({start}–{end}) from the document “{object}”': 'delete {n} blocks ({start}–{end}) from a document',
+  'insert {n} blocks into the document “{object}”': 'insert {n} blocks into a document',
+  'change {n} blocks in the document “{object}”': 'change {n} blocks in a document',
+  'create the document “{object}”': 'create a document',
+  'send a message in {object}': 'send a message in a chat',
+  'send a message to {object}': 'send a message to a person',
+  'upload a file to the folder “{object}”': 'upload a file to a folder',
+  'change {n} rows in the table “{object}”': 'change {n} rows in a table',
+  'create the channel {object}': 'create a channel',
+  'invite {n} people to {object}': 'invite {n} people to a channel',
+  'rename {object} to {name}': 'rename a channel to {name}',
+});
+const OBJECT_TAIL = /\s*(?:（\{object\}）|“\{object\}”)$/;
+/** `{key, params, text}` of a wordsOf() answer with its object left out (`text` = a generated row's {en, zh, ja}). */
+function bareWords(w) {
+  if (w && w.text) { const text = {}; for (const [k, v] of Object.entries(w.text)) text[k] = String(v).replace(OBJECT_TAIL, ''); return { key: text.en, params: w.params || {}, text }; }
+  return { key: (w && BARE[w.key]) || (w && w.key) || '', params: (w && w.params) || {}, text: null };
+}
+
 /** The object as drawn: its NAME (the store's, or the request's own) or the id shortened in a chip — never a name the
  *  agent's note claims (the note is a quote). */
 function objectView(obj, { name = null, conv = null } = {}) {
@@ -145,4 +169,4 @@ function objectView(obj, { name = null, conv = null } = {}) {
   return { kind: obj.kind, id: obj.id || null, name: known ? capName(known) : null, short: known ? null : shortId(obj.id), conv: known && conv ? conv : null };
 }
 
-module.exports = { VENDORS, ROWS, GENERATED, OBJECT_NAME_MAX, SHORT_ID, vendorOf, fieldsOf, lastSegment, shortId, wordsOf, objectView };
+module.exports = { VENDORS, ROWS, GENERATED, OBJECT_NAME_MAX, SHORT_ID, BARE, vendorOf, fieldsOf, lastSegment, shortId, wordsOf, bareWords, objectView };

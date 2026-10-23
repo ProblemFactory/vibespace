@@ -389,6 +389,8 @@ const ROUTES = {
   'POST /api/records/clear-many': 'writes',
   'POST /api/user-todos/:id/reply': 'reads',            // the quote block is built from the store record (the walk types a reply after the clear)
   'POST /api/user-todos/resolve-many': 'meta',
+  'POST /api/user-todos/notices/read-all': 'meta',     // lane inbox-fyi-mark-all: «Mark all read» answers ids and counts, never an item's words
+  'POST /api/user-todos/notices/unread': 'meta',       // …and its 5 s Undo, the same answer
   'GET /api/user-todos/:id': 'reads',
   // ── verify r3 on the merged tree: the rows the DERIVED file list + the call closure add ──
   'POST /api/sessions/:id/stash/hand-over': 'writes',  // src/server/stash-handover.js: reads BOTH stashes (peekNotifs / stashEntries) and delivers them as ONE turn; answers counts; a hand-over after a clear carries the sentence (the walk hands over after its clear)
@@ -2047,6 +2049,8 @@ const I_RECV = {
   'src/agentd/stream-window-source.js|plan.encoder': ['harness', 'the encoder ladder rung\'s fixed label (NVENC / AMF / Quick Sync / x264 — src/stream-plan.js ENCODER_LADDER), the window source\'s start line (lane stream-p2w-build)'],
   // lane stream-mac-ax-respawn: the Mac injector's replacement line names the grant's two values, never a record's words
   'src/input-inject.js|r.replace': ['harness', 'THE RESPAWN RULE\'s verdict — the Accessibility grant\'s from / to (granted · denied · unknown — src/input-inject.js macRespawn)'],
+  // lane voice-teach-skips: the settings list's 加入 toast names why Dropline skipped the word — the vendor's skip CODE
+  'src/lib/voice-teach-ui.js|skip': ['vendor code', 'Dropline\'s skip reason for ONE dictionary word (review / refused mapped to fixed words, else the vendor\'s own short code) — never a record\'s text'],
 };
 // the per-site class of every record / carrier read: `file|sink|read` → [class, why]
 const I_SITES = {

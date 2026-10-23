@@ -44,7 +44,7 @@ import { userChannelKind, userChannelRecord, userMessageCardHtml, userFileCardHt
 import { stallWords } from '../workflow-disk.js'; // PURE: a stalled Workflow run's words — the View Workflow window reads the same function
 import { clearedText } from './record-clear-ui.js'; // the .197 integration: a CLEARED group card's words (the device's language)
 import { GROUP_ADAPTER_ID } from '../channel-groups.js'; // lane group-report-card: a group card's group opens its window (the group namespace, never a registry adapter id)
-import { askTarget, askSubject, askState, isWaiting, helperAskHead, helperAskSettledWords, mainAskSettledWords, helperLabelOf, agentStatusWords, isStopRejection, hiddenCharsOf, revealParts, revealHidden, secondPressVerdict } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask; r6: the whole subject (F3) + the hidden-character screen and the second press (F7) — its card's words, a stopped helper's chip
+import { askTarget, askSubject, askState, isWaiting, helperAskHead, helperAskSettledWords, mainAskSettledWords, helperLabelOf, agentStatusWords, isStopRejection, isSubTerminated, hiddenCharsOf, revealParts, revealHidden, secondPressVerdict } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask; r6: the whole subject (F3) + the hidden-character screen and the second press (F7) — its card's words, a stopped helper's chip
 /** The css class of a settled permission's words (verify r5): green for allowed, red for a refusal, grey for unknown. */
 const permissionClassOf = (w) => (w && w.cls === 'allowed' ? 'chat-permission-allowed' : w && w.cls === 'unknown' ? 'chat-permission-unknown' : 'chat-permission-denied');
 // THE one reset-credit confirm dialog (design-reset-credits p2): the wall card /
@@ -119,6 +119,15 @@ export function searchQueryChipHtml(block, msg) {
   if (!q) return '';
   const short = q.length > SEARCH_TITLE_MAX ? q.slice(0, SEARCH_TITLE_MAX - 1) + '…' : q;
   return ` <span class="chat-tool-query" title="${escHtml(q)}">${escHtml(short)}</span>`;
+}
+/** lane agy-card-details gap 3: agy's OWN words for a tool act — `input.summary` (its toolSummary, set by the normalizer:
+ *  «count the lines of the sample») — as a chip in the card's head, so a run_command card is not just «Bash» over a bare
+ *  truncation notice. Only agy sets `summary` on a tool input (claude / codex do not), so the chip is empty for them. */
+function toolSummaryChipHtml(block) {
+  const sum = block && block.input && typeof block.input.summary === 'string' ? block.input.summary : '';
+  if (!sum) return '';
+  const short = sum.length > SEARCH_TITLE_MAX ? sum.slice(0, SEARCH_TITLE_MAX - 1) + '…' : sum;
+  return ` <span class="chat-tool-query" title="${escHtml(sum)}">${escHtml(short)}</span>`;
 }
 
 /**
@@ -1470,7 +1479,7 @@ class ChatRenderers {
         html = `<div class="chat-tool-pending"><span class="chat-tool-label">${label}</span><span class="chat-spinner" aria-hidden="true"></span></div>`;
       } else {
         const ac = isAgent ? null : agentCommandOf(block.input); // lane L: a browser-only call wears the browser's face
-        const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}${agentModelChip(block.input?.model)}` : ac?.browser ? agentBrowserHeadHtml(ac) : `${icon} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`;
+        const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}${agentModelChip(block.input?.model)}` : ac?.browser ? agentBrowserHeadHtml(ac) : `${icon} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}${toolSummaryChipHtml(block)}`;
         const inputStr = revealHidden(stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2))); // r6 F7: a hidden character shows as ⟦U+XXXX⟧
         const statusHtml = isPending
           ? `<div class="chat-tool-output-pending"><span class="chat-spinner" aria-hidden="true"></span> ${t('running...')}</div>`
@@ -1605,6 +1614,11 @@ class ChatRenderers {
     // CLI's canned rejection ("The user doesn't want to proceed with this tool use… STOP what you are
     // doing…") — the card kept no title and printed that internal string in red. It keeps its title and
     // says what happened; any OTHER failure keeps its text (it is the only explanation there is).
+    // lane agy-card-details gap 5: a sub's tool card closed because the sub was KILLED / STOPPED mid-run — the
+    // closing record carries the SUB_TERMINATED sentinel. Keep the head + path, say so once, never the raw token.
+    if (block.status === 'error' && isSubTerminated(resultText)) {
+      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)} ${this.clickablePath(fp)}</span><div class="chat-diff-summary chat-agent-stopped">\u2717 ${escHtml(t('Terminated with the subagent'))}</div></div>`;
+    }
     if (block.status === 'error' && block.toolName === 'Agent') {
       const desc = block.input?.description || '';
       const stopped = isStopRejection(resultText);
@@ -1614,7 +1628,7 @@ class ChatRenderers {
       return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent${desc ? ': ' + escHtml(desc) : ''}${agentModelChip(block.input?.model)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${body}</div>`;
     }
     if (block.status === 'error') {
-      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}${toolSummaryChipHtml(block)}`} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
     }
     if (block.toolName === 'Patch') {
       const patchHtml = this.renderPatchDiff(block);
@@ -1664,6 +1678,15 @@ class ChatRenderers {
       return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.image} ${escHtml(verb)} ${this.clickablePath(imgPath)}</span>${imageMediaHtml({ path: isImagePath(imgPath) ? imgPath : '', host: mediaHost, mediaType: im.mediaType || '', bytes: im.bytes || 0 })}${promptHtml}</div>`;
     }
     if (block.toolName === 'Read') {
+      // lane agy-card-details gap 1: agy's read result is a ONE-LINE summary («113 lines, 24215 bytes»), never the
+      // file's text — counting its lines read «✓ 1 行». Show it AS the status, with the size, over the clickable path.
+      const agySum = /^(\d+)\s+lines?,\s+(\d+)\s+bytes$/.exec(resultText.trim());
+      if (agySum) {
+        const nLines = Number(agySum[1]), nBytes = Number(agySum[2]);
+        const sizeStr = nBytes > 1024 ? (nBytes / 1024).toFixed(1) + ' KB' : nBytes + ' B';
+        const mbA = memoryBase(fp);
+        return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.book} ${mbA ? t('Memory read') : t('Read')} ${this.clickablePath(fp, mbA)}</span><span class="chat-diff-summary">\u2713 ${escHtml(t('{n} lines', { n: nLines }))} \u00b7 ${escHtml(sizeStr)}</span></div>`;
+      }
       const lineCount = resultText.split('\n').length;
       const codeBlock = this.renderCodeBlock(resultText, fp);
       const mbR = memoryBase(fp);
@@ -1715,7 +1738,7 @@ class ChatRenderers {
     // declares itself internal metadata) is said as a sentence (lane S3); the
     // raw record stays behind the expander below
     const firstLine = this._resultSentence({ ...block, output: resultText }) || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
-    return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`}</span>${mediaHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
+    return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}${toolSummaryChipHtml(block)}`}</span>${mediaHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
   }
 
   /**

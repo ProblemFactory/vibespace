@@ -995,7 +995,8 @@ const IM_WIN_GROUPS = {
 // B-f467: the Outbox window — its rows (the channel list's grammar), the state heads, the toolbar, an opened card's head + actions
 const IM_OUTBOX_GROUPS = {
   orow: { sel: '.chan-outbox-list > .chan-orow', parts: { av: ':scope > .chan-av', title: '.chan-orow-title', acct: '.chan-orow-acct', at: '.chan-orow-at', chev: '.chan-orow-chev', pill: '.chan-prop-state', text: '.chan-orow-text', act: '.chan-orow-act .mounts-btn' }, whole: ['at', 'pill', 'act'] },
-  sec: { sel: '.chan-outbox-list > .chan-outbox-sec', parts: { dot: '.chan-dot', words: ':scope > span:last-child' }, whole: ['words'] },
+  // lane outbox-window-scroll-filter: a section head = the dot · the census's words · (folded) 「在「全部」里看」; the API section's head too
+  sec: { sel: '.chan-outbox-list .chan-outbox-sec', parts: { dot: '.chan-dot', words: '.chan-outbox-sec-words', all: '.chan-outbox-sec-all' }, whole: ['words', 'all'] },
   bar: { sel: '.chan-outbox > .jobs-toolbar', parts: { summary: '.jobs-summary', seg: '.chan-seg' } },
   cardhead: { sel: '.chan-outbox-list > .chan-prop > .chan-prop-head', parts: { state: '.chan-prop-state', who: '.chan-prop-who', when: '.chan-prop-when' }, whole: ['state', 'when'] },
   cardact: { sel: '.chan-outbox-list > .chan-prop > .chan-prop-actions', parts: { a: ':scope > :nth-child(1)', b: ':scope > :nth-child(2)', c: ':scope > :nth-child(3)' }, whole: ['a', 'b', 'c'] },

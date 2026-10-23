@@ -27,7 +27,7 @@ import { fetchJson, showToast, showConfirmDialog, copyText, createModalShell, sh
 import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
-import { showUnlock, showSetup, showChange, vaultFacts, onVaultFacts, refreshVaultFacts, lockNow, setIdleHours, stateIconEl } from './vault-unlock.js';
+import { showUnlock, showSetup, showChange, vaultFacts, onVaultFacts, refreshVaultFacts, lockNow, setIdleHours, stateIconEl, vaultWaitLine } from './vault-unlock.js';
 import { revealLeftMs, revealHeaders, onRevealChange, noteRevealLeft, forgetReveal, endReveal, revealValue, revealWords, askRevealPassword } from './vault-reveal.js'; // r2: THE PAGE's window (its secret in page memory)
 import { removeAccount, showReauthAccountDialog } from './channel-account-dialogs.js';
 import { passkeyDeleteWords } from './browser-panel-model.js';
@@ -618,12 +618,17 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   }
   function lockedNow() { forgetReveal(); hideAll(); drawTimer(); refresh(); }
   async function refresh() {
+    // lane vault-slow-load (inc-mvk5jyv3 «保险库操作好像加载时间有点长»): until the first answer the list SAYS it is reading — a busy
+    // hub left it blank, the rail without counts — and the keys' grants are asked WITH the list, not after it (one round trip,
+    // not two; q-046's order below is kept: no row is published before them)
+    if (!st.data) reconcile(list, [vaultWaitLine(t('Reading the vault…'))]);
+    const autoEarly = vaultFacts()?.state === 'unlocked' ? loadAutomation() : null;
     const r = await fetchJson('/api/vault/contents', { headers: revealHeaders() });
     if (st.closed) return;
     if (!r || r.ok === false) { st.data = null; drawHead(); reconcile(list, []); noteText.textContent = revealWords(r || {}); drawRail(null, { locked: !!r && r.code === 'vault_locked' }); return; }
     // design q-046: the keys' grants + the picker's subjects (never a value) — read BEFORE the new rows are published: a pick in
     // the rail between the two drew the purpose with no row and a 铸造… with no choices (test-automation-keys-chrome ⑨b, 2/3)
-    const auto = r.state === 'unlocked' ? await loadAutomation() : null;
+    const auto = r.state === 'unlocked' ? await (autoEarly || loadAutomation()) : null;
     if (st.closed) return;
     st.data = { state: r.state, stores: r.stores || [], rows: r.rows || [] };
     st.auto = auto;
@@ -637,8 +642,19 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   search.addEventListener('input', () => { st.q = search.value; place(); }, { signal: sig });
   sortSel.onchange = () => { st.sort = sortSel.value; place(); };
   showAllB.onclick = async () => {
+    if (showAllB._vwBusy) return;   // a re-entry guard, never a greyed control (vault-window-v2)
     const shown = [...rowEls.values()].filter((x) => x.el.isConnected).sort((a, b) => (a.el.compareDocumentPosition(b.el) & 4 ? -1 : 1));
-    for (const x of shown) { if (x.row.revealable === false || isTotp(x.row)) continue; if (!x.plain && !(await revealRow(x))) break; }   // int317: never-shown rows are skipped (not a stop)
+    const todo = shown.filter((x) => x.row.revealable !== false && !isTotp(x.row) && !x.plain);   // int317: never-shown rows are skipped (not a stop)
+    if (!todo.length || (!revealLeftMs() && !(await askRevealPassword()))) return;
+    // lane vault-slow-load: the press says how far it is — one reveal per value, each its own answer
+    showAllB._vwBusy = true;
+    const word = showAllB.lastChild.textContent;
+    try {
+      for (const [i, x] of todo.entries()) {
+        showAllB.lastChild.textContent = t('Showing {n} of {total}…', { n: i + 1, total: todo.length });
+        if (!x.plain && !(await revealRow(x))) break;
+      }
+    } finally { showAllB._vwBusy = false; showAllB.lastChild.textContent = word; }
   };
   hideAllB.onclick = () => { hideAll(); drawTimer(); };
   // a lock anywhere (another tab, an agent's lock, the idle lock) hides every value at once

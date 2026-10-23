@@ -24,6 +24,19 @@ const REFRESH_LIFE_MS = 60 * 24 * 3600e3;                        // the refresh 
 const ACCESS_SKEW_MS = 60e3;                                     // refresh a minute before the access token ends
 const DEFAULT_ACCESS_S = 86400;                                  // measured: expires_in 86400 (the docs say 1 h; never assumed)
 
+/** a /v1/terms skipped entry as the vendor sent it: {term, reason} + every other field (≤ 8, each ≤ 200 chars); a bare
+ *  string entry is a term with no reason (lane voice-teach-skips) */
+function skipOf(x) {
+  if (typeof x === 'string') return { term: x.slice(0, 120), reason: null };
+  const o = x && typeof x === 'object' ? x : {};
+  const fields = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (k === 'term' || k === 'reason' || Object.keys(fields).length >= 8) continue;
+    fields[k.slice(0, 40)] = v === null || typeof v === 'number' || typeof v === 'boolean' ? v : (typeof v === 'string' ? v : JSON.stringify(v) || '').slice(0, 200);
+  }
+  return { term: String(o.term == null ? '' : o.term).slice(0, 120), reason: typeof o.reason === 'string' ? o.reason.slice(0, 60) : null, ...(Object.keys(fields).length ? { fields } : {}) };
+}
+
 class DroplineError extends Error {
   constructor(code, message, { status = 502, retryAfter = null, requestId = null } = {}) {
     super(message); this.code = code; this.status = status; this.retryAfter = retryAfter; this.requestId = requestId;
@@ -228,15 +241,23 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   }
   /** a teach WRITE: the plugin on, and this instance's hour cap for the kind not spent (`teachCap`) */
   const teachGate = (kind) => { if (!pluginOn()) throw new DroplineError('plugin-off', 'voice input is turned off', { status: 409 }); if (!teachCap(kind)) throw new DroplineError('teach-cap', `this instance sent its ${kind} for this hour`, { status: 429 }); };
-  /** the person's dictionary (a READ — no confirmation needed): the terms' spellings */
+  /** the person's dictionary (a READ — no confirmation needed): the terms' spellings ({term, aliases, section} rows; a bare
+   *  string row is read as its term) */
   async function vocabulary() {
     const j = await jsonCall('GET', '/v1/vocabulary');
-    return (Array.isArray(j && j.terms) ? j.terms : []).map((x) => String((x && x.term) || '')).filter(Boolean);
+    return (Array.isArray(j && j.terms) ? j.terms : []).map((x) => String((typeof x === 'string' ? x : x && x.term) || '')).filter(Boolean);
   }
+  /** POST /v1/terms — Dropline checks each word the way it checks context and adds only those it would otherwise get wrong;
+   *  the rest come back `skipped` with a REASON (the docs: `review` = it did not need the word, `refused` = deleted before /
+   *  the dictionary full). Lane voice-teach-skips: every skipped entry is KEPT (`skips`: term, reason, every other field,
+   *  bounded) and said in ONE log line (the words + reasons + the request id; never a key) — the base kept the count only. */
   async function terms(list) {
     teachGate('terms');
     const j = await jsonCall('POST', '/v1/terms', { terms: list.map((term) => ({ term })) });
-    return { added: Array.isArray(j && j.added) ? j.added.map(String) : [], skipped: Array.isArray(j && j.skipped) ? j.skipped.map((x) => String((x && x.term) || x)) : [] };
+    const skips = (Array.isArray(j && j.skipped) ? j.skipped : []).map(skipOf).filter((x) => x.term);
+    const out = { added: Array.isArray(j && j.added) ? j.added.map(String) : [], skipped: skips.map((x) => x.term), skips, requestId: (j && typeof j.request_id === 'string' && j.request_id.slice(0, 80)) || null };
+    log.log?.(`[voice] Dropline /v1/terms: sent ${list.length} · added ${out.added.length} · skipped ${skips.length}${skips.length ? ' ' + JSON.stringify(skips).slice(0, 1500) : ''}${out.requestId ? ' · ' + out.requestId : ''}`);
+    return out;
   }
   async function context({ title, text }) {
     teachGate('context');
@@ -247,4 +268,4 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   return { dictate, me, credentialOf, testRunner, connected: () => !!credentialOf().key || !!livePair(), locked: vaultLocked, account, register, authorizeUrl, connectWith, refreshPair, disconnect, vocabulary, terms, context };
 }
 
-module.exports = { create, DroplineError, DROPLINE_BASE, OAUTH_BASE, AUTHORIZE_URL, OAUTH_SCOPE };
+module.exports = { create, DroplineError, DROPLINE_BASE, OAUTH_BASE, AUTHORIZE_URL, OAUTH_SCOPE, skipOf };

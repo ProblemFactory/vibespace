@@ -83,6 +83,7 @@
   "test-channel-jump": 39936,
   "test-channel-lark-threads-ui": 16598,
   "test-channel-names-ui": 10183,
+  "test-channel-outbox-window": 40579,
   "test-channel-revisions-ui": 18790,
   "test-channel-store": 31530,
   "test-channel-threads-ui": 85295,

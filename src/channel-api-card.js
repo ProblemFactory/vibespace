@@ -93,6 +93,62 @@ function outcomeOf(p, { now = Date.now() } = {}) {
   return { key: 'Not run — {reason}', params: { reason: (r && r.error) || p.reason || '' } };
 }
 
+/** THE OUTBOX ROW'S STATUS (lane outbox-window-scroll-filter, the owner's card law 2026-10-13: «the outcome a short
+ *  status») — one word for a decided call («已执行» / «已拒绝» / «已过期» / «已撤回» / «未执行»); a waiting one keeps its
+ *  expiry, a redirect its own short sentence. The answer's HTTP status and size ride the card's 技术细节 fold
+ *  (`answerOf`), a reason the card's meta line (`outcomeMore`). `{key, params}`. */
+function statusOf(p, { now = Date.now() } = {}) {
+  const f = fateOf(p);
+  if (f === 'pending' || f === 'running') return outcomeOf(p, { now });
+  if (f === 'ran') return { key: 'Ran', params: {} };
+  if (f === 'rejected') return p.decidedBy === 'user' || !p.decidedBy ? { key: 'Rejected', params: {} } : { key: 'Rejected by {who}', params: { who: String(p.decidedBy) } };
+  if (f === 'expired') return { key: 'Expired', params: {} };
+  if (f === 'withdrawn') return { key: 'Withdrawn', params: {} };
+  if (f === 'failed' && redirectOf(p)) return outcomeOf(p, { now });
+  return { key: 'Not run', params: {} };
+}
+/** What the Outbox's opened card adds to the row's short status: a ran call's answer (HTTP status · size) as a 技术细节
+ *  line — `answerOf` —, and the full sentence when it carries a reason the one word does not (`outcomeMore`; null when
+ *  the row already said everything). */
+function answerOf(p) {
+  if (fateOf(p) !== 'ran') return null;
+  const r = (p && p.result) || {};
+  return { key: 'Answer: HTTP {status} · {size}', params: { status: r.status || 0, size: sizeText(r.bytes) } };
+}
+function outcomeMore(p, { now = Date.now() } = {}) {
+  const o = outcomeOf(p, { now }), s = statusOf(p, { now });
+  return ['ran', 'rejected', 'pending', 'running'].includes(fateOf(p)) || o.key === s.key ? null : o;
+}
+const CJK = '　-〿぀-ヿ㐀-鿿豈-﫿＀-￯';
+const CJK_GAP = new RegExp(`([${CJK}])\\s+(?=[${CJK}])`, 'g');
+/** THE OUTBOX ROW (lane outbox-window-scroll-filter): the actor · the action · the object only when it has a NAME — an
+ *  object known by its id alone (a vendor message id, a folder token) is never on the row: it is the card's 技术细节
+ *  line «Object id: …» (`objectId`). An unknown call says "call the <vendor> API" (its method + path ride the fold). The
+ *  policy is the chip, the outcome the short status (`statusOf`). `runKey` = what the row SAYS: consecutive rows with
+ *  the same key are drawn as ONE row «×n» (a waiting proposal is never grouped — its key is its own id). PURE. */
+function rowModel(p, { now = Date.now() } = {}) {
+  const fate = fateOf(p);
+  const w = W.wordsOf(p);
+  const o = W.objectView(w.object, { name: p.objectName || null, conv: p.objectConv || null });
+  const named = !!(o && o.name);
+  const what = !w.row ? { key: 'call the {vendor} API', params: { vendor: w.params.vendor }, text: null, object: null }
+    : named ? { key: w.key, params: w.params, text: w.text || null, object: o.name }
+      : { ...W.bareWords(w), object: null };
+  const who = String(whoOf(p)); const name = who.length > WHO_MAX ? `${who.slice(0, WHO_MAX - 1)}…` : who;
+  const status = statusOf(p, { now });
+  const chip = p.sensitive ? { key: SENSITIVE_CHIP[p.sensitive] || 'Sensitive · always asks', params: {} } : null;
+  const objectId = w.object && w.object.id ? String(w.object.id) : null;
+  return { id: p.id, fate, actionable: fate === 'pending', who: name, what, status, chip, objectId,
+    runKey: fate === 'pending' ? `pending:${p.id}` : JSON.stringify([name, what, fate === 'running' ? 'running' : status.key, status.params, chip]) };
+}
+/** The row's words: «<actor> · <action>» — a Chinese / Japanese phrase loses the generator's space between two CJK
+ *  words («删除 消息» → «删除消息»). `t` / `lang` as titleWords. PURE. */
+function rowWords(rm, { t = fill, lang = 'en' } = {}) {
+  const raw = rm.what.text ? rm.what.text[lang] || rm.what.text.en : rm.what.key;
+  const what = String(t(raw, { ...rm.what.params, object: rm.what.object || '' })).replace(CJK_GAP, '$1');
+  return rm.who ? `${rm.who} · ${what}` : what;
+}
+
 /** THE CARD MODEL — everything a surface draws; `sig` changes iff a drawn word changes (the keyed patch's test). */
 function cardModel(p, { now = Date.now() } = {}) {
   const fate = fateOf(p);
@@ -182,4 +238,4 @@ function sweepVerdicts(list, { now = Date.now(), live = () => null } = {}) {
   return out;
 }
 
-module.exports = { TTL_MS, BODY_SHOWN, NOTE_MAX, SENSITIVE_CHIP, FATES, SWEEP_BY, REDIRECT_WHY_WORDS, fateOf, sizeText, outcomeOf, titleOf, titleWords, cardModel, forYouOf, resolvedFactOf, receiptText, chainIds, sweepVerdicts };
+module.exports = { TTL_MS, BODY_SHOWN, NOTE_MAX, SENSITIVE_CHIP, FATES, SWEEP_BY, REDIRECT_WHY_WORDS, fateOf, sizeText, outcomeOf, statusOf, answerOf, outcomeMore, titleOf, titleWords, rowModel, rowWords, cardModel, forYouOf, resolvedFactOf, receiptText, chainIds, sweepVerdicts };

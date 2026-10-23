@@ -457,6 +457,21 @@ export function noticeChips(notices, { prev = null } = {}) {
     ...groups.map((g) => ({ origin: g.origin, label: g.label, count: g.open }))];
 }
 
+/** «MARK ALL READ» (lane inbox-fyi-mark-all, the owner 2026-10-22: 「既然是仅供知晓还让我一个一个确认很弱智」): the ids
+ *  ONE press covers — every OPEN notice the surface lists under `filter` ('all', or the origin section in force; a
+ *  filtered-out group is hidden, so none of its rows), in list order, each once. A row resolved in place, an item whose
+ *  status already left 'open' (a broadcast ahead of the slot) and a non-notice are never in it. `[]` = the button is
+ *  disabled. The For-you window hands its scoped + text-filtered list with 'all'; the popup and the phone page their
+ *  notices with the chip in force while the notices are open (closed, the head counts them ALL — the press covers that). */
+export function noticeReadAll(notices, filter = 'all') {
+  const ids = new Set();
+  for (const g of noticeGroups(notices, filter)) {
+    if (!g.shown) continue;
+    for (const e of g.entries) if (e && !e.resolved && isNotice(e.item) && (e.item.status || 'open') === 'open' && e.item.id) ids.add(e.item.id);
+  }
+  return [...ids];
+}
+
 /** THE TAB COUNTS. `inbox.action` = the open ACTION items (badgeCounts — the
  *  same number the taskbar badge shows) with `urgency` their worst (the pill
  *  takes that tier's colour), `inbox.notice` = the open notices (the grey

@@ -235,6 +235,9 @@ const WANT = {
   zh: { gen: 'Odd jobs 想批量删除 文档块的子块（DocFixtu…）', docxDelete: 'Odd jobs 想删除文档《DocFixtu…》里的 3 个块（第 1–3 个）', unknown: 'Odd jobs 想调用 Lark API（POST users）', send: 'Odd jobs 想在 Product room 发消息', chip: '删除 · 总是询问', fold: '技术细节',
     alwaysSend: '执行，并以后不再问（在 Product room 发消息）', alwaysUnknown: '执行，并以后不再问（调用 Lark API）', allowLine: '以后放行：POST open.feishu.cn/open-apis/im/*/messages' },
 };
+// lane outbox-window-scroll-filter: the Outbox ROW is «actor · action» — an object known by its id alone is not on it (the card's fold has it)
+Object.assign(WANT.en, { docxRow: 'Odd jobs · delete 3 blocks (1–3) from a document', objLine: 'Object id: ' });
+Object.assign(WANT.zh, { docxRow: 'Odd jobs · 删除文档里的 3 个块（第 1–3 个）', objLine: '对象 id：' });
 Object.assign(WANT.en, { redirected: WANT.en.send, redirOutcome: 'The vendor redirected it — not followed', redirLine: `The vendor redirected it (307) to ${REDIR_TO} — not followed: it would need your approval`, resubmit: 'Resubmit', resubmitted: 'The vendor redirected it — resubmitted as a new card' });
 Object.assign(WANT.zh, { redirected: WANT.zh.send, redirOutcome: '服务方把它重定向到了别处 — 未跟随', redirLine: `服务方把它重定向（307）到 ${REDIR_TO} — 未跟随：需要你的批准`, resubmit: '重新提交', resubmitted: '服务方把它重定向到了别处 — 已重新提交为新卡片' });
 for (const lang of ['en', 'zh']) {
@@ -290,14 +293,17 @@ for (const lang of ['en', 'zh']) {
   pop.querySelector('.chan-api-reject-go').click();
   await new Promise((r) => setTimeout(r, 0));
   ok(calls.some((x) => x.url === '/api/channels/api/proposals/api-send/reject' && x.body.reason === 'wrong room') && !a.querySelector('.chan-api-reject-pop'), 'the popover\'s Reject sends the reason and closes', calls);
-  // the Outbox: row = short title + chip + outcome; the expanded card never repeats the title
+  // the Outbox: row = «actor · action» + chip + outcome; the expanded card never repeats the title (lane outbox-window-scroll-filter: the
+  // row never carries the object's id — the card's 技术细节 fold does)
   cards = [FX.docxDelete, FX.unknown, FX.send];
   const sec = V.apiOutboxSection(app);
   await new Promise((r) => setTimeout(r, 0));
   const rows = sec.el.querySelectorAll('.chan-api-orow');
   const r0 = rows[0];
-  ok(rows.length === 3 && r0.querySelector('.chan-api-orow-head').textContent === WANT[lang].docxDelete && r0.querySelector('.chan-api-orow-chip').textContent === WANT[lang].chip && !r0.querySelector('.chan-api-orow-chip').hidden && /23/.test(r0.querySelector('.chan-api-orow-out').textContent), 'the Outbox row: the short title + the policy chip + 等你决定 · 23 h', rows.map((r) => r.textContent));
+  ok(rows.length === 3 && r0.querySelector('.chan-api-orow-head').textContent === WANT[lang].docxRow && !/DocFixtu/.test(r0.textContent) && r0.querySelector('.chan-api-orow-chip').textContent === WANT[lang].chip && !r0.querySelector('.chan-api-orow-chip').hidden && /23/.test(r0.querySelector('.chan-api-orow-out').textContent), 'the Outbox row: «actor · action» (no id) + the policy chip + 等你决定 · 23 h', rows.map((r) => r.textContent));
   ok(rows[2].querySelector('.chan-api-orow-chip').hidden, 'a non-sensitive row draws no chip');
+  const objl = sec.el.querySelector('.chan-api-card .chan-api-objline');
+  ok(objl && objl.parentNode.dataset.fold === 'tech' && objl.textContent === `${WANT[lang].objLine}${DOC}`, 'the object\'s whole id is a line of the opened card\'s 技术细节 fold', objl && objl.textContent);
   const open = sec.el.querySelectorAll('.chan-api-card');
   ok(open.length === 3 && open.every((c) => !c.querySelector('.chan-api-head') && !c.querySelector('.chan-api-outcome') && !c.querySelector('.chan-api-chip-warn')) && rows.every((r) => r.classList.contains('chan-orow-open')) && open.every((c) => !violations(c).length) && rows.every((r) => !violations(r, { titleSel: 'chan-api-orow-head' }).length), 'the expanded cards repeat neither the title nor the row\'s chip / outcome, and rows + cards pass the grammar', open.map((c) => violations(c)));
   sec.stop();

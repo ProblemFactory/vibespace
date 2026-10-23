@@ -97,6 +97,31 @@ export function cspExcused(line, suite = path.basename(process.argv[1] || '')) {
   let r; try { r = typeof line === 'string' ? JSON.parse(line) : line; } catch { return null; }
   return CSP_EXCEPTIONS.find((x) => x.suite === suite && r && (!x.directive || x.directive.test(String(r.directive))) && (x.blocked == null || r.blocked === x.blocked) && (x.source == null || r.source === x.source) && r.document === x.document) || null;
 }
+/** A NEGATIVE CONTROL THAT PARSES HOSTILE MARKUP RUNS HERE (lane chrome-156-drift): `expression` is evaluated in a FRESH
+ *  about:blank tab of the suite's own Chrome — a page with no content-security policy — over that tab's own socket, and the
+ *  tab is closed; resolves the value (returnByValue). Since Chrome 156 an inline handler is reported when its attribute is
+ *  SET — in an inert document (createHTMLDocument / DOMParser / <template>) too, as the page that ran the code, at the
+ *  position of the statement (measured on 156.0.8078.47; 155 reported only a handler that compiled). On the app page such a
+ *  control IS a CSP report: the runner's «script-src-attr inline, line 1 column 101, source ""» was three suites' own
+ *  control — `d.innerHTML =` at column 101 of the evaluated line. The same browser parses the same markup here; nothing
+ *  reports and no handler runs. Bounded: a tab that never answers rejects after `ms`. */
+export async function evalInBlankTab(cdpPort, expression, { ms = 15000 } = {}) {
+  const t = await (await fetch(`http://127.0.0.1:${cdpPort}/json/new?about:blank`, { method: 'PUT' })).json();
+  const ws = new WebSocket(t.webSocketDebuggerUrl);
+  try {
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error('the blank tab\'s socket did not open')); });
+    const r = await new Promise((res, rej) => {
+      const timer = setTimeout(() => rej(new Error(`the blank tab gave no answer in ${ms} ms`)), ms);
+      ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id === 1) { clearTimeout(timer); m.error ? rej(new Error(m.error.message)) : res(m.result); } };
+      ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }));
+    });
+    if (r.exceptionDetails) throw new Error('the blank tab threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
+    return r.result.value;
+  } finally {
+    try { ws.close(); } catch { }
+    try { await fetch(`http://127.0.0.1:${cdpPort}/json/close/${t.id}`); } catch { }
+  }
+}
 /** A suite that plants a violation ON PURPOSE (a negative control) TAKES its report: waits ≤ `ms` for `want` lines matching
  *  `match` (a parsed line → bool) in this suite's file, removes them and returns them (the hub never writes the same key
  *  twice). What is left is what the teardown judges. */
@@ -113,6 +138,23 @@ export async function takeCspReports(match, { ms = 5000, step = 100, want = 1 } 
     await new Promise((r) => setTimeout(r, step));
   }
 }
+/** WHAT a report line names, in words (lane chrome-156-drift — the runner's line «script-src-attr inline, line 1 column
+ *  101, source ""» named no element): the directive, the code's own SAMPLE (src/app-csp.js 'report-sample'; a suite's hub
+ *  keeps it), where the code that set it ran — a line with no source is a script with no URL, the SUITE's own
+ *  Runtime.evaluate — and, for an inline handler, the Chrome 156 rule that reports one when its attribute is SET. */
+export function cspWhat(line) {
+  let r; try { r = typeof line === 'string' ? JSON.parse(line) : line; } catch { return 'an unreadable line'; }
+  if (!r || !r.directive) return 'an unreadable line';
+  const at = `${r.line == null ? '?' : r.line}:${r.column == null ? '?' : r.column}`;
+  const where = r.source ? `code in ${r.source} at ${at}` : `code with NO URL at ${at} — a script this SUITE evaluated over CDP (Runtime.evaluate), not the app's bundle`;
+  const what = r.sample ? `«${r.sample}»` : (/^script-src/.test(r.directive) ? '(no sample — a hub outside this suite\'s file keeps none)' : `${r.blocked}`);
+  if (r.kind === 'sanitizer-parse') return `${r.directive} ${r.blocked} — ${what}, set by ${where}, on ${r.document || 'the page'} · the SANITIZER's parse: DOMPurify's inert DOMParser document set this handler and dropped it, nothing ran (src/app-csp.js THE SANITIZER'S PARSE — counted apart, never a notice, not a gap in the policy)`;
+  const attr = r.directive === 'script-src-attr' ? ' · an inline HANDLER: since Chrome 156 one is reported when its attribute is SET — in an inert document (createHTMLDocument / DOMParser / <template>) too — so a negative control built from markup belongs in a blank tab with no policy' : '';
+  return `${r.directive} ${r.blocked} — ${what}, set by ${where}, on ${r.document || 'the page'}${attr}`;
+}
+/** A line the collector named the sanitizer's parse (src/app-csp.js KIND_SANITIZER) — printed at the end, never a failure:
+ *  the policy is complete exactly when nothing ELSE was reported (lane chrome-156-followups). */
+export const cspSanitizerLine = (l) => { try { return JSON.parse(l).kind === 'sanitizer-parse'; } catch { return false; } };
 /** The report lines in these files: [{ file, lines }] (a file that is missing or empty is not listed). */
 export function cspReportsIn(files) {
   const out = [];
@@ -129,11 +171,13 @@ function cspReportsAtExit() {
   try { fs.rmSync(path.dirname(CSP_REPORTS_FILE), { recursive: true, force: true }); } catch { }
   const excused = all.flatMap((f) => f.lines.filter((l) => cspExcused(l)));
   if (excused.length) console.log(`\n  CSP: ${excused.length} report(s) excused by the ONE exception list (scripts/scratch.mjs CSP_EXCEPTIONS — ${[...new Set(excused.map((l) => cspExcused(l).suite))].join(', ')})`);
-  const found = all.map((f) => ({ ...f, lines: f.lines.filter((l) => !cspExcused(l)) })).filter((f) => f.lines.length);
+  const dropped = all.flatMap((f) => f.lines.filter((l) => !cspExcused(l) && cspSanitizerLine(l)));
+  if (dropped.length) { console.log(`\n  CSP: ${dropped.length} line(s) of the sanitizer's parse — not a gap in the policy:`); for (const l of dropped.slice(0, 10)) console.log(`      ↳ ${cspWhat(l)}`); }
+  const found = all.map((f) => ({ ...f, lines: f.lines.filter((l) => !cspExcused(l) && !cspSanitizerLine(l)) })).filter((f) => f.lines.length);
   if (!found.length) return;
   const n = found.reduce((a, f) => a + f.lines.length, 0);
   console.error(`\n  ✗ CSP: the app page reported ${n} thing(s) its content-security policy would block (src/app-csp.js — the policy must be complete before it is enforced):`);
-  for (const f of found) { console.error(`    ${f.file}`); for (const l of f.lines.slice(0, 40)) console.error(`      ${l}`); if (f.lines.length > 40) console.error(`      … ${f.lines.length - 40} more`); }
+  for (const f of found) { console.error(`    ${f.file}`); for (const l of f.lines.slice(0, 40)) console.error(`      ${l}\n        ↳ ${cspWhat(l)}`); if (f.lines.length > 40) console.error(`      … ${f.lines.length - 40} more`); }
   console.error('FAILED (CSP reports at the end of the suite)');
   process.exitCode = 1;
 }

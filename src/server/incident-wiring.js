@@ -109,12 +109,20 @@ function _incidentTargets(clientSnapshot) {
   try { for (const cid of noConvoRef.map.keys()) cids.add(cid); } catch {}
   return { cids: [...cids].filter(Boolean), hostIds: [...hostIds].filter(Boolean), terminalIds: [...terminalIds].filter(Boolean) };
 }
-app.post('/api/incident', (req, res) => {
+/** THE FREEZE OFF THE MAIN THREAD (lane vault-slow-load addendum): captureLocal + env.json in a one-worker SafeFs
+ *  (src/server/incident-freeze-worker.js), started for this capture and closed after it — the loop keeps answering pages
+ *  while a scene with gigabyte transcripts is copied and hashed. → the worker's {ms, pruned, where}. */
+function freezeOffLoop(payload) {
+  const { SafeFs } = require('../safe-fs.js');
+  const pool = new SafeFs({ workerPath: path.join(__dirname, 'incident-freeze-worker.js'), name: 'incident-freeze', inlineRun: require('./incident-freeze-worker.js').runOp, poolSize: 1, timeouts: { freeze: 10 * 60 * 1000 } });
+  return pool.call('freeze', payload).finally(() => { try { pool.close(); } catch { } });
+}
+app.post('/api/incident', async (req, res) => {
   try {
     const id = 'inc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
     const dir = path.join(INCIDENTS_DIR, id);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'bundle.json'), JSON.stringify({
+    await fs.promises.mkdir(dir, { recursive: true });
+    await fs.promises.writeFile(path.join(dir, 'bundle.json'), JSON.stringify({
       id, at: new Date().toISOString(), note: String(req.body?.note || '').slice(0, 2000),
       clientVersion: String(req.body?.version || ''), client: { rings: req.body?.rings, snapshot: req.body?.snapshot },
       server: _incidentServerState(),
@@ -126,28 +134,28 @@ app.post('/api/incident', (req, res) => {
     // `env.json.pending` marker tells a later reader the capture was cut off
     // (server killed mid-freeze) rather than empty by design.
     const targets = _incidentTargets(req.body?.snapshot);
-    fs.writeFileSync(path.join(dir, 'env.json.pending'), JSON.stringify({ startedAt: new Date().toISOString(), targets }, null, 1));
+    await fs.promises.writeFile(path.join(dir, 'env.json.pending'), JSON.stringify({ startedAt: new Date().toISOString(), targets }, null, 1));
     (async () => {
       try {
         const inc = require('../incident.js');
-        const local = await inc.captureLocal(dir, { dataDir: path.join(rootDir, 'data'), cids: targets.cids, terminalIds: targets.terminalIds });
-        fs.writeFileSync(path.join(dir, 'env.json'), JSON.stringify({ targets, local }, null, 1));
+        // lane vault-slow-load addendum: the local freeze (+ env.json + the prune) runs in its own worker — never the loop
+        const frozen = await freezeOffLoop({ dir, dataDir: path.join(rootDir, 'data'), cids: targets.cids, terminalIds: targets.terminalIds, targets });
         if (hosts && targets.hostIds.length) {
           const remote = await inc.captureRemote({ hosts, hostIds: targets.hostIds, cids: targets.cids });
-          fs.writeFileSync(path.join(dir, 'remote.json'), JSON.stringify(remote, null, 1));
+          await fs.promises.writeFile(path.join(dir, 'remote.json'), JSON.stringify(remote, null, 1));
         }
-        fs.rmSync(path.join(dir, 'env.json.pending'), { force: true });
-        console.log(`[incident] ${id}: scene frozen (${targets.cids.length} conversations, ${targets.hostIds.length} hosts)`);
+        await fs.promises.rm(path.join(dir, 'env.json.pending'), { force: true });
+        console.log(`[incident] ${id}: scene frozen (${targets.cids.length} conversations, ${targets.hostIds.length} hosts) in ${frozen && frozen.ms} ms ${frozen && frozen.where === 'worker' ? 'off the main thread' : 'on the main thread (no worker)'}`);
       } catch (e) {
         console.warn('[incident] async freeze failed:', e.message); // NEVER swallow — a silent catch hid a missing binding for one release
         try { fs.writeFileSync(path.join(dir, 'env-error.txt'), String(e.stack || e.message)); } catch {}
         console.error(`[incident] ${id}: freeze failed:`, e.message);
       }
     })();
-    // prune: newest 30 kept
+    // prune: newest 30 kept — before the answer, through the async fs (a recursive rm of frozen tails is not the loop's)
     try {
-      const all = fs.readdirSync(INCIDENTS_DIR).filter((d) => d.startsWith('inc-')).sort();
-      for (const d of all.slice(0, Math.max(0, all.length - 30))) fs.rmSync(path.join(INCIDENTS_DIR, d), { recursive: true, force: true });
+      const all = (await fs.promises.readdir(INCIDENTS_DIR)).filter((d) => d.startsWith('inc-')).sort();
+      for (const d of all.slice(0, Math.max(0, all.length - 30))) await fs.promises.rm(path.join(INCIDENTS_DIR, d), { recursive: true, force: true });
     } catch {}
     console.log(`[incident] captured ${id}${req.body?.note ? ' — ' + String(req.body.note).slice(0, 80) : ''}`);
     res.json({ id });

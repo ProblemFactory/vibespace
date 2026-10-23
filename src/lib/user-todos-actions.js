@@ -188,6 +188,25 @@ export function inboxModel(app) {
     if (!r || !r.success) { showToast(t('Could not update the item') + (r?.error ? `: ${r.error}` : ''), { type: 'error' }); return false; }
     return true;
   };
+  /** «Mark all read» (lane inbox-fyi-mark-all) — THE notices' bulk verb (the window's notices tab, the popup's and the
+   *  phone page's notices head): ONE POST for every id (PURE noticeReadAll chose them) ⇒ the store's ONE write + ONE
+   *  broadcast, so every count drops in the same tick on every client; then a 5 s Undo toast that brings exactly the
+   *  notices this press read back open (…/unread). A failure is said by name. Resolves the ids it read (null = refused). */
+  const readNotices = async (ids) => {
+    const list = Array.isArray(ids) ? ids.filter((x) => typeof x === 'string' && x) : [];
+    if (!list.length) return [];
+    const post = (door, body) => fetchJson(`/api/user-todos/notices/${door}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await post('read-all', { ids: list });
+    if (!r || !r.ok) { showToast(t('Could not update {n} items: {why}', { n: list.length, why: r && r.error ? r.error : t('server unreachable') }), { type: 'error' }); return null; }
+    const read = Array.isArray(r.changed) ? r.changed : [];
+    if (read.length) {
+      showToast(t('{n} notices marked read', { n: read.length }), { duration: 5000, actions: [{ label: t('Undo'), run: async () => {
+        const u = await post('unread', { ids: read });
+        if (!u || !u.ok) showToast(t('Could not update {n} items: {why}', { n: read.length, why: u && u.error ? u.error : t('server unreachable') }), { type: 'error' });
+      } }] });
+    }
+    return read;
+  };
   /** A reply REOPENED its ended conversation (lane inbox-reply-dead-session): that conversation's window opens on THIS
    *  page — a window still showing it ended (a read-only / view-only one) is closed first, as a hand Resume does. */
   const openReopened = (r) => {
@@ -543,7 +562,7 @@ export function inboxModel(app) {
   const model = {
     get todos() { return todos; },
     get loaded() { return loaded; },
-    byId, sessionFor, displayName, wordsOf, detailOf, detailLinesOf, nameFor, jump, setStatus, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
+    byId, sessionFor, displayName, wordsOf, detailOf, detailLinesOf, nameFor, jump, setStatus, readNotices, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
     ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts,
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */

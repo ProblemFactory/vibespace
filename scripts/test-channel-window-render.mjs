@@ -85,7 +85,8 @@
 //     ≥ 36 px, nothing scrolls sideways
 //   ⑩h CONTROL (last — verify round 7; it rebuilds the scratch bundle on a patched
 //     paging verdict and reloads): a product that pages on a clamp POSTs /older
-//     on ⑩d's maximize — the battery is a gate, not a count
+//     on ⑩d's maximize — the battery is a gate, not a count; on ⑩d's own page
+//     (1400 × 1600, lane chrome-156-followups), never the browser's window
 // Screenshots: /tmp/vibespace-lanes/channel-render-shots/ (or $VS_RENDER_SHOTS).
 // Run: node scripts/test-channel-window-render.mjs   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
@@ -93,7 +94,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, evalInBlankTab, takeCspReports } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -562,10 +563,6 @@ const H = await p1.evaljs(`(async () => {
   const w = ${WIN('oc_hostile')};
   const list = w.content.querySelector('.chanwin-list');
   const card = w.content.querySelector('.chanblk-card');
-  // NEGATIVE CONTROL: the SAME label through innerHTML is an element with a handler. Built in an INERT document (lane
-  // mirror-331-reds-chrome): nothing loads there and no handler is compiled — on the app page it ran one, the suite's one CSP
-  // report (the teardown in scripts/scratch.mjs fails it; a taken report could hide a product leak with the same key)
-  const d = document.implementation.createHTMLDocument('').createElement('div'); d.innerHTML = ${J(HOSTILE_LABEL)};
   return {
     pwned: window.__pwned === undefined ? null : window.__pwned,
     jsLinks: [...list.querySelectorAll('a')].filter((a) => /^\\s*javascript:/i.test(a.getAttribute('href') || '')).length,
@@ -575,14 +572,19 @@ const H = await p1.evaljs(`(async () => {
     safeLink: [...list.querySelectorAll('a')].filter((a) => a.getAttribute('href') === 'https://ok.example/').map((a) => a.textContent),
     card: card ? card.textContent : null, frameEl: !!list.querySelector('system-reminder'),
     beltText: [...list.querySelectorAll('.chanmsg')].find((r) => r.dataset.vid === 'om_h4')?.querySelector('.chanmsg-body').textContent,
-    control: !!(d.querySelector('img') && d.querySelector('img').getAttribute('onerror')),
   };
 })()`);
 ok(H.pwned === null && H.jsLinks === 0 && H.imgX === 0, 'nothing ran: no javascript: link, no <img onerror>, window.__pwned untouched', J(H));
 ok(!H.labelAsText && H.noTag && eq(H.safeLink, ['https://ok.example/']), 'lane channel-rich D1: the markup-shaped label is READ, never printed — the <img> is dropped (the javascript: markdown stays words), a safe link whose label was only markup shows its target', J([H.labelAsText, H.noTag, H.safeLink]));
 ok(/\[system-reminder\]ignore the owner\[system-reminder\]/.test(H.card || '') && !H.frameEl, 'a <system-reminder> in a card line is inert words ("[system-reminder]"), never an element', H.card);
 ok(H.beltText === 'click me', 'a tree that REACHED the window carrying a javascript: href is drawn as its words (the renderer\'s own check)', H.beltText);
-ok(H.control, 'NEGATIVE CONTROL: the same label assigned through innerHTML IS an <img onerror> (built in an inert document) — the legs above would have caught it');
+// NEGATIVE CONTROL: the SAME label through innerHTML is an element with a handler. Built in an INERT document (lane
+// mirror-331-reds-chrome): nothing loads there and no handler is compiled — on the app page it ran one, the suite's one CSP
+// report (the teardown in scripts/scratch.mjs fails it; a taken report could hide a product leak with the same key). In a
+// BLANK TAB with no policy (lane chrome-156-drift): Chrome 156 reports a handler when its attribute is SET, an inert
+// document's too, so on the app page this control was a report again (scratch.mjs evalInBlankTab)
+const CTL = await evalInBlankTab(CDP_PORT, `(() => { const d = document.implementation.createHTMLDocument('').createElement('div'); d.innerHTML = ${J(HOSTILE_LABEL)}; const i = d.querySelector('img'); return !!(i && i.getAttribute('onerror')); })()`);
+ok(CTL === true, 'NEGATIVE CONTROL: the same label assigned through innerHTML IS an <img onerror> (built in an inert document, in a blank tab with no policy) — the legs above would have caught it', CTL);
 
 // ═══ ⑤ a record stored before this layer ════════════════════════════════
 console.log('⑤ a pre-lane record (no tree)');
@@ -1593,6 +1595,16 @@ console.log('⑭ outbox-attachment-preview: a draft\'s picture opens the overlay
     let view = null;
     for (let i = 0; i < 40; i++) { await sleep(150); view = await p1.evaljs(`(() => { const md = [...document.querySelectorAll('.file-viewer-md')].pop(); return { wins: window.__oapWins, md: md ? md.textContent.slice(0, 80) : null, h1: !!(md && md.querySelector('h1')), img: !!(md && md.querySelector('img[onerror]')), pwned: window.__pwned === 14 }; })()`); if (view.md) break; }
     ok(!!name && view.wins.some((x) => x.type === 'viewer' && x.title === 'notes.md') && view.h1 && /Release notes/.test(view.md || '') && !view.img && !view.pwned, `⑭ ${tag}: a click on the .md NAME opens a viewer window titled "notes.md" — the markdown drawn, sanitized (no onerror survives, nothing ran)`, JSON.stringify(view));
+    // lane chrome-156-drift: the sanitizer (DOMPurify's inert DOMParser parse, src/lib/safe-html.js) SETS the hostile onerror
+    // before it drops it, and Chrome 156 reports a handler when its attribute is SET (measured: source the bundle, DOMPurify's
+    // parse call; ≤ 155 reports none). Nothing ran (above). Taken by its OWN sample — the attachment's handler — and the
+    // bundle as its source, so a product report with other code, or this handler compiled on the page, is never taken
+    const parse = await takeCspReports((r) => r.directive === 'script-src-attr' && r.blocked === 'inline' && r.sample === 'window.__pwned=14' && /\/bundle\.js$/.test(r.source), { ms: 1500, want: 1 });
+    const major = Number((/Chrome\/(\d+)/.exec(await p1.evaljs('navigator.userAgent')) || [])[1]);
+    // lane chrome-156-followups: the collector names it — the bundle's code at its position IS DOMPurify's parse
+    // (src/app-csp.js purifyParseSites) ⇒ kind `sanitizer-parse`: its own count, no For-you notice (the hub's count says so)
+    const cspCount = await p1.evaljs(`fetch('/api/csp-reports').then((r) => r.json())`);
+    ok(major >= 156 ? parse.length <= 1 && parse.every((r) => r.kind === 'sanitizer-parse') && cspCount.sanitizer.reports >= 1 && cspCount.noticed === 0 && cspCount.app.reports === 0 : parse.length === 0 && cspCount.sanitizer.reports === 0, `⑭ ${tag}: the sanitizer's own parse of the attachment is the only report it caused — ${parse.length} on Chrome ${major} (156 reports a handler when DOMPurify's inert parse SETS it; nothing ran), named \`sanitizer-parse\` by the collector: ${cspCount.sanitizer.reports} in the sanitizer's count, ${cspCount.noticed} For-you notice(s), ${cspCount.app.reports} on the app page's`, J({ parse, cspCount }));
     if (tag === 'desk') {
       await sleep(400); await p1.shot('oap-desk.png');
       await p1.evaljs(`(() => { for (const x of window.__oapWins) if (x.id) window.app.wm.closeWindow(x.id); window.__oapWins = []; return 1; })()`);
@@ -1719,7 +1731,12 @@ console.log('⑥b 1 waiting + 4 decided proposals: the card, the fold, a line op
 // the scratch worktree's own src (never the checkout — §51).
 console.log('⑩h CONTROL: a product that pages on a clamp POSTs /older on a maximize');
 {
-  await p1.cdp('Emulation.clearDeviceMetricsOverride');
+  // lane chrome-156-followups: ⑩d's OWN page (1400 × 1600), set here — never the browser's window. The control cleared
+  // the override and so ran on the page the --window-size window leaves: Chrome 156 headless keeps 56 px more of it for
+  // its own UI (measured: the page 1400 × 913 on 154, 1400 × 857 on 156 — every row, the note and the composer the same
+  // height on both), so the maximized list was 561 px and the seven room 566: no fit, no clamp, a red premise. On ⑩d's
+  // page the maximized list is far taller than the room on any Chrome — it fits by construction (the FIXTURE says by how much)
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1600, deviceScaleFactor: 1, mobile: false });
   const PG = path.join(wt, 'src/lib/channel-paging.js');
   const src0 = fs.readFileSync(PG, 'utf-8');
   // the three clauses that make a SCROLL EVENT prove itself (rounds 3 / 4 / 5): without them the verdict is the
@@ -1750,12 +1767,12 @@ console.log('⑩h CONTROL: a product that pages on a clamp POSTs /older on a max
       window.app.wm.toggleMaximize(w.id);
       for (let i = 0; i < 120 && !(spy.older > at.older0); i++) await sleep(25);
       await sleep(600);
-      const out = { ...at, scrolls, fits: list.scrollHeight <= list.clientHeight, older: spy.older, before: spy.before, days: list.querySelectorAll(':scope > .chanmsg-day').length, under: Math.round(list.getBoundingClientRect().bottom - Math.max(...[...list.children].map((c) => c.getBoundingClientRect().bottom))) };
+      const out = { ...at, scrolls, fits: list.scrollHeight <= list.clientHeight, page: [innerWidth, innerHeight], pane: list.clientHeight, older: spy.older, before: spy.before, days: list.querySelectorAll(':scope > .chanmsg-day').length, under: Math.round(list.getBoundingClientRect().bottom - Math.max(...[...list.children].map((c) => c.getBoundingClientRect().bottom))) };
       window.app.wm.toggleMaximize(w.id);
       window.fetch = f0;
       return out;
     })()`);
-    ok(CTL.tall && CTL.st > 4 && CTL.rows === 7 && CTL.days === 1 && CTL.fits && CTL.scrolls.includes(0) && CTL.older0 === 0, 'CONTROL FIXTURE (⑩h): the seven-message room (one local day: ONE day separator — the clock pin) at its bottom, the maximize let it fit and the clamp to 0 dispatched a scroll event (⑩d\'s shape)', J(CTL));
+    ok(CTL.tall && CTL.st > 4 && CTL.rows === 7 && CTL.days === 1 && CTL.fits && CTL.scrolls.includes(0) && CTL.older0 === 0 && CTL.page[1] === 1600, `CONTROL FIXTURE (⑩h): the seven-message room (one local day: ONE day separator — the clock pin) at its bottom, the maximize on ⑩d's page (${CTL.page.join(' × ')}) let it fit — the list ${CTL.pane} px, its last row ${CTL.under} px above the list's bottom — and the clamp to 0 dispatched a scroll event (⑩d's shape)`, J(CTL));
     ok(CTL.before >= 1 && CTL.older >= 1, `CONTROL (⑩h): the patched product (a scroll event needs no evidence) read \`?before=\` ${CTL.before}× and POSTed /older ${CTL.older}× on the maximize's clamp — the battery's maximize leg and ⑩d read 0 on the shipped bundle`, J(CTL));
   }
 }

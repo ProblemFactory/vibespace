@@ -67,6 +67,11 @@
 //      the session's own marker release answer; handed back the marker CHANGES the
 //      picture (the positive control) with the page's DOM untouched, and the
 //      release puts it back byte-identical.
+//      lane chrome-156-drift (2026-10-22): on 156+ the new find-in-page (a
+//      view act — measured, it scrolls the page to the match and blurs the
+//      user's field) is refused while paused and the page neither scrolls nor
+//      loses its focused field, the sub-app list answers (a read); handed back
+//      the find goes through and the page SCROLLS (the positive control).
 // SKIPs with evidence when no chrome / no agent-browser / a launch fails.
 // cdp-protocol-under-test — every 'Page.navigate' here is a CDP message judged
 // by the proxy against a real chrome, never a navigation of VibeSpace's page.
@@ -263,7 +268,7 @@ else {
   const rs = (await raw.call('Target.attachToTarget', { targetId: A, flatten: true })).result.sessionId;
   const oracle = async (expr) => { const r = await raw.call('Runtime.evaluate', { expression: expr, returnByValue: true }, rs); return r.result && r.result.result ? r.result.result.value : undefined; };
   const codeOf = (r) => M.refusalCodeOf(r);
-  await c6.call('Page.navigate', { url: 'data:text/html,<title>census</title><input id=i autofocus><p id=mk style="font:24px sans-serif">speling here</p><div id=pop popover>pop</div><button id=pb popovertarget=pop>open</button><script>window.k=0;addEventListener("keydown",()=>{window.k++});</script>' }, s6);
+  await c6.call('Page.navigate', { url: 'data:text/html,<title>census</title><input id=i autofocus><p id=mk style="font:24px sans-serif">speling here</p><div id=pop popover>pop</div><button id=pb popovertarget=pop>open</button><div style="height:3000px"></div><p id=fd>findme156</p><script>window.k=0;addEventListener("keydown",()=>{window.k++});</script>' }, s6);
   await sleep(400);
   const KEY = { type: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, text: 'a' };
   ok((await c6.call('Input.dispatchKeyEvent', KEY, s6)).result !== undefined && (await oracle('window.k')) === 1, '⑥ not paused: the agent\'s Input.dispatchKeyEvent reaches the page (the oracle counts 1 keydown)');
@@ -326,6 +331,22 @@ else {
     const cl = await c6.call('DOM.clearTextMarkers', {}, s6);
     ok(codeOf(ia) === null && ia.result && String(ia.result.backendNodeIds) === String(btnB) && codeOf(cl) === null && cl.result !== undefined && (await oracle('document.getElementById("pop").matches(":popover-open")')) === false, `⑥ PAUSED · read + harmless (Chrome ${cv}): DOM.getImplicitAnchorCandidates answers with the popover's button (backend node ${btnB}) and the popover stays closed; DOM.clearTextMarkers is FORWARDED (Chrome's own answer)`, JSON.stringify({ ia, cl }).slice(0, 240));
   } else skip(`⑥ Chrome ${cv} lists no DOM.setTextMarker / clearTextMarkers / getImplicitAnchorCandidates — the Chrome 155 legs need 155+`);
+  // lane chrome-156-drift: Chrome 156's new FindInPage domain on the paused lease — a VIEW act all through (measured on
+  // 156.0.8078.47: the page scrolls to the match, the match is highlighted and the user's focused field is blurred) is
+  // refused, and the page neither scrolled nor lost its focused field (the oracle reads the raw endpoint); the sub-app
+  // list (an Isolated Web App read, classed with Page.getAppManifest) answers
+  let find156 = false;
+  if (lists('FindInPage.findFirst') && lists('FindInPage.stop') && lists('Page.getSubApps')) {
+    find156 = true;
+    const at = async () => oracle('JSON.stringify([Math.round(scrollY), (document.activeElement && document.activeElement.id) || ""])');
+    const before = await at();
+    const ff = await c6.call('FindInPage.findFirst', { query: 'findme156' }, s6);
+    const st = await c6.call('FindInPage.stop', {}, s6);
+    await sleep(300);
+    ok(codeOf(ff) === 'browser_interrupted' && codeOf(st) === 'browser_interrupted' && (await at()) === before && JSON.parse(before)[0] === 0, `⑥ PAUSED · view (Chrome ${cv}): FindInPage.findFirst and FindInPage.stop are browser_interrupted — the page did not scroll and its focused field kept the focus (${before})`, JSON.stringify({ ff, st }).slice(0, 240));
+    const sa = await c6.call('Page.getSubApps', {}, s6);
+    ok(codeOf(sa) === null && sa.result && Array.isArray(sa.result.subApps), `⑥ PAUSED · read (Chrome ${cv}): Page.getSubApps answers (${sa.result ? sa.result.subApps.length : '?'} sub-apps — a plain page is no Isolated Web App)`, JSON.stringify(sa).slice(0, 200));
+  } else skip(`⑥ Chrome ${cv} lists no FindInPage domain / Page.getSubApps — the Chrome 156 legs need 156+`);
   ok(codeOf(await c6.call('Network.setCookie', { name: 'vs6', value: '1', url: 'https://example.invalid/' }, s6)) === 'browser_interrupted' && codeOf(await c6.call('DOM.setOuterHTML', { nodeId: 1, outerHTML: '<html></html>' }, s6)) === 'browser_interrupted' && (await oracle('document.title')) === 'census', '⑥ PAUSED · page-mutation: Network.setCookie and DOM.setOuterHTML are browser_interrupted too (the whole class) — the page unchanged');
   const shot2 = await c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6);
   ok(shot2.result && typeof shot2.result.data === 'string' && (await c6.call('Runtime.getHeapUsage', {}, s6)).result !== undefined, '⑥ PAUSED · a read (Page.captureScreenshot, Runtime.getHeapUsage) still answers');
@@ -387,6 +408,17 @@ else {
     const cl2 = await c6.call('DOM.clearTextMarkers', {}, s6);
     await sleep(150);
     ok(cl2.result !== undefined && (await mk155.pic()) === p0, `⑥ handed back (Chrome ${cv}): the lease's DOM.clearTextMarkers puts the picture back byte-identical`, JSON.stringify(cl2).slice(0, 160));
+  }
+  // lane chrome-156-drift: handed back, the find goes through — the page SCROLLS to the match (the paused leg's positive
+  // control: the oracle sees a find when one runs) — and the lease's stop answers
+  if (find156) {
+    await oracle('scrollTo(0, 0), document.getElementById("i").focus(), 1');
+    const y0 = await oracle('Math.round(scrollY)');
+    const ff2 = await c6.call('FindInPage.findFirst', { query: 'findme156' }, s6);
+    let y1 = y0; for (let i = 0; i < 30 && y1 === y0; i++) { await sleep(100); y1 = await oracle('Math.round(scrollY)'); }
+    const st2 = await c6.call('FindInPage.stop', {}, s6);
+    ok(codeOf(ff2) === null && ff2.result !== undefined && y0 === 0 && y1 > 1000 && codeOf(st2) === null && st2.result !== undefined, `⑥ handed back (Chrome ${cv}): FindInPage.findFirst goes through — the page SCROLLS to the match (${y0} → ${y1} px; the oracle sees a find when one runs) — and FindInPage.stop answers`, JSON.stringify({ ff2, st2, y0, y1 }).slice(0, 240));
+    await oracle('scrollTo(0, 0), 1');
   }
   try { await raw.call('Target.detachFromTarget', { sessionId: rs }); } catch { /* gone */ }
   c6.ws.close();
