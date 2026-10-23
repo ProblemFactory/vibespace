@@ -35,6 +35,7 @@ const { Mux, PROTO_VERSION } = require('../src/agentd/mux.js');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const readMark = (f) => { try { return fs.existsSync(f) && JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } }; // a mark still landing reads as 'not yet', never a crash
 const until = async (fn, ms = 10000, step = 50) => { const end = Date.now() + ms; for (;;) { const v = fn(); if (v) return v; if (Date.now() > end) return v; await sleep(step); } };
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-sig-'));
 const roots = [];
@@ -211,7 +212,7 @@ try {
   ok(KEYS_RE.test(built) && /\b(const|var|let) RELEASE_KEYS = \[\];/.test(bsrc), '(the legs\' base: the built bundle with its baked release key set emptied)');
   const realVersion = (/\bVERSION\s*:\s*"(\d+\.\d+\.\d+)"/.exec(bsrc) || [])[1];
   // the "next release": a stub that records its own start (the re-exec) and exits — what a landed bundle runs
-  const stub = (mark, v) => Buffer.from(`require('fs').writeFileSync(${JSON.stringify(mark)}, JSON.stringify({ argv: process.argv.slice(2), v: process.env.VIBESPACE_AGENTD_VERSION || null }));\n/* module.exports = { VERSION: "${v}" }; */\n`);
+  const stub = (mark, v) => Buffer.from(`const fs = require('fs'); fs.writeFileSync(${JSON.stringify(mark)} + '.part', JSON.stringify({ argv: process.argv.slice(2), v: process.env.VIBESPACE_AGENTD_VERSION || null })); fs.renameSync(${JSON.stringify(mark)} + '.part', ${JSON.stringify(mark)});\n/* module.exports = { VERSION: "${v}" }; */\n`); // the mark lands by rename: the poll below never reads a half-written file (the .346 branch run 3: "Unexpected end of JSON input" on the runner)
   const install = (name, src, trust, root = path.join(tmp, name), track = true) => {
     if (track) roots.push(root); // a root a daemon may run under (the finally ends them); the ssh road's fake hosts run none
     const inst = path.join(root, realVersion); fs.mkdirSync(inst, { recursive: true });
@@ -293,7 +294,7 @@ try {
   const relA = stub(markA, '9.9.9');
   const mA = await push(a.L, relA, { version: '9.9.9', sig: SIG.sign(K2.privateKeyPem, relA, '9.9.9', { ...C, chain: [L12] }) });
   try { a.s.destroy(); } catch { } // the hub drops its link at upgrade-done (the hand-over's close waits for open links)
-  const seenA = await until(() => fs.existsSync(markA) && JSON.parse(fs.readFileSync(markA, 'utf8')), 10000);
+  const seenA = await until(() => readMark(markA), 10000);
   ok(mA.op === 'upgrade-done' && seenA && seenA.v === '9.9.9', 'a GOOD signature (K2 through the chain K1 → K2) lands, and the daemon re-execs into it (the stub recorded its start as 9.9.9)', { mA, seenA });
   ok(fs.readFileSync(path.join(A.root, '9.9.9', 'agentd.js')).equals(relA) && fs.realpathSync(path.join(A.root, 'current')) === fs.realpathSync(path.join(A.root, '9.9.9')), 'the landed bytes are the signed ones and `current` points at them');
   const pinA = SIG.parseTrust(fs.readFileSync(path.join(A.state, 'trusted-keys.json'), 'utf8'));
@@ -318,7 +319,7 @@ try {
   process.env.VIBESPACE_AGENTD_ROOT = Bd.root;
   const dmB = new DeviceManager({ dataDir: hubB, bundlePath: path.join(hubB, 'agentd.js'), version: '1.1.1', log: () => { } });
   dmB.connect().catch(() => { });
-  const seenB = await until(() => fs.existsSync(markB) && JSON.parse(fs.readFileSync(markB, 'utf8')), 12000);
+  const seenB = await until(() => readMark(markB), 12000);
   dmB.stop();
   ok(seenB && seenB.v === '9.9.8' && /upgrade to 9\.9\.8: accepted on this machine's own socket \(the local proof\)/.test(Bd.log()) && !fs.existsSync(path.join(Bd.state, 'upgrade-proof')), 'the hub\'s OWN daemon takes an unsigned local build with the local proof (landed, re-exec\'d, the proof deleted)', { seenB, log: Bd.log().split('\n').filter((l) => /upgrade/.test(l)).slice(-3) });
 
