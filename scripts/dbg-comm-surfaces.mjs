@@ -179,11 +179,14 @@ async function newPage({ width, height, mobile }) {
     for (let i = 0; i < 160; i++) { try { if (await evaljs('!!(window.app && window.app.wm && window.app.sidebar)')) return true; } catch {} await sleep(250); }
     return false;
   };
-  /** Set the per-DEVICE choices (localStorage) on the origin BEFORE the app boots. */
+  /** Set the per-DEVICE choices (localStorage) on the origin BEFORE the app boots. The rail record (`vs-rail-labels`, the
+   *  key scratch.mjs PRESET_KEYS presets to 'done' for the chrome suites) is primed to a FIRST-WEEK record on purpose
+   *  (ci-344-reds): these shots measure what a newcomer sees — the rail with its words, 68 px — and each IM shot says its
+   *  rail state (index.json `rail`). */
   const prime = async ({ lang, theme, sidebarWidth }) => {
     await cdp('Page.navigate', { url: `${base}/api/home` });   // same origin, no app
     await sleep(300);
-    await evaljs(`(() => { localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); localStorage.setItem('theme', ${JSON.stringify(theme)}); localStorage.setItem('sidebarWidth', ${JSON.stringify(String(sidebarWidth))}); localStorage.setItem('vs-onboarded', '1'); return 1; })()`);
+    await evaljs(`(() => { localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); localStorage.setItem('theme', ${JSON.stringify(theme)}); localStorage.setItem('sidebarWidth', ${JSON.stringify(String(sidebarWidth))}); localStorage.setItem('vs-onboarded', '1'); localStorage.setItem('vs-rail-labels', JSON.stringify({ since: Date.now(), used: [] })); return 1; })()`);
   };
   const shot = async (file, clip) => {
     const params = { format: 'png' };
@@ -716,7 +719,7 @@ async function pass({ lang, viewport, theme }) {
   // ── PANEL WIDTHS: widened to the resizer's max, narrowed to its min ──
   if (hasPanel) {
     for (const [w, nm] of [[500, 'wide'], [340, 'mid'], [200, 'narrow']]) {
-      await page.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(${w}); sb._applySidebarLayoutWidth(${w}); return sb.el.offsetWidth; })()`);
+      await page.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(${w}); sb._applySidebarLayoutWidth(); return sb.el.offsetWidth; })()`);
       await sleep(400); await tagSections(page);
       await capture(page, tag, `panel-09-${nm}-${w}`, '#sidebar');
       await capture(page, tag, `panel-09-${nm}-${w}-section-poll`, SEC('fake-poll'), { pad: 4 });
@@ -1025,8 +1028,10 @@ async function imCapture(page, tag, name, rootSel, groups, { pad = 0, clipSel = 
   await page.shot(file + '.png', clip);
   const m = await page.evaljs(`${MEASURE}(${JSON.stringify(rootSel)}, ${PROBES})`);
   const im = await page.evaljs(`${IM_MEASURE}(${JSON.stringify(rootSel)}, ${JSON.stringify(groups)})`);
-  fs.writeFileSync(file + '.json', JSON.stringify({ name, tag, rootSel, clip, ...(m || {}), im }, null, 1));
-  manifest.push({ tag, name, file: path.basename(file) + '.png', missing: m && m.missing, rect: m && m.rect, im: true });
+  // the rail's state in this shot: 'labelled' (the first week's words) | 'icons' | 'none' (no rail on screen: the phone)
+  const rail = await page.evaljs(`(() => { const r = document.getElementById('sidebar-rail'), sb = document.getElementById('sidebar'); const w = r ? Math.round(r.getBoundingClientRect().width) : 0; return w ? { state: r.classList.contains('rail-labelled') ? 'labelled' : 'icons', w, sidebar: Math.round(sb.getBoundingClientRect().width) } : { state: 'none' }; })()`);
+  fs.writeFileSync(file + '.json', JSON.stringify({ name, tag, rootSel, clip, ...(m || {}), im, rail }, null, 1));
+  manifest.push({ tag, name, file: path.basename(file) + '.png', missing: m && m.missing, rect: m && m.rect, im: true, rail });
   log(tag, name, m && m.missing ? 'MISSING ' + m.missing : `${m.rect.w}×${m.rect.h} · ${im && im.groups ? im.groups.length : 0} groups · ${im && im.targets ? im.targets.length : 0} targets`);
   return im;
 }
@@ -1063,8 +1068,8 @@ async function imPass({ lang, viewport, theme }) {
     await openPanel(page);
     await waitFor(page, `document.querySelectorAll('.rail-panel-channels .chan-groups .chan-grow').length >= 3`, 60);
     await sleep(500);
-    for (const w of [260, 200, 340, 500]) {
-      await page.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(${w}); sb._applySidebarLayoutWidth(${w}); return 1; })()`);
+    for (const w of [260, 200, 340, 500]) {   // _applySidebarLayoutWidth() reads the width the sidebar HAS: the first-week rail raises the floor 200 → 224 (ci-344-reds)
+      await page.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(${w}); sb._applySidebarLayoutWidth(); return 1; })()`);
       await sleep(400);
       await page.evaljs(`(() => { for (let n = document.querySelector('.rail-panel-channels .chan-bar'); n; n = n.parentElement) n.scrollTop = 0; return 1; })()`);
       await imCapture(page, tag, `list-focus-${w}`, '#sidebar', IM_PANEL_GROUPS);
@@ -1076,7 +1081,7 @@ async function imPass({ lang, viewport, theme }) {
     await imCapture(page, tag, 'list-all-260', '#sidebar', IM_PANEL_GROUPS);
     await page.evaljs(`(() => { const b = document.querySelector('.rail-panel-channels .chan-view-btn[data-view="focus"]'); if (b) b.click(); return !!b; })()`);
     for (const w of [260, 340]) {
-      await page.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(${w}); sb._applySidebarLayoutWidth(${w}); return 1; })()`);
+      await page.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(${w}); sb._applySidebarLayoutWidth(); return 1; })()`);
       await sleep(400);
       await waitFor(page, `!!document.querySelector('.rail-panel-channels .chan-account[data-adapter="lark"] .chan-sec-health')`, 40);
       await page.evaljs(`(() => { const el = document.querySelector('.rail-panel-channels .chan-account[data-adapter="lark"]'); if (el) el.scrollIntoView({ block: 'start' }); return !!el; })()`);

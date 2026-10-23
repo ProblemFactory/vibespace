@@ -149,6 +149,10 @@ const RAIL_CAPTION = { diagnostics: 'Diagnostics' };   // a door whose tip is a 
 const readRailRecord = () => { try { const v = localStorage.getItem(RAIL_LABELS_KEY); return v === RAIL_DONE ? RAIL_DONE : v ? JSON.parse(v) : null; } catch { return null; } };
 const keepRailRecord = (r) => { try { localStorage.setItem(RAIL_LABELS_KEY, r === RAIL_DONE ? RAIL_DONE : JSON.stringify(r)); } catch { } };
 
+/** What the rail's first-week words add to its width (68 − 44 px, public/style.css #sidebar-rail.rail-labelled) — and so to
+ *  the sidebar's floor while they show (ci-344-reds). */
+const LABELLED_RAIL_EXTRA = 24;
+
 export function installSidebarRail(Sidebar) {
   Object.assign(Sidebar.prototype, {
 
@@ -241,6 +245,10 @@ export function installSidebarRail(Sidebar) {
       const was = this._railEl.classList.contains('rail-labelled');
       this._railEl.classList.toggle('rail-labelled', v.show);
       this.el.classList.toggle('rail-labelled', v.show);
+      // ci-344-reds: the words widen the rail 44 → 68 px, so the sidebar's floor rises by the same 24 px — the panel keeps
+      // the 156 px a 200 px sidebar gives it (at 132 px the Channels list cut its tags and scrolled sideways). The CSS
+      // floor (.sidebar.rail-labelled min-width) holds a stored narrower width; the drag's own floor follows here.
+      if (this._resizer) { this._resizer._floorMin ??= this._resizer.min; this._resizer.min = v.show ? this._resizer._floorMin + LABELLED_RAIL_EXTRA : this._resizer._floorMin; }
       if (was !== v.show) this._applySidebarLayoutWidth?.();
     },
     _railDoorUsed(id) {

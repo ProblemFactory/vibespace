@@ -4623,6 +4623,7 @@ button.plugin-chip-primary:hover { background: color-mix(in srgb, var(--accent) 
 #sidebar-rail.rail-labelled .rail-item { width: 64px; height: auto; min-height: 44px; flex-direction: column; gap: 2px; padding: 5px 2px; }
 #sidebar-rail.rail-labelled .rail-label { display: block; font-size: 9.5px; line-height: 1.15; text-align: center; max-width: 62px; overflow-wrap: anywhere; color: inherit; }
 .sidebar.rail-collapsed.rail-labelled { width: 68px !important; }
+.sidebar.rail-labelled:not(.rail-collapsed) { min-width: 224px; }   /* ci-344-reds: at the floor the words' 24 px come out of the sidebar, not the panel — 200 + 24, so the panel keeps its 156 px (src/lib/sidebar-rail.js LABELLED_RAIL_EXTRA) */
 .rail-panel { padding: 8px; overflow-y: auto; }
 .ports-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 6px; border-radius: var(--radius-sm); font-size: 12px; }
 .ports-row:hover { background: var(--hover-overlay); }

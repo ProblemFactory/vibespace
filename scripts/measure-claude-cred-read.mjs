@@ -109,6 +109,9 @@ const { OAT_VARIANTS, oatInFile, cliVersionOf, measuredVersions, withMeasured } 
 // FAKE tokens, built at runtime: no token-shaped literal sits in the tree
 const OAT_PFX = ['sk', 'ant', 'oat01'].join('-');
 const ORT_PFX = ['sk', 'ant', 'ort01'].join('-');
+// the resolver(s) this box's lookups go to (/etc/resolv.conf) and what counts as loopback (ci-344-reds)
+function nameserversOf() { try { return fs.readFileSync('/etc/resolv.conf', 'utf8').split('\n').map((l) => (/^\s*nameserver\s+(\S+)/.exec(l) || [])[1]).filter(Boolean); } catch { return []; } }
+function isLoopbackAddr(a, loAddrs = []) { const x = String(a).replace(/^::ffff:/i, ''); return /^127\./.test(x) || x === '::1' || loAddrs.includes(x); }
 // the claude the namespace rung measures: --claude, else the one on PATH
 const findClaude = () => {
   let c = opt('claude', '');
@@ -126,7 +129,15 @@ if (NETNS && !flag('inner')) {
   const pass = argv.filter((a) => a !== '--inner');
   const inner = ['env', `HOME=${process.env.HOME || os.homedir()}`, `PATH=${path.dirname(process.execPath)}:/usr/bin:/bin`, `USER=${user}`, process.execPath, SELF, '--inner', '--claude', claude, ...pass];
   const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-  const r = spawn('sudo', ['-n', 'unshare', '-n', '--', 'sh', '-c', `ip link set lo up && exec sudo -n -u ${q(user)} -- ${inner.map(q).join(' ')}`], { stdio: 'inherit' });
+  // ci-344-reds: the host's resolver, ON lo inside this same namespace. claude (2.1.308 and 2.1.309, measured) resolves
+  // api.anthropic.com at start even with ANTHROPIC_BASE_URL on the mock; where /etc/resolv.conf names a non-loopback
+  // server (the 2.369.344 runner: 168.63.129.16) that lookup was a connect() off loopback — refused by the namespace
+  // (ENETUNREACH), killed by the belt, and the run measured nothing. Its address on lo keeps the lookup on loopback
+  // (nothing listens: refused at once, as on a systemd-resolved box); the namespace stays lo-only (no route out, the
+  // inner rung re-checks), and the belt still ABORTS on any other off-loopback connect.
+  const resolvers = nameserversOf().filter((a) => !isLoopbackAddr(a) && /^(\d{1,3}(\.\d{1,3}){3}|[0-9a-f:]*:[0-9a-f:]*)$/i.test(a));
+  const pin = resolvers.map((a) => ` && { ip addr add ${q(a + (a.includes(':') ? '/128' : '/32'))} dev lo || echo ${q(`NOTE: resolver ${a} not pinned on lo — its lookup ABORTS the run`)} >&2; }`).join('');
+  const r = spawn('sudo', ['-n', 'unshare', '-n', '--', 'sh', '-c', `ip link set lo up${pin} && exec sudo -n -u ${q(user)} -- ${inner.map(q).join(' ')}`], { stdio: 'inherit' });
   r.on('error', (e) => { console.error(`REFUSED: sudo did not start (${e.code || e.message})`); process.exit(2); });
   r.on('exit', (c) => process.exit(c ?? 1));
 } else {
@@ -171,6 +182,10 @@ async function main() {
   fs.mkdirSync(ROOT, { recursive: true, mode: 0o700 });
   const version = execFileSync(CLAUDE, ['--version'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: ROOT } }).trim();
   process.stderr.write(`[measure] ${CLAUDE} = ${version}${NETNS ? '' : ' (--no-netns: a FAKE claude on the loopback mock)'}\n`);
+  // the namespace's lo addresses (127/8, ::1 and the resolver the outer rung pinned there) and the resolver the CLI asks
+  const LO_ADDRS = NETNS ? (() => { try { return execFileSync('ip', ['-o', 'addr', 'show', 'dev', 'lo'], { encoding: 'utf8' }).split('\n').map((l) => (/\binet6?\s+([^/\s]+)/.exec(l) || [])[1]).filter(Boolean); } catch { return []; } })() : [];
+  const RESOLVER = nameserversOf();
+  if (NETNS) process.stderr.write(`[measure] resolver ${RESOLVER.join(', ') || '(none)'} — ${RESOLVER.every((a) => isLoopbackAddr(a, LO_ADDRS)) ? 'on lo' : 'NOT on lo: a lookup ABORTS the run'}\n`);
   // Refuse unless the namespace really has no route out (the whole point).
   if (NETNS) {
     const routes = execFileSync('ip', ['-o', 'link'], { encoding: 'utf8' }).split('\n').filter(Boolean);
@@ -332,7 +347,7 @@ async function main() {
     const v4 = /sin_port=htons\((\d+)\), sin_addr=inet_addr\("([^"]+)"\)/.exec(line);
     const v6 = /sin6_port=htons\((\d+)\).*?inet_pton\(AF_INET6, "([^"]+)"/.exec(line);
     const [port, addr] = v4 ? [v4[1], v4[2]] : v6 ? [v6[1], v6[2]] : ['?', '?'];
-    if (/^127\./.test(addr) || addr === '::1' || /^::ffff:127\./.test(addr)) return null;
+    if (isLoopbackAddr(addr, LO_ADDRS)) return null;   // 127/8, ::1, ::ffff:127/8 — and an address ON lo in the namespace (ci-344-reds)
     return { addr, port, result: (/\)\s*=\s*(.*)$/.exec(line) || [])[1] || '?' };
   };
 
@@ -684,7 +699,7 @@ async function main() {
     results.push(r);
     process.stderr.write(JSON.stringify({ variant: r.variant, steps: r.steps.map((s) => [s.step, s.accts.join(' '), s.result?.subtype || s.result]), otel: r.otel.map((o) => `${o.phase}:${(o.org || '').slice(0, 8)}`), oauth: r.oauth.map((o) => `${o.phase}:${o.kind}:${o.acct}`), fileAfter: r.fileAfter, credSyscalls: r.credSyscalls, events: r.events.length }) + '\n');
   }
-  const record = { measuredAt: new Date().toISOString(), cli: results[0]?.version || version, netns: NETNS, gapMs: GAP, escapes: M.escapes.map((e) => `${e.via} ${e.what}`), aborted: ESCAPED.length ? ESCAPED : undefined, events: EVENTS.map((e) => ({ ...e, t: new Date(e.t).toISOString().slice(11, 23) })), results };
+  const record = { measuredAt: new Date().toISOString(), cli: results[0]?.version || version, netns: NETNS, resolver: RESOLVER, loAddrs: LO_ADDRS, gapMs: GAP, escapes: M.escapes.map((e) => `${e.via} ${e.what}`), aborted: ESCAPED.length ? ESCAPED : undefined, events: EVENTS.map((e) => ({ ...e, t: new Date(e.t).toISOString().slice(11, 23) })), results };
   if (EVENTS.length) process.stderr.write(`[measure] ${EVENTS.length} events recorded, the run kept going (record.events)\n`);
   if (!flag('keep')) { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } } // the scratch HOME + fake creds + strace logs (--keep to inspect)
   if (OUT) fs.writeFileSync(OUT, JSON.stringify(record, null, 2));

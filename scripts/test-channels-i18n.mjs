@@ -359,6 +359,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const byKind = viol.reduce((m, x) => ({ ...m, [x.what]: (m[x.what] || 0) + 1 }), {});
     console.log(`  … ${imShots.length} IM shots · ${groups} rows / bars / messages · ${avatars} avatars · ${targets} targets measured; violations ${JSON.stringify(byKind)}`);
     ok(imShots.length >= want.length * IM_LANGS.length && groups > 200 && avatars > 100, 'the census is NON-VACUOUS (it measured the rows, the avatars and the targets it judges)', JSON.stringify({ shots: imShots.length, groups, avatars }));
+    // ci-344-reds: the STATE the shots measure — the first-week rail (its words, 68 px: a newcomer's screen, and the stricter
+    // one — 24 px less panel); the 200 px setting lays out at the labelled rail's 224 px floor, so the panel keeps 156 px
+    const railOf = (x) => (x.rail && x.rail.state) || '?';
+    const desk = imShots.filter((x) => /-desktop-/.test(x.tag));
+    const railStates = imShots.reduce((m, x) => { const k = `${/-desktop-/.test(x.tag) ? 'desktop' : 'phone'}:${railOf(x)}`; return { ...m, [k]: (m[k] || 0) + 1 }; }, {});
+    console.log(`  … the rail in the shots: ${JSON.stringify(railStates)}`);
+    const lists = desk.filter((x) => /^list-/.test(x.name));
+    ok(lists.length > 0 && desk.every((x) => railOf(x) === 'labelled' || railOf(x) === 'none') && lists.every((x) => railOf(x) === 'labelled'),
+      'the desktop shots are the FIRST-WEEK rail (its words) — the list at every width included: the census measures what a newcomer sees', JSON.stringify(desk.filter((x) => railOf(x) !== 'labelled').map((x) => `${x.tag}/${x.name}:${railOf(x)}`).slice(0, 8)));
+    const at200 = desk.filter((x) => x.name === 'list-focus-200');
+    ok(at200.length > 0 && at200.every((x) => x.rail.sidebar >= 224 && x.rail.sidebar - x.rail.w >= 156),
+      '…and at the 200 px setting the words come out of the sidebar, not the panel: sidebar ≥ 224 px, panel ≥ 156 px (what the 200 px floor gave it before the words)', JSON.stringify(at200.map((x) => x.rail)));
     ok(viol.length === 0, 'THE LOOK: nothing overlaps, nothing is cut, no part leaves its row, nothing scrolls sideways, every phone target ≥ 36 px, every avatar ≥ 4.5 : 1 and paint — at every rail width, in every language, under the runner\'s face',
       viol.slice(0, 30).map((v) => `${v.what} ${v.where}: ${v.detail}`).join('\n    '));
   }

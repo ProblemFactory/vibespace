@@ -232,13 +232,19 @@ console.log('— active-sessions payload → _merge() (whitelist drift)');
   const gating = factRows.filter(([, g]) => g).map(([k]) => k);
   // Keys _merge() handles by NAME (renamed, derived, or composed) — everything
   // else in the payload must ride LIVE_SESSION_FACTS.
+  // `purpose` (lane door-day-one-landing, 'sign-in') is read by name too: _merge() DROPS that row before it is built
+  // (isSignInRow) — a filter, so carrying it would be a dead fact; the pin below holds the read in place.
   const HANDLED = new Set(['id', 'name', 'cwd', 'host', 'hostName', 'createdAt', 'backend', 'backendSessionId',
-    'sessionKey', 'claudeSessionId', 'sourceKind', 'agentKind', 'agentRole', 'agentNickname', 'parentThreadId', 'mode']);
+    'sessionKey', 'claudeSessionId', 'sourceKind', 'agentKind', 'agentRole', 'agentNickname', 'parentThreadId', 'mode', 'purpose']);
   const missing = [...payloadKeys].filter((k) => !HANDLED.has(k) && !facts.includes(k));
   const dead = facts.filter((k) => !payloadKeys.has(k));
   ok('EVERY live fact the server publishes is either renamed/derived by name or carried by LIVE_SESSION_FACTS — a new payload key fails HERE, not silently in production',
     missing.length === 0, 'not carried: ' + JSON.stringify(missing));
   ok('…and no dead entries (a fact the payload stopped sending must leave the list)', dead.length === 0, 'dead: ' + JSON.stringify(dead));
+  // ci-344-reds: a HANDLED key is a claim that _merge() reads it by NAME — for `purpose` that read is the sign-in filter
+  const dayOne = fs.readFileSync(path.join(repo, 'src/day-one.js'), 'utf8');
+  ok('`purpose` is HANDLED because _merge() reads it by name: a sign-in row is dropped before the webui-only unshift (isSignInRow(ws) → row.purpose === SIGN_IN)',
+    /for \(const ws of webui\) \{\n\s*if \(isSignInRow\(ws\)\) continue;/.test(sb) && /const isSignInRow = \(row\) => !!row && row\.purpose === SIGN_IN;/.test(dayOne));
   ok('…the facts this round found dead are on it', ['worktree', 'worktreePath', 'outputStyle', 'remoteState'].every((k) => facts.includes(k)), facts.join(','));
   ok('…every row states its render-gate choice (the parse saw all of them — a row this regex cannot read would silently drop out of BOTH halves of the guard)',
     facts.length >= 8 && facts.length === (listSrc.match(/digest:/g) || []).length, JSON.stringify(factRows));

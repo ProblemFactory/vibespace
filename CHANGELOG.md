@@ -8,7 +8,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The welcome now says in plain words what VibeSpace is for, with three things you could ask; theme and language are in Settings instead of the first screen.
 - Your first chat starts in the folder that holds your files: the tour and New Session offer your folders, the one with files first, like "work (23 files)".
 - New Session no longer fills in the folder of your previous session; pick a folder, the last one you used, or type one.
-- For your first week, the left bar shows each icon's name under it, until you have used every one.
+- For your first week, the left bar shows each icon's name under it, until you have used every one; at its narrowest, the sidebar widens to make room for them.
 
 ### Fixed
 - On a cloud VibeSpace, connecting Lark or Gmail now comes back to VibeSpace by itself after you sign in, and the sign-in tab closes itself.
