@@ -71,7 +71,7 @@ const RE_ENABLE_MS = 30 * 1000;              // a held tab's Page.enable is aske
 const STOP_RETRIES = 4, STOP_RETRY_MS = 120; // verify r4 #5: Page.stopLoading under "Not attached to an active page" (a page mid-swap) is asked again — ≤ 0.5 s
 
 function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.now,
-  enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, reEnableMs = RE_ENABLE_MS, // verify r1: the quiet rule is a clock a fast gate shortens (lane browser-held-not-hung: the re-ask too)
+  enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, pageAnswerMs = ST.PAGE_ANSWER_MS, closeGoneMs = 2000 /* lane browser-shared-profile-freeze */, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, reEnableMs = RE_ENABLE_MS, // verify r1: the quiet rule is a clock a fast gate shortens (lane browser-held-not-hung: the re-ask too)
   tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null,
   promptAskMs = ST.PROMPT_ASK_MS, authHoldMaxMs = ST.AUTH_HOLD_MAX_MS,
   passkeys = null, takeoverOf = null } = {}) { // lane passkey-store-core: `passkeys` = {read, write, cipher} (the wiring: data/browser-passkeys.json 0600 + the key file); none ⇒ today's tab-native passkeys // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
@@ -949,10 +949,22 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   /** `tab close` while a loop stands: `Target.closeTarget` on the LOOPING tab through this socket (never the daemon's queue);
    *  the browser's only page gets a blank one first (a browser with no page is not one the CLI can drive again). */
-  async function closeTab(t) {
+  async function closeTab(t, { targetId = null } = {}) {
     const w = watches.get(String((t && t.profileId) || ''));
     if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
-    const e = pickTab(t, { current: true });
+    // lane browser-shared-profile-freeze: a tab NAMED by id (page_busy's way out — a popup holding a dialog nobody can answer):
+    // the conversation's own only (ownsTab — a popup of its page is its opener's), closed through this socket (the driver's own
+    // `tab close` reads the tab list through the very driver the held page holds: measured tabs_unreadable after 13–19 s)
+    if (targetId) {
+      // only a tab NOBODY can answer (held — its Page domain never answered — or silent to one bounded ask now): a tab that
+      // answers is closed by the conversation's own `tab close`, with its bookkeeping and its fence's words (the CLI falls
+      // through on `tab_answers` / `not_your_tab`); then the conversation's own only
+      const e0 = w.targets.get(String(targetId).toUpperCase());
+      if (!e0) return { ok: false, code: 'not-found', error: 'that tab is not open in your browser' };
+      if (!e0.heldAt) { const a = e0.sid ? await call(w, 'Runtime.evaluate', { expression: '1', returnByValue: true }, e0.sid, Math.min(1500, pageAnswerMs)) : null; if (a && !a.timeout && !a.error && a.result) return { ok: false, code: 'tab_answers', error: 'that tab answers — it is closed through your browser as usual' }; }
+      const own = ownsTab(t, String(targetId).toUpperCase()); if (!own.ok) return own;
+    }
+    const e = targetId ? w.targets.get(String(targetId).toUpperCase()) : pickTab(t, { current: true });
     if (!e) return { ok: false, code: 'no_loop', error: 'no tab of yours is looping' };
     const was = e.loop ? { ...ST.loopBlock(e.loop) } : null;
     const pages = [...w.targets.values()].length;
@@ -960,7 +972,45 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (pages <= 1) { const c = await call(w, 'Target.createTarget', { url: 'about:blank' }, null, 3000); opened = !!(c && c.result && c.result.targetId); }
     const r = await call(w, 'Target.closeTarget', { targetId: e.targetId }, null, 3000);
     if (!r || r.timeout || r.error || (r.result && r.result.success === false)) return { ok: false, code: 'close_failed', error: r && r.error ? String(r.error.message || 'refused') : 'the browser did not close it' };
+    // lane browser-shared-profile-freeze: a close BY ID is said CLOSED only once the tab is gone — measured: Chrome answers
+    // closeTarget `success` at once, but a page holding its main thread outlives the ask until its script lets go
+    if (targetId) { const until = now() + closeGoneMs; while (w.targets.get(e.targetId) === e && now() < until) await new Promise((res) => setTimeout(res, 50)); if (w.targets.get(e.targetId) === e) return { ok: false, code: 'close_pending', error: ST.closePendingText({ url: e.url, title: e.title, ms: closeGoneMs }) }; }
     return { ok: true, url: ST.pageText(e.url, 300), title: ST.pageText(e.title, 120), was, targetId: e.targetId, opened };
+  }
+  /**
+   * lane browser-shared-profile-freeze: DOES THE TAB A VERB ACTS ON ANSWER? One `Runtime.evaluate` per tab on THIS socket's
+   * own session (never the conversation's driver — its queue is what a silent page holds), all at once, each bounded by
+   * `boundMs`. `targets` = the tab(s) the verb acts on (a named lease's own tab), else every tab of the conversation (its
+   * ephemeral browser — the current one is the driver's), of those only the ones the agent worked in when there are any; the
+   * ask settles at the FIRST answer (`answered: null` = not waited for). A silent tab carries the tabs IT opened that this socket holds
+   * (`popups`: their Page domain never answered — a dialog that opened before anything saw it); `worked` = a tab the agent
+   * navigated (its keeper-bound blank and its pages' popups are not). → ST.pageBusyVerdict's
+   * `ask` (`{asked:false}` when nothing is watched). Never throws.
+   */
+  async function pageAnswers(t, { targets = null, boundMs = pageAnswerMs } = {}) {
+    const w = watches.get(String((t && t.profileId) || ''));
+    if (!w || w.state !== 'open') return { asked: false };
+    const scope = t && t.ephemeral ? null : scopeFor(t);
+    const want = Array.isArray(targets) && targets.length ? targets.map((x) => String(x).toUpperCase()) : [...w.targets.keys()].filter((tid) => inScope(scope, tid));
+    const rows = want.map((tid) => w.targets.get(tid)).filter((e) => e && e.sid);
+    if (!rows.length) return { asked: false };
+    // only the tabs the verb can act on are asked — the ones the agent worked in (navigated), else every one — and the ask
+    // SETTLES at the first answer (the verb then runs): a silent sibling never costs a healthy page's verb the bound
+    const worked = rows.filter((e) => (e.agentHopAt || 0) > 0), judged = worked.length ? worked : rows;
+    const pages = judged.map((e) => ({ targetId: e.targetId, url: e.url, title: e.title, answered: null, ms: null, popups: [], worked: (e.agentHopAt || 0) > 0 }));
+    await new Promise((resolve) => {
+      let left = judged.length;
+      judged.forEach((e, i) => {
+        const t0 = now();
+        call(w, 'Runtime.evaluate', { expression: '1', returnByValue: true }, e.sid, boundMs).then((r) => {
+          const answered = !!(r && !r.timeout && !r.error && r.result);
+          pages[i].answered = answered; pages[i].ms = now() - t0;
+          if (!answered) pages[i].popups = [...w.targets.values()].filter((q) => q.opener === e.targetId && q.heldAt).map((q) => ({ targetId: q.targetId, url: q.url, title: q.title }));
+          if (answered || --left === 0) resolve();
+        });
+      });
+    });
+    return { asked: true, boundMs, pages };
   }
   /** `screenshot` while a loop stands: `Page.captureScreenshot` on the looping tab through this socket, bounded (measured:
    *  a page that navigates away before it paints has no frame to take — the capture then never answers). → `{ok, data}` |
@@ -1602,6 +1652,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
 
   return { arm, disarm, factFor, openOn, stuckForKey, pageStuckMap, waitForOpen, answer, noteOutcome, resetOutcomes, verbStarted, verbEnded, verbRunning, scopeFor, onChange, setTabsOf, stats, bindTab, orphansOf, // verify r4 #1: the `tab new` ack binds
     ownsTab, pickTab, stopTab, closeTab, captureTab, noteCut, busyFor, // lane site-reset: a looping tab never disables the browser
+    pageAnswers, // lane browser-shared-profile-freeze: the verb's own tab asked first, bounded (a silent page answered page_busy by name)
     ownTabs, clearSite, // lane site-reset step 2: one site's stored login, cleared
     passkeyIn, cancelPasskey, // lane browser-passkey: a page waiting for a passkey, named and cancellable
     passkeyVaultRows, passkeyVaultReveal, // lane vault-contents-window: the Vault window's masked rows + its one-value reveal

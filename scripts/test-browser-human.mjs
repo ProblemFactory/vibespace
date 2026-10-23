@@ -1468,6 +1468,9 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     // lane browser-tabs-by-window (the 2.369.240 integration): the tab groups' holder windows — a CONVERSATION lease's stamped
     // `windowId` while it is of this browser run (`windowIn`); his window is read off his own tab (`h.ownTab`) before this loop
     holderWindowsOf: 1,
+    // lane browser-shared-profile-freeze: the scope road's url is minted only for a CONVERSATION lease that stands (an agent's
+    // key — the user's own Browse-yourself key keeps the raw url, leaseRoadVerdict's `human` row)
+    leaseUrlFor: 1,
   };
   // holder: "who holds this browser / is it used" — through holdersOn (the conversations' leases + his row)
   const HOLDER = { list: 1, holdersOn: 1 };

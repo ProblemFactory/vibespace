@@ -10630,4 +10630,6 @@ export default {
   "Context table budget per group (bytes)": "每组 Context 表的注入预算（字节）", // lane task-group-context
   "How many bytes one Task Group's Context table may take in what a conversation is told. Rows are told in table order at the depth each one chose; a row that does not fit steps down (contents, then file names with key files, then file names, then only the path and note) and says so. The room the hook carries beside the tools and the standing instructions caps it too. 0 = only that room.": "一个任务组的 Context 表在对话听到的内容里最多占多少字节。各行按表中顺序、按各自选的深度告诉 agent；装不下的一行会退一档（内容 → 文件名 + 关键文件内容 → 文件名 → 只说明路径和说明）并写明。钩子在工具说明和常驻指令之外能带的空间也会限制它。0 = 只受那个空间限制。", // lane task-group-context
   "「{path}」 is too big to tell as 「{chosen}」 → told as 「{level}」 (the agent still knows where it is and what it is for)": "「{path}」太大，无法按「{chosen}」告诉 → 退到「{level}」（agent 仍然知道它在哪、管什么）", // lane task-group-context
+  // lane chat-live-tail-pin (inc-mvl02dkn-gop0): a wheel-up at the start of a conversation
+  "No earlier messages": "没有更早的消息",
 };

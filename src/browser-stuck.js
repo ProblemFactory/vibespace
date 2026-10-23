@@ -767,6 +767,67 @@ function pageAnswerVerdict(ask) {
   if (!answered.length) return { state: 'hung', why: 'no-page-answered', answered, silent, boundMs };
   return { state: 'answering', why: 'pages', answered, silent, boundMs };
 }
+// ── lane browser-shared-profile-freeze (fb-8727ee62fb / fb-0898d92d0a): A SILENT PAGE IS ANSWERED BY NAME, BEFORE THE DRIVER
+// GETS THE VERB. MEASURED (scripts/measure-shared-profile-freeze.mjs — agent-browser 0.38.2 + Chrome 154): a verb handed to the
+// driver on a page that answers nothing holds THAT conversation's driver until its own timeout (an `eval` on a page holding
+// its main thread 20 s took 19.8 s, and the same conversation's `tab new` behind it 19.6 s — the server's tab list runs
+// through that driver); a popup the page opened WITH a dialog (one that opened before anything could watch it: nobody can
+// answer it) holds its opener too (a same-site popup shares its renderer) — every later `eval` timed out (60 s, 30 s, 30 s)
+// and the tab list failed tabs_unreadable, on the conversation's own ephemeral browser exactly as on a named profile (the
+// fb-0898 shape: the two differ only by the site's timing), and closing that popup freed the page at once (0.2 s). So
+// /resolve asks the tab the verb acts on FIRST — one Runtime.evaluate on the dialog watch's own session, bounded by
+// PAGE_ANSWER_MS (the restart verdict's bound) — and a page-waiting verb on a silent tab is answered `page_busy`, naming the
+// tab (and a held popup with its way out); the ways out still run.
+/** The verbs a silent page never refuses: they act on the tab from outside it (or answer the dialog that holds it), and a
+ *  navigation — MEASURED on a page holding its main thread 15 s: `open` of another site answered in 108 ms (a new renderer;
+ *  a same-site one waits as before), while `screenshot` timed out at 30 s, `back` took 15.6 s and `reload` 14.7 s. */
+const PAGE_BUSY_PASS_VERBS = Object.freeze(['stop', 'site-reset', 'tab', 'close', 'dialog', 'open', 'goto', 'navigate', 'nav']);
+function busyPasses(verb) { return PAGE_BUSY_PASS_VERBS.includes(str(verb)); }
+const tabRow = (x) => ({ targetId: str(x && x.targetId).slice(0, 64), url: pageText(x && x.url, URL_MAX), title: pageText(x && x.title, 120) });
+/**
+ * THE PAGE-BUSY VERDICT (PURE): the watch's bounded ask of the tab(s) a verb acts on → `null` (the verb runs) or
+ * `{code:'page_busy', text, silent, popups, boundMs}` (each a list of `{targetId, url, title}`), first match wins:
+ *   · not asked, or no tab asked                     ⇒ null (the verb runs, as before)
+ *   · ≥ 1 judged tab answered within the bound       ⇒ null (its tab answers — where the current one is not known, one may)
+ *   · every judged tab silent                        ⇒ page_busy
+ * JUDGED = the tabs the agent worked in (`worked`: it navigated them), else every asked tab.
+ * `ask` = `{asked, boundMs, pages: [{targetId, url, title, answered, popups: [{targetId, url, title}]}]}` — `popups` = the
+ * tabs this one opened that the watch holds (their Page domain never answered: a dialog that opened before anything saw it).
+ */
+function pageBusyVerdict(ask) {
+  if (!ask || typeof ask !== 'object' || ask.asked !== true) return null;
+  const pages = Array.isArray(ask.pages) ? ask.pages.filter((x) => x && typeof x === 'object' && x.targetId) : [];
+  // the tabs the agent WORKED in (navigated) are the ones a verb acts on — a holder's idle blank or a page's popup is not judged
+  // (measured: the keeper's bound about:blank in the holder's own window answered beside the agent's silent page)
+  const judged = pages.some((x) => x.worked === true) ? pages.filter((x) => x.worked === true) : pages;
+  if (!judged.length || judged.some((x) => x.answered === true)) return null;
+  const boundMs = Number(ask.boundMs) > 0 ? Number(ask.boundMs) : PAGE_ANSWER_MS;
+  const silent = judged.map(tabRow);
+  const seen = new Set(); const popups = [];
+  for (const x of judged) for (const q of Array.isArray(x.popups) ? x.popups : []) if (q && q.targetId && !seen.has(String(q.targetId))) { seen.add(String(q.targetId)); popups.push(tabRow(q)); }
+  return { code: 'page_busy', silent, popups, boundMs, text: pageBusyText({ silent, popups, boundMs }) };
+}
+/** The refusal's words (English, agent-facing, never t()): WHICH tab, that nothing ran, the scope of the harm, the way out. */
+function pageBusyText({ silent = [], popups = [], boundMs = PAGE_ANSWER_MS } = {}) {
+  const tab = (x) => `${x.targetId.slice(0, 8) || '?'}${x.title ? ' ' + quoted(x.title) : ''}${x.url ? ' (' + x.url + ')' : ''}`;
+  const which = silent.length === 1 ? `your tab ${tab(silent[0])} is` : `your tabs ${silent.slice(0, 3).map(tab).join(', ')}${silent.length > 3 ? `, +${silent.length - 3} more` : ''} are`;
+  const head = `${which} not answering — it answered nothing in ${secs(boundMs)} (its page holds its main thread, or a dialog holds it); nothing ran: the command was not handed to the browser, where it would wait and hold your next commands. Other conversations' tabs are not affected.`;
+  if (popups.length) return `${head} ${popups.length === 1 ? 'It opened a popup' : 'It opened popups'} ${popups.slice(0, 3).map((q) => `${q.targetId.slice(0, 8)}${q.url ? ' (' + q.url + ')' : ''}`).join(', ')} that ${popups.length === 1 ? 'holds a dialog' : 'hold dialogs'} nobody can answer (opened before anything could watch ${popups.length === 1 ? 'it' : 'them'}) — \`vibespace-browser tab close ${popups[0].targetId}\` closes it and frees this page.`;
+  // the way out that does not wait on the page (measured 108 ms): a navigation to another site (a new page process) — `tab new`
+  // and `tab close` wait on it (the tab list is read through the driver, and Chrome closes a busy page only when it lets go)
+  return `${head} Wait and run it again, or \`vibespace-browser open <a url on another site>\` — that leaves it at once (a new page process).`;
+}
+/** A close BY ID the browser accepted but has not done within `ms` (measured: a page holding its main thread outlives it). */
+function closePendingText({ url = '', title = '', ms = 2000 } = {}) {
+  const where = `${title ? quoted(pageText(title, 120)) + ' — ' : ''}${pageText(url, URL_MAX) || 'the tab'}`;
+  return `the browser was asked to close ${where}, and ${secs(ms)} later it is still open: its page holds its main thread, and Chrome closes it only when it lets go — \`vibespace-browser open <a url on another site>\` leaves it at once`;
+}
+/** A held tab closed by id through the watch (the page_busy way out). */
+function busyCloseText({ url = '', title = '' } = {}) {
+  const where = `${title ? quoted(pageText(title, 120)) + ' — ' : ''}${pageText(url, URL_MAX) || 'the tab'}`;
+  return `closed the tab ${where} (a tab nobody could answer). Run your command again.`;
+}
+
 /**
  * WHO MAY RESTART (PURE): the user always; an agent only while no human drives it and the browser is judged hung — by
  * THE PAGE'S ANSWERS, never the helper's liveness. → {ok, why} or {ok:false, code, error}. First match wins:
@@ -981,6 +1042,7 @@ module.exports = {
   // lane browser-unresponsive: the WHOLE browser that does not answer (one verdict, every surface reads it)
   UNRESPONSIVE_AFTER_MS, UNRESPONSIVE_MIN_ASKS, ANSWER_ASK_MS, browserAnswerVerdict, unresponsiveFact, utcClock, minutesSince, restartAdmission,
   PAGE_ANSWER_MS, pageAnswerVerdict, answeringText, restartWhyText, // lane browser-daemon-survives-update: a restart judges the page's answers, never the helper's
+  PAGE_BUSY_PASS_VERBS, busyPasses, pageBusyVerdict, pageBusyText, busyCloseText, closePendingText, // lane browser-shared-profile-freeze: a silent page is answered by name before the driver gets the verb
   restartedCardText, unresponsiveLine, answeredAgainLine, unresponsiveNotice, unresponsiveWords,
   // lane browser-ui-prompts: the browser's own prompts (a file chooser, an HTTP sign-in) — one record, one sentence, one bar
   PROMPT_TYPES, PROMPT_ASK_MS, AUTH_HOLD_MAX_MS, promptFromCdp, promptText, promptBlock, promptAnsweredNote, promptWords,

@@ -1061,6 +1061,15 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           if (sessionMode === 'chat') {
             session._normalizer = createMessageManager(backend, id);
             session._normEpoch = Date.now();
+            // A NEW CONVERSATION IS BORN WITH ITS HISTORY LOADED (inc-mvl02dkn-gop0): `_historyLoaded` says "this
+            // normalizer holds the whole conversation", and one that sees the conversation's FIRST record does — there
+            // is nothing on disk before it. It used to be set only by the first ATTACH's rebuild, and the creator never
+            // attaches (2.368.4): every chat started here stayed "not loaded" for its whole life (the owner's busy
+            // chat, 1.4 h) — every history page re-read and re-converted the transcript under ids the live
+            // stream does not use, and the browser / proposal / group cards waited for an attach that never came. A
+            // resume, a fork or an adopted keeper session carries history from before this normalizer: the first
+            // attach still loads it.
+            if (!(data.resume && data.resumeId) && !data.fork && !data.keeperSid) session._historyLoaded = true;
             session._normalizer.onOp((op) => {
               try { if (session.host && session.keeperSid) sbNoteServerOp?.(session.host, session.keeperSid, op); } catch { } // session-brain step-2 dark tap
               broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op });

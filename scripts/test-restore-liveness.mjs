@@ -900,22 +900,31 @@ console.log('— §6 the device pty shim is a real node-pty duck (multi-listener
 
 // A PAIRED MACHINE THAT CANNOT BE REACHED NEVER STOPS THE HUB (lane hub-dies-dead-ssh-host — the .346 verify round's HIGH:
 // picking it in New Session killed the hub, `Error: write EPIPE` its last journal line). A REAL worktree server with a
-// dead ssh record (h-dead, my-mac) and a stub `ssh` first on its PATH that exits 255 at once (never a real machine): the
-// machine's stdin roads (the tools tar, the usage scanner) and its host rung (the folder listing, its recent folders, its
-// home) are pressed over HTTP — each answers, the field's words name the machine, and the hub answers the NEXT request.
-// RED CONTROL: the same server with a copy of hosts.js whose feedStdin does not listen (the pre-fix shape) DIES of the
-// first stdin road — its process exits, `write EPIPE` in its journal, the next request refused.
+// dead ssh record (h-dead, my-mac) and a stub `ssh` first on its PATH that closes its stdin and exits 255 at once (never a
+// real machine): the machine's stdin roads (the tools tar, the usage scanner) and its host rung (the folder listing, its
+// recent folders, its home) are pressed over HTTP — each answers, the field's words name the machine, and the hub answers
+// the NEXT request. RED CONTROL: the same server with a copy of hosts.js whose feedStdin does not listen (the pre-fix
+// shape) DIES of the first stdin road — its process exits right after the tools install, a stream write error in its
+// journal, the next request refused.
+// DETERMINISTIC (r2, 主开发: the control read «survived» once of 86 on the .346 stack): the tools tar is padded to ~6 MB
+// (one tracked tool in the throwaway worktree) — no socket buffer can hold it (a child's stdin is a socketpair: ~108 KiB
+// measured here, wmem_default 208 KiB), so the write can never finish before the stub exits; the stub closes its stdin
+// first; the write error may be EPIPE or ECONNRESET (a reader that leaves unread bytes resets the socket) — both are the
+// death; the boot gets 120 s and «did not boot» is its own red, never read as «survived».
 console.log('— §7 a paired machine that cannot be reached never stops the hub —');
 {
   const BIN7 = path.join(ROOT, 'dead-ssh-bin'); fs.mkdirSync(BIN7, { recursive: true });
   const CALLS7 = path.join(ROOT, 'dead-ssh-calls.log');
-  fs.writeFileSync(path.join(BIN7, 'ssh'), `#!/bin/sh\necho x >> '${CALLS7}'\necho "ssh: Could not resolve hostname mac.example.test: Name or service not known" >&2\nexit 255\n`, { mode: 0o755 });
-  const deadHub = async (tag, hostsSrc) => {
+  fs.writeFileSync(path.join(BIN7, 'ssh'), `#!/bin/sh\nexec 0<&-\necho x >> '${CALLS7}'\necho "ssh: Could not resolve hostname mac.example.test: Name or service not known" >&2\nexit 255\n`, { mode: 0o755 });
+  const PAD7 = 6 << 20;           // the tools tar's padding: far past any socket buffer, under installAgentTools' 8 MB tar bound
+  const WRITE_ERR7 = /write (?:EPIPE|ECONNRESET)|ERR_STREAM_DESTROYED/;
+  const deadHub = async (tag, hostsSrc, { expectDeath = false } = {}) => {
     const wt = path.join(ROOT, 'wt-dead-' + tag);
     worktrees.add(wt);
     execFileSync('git', ['-C', REPO, 'worktree', 'add', '--detach', wt, 'HEAD'], { stdio: 'ignore' });
     for (const f of ['src', 'public', 'server.js', 'package.json']) { execFileSync('rm', ['-rf', path.join(wt, f)]); execFileSync('cp', ['-r', path.join(REPO, f), path.join(wt, f)]); }
     if (hostsSrc) fs.writeFileSync(path.join(wt, 'src/hosts.js'), hostsSrc);
+    fs.appendFileSync(path.join(wt, 'data/bin/vibespace-docs'), '\n' + ('#'.repeat(1023) + '\n').repeat(PAD7 >> 10)); // a tracked tool, never regenerated at boot
     fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wt, 'node_modules'));
     fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
     fs.writeFileSync(path.join(wt, 'data/hosts.json'), JSON.stringify({ hosts: [{ id: 'h-dead', name: 'my-mac', host: 'mac.example.test', user: 'me', port: 22, transport: 'ssh', createdAt: Date.now() }] }));
@@ -925,33 +934,37 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] }); servers.add(srv);
     let out = ''; srv.stdout.on('data', (d) => { out += d; }); srv.stderr.on('data', (d) => { out += d; });
     let exited = null; srv.on('exit', (c, sig) => { exited = { code: c, sig }; });
-    const t0 = Date.now(); while (!out.includes('Ready.') && exited == null && Date.now() - t0 < 45000) await sleep(100);
+    const t0 = Date.now(); while (!out.includes('Ready.') && exited == null && Date.now() - t0 < 120000) await sleep(100);
+    const bootMs = Date.now() - t0;
     const call = async (p, body) => { try { const c = new AbortController(); const tm = setTimeout(() => c.abort(), 15000); const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: c.signal }); clearTimeout(tm); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; } catch (e) { return { status: 'NO ANSWER', err: String(e.message || e) }; } };
     const steps = {};
-    steps.install = await call('/api/hosts/h-dead/agent-tools/install', {}); await sleep(800);
+    steps.install = await call('/api/hosts/h-dead/agent-tools/install', {});
+    { const t1 = Date.now(); while (exited == null && Date.now() - t1 < (expectDeath ? 15000 : 800)) await sleep(100); } // the control's death is AT this road
+    const exitedAfterInstall = exited;
     steps.harvest = await call('/api/usage-stats/harvest-hosts', { host: 'h-dead', force: true }); await sleep(800);
     steps.slice = await call(`/api/hosts/h-dead/dir-complete?path=Doc&bases=${encodeURIComponent('["~"]')}&probe=%5B%5D&q=Doc&kind=folder`);
     steps.recent = await call('/api/hosts/h-dead/recent-cwds');
     steps.home = await call('/api/home?host=h-dead');
     steps.next = await call('/api/home');
-    const r = { steps, exited, ready: out.includes('Ready.'), epipe: /write EPIPE/.test(out), journal: () => out };
+    const r = { steps, exited, exitedAfterInstall, bootMs, ready: out.includes('Ready.'), writeErr: (out.match(WRITE_ERR7) || [''])[0], journal: () => out };
     try { srv.kill('SIGKILL'); } catch { }
     return r;
   };
   try {
     const fixed = await deadHub('fixed');
     const s = fixed.steps;
-    ok(fixed.ready, '§7 the hub with a dead paired machine boots', fixed.journal().slice(-600));
+    ok(fixed.ready, `§7 the hub with a dead paired machine boots (${fixed.bootMs} ms)`, fixed.journal().slice(-600));
     ok(s.install.status === 400 && /my-mac cannot be reached/.test(s.install.j?.error || '') && s.harvest.status === 200 && s.harvest.j?.hosts?.['h-dead']?.error && /my-mac cannot be reached/.test(s.harvest.j.hosts['h-dead'].error),
-      '§7 the stdin roads answer with the machine BY NAME (the tools tar → 400 «my-mac cannot be reached — ssh: …»; the usage harvest names it per machine)', JSON.stringify({ install: s.install, harvest: s.harvest }).slice(0, 600));
+      '§7 the stdin roads answer with the machine BY NAME (a ~6 MB tools tar → 400 «my-mac cannot be reached — ssh: …»; the usage harvest names it per machine)', JSON.stringify({ install: s.install, harvest: s.harvest }).slice(0, 600));
     ok(s.slice.j?.unreachable?.host === 'my-mac' && /Could not resolve hostname/.test(s.slice.j.unreachable.line) && s.recent.j?.unreachable?.host === 'my-mac' && s.home.status === 400 && s.home.j?.code === 'host-unreachable',
       '§7 the host rung refuses it BY NAME before any listing spawns (dir-complete + recent-cwds say `unreachable`; its home is a 400 host-unreachable)', JSON.stringify({ slice: s.slice.j, recent: s.recent.j, home: s.home }).slice(0, 600));
-    ok(s.next.status === 200 && fixed.exited == null && !fixed.epipe, '§7 …and the hub answers the NEXT request (alive, no `write EPIPE` in its journal)', JSON.stringify({ next: s.next.status, exited: fixed.exited, tail: fixed.journal().slice(-400) }));
+    ok(s.next.status === 200 && fixed.exited == null && !fixed.writeErr, '§7 …and the hub answers the NEXT request (alive, no stream write error in its journal)', JSON.stringify({ next: s.next.status, exited: fixed.exited, writeErr: fixed.writeErr, tail: fixed.journal().slice(-400) }));
     const src7 = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
     const preFix7 = src7.replace("  stdin.on('error', (e) => { if (!fed.error) fed.error = e; });\n", '');
-    const ctl = await deadHub('prefix', preFix7);
-    ok(preFix7 !== src7 && ctl.ready && ctl.exited != null && ctl.epipe && ctl.steps.next.status === 'NO ANSWER',
-      `§7 RED CONTROL: the same hub with a feedStdin that does not listen DIES of the first stdin road (exit ${JSON.stringify(ctl.exited)}, write EPIPE in its journal, the next request ${ctl.steps.next.status})`, ctl.journal().slice(-600));
+    const ctl = await deadHub('prefix', preFix7, { expectDeath: true });
+    ok(preFix7 !== src7 && ctl.ready, `§7 RED CONTROL setup: the copy without the listener took its edit and its hub booted (${ctl.bootMs} ms — «did not boot» is this red, never «survived»)`, ctl.journal().slice(-600));
+    ok(ctl.exitedAfterInstall != null && ctl.exitedAfterInstall.code === 1 && !!ctl.writeErr && ctl.steps.next.status === 'NO ANSWER',
+      `§7 RED CONTROL: the same hub with a feedStdin that does not listen DIES of the first stdin road (exit ${JSON.stringify(ctl.exitedAfterInstall)} right after the tools install, «${ctl.writeErr}» in its journal, the next request ${ctl.steps.next.status})`, ctl.journal().slice(-600));
   } catch (e) { ok(false, '§7 the dead-machine leg ran', String((e && e.stack) || e).slice(0, 600)); }
 }
 

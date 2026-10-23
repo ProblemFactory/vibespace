@@ -521,7 +521,7 @@ export function installChatSeek(ChatView) {
       if (!firstInserted) firstInserted = el;
     }
     marker._gapAnchor = firstInserted;         // older slabs insert above this
-    this._pinned = false;
+    this._setPinned(false, 'teleport');        // a chosen destination (search / minimap time) — ↓ is "return to latest"
     this._scrollBtn.classList.remove('hidden'); // "return to latest" affordance
     const target = this._gapElForLine(line) || firstInserted;
     // Scroll to the target SYNCHRONOUSLY (before the browser paints) so the jump

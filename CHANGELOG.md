@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.347 — 2026-10-23
+
+### Fixed
+- A chat you started in this window stays at the bottom when you press the down arrow and keeps following new messages — the newest ones, not the first.
+- Scrolling up at the start of a chat says “No earlier messages” once instead of trying to load history it does not have.
+- When one page of a shared Agent browser profile stops answering, its other pages and conversations keep working, and that page is named as not answering.
+- A VibeSpace update no longer leaves a browser nobody can reach: each conversation's next command finds its browser and its tab again.
+
 ## 2.369.346 — 2026-10-23
 
 ### Added

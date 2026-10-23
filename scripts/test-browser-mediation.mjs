@@ -55,6 +55,11 @@
 //      the retired `browser.fenceScriptsWhileDriven` stored as false is IGNORED and said
 //      once; CONTROL: a mediator copy whose interrupt is the old pause (nothing in
 //      flight is touched) leaves the call waiting past 50 ms.
+//   ⑧ (lane browser-shared-profile-freeze, fleet fb-8727ee62fb) THE SCOPE ROAD: the PURE judge / road verdict / explicit
+//      admission; the real proxy in mode 'scope' over the fake browser — another holder's new tab never reaches the
+//      scoped connection (CONTROL: the raw one is told), an attach by id passes and admits, no census refusal, no
+//      interrupt, a revoke keeps the tabs; the real keeper hands each agent lease of an owner profile ONE url of its own,
+//      in its env and in the keeper's own calls in that session. The real-driver proof is test-browser-live ⑩.
 // The real-chrome exit proof is test-browser-mediation-chrome (heavy).
 // cdp-protocol-under-test — every 'Page.navigate' here is a CDP message judged by
 // the proxy, never a navigation of VibeSpace's own page (§47's declared exemption).
@@ -708,9 +713,13 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { reapA
   ok(!dump.includes(fake.url) && !dump.includes('RAW-ID') && !dump.includes(atA.cdpUrl.split('/m/')[1].slice(0, 32)), 'the raw url and the tokens reach no digest, broadcast, status or lease view');
   ok(keeper.list().mediation.port === med.port() && keeper.list().mediation.grants.length === 2 && keeper.list().mediation.grants.every((g) => !('token' in g)), 'the digest carries the proxy\'s port and two grant views (no token)');
   const atC = await keeper.attach({ profileId: solo.id, browserKey: KEY_C, sessionId: 'sess-c' });
-  // naive study 2: an owner profile is NOT mediated — its lease reaches the keeper's browser over that browser's OWN url
-  // (never a scoped /m/ url), and never its directory (the keeper is the only launcher; was: the directory, no CDP pair)
-  ok(atC.mediated === false && !atC.env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && atC.env.some((kv) => kv.startsWith('AGENT_BROWSER_CDP=') && !kv.includes('/m/') && kv.slice('AGENT_BROWSER_CDP='.length) === keeper.browserOf(solo.id).cdpUrl), 'NEGATIVE CONTROL: an owner profile attaches unmediated — its browser\'s own CDP url, no scoped url, no directory');
+  // naive study 2: an owner profile is NOT mediated — never its directory (the keeper is the only launcher; was: the
+  // directory, no CDP pair). lane browser-shared-profile-freeze (fb-8727ee62fb — measured on agent-browser 0.38.2 + Chrome
+  // 154: a driver on the browser's RAW url held its next command until each NEW tab of the browser answered Page.enable, so one
+  // tab born busy froze every conversation on the profile 19.8 s): with the proxy in this process its AGENT lease is handed a
+  // url of ITS OWN — the scope road (grant mode 'scope': its discovery scoped, no census fence, no takeover interrupt)
+  const gC = (keeper.list().mediation.grants || []).find((g) => g.browserKey === KEY_C && g.profileId === solo.id) || null;
+  ok(atC.mediated === false && !atC.env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && atC.env.some((kv) => kv.startsWith('AGENT_BROWSER_CDP=') && kv.includes('/m/') && kv.slice('AGENT_BROWSER_CDP='.length) !== keeper.browserOf(solo.id).cdpUrl) && gC && gC.mode === 'scope', 'NEGATIVE CONTROL: an owner profile attaches unmediated — no census fence (its grant\'s mode is scope), a url of its own (the scope road), no directory', { env: atC.env, grant: gC });
   // ─ scope across the two conversations, through the keeper's own grants
   const cA = cdpClient(atA.cdpUrl); await cA.open;
   const cB = cdpClient(atB.cdpUrl); await cB.open;
@@ -908,6 +917,76 @@ console.log('— ⑦ the owner\'s ruling ("直接打断所有脚本和agent操�
   for (const r of copiesCensus(MUT7.files, MUT7.dir, REPO7, { minCopies: 1, label: '⑦ ' })) ok(r.pass, r.name, r.detail);
   cc.ws.close(); c7.ws.close();
   kC.shutdown(); k7.shutdown(); fake7c.close(); fake7.close();
+}
+
+// ═══ ⑧ THE SCOPE ROAD (lane browser-shared-profile-freeze — fleet fb-8727ee62fb / fb-0898d92d0a, 2026-10-23) ═══
+// MEASURED on agent-browser 0.38.2 + Chrome 154 (scripts/measure-shared-profile-freeze.mjs): every driver attached to a shared
+// browser's RAW url discovers each NEW tab, attaches it and holds its next command until that tab answers Page.enable — one
+// tab born busy held three other conversations' own-tab `eval` 19.8 s, one born with a confirm() 59.8 s, all at once. An
+// AGENT lease of a cooperatively shared profile is therefore handed a url of its own (grant mode 'scope'): what its
+// connection DISCOVERS is its own; every call passes as written (no census class, no takeover fence, no interrupt).
+console.log('— ⑧ the scope road: a cooperative agent lease discovers only its own tabs, every call passes; the road verdict; the keeper hands it (and its own calls in that session) ONE scoped url; CONTROL = the raw url / the mediated judge');
+{
+  const sc = M.newScope({ targets: ['T-A'] });
+  ok(M.judgeScope({ id: 1, method: 'Browser.close' }).kind === 'forward' && M.judgeScope({ id: 2, method: 'Target.attachToTarget', params: { targetId: 'T-Z' } }).kind === 'forward' && M.judgeScope({ id: 3, method: 'Runtime.evaluate', params: {}, sessionId: 'S-x' }).kind === 'forward' && M.judgeScope({ method: 'X' }).kind === 'drop' && M.judgeScope({ id: 4 }).kind === 'refuse', '⑧ PURE judgeScope: every CDP call passes as written (a whole-browser act, an attach out of scope, a call on any session — the cooperative trust); no id = dropped, no method = refused');
+  ok(M.judge({ id: 1, method: 'Browser.close' }, sc).kind === 'refuse' && M.judge({ id: 2, method: 'Target.attachToTarget', params: { targetId: 'T-Z' } }, sc).kind === 'refuse', '⑧ CONTROL: the mediated judge refuses those same two calls (the road the scope road is not)');
+  M.admitReply({ id: 2, result: { sessionId: 'S-9' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-Z' } }, sc, { explicit: true });
+  const sc2 = M.newScope({ targets: ['T-A'] }); M.admitReply({ id: 2, result: { sessionId: 'S-9' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-Z' } }, sc2);
+  ok(M.inScope(sc, 'T-Z') && sc.sessions.get('S-9') === 'T-Z' && !M.inScope(sc2, 'T-Z') && !sc2.sessions.has('S-9'), '⑧ PURE admitReply {explicit}: an attach BY ID admits its tab and session (the keeper\'s bind, `tab <targetId>`); CONTROL: without it (the mediated road) the same reply admits nothing');
+  const rv = (o) => M.leaseRoadVerdict(o).mode;
+  ok(rv({ mediated: true }) === 'mediated' && rv({ proxy: false, agent: true }) === null && rv({ proxy: true, ephemeral: true, agent: true }) === null && rv({ proxy: true, remote: true, agent: true }) === null && rv({ proxy: true, agent: false }) === null && rv({ proxy: true, agent: true }) === 'scope', '⑧ PURE leaseRoadVerdict: mediated stays mediated; no proxy / an ephemeral browser / a remote one / the user\'s own session ⇒ the raw url; an agent lease of a local shared profile ⇒ scope');
+  // the REAL proxy over the fake browser
+  const fake = await fakeBrowser();
+  const med = MED.create({ log: { log() { }, warn() { } } });
+  const gS = await med.grantFor({ profileId: 'bp-0000000e', browserKey: 'bk-000000e1', upstream: fake.url, targetIds: ['T-A'], mode: 'scope' });
+  const cS = cdpClient(gS.url); await cS.open;
+  const raw = cdpClient(fake.url); await raw.open; // CONTROL: the raw url (what the lease was handed before)
+  await cS.call('Target.setDiscoverTargets', { discover: true }); await raw.call('Target.setDiscoverTargets', { discover: true });
+  const lt = await cS.call('Target.getTargets');
+  ok(lt.result && lt.result.targetInfos.map((t) => t.targetId).join() === 'T-A' && med.list().find((g) => g.browserKey === 'bk-000000e1').mode === 'scope', '⑧ getTargets through the scope url: the lease\'s own tab only (the browser holds three); its grant view says mode scope');
+  const sMark = cS.events.length, rMark = raw.events.length;
+  const made = await raw.call('Target.createTarget', { url: 'about:stranger' }); // another holder's new tab (anyone's `tab new`, a popup in another tab, the keeper's blank)
+  await sleep(150);
+  const sawS = cS.events.slice(sMark).filter((e) => /^Target\./.test(e.method)), sawR = raw.events.slice(rMark).filter((e) => e.method === 'Target.targetCreated');
+  ok(made.result && sawS.length === 0 && sawR.length === 1, `⑧ a NEW tab of another holder never reaches the scoped connection (${sawS.length} Target event(s)); CONTROL: the raw connection is told (${sawR.length}) — the driver attaches what it is told of, and waits on it`);
+  fake.emit({ method: 'Target.targetInfoChanged', params: { targetInfo: { targetId: made.result.targetId, type: 'page', url: 'about:stranger2' } } }); await sleep(80);
+  ok(!cS.events.slice(sMark).some((e) => /^Target\./.test(e.method)), '⑧ …nor its later changes');
+  const at = await cS.call('Target.attachToTarget', { targetId: made.result.targetId, flatten: true });
+  const lt2 = await cS.call('Target.getTargets');
+  ok(at.result && at.result.sessionId && !at.error && lt2.result.targetInfos.some((t) => t.targetId === made.result.targetId), '⑧ an attach BY ID through the scope url passes (no target_out_of_scope) and admits that tab');
+  const c2 = await cS.call('Target.createTarget', { url: 'about:mine' }); await sleep(80);
+  ok(c2.result && cS.events.some((e) => e.method === 'Target.targetCreated' && e.params.targetInfo.targetId === c2.result.targetId) && fake.seen.filter((x) => x.method === 'Target.createTarget').pop().params.newWindow !== true, '⑧ a tab the lease creates is announced to it and is its own — sent as written (no window rewrite: the keeper\'s own windows rule that road)');
+  const cl = await cS.call('Browser.close');
+  ok(cl.result && !cl.error, '⑧ no census refusal on the scope road (Browser.close is answered by the browser, not refused by the proxy) — that road was never fenced');
+  const held = cS.call('Runtime.evaluate', { expression: '1', __hold: true }); await sleep(60);
+  const ia = med.interrupt({ profileId: 'bp-0000000e', browserKey: 'bk-000000e1' });
+  fake.release(); const hr = await held;
+  ok(ia.aborted.length === 0 && hr.result && !hr.error, '⑧ a takeover\'s interrupt touches nothing on the scope road (its call in flight answered by the browser) — the cooperative road\'s pause is /resolve\'s');
+  const closes0 = fake.closes.length;
+  const rvk = med.revoke({ profileId: 'bp-0000000e', browserKey: 'bk-000000e1' });
+  const cc = await Promise.race([cS.closed, sleep(2000).then(() => null)]); await rvk.closing; await sleep(80);
+  ok(rvk.revoked && cc && cc.code === 1008 && fake.closes.length === closes0, `⑧ revoking a scope grant closes its connection 1008 and NONE of its tabs (${fake.closes.length - closes0} closeTarget upstream) — a detached conversation's page stays (noteLeftTab)`);
+  try { raw.ws.close(); } catch { /* */ }
+  med.shutdown(); fake.close();
+  // THE KEEPER hands the lease ONE scoped url — in its env AND in the keeper's own calls in that session (the same VALUE: a
+  // driver handed another endpoint spelling re-opens its connection — lane one-browser-b1); the user's own key never
+  const fake2 = await fakeBrowser();
+  const med2 = MED.create({ log: { log() { }, warn() { } } });
+  const rtEnv8 = { FAKE_AB_STATE: AB_STATE, FAKE_CDP_URL: fake2.url, PATH: PATH_ENV, HOME };
+  const calls8 = [];
+  const spy = (bin, args, opts, cb) => { calls8.push({ args: args.slice(0, 4).join(' '), cdp: (opts.env && opts.env.AGENT_BROWSER_CDP) || (args.includes('--cdp') ? args[args.indexOf('--cdp') + 1] : null), session: opts.env && opts.env.AGENT_BROWSER_SESSION }); return require('node:child_process').execFile(bin, args, opts, cb); };
+  const k8 = K.create({ dataDir: path.join(ROOT, 'data-scope'), homeDir: HOME, env: () => rtEnv8, broadcast: () => { }, serverSetting: () => undefined, serverNotice: null, getTelemetry: () => null, liveKeys: () => new Set(['bk-000000e2', 'bk-000000e3']), runtime: F.createBrowserRuntime({ env: rtEnv8, cmd: path.join(BIN, 'agent-browser'), execFileImpl: spy }), facts: F.createBrowserFacts({ env: rtEnv8 }), log: { log() { }, warn() { }, error() { } }, install: false, mediator: med2 });
+  const p8 = k8.createProfile({ label: 'Shared8' }, { owner: { kind: 'instance', id: null } });
+  const a8 = await k8.attach({ profileId: p8.id, browserKey: 'bk-000000e2', sessionId: 'sess-e2' });
+  const b8 = await k8.attach({ profileId: p8.id, browserKey: 'bk-000000e3', sessionId: 'sess-e3' });
+  const urlOf = (r) => ((r.env || []).find((kv) => kv.startsWith('AGENT_BROWSER_CDP=')) || '').slice('AGENT_BROWSER_CDP='.length);
+  const ua = urlOf(a8), ub = urlOf(b8);
+  ok(p8.sharing === 'owner' && a8.mediated === false && ua.includes('/m/') && ub.includes('/m/') && ua !== ub && a8.cdpUrl === ua && !ua.includes(fake2.url.split('/devtools/')[0].replace('ws://', '')), `⑧ the keeper: two conversations on ONE owner-shared profile each get a url of their OWN through the proxy (never the browser's raw one), unmediated`, { ua, ub, raw: fake2.url });
+  calls8.length = 0;
+  try { await k8.agentTabAct({ browserKey: 'bk-000000e2', argv: ['tab', 'list'] }); } catch { /* the fake knows no tab list — the CALL is what is judged */ }
+  const inSession = calls8.filter((c) => c.session === 'vs-bk-000000e2');
+  ok(inSession.length >= 1 && inSession.every((c) => c.cdp === ua), `⑧ …and the keeper's own calls in that lease's session carry the SAME url (${inSession.length} call(s): ${[...new Set(inSession.map((c) => c.cdp === ua ? 'its scoped url' : c.cdp))].join(', ')})`, inSession);
+  k8.shutdown?.(); med2.shutdown(); fake2.close();
 }
 
 // ═══ ⑤ takeover C3 (design-browser-takeover §3.2 / §5.3, I2 / I3) ═══════════

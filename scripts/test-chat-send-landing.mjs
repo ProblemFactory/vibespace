@@ -54,7 +54,8 @@
 //
 // CONTROLS (a leg that cannot go red proves nothing): three scratch copies, each
 // with ONE fix reverted at source level by a string-exact marker (asserted, and
-// asserted again in the built bundle) — ctl-hold runs ①, ctl-send ②, ctl-gen ③,
+// asserted again in the built bundle) — ctl-hold runs ① (the hold AND the server-tail refetch reverted:
+// since 2.369.346 either alone keeps the echo; belt-tail reverts the hold only and must stay GREEN), ctl-send ②, ctl-gen ③,
 // ctl-newest ④ (its revert is four replacements: the head's last-to-finish
 // release) — and each must fail its own row.
 // Run: node scripts/test-chat-send-landing.mjs
@@ -80,6 +81,10 @@ const FIXES = {
   send: { file: 'src/lib/chat-view.js', fixed: 'if (this._teleported || this._windowEnd < this._total) { // B-172e ②', pre: "if ((window.__sendCtl = 'send reverted') && this._windowEnd < this._total) {" },
   hold: { file: 'src/lib/chat-view.js', fixed: 'if (this._tailHold) { this._tailHold.ops.push(op); return; } // B-172e ①', pre: "if ((window.__holdCtl = 'hold reverted') && false) { this._tailHold.ops.push(op); return; }" },
   gen: { file: 'src/lib/chat-view.js', fixed: 'const stale = gen !== this._windowGen; // B-172e ③', pre: "const stale = !!(window.__genCtl = 'gen reverted') && false;" },
+  // inc-mvl02dkn-gop0 (2.369.346): jumpToBottom lands on the SERVER's tail — an answer whose total runs past the slab
+  // refetches the slab that ends there. The echo that arrived during the fetch is in that total, so this belt ALSO
+  // recovers ①: ctl-hold reverts both (either alone keeps the echo), belt-tail reverts the hold only and stays GREEN.
+  tail: { file: 'src/lib/chat-view.js', fixed: 'if (Number.isFinite(page?.total) && page.total > start + (page.messages || []).length) {', pre: "if ((window.__tailCtl = 'tail reverted') && false) {" },
   newest: { file: 'src/lib/chat-view.js', pairs: [
     ['const call = this._tailCall = (this._tailCall || 0) + 1;', "const call = this._tailCall = (this._tailCall || 0) + 1; hold.n = (hold.n || 0) + 1; window.__newestCtl = 'newest reverted';"],
     ['if (!hold || this._tailHold !== hold) return;', 'if (!hold || this._tailHold !== hold || --hold.n > 0) return;'],
@@ -89,7 +94,8 @@ const FIXES = {
 };
 const VARIANTS = [
   { name: 'fix', revert: null, rows: ['tail', 'slab', 'inflight-down', 'inflight-up', 'hang-return'] },
-  { name: 'ctl-hold', revert: 'hold', rows: ['tail'] },
+  { name: 'ctl-hold', revert: ['hold', 'tail'], rows: ['tail'] },
+  { name: 'belt-tail', revert: 'hold', rows: ['tail'] },
   { name: 'ctl-send', revert: 'send', rows: ['slab'] },
   { name: 'ctl-gen', revert: 'gen', rows: ['inflight-down', 'inflight-up'] },
   { name: 'ctl-newest', revert: 'newest', rows: ['hang-return'] },
@@ -114,6 +120,7 @@ const REAL_PROJECTS = path.join(process.env.HOME || '', '.claude', 'projects');
 const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
 const { fixtureLitter } = require('../src/fixture-guard.js');
 
+const reverts = (v) => [].concat(v.revert || []);
 async function prepareVariant(v) {
   const tag = `sendland-${v.name}`;
   const wt = scratch(tag);
@@ -153,9 +160,9 @@ done
     let src = fs.readFileSync(path.join(wt, fx2.file), 'utf8');
     for (const [fixed, pre] of fx2.pairs || [[fx2.fixed, fx2.pre]]) {
       if (src.split(fixed).length !== 2) throw new Error(`${v.name}: the ${k} fix marker is not exactly once in ${fx2.file} — update FIXES.${k}`);
-      if (v.revert === k) src = src.replace(fixed, pre);
+      if (reverts(v).includes(k)) src = src.replace(fixed, pre);
     }
-    if (v.revert === k) fs.writeFileSync(path.join(wt, fx2.file), src);
+    if (reverts(v).includes(k)) fs.writeFileSync(path.join(wt, fx2.file), src);
   }
   // the bundle's version = /api/version (a 'test' stamp would make the stale-bundle check reload the tab)
   const bv = path.join(wt, 'src/lib/build-version.js');
@@ -164,7 +171,7 @@ done
   const bundle = fs.readFileSync(path.join(wt, 'public/bundle.js'), 'utf8');
   for (const k of Object.keys(FIXES)) {
     const reverted = bundle.includes(`${k} reverted`);
-    if (reverted !== (v.revert === k)) throw new Error(`${v.name}: the bundle's ${k} fix is ${reverted ? 'REVERTED' : 'in place'}`);
+    if (reverted !== reverts(v).includes(k)) throw new Error(`${v.name}: the bundle's ${k} fix is ${reverted ? 'REVERTED' : 'in place'}`);
   }
   return { wt, fakeHome, cwd, stub, fx };
 }
@@ -197,7 +204,7 @@ const judge = (s) => {
 };
 
 async function runVariant(v) {
-  console.log(`— ${v.name}${v.revert ? ` (the ${v.revert} fix reverted)` : ''}: preparing (${FIXTURE_MB} MB §1c transcript, worktree, bundle)`);
+  console.log(`— ${v.name}${v.revert ? ` (the ${reverts(v).join(' + ')} fix reverted)` : ''}: preparing (${FIXTURE_MB} MB §1c transcript, worktree, bundle)`);
   const { wt, fakeHome, cwd, stub, fx } = await prepareVariant(v);
   const [PORT, CDP_PORT] = await freePorts(2);
   let journal = '';
@@ -405,7 +412,9 @@ const ctl = (variant, row, sig, what) => {
   const r = (R[variant] || {})[row];
   check(`${variant}: ${what}`, !!(r && r.ok && r.reasons.some((x) => sig.test(x))), r ? (r.ok ? (r.reasons.join('; ') || 'GREEN — the control did not reproduce') : `precondition not met: ${JSON.stringify(r.pre)}`) : 'row did not run');
 };
-ctl('ctl-hold', 'tail', /not in the view/, '① without the hold the echo is lost — the view lands on the tail WITHOUT the sent message');
+ctl('ctl-hold', 'tail', /not in the view/, '① without the hold AND the server-tail refetch the echo is lost — the view lands on the tail WITHOUT the sent message');
+{ const r = (R['belt-tail'] || {}).tail; // inc-mvl02dkn-gop0: the refetch alone keeps the echo the hold used to be the only defence for
+  check('belt-tail: ① without the hold the server-tail refetch alone keeps the echo — the answer\'s total ran past the slab, the slab that ends there holds the sent message', !!(r && r.ok && r.reasons.length === 0), r ? (r.ok ? r.reasons.join('; ') : `precondition not met: ${JSON.stringify(r.pre)}`) : 'row did not run'); }
 ctl('ctl-send', 'slab', /not in the view|teleported slab/, '② without the slab branch the send pins the SLAB — the sent message is nowhere');
 ctl('ctl-gen', 'inflight-down', /older than the send|do not describe|not the live tail/, '③ without the generation an in-flight extendBottom writes its stale page below the sent message');
 ctl('ctl-gen', 'inflight-up', /do not describe|not the live tail/, '③ without the generation an in-flight extendTop writes its stale page into the new window');

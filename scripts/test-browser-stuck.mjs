@@ -20,6 +20,10 @@
 //   ⑤ the keeper's seams: `noAutoDialog` in a lease session's file and in a launch file ONLY for a record launched with
 //      it (no relaunch at the update), the stuck fact on factFor, the fact's words;
 //   ⑥ teaching: the manual's "Page dialogs" section, the ONE tools-intro line under the inline cap, the CLI usage;
+//   ①p / ③p (lane browser-shared-profile-freeze, fleet fb-8727ee62fb / fb-0898d92d0a): THE PAGE-BUSY DOOR — the PURE verdict
+//      and words; the REAL routes + CLI + watch: a verb on a page that answers nothing is answered page_busy by name and never
+//      handed to the browser CLI, the ways out run, a held popup is closed by id through the watch (said close_pending when
+//      the browser keeps it); CONTROL = a CLI copy without the door spawns the browser CLI on the silent page;
 //   CONTROLS (scripts/mutant-copy.mjs): a verdict that auto-answers every kind (the daemons' silent default), a CLI
 //   without the long-poll (the verb sits out the binary's hang), a CLI without the repeat (the binary is spawned
 //   behind the dialog), a watch that does not accept alerts.
@@ -329,6 +333,23 @@ function invisibleLeak(mod) {
   ok(bad.includes('beforeunload') && bad.includes('confirm'), `CONTROL: a verdict that auto-answers every kind (what 0.38.1 does to alert + beforeunload) fails the table: ${bad.join(', ')}`);
 }
 
+// ═══ ①p lane browser-shared-profile-freeze: THE PAGE-BUSY VERDICT (PURE) ═══
+console.log('①p the page-busy verdict: a silent page (the tabs the agent worked in) answered page_busy by name; the ways out pass');
+{
+  const T = (id, o = {}) => ({ targetId: id.padEnd(32, '0'), url: 'https://x.test/' + id, title: id, answered: false, ...o });
+  ok(ST.pageBusyVerdict(null) === null && ST.pageBusyVerdict({ asked: false }) === null && ST.pageBusyVerdict({ asked: true, pages: [] }) === null, '①p not asked / nothing asked ⇒ null (the verb runs as before)');
+  ok(ST.pageBusyVerdict({ asked: true, pages: [T('A', { answered: true })] }) === null, '①p the tab answered ⇒ null');
+  const v1 = ST.pageBusyVerdict({ asked: true, boundMs: 5000, pages: [T('A', { worked: true })] });
+  ok(v1 && v1.code === 'page_busy' && v1.silent.length === 1 && /^your tab A0000000 "A" \(https:\/\/x\.test\/A\) is not answering — it answered nothing in 5 s/.test(v1.text) && /Other conversations' tabs are not affected\./.test(v1.text) && /open <a url on another site>` — that leaves it at once/.test(v1.text), '①p one silent tab ⇒ page_busy naming it, the bound, that nothing ran, the scope of the harm and the way out that does not wait on it', v1);
+  const v2 = ST.pageBusyVerdict({ asked: true, pages: [T('A', { worked: true }), T('B', { answered: true, url: 'about:blank' })] });
+  ok(v2 && v2.silent.length === 1 && v2.silent[0].targetId.startsWith('A'), '①p the holder\'s idle blank answering beside the agent\'s silent page (MEASURED: the keeper\'s bound about:blank in the holder\'s own window) ⇒ still page_busy — only the tabs the agent WORKED in are judged');
+  ok(ST.pageBusyVerdict({ asked: true, pages: [T('A', { worked: true }), T('B', { worked: true, answered: true })] }) === null, '①p two worked tabs, one answering (the current one not known) ⇒ null — never a refusal of a verb whose tab may answer');
+  const v3 = ST.pageBusyVerdict({ asked: true, pages: [T('A', { worked: true, popups: [{ targetId: 'P'.padEnd(32, '1'), url: 'https://x.test/approve' }] })] });
+  ok(v3 && v3.popups.length === 1 && /It opened a popup P1111111 \(https:\/\/x\.test\/approve\) that holds a dialog nobody can answer/.test(v3.text) && v3.text.includes('`vibespace-browser tab close ' + 'P'.padEnd(32, '1') + '`'), '①p a held popup of the silent tab is named, with `tab close <its full id>`');
+  ok(['stop', 'site-reset', 'tab', 'close', 'dialog', 'open', 'goto', 'navigate', 'nav'].every((x) => ST.busyPasses(x)) && ['eval', 'click', 'snapshot', 'screenshot', 'back', 'reload', 'get', 'fill'].every((x) => !ST.busyPasses(x)), '①p the ways out pass (MEASURED on a page holding its main thread 15 s: `open` of another site 108 ms; `screenshot` timed out 30 s, `back` 15.6 s, `reload` 14.7 s — refused)');
+  ok(/^the browser was asked to close .*, and 2 s later it is still open: its page holds its main thread/.test(ST.closePendingText({ url: 'https://x.test/a' })) && /^closed the tab /.test(ST.busyCloseText({ url: 'https://x.test/a' })), '①p the close-by-id words: closed only when gone, else close_pending (measured: Chrome answers closeTarget at once and keeps a busy page)');
+}
+
 // ═══ ①b lane site-reset: THE NAVIGATION LOOP (PURE) — the table over the MEASURED 0.38.1 event shapes ═══
 console.log('①b PURE the navigation loop (the measured 0.38.1 shapes) + the site-reset scope table');
 {
@@ -529,6 +550,10 @@ function fakeChrome() {
       if (m.method === 'Target.getTargets') return reply({ result: { targetInfos: [...targets.values()].map((t) => t.info) } });
       if (m.method === 'Target.attachToTarget') { const t = targets.get(m.params.targetId); if (!t) return reply({ error: { code: -32602, message: 'No target' } }); const sid = `S-${m.params.targetId}-${++n}`; sessions.set(sid, { targetId: m.params.targetId, ws, enabled: false }); return reply({ result: { sessionId: sid } }); }
       if (m.method === 'Page.enable') { const s = sessions.get(m.sessionId); const t = s && targets.get(s.targetId); if (t && (t.held || t.open)) return; const on = () => { if (s) s.enabled = true; reply({ result: {} }); }; if (api.enableGate) { api.enableGate.then(on); return; } return on(); } // measured: a tab whose dialog opened before this client enabled Page never answers; enableGate (lane heavy3-flake-races): the answer waits
+      // lane browser-shared-profile-freeze: a page holding its main thread never answers Runtime.evaluate (`silent`); a close
+      // destroys the tab and says so to every client — or is accepted and NOT done (`closeKeeps`: Chrome's busy page, measured)
+      if (m.method === 'Runtime.evaluate' && m.sessionId) { const s = sessions.get(m.sessionId); if (s && (api.silentAll || api.silent.has(s.targetId))) return; }
+      if (m.method === 'Target.closeTarget') { const id = m.params && m.params.targetId; if (!targets.has(id)) return reply({ error: { code: -32602, message: 'No target with given id found' } }); api.closed.push(id); if (api.closeKeeps.has(id)) return reply({ result: { success: true } }); targets.delete(id); reply({ result: { success: true } }); for (const c of wss.clients) c.send(JSON.stringify({ method: 'Target.targetDestroyed', params: { targetId: id } })); return; }
       if (m.method === 'Page.handleJavaScriptDialog') {
         const s = sessions.get(m.sessionId); const t = s && targets.get(s.targetId);
         handled.push({ sessionId: m.sessionId, targetId: s && s.targetId, params: m.params, at: Date.now() });
@@ -551,7 +576,7 @@ function fakeChrome() {
     for (const [sid, s] of sessions) if (s.targetId === targetId && s.enabled && s.ws.readyState === 1) s.ws.send(JSON.stringify({ sessionId: sid, method: 'Page.javascriptDialogOpening', params }));
   }
   const pageEvent = (targetId, method, params) => { for (const [sid, s] of sessions) if (s.targetId === targetId && s.enabled && s.ws.readyState === 1) s.ws.send(JSON.stringify({ sessionId: sid, method, params })); }; // verify r1 A7: navigation events
-  const api = { srv, wss, addTab, emit, pageEvent, handled, events, targets, sessions, handleDelayMs: 0, onAnswered: null, failHandle: false, enableGate: null,
+  const api = { srv, wss, addTab, emit, pageEvent, handled, events, targets, sessions, handleDelayMs: 0, onAnswered: null, failHandle: false, enableGate: null, silent: new Set(), silentAll: false, closeKeeps: new Set(), closed: [],
     async listen() { const p = await freePort(); await new Promise((r) => srv.listen(p, '127.0.0.1', r)); this.port = p; this.url = `ws://127.0.0.1:${p}/devtools/browser/fake`; return this; },
     async close() { for (const c of wss.clients) { try { c.terminate(); } catch { } } await new Promise((r) => srv.close(() => r())); },
     closeSockets() { for (const c of wss.clients) { try { c.terminate(); } catch { } } } };
@@ -1359,7 +1384,7 @@ const stubKeeper = {
 };
 const TOKEN = 'vsst_bstuck_1';
 const sessions = new Map([['sess-1', { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', _browserEnv: [`AGENT_BROWSER_SESSION=vs-${KEY}`, `AGENT_BROWSER_NAMESPACE=vs-${KEY}`, `AGENT_BROWSER_CONFIG=${CFG}`], name: 'Chat', cwd: ROOT }]]);
-const dialogs = D.create({ keeper: stubKeeper, log: { warn() { }, log() { } }, enableTimeoutMs: 400, holdersOf: () => [], leaseCountOf: () => 1 });
+const dialogs = D.create({ keeper: stubKeeper, log: { warn() { }, log() { } }, enableTimeoutMs: 400, holdersOf: () => [], leaseCountOf: () => 1, pageAnswerMs: 400, closeGoneMs: 300 }); // lane browser-shared-profile-freeze: the page-busy bounds shortened (only a silent page waits on them)
 function mkApp(routesMod, dl = dialogs) {
   const app = express(); app.use(express.json());
   const seen = [];
@@ -1694,6 +1719,71 @@ try {
     ok(rsrcR.split(belt).length === 3, 'control setup: the belt is found on both Restart routes');
     const cr = await restartAs(MUT.load('src/routes/browser.js', rsrcR.split(belt).join(''), 'r2-restart-agent'), TOKEN);
     ok(cr.pr.status === 200 && cr.acts.join(',') === 'stop,start' && cr.sr.status !== 403, 'CONTROL: without it the agent\'s own token stops and restarts the user\'s browser (sign-in off) — the leg above reddens on it', cr);
+  }
+  // ③p lane browser-shared-profile-freeze (fleet fb-8727ee62fb / fb-0898d92d0a — MEASURED on agent-browser 0.38.2 + Chrome 154:
+  // a verb handed to the driver on a page that answers nothing holds THAT conversation's driver to its own timeout, 19.8–60 s,
+  // and its `tab new` / `tab list` behind it): the tab the verb acts on is asked FIRST through the watch's own session
+  // (bounded — here 400 ms) and a page-waiting verb on a silent page is answered `page_busy` BY NAME, the browser CLI never
+  // spawned; the ways out still run; a held popup is named with `tab close <its id>`, closed through the watch's socket
+  {
+    console.log('③p a silent page: page_busy by name before the browser CLI gets the verb; the ways out run; a held popup closed by id');
+    fs.writeFileSync(LOG, '');
+    setPlan({ eval: { out: '2', hangMs: 30000 }, snapshot: { out: '- document', hangMs: 30000 }, tab: { out: 't1 ok' }, open: { out: '✓ opened' } });
+    ch.silentAll = true;
+    let r = await runCli(['eval', '1+1']);
+    const evals = () => realCalls().filter((c) => c.verb === 'eval' && c.start).length;
+    ok(r.code === 1 && /\[page_busy\]/.test(r.err) && /your tab T1 "T T1" \(https:\/\/example\.test\/T1\) is not answering — it answered nothing in 0\.4 s/.test(r.out) && /nothing ran: the command was not handed to the browser/.test(r.out) && /open <a url on another site>/.test(r.out) && evals() === 0 && r.ms < 8000, `③p a verb on a page that answers nothing is answered page_busy BY NAME in ${r.ms} ms (bound 400 ms) — the browser CLI never spawned (${evals()} eval spawn), so it holds nothing`, r.out + r.err);
+    r = await runCli(['snapshot']);
+    ok(r.code === 1 && /\[page_busy\]/.test(r.err) && realCalls().filter((c) => c.verb === 'snapshot').length === 0, '③p …a reading verb too (it would wait on the same page)', r.out + r.err);
+    r = await runCli(['open', 'https://other.test/']);
+    ok(r.code === 0 && /✓ opened/.test(r.out) && realCalls().some((c) => c.verb === 'open'), '③p …while a navigation still runs (measured: `open` of another site leaves a busy page in 108 ms — a new page process)', r.out + r.err);
+    r = await runCli(['eval', '1+1', '--json']);
+    let j = null; try { j = JSON.parse(r.out.trim().split('\n').pop()); } catch { j = null; }
+    ok(r.code === 1 && j && j.code === 'page_busy' && j.pageBusy && j.pageBusy.silent[0].targetId === 'T1' && j.success === false, '③p --json: {code: page_busy, pageBusy: {silent, popups, boundMs}}', r.out);
+    // a POPUP of the silent page that the watch holds (its Page domain never answered — a dialog opened before anything watched)
+    const PID = 'ABCDEF0123456789ABCDEF0123456789';
+    ch.addTab(PID, { held: true, openerId: 'T1', url: 'https://bank.test/approve' });
+    await until(() => (dialogs.stats().find((x) => x.profileId === EPH) || { held: 0 }).held >= 1 || ch.sessions.size && [...ch.sessions.values()].some((x) => x.targetId === PID), 3000);
+    await sleep(700); // the watch's own Page.enable bound (400 ms) — the popup is HELD after it
+    r = await runCli(['eval', '1+1']);
+    ok(r.code === 1 && new RegExp(`It opened a popup ABCDEF01 \\(https://bank\\.test/approve\\) that holds a dialog nobody can answer .* \`vibespace-browser tab close ${PID}\` closes it and frees this page`).test(r.out), '③p a held POPUP of the silent page is named, with its way out by id', r.out);
+    fs.writeFileSync(LOG, '');
+    r = await runCli(['tab', 'close', PID]);
+    ok(r.code === 0 && /closed the tab .*bank\.test\/approve.* \(a tab nobody could answer\)/.test(r.out) && ch.closed.includes(PID) && !ch.targets.has(PID) && !realCalls().some((c) => c.verb === 'tab'), '③p `tab close <its id>` closes it THROUGH THE WATCH\'s socket (the browser CLI\'s own tab list would wait on the held page) — the browser CLI never spawned', r.out + r.err);
+    // honest: a close the browser accepts but does not do (a page holding its main thread outlives the ask — measured)
+    ch.silent.add('T1'); ch.closeKeeps.add('T1');
+    r = await runCli(['tab', 'close', 'T1']);
+    ok(r.code !== 0 || !/closed the tab/.test(r.out), '③p (a non-hex ref is the usual `tab close` — never the direct door)', r.out + r.err);
+    const KID = 'FEDCBA9876543210FEDCBA9876543210';
+    ch.addTab(KID, { url: 'https://busy.test/' }); ch.silent.add(KID); ch.closeKeeps.add(KID); await sleep(300);
+    r = await runCli(['tab', 'close', KID]);
+    ok(r.code === 1 && /\[close_pending\]/.test(r.err) && /is still open: its page holds its main thread/.test(r.err) && ch.targets.has(KID), '③p a close the browser accepted but did not do within its bound is said close_pending — never "closed"', r.out + r.err);
+    ch.closeKeeps.clear(); ch.silent.clear(); ch.silentAll = false;
+    // a silent SIBLING never costs a healthy page's verb the bound: the ask settles at the first answer
+    ch.silent.add(KID);
+    const sib = await dialogs.pageAnswers({ profileId: EPH, browserKey: KEY, ephemeral: true });
+    const rowOf = (id) => (sib.pages || []).find((x) => x.targetId === id) || null;
+    ok(sib.asked && rowOf('T1') && rowOf('T1').answered === true && (!rowOf(KID) || rowOf(KID).answered === null) && ST.pageBusyVerdict(sib) === null, `③p a silent sibling tab beside an answering one: ${rowOf(KID) ? 'not waited for (the ask settles at the FIRST answer)' : 'not even asked (only the tabs the agent worked in are)'} — the verdict lets the verb run`, sib);
+    // …and with no worked tab at all, every tab is asked and the FIRST answer settles it (the silent one answered null)
+    const sib2 = D.create({ keeper: stubKeeper, log: { warn() { }, log() { } }, enableTimeoutMs: 400, holdersOf: () => [], leaseCountOf: () => 1, pageAnswerMs: 30000 });
+    await sib2.arm(EPH); await sleep(300);
+    const s2 = await sib2.pageAnswers({ profileId: EPH, browserKey: KEY, ephemeral: true });
+    const r2 = (id) => (s2.pages || []).find((x) => x.targetId === id) || null;
+    ok(s2.asked && r2('T1') && r2('T1').answered === true && r2(KID) && r2(KID).answered === null, `③p …a fresh watch (no tab worked in): both asked, settled at T1's answer — the silent one not waited for (null, never its 30 s timeout's false)`, s2);
+    sib2.shutdown();
+    ch.silent.clear();
+    fs.writeFileSync(LOG, '');
+    r = await runCli(['eval', '1+1'], { timeoutMs: 60000 });
+    ok(!/page_busy/.test(r.out + r.err) && evals() === 1, '③p the page answers again ⇒ the verb runs as before (the browser CLI spawned)', r.out + r.err);
+    // CONTROL (mutant-copy): a CLI without the page-busy door hands the verb to the browser CLI, which holds it (the base)
+    setPlan({ eval: { out: '2', hangMs: 1500 } });
+    ch.silentAll = true; fs.writeFileSync(LOG, '');
+    const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
+    const busyNeedle = "if (busyStand && DS && typeof DS.busyPasses === 'function' && !DS.busyPasses(words0[0] || '')) {";
+    const noBusy = MUT.write('data/bin/vibespace-browser', cliSrc.replace(busyNeedle, 'if (false) {'), 'no-page-busy');
+    r = await runCli(['eval', '1+1'], { cli: noBusy });
+    ok(cliSrc.includes(busyNeedle) && evals() === 1 && !/page_busy/.test(r.out + r.err), '③p CONTROL: a CLI copy without the page-busy door spawns the browser CLI on the silent page (it would wait there — the base) — the legs above can go red', r.out + r.err);
+    ch.silentAll = false;
   }
 } finally {
   await new Promise((r) => apiSrv.close(() => r()));

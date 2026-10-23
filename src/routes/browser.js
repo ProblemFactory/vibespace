@@ -199,7 +199,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // lane browser-propose (2026-09-30): a proposal's Approve / Reject — not in a state to decide, a card that is not the proposal as it stands, nothing to approve here
   proposal_state: 409, proposal_changed: 409, proposal_unavailable: 409,
   // lane site-reset: a tab that is not this conversation's; a stop the tab did not answer; the site-reset refusals
-  not_your_tab: 403, stop_failed: 502, close_failed: 502, no_loop: 409, no_picture: 409, host_not_current: 409, 'bad-host': 400, shared_profile: 409, clear_failed: 502,
+  not_your_tab: 403, stop_failed: 502, close_failed: 502, no_loop: 409, tab_answers: 409, close_pending: 409 /* lane browser-shared-profile-freeze */, no_picture: 409, host_not_current: 409, 'bad-host': 400, shared_profile: 409, clear_failed: 502,
   // lane browser-resume (§3.9): a Forget of nothing kept / of a browser that runs / that could not remove its directory
   not_kept: 404, kept_live: 409, forget_failed: 500,
   // lane browser-resume B (ruling 2): a Resume's refusals (a helper's browser is never kept; its directory became a named
@@ -1892,6 +1892,18 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
     // lane site-reset: a page-ACTING verb's instant (its page turn is the agent's, never a loop) — never one the CLI will
     // answer with the standing loop instead of running it (a refused click must not reset the loop it was refused for)
     if (arm) D.verbStarted(f.browserKey, { profileId: t.profileId, verb: fct.loop && !require('../browser-stuck.js').loopPasses(verb) ? null : verb });
+    // lane browser-shared-profile-freeze: THE TAB THE VERB ACTS ON, ASKED FIRST (bounded, through the watch's own session) —
+    // a page-waiting verb on a tab that answers nothing is answered `page_busy` by name and never handed to the driver
+    // (measured: a verb on a silent page holds that conversation's driver 20–60 s and its `tab new` / `tab list` behind it).
+    // A named lease's tab is its own (`targetId`); on its ephemeral browser every tab of the conversation is asked.
+    let pageBusy = null;
+    const pkStands = !!(fct.passkey && ['passkey_open', 'passkey_ask'].includes(fct.passkey.state)); // (its own door, said first — the CLI's rule)
+    if (arm && verb && !fct.open && !fct.loop && !pkStands && !fct.prompt && typeof D.pageAnswers === 'function' && !require('../browser-stuck.js').busyPasses(verb)) {
+      // the lease's pinned tab when the keeper knows it, else the conversation's own tabs (the watch's scope: its holder tabs,
+      // the live view's, the ones its verbs created) — page_busy only when NONE of them answers
+      let cur = null; if (!t.ephemeral) { try { const l = (k.leasesFor(f.browserKey) || []).find((x) => x && x.profileId === t.profileId); cur = l && l.targetId ? String(l.targetId) : null; } catch { cur = null; } }
+      try { pageBusy = require('../browser-stuck.js').pageBusyVerdict(await D.pageAnswers(t, { targets: cur ? [cur] : null })); } catch { pageBusy = null; }
+    }
     // verify r1 A7: a timeout while the watch saw a navigation start on this conversation's tab and not commit is the
     // NETWORK's (a slow site) — never evidence of a hung page (three of them branded a browser "not responding" whose
     // next `open` answered in 96 ms)
@@ -1905,7 +1917,7 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
     const fresh = outcome ? D.factFor({ ...t, consume: false }) : fct;
     const loop = fresh.loop;
     // verify r1: `loopShared` — some tab of a shared browser loops and this conversation's cannot be told apart (a kind only)
-    return { dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}) } };
+    return { dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}), ...(pageBusy ? { pageBusy } : {}) } };
   } catch (e) { console.warn(`[browser-dialog] ${f.browserKey}: the dialog fact was not read — ${e && e.message}`); return {}; }
 }
 /** The CLI's long-poll while its verb runs: answers at the first HELD dialog in this conversation's scope (the event),
@@ -2097,9 +2109,11 @@ router.post('/api/agent/browser/direct', async (req, res) => {
       return res.json({ ok: true, text: ST.stopText({ ...r, busyMs }), url: r.url || '', title: r.title || '', nothing: !!r.nothing, ...(r.was ? { loop: r.was } : {}) });
     }
     if (action === 'close') {
-      const r = await D.closeTab(t);
+      // lane browser-shared-profile-freeze: `targetId` = a tab page_busy named (a popup holding a dialog nobody can answer) — closed by id
+      const tid = typeof req.body?.targetId === 'string' && /^[A-Fa-f0-9]{16,64}$/.test(req.body.targetId) ? req.body.targetId : null;
+      const r = await D.closeTab(t, tid ? { targetId: tid } : {});
       if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code });
-      return res.json({ ok: true, text: ST.closeText({ ...r, busyMs }), url: r.url, title: r.title, opened: !!r.opened, ...(r.was ? { loop: r.was } : {}) });
+      return res.json({ ok: true, text: tid ? ST.busyCloseText(r) : ST.closeText({ ...r, busyMs }), url: r.url, title: r.title, opened: !!r.opened, ...(r.was ? { loop: r.was } : {}) });
     }
     const r = await D.captureTab(t);
     if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code, ...(r.loop ? { loop: r.loop } : {}) });

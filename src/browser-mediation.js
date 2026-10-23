@@ -385,6 +385,45 @@ function judge(msg, scope, { paused = false } = {}) {
   return { kind: 'forward', pending: { method, params, sessionId: sid } };
 }
 
+// ── lane browser-shared-profile-freeze (fb-8727ee62fb / fb-0898d92d0a — userW's jarvis-work «freezes for every session at
+// once»): THE SCOPE ROAD. MEASURED on agent-browser 0.38.2 + Chrome 154 (scripts/measure-shared-profile-freeze.mjs, the real
+// keeper + routes + CLI, four conversations on one profile): the driver attached over CDP discovers EVERY page target of the
+// browser (`Target.setDiscoverTargets`), attaches each NEW one and holds its next command until that target answers
+// `runIfWaitingForDebugger` + `Page.enable` — 30 s per try, tried twice. One new tab that cannot answer at birth (a page that
+// holds its main thread as it loads: B, D, E's own-tab `eval 1+1` 19.8 s each; a confirm() at load: 59.8 s each) froze every
+// conversation on the profile at once, while `/json/list`, the tab list and `session info` answered; the mediated road
+// (each lease shown only its own targets) answered the same births in 103–117 ms. A profile its conversations share
+// cooperatively (`owner`) therefore hands each AGENT lease a scoped url too — THIS judge: every call passes as written (the
+// cooperative trust — no census class, no takeover fence, no window rewrite: the keeper's own windows and /resolve's pause
+// stay that road's rules); what the connection DISCOVERS is the lease's own (filterEvent / admitReply, the scope above), and
+// an explicit attach by id (the keeper's bind, `tab <targetId>`) admits that target.
+const SCOPE_MODE = 'scope', MEDIATED_MODE = 'mediated';
+/** The scope road's judge (PURE): `{kind:'forward', pending}` for every CDP call, `drop` for what is not one. */
+function judgeScope(msg) {
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return { kind: 'drop', why: 'not an object' };
+  const method = typeof msg.method === 'string' ? msg.method : '';
+  if (msg.id == null) return { kind: 'drop', why: method ? 'no id' : 'no method' };
+  if (!method) return { kind: 'refuse', reply: refusal(msg.id, 'bad_message', 'a CDP call names a method', msg.sessionId == null ? null : String(msg.sessionId)) };
+  return { kind: 'forward', pending: { method, params: msg.params && typeof msg.params === 'object' ? msg.params : {}, sessionId: msg.sessionId == null ? null : String(msg.sessionId) }, explicit: true };
+}
+/**
+ * WHICH ROAD a lease's CDP url takes (PURE) → `{mode: 'mediated'|'scope'|null, why}`:
+ *   · a mediated profile (`instance` sharing)                                  ⇒ 'mediated' (its own judge, unchanged)
+ *   · no mediating proxy in this process                                       ⇒ null 'no-proxy' (the raw url, as before)
+ *   · an ephemeral browser (the conversation's own — nobody else's tabs in it) ⇒ null 'ephemeral'
+ *   · a browser on a paired machine / reached remotely                         ⇒ null 'remote' (the proxy serves THIS machine)
+ *   · the user's own session (Browse yourself) or no agent key                 ⇒ null 'human' (a person sees every tab)
+ *   · else (an agent's lease on a local named profile shared cooperatively)    ⇒ 'scope'
+ */
+function leaseRoadVerdict({ mediated = false, proxy = false, ephemeral = false, remote = false, agent = false } = {}) {
+  if (mediated) return { mode: MEDIATED_MODE, why: 'mediated' };
+  if (!proxy) return { mode: null, why: 'no-proxy' };
+  if (ephemeral) return { mode: null, why: 'ephemeral' };
+  if (remote) return { mode: null, why: 'remote' };
+  if (!agent) return { mode: null, why: 'human' };
+  return { mode: SCOPE_MODE, why: 'shared' };
+}
+
 /**
  * A browser→client REPLY to a forwarded call: grow the scope from what the
  * browser handed back (a target this lease created, a session it was
@@ -393,7 +432,7 @@ function judge(msg, scope, { paused = false } = {}) {
  * fine — the object is the proxy's own parse) and the events to send BEFORE
  * it (the replayed `targetCreated` of a tab this lease just created).
  */
-function admitReply(reply, pending, scope) {
+function admitReply(reply, pending, scope, { explicit = false } = {}) {
   if (!reply || typeof reply !== 'object' || !pending) return { reply, emit: [] };
   const r = reply.result && typeof reply.result === 'object' ? reply.result : null;
   const p = pending.params || {};
@@ -406,7 +445,7 @@ function admitReply(reply, pending, scope) {
         if (seen) { scope.recent.delete(String(r.targetId)); emit.push({ method: 'Target.targetCreated', params: { targetInfo: seen } }); }
       }
       break;
-    case 'Target.attachToTarget': if (r && r.sessionId && inScope(scope, p.targetId)) scope.sessions.set(String(r.sessionId), String(p.targetId)); break;
+    case 'Target.attachToTarget': if (r && r.sessionId && explicit && p.targetId) admitTarget(scope, p.targetId); if (r && r.sessionId && inScope(scope, p.targetId)) scope.sessions.set(String(r.sessionId), String(p.targetId)); break; // the scope road: an attach BY ID is the lease's own act
     case 'Target.attachToBrowserTarget': if (r && r.sessionId) scope.sessions.set(String(r.sessionId), null); break;
     case 'Target.createBrowserContext': if (r && r.browserContextId) scope.contexts.add(String(r.browserContextId)); break;
     case 'Target.detachFromTarget': if (p.sessionId) scope.sessions.delete(String(p.sessionId)); break;
@@ -496,7 +535,7 @@ function grantKey(profileId, browserKey) { return `${String(profileId || '')}|${
  *  the raw upstream. */
 function grantView(g) {
   if (!g) return null;
-  return { profileId: g.profileId, browserKey: g.browserKey, targets: g.scope ? g.scope.targets.size : 0, sessions: g.scope ? g.scope.sessions.size : 0, contexts: g.scope ? g.scope.contexts.size : 0, connections: g.conns ? g.conns.size : 0, createdAt: g.createdAt || 0, lastUsedAt: g.lastUsedAt || 0, upstreamKnown: !!g.upstream, unclassified: g.unclassified ? [...g.unclassified] : [], // verify r4: the methods this lease was refused for lacking a census row
+  return { profileId: g.profileId, browserKey: g.browserKey, mode: g.mode === SCOPE_MODE ? SCOPE_MODE : MEDIATED_MODE, targets: g.scope ? g.scope.targets.size : 0, sessions: g.scope ? g.scope.sessions.size : 0, contexts: g.scope ? g.scope.contexts.size : 0, connections: g.conns ? g.conns.size : 0, createdAt: g.createdAt || 0, lastUsedAt: g.lastUsedAt || 0, upstreamKnown: !!g.upstream, unclassified: g.unclassified ? [...g.unclassified] : [], // verify r4: the methods this lease was refused for lacking a census row
     // the owner's ruling (2026-09-27): what the LAST takeover interrupted on this lease (counts + method names + the browser's answers to terminateExecution — never a param)
     lastInterrupt: g.lastInterrupt ? { at: g.lastInterrupt.at, aborted: g.lastInterrupt.aborted, methods: [...(g.lastInterrupt.methods || [])], terminated: g.lastInterrupt.terminated, terminateAnswers: [...(g.lastInterrupt.terminateAnswers || [])], landed: Number(g.lastInterrupt.landed) || 0, landedMethods: [...(g.lastInterrupt.landedMethods || [])] } : null }; // verify r6: `landed` = aborted calls the browser still answered with a success (they took effect)
 }
@@ -516,6 +555,7 @@ module.exports = {
   CENSUS, pausedVerdict, pausedWords, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
+  SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, // lane browser-shared-profile-freeze: the scope road (a cooperative lease shown only its own targets)
   INPUT_CREDIT_MS, isInputMethod, takeCredit, creditReceipt, creditExpectation, creditMatches, creditSessionOk, CREDIT_METHODS, // lane S2: the user's own input passes the paused fence on a credit BOUND to its record's own CDP call AND to the tab the user is looking at (verify r2)
   creditExpiryReceipt, ALWAYS_REFUSED_WHY, // verify r3: honest expiry words (spent / other_tab / not_dispatched); the deaf-page method's words
   mediatedNamespace, mediatedEnvFor, grantKey, grantView, mediationSentence,

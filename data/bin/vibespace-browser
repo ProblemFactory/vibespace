@@ -758,6 +758,14 @@ async function runPage(c) {
   }
   // lane browser-viewport-answer: while the picture size is pinned a batch never carries a raw set past it — refused whole, nothing ran
   if (vpInBatch && r.viewportRuling) refuseLocally({ code: 'size_pinned', error: `a \`set viewport\` / \`set device\` line cannot run inside a batch while ${r.viewportRuling.text || 'the picture size is pinned'} — nothing ran`, remedy: 'run the batch without that line' });
+  // lane browser-shared-profile-freeze: `tab close <targetId>` of a tab NOBODY can answer (page_busy names it — a popup holding a
+  // dialog that opened before anything could watch it) is closed DIRECT through VibeSpace's own socket: the server's tab verb
+  // and the browser CLI's own read the tab list through the very driver that page holds (measured: tabs_unreadable after
+  // 13–19 s). A tab that answers (`tab_answers`) or is not known there falls through to the usual `tab close`.
+  if (words0[0] === 'tab' && words0[1] === 'close' && words0.length === 3 && /^[A-Fa-f0-9]{16,64}$/.test(words0[2]) && dlg && dlg.watched && dlg.profileId) {
+    const done = await runDirect('close', { r, head, profileId: dlg.profileId, wantsJson, targetId: words0[2] });
+    if (done) return;
+  }
   if (tabFenced && words0[0] === 'tab') { // (a page dialog never lets the binary's unfenced `tab` run instead — the server lists and closes by the CDP's own)
     // integration 2.369.199 (lane site-reset × lane browser-resume): while a NAVIGATION LOOP stands on this conversation's
     // tab, a bare `tab close` is site-reset's way out — DIRECT through VibeSpace's own socket, this conversation's tab only
@@ -831,6 +839,19 @@ async function runPage(c) {
     printLoop(loopStand);
     for (const h of head) console.error(h);
     await call('POST', '/api/agent/browser/audit', { profile: dlg.profileId, verb: words0[0] || null, ok: false, loop: true, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
+    process.exit(1);
+  }
+  // lane browser-shared-profile-freeze: THE TAB THIS VERB ACTS ON ANSWERS NOTHING (the watch asked it first, bounded) — a
+  // page-waiting verb is answered `page_busy` by name at once and NEVER handed to the browser CLI (it would wait there for its
+  // own timeout and hold this conversation's next commands — its `tab new` / `tab list` run through the same driver); the ways
+  // out (tab …, close, dialog, stop, site-reset, a navigation) still run. An older copy of the rules beside this file: none judged.
+  const busyStand = dlg && dlg.pageBusy && typeof dlg.pageBusy === 'object' ? dlg.pageBusy : null;
+  if (busyStand && DS && typeof DS.busyPasses === 'function' && !DS.busyPasses(words0[0] || '')) {
+    if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: 'page_busy', pageBusy: { silent: busyStand.silent || [], popups: busyStand.popups || [], boundMs: busyStand.boundMs || null }, error: busyStand.text || '' }));
+    else console.log(busyStand.text || 'your tab is not answering — nothing ran');
+    for (const h of head) console.error(h);
+    console.error('[page_busy]');
+    await call('POST', '/api/agent/browser/audit', { profile: dlg.profileId, verb: words0[0] || null, ok: false, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
     process.exit(1);
   }
   // `dialog status | accept [text] | dismiss` — answered through the watch (the one client that saw the dialog open; the
@@ -1093,11 +1114,12 @@ async function applySize(size, profile) {
 }
 /** lane site-reset: a way out through VibeSpace's own socket (`/api/agent/browser/direct`) — `stop` always, a bare `tab close`
  *  and a `screenshot` while a loop stands. → true when it answered (printed, audited, exited), false = run the binary. */
-async function runDirect(action, { r, head, profileId, wantsJson, shotPath = null }) {
+async function runDirect(action, { r, head, profileId, wantsJson, shotPath = null, targetId = null }) {
   const verbName = action === 'close' ? 'tab' : action;
   const audit = (ok) => call('POST', '/api/agent/browser/audit', { profile: profileId, verb: verbName, ok, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
-  const a = await call('POST', '/api/agent/browser/direct', { profile: profileId, action }, { soft: true });
+  const a = await call('POST', '/api/agent/browser/direct', { profile: profileId, action, ...(targetId ? { targetId } : {}) }, { soft: true });
   if (a._failed && a.code === 'no_loop' && action !== 'stop') return false; // the loop ended meanwhile: the binary's own verb
+  if (a._failed && targetId && ['tab_answers', 'not-found', 'not_watched', 'not_your_tab'].includes(a.code)) return false; // lane browser-shared-profile-freeze: an answering tab (or not this conversation's) ⇒ the usual close, its fence's words
   for (const h of head) console.error(h);
   if (a._failed) {
     // lane fleet-image-2: the answer WITHOUT a picture tells the loop as the answer with one does (below) — on a pod whose

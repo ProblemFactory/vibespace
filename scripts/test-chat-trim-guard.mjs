@@ -52,7 +52,7 @@ ok('_extendTop measures the fresh slab and folds INSIDE the anchored landing, an
 ok('_extendBottom folds BEFORE its trim and re-folds after one (the downward mirror of the 2.369.129 order defect — the owner\'s `trimTop removed:351 anchored:false`)', /this\._reserveFreshHeights\(fresh\);[\s\S]{0,500}this\._updateRuns\(\);\s*\{ const before = this\._windowStart; this\._trimTop\(\); if \(this\._windowStart !== before\) this\._updateRuns\(\); \}/.test(cv));
 ok('the trim trace tags survive with their decision inputs (the capture channel that caught all three)', cv.includes("'trimBottom' : 'trimTop'") && /zone: \[Math\.round\(zone\.top\), Math\.round\(zone\.bottom\)\]/.test(cv) && cv.includes("_trace('extendTop:done'") && cv.includes("_trace('trimSkipZone'"));
 ok('a fresh slab is rendered ONCE at insert so the landing and the zone read MEASURED heights (content-visibility placeholders are estimates) — the override comes off two frames later, after the remembered size is recorded', /_reserveFreshHeights\(els(, \{ live = false \} = \{\})?\) \{/.test(cv) && /el\.style\.contentVisibility = 'visible';/.test(cv) && /requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => \{/.test(cv));
-ok('PINNED ⇔ AT THE LIVE TAIL: the pin predicate carries windowEnd ≥ total and not-teleported, and every pin site reads it (scroll handler, run-bar landing, the read-only scroll button)', /_atLiveTail\(scrollTop, scrollHeight, clientHeight\) \{\s*return !this\._teleported && this\._windowEnd >= this\._total && scrollHeight - scrollTop - clientHeight < 50;/.test(cv) && /const atTail = atBottom && this\._atLiveTail\(scrollTop, scrollHeight, clientHeight\);\s*const repin = this\._repinVerdict\(atTail\);/.test(cv) && /_repinVerdict\(atTail\) \{\s*if \(!atTail \|\| this\._pinned\) return null;/.test(cv) && /const atBottom = this\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\);/.test(cv) && /\(this\._readOnly \|\| !this\.sessionId\) && !\(this\._windowEnd < this\._total && this\._canPaginate\)/.test(cv));
+ok('PINNED ⇔ AT THE LIVE TAIL: the pin predicate carries windowEnd ≥ total and not-teleported, and every pin site reads it (scroll handler, run-bar landing, the read-only scroll button)', /_atLiveTail\(scrollTop, scrollHeight, clientHeight\) \{\s*return !this\._teleported && this\._windowEnd >= this\._total && scrollHeight - scrollTop - clientHeight < 50;/.test(cv) && /const atTail = atBottom && this\._atLiveTail\(scrollTop, scrollHeight, clientHeight\);\s*const repin = this\._repinVerdict\(atTail\);/.test(cv) && /_repinVerdict\(atTail\) \{\s*if \(!atTail \|\| this\._pinned\) return null;/.test(cv) && /const atBottom = this\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\);/.test(cv) && /if \(!\(this\._windowEnd < this\._total && this\._canPaginate\)\) \{\s*this\._noteUserNav\('scrollBtn'\);\s*this\._setPinned\(true, 'scrollBtn'\);/.test(cv)); // inc-mvl02dkn-gop0: ANY view at the tail pins and scrolls (a live one no longer refetches)
 ok('the viewport anchor never picks the seek sentinel (a huge session\'s first child) — at the top edge it is the first VISIBLE card, delta included', /const skip = \(c\) => runChrome\(c\) \|\| c\._isSeekSentinel;/.test(cv) && !/\} else if \(list\.children\.length\) \{/.test(cv) && /if \(!el && list\.children\.length\) \{ el = list\.children\[0\]; delta = 0; \}/.test(cv));
 // ── SHORT-VIEW RESCUE after attach (2.369.43) ───────────────────────────────
 // The 2.369.36 gate `_windowStart > 0 && rendered < 30 && sh <= ch` was
@@ -245,7 +245,7 @@ ok('…and it asserts off the pin SNAPSHOT taken when the window was HIDDEN (a t
 ok('the scroll handler updates the run-bar READOUT first, stamps a scrollbar DRAG, then no-ops for the settle BEFORE it touches the pin (transitional geometry must not unpin)',
   /this\._suspended\) return;[\s\S]{0,400}this\._updateRunBar\(scrollTop\);[\s\S]{0,200}this\._programmaticScroll\) return;[\s\S]{0,700}this\._pointerDragScroll\(scrollTop\)\)[\s\S]{0,1400}Date\.now\(\) < \(this\._resumeSettleUntil \|\| 0\)\) return;[\s\S]{0,2400}const atBottom =/.test(cv));
 ok('…and the UNPIN itself is gated on positive evidence for the rest of the horizon (the settle alone was a one-shot cliff)',
-  /if \(this\._pinned && this\._resumeDisplacement\(\)\) \{[\s\S]{0,260}_scrollToBottom\(\);\s*return;\s*\}[\s\S]{0,200}this\._pinned = false;/.test(cv)
+  /if \(this\._pinned && this\._resumeDisplacement\(\)\) \{[\s\S]{0,260}_scrollToBottom\(\);\s*return;\s*\}[\s\S]{0,200}this\._setPinned\(false, 'scrolledAway'/.test(cv)
   && /_resumeDisplacement\(\) \{/.test(cv));
 ok('the loadHistory auto-fill DEFERS through the settle instead of deciding on transitional geometry',
   /const tryAutoFill = \(retries\) => \{[\s\S]{0,400}this\._resumeSettleUntil \|\| 0\) - Date\.now\(\)[\s\S]{0,200}tryAutoFill\(retries - 1\)/.test(cv));
@@ -881,7 +881,7 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
 {
   ok('the wheel handler carries the OVERSHOOT of a notch that CROSSES an edge (px − room), not only a notch that starts there — both directions',
     /const roomUp = list\.scrollTop;/.test(cv) && /if \(e\.deltaY < 0 && \(roomUp < 10 \|\| px > roomUp\)\) \{/.test(cv) && /this\._addWheelCarry\('up', px - roomUp\);/.test(cv)
-    && /\(roomDown < 10 \|\| px > roomDown\)\) \{/.test(cv) && /this\._addWheelCarry\('down', px - roomDown\);/.test(cv));
+    && /\(roomDown < 10 \|\| px > roomDown\)\s*&& \(this\._teleported \|\| this\._windowEnd < this\._total\)\) \{/.test(cv) && /this\._addWheelCarry\('down', px - roomDown\);/.test(cv));
   ok('a notch eaten by the load lock leaves its trace BEFORE the early return (wheelTop / wheelBottom {eaten:1})',
     /this\._wheelPending = 'up'; this\._trace\('wheelTop', \{ st: Math\.round\(roomUp\), eaten: 1/.test(cv) && /this\._wheelPending = 'down'; this\._trace\('wheelBottom', \{[^}]*eaten: 1/.test(cv));
   ok('ONE carry accounting (_addWheelCarry / _applyWheelCarry / _clearWheelCarry / _dropWheelCarry): both extends AND both gap slabs consume it; nothing else assigns _wheelCarry',
@@ -943,8 +943,21 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     ok('unit: the down mirror — a 700 px wheel-down with 100 px of room below carries 600 and fires _extendBottom', v._wheelCarry === 600 && v._wheelCarryDir === 'down' && v.calls.join() === 'extendBottom');
     v = mk({ _pinned: false, _windowEnd: 3201, _messageList: { scrollTop: 4200, scrollHeight: 5000, clientHeight: 700 } }); wheel(v, 700);
     ok('unit: …and at the live tail (windowEnd = total) the down branch fires nothing', v.calls.length === 0);
-    v = mk({ _windowStart: 0 }); wheel(v, -700);
-    ok('unit: with the registered tail exhausted the crossing notch is carried into the SEEK path (_maybeSeekEarlier consumes it at the slab landing)', v._wheelCarry === 468 && v.calls.join() === 'seekEarlier');
+    v = mk({ _windowStart: 0, _gapMinimapActive: true, _seekSentinel: { isConnected: true, _gapCursor: null } }); wheel(v, -700);
+    ok('unit: with the registered tail exhausted (a huge session, its seek sentinel short of line 0) the crossing notch is carried into the SEEK path (_maybeSeekEarlier consumes it at the slab landing)', v._wheelCarry === 468 && v.calls.join() === 'seekEarlier');
+    // inc-mvl02dkn-gop0 (the owner's chat, from the bundle): a LIVE chat at its conversation's start — window 0 … 37,
+    // one screen (st 0, sh 818 = ch 818), pinned — and six wheel-ups at the top (the capture's carry 100 … 818, then unpinned).
+    const atStart = (over) => mk({ _windowStart: 0, _windowEnd: 37, _total: 37, _messageList: { scrollTop: 0, scrollHeight: 818, clientHeight: 818 }, ...over });
+    v = atStart({}); for (let i = 0; i < 6; i++) wheel(v, -100);
+    ok(`unit: nothing earlier (window 0 … 37, one screen): six wheel-ups at the top page nothing, carry nothing and KEEP the pin (${v.calls} · carry ${v._wheelCarry || 0} · pin ${v._pinned})`,
+      v.calls.length === 0 && !v._wheelCarry && !v._wheelCarryDir && v._pinned === true && !v._traces.some((t) => t.tag === 'unpin' || t.tag === 'wheelTop'));
+    ok('unit: …and say «No earlier messages» ONCE (one noEarlier trace for six notches)', v._traces.filter((t) => t.tag === 'noEarlier').length === 1);
+    v = atStart({ _gapMinimapActive: true, _seekSentinel: { isConnected: true, _gapCursor: 0 } }); wheel(v, -100);
+    ok('unit: a huge session whose seek reached line 0 has nothing earlier either', v.calls.length === 0 && v._pinned === true);
+    v = atStart({ _windowStart: 4 }); wheel(v, -100);
+    ok('unit: CONTROL — with four messages above the window the same notch unpins (traced `unpin` {why: wheelUp}) and pages', v.calls.join() === 'extendTop' && v._pinned === false && v._traces.some((t) => t.tag === 'unpin' && t.why === 'wheelUp'));
+    v = atStart({ _messageList: { scrollTop: 1200, scrollHeight: 2018, clientHeight: 818 } }); wheel(v, 100);
+    ok('unit: at the live tail a wheel-down carries nothing and pages nothing (the capture\'s 46 wheelBottom carry:818 traces)', v.calls.length === 0 && !v._wheelCarry && !v._traces.some((t) => t.tag === 'wheelBottom'));
   }
   // (c) _applyWheelCarry, EXECUTED
   {

@@ -45,6 +45,11 @@
  *     the url it dialed still the target's CURRENT one) — else 503 by name,
  *     never a connection no grant owns (verify r3 M3);
  *   · nothing is logged with a token or a raw url in it.
+ * lane browser-shared-profile-freeze: a grant has a MODE — 'mediated' (the above) or 'scope' (an AGENT's lease of a profile
+ * its conversations share cooperatively, `owner`): every call passes as written (M.judgeScope — no census class, no takeover
+ * fence, no interrupt, no window rewrite) and the connection discovers only the lease's own targets (the same scope rules);
+ * revoking it closes its connections, never its tabs (a detached conversation's page stays, as on that road). Measured: one
+ * new tab that could not answer at birth held EVERY attached driver's next command 20–60 s (browser-mediation.js).
  * Gate: test-browser-mediation (fast: the real proxy over a fake CDP upstream)
  * + test-browser-mediation-chrome (heavy: the real chrome — the §6.2 exit).
  */
@@ -186,7 +191,7 @@ function create({ log = console, now = Date.now } = {}) {
         credit = tc.credit;
       }
       // the owner's ruling (2026-09-27): no switch — every class but read / session / harmless is refused while the user drives
-      const v = M.judge(msg, g.scope, { paused: credit ? false : paused });
+      const v = g.mode === M.SCOPE_MODE ? M.judgeScope(msg) : M.judge(msg, g.scope, { paused: credit ? false : paused }); // lane browser-shared-profile-freeze: the scope road passes every call
       if (v.kind === 'refuse') {
         g.refusals = (g.refusals || 0) + 1;
         // verify r4: a method the census does not list was refused while the user drives — said ONCE per method per grant (the
@@ -223,7 +228,7 @@ function create({ log = console, now = Date.now } = {}) {
       if (msg.id != null && conn.pending.has(msg.id)) {
         const pend = conn.pending.get(msg.id); conn.pending.delete(msg.id);
         if (conn.credits && conn.credits.has(msg.id)) { const c = conn.credits.get(msg.id); conn.credits.delete(msg.id); settleCredit(c, M.creditReceipt(msg)); } // lane S2: the receipt is the browser's own answer
-        const out = M.admitReply(msg, pend, g.scope);
+        const out = M.admitReply(msg, pend, g.scope, { explicit: g.mode === M.SCOPE_MODE }); // the scope road: an attach by id admits its target
         // an ABORTED call (the takeover answered it browser_interrupted already): its scope growth stands, its reply is swallowed —
         // verify r6: a SUCCESS reply means the call had reached Chrome and TOOK EFFECT (a fill's insertText, a click): the takeover's
         // record counts it as `landed` so the agent is told "cut short — but this reached the page" rather than a plain "cut"
@@ -259,7 +264,7 @@ function create({ log = console, now = Date.now } = {}) {
   /** ONE grant per (profile, conversation): minted on first ask, re-used
    *  after (the upstream and the paused reader refreshed; the scope KEPT — a
    *  lease that re-attaches keeps its tabs; `targetIds` are ADDED). */
-  async function grantFor({ profileId, browserKey, upstream = null, targetIds = [], paused = null } = {}) {
+  async function grantFor({ profileId, browserKey, upstream = null, targetIds = [], paused = null, mode = M.MEDIATED_MODE } = {}) {
     if (!profileId || !browserKey) throw Object.assign(new Error('a grant names a profile and a conversation'), { code: 'bad-request' });
     await listen();
     const key = M.grantKey(profileId, browserKey);
@@ -270,6 +275,7 @@ function create({ log = console, now = Date.now } = {}) {
       log.log?.(`[cdp-mediator] grant minted for ${g.browserKey} on ${g.profileId}`);
     }
     for (const t of targetIds || []) M.admitTarget(g.scope, t);
+    g.mode = mode === M.SCOPE_MODE ? M.SCOPE_MODE : M.MEDIATED_MODE; // lane browser-shared-profile-freeze: the road the keeper judged (leaseRoadVerdict)
     if (typeof paused === 'function') g.paused = paused;
     if (upstream !== undefined && upstream !== g.upstream) repointGrant(g, upstream);
     return { token: g.token, url: M.mediatedBrowserUrl({ port, token: g.token }), httpBase: M.mediatedHttpBase({ port, token: g.token }), view: view(g) };
@@ -287,7 +293,7 @@ function create({ log = console, now = Date.now } = {}) {
   function interrupt({ profileId, browserKey } = {}) {
     const g = grantOf(profileId, browserKey);
     const out = { aborted: [], terminated: 0, at: now() };
-    if (!g) return out;
+    if (!g || g.mode === M.SCOPE_MODE) return out; // lane browser-shared-profile-freeze: the cooperative road never interrupted its calls (its pause is /resolve's)
     const rec = { at: out.at, aborted: 0, methods: [], terminated: 0, terminateAnswers: [], landed: 0, landedMethods: [] }; // verify r6: `landed` = aborted calls the browser still answered with a success (they took effect)
     for (const conn of g.conns) {
       const plan = M.interruptPlan([...conn.pending].map(([id, p]) => ({ id, method: p.method, sessionId: p.sessionId, aborted: !!p.aborted })), { pageConn: conn.kind === 'page' });
@@ -383,6 +389,7 @@ function create({ log = console, now = Date.now } = {}) {
     if (!g) return { revoked: false, closing: Promise.resolve({ closed: 0, failed: 0, why: 'no grant' }) };
     closeConns(g, 1008, 'lease_gone');
     const n = g.scope.targets.size;
+    if (g.mode === M.SCOPE_MODE) closeTargets = false; // lane browser-shared-profile-freeze: a cooperative lease's tabs outlive its url (noteLeftTab — the page stays)
     const closing = closeTargets && n ? closeTargetsOf(g).then((r) => { log.log?.(`[cdp-mediator] grant revoked for ${g.browserKey} on ${g.profileId}: ${r.closed}/${n} tab(s) closed${r.failed ? `, ${r.failed} not` : ''} (${g.refusals} refusal(s), ${g.dropped} event(s) withheld)`); return r; }) : Promise.resolve({ closed: 0, failed: 0, why: n ? 'kept' : null });
     if (!(closeTargets && n)) log.log?.(`[cdp-mediator] grant revoked for ${g.browserKey} on ${g.profileId} (${g.refusals} refusal(s), ${g.dropped} event(s) withheld)`);
     return { revoked: true, closing };

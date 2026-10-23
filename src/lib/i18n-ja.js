@@ -10629,4 +10629,6 @@ export default {
   "Context table budget per group (bytes)": "グループごとの Context 表の注入予算（バイト）", // lane task-group-context
   "How many bytes one Task Group's Context table may take in what a conversation is told. Rows are told in table order at the depth each one chose; a row that does not fit steps down (contents, then file names with key files, then file names, then only the path and note) and says so. The room the hook carries beside the tools and the standing instructions caps it too. 0 = only that room.": "一つのタスクグループの Context 表が、会話に伝える内容の中で何バイトまで使えるか。各行は表の順に、それぞれ選んだ深さで伝えます。入りきらない行は一段下げ（内容 → ファイル名 + 主要ファイルの内容 → ファイル名 → パスと説明だけ）、そのことを書き添えます。フックがツールの説明と常駐指示の横に運べる容量も上限になります。0 = その容量だけ。", // lane task-group-context
   "「{path}」 is too big to tell as 「{chosen}」 → told as 「{level}」 (the agent still knows where it is and what it is for)": "「{path}」は「{chosen}」で伝えるには大きすぎます → 「{level}」で伝えます（エージェントは場所と用途を引き続き知っています）", // lane task-group-context
+  // lane chat-live-tail-pin (inc-mvl02dkn-gop0): a wheel-up at the start of a conversation
+  "No earlier messages": "これより前のメッセージはありません",
 };

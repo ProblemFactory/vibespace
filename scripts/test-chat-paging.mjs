@@ -888,7 +888,7 @@ console.log('§4d pre-fix control: the same legs on a copy with the keep zone an
     // a crossing wheel-down now pages the DOM edge from the wheel handler before the mid-history pin can stick,
     // which masked ② on the control), back to the edge-only carry the g2 control went red with
     ["if (e.deltaY < 0 && (roomUp < 10 || px > roomUp)) {", "if (e.deltaY < 0 && roomUp < 10) {"],
-    ["&& (roomDown < 10 || px > roomDown)) {", "&& roomDown < 10) {"],
+    ["&& (roomDown < 10 || px > roomDown)\n", "&& roomDown < 10\n"], // the condition continues on its next line since 2.369.346 (nothing later ⇒ no carry, inc-mvl02dkn-gop0)
     ["  _addWheelCarry(dir, px) {", "  _addWheelCarry(dir, px) { px = Math.abs(px) + this._messageList.scrollTop; /* control: the whole notch, edge-only */"],
   ];
   const [CPORT] = await freePorts(1);

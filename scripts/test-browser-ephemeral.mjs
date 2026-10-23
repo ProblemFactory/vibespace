@@ -998,7 +998,8 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
   // CONTROLS (scripts/mutant-copy.mjs): the pre-fix keeper, one edit each
   const M5 = mutantCopies('browser-ephemeral-one-launcher', REPO);
   const k5src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const k5dir = k5src.replace('env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseCdp, socketDir: rec && rec.launch === \'attach\' ? rec.socketDir : null })', 'env: [`AGENT_BROWSER_SESSION=vs-${browserKey}`, `AGENT_BROWSER_NAMESPACE=vs-${p.id}`, `AGENT_BROWSER_PROFILE=${p.dir}`, \'AGENT_BROWSER_IDLE_TIMEOUT_MS=0\']');
+  // lane browser-shared-profile-freeze: the anchor names the lease's own url (leaseUrlFor — the scope road's, else the raw one)
+  const k5dir = k5src.replace('env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseUrl, socketDir: rec && rec.launch === \'attach\' ? rec.socketDir : null })', 'env: [`AGENT_BROWSER_SESSION=vs-${browserKey}`, `AGENT_BROWSER_NAMESPACE=vs-${p.id}`, `AGENT_BROWSER_PROFILE=${p.dir}`, \'AGENT_BROWSER_IDLE_TIMEOUT_MS=0\']');
   if (k5dir !== k5src) {
     const c5 = await legOf(M5.load('src/server/browser-keeper.js', k5dir, 'env-dir'), 'ctl-dir');
     ok(c5.cmdX && c5.cmdX.status !== 0 && c5.cmdY && c5.cmdY.status !== 0 && c5.refused.length === 2 && c5.launches.length === 1, `⑤ CONTROL: a keeper copy that hands the lease the DIRECTORY (the pre-fix env) — both sessions' commands die on the lock (${c5.refused.length} SingletonLock refusals): the legs above can go red`, c5);

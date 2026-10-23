@@ -253,7 +253,15 @@ class ChatView {
     // never ticks, yet the renderer still paints each coalescing edit live —
     // so the SET is what gets frozen at turn end, not the ticker's last card.
     this._liveHeadIds = new Set();
-    this._pinned = true; // auto-scroll to bottom
+    // A LIVE CHAT ALWAYS HAS A DEFINED WINDOW (inc-mvl02dkn-gop0): the bounds were set only by a history load, and the
+    // window that CREATED a chat never gets one (its creator never attaches, 2.368.4) — so the first live message's
+    // `_total++` made them NaN for good: `_atLiveTail` was never true again (a scroll to the bottom never re-pinned), ↓
+    // fetched offset NaN (the server read 0 — the conversation's FIRST fifty messages, «pinned»), and paging up asked a
+    // window with no start. Until a history load says otherwise the live tail IS the window: 0 … the live count.
+    this._windowStart = 0;
+    this._windowEnd = 0;
+    this._total = 0;
+    this._setPinned(true, 'init'); // auto-scroll to bottom
     this._renderedMsgIds = new Set(); // dedup by msgId
     // Desktop-resume settle window (inc-mtq5bpjt-0o0n): while a just-shown
     // window re-measures, EVERY automatic paging trigger is a no-op. Stamped
@@ -559,15 +567,15 @@ class ChatView {
     this._scrollBtn.title = t('Scroll to bottom');
     this._scrollBtn.onclick = () => {
       if (this._teleported) { this.jumpToBottom(); return; }   // return to latest
-      // A read-only view whose rendered window still ENDS at the live tail just
+      // A view whose rendered window still ENDS at the live tail just pins and
       // scrolls; one that paged into history (windowEnd < total after a trim)
-      // refetches the tail like a live window does — pinning a partial window
-      // at its DOM bottom is the H2 lie (inc-mubvu3a4-x8sb).
-      if ((this._readOnly || !this.sessionId) && !(this._windowEnd < this._total && this._canPaginate)) {
-        // Read-only or no session at the tail: just scroll, don't fetch
-        this._pinned = true;
-        this._newMsgCount = 0;
-        this._scrollBtn.classList.add('hidden');
+      // refetches the tail — pinning a partial window at its DOM bottom is the
+      // H2 lie (inc-mubvu3a4-x8sb). THE ARROW MEANS PIN (inc-mvl02dkn-gop0): a
+      // LIVE window at the tail used to refetch too — a full DOM rebuild that
+      // re-folded the run the owner had open, for nothing the view lacked.
+      if (!(this._windowEnd < this._total && this._canPaginate)) {
+        this._noteUserNav('scrollBtn');
+        this._setPinned(true, 'scrollBtn');
         this._forceScrollToBottom();
       } else {
         this.jumpToBottom();
@@ -681,6 +689,10 @@ class ChatView {
       const roomUp = list.scrollTop;
       const roomDown = list.scrollHeight - list.scrollTop - list.clientHeight;
       if (e.deltaY < 0 && (roomUp < 10 || px > roomUp)) {
+        // NOTHING EARLIER (inc-mvl02dkn-gop0): the conversation's start is the
+        // window's start — the notch pages nothing, so it carries nothing and
+        // unpins nothing (a one-screen live chat at the top IS at the tail).
+        if (!this._hasEarlier()) { this._noEarlier(roomUp < 10); return; }
         // THE NOTCH IS NOT LOST (inc-mubvu3a4-x8sb): at the top edge a wheel-up
         // has nothing to scroll into, and while a slab is in flight (`_loading`,
         // held 300 ms past the landing) this handler used to drop it outright —
@@ -703,12 +715,13 @@ class ChatView {
         // collapsed geometry scrollTop can be 0 while still pinned, and a
         // pinned view that pages up gets yanked straight back to the bottom
         // by the pin machinery on the next live edit — the visible bounce.
-        this._pinned = false;
+        this._setPinned(false, 'wheelUp');
         this._trace('wheelTop', { st: Math.round(list.scrollTop), sh: list.scrollHeight, ws: this._windowStart, tp: this._teleported ? 1 : 0, carry: Math.round(this._wheelCarry || 0) });
         if (this._teleported) this._maybeSeekEarlier();        // teleported: seek older by line
         else if (this._windowStart > 0) this._extendTop();
         else this._maybeSeekEarlier();                         // registered tail exhausted → seek gap
-      } else if (e.deltaY > 0 && list.scrollHeight - list.clientHeight > 50 && (roomDown < 10 || px > roomDown)) {
+      } else if (e.deltaY > 0 && list.scrollHeight - list.clientHeight > 50 && (roomDown < 10 || px > roomDown)
+          && (this._teleported || this._windowEnd < this._total)) { // nothing later (the live tail): nothing to carry, nothing to page (inc-mvl02dkn-gop0)
         // THE BOUNCE (inc-msor3oax, still reproducing on 2.305.0): with a
         // fresh batch's heights unresolved the list has NO scrollable range
         // (sh === ch === 755 in the capture), so "parked at the bottom edge"
@@ -817,9 +830,7 @@ class ChatView {
           this._trace('repin', { st: Math.round(scrollTop), sh: scrollHeight, ch: clientHeight, we: this._windowEnd, total: this._total,
             structAge: Date.now() - (this._lastStructuralAt || 0), n: this._messageList.childElementCount,
             fsb: this._fsbActive ? (this._fsbFrames || 0) : -1, posAgo: this._lastPositionAt ? Date.now() - this._lastPositionAt : -1 });
-          this._pinned = true;
-          this._newMsgCount = 0;
-          this._scrollBtn.classList.add('hidden');
+          this._setPinned(true, 'tail');
         } else if (!atBottom) {
           // POSITIVE-EVIDENCE UNPIN GATE (round-2 verifier's minor): the
           // settle window was a one-shot CLIFF — the resume's re-measure keeps
@@ -839,10 +850,10 @@ class ChatView {
             this._scrollToBottom();
             return;
           }
-          if (this._pinned) this._trace('unpin', { st: Math.round(scrollTop), wheelAgo: this._lastUserScrollAt ? Date.now() - this._lastUserScrollAt : -1 });
-          this._pinned = false;
+          this._setPinned(false, 'scrolledAway', { st: Math.round(scrollTop), wheelAgo: this._lastUserScrollAt ? Date.now() - this._lastUserScrollAt : -1 });
           this._scrollBtn.classList.remove('hidden');
         }
+        if (scrollTop >= 100) this._noEarlierSaid = false; // left the top: the next arrival may say «No earlier messages» again
         // INTENT GATE (inc-msorcsrl, the third capture — this is the real
         // mechanism): after paging UP, the fresh batch's heights resolve and
         // native scroll anchoring raises scrollTop to keep the view stable
@@ -887,7 +898,7 @@ class ChatView {
         const inputResizing = (window.__vsInputResizeAt && (Date.now() - window.__vsInputResizeAt < 250))
           || (window.__vsViewportResizeAt && (Date.now() - window.__vsViewportResizeAt < 400)); // browser-window drag-resize = the same displacement, third door (2.339.1)
         if (!this._pinned && scrollTop < 100 && !this._loading && this._canPaginate && !goingDown && !lockUp
-            && userRecentUp && !inputResizing) {
+            && userRecentUp && !inputResizing && this._hasEarlier()) { // nothing earlier ⇒ no page (inc-mvl02dkn-gop0: 34 empty pageUps in 0.4 s)
           this._trace('pageUp', { st: Math.round(scrollTop), sh: scrollHeight, ws: this._windowStart, tp: this._teleported ? 1 : 0 });
           if (this._teleported) this._maybeSeekEarlier();       // teleported: seek older by line
           else if (this._windowStart > 0) this._extendTop();
@@ -911,7 +922,8 @@ class ChatView {
         const userRecent = userRecentUp;
         const reading = !this._pinned && this._windowEnd < this._total;
         if (scrollHeight - scrollTop - clientHeight < 300 && !this._loading && this._canPaginate
-            && !goingUp && !lockDown && (!reading || userRecent) && !inputResizing) {
+            && !goingUp && !lockDown && (!reading || userRecent) && !inputResizing
+            && (this._teleported || this._windowEnd < this._total)) { // nothing later ⇒ no page, no trace (inc-mvl02dkn-gop0: 122 empty pageDowns crowded the ring)
           this._trace('pageDown', { st: Math.round(scrollTop), sh: scrollHeight, we: this._windowEnd, total: this._total, pin: this._pinned ? 1 : 0, reading: reading ? 1 : 0, input: userRecent ? 1 : 0, tp: this._teleported ? 1 : 0 });
           if (this._teleported) this._maybeSeekLater();
           else if (this._windowEnd < this._total) this._extendBottom();
@@ -990,9 +1002,7 @@ class ChatView {
         if (this._teleported || this._windowEnd < this._total) { // B-172e ②
           this.jumpToBottom();
         } else {
-          this._pinned = true;
-          this._newMsgCount = 0;
-          this._scrollBtn.classList.add('hidden');
+          this._setPinned(true, 'send');
           this._scrollToBottom();
         }
       },
@@ -2577,9 +2587,7 @@ class ChatView {
         if (!this._pinned && !this._pinnedAtSuspend) return;
         if (this._teleported || this._windowEnd < this._total) this.jumpToBottom({ user: false }); // re-pins itself
         else {
-          this._pinned = true;                            // re-assert: we ARE the live tail
-          this._newMsgCount = 0;
-          this._scrollBtn.classList.add('hidden');
+          this._setPinned(true, 'resumeRetail');          // re-assert: we ARE the live tail
           this._scrollToBottom();
         }
       } catch { } };
@@ -2893,7 +2901,7 @@ class ChatView {
     const pending = this._wheelPending; this._wheelPending = null;
     if (this._suspended || this._disposed || this._teleported) return;
     const list = this._messageList;
-    if (pending === 'up' && this._windowStart > 0 && list.scrollTop < 10) { this._pinned = false; this._trace('wheelPending', { dir: 'up', ws: this._windowStart }); this._extendTop(); } // a wheel-up is intent to leave the tail (the wheelTop branch unpins the same way)
+    if (pending === 'up' && this._windowStart > 0 && list.scrollTop < 10) { this._setPinned(false, 'wheelUp'); this._trace('wheelPending', { dir: 'up', ws: this._windowStart }); this._extendTop(); } // a wheel-up is intent to leave the tail (the wheelTop branch unpins the same way)
     else if (pending === 'down' && this._windowEnd < this._total && list.scrollHeight - list.scrollTop - list.clientHeight < 10) { this._trace('wheelPending', { dir: 'down', we: this._windowEnd }); this._extendBottom(); }
     else if (this._lockSkippedPageUp()) { this._trace('lockBand', { st: Math.round(list.scrollTop), ws: this._windowStart }); this._extendTop(); }
   }
@@ -3302,7 +3310,7 @@ class ChatView {
     if (side === 'bottom') {
       for (let i = els.length - 1; i >= els.length - n; i--) drop(els[i]);
       this._windowEnd -= n;
-      this._pinned = false; // the rendered window no longer ends at the live tail
+      this._setPinned(false, 'trimBottom'); // the rendered window no longer ends at the live tail (reached only unpinned: a pinned _extendTop never trims — trimSkipPinned)
     } else {
       // Element-anchored ABSOLUTE restore (2.229.1, forensics-confirmed): the
       // old relative `scrollTop -= (before - after)` double-compensated with
@@ -3593,6 +3601,67 @@ class ChatView {
     return !this._teleported && this._windowEnd >= this._total && scrollHeight - scrollTop - clientHeight < 50;
   }
 
+  /** THE PIN CHANGES IN ONE PLACE, AND SAYS WHY (inc-mvl02dkn-gop0). Fifteen sites used to assign `_pinned` bare and
+   *  only the scroll handler's unpin left a trace — the owner's capture lost its pin with no `unpin` anywhere in 300
+   *  events (a wheel-up at the top of a one-screen view cleared it silently). Every change is now an intent with a
+   *  reason, traced `pin` / `unpin` {why} (test-chat-scroll's census: this setter holds the ONE assignment). Pinned
+   *  means following the live tail, so pinning clears the new-message count and hides ↓; unpinning re-decides ↓
+   *  (_syncScrollBtn). Returns whether the pin changed. */
+  _setPinned(v, why, extra) {
+    const on = !!v;
+    if (on && this._scrollBtn) { this._scrollBtn.classList.add('hidden'); if (this._newMsgCount) this._scrollBtn.textContent = '\u2193'; } // the count's badge leaves with the count
+    if (on) this._newMsgCount = 0;
+    if (this._pinned === on) return false;
+    this._pinned = on;
+    this._trace(on ? 'pin' : 'unpin', { why: why || '', ...(extra || {}) });
+    if (!on) this._syncScrollBtn();
+    return true;
+  }
+
+  /** ↓ IS SHOWN ONLY WHEN THERE IS SOMEWHERE TO GO (inc-mvl02dkn-gop0): a pinned view hides it; an unpinned one shows
+   *  it when its window is not the live tail (paged history, a teleport — ↓ is «return to latest») or when the list
+   *  can still scroll down. A one-screen chat at the live tail (scrollHeight ≈ clientHeight) has nothing to scroll to. */
+  _syncScrollBtn() {
+    const btn = this._scrollBtn;
+    if (!btn) return;
+    if (this._pinned) { btn.classList.add('hidden'); return; }
+    const list = this._messageList;
+    const room = list ? list.scrollHeight - list.scrollTop - list.clientHeight : Infinity;
+    if (this._teleported || this._windowEnd < this._total || !(room < 50)) btn.classList.remove('hidden');
+    else btn.classList.add('hidden');
+  }
+  /** …re-decided once per frame after a live append to an unpinned view (it may have just outgrown one screen). */
+  _scheduleScrollBtnSync() {
+    if (this._scrollBtnSyncRaf) return;
+    this._scrollBtnSyncRaf = requestAnimationFrame(() => { this._scrollBtnSyncRaf = 0; if (!this._disposed) this._syncScrollBtn(); });
+  }
+
+  /** IS THERE HISTORY ABOVE THE RENDERED WINDOW? (inc-mvl02dkn-gop0) The window starts past message 0, a teleported
+   *  slab (it seeks older by line), or a huge session whose seek sentinel has not reached line 0. Every upward page asks
+   *  this first: with nothing above, a wheel-up at the top pages nothing, unpins nothing and carries nothing
+   *  (_noEarlier), and the scroll handler's pageUp does not fire. */
+  _hasEarlier() {
+    if (this._teleported || this._windowStart > 0) return true;
+    if (!this._gapMinimapActive) return false;
+    const s = this._seekSentinel;
+    return !!(s && s.isConnected && (s._gapCursor == null || s._gapCursor > 0));
+  }
+
+  /** A wheel-up at the top of a conversation with nothing earlier (inc-mvl02dkn-gop0: the owner's six notches at
+   *  scrollTop 0 carried 100 … 818 px and unpinned a view that had nowhere to go). The carry is dropped, the pin is kept,
+   *  and the reader is told ONCE per arrival at the top (the scroll handler re-arms it when the view leaves the top). */
+  _noEarlier(atEdge) {
+    if (this._wheelCarryDir === 'up') this._clearWheelCarry('noEarlier');
+    if (!atEdge || this._noEarlierSaid || this._historyInFlight) return;
+    this._noEarlierSaid = true;
+    this._trace('noEarlier', { st: Math.round(this._messageList?.scrollTop || 0), ws: this._windowStart, total: this._total });
+    this._showHistoryStatus(t('No earlier messages'), { kind: 'info', autoHideMs: 2500 });
+  }
+
+  /** The window's first history page is on its way (a resumed chat's creator, session-lifecycle): nothing is known
+   *  about what lies above it yet, so «No earlier messages» waits. */
+  noteHistoryInFlight(on) { this._historyInFlight = !!on; }
+
   // Jump to a specific message index: replace window entirely
   async jumpToIndex(targetIdx) {
     this._noteUserNav('jumpToIndex');   // a chosen destination — the resume re-tail must never overrule it
@@ -3622,7 +3691,7 @@ class ChatView {
     this._messages = [];
     this._windowStart = start;
     this._windowEnd = end;
-    this._pinned = false;
+    this._setPinned(false, 'jumpToIndex');
 
     this._loadingHistory = true;
     for (const msg of msgs) this._onCreateMessage(msg);
@@ -3659,7 +3728,8 @@ class ChatView {
   async jumpToBottom({ user = true } = {}) {
     if (user) this._noteUserNav('jumpToBottom');
     const windowSize = 50;
-    const start = Math.max(0, this._total - windowSize);
+    const known = Number.isFinite(this._total) ? this._total : 0;
+    let start = Math.max(0, known - windowSize);
     // THE ECHO IS NOT LOST (B-172e ①, inc-mt1zrvj3-wsr4): a send from a window
     // paged out of the tail comes here, and the server feeds the user's message
     // live in the same breath (src/server/user-input.js) — its `create` arrived
@@ -3679,7 +3749,20 @@ class ChatView {
     // (the "return to latest" button would just blank the window).
     let msgs;
     const endLoad = this._beginHistoryLoad(t('Loading messages…'));
-    try { msgs = await this._fetchMessages(start, this._total - start); }
+    try {
+      let page = await this._fetchMessagePage(start, known - start);
+      // THE TAIL IS THE SERVER'S (inc-mvl02dkn-gop0): the slab above is sized by
+      // OUR count, and a count that fell short (a create that rendered no card is
+      // never counted) ends the slab before the conversation does — the newest
+      // messages were missing from the view ↓ had just "pinned". The answer names
+      // the server's total: past the slab ⇒ fetch the slab that ends there.
+      if (Number.isFinite(page?.total) && page.total > start + (page.messages || []).length) {
+        this._trace('tailRefetch', { known, total: page.total, start, n: (page.messages || []).length });
+        start = Math.max(0, page.total - windowSize);
+        page = await this._fetchMessagePage(start, page.total - start);
+      }
+      msgs = page?.messages || [];
+    }
     catch (e) {
       if (call !== this._tailCall) return;   // a newer tail call answers for the view
       this._showHistoryStatus(t('Couldn\'t load the latest messages'), {
@@ -3704,9 +3787,7 @@ class ChatView {
     this._loadingHistory = true;
     for (const msg of msgs) this._onCreateMessage(msg);
     this._loadingHistory = false;
-    this._pinned = true;
-    this._newMsgCount = 0;
-    this._scrollBtn.classList.add('hidden');
+    this._setPinned(true, 'jumpToBottom');
     this._releaseTailHold(hold);   // pinned at the tail now: the held echo renders below the slab
     if (this._search?.hasHighlight) this._search.applyHighlightLayer();
 
@@ -3995,6 +4076,7 @@ class ChatView {
       this._reserveFreshHeights([el], { live: true });
       this._total++;
       this._windowEnd = this._total;
+      if (!this._pinned) this._scheduleScrollBtnSync(); // a one-screen view may just have outgrown its screen: ↓ appears
       // Update minimap with new user turns (CLI-injected page-image
       // attachments share the previous turnIndex — not a turn, no marker)
       if (msg.role === 'user' && !msg.imageAttachment) {
@@ -5433,7 +5515,7 @@ class ChatView {
     }
     if (!el) { showToast(t('Nothing to answer is on screen — the request may have been settled already')); return false; }
     this._noteUserNav?.('jumpToAsk');
-    this._pinned = false;
+    this._setPinned(false, 'jumpToAsk');
     const host = el.closest('.chat-msg');
     if (host) host.style.contentVisibility = 'visible';
     // verify-r6 K1: the card is landed WHOLE (its whole request above its Allow — taller since r6), never its top at mid-screen
@@ -7285,11 +7367,7 @@ class ChatView {
     list.scrollTop = run.header.offsetTop;
     this._lastStructuralAt = Date.now(); this._lastStructuralDir = null;
     const atBottom = this._atLiveTail(list.scrollTop, list.scrollHeight, list.clientHeight); // the DOM edge is not the tail (inc-mubvu3a4-x8sb)
-    if (atBottom !== this._pinned) {
-      this._pinned = atBottom;
-      if (atBottom) this._newMsgCount = 0;
-      this._scrollBtn?.classList.toggle('hidden', atBottom);
-    }
+    this._setPinned(atBottom, 'runLand'); // the landing decides, honestly — at the live tail it stays pinned (inc-mvl02dkn-gop0: NaN bounds made every run-bar landing an unpin)
     this._trace('runLand', { st: Math.round(list.scrollTop), pin: this._pinned ? 1 : 0 });
     this._scheduleRunBar();
   }

@@ -15,6 +15,9 @@
 //      Chrome is SIGSTOPped (`session info` answers, nothing else), one whose record a pre-fix boot left stopped ⇒ the boot
 //      RE-OWNS the first and the third (same daemon, ready) and ENDS the second with its Chrome; that profile's next start is
 //      fresh and answers. RED CONTROL: the pre-fix boot adopts the wedged one ready and leaves the third unowned.
+//   Ⓓ (lane browser-shared-profile-freeze, fleet fb-8727ee62fb) A SERVER RESTART ON THE SCOPE ROAD: a lease's url is served by
+//      the server (the proxy) — the Update takes it; the daemon and Chrome outlive it, the boot re-owns them, the next command's
+//      new url reaches the same daemon, browser and tab. RED CONTROL: the old url reaches nothing after the restart.
 // SKIPs with evidence without the real binary / a Chrome it can launch. Zero vendor calls; ends every process this run's root started.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -222,6 +225,45 @@ async function bootLeg(Kmod, tag) {
   const Kpre = keeperCopy('pre-boot', [['        if (cliAsked(i)) {\n', '        if (false) {\n'], ["        if (seenBy === 'boot' && unkept && browserAlive && p) {\n", '        if (false) {\n']]);
   const ctl = Kpre ? await bootLeg(Kpre, 'c-pre') : null;
   ok(ctl && !ctl.threw && ctl.wedged.state === 'ready' && ctl.wedged.daemonAlive && ctl.unowned.state === 'stopped' && ctl.unowned.alive, 'Ⓒ RED CONTROL: the pre-fix boot ADOPTS the wedged browser ready on `session info` alone and leaves the running one under its stopped record unowned — the legs above can go red', ctl && { wedged: ctl.wedged, unowned: ctl.unowned });
+}
+
+// ═══ Ⓓ lane browser-shared-profile-freeze (fleet fb-8727ee62fb): A SERVER RESTART ON THE SCOPE ROAD ═══
+// An agent lease of a shared profile now reaches its browser through a url the SERVER serves (cdp-mediator mode 'scope' — the
+// fix for «every session at once»: its driver discovers only its own tabs), so an Update (the server stops and starts again)
+// takes that url with it. THE RULE: the daemon and its Chrome outlive the server (the .332 fix); the next server's boot
+// re-owns them; the agent's next command — its /resolve answer (the keeper's attach) names the NEW url — reaches the SAME
+// daemon, the SAME browser, the SAME tab. RED CONTROL: the old url after the restart reaches nothing.
+console.log('— Ⓓ a server restart on the scope road: the daemon outlives the old url, the boot re-owns it, the next command answers through the new one');
+{
+  const MED = require('../src/server/cdp-mediator.js'), S = require('../src/browser-stream.js');
+  const w = world('d-scope'); let k1 = null, k2 = null, m1 = null, m2 = null; const r = {};
+  const ab = (args, pairs, timeout = 45000) => new Promise((resolve) => require('node:child_process').execFile(REAL_AB, args, { env: { ...w.env, ...S.pairsToEnv(pairs) }, encoding: 'utf8', timeout }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || '') + (err ? ' ' + String(err.message).slice(0, 200) : '') })));
+  const cdpOf = (pairs) => ((pairs || []).find((kv) => kv.startsWith('AGENT_BROWSER_CDP=')) || '').slice('AGENT_BROWSER_CDP='.length);
+  try {
+    m1 = MED.create({ log: { log() { }, warn() { } } }); k1 = w.make(K, { mediator: m1 });
+    const p = k1.createProfile({ label: 'shared' }, { owner: { kind: 'instance', id: null } });
+    const a1 = await k1.attach({ profileId: p.id, browserKey: KA, sessionId: 'sess-d', by: 'agent' });
+    r.u1 = cdpOf(a1.env);
+    r.open = await ab(['open', U('/scoped')], a1.env);
+    const rec1 = k1._reg().browsers[p.id]; r.daemon = rec1.pid; r.chrome = rec1.browser && rec1.browser.pid;
+    r.t1 = await ab(['get', 'title'], a1.env);
+    k1.shutdown(); m1.shutdown(); // the Update: the server process (and the proxy it serves) goes away — the browsers keep running
+    r.stale = await ab(['get', 'title'], a1.env, 15000); // RED CONTROL: the old url reaches nothing now
+    m2 = MED.create({ log: { log() { }, warn() { } } }); k2 = w.make(K, { mediator: m2 });
+    await k2.boot();
+    const b = k2.browserOf(p.id) || {};
+    r.reowned = { state: b.state, same: b.pid === r.daemon, alive: alive(r.daemon), chromeAlive: alive(r.chrome) };
+    const a2 = await k2.attach({ profileId: p.id, browserKey: KA, sessionId: 'sess-d', by: 'agent' }); // what the next command's /resolve does
+    r.u2 = cdpOf(a2.env);
+    r.t2 = await ab(['get', 'title'], a2.env);
+    r.after = { daemon: (k2._reg().browsers[p.id] || {}).pid, chrome: ((k2._reg().browsers[p.id] || {}).browser || {}).pid };
+  } catch (e) { r.threw = String(e && e.stack); }
+  ok(!r.threw && r.open && r.open.ok && /\/m\//.test(r.u1 || '') && /BD \/scoped/.test((r.t1 || {}).out || ''), 'Ⓓ an agent lease of a shared profile browses through a url the server serves (the scope road)', r);
+  ok(!r.threw && r.stale && !/BD \/scoped/.test(r.stale.out), 'Ⓓ RED CONTROL: after the server stopped, the old url reaches nothing (a driver kept on it would fail)', r.stale);
+  ok(!r.threw && r.reowned && r.reowned.state === 'ready' && r.reowned.same && r.reowned.alive && r.reowned.chromeAlive, 'Ⓓ the next server\'s boot RE-OWNS the same daemon and its Chrome (never an orphan)', r.reowned);
+  ok(!r.threw && r.u2 && /\/m\//.test(r.u2) && r.u2 !== r.u1 && r.t2 && r.t2.ok && /BD \/scoped/.test(r.t2.out) && r.after && r.after.daemon === r.daemon && r.after.chrome === r.chrome, 'Ⓓ the agent\'s next command (its new url from the keeper) answers on the SAME daemon, browser and tab — the page it had before the Update', { u1: r.u1 && r.u1.replace(/\/m\/[^/]+/, '/m/…'), u2: r.u2 && r.u2.replace(/\/m\/[^/]+/, '/m/…'), t2: r.t2, after: r.after, daemon: r.daemon, chrome: r.chrome });
+  if (k2) { for (const id of Object.keys(k2._reg().browsers || {})) await k2.stop(id).catch(() => { }); k2.shutdown(); }
+  try { m2 && m2.shutdown(); } catch { /* */ }
 }
 
 pages.close();

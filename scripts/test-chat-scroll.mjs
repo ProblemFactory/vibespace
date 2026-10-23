@@ -52,9 +52,37 @@ fs.mkdirSync(CWD, { recursive: true });
 const SUMMARY = path.join(CWD, 'Summary.md');
 const SID = '5c3a0000-0000-4000-8000-0000000c5c01';
 const STDIN_LOG = path.join(stubDir, 'stdin.ndjson');
+const NTH_FILE = path.join(stubDir, 'nth'); // the stub's chat-process counter: the 2nd chat (⑪) gets its own conversation id and script
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── ⑪ census (lane chat-live-tail-pin, inc-mvl02dkn-gop0): THE PIN CHANGES IN ONE PLACE. The owner's capture lost its pin
+// with no `unpin` in 300 events — fifteen sites assigned `_pinned` bare and only one traced. Every write to a chat view's
+// `_pinned` in the client goes through ChatView._setPinned(v, why) (traced `pin` / `unpin` {why}); the ONE assignment is
+// inside it. src/lib/terminal.js is a different object (the terminal's own follow flag) — the named exemption.
+console.log('⑪ census: no bare `_pinned =` outside ChatView._setPinned');
+{
+  const LIB = path.join(repo, 'src/lib');
+  const EXEMPT = { 'terminal.js': 'TerminalSession keeps its own follow flag (not a chat view)' };
+  const ASSIGN = /\b_pinned\s*(?:\|\||&&|\?\?)?=(?!=)/g;
+  const rows = [];
+  for (const f of fs.readdirSync(LIB).filter((x) => x.endsWith('.js')).sort()) {
+    if (EXEMPT[f]) continue;
+    const src = fs.readFileSync(path.join(LIB, f), 'utf8');
+    for (const m of src.matchAll(ASSIGN)) rows.push({ f, line: src.slice(0, m.index).split('\n').length, text: src.slice(src.lastIndexOf('\n', m.index) + 1, src.indexOf('\n', m.index)).trim().slice(0, 120) });
+  }
+  const cvSrc = fs.readFileSync(path.join(LIB, 'chat-view.js'), 'utf8');
+  const setter = cvSrc.match(/\n  _setPinned\(v, why, extra\) \{[\s\S]*?\n  \}\n/);
+  const inSetter = (r) => r.f === 'chat-view.js' && !!setter && (() => { const at = cvSrc.indexOf(setter[0]); const a = cvSrc.slice(0, at).split('\n').length; return r.line > a && r.line <= a + setter[0].split('\n').length; })();
+  const bare = rows.filter((r) => !inSetter(r));
+  check(`the setter exists and holds the ONE assignment (${rows.length - bare.length} inside it)`, !!setter && rows.length - bare.length === 1, rows);
+  check(`no bare \`_pinned =\` anywhere else in src/lib (${bare.length}${bare.length ? ': ' + bare.map((r) => `${r.f}:${r.line}`).join(', ') : ''})`, bare.length === 0, bare);
+  check('…and the setter traces every change with its reason (`pin` / `unpin` {why})', !!setter && /this\._trace\(on \? 'pin' : 'unpin', \{ why:/.test(setter[0]));
+  // CONTROL: the census sees a bare assignment (the base's wheel-top site, re-inserted into a scratch copy of the text)
+  const ctl = cvSrc.replace("this._setPinned(false, 'wheelUp');\n        this._trace('wheelTop',", "this._pinned = false;\n        this._trace('wheelTop',");
+  check('CONTROL: the base\'s silent wheel-top unpin, put back in a copy, is a bare assignment the census counts', ctl !== cvSrc && [...ctl.matchAll(ASSIGN)].length === [...cvSrc.matchAll(ASSIGN)].length + 1);
+}
 
 // ── the stub CLI ──
 const A = (id, content, extra = {}) => ({ type: 'assistant', message: { id, type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content, usage: { input_tokens: 1, output_tokens: 1 }, ...extra } });
@@ -68,6 +96,18 @@ for (let i = 0; i < 36; i++) {
   }
 }
 PLAY1.push(A('msg_end1', [{ type: 'text', text: 'LAST-LINE-1 all done.' }], { stop_reason: 'end_turn' }));
+// ⑪'s BUSY LIVE TURN (inc-mvl02dkn-gop0: a 1.4 h chat at ~100 frames a minute, two helpers working): groups of one line of
+// text and a run of three tool cards (Read / Grep / Bash — folded under a run header), a fast prologue, then a slow
+// stream that keeps going (a record every 250 ms, a tool card's result landing = a live edit) until the next message.
+const LIVE = [];
+for (let g = 0; g < 120; g++) {
+  LIVE.push(A('msg_lv_t' + g, [{ type: 'text', text: `TICK-${g}: ` + 'Working through the next file of the colony code. '.repeat(3) }]));
+  for (const [k, name, input] of [['r', 'Read', { file_path: '/work/room' + g + '.js' }], ['g', 'Grep', { pattern: 'spawn' + g, path: '/work' }], ['b', 'Bash', { command: 'ls /work/' + g, description: 'List' }]]) {
+    LIVE.push(A(`msg_lv_${k}${g}`, [{ type: 'tool_use', id: `toolu_lv_${k}${g}`, name, input }]));
+    LIVE.push({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_lv_${k}${g}`, content: 'ok\n'.repeat(4) }] } });
+  }
+}
+const LIVE_FAST = 15 * 7; // the prologue: fifteen groups at 30 ms, then the slow stream from TICK-15 on
 const ASKS = [
   { tool: 'Bash', input: { command: 'pip install python-docx && cat a.pdf b.pdf c.pdf', description: 'Install and read' } },
   { tool: 'Write', input: { file_path: SUMMARY, content: '# Summary\n\nTHE-SUMMARY-LANDED: two contracts renew automatically.\n' } },
@@ -78,11 +118,13 @@ const fs = require('fs');
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('2.1.309 (Claude Code)'); process.exit(0); }
 if (args.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
-const SID = ${JSON.stringify(SID)}; const PLAY1 = ${JSON.stringify(PLAY1)}; const ASKS = ${JSON.stringify(ASKS)};
+const NTH = args.includes('stream-json') ? (() => { let n = 0; try { n = Number(fs.readFileSync(${JSON.stringify(NTH_FILE)}, 'utf8')) || 0; } catch {} fs.writeFileSync(${JSON.stringify(NTH_FILE)}, String(n + 1)); return n; })() : 0;
+const SID = NTH ? ${JSON.stringify(SID.slice(0, -2))} + String(10 + NTH) : ${JSON.stringify(SID)}; const PLAY1 = ${JSON.stringify(PLAY1)}; const ASKS = ${JSON.stringify(ASKS)};
+const LIVE = ${JSON.stringify(LIVE)}; const LIVE_FAST = ${LIVE_FAST};
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 const result = (cost, extra) => out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 900, num_turns: 1, result: 'done', session_id: SID, total_cost_usd: cost, usage: { input_tokens: 1, output_tokens: 1 }, ...(extra || {}) });
 out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-5-5', cwd: ${JSON.stringify(CWD)}, tools: ['Bash', 'Write'], permissionMode: 'default', claude_code_version: '2.1.309', apiKeySource: 'none' });
-let turn = 0, k = -1, buf = '';
+let turn = 0, k = -1, buf = '', lturn = 0, stopLive = false;
 const ask = () => {
   const s = ASKS[k]; const id = 'toolu_ask_' + k;
   out({ type: 'assistant', message: { id: 'msg_ask_' + k, type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [{ type: 'tool_use', id, name: s.tool, input: s.input }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } }, session_id: SID, uuid: 'ask-a-' + k });
@@ -92,6 +134,13 @@ process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n'
   if (!line.trim()) continue;
   fs.appendFileSync(${JSON.stringify(STDIN_LOG)}, line + '\\n');
   let m = null; try { m = JSON.parse(line); } catch {} if (!m) continue;
+  if (m.type === 'user' && NTH) { // ⑪'s chat: turn 1 one line (a one-screen chat), turn 2 the busy stream, turn 3 ends it
+    lturn++;
+    if (lturn === 1) setTimeout(() => { out({ type: 'assistant', message: { id: 'msg_lv_hello', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: 'HELLO-LIVE ready.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }, session_id: SID, uuid: 'lv-hello' }); result(0.01); }, 150);
+    else if (lturn === 2) { let j = 0; const next = () => { if (stopLive) return; if (j < LIVE.length) { out({ ...LIVE[j], session_id: SID, uuid: 'lv-' + j }); j++; setTimeout(next, j < LIVE_FAST ? 30 : 250); } }; setTimeout(next, 150); }
+    else { stopLive = true; setTimeout(() => { out({ type: 'assistant', message: { id: 'msg_lv_end', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: 'LIVE-END' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }, session_id: SID, uuid: 'lv-end' }); result(0.02); }, 300); }
+    continue;
+  }
   if (m.type === 'user') {
     turn++;
     if (turn === 1) { let j = 0; const next = () => { if (j < PLAY1.length) { out({ ...PLAY1[j], session_id: SID, uuid: 'sc-' + j }); j++; setTimeout(next, 30); return; } result(0.47, { model_usage_since_last_result: { x: 1 } }); }; setTimeout(next, 150); }
@@ -131,7 +180,7 @@ const cleanup = () => {
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
-armWatchdog({ capMs: 240e3, exit: () => { cleanup(); process.exit(1); }, pending: () => [...pend.keys()].map((id) => `CDP call #${id}`) }); // the shared clock names the leg it hung in
+armWatchdog({ capMs: 360e3, exit: () => { cleanup(); process.exit(1); }, pending: () => [...pend.keys()].map((id) => `CDP call #${id}`) }); // the shared clock names the leg it hung in
 for (let i = 0; i < 80; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 
 // ── raw CDP ──
@@ -326,6 +375,105 @@ try {
   check('a press answers the request with the folder’s allow rules on the CLI’s stdin (Bash, Edit, Write, MultiEdit, NotebookEdit → localSettings)', done && resp?.response?.response?.behavior === 'allow' && Array.isArray(up) && up.length === 1 && up[0].type === 'addRules' && up[0].behavior === 'allow' && up[0].destination === 'localSettings' && JSON.stringify(up[0].rules) === JSON.stringify(['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'].map((toolName) => ({ toolName }))), resp);
   const resp0 = stdinLines().filter((m) => m.type === 'control_response' && m.response?.request_id === 'req-ask-0').pop();
   check('…while a plain Allow sent none (the first card)', resp0?.response?.response?.behavior === 'allow' && !resp0.response.response.updatedPermissions, resp0);
+
+  // ── ⑪ ── (lane chat-live-tail-pin, inc-mvl02dkn-gop0 — the owner: «为啥没办法把这个对话pin to bottom»)
+  console.log('⑪ a chat THIS window created (its creator never attaches): the live tail is the window; the pin is an intent');
+  await evalJs(`app.createSession({ cwd: ${JSON.stringify(CWD)}, name: 'live tail', mode: 'chat', backend: 'claude' }); true`);
+  let sid2 = null;
+  for (let i = 0; i < 80 && !sid2; i++) { sid2 = await evalJs(`([...app.sessions.values()].find((v) => v && v._messageList && v.sessionId !== window.__sid)?.sessionId) || null`); if (!sid2) await sleep(250); }
+  check('a second chat is created by the page\'s own createSession (the creator road — no attach, no history load)', !!sid2);
+  const V2 = `([...app.sessions.values()].find((v) => v && v.sessionId === ${JSON.stringify(sid2)}))`;
+  const L2 = `${V2}._messageList`;
+  await waitFor(`!!${V2} && !!${V2}._container.querySelector('.chat-input')`, 20000);
+  // the new window on top, alone: close the first chat's window (its session ends with it — every earlier leg is done)
+  await evalJs(`(() => { const w = [...(app.wm?.windows?.values?.() || [])].find((x) => x && app.sessions.get(x.id)?.sessionId === window.__sid); if (w) app.wm.closeWindow(w.id); return true; })()`);
+  await sleep(800);
+  const say2 = (text) => ws.send(JSON.stringify({ type: 'chat-input', sessionId: sid2, text }));
+  const geo2 = () => evalJs(`(() => { const v = ${V2}, l = v._messageList; return { st: Math.round(l.scrollTop), sh: l.scrollHeight, ch: l.clientHeight, ws: v._windowStart, we: v._windowEnd, total: v._total, n: v._messages.length, pin: v._pinned, btn: !v._scrollBtn.classList.contains('hidden') }; })()`);
+  const seq2 = () => evalJs(`${V2}._traceSeq || 0`);
+  const ring2 = (since) => evalJs(`(${V2}._traceRing || []).filter((e) => e.seq > ${Number(since) || 0}).map((e) => ({ ...e }))`);
+  const at2 = async () => { const r = await rectOf(L2); return { x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h / 2) }; };
+  const onList = (x, y) => evalJs(`${L2}.contains(document.elementFromPoint(${x}, ${y}))`);
+  say2('Hello there');
+  check('the first answer renders live in the created chat', await waitFor(`/HELLO-LIVE/.test(${L2}.textContent)`, 20000));
+  await sleep(900);
+  const g1 = await geo2();
+  check(`its window is DEFINED with no history load: 0 … the live count (ws ${g1.ws} · we ${g1.we} · total ${g1.total} · rendered ${g1.n}) — the bundle's geom was ws/we/total null`,
+    Number.isFinite(g1.ws) && Number.isFinite(g1.we) && Number.isFinite(g1.total) && g1.ws === 0 && g1.we === g1.total && g1.total === g1.n && g1.n >= 2, g1);
+  check('one screen (scrollHeight ≈ clientHeight), pinned, and ↓ hidden — there is nothing to scroll to', g1.sh <= g1.ch + 1 && g1.pin === true && g1.btn === false, g1);
+  const c11 = await at2();
+  check('…the created window is on top where the wheel lands', await onList(c11.x, c11.y), c11);
+  let m11 = await seq2();
+  for (let i = 0; i < 6; i++) { await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: c11.x, y: c11.y }); await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: c11.x, y: c11.y, deltaX: 0, deltaY: -100 }); await sleep(120); }
+  await sleep(500);
+  let r11 = await ring2(m11); const g2 = await geo2();
+  const said = await evalJs(`(${V2}._container.querySelector('.chat-history-status')?.textContent) || ''`);
+  check('six real wheel-ups at the top of a chat with nothing earlier: the pin STAYS (the capture: wheelTop carry 100 … 818, then pin 0)', g2.pin === true && !r11.some((e) => e.tag === 'unpin'), r11.filter((e) => /pin|wheel|page/.test(e.tag)));
+  check('…no page up fires and no notch is carried (the capture: 34 pageUp in 0.4 s into history that does not exist)', !r11.some((e) => e.tag === 'pageUp' || e.tag === 'wheelTop') && !r11.some((e) => e.tag === 'wheelCarry'), r11.map((e) => e.tag));
+  check(`…and the chat says «No earlier messages» ONCE (${r11.filter((e) => e.tag === 'noEarlier').length} for six notches; on screen: «${said}»)`, r11.filter((e) => e.tag === 'noEarlier').length === 1 && said === 'No earlier messages', r11.map((e) => e.tag));
+
+  console.log('⑪ the busy live turn: ~240 records a minute, runs of tool cards, results landing as live edits');
+  say2('Now get busy');
+  check('the fast prologue lands and the slow stream begins (TICK-15)', await waitFor(`/TICK-15:/.test(${L2}.textContent)`, 30000));
+  await sleep(1500);
+  m11 = await seq2();
+  const samples = [];
+  for (let i = 0; i < 8; i++) { await sleep(500); samples.push(await geo2()); }
+  r11 = await ring2(m11);
+  check(`it streams on while pinned: the pin holds through ${samples.length} samples, each at the bottom, the window defined (we = total)`,
+    samples.every((g) => g.pin === true && g.sh - g.st - g.ch < 60 && Number.isFinite(g.total) && g.we === g.total) && samples[samples.length - 1].total > samples[0].total && !r11.some((e) => e.tag === 'unpin'), samples);
+  check('…the stream\'s tool cards fold under run headers', await evalJs(`${L2}.querySelectorAll('.chat-run-header').length`) > 0);
+  // a run header press — open, then close — never unpins
+  m11 = await seq2();
+  let hdr = await evalJs(`(() => { const l = ${L2}, lr = l.getBoundingClientRect(); const hs = [...l.querySelectorAll('.chat-run-header')].filter((h) => { const r = h.getBoundingClientRect(); return r.height > 0 && r.top > lr.top + 4 && r.bottom < lr.bottom - 4; }); const h = hs[hs.length - 1]; if (!h) return null; const r = h.getBoundingClientRect(); return { x: Math.round(r.x + Math.min(40, r.width / 2)), y: Math.round(r.y + r.height / 2) }; })()`);
+  check('a run header is in view to press', !!hdr, hdr);
+  if (hdr) { await press(hdr.x, hdr.y); await sleep(700); }
+  const gOpen = await geo2();
+  hdr = await evalJs(`(() => { const l = ${L2}, lr = l.getBoundingClientRect(); const hs = [...l.querySelectorAll('.chat-run-header')].filter((h) => { const r = h.getBoundingClientRect(); return r.height > 0 && r.top > lr.top + 4 && r.bottom < lr.bottom - 4; }); const h = hs[hs.length - 1]; if (!h) return null; const r = h.getBoundingClientRect(); return { x: Math.round(r.x + Math.min(40, r.width / 2)), y: Math.round(r.y + r.height / 2) }; })()`);
+  if (hdr) { await press(hdr.x, hdr.y); await sleep(700); }
+  const gClose = await geo2(); r11 = await ring2(m11);
+  check('a run header pressed open and closed while it streams never unpins (the owner opened one at 13:21:59)', gOpen.pin === true && gClose.pin === true && !r11.some((e) => e.tag === 'unpin'), { gOpen, gClose, tags: r11.filter((e) => /pin|run/i.test(e.tag)) });
+
+  console.log('⑪ a real wheel up unpins; scrolling back to the end re-pins; ↓ pins at the live tail');
+  const c12 = await at2();
+  m11 = await seq2();
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: c12.x, y: c12.y });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: c12.x, y: c12.y, deltaX: 0, deltaY: -700 }); await sleep(600);
+  const gUp = await geo2(); r11 = await ring2(m11);
+  const unp = r11.find((e) => e.tag === 'unpin');
+  check(`a real wheel up unpins — traced \`unpin\` {why: ${unp?.why}} — and ↓ shows`, gUp.pin === false && unp?.why === 'scrolledAway' && gUp.btn === true, { gUp, unp });
+  m11 = await seq2();
+  for (let i = 0; i < 10; i++) { await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: c12.x, y: c12.y, deltaX: 0, deltaY: 400 }); await sleep(250); if ((await geo2()).pin) break; }
+  await sleep(400);
+  const gBack = await geo2(); r11 = await ring2(m11);
+  const rep = r11.find((e) => e.tag === 'pin');
+  check(`wheeling back to the end RE-PINS (traced \`pin\` {why: ${rep?.why}}) and ↓ hides — NaN bounds made the live tail unreachable: no scroll ever re-pinned`, gBack.pin === true && rep?.why === 'tail' && gBack.btn === false, { gBack, tags: r11.filter((e) => /pin/.test(e.tag)) });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: c12.x, y: c12.y, deltaX: 0, deltaY: -900 }); await sleep(700);
+  const btn2 = await evalJs(`(() => { const b = ${V2}._scrollBtn; if (b.classList.contains('hidden')) return null; const r = b.getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), w: r.width }; })()`);
+  check('wheeled up again: ↓ is on screen to press', !!btn2 && btn2.w > 0, btn2);
+  m11 = await seq2();
+  if (btn2) await press(btn2.x, btn2.y);
+  await sleep(1800);
+  const gBtn = await geo2(); r11 = await ring2(m11);
+  const newest = await evalJs(`(() => { const v = ${V2}; const els = [...v._messageList.querySelectorAll(':scope > .chat-msg')]; const last = els[els.length - 1]; const ticks = [...v._messageList.textContent.matchAll(/TICK-(\\d+)/g)].map((m) => +m[1]); const u = [...new Set(ticks)].sort((a, b) => a - b); return { lastId: last?.dataset.msgId || null, newestId: v._messages[v._messages.length - 1]?.id || null, maxTick: u.length ? u[u.length - 1] : -1, holes: u.filter((x, i) => i && x !== u[i - 1] + 1).length, first: u[0] }; })()`);
+  check(`↓ PINS and hides until a real scroll: pinned, at the bottom, ↓ hidden (pin {why: ${r11.find((e) => e.tag === 'pin')?.why}})`, gBtn.pin === true && gBtn.btn === false && gBtn.sh - gBtn.st - gBtn.ch < 60 && r11.some((e) => e.tag === 'pin' && e.why === 'scrollBtn'), gBtn);
+  check(`…at the LIVE tail, not the conversation's start: the newest record is the last card (TICK-${newest.maxTick}) and the window runs to it unbroken (${newest.holes} holes from TICK-${newest.first}) — the base fetched offset NaN, which the server read as 0, and «pinned» the first fifty messages`, !!newest.lastId && newest.lastId === newest.newestId && newest.maxTick >= 15 && newest.holes === 0, newest);
+  // (the base landed the FIRST slab and the stream appended below it: TICK-0 … TICK-11, a hole, then the live ticks)
+  check('…without rebuilding a window that already ended at the tail (no tail refetch: no gapReset)', !r11.some((e) => e.tag === 'gapReset' || e.tag === 'tailRefetch'), r11.map((e) => e.tag));
+  m11 = await seq2(); await sleep(2500);
+  const gAfter = await geo2(); r11 = await ring2(m11);
+  check('…and it keeps following the stream (live edits never unpin)', gAfter.pin === true && gAfter.sh - gAfter.st - gAfter.ch < 60 && gAfter.total > gBtn.total && !r11.some((e) => e.tag === 'unpin'), { gBtn, gAfter });
+
+  console.log('⑪ the server: a new conversation is born with its history loaded');
+  const ids2 = await evalJs(`${V2}._getSessionIds()`);
+  const pageQ = new URLSearchParams({ backend: 'claude', backendSessionId: ids2.backendSessionId || '', cwd: CWD, offset: '0', limit: '3' });
+  const pg = await (await fetch(`http://127.0.0.1:${PORT}/api/session-messages?${pageQ}`)).json();
+  const gNow = await geo2();
+  check(`a history page of the created chat is served by its LIVE normalizer (ids ${JSON.stringify((pg.messages || []).map((m) => String(m.id).split(':')[0]))}, total ${pg.total} vs the view's ${gNow.total}) — the base re-converted the transcript under other ids every page`,
+    Array.isArray(pg.messages) && pg.messages.length === 3 && pg.messages.every((m) => String(m.id).startsWith(sid2 + ':')) && Math.abs(pg.total - gNow.total) <= 8, { ids: (pg.messages || []).map((m) => m.id), total: pg.total, view: gNow.total });
+  say2('stop');
+  check('the turn ends (LIVE-END) and the view is still pinned at the bottom', await waitFor(`/LIVE-END/.test(${L2}.textContent)`, 15000) && (await sleep(800), (await geo2()).pin === true));
+
   check('no page exception in the whole run', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++;

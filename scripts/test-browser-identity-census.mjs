@@ -107,6 +107,10 @@ const KNOWN_KEEPER = {
   removeProfile: { why: 'a delete CLEARS every pin naming it (the cleared mark)', order: ['reg.pins[k] = { profileId: null'] },
   clearPin: { why: 'a clear (the cleared mark)', order: ['reg.pins[bk] = { profileId: null'] },
   streamPortFor: { why: 'the live view\'s mediated grant is for the TARGET\'s session — a target streamTargetFor built over the session\'s own attachment set (②)', order: ['target.sessionName', 'mediator.grantFor('] },
+  // lane browser-shared-profile-freeze (fb-8727ee62fb): THE SCOPE ROAD's grant — an agent lease of a cooperatively shared
+  // profile is handed a url of its own (its driver discovers only its own tabs): only on the road the PURE verdict names,
+  // and only for a lease that STANDS (attach took it after its own fences) — never an admission of its own
+  leaseUrlFor: { why: 'the scope road\'s url: the PURE road verdict, then a lease that stands, then the grant', order: ['leaseRoadOf(p, browserKey).mode !== M.SCOPE_MODE', 'B.findLease(reg.leases, p.id, String(browserKey))', 'mediator.grantFor('], never: ['reg.leases.push(', 'reg.leases ='] },
 };
 function judgeAdmission(src) {
   const { sites, fns } = admissionSites(src);
@@ -127,7 +131,7 @@ const ksrc = read('src/server/browser-keeper.js');
   const fnsHit = [...new Set(v.sites.map((s) => s.fn))].sort();
   ok(v.sites.length >= 16 && !v.unknown.length, `every admission-class write site in the keeper (${v.sites.length}: ${SITE_RES.map(([k]) => k).join(' / ')}) is inside a KNOWN function — ${fnsHit.join(', ')}`, v.unknown);
   ok(!v.fence.length, `…and in every known function the fence comes BEFORE the write (attach: remote refusal → decideAttach → lease → grant; addConversation: remote → mayAttach → owner; setPin: agent judged / user adds first; copyPin and the sweeps never write an owner; ensureEphemeral leases its own record; the PATCH judges by usePatchVerdict and re-judges)`, v.fence);
-  ok(v.sites.filter((s) => s.kind === 'grant').every((s) => s.fn === 'attach' || s.fn === 'streamPortFor'), 'a mediator grant is minted only inside `attach` (after decideAttach) and `streamPortFor` (for a target over the session\'s own set)', v.sites.filter((s) => s.kind === 'grant'));
+  ok(v.sites.filter((s) => s.kind === 'grant').every((s) => s.fn === 'attach' || s.fn === 'streamPortFor' || s.fn === 'leaseUrlFor'), 'a mediator grant is minted only inside `attach` (after decideAttach), `streamPortFor` (for a target over the session\'s own set) and `leaseUrlFor` (the scope road: for a lease that stands)', v.sites.filter((s) => s.kind === 'grant'));
   // isRemoteKey itself: the wiring's rule (a live session on another machine), never a branch on hostId inside the keeper
   ok(/const isRemoteKey = \(browserKey, remote = false\) => \{ if \(remote\) return true; try \{ const v = remoteKeys\(\);/.test(ksrc) && !/hostId\s*\|\|\s*\w+\.host\b/.test(stripComments(ksrc).split('\n').filter((l) => /isRemoteKey/.test(l)).join('\n')), 'isRemoteKey reads the wiring\'s `remoteKeys()` set (or the caller\'s explicit `remote`), never a hostId branch of its own');
   // CONTROL (a): a raw door added to the keeper — a new function pushing a lease without any fence ⇒ unknown site RED

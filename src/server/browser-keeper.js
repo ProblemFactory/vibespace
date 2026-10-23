@@ -277,7 +277,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const opts = o && typeof o === 'object' ? o : {};
       const ex = opts.extraEnv && typeof opts.extraEnv === 'object' ? opts.extraEnv : {};
       const file = machineConfigFile('machine');
-      return { ...opts, dir: null, attach: { cdp: rec.cdpUrl, socketDir: rec.socketDir || null }, extraEnv: { ...ex, ...(file ? { [VERBS.CONFIG_KEY]: file } : {}) } };
+      // lane browser-shared-profile-freeze: a lease session's call names ITS url (leaseCliOpts — the scope road's own), never the raw one
+      const cdp = typeof ex.AGENT_BROWSER_CDP === 'string' && B.isLoopbackCdpUrl(ex.AGENT_BROWSER_CDP) ? ex.AGENT_BROWSER_CDP : rec.cdpUrl;
+      return { ...opts, dir: null, attach: { cdp, socketDir: rec.socketDir || null }, extraEnv: { ...ex, ...(file ? { [VERBS.CONFIG_KEY]: file } : {}) } };
     };
     const withConfig = (ns, o) => {
       const opts = o && typeof o === 'object' ? o : {};
@@ -3171,7 +3173,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!o) return null;
     const rows = await tabListUnder(nsOf(p.id), { ...o, timeout: 5000 });
     const act = rows ? String((rows.find((x) => x.active) || {}).targetId || '').toUpperCase() : '';
-    const targets = act ? await tabTargetsOf(o.extraEnv.AGENT_BROWSER_CDP) : null;
+    const targets = act ? await tabTargetsOf(rawCdpOf(p.id, o)) : null;
     if (!targets) return null;
     const own = TBS.ownSetOf(TBS.tabOwners({ targets, holders: tabHoldersOf(p.id, { [l.browserKey]: act }) }), l.browserKey);
     keepTabRoots(p.id, l.browserKey, own, before);
@@ -3333,6 +3335,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (made && made.ok && made.targetId) {
       const id = String(made.targetId).toUpperCase();
       if (mediator && isMediated(p)) mediator.admitTarget(p.id, holderKey, id); // P6: the proxy scopes the lease to it before its session binds it
+      else if (mediator && leaseRoadOf(p, holderKey).mode === M.SCOPE_MODE) mediator.admitTarget(p.id, holderKey, id); // lane browser-shared-profile-freeze: the scope road's too
       let b = null;
       try { b = await rt.exec(ns, [...pin, 'tab', id, '--json'], { ...opts, timeout }); } catch (e) { b = { ok: false, error: String(e && e.message) }; }
       if (!execFailed(b)) {
@@ -3408,16 +3411,19 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const rows0 = await tabListUnder(ns, o);
       const lw = B.findLease(reg.leases, p.id, bk);
       const rows = rows0 ? WIN.withLabelsOnRows(rows0, lw && lw.tabLabels) : null; // lane browser-windows: the labels of the tabs VibeSpace opened in their own windows
-      const targets = rows ? await tabTargetsOf(o.extraEnv.AGENT_BROWSER_CDP) : null;
+      const targets = rows ? await tabTargetsOf(rawCdpOf(p.id, o)) : null;
       const active = rows ? ((rows.find((x) => x.active) || {}).targetId || null) : null;
       const owners = targets ? TBS.tabOwners({ targets, holders: tabHoldersOf(p.id, active ? { [bk]: String(active).toUpperCase() } : {}) }) : null;
       const own = TBS.ownSetOf(owners, bk);
       keepTabRoots(p.id, bk, own, before);
-      return { rows, owners, own, active: active ? String(active).toUpperCase() : null };
+      return { rows, owners, own, active: active ? String(active).toUpperCase() : null, targets };
     };
     const s0 = await read();
     if (!s0.rows || !s0.owners) { const hung = noteAnswer(rec, p, false, 'a refused tab read') ? unresponsiveOf(rec, p) : null; const code = hung ? 'browser_unresponsive' : 'tabs_unreadable'; log.log?.(`[browser] ${bk} on ${p.id}: its \`tab ${w.act}\` refused ${code} (${s0.rows ? 'the CDP read' : 'its tab list'} did not answer) — nothing ran`); throw namedError(code, TBS.tabRefusalText('tabs_unreadable', { agent: true, ...(hung ? { unresponsive: hung } : {}) })); } // lane browser-unresponsive: a refusal is an ask that did not answer
-    const targetId = w.ref ? TBS.resolveTabRef(w.ref, s0.rows) : null;
+    // lane browser-shared-profile-freeze: on the scope road the driver's own list holds only this conversation's tabs, so a
+    // TARGET ID is also looked up in the browser's own list — another holder's tab is then refused not_your_tab (its owner
+    // named by the fence), never no_such_tab
+    const targetId = w.ref ? (TBS.resolveTabRef(w.ref, s0.rows) || TBS.resolveTabRef(TBS.TARGET_ID_RE.test(String(w.ref)) ? w.ref : '', s0.targets || [])) : null;
     const av = TBS.agentTabVerdict({ act: w.act, ref: w.ref, targetId, own: s0.own, current: s0.active });
     if (!av.ok) { log.log?.(`[browser] ${bk} on ${p.id}: its \`tab ${w.act}${w.ref ? ' ' + String(w.ref).slice(0, 40) : ''}\` refused ${av.code} — nothing ran`); throw namedError(av.code, av.error); }
     const out = { ok: true, act: w.act, profileId: p.id };
@@ -3593,7 +3599,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       opts = await leaseCliOpts(p.id, bk); ns = nsOf(p.id);
       if (!opts) throw namedError('browser_no_cdp', noCdpError(p));
       rows = await tabListUnder(ns, opts);
-      const targets = rows ? await tabTargetsOf(opts.extraEnv.AGENT_BROWSER_CDP) : null;
+      const targets = rows ? await tabTargetsOf(rawCdpOf(p.id, opts)) : null;
       if (!rows || !targets) throw namedError('tabs_unreadable', TBS.tabRefusalText('tabs_unreadable'));
       if (!tabRowOf(rows, id)) throw namedError('no_such_tab', TBS.tabRefusalText('no_such_tab'));
       const act0 = (rows.find((x) => x.active) || {}).targetId || null;
@@ -3653,7 +3659,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         const mine = (x) => (eph ? ownIds.includes(String(x.targetId).toUpperCase()) : true);
         let nb = null;
         if (!eph) {
-          const targets = await tabTargetsOf(opts.extraEnv.AGENT_BROWSER_CDP);
+          const targets = await tabTargetsOf(rawCdpOf(p.id, opts));
           const own2 = targets ? TBS.ownSetOf(TBS.tabOwners({ targets, holders: tabHoldersOf(p.id, { [bk]: id }) }), bk) : null;
           if (!own2) throw namedError('tabs_unreadable', TBS.tabRefusalText('tabs_unreadable'));
           nb = [...rows.slice(i + 1), ...rows.slice(0, i).reverse()].find((x) => own2.has(String(x.targetId).toUpperCase()) && String(x.targetId).toUpperCase() !== id) || null;
@@ -4035,11 +4041,40 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** The options of ONE CLI call under a lease's own session: `{ session, extraEnv: { AGENT_BROWSER_CDP } }` —
    *  never a `dir`. null when the browser has no CDP url (the caller refuses `browser_no_cdp`). */
   async function leaseCliOpts(profileId, browserKey) {
-    const url = await leaseCdpUrl(profileId);
+    const raw = await leaseCdpUrl(profileId);
     // the lease session's OWN launch view = what its CLI child runs with (attachedEnvFor: the CDP url + idle 0) —
     // a keeper call with another view would restart that daemon and lose the agent's pinned tab (measured on 0.38.1)
+    // lane browser-shared-profile-freeze: …and that url is the lease's OWN on the scope road (leaseUrlFor), the SAME value
+    const url = raw ? await leaseUrlFor(profile(profileId), browserKey, raw) : null;
     return url ? { session: B.sessionNameFor(String(browserKey || '')), extraEnv: { AGENT_BROWSER_CDP: url, AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } } : null;
   }
+  // ── lane browser-shared-profile-freeze (fb-8727ee62fb / fb-0898d92d0a: userW's jarvis-work «freezes for every session at
+  // once — Runtime.evaluate / Page.navigate / tab new all time out while status and the tab list still answer»): THE SCOPE
+  // ROAD. MEASURED (scripts/measure-shared-profile-freeze.mjs — this keeper, the routes, the CLI, agent-browser 0.38.2,
+  // Chrome 154, four conversations on one profile): every driver attached to the RAW endpoint discovers every page target
+  // of the browser and holds its next command until each NEW one answers Page.enable — one tab that could not answer at
+  // birth (its page holding its main thread as it loaded; a confirm() at load) held the other conversations' own-tab
+  // `eval 1+1` 19.8 s / 59.8 s, all at once. An AGENT's lease of a local named profile shared cooperatively is therefore
+  // handed a url of its own through the proxy (cdp-mediator mode 'scope'): its driver discovers only the lease's tabs
+  // (and the tabs they open); every call passes as written. No proxy here ⇒ the raw url, as before (said by the verdict).
+  const leaseRoadOf = (p, browserKey) => {
+    const bk = String(browserKey || ''), rec = p ? reg.browsers[p.id] : null;
+    return M.leaseRoadVerdict({ mediated: isMediated(p), proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: !p || isEph(p), remote: !!(p && p.host) || !(rec && isLocalRec(rec)), agent: (B.isBrowserKey(bk) || B.isChildKey(bk)) && !HM.isHumanKey(bk) });
+  };
+  /** The url ONE lease's driver is handed for `raw` (the browser's own endpoint): its scope grant's on the scope road (the
+   *  lease's known tabs admitted first — holderTabs), else `raw` unchanged. A proxy that throws leaves `raw` (journalled). */
+  async function leaseUrlFor(p, browserKey, raw) {
+    if (!raw || !p || leaseRoadOf(p, browserKey).mode !== M.SCOPE_MODE) return raw;
+    // a url is an authority: minted only for a lease that STANDS (attach took it after its fences — identity census)
+    if (!B.findLease(reg.leases, p.id, String(browserKey))) return raw;
+    try {
+      const g = await mediator.grantFor({ profileId: p.id, browserKey: String(browserKey), upstream: raw, targetIds: holderTabs(p.id, browserKey), mode: M.SCOPE_MODE });
+      return g && g.url ? g.url : raw;
+    } catch (e) { log.warn?.(`[browser] ${browserKey} on ${p.id}: no scoped url (${e && e.message}) — its driver sees every tab of the browser this time`); return raw; }
+  }
+  /** The browser's OWN endpoint for the keeper's raw reads (the whole tab set — the fence judges ownership itself), never a
+   *  lease's scoped url. */
+  const rawCdpOf = (profileId, o) => (reg.browsers[profileId] && B.isLoopbackCdpUrl(reg.browsers[profileId].cdpUrl) ? reg.browsers[profileId].cdpUrl : (o && o.extraEnv && o.extraEnv.AGENT_BROWSER_CDP) || null);
   // ── LANE ONE-BROWSER-B1 (design q-026 r1 §2.1 / §2.4 / §3 row B1, 2026-10-16): THE ATTACH ROAD ──
   /** Does the display keeper's machine have xpra + xauth (the display-only session's recipe)? false when unwired / unknown. */
   async function displayHasXpra() {
@@ -4402,7 +4437,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         const pin = pinTab0 ? ['--pin-tab'] : [];
         // lane profile-lock-roll (L2): the browser's ONE page that nobody roots (a fresh launch's single blank tab) is bound
         // to — no second blank tab per relaunch; anything else ⇒ a new tab of its own (never another holder's)
-        const pick = o ? TBS.rebindPick({ targets: await tabTargetsOf(o.extraEnv.AGENT_BROWSER_CDP), holders: tabHoldersOf(p.id), key: browserKey }) : null;
+        const pick = o ? TBS.rebindPick({ targets: await tabTargetsOf(rawCdpOf(p.id, o)), holders: tabHoldersOf(p.id), key: browserKey }) : null;
         let r = o && pick ? await rt.exec(nsOf(p.id), [...pin, 'tab', pick.targetId, '--json'], o) : null;
         let how = r && r.ok ? 'switched' : null;
         if (!how) { r = o ? await rt.exec(nsOf(p.id), [...pin, 'tab', 'new'], o) : null; how = r && r.ok ? 'new' : null; }
@@ -4463,7 +4498,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // hub-side CDP url, never by a directory — the pair rides the env only
     // (the subshell and the `--` form), `use --print` withholds it (§5.1)
     const noteOut = takeRebound(p.id, browserKey, rebound); // verify r3 (F4): this answer carries the note (its own, or one an abandoned answer left)
-    return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: false, env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseCdp, socketDir: rec && rec.launch === 'attach' ? rec.socketDir : null }), cdpUrl: rec ? rec.cdpUrl : null, pinTab, ...(added ? { added } : {}), ...(noteOut ? { rebound: noteOut } : {}) };
+    const leaseUrl = await leaseUrlFor(p, browserKey, leaseCdp); // lane browser-shared-profile-freeze: the scope road's own url (else the raw one)
+    return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: false, env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseUrl, socketDir: rec && rec.launch === 'attach' ? rec.socketDir : null }), cdpUrl: leaseUrl !== leaseCdp ? leaseUrl : rec ? rec.cdpUrl : null, pinTab, ...(added ? { added } : {}), ...(noteOut ? { rebound: noteOut } : {}) };
   }
   /** VERIFY r2 L8: the paused sentence, said about a DETACH (the refusal's own words name a command). */
   const detachPausedText = (err) => String(err || '').replace('your command did NOT run', 'your detach did NOT run (it would end their takeover and take the browser out from under them)');
@@ -6114,6 +6150,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       l.targetId = targetId ? String(targetId) : null;
       l.reopenedAt = now();
       if (mediator && isMediated(p) && l.targetId) mediator.admitTarget(p.id, l.browserKey, l.targetId); // P6: the re-opened tab is the lease's
+      else if (mediator && l.targetId && leaseRoadOf(p, l.browserKey).mode === M.SCOPE_MODE) mediator.admitTarget(p.id, l.browserKey, l.targetId); // lane browser-shared-profile-freeze
       reopened.push({ browserKey: l.browserKey, url, ok, targetId: l.targetId, error });
     }
     return reopened;

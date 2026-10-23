@@ -475,6 +475,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           // (real user report 2026-07-11); VibeSpace-started ones appeared fine
           // only because attach/view paths had already cached their transcript.
           if (resumeId) {
+            chatView.noteHistoryInFlight(true); // until this page lands nothing is known about what lies above (inc-mvl02dkn-gop0)
             fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId || resumeId)}&cwd=${encodeURIComponent(cwd||'')}&withStatus=1${hostId ? `&host=${encodeURIComponent(hostId)}` : ''}${forkAtUuid ? `&untilUuid=${encodeURIComponent(forkAtUuid)}` : ''}`)
               .then(r => r.json())
               .then(data => {
@@ -486,7 +487,7 @@ export function installSessionLifecycle(App, ctx = {}) {
               // echoed user message appends instead of being wiped by loadHistory.
               // This first turn is also what makes the fork diverge (claude mints
               // the fork's new id on first input).
-              .finally(() => { if (initialMessage) this._sendChatMessage(msg.sessionId, initialMessage); });
+              .finally(() => { chatView.noteHistoryInFlight(false); if (initialMessage) this._sendChatMessage(msg.sessionId, initialMessage); });
           } else if (initialMessage) {
             this._sendChatMessage(msg.sessionId, initialMessage);
           }

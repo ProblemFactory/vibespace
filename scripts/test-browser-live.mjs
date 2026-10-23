@@ -78,6 +78,10 @@
 //      ("The user took over your browser; 1 operation was interrupted: wait." —
 //      nothing delivered), the command ends [browser_interrupted] and the Hand back
 //      reminds "Re-run what was interrupted: wait" once.
+//   ⑩ lane browser-shared-profile-freeze (fleet fb-8727ee62fb / fb-0898d92d0a): the REAL keeper + proxy + dialog watch + routes
+//      + CLI + driver, ONE owner-shared profile, two conversations: a new tab born busy / with a confirm() never holds the
+//      other conversation (≤ 2 s; RED CONTROL: a driver on the RAW url is held); a conversation's own silent page is answered
+//      page_busy by name. BROWSER_LIVE_ONLY=freeze runs it alone.
 //   ③b+ lane agent-window-no-pop (owner incident inc-mvhebl4n-rkvr): the agent browser's twin row — the
 //      same lane H world with the person in ANOTHER window of this desk when the
 //      agent's browser starts ⇒ no live view, the chat's box unchanged, the chat's
@@ -310,6 +314,127 @@ async function legAttach() {
     try { fs.rmSync(SB, { recursive: true, force: true }); } catch { }
   }
 }
+// ═══ ⑩ LANE BROWSER-SHARED-PROFILE-FREEZE (fleet fb-8727ee62fb / fb-0898d92d0a — userW's jarvis-work «freezes for every session
+// at once»): ONE STUCK PAGE NEVER HOLDS THE PROFILE'S OTHER CONVERSATIONS, and a silent page is answered by name. MEASURED
+// (scripts/measure-shared-profile-freeze.mjs, agent-browser 0.38.2 + Chrome 154): a driver attached to the browser's RAW url
+// holds its next command until each NEW tab of the browser answers Page.enable — one tab born busy held three other
+// conversations' own-tab `eval` 19.8 s, one born with a confirm() 59.8 s, all at once. The REAL keeper (+ the REAL proxy, the
+// REAL dialog watch with the wiring's own tab source, the REAL routes) launches ONE named profile on the hidden-window rung (no
+// desktop — the fleet's shape: the driver's own Xvfb); conversations A and B hold it (sharing owner, the default); the shipped
+// `vibespace-browser` drives the REAL driver over loopback pages:
+//   a  a NEW tab born holding its main thread (anyone's `tab new`, a site's popup, the keeper's blank): B's own-tab `eval`
+//      answers within 2 s — RED CONTROL on the same browser: a driver handed the RAW url (the base road's exact env) waits on it;
+//   b  a NEW tab born with a confirm(): B answers within 2 s — RED CONTROL: the raw-url driver is still held at 12 s;
+//   c  A's OWN page holds its main thread: A's next verb is answered page_busy BY NAME within the bound, its tab named, never
+//      handed to the driver; B meanwhile within 2 s; A's `open` of another site then leaves the page at once.
+// SKIPs with evidence without the driver / Xvfb. Zero vendor calls; ends every daemon it started (by their session names).
+async function legSharedFreeze() {
+  console.log('— ⑩ lane browser-shared-profile-freeze: one stuck page never holds the profile\'s other conversations; a silent page is answered page_busy by name');
+  const envBase = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_') && !k.startsWith('VIBESPACE_') && !['DISPLAY', 'WAYLAND_DISPLAY', 'XDG_SESSION_TYPE', 'DBUS_SESSION_BUS_ADDRESS', 'XAUTHORITY'].includes(k)) envBase[k] = v;
+  const realBin = F.binaryResolver('agent-browser', envBase)();
+  const DD = require('../src/desktop-display.js');
+  const missing = Object.entries({ 'agent-browser': realBin, Xvfb: DD.binOnPath('Xvfb', { env: envBase }) }).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length) { skip(`⑩ the shared-profile freeze leg: ${missing.join(', ')} not on this machine`); return; }
+  const K10 = require('../src/server/browser-keeper.js'), D10 = require('../src/server/browser-dialogs.js'), R10 = require('../src/routes/browser.js'), MED10 = require('../src/server/cdp-mediator.js'), B10 = require('../src/browser-profiles.js'), ST10 = require('../src/browser-stuck.js');
+  const express = require('express');
+  const RT = path.join(ROOT, 'freeze'), KH = path.join(RT, 'h'), KXD = path.join(RT, 'x'), CWD = path.join(RT, 'cwd');
+  for (const d of [path.join(KH, '.agent-browser'), KXD, CWD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  const env = { ...envBase, HOME: KH, XDG_RUNTIME_DIR: KXD };
+  const HOLD = 8000; // the page's own hold (a heavy page's script; the measurement used 20 s)
+  const holds = new Set();
+  const pages = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x'); res.setHeader('content-type', 'text/html; charset=utf-8'); res.setHeader('cache-control', 'no-store');
+    if (u.pathname === '/born') return res.end(u.searchParams.get('kind') === 'ask' ? '<!doctype html><title>BORN-ASK</title><script>confirm("born with a question")</script><p>asked' : `<!doctype html><title>BORN-SPIN</title><script>{const e=Date.now()+${HOLD};while(Date.now()<e){}}</script><p>spun`);
+    if (u.pathname === '/spin') return res.end('<!doctype html><title>SPIN</title><script>window.spin=(ms)=>{setTimeout(()=>{const e=Date.now()+ms;while(Date.now()<e){}},40);return "armed"}</script><p>spin');
+    res.end(`<!doctype html><title>${u.searchParams.get('t') || 'LIGHT'}</title><p>light`);
+  });
+  await new Promise((r) => pages.listen(0, '127.0.0.1', r));
+  const SITE = (p) => `http://127.0.0.1:${pages.address().port}${p}`, OTHER = (p) => `http://localhost:${pages.address().port}${p}`;
+  const quiet = { log() { }, warn() { }, error() { }, info() { } };
+  const KA = 'bk-0000fa01', KB = 'bk-0000fb02', KC = 'bk-0000fc03', TA = 'vsst_bfreeze_a', TB = 'vsst_bfreeze_b';
+  const med = MED10.create({ log: quiet });
+  const kk = K10.create({ dataDir: path.join(RT, 'data'), homeDir: KH, env: () => env, serverSetting: (k) => (k === 'browser.headed' ? 'yes' : undefined), liveKeys: () => new Set([KA, KB]), runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: quiet, install: false, mediator: med });
+  const prof = kk.createProfile({ label: 'Work' }, { owner: { kind: 'instance', id: null } });
+  const sessions10 = new Map([['sess-fa', { agentToken: TA, _browserKey: KA, _browserVariant: 'D', _browserEnv: null, name: 'Chat A', cwd: CWD }], ['sess-fb', { agentToken: TB, _browserKey: KB, _browserVariant: 'D', _browserEnv: null, name: 'Chat B', cwd: CWD }]]);
+  const dialogs = D10.create({ keeper: kk, log: quiet, leaseCountOf: (pid) => new Set(((kk.list().leases) || []).filter((l) => l && l.profileId === pid && l.browserKey).map((l) => l.browserKey)).size, holdersOf: () => [] });
+  kk.setStuckSource((bk) => dialogs.stuckForKey(bk));
+  dialogs.setTabsOf((q) => { try { return kk.holderTabs(q && q.profileId, q && q.browserKey) || []; } catch { return []; } }); // the wiring's own tab source (mounts-plugins-wiring)
+  R10.setup({ keeper: kk, activeSessions: sessions10, dialogs, tasksForSession: () => [] });
+  const app = express(); app.use(express.json()); app.use(R10.router);
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const API = `http://127.0.0.1:${srv.address().port}`;
+  const PASSWD = path.join(RT, 'passwd.cjs'); fs.writeFileSync(PASSWD, `const os = require('os'); const real = os.userInfo; os.userInfo = (o) => ({ ...real(o), homedir: ${JSON.stringify(KH)} });\n`);
+  const run = (bin, args, e, timeoutMs) => new Promise((resolve) => {
+    const t0 = Date.now(); let held = false; const c = spawn(bin, args, { env: e, cwd: CWD });
+    let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
+    const t = setTimeout(() => { held = true; c.kill('SIGKILL'); }, timeoutMs);
+    c.on('exit', (code) => { clearTimeout(t); resolve({ code, out, err, ms: Date.now() - t0, held }); });
+  });
+  const cli = (token) => (args, timeoutMs = 60000) => run(process.execPath, ['--require', PASSWD, path.join(repo, 'data/bin/vibespace-browser'), ...args], { ...env, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: token, VIBESPACE_SESSION_CWD: CWD }, timeoutMs);
+  const A = cli(TA), Bc = cli(TB);
+  // THE RED CONTROL: the base road's exact env — a lease's pairs over the browser's RAW url (attachedEnvFor before this lane)
+  const ctl = (args, timeoutMs) => run(realBin, args, { ...env, ...S.pairsToEnv(B10.attachedEnvFor({ browserKey: KC, profileId: prof.id, cdpUrl: kk.browserOf(prof.id).cdpUrl })) }, timeoutMs);
+  let raw = null;
+  try {
+    await kk.attach({ profileId: prof.id, browserKey: KA, sessionId: 'sess-fa', by: 'user' });
+    await kk.attach({ profileId: prof.id, browserKey: KB, sessionId: 'sess-fb', by: 'user' });
+    const ra = await A(['open', SITE('/light?t=A')]), rb = await Bc(['open', SITE('/light?t=B')]);
+    const rec = kk.browserOf(prof.id);
+    if (!rec || !rec.cdpUrl || ra.code !== 0 || rb.code !== 0) { skip(`⑩ the keeper could not launch the browser here: ${JSON.stringify({ a: ra.err.slice(-200), b: rb.err.slice(-200) })}`); return; }
+    const scoped = ((kk.list().mediation || {}).grants || []).filter((g) => g.profileId === prof.id && g.mode === M10SCOPE);
+    ok(scoped.length === 2 && prof.sharing === 'owner', `⑩ two conversations on ONE owner-shared profile each browse over a url of their own (${scoped.length} scope grants) — never the browser's raw one`, JSON.stringify(kk.list().mediation));
+    raw = await new Promise((resolve, reject) => { const ws = new WebSocket(rec.cdpUrl); let id = 0; const wait = new Map(); ws.on('message', (m) => { const j = JSON.parse(String(m)); if (j.id && wait.has(j.id)) { wait.get(j.id)(j); wait.delete(j.id); } }); ws.once('open', () => resolve({ ws, send: (method, params = {}) => new Promise((r) => { const n = ++id; wait.set(n, r); ws.send(JSON.stringify({ id: n, method, params })); setTimeout(() => { if (wait.delete(n)) r({ error: { message: 'timeout' } }); }, 10000); }) })); ws.once('error', reject); });
+    await ctl(['get', 'title'], 30000); // the control's driver connected BEFORE the births (as every attached conversation is)
+    const born = async (kind) => { const c = await raw.send('Target.createTarget', { url: SITE(`/born?kind=${kind}`) }); return c.result && c.result.targetId; };
+    // a
+    const t1 = await born('spin'); const tb1 = Date.now(); await sleep(300);
+    const [b1, c1] = await Promise.all([Bc(['eval', '1+1']), ctl(['eval', '1+1'], HOLD + 8000)]);
+    ok(b1.code === 0 && /\b2\b/.test(b1.out) && b1.ms <= 2000, `⑩ a: a NEW tab born holding its main thread ${HOLD / 1000} s — B's own-tab \`eval 1+1\` answers in ${b1.ms} ms (≤ 2 s)`, b1.out + b1.err);
+    ok(c1.ms >= HOLD / 2, `⑩ a RED CONTROL: the same eval through a driver on the RAW url (the base road's env) waited ${c1.ms} ms on that tab${c1.held ? ' (still held — killed)' : ''}`, JSON.stringify(c1));
+    await sleep(Math.max(0, HOLD + 800 - (Date.now() - tb1))); await raw.send('Target.closeTarget', { targetId: t1 });
+    // b
+    const t2 = await born('ask'); await sleep(300);
+    const [b2, c2] = await Promise.all([Bc(['eval', '2+2']), ctl(['eval', '2+2'], 12000)]);
+    ok(b2.code === 0 && /\b4\b/.test(b2.out) && b2.ms <= 2000, `⑩ b: a NEW tab born with a confirm() — B answers in ${b2.ms} ms (≤ 2 s)`, b2.out + b2.err);
+    ok(c2.held || c2.ms >= 10000, `⑩ b RED CONTROL: the raw-url driver is still held at ${c2.ms} ms (measured on the base road: 59.8 s — two 30 s Page.enable tries)`, JSON.stringify(c2));
+    await raw.send('Target.closeTarget', { targetId: t2 }); await sleep(500);
+    // c
+    const ao = await A(['open', SITE('/spin')]);
+    // the hold starts AT ONCE through the raw client (fire and forget — a page timer is clamped to ≥ 1 s in a tab not in
+    // front, so a page-armed spin may start after the agent's next verb), then the precondition is MEASURED, not assumed:
+    // the page answers NOTHING to the raw client's own ask before A's next verb is sent
+    const spinTab = await (async () => { const l = await raw.send('Target.getTargets'); return ((l.result && l.result.targetInfos) || []).find((t) => t.type === 'page' && /\/spin$/.test(t.url)) || null; })();
+    let held = null;
+    if (spinTab) {
+      const at = await raw.send('Target.attachToTarget', { targetId: spinTab.targetId, flatten: true }); const sid = at.result && at.result.sessionId;
+      if (sid) {
+        raw.ws.send(JSON.stringify({ id: 990001, method: 'Runtime.evaluate', params: { expression: `{const e=Date.now()+${HOLD};while(Date.now()<e){}} 'spun'` }, sessionId: sid })); // its answer comes when the hold ends
+        await sleep(200);
+        const t0p = Date.now();
+        const ev = await new Promise((r) => { const tm = setTimeout(() => r({ silent: true }), 1500); raw.ws.on('message', function on(m) { const j = JSON.parse(String(m)); if (j.id === 990002) { clearTimeout(tm); raw.ws.off('message', on); r(j); } }); raw.ws.send(JSON.stringify({ id: 990002, method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: sid })); });
+        held = { silent: !!ev.silent, ms: Date.now() - t0p };
+      }
+    }
+    ok(ao.code === 0 && spinTab && held && held.silent, `⑩ c precondition: A's page answers NOTHING to a raw ask within 1.5 s (its main thread held ${HOLD / 1000} s from the raw client)`, JSON.stringify({ open: ao.out.slice(-160) + ao.err.slice(-160), spinTab, held }));
+    const [a3, b3] = await Promise.all([A(['eval', '1+1']), (async () => { await sleep(600); return Bc(['eval', '3+3']); })()]);
+    ok(a3.code === 1 && /\[page_busy\]/.test(a3.err) && /\/spin\) is not answering — it answered nothing in 5 s/.test(a3.out) && /nothing ran: the command was not handed to the browser/.test(a3.out) && a3.ms <= ST10.PAGE_ANSWER_MS + 3000, `⑩ c: A's OWN page holds its main thread — A's next verb is answered page_busy BY NAME in ${a3.ms} ms (bound ${ST10.PAGE_ANSWER_MS} ms; the page's own hold ${HOLD} ms)`, a3.out + a3.err);
+    ok(b3.code === 0 && /\b6\b/.test(b3.out) && b3.ms <= 2000, `⑩ c: …while B answers in ${b3.ms} ms`, b3.out + b3.err);
+    const a4 = await A(['open', OTHER('/light?t=A2')]);
+    ok(a4.code === 0 && a4.ms <= 3000, `⑩ c: A's \`open\` of another site leaves the busy page at once (${a4.ms} ms — a new page process)`, a4.out + a4.err);
+  } catch (e) {
+    ok(false, '⑩ the shared-profile freeze leg threw', e && (e.stack || e.message));
+  } finally {
+    try { raw && raw.ws.close(); } catch { }
+    try { await kk.stop(prof.id, { why: 'user' }); } catch { }
+    try { dialogs.shutdown(); kk.shutdown?.(); med.shutdown(); } catch { }
+    await new Promise((r) => srv.close(() => r())); await new Promise((r) => pages.close(() => r()));
+    reapDaemons(new Set([`vs-${KA}`, `vs-${KB}`, `vs-${KC}`, `vs-${prof.id}`]));
+    try { fs.rmSync(RT, { recursive: true, force: true }); } catch { }
+  }
+}
+const M10SCOPE = require('../src/browser-mediation.js').SCOPE_MODE;
+// lane browser-shared-profile-freeze: BROWSER_LIVE_ONLY=freeze runs ⑩ alone (the shared-profile freeze's real leg)
+if (process.env.BROWSER_LIVE_ONLY === 'freeze') { await legSharedFreeze(); done(); }
 // lane one-browser-b1: BROWSER_LIVE_ONLY=b1 runs ⑨ alone (the attach road's real leg — the other sections need a worktree server)
 const DA9 = require('../src/desktop-apps.js');
 if (process.env.BROWSER_LIVE_ONLY === 'b1') { await legAttach(); done(); }
@@ -1860,5 +1985,6 @@ await (async () => {
   }
 })().catch((e) => ok(false, '⑤ the real-rung leg threw', e && (e.stack || e.message)));
 
+await legSharedFreeze(); // ⑩ lane browser-shared-profile-freeze
 await legAttach(); // ⑨ lane one-browser-b1
 done();

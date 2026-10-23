@@ -206,7 +206,7 @@ console.log('\n── ⑦ a paired machine that CANNOT be reached: refused by na
 {
   const BIN7 = path.join(TMP, 'deadbin'); fs.mkdirSync(BIN7);
   const CALLS = path.join(TMP, 'ssh-calls.log');
-  fs.writeFileSync(path.join(BIN7, 'ssh'), `#!/bin/sh\necho x >> '${CALLS}'\necho "ssh: Could not resolve hostname mac.example.test: Name or service not known" >&2\nexit 255\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(BIN7, 'ssh'), `#!/bin/sh\nexec 0<&-\necho x >> '${CALLS}'\necho "ssh: Could not resolve hostname mac.example.test: Name or service not known" >&2\nexit 255\n`, { mode: 0o755 });
   const calls = () => { try { return fs.readFileSync(CALLS, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
   const PATH0 = process.env.PATH; process.env.PATH = `${BIN7}:${PATH0}`;
   const uncaught = []; const trap = (e) => uncaught.push(String((e && e.code) || e)); process.on('uncaughtException', trap);
@@ -252,7 +252,7 @@ console.log('\n── ⑦ a paired machine that CANNOT be reached: refused by na
     const mut = src.replace("  stdin.on('error', (e) => { if (!fed.error) fed.error = e; });\n", '');
     const M = mutantCopies('dir-complete-nolisten', REPO);
     const preFix = await roadsOf(M.load('src/hosts.js', mut, 'nolisten').HostManager, 'prefix');
-    ok('RED CONTROL: the same roads through a copy whose feedStdin does not listen ⇒ an uncaught write EPIPE (the hub\'s death)', mut !== src && uncaught.filter((c) => c === 'EPIPE').length >= 2, { uncaught, preFix });
+    ok('RED CONTROL: the same roads through a copy whose feedStdin does not listen ⇒ an uncaught stream write error, EPIPE or ECONNRESET (the hub\'s death)', mut !== src && uncaught.filter((c) => /^(?:EPIPE|ECONNRESET|ERR_STREAM_DESTROYED)$/.test(c)).length >= 2, { uncaught, preFix });
   } finally { process.removeListener('uncaughtException', trap); process.env.PATH = PATH0; }
 }
 
